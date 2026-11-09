@@ -35,6 +35,15 @@
 //! compaction renumber, so the key names the shard's `segments_version` beside the rest, and the
 //! grant, as every key here does.
 //!
+//! # Projections
+//!
+//! An expression answered over items, leaves combined by conjunction and disjunction, also keeps
+//! the rows in one view of the items it matches among those the grant admits, before deletions and
+//! suppressions are taken out. Its answer over a request's candidate is that set intersected with
+//! the candidate, so a request reads the rows over its own domain and narrows them through its
+//! composed mask, which removes exactly the rows of items outside the candidate. The entry is a row
+//! entry covering every row of the view, under a key of its own.
+//!
 //! # Bound and peak
 //!
 //! `filter_cache_bytes` bounds the bytes resident here. A request holds an entry only while it
@@ -59,7 +68,9 @@ use mosaica_roaring::Runs;
 use mosaica_types::ShardId;
 
 use crate::cancel::CancelToken;
-use crate::filter::{FilterColumns, FilterError, FilterOperand, LeafQuery, Scalar, TextQuery};
+use crate::filter::{
+    FilterColumns, FilterError, FilterExpr, FilterOperand, LeafQuery, Scalar, TextQuery,
+};
 use crate::{Generation, Shard};
 
 /// `serve.filter_cache_bytes` where it is not set.
@@ -295,6 +306,75 @@ fn key_over(
         segments,
     };
     (key, canonical)
+}
+
+/// The key of the rows, in `view` at `incarnation`, of the items `expr` matches in `shard` for
+/// `grant`, and its canonical bytes; `None` for an expression the shard's filter columns do not
+/// answer over items ([`FilterColumns::answered_over_items`]).
+pub(crate) fn projection_key_of(
+    shard: &Shard,
+    grant: [u8; 32],
+    view: &str,
+    incarnation: u64,
+    expr: &FilterExpr,
+) -> Option<(LeafKey, Vec<u8>)> {
+    fn write(expr: &FilterExpr, out: &mut Vec<u8>) -> Option<()> {
+        let kids = match expr {
+            FilterExpr::Leaf { column, operand } => {
+                let leaf = canonical(column, LeafQuery::Value(operand));
+                out.extend_from_slice(&(leaf.len() as u32).to_le_bytes());
+                out.extend_from_slice(&leaf);
+                return Some(());
+            }
+            FilterExpr::AllOf(kids) => {
+                out.push(0);
+                kids
+            }
+            FilterExpr::AnyOf(kids) => {
+                out.push(1);
+                kids
+            }
+            _ => return None,
+        };
+        out.extend_from_slice(&(kids.len() as u32).to_le_bytes());
+        kids.iter().try_for_each(|kid| write(kid, out))
+    }
+    if !shard.filter_columns.answered_over_items(expr) {
+        return None;
+    }
+    let mut canonical = vec![4];
+    write(expr, &mut canonical)?;
+    canonical.extend_from_slice(&incarnation.to_le_bytes());
+    canonical.extend_from_slice(view.as_bytes());
+    Some(key_over(shard, grant, canonical, Some(shard.segments_version)))
+}
+
+/// The rows of `wanted` the kept rows for `key` hold, or `None` where none are kept.
+pub(crate) fn projected_rows(
+    cache: &FilterCache,
+    (key, canonical): &(LeafKey, Vec<u8>),
+    wanted: &Bitmap,
+) -> Option<Bitmap> {
+    if cache.bound_bytes() == 0 {
+        return None;
+    }
+    let Peek::Ready(entry) = cache.peek(key) else {
+        return None;
+    };
+    (entry.canonical == *canonical).then(|| entry.rows().1.and(wanted))
+}
+
+/// Keep `rows` for `key`, the rows an expression's items hold in a view of `total_rows` rows.
+pub(crate) fn keep_projection(
+    cache: &FilterCache,
+    shard: &Shard,
+    (key, canonical): (LeafKey, Vec<u8>),
+    rows: Bitmap,
+    total_rows: u32,
+) {
+    if cache.bound_bytes() > 0 {
+        keep(cache, shard, key, canonical, Bitmap::from_range(0..total_rows), rows);
+    }
 }
 
 /// How many of `domain`'s rows, ascending disjoint ranges, `cache`'s entry for a row leaf holds.

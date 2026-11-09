@@ -4700,8 +4700,12 @@ fn rows_already_kept_are_read_on_the_row_route() {
         (ids, row_routed, engine.filter_cache_stats().misses - scans)
     };
 
+    // With the cache off, so that the entity route keeps no rows of its own.
+    let bound = engine.filter_cache_stats().bound_bytes;
+    engine.set_filter_cache_bytes(0);
     let (unkept, row_routed, _) = ask(0, FULL_VIEWPORT);
     assert!(!row_routed, "with nothing kept the whole extent takes the entity route");
+    engine.set_filter_cache_bytes(bound);
     for (x, y) in [(0.0, 0.0), (500.0, 0.0), (0.0, 500.0), (500.0, 500.0)] {
         // Inside the quarter's tile, so the request reads that tile alone.
         let (_, row_routed, _) = ask(1, [x + 1.0, y + 1.0, x + 499.0, y + 499.0]);
@@ -4711,6 +4715,117 @@ fn rows_already_kept_are_read_on_the_row_route() {
     assert!(row_routed, "every row is kept, so the whole extent takes the row route");
     assert_eq!(scans, 0, "and scans nothing");
     assert_eq!(kept, unkept);
+}
+
+/// **An entity-route filter's rows are kept per grant and read by every later viewport.** The
+/// first request over the whole extent projects the items `archive` `xx` matches and keeps their
+/// rows; a repeat, and a narrow window that would take the row route, read them and project
+/// nothing. A disjunction is kept the same way, and a negation, which no kept rows can answer, is
+/// projected on every request. Another grant keeps its own, a suppression removes its item from
+/// the kept rows' answer at once, and a flush projects again with the flushed item. Every answer is
+/// the one an engine keeping nothing gives.
+#[test]
+fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-projection-kept");
+    let wal = fx._dir.path().join("wal-projection-kept");
+    let mut engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    engine.start_write_executor(8).expect("the executor starts");
+    let bound = engine.filter_cache_stats().bound_bytes;
+    let code = |key: &str| AttrLocalId::new(fx.archive_codes[key]);
+    let xx = || leaf("archive", FilterOperand::Equals(code("xx")));
+    let id_of = |e: u64| {
+        engine
+            .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+            .expect("identity is computable")
+            .raw()
+    };
+    let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    // The marks drawn with the cache on, checked against the same request with it off, and how
+    // many projections and row routes the request took.
+    let ask = |session: &mosaica_engine::Session, zoom: u8, window: [f64; 4], expr: &FilterExpr| {
+        let request = || ViewportRequest::new("s0", zoom, window, 10_000).filter(expr.clone());
+        engine.set_filter_cache_bytes(0);
+        let unkept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        engine.set_filter_cache_bytes(bound);
+        let (projected, routes) = (engine.filter_crossing_routes().0, engine.filter_row_routes());
+        let kept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        assert_eq!(kept, unkept, "{expr:?} over {window:?}");
+        (
+            kept,
+            engine.filter_crossing_routes().0 - projected,
+            engine.filter_row_routes() - routes,
+        )
+    };
+    let want = |keys: &[&str], sees: &dyn Fn(u64) -> bool| -> std::collections::BTreeSet<u64> {
+        (0..N)
+            .filter(|&e| sees(e) && archive_of(e).is_some_and(|key| keys.contains(&key)))
+            .map(id_of)
+            .collect()
+    };
+    let everyone = |_: u64| true;
+
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let (first, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((first.clone(), projected), (want(&["xx"], &everyone), 1));
+    let (again, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((again, projected), (first.clone(), 0), "the repeat reads the kept rows");
+    let narrow = [0.0, 0.0, 400.0, 400.0];
+    let (_, projected, routes) = ask(&full, 8, narrow, &xx());
+    assert_eq!((projected, routes), (0, 0), "a narrow window reads the kept rows too");
+
+    let either = FilterExpr::AnyOf(vec![xx(), leaf("archive", FilterOperand::Equals(code("zz")))]);
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &either);
+    assert_eq!((got, projected), (want(&["xx", "zz"], &everyone), 1));
+    let (_, projected, _) = ask(&full, 0, FULL_VIEWPORT, &either);
+    assert_eq!(projected, 0);
+    let neither = FilterExpr::NoneOf(vec![xx()]);
+    for _ in 0..2 {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &neither);
+        let others: std::collections::BTreeSet<u64> = (0..N)
+            .filter(|&e| archive_of(e) != Some("xx"))
+            .map(id_of)
+            .collect();
+        assert_eq!((got, projected), (others, 1), "a negation is projected each time");
+    }
+
+    let part = engine.authorise(&subset_credential()).unwrap();
+    let sees = |e: u64| terms_of(e).contains(&SUBSET_TERM);
+    let (got, projected, _) = ask(&part, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((got, projected), (want(&["xx"], &sees), 1), "a grant keeps its own rows");
+
+    let hidden = (0..N)
+        .find(|&e| archive_of(e) == Some("xx"))
+        .expect("an item carries xx");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&hidden]),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )
+        .expect("a suppression is accepted");
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!(projected, 0, "a suppression leaves the kept rows");
+    assert!(!got.contains(&id_of(hidden)) && got.len() == first.len() - 1);
+
+    let flushed = ingest_and_flush_with(
+        &engine,
+        "projection-kept",
+        WalScalar::Utf8("eng".to_string()),
+        WalScalar::Utf8("xx".to_string()),
+        "paper-99",
+        5,
+        WalScalar::Null,
+    );
+    let fresh = engine.authorise(&full_coverage_credential()).unwrap();
+    let (got, projected, _) = ask(&fresh, 0, FULL_VIEWPORT, &xx());
+    assert_eq!(projected, 1, "a flush renumbers the rows, so they are projected again");
+    let id = engine
+        .mosaica_id_of(mosaica_types::EntityId::new(flushed))
+        .expect("identity is computable")
+        .raw();
+    assert!(got.contains(&id), "the flushed item is matched");
 }
 
 /// **A negation is the visible set minus the matches on either route**, over two columns, one of
