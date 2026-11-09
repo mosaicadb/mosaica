@@ -6,6 +6,20 @@ use std::sync::Arc;
 
 use croaring::{Bitmap, BitmapView, Frozen, Portable};
 
+/// The bitmap `bytes` hold in the portable format, or `None` unless serialising it gives back
+/// exactly `bytes`.
+///
+/// The decoder reads the containers in sequence and ignores the offset header, which a view
+/// follows to find each container. Requiring the bytes to be the bitmap's own serialisation makes
+/// every offset the one the decoder used, and refuses trailing bytes. Deserialising keeps each
+/// container's kind, so the output of any `serialize::<Portable>` passes, run-optimised or not.
+/// `scratch` holds the serialisation, so a caller checking many bitmaps can reuse one buffer.
+pub fn exact_portable(bytes: &[u8], scratch: &mut Vec<u8>) -> Option<Bitmap> {
+    let bitmap = Bitmap::try_deserialize::<Portable>(bytes)?;
+    scratch.clear();
+    (*bitmap.serialize_into_vec::<Portable>(scratch) == *bytes).then_some(bitmap)
+}
+
 /// A bitmap read in place from bytes inside an allocation `owner` keeps alive.
 ///
 /// The view borrows the bytes for as long as this value lives, which the type system cannot
@@ -40,8 +54,9 @@ impl OwnedView {
     pub unsafe fn portable(bytes: &[u8], owner: Arc<dyn Any + Send + Sync>) -> Option<OwnedView> {
         // The view's deserialiser is unchecked, and would read bytes that are not a bitmap as
         // containers at whatever the header claimed.
-        Bitmap::try_deserialize::<Portable>(bytes)?;
-        // SAFETY: the bytes deserialise, and the caller's contract is this one's.
+        exact_portable(bytes, &mut Vec::new())?;
+        // SAFETY: the bytes are exactly a bitmap's serialisation, and the caller's contract is
+        // this one's.
         Some(unsafe { OwnedView::new(Format::Portable, bytes, owner) })
     }
 
@@ -157,6 +172,76 @@ mod tests {
         let bytes = &shifted[at..at + range.len()];
         assert_eq!(bytes.as_ptr() as usize % 32, 1);
         assert!(unsafe { OwnedView::frozen(bytes, shifted.clone()) }.is_none());
+    }
+
+    /// Bitmaps of every container kind, among them one `run_optimize` would change and its
+    /// optimised form.
+    fn shapes() -> Vec<Bitmap> {
+        // A bitset of consecutive values and an array of consecutive values, both runs once
+        // optimised.
+        let unoptimised: Bitmap = (0..20_000).chain(70_000..70_100).collect();
+        let mut optimised = unoptimised.clone();
+        optimised.run_optimize();
+        assert_ne!(
+            unoptimised.serialize::<Portable>(),
+            optimised.serialize::<Portable>()
+        );
+        let mut sparse_bitset: Bitmap = (0..20_000).map(|i| i * 3).collect();
+        sparse_bitset.remove(3);
+        let many_arrays: Bitmap = (0..6u32)
+            .flat_map(|c| (0..50).map(move |i| (c << 16) + 2 * i))
+            .collect();
+        vec![
+            Bitmap::new(),
+            Bitmap::of(&[7]),
+            unoptimised,
+            optimised,
+            sparse_bitset,
+            many_arrays,
+        ]
+    }
+
+    #[test]
+    fn every_serialisation_passes_as_itself() {
+        let mut scratch = Vec::new();
+        for bitmap in shapes() {
+            let bytes = bitmap.serialize::<Portable>();
+            assert_eq!(exact_portable(&bytes, &mut scratch), Some(bitmap));
+        }
+    }
+
+    /// A container offset the decoder never reads, moved by one byte, would have a view read the
+    /// container from the wrong bytes.
+    #[test]
+    fn a_wrong_offset_header_or_a_trailing_byte_is_refused() {
+        // Three array containers and no runs, so the bytes carry an offset header: a 4-byte
+        // cookie, a 4-byte container count, 4 bytes of key and cardinality a container, then a
+        // 4-byte offset a container.
+        let bitmap: Bitmap = (0..3u32)
+            .flat_map(|c| (0..100).map(move |i| (c << 16) + 2 * i))
+            .collect();
+        let bytes = bitmap.serialize::<Portable>();
+        assert_eq!(
+            &bytes[0..4],
+            &12346u32.to_le_bytes(),
+            "a no-run portable cookie"
+        );
+        assert_eq!(&bytes[4..8], &3u32.to_le_bytes(), "three containers");
+        let mut scratch = Vec::new();
+
+        let mut moved = bytes.clone();
+        moved[4 + 4 + 3 * 4 + 4] += 1;
+        assert!(
+            Bitmap::try_deserialize::<Portable>(&moved).is_some(),
+            "the decoder does not read the offsets"
+        );
+        assert_eq!(exact_portable(&moved, &mut scratch), None);
+        let owner = Arc::new(moved);
+        assert!(unsafe { OwnedView::portable(&owner, owner.clone()) }.is_none());
+
+        let mut longer = bytes.clone();
+        longer.push(0);
+        assert_eq!(exact_portable(&longer, &mut scratch), None);
     }
 
     #[test]

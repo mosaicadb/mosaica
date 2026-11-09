@@ -2099,6 +2099,7 @@ dependencies = [
  "memmap2",
  "mosaica-access",
  "mosaica-cache",
+ "mosaica-roaring",
  "mosaica-types",
  "proptest",
  "rand 0.8.8",

@@ -33,7 +33,7 @@ mod view;
 pub use counts::{count_ranges, RangeEnds};
 pub use ranks::BlockRanks;
 pub use runs::{for_each_run_in, split_by_cardinality, RankedRuns, Runs};
-pub use view::OwnedView;
+pub use view::{exact_portable, OwnedView};
 
 /// The values block `block` spans: one container's.
 pub fn span(block: u32) -> std::ops::RangeInclusive<u32> {

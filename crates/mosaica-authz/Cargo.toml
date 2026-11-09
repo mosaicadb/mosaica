@@ -25,6 +25,7 @@ mosaica-access = { workspace = true }
 # The single-flight cache the fragment tier is built on, shared with mosaica-engine so the state
 # machine and its rules exist once.
 mosaica-cache = { workspace = true }
+mosaica-roaring = { workspace = true }
 rustc-hash = "1"
 rayon = { workspace = true }
 arrow = { workspace = true }

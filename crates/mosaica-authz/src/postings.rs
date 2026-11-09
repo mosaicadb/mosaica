@@ -272,9 +272,8 @@ pub(crate) fn read_posting(array: &LargeBinaryArray, idx: usize) -> io::Result<P
         0 => Ok(PostingRef::Array(payload)),
         1 => {
             // SAFETY: every tag-1 payload was validated once, at open time, by
-            // `validate_records`, which confirms the payload is byte for byte the portable
-            // serialisation of the bitmap it decodes to, so every offset the view follows is the
-            // offset of a container the validator read.
+            // `validate_records` on `mosaica_roaring::exact_portable`'s rule, so every offset
+            // the view follows is the offset of a container the validator read.
             let view = unsafe { BitmapView::deserialize::<Portable>(payload) };
             Ok(PostingRef::Roaring(view))
         }
@@ -302,10 +301,8 @@ pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
     }
 }
 
-/// A tag-1 payload is accepted only when serialising the bitmap it decodes to reproduces it. The
-/// safe decoder reads the containers in sequence and ignores the offset header, which the view
-/// follows; equality makes the two agree, and refuses trailing bytes too. Every writer serialises
-/// the bitmap it built, so a valid file always passes. `scratch` holds the serialisation.
+/// A tag-1 payload is accepted on [`mosaica_roaring::exact_portable`]'s rule, which is what makes
+/// the view [`read_posting`] builds safe. `scratch` is that rule's buffer.
 fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) -> io::Result<()> {
     let bytes = array.value(idx);
     let (tag, payload) = bytes
@@ -323,18 +320,10 @@ fn validate_record(array: &LargeBinaryArray, idx: usize, scratch: &mut Vec<u8>) 
             }
         }
         1 => {
-            let bitmap = Bitmap::try_deserialize::<Portable>(payload).ok_or_else(|| {
-                invalid_data(format!(
-                    "postings: term {idx} tag-1 payload is not a valid portable \
-                     Roaring bitmap"
-                ))
-            })?;
-            scratch.clear();
-            if *bitmap.serialize_into_vec::<Portable>(scratch) != *payload {
+            if mosaica_roaring::exact_portable(payload, scratch).is_none() {
                 return Err(invalid_data(format!(
-                    "postings: term {idx} tag-1 payload is not the serialisation of the bitmap \
-                     it decodes to: its headers disagree with its containers or bytes follow \
-                     them; rebuild the file"
+                    "postings: term {idx} tag-1 payload is not exactly a portable Roaring \
+                     bitmap; rebuild the file"
                 )));
             }
         }
@@ -608,35 +597,22 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 
-    /// A tag-1 record whose offset header points one byte off a container decodes cleanly in
-    /// sequence but would be served from the wrong bytes, so it is refused at open.
+    /// The offset-header rule (`mosaica_roaring::exact_portable`'s test) is applied at open: the
+    /// file is refused, not served from the wrong bytes.
     #[test]
     fn open_rejects_a_tag1_record_whose_offset_header_is_wrong() {
         let temp = TempDir::new().unwrap();
-        // Three array containers and no runs, so the payload carries an offset header: a 4-byte
-        // cookie, a 4-byte container count, 4 bytes of key and cardinality a container, then a
-        // 4-byte offset a container.
+        // Three array containers and no runs; the second container's offset is at byte 24 of the
+        // payload, after the cookie, the count, three descriptions and the first offset.
         let entities: Vec<u32> = (0..3u32)
             .flat_map(|c| (0..100u32).map(move |i| (c << 16) + 2 * i))
             .collect();
-        let record = encode_posting(0, &entities, 0).unwrap();
-        assert_eq!(&record[1..5], &12346u32.to_le_bytes(), "a no-run portable cookie");
-        assert_eq!(&record[5..9], &3u32.to_le_bytes(), "three containers");
-
-        let valid_path = temp.path().join("valid");
-        write_raw_records(&valid_path, &[&record]).unwrap();
-        let reader = PostingsReader::open(&valid_path, true).unwrap();
-        let served: Vec<u32> = reader.posting(TermId::new(0)).unwrap().unwrap().iter().collect();
-        assert_eq!(served, entities);
-
-        // The second container's offset, one byte later than where it starts.
-        let mut damaged = record.clone();
-        let at = 1 + 4 + 4 + 3 * 4 + 4;
-        damaged[at] += 1;
-        let damaged_path = temp.path().join("damaged");
-        write_raw_records(&damaged_path, &[&damaged]).unwrap();
+        let mut record = encode_posting(0, &entities, 0).unwrap();
+        record[1 + 24] += 1;
+        let path = temp.path().join("damaged");
+        write_raw_records(&path, &[&record]).unwrap();
         for mmap in [true, false] {
-            let err = PostingsReader::open(&damaged_path, mmap).unwrap_err();
+            let err = PostingsReader::open(&path, mmap).unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         }
     }
