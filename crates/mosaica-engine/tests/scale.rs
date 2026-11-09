@@ -442,18 +442,20 @@ fn ingest_round(engine: &Engine, round: usize, batch: usize) -> (Vec<Planted>, R
     // loop; a test that asserted straight after the flush would be asserting D1 does not exist.
     let ack = t_ack.elapsed();
     let flushes = engine.write_executor_stats().flushes;
-    let refreshes = engine.refreshes();
     let t_publish = Instant::now();
     engine.request_flush();
     wait_until("the round's flush to publish", WAIT, || {
         engine.write_executor_stats().flushes > flushes
     });
     let publish = t_publish.elapsed();
+    // The executor marks a refresh in flight before it swaps a publication in, so once the flush
+    // has published, idle means its own refresh has replaced the session's projection. Counting
+    // refreshes instead is satisfied by a merge's refresh that ends while the flush's still runs.
     let t_refresh = Instant::now();
     wait_until(
         "the background refresh to replace the session's projection",
         WAIT,
-        || engine.refreshes() > refreshes,
+        || engine.maintenance_idle_for_test(),
     );
     (
         probes,
