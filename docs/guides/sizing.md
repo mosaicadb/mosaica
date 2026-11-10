@@ -83,17 +83,15 @@ At 500 points a tile the hot set no longer fitted, and the server delivered fewe
 
 ### Under a small memory cap
 
-The cache limits don't follow the memory cap, so a server capped below their total fills its caches past the cap and is stopped by the kernel. Under such a cap, set each cache to a share of it. These shares kept every server alive in the runs above, at caps from 512 MiB to 8 GiB; for a 2 GiB cap:
+The limits in [the caches](#the-caches) are how much the server may fill, whatever its memory cap. A server capped below their total keeps filling them until the kernel stops it, as servers with default limits were stopped at 512 MiB and 1 GiB in the runs above. Under a small cap, then, choose the limits so that they fit beside the hot set, keeping large the ones your workload depends on:
 
-```toml
-[serve]
-row_projection_cache_bytes = 268435456  # 256 MiB, about 12% of the cap
-fragment_cache_bytes = 134217728        # 128 MiB, about 6%
-filter_cache_bytes = 134217728          # 128 MiB, about 6%
-masked_count_cache_bytes = 67108864     # 64 MiB, about 3%
-region_cache_bytes = 67108864           # 64 MiB, about 3%
-occupancy_cache_bytes = 16777216        # 16 MiB, about 1%
-```
+- **`row_projection_cache_bytes` and `fragment_cache_bytes`, when many users hold attributes of their own.** A set of attributes that doesn't fit is built again on its next request, which costs CPU in proportion to the corpus. Give them the sets in use at once, as [How much to give a server](#how-much-to-give-a-server) works out.
+- **`filter_cache_bytes`, when viewers filter and pan.** A condition that isn't kept is evaluated again on each request.
+- **The rest can usually be small.** `masked_count_cache_bytes` stays empty unless an annotation level is served from a column, `region_cache_bytes` holds only drawn regions, and `occupancy_cache_bytes` is small already.
+
+Two allowances aren't caches but still count. The paged reads reserve 896 MiB by default, more than a 512 MiB cap on its own, so lower `bulk_admission` or `max_page_bytes` under a cap that small. The recent changes can't be lowered: they hold deletions, suppressions and new items until the next flush or compaction, so a capped server taking many changes needs those to run often.
+
+In the runs above, giving the caches about a third of the cap in all kept every server alive from 512 MiB to 8 GiB. The shares used are `[defaults.tuned]` in the benchmark's `bench/capacity.toml`.
 
 ??? info "How these figures arise"
     **The access caches.** Each set of access attributes in use holds its visible items twice: as a bitmap in item order, in `fragment_cache_bytes`, and as one in map order for each view and shard, in `row_projection_cache_bytes`. A bitmap stores each block of 65,536 rows in the least of three forms: 2 bytes per visible row, a flat 8 KiB, or a few bytes per run of consecutive visible rows. So a set seeing a sixteenth or more of the items, scattered, costs about one bit per item; a smaller scattered share costs about 2 bytes per visible item; and items that sit together cost far less. This is worked out from the format. Measured, each set seeing a scattered sixteenth added 1.4 MiB at 10 million items and 13.5 MiB at 100 million, against 1.2 MiB and 11.9 MiB predicted for one bitmap. At 100 million items, a thousand new sets arriving at once were limited by the CPU that building them takes, a few hundred a minute on three cores, and larger caches didn't help.
