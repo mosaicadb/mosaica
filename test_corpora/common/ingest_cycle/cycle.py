@@ -873,12 +873,14 @@ class Cycle:
         server compacts every shard with something to reclaim, one after another, and keeps
         `fold_requested` raised until the last publishes. Each compaction seen to publish is
         recorded with its shard, seconds and peak memory; the shards whose identity moved on disc
-        are the ones compacted. `completed` is false where [`compaction_answered`] raises, and
-        `fold_failures` and `fold_refusals` say why."""
+        are the ones compacted. `completed` is false where [`compaction_answered`] raises for the
+        request's answer on `GET /control/compact/{request}`, and `fold_failures` and
+        `fold_refusals` say why."""
         first = control.status()
         before, costs_before = first["compaction"], last_compactions(first)
         identities = self.shard_identities()
-        code = control.compact().status_code
+        asked = control.compact()
+        code = asked.status_code
         compactions: list[dict] = []
         seen, costs_seen = before["folds"], costs_before
 
@@ -908,7 +910,9 @@ class Cycle:
         compaction = last["compaction"]
         ran = [c for s, c in last_compactions(last).items() if costs_before.get(s) != c]
         try:
-            done = settled_in_time and compaction_answered(before, compaction)
+            done = settled_in_time and code == 202 and compaction_answered(
+                control.compaction_request(asked.json()["request"])
+            )
         except RuntimeError:
             done = False
         after = self.shard_identities()

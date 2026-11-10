@@ -638,7 +638,7 @@ impl Executor {
     /// bumping either would invalidate every row projection for a change no request can observe.
     pub(super) fn publish_completed_suggests(&mut self) -> bool {
         let mut any = false;
-        while let Some(completed) = self.suggest.next_completed() {
+        while let Some((completed, _)) = self.suggest.next_completed() {
             let generation = self.generation.load_full();
             let superseded = generation
                 .suggest
@@ -679,7 +679,7 @@ impl Executor {
             return false;
         }
         let mut any = false;
-        while let Some(completed) = self.merge.next_completed() {
+        while let Some((completed, _)) = self.merge.next_completed() {
             self.publish_merge(completed);
             any = true;
         }
@@ -873,7 +873,7 @@ impl Executor {
     /// Apply every completed coalesce waiting from the pool, and report whether any did.
     pub(super) fn publish_completed_coalesces(&mut self) -> bool {
         let mut any = false;
-        while let Some(completed) = self.coalesce.next_completed() {
+        while let Some((completed, _)) = self.coalesce.next_completed() {
             self.publish_coalesce(completed);
             any = true;
         }
@@ -890,8 +890,8 @@ impl Executor {
     /// descriptors, so no projection is invalidated and no session pays anything. What it swaps is
     /// content-preserving, so a request holding either version agrees on every answer.
     ///
-    /// The consumed files are not deleted: every side-manifest below this `n` still names them, and
-    /// reclaiming them is compaction's.
+    /// The consumed files are not deleted here: the side-manifests below this `n` still name them.
+    /// They are deleted once the last of those is pruned and nothing holds a generation naming them.
     pub(super) fn publish_coalesce(&mut self, completed: crate::coalesce::CompletedCoalesce) {
         let started = std::time::Instant::now();
         // Same `may_publish` guard as `publish_merge`.
@@ -1207,9 +1207,9 @@ impl Executor {
     /// and never waits behind a commit window.
     pub(super) fn publish_completed_flushes(&mut self) -> bool {
         let mut any = false;
-        while let Some(completed) = self.flush.next_completed() {
+        while let Some((completed, job)) = self.flush.next_completed() {
             let mark = StageMark::now();
-            self.publish_flush(completed);
+            self.publish_flush(completed, job);
             self.health
                 .flush_lap(crate::flush::FlushStage::PublishWall, mark);
             any = true;
@@ -1534,7 +1534,14 @@ impl Executor {
                  one"
             );
         }
-        let unit = self.flush.start();
+        let (stages, record) = mosaica_types::progress::Stages::queued(
+            mosaica_types::progress::JobKind::Flush,
+            crate::flush::FlushStage::Promote,
+        );
+        let record = Arc::new(record);
+        let unit = self
+            .flush
+            .start_recorded(&self.health.jobs, Arc::clone(&record));
         self.health.mark_flush_started(std::time::Instant::now());
         let health = Arc::clone(&self.health);
         let switches = Arc::clone(&self.deps.switches);
@@ -1543,7 +1550,7 @@ impl Executor {
             if unit.abandoned() {
                 return;
             }
-            let mut laps = crate::flush::FlushLaps::default();
+            let mut laps = crate::flush::FlushLaps::new(record, stages);
             match crate::flush::execute_flush(plan, context, &mut laps) {
                 Ok(completed) => {
                     health.record_flush_execution(&laps, Some(completed.consumed.len()));
@@ -2087,9 +2094,18 @@ impl Executor {
     ///
     /// A flush planned against a superseded prefix is discarded: its row bases were computed
     /// against a row space that no longer exists.
-    pub(super) fn publish_flush(&mut self, completed: crate::flush::CompletedFlush) {
+    ///
+    /// `job` is the flush's record, finished once it publishes and failed by a discard.
+    pub(super) fn publish_flush(
+        &mut self,
+        completed: crate::flush::CompletedFlush,
+        job: Option<crate::write::Job>,
+    ) {
         let mut mark = StageMark::now();
         if self.publish_flush_stages(completed, &mut mark) {
+            if let Some(job) = job {
+                job.finish();
+            }
             // The publication cycle closes at the swap (`ExecutorHealth::publication`): the
             // generation carrying this unit's rows, fills and extents is the live one from here,
             // so the number being reached and the work being served are one event. A request it

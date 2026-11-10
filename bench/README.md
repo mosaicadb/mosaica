@@ -305,3 +305,52 @@ than duplicating each other.
 **`ingest-build` at the smallest scale is contaminated if it runs first** — it reads the 6.6 GB
 `geometry.parquet` cold while later builds hit the page cache. Compare adjacent scales, not the
 first row.
+
+---
+
+## 10. The nightly comparison
+
+[`scripts/bench_ab.py`](../scripts/bench_ab.py) needs no corpus and no fixtures. It writes a
+profile's corpus from a seed and runs two `mosaica` binaries over it through the CLI and the HTTP
+API: build, start, a battery of viewport, aggregate and bulk-read requests by a principal who sees
+everything and one who sees one term, an ingest of 5% more items with a flush, deletion of 1% and
+suppression of 0.1%, and a compaction. Each step's result is checked by the visible count before
+its time is kept. The binaries alternate, baseline first on even repetitions, so drift in the
+machine falls on both.
+
+```bash
+cargo build --release -p mosaica && cp target/release/mosaica /tmp/candidate
+python3 scripts/bench_ab.py run --profile fields --baseline /tmp/baseline --candidate /tmp/candidate \
+    --work /tmp/ab --out ab-fields.json
+python3 scripts/bench_ab.py report ab-*.json
+```
+
+| profile | items | what it varies |
+|---|---|---|
+| `fields` | 5,000,000 | every attribute type, each rendered, indexed, both and neither |
+| `scatter` | 100,000,000 | labels hashed over 1,024 terms: the least contiguous a term can be |
+| `clustered` | 100,000,000 | a Web Mercator view, labels by spatial cluster: the most contiguous |
+| `text` | 10,000,000 | an indexed text column of about 24 words, and an indexed keyword |
+| `layers` | 50,000,000 | a three-level tiered layer and a flat layer over a category |
+
+The sizes are what fits a standard GitHub runner with room to spare. At 100,000,000 items one run
+of one binary took 400 s on four cores, with the build at 4.3 GiB resident, the server at 8.4 GiB
+including the bundle pages it maps, and 16 GB of disc. `--items` changes a profile's size. The
+Python it needs is in [`scripts/bench_ab.requirements.txt`](../scripts/bench_ab.requirements.txt).
+
+[`.github/workflows/nightly.yml`](../.github/workflows/nightly.yml) runs every profile each
+evening, comparing main with main as it stood 24 hours earlier, and puts the tables in the run's
+summary; a manual run takes any baseline. Each binary runs five times. A row is marked slower or
+faster when the ratio of the two sides' minima is past 15%, their five figures do not overlap, and
+for a timing they differ by more than 2 ms. A slower row turns the run red. A `cold` row, the first
+answer after a session is minted, is one answer per run and differed by more than twice between
+runs of one binary, so it is shown without a verdict.
+
+Two binaries that do not differ still separate completely on one row in 252, by chance, and a
+night has hundreds of rows, so the 15% and 2 ms conditions are what keep a red run meaningful.
+They were set from one repetition of a binary run against itself on a 4-core machine: filtered
+viewports differed by up to 20%, build and compaction by under 5%, and ingest by up to 50% on the
+`fields` profile. How often a hosted runner raises a false alarm under these conditions has not
+been measured, so rerun a red row with the same baseline before acting on it. Hosted runners
+differ from one another by more than any of these figures, so only the ratio, taken on one
+machine, means anything, and the absolutes belong to that runner.

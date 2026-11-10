@@ -35,6 +35,7 @@ use mosaica_store::term_images::{
 use mosaica_store::{Permutation, RowSpace};
 
 use crate::error::{BuildError, Result};
+use mosaica_types::progress::ADVANCE_EVERY;
 
 /// **Zero, because a build is publication zero**: the file is named after the manifest generation
 /// it belongs to, and a build writes `SEGMENTS-0.json`.
@@ -89,9 +90,9 @@ impl TermImageReport {
              {:.1} s",
             crate::thousands(u64::from(self.kept)),
             crate::thousands(u64::from(self.terms)),
-            crate::unique_key::human_bytes(self.payload_bytes),
-            crate::unique_key::human_bytes(self.table_bytes),
-            crate::unique_key::human_bytes(self.largest_image_bytes),
+            mosaica_types::process::human_bytes(self.payload_bytes),
+            mosaica_types::process::human_bytes(self.table_bytes),
+            mosaica_types::process::human_bytes(self.largest_image_bytes),
             self.wall_s,
         )
     }
@@ -116,7 +117,8 @@ pub struct ViewTermImages {
 /// A view with no rows and a dictionary with no terms both give `None`, and no file and no
 /// manifest entry. Neither has an image to hold: projection maps entities to rows, and a view that
 /// holds no row projects every posting to the empty set.
-pub fn run(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run(
     postings: &PostingsReader,
     prefix_dir: &Path,
     layout: mosaica_store::ShardLayout<'_>,
@@ -124,6 +126,7 @@ pub fn run(
     rows_in_view: u32,
     index: &mut DerivedIndex,
     threads: usize,
+    steps: crate::observer::Steps<'_>,
 ) -> Result<Option<ViewTermImages>> {
     let dict_len = postings.term_count();
     if rows_in_view == 0 || dict_len == 0 {
@@ -151,10 +154,18 @@ pub fn run(
 
     let file = mosaica_store::derived::term_image_file(prefix_dir, layout, MANIFEST_N, index)?;
 
-    let walk: PostingWalk<'_> = &|term, visit| walk_posting(postings, term, visit);
+    // The derivation reads the terms one after another in term order, so each block of
+    // `ADVANCE_EVERY` terms is counted as its last term is read, and the rest at the end.
+    let walk: PostingWalk<'_> = &|term, visit| {
+        if (u64::from(term) + 1) % ADVANCE_EVERY == 0 {
+            steps.advance(ADVANCE_EVERY);
+        }
+        walk_posting(postings, term, visit)
+    };
     let options = DeriveOptions { threads };
     let summary = derive_term_images(&space, dict_len, walk, &stamp, &file.path, options)
         .map_err(|e| BuildError::io(&file.path, e))?;
+    steps.advance(u64::from(dict_len) % ADVANCE_EVERY);
     // The derivation syncs the file. The directory entry has to be durable too, or a crash leaves
     // a manifest naming a file whose name was never written.
     crate::fsync_dir(&file.dir)?;

@@ -60,7 +60,8 @@ re-hash would be the whole run.
 **This is a backstop, never a gate** (§6, §13). It is skipped unless `MOSAICA_SUITE_ENDURANCE=1`
 is set, so a plain `pytest conformance/suite` — including CI's — never runs it; wiring it into a
 gate and then disabling it is the failure that sentence in the design exists to prevent. It runs
-on demand and before a release. The knobs (defaults are the real thing, §16's tier table):
+on demand, before a release and each evening (`.github/workflows/nightly.yml`). The knobs
+(defaults are the real thing, §16's tier table):
 
     MOSAICA_SUITE_ENDURANCE=1   opt in (required; everything below is optional)
     MOSAICA_SUITE_BASE=1000000  built corpus items
@@ -134,7 +135,6 @@ more to the next reader than a tidy one.
 
 from __future__ import annotations
 
-import base64
 import collections
 import hashlib
 import io
@@ -152,6 +152,7 @@ import pytest
 
 from oracle.harness import CLI_BIN
 from oracle.layout import read_publication, shard_dir, view_dir
+from oracle.wire import split_items_frames
 
 from .battery import Viewport
 from .driver import (
@@ -987,9 +988,27 @@ def test_endurance_long_life(tmp_path_factory):
             for fx in pool[:need]
         )
 
+        mosaica_ids: dict[int, str] = {}
+
+        def mosaica_id_of(record: DenyRecord) -> str:
+            """The `mosaica_id` of `record`'s item, read by its unique `id` when first named. An
+            ingested item has one only once it is accepted, and a suppressed item is not served,
+            so the identifier a suppression reads is the one its unsuppression sends."""
+            if record.fx not in mosaica_ids:
+                resp = h.server.items(
+                    h.token, view=VIEW_ID, fields=[], filters={"id": {"eq": record.e}}
+                )
+                assert resp.status_code == 200, f"items refused ({resp.status_code}): {resp.text}"
+                found = []
+                for records, _end in split_items_frames(resp.content).pages:
+                    with ipc.open_stream(io.BytesIO(records)) as reader:
+                        found += reader.read_all().column("mosaica_id").to_pylist()
+                assert len(found) == 1, f"id {record.e} names {len(found)} served items"
+                mosaica_ids[record.fx] = str(found[0])
+            return mosaica_ids[record.fx]
+
         def deny(op: str, record: DenyRecord, label: str) -> Deny:
-            b64 = base64.b64encode(record.e.to_bytes(8, "little")).decode()
-            return Deny(op, lambda _h, b64=b64, fx=record.fx: (b64, fx), label=label)
+            return Deny(op, lambda _h, r=record: (mosaica_id_of(r), r.fx), label=label)
 
         # -- the ladder phase: writes only, no fold, the merge left to find its settle ----------
         chunk_size = 8
@@ -1102,9 +1121,12 @@ def test_endurance_long_life(tmp_path_factory):
         # The wire's fold counter is process-local and the final reload reset it; the harness's
         # own ledger is what says every requested fold landed.
         assert t.folds_landed == p.folds - (1 if p.kill else 0)
-        assert t.entity_high_water >= p.base + p.rounds * p.rows, (
-            f"entity high-water {t.entity_high_water} is below the {p.base + p.rounds * p.rows} "
-            f"items this run fed the server — entities were lost or the floor slid back"
+        # A new item may take a number a fold freed, so the floor is the numbers the receipts
+        # say were issued, not the count of items fed.
+        floor = h.numbers.high_water_floor()
+        assert t.entity_high_water >= floor, (
+            f"entity high-water {t.entity_high_water} is below {floor}, past every number this "
+            f"run's receipts issued — entities were lost or the floor slid back"
         )
         assert t.side_global_max >= p.rounds, (
             f"the side-manifest sequence reached only {t.side_global_max} across {p.rounds} "

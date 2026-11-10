@@ -48,7 +48,7 @@ A client builds everything it shows from a handful of requests: the points of th
     | [The map](#drawing-the-map) | the counts and a sample of points in each tile on screen | Not built yet |
     | [Topics and regions](#annotations-on-the-map) | the artifacts in each tile, with names, counts and positions | Not built yet |
     | [A filter list or typeahead](#filter-lists-and-typeahead) | a category's values | Not built yet |
-    | [An item's card](#reading-records) | one item's fields | Not built yet. `mosaica items` with an `eq` filter on a unique field reads the fields you name of one item in one view |
+    | [An item's card](#reading-records) | one item's fields | Not built yet. `mosaica items` with a `mosaica_id` filter, or an `eq` filter on a unique field, reads the fields you name of one item in one view |
     | [A table or an export](#reading-records) | every matching item or artifact | `mosaica items`, `mosaica artifacts` |
     | [A chart or breakdown](#charts-and-breakdowns) | counts by group, histograms and density grids | `mosaica aggregate` |
 
@@ -102,6 +102,8 @@ You combine filters with `all_of`, `any_of` and `none_of`:
 ```
 
 Two more filters work on the map rather than on a field: `region` keeps the items inside a shape the viewer drew, such as a box, circle, ellipse or polygon, and `member_of` keeps the members of one artifact, such as the papers on one topic. `member_of` names the artifact by its `mosaica_id` or by the key you published it under, so a clustering you added as a layer can be filtered to cluster 37 with `{"member_of": {"layer": "hdbscan", "key": "37"}}`. Both combine with every other filter and can be negated. A drawn shape is tested exactly against each item's stored position, but because Mosaica counts the map cells wholly inside it without reading them and tests only the items near its edge, a large shape costs little more than a small one.
+
+A third, `mosaica_id`, keeps the items named by the identifiers responses hand out, as in `{"mosaica_id": {"in": ["8813092118", "2283451907"]}}`. It is the way to read fields of points already drawn, such as an image link for each point a client shows a picture for, with one bulk read. An identifier naming an item the viewer may not see matches nothing, as one naming nothing does.
 
 !!! note "`none_of` keeps items with no value"
     `{"none_of": [{"archive": {"eq": "cs"}}]}` keeps every paper the viewer may see whose archive is not `cs`, including papers with no archive. The expressions inside one `none_of` may name different fields, and may be free-text searches.

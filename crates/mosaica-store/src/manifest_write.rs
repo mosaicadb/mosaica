@@ -377,9 +377,22 @@ fn write_once(dir: &Path, name: &str, bytes: &[u8]) -> Result<()> {
 /// How many `SEGMENTS-<n>.json` one partition directory keeps: the newest and the two before it.
 pub const SIDE_MANIFESTS_KEPT: usize = 3;
 
+/// What [`prune_superseded_segments_manifests`] removed, and the data files it left unnamed.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Pruned {
+    /// Side-manifest files removed.
+    pub removed: usize,
+    /// Prefix-relative data files a removed publication named that no kept publication and no
+    /// `build_files` entry names. They are still on disc: a reader holding an older generation
+    /// may open one for the first time, so the caller deletes them once none is held.
+    pub unnamed: Vec<String>,
+}
+
 /// Delete every partition `SEGMENTS-<n>.json` below the [`SIDE_MANIFESTS_KEPT`] highest, then
 /// every shard's and layer space's `SEGMENTS-<m>.json` that no kept partition file names and whose
-/// `m` is below the highest kept `n`, and return how many files were removed.
+/// `m` is below the highest kept `n`. Returns how many files were removed, and the data files only
+/// the removed publications named: a merge's consumed segments, a coalesce's consumed extents.
+/// `build_files` is the prefix's `MANIFEST.json` `files`, whose entries are never reported.
 ///
 /// **Deleting a superseded candidate removes it from the step-down walk rather than letting the
 /// walk skip it, and that is what keeps the walk safe.** The walk's safety rests on never stepping
@@ -392,23 +405,34 @@ pub const SIDE_MANIFESTS_KEPT: usize = 3;
 /// has not committed yet, and is left. Where a kept partition file cannot be read, no shard or
 /// space file is removed, since what it names is unknown.
 ///
-/// Directory entries are left unsynced: a deletion lost to a crash is pruned again.
-pub fn prune_superseded_segments_manifests(prefix_dir: &Path, partition: &str) -> Result<usize> {
+/// Directory entries are left unsynced: a deletion lost to a crash is pruned again, and what it
+/// named is reported again. A reported file the caller had not deleted when the process stopped is
+/// not reported again, nor is one only an unreadable publication named; the next compaction's
+/// prefix removal takes it.
+pub fn prune_superseded_segments_manifests(
+    prefix_dir: &Path,
+    partition: &str,
+    build_files: &std::collections::BTreeMap<String, crate::manifest::FileDigest>,
+) -> Result<Pruned> {
     let dir = crate::layout::partition_dir(prefix_dir, partition);
     let mut present = crate::read::list_segments_manifests(&dir, partition)?;
-    // Highest first, so the skip below keeps the newest and the two before it.
+    // Highest first, so the split keeps the newest and the two before it.
     present.sort_unstable_by(|a, b| b.cmp(a));
+    let (kept, superseded) = present.split_at(present.len().min(SIDE_MANIFESTS_KEPT));
+    // Read before anything is removed: the superseded publications' shard and space files go below.
+    let unnamed = named_only_by(prefix_dir, partition, superseded, kept, build_files);
     let mut removed = 0;
-    for n in present.iter().skip(SIDE_MANIFESTS_KEPT) {
+    for n in superseded {
         removed += remove_if_present(&dir.join(segments_name(*n)))?;
     }
-    let Some(&highest) = present.first() else {
-        return Ok(removed);
+    let pruned = |removed| Pruned { removed, unnamed };
+    let Some(&highest) = kept.first() else {
+        return Ok(pruned(removed));
     };
     let mut named = std::collections::BTreeSet::new();
-    for n in present.iter().take(SIDE_MANIFESTS_KEPT) {
+    for n in kept {
         let Ok(file) = crate::read::read_partition_file(&dir.join(segments_name(*n))) else {
-            return Ok(removed);
+            return Ok(pruned(removed));
         };
         for shard in &file.shards.files {
             named.insert(ShardLayout::new(partition, shard.id).manifest_rel(shard.n));
@@ -427,7 +451,43 @@ pub fn prune_superseded_segments_manifests(prefix_dir: &Path, partition: &str) -
             }
         }
     }
-    Ok(removed)
+    Ok(pruned(removed))
+}
+
+/// The data files the `superseded` publications name that no `kept` publication and no
+/// `build_files` entry names. Empty where a kept publication cannot be read, since what it names
+/// is unknown; a superseded one that cannot be read contributes nothing.
+fn named_only_by(
+    prefix_dir: &Path,
+    partition: &str,
+    superseded: &[u64],
+    kept: &[u64],
+    build_files: &std::collections::BTreeMap<String, crate::manifest::FileDigest>,
+) -> Vec<String> {
+    let files_of = |n: u64| {
+        crate::read::read_publication(prefix_dir, partition, n)
+            .map(|published| published.manifest.partition.files)
+    };
+    if superseded.is_empty() {
+        return Vec::new();
+    }
+    let mut named = std::collections::BTreeSet::new();
+    for &n in kept {
+        let Ok(files) = files_of(n) else {
+            return Vec::new();
+        };
+        named.extend(files.into_keys());
+    }
+    let mut unnamed = std::collections::BTreeSet::new();
+    for &n in superseded {
+        let Ok(files) = files_of(n) else { continue };
+        unnamed.extend(
+            files
+                .into_keys()
+                .filter(|rel| !named.contains(rel) && !build_files.contains_key(rel)),
+        );
+    }
+    unnamed.into_iter().collect()
 }
 
 /// Remove `path`, counting it: one already gone is not a failure to remove it.

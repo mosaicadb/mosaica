@@ -155,7 +155,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/control/flush", post(flush))
         .route("/control/compact", post(compact))
         .route_layer(axum::middleware::from_fn(require_write));
-    let admin_routes = Router::new().route("/control/status", get(status));
+    let admin_routes = Router::new()
+        .route("/control/status", get(status))
+        .route("/control/compact/{request}", get(compaction_request));
     // Fault arming exists only in a fault-injection build, behind the credential like every route.
     #[cfg(feature = "fault-injection")]
     let admin_routes = admin_routes
@@ -940,8 +942,8 @@ async fn flush(
 
 /// `POST /control/compact`: sets a flag the executor reads at its next tick, and answers 202 with
 /// the request's number. At most one compaction is in flight. A request that arrives while one
-/// runs is held until it lands. `/control/status`'s `compaction.requests` says when the request is
-/// answered and whether it was refused. A 503 where no tick could compact before a restart.
+/// runs is held until it lands. `GET /control/compact/{request}` says when the request is answered
+/// and how. A 503 where no tick could compact before a restart.
 async fn compact(
     State(state): State<Arc<AppState>>,
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
@@ -953,6 +955,84 @@ async fn compact(
         Err(mosaica_engine::CompactionRefused::NotRunning) => Err(ApiError::NotReady),
         Err(refused) => Err(ApiError::Unavailable(refused.detail())),
     }
+}
+
+/// `GET /control/compact/{request}`: where one compaction request is. Pending, with the record of
+/// the compaction serving it, or answered, with its outcome, the requests answered with it and the
+/// record of the compaction that answered them. A number this run of the server has not given is
+/// `404`, and an answer older than the ones kept is `410`.
+async fn compaction_request(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(request): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let number = request
+        .parse::<u64>()
+        .ok()
+        .filter(|number| *number > 0)
+        .ok_or_else(|| {
+            ApiError::Contract(format!(
+                "`{request}` is not a compaction request's number; write the number `POST \
+                 /control/compact` answered"
+            ))
+        })?;
+    let found = state.engine.compaction_request(number).ok_or_else(|| {
+        ApiError::Unknown(format!(
+            "this run of the server has given no compaction request the number {number}: a \
+             number from before the server restarted is lost with the request; ask for a \
+             compaction again"
+        ))
+    })?;
+    let body = match found {
+        mosaica_engine::RequestState::Pending { job } => serde_json::json!({
+            "request": number,
+            "answered": false,
+            "answer": null,
+            "job": job,
+        }),
+        mosaica_engine::RequestState::Answered(answer) => {
+            let refusal = match answer.outcome {
+                mosaica_engine::RequestOutcome::Refused {
+                    gate,
+                    shard,
+                    need_bytes,
+                    had_bytes,
+                    ..
+                } => Some((gate, shard.map(|s| s.raw()), need_bytes, had_bytes)),
+                _ => None,
+            };
+            serde_json::json!({
+                "request": number,
+                "answered": true,
+                "answer": {
+                    "first": answer.first,
+                    "last": answer.last,
+                    "outcome": answer.outcome.as_str(),
+                    "ok": answer.outcome.succeeded(),
+                    "gate": refusal.map(|r| r.0),
+                    "detail": answer.detail(),
+                    "shard": refusal.and_then(|r| r.1),
+                    "need_bytes": refusal.and_then(|r| r.2),
+                    "had_bytes": refusal.and_then(|r| r.3),
+                },
+                "job": answer.job,
+            })
+        }
+        mosaica_engine::RequestState::Abandoned => {
+            return Err(ApiError::Unavailable(
+                "the write executor has stopped, so this request will not be answered; restart \
+                 the server, which loses the request, and ask for a compaction again",
+            ))
+        }
+        mosaica_engine::RequestState::Forgotten => {
+            return Err(ApiError::Gone(format!(
+                "request {number} was answered, and its answer is older than the latest {} this \
+                 server keeps; `compaction.folds` and `compaction.fold_failures` on \
+                 /control/status count the compactions that published and failed",
+                mosaica_engine::KEPT_ANSWERS
+            )))
+        }
+    };
+    Ok(Json(body))
 }
 
 /// `PUT /control/layers`: registers one annotation layer. Synchronous: the answer follows the
@@ -2860,7 +2940,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
     let fragment_cache: mosaica_engine::FragmentCacheStats = live.fragment_cache;
     let masked_counts = state.engine.figures_stats();
     let region_cache: mosaica_engine::CacheStats = state.engine.region_cache_stats();
-    let text_filter_cache: mosaica_engine::CacheStats = state.engine.text_filter_cache_stats();
+    let filter_cache: mosaica_engine::CacheStats = state.engine.filter_cache_stats();
     let derived_cache = state.engine.derived_cache_stats();
     let suggest_sets = state.engine.suggest_set_stats();
     let occupancy: mosaica_engine::CacheStats = state.engine.occupancy_cache_stats();
@@ -2868,6 +2948,12 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
     let ingest = state.ingest_admission.status();
     let sessions = state.sessions.lock().stats();
     let segments: Vec<mosaica_engine::ViewSegments> = live.segments;
+    // The jobs in flight before the last compaction to end, so a compaction that ends between the
+    // two reads is in one of them.
+    let jobs = state.engine.jobs();
+    let last_compaction = state
+        .engine
+        .last_job(mosaica_types::progress::JobKind::Compaction);
     Ok(Json(serde_json::json!({
         "entity_id_high_water": state.engine.allocator_high_water(),
         "shards": {
@@ -3131,15 +3217,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "requests": {
                 "accepted": executor.compaction_requests_accepted,
                 "answered": executor.compaction_requests_answered,
-                "last_refusal": executor.last_request_refusal.map(|r| serde_json::json!({
-                    "request": r.request,
-                    "shard": r.shard.map(|s| s.raw()),
-                    "gate": r.refusal.gate,
-                    "detail": r.detail,
-                    "need_bytes": r.refusal.need_bytes,
-                    "had_bytes": r.refusal.had_bytes,
-                    "at_unix": r.refusal.at_unix,
-                })),
             },
             "last_attr_bytes_read": executor.last_fold_attr_read,
             "last_attr_bytes_written": executor.last_fold_attr_written,
@@ -3150,9 +3227,15 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
                     "ms": p.elapsed.as_millis() as u64,
                     "rss_bytes": p.rss,
                     "anon_bytes": p.anon,
+                    "done": p.done,
+                    "total": p.total,
                 }))
                 .collect::<Vec<_>>(),
+            "last_job": last_compaction,
         },
+        // The record of the flush and of the compaction in flight. Served on the control plane
+        // only, since a compaction's counts are over the whole corpus.
+        "jobs": jobs,
         // How scattered ingested postings are: entity ids are sorted by term signature only within
         // one allocation run, so small runs erode compression. Measured over delta tiers as each is
         // flushed; base postings are excluded. The ratios are `null` until the first flush.
@@ -3248,7 +3331,7 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
             "disk_bound_bytes": masked_counts.disk_bound_bytes,
         },
         "region_cache": shared_cache_status(&region_cache),
-        "text_filter_cache": shared_cache_status(&text_filter_cache),
+        "filter_cache": shared_cache_status(&filter_cache),
         "derived_cache": {
             "entries": derived_cache.entries,
             "bytes": derived_cache.resident_bytes,

@@ -35,7 +35,7 @@ import pathlib
 import re
 import sys
 import warnings
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Union
 
 import anywidget
 import traitlets
@@ -250,6 +250,10 @@ class Map(anywidget.AnyWidget):
       change shows the next time the map is displayed.
     - `title_field`: the field whose value titles a point in the hover and the item card. `None`,
       the default, titles a point by its id.
+    - `image_fields`: the fields whose value is the address of an image, which the item card
+      draws as that image. The address is an `http:` or `https:` one, or a path resolved against
+      the page that shows the map. The viewer's browser loads the image from the host serving it.
+      Any other value, and an image that does not load, is shown as text.
     - `artifacts_per_tile`: the most annotations each level of a layer draws in one map tile,
       largest first. `None`, the default, asks for 50, or for the server's
       `max_artifacts_per_tile` when that is smaller, and the server refuses a value above its
@@ -298,10 +302,10 @@ class Map(anywidget.AnyWidget):
       colours. Setting either replaces every colour of its kind that the map holds.
 
     The page applies a `filters` expression only when its filter panel can show it, so it
-    refuses `any_of`, `none_of` and two tests on one column, applying nothing and saying why in
-    `last_error` and a warning. A `member_of` test, alone or in `none_of`, is shown as a chip
-    beside the panel's fields and keeps the map to an annotation's members or to the items
-    outside it; one naming its annotation by `key` is refused, since the map holds an
+    refuses `any_of`, `none_of`, `mosaica_id` and two tests on one column, applying nothing and
+    saying why in `last_error` and a warning. A `member_of` test, alone or in `none_of`, is shown
+    as a chip beside the panel's fields and keeps the map to an annotation's members or to the
+    items outside it; one naming its annotation by `key` is refused, since the map holds an
     annotation by its `mosaica_id`.
 
     The map also keeps these attributes, which you read and do not set:
@@ -338,6 +342,8 @@ class Map(anywidget.AnyWidget):
     height = traitlets.Int(480).tag(sync=True)
     # The record field that titles a point in the hover and the item card; `None` titles it by id.
     title_field = traitlets.Unicode(None, allow_none=True).tag(sync=True)
+    # The record fields the item card draws as images.
+    image_fields = traitlets.List(traitlets.Unicode()).tag(sync=True)
     # The store's quota of annotations per level per tile; `None` leaves the store's default.
     artifacts_per_tile = traitlets.Int(None, allow_none=True).tag(sync=True)
     budget = traitlets.Int(0).tag(sync=True)
@@ -399,6 +405,7 @@ class Map(anywidget.AnyWidget):
         height: int = 480,
         explorer_layout: str = "docked",
         title_field: Optional[str] = None,
+        image_fields: Union[str, Sequence[str], None] = None,
         artifacts_per_tile: Optional[int] = None,
         budget: int = 0,
         budget_min: int = 1_000,
@@ -442,6 +449,7 @@ class Map(anywidget.AnyWidget):
             height=height,
             explorer_layout=explorer_layout,
             title_field=title_field,
+            image_fields=[] if image_fields is None else listed(image_fields),
             artifacts_per_tile=artifacts_per_tile,
             budget=budget,
             budget_min=budget_min,

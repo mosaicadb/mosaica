@@ -11,19 +11,17 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, LargeBinaryArray, LargeBinaryBuilder};
+use arrow::array::{Array, LargeBinaryArray, LargeBinaryBuilder};
 use arrow::buffer::{Buffer, OffsetBuffer, ScalarBuffer};
-use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use arrow::ipc::reader::{read_footer_length, FileDecoder};
-use arrow::ipc::writer::FileWriter;
-use arrow::ipc::{root_as_footer, MetadataVersion};
-use arrow::record_batch::RecordBatch;
+use arrow::datatypes::{DataType, Field, Schema};
 use croaring::{Bitmap, BitmapView, Portable};
 
 use mosaica_types::TermId;
+
+use crate::arrow_file::invalid_data;
+use crate::arrow_file::{decode_single_batch, mapped_buffer, read_buffer, write_single_batch};
 
 const POSTING_COLUMN_NAME: &str = "posting";
 
@@ -115,26 +113,6 @@ pub fn write_posting_records(path: &Path, records: &[Vec<u8>]) -> io::Result<()>
     write_record_array(path, POSTING_COLUMN_NAME, builder.finish())
 }
 
-/// The single schema/batch/IPC-writer invocation behind every file this crate writes, so a
-/// buffered and a spooled path stay byte-identical.
-pub(crate) fn write_single_batch(
-    path: &Path,
-    schema: SchemaRef,
-    columns: Vec<ArrayRef>,
-) -> io::Result<()> {
-    let batch = RecordBatch::try_new(schema.clone(), columns)
-        .map_err(|e| invalid_data(e.to_string()))?;
-
-    let file = File::create(path)?;
-    let mut writer = FileWriter::try_new(BufWriter::new(file), &schema)
-        .map_err(|e| invalid_data(e.to_string()))?;
-    writer
-        .write(&batch)
-        .map_err(|e| invalid_data(e.to_string()))?;
-    writer.finish().map_err(|e| invalid_data(e.to_string()))?;
-    Ok(())
-}
-
 /// [`write_single_batch`] with one non-null `LargeBinary` column named `column`, record *i* the
 /// *i*-th term's. The column carries no validity buffer: a spurious all-valid buffer would change
 /// the file bytes.
@@ -145,18 +123,6 @@ fn write_record_array(path: &Path, column: &str, array: LargeBinaryArray) -> io:
         false,
     )]));
     write_single_batch(path, schema, vec![Arc::new(array)])
-}
-
-/// Memory-map `file` whole as an Arrow buffer, without copying.
-pub(crate) fn mapped_buffer(file: &File) -> io::Result<Buffer> {
-    let mapping = unsafe { memmap2::Mmap::map(file) }?;
-    let len = mapping.len();
-    let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-    // SAFETY: `arc` owns the mapping for as long as any Buffer built from it is alive, and the
-    // mapping is valid for `len` bytes for its entire lifetime.
-    let ptr = NonNull::new(arc.as_ptr() as *mut u8)
-        .expect("memmap2::Mmap never returns a null base pointer");
-    Ok(unsafe { Buffer::from_custom_allocation(ptr, len, arc) })
 }
 
 /// The spool file behind [`PostingsSpool`] and [`crate::KeyedPostingsSpool`], so a build does not
@@ -526,7 +492,7 @@ pub fn open_record_column(path: &Path, mmap: bool, column: &str) -> io::Result<L
     let buffer = if mmap {
         mapped_buffer(&File::open(path)?)?
     } else {
-        Buffer::from_vec(std::fs::read(path)?)
+        read_buffer(path)?
     };
     let what = path.file_name().map_or_else(
         || path.display().to_string(),
@@ -582,144 +548,60 @@ pub(crate) fn read_posting(array: &LargeBinaryArray, idx: usize) -> io::Result<P
 /// bytes to the unsafe zero-copy `BitmapView::deserialize` for tag-1 records. A malformed record
 /// fails `open` closed rather than causing undefined behaviour on first lookup.
 pub(crate) fn validate_records(array: &LargeBinaryArray) -> io::Result<()> {
-    for idx in 0..array.len() {
-        let bytes = array.value(idx);
-        let (tag, payload) = bytes
-            .split_first()
-            .ok_or_else(|| invalid_data(format!("postings.arrow: term {idx} has no tag byte")))?;
+    use rayon::prelude::*;
 
-        match tag {
-            0 => {
-                if payload.len() % 4 != 0 {
-                    return Err(invalid_data(format!(
-                        "postings.arrow: term {idx} tag-0 payload length {} is not a multiple \
-                         of 4",
-                        payload.len()
-                    )));
-                }
-            }
-            1 => {
-                let bitmap = Bitmap::try_deserialize::<Portable>(payload).ok_or_else(|| {
-                    invalid_data(format!(
-                        "postings.arrow: term {idx} tag-1 payload is not a valid portable \
-                         Roaring bitmap"
-                    ))
-                })?;
-                let consumed = bitmap.get_serialized_size_in_bytes::<Portable>();
-                if consumed != payload.len() {
-                    return Err(invalid_data(format!(
-                        "postings.arrow: term {idx} tag-1 payload has {} trailing byte(s) \
-                         beyond the {consumed}-byte serialised bitmap (payload is \
-                         {} bytes) — BitmapView::deserialize requires an exact-length buffer",
-                        payload.len().saturating_sub(consumed),
-                        payload.len()
-                    )));
-                }
-            }
-            other => {
+    // The first bad record in term order, whichever thread found it.
+    match (0..array.len())
+        .into_par_iter()
+        .filter_map(|idx| validate_record(array, idx).err())
+        .find_first(|_| true)
+    {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
+fn validate_record(array: &LargeBinaryArray, idx: usize) -> io::Result<()> {
+    let bytes = array.value(idx);
+    let (tag, payload) = bytes
+        .split_first()
+        .ok_or_else(|| invalid_data(format!("postings.arrow: term {idx} has no tag byte")))?;
+
+    match tag {
+        0 => {
+            if payload.len() % 4 != 0 {
                 return Err(invalid_data(format!(
-                    "postings.arrow: term {idx} has unknown tag byte {other}"
-                )))
+                    "postings.arrow: term {idx} tag-0 payload length {} is not a multiple \
+                     of 4",
+                    payload.len()
+                )));
             }
+        }
+        1 => {
+            let bitmap = Bitmap::try_deserialize::<Portable>(payload).ok_or_else(|| {
+                invalid_data(format!(
+                    "postings.arrow: term {idx} tag-1 payload is not a valid portable \
+                     Roaring bitmap"
+                ))
+            })?;
+            let consumed = bitmap.get_serialized_size_in_bytes::<Portable>();
+            if consumed != payload.len() {
+                return Err(invalid_data(format!(
+                    "postings.arrow: term {idx} tag-1 payload has {} trailing byte(s) \
+                     beyond the {consumed}-byte serialised bitmap (payload is \
+                     {} bytes) — BitmapView::deserialize requires an exact-length buffer",
+                    payload.len().saturating_sub(consumed),
+                    payload.len()
+                )));
+            }
+        }
+        other => {
+            return Err(invalid_data(format!(
+                "postings.arrow: term {idx} has unknown tag byte {other}"
+            )))
         }
     }
     Ok(())
-}
-
-/// Decode the single record batch of an Arrow IPC FILE held in `buffer`, without copying its
-/// buffers, subject to alignment. `what` names the artefact in error messages. Public because
-/// the attribute value column is read the same way, for the same reason.
-pub fn decode_single_batch(buffer: &Buffer, what: &str) -> io::Result<RecordBatch> {
-    const FOOTER_TRAILER_LEN: usize = 10; // 4-byte footer length + 6-byte "ARROW1" magic
-    if buffer.len() < FOOTER_TRAILER_LEN {
-        return Err(invalid_data(format!("{what}: file too short to contain a footer")));
-    }
-
-    let trailer_start = buffer.len() - FOOTER_TRAILER_LEN;
-    let trailer: [u8; FOOTER_TRAILER_LEN] = buffer[trailer_start..]
-        .try_into()
-        .expect("view length matches FOOTER_TRAILER_LEN");
-    let footer_len =
-        read_footer_length(trailer).map_err(|e| invalid_data(format!("{what}: {e}")))?;
-    if footer_len > trailer_start {
-        return Err(invalid_data(format!("{what}: footer length exceeds file size")));
-    }
-
-    let footer = root_as_footer(&buffer[trailer_start - footer_len..trailer_start])
-        .map_err(|e| invalid_data(format!("{what}: invalid footer: {e}")))?;
-
-    let schema_fb = footer
-        .schema()
-        .ok_or_else(|| invalid_data(format!("{what}: footer has no schema")))?;
-    let schema: SchemaRef = Arc::new(
-        arrow::ipc::convert::try_fb_to_schema(schema_fb)
-            .map_err(|e| invalid_data(format!("{what}: invalid schema: {e}")))?,
-    );
-
-    let version: MetadataVersion = footer.version();
-    let mut decoder = FileDecoder::new(schema, version);
-
-    if let Some(dictionaries) = footer.dictionaries() {
-        for block in dictionaries.iter() {
-            let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
-            let data = buffer.slice_with_length(offset, block_len);
-            decoder
-                .read_dictionary(block, &data)
-                .map_err(|e| invalid_data(format!("{what}: {e}")))?;
-        }
-    }
-
-    let batches = footer
-        .recordBatches()
-        .ok_or_else(|| invalid_data(format!("{what}: footer has no record batches")))?;
-    if batches.len() != 1 {
-        return Err(invalid_data(format!(
-            "{what}: expected exactly one record batch, found {}",
-            batches.len()
-        )));
-    }
-
-    let block = batches.get(0);
-    let (offset, block_len) = checked_block_range(block, buffer.len(), what)?;
-    let data = buffer.slice_with_length(offset, block_len);
-
-    decoder
-        .read_record_batch(block, &data)
-        .map_err(|e| invalid_data(format!("{what}: {e}")))?
-        .ok_or_else(|| invalid_data(format!("{what}: record batch block decoded to nothing")))
-}
-
-/// Validate a footer `Block`'s `(offset, bodyLength + metaDataLength)` against the file length,
-/// returning them as checked `usize`s. A corrupt footer could report a negative value or an
-/// overflowing sum, and `Buffer::slice_with_length` panics on out-of-bounds input, so every
-/// field is checked here first.
-fn checked_block_range(
-    block: &arrow::ipc::Block,
-    buffer_len: usize,
-    what: &str,
-) -> io::Result<(usize, usize)> {
-    let offset = usize::try_from(block.offset())
-        .map_err(|_| invalid_data(format!("{what}: block offset is negative")))?;
-    let body_len = usize::try_from(block.bodyLength())
-        .map_err(|_| invalid_data(format!("{what}: block bodyLength is negative")))?;
-    let meta_len = usize::try_from(block.metaDataLength())
-        .map_err(|_| invalid_data(format!("{what}: block metaDataLength is negative")))?;
-    let block_len = body_len
-        .checked_add(meta_len)
-        .ok_or_else(|| invalid_data(format!("{what}: block length overflows")))?;
-    let end = offset
-        .checked_add(block_len)
-        .ok_or_else(|| invalid_data(format!("{what}: block offset + length overflows")))?;
-    if end > buffer_len {
-        return Err(invalid_data(format!(
-            "{what}: block range [{offset}, {end}) exceeds file length {buffer_len}"
-        )));
-    }
-    Ok((offset, block_len))
-}
-
-pub(crate) fn invalid_data(msg: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, msg.into())
 }
 
 fn invalid_input(msg: impl Into<String>) -> io::Error {
@@ -729,6 +611,8 @@ fn invalid_input(msg: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::ipc::writer::FileWriter;
+    use arrow::record_batch::RecordBatch;
     use proptest::prelude::*;
     use rand::SeedableRng;
     use std::collections::BTreeSet;

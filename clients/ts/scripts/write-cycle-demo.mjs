@@ -126,10 +126,6 @@ async function publish(layer, artifactsToPublish) {
   return accepted(`publish into ${layer}`, await control.publish(layer, {level: 0, artifacts: artifactsToPublish}));
 }
 
-async function status() {
-  return accepted('status', await control.status());
-}
-
 const line = (label, value) => console.log(`  ${String(label).padEnd(34)} ${value}`);
 const describe = (row) => (row ? `${row.masked}${row.text ? `, "${row.text}"` : ''}` : 'absent');
 
@@ -201,23 +197,13 @@ line('cluster', describe(afterDelete.get(`${clusterLayer}::c0`)));
 line('label', describe(afterDelete.get(`${labelLayer}::l-c0`)));
 
 console.log('\n3. run a fold');
-const statusBefore = await status();
-accepted('compact', await control.compact());
-const folds = (st) => st.compaction?.folds ?? st.folds ?? 0;
-const failures = (st) => st.compaction?.fold_failures ?? st.fold_failures ?? 0;
-const deadline = Date.now() + 30 * 60_000;
-for (;;) {
-  const now = await status();
-  if (folds(now) > folds(statusBefore)) {
-    line('folds', folds(now));
-    break;
-  }
-  if (failures(now) > failures(statusBefore)) {
-    throw new Error('the fold was discarded; the server log says which check refused it');
-  }
-  if (Date.now() > deadline) throw new Error('the fold did not publish within thirty minutes');
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+const fold = await control.compact({wait: true, signal: AbortSignal.timeout(30 * 60_000)});
+accepted('compact', fold);
+const waited = fold.waited;
+if (waited?.ended !== 'answered' || waited.answer.outcome !== 'compacted') {
+  throw new Error(`no fold was published, so nothing below means anything: ${JSON.stringify(waited)}`);
 }
+line('outcome', waited.answer.outcome);
 
 console.log('\n4. and afterwards');
 const afterFold = await artifacts(token, [clusterLayer, labelLayer]);

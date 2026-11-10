@@ -28,12 +28,14 @@ const META = meta({
     scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']}),
     scalar('submitted_at', 'timestamp_us', {render: true, homes: ['rendered']}),
     scalar('authors', 'u16', {render: false}),
+    scalar('retracted', 'bool', {render: true, homes: ['rendered']}),
     scalar('title', 'utf8')
   ],
   filterOperands: [
     {column: 'archive', family: 'category', operands: ['eq', 'in']},
     {column: 'submitted_at', family: 'numeric', operands: ['range']},
     {column: 'authors', family: 'numeric', operands: ['range']},
+    {column: 'retracted', family: 'numeric', operands: ['eq', 'in', 'range']},
     {column: 'title', family: 'text', operands: ['match', 'phrase']}
   ],
   layers: [topicsLayer]
@@ -378,6 +380,70 @@ describe('<mosaica-field-card> on a date', () => {
     answerAggregate(store, 'field-summary', aggregateEntry([{rows: []}], 's0', [new Map([['submitted_at', {values: 25n, missing: 5n, min: YEAR(1990), max: YEAR(2020), mean: YEAR(2011)}]])]));
     await settle(host);
     expect(deep(host, '[part="sub"]')!.textContent).toBe('n 25 · mean 1 Jan 2011');
+  });
+});
+
+describe('<mosaica-field-card> on a bool', () => {
+  /** A bool's two bins, false then true, as the server serves them. */
+  const flags = (no: number, yes: number) => [
+    {lower: 0n, upper: 1n, count: no},
+    {lower: 1n, upper: 2n, count: yes}
+  ];
+  const counts = (host: HTMLElement) => rows(host).map((r) => [r.dataset.key, r.querySelector('[part="name"]')!.textContent, r.querySelector('[part="count"]')!.textContent, r.dataset.state]);
+
+  it('counts its two values in view and over everything matching, as two bins, each leaving out its own clause', async () => {
+    const {store} = await mountCard('retracted');
+    const twoBins = {count: true, by: {field: 'retracted', bins: 2, sample: 100_000}};
+    expect(spec(store, 'field-subject')).toEqual({groupings: [twoBins], subject: 'view', highlighted: true, without: 'retracted'});
+    expect(spec(store, 'field-match')).toEqual({groupings: [twoBins], without: 'retracted'});
+  });
+
+  it('lists yes and no with their counts', async () => {
+    const {host, store} = await mountCard('retracted');
+    await answer(host, store, [{rows: flags(30, 10), total: 45}], [{rows: flags(300, 100), total: 450}]);
+    expect(counts(host)).toEqual([
+      ['true', 'yes', '10 / 100', ''],
+      ['false', 'no', '30 / 300', '']
+    ]);
+    expect(deep(host, 'mosaica-filter')).toBeNull();
+  });
+
+  it('marks counts taken from a sample as estimates', async () => {
+    const {host, store} = await mountCard('retracted');
+    await answer(host, store, [{rows: flags(30, 10), sample: {sampled: true, items: 40}}], [{rows: flags(300, 100), sample: {sampled: true, items: 400}}]);
+    expect(counts(host).map((r) => r[2])).toEqual(['≈10 / ≈100', '≈30 / ≈300']);
+  });
+
+  it('filters and highlights by a value from its row, as a range over its 1 or 0', async () => {
+    const {host, store} = await mountCard('retracted');
+    await answer(host, store, [{rows: flags(30, 10)}], [{rows: flags(300, 100)}]);
+    const changes: unknown[] = [];
+    host.addEventListener('mosaica-filterchange', (e) => changes.push((e as CustomEvent).detail));
+    (rows(host)[0]!.querySelector('[part="name"]') as HTMLElement).click();
+    expect(lastFilters(store)).toEqual({filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {}});
+    (rows(host)[1]!.querySelector('[part="highlight"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {}, highlight: {retracted: {family: 'numeric', gte: 0, lte: 0}}});
+    expect(changes).toEqual([
+      {column: 'retracted', verb: 'filter', expr: {retracted: {range: {gte: 1, lte: 1}}}},
+      {column: 'retracted', verb: 'highlight', expr: {retracted: {range: {gte: 0, lte: 0}}}}
+    ]);
+  });
+
+  it('shows the value its filter keeps, adds the other to it, and takes either out', async () => {
+    const {host, store} = await mountCard('retracted', {filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {}});
+    await answer(host, store, [{rows: flags(30, 10)}], [{rows: flags(300, 100)}]);
+    expect(counts(host).map((r) => r[3])).toEqual(['in', 'out']);
+    (rows(host)[1]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {retracted: {family: 'numeric', gte: 0, lte: 1}}, highlight: {}});
+    store.set('filters', filtersOf({filter: {retracted: {family: 'numeric', gte: 0, lte: 1}}, highlight: {}}));
+    await settle(host);
+    expect(counts(host).map((r) => r[3])).toEqual(['in', 'in']);
+    (rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {retracted: {family: 'numeric', gte: 0, lte: 0}}, highlight: {}});
+    store.set('filters', filtersOf({filter: {retracted: {family: 'numeric', gte: 0, lte: 0}}, highlight: {}}));
+    await settle(host);
+    (rows(host)[1]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {retracted: {family: 'numeric', gte: null, lte: null}}, highlight: {}});
   });
 });
 

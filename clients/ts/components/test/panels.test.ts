@@ -71,6 +71,43 @@ describe('<mosaica-item-card>', () => {
     expect(typeof detail!.id).toBe('string');
   });
 
+  describe('image-fields', () => {
+    const photo = {id: 9n, detail: {fields: {thumb: 'https://images.example.org/a.jpg', other: 'https://images.example.org/b.jpg', bad: 'javascript:alert(1)', local: '/thumbs/c.png', caption: 'A cat'}, labels: [], views: [], scoped: {}}};
+    async function card(markup: string) {
+      const host = await mount(markup);
+      const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+      el.item = photo;
+      await settle(host);
+      return {host, image: (name: string) => deep(host, `[part="field"][data-name="${name}"] [part="image"]`) as HTMLImageElement | null};
+    }
+
+    it('draws each named field holding an http or https address as its image, without a referrer, and the rest as text', async () => {
+      const {host, image} = await card('<mosaica-item-card image-fields="thumb, bad local"></mosaica-item-card>');
+      const img = image('thumb')!;
+      expect(img.getAttribute('src')).toBe('https://images.example.org/a.jpg');
+      expect(img.getAttribute('referrerpolicy')).toBe('no-referrer');
+      expect(img.getAttribute('loading')).toBe('lazy');
+      expect(image('other')).toBeNull();
+      expect(image('bad')).toBeNull();
+      expect(image('caption')).toBeNull();
+      expect(image('local')!.getAttribute('src')).toBe(new URL('/thumbs/c.png', document.baseURI).href);
+      expect(deep(host, '[part="field"][data-name="bad"] [part="value"]')!.textContent).toBe('javascript:alert(1)');
+    });
+
+    it('shows an image that does not load as its address', async () => {
+      const {host, image} = await card('<mosaica-item-card image-fields="thumb"></mosaica-item-card>');
+      image('thumb')!.dispatchEvent(new Event('error'));
+      await settle(host);
+      expect(image('thumb')).toBeNull();
+      expect(deep(host, '[part="field"][data-name="thumb"] [part="value"]')!.textContent).toBe('https://images.example.org/a.jpg');
+    });
+
+    it('draws images on the compact card for the fields it shows', async () => {
+      const {image} = await card('<mosaica-item-card compact card-fields="thumb" image-fields="thumb"></mosaica-item-card>');
+      expect(image('thumb')!.getAttribute('src')).toBe('https://images.example.org/a.jpg');
+    });
+  });
+
   describe('Open', () => {
     const geonames = {id: 7n, detail: {fields: {geonameid: 2643743, name: 'St. Mary’s & Co/Ltd?', link: 'javascript:alert(1)'}, labels: [], views: [], scoped: {}}};
     async function card(markup: string, set: (el: MosaicaItemCard) => void = () => {}) {
@@ -804,6 +841,16 @@ describe('<mosaica-filter-panel>', () => {
       expect(activeCount(sent())).toBe(0);
       expect(sent().highlight).toEqual({});
     });
+  });
+
+  it('names the values a clause on a bool keeps in its chip', async () => {
+    const host = await mount('<mosaica-filter-panel></mosaica-filter-panel>');
+    const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
+    const withBool = {...META, declaredScalars: [...META.declaredScalars, scalar('retracted', 'bool')], filterOperands: [...META.filterOperands, {column: 'retracted', family: 'numeric' as const, operands: ['eq', 'in', 'range']}]};
+    const draft: FilterDraft = {filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {retracted: {family: 'numeric', gte: 0, lte: 1}}};
+    panel.store = fakeStore({meta: withBool, status: status({}), filters: filtersOf(draft)});
+    await settle(host);
+    expect(deepAll(host, '[part="chip"]').map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Retracted: yes', 'Retracted: yes, no']);
   });
 
   it('leaves the subject row and the chips out under controls-only, and the cards out under chips-only', async () => {

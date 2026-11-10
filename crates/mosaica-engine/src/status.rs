@@ -22,6 +22,8 @@ pub(crate) struct ServeCounters {
     pub(crate) member_of_column_walks: AtomicU64,
     /// Bulk-read stretches driven from their filter's matches rather than walked over the view.
     pub(crate) driven_stretches: AtomicU64,
+    /// Shards of a filtered viewport whose filter was evaluated over the tiles' entities alone.
+    pub(crate) tile_filters: AtomicU64,
     /// Requests served from a one-generation-stale entry.
     pub(crate) stale_serves: AtomicU64,
     /// Entries the background refresh has produced.
@@ -277,6 +279,12 @@ impl Engine {
         self.counters.driven_stretches.load(Ordering::Relaxed)
     }
 
+    /// Shards of filtered viewports whose filter was evaluated over the tiles' entities alone
+    /// rather than the viewer's whole visible set.
+    pub fn tile_filters(&self) -> u64 {
+        self.counters.tile_filters.load(Ordering::Relaxed)
+    }
+
     /// The point shards' high waters, summed.
     pub fn allocator_high_water(&self) -> u64 {
         self.write.live().high_water()
@@ -367,11 +375,11 @@ impl Engine {
         self.region_cache.set_bound_bytes(bytes);
     }
 
-    /// Bound the text filter leaves' answers (`serve.text_filter_cache_bytes`). Zero keeps none
+    /// Bound the filter leaves' kept answers (`serve.filter_cache_bytes`). Zero keeps none
     /// and evaluates every leaf. Unset, an embedder gets
-    /// [`crate::text_filter_cache::DEFAULT_TEXT_FILTER_CACHE_BYTES`].
-    pub fn set_text_filter_cache_bytes(&self, bytes: u64) {
-        self.text_filter_cache.set_bound_bytes(bytes);
+    /// [`crate::filter_cache::DEFAULT_FILTER_CACHE_BYTES`].
+    pub fn set_filter_cache_bytes(&self, bytes: u64) {
+        self.filter_cache.set_bound_bytes(bytes);
     }
 
     /// `serve.max_region_cells`: the boundary-cell budget a region's descent stops at, published
@@ -385,9 +393,9 @@ impl Engine {
         self.region_cache.stats()
     }
 
-    /// The text filter cache's gauges.
-    pub fn text_filter_cache_stats(&self) -> mosaica_cache::CacheStats {
-        self.text_filter_cache.stats()
+    /// The filter cache's gauges.
+    pub fn filter_cache_stats(&self) -> mosaica_cache::CacheStats {
+        self.filter_cache.stats()
     }
 
     /// The occupancy memo's gauges, one entry per `(session, view, depth, generation)` rung.
@@ -402,13 +410,13 @@ impl Engine {
     }
 
     /// How long a request waits on another request's in-flight row-projection or fragment build
-    /// before it is refused, or on a text filter leaf's evaluation before it evaluates the leaf
+    /// before it is refused, or on a filter leaf's evaluation before it evaluates the leaf
     /// itself (`serve.single_flight_wait_ms`). Unset, an embedder gets
     /// [`crate::DEFAULT_SINGLE_FLIGHT_WAIT_MS`].
     pub fn set_single_flight_wait_ms(&self, wait_budget_ms: u64) {
         self.row_projection_cache.set_wait_budget_ms(wait_budget_ms);
         self.fragments.set_wait_budget_ms(wait_budget_ms);
-        self.text_filter_cache.set_wait_budget_ms(wait_budget_ms);
+        self.filter_cache.set_wait_budget_ms(wait_budget_ms);
     }
 
     /// The row count at which a commit window closes (`ingest.commit_window_max_items`, which
@@ -610,6 +618,29 @@ impl Engine {
     /// fold.
     pub fn last_fold_passes(&self) -> Vec<crate::compact::PassCost> {
         self.write.health().last_fold_passes()
+    }
+
+    /// A record of the flush and of the compaction running, each where one is. The counts are over
+    /// the whole corpus, not a viewer's visible set.
+    pub fn jobs(&self) -> Vec<mosaica_types::progress::Progress> {
+        self.write.health().jobs.running()
+    }
+
+    /// Where compaction request `request` is: pending, with the record of the compaction serving
+    /// it once a tick has taken it, answered, or answered and no longer kept. `None` for a number
+    /// this run of the server has not given: one above the last it gave, or one an earlier run
+    /// gave, which is below this run's first, since each run numbers from the wall clock.
+    pub fn compaction_request(&self, request: u64) -> Option<crate::RequestState> {
+        self.write.health().request_state(request)
+    }
+
+    /// The last record of the last job of kind `job` to end since the executor started, with its
+    /// state `finished` or `failed`.
+    pub fn last_job(
+        &self,
+        job: mosaica_types::progress::JobKind,
+    ) -> Option<mosaica_types::progress::Progress> {
+        self.write.health().jobs.last_ended(job)
     }
 
     /// What the last fold's deletions degraded: artifacts that lost members, supplied content that

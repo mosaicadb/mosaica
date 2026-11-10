@@ -20,6 +20,7 @@
 mod command;
 mod executor;
 mod health;
+mod jobs;
 pub(crate) mod joined;
 mod live;
 mod opening;
@@ -30,6 +31,7 @@ pub use command::{ViewDropped, VocabularyDeclared, VocabularyValues};
 pub(crate) use command::*;
 pub use executor::*;
 pub use health::*;
+pub(crate) use jobs::{Job, Jobs};
 pub(crate) use live::*;
 pub(crate) use opening::*;
 pub(crate) use reconstruct::*;
@@ -1302,7 +1304,7 @@ pub(crate) struct MaintenanceDeps {
     >,
     /// The text filter leaves' answers, pruned at every publication of the shards they were
     /// taken over.
-    pub(crate) text_filter_cache: Arc<crate::text_filter_cache::TextFilterCache>,
+    pub(crate) filter_cache: Arc<crate::filter_cache::FilterCache>,
     /// The spatial levels' held shapes and per-segment pieces (`crate::shapes`): filled by the
     /// flush before its publication, rebuilt at a publication into a shape layer, re-resolved at
     /// the fold and the merge.

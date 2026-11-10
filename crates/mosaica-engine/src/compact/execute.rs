@@ -11,6 +11,7 @@ use mosaica_store::manifest::{
 };
 use mosaica_store::render_presence::RENDER_PRESENCE_DIR;
 use mosaica_store::{fold_row_space, FoldRowSpaceSpec, FoldSegmentInput, PairsParquetWriter};
+use mosaica_types::progress::{Batched, Stage, Tracker, Unit};
 use mosaica_types::IdentityKey;
 
 use crate::flush::{failed, remove_spool_on_error, MaintenanceFailed};
@@ -18,7 +19,7 @@ use crate::flush::{failed, remove_spool_on_error, MaintenanceFailed};
 use super::attributes::{
     fold_entity_terms, fold_record_blob, fold_text_columns, fold_value_columns,
 };
-use super::cost::{PassCost, Staircase};
+use super::cost::{Pass, Staircase};
 use super::plan::{FoldPlan, PlannedEntities, TERM_IMAGE_MANIFEST_N, TERM_IMAGE_THREADS};
 
 /// Everything [`execute`] needs beyond its plan, taken from the generation and then immutable.
@@ -90,9 +91,8 @@ pub(crate) struct CompletedFold {
     pub(crate) edited: mosaica_store::manifest::EditedItemsRuns,
     /// Written unchanged into the new `SEGMENTS-<n>.json`.
     pub(crate) term_images: Vec<FoldedTermImages>,
-    pub(crate) cost: Vec<PassCost>,
-    /// Publication's first cost row is measured from here.
-    pub(crate) finished: std::time::Instant,
+    /// The passes so far, which the publication goes on with.
+    pub(crate) stairs: Staircase,
     pub(crate) attr_bytes_read: u64,
     pub(crate) attr_bytes_written: u64,
     /// The columns this compaction gave the shard a base of, which its record lists.
@@ -133,63 +133,63 @@ fn file_len(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Runs the fold's passes into `ctx.to_prefix_dir` on one dedicated thread. A failure discards the
-/// fold: its files are orphans under a prefix `CURRENT` does not name, and there is no resume.
+/// Runs the fold's passes into `ctx.to_prefix_dir` on one dedicated thread, each entered in
+/// `stairs`, which the dispatch began in the first. A failure discards the fold: its files are
+/// orphans under a prefix `CURRENT` does not name, and there is no resume.
 pub(crate) fn execute(
     plan: FoldPlan,
     ctx: FoldContext,
+    mut stairs: Staircase,
 ) -> Result<CompletedFold, MaintenanceFailed> {
     let layout = plan.layout();
     let terms_dir = ctx.to_prefix_dir.join(layout.terms_rel());
     let entities_dir = ctx.to_prefix_dir.join(layout.entities_rel());
     for dir in [&terms_dir, &entities_dir] {
-        std::fs::create_dir_all(dir).map_err(failed("creating the new prefix"))?;
+        std::fs::create_dir_all(dir)
+            .map_err(failed(Pass::RowSpace.at("creating the new prefix")))?;
     }
 
     let mut out = FoldOutput::default();
 
-    let mut stairs = Staircase::start();
-    stairs.record("entry");
-
-    let segments = fold_row_spaces(&plan, &ctx, &mut out)?;
-    stairs.record("1 row space");
+    let segments = fold_row_spaces(&plan, &ctx, stairs.record(), &mut out)?;
     ctx.going_on()?;
 
-    let postings_path = fold_postings(&plan, &ctx, &terms_dir, &mut out)?;
-    stairs.record("2 postings");
+    stairs.enter(Pass::Postings, Some((plan.dict_len.into(), Unit::Terms)));
+    let postings_path = fold_postings(&plan, &ctx, stairs.record(), &terms_dir, &mut out)?;
     ctx.going_on()?;
 
+    stairs.enter(Pass::TermImages, None);
     let term_images = derive_term_images(&plan, &ctx, &segments, &postings_path, &mut out)?;
-    stairs.record("2b term images");
     ctx.going_on()?;
 
+    stairs.enter(Pass::UniqueIndexes, None);
     let unique = fold_unique_indexes(&plan, &ctx, &mut out)?;
-    stairs.record("3b unique indexes");
     ctx.going_on()?;
 
+    stairs.enter(Pass::EditedItems, None);
     let edited = fold_edited_items(&plan, &ctx, &mut out)?;
-    stairs.record("3c edited items");
     ctx.going_on()?;
 
+    stairs.enter(Pass::Attributes, None);
     fold_text_columns(&plan, &ctx, &mut out)?;
     fold_value_columns(&plan, &ctx, &mut out)?;
     fold_record_blob(&plan, &ctx, &mut out)?;
-    stairs.record("4a attributes");
     ctx.going_on()?;
 
+    stairs.enter(Pass::EntityTerms, None);
     fold_entity_terms(&plan, &ctx, &mut out)?;
-    stairs.record("4c entity terms");
     ctx.going_on()?;
 
+    stairs.enter(Pass::FieldTallies, None);
     derive_field_tallies(&plan, &ctx, &segments, &mut out)?;
-    stairs.record("4d field tallies");
     ctx.going_on()?;
 
-    // No pass 4b: the term dictionary is carried to the new prefix by a hard link at publication.
-    let files = digest_and_sync(&out)?;
-    stairs.record("5 digests + fsync");
+    // The term dictionary is carried to the new prefix by a hard link at publication, so no pass
+    // writes it.
+    stairs.enter(Pass::Digests, None);
+    let files = digest_and_sync(&out, stairs.record())?;
+    stairs.close();
 
-    let finished = stairs.mark();
     Ok(CompletedFold {
         plan,
         prefix: ctx.to_prefix,
@@ -198,8 +198,7 @@ pub(crate) fn execute(
         unique,
         edited,
         term_images,
-        cost: stairs.into_cost(),
-        finished,
+        stairs,
         attr_bytes_read: out.attr_read,
         attr_bytes_written: out.attr_written,
         runtime_attributes: ctx.runtime_attributes,
@@ -213,6 +212,7 @@ pub(crate) fn execute(
 fn fold_row_spaces(
     plan: &FoldPlan,
     ctx: &FoldContext,
+    progress: &Tracker,
     output: &mut FoldOutput,
 ) -> Result<Vec<SegmentDescriptor>, MaintenanceFailed> {
     let mut segments: Vec<SegmentDescriptor> = Vec::with_capacity(plan.views.len());
@@ -220,8 +220,8 @@ fn fold_row_spaces(
         // An empty schema would write a segment with no scalar tail.
         let Some(view_schema) = ctx.scalar_schema.get(&view.view) else {
             return Err(MaintenanceFailed(format!(
-                "pass 1 (row space): the fold plan names view '{}' but the fold has no writer \
-                 schema for it",
+                "{}: the fold plan names view '{}' but the fold has no writer schema for it",
+                Pass::RowSpace.name(),
                 view.view
             )));
         };
@@ -257,7 +257,7 @@ fn fold_row_spaces(
                 })
             })
             .collect::<Result<_, mosaica_store::StoreError>>()
-            .map_err(failed("pass 1 (row space: the inputs' entities)"))?;
+            .map_err(failed(Pass::RowSpace.at("the inputs' entities")))?;
         let out = fold_row_space(
             &segment_dir,
             &permutation_path,
@@ -271,9 +271,10 @@ fn fold_row_spaces(
                 absent_ok: ctx.absent_ok.get(&view.view).map_or(&[][..], Vec::as_slice),
                 tombstones: &plan.tombstones,
                 permutation_bound: view.permutation_bound,
+                progress: Some(progress),
             },
         )
-        .map_err(failed("pass 1 (row space)"))?;
+        .map_err(failed(Pass::RowSpace.name()))?;
 
         for name in mosaica_store::SEGMENT_FILES {
             output.push(format!("{segment_rel}/{name}"), segment_dir.join(name));
@@ -320,7 +321,7 @@ fn derive_field_tallies(
             &ctx.declared_scalars,
             &|name| mosaica_filter::base_numbers(&ctx.to_prefix_dir.join(layout.column_rel(name))),
         )
-        .map_err(failed("pass 4d (field tallies)"))?;
+        .map_err(failed(Pass::FieldTallies.name()))?;
         out.push(
             format!(
                 "{}/{}",
@@ -339,6 +340,7 @@ fn derive_field_tallies(
 fn fold_postings(
     plan: &FoldPlan,
     ctx: &FoldContext,
+    progress: &Tracker,
     terms_dir: &Path,
     out: &mut FoldOutput,
 ) -> Result<PathBuf, MaintenanceFailed> {
@@ -350,9 +352,10 @@ fn fold_postings(
     let spool_path = terms_dir.join("postings.spool");
     {
         let mut spool =
-            PostingsSpool::create(&spool_path).map_err(failed("pass 2 (spool)"))?;
+            PostingsSpool::create(&spool_path).map_err(failed(Pass::Postings.at("spool")))?;
         let mut pairs =
-            PairsParquetWriter::create(&pairs_path).map_err(failed("pass 2 (pairs)"))?;
+            PairsParquetWriter::create(&pairs_path).map_err(failed(Pass::Postings.at("pairs")))?;
+        let mut swept = Batched::new(Some(progress));
         let sweep = sweep_term_postings(
             plan.dict_len,
             &ctx.base_postings,
@@ -361,6 +364,7 @@ fn fold_postings(
             plan.small_term_threshold,
             &mut spool,
             |term, entities| {
+                swept.add(1);
                 pairs
                     .push_iter(term.raw(), entities.iter())
                     .map_err(|e| std::io::Error::other(e.to_string()))
@@ -370,8 +374,8 @@ fn fold_postings(
             sweep.and_then(|()| spool.finish(&postings_path)),
             &spool_path,
         )
-        .map_err(failed("pass 2 (postings)"))?;
-        pairs.finish().map_err(failed("pass 2 (pairs)"))?;
+        .map_err(failed(Pass::Postings.name()))?;
+        pairs.finish().map_err(failed(Pass::Postings.at("pairs")))?;
     }
     out.push(postings_rel, postings_path.clone());
     out.push(pairs_rel, pairs_path);
@@ -391,7 +395,7 @@ fn derive_term_images(
 ) -> Result<Vec<FoldedTermImages>, MaintenanceFailed> {
     let mut term_images: Vec<FoldedTermImages> = Vec::new();
     let postings = PostingsReader::open(postings_path, true)
-        .map_err(failed("pass 2b (term images: the new postings)"))?;
+        .map_err(failed(Pass::TermImages.at("the new postings")))?;
     let dict_len = postings.term_count();
     let mut index = mosaica_store::derived::DerivedIndex::default();
     for segment in segments {
@@ -403,7 +407,7 @@ fn derive_term_images(
             .join(plan.layout().permutation_rel(&segment.view));
         // From pass 1's file, so the images match the permutation that is published.
         let permutation = mosaica_store::Permutation::load(&permutation_path)
-            .map_err(failed("pass 2b (term images: the new permutation)"))?;
+            .map_err(failed(Pass::TermImages.at("the new permutation")))?;
         let space = mosaica_store::RowSpace::new(Arc::new(permutation), segment.row_count);
         let stamp = mosaica_store::term_images::TermImageStamp {
             prefix: ctx.to_prefix.clone(),
@@ -419,7 +423,7 @@ fn derive_term_images(
             TERM_IMAGE_MANIFEST_N,
             &mut index,
         )
-        .map_err(failed("pass 2b (term images: naming the file)"))?;
+        .map_err(failed(Pass::TermImages.at("naming the file")))?;
 
         let summary = mosaica_store::term_images::derive_term_images(
             &space,
@@ -431,7 +435,7 @@ fn derive_term_images(
                 threads: TERM_IMAGE_THREADS,
             },
         )
-        .map_err(failed("pass 2b (term images: the derivation)"))?;
+        .map_err(failed(Pass::TermImages.at("the derivation")))?;
 
         out.push(file.rel.clone(), file.path);
         term_images.push(FoldedTermImages {
@@ -471,12 +475,14 @@ fn fold_unique_indexes(
             &ctx.to_prefix_dir.join(&out_rel),
             "base",
         )
-        .map_err(failed(format!("pass 3b (unique index '{}')", index.attribute)))?;
+        .map_err(failed(
+            Pass::UniqueIndexes.at(format!("column '{}'", index.attribute)),
+        ))?;
         let mut base = Vec::with_capacity(written.len());
         for run in written {
-            let listed = run
-                .as_base(&ctx.to_prefix_dir)
-                .map_err(failed(format!("pass 3b (unique index '{}')", index.attribute)))?;
+            let listed = run.as_base(&ctx.to_prefix_dir).map_err(failed(
+                Pass::UniqueIndexes.at(format!("column '{}'", index.attribute)),
+            ))?;
             out.push(listed.path.clone(), run.path);
             base.push(listed);
         }
@@ -519,10 +525,10 @@ fn fold_edited_items(
                 .join(plan.layout().edited_runs_rel(direction)),
             "base",
         )
-        .map_err(failed("pass 3c (edited items)"))?;
+        .map_err(failed(Pass::EditedItems.name()))?;
         for run in written {
             let listed = mosaica_store::edited::as_base(&ctx.to_prefix_dir, &run)
-                .map_err(failed("pass 3c (edited items)"))?;
+                .map_err(failed(Pass::EditedItems.name()))?;
             out.push(listed.path.clone(), run.path);
             into.base.push(listed);
         }
@@ -531,17 +537,21 @@ fn fold_edited_items(
 }
 
 /// Pass 5: digests each file in `out.written` by reading it back, since the writers cannot hash as
-/// they write, and fsyncs them all before `CURRENT` is flipped onto this prefix.
-fn digest_and_sync(out: &FoldOutput) -> Result<BTreeMap<String, FileDigest>, MaintenanceFailed> {
+/// they write, and fsyncs them all before `CURRENT` is flipped onto this prefix. `progress` counts
+/// the bytes digested.
+fn digest_and_sync(
+    out: &FoldOutput,
+    progress: &Tracker,
+) -> Result<BTreeMap<String, FileDigest>, MaintenanceFailed> {
+    let lengths: Vec<u64> = out.written.iter().map(|(_, path)| file_len(path)).collect();
+    progress.count(lengths.iter().sum(), Unit::Bytes);
     let mut files = BTreeMap::new();
-    for (rel, path) in &out.written {
-        files.insert(
-            rel.clone(),
-            crate::flush::digest_of(path)?,
-        );
+    for ((rel, path), length) in out.written.iter().zip(lengths) {
+        files.insert(rel.clone(), crate::flush::digest_of(path)?);
+        progress.advance(length);
     }
     let paths: Vec<PathBuf> = out.written.iter().map(|(_, path)| path.clone()).collect();
-    mosaica_store::fsync_written(&paths).map_err(failed("pass 5 (durability)"))?;
+    mosaica_store::fsync_written(&paths).map_err(failed(Pass::Digests.at("durability")))?;
 
     Ok(files)
 }

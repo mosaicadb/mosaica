@@ -81,6 +81,7 @@ fn a_column_an_input_lacks_fails_the_fold_unless_declared_since_the_inputs() {
         absent_ok,
         tombstones: &no_tombstones,
         permutation_bound: 8,
+        progress: None,
     };
     let torn = fold_row_space(
         &dir.path().join("torn-seg"),
@@ -133,6 +134,7 @@ fn fold(
             absent_ok: &[],
             tombstones,
             permutation_bound: bound,
+            progress: None,
         },
     )
     .expect("fold_row_space executes");

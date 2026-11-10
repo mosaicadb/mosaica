@@ -7,14 +7,14 @@
 
 **Interactive maps of billions of points.**
 
-Mosaica is a database for serving interactive maps over billions of spatial data points with granular access control on every point. Give it records with a position, such as every place in a gazetteer, every specimen in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map anyone can pan, zoom, filter and search, in a browser or a notebook.
+Mosaica is a database for serving interactive maps over billions of spatial data points with granular access control on every point. It takes records with a position, such as locations in geo datasets, specimens in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map that users can pan, zoom, filter and search, in a browser or a notebook.
 
 ![150,000 GeoNames places in the Mosaica explorer, coloured by feature class](brand/mosaica_example.png)
 
 ## Why Mosaica
 
 - **Nothing is thrown away.** Tile pipelines drop points to keep tiles small, so a filter can only narrow what survived. Mosaica answers each view from the full data, so a filter down to ten points shows those ten points.
-- **Big data, small hardware.** It is built to serve billions of points from a single machine to many viewers at once.
+- **Big data, small hardware.** It is built to serve billions of points from a single machine to many viewers at once. It gracefully handles datasets that don't fit in system memory.
 - **Live data.** Insert, delete and hide records while it serves, with no rebuild.
 - **A map per viewer.** Give records access labels, and each viewer's map, its points and every count, is computed only from what they may see.
 - **Use it from anywhere.** Deploy as a server with the bundled explorer, integrate with your existing UI, run directly in a Python notebook, or script it from the command line or the HTTP API.
@@ -26,7 +26,7 @@ Mosaica is a database for serving interactive maps over billions of spatial data
 
 ![Typical and slowest frame time against the number of records, for Mosaica, ClickHouse, OpenSearch and PostgreSQL](docs/assets/comparison/four-systems.png)
 
-We served one map of GBIF's species records to a viewer allowed to see 88% of them, from Mosaica and from three databases, each enforcing that viewer's access with its own access control on a desktop with a 24 GB memory cap. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse. ClickHouse builds four times faster and stores the data in about a quarter of the space. [Compared with other databases](docs/system/comparison.md) gives the method, each system's setup and every measurement.
+We served one map of GBIF's species records, from Mosaica and compared it to delivering the same functionality from three other databases. Each was optimised for the queries run and applied the same access control requirements as Mosaica. The tests were run on a machine with 24GB RAM. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse, the fastest competitor. [Compared with other databases](docs/system/comparison.md) gives the method, each system's setup and more detailed measurements.
 
 ## Try it in a notebook
 
@@ -37,7 +37,7 @@ pip install 'mosaica[widget]' pandas jupyterlab
 jupyter lab
 ```
 
-In a notebook in the clone, map the 150,000 GeoNames places the repository ships:
+This demonstrates Mosaica on a small 150,000 GeoNames places dataset the repository bundles:
 
 ```python
 import mosaica

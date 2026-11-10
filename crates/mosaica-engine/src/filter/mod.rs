@@ -68,7 +68,7 @@ use mosaica_lifecycle::overlay::Overlay;
 pub use columns::successor::{
     CoalescedTextWindow, CoalescedWindow, OpenedExtent, TextExtentPaths,
 };
-pub use columns::{FilterColumns, ShardExtents, ValueLayers};
+pub use columns::{RouteChoice, FilterColumns, LeafCost, LeafCosts, ShardExtents, ValueLayers};
 pub(crate) use columns::{open_entity_terms_stack, open_record_stack, record_extent_paths};
 pub(crate) use declared::{carries_live_view, scoped_visibility_of};
 pub use declared::{
@@ -78,9 +78,10 @@ pub use declared::{
 };
 pub use error::{ComposeError, FilterError};
 pub use expr::{
-    FilterExpr, FilterOperand, MemberOfArtifact, MemberOfLeaf, MemberResolver, RegionLeaf, RegionResolver,
-    RoutedFilter, RowExpr, RowLeafResolvers, TextQuery, TextResolver, UniqueResolver,
-    evaluate_text, MAX_FILTER_DEPTH, MEMBER_OF_COLUMN, REGION_COLUMN, UNRESOLVABLE_VALUE,
+    evaluate_leaf, FilterExpr, FilterOperand, LeafEvaluation, LeafQuery, LeafResolver,
+    MemberOfArtifact, MemberOfLeaf, MemberResolver, RegionLeaf, RegionResolver, RoutedFilter,
+    RowExpr, RowLeafResolvers, TextQuery, UniqueResolver, MAX_FILTER_DEPTH, MEMBER_OF_COLUMN,
+    MOSAICA_ID_COLUMN, REGION_COLUMN, UNRESOLVABLE_VALUE,
 };
 pub use membership::{
     CategoryCounts, CategoryMembership, CountCodes, EntityCodes, VisitBuffered, VisitCodes,

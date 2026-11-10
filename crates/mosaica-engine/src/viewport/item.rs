@@ -157,16 +157,15 @@ impl Engine {
     pub fn item(&self, session: &Session, id: MosaicaId) -> Result<Option<ItemOut>> {
         let generation = self.generation.load_full();
 
-        let Some((shard, number, current)) =
-            crate::edited::named(&self.identity_key, &generation, id)
-        else {
+        let Some((shard, ..)) = crate::edited::named(&self.identity_key, &generation, id) else {
             return Ok(None);
         };
         // The item's current entity, the edited-items map probed whether or not it holds the
-        // number, so an edited item's card costs what any other's does. An entity the overlay has
-        // deleted is not an answer; visibility below decides the rest.
-        let Some(entity) = crate::edited::entities_of_numbers(shard, &[number], |_| true)
-            .map_err(EngineError::Store)?[0]
+        // number, so an edited item's card costs what any other's does. Visibility below decides
+        // the rest.
+        let Some((entity, current)) =
+            crate::edited::entities_named(&self.identity_key, &generation, shard, &[id])
+                .map_err(EngineError::Store)?[0]
         else {
             return Ok(None);
         };

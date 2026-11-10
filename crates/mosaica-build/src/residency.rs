@@ -1071,18 +1071,18 @@ pub(crate) fn entity_order_residency(
             constant: true,
         });
     }
-    // The keyword dictionary's `(row, ordinal)` partition, where a column is indexed at all.
+    // The keyword dictionary's `(chunk, ordinal)` remap partition, where a column is indexed at
+    // all: its writer buffers, and the translate's one loaded bucket of remaps at 4 B a key
+    // beside a hashed chunk's table at 4 B a key.
     if columns
         .iter()
         .any(|column| matches!(column.ty, ScalarType::Keyword))
     {
         terms.push(Term {
-            what: "the keyword dictionary's (row, ordinal) partition: writer buffers, one loaded \
-                   bucket at 8 B a record and the u32 window it is scattered into"
+            what: "the keyword dictionary's (chunk, ordinal) partition: writer buffers, one \
+                   bucket's remaps and a hashed chunk's table"
                 .into(),
-            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8)
-                .saturating_add(bucket(8))
-                .saturating_add(bucket(4)),
+            bytes: buffers(crate::spill::PARTITION_BUCKETS as u64, 8).saturating_add(bucket(8)),
             mapped: false,
             phases: Phases::INDEX,
             constant: true,
@@ -1929,32 +1929,42 @@ pub(crate) fn disk(
             width * n + n.div_ceil(8),
             Phases::INDEX.onwards(),
         );
-        // `values.arrow` is assembled from a spool of the same values beside it
-        // (`mosaica_filter::values_writer`), so the column's slots stand twice while it is
-        // written. Measured on the GBIF prefix: `specieskey` 473,983,152 bytes of spool and `year`
-        // 243,206,776, both alive at the index phase's peak.
-        push(
-            format!(
-                "attribute '{}': the value column's own spool, {width} B/item, beside \
-                 values.arrow while it is assembled",
-                attribute.name
+        // A column written a block at a time is spooled beside `values.arrow` until its presence
+        // divides it into blocks: the codes it was pushed and then their encoded blocks, both
+        // alive while `values.arrow` is written, the blocks at most the codes' width a value. A
+        // flat column is written in place and spools nothing. Measured on the GBIF prefix:
+        // `specieskey` 473,983,152 bytes of spooled codes at the index phase's peak.
+        let blocked = matches!(
+            mosaica_store::empty_shard::value_column_kind(
+                attribute.ty,
+                attribute.vocabulary.is_some()
             ),
-            width * n,
-            Phases::INDEX,
+            mosaica_filter::ColumnKind::Ordinals | mosaica_filter::ColumnKind::Ordinals16
         );
-        if matches!(attribute.ty, ScalarType::Utf8 | ScalarType::Keyword) {
-            // The dictionary pass's own scratch, under the column's directory rather than
-            // `.build-tmp/`: the `(row, ordinal)` partition the merge fills, 8 B a row, and the
-            // sorted runs it merges, both gone by the end of the pass. The partition's buckets go
-            // back one at a time as the values file is written past them, so this is a ceiling
-            // and the pass's own peak is a bucket lower.
+        if blocked {
             push(
                 format!(
-                    "attribute '{}': the keyword dictionary's (row, ordinal) partition and \
-                     sorted runs, 8 B/item and a ceiling of half the column's characters",
+                    "attribute '{}': the value column's own spools, its codes and their blocks at \
+                     {width} B/item each, beside values.arrow while it is assembled",
                     attribute.name
                 ),
-                8 * n + characters / EXTENT_SHARE,
+                2 * width * n,
+                Phases::INDEX,
+            );
+        }
+        if matches!(attribute.ty, ScalarType::Utf8 | ScalarType::Keyword) {
+            // The dictionary pass's own scratch, under the column's directory rather than
+            // `.build-tmp/`: an id per row, 4 B; per key of each chunk, an 8 B remap record and,
+            // for a hashed chunk, a 4 B rank; and the sorted runs it merges. All are gone by the
+            // end of the pass. A chunk holds at most one key a row, so 16 B/item is a ceiling;
+            // a column whose keys repeat spends little more than the ids.
+            push(
+                format!(
+                    "attribute '{}': the keyword dictionary's ids, remap and sorted runs, \
+                     16 B/item and a ceiling of half the column's characters",
+                    attribute.name
+                ),
+                16 * n + characters / EXTENT_SHARE,
                 Phases::INDEX,
             );
             // And the dictionary the pass leaves behind, which is in the bundle from there on.
@@ -2698,7 +2708,7 @@ mod tests {
         );
         // **Net of the partitions the column opens.** Its storage is a file and is charged at
         // nothing; what a declared column does cost the machine is the join's `(entity, value)`
-        // partition and, for a keyword one, the dictionary's `(row, ordinal)` partition — both
+        // partition and, for a keyword one, the dictionary's `(chunk, ordinal)` partition — both
         // constants of the key type, both named terms of their own — and, being blob-resident, the
         // record blob's block directory.
         let directory = with_keyword
@@ -3390,7 +3400,7 @@ mod tests {
             disk.terms
                 .iter()
                 .any(|t| t.what.contains("the value column's own spool")),
-            "values.arrow is assembled from a spool of the same values beside it"
+            "a keyword's values.arrow is assembled from spools beside it"
         );
         // **And the entry overhead beside the characters.** The file is front-coded, two varints
         // and a share of a restart offset an entry, so a column of short distinct values that

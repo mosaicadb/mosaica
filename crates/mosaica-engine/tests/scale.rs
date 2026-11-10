@@ -241,10 +241,9 @@ fn masked_total(engine: &Engine, session: &Session) -> u64 {
 /// Total bytes on disc under `root`, orphans included.
 ///
 /// **Not the same number as [`live_bytes`], and the gap is the point.** A merge's consumed
-/// segments and a coalesce's consumed tiers stay on disc: every side-manifest below the current
-/// `n` still names them, and a step-down serves one of those (contracts §2.3). Reclaiming them is
-/// compaction's, and **this harness runs no fold** — so within a run this number only ever grows, and
-/// the ratio between the two is what a deployment would actually have to provision for today.
+/// segments and a coalesce's consumed tiers stay on disc while a kept side-manifest still names
+/// them, since a step-down serves one of those (contracts §2.3), and until no request holds a
+/// generation that names them. The ratio between the two is what a deployment provisions for.
 fn bundle_bytes(root: &std::path::Path) -> u64 {
     fn walk(dir: &std::path::Path, total: &mut u64) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -442,18 +441,20 @@ fn ingest_round(engine: &Engine, round: usize, batch: usize) -> (Vec<Planted>, R
     // loop; a test that asserted straight after the flush would be asserting D1 does not exist.
     let ack = t_ack.elapsed();
     let flushes = engine.write_executor_stats().flushes;
-    let refreshes = engine.refreshes();
     let t_publish = Instant::now();
     engine.request_flush();
     wait_until("the round's flush to publish", WAIT, || {
         engine.write_executor_stats().flushes > flushes
     });
     let publish = t_publish.elapsed();
+    // The executor marks a refresh in flight before it swaps a publication in, so once the flush
+    // has published, idle means its own refresh has replaced the session's projection. Counting
+    // refreshes instead is satisfied by a merge's refresh that ends while the flush's still runs.
     let t_refresh = Instant::now();
     wait_until(
         "the background refresh to replace the session's projection",
         WAIT,
-        || engine.refreshes() > refreshes,
+        || engine.maintenance_idle_for_test(),
     );
     (
         probes,
@@ -1812,7 +1813,7 @@ fn p1_one_scale(base: u64) {
     let entities = engine.generation().only_shard().watermark;
 
     // **The input the coefficient is against is the bytes the fold reads**, which is what the live
-    // manifests name — not everything on disc. A merge's consumed segments are still in the
+    // manifests name — not everything on disc. A merge's consumed segments can still be in the
     // directory and a fold does not open them, so charging the fold for them would flatter it by
     // exactly the orphan ratio.
     let input_bytes = live_before;

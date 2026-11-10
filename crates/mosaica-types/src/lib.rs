@@ -22,6 +22,12 @@ pub mod process;
 pub mod scalar;
 pub mod written;
 
+/// How far a long-running job has gone, as every surface serves it. Behind `serde` because the
+/// record exists to be served, and here because the build, the engine and the clients' CLI all
+/// report it.
+#[cfg(feature = "serde")]
+pub mod progress;
+
 /// The annotation layer declaration, shared by the WAL record that makes a registration durable,
 /// the manifest section that carries it, and the gate-filtered `/v1/meta` view.
 ///
@@ -266,9 +272,13 @@ pub struct GenerationStamp {
 // refused.
 // 50: every text index, a base as well as an extent, carries `positions.arrow`, and a text extent
 // names it. A 49 bundle is refused.
+// 51: a keyword column's ordinals are stored per 2^16-entity block in the narrowest encoding the
+// block allows. A 50 bundle is refused.
+// 52: a category's codes, where its vocabulary is u16 or u32 wide, are stored per 2^16-entity block
+// as a keyword's ordinals are, and every such file records its codes' width. A 51 bundle is refused.
 // Each bump makes a stale local bundle a loud refusal rather than a silent misread — a fail-closed
 // guard, not compatibility.
-pub const BUNDLE_FORMAT: u32 = 50;
+pub const BUNDLE_FORMAT: u32 = 52;
 pub const API_VERSION: u32 = 1;
 pub const ABI_VERSION: u32 = 1;
 pub const ROW_ABSENT: u32 = 0xFFFF_FFFF;

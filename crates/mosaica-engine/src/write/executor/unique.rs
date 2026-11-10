@@ -268,7 +268,7 @@ impl Executor {
     /// declaration a fold held back.
     pub(super) fn publish_completed_unique_rounds(&mut self) -> bool {
         let mut any = false;
-        while let Some(done) = self.unique_declarations.rounds.next_completed() {
+        while let Some((done, _)) = self.unique_declarations.rounds.next_completed() {
             any = true;
             self.take_round(done);
         }

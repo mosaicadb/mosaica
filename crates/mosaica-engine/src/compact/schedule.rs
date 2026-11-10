@@ -16,7 +16,8 @@ pub struct CompactionSchedule {
     pub after_deletions: Option<u64>,
     /// Retirable deletions over live rows.
     pub tombstoned_rows_fraction: Option<f64>,
-    /// Dead bytes over named bytes. Reclaims space from merge churn that leaves the counts low.
+    /// Dead bytes over named bytes: the files a discarded or interrupted publication left, which
+    /// only a compaction removes.
     pub dead_bytes_ratio: Option<f64>,
 }
 

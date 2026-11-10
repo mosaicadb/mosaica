@@ -3,41 +3,26 @@
 //!
 //! ## One writer, several producers
 //!
-//! [`SegmentWriter`] takes segment rows one at a time, in row order, and holds none of them: each
-//! column's bytes go straight to a spool file beside the output, and the single record batch
-//! contracts §2.6 requires is assembled at [`SegmentWriter::finish`] with the spools
-//! memory-mapped as its values buffers. That is `PostingsSpool`'s discipline
-//! (`mosaica_authz::postings`), for the same reason — the compaction fold's pass 1 streams the
-//! whole corpus through here and may not materialise it (compaction §3), and merge's measured
-//! **4.4–4.9× peak over its inputs' bytes** is what
-//! forced `max_merged_segment_bytes` to stay where decision 0049 left it.
+//! [`SegmentWriter`] takes segment rows one at a time, in row order, and holds none of them:
+//! `columns.arrow` is laid out at its final size when the writer is created
+//! ([`mosaica_authz::arrow_file::InPlaceFile`]) and each column's values are written at their own
+//! offset as rows arrive, so each byte is written once. That needs the row count up front, which
+//! every producer has: [`write_segment`] holds its rows, a merge sums its inputs, and the fold
+//! counts the rows its tombstones leave.
 //!
-//! Its two producers are [`write_segment`], for an already-sorted in-memory batch (flush and the
-//! build's tiler), and [`crate::merge::execute_merge`]'s k-way merge, for rows streamed off mapped
-//! inputs. *A second writer that knows the layout is how two come to disagree about a format*
-//! (write-path §7), so the merge feeds this one rather than growing its own — and the two paths
-//! then produce byte-identical files for equal rows by construction rather than by argument
-//! (`merge_execution::the_k_way_merge_emits_exactly_what_a_concatenate_and_sort_would`).
-//!
-//! The batch build lays `columns.arrow` out in place instead ([`crate::columns`]), and its bytes
-//! are held equal to this writer's for the same rows
+//! Its producers are [`write_segment`], for an already-sorted in-memory batch (flush), and the
+//! k-way merges of [`crate::merge::execute_merge`] and [`crate::fold::fold_row_space`], for rows
+//! streamed off mapped inputs. The build fills the same layout bucket by bucket
+//! ([`columns_layout`]), and its bytes are held equal to this writer's for the same rows
 //! (`segment_roundtrip::a_column_file_filled_in_place_is_byte_identical_to_one_written_whole`).
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::ptr::NonNull;
 use std::sync::Arc;
 
-use arrow::array::{
-    ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int64Array, Int8Array, StringArray, TimestampMicrosecondArray, UInt16Array, UInt32Array,
-    UInt64Array, UInt8Array,
-};
-use arrow::buffer::{Buffer, OffsetBuffer, ScalarBuffer};
-use arrow::datatypes::{ArrowNativeType, DataType, Field, Schema, TimeUnit};
-use arrow::ipc::writer::FileWriter;
-use arrow::record_batch::RecordBatch;
+use arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
+use mosaica_authz::arrow_file::{FileLayout, InPlaceFile};
 
 use mosaica_spatial::split32;
 use mosaica_spatial::tiler::{ScalarType, ScalarValue, TilerItem};
@@ -91,7 +76,7 @@ pub fn write_segment(
         ));
     }
 
-    let mut writer = SegmentWriter::create(dir, scalar_schema, indexed)?;
+    let mut writer = SegmentWriter::create(dir, scalar_schema, indexed, items.len())?;
     let drawn = scalar_schema.len();
     for (item, code) in items.iter().zip(codes) {
         let (scalars, after) = item.scalars.split_at(drawn.min(item.scalars.len()));
@@ -203,86 +188,97 @@ pub fn no_indexed(k: usize) -> io::Result<ScalarValue> {
 /// Writes one segment's `morton.u32` and `columns.arrow` from rows arriving in
 /// `(morton, mosaica_id)` order, holding no row and no column.
 ///
-/// See the module doc for why this is the only thing that knows the layout. Memory is the offset
-/// table of any `Utf8` declared scalar (4 B/row — the one term that is not O(1) in rows) plus two
-/// `BufWriter`s.
+/// See the module doc for why this is the only writer that takes rows. Memory is a staging buffer
+/// of [`STAGE_BYTES`] per column and two `BufWriter`s.
 ///
-/// **That term is zero in every bundle a schema can currently produce**, and by refusal rather
-/// than by accident: `render` is the only built placement and `render` on `utf8` is refused at
-/// parse (per-point-attributes §4.3 — a per-row string is the vocabulary stored once per row). The
-/// writer keeps the capability because the *format* admits it and a hand-written manifest may
-/// declare one; what no schema can do is ask for it.
+/// **Every column is fixed-width.** `render` on a string type is refused at the declaration
+/// (per-point-attributes §4.3), and a `utf8` column reaching here is refused at
+/// [`SegmentWriter::create`], as it is at the build.
 ///
-/// **The spools are native-endian; the artefacts are not.** A spool becomes an Arrow values buffer
-/// in memory, where arrow reads it at the host's own endianness, so writing it little-endian would
-/// corrupt every value on a big-endian host. `morton.u32` and `permutation.bin` are interchange
-/// byte formats fixed little-endian by contracts §2.6 and stay so.
+/// **Values are written native-endian; the interchange files are not.** A column is an Arrow
+/// values buffer, which arrow reads at the host's own endianness. `morton.u32` and
+/// `permutation.bin` are byte formats fixed little-endian by contracts §2.6.
 pub struct SegmentWriter {
     morton: BufWriter<File>,
     cuts: CutWriter,
     bands: crate::bands::BandWriter,
     dir: PathBuf,
-    columns_path: PathBuf,
-    schema: Arc<Schema>,
-    /// One spool per schema column, in schema order: `mosaica_id`, `residual`, then the declared
+    schema: SchemaRef,
+    columns: InPlaceFile,
+    /// One per schema column, in schema order: `mosaica_id`, `residual`, then the declared
     /// scalars.
-    columns: Vec<ColumnSpool>,
+    staged: Vec<Staged>,
     rows: usize,
     /// The last `(morton, mosaica_id)` appended — the row-order check's only state.
     last_key: Option<(u32, u64)>,
-    spools: SpoolGuard,
+}
+
+/// How many bytes of a column are held before they are written at their offset.
+const STAGE_BYTES: usize = 1 << 16;
+
+/// One column's values not yet written, and where they go.
+#[derive(Default)]
+struct Staged {
+    bytes: Vec<u8>,
+    /// The offset in the column's values buffer that `bytes` begins at.
+    at: u64,
+    /// A `Boolean` column's partial byte, least significant bit first, and how many of its bits
+    /// are rows.
+    bits: u8,
+    bit_len: u8,
+}
+
+impl Staged {
+    fn write(&mut self, columns: &InPlaceFile, column: usize) -> io::Result<()> {
+        columns.put(column, self.at, &self.bytes)?;
+        self.at += self.bytes.len() as u64;
+        self.bytes.clear();
+        Ok(())
+    }
+
+    fn push(&mut self, bytes: &[u8], columns: &InPlaceFile, column: usize) -> io::Result<()> {
+        self.bytes.extend_from_slice(bytes);
+        if self.bytes.len() >= STAGE_BYTES {
+            self.write(columns, column)?;
+        }
+        Ok(())
+    }
 }
 
 impl SegmentWriter {
-    /// Create the segment's files under `dir`, which must exist. `scalar_schema` is
-    /// `columns.arrow`'s tail; `indexed` is the columns the bands copy beside it, whose values each
-    /// row's [`SegmentRow::indexed`] answers.
+    /// Create the segment's files under `dir`, which must exist, for exactly `rows` rows.
+    /// `scalar_schema` is `columns.arrow`'s tail; `indexed` is the columns the bands copy beside
+    /// it, whose values each row's [`SegmentRow::indexed`] answers.
     pub fn create(
         dir: &Path,
         scalar_schema: &[(String, ScalarType)],
         indexed: &[(String, ScalarType)],
+        rows: usize,
     ) -> io::Result<Self> {
-        let mut fields = fixed_fields();
-        for (name, ty) in scalar_schema {
-            fields.push(Field::new(name, arrow_type_of(*ty), false));
-        }
-        let schema = Arc::new(Schema::new(fields));
-
-        // The guard is constructed **before** the first spool file, so a failure part-way through
-        // this loop still unlinks the ones already created.
-        let spools = SpoolGuard(
-            (0..schema.fields().len())
-                .map(|idx| dir.join(format!("columns.arrow.spool.{idx}")))
-                .collect(),
-        );
-        let mut columns = Vec::with_capacity(schema.fields().len());
-        for (idx, field) in schema.fields().iter().enumerate() {
-            let kind = ColumnKind::of(field.data_type(), field.name())?;
-            columns.push(ColumnSpool::create(&spools.0[idx], kind)?);
-        }
-
+        let schema = columns_schema(scalar_schema);
+        let columns =
+            InPlaceFile::create(&dir.join("columns.arrow"), columns_layout(scalar_schema, rows)?)?;
         Ok(SegmentWriter {
             morton: BufWriter::new(File::create(dir.join("morton.u32"))?),
             cuts: CutWriter::create(dir)?,
             bands: crate::bands::BandWriter::create(dir, indexed)?,
             dir: dir.to_path_buf(),
-            columns_path: dir.join("columns.arrow"),
+            staged: (0..schema.fields().len()).map(|_| Staged::default()).collect(),
             schema,
             columns,
             rows: 0,
             last_key: None,
-            spools,
         })
     }
 
     /// Append the next row. Rows must arrive in `(morton, mosaica_id)` order — contracts §2.6's
     /// row order, which `tile_ranges` binary-searches.
     ///
-    /// **A `debug_assert`, matching what this function replaced, because the fail-closed backstop
-    /// is at the read.** `MortonSlice::load` refuses a non-ascending `morton.u32` at every open,
-    /// and the engine's merge unit loads the segment it just wrote before publishing it — so an
-    /// out-of-order producer is a refused publication in release and a failed test in debug, never
-    /// a bundle that serves nonsense.
+    /// **A `debug_assert`, because the fail-closed backstop is at the read.**
+    /// `MortonSlice::load` refuses a non-ascending `morton.u32` at every open, and the engine's
+    /// merge unit loads the segment it just wrote before publishing it — so an out-of-order
+    /// producer is a refused publication in release and a failed test in debug, never a bundle
+    /// that serves nonsense.
     pub fn append(&mut self, row: SegmentRow<'_>) -> io::Result<()> {
         let key = (row.morton, row.mosaica_id.raw());
         debug_assert!(
@@ -290,357 +286,152 @@ impl SegmentWriter {
             "SegmentWriter::append: rows must arrive in (morton, mosaica_id) order"
         );
         self.last_key = Some(key);
+        if self.rows == self.columns.rows() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "segment writer: mosaica_id {} is a row past the {} the segment was \
+                     created for; create it with the count of rows it will be appended",
+                    row.mosaica_id.raw(),
+                    self.columns.rows()
+                ),
+            ));
+        }
 
         self.morton.write_all(&row.morton.to_le_bytes())?;
         self.cuts.push(row.morton)?;
         self.bands
             .push(row.mosaica_id.raw(), row.morton, row.residual, row.indexed)?;
-        self.columns[0].append_u64(row.mosaica_id.raw())?;
-        self.columns[1].append_u32(row.residual)?;
-        for (idx, spool) in self.columns.iter_mut().enumerate().skip(FIXED_COLUMN_COUNT) {
-            let name = self.schema.field(idx).name();
+        let columns = &self.columns;
+        self.staged[0].push(&row.mosaica_id.raw().to_ne_bytes(), columns, 0)?;
+        self.staged[1].push(&row.residual.to_ne_bytes(), columns, 1)?;
+        for (idx, staged) in self.staged.iter_mut().enumerate().skip(FIXED_COLUMN_COUNT) {
+            let field = self.schema.field(idx);
             let value = row.scalars.get(idx - FIXED_COLUMN_COUNT).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "write_segment: mosaica_id {} is missing scalar '{}' at index {}",
+                        "segment writer: mosaica_id {} is missing scalar '{}' at index {}",
                         row.mosaica_id.raw(),
-                        name,
+                        field.name(),
                         idx - FIXED_COLUMN_COUNT
                     ),
                 )
             })?;
-            spool.append(value, name, row.mosaica_id)?;
+            append_scalar(staged, columns, idx, field, value, row.mosaica_id)?;
         }
         self.rows += 1;
         Ok(())
     }
 
-    /// Assemble `columns.arrow` from the spools, then the band file from it, and return the row
-    /// count.
-    ///
-    /// The spools are mapped rather than read back, so the record batch's values buffers are the
-    /// files themselves; the IPC writer copies them out once. They are unlinked on the way out of
-    /// this function whether it succeeded or not — [`SpoolGuard`].
+    /// Write the last staged values, then the band file from the finished `columns.arrow`, and
+    /// return the row count, which must be the count the writer was created for.
     pub fn finish(self) -> io::Result<usize> {
         let SegmentWriter {
             mut morton,
             cuts,
             bands,
             dir,
-            columns_path,
-            schema,
             columns,
+            mut staged,
             rows,
-            spools,
             ..
         } = self;
+        if rows != columns.rows() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "segment writer: {rows} rows were appended to a segment created for {}; \
+                     create it with the count of rows it will be appended",
+                    columns.rows()
+                ),
+            ));
+        }
         morton.flush()?;
         drop(morton);
         cuts.finish()?;
-
-        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(columns.len());
-        for (spool, field) in columns.into_iter().zip(schema.fields()) {
-            arrays.push(spool.into_array(rows, field.name())?);
+        for (column, staged) in staged.iter_mut().enumerate() {
+            // A `Boolean` column's trailing partial byte is real: without it a row count that is
+            // not a multiple of eight loses up to seven values.
+            if staged.bit_len > 0 {
+                staged.bytes.push(staged.bits);
+            }
+            staged.write(&columns, column)?;
         }
-        let batch = RecordBatch::try_new(schema.clone(), arrays)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-
-        write_single_batch(&columns_path, &schema, &batch)?;
-        // The mappings die with the batch, before `spools` unlinks the files they cover.
-        drop(batch);
-        drop(spools);
+        columns.finish()?;
         bands.finish(&dir)?;
         Ok(rows)
-    }
-}
-
-/// Unlinks the spool files it names, on every exit path from [`SegmentWriter`] — success, error
-/// and panic alike.
-///
-/// **A destructor rather than a line at the bottom of `finish`**: the fold's spools are
-/// corpus-sized (compaction §3, ~12 GB at 10⁹), so leaving them behind on a failure is a filled
-/// device, which takes the whole write path down with it (write-path §1.3).
-struct SpoolGuard(Vec<PathBuf>);
-
-impl Drop for SpoolGuard {
-    fn drop(&mut self) {
-        for path in &self.0 {
-            let _ = std::fs::remove_file(path);
-        }
     }
 }
 
 /// The two columns contracts §2.6 fixes; everything after them is a declared scalar.
 const FIXED_COLUMN_COUNT: usize = 2;
 
-/// What kind of Arrow column a spool is accumulating — the types [`fixed_fields`] and
-/// [`arrow_type_of`] between them can produce.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum ColumnKind {
-    Bool,
-    U8,
-    U16,
-    U32,
-    U64,
-    I8,
-    I16,
-    I32,
-    I64,
-    F32,
-    F64,
-    TimestampUs,
-    Utf8,
-}
-
-impl ColumnKind {
-    fn of(ty: &DataType, name: &str) -> io::Result<Self> {
-        match ty {
-            DataType::Boolean => Ok(ColumnKind::Bool),
-            DataType::UInt8 => Ok(ColumnKind::U8),
-            DataType::UInt16 => Ok(ColumnKind::U16),
-            DataType::UInt32 => Ok(ColumnKind::U32),
-            DataType::UInt64 => Ok(ColumnKind::U64),
-            DataType::Int8 => Ok(ColumnKind::I8),
-            DataType::Int16 => Ok(ColumnKind::I16),
-            DataType::Int32 => Ok(ColumnKind::I32),
-            DataType::Int64 => Ok(ColumnKind::I64),
-            DataType::Float32 => Ok(ColumnKind::F32),
-            DataType::Float64 => Ok(ColumnKind::F64),
-            DataType::Timestamp(TimeUnit::Microsecond, None) => Ok(ColumnKind::TimestampUs),
-            DataType::Utf8 => Ok(ColumnKind::Utf8),
-            other => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("write_segment: column '{name}' has unsupported type {other:?}"),
-            )),
-        }
+/// Stage one declared scalar, refusing a value that is not of the column's declared type.
+///
+/// **A mismatch fails the write rather than coercing or dropping.** Dropping shortens the column
+/// and shifts every later row of it into another row's place — every value present, every value
+/// against the wrong identity, and no error anywhere.
+fn append_scalar(
+    staged: &mut Staged,
+    columns: &InPlaceFile,
+    column: usize,
+    field: &Field,
+    value: &ScalarValue,
+    mosaica_id: MosaicaId,
+) -> io::Result<()> {
+    macro_rules! put {
+        ($v:expr) => {
+            staged.push(&$v.to_ne_bytes(), columns, column)
+        };
     }
-
-    /// Whether this kind carries an offset table rather than fixed-width values.
-    fn is_var_width(self) -> bool {
-        matches!(self, ColumnKind::Utf8)
-    }
-}
-
-/// One column's values, appended to a spool file as rows arrive.
-pub(crate) struct ColumnSpool {
-    kind: ColumnKind,
-    writer: BufWriter<File>,
-    /// [`ColumnKind::Bool`] only: the partial byte being packed, and how many of its bits are
-    /// live. Flushed at eight, and padded at `into_array` — a trailing partial byte is real, and
-    /// dropping it would lose up to seven rows' values with the row count still agreeing.
-    bit_buf: u8,
-    bit_len: u8,
-    /// Var-width kinds only: Arrow's `i32` offset table, which has no file-backed form — a
-    /// `LargeBinary`'s `i64` twin is what `PostingsSpool` holds for the same reason.
-    offsets: Vec<i32>,
-}
-
-impl ColumnSpool {
-    pub(crate) fn create(path: &Path, kind: ColumnKind) -> io::Result<Self> {
-        // Read access as well as write: `into_array` maps the spool through this same handle, and
-        // mapping a write-only descriptor fails with EACCES.
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)?;
-        Ok(ColumnSpool {
-            kind,
-            writer: BufWriter::new(file),
-            bit_buf: 0,
-            bit_len: 0,
-            offsets: if kind.is_var_width() {
-                vec![0]
-            } else {
-                Vec::new()
-            },
-        })
-    }
-
-    /// The `mosaica_id` column, whose type [`fixed_fields`] fixes — no tag to check.
-    fn append_u64(&mut self, value: u64) -> io::Result<()> {
-        debug_assert!(matches!(self.kind, ColumnKind::U64));
-        self.writer.write_all(&value.to_ne_bytes())
-    }
-
-    /// The `residual` column.
-    pub(crate) fn append_u32(&mut self, value: u32) -> io::Result<()> {
-        debug_assert!(matches!(self.kind, ColumnKind::U32));
-        self.writer.write_all(&value.to_ne_bytes())
-    }
-
-    /// The running `i32` offset after appending `len` more bytes, refusing the overflow rather
-    /// than wrapping — `PostingsSpool`'s `next_offset` rule, at `i32` because Arrow's `Utf8`
-    /// offsets are 32-bit.
-    fn next_offset(&self, len: usize, name: &str) -> io::Result<i32> {
-        let last = *self
-            .offsets
-            .last()
-            .expect("var-width spools hold a leading 0");
-        i32::try_from(len)
-            .ok()
-            .and_then(|len| last.checked_add(len))
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("column '{name}' exceeds i32::MAX bytes"),
-                )
-            })
-    }
-
-    /// Append one declared scalar, refusing a tag that is not the column's declared type.
-    ///
-    /// **A mismatch fails the write rather than coercing or dropping.** Dropping shortens the
-    /// column and shifts every later row of it into another row's place — every value present,
-    /// every value against the wrong identity, and no error anywhere.
-    fn append(&mut self, value: &ScalarValue, name: &str, mosaica_id: MosaicaId) -> io::Result<()> {
-        match (self.kind, value) {
-            // Packed into the spool a bit at a time, so the spool *is* the Arrow values buffer
-            // and `into_array` can map it like every other column. Buffering a byte and flushing
-            // it when full is the whole mechanism; `finish` pads the last partial byte.
-            (ColumnKind::Bool, ScalarValue::Bool(v)) => {
-                if *v {
-                    self.bit_buf |= 1 << self.bit_len;
-                }
-                self.bit_len += 1;
-                if self.bit_len == 8 {
-                    self.writer.write_all(&[self.bit_buf])?;
-                    self.bit_buf = 0;
-                    self.bit_len = 0;
-                }
-                Ok(())
+    match (field.data_type(), value) {
+        (DataType::Boolean, ScalarValue::Bool(v)) => {
+            staged.bits |= u8::from(*v) << staged.bit_len;
+            staged.bit_len += 1;
+            if staged.bit_len < 8 {
+                return Ok(());
             }
-            (ColumnKind::U8, ScalarValue::U8(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::U16, ScalarValue::U16(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::U32, ScalarValue::U32(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::U64, ScalarValue::U64(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::I8, ScalarValue::I8(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::I16, ScalarValue::I16(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::I32, ScalarValue::I32(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::I64, ScalarValue::I64(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::TimestampUs, ScalarValue::TimestampUs(v)) => {
-                self.writer.write_all(&v.to_ne_bytes())
-            }
-            (ColumnKind::F32, ScalarValue::F32(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::F64, ScalarValue::F64(v)) => self.writer.write_all(&v.to_ne_bytes()),
-            (ColumnKind::Utf8, ScalarValue::Utf8(v)) => {
-                let next = self.next_offset(v.len(), name)?;
-                self.writer.write_all(v.as_bytes())?;
-                self.offsets.push(next);
-                Ok(())
-            }
-            (kind, got) => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "write_segment: mosaica_id {} scalar '{name}' expected {kind:?}, got {got:?}",
-                    mosaica_id.raw()
-                ),
-            )),
+            let byte = staged.bits;
+            (staged.bits, staged.bit_len) = (0, 0);
+            staged.push(&[byte], columns, column)
         }
-    }
-
-    /// Map the spool and build this column's array over it.
-    pub(crate) fn into_array(self, rows: usize, name: &str) -> io::Result<ArrayRef> {
-        let ColumnSpool {
-            kind,
-            mut writer,
-            offsets,
-            bit_buf,
-            bit_len,
-        } = self;
-        // The trailing partial byte, if any. Without it a column whose row count is not a
-        // multiple of eight loses up to seven values while `rows` still agrees — a short buffer
-        // arrow would either refuse or read past, and neither says what happened.
-        if bit_len > 0 {
-            writer.write_all(&[bit_buf])?;
-        }
-        let file = writer
-            .into_inner()
-            .map_err(io::IntoInnerError::into_error)?;
-        // The map reads the page cache the flush wrote to; nothing reads the spool after a crash.
-        let len = file.metadata()?.len() as usize;
-
-        // memmap2 rejects a zero-length map, and an empty typed array cannot be built from a
-        // dangling `Buffer` either — `typed_column`'s alignment check would refuse it. Both
-        // producers can legitimately write no rows, so this is the ordinary empty case.
-        if len == 0 {
-            return Ok(match kind {
-                ColumnKind::Bool => Arc::new(BooleanArray::from(Vec::<bool>::new())) as ArrayRef,
-                ColumnKind::U8 => Arc::new(UInt8Array::from(Vec::<u8>::new())),
-                ColumnKind::U16 => Arc::new(UInt16Array::from(Vec::<u16>::new())),
-                ColumnKind::U32 => Arc::new(UInt32Array::from(Vec::<u32>::new())),
-                ColumnKind::U64 => Arc::new(UInt64Array::from(Vec::<u64>::new())),
-                ColumnKind::I8 => Arc::new(Int8Array::from(Vec::<i8>::new())),
-                ColumnKind::I16 => Arc::new(Int16Array::from(Vec::<i16>::new())),
-                ColumnKind::I32 => Arc::new(Int32Array::from(Vec::<i32>::new())),
-                ColumnKind::I64 => Arc::new(Int64Array::from(Vec::<i64>::new())),
-                ColumnKind::TimestampUs => {
-                    Arc::new(TimestampMicrosecondArray::from(Vec::<i64>::new()))
-                }
-                ColumnKind::F32 => Arc::new(Float32Array::from(Vec::<f32>::new())),
-                ColumnKind::F64 => Arc::new(Float64Array::from(Vec::<f64>::new())),
-                ColumnKind::Utf8 => Arc::new(
-                    StringArray::try_new(
-                        OffsetBuffer::new(ScalarBuffer::from(offsets)),
-                        Buffer::from_vec(Vec::<u8>::new()),
-                        None,
-                    )
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
-                ),
-            });
-        }
-
-        // SAFETY: identical to `ColumnsRef::load`'s and `PostingsSpool::finish`'s mmap arm — `arc`
-        // owns the mapping for as long as any `Buffer` built from it is alive (captured as the
-        // buffer's `Allocation`), the mapping is valid for `len` bytes for its whole lifetime, and
-        // memmap2 never returns a null base pointer.
-        let mapping = unsafe { memmap2::Mmap::map(&file) }?;
-        let arc: Arc<memmap2::Mmap> = Arc::new(mapping);
-        let ptr = NonNull::new(arc.as_ptr() as *mut u8)
-            .expect("memmap2::Mmap never returns a null base pointer");
-        let buffer = unsafe { Buffer::from_custom_allocation(ptr, len, arc) };
-
-        Ok(match kind {
-            // The one column whose buffer is not `rows` elements wide: a bit each, so
-            // `ceil(rows / 8)` bytes, which `BooleanBuffer` slices to `rows` itself.
-            ColumnKind::Bool => {
-                let needed = rows.div_ceil(8);
-                if buffer.len() < needed {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!(
-                            "column '{name}' has {} bytes, {rows} packed bits need {needed}",
-                            buffer.len()
-                        ),
-                    ));
-                }
-                Arc::new(BooleanArray::new(
-                    arrow::buffer::BooleanBuffer::new(buffer, 0, rows),
-                    None,
-                )) as ArrayRef
-            }
-            ColumnKind::U8 => Arc::new(UInt8Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::U16 => Arc::new(UInt16Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::U32 => Arc::new(UInt32Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::U64 => Arc::new(UInt64Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::I8 => Arc::new(Int8Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::I16 => Arc::new(Int16Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::I32 => Arc::new(Int32Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::I64 => Arc::new(Int64Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::TimestampUs => Arc::new(TimestampMicrosecondArray::new(
-                typed_column(name, buffer, rows)?,
-                None,
-            )),
-            ColumnKind::F32 => Arc::new(Float32Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::F64 => Arc::new(Float64Array::new(typed_column(name, buffer, rows)?, None)),
-            ColumnKind::Utf8 => Arc::new(
-                StringArray::try_new(OffsetBuffer::new(ScalarBuffer::from(offsets)), buffer, None)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
+        (DataType::UInt8, ScalarValue::U8(v)) => put!(v),
+        (DataType::UInt16, ScalarValue::U16(v)) => put!(v),
+        (DataType::UInt32, ScalarValue::U32(v)) => put!(v),
+        (DataType::UInt64, ScalarValue::U64(v)) => put!(v),
+        (DataType::Int8, ScalarValue::I8(v)) => put!(v),
+        (DataType::Int16, ScalarValue::I16(v)) => put!(v),
+        (DataType::Int32, ScalarValue::I32(v)) => put!(v),
+        (DataType::Int64, ScalarValue::I64(v)) => put!(v),
+        (DataType::Timestamp(TimeUnit::Microsecond, None), ScalarValue::TimestampUs(v)) => put!(v),
+        (DataType::Float32, ScalarValue::F32(v)) => put!(v),
+        (DataType::Float64, ScalarValue::F64(v)) => put!(v),
+        (ty, got) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "segment writer: mosaica_id {} scalar '{}' expected {ty:?}, got {got:?}",
+                mosaica_id.raw(),
+                field.name()
             ),
-        })
+        )),
     }
+}
+
+/// `columns.arrow`'s schema: the fixed columns, then `scalars` in declared order.
+pub fn columns_schema(scalars: &[(String, ScalarType)]) -> SchemaRef {
+    let mut fields = fixed_fields();
+    for (name, ty) in scalars {
+        fields.push(Field::new(name, arrow_type_of(*ty), false));
+    }
+    Arc::new(Schema::new(fields))
+}
+
+/// The layout of a `columns.arrow` of `rows` rows carrying `scalars`, for a producer that fills
+/// it in place in its own order, as the build does a Morton bucket at a time. Refuses a scalar
+/// that is not fixed-width.
+pub fn columns_layout(scalars: &[(String, ScalarType)], rows: usize) -> io::Result<FileLayout> {
+    FileLayout::new(columns_schema(scalars), rows)
 }
 
 /// The fixed, non-nullable fields of `columns.arrow` (contracts §2.6), in column order. The reader
@@ -664,27 +455,9 @@ fn fixed_fields() -> Vec<Field> {
     ]
 }
 
-/// The one writer path for `columns.arrow`: Arrow IPC file format, exactly one record batch
-/// (the reader's `decode_single_batch` refuses anything else), uncompressed buffers, no fsync
-/// (the build pipeline's manifest digests are what make a partially-written file detectable).
-/// Every `columns.arrow` writer funnels through here, so equal batches produce equal bytes by
-/// construction.
-fn write_single_batch(path: &Path, schema: &Arc<Schema>, batch: &RecordBatch) -> io::Result<()> {
-    let file = File::create(path)?;
-    let mut writer = FileWriter::try_new(BufWriter::new(file), schema)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    writer
-        .write(batch)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    writer
-        .finish()
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    Ok(())
-}
-
 /// The Arrow type each declared scalar width becomes in `columns.arrow`'s schema. Paired with
-/// `read::validate_schema`'s accepted set and [`ColumnKind::of`]: a type added to one and not the
-/// others is a segment one writer emits and the reader refuses.
+/// `read::validate_schema`'s accepted set: a type added to one and not the other is a segment the
+/// writer emits and the reader refuses.
 pub(crate) fn arrow_type_of(ty: ScalarType) -> DataType {
     match ty {
         ScalarType::Bool => DataType::Boolean,
@@ -701,52 +474,10 @@ pub(crate) fn arrow_type_of(ty: ScalarType) -> DataType {
         // `None` for the timezone: these are instants, and a per-column zone would be a second
         // place a time's meaning is decided.
         ScalarType::TimestampUs => DataType::Timestamp(TimeUnit::Microsecond, None),
-        // **Unreachable, and `Utf8` rather than a panic.** `render` on either string type is
-        // refused at the declaration, so no keyword column reaches the hot column's schema. If one
-        // ever did, its rendered form would be the value's bytes — which is what
-        // `ScalarValue::or_render_placeholder` substitutes for it — never the ordinal, which is a
-        // per-layer index internal (records §4.3). The two must agree, so they are stated as one.
+        // **Unreachable.** `render` on either string type is refused at the declaration, and a
+        // `Utf8` column by `columns_layout`, which both writers of the file lay it out with.
         ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text => DataType::Utf8,
     }
-}
-
-/// Check `buffer` can back `rows` values of `T` — long enough, and aligned to `T` (arrow's
-/// `ScalarBuffer` conversion *panics* on misalignment; this turns both failure modes into
-/// typed `InvalidInput` errors first). A buffer longer than `rows` values is fine — the tail
-/// is sliced off — so a page-rounded mapping needs no trimming by the caller.
-fn typed_column<T: ArrowNativeType>(
-    name: &str,
-    buffer: Buffer,
-    rows: usize,
-) -> io::Result<ScalarBuffer<T>> {
-    let width = std::mem::size_of::<T>();
-    let needed = rows.checked_mul(width).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("columns.arrow: {rows} rows of '{name}' overflow usize"),
-        )
-    })?;
-    if buffer.len() < needed {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "columns.arrow: column '{name}' has {} bytes, {rows} rows of \
-                 {width}-byte values need {needed}",
-                buffer.len()
-            ),
-        ));
-    }
-    let align = std::mem::align_of::<T>();
-    if buffer.as_ptr().align_offset(align) != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "columns.arrow: column '{name}' buffer is not {align}-byte aligned \
-                 (arrow requires element alignment; page-aligned mmaps always satisfy this)"
-            ),
-        ));
-    }
-    Ok(ScalarBuffer::new(buffer, 0, rows))
 }
 
 /// Write `permutation.bin` (R4), the two-level paged entity→row map — see
@@ -1028,7 +759,7 @@ impl PermutationWriter {
             ));
         }
         // Explicit little-endian, never a native cast: the slot array is an interchange byte
-        // format (contracts §2.6), unlike the spools above, which become in-memory Arrow buffers.
+        // format (contracts §2.6), unlike `columns.arrow`, whose buffers arrow reads natively.
         self.map[at..at + 4].copy_from_slice(&row.to_le_bytes());
         Ok(())
     }

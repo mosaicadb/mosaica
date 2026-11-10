@@ -456,6 +456,7 @@ fn the_description_names_every_route_on_the_three_planes_and_no_other() {
             "/control/attributes",
             "/control/changes",
             "/control/compact",
+            "/control/compact/{request}",
             "/control/flush",
             "/control/grants",
             "/control/grants/revoke",
@@ -600,6 +601,7 @@ fn every_closed_dto_is_declared_closed() {
         "BatchLimits",
         "WriteExecutorStatus",
         "CompactionStatus",
+        "CompactionRequest",
     ] {
         let schema = &doc["components"]["schemas"][name];
         assert!(schema.is_object(), "schema {name} is missing");
@@ -2491,10 +2493,10 @@ async fn every_described_route_requires_its_planes_credential() {
         "/session/authorise and /session/revoke are the session plane's"
     );
     assert_eq!(
-        control_plane, 41,
-        "the control plane's operations are ingest, changes, status, flush, compact, \
-         the attribute, shard size, vocabulary, value-page, view group and plain view \
-         declarations, a group view's create and drop, a layer's registration and drop, an \
+        control_plane, 42,
+        "the control plane's operations are ingest, changes, status, flush, compact, a compaction \
+         request's read, the attribute, shard size, vocabulary, value-page, view group and plain \
+         view declarations, a group view's create and drop, a layer's registration and drop, an \
          artifact publication and growth, and the catalogue's 24 verbs"
     );
 }
@@ -3027,7 +3029,8 @@ async fn changes_match_the_description() {
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 }
 
-/// `GET /control/status`, `POST /control/flush` and `POST /control/compact`.
+/// `GET /control/status`, `POST /control/flush`, `POST /control/compact` and
+/// `GET /control/compact/{request}`.
 #[tokio::test]
 async fn status_flush_and_compact_match_the_description() {
     let doc = description();
@@ -3058,20 +3061,54 @@ async fn status_flush_and_compact_match_the_description() {
         .unwrap();
     assert_refusal_to(&doc, Some(&post), resp, 422, "contract").await;
 
+    // The status and the request of a compaction held after its passes, which serve its progress
+    // record, and of the same compaction answered.
+    let engine = &f.server.state.engine;
+    engine.set_fold_paused_for_test(true);
     let resp = control(&f.server, &post, "/control/compact")
         .send()
         .await
         .unwrap();
     let compact = assert_answer(&doc, &post, resp, 202).await;
-    assert_eq!(compact["request"], 1);
-
-    // After a flush has published, the status still matches.
+    let request = compact["request"].as_u64().unwrap();
+    let route = format!("/control/compact/{request}");
+    wait_until(
+        "the compaction holds",
+        std::time::Duration::from_secs(60),
+        async || engine.fold_is_holding_for_test(),
+    )
+    .await;
     let resp = control(&f.server, &get, "/control/status")
         .send()
         .await
         .unwrap();
     let status = assert_answer(&doc, &get, resp, 200).await;
     assert!(status["publication"].as_u64().unwrap() >= answer["publication"].as_u64().unwrap());
+    let resp = control(&f.server, &get, &route).send().await.unwrap();
+    assert_answer(&doc, &get, resp, 200).await;
+
+    engine.set_fold_paused_for_test(false);
+    wait_until(
+        "the compaction answered",
+        std::time::Duration::from_secs(60),
+        async || engine.write_executor_stats().compaction_requests_answered >= request,
+    )
+    .await;
+    let resp = control(&f.server, &get, "/control/status")
+        .send()
+        .await
+        .unwrap();
+    assert_answer(&doc, &get, resp, 200).await;
+    let resp = control(&f.server, &get, &route).send().await.unwrap();
+    assert_answer(&doc, &get, resp, 200).await;
+    // A number this run has not given, and two that are no request's number.
+    let next = format!("/control/compact/{}", request + 1);
+    let resp = control(&f.server, &get, &next).send().await.unwrap();
+    assert_refusal_to(&doc, Some(&get), resp, 404, "unknown").await;
+    for malformed in ["/control/compact/0", "/control/compact/abc"] {
+        let resp = control(&f.server, &get, malformed).send().await.unwrap();
+        assert_refusal_to(&doc, Some(&get), resp, 422, "contract").await;
+    }
     let resp = f
         .server
         .client

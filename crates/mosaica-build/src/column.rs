@@ -703,6 +703,28 @@ impl EntityColumn {
             .map(move |entity| entity - lo)
     }
 
+    /// How many entities [`Self::present_entities`] yields, counted a word at a time.
+    pub(crate) fn present_count(&self) -> usize {
+        let words = match &self.storage {
+            ColumnStorage::ByEntity { present, .. } => present.as_slice(),
+            ColumnStorage::Empty => return 0,
+        };
+        let (lo, hi) = (self.lo, self.lo + self.len);
+        (lo / 64..hi.div_ceil(64).min(words.len()))
+            .map(|w| {
+                let (first, last) = (w * 64, w * 64 + 64);
+                let mut word = words[w];
+                if first < lo {
+                    word &= u64::MAX << (lo - first);
+                }
+                if last > hi {
+                    word &= u64::MAX >> (last - hi);
+                }
+                word.count_ones() as usize
+            })
+            .sum()
+    }
+
     /// Borrow a string value, or `None` where the entity has none. For the readers that only scan
     /// the column — the keyword dictionary and the text index — where [`Self::iter`]'s copy would
     /// be a second copy of every string in the corpus.
@@ -1360,6 +1382,25 @@ mod tests {
             column.take_from(0, &mut staged, 0, "k").is_err(),
             "a spilled column took a value from a staging buffer"
         );
+    }
+
+    /// The count of present entities is the length of their walk, in every window.
+    #[test]
+    fn the_present_count_is_the_present_walk_in_every_window() {
+        let (scratch, _dir) = scratch();
+        let n = 200;
+        for (lo, hi) in [(0, n), (0, 64), (3, 61), (63, 129), (64, 128), (70, n), (n, n)] {
+            let mut column = EntityColumn::filled(&scratch, ScalarType::U32, n).unwrap();
+            for entity in (0..n).filter(|e| e % 3 != 1) {
+                column.set(entity, ScalarValue::U32(entity as u32), "v").unwrap();
+            }
+            column.window(lo, hi);
+            assert_eq!(
+                column.present_count(),
+                column.present_entities().count(),
+                "window {lo}..{hi}"
+            );
+        }
     }
 
     /// **Both record shapes round-trip, in an arena filled the way the join fills one.**

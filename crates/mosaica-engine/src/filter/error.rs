@@ -183,6 +183,10 @@ pub enum FilterError {
     /// A unique column's index could not be read. Fail-closed, on
     /// [`FilterError::PostingsUnreadable`]'s argument.
     UniqueUnreadable { column: String, detail: String },
+    /// A `mosaica_id` leaf's identifiers could not be resolved to items, because the shard's
+    /// edited-items map could not be read. Fail-closed, on
+    /// [`FilterError::PostingsUnreadable`]'s argument.
+    IdentifiersUnreadable(String),
     /// The request's client went away before the evaluation finished. Neither an answer nor a
     /// refusal: it becomes [`crate::EngineError::Cancelled`].
     Cancelled,
@@ -250,6 +254,9 @@ impl std::fmt::Display for FilterError {
                 f,
                 "the unique index of column '{column}' could not be read ({detail})"
             ),
+            FilterError::IdentifiersUnreadable(detail) => {
+                write!(f, "the items a `mosaica_id` filter names could not be resolved ({detail})")
+            }
             FilterError::Cancelled => {
                 write!(f, "the request was cancelled while its filter was evaluated")
             }
@@ -295,6 +302,7 @@ impl FilterError {
             | FilterError::MemberOfInEntitySpace
             | FilterError::MemberOfUnavailable(_)
             | FilterError::UniqueUnreadable { .. }
+            | FilterError::IdentifiersUnreadable(_)
             | FilterError::Cancelled => false,
         }
     }

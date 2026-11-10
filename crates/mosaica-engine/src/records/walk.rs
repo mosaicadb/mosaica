@@ -104,9 +104,9 @@ pub(super) trait WalkCx {
         cancel: &Option<CancelToken>,
     ) -> Result<RoutedRows>;
     /// The rows of the side at `place` an index bounds one leaf's matches to: a unique field's
-    /// `eq` or `in`, as the rows of the items holding the values named that are in the viewer's
-    /// candidate set, tested only at the holders; a `member_of`, as the artifact's members the
-    /// page's mask admits. `None` for any other expression.
+    /// `eq` or `in`, `mosaica_id`'s among them, as the rows of the items holding the values named
+    /// that are in the viewer's candidate set, tested only at the holders; a `member_of`, as the
+    /// artifact's members the page's mask admits. `None` for any other expression.
     fn index_rows(&self, place: usize, expr: &FilterExpr) -> Result<Option<Bitmap>>;
     /// The verdict a region leaf reaches in the side at `place`.
     fn region_verdict(
@@ -224,10 +224,11 @@ impl WalkCx for PageCx<'_> {
         let engine = self.engine;
         let side = self.side(place);
         let rows_in_ranges: u64 = domain.iter().map(|r| r.len() as u64).sum();
-        let body = |route: &dyn Fn(&FilterExpr, bool) -> Result<crate::filter::RoutedFilter>| {
-            engine.rows_of_routed(side, route(expr, true)?, domain, rows_in_ranges, per_tile_only)
-        };
         let served = &self.open.served;
+        let body = |route: &crate::viewport::RouteFilter<'_>| {
+            let routed = route(expr, crate::filter::RouteChoice::Row)?;
+            engine.rows_of_routed(served, side, routed, domain, rows_in_ranges, per_tile_only)
+        };
         let candidate = match candidate {
             Some(within) => crate::viewport::FilterCandidate::Within(within),
             None => crate::viewport::FilterCandidate::Compose,
@@ -242,11 +243,16 @@ impl WalkCx for PageCx<'_> {
                 let Some(keys) = side.shard.filter_columns.unique_keys(column, operand) else {
                     return Ok(None);
                 };
-                let holders: Bitmap =
-                    unique_holders(self.open.served.generation, side.shard, column, &keys)
-                    .map_err(filter_refusal)?
-                    .into_iter()
-                    .collect();
+                let holders: Bitmap = unique_holders(
+                    &self.engine.identity_key,
+                    self.open.served.generation,
+                    side.shard,
+                    column,
+                    &keys,
+                )
+                .map_err(filter_refusal)?
+                .into_iter()
+                .collect();
                 let visible = self.candidate_within(place, &holders)?;
                 Some(
                     visible
@@ -1010,16 +1016,7 @@ impl Walk {
             let mut domain: Vec<Range<u32>> = Vec::new();
             for_each_run_in(&ahead, 0..cx.total_rows(place), &mut |run| domain.push(run));
             let routed = cx.filter_rows(place, expr, Some(&candidate), &domain, true, cancel)?;
-            filter[place] = Some(match routed.rows {
-                FilterRows::Viewport { rows, domain } => FilterRows::Viewport {
-                    rows: rows.and(&ahead),
-                    domain,
-                },
-                FilterRows::Complete(rows) => FilterRows::Viewport {
-                    rows: rows.and(&ahead),
-                    domain,
-                },
-            });
+            filter[place] = Some(routed.rows.held_to(&ahead, domain));
         }
         if filter.iter().all(Option::is_none) {
             return Ok(None);

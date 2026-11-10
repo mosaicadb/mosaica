@@ -30,6 +30,7 @@ mod edited;
 mod engine;
 mod error;
 pub mod filter;
+pub mod filter_cache;
 mod flush;
 mod layer_read;
 pub mod gate;
@@ -58,7 +59,6 @@ pub mod suggest;
 pub mod suggest_set;
 mod switches;
 mod test_hooks;
-pub mod text_filter_cache;
 pub mod tile_index;
 pub mod timing;
 mod unique;
@@ -194,9 +194,9 @@ pub use bundle_lock::BundleLockError;
 pub use compact::NoFold;
 pub use write::{
     AcceptError, CompactionRefused, ExecutorHealth, ExecutorPosture, ExecutorStartError,
-    ExecutorStats, FoldRefusal, PendingChange, PublishGeometryError, RequestRefusal,
-    VocabularyDeclared, VocabularyValues, WalGauge, WriteStage, DENY_DURABILITY_ATTEMPTS,
-    DENY_WINDOW_MAX_ENTRIES, FOLD_GATES,
+    ExecutorStats, FoldRefusal, PendingChange, PublishGeometryError, RequestAnswer, RequestOutcome,
+    RequestState, VocabularyDeclared, VocabularyValues, WalGauge, WriteStage,
+    DENY_DURABILITY_ATTEMPTS, DENY_WINDOW_MAX_ENTRIES, FOLD_GATES, KEPT_ANSWERS,
 };
 // The flush's own laps, beside `WriteStage`'s and read by the same status block.
 pub use flush::FlushStage;

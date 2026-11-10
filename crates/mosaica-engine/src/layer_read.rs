@@ -20,11 +20,11 @@ use crate::cancel::CancelToken;
 use crate::compose::{EffectiveMask, ShardedMask, WholeMask};
 use crate::derived::RowLocator;
 use crate::error::Result;
-use crate::filter::FilterExpr;
+use crate::filter::{RouteChoice, FilterExpr};
 use crate::figures::{Geometry, LevelFigures};
 use crate::region::RegionVerdict;
 use crate::session::Session;
-use crate::viewport::{ResolvedLeaves, ServedView};
+use crate::viewport::{ResolvedLeaves, ServedView, ViewLeafCosts};
 use crate::Engine;
 
 /// Why a layer or a level named by a request cannot be read. Each names deployment schema the
@@ -97,9 +97,8 @@ impl Engine {
         let mut rows = vec![Bitmap::new(); served.sides.len()];
         let mut region = None;
         let candidate = crate::viewport::FilterCandidate::Compose;
-        let read = served.filtered_sides(mask).map(|(_, side, _)| side);
-        let prefer_row =
-            self.region_prefers_rows(served, read, &resolved, cancel, expr, mask.visible_total())?;
+        let costs = self.region_costs(served, mask, &resolved, cancel, expr)?;
+        let choice = costs.as_ref().map_or(RouteChoice::Entity, ViewLeafCosts::routes);
         for (place, side, _) in served.filtered_sides(mask) {
             let (side_rows, verdict) =
                 self.route_filters_under(served, side, candidate, &resolved, cancel, |route| {
@@ -107,7 +106,7 @@ impl Engine {
                     // no tile ranges here to make the row route cheaper.
                     Ok(
                         match self.route_over_view(
-                            served, side, &resolved, cancel, route, expr, prefer_row,
+                            served, side, &resolved, cancel, route, expr, choice,
                         )? {
                             crate::viewport::OverView::Entities(entities) => {
                                 (side.data.row_space.project(&entities), None)

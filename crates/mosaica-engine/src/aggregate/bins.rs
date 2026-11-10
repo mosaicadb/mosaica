@@ -1,4 +1,4 @@
-//! A grouping by bins of a number or timestamp field: a histogram.
+//! A grouping by bins of a number, timestamp or bool field: a histogram.
 //!
 //! The bins' edges are the request's range cut into equal widths, or, with no range, readable
 //! edges around the smallest and largest value among the items the viewer may see in the view.
@@ -17,6 +17,9 @@
 //! every value is placed exactly and a `range` filter between two edges matches exactly the bin's
 //! items. A float field's edges are `f64`, and so are an integer field's where a bound of its
 //! range is fractional.
+//!
+//! A bool is binned as 0 for false and 1 for true. Its default edges are 0, 1 and 2, a bin for
+//! false and one for true, whatever the items hold, or 0 and 1 where one bin is asked for.
 //!
 //! Readable edges are multiples of 1, 2, 2.5 or 5 times a power of ten, whole numbers on an
 //! integer field. On a timestamp field they fall on whole seconds, minutes, hours, days, weeks
@@ -67,18 +70,20 @@ use crate::Generation;
 /// Entity ids one piece of a pass over a field's per-entity values spans.
 const ENTITY_PIECE: u64 = 1 << 20;
 
-/// A number or timestamp field resolved in one request's generation, and where its values are
-/// read.
+/// A number, timestamp or bool field resolved in one request's generation, and where its values
+/// are read.
 pub(super) struct Numbers {
     column: String,
     kind: Kind,
+    /// The field is a bool, read as 0 and 1.
+    boolean: bool,
     /// The field's per-entity values are held.
     held: bool,
     /// The field is drawn in every view's rows.
     drawn: bool,
 }
 
-/// A number or timestamp field as one request bins it.
+/// A number, timestamp or bool field as one request bins it.
 pub(super) struct Bins {
     field: Numbers,
     /// How the values are compared with the edges: the field's kind, or float where an integer
@@ -114,7 +119,7 @@ impl Kind {
     fn of(ty: ScalarType) -> Option<Kind> {
         use ScalarType as T;
         Some(match ty {
-            T::U8 | T::U16 | T::U32 | T::U64 => Kind::Unsigned,
+            T::Bool | T::U8 | T::U16 | T::U32 | T::U64 => Kind::Unsigned,
             T::I8 | T::I16 | T::I32 | T::I64 => Kind::Signed,
             T::F32 | T::F64 => Kind::Float,
             T::TimestampUs => Kind::Timestamp,
@@ -122,14 +127,31 @@ impl Kind {
         })
     }
 
+    /// The values the served column of an integer or timestamp kind holds; `None` for a float.
+    fn span(self) -> Option<(i128, i128)> {
+        match self {
+            Kind::Unsigned => ScalarType::U64,
+            Kind::Signed => ScalarType::I64,
+            Kind::Timestamp => ScalarType::TimestampUs,
+            Kind::Float => return None,
+        }
+        .integer_range()
+    }
+
     /// Edges moved inside the span the served column holds. No stored value lies outside that
     /// span, so the move takes no value into another bin.
     fn clamp(self, edges: Vec<i128>) -> Vec<i128> {
-        let (lo, hi) = match self {
-            Kind::Unsigned => (0, i128::from(u64::MAX)),
-            _ => (i128::from(i64::MIN), i128::from(i64::MAX)),
+        let Some((lo, hi)) = self.span() else {
+            return edges;
         };
         edges.into_iter().map(|e| e.clamp(lo, hi)).collect()
+    }
+
+    /// `x` as a `u64` key that orders as the values do: its distance above the bottom of the span,
+    /// where the span holds it.
+    fn key(self, x: i128) -> Option<u64> {
+        let (lo, hi) = self.span()?;
+        (lo..=hi).contains(&x).then(|| (x - lo) as u64)
     }
 }
 
@@ -159,8 +181,8 @@ impl Edges {
 }
 
 impl Numbers {
-    /// The number or timestamp field `column` names, where its values can be read. `for_figures`
-    /// says whether field figures ask for it rather than bins, for the refusal.
+    /// The number, timestamp or bool field `column` names, where its values can be read.
+    /// `for_figures` says whether field figures ask for it rather than bins, for the refusal.
     pub(super) fn of(generation: &Generation, column: &str, for_figures: bool) -> Result<Numbers> {
         let manifest = &generation.bundle.manifest;
         let refused = |why: AggregateRefused| EngineError::AggregateRefused(why);
@@ -181,9 +203,6 @@ impl Numbers {
                 (family.arrow_type, family.vocabulary.is_some())
             }
         };
-        if ty == ScalarType::Bool && !for_figures {
-            return Err(refused(AggregateRefused::BinsOnBool(column.to_string())));
-        }
         let kind = Kind::of(ty).filter(|_| !vocabulary).ok_or_else(unfit)?;
         let held = generation.declared_columns().value_layers(column).is_some();
         let drawn = manifest
@@ -195,6 +214,7 @@ impl Numbers {
         Ok(Numbers {
             column: column.to_string(),
             kind,
+            boolean: ty == ScalarType::Bool,
             held,
             drawn,
         })
@@ -309,10 +329,13 @@ impl Bins {
         })
     }
 
-    /// The request's range cut into equal bins, or readable edges around the smallest and largest
-    /// value of every item this viewer may see in the view.
+    /// The request's range cut into equal bins, a bool's bins for false and true, or readable
+    /// edges around the smallest and largest value of every item this viewer may see in the view.
     fn edges(&self, cx: &Cx<'_>) -> Result<Edges> {
         let n = self.bins;
+        if self.range.is_none() && self.field.boolean {
+            return Ok(Edges::Ints(if n >= 2 { vec![0, 1, 2] } else { vec![0, 1] }));
+        }
         if let Some((lower, upper)) = self.range {
             return Ok(match self.kind {
                 Kind::Float => Edges::Floats(equal_floats(
@@ -356,22 +379,19 @@ impl Bins {
         timings: &mut AggregateTimings,
     ) -> Result<(Counts, Counted)> {
         let bins = edges.bins();
-        // With no bin, every value is in `rest`.
         let (sides, sampled) = match edges {
-            Edges::Floats(edges) if bins > 0 => self.tally(
-                cx,
-                set,
-                || Histogram::new(&edges[..bins], edges[bins]),
-                timings,
-            )?,
-            Edges::Ints(edges) if bins > 0 => self.tally(
-                cx,
-                set,
-                || Histogram::new(&edges[..bins], edges[bins]),
-                timings,
-            )?,
-            Edges::Floats(_) => self.tally(cx, set, || Histogram::<f64>::new(&[], 0.0), timings)?,
-            Edges::Ints(_) => self.tally(cx, set, || Histogram::<i128>::new(&[], 0), timings)?,
+            Edges::Floats(edges) => {
+                self.tally(cx, set, || Histogram::<f64>::new(edges, self.kind), timings)?
+            }
+            Edges::Ints(edges) => {
+                let keys = keys(edges, self.kind).ok_or_else(|| {
+                    EngineError::Malformed(format!(
+                        "field '{}' has a bin edge outside its column's span",
+                        self.field.column
+                    ))
+                })?;
+                self.tally(cx, set, || Histogram::<i128>::new(&keys, self.kind), timings)?
+            }
         };
         let items = sides.iter().map(|side| side.items).sum();
         Ok((
@@ -392,9 +412,9 @@ impl Bins {
         let cut = sample_cut(self.sample, cx.reads().map(|place| set.size_in(place)));
         let mut sides = Vec::new();
         for place in cx.reads() {
-            let members = set.cells(cx, place);
             let (hist, none, items) = match cut {
                 Some(cut) => {
+                    let members = set.cells(cx, place);
                     let plan = SamplePlan::of(cx, place, &members, cut);
                     let side = self.field.pass_sample(cx, place, &members, &plan, &empty)?;
                     timings.band_entries += plan.entries_read();
@@ -687,34 +707,37 @@ impl Numbers {
                     let base = row_base as usize;
                     let present = segment.columns.presence(column).bitmap();
                     macro_rules! walk {
-                        ($values:expr, $num:expr) => {{
-                            let values = $values;
+                        ($read:expr) => {{
+                            let read = $read;
                             set.for_each_run(rows.clone(), &mut |run| {
                                 for row in run {
                                     let local = row as usize - base;
                                     if present.is_some_and(|p| !p.contains(local as u32)) {
                                         none += 1;
                                     } else {
-                                        tally.add($num(values[local]), row);
+                                        tally.add(read(local), row);
                                     }
                                 }
                             })
                         }};
                     }
+                    let int = |x: i128| K::int(x);
                     match segment.columns.scalar(column) {
-                        Some(ScalarSlice::U8(v)) => walk!(v, |x: u8| K::int(i128::from(x))),
-                        Some(ScalarSlice::U16(v)) => walk!(v, |x: u16| K::int(i128::from(x))),
-                        Some(ScalarSlice::U32(v)) => walk!(v, |x: u32| K::int(i128::from(x))),
-                        Some(ScalarSlice::U64(v)) => walk!(v, |x: u64| K::int(i128::from(x))),
-                        Some(ScalarSlice::I8(v)) => walk!(v, |x: i8| K::int(i128::from(x))),
-                        Some(ScalarSlice::I16(v)) => walk!(v, |x: i16| K::int(i128::from(x))),
-                        Some(ScalarSlice::I32(v)) => walk!(v, |x: i32| K::int(i128::from(x))),
-                        Some(ScalarSlice::I64(v)) => walk!(v, |x: i64| K::int(i128::from(x))),
-                        Some(ScalarSlice::TimestampUs(v)) => {
-                            walk!(v, |x: i64| K::int(i128::from(x)))
+                        Some(ScalarSlice::U8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::U64(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
+                        Some(ScalarSlice::I64(v)) | Some(ScalarSlice::TimestampUs(v)) => {
+                            walk!(|l: usize| int(i128::from(v[l])))
                         }
-                        Some(ScalarSlice::F32(v)) => walk!(v, |x: f32| K::float(f64::from(x))),
-                        Some(ScalarSlice::F64(v)) => walk!(v, |x: f64| K::float(x)),
+                        Some(ScalarSlice::F32(v)) => walk!(|l: usize| K::float(f64::from(v[l]))),
+                        Some(ScalarSlice::F64(v)) => walk!(|l: usize| K::float(v[l])),
+                        Some(ScalarSlice::Bool(v)) => {
+                            walk!(|l: usize| int(i128::from(v.value(l))))
+                        }
                         _ => none += set.count(rows.clone()),
                     }
                     (tally, none)
@@ -803,28 +826,24 @@ trait Num: Copy + PartialOrd + Send + Sync {
     fn float(x: f64) -> Self;
     fn finite(self) -> bool;
     fn number(self) -> Number;
+    /// What a histogram compares this value with its edges as, in a field of kind `kind`: a float
+    /// as itself, an integer as its key ([`Kind::key`]), where it has one.
+    type Edge: Copy + PartialOrd + Send + Sync;
+    fn edge(self, kind: Kind) -> Option<Self::Edge>;
     fn add_to(sum: &mut Self::Sum, x: Self);
     fn joined(sum: Self::Sum, other: Self::Sum) -> Self::Sum;
     fn exact(sum: Self::Sum) -> Sum;
 
     fn of_record(value: &RecordValue) -> Option<Self> {
-        Some(match *value {
-            RecordValue::U8(x) => Self::int(i128::from(x)),
-            RecordValue::U16(x) => Self::int(i128::from(x)),
-            RecordValue::U32(x) => Self::int(i128::from(x)),
-            RecordValue::U64(x) => Self::int(i128::from(x)),
-            RecordValue::I8(x) => Self::int(i128::from(x)),
-            RecordValue::I16(x) => Self::int(i128::from(x)),
-            RecordValue::I32(x) => Self::int(i128::from(x)),
-            RecordValue::I64(x) | RecordValue::TimestampUs(x) => Self::int(i128::from(x)),
-            RecordValue::F32(x) => Self::float(f64::from(x)),
-            RecordValue::F64(x) => Self::float(x),
-            _ => return None,
+        Some(match value.number()? {
+            Number::Int(x) => Self::int(x),
+            Number::Float(x) => Self::float(x),
         })
     }
 
     fn of_wal(value: &WalScalar) -> Option<Self> {
         Some(match *value {
+            WalScalar::Bool(x) => Self::int(i128::from(x)),
             WalScalar::U8(x) => Self::int(i128::from(x)),
             WalScalar::U16(x) => Self::int(i128::from(x)),
             WalScalar::U32(x) => Self::int(i128::from(x)),
@@ -855,6 +874,10 @@ impl Num for i128 {
     fn number(self) -> Number {
         Number::Int(self)
     }
+    type Edge = u64;
+    fn edge(self, kind: Kind) -> Option<u64> {
+        kind.key(self)
+    }
     type Sum = i128;
     fn add_to(sum: &mut i128, x: Self) {
         *sum += x;
@@ -879,6 +902,10 @@ impl Num for f64 {
     }
     fn number(self) -> Number {
         Number::Float(self)
+    }
+    type Edge = f64;
+    fn edge(self, _: Kind) -> Option<f64> {
+        Some(self)
     }
     type Sum = ExactSum;
     fn add_to(sum: &mut ExactSum, x: Self) {
@@ -1030,21 +1057,21 @@ impl Reader<'_> {
     }
 }
 
-/// A count per bin: bin `b` holds `lowers[b] <= x` up to the next lower bound, and the last bin
-/// holds up to `upper` inclusive.
-struct Histogram<'e, K> {
-    lowers: &'e [K],
-    upper: K,
+/// A count per bin of `edges`, ascending: bin `b` holds `edges[b] <= x` up to the next edge, and
+/// the last bin holds its upper edge too. Values are compared as [`Num::edge`] gives them.
+struct Histogram<'e, K: Num> {
+    edges: &'e [K::Edge],
+    kind: Kind,
     bins: Vec<u64>,
     rest: u64,
 }
 
 impl<'e, K: Num> Histogram<'e, K> {
-    fn new(lowers: &'e [K], upper: K) -> Self {
+    fn new(edges: &'e [K::Edge], kind: Kind) -> Self {
         Histogram {
-            lowers,
-            upper,
-            bins: vec![0; lowers.len()],
+            edges,
+            kind,
+            bins: vec![0; edges.len().saturating_sub(1)],
             rest: 0,
         }
     }
@@ -1053,11 +1080,17 @@ impl<'e, K: Num> Histogram<'e, K> {
 impl<K: Num> Tally<K> for Histogram<'_, K> {
     #[inline]
     fn add(&mut self, x: K, _: u32) {
-        // A NaN is below no bound and so in no bin.
-        let at = self.lowers.partition_point(|&lower| lower <= x);
-        match at.checked_sub(1) {
-            Some(bin) if x <= self.upper => self.bins[bin] += 1,
-            _ => self.rest += 1,
+        let bins = self.bins.len();
+        // A NaN is below no edge. An integer no column of its kind can hold is outside every edge.
+        let bin = x.edge(self.kind).and_then(|x| {
+            self.edges[..bins]
+                .partition_point(|&lower| lower <= x)
+                .checked_sub(1)
+                .filter(|_| x <= self.edges[bins])
+        });
+        match bin {
+            Some(bin) => self.bins[bin] += 1,
+            None => self.rest += 1,
         }
     }
 
@@ -1068,6 +1101,12 @@ impl<K: Num> Tally<K> for Histogram<'_, K> {
         self.rest += other.rest;
         self
     }
+}
+
+/// Integer edges as the keys their values are compared by ([`Kind::key`]), or `None` where an
+/// edge is outside the span a column of `kind` holds.
+fn keys(edges: &[i128], kind: Kind) -> Option<Vec<u64>> {
+    edges.iter().map(|&edge| kind.key(edge)).collect()
 }
 
 /// Whether `lower` is below `upper`, comparing two integers exactly.
@@ -1640,7 +1679,7 @@ mod tests {
     #[test]
     fn a_value_falls_in_the_bin_whose_edges_hold_it_and_the_last_bin_is_closed() {
         let edges = [0.0, 0.5, 1.0, 1.5];
-        let mut floats = Histogram::new(&edges[..3], edges[3]);
+        let mut floats = Histogram::<f64>::new(&edges, Kind::Float);
         for x in [
             -0.1,
             0.0,
@@ -1655,22 +1694,46 @@ mod tests {
             floats.add(x, 0);
         }
         assert_eq!((floats.bins.clone(), floats.rest), (vec![2, 1, 2], 4));
-        // Integers past 2^63 against exact edges.
+    }
+
+    /// Integer edges as a field of each kind is served them, its values placed against the edges
+    /// themselves: at and either side of every edge, at each end of the column's span and past it.
+    #[test]
+    fn an_integer_falls_in_the_bin_whose_edges_hold_it_in_every_kind() {
         let big = 1i128 << 63;
-        let edges = equal_ints(big, big + 100, 4);
-        let mut ints = Histogram::new(&edges[..4], edges[4]);
-        for x in [
-            big - 1,
-            big,
-            big + 5,
-            big + 24,
-            big + 25,
-            big + 100,
-            big + 101,
-        ] {
-            ints.add(x, 0);
+        let year = |y: i64| date(y, 1, 1) as i64;
+        let cases = [
+            (Kind::Unsigned, equal_ints(big - 50, big + 50, 4)),
+            // Repeated edges, as clamping a range leaves them.
+            (Kind::Unsigned, Kind::Unsigned.clamp(equal_ints(-100, 100, 4))),
+            (Kind::Unsigned, Kind::Unsigned.clamp(equal_ints(-10, i128::MAX, 3))),
+            (Kind::Signed, Kind::Signed.clamp(equal_ints(i128::MIN, i128::MAX, 2))),
+            (Kind::Signed, Kind::Signed.clamp(readable_ints(-1_000_003, 7, 13))),
+            (Kind::Timestamp, readable_times(year(1900), year(1960), 10)),
+            (Kind::Timestamp, readable_times(i64::MIN, i64::MAX, 3)),
+        ];
+        for (kind, edges) in cases {
+            let (lo, hi) = kind.span().expect("an integer kind has a span");
+            let n = edges.len() - 1;
+            let oracle = |x: i128| {
+                (0..n)
+                    .rev()
+                    .find(|&b| edges[b] <= x)
+                    .filter(|_| x <= edges[n])
+            };
+            let keys = keys(&edges, kind).expect("served edges lie within the span");
+            let values = edges
+                .iter()
+                .flat_map(|&e| [e - 1, e, e + 1])
+                .chain([lo - 1, lo, lo + 1, 0, hi - 1, hi, hi + 1]);
+            for x in values {
+                let mut histogram = Histogram::<i128>::new(&keys, kind);
+                histogram.add(x, 0);
+                let placed = histogram.bins.iter().position(|&count| count == 1);
+                assert_eq!(placed, oracle(x), "{kind:?} {edges:?} at {x}");
+                assert_eq!(histogram.rest, u64::from(placed.is_none()));
+            }
         }
-        assert_eq!((ints.bins.clone(), ints.rest), (vec![3, 1, 0, 1], 2));
     }
 
     /// A sampled histogram over two shards against one shard holding both: each shard's raw

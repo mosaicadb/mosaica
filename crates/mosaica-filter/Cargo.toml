@@ -29,6 +29,9 @@ mosaica-roaring = { workspace = true }
 # than the other way round.
 mosaica-authz = { workspace = true }
 croaring.workspace = true
+# A scan fans out over the rayon pool its caller runs it on, and runs serially on any other thread,
+# so the engine's pool stays the thread budget.
+rayon = { workspace = true }
 bitpacking = { workspace = true }
 # The value column is an Arrow IPC file, as every other columnar artefact in the bundle is
 # (contracts §2.1). Reading it here rather than through `mosaica-store` is what keeps the layer

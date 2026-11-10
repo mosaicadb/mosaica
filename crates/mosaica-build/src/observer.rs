@@ -12,7 +12,9 @@
 
 use std::time::Duration;
 
-/// The pipeline's stages, in execution order.
+use mosaica_types::progress::{context, Batched, JobKind, Part, Phase, Tracker, Unit};
+
+/// The pipeline's stages. [`BuildStage::ALL`] lists them in the order they run.
 ///
 /// Names match the `// ---- n. ...` comments in `pipeline.rs`. Adding a stage means adding a
 /// variant; renaming one means changing both, which is the point — a stage that exists in the
@@ -123,6 +125,32 @@ impl BuildStage {
         }
     }
 
+    /// The phase of a build this stage runs in, as `docs/dev/progress.md` names them. The match
+    /// has no wildcard arm, so a new stage does not compile until it has a phase.
+    pub fn phase(&self) -> Phase {
+        let at = match self {
+            BuildStage::SourceIds
+            | BuildStage::Dictionary
+            | BuildStage::PairsPack
+            | BuildStage::GeometryRead => 0,
+            BuildStage::SignatureSort | BuildStage::Assignment => 1,
+            BuildStage::PostingsWrite
+            | BuildStage::AttributeTail
+            | BuildStage::Layers
+            | BuildStage::UniqueIndexes
+            | BuildStage::FilterPostings
+            | BuildStage::TextIndex
+            | BuildStage::RecordBlob
+            | BuildStage::ColumnRelease => 2,
+            BuildStage::TilerSort
+            | BuildStage::SegmentWrite
+            | BuildStage::ArtifactPass
+            | BuildStage::TermImages => 3,
+            BuildStage::Manifests => 4,
+        };
+        Phase::nth(&PHASES, at)
+    }
+
     pub const ALL: [BuildStage; 19] = [
         BuildStage::SourceIds,
         BuildStage::Dictionary,
@@ -146,6 +174,21 @@ impl BuildStage {
     ];
 }
 
+/// The phases of a build, in the order they run.
+static PHASES: [&str; 5] = [
+    "Reading sources",
+    "Assigning ids",
+    "Indexing records",
+    "Laying out views",
+    "Verifying the bundle",
+];
+
+/// A tracker for one build, its step the build's first stage until the build begins one.
+pub fn tracker() -> Tracker {
+    let first = BuildStage::ALL[0];
+    Tracker::new(JobKind::Build, first.phase(), first.name())
+}
+
 /// Notified as each stage completes.
 ///
 /// `rows` is whatever the stage counted — items, pairs, terms — and is stage-specific rather than
@@ -153,6 +196,20 @@ impl BuildStage {
 /// at stage end, which is enough to see which stage owns the build's high-water mark.
 pub trait BuildObserver: Send + Sync {
     fn stage_end(&self, stage: BuildStage, elapsed: Duration, rows: u64, peak_rss_kib: u64);
+
+    /// The tracker the build opens a step in as each stage begins and counts that step's work
+    /// into, or `None` for an observer of stage ends alone.
+    fn progress(&self) -> Option<&Tracker> {
+        None
+    }
+
+    /// Called on the build's thread as a step in [`Self::progress`]'s tracker ends, before the
+    /// next one begins, so that a reader can take the step's last snapshot.
+    fn step_ended(&self) {}
+
+    /// Called on the build's thread just after a step begins in [`Self::progress`]'s tracker, so
+    /// that a reader can take the step's first snapshot however briefly the step runs.
+    fn step_begun(&self) {}
 }
 
 /// The default: observes nothing, costs nothing.
@@ -176,30 +233,63 @@ pub(crate) fn peak_rss_kib() -> u64 {
         .unwrap_or(0)
 }
 
-/// Times a stage and reports it. Held by the pipeline across each stage's body.
+/// Opens each stage of the build, times it and reports it, and opens the stage's step in the
+/// observer's tracker.
+///
+/// A stage's time runs from the end of the stage before it, so the stages' times sum to the wall
+/// clock. The pipeline begins each stage directly after it ends the one before, so the step a
+/// reader sees and the stage the time is charged to are the same for every second of the build.
 pub(crate) struct StageTimer<'a> {
     observer: &'a dyn BuildObserver,
+    steps: Steps<'a>,
     start: std::time::Instant,
+    open: Option<BuildStage>,
 }
 
 impl<'a> StageTimer<'a> {
     pub(crate) fn new(observer: &'a dyn BuildObserver) -> Self {
         StageTimer {
             observer,
+            steps: Steps::of(observer),
             start: std::time::Instant::now(),
+            open: None,
         }
     }
 
-    /// Close the current stage and open the next. `rows` is this stage's count.
+    /// The steps of this build, for a pass that opens steps within a stage or counts its work.
+    pub(crate) fn steps(&self) -> Steps<'a> {
+        self.steps
+    }
+
+    /// Open `stage`, as the part of it `parts` names where it runs more than once. `counted` is
+    /// the step's total and unit, or `None` for a stage whose work is not a pass over a count
+    /// known now ([`Steps::count`] gives one later).
+    pub(crate) fn begin(
+        &mut self,
+        stage: BuildStage,
+        parts: &[Part<'_>],
+        counted: Option<(u64, Unit)>,
+    ) {
+        debug_assert_eq!(self.open, None, "{stage:?} begun inside another stage");
+        self.open = Some(stage);
+        self.steps.open(stage, parts, counted, false);
+    }
+
+    /// Close the open stage, `stage`. `rows` is its count.
     ///
     /// **The allocator's free pages go back to the kernel here**, which is what makes a stage
     /// boundary the point the next stage's page cache is decided at ([`crate::trim_heap`]). The
     /// trim runs before the report, so the peak this reads is the stage's own.
     pub(crate) fn end(&mut self, stage: BuildStage, rows: u64) {
+        debug_assert_eq!(self.open.take(), Some(stage), "{stage:?} ended unopened");
         crate::trim_heap();
+        let now = std::time::Instant::now();
         self.observer
-            .stage_end(stage, self.start.elapsed(), rows, peak_rss_kib());
-        self.start = std::time::Instant::now();
+            .stage_end(stage, now - self.start, rows, peak_rss_kib());
+        if self.steps.live.is_some() {
+            self.observer.step_ended();
+        }
+        self.start = now;
     }
 
     /// Report a stage whose duration was measured **inside** the open block, and charge it to
@@ -208,11 +298,86 @@ impl<'a> StageTimer<'a> {
     ///
     /// For the passes that interleave rather than follow one another — the filter-postings loop
     /// visits a text column and a category column in whatever order the schema declares them, so
-    /// their costs cannot be separated by a boundary in time.
+    /// their costs cannot be separated by a boundary in time. The pass opens the charged stage's
+    /// steps itself ([`Steps::begin`]).
     pub(crate) fn charge(&mut self, stage: BuildStage, elapsed: Duration, rows: u64) {
         self.observer
             .stage_end(stage, elapsed, rows, peak_rss_kib());
         self.start += elapsed;
+    }
+}
+
+/// The steps of a build, opened in the [`BuildObserver::progress`] tracker. It is copied into the
+/// passes that count their work, and with no tracker each call is a test of `None`.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Steps<'a> {
+    live: Option<(&'a Tracker, &'a dyn BuildObserver)>,
+    /// The parts of the stage the steps opened from here are within, outermost first.
+    within: [Option<Part<'a>>; 2],
+}
+
+impl<'a> Steps<'a> {
+    fn of(observer: &'a dyn BuildObserver) -> Self {
+        Steps {
+            live: observer.progress().map(|tracker| (tracker, observer)),
+            within: [None; 2],
+        }
+    }
+
+    /// These steps, every step opened from them a step of `part`.
+    pub(crate) fn within(mut self, part: Part<'a>) -> Self {
+        let free = self.within.iter_mut().find(|slot| slot.is_none());
+        *free.expect("steps are within at most two parts") = Some(part);
+        self
+    }
+
+    /// End the open step and begin one of `stage` for the part `parts` names, inside a stage that
+    /// [`StageTimer`] opened: a file of the identity pass, or a column of the filter postings.
+    pub(crate) fn begin(self, stage: BuildStage, parts: &[Part<'_>], counted: Option<(u64, Unit)>) {
+        self.open(stage, parts, counted, true);
+    }
+
+    fn open(
+        self,
+        stage: BuildStage,
+        parts: &[Part<'_>],
+        counted: Option<(u64, Unit)>,
+        ends_one: bool,
+    ) {
+        let Some((tracker, observer)) = self.live else {
+            return;
+        };
+        if ends_one {
+            observer.step_ended();
+        }
+        let within: Vec<Part<'_>> = self.within.iter().flatten().chain(parts).copied().collect();
+        tracker.begin(stage.phase(), stage.name(), context(&within), counted);
+        observer.step_begun();
+    }
+
+    /// Give the open step its total, found by `total` only where there is a tracker.
+    pub(crate) fn count(
+        self,
+        unit: Unit,
+        total: impl FnOnce() -> crate::Result<u64>,
+    ) -> crate::Result<()> {
+        if let Some((tracker, _)) = self.live {
+            tracker.count(total()?, unit);
+        }
+        Ok(())
+    }
+
+    /// Add `n` to the step's count. Called once per batch of a pass, never once per unit.
+    #[inline]
+    pub(crate) fn advance(self, n: u64) {
+        if let Some((tracker, _)) = self.live {
+            tracker.advance(n);
+        }
+    }
+
+    /// A count for a pass that meets its units one at a time.
+    pub(crate) fn batched(self) -> Batched<'a> {
+        Batched::new(self.live.map(|(tracker, _)| tracker))
     }
 }
 
@@ -250,8 +415,8 @@ pub struct StageRecord {
 
 /// Collects every stage's record, for writing as JSON at the end of the build.
 ///
-/// `Mutex` rather than `RefCell` because [`BuildObserver`] is `Send + Sync`; the lock is taken
-/// once per stage, eighteen times in a build, so it costs nothing measurable.
+/// `Mutex` rather than `RefCell` because [`BuildObserver`] is `Send + Sync`. The lock is taken
+/// once per stage report, which is a few dozen times in a build of several batches and views.
 #[derive(Default)]
 pub struct JsonStageTimings {
     records: std::sync::Mutex<Vec<StageRecord>>,

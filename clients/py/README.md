@@ -8,7 +8,7 @@ pip install 'mosaica[widget]'
 ```
 
 On Linux or macOS on x86_64 or ARM64 (a `platform_machine` of `x86_64`, `aarch64` or `arm64`),
-`mosaica` depends on `mosaica-native==0.2.0`, its own version. That companion wheel carries the `mosaica` binary,
+`mosaica` depends on `mosaica-native==0.3.0`, its own version. That companion wheel carries the `mosaica` binary,
 which pip puts on `PATH`, and the `_mosaica` extension module. Its wheels are built for Linux on
 x86_64 and aarch64 (glibc 2.28 or later, or musl 1.2 or later), macOS 11 or later on arm64, and
 macOS 10.12 or later on x86_64. On a machine the marker leaves out, Windows included, `mosaica`
@@ -100,8 +100,11 @@ db.check()                                         # what the declaration reads,
 db.commit()                                        # mosaica check, mosaica build, mosaica serve
 ```
 
-No call prints. Each returns a report that shows as a short summary of what happened, in numbers,
-with every refusal and finding in full; a notebook cell that ends in one shows it. The detail is
+Starting the server prints one line naming the address it serves at, and while they run,
+`commit()` and `compact(wait=True)` draw a `tqdm` bar of how far they have gone, which their
+`progress` argument turns off or hands to a function, as their docstrings say. Every call returns
+a report that shows as a short summary of what happened, in numbers, with every refusal and
+finding in full; a notebook cell that ends in one shows it. The detail is
 on the report's attributes: an insert's `read` and `ignored` columns, a check's or a first
 commit's `findings` and `log` (the declaration check's and the build's text), a later commit's
 `plan`, `rows_accepted` and `refusals`. `db.path` is where the database is and `db.binary` the
@@ -115,6 +118,17 @@ the extension adds is a refusal naming the block it is about. Every block names 
 and the column names its inserts gave it. The directory is everything the binary reads, so
 `db.save("~/somewhere")` and `mosaica serve --deployment ~/somewhere/mosaica.toml` on another
 machine serve the same database.
+
+The server listens on this machine only, and its viewer, session and control planes share one
+port: 9141, or the next free port above it while 9141 is taken. `mosaica.create(port=9200)` states
+another, which the database keeps and `mosaica.open(path, port=...)` changes, and `port=0` lets
+the system choose. A stated port that is taken is refused rather than moved. The notebook's map
+reads from the viewer plane in the browser, so with the kernel on another machine, forward that
+port to the same port on yours, as `ssh -L 9141:127.0.0.1:9141 host` does. Where the browser
+reaches the server at another address, through a tunnel to another local port or a proxy, give
+the map that address: `mosaica.Map("http://127.0.0.1:9200", token=db.token())`. The kernel's own
+requests keep the address the server announced. A deployment written by hand can give the
+session and control planes addresses of their own.
 
 `declare_view_group` is the group surface: its views and their metadata come from
 `insert(group, roster=table, key=, **metadata_columns)`, and its rows from one of the two
@@ -346,9 +360,10 @@ its own operator credential under `.mosaica/`, owner-only, and its catalogue of 
 credentials and grants under `.mosaica/catalogue`. The operator credential authenticates the
 server's superuser, and the database uses it for every write and to mint every token, so nobody
 has to set up principals to read their own data. `commit()` starts `mosaica serve` as a child
-process on loopback at port 0 and reads the three bound addresses from the JSON line the child
-prints once all three planes are listening; `db.viewer_url`, `db.session_url` and
-`db.operator_credential` are what a token is minted against.
+process on loopback, on the port the database states or else 9141 or the next free port above
+it, and reads the bound address from the JSON line the child prints once every plane is
+listening; `db.viewer_url`, `db.session_url` and `db.operator_credential` are what a token is
+minted against.
 The child is killed by its pid at `close()` and at interpreter exit, and is started with
 `--exit-on-stdin-close`, so it also stops when the Python process ends in any other way. A
 database `create()` made with no path is removed at both, after its child has stopped. Its
@@ -475,9 +490,9 @@ db.view("s0").within((0, 0, 10, 10)).aggregate([top_five])
 `aggregate(view, groupings, filters=None, reference=None)` counts how the items the reader may see
 in a view are distributed, and returns one pyarrow table per grouping, in order. Each grouping names
 its figures: `"count": True` counts the items in each row, so `{"count": True}` is the size of the
-set. `"summary": [field, ...]` gives one row of each number or timestamp field's `values_<field>`,
-`missing_<field>`, `min_<field>`, `max_<field>` and `mean_<field>` over every item the reader may
-see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each;
+set. `"summary": [field, ...]` gives one row of each number, timestamp or bool field's
+`values_<field>`, `missing_<field>`, `min_<field>`, `max_<field>` and `mean_<field>` over every item
+the reader may see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each;
 they take no `"by"`, `"cells"`, `filters` or `reference`. `"by"` groups by the values of a category
 field declared with `index` or `render`, or by the artifacts of one level of a layer, as the `top`
 groups by count or the groups named in `values` or `artifacts`; `rest` and `none` rows count the
@@ -602,6 +617,7 @@ for a set of terms, since it is made for no principal of the catalogue.
 ```python
 db.status()                                    # the watermarks, queues and pagination units
 db.compact()                                   # ask for the fold that removes a deletion's rows
+db.compact(wait=True)                          # and wait for the server's answer
 db.drop_layer("clusters/kmeans")               # the inverse of declare_layer
 db.drop_view("slices", "a")                    # remove one view of a view group
 ```
@@ -622,8 +638,10 @@ minutes.
 
 `remove()` puts a deletion in the overlay, and the compaction that removes its rows is what ends
 it; `compact()` is how one is asked for, and it is accepted rather than finished when the call
-returns. After `drop_layer()` the name may be declared again, as a new layer that none of the
-dropped layer's `mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
+returns. `compact(wait=True)` waits until the server has answered the request, and raises
+`Refusal` where the served answer's `ok` is false; its docstring says what it returns. After
+`drop_layer()` the name may be declared again, as a new layer that none of the dropped layer's
+`mosaica_id`s names, so no stale reference reaches it. `drop_view()` deletes the
 items it leaves in no view, as `remove()` deletes one, and the answer's `deleted` says how many.
 
 ## A deployment somebody else runs

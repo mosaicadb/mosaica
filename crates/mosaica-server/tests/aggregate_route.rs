@@ -68,6 +68,11 @@ index = true
 [[attribute]]
 name = "pages"
 type = "u32"
+
+[[attribute]]
+name  = "flag"
+type  = "bool"
+index = true
 "#;
 
 /// Item `e`'s score: none on every seventh, otherwise from 0 to 99.9.
@@ -79,6 +84,11 @@ fn score_of(e: u64) -> Option<f64> {
 fn stamp_of(e: u64) -> Option<i64> {
     const JAN_2020: i64 = 1_577_836_800_000_000;
     (!e.is_multiple_of(11)).then(|| JAN_2020 + ((e * 389) % 700) as i64 * 86_400_000_000)
+}
+
+/// Item `e`'s flag: none on every thirteenth, otherwise true on every third.
+fn flag_of(e: u64) -> Option<bool> {
+    (!e.is_multiple_of(13)).then_some(e.is_multiple_of(3))
 }
 
 /// Item `e`'s archive: none on every tenth, otherwise spread so that both viewers see all three.
@@ -113,6 +123,7 @@ fn build_bundle(dir: &Path) {
     let stamps =
         arrow::array::TimestampMicrosecondArray::from_iter(ids.iter().map(|&e| stamp_of(e)));
     let pages = arrow::array::UInt32Array::from_iter_values(ids.iter().map(|&e| e as u32));
+    let flags = arrow::array::BooleanArray::from_iter(ids.iter().map(|&e| flag_of(e)));
     write_points(
         &points,
         &ids,
@@ -123,6 +134,7 @@ fn build_bundle(dir: &Path) {
             column("score", true, scores),
             column("stamp", true, stamps),
             column("pages", false, pages),
+            column("flag", true, flags),
         ],
     );
     write_pairs_n(&pairs, N);
@@ -1608,6 +1620,7 @@ fn summary_row(decoded: &DecodedAggregate, grouping: usize, field: &str) -> Summ
         }
         Some(match column.data_type() {
             DataType::Float64 => column.as_primitive::<Float64Type>().value(0),
+            DataType::UInt64 => column.as_primitive::<UInt64Type>().value(0) as f64,
             DataType::Timestamp(_, _) => column.as_primitive::<TimestampMicrosecondType>().value(0) as f64,
             other => panic!("a summary value of type {other:?}"),
         })
@@ -1637,6 +1650,53 @@ fn near(a: Summary, b: Summary) -> bool {
         (x, y) => x == y,
     };
     (a.0, a.1, a.2, a.3, a.4) == (b.0, b.1, b.2, b.3, b.4) && close(a.5, b.5)
+}
+
+/// **A bool is counted in a bin for false and one for true**, edged 0, 1 and 2 as `uint64`
+/// whenever two or more bins are asked for, **and in one bin edged 0 and 1 where one is**, for
+/// each viewer under a filter, and **its summary's mean is the share of its values that are true**.
+#[tokio::test]
+async fn a_bool_is_counted_in_a_bin_for_false_and_one_for_true() {
+    use arrow::array::AsArray;
+    use arrow::datatypes::UInt64Type;
+    let f = fixture().await;
+    for terms in [&["0"][..], &["1"][..]] {
+        let token = token_for(&f.server, terms).await;
+        let hep = items(terms, |e| archive_of(e) == Some("hep"));
+        let holding = |v: Option<bool>| hep.iter().filter(|&&e| flag_of(e) == v).count() as u64;
+        let listed = |edges: (u64, u64), n: u64| ("listed".to_string(), Some(edges), n);
+        let none = ("none".to_string(), None, holding(None));
+        for (bins, want) in [
+            (20, vec![listed((0, 1), holding(Some(false))), listed((1, 2), holding(Some(true))), none.clone()]),
+            (2, vec![listed((0, 1), holding(Some(false))), listed((1, 2), holding(Some(true))), none.clone()]),
+            (1, vec![listed((0, 1), holding(Some(false)) + holding(Some(true))), none.clone()]),
+        ] {
+            let body = json!({ "view": "s0", "filters": { "archive": { "eq": "hep" } },
+                               "groupings": [{ "count": true, "by": { "field": "flag", "bins": bins } }] });
+            let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
+            let batch = &decoded.tables[0].1[0].0;
+            let edges = |name: &str| batch.column_by_name(name).unwrap().as_primitive::<UInt64Type>().clone();
+            let (lower, upper) = (edges("lower"), edges("upper"));
+            let rows: Vec<_> = aggregate_rows(batch)
+                .into_iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let listed = row.group.as_deref() == Some("listed");
+                    (row.group.unwrap(), listed.then(|| (lower.value(i), upper.value(i))), row.count)
+                })
+                .collect();
+            assert_eq!(rows, want, "{terms:?}, {bins} bins");
+        }
+
+        let body = json!({ "view": "s0", "groupings": [{ "count": true, "summary": ["flag"] }] });
+        let (_, decoded) = aggregate_ok(&f.server, &token, &body).await;
+        let all = items(terms, |_| true);
+        let flag = summary_row(&decoded, 0, "flag");
+        assert!(
+            near(flag, summary_oracle(&all, |e| flag_of(e).map(|b| f64::from(u8::from(b))))),
+            "{terms:?}: {flag:?}"
+        );
+    }
 }
 
 /// **A summary is the figures of every item the viewer may see in the view**, for each viewer,

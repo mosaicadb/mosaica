@@ -458,13 +458,26 @@ impl Executor {
         // Nothing is pruned on a stepped-down partition: the manifests between its older served
         // `n` and the newest are what a reopen walks back through.
         if !partition_data.stepped_down() {
-            match mosaica_store::prune_superseded_segments_manifests(prefix_dir, partition) {
-                Ok(0) => {}
-                Ok(removed) => tracing::debug!(
-                    removed,
-                    partition = %partition,
-                    "superseded side-manifests were pruned"
-                ),
+            let live = self.generation.load_full();
+            match mosaica_store::prune_superseded_segments_manifests(
+                prefix_dir,
+                partition,
+                &live.bundle.manifest.files,
+            ) {
+                Ok(pruned) => {
+                    if pruned.removed > 0 {
+                        tracing::debug!(
+                            removed = pruned.removed,
+                            partition = %partition,
+                            "superseded side-manifests were pruned"
+                        );
+                    }
+                    // A fold's publication is into its new prefix, which the live manifest does
+                    // not describe; what its prefix leaves unnamed goes with the prefix.
+                    if fold.is_none() {
+                        self.reclaim_when_released(&live, prefix_dir, pruned.unnamed);
+                    }
+                }
                 Err(e) => tracing::warn!(
                     error = %e,
                     partition = %partition,

@@ -44,7 +44,7 @@ const N: u64 = 3_000;
 const INGESTED: u64 = 1_000_000;
 
 /// `score` is drawn and indexed, `weight` and `seen` indexed alone, `rank` and `when` drawn alone.
-/// `flag` is an indexed bool, which has no bins.
+/// `flag` is an indexed bool and `lit` a drawn one.
 const SCHEMA: &str = r#"
 [[vocabulary]]
 name       = "kind"
@@ -95,6 +95,17 @@ name   = "id"
 type   = "u64"
 field  = "entity_id"
 unique = true
+
+[[attribute]]
+name   = "views"
+type   = "u64"
+render = true
+index  = true
+
+[[attribute]]
+name   = "lit"
+type   = "bool"
+render = true
 "#;
 
 const DAY: i64 = 86_400_000_000;
@@ -147,6 +158,9 @@ struct Item {
     rank: Option<i32>,
     seen: Option<i64>,
     when: Option<i64>,
+    views: Option<u64>,
+    flag: Option<bool>,
+    lit: Option<bool>,
     subset: bool,
     position: (f64, f64),
     /// Holds a row in the view.
@@ -169,6 +183,9 @@ impl Item {
             "rank" => self.rank.map(|r| Val::I(i128::from(r))),
             "seen" => self.seen.map(Val::T),
             "when" => self.when.map(Val::T),
+            "views" => self.views.map(|v| Val::I(i128::from(v))),
+            "flag" => self.flag.map(|b| Val::I(i128::from(b))),
+            "lit" => self.lit.map(|b| Val::I(i128::from(b))),
             _ => panic!("no column {column}"),
         }
     }
@@ -202,6 +219,8 @@ fn built(s: u64) -> Item {
     let when = extreme(s, 14, 16, date(2000, 1, 1), date(2030, 1, 1)).or_else(|| {
         (!s.is_multiple_of(23)).then(|| date(2024, 3, 1) + ((s * 61) % 200) as i64 * HOUR)
     });
+    let views = extreme(s, 19, 20, (1 << 63) - 5_000, (1 << 63) + 5_000)
+        .or_else(|| (!s.is_multiple_of(29)).then(|| (1u64 << 63) - 500 + (s * 7919) % 1000));
     Item {
         source: s,
         kind: ["a", "b", "c"][(s % 5 % 3) as usize],
@@ -210,6 +229,9 @@ fn built(s: u64) -> Item {
         rank,
         seen,
         when,
+        views,
+        flag: (!s.is_multiple_of(11)).then_some(s.is_multiple_of(2)),
+        lit: (!s.is_multiple_of(9)).then_some(s % 3 == 1),
         subset: subset_sees(s),
         position: (((s * 37) % 1000) as f64, ((s * 53) % 1000) as f64),
         flushed: true,
@@ -236,6 +258,8 @@ fn write_points(path: &Path, items: &[Item]) {
             true,
         ),
         Field::new("flag", DataType::Boolean, true),
+        Field::new("views", DataType::UInt64, true),
+        Field::new("lit", DataType::Boolean, true),
     ]));
     let batch = RecordBatch::try_new(
         schema.clone(),
@@ -265,9 +289,11 @@ fn write_points(path: &Path, items: &[Item]) {
             Arc::new(TimestampMicrosecondArray::from(
                 items.iter().map(|i| i.when).collect::<Vec<_>>(),
             )),
-            Arc::new(BooleanArray::from_iter(
-                items.iter().map(|i| Some(i.source.is_multiple_of(2))),
+            Arc::new(BooleanArray::from_iter(items.iter().map(|i| i.flag))),
+            Arc::new(UInt64Array::from(
+                items.iter().map(|i| i.views).collect::<Vec<_>>(),
             )),
+            Arc::new(BooleanArray::from_iter(items.iter().map(|i| i.lit))),
         ],
     )
     .unwrap();
@@ -732,7 +758,10 @@ fn expected(edges: &[Val], items: &[&Item], reference: Option<&[&Item]>, column:
 /// Which items a filter admits, as the oracle reads it.
 type Keep<'a> = &'a dyn Fn(&Item) -> bool;
 
-const COLUMNS: [&str; 5] = ["score", "weight", "rank", "seen", "when"];
+const COLUMNS: [&str; 7] = ["score", "weight", "rank", "seen", "when", "flag", "lit"];
+
+/// The bools among [`COLUMNS`], whose default edges are 0, 1 and 2 whatever the items hold.
+const BOOLS: [&str; 2] = ["flag", "lit"];
 
 // ---- the tests ------------------------------------------------------------------------------
 
@@ -794,6 +823,43 @@ fn bin_counts_are_the_oracles_and_the_edges_hold_still() {
                             .count() as u64
                     )
                 );
+            }
+        }
+    }
+}
+
+/// **An unsigned field is binned exactly either side of 2⁶³**, by its default edges and by a
+/// range past every `i64`, for either viewer, with no filter, a category filter and a region.
+#[test]
+fn an_unsigned_field_is_binned_exactly_past_every_i64() {
+    let fx = fixture();
+    let area = [100.0, 200.0, 600.0, 750.0];
+    let big = 1i128 << 63;
+    for broad in [true, false] {
+        let session = fx.session(broad);
+        let filters: [(&str, Option<FilterExpr>, Keep); 3] = [
+            ("none", None, &|_| true),
+            ("kind", Some(fx.kind_is("b")), &|i| i.kind == "b"),
+            (
+                "region",
+                Some(bbox(area[0], area[1], area[2], area[3])),
+                &|i| in_box(i, area),
+            ),
+        ];
+        for (name, filter, keep) in filters {
+            for range in [None, Some((Scalar::Int(big - 300), Scalar::Int(big + 300)))] {
+                let groupings = [bins("views", 12, range)];
+                let mut req = request(&groupings);
+                req.filter = filter.clone();
+                let (_, rows) = table(&fx.engine, &session, req);
+                let what = format!("broad {broad}, filter {name}, range {range:?}");
+                let edges = edges_of(&rows);
+                assert!(
+                    less(edges[0], Val::I(big)) && less(Val::I(big), edges[edges.len() - 1]),
+                    "{what}: {edges:?} do not span 2^63"
+                );
+                let items: Vec<&Item> = fx.visible(broad, keep).collect();
+                assert_eq!(rows, expected(&edges, &items, None, "views"), "{what}");
             }
         }
     }
@@ -1096,10 +1162,6 @@ fn a_grouping_by_bins_that_cannot_be_served_is_refused() {
             AggregateRefused::NotBinnable(column.to_string())
         );
     }
-    assert_eq!(
-        refused(bins("flag", 4, None)),
-        AggregateRefused::BinsOnBool("flag".to_string())
-    );
     assert_eq!(
         refused(bins("seen", 4, Some((Scalar::Float(0.5), Scalar::Int(10))))),
         AggregateRefused::FractionalTime("seen".to_string())
@@ -1430,7 +1492,10 @@ fn default_edges_are_exact_however_the_set_is_counted() {
         let outside = everything
             .iter()
             .any(|&v| seen.iter().all(|&w| less(w, v)) || seen.iter().all(|&w| less(v, w)));
-        assert!(outside, "{column}: the extremes lie outside the sample");
+        assert!(
+            outside || BOOLS.contains(&column),
+            "{column}: the extremes lie outside the sample"
+        );
         for item in &all {
             if let Some(v) = item.value(column).filter(|v| match v {
                 Val::F(f) => f.is_finite(),
@@ -1517,6 +1582,9 @@ fn a_flushed_ingest_is_binned() {
                 rank: Some(i as i32),
                 seen: Some(date(2030, 6, 1) + i as i64 * DAY),
                 when: (i % 3 != 0).then(|| date(2024, 3, 2) + i as i64 * HOUR),
+                views: Some(1 << 63),
+                flag: Some(i.is_multiple_of(2)),
+                lit: (i % 5 != 0).then_some(i % 3 == 0),
                 subset: false,
                 position: ((i * 23 % 1000) as f64, (i * 41 % 1000) as f64),
                 flushed: false,
@@ -1534,8 +1602,10 @@ fn a_flushed_ingest_is_binned() {
                     item.rank.map_or(WalScalar::Null, WalScalar::I32),
                     item.seen.map_or(WalScalar::Null, WalScalar::TimestampUs),
                     item.when.map_or(WalScalar::Null, WalScalar::TimestampUs),
-                    WalScalar::Bool(item.source.is_multiple_of(2)),
+                    item.flag.map_or(WalScalar::Null, WalScalar::Bool),
                     WalScalar::U64(key_id(&format!("binned-{i}"))),
+                    item.views.map_or(WalScalar::Null, WalScalar::U64),
+                    item.lit.map_or(WalScalar::Null, WalScalar::Bool),
                 ],
                 terms: fx.engine.resolve_terms(&[b"0".to_vec()]),
                 scoped: Vec::new(),
@@ -1664,7 +1734,7 @@ fn an_item_joining_another_view_is_sampled_with_its_indexed_values() {
         mosaica_id: None,
         labels: None,
         position,
-        scalars: (0..8)
+        scalars: (0..10)
             .map(|p| match p {
                 3 => rank.map_or(WalScalar::Null, WalScalar::I32),
                 7 => WalScalar::U64(item.source),
@@ -1672,7 +1742,9 @@ fn an_item_joining_another_view_is_sampled_with_its_indexed_values() {
             })
             .collect(),
         scoped: Vec::new(),
-        omitted: (0..7).filter(|&p| p != 3 || rank.is_none()).collect(),
+        omitted: (0..10)
+            .filter(|&p| p != 7 && (p != 3 || rank.is_none()))
+            .collect(),
     };
     let joining: Vec<IngestRow> = fx
         .items
@@ -1755,8 +1827,10 @@ fn a_sample_read_partly_from_the_band_and_partly_by_scanning_is_the_oracles() {
                     item.rank.map_or(WalScalar::Null, WalScalar::I32),
                     item.seen.map_or(WalScalar::Null, WalScalar::TimestampUs),
                     item.when.map_or(WalScalar::Null, WalScalar::TimestampUs),
-                    WalScalar::Bool(item.source.is_multiple_of(2)),
+                    item.flag.map_or(WalScalar::Null, WalScalar::Bool),
                     WalScalar::U64(key_id(&format!("binned-{i}"))),
+                    item.views.map_or(WalScalar::Null, WalScalar::U64),
+                    item.lit.map_or(WalScalar::Null, WalScalar::Bool),
                 ],
                 scoped: Vec::new(),
             };
@@ -1956,7 +2030,8 @@ fn summary_of(engine: &Engine, session: &Session, view: &str, column: &str) -> F
 
 /// The default edges of `column` in `view`, checked against `items`, the items the viewer may see
 /// there: every finite value lies within them, and the first and last bins hold one, so the edges
-/// are the readable ones around the smallest and largest value.
+/// are the readable ones around the smallest and largest value. A bool's are a bin for false and
+/// one for true.
 fn check_edges(
     engine: &Engine,
     session: &Session,
@@ -1982,6 +2057,10 @@ fn check_edges(
         req.view = view;
         let (_, rows) = table(engine, session, req);
         let edges = edges_of(&rows);
+        if BOOLS.contains(&column) {
+            assert_eq!(edges, [Val::I(0), Val::I(1), Val::I(2)], "{what}, {column}");
+            continue;
+        }
         let finite: Vec<Val> = items
             .iter()
             .filter_map(|i| i.value(column))
@@ -2194,7 +2273,7 @@ fn a_summary_that_cannot_be_served_is_refused() {
         }),
         AggregateRefused::NoFigure
     );
-    for column in ["kind", "flag", "nothing"] {
+    for column in ["kind", "nothing"] {
         assert_eq!(
             refused(summary(column)),
             AggregateRefused::NotSummarisable(column.to_string())
@@ -2220,7 +2299,7 @@ fn invisible_items_move_no_figure() {
         );
         let everything = summary_of(&fx.engine, &broad, "s0", column);
         assert!(
-            everything.min != seen.min && everything.max != seen.max,
+            BOOLS.contains(&column) || (everything.min != seen.min && everything.max != seen.max),
             "{column}: the hidden items hold the extremes"
         );
     }
@@ -2428,6 +2507,9 @@ fn the_figures_are_the_oracles_through_every_change() {
                     }),
                     seen: Some(date(2031, 6, 1) + i as i64 * DAY),
                     when: (i % 3 != 0).then(|| date(2024, 3, 2) + i as i64 * HOUR),
+                    views: Some(1 << 63),
+                    flag: Some(i.is_multiple_of(2)),
+                    lit: (i % 5 != 0).then_some(i % 3 == 0),
                     subset,
                     position: ((i * 23 % 1000) as f64, (i * 41 % 1000) as f64),
                     flushed: false,
@@ -2450,8 +2532,10 @@ fn the_figures_are_the_oracles_through_every_change() {
                         item.rank.map_or(WalScalar::Null, WalScalar::I32),
                         item.seen.map_or(WalScalar::Null, WalScalar::TimestampUs),
                         item.when.map_or(WalScalar::Null, WalScalar::TimestampUs),
-                        WalScalar::Bool(item.source.is_multiple_of(2)),
+                        item.flag.map_or(WalScalar::Null, WalScalar::Bool),
                         WalScalar::U64(source),
+                        item.views.map_or(WalScalar::Null, WalScalar::U64),
+                        item.lit.map_or(WalScalar::Null, WalScalar::Bool),
                     ],
                     scoped: Vec::new(),
                 };

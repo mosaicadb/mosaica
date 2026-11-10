@@ -1,6 +1,6 @@
 # Schedule compactions
 
-Deleted and edited items stay in the bundle, hidden from every viewer, until a compaction removes them. Compaction also merges the segments that new data adds and frees the disc space that merging leaves behind. The server compacts on its own, mostly in a nightly window, so the main thing to decide is when that window falls. This page explains what starts a compaction, what it needs, and how to start one yourself and check it worked.
+Deleted and edited items stay in the bundle, hidden from every viewer, until a compaction removes them. Compaction also rewrites the segments that new data adds as one segment per view, and frees the disc space that a failed or interrupted write leaves behind. The server compacts on its own, mostly in a nightly window, so the main thing to decide is when that window falls. This page explains what starts a compaction, what it needs, and how to start one yourself and check it worked.
 
 The examples use the [systemd install](systemd.md), whose control address is a Unix socket. Under Docker, write `--control http://127.0.0.1:9163` instead.
 
@@ -29,40 +29,78 @@ A compaction needs free space on the bundle's disc of one and a half times the s
 
 ## Start one yourself
 
-`mosaica compact` asks for a compaction now, whatever the schedule says. It needs a credential with `write`, read from `MOSAICA_CREDENTIAL`:
+`mosaica compact` asks for a compaction now, whatever the schedule says, and with `--wait` it stays until the server has answered the request. It needs a credential with `write`, and with `--wait` also `admin`, as the operator credential has, read from `MOSAICA_CREDENTIAL`. Here a deleted place, Dublin, is waiting to be removed:
 
 ```console
 mosaica$ export MOSAICA_CREDENTIAL=$(cat secrets/operator.secret)
-mosaica$ mosaica compact --control unix:/run/mosaica/control.sock
-{"request":1}
+mosaica$ mosaica compact --wait --progress plain --control unix:/run/mosaica/control.sock
+mosaica compact: waiting for request 1794068664464
+16:24:26Z [2/4 Indexing records] attributes shard 0  1s  rss 102 MiB
+16:24:28Z [4/4 Publishing] derived shard 0  3s  rss 104 MiB
+16:24:35Z [4/4 Publishing] retire shard 0  10s  rss 103 MiB
+16:24:36Z [4/4 Publishing] reclaim shard 0  10s  rss 102 MiB  finished
+{"answer":{"detail":null,"first":1794068664464,"gate":null,"had_bytes":null,"last":1794068664464,"need_bytes":null,"ok":true,"outcome":"compacted","shard":null},"answered":true,"job":{"context":"shard 0","elapsed_s":10.119004202,"job":"compaction","phase":{"index":4,"name":"Publishing","of":4},"rss_bytes":107151360,"state":"finished","step":"reclaim","step_elapsed_s":0.0242591,"step_id":21},"request":1794068664464}
 ```
 
-The server compacts every shard with something to reclaim, one after another. The answer is the request's number, counted from 1 each time the server starts. A request made while a compaction is running waits for it to finish. Over HTTP, the same request is `POST /control/compact`, and the Python and TypeScript clients have `compact`.
+The first line names the request's number. Each time the server starts it numbers its requests from the time in milliseconds, so a number from before a restart is never given again. The lines after it follow the compaction through its four phases, naming the shard it is rewriting, and the last of them says how it ended. The command reads the compaction's progress once a second, so a step shorter than that, here the first phase, may not be shown. In a terminal `--progress` draws a bar in their place, `json` prints each record as a JSON object, and `none` prints nothing. These lines go to stderr, and the server's answer, the last line, goes to stdout. The server compacts every shard with something to reclaim, one after another, and a request made while a compaction is running waits for it to finish. Without `--wait` the command prints `{"request":…}` and returns at once.
 
-To see how it went, read `compaction` in `mosaica status`, which needs `admin`, as the operator credential has:
+`mosaica compact --wait` exits 0 when the request was compacted or had nothing to compact. It exits 1 when a shard was refused, when a compaction for the request failed, and when the server restarted while it waited, which loses the request, and in each case prints the server's explanation on stderr. Over HTTP the request is `POST /control/compact`, and the Python and TypeScript clients have `compact`.
+
+## Read how a request went
+
+`mosaica compact --request` reads a request you made earlier, through `GET /control/compact/{request}`, and `--request` with `--wait` waits for it as above. It needs `admin`:
 
 ```console
-mosaica$ mosaica status --control unix:/run/mosaica/control.sock | jq '.compaction | {folds, requests}'
+mosaica$ mosaica compact --request 1794068664464 --control unix:/run/mosaica/control.sock | jq
 {
-  "folds": 1,
-  "requests": {
-    "accepted": 1,
-    "answered": 1,
-    "last_refusal": null
-  }
+  "answer": {
+    "detail": null,
+    "first": 1794068664464,
+    "gate": null,
+    "had_bytes": null,
+    "last": 1794068664464,
+    "need_bytes": null,
+    "ok": true,
+    "outcome": "compacted",
+    "shard": null
+  },
+  "answered": true,
+  "job": {
+    "context": "shard 0",
+    "elapsed_s": 10.119004202,
+    "job": "compaction",
+    "phase": {
+      "index": 4,
+      "name": "Publishing",
+      "of": 4
+    },
+    "rss_bytes": 107151360,
+    "state": "finished",
+    "step": "reclaim",
+    "step_elapsed_s": 0.0242591,
+    "step_id": 21
+  },
+  "request": 1794068664464
 }
 ```
 
-Your request is finished once `answered` reaches its number. If `last_refusal` is null, or its `request` is below your number, nothing refused it. To confirm the deleted rows are gone, check that `folds` rose and `overlay.retirable` fell.
+While the request waits, `answered` is `false`, `answer` is `null`, and `job` is the progress of the compaction serving it, once the server has started one. Once it is answered, `job` is the last record of the compaction that answered it, `answer.ok` says whether the request succeeded, and `answer.outcome` is one of these:
 
-??? info "Reading the outcome in full"
-    `last_refusal` holds only the latest refusal that answered a request, and its `request` is the highest request it answered. Once your request is answered:
+- `compacted`: a compaction for the request was published and the deleted rows are gone.
+- `nothing_to_do`: no shard the request named had anything to compact.
+- `refused`: a shard was refused. `gate` names why, such as `insufficient_disc`, `detail` says what to do, `shard` names the shard, and for a memory or disc refusal `need_bytes` and `had_bytes` give what the compaction needed and what the host had.
+- `failed`: a compaction for the request failed or was discarded. `detail` names the step it stopped in, and `job` is its last record.
 
-    - `last_refusal.request` below your number: none of your request's shards was refused.
-    - Equal to it: a shard was refused while answering it. `last_refusal` names the shard and the reason in `gate`, gives the bytes needed and available for a memory or disc refusal, and says what to do in `detail`.
-    - Above it: a later request's refusal has replaced the record. Requests answered together share a refusal, so it may or may not concern yours.
+Requests made close together are answered together, and `first` and `last` give the range of request numbers that share the answer. The server keeps the latest 1,024 answers, and an older one answers `410`. The [HTTP reference](../reference/http.md) describes the route in full.
 
-    A request answered without a refusal may still have failed: `fold_failures` counts the compactions that failed or were discarded. A compaction the schedule started and the server refused is recorded only under `compaction.last_refusal`, not under `requests`. If the write side stops after the request was accepted, the request is never answered, and `write_executor.posture` reads `dead`.
+A server forgets its requests when it stops, so a number from before a restart answers `404`. This is the request above, read again after the server restarted:
+
+```console
+mosaica$ mosaica compact --request 1794068664464 --control unix:/run/mosaica/control.sock
+mosaica compact: the server answered 404: {"error":"unknown","detail":"this run of the server has given no compaction request the number 1794068664464: a number from before the server restarted is lost with the request; ask for a compaction again"}
+```
+
+A `404` for a number you were given means the server restarted after you asked, and the request was lost with it, so ask again. If the write side stops while a request waits, reading the request answers `503 not-ready`, because it will not be answered.
 
 When no compaction can start until the server restarts, the request is refused at once with `503 not-ready`. That happens when the write side isn't running, when the record of deletions no longer matches the log, when a compaction finished on disc but the server couldn't switch to it, or when part of the server is serving an older state of the bundle than the newest on disc. Except when the write side isn't running, the detail says which, and what to do.
 

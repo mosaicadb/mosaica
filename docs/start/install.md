@@ -87,7 +87,7 @@ The archives above cover the platforms `mosaica` runs on. There is no Windows bu
 
     You get two packages from PyPI. `mosaica` is the client. `mosaica-native` carries the `mosaica` program, which the client runs when it makes a database of its own, and puts it on your `PATH`. The client runs this copy even when another `mosaica` comes first on your `PATH`; [`Database.binary`](../reference/python/connecting.md#mosaica._database.Database.binary) says how to name a different one. The `widget` extra adds the map for Jupyter and marimo notebooks. Leave it out if you only read and write data.
 
-    On Linux with a glibc older than 2.28, there is no `mosaica-native` for your machine. Install the client with `pip install --no-deps mosaica`, then `pip install pyarrow`, and `anywidget` for the map. The client then connects to a database running elsewhere.
+    On Linux with a glibc older than 2.28, there is no `mosaica-native` for your machine. Install the client with `pip install --no-deps mosaica`, then `pip install pyarrow tqdm`, and `anywidget` for the map. The client then connects to a database running elsewhere.
 
 === "TypeScript"
 
@@ -290,7 +290,7 @@ Every key this example leaves out is in the [schema.toml](../reference/schema-to
 
 ## From Python
 
-In Python you don't write either file yourself. `mosaica.create("~/maps/places")` makes a database in that directory and writes both files there, and its first commit builds the database and starts it. Because everything lives in that one directory, you can serve the database later without Python, with `mosaica serve --deployment ~/maps/places/mosaica.toml`.
+In Python you don't write either file yourself. `mosaica.create("~/maps/places")` makes a database in that directory and writes both files there, and its first commit builds the database and starts it. The server listens on this machine only, on port 9141, or the next free port above it, and prints its address when it starts; `create(..., port=9200)` names another port. Because everything lives in that one directory, you can serve the database later without Python, with `mosaica serve --deployment ~/maps/places/mosaica.toml`.
 
 Leave out the path and you get a temporary database, which is deleted when Python exits. The [Python reference](../reference/python/connecting.md) has the details of `create()`, `open()` and `save()`.
 

@@ -501,7 +501,7 @@ def _filter_columns(expression: Any) -> set[str]:
         if key in ("all_of", "any_of", "none_of"):
             for one in value if isinstance(value, list) else []:
                 named |= _filter_columns(one)
-        elif key not in ("region", "member_of"):
+        elif key not in ("region", "member_of", "mosaica_id"):
             named.add(key)
     return named
 
@@ -706,18 +706,13 @@ class Selection:
 
         When the box's outline crosses more grid cells than the server's `max_region_cells`
         setting allows, the server counts the cells that cover the box, so the count can include
-        items outside it. `sample(k=0)` gives the same count as `matched` in its `mosaica.counts`,
-        with the verdict on the box in `mosaica.region`.
+        items outside it. `aggregate([{"count": True}])` gives the same count, with the verdict on
+        the box in its table's `mosaica.region`.
 
             db.view("papers").count()
         """
-        request = {"view": self._view, "zoom": 0, "tiles": [0], "k": 0}
-        expression = self._expression()
-        if expression is not None:
-            request["filters"] = expression
-        body = self._reader()._request("POST", "/v1/viewport", request)
-        tiles = _tables([p for kind, p in split_frames(body) if kind == FRAME_TILES])
-        return _tile_counts(tiles).get("matched", 0)
+        [size] = self.aggregate([{"count": True}])
+        return int(size.column("count")[0].as_py()) if size.num_rows else 0
 
     def sample(
         self,
@@ -1397,9 +1392,9 @@ class Viewer:
 
         A grouping names at least one figure. `"count": True` counts the items in each row, so
         `{"count": True}` alone is the size of the set. `"values"`, `"missing"`, `"min"`, `"max"`
-        and `"mean"` each take a list of number or timestamp fields and give a column per field,
-        such as `min_year`, and `"summary"` gives all five. They are exact and are taken over
-        every item this reader may see in the view, so they are refused beside `"by"` or
+        and `"mean"` each take a list of number, timestamp or bool fields and give a column per
+        field, such as `min_year`, and `"summary"` gives all five. They are exact and are taken
+        over every item this reader may see in the view, so they are refused beside `"by"` or
         `"cells"` and in a request with `filters` or `reference`. `min_` and `max_` have the
         field's type, and `mean_` is a float, or a UTC timestamp on a timestamp field.
 
@@ -1417,14 +1412,14 @@ class Viewer:
           `top` needs `"cut": {"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}`, so that it
           ranks the annotations a map draws at that zoom, box and cluster budget, and without
           `budget` it ranks the finest cut.
-        - By bins of a number or timestamp field, as `{"field": name, "bins": n}`, a histogram of
-          at most `n` bins in one page. With `"range": [lower, upper]` the bins divide that range
-          into equal widths and `rest` counts the values outside it. Without a range the edges
-          are round values around the smallest and largest value this reader may see in the view,
-          so they stay put as the filters change. The edges have the field's type, except that an
-          integer field gets float edges when a bound of `range` is fractional. `"sample": s`
-          counts a large set faster, over about `s` of its items, and scales each count to the
-          set's size.
+        - By bins of a number, timestamp or bool field, as `{"field": name, "bins": n}`, a
+          histogram of at most `n` bins in one page. With `"range": [lower, upper]` the bins
+          divide that range into equal widths and `rest` counts the values outside it. Without a
+          range the edges are round values around the smallest and largest value this reader may
+          see in the view, so they stay put as the filters change; a bool's are a bin for false
+          (0) and one for true (1). The edges have the field's type, except that an integer field
+          gets float edges when a bound of `range` is fractional. `"sample": s` counts a large
+          set faster, over about `s` of its items, and scales each count to the set's size.
 
         `"cells": {"depth": d}` divides the set, or each group, into the view's cells at a depth
         from 0 to 32, where up to 16 they are the map's tiles at that zoom. Adding `"area": [x0,

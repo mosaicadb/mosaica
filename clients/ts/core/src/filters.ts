@@ -10,6 +10,16 @@ import type {FilterExpr, FilterOperandSet, FilterOperator} from './types.js';
  */
 
 /**
+ * A filter keeping the items `ids` name, such as the points a map shows a picture for, so one
+ * {@link MosaicaClient.items} call reads their fields. Each id is sent as its decimal string.
+ *
+ * @category Filters
+ */
+export function namedItems(ids: Iterable<bigint>): FilterExpr {
+  return {mosaica_id: {in: Array.from(ids, String)}};
+}
+
+/**
  * One alternative of a text query, as {@link textTerms} returns it.
  *
  * @category Filters

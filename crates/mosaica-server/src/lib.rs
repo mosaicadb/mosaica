@@ -1,9 +1,9 @@
 //! `mosaica-server`: the viewer, session and control planes, and the `mosaica serve` entry point.
 //!
-//! [`prepare`] does everything that can fail before a listener is bound: it loads the config and
-//! opens the engine (bundle verification, WAL replay). [`run`] binds the three
-//! planes, announces their addresses on stdout and serves. A refusal to start is therefore
-//! testable without a socket.
+//! [`bind`] binds the listeners a deployment declares, one for the three planes unless it gives a
+//! plane an address of its own. [`prepare`] loads the config and opens the engine (bundle
+//! verification, WAL replay), so a refusal to start is testable without a socket. [`run`]
+//! announces the bound addresses on stdout and serves.
 
 mod address;
 mod aggregate;
@@ -17,6 +17,7 @@ pub mod error;
 mod filter_dto;
 pub mod health;
 pub mod identity;
+mod listen;
 mod login;
 pub mod memory;
 pub mod oidc;
@@ -37,12 +38,14 @@ use parking_lot::Mutex;
 
 use mosaica_engine::{Engine, EngineConfig};
 
-use mosaica_config::{Config, ControlListen};
+use mosaica_config::Config;
 use state::{AppState, ComputeGate, SessionRegistry};
+
+pub use listen::{bind, Listeners};
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Everything [`prepare`] built, for [`run`] to bind and serve.
+/// Everything [`prepare`] built, for [`run`] to serve.
 pub struct Prepared {
     pub state: Arc<AppState>,
     pub config: Config,
@@ -82,20 +85,10 @@ pub fn prepare_config(config: Config) -> Result<Prepared, BoxError> {
         }
     }
 
-    // `[serve]` is optional because a build reads this file too, but a server needs all three
-    // addresses and gets no default. Port 0 is allowed; the announce line reports the real port.
-    for (what, declared, example) in [
-        ("viewer", config.viewer_addr.is_some(), "127.0.0.1:8080"),
-        ("session", config.session_addr.is_some(), "127.0.0.1:8081"),
-        ("control", config.control_listen.is_some(), "unix:/run/mosaica/control.sock"),
-    ] {
-        if !declared {
-            return Err(format!(
-                "this deployment declares no `{what}` address; add one under `[serve]`, such as \
-                 `{what} = \"{example}\"`"
-            )
-            .into());
-        }
+    // `[serve]` is optional because a build reads this file too, but a server needs the viewer's
+    // address, which the other planes share unless they name their own.
+    if config.viewer_addr.is_none() {
+        return Err(listen::no_viewer_address());
     }
 
     let engine_config = EngineConfig {
@@ -148,7 +141,7 @@ pub fn prepare_config(config: Config) -> Result<Prepared, BoxError> {
     // The region leaf's cell budget, and the bound on decompositions cached across principals.
     engine.set_max_region_cells(config.max_region_cells);
     engine.set_region_cache_bytes(config.region_cache_bytes);
-    engine.set_text_filter_cache_bytes(config.text_filter_cache_bytes);
+    engine.set_filter_cache_bytes(config.filter_cache_bytes);
     // How long a request waits on another request's row-projection build before it is shed.
     engine.set_single_flight_wait_ms(config.single_flight_wait_ms);
     // Crossing the limit raises a counter and a log line and nothing else. Set after replay, so a
@@ -299,8 +292,9 @@ fn open_catalogue(config: &Config) -> Result<mosaica_catalogue::Catalogue, BoxEr
         .map_err(|e| format!("the catalogue in {} cannot be opened: {e}", dir.display()).into())
 }
 
-/// The one line `run` writes to stdout once all three planes are listening. A declared port 0
-/// is chosen by the kernel, so only the process can report the address. Field order is key order.
+/// The one line `run` writes to stdout once every listener is serving. A declared port 0 is
+/// chosen by the kernel and a taken port may move up, so only the process can report the address.
+/// Planes on one listener are announced at one address. Field order is key order.
 #[derive(serde::Serialize)]
 struct Listening<'a> {
     event: &'a str,
@@ -309,10 +303,9 @@ struct Listening<'a> {
     control: String,
 }
 
-/// Binds all three listeners and serves until one of them errors. The control plane binds a
-/// unix socket unless configured as loopback TCP.
-pub async fn run(prepared: Prepared) -> Result<(), BoxError> {
-    serve_announcing(prepared, std::io::stdout()).await
+/// Serves on `listeners` until one of them errors.
+pub async fn run(prepared: Prepared, listeners: Listeners) -> Result<(), BoxError> {
+    serve_announcing(prepared, listeners, std::io::stdout()).await
 }
 
 /// Turn off Nagle's algorithm on an accepted connection. A streamed response is several writes,
@@ -326,75 +319,40 @@ fn send_at_once(stream: &mut tokio::net::TcpStream) {
 }
 
 /// [`run`], with the announce line written somewhere a test can read. Stdout carries only that
-/// line, a JSON object written and flushed once every plane is bound and every router built, so
-/// a supervisor that reads it can send a request at once. Diagnostics go to stderr.
+/// line, a JSON object written and flushed once every router is built, so a supervisor that
+/// reads it can send a request at once. Diagnostics go to stderr.
 pub async fn serve_announcing<W: std::io::Write>(
     prepared: Prepared,
+    listeners: Listeners,
     mut announce_to: W,
 ) -> Result<(), BoxError> {
-    let Prepared { state, config } = prepared;
-
-    let viewer_addr = config
-        .viewer_addr
-        .expect("prepare() refuses a serve with no viewer address");
-    let session_addr = config
-        .session_addr
-        .expect("prepare() refuses a serve with no session address");
-    let viewer_listener = tokio::net::TcpListener::bind(viewer_addr).await?;
-    let session_listener = tokio::net::TcpListener::bind(session_addr).await?;
-
-    // Bound before the announce, so the line names three live planes.
-    enum ControlBound {
-        Tcp(tokio::net::TcpListener),
-        Unix(tokio::net::UnixListener, std::path::PathBuf),
-    }
-    let control_bound = match config
-        .control_listen
-        .expect("prepare() refuses a serve with no control address")
-    {
-        ControlListen::Tcp(addr) => ControlBound::Tcp(tokio::net::TcpListener::bind(addr).await?),
-        ControlListen::Unix(path) => {
-            let _ = std::fs::remove_file(&path);
-            let listener = tokio::net::UnixListener::bind(&path)?;
-            ControlBound::Unix(listener, path)
-        }
-    };
-
-    let viewer_router = viewer::router(Arc::clone(&state));
-    let session_router = session::router(Arc::clone(&state));
-    let control_router = control::router(Arc::clone(&state));
-
+    let state = prepared.state;
     let listening = Listening {
         event: "listening",
-        viewer: viewer_listener.local_addr()?.to_string(),
-        session: session_listener.local_addr()?.to_string(),
-        control: match &control_bound {
-            ControlBound::Tcp(listener) => listener.local_addr()?.to_string(),
-            ControlBound::Unix(_, path) => format!("unix:{}", path.display()),
-        },
+        viewer: listeners.address_of(|p| p.viewer)?,
+        session: listeners.address_of(|p| p.session)?,
+        control: listeners.address_of(|p| p.control)?,
     };
+
+    let mut serving = tokio::task::JoinSet::new();
+    for (socket, planes) in listeners.bound {
+        let router = listen::router(&state, planes);
+        match socket {
+            listen::Socket::Tcp(listener) => {
+                let listener = tokio::net::TcpListener::from_std(listener)?.tap_io(send_at_once);
+                serving.spawn(async move { axum::serve(listener, router).await });
+            }
+            listen::Socket::Unix(listener, _) => {
+                let listener = tokio::net::UnixListener::from_std(listener)?;
+                serving.spawn(async move { axum::serve(listener, router).await });
+            }
+        }
+    }
     writeln!(announce_to, "{}", serde_json::to_string(&listening)?)?;
     announce_to.flush()?;
 
-    let viewer_listener = viewer_listener.tap_io(send_at_once);
-    let session_listener = session_listener.tap_io(send_at_once);
-    let viewer_task =
-        tokio::spawn(async move { axum::serve(viewer_listener, viewer_router).await });
-    let session_task =
-        tokio::spawn(async move { axum::serve(session_listener, session_router).await });
-    let control_task = match control_bound {
-        ControlBound::Tcp(listener) => {
-            let listener = listener.tap_io(send_at_once);
-            tokio::spawn(async move { axum::serve(listener, control_router).await })
-        }
-        ControlBound::Unix(listener, _) => {
-            tokio::spawn(async move { axum::serve(listener, control_router).await })
-        }
-    };
-
-    let (v, s, c) = tokio::try_join!(viewer_task, session_task, control_task)?;
-    v?;
-    s?;
-    c?;
+    while let Some(served) = serving.join_next().await {
+        served??;
+    }
     Ok(())
 }

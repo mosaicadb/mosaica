@@ -46,7 +46,25 @@ pub enum FilterRows {
     },
 }
 
+/// The rows `ranges` spans, as a bitmap.
+pub(crate) fn rows_of(ranges: &[Range<u32>]) -> Bitmap {
+    let mut rows = Bitmap::new();
+    for r in ranges {
+        rows.add_range(r.clone());
+    }
+    rows
+}
+
 impl FilterRows {
+    /// These rows held to `rows`, the rows `domain` spans: exact there and silent outside it, as
+    /// the per-tile crossing's are. What an answer over part of the view is.
+    pub(crate) fn held_to(self, rows: &Bitmap, domain: Vec<Range<u32>>) -> FilterRows {
+        FilterRows::Viewport {
+            rows: self.rows().and(rows),
+            domain,
+        }
+    }
+
     pub(crate) fn rows(&self) -> &Bitmap {
         match self {
             FilterRows::Complete(rows) => rows,
@@ -315,11 +333,10 @@ impl EffectiveMask {
                 visible,
             };
         }
-        let mut within = Bitmap::new();
         for r in ranges {
             self.debug_assert_in_domain(r);
-            within.add_range(r.clone());
         }
+        let mut within = rows_of(ranges);
         let matched = match &self.filter {
             None => visible.clone(),
             Some(filter) => {

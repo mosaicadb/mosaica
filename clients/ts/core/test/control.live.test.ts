@@ -1,8 +1,8 @@
 import {Field, Float64, List, Null, RecordBatch, Schema, Struct, Table, tableToIPC, Utf8, vectorFromArray} from 'apache-arrow';
-import {afterAll, beforeAll, describe, expect, it, vi, type TestContext} from 'vitest';
+import {afterAll, beforeAll, describe, expect, it, type TestContext} from 'vitest';
 import {clusterLayerDeclaration, labelLayerDeclaration} from '../../scripts/operator.js';
 import {MosaicaClient} from '../src/client.js';
-import {Control} from '../src/control.js';
+import {Control, type CompactAccepted, type CompactWait, type ControlStatus, type Progress} from '../src/control.js';
 import type {Meta, ViewportRequest} from '../src/types.js';
 import {start, type Served} from './served.js';
 
@@ -97,6 +97,13 @@ async function byKey(): Promise<Map<string, bigint>> {
     out.set(item.fields[KEY] as string, id);
   }
   return out;
+}
+
+/** `compaction` in `/control/status`. */
+async function compaction(): Promise<ControlStatus['compaction']> {
+  const status = await control.status();
+  expect(status.ok).toBe(true);
+  return (status.body as ControlStatus).compaction;
 }
 
 async function flushed(): Promise<void> {
@@ -302,19 +309,22 @@ describe('Control against a live server', () => {
     expect(after.ids).toContain(hidden);
   });
 
-  it('asks for a fold, which runs, and the deleted row stays gone after it', async (ctx) => {
+  it('asks for a fold and waits for it, which compacts, and the deleted row stays gone after it', async (ctx) => {
     live(ctx);
-    type Compaction = {folds: number; requests: {answered: number; last_refusal: {request: number} | null}};
-    const compaction = async () => (await control.status()).body.compaction as Compaction;
-    const before = (await compaction()).folds;
-    const asked = await control.compact();
-    expect(asked.status).toBe(202);
-    const request = asked.body.request as number;
-    expect(request).toBeGreaterThan(0);
-    await vi.waitFor(async () => expect((await compaction()).requests.answered).toBeGreaterThanOrEqual(request), {timeout: 30_000, interval: 50});
-    const after = await compaction();
-    expect(after.requests.last_refusal?.request ?? 0).toBeLessThan(request);
-    expect(after.folds).toBeGreaterThan(before);
+    const folds = async () => (await compaction()).folds as number;
+    const before = await folds();
+    const records: Progress[] = [];
+    const asked = await control.compact({wait: true, onProgress: (record) => records.push(record)});
+    expect(asked).toMatchObject({
+      status: 202,
+      waited: {ok: true, ended: 'answered', answer: {outcome: 'compacted'}, job: {job: 'compaction', state: 'finished'}}
+    });
+    const waited = asked.waited as Extract<CompactWait, {ended: 'answered'}>;
+    const request = (asked.body as CompactAccepted).request;
+    expect(waited.answer.first).toBeLessThanOrEqual(request);
+    expect(waited.answer.last).toBeGreaterThanOrEqual(request);
+    expect(records.at(-1)).toEqual(waited.job);
+    expect(await folds()).toBeGreaterThan(before);
     expect((await seen()).visible).toBe(3n);
     expect((await byKey()).has('row-0')).toBe(false);
   });

@@ -264,6 +264,34 @@ pub(crate) fn named<'g>(
     Some((shard, number, shard.tenancy.of(number) == high.tenancy))
 }
 
+/// The entity holding the item each of `ids` names in `shard`, with whether the identifier carries
+/// the tenancy the shard's index holds for its number; `None` for an identifier naming no item or
+/// one of another shard. The edited-items map is probed for every identifier of `shard`, current or
+/// not, so the work does not depend on which of them name a current item. The entity may be
+/// deleted, suppressed or invisible: the caller tests visibility.
+pub(crate) fn entities_named(
+    key: &IdentityKey,
+    generation: &Generation,
+    shard: &Shard,
+    ids: &[MosaicaId],
+) -> Result<Vec<Option<(EntityId, bool)>>, StoreError> {
+    let named: Vec<(usize, EntityId, bool)> = ids
+        .iter()
+        .enumerate()
+        .filter_map(|(at, id)| {
+            let (held, number, current) = named(key, generation, *id)?;
+            (held.id() == shard.id()).then_some((at, number, current))
+        })
+        .collect();
+    let numbers: Vec<EntityId> = named.iter().map(|(_, number, _)| *number).collect();
+    let entities = entities_of_numbers(shard, &numbers, |_| true)?;
+    let mut out = vec![None; ids.len()];
+    for ((at, _, current), entity) in named.iter().zip(entities) {
+        out[*at] = entity.map(|entity| (entity, *current));
+    }
+    Ok(out)
+}
+
 /// The shard and number `id` names, or `None` where it names no item, a shard `generation` does
 /// not hold, or a number at a tenancy the index does not hold.
 pub(crate) fn number_named<'g>(

@@ -61,6 +61,7 @@
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use memmap2::Mmap;
@@ -75,20 +76,17 @@ use crate::select;
 /// A row-indexed "already claimed" set, one bit a row, for checking an extent's rows: a row whose
 /// bit is already set is claimed by a second entity. [`Permutation::validate_rows`] claims the
 /// base's rows a bucket at a time instead.
-struct RowsSeen(Vec<u64>);
+struct RowsSeen(Vec<AtomicU64>);
 
 impl RowsSeen {
     fn new(rows: usize) -> RowsSeen {
-        RowsSeen(vec![0u64; rows.div_ceil(64)])
+        RowsSeen((0..rows.div_ceil(64)).map(|_| AtomicU64::new(0)).collect())
     }
 
     /// Claim `row`, returning whether it was already claimed.
-    fn claim(&mut self, row: usize) -> bool {
+    fn claim(&self, row: usize) -> bool {
         let bit = 1u64 << (row & 63);
-        let word = &mut self.0[row >> 6];
-        let already = *word & bit != 0;
-        *word |= bit;
-        already
+        self.0[row >> 6].fetch_or(bit, Ordering::Relaxed) & bit != 0
     }
 }
 
@@ -1163,9 +1161,9 @@ impl Permutation {
         // every row. Here the slots of a round of pages are first bucketed by row range on as many
         // threads as the pool has, as the projection's walk buckets them, and each bucket is then
         // claimed by one thread into its own 512 KB of the array, which stays in L2 while it does.
-        // No claim is shared, so none is atomic. ⊘ **Measured** on a 4-core Xeon at 10⁹ rows:
-        // 19.0 s for a claim per slot on one thread, against 11.0 s bucketed on one and 2.8–3.1 s
-        // bucketed on four.
+        // No claim is shared, so none is atomic. ⊘ **Measured** on a 4-core Xeon at 10⁹ rows: an
+        // atomic claim per slot took 28.7 s on one thread and 5.2–6.5 s on four, against 11.0 s
+        // and 2.8–3.1 s bucketed.
         let nbuckets = (row_count as usize >> BUCKET_SHIFT) + 1;
         let threads = rayon::current_num_threads().max(1);
         let pages: Vec<usize> = (0..self.page_count)
@@ -1913,7 +1911,7 @@ impl SegmentExtent {
             return false;
         }
         let count = self.row_count();
-        let mut seen = RowsSeen::new(count as usize);
+        let seen = RowsSeen::new(count as usize);
         for row in self
             .rows
             .iter()

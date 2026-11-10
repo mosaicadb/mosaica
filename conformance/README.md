@@ -27,8 +27,9 @@ including the property everything downstream rests on, that recording one batter
 unchanged state compares equal.
 
 CI runs it on every pull request and every push to `main`, alongside the rest of CLAUDE.md's gate
-(`.github/workflows/ci.yml`). That is conformance §6's per-PR tier; the nightly and release tiers
-it also specifies do not exist.
+(`.github/workflows/ci.yml`). That is conformance §6's per-PR tier. `.github/workflows/nightly.yml`
+runs the endurance test each evening on a seed taken from the date; the rest of the nightly tier,
+and the release tier, do not exist.
 
 **700 pass, 5 skip and 2 fail, over 707 cases (2026-08-31, measured serially on a loaded box)** —
 `conformance/tests` and `conformance/suite` together, the split CI's own case-count step compares

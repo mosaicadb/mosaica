@@ -46,7 +46,7 @@ use mosaica_store::vocabulary::Vocabularies;
 use mosaica_store::TileOrder;
 use mosaica_types::layer::ComputedProperty;
 use mosaica_types::{
-    EntityId, GenerationStamp, ShardId, ShardRow, TermId, MosaicaId, API_VERSION,
+    EntityId, GenerationStamp, RowId, ShardId, ShardRow, TermId, MosaicaId, API_VERSION,
 };
 
 use crate::cache::{CacheWaitEnded, Peek, RowProjectionKey, SessionGeometry};
@@ -97,7 +97,7 @@ pub(crate) use item::{
 pub(crate) use meta::{family_view, meta_of, Resolution};
 pub(crate) use row_filter::{
     crossing_domain, filter_refusal, merged_spans, predicate_source, predicate_vocabulary,
-    unique_holders, FilterCandidate, OverView, ResolvedLeaves, RoutedRows,
+    unique_holders, FilterCandidate, OverView, ResolvedLeaves, RouteFilter, RoutedRows, ViewLeafCosts,
 };
 pub(crate) use served::{ServedSide, ServedView};
 pub(crate) use sweep::{

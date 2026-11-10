@@ -193,6 +193,31 @@ async fn an_executor_panic_fails_readiness_and_reports_dead() {
         .unwrap();
     assert_eq!(ready.status(), 200);
 
+    // A compaction request pending when the executor dies: its segment published first, then
+    // the compaction held after its passes.
+    flush_and_wait(&server, "faults-surface-published").await;
+    server.state.engine.set_fold_paused_for_test(true);
+    let resp = server
+        .client
+        .post(server.control_url("/control/compact"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 202);
+    let request = resp.json::<serde_json::Value>().await.unwrap()["request"]
+        .as_u64()
+        .unwrap();
+    wait_until(
+        "the compaction holds",
+        Duration::from_secs(60),
+        async || match server.state.engine.fold_is_holding_for_test() {
+            true => Ok(()),
+            false => Err("not yet".to_string()),
+        },
+    )
+    .await;
+
     server.state.faults.arm_pause(
         mosaica_lifecycle::faults::PauseSite::BeforeManifestPublish,
         mosaica_lifecycle::faults::PauseAction::Panic,
@@ -241,4 +266,32 @@ async fn an_executor_panic_fails_readiness_and_reports_dead() {
     let status = control_status(&server).await;
     assert_eq!(status["write_executor"]["posture"], "dead");
     assert_eq!(status["write_executor"]["ready"], false);
+    // The pending request will not be answered, and says so rather than staying pending.
+    let resp = server
+        .client
+        .get(server.control_url(&format!("/control/compact/{request}")))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 503);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["error"], "not-ready", "{body}");
+}
+
+/// Ingest one point under `batch` and wait until a publication carries it.
+async fn flush_and_wait(server: &TestServer, batch: &str) {
+    let body = build_ingest_batch_optional(&[(None, 20.0, 20.0, "0")]);
+    let resp = server
+        .client
+        .post(server.control_url("/control/ingest"))
+        .bearer_auth(OPERATOR_CREDENTIAL)
+        .header("x-mosaica-batch-id", batch)
+        .header("content-type", "application/vnd.apache.arrow.stream")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    tick(server).await;
 }

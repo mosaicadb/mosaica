@@ -139,7 +139,7 @@ Compaction never removes three things: an access attribute that only deleted ite
     After the compaction, the previous files are removed once no request is reading them, usually within one flush interval, and the log's copy goes when the log next rotates. The cache directory holds no field values; counts and positions the item contributed to are dropped when the cache is next swept, or evicted sooner.
 
 !!! note "Confirming that a compaction ran"
-    `POST /control/compact` answers 202 with the request's number once it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space, or fail. Check `/control/status` until `compaction.requests.answered` reaches that number. If `compaction.requests.last_refusal.request` then equals it, a shard was refused and `detail` says why; below it, nothing was refused; above it, a later request's refusal has replaced the record. To confirm the deleted rows are gone, check that `compaction.folds` has risen and `overlay.retirable` has fallen; `compaction.fold_failures` counts compactions that failed or were discarded. Where no compaction could start until the server is restarted, the request is answered 503 with the reason.
+    `POST /control/compact` answers 202 with the request's number once it has asked for a compaction, and the compaction can still be refused, for example for lack of disc space, or fail. `GET /control/compact/{request}` says whether the request is still pending and, once it is answered, its outcome and whether it succeeded, with the last progress record of the compaction that answered it. The HTTP reference describes how requests are numbered and how long their answers are kept. Where no compaction could start until the server is restarted, the request is answered 503 with the reason.
 
 Copies outside Mosaica are yours to remove: backups, filesystem snapshots, the build's source files, and the request log if `[serve] request_log` is set.
 
@@ -151,16 +151,16 @@ Ingest is limited under load, so that a burst of writes can't starve the map. On
 
 ## Background maintenance
 
-Three kinds of background work keep the data quick to read, and none of them changes what a viewer may see. A **flush** writes waiting items to disc as a new segment, a file of rows in map order, and publishes them, which is what makes new and edited items appear. As segments accumulate, a **merge** combines small ones into larger ones, so a request has fewer files to read. And a **compaction** rewrites the data as one segment per view, without the rows of deleted items or the values an edit replaced. It's the only step that removes them and reclaims their space.
+Three kinds of background work keep the data quick to read, and none of them changes what a viewer may see. A **flush** writes waiting items to disc as a new segment, a file of rows in map order, and publishes them, which is what makes new and edited items appear. As segments accumulate, a **merge** combines small ones into larger ones, so a request has fewer files to read. The files a merge replaces are deleted once the last three saved states, which a restart can fall back to, no longer name them and no request is still reading them. And a **compaction** rewrites the data as one segment per view, without the rows of deleted items or the values an edit replaced. It's the only step that removes them and reclaims their space.
 
 Compaction runs on a schedule. By default it runs:
 
 - in a daily window starting at 00:00 UTC and lasting four hours, when a view has 8 or more segments;
-- at any time, when a view reaches 64 segments, when 20% of the stored rows belong to deleted items, when the deleted items and annotations reach the overlay's soft limit, or when files no longer used reach the size of those in use.
+- at any time, when a view reaches 64 segments, when 20% of the stored rows belong to deleted items, when the deleted items and annotations reach the overlay's soft limit, or when files no longer used, such as those a failed write left, reach the size of those in use.
 
 An edit leaves its old version as a deleted item, so heavy editing counts towards these triggers. The schedule starts at most one compaction a day for each shard, and that limit starts again after a restart. `POST /control/compact` asks for one now. The `compaction_*` settings in the [server configuration](../reference/mosaica-toml.md) change the schedule.
 
-A compaction runs alongside requests, which keep being answered. When it finishes, each viewer's cached state is rebuilt, either by a background pass or on the viewer's next request, so that request can be slower. The identifiers a client holds, such as `mosaica_id`s and tile addresses, keep working across every kind of maintenance.
+A compaction runs alongside requests, which keep being answered, and the old copy of the data is deleted on a thread of its own so that writes are not held behind it. When it finishes, each viewer's cached state is rebuilt, either by a background pass or on the viewer's next request, so that request can be slower. The identifiers a client holds, such as `mosaica_id`s and tile addresses, keep working across every kind of maintenance.
 
 ## Not built yet
 

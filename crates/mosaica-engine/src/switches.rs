@@ -15,11 +15,18 @@ pub(crate) struct TestSwitches {
     /// Whether a bulk read may be driven from its filter's matches; off, every read walks its
     /// view in stretches.
     pub(crate) driven_reads_enabled: AtomicBool,
+    /// Whether a viewport's filter may be evaluated over its tiles' entities alone; off, every
+    /// filter is evaluated over the viewer's whole visible set.
+    pub(crate) tile_filters_enabled: AtomicBool,
+    /// Whether every viewport's filter is evaluated over its tiles' entities, whatever that costs.
+    pub(crate) tile_filters_always: AtomicBool,
     /// Whether a flush holds between finishing on the pool and submitting the result, so it is
     /// still in flight when the next tick lands.
     pub(crate) flush_paused: AtomicBool,
     /// Whether a fold holds between finishing its passes and submitting the result.
     pub(crate) fold_paused: AtomicBool,
+    /// Whether the next fold panics as its thread begins its passes.
+    pub(crate) fold_panics: AtomicBool,
     /// See [`crate::Engine::set_fold_publication_paused_for_test`].
     pub(crate) fold_publication_paused: AtomicBool,
     /// The memory a compaction's pre-flight takes the host to have, in bytes; zero measures it.
@@ -214,8 +221,11 @@ impl Default for TestSwitches {
             coalesce_enabled: AtomicBool::new(true),
             merge_enabled: AtomicBool::new(true),
             driven_reads_enabled: AtomicBool::new(true),
+            tile_filters_enabled: AtomicBool::new(true),
+            tile_filters_always: AtomicBool::new(false),
             flush_paused: AtomicBool::new(false),
             fold_paused: AtomicBool::new(false),
+            fold_panics: AtomicBool::new(false),
             fold_publication_paused: AtomicBool::new(false),
             fold_memory: AtomicU64::new(0),
             merge_publication_paused: AtomicBool::new(false),

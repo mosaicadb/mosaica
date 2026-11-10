@@ -27,19 +27,28 @@ fn both(
 
     let streamed = dir.join("streamed.arrow");
     let streamed_presence = dir.join("streamed.roaring");
-    let mut w = ValueColumnWriter::create(&streamed, &streamed_presence, ColumnKind::of(whole))
-        .expect("create");
+    let mut w = ValueColumnWriter::create(
+        &streamed,
+        &streamed_presence,
+        ColumnKind::of(whole),
+        Some(whole.len()),
+    )
+    .expect("create");
     for chunk in chunks {
         w.push(&chunk).expect("push");
     }
     w.finish(presence).expect("finish");
 
-    // The spool is a transient, not an artefact: a caller that has finished a column must be left
-    // with the two files the format names and nothing else.
-    for stray in std::fs::read_dir(dir).expect("dir") {
-        let name = stray.expect("entry").file_name();
-        let name = name.to_string_lossy();
-        assert!(!name.contains("spool"), "the writer left {name} behind");
+    // A caller that has finished a column is left with the files the format names and nothing
+    // else.
+    for left in std::fs::read_dir(dir).expect("dir") {
+        let name = left.expect("entry").file_name();
+        let name = name.to_string_lossy().into_owned();
+        assert!(
+            ["one.arrow", "one.roaring", "streamed.arrow", "streamed.roaring"]
+                .contains(&name.as_str()),
+            "the writer left {name} behind"
+        );
     }
     if presence.is_some() {
         assert_eq!(read(&one_presence), read(&streamed_presence));
@@ -50,8 +59,9 @@ fn both(
 #[test]
 fn fixed_width_columns_stream_byte_identically_at_every_chunking() {
     let dir = tempfile::tempdir().expect("tempdir");
-    for chunk in [1usize, 2, 7, 999, 5_000] {
-        let values: Vec<u32> = (0..5_000u32)
+    // 40,000 values is several of the writer's own writes, so chunks straddle them.
+    for chunk in [1usize, 2, 7, 999, 40_000] {
+        let values: Vec<u32> = (0..40_000u32)
             .map(|e| e.wrapping_mul(2_654_435_761))
             .collect();
         let whole = Codes::U32(values.clone().into());
@@ -110,6 +120,7 @@ fn split(whole: &Codes, at: usize) -> Vec<Codes> {
         Codes::I64(v) => halves!(v, Codes::I64),
         Codes::F32(v) => halves!(v, Codes::F32),
         Codes::F64(v) => halves!(v, Codes::F64),
+        Codes::Ordinals(_) => unreachable!("every column here is written flat"),
     }
 }
 
@@ -155,10 +166,11 @@ fn a_chunk_of_the_wrong_family_is_refused() {
         &dir.path().join("v.arrow"),
         &dir.path().join("p.roaring"),
         ColumnKind::U32,
+        Some(3),
     )
     .expect("create");
     w.push(&Codes::U32(vec![1u32, 2].into())).expect("push");
-    // A `u16` chunk would be spooled as two bytes a value and read back as four — every value
+    // A `u16` chunk would be written as two bytes a value and read back as four — every value
     // after it addressed wrongly, with no error anywhere.
     let err = w.push(&Codes::U16(vec![3u16].into())).expect_err("refused");
     assert!(err.to_string().contains("declared"), "{err}");
@@ -183,6 +195,7 @@ fn a_presence_bitmap_that_does_not_match_the_value_count_is_refused_by_both_writ
         &dir.path().join("v2.arrow"),
         &dir.path().join("p2.roaring"),
         ColumnKind::U32,
+        Some(3),
     )
     .expect("create");
     w.push(&Codes::U32(vec![1u32, 2, 3].into())).expect("push");
@@ -190,21 +203,52 @@ fn a_presence_bitmap_that_does_not_match_the_value_count_is_refused_by_both_writ
     assert!(err.to_string().contains("presence has 5"), "{err}");
 }
 
+/// A writer dropped before it finishes leaves no file, whether it was writing in place or
+/// spooling codes to be written a block at a time.
 #[test]
-fn an_abandoned_writer_leaves_no_spool_behind() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    {
-        let mut w = ValueColumnWriter::create(
-            &dir.path().join("v.arrow"),
-            &dir.path().join("p.roaring"),
-            ColumnKind::U32,
-        )
-        .expect("create");
-        w.push(&Codes::U32(vec![7u32; 100].into())).expect("push");
+fn an_abandoned_writer_leaves_nothing_behind() {
+    for kind in [ColumnKind::U32, ColumnKind::Ordinals] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        {
+            let mut w = ValueColumnWriter::create(
+                &dir.path().join("v.arrow"),
+                &dir.path().join("p.roaring"),
+                kind,
+                Some(100),
+            )
+            .expect("create");
+            w.push(&Codes::U32(vec![7u32; 100].into())).expect("push");
+        }
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .expect("dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert!(left.is_empty(), "{kind:?}: {left:?}");
     }
-    let left: Vec<_> = std::fs::read_dir(dir.path())
-        .expect("dir")
-        .map(|e| e.expect("entry").file_name())
-        .collect();
-    assert!(left.is_empty(), "{left:?}");
+}
+
+/// A flat column is laid out for the count it was created with: more values are refused when they
+/// arrive, fewer when it finishes, and neither leaves a file.
+#[test]
+fn a_flat_column_holds_exactly_the_count_it_was_created_for() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let values = dir.path().join("v.arrow");
+    let presence = dir.path().join("p.roaring");
+
+    let mut w =
+        ValueColumnWriter::create(&values, &presence, ColumnKind::U16, Some(3)).expect("create");
+    w.push(&Codes::U16(vec![1u16, 2].into())).expect("push");
+    w.push(&Codes::U16(vec![3u16, 4].into())).expect_err("a fourth value is refused");
+    drop(w);
+    assert!(!values.exists());
+
+    let mut w =
+        ValueColumnWriter::create(&values, &presence, ColumnKind::U16, Some(3)).expect("create");
+    w.push(&Codes::U16(vec![1u16, 2].into())).expect("push");
+    w.finish(None).expect_err("two values are refused");
+    assert!(!values.exists());
+
+    ValueColumnWriter::create(&values, &presence, ColumnKind::U16, None)
+        .err()
+        .expect("a flat column with no count is refused");
 }

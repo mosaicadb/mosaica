@@ -4,6 +4,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::sync::Arc;
 
+use mosaica_types::progress::Tracker;
+
+use crate::write::{Job, Jobs};
+
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two
 /// flags.
 pub(crate) fn outstanding(in_flight: &AtomicBool, completed_pending: &AtomicBool) -> bool {
@@ -11,15 +15,17 @@ pub(crate) fn outstanding(in_flight: &AtomicBool, completed_pending: &AtomicBool
 }
 
 /// One kind of background work. At most one unit of a kind is in flight. A finished unit waits in
-/// the channel until the executor thread takes it, since only that thread publishes.
+/// the channel until the executor thread takes it, since only that thread publishes, with the job
+/// recording it where it has one: publication finishes the job, and a unit that never publishes
+/// fails it.
 pub(in crate::write) struct Background<C> {
     in_flight: Arc<AtomicBool>,
     completed_pending: Arc<AtomicBool>,
     /// Raised when the executor ends; a unit then stops at its next check and publishes nothing.
     abandoned: Arc<AtomicBool>,
     attempt: u64,
-    done: Receiver<C>,
-    submit: Sender<C>,
+    done: Receiver<(C, Option<Job>)>,
+    submit: Sender<(C, Option<Job>)>,
     bell: SyncSender<()>,
 }
 
@@ -80,8 +86,19 @@ impl<C> Background<C> {
 
     /// Marks a unit in flight and returns what its worker reports through.
     pub(super) fn start(&self) -> InFlight<C> {
+        self.start_with(None)
+    }
+
+    /// Marks a unit in flight, recorded by `tracker` among `jobs` until it publishes or fails,
+    /// and returns what its worker reports through.
+    pub(super) fn start_recorded(&self, jobs: &Arc<Jobs>, tracker: Arc<Tracker>) -> InFlight<C> {
+        self.start_with(Some(Job::begin(jobs, tracker)))
+    }
+
+    fn start_with(&self, job: Option<Job>) -> InFlight<C> {
         self.in_flight.store(true, Ordering::SeqCst);
         InFlight {
+            job,
             completed: false,
             in_flight: Arc::clone(&self.in_flight),
             completed_pending: Arc::clone(&self.completed_pending),
@@ -94,11 +111,12 @@ impl<C> Background<C> {
     /// Puts a finished unit in the channel from the executor thread itself.
     #[cfg(feature = "fault-injection")]
     pub(super) fn submit_now(&self, unit: C) {
-        let _ = self.submit.send(unit);
+        let _ = self.submit.send((unit, None));
     }
 
-    /// The next finished unit, if one is waiting. Call [`Self::drained`] after taking any.
-    pub(super) fn next_completed(&self) -> Option<C> {
+    /// The next finished unit and the job recording it, if one is waiting. Call
+    /// [`Self::drained`] after taking any.
+    pub(super) fn next_completed(&self) -> Option<(C, Option<Job>)> {
         self.done.try_recv().ok()
     }
 
@@ -111,11 +129,13 @@ impl<C> Background<C> {
 /// A unit in flight. Dropping it uncompleted clears the in-flight flag, so a worker that fails,
 /// panics or never runs does not leave its kind blocked, and rings the doorbell.
 pub(super) struct InFlight<C> {
+    /// The unit's record, which fails where the unit is dropped uncompleted.
+    job: Option<Job>,
     completed: bool,
     in_flight: Arc<AtomicBool>,
     completed_pending: Arc<AtomicBool>,
     abandoned: Arc<AtomicBool>,
-    submit: Sender<C>,
+    submit: Sender<(C, Option<Job>)>,
     bell: SyncSender<()>,
 }
 
@@ -133,13 +153,16 @@ impl<C> InFlight<C> {
         self.completed = true;
         self.completed_pending.store(true, Ordering::SeqCst);
         self.in_flight.store(false, Ordering::SeqCst);
-        let _ = self.submit.send(unit);
+        let _ = self.submit.send((unit, self.job.take()));
         let _ = self.bell.try_send(());
     }
 }
 
 impl<C> Drop for InFlight<C> {
     fn drop(&mut self) {
+        // The record ends failed before the flag clears, so a reader that sees the unit no
+        // longer in flight finds its last record.
+        drop(self.job.take());
         if !self.completed {
             self.in_flight.store(false, Ordering::SeqCst);
             let _ = self.bell.try_send(());
@@ -183,7 +206,7 @@ mod tests {
         unit.complete(7);
         assert!(!background.in_flight(), "the unit's work is done");
         assert!(background.outstanding(), "its result is not yet taken");
-        assert_eq!(background.next_completed(), Some(7));
+        assert_eq!(background.next_completed().map(|(unit, _)| unit), Some(7));
         background.drained();
         assert!(!background.outstanding());
     }
@@ -195,7 +218,7 @@ mod tests {
         let (bell, _rung) = std::sync::mpsc::sync_channel(2);
         let background: Background<u32> = Background::new(bell);
         background.start().complete(1);
-        assert_eq!(background.next_completed(), Some(1));
+        assert_eq!(background.next_completed().map(|(unit, _)| unit), Some(1));
         background.drained();
         let second = background.start();
         assert!(background.outstanding(), "the second unit is running");

@@ -1334,7 +1334,7 @@ async fn viewport(
 fn stage_header(t: &mosaica_engine::StageTimings, arrow_serialise_ns: u64) -> Option<String> {
     // Append only: consumers read this CSV by position.
     Some(format!(
-        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+        "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         t.generation_resolve_ns,
         t.stamp_compare_ns,
         t.view_lookup_ns,
@@ -1363,6 +1363,11 @@ fn stage_header(t: &mosaica_engine::StageTimings, arrow_serialise_ns: u64) -> Op
         // corpus.
         t.theta_occupancy_ns,
         t.tiles_from_bands,
+        // The filter's entity-space evaluation, its crossing into row space, and the entities it
+        // admitted before the crossing.
+        t.filter_eval_ns,
+        t.filter_cross_ns,
+        t.filter_matched,
     ))
 }
 

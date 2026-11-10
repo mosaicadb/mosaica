@@ -152,6 +152,10 @@ pub fn parse(
         // Reserved words come before any column; the build refuses columns with these names.
         mosaica_engine::filter::REGION_COLUMN => Ok(FilterExpr::Region(parse_region(body, region)?)),
         mosaica_engine::filter::MEMBER_OF_COLUMN => Ok(FilterExpr::MemberOf(parse_member_of(body)?)),
+        mosaica_engine::filter::MOSAICA_ID_COLUMN => Ok(FilterExpr::Leaf {
+            column: name.clone(),
+            operand: parse_items(body)?,
+        }),
         leaf => {
             let resolved = resolve_leaf(leaf, column_of(leaf))?;
             let operand = parse_operand(leaf, &resolved, body, resolve)?;
@@ -161,6 +165,26 @@ pub fn parse(
                 operand,
             })
         }
+    }
+}
+
+/// A `mosaica_id` leaf's body: `{"eq": id}` or `{"in": [id, ...]}`, each a JSON number or its
+/// decimal string, as the operand of a unique `u64` column.
+fn parse_items(body: &Value) -> Result<FilterOperand, ApiError> {
+    const SHAPE: &str = "`mosaica_id` takes `{\"eq\": id}` or `{\"in\": [id, ...]}`";
+    let id = |value: &Value, field: &str| -> Result<Scalar, ApiError> {
+        Ok(Scalar::Int(i128::from(mosaica_id(Some(value), field)?.raw())))
+    };
+    let obj = body.as_object().filter(|obj| obj.len() == 1).ok_or_else(|| bad(SHAPE))?;
+    match obj.iter().next().expect("length checked") {
+        (op, value) if op == "eq" => Ok(FilterOperand::NumEquals(id(value, "mosaica_id.eq")?)),
+        (op, Value::Array(values)) if op == "in" => Ok(FilterOperand::NumIn(
+            values
+                .iter()
+                .map(|value| id(value, "mosaica_id.in"))
+                .collect::<Result<_, _>>()?,
+        )),
+        _ => Err(bad(SHAPE)),
     }
 }
 

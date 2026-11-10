@@ -25,6 +25,7 @@ use mosaica_engine::{Engine, EngineConfig};
 use mosaica_lifecycle::command::UnallocatedRow;
 use mosaica_lifecycle::wal::ChangeOp;
 use mosaica_store::read::open_bundle;
+use mosaica_types::progress::{JobKind, JobState};
 use mosaica_types::{EntityId, MosaicaId, TermId};
 use parquet::arrow::ArrowWriter;
 
@@ -470,10 +471,12 @@ fn the_old_prefix_is_reclaimed_whole_and_its_carry_forwards_are_links_not_copies
         before,
         "a carried-forward file is a second name for the same inode, not a copy"
     );
-    assert!(
-        !root.join("v00000").exists(),
-        "and the superseded prefix is gone whole — the build's base, every consumed tier and \
-         every superseded side-manifest"
+    // The superseded prefix is gone whole: the build's base, every consumed tier and every
+    // superseded side-manifest. It is deleted on a thread of its own.
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists(),
     );
 
     // The bytes survived the unlink, which is the property the link buys.
@@ -703,6 +706,54 @@ fn a_request_made_while_a_compaction_runs_is_answered_by_a_later_one() {
         0,
         "the deletion accepted during the first compaction is retired by the second"
     );
+}
+
+/// A compaction's progress record is among the engine's jobs while it runs, naming its part, and
+/// its phase never goes back. Once the compaction publishes no job is left, and its last record
+/// is finished in the last phase.
+#[test]
+fn a_compaction_is_a_job_until_it_publishes() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    let engine = engine_over_fixture(tmp.path(), &root, config_uncapped());
+    engine
+        .accept_change(entity_of_source(&root, "v00000", 4), ChangeOp::Delete)
+        .unwrap();
+    assert_eq!(engine.jobs(), Vec::new(), "nothing runs before the request");
+
+    engine.set_fold_paused_for_test(true);
+    let before = engine.write_executor_stats();
+    engine.request_fold().unwrap();
+    let mut seen = Vec::new();
+    wait_for("the compaction's passes to finish", || {
+        seen.extend(engine.jobs());
+        engine.fold_is_holding_for_test()
+    });
+    seen.extend(engine.jobs());
+    engine.set_fold_paused_for_test(false);
+    wait_for_fold_publication(&engine, &before);
+
+    assert!(!seen.is_empty(), "a held compaction is a job");
+    for record in &seen {
+        assert_eq!(
+            (record.job, record.state),
+            (JobKind::Compaction, JobState::Running)
+        );
+        assert!(record.context.is_some(), "{record:?}");
+    }
+    let phases: Vec<u32> = seen.iter().map(|record| record.phase.index).collect();
+    assert!(phases.is_sorted(), "{phases:?}");
+
+    assert_eq!(
+        engine.jobs(),
+        Vec::new(),
+        "the published compaction left the jobs"
+    );
+    let last = engine
+        .last_job(JobKind::Compaction)
+        .expect("the compaction's last record is kept");
+    assert_eq!(last.state, JobState::Finished);
+    assert_eq!(last.phase.index, last.phase.of);
 }
 
 /// The `v#####` prefixes under `root`, in order.
@@ -1144,7 +1195,7 @@ fn a_merge_cap_above_the_base_segment_is_obeyed() {
 
     // Every file a manifest names is present and digest-clean, which is what `open_bundle`
     // checks. The files beside them are the manifests themselves and the four segments the merge
-    // consumed, which stay until the next fold reclaims the prefix.
+    // consumed, which stay while a kept side-manifest still names them.
     open_bundle(&root).expect("the published prefix opens and verifies");
     let live: Vec<&str> = generation.bundle.only_shard().views["s0"]
         .segments
@@ -1170,9 +1221,11 @@ fn a_merge_cap_above_the_base_segment_is_obeyed() {
     // A generation or a session still held pins the prefix it was served from.
     drop((generation, session, revealed));
     fold(&restarted);
-    assert!(
-        !root.join("v00001").exists(),
-        "the next fold reclaims the merge's inputs"
+    // The next fold reclaims the merge's inputs with the prefix.
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00001").exists(),
     );
     let live: Vec<String> = restarted.generation().bundle.only_shard().views["s0"]
         .segments
@@ -2379,7 +2432,11 @@ fn the_dead_bytes_route_dispatches_a_fold_on_a_bundle_with_nothing_deleted() {
     );
     // And the fold did what the route dispatched it for: the superseded prefix is gone whole, so
     // what was dead is reclaimed rather than merely rewritten beside itself.
-    assert!(!root.join("v00000").exists());
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists(),
+    );
     let generation = engine.generation();
     let prefix = root.join(&generation.prefix);
     let partition = &generation.bundle.partitions["default"];
@@ -2655,8 +2712,11 @@ fn a_second_fold_publishes_a_third_prefix_and_reclaims_the_second() {
     assert_eq!(engine.generation().prefix, "v00001");
     fold(&engine);
     assert_eq!(engine.generation().prefix, "v00002");
-    assert!(!root.join("v00000").exists());
-    assert!(!root.join("v00001").exists());
+    wait_until(
+        "both superseded prefixes to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists() && !root.join("v00001").exists(),
+    );
 
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     assert_eq!(visible(&engine, &session), N_ITEMS);

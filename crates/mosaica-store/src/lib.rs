@@ -4,7 +4,6 @@
 
 pub mod access_column;
 pub mod bands;
-pub mod columns;
 pub mod coordinates;
 pub mod declaration;
 pub mod derived;
@@ -75,16 +74,17 @@ pub use layout::{
 };
 pub use manifest_write::{
     fsync_dir, fsync_written, prune_superseded_segments_manifests, stage_publication,
-    write_and_fsync, write_current, write_manifest_json, write_publication, StagedPublication,
-    SIDE_MANIFESTS_KEPT,
+    write_and_fsync, write_current, write_manifest_json, write_publication, Pruned,
+    StagedPublication, SIDE_MANIFESTS_KEPT,
 };
 pub use pairs::PairsParquetWriter;
 pub use permutation::{EntityBuckets, Permutation, RowEntities, RowSpace, SegmentExtent};
 pub use read::{
     database_of, first_code_at_or_past, hex, highest_published_n, highest_side_manifest_n,
-    newest_publication, open_bundle, open_written_prefix, open_written_prefix_carrying,
-    read_publication, tile_ranges, tile_ranges_all, tile_ranges_within, Bundle, ColumnsRef,
-    CutIndex, MortonSlice, PartitionData, ScalarSlice, SegmentData, ShardData, TileOrder, ViewData,
+    newest_publication, open_bundle, open_bundle_with_digests, open_written_prefix,
+    open_written_prefix_carrying, read_publication, tile_ranges, tile_ranges_all,
+    tile_ranges_within, Bundle, ColumnsRef, CutIndex, MortonSlice, PartitionData, ScalarSlice,
+    SegmentData, ShardData, TileOrder, ViewData,
 };
 pub use reclaim::{hard_link_forward, reclaim_prefix, reclaim_unpublished_prefix};
 pub use row_entity::{write_row_entity, RowToEntity, ROW_ENTITY_FILE};

@@ -45,15 +45,18 @@ pub struct EmptyShardWritten {
     pub segments: Vec<SegmentDescriptor>,
 }
 
-/// The kind a value column of `arrow_type` is written as: a keyword's ordinals and a text
-/// column's terms as `u32`, a category's codes at its width, and a number at its own.
+/// The kind a value column of `arrow_type` is written as, at the build, a flush and an empty
+/// shard alike: a keyword's ordinals and a category's `u16` and `u32` codes a block at a time, a
+/// `u8` category's codes flat, since a block can store them no narrower, and a number at its own
+/// width.
 pub fn value_column_kind(arrow_type: ScalarType, category: bool) -> mosaica_filter::ColumnKind {
     use mosaica_filter::ColumnKind;
     match arrow_type {
-        ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => ColumnKind::U32,
+        ScalarType::Keyword | ScalarType::Text | ScalarType::Utf8 => ColumnKind::Ordinals,
         ScalarType::U8 => ColumnKind::U8,
+        ScalarType::U16 if category => ColumnKind::Ordinals16,
         ScalarType::U16 => ColumnKind::U16,
-        _ if category => ColumnKind::U32,
+        _ if category => ColumnKind::Ordinals,
         ScalarType::Bool => ColumnKind::U8,
         ScalarType::U32 => ColumnKind::U32,
         ScalarType::U64 => ColumnKind::U64,
@@ -79,6 +82,7 @@ pub fn write_empty_value_column(
         &values,
         &dir.join(mosaica_filter::PRESENCE_FILE),
         value_column_kind(arrow_type, category),
+        Some(0),
     )
     .and_then(|writer| writer.finish(None))
     .map_err(io(&values))?;
@@ -348,18 +352,8 @@ impl Written<'_> {
         let segment_rel = layout.segment_rel(view.id, seg_id);
         let segment_dir = self.dir(&segment_rel)?;
 
-        let morton = segment_dir.join("morton.u32");
-        std::fs::File::create(&morton).map_err(io(&morton))?;
-        crate::write::CutWriter::create(&segment_dir)
-            .and_then(|cuts| cuts.finish())
-            .map_err(io(&segment_dir))?;
-        let columns = segment_dir.join("columns.arrow");
-        crate::columns::ColumnsPlan::new(&view.render, 0)
-            .and_then(|plan| crate::columns::ColumnsFile::create(&columns, plan))
-            .and_then(|file| file.finish())
-            .map_err(io(&columns))?;
-        crate::bands::BandWriter::create(&segment_dir, indexed)
-            .and_then(|bands| bands.finish(&segment_dir))
+        crate::write::SegmentWriter::create(&segment_dir, &view.render, indexed, 0)
+            .and_then(|writer| writer.finish())
             .map_err(io(&segment_dir))?;
         for name in crate::SEGMENT_FILES {
             self.push(format!("{segment_rel}/{name}"));

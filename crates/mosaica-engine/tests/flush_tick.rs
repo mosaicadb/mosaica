@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use common::*;
 use mosaica_lifecycle::ChangeOp;
+use mosaica_types::progress::{JobKind, JobState};
 use mosaica_types::EntityId;
 
 /// [`engine_with_tick`] with the row trigger set too — `flush_max_items`, §4.1's second trigger.
@@ -373,13 +374,12 @@ fn a_request_made_while_a_view_is_deferred_is_honoured_without_the_period() {
 /// open cycle inside the tick, with no publication to wake the executor again: only the re-armed
 /// request brings the promised cycle before the hour-long period.
 ///
-/// The flush is made to fail by a read-only segments directory. No fault switch fails a flush and
-/// lets it recover: a WAL fault leaves the overlay diverged and a step-down stays, and both refuse
-/// every later flush until a restart.
+/// The flush is made to fail by a file where the view's segments directory goes, which fails for
+/// every user, root included, where a read-only directory would not. No fault switch fails a flush
+/// and lets it recover: a WAL fault leaves the overlay diverged and a step-down stays, and both
+/// refuse every later flush until a restart.
 #[test]
 fn a_retry_that_finds_nothing_to_flush_still_reaches_the_promised_number() {
-    use std::os::unix::fs::PermissionsExt;
-
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("bundle");
     build_fixture(
@@ -390,14 +390,23 @@ fn a_retry_that_finds_nothing_to_flush_still_reaches_the_promised_number() {
     let engine = engine_with_tick(&tmp, &root, 3600);
     let entity = ingest(&engine, "failed-cycle");
 
+    // The served segments are already mapped, so moving their directory aside serves the same rows.
     let segments = segments_dir(&root, "s0");
-    let writable = std::fs::metadata(&segments).unwrap().permissions();
-    std::fs::set_permissions(&segments, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let aside = segments.with_extension("aside");
+    std::fs::rename(&segments, &aside).unwrap();
+    std::fs::write(&segments, b"not a directory").unwrap();
 
     let first = engine.request_flush_publication();
     wait_until("the flush fails", WAIT, || {
         engine.write_executor_stats().flush_failures >= 1
     });
+    wait_until("the failed flush's record ends", WAIT, || {
+        engine.jobs().is_empty()
+    });
+    let failed = engine
+        .last_job(JobKind::Flush)
+        .expect("its last record is kept");
+    assert_eq!(failed.state, JobState::Failed, "{failed:?}");
     let second = engine.request_flush_publication();
     assert_eq!(
         second,
@@ -408,7 +417,8 @@ fn a_retry_that_finds_nothing_to_flush_still_reaches_the_promised_number() {
     engine
         .accept_change(entity, ChangeOp::Delete)
         .expect("the deletion is accepted");
-    std::fs::set_permissions(&segments, writable).unwrap();
+    std::fs::remove_file(&segments).unwrap();
+    std::fs::rename(&aside, &segments).unwrap();
 
     wait_until("the retry closes the failed cycle", WAIT, || {
         engine.publication() >= first
@@ -453,6 +463,43 @@ fn an_engine_dropped_during_a_flush_abandons_it() {
     let engine = engine_with_tick(&tmp, &root, 3600);
     publish_buffered(&engine);
     assert_eq!(engine.write_executor_stats().flush_rows_published, 1);
+}
+
+/// A flush's progress record is among the engine's jobs while it runs, and leaves them finished
+/// once it has executed.
+#[test]
+fn a_flush_is_a_job_while_it_runs() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().join("bundle");
+    build_fixture(
+        &root,
+        &tmp.path().join("points.parquet"),
+        &tmp.path().join("pairs.parquet"),
+    );
+    let engine = engine_with_tick(&tmp, &root, 3600);
+    assert_eq!(engine.jobs(), Vec::new(), "nothing runs before the flush");
+    ingest(&engine, "flush-job");
+
+    engine.set_flush_paused_for_test(true);
+    engine.request_flush();
+    wait_until("the flush is held", WAIT, || {
+        engine.flush_is_holding_for_test()
+    });
+    let held = engine.jobs();
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(
+        (held[0].job, held[0].state),
+        (JobKind::Flush, JobState::Running)
+    );
+
+    engine.set_flush_paused_for_test(false);
+    wait_until("the flush to leave the jobs", WAIT, || {
+        engine.jobs().is_empty()
+    });
+    let last = engine
+        .last_job(JobKind::Flush)
+        .expect("its last record is kept");
+    assert_eq!(last.state, JobState::Finished);
 }
 
 /// The directory `view`'s flushed segments are written into.

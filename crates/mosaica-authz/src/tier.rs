@@ -25,10 +25,8 @@ use arrow::datatypes::{DataType, Field, Schema};
 
 use mosaica_types::TermId;
 
-use crate::postings::{
-    decode_single_batch, encode_posting, invalid_data, mapped_buffer, read_posting,
-    write_single_batch, PostingRef, RecordSpool,
-};
+use crate::arrow_file::{decode_single_batch, invalid_data, mapped_buffer, write_single_batch};
+use crate::postings::{encode_posting, read_posting, PostingRef, RecordSpool};
 
 const TERM_COLUMN_NAME: &str = "term_id";
 const POSTING_COLUMN_NAME: &str = "posting";
@@ -117,7 +115,7 @@ fn write_tier_entries<'a>(
     write_keyed_array(path, UInt32Array::from(terms), postings.finish())
 }
 
-/// [`crate::postings::write_single_batch`] with the keyed tier schema. Neither column carries a
+/// [`crate::arrow_file::write_single_batch`] with the keyed tier schema. Neither column carries a
 /// validity buffer.
 fn write_keyed_array(
     path: &Path,

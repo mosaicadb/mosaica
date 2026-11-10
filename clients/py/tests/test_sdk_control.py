@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import http.server
 import json
-import threading
 
 import pytest
 
+from conftest import serving
 from mosaica import _control
 from mosaica._control import (
     RETRY_BUDGET_S,
@@ -85,11 +85,9 @@ def waits(monkeypatch):
 
 
 def test_a_429_is_retried_after_its_retry_after_with_identical_bytes(waits):
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Backpressure)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    server, base = serving(_Backpressure)
     try:
-        control = Control(f"http://127.0.0.1:{server.server_port}", "credential")
+        control = Control(base, "credential")
         body = b"one page of rows"
         answer = control.ingest(body, batch_id("points", 0), view="s0")
     finally:
@@ -161,19 +159,12 @@ def test_a_timestamp_value_is_sent_as_its_microseconds_since_the_epoch(declared)
     assert declared.addresses(pd.DataFrame({"ts": [held[2]]})) == [{"ts": micros}]
 
 
-def serving():
-    """The fake plane, started, with its address."""
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Backpressure)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server, f"http://127.0.0.1:{server.server_port}"
-
-
 def test_a_429_that_never_lets_up_is_answered_before_the_waits_pass_the_budget(waits):
     """The request is sent again while the waits total at most `RETRY_BUDGET_S`; the `429` whose
     wait would take them past it is the answer, which a commit's report lists."""
     _Backpressure.refusals = 1_000
     _Backpressure.retry_after = "7"
-    server, base = serving()
+    server, base = serving(_Backpressure)
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
     finally:
@@ -196,7 +187,7 @@ def test_a_429_waits_its_header_then_its_body_then_one_second_and_never_less(
     _Backpressure.refusals = 1
     _Backpressure.retry_after = header
     _Backpressure.retry_after_s = body
-    server, base = serving()
+    server, base = serving(_Backpressure)
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
     finally:
@@ -210,7 +201,7 @@ def test_a_page_no_server_answered_is_sent_once_more_with_identical_bytes(waits)
     goes once more, as it was, after the one-second wait."""
     _Backpressure.refusals = 0
     _Backpressure.silences = 1
-    server, base = serving()
+    server, base = serving(_Backpressure)
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
     finally:
@@ -225,7 +216,7 @@ def test_a_page_unanswered_twice_is_an_answer_and_not_an_exception(waits):
     """A page sent once more and still unanswered is a refusal the report carries: whether it
     landed is the database's to say."""
     _Backpressure.silences = 3
-    server, base = serving()
+    server, base = serving(_Backpressure)
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
     finally:
@@ -241,7 +232,7 @@ def test_the_resend_takes_nothing_from_the_429_budget(waits):
     _Backpressure.silences = 1
     _Backpressure.refusals = 1_000
     _Backpressure.retry_after = "7"
-    server, base = serving()
+    server, base = serving(_Backpressure)
     try:
         answer = Control(base, "credential").ingest(b"rows", batch_id("points", 0))
     finally:
@@ -253,7 +244,7 @@ def test_the_resend_takes_nothing_from_the_429_budget(waits):
 
 def test_a_request_that_reaches_no_server_is_an_answer_and_not_an_exception(waits):
     """A request that never reached a server is a refusal the report carries."""
-    server, base = serving()
+    server, base = serving(_Backpressure)
     server.shutdown()
     server.server_close()
     answer = Control(base, "credential").changes([{"op": "delete", "match": {"mosaica_id": "1"}}])
@@ -274,7 +265,7 @@ def test_a_commit_whose_pages_reach_no_server_reports_it_and_does_not_raise(
         assert db.commit().ok
         db.insert("map", rows, x="x", y="y", access="access")
         # The operator plane this commit's pages go to is an address nothing is listening on.
-        server, base = serving()
+        server, base = serving(_Backpressure)
         server.shutdown()
         server.server_close()
         monkeypatch.setattr(Database, "control", property(lambda self: Control(base, "c")))

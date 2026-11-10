@@ -69,9 +69,11 @@
 //! ## Peak memory does not scale with row count
 //!
 //! *k* cursors (one mapped `(morton.u32, columns.arrow)` pair per live segment) plus
-//! [`SegmentWriter`]'s spool buffers, exactly as `execute_merge`. Nothing here accumulates a
-//! corpus-sized `Vec` — the one structure that would have (an entity-span-sized extent, as
-//! `execute_merge` builds) is what the mapped permutation writer replaces.
+//! [`SegmentWriter`]'s staging buffers, exactly as `execute_merge`, and the `u32` per surviving row
+//! of the row→entity table. The output segment is laid out before its first row for the rows the
+//! tombstones leave, which [`surviving_rows`] counts first. The one structure that would have been
+//! corpus-sized beyond that (an entity-span-sized extent, as `execute_merge` builds) is what the
+//! mapped permutation writer replaces.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -138,6 +140,8 @@ pub struct FoldRowSpaceSpec<'a> {
     /// `high_water` at the snapshot, not against the row count this pass will emit,
     /// which is smaller whenever any tombstone applies.
     pub permutation_bound: u64,
+    /// Where the rows read from the inputs are counted, dropped rows included.
+    pub progress: Option<&'a mosaica_types::progress::Tracker>,
 }
 
 /// What [`fold_row_space`] produced.
@@ -151,6 +155,31 @@ pub struct FoldRowSpaceOutput {
     /// entity named by `tombstones` that has no row anywhere in `inputs` costs nothing (see the
     /// module doc and `a_tombstone_naming_no_row_is_harmless` in the test suite).
     pub row_count: u32,
+}
+
+/// How many of the inputs' rows the tombstones leave: the rows the output segment is laid out
+/// for before the first is written. Each row's entity is the one the merge below reads, and the
+/// inputs are counted in parallel, each in chunks.
+fn surviving_rows(cursors: &[SegmentCursor], spec: &FoldRowSpaceSpec<'_>) -> Result<usize> {
+    use rayon::prelude::*;
+    const CHUNK: usize = 1 << 16;
+    let rows: usize = cursors.iter().map(|cursor| cursor.rows).sum();
+    if spec.tombstones.is_empty() {
+        return Ok(rows);
+    }
+    let dropped = cursors
+        .par_iter()
+        .flat_map(|cursor| {
+            (0..cursor.rows.div_ceil(CHUNK)).into_par_iter().map(move |chunk| {
+                let start = chunk * CHUNK;
+                (start..(start + CHUNK).min(cursor.rows)).try_fold(0usize, |dropped, row| {
+                    let entity = cursor.entity_at(row, spec.identity_key, spec.shard)?;
+                    Ok(dropped + usize::from(spec.tombstones.contains(entity.raw() as u32)))
+                })
+            })
+        })
+        .try_reduce(|| 0, |a, b| Ok(a + b))?;
+    Ok(rows - dropped)
 }
 
 /// Run the fold's row-space pass: merge every entry of `spec.inputs` into one new segment under
@@ -202,10 +231,11 @@ pub fn fold_row_space(
     // its entity are the same event, so a second pass could only disagree with this one. A `u32`
     // per surviving row — the same 4 GB per 10⁹ rows the permutation costs, and the reason the
     // filtered viewport can walk a tile without a Feistel per row.
-    let mut row_entity: Vec<u32> = Vec::new();
+    let rows = surviving_rows(&cursors, &spec)?;
+    let mut row_entity: Vec<u32> = Vec::with_capacity(rows);
 
-    let mut writer =
-        SegmentWriter::create(output_dir, spec.scalar_schema, spec.indexed).map_err(columns_io)?;
+    let mut writer = SegmentWriter::create(output_dir, spec.scalar_schema, spec.indexed, rows)
+        .map_err(columns_io)?;
     let mut permutation =
         PermutationWriter::create(permutation_path, spec.permutation_bound).map_err(perm_io)?;
 
@@ -260,7 +290,9 @@ pub fn fold_row_space(
     // anything computed before this row's drop decision. This is what makes the shift a dropped
     // row causes to every later row automatic rather than something tracked.
     let mut row_count: u32 = 0;
+    let mut read = mosaica_types::progress::Batched::new(spec.progress);
     while let Some(Reverse((morton, mosaica_raw, index))) = heap.pop() {
+        read.add(1);
         let cursor = &mut cursors[index];
         let row = cursor.row;
         let mosaica_id = MosaicaId::new(mosaica_raw);
@@ -436,6 +468,7 @@ mod tests {
                 absent_ok: &[],
                 tombstones,
                 permutation_bound: 8,
+                progress: None,
             },
         )
         .expect("fold")

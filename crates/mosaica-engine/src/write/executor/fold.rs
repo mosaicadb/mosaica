@@ -509,6 +509,23 @@ pub(in crate::write) struct Compactions {
     last: Option<ShardId>,
     /// The thread of the compaction dispatched last.
     thread: Option<CompactionThread>,
+    /// The request being answered, from the tick that takes it until it is answered.
+    answering: Option<Answering>,
+}
+
+/// What a request's answer is made from: the number its range of merged requests begins at, the
+/// compaction counters when a tick took it, and the refusal that answers it, where one does. Only
+/// the request's compactions run while it is answered, so the counters' rise is theirs.
+struct Answering {
+    first: u64,
+    folds: u64,
+    failures: u64,
+    refused: Option<RequestOutcome>,
+    /// Compactions ended when [`Self::job`] was last brought up to date.
+    ended: u64,
+    /// The record of the compaction that answers the request: the first that failed where one
+    /// did, and the last to end otherwise.
+    job: Option<mosaica_types::progress::Progress>,
 }
 
 /// A compaction's thread and the flag that abandons it. Dropping it raises the flag and joins the
@@ -1183,7 +1200,27 @@ impl Executor {
         {
             self.compactions.requested = None;
         }
+        self.note_compaction_ended();
         if self.compactions.requested.is_none() {
+            if let Some(answering) = self.compactions.answering.take() {
+                let failures = self.health.fold_failures.load(Ordering::SeqCst);
+                let folds = self.health.folds.load(Ordering::SeqCst);
+                let outcome = match answering.refused {
+                    Some(refused) => refused,
+                    None if failures > answering.failures => RequestOutcome::Failed,
+                    None if folds > answering.folds => RequestOutcome::Compacted,
+                    None => RequestOutcome::NothingToDo,
+                };
+                self.health.keep_answer(RequestAnswer {
+                    first: answering.first,
+                    last: self.compactions.requested_through,
+                    outcome,
+                    job: answering.job,
+                });
+                self.health
+                    .compaction_serving_through
+                    .store(0, Ordering::SeqCst);
+            }
             self.health
                 .compaction_requests_answered
                 .fetch_max(self.compactions.requested_through, Ordering::SeqCst);
@@ -1249,16 +1286,88 @@ impl Executor {
         }
     }
 
+    /// Take the request numbered `request`, merged into the one being answered where there is one.
+    fn take_request(&mut self, request: u64) {
+        self.compactions.requested_through = request;
+        self.health
+            .compaction_serving_through
+            .store(request, Ordering::SeqCst);
+        if self.compactions.answering.is_none() {
+            let folds = self.health.folds.load(Ordering::SeqCst);
+            let failures = self.health.fold_failures.load(Ordering::SeqCst);
+            self.compactions.answering = Some(Answering {
+                first: self
+                    .health
+                    .compaction_requests_answered
+                    .load(Ordering::SeqCst)
+                    + 1,
+                folds,
+                failures,
+                refused: None,
+                ended: folds + failures,
+                job: None,
+            });
+        }
+    }
+
+    /// Keep the record of a compaction of the request being answered that has ended since the
+    /// last look. Called with no compaction in flight, before the next is dispatched and when the
+    /// request is answered, so the last record to end is that compaction's. A failed record is
+    /// kept over any later one.
+    fn note_compaction_ended(&mut self) {
+        if self.fold.outstanding() {
+            return;
+        }
+        let Some(answering) = &mut self.compactions.answering else {
+            return;
+        };
+        let ended = self.health.folds.load(Ordering::SeqCst)
+            + self.health.fold_failures.load(Ordering::SeqCst);
+        if ended == answering.ended {
+            return;
+        }
+        answering.ended = ended;
+        let failed = |job: &Option<mosaica_types::progress::Progress>| {
+            job.as_ref()
+                .is_some_and(|job| job.state == mosaica_types::progress::JobState::Failed)
+        };
+        if !failed(&answering.job) {
+            answering.job = self
+                .health
+                .jobs
+                .last_ended(mosaica_types::progress::JobKind::Compaction);
+        }
+    }
+
+    /// Record that `reason` refused `shard` of the request being answered, or the whole request
+    /// where `shard` is `None`. A shard with nothing to compact refuses nothing the request asked
+    /// for.
+    fn refuse_requested(&mut self, reason: crate::compact::NoFold, shard: Option<ShardId>) {
+        if reason == crate::compact::NoFold::NothingToFold {
+            return;
+        }
+        if let Some(answering) = &mut self.compactions.answering {
+            let (gate, need_bytes, had_bytes) = reason.gauge();
+            answering.refused.get_or_insert(RequestOutcome::Refused {
+                gate,
+                detail: reason.detail(),
+                shard,
+                need_bytes,
+                had_bytes,
+            });
+        }
+    }
+
     /// Answer the request held or being worked through with `reason`, a state that stops this node
     /// publishing until a restart.
     fn refuse_request_unpublishable(&mut self, reason: crate::compact::NoFold) {
         if let Some(request) = self.health.take_compaction_request() {
-            self.compactions.requested_through = request.request;
+            self.take_request(request.request);
         } else if self.compactions.requested.is_none() {
             return;
         }
-        self.health
-            .record_fold_refusal(reason, Some((self.compactions.requested_through, None)));
+        self.health.record_fold_refusal(reason);
+        self.refuse_requested(reason, None);
         self.compactions.requested = None;
         self.request_answered();
         tracing::warn!(
@@ -1303,7 +1412,7 @@ impl Executor {
         }
         // A request is resolved to its shards at this tick, against the gauges as they stand.
         if let Some(request) = self.health.take_compaction_request() {
-            self.compactions.requested_through = request.request;
+            self.take_request(request.request);
             let shards = self.requested_shards(generation, request);
             match &mut self.compactions.requested {
                 Some(left) => {
@@ -1345,9 +1454,10 @@ impl Executor {
             Err(reason) => {
                 // Recorded before the request is answered, so a caller that reads it answered
                 // finds the refusal.
-                let answering = matches!(from, Dispatching::Requested)
-                    .then_some((self.compactions.requested_through, Some(shard_id)));
-                self.health.record_fold_refusal(reason, answering);
+                self.health.record_fold_refusal(reason);
+                if matches!(from, Dispatching::Requested) {
+                    self.refuse_requested(reason, Some(shard_id));
+                }
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
                 tracing::warn!(
@@ -1399,12 +1509,22 @@ impl Executor {
                 })
                 .collect()
         };
+        // The compaction is in flight, and its record listed, from here, so a failure to name its
+        // prefix is the record's failure too.
+        let rows = plan.views.iter().map(|view| view.rows).sum();
+        let stairs = crate::compact::Staircase::start(shard_id, rows);
+        let unit = self
+            .fold
+            .start_recorded(&self.health.jobs, Arc::clone(stairs.record()));
         let to_prefix = match crate::compact::next_prefix_name(&self.deps.bundle_root) {
             Ok(prefix) => prefix,
             Err(e) => {
+                // Counted before the record ends and the request is answered, so the answer is a
+                // failure.
+                self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
+                drop(unit);
                 self.compaction_taken(shard_id, from);
                 self.request_answered();
-                self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(error = %e, "could not name a new prefix for the fold");
                 return;
             }
@@ -1482,7 +1602,6 @@ impl Executor {
         self.health
             .compaction_shard
             .store(shard_id.raw(), Ordering::SeqCst);
-        let unit = self.fold.start();
         let health = Arc::clone(&self.health);
         let switches = Arc::clone(&self.deps.switches);
         let abandoned = Arc::clone(&ctx.abandoned);
@@ -1491,7 +1610,20 @@ impl Executor {
             .spawn(move || {
                 let abandoned = Arc::clone(&ctx.abandoned);
                 let to_prefix_dir = ctx.to_prefix_dir.clone();
-                let outcome = crate::compact::execute(plan, ctx);
+                // A pass that panics fails the compaction as an error does.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // Test hook; always false otherwise. See `Engine::panic_next_fold_for_test`.
+                    if switches.fold_panics.swap(false, Ordering::SeqCst) {
+                        panic!("the test hook made the compaction panic");
+                    }
+                    crate::compact::execute(plan, ctx, stairs)
+                }))
+                .unwrap_or_else(|panic| {
+                    Err(crate::flush::MaintenanceFailed(format!(
+                        "a pass of the compaction panicked: {}",
+                        crate::engine::panic_message(panic.as_ref())
+                    )))
+                });
                 // Test hook; always false otherwise. See `Engine::set_fold_paused_for_test`.
                 if outcome.is_ok() {
                     health.fold_holding.store(true, Ordering::SeqCst);
@@ -1515,7 +1647,7 @@ impl Executor {
                 }
                 match outcome {
                     Ok(mut completed) => {
-                        completed.finished = std::time::Instant::now();
+                        completed.stairs.enter(crate::compact::Pass::HandOff, None);
                         // Before the in-flight flag clears, so a tick that observes the fold
                         // finished also observes when. See `fold_floor_from`.
                         health
@@ -1556,7 +1688,9 @@ impl Executor {
                 }
             }
             Err(e) => {
-                // The closure was dropped without running, which cleared the in-flight flag.
+                // The closure was dropped without running, which cleared the in-flight flag and
+                // ended its record failed before the failure is counted here. No request is
+                // answered in between: the executor answers only on this thread, at a later tick.
                 self.health.fold_failures.fetch_add(1, Ordering::Relaxed);
                 tracing::error!(error = %e, "the OS refused a thread for the compaction fold");
             }
@@ -1575,8 +1709,8 @@ impl Executor {
             return false;
         }
         let mut any = false;
-        while let Some(completed) = self.fold.next_completed() {
-            self.publish_fold(completed);
+        while let Some((completed, job)) = self.fold.next_completed() {
+            self.publish_fold(completed, job);
             any = true;
         }
         if any {
@@ -1835,15 +1969,17 @@ impl Executor {
     /// orphans, every consumed artefact still stands, and the next trigger re-plans. A failure
     /// after the flip is alarmed instead: the bundle on disc is the new one, but this process goes
     /// on serving the old geometry it still holds mapped, until restarted.
-    pub(super) fn publish_fold(&mut self, completed: crate::compact::CompletedFold) {
+    ///
+    /// `job` is the compaction's record, finished once it publishes and failed by a discard.
+    pub(super) fn publish_fold(
+        &mut self,
+        completed: crate::compact::CompletedFold,
+        job: Option<crate::write::Job>,
+    ) {
         let started = std::time::Instant::now();
-        let mut stairs =
-            crate::compact::Staircase::resume(completed.cost.clone(), completed.finished);
+        let mut stairs = completed.stairs.clone();
         let live = self.generation.load_full();
         let plan = &completed.plan;
-        if !self.may_publish() {
-            return;
-        }
         // One closure for every discard below, since each is the same posture: nothing happened,
         // the files are orphans, the next trigger re-plans.
         let discard = {
@@ -1859,6 +1995,10 @@ impl Executor {
                 );
             }
         };
+        if let Some(gate) = self.health.unpublishable() {
+            discard(gate.detail());
+            return;
+        }
 
         let FoldApplies {
             forward,
@@ -1896,7 +2036,7 @@ impl Executor {
         // prefix rather than carried forward or dropped. `repack_all` drops exactly the executed
         // deletions: a suppressed member keeps its bit (Rule S).
         let to_prefix_dir = self.deps.bundle_root.join(&completed.prefix);
-        stairs.record("6 hand-off");
+        stairs.enter(crate::compact::Pass::Memberships, None);
         // An artifact deletion this shard must remove leaves its slice here. One no other shard
         // still holds is executed: an artifact has no rows, and its record, content and members
         // leave the files this compaction writes. One another shard holds stays, denied, until
@@ -1952,7 +2092,7 @@ impl Executor {
                 }
             };
 
-        stairs.record("7 memberships");
+        stairs.enter(crate::compact::Pass::Derived, None);
 
         // The levels the retirement below is about to move, and has not yet
         // ([`PendingRetirement`]): the store still holds pre-retirement records, so a level in the
@@ -1969,7 +2109,7 @@ impl Executor {
             others: rewritten,
             moved,
         } = self.write_fold_derived(&live, &to_prefix_dir, &completed, manifest_n, &pending);
-        stairs.record("8 derived");
+        stairs.enter(crate::compact::Pass::Report, None);
 
         // ---- the report, before anything retires ---------------------------------------------------
         //
@@ -1979,7 +2119,7 @@ impl Executor {
         let degraded = self
             .live
             .with_artifacts(|store| store.degradations(&pending.retired));
-        stairs.record("9 report");
+        stairs.enter(crate::compact::Pass::Manifest, None);
 
         // ---- assemble `SEGMENTS-<n>` from the live partition manifest ------------------------------
         //
@@ -2423,7 +2563,7 @@ impl Executor {
             ));
             return;
         }
-        stairs.record("10 manifest");
+        stairs.enter(crate::compact::Pass::Flip, None);
 
         self.pause_point(PauseSiteArg::BeforeCurrentFlip);
         if let Err(e) = mosaica_store::write_current(
@@ -2434,7 +2574,7 @@ impl Executor {
             discard(&format!("CURRENT would not flip ({e})"));
             return;
         }
-        stairs.record("11 flip");
+        stairs.enter(crate::compact::Pass::Retire, None);
 
         // Retires the resident store here, before the new generation is installed: the published
         // overlay already carries the executed deletions retired, so retiring after would leave a
@@ -2493,7 +2633,7 @@ impl Executor {
             .map(|record| record.deltas.clone())
             .unwrap_or_default();
         *lock_recover(&self.health.last_fold_report) = degraded;
-        stairs.record("12 retire");
+        stairs.enter(crate::compact::Pass::Open, None);
 
         let segments_version = live.segments_version + 1;
         if let Err(reason) = self.swap_onto_folded_prefix(
@@ -2512,7 +2652,7 @@ impl Executor {
         let mut generations =
             std::mem::take(&mut *self.superseded.lock().unwrap_or_else(|e| e.into_inner()));
         generations.push(Arc::downgrade(&live));
-        stairs.record("13 open");
+        stairs.enter(crate::compact::Pass::Adopt, None);
 
         // Only the files written over a view's live incarnation, as an open adopts them.
         let swapped = self.generation.load();
@@ -2539,14 +2679,14 @@ impl Executor {
                 &enumerated,
             )
         });
-        stairs.record("14 adopt");
+        stairs.enter(crate::compact::Pass::Warm, None);
 
         // Must run after both the swap and the retire above: built before the swap, a projection
         // would be keyed to a generation no reader can ask for; built before the retire, it would
         // be keyed to a store version the retire is about to bump, discarding the warm.
         self.warm_artifact_caches();
         self.deps.shapes.clear_staged();
-        stairs.record("15 warm");
+        stairs.enter(crate::compact::Pass::Wal, None);
 
         // ---- rotate the WAL ---------------------------------------------------------------------
         //
@@ -2563,7 +2703,7 @@ impl Executor {
             compacted.with_allocator(|alloc| alloc.release_after(freed.position, freeing.ids));
         }
         self.rotate_wal();
-        stairs.record("16 wal");
+        stairs.enter(crate::compact::Pass::Reclaim, None);
         self.live.with_attributes(|attributes| {
             attributes.retire_folded(&folded.entity, &folded.scoped)
         });
@@ -2582,11 +2722,13 @@ impl Executor {
         drop(live);
         self.pending_reclaim.push(PendingReclaim {
             generations,
-            prefix_dir: from_prefix_dir,
+            unread: Unread::Prefix(from_prefix_dir),
         });
-        self.reclaim_superseded_prefixes();
-        stairs.record("17 reclaim");
-        let cost = stairs.into_cost();
+        self.reclaim_released();
+        let cost = stairs.finish();
+        if let Some(job) = job {
+            job.finish();
+        }
 
         let (passes, fold_secs, staircase_rss) = self.health.record_fold_cost(
             shard_id,
@@ -2744,40 +2886,70 @@ impl Executor {
         .map_err(|e| format!("the swap was refused ({e})"))
     }
 
-    /// Delete every superseded prefix nothing is reading any more.
+    /// Queue `rels`, files under `prefix_dir` that no side-manifest on disc names any more, for
+    /// deletion once every generation that may name them is released: those replaced since the
+    /// last fold's publication, and `live`.
+    pub(super) fn reclaim_when_released(
+        &mut self,
+        live: &Arc<Generation>,
+        prefix_dir: &Path,
+        rels: Vec<String>,
+    ) {
+        if rels.is_empty() {
+            return;
+        }
+        let mut generations = self
+            .superseded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        generations.push(Arc::downgrade(live));
+        self.pending_reclaim.push(PendingReclaim {
+            generations,
+            unread: Unread::Files(rels.iter().map(|rel| prefix_dir.join(rel)).collect()),
+        });
+    }
+
+    /// Delete every superseded prefix and every unnamed file nothing is reading any more.
     ///
-    /// Waits for every generation published over the prefix to be released before unlinking: the
-    /// generation pointer has already moved, so no new holder can appear.
+    /// Waits for every generation that may resolve a path to it to be released before unlinking:
+    /// the generation pointer has already moved, so no new holder can appear. Files also wait
+    /// while a compaction is outstanding, since it reads by path what its plan named and holds no
+    /// generation; a merge or a coalesce reads only what the newest manifest still names.
     ///
-    /// A failure alarms once and drops the entry rather than retrying every tick; the tree stands
-    /// as an orphan.
-    pub(super) fn reclaim_superseded_prefixes(&mut self) {
+    /// A failure alarms once and drops the entry rather than retrying every tick; what it names
+    /// stands as an orphan until the next compaction's prefix removal.
+    pub(super) fn reclaim_released(&mut self) {
         if self.pending_reclaim.is_empty() {
             return;
         }
+        let compacting = self.fold_outstanding();
         let mut still_read = Vec::new();
         for pending in std::mem::take(&mut self.pending_reclaim) {
             if pending
                 .generations
                 .iter()
                 .any(|held| held.strong_count() > 0)
+                || (compacting && matches!(pending.unread, Unread::Files(_)))
             {
                 still_read.push(pending);
                 continue;
             }
-            let prefix_dir = pending.prefix_dir;
-            match mosaica_store::reclaim_prefix(&prefix_dir) {
-                Ok(()) => tracing::info!(
-                    prefix = %prefix_dir.display(),
-                    "the superseded prefix is reclaimed: the build's base, every merged-away \
-                     segment, every consumed tier and every superseded side-manifest"
-                ),
-                Err(e) => tracing::error!(
-                    error = %e,
-                    prefix = %prefix_dir.display(),
-                    "ALARM: the superseded prefix could not be reclaimed and stands as an orphan. \
-                     Nothing live was unlinked; what is lost is the disc the fold exists to free"
-                ),
+            match pending.unread {
+                Unread::Files(paths) => remove_unnamed(&paths),
+                // Its own thread: unlinking a prefix is IO in proportion to the corpus, and this
+                // thread answers every write. One cut short by an exit is the startup sweep's.
+                Unread::Prefix(prefix_dir) => {
+                    let spawned = std::thread::Builder::new()
+                        .name("mosaica-reclaim".into())
+                        .spawn({
+                            let prefix_dir = prefix_dir.clone();
+                            move || reclaim_prefix(&prefix_dir)
+                        });
+                    if spawned.is_err() {
+                        reclaim_prefix(&prefix_dir);
+                    }
+                }
             }
         }
         self.pending_reclaim = still_read;
@@ -3897,11 +4069,63 @@ pub(super) fn fold_segments(
     out
 }
 
-/// One superseded prefix awaiting reclamation, and the generations published over it, whose
-/// release says no thread can still resolve a path inside it. See [`Executor::superseded`].
+/// Delete a prefix a fold superseded and nothing reads, logging the outcome.
+fn reclaim_prefix(prefix_dir: &Path) {
+    match mosaica_store::reclaim_prefix(prefix_dir) {
+        Ok(()) => tracing::info!(
+            prefix = %prefix_dir.display(),
+            "the superseded prefix is reclaimed: the build's base, every merged-away segment, \
+             every consumed tier and every superseded side-manifest"
+        ),
+        Err(e) => tracing::error!(
+            error = %e,
+            prefix = %prefix_dir.display(),
+            "ALARM: the superseded prefix could not be reclaimed and stands as an orphan. Nothing \
+             live was unlinked; what is lost is the disc the fold exists to free"
+        ),
+    }
+}
+
+/// Delete each of `paths`, alarming once if any cannot be. One already gone was taken with its
+/// prefix. Directories are left, since a writer may be creating a file in one; the next
+/// compaction's prefix removal takes them.
+fn remove_unnamed(paths: &[PathBuf]) {
+    let mut failed = 0usize;
+    let mut first = None;
+    for path in paths {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                failed += 1;
+                first.get_or_insert((path.clone(), e));
+            }
+        }
+    }
+    if let Some((path, error)) = first {
+        tracing::error!(
+            failed,
+            path = %path.display(),
+            error = %error,
+            "ALARM: files no manifest names could not be deleted and stand as orphans until the \
+             next compaction removes the prefix"
+        );
+    }
+}
+
+/// What awaits reclamation, and the generations that may still resolve a path to it, whose
+/// release says no thread can. See [`Executor::superseded`].
 pub(in crate::write) struct PendingReclaim {
     generations: Vec<std::sync::Weak<Generation>>,
-    prefix_dir: PathBuf,
+    unread: Unread,
+}
+
+/// What a [`PendingReclaim`] deletes.
+enum Unread {
+    /// A prefix a fold superseded, deleted whole.
+    Prefix(PathBuf),
+    /// Files in the live prefix no side-manifest on disc names any more.
+    Files(Vec<PathBuf>),
 }
 
 /// Seconds since the Unix epoch, or `None` if the clock is before it.

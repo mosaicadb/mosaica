@@ -33,7 +33,7 @@ Each cache has a limit you can set under `[serve]` in `mosaica.toml`:
 | `masked_count_cache_bytes` | 1 GiB | The counts, centroids and boxes of annotation levels served from a column, as each set of attributes sees them, and the tallies of number and timestamp fields. Empty without such a level |
 | `figures_disk_bytes` | 8 GiB | The same counts, kept on disc in the cache directory so that a restart reads them back |
 | `region_cache_bytes` | 256 MiB | Drawn filter regions broken into map tiles, shared between viewers |
-| `text_filter_cache_bytes` | 256 MiB | The items each `match` and `phrase` filter matches, for each set of access attributes, until the next flush, coalesce or compaction. An entry is about 12 MB at 100 million items for a phrase that half of them contain, and each request in flight can hold one more beside the limit |
+| `filter_cache_bytes` | 1 GiB | The items each filter condition matches (a `match`, a `phrase`, or a range, `eq` or `in` on a column), for each set of access attributes, until the next flush, coalesce or compaction. An entry is about 12 MB at 100 million items for a condition half of them match, scattered. Each request in flight can hold one more beside the limit. A filter answered over the whole map also keeps the map rows of the items it matches, and a condition on a rendered column read from the map's rows keeps the rows read so far and their matches, so a pan reads only what it brings into view |
 | `occupancy_cache_bytes` | 32 MiB | How many tiles at each zoom hold something a set of access attributes can see |
 
 Beside these, the server keeps what it subtracts and adds on each request for deleted, suppressed and newly ingested items, and the labels of denied rows, under fixed limits that come to 1.5 GiB. The paged reads, `POST /v1/items` and `POST /v1/artifacts`, share one more: two may run at once (`bulk_admission`), each holding up to seven pages of at most 64 MiB (`max_page_bytes`). The server logs what that comes to when it starts, as `bulk_read_memory_bytes=939524096`.
@@ -71,12 +71,12 @@ The count takes longer the more of the database the attributes admit, and a requ
 
 Plan disc space for four things:
 
-- **The bundle.** Deleted and edited rows stay in it until a compaction, which by default starts once they're a fifth of all rows. Merging segments also leaves files behind, and a compaction starts once those take as much space as the files the bundle uses. So a bundle can reach about twice its live size before a compaction reclaims it, and a little more in the day after one, since compactions are at least a day apart.
+- **The bundle.** Deleted and edited rows stay in it until a compaction, which by default starts once they're a fifth of all rows, so a bundle can reach about a quarter more than its live size before a compaction reclaims it. The files a merge replaces are deleted a few publications later, once no request is still reading them, so merging adds little to that.
 - **Room for a compaction**, which needs free space of one and a half times the size of the files the bundle uses. Without it the compaction is refused. In a bundle of several shards, each shard is compacted on its own, so the space needed is that of the largest.
 - **The cache directory**, which holds work the server can redo. The saved counts are bounded by `figures_disk_bytes`, 8 GiB by default. The copies of each distinct set of access attributes' visible items aren't bounded: they grow with the number of such sets, and with each flush, until the next compaction removes them.
 - **The write-ahead log**, which holds every change since the last flush, so it usually stays small. An annotation level that has grown or been filled holds the log until the next compaction, and `wal_pin` in `/control/status` says what is holding it.
 
-Taken together, a database that's written to and compacted on the default schedule needs about three and a half times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache. [Schedule compactions](compaction.md) explains when compactions run.
+Taken together, a database that's written to and compacted on the default schedule needs about three times its live bundle size, plus the cache. A database you only build and read needs the bundle and the cache. [Schedule compactions](compaction.md) explains when compactions run.
 
 Keep the bundle and the log on a local disc. A fast SSD matters most when the bundle doesn't fit in memory, since every read the page cache misses goes to disc.
 

@@ -35,6 +35,7 @@ The other flags override `mosaica.toml` or tune the build.
 | `--memory-budget` | `SIZE` | derived | Peak memory for the build's own structures, in bytes or with a `k`, `m` or `g` suffix, such as `24g`. Default: 80% of the available memory or of the process's cgroup limit, whichever is lower, kept between 2 GiB and 1 TiB, and 24 GiB where available memory cannot be read. Batch and band sizes follow from it. A build that would not fit is refused before it assigns internal ids, with the arithmetic in the message. |
 | `--stage-timings` |  |  | Print each build stage's wall time, row count and peak resident memory to stderr as the stage ends. Peak resident memory is the process's high-water mark when the stage ended, so it shows the stage in which the peak was reached. |
 | `--stage-timings-json` | `PATH` |  | Write the per-stage records to this file as JSON when the build ends, including one that fails partway. One object per stage, in order, with `stage`, `wall_s`, `rows`, `peak_rss_kib`, `started_at` and `ended_at`. It does not need `--stage-timings`. |
+| `--progress` | `MODE` | `auto` | Show the build's progress on stderr: its phase, the step running, the step's count, rate and time remaining, the time elapsed and resident memory. `bar` redraws two lines in place. `plain` prints a line when a step begins, a line with its final count when it ends, and a line every 30 seconds while it runs, with no terminal control codes. `json` prints one progress record per line when a step begins, when it ends and at most once a second while it runs. Each mode ends with a record whose state is `finished` or `failed`. `none` prints nothing. `auto` is `bar` when stderr is a terminal and `plain` otherwise. |
 
 ## `mosaica check`
 
@@ -65,7 +66,7 @@ mosaica verify [OPTIONS] <BUNDLE>
 
 Verify a bundle's files and every row's `mosaica_id`.
 
-It opens the bundle as the server does. That checks every manifest digest, the size and SHA-256 of every file except the unique indexes' runs, and that each segment's permutation maps one-to-one onto its rows. `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows the segments claim, and computes each row's `mosaica_id` again from the identity key, failing on the first row that differs.
+It checks every manifest digest, the size and SHA-256 of every file except the unique indexes' runs, and that each segment's permutation maps one-to-one onto its rows. `--deep` hashes those runs too. It then confirms that the row space holds exactly the rows the segments claim, and computes each row's `mosaica_id` again from the identity key, failing on the first row that differs. A server opening the bundle checks the sizes and the permutations, and hashes only the few files it reads without checking their structure: hashing every file would read the whole bundle at every start.
 
 It also prints to stderr each indexed keyword column's count of distinct values against its rows, with a warning for a column whose values are unique per row. A warning does not fail the verify.
 
@@ -188,7 +189,7 @@ mosaica aggregate [OPTIONS] --view <VIEW> --grouping <JSON> --server <URL>
 
 Count how the items a session token may see in one view are distributed, by one grouping, from a running server, and write the table as Arrow IPC or Parquet.
 
-The grouping is `POST /v1/aggregate`'s, as JSON, and names its figures: `"count": true` counts the items in each row, so `{"count": true}` is the size of the set. With it, `"by": {"field": "venue", "top": 10}` gives the ten commonest values of a category field; `"by": {"field": "year", "bins": 20}` a histogram of a number or timestamp field, and with `"sample": 100000` one counted over about that many of the set's items and scaled to it; `"by": {"layer": "clusters", "top": 10}` the largest artifacts of a layer, and on a `nested` or `dag` layer `"by": {"layer": "topics", "top": 10, "cut": {"zoom": 3, "bbox": [0, 0, 100, 100], "budget": 1000}}` the largest of those the map draws at that tile depth, box and cluster budget, and with `"palette_size": 10` beside `layer` a `slot` column, each artifact's colour among ten; `"cells": {"depth": 8}` a density surface. `{"summary": ["year"]}` is one row of a number or timestamp field's `values_year`, `missing_year`, `min_year`, `max_year` and `mean_year` over every item the token may see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each; they take no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and written, as `mosaica items` carries and writes one. The table's head, with the set's total, is printed on stderr at the end.
+The grouping is `POST /v1/aggregate`'s, as JSON, and names its figures: `"count": true` counts the items in each row, so `{"count": true}` is the size of the set. With it, `"by": {"field": "venue", "top": 10}` gives the ten commonest values of a category field; `"by": {"field": "year", "bins": 20}` a histogram of a number, timestamp or bool field, and with `"sample": 100000` one counted over about that many of the set's items and scaled to it; `"by": {"layer": "clusters", "top": 10}` the largest artifacts of a layer, and on a `nested` or `dag` layer `"by": {"layer": "topics", "top": 10, "cut": {"zoom": 3, "bbox": [0, 0, 100, 100], "budget": 1000}}` the largest of those the map draws at that tile depth, box and cluster budget, and with `"palette_size": 10` beside `layer` a `slot` column, each artifact's colour among ten; `"cells": {"depth": 8}` a density surface. `{"summary": ["year"]}` is one row of a number, timestamp or bool field's `values_year`, `missing_year`, `min_year`, `max_year` and `mean_year` over every item the token may see in the view, and `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each; they take no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and written, as `mosaica items` carries and writes one. The table's head, with the set's total, is printed on stderr at the end.
 
 For example, `mosaica aggregate --server http://127.0.0.1:8080 --view papers --grouping '{"count": true, "by": {"field": "submitted_at", "bins": 12}}' --format ipc > submitted.arrows`.
 
@@ -353,6 +354,7 @@ For example, `mosaica insert --control http://127.0.0.1:8082 --view papers paper
 | `--page-rows` | `N` | derived | The most rows in one request, above 0. Default: `limits.ingest.max_batch_rows` from `/control/status`, or 10,000 with `--vocabulary`; where the credential cannot read `/control/status`, the server's documented default, 10,000. The figures used are printed on stderr. |
 | `--page-bytes` | `SIZE` | derived | The most bytes in one request body, above 0, in bytes or with a `k`, `m` or `g` suffix. A page whose body is larger is split in half until each part fits. Default: `limits.ingest.max_batch_bytes` from `/control/status`, or `limits.declarations.max_body_bytes` with `--vocabulary`; where the credential cannot read `/control/status`, the server's documented default, 16 MiB, or 2 MiB with `--vocabulary`. |
 | `--wait` |  |  | Once every page is sent, send `POST /control/flush?wait=visible`, and end once readers see the rows, or after the server's `serve.visible_wait_max_secs` with `visible` false. Without it the rows become visible at the server's next publication. |
+| `--progress` | `MODE` | `auto` | Show the insert's progress on stderr: the page being sent, the rows sent out of the rows in the file where its format says how many, the rate and time remaining, the time elapsed and resident memory, and then the wait for the publication under `--wait`. The modes are `mosaica build --progress`'s. Each mode ends with a record whose state is `finished`, or `failed` when a request was refused or went unanswered. A Parquet file says how many rows it holds, and an Arrow IPC or NDJSON file does not, so their pages are shown without a total. |
 | `--ids-out` | `PATH` |  | Write each row's `mosaica_id` to this file, ending in `.arrows` or `.parquet`: the columns `row`, its position in the input from 0, and `mosaica_id`, null for a row that was refused or whose page was. |
 
 ## `mosaica delete`
@@ -511,16 +513,19 @@ A publication is when buffered writes become visible to readers. The answer's `p
 ## `mosaica compact`
 
 ```text
-mosaica compact --control <ADDRESS>
+mosaica compact [OPTIONS] --control <ADDRESS>
 ```
 
 Ask for a compaction through `POST /control/compact`, and print the server's answer, the request's number in `request`.
 
-A compaction removes deleted items' rows from disc, one shard after another, and runs for minutes to hours on a large corpus. `mosaica status` reports it under `compaction.requests`, where `answered` reaches the request's number once it is answered. Needs `write`, and the credential is read from `MOSAICA_CREDENTIAL`.
+A compaction removes deleted items' rows from disc, one shard after another, and runs for minutes to hours on a large corpus. `GET /control/compact/{request}` says whether the request is answered, how, and with the progress record of its compaction, which `--wait` reads, and `--request` reads a request already made. Needs `write`, and with `--wait` or `--request` also `admin`, and the credential is read from `MOSAICA_CREDENTIAL`.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--control` | `ADDRESS` |  | The control plane's address: `http://<host>:<port>`, or `unix:<path>` for a Unix socket. |
+| `--request` | `N` |  | Ask for nothing, and read the request with this number instead: print what `GET /control/compact/{request}` answers, or with `--wait` wait for it. |
+| `--wait` |  |  | Wait until the request is answered, reading `GET /control/compact/{request}` once a second, then print the route's answer on stdout in place of the request's number, which a line on stderr names. Its `answer.outcome` tells a compaction from a request with nothing to compact. It exits 1 when the server refused the request, when a compaction for it failed, and when the server restarted after the request was made and so lost it, and prints the server's detail on stderr. |
+| `--progress` | `MODE` | `auto` | Show the progress of the compaction in flight while `--wait` waits, on stderr, from the record `GET /control/compact/{request}` serves: its phase, its step and the shard, the step's count, rate and time remaining, the time elapsed and the server's resident memory. The modes are `mosaica build --progress`'s, except that a step's end is not seen, so no line is printed for it. Where a compaction ran for the request, each mode ends with that compaction's last record as the route serves it, its state `finished` or `failed`. |
 
 ## `mosaica status`
 
