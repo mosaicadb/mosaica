@@ -216,13 +216,13 @@ pub(crate) fn encode_entity(
     anchor
 }
 
-/// Reads a term's entities in the run format from their bytes, in pieces of any size, finding
-/// where each begins: what a run's writer takes its checkpoints by, and what a held term's chain is
-/// weighed by. A held chain's segments ([`crate::TermAccumulator`]) are read where `segments` says,
-/// a zero gap there marking an entity given whole. It decodes only what it must, the gaps and the
-/// occurrence counts, and refuses nothing: what it reads was encoded here, and a reader checks it.
+/// Reads a term's entities in a text run's format from their bytes, in pieces of any size, finding
+/// where each begins: what a run's writer takes the checkpoints of a body by where it is not told
+/// where its entities begin, and what a held term's chain is weighed by. A held chain's segments
+/// ([`crate::TermAccumulator`]) are read where `segments` says, a zero gap there marking an entity
+/// given whole. It decodes only what it must, the gaps and the occurrence counts, and refuses
+/// nothing: what it reads was encoded here, and a reader checks it.
 pub(crate) struct ItemScan {
-    payload: RunPayload,
     segments: bool,
     stage: Stage,
     value: u32,
@@ -242,9 +242,8 @@ enum Stage {
 }
 
 impl ItemScan {
-    pub(crate) fn new(payload: RunPayload, segments: bool) -> ItemScan {
+    pub(crate) fn new(segments: bool) -> ItemScan {
         ItemScan {
-            payload,
             segments,
             stage: Stage::Gap,
             value: 0,
@@ -253,11 +252,6 @@ impl ItemScan {
             rank: 0,
             left: 0,
         }
-    }
-
-    /// The entities begun.
-    pub(crate) fn rank(&self) -> u64 {
-        self.rank
     }
 
     /// Read `bytes`, the first of them at `offset`, calling `mark(previous entity, rank, offset)`
@@ -270,7 +264,25 @@ impl ItemScan {
         next: &mut u64,
         mut mark: impl FnMut(u32, u64, u64),
     ) {
-        for (at, &byte) in (offset..).zip(bytes) {
+        let mut i = 0;
+        while i < bytes.len() {
+            if self.stage == Stage::Positions {
+                // Only where each position ends matters: a byte below 0x80 ends a varint.
+                let ended = bytes[i..].iter().position(|&byte| {
+                    self.left -= u32::from(byte < 0x80);
+                    self.left == 0
+                });
+                match ended {
+                    Some(at) => {
+                        i += at + 1;
+                        self.end_entity();
+                    }
+                    None => i = bytes.len(),
+                }
+                continue;
+            }
+            let (byte, at) = (bytes[i], offset + i as u64);
+            i += 1;
             if self.stage == Stage::Gap && self.shift == 0 && at >= *next && self.rank > 0 {
                 mark(self.entity, self.rank, at);
                 *next = at + RUN_INDEX_STRIDE;
@@ -292,21 +304,12 @@ impl ItemScan {
                         false => value,
                     };
                     self.stage = Stage::Count;
-                    if self.payload == RunPayload::Rows {
-                        self.end_entity();
-                    }
                 }
                 Stage::Count if value > 0 => {
                     self.left = value;
                     self.stage = Stage::Positions;
                 }
-                Stage::Count => self.end_entity(),
-                Stage::Positions => {
-                    self.left -= 1;
-                    if self.left == 0 {
-                        self.end_entity();
-                    }
-                }
+                Stage::Count | Stage::Positions => self.end_entity(),
             }
         }
     }
@@ -315,6 +318,22 @@ impl ItemScan {
         self.rank += 1;
         self.stage = Stage::Gap;
     }
+}
+
+/// A piece of a body [`TextRunWriter::push_body`] writes: one that begins an entity, given with
+/// it; the rest of that entity; or bytes whose entities' ends are not known.
+pub(crate) enum Piece<'a> {
+    Entity(u32, &'a [u8]),
+    Rest(&'a [u8]),
+    Unread(&'a [u8]),
+}
+
+/// Append a run's checkpoint at the entity of rank `rank`, which begins at `offset` after
+/// `previous`.
+fn checkpoint(checkpoints: &mut Vec<u8>, previous: u32, rank: u64, offset: u64) {
+    checkpoints.extend_from_slice(&previous.to_le_bytes());
+    checkpoints.extend_from_slice(&(rank as u32).to_le_bytes());
+    checkpoints.extend_from_slice(&offset.to_le_bytes());
 }
 
 /// Appends one **text run**: a sorted, distinct term stream with each term's ascending entity
@@ -348,10 +367,10 @@ impl ItemScan {
 /// a checkpoint at the first of its entities to begin a stride or more past its first entity, and
 /// at the first a stride or more past each checkpoint: `previous entity u32 ‖ rank u32 ‖ offset
 /// u64`, the entity before it, how many of the term's entities come before it, and where it begins
-/// in the file. Their
-/// terms are the keys of a second [`SortedDict`], each naming two `u64`s in an array after it, the
-/// index of the term's first checkpoint and how many entities the term holds; the checkpoints
-/// follow, record by record. A trailer ends the file:
+/// in the file. Their terms are the keys of a second [`SortedDict`], each naming two `u64`s in an
+/// array after it, the index of the term's first checkpoint and how many entities the term holds;
+/// the checkpoints follow, record by record. A run of rows has none, since nothing divides a
+/// keyword's term. A trailer ends the file:
 /// `records_len u64 ‖ index_len u64 ‖ terms_len u64 ‖ checkpoints u64 ‖ largest u32 ‖ "MSR4"`,
 /// `largest` being the most entities one term holds. [`RunFile`] reads it.
 ///
@@ -389,8 +408,9 @@ pub struct TextRunWriter {
     index: SortedDictWriter<Vec<u8>>,
     blocks: Vec<u64>,
     next_point: u64,
-    /// The open record's entities read as they are written, where its next checkpoint may begin,
-    /// and the index of its first checkpoint.
+    /// The open record's entities: how many, those of a body read as they are written, where its
+    /// next checkpoint may begin, and the index of its first checkpoint.
+    entities: u32,
     items: ItemScan,
     next_checkpoint: u64,
     first_checkpoint: u64,
@@ -455,7 +475,8 @@ impl TextRunWriter {
             index: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
             blocks: Vec::new(),
             next_point: 0,
-            items: ItemScan::new(payload, false),
+            entities: 0,
+            items: ItemScan::new(false),
             next_checkpoint: 0,
             first_checkpoint: 0,
             checkpointed: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
@@ -464,16 +485,17 @@ impl TextRunWriter {
         })
     }
 
-    /// Write `bytes` of the open record's entities into the records, with a checkpoint at each
-    /// entity that begins one stride past the last.
-    fn put_entities(&mut self, bytes: &[u8]) -> io::Result<()> {
-        let (next, checkpoints) = (&mut self.next_checkpoint, &mut self.checkpoints);
-        self.items
-            .feed(bytes, self.written, next, |previous, rank, offset| {
-                checkpoints.extend_from_slice(&previous.to_le_bytes());
-                checkpoints.extend_from_slice(&(rank as u32).to_le_bytes());
-                checkpoints.extend_from_slice(&offset.to_le_bytes());
-            });
+    /// Write `bytes` of the open record's body, whose entities' ends it is not told, into the
+    /// records, with a checkpoint at each entity that begins one stride past the last, read from
+    /// the bytes. A body is given all in such bytes or none.
+    fn put_unread(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if self.payload == RunPayload::Positions {
+            let (next, checkpoints) = (&mut self.next_checkpoint, &mut self.checkpoints);
+            self.items
+                .feed(bytes, self.written, next, |previous, rank, offset| {
+                    checkpoint(checkpoints, previous, rank, offset)
+                });
+        }
         self.put(bytes)
     }
 
@@ -486,7 +508,7 @@ impl TextRunWriter {
             self.terms_table
                 .extend_from_slice(&self.first_checkpoint.to_le_bytes());
             self.terms_table
-                .extend_from_slice(&self.items.rank().to_le_bytes());
+                .extend_from_slice(&u64::from(self.entities).to_le_bytes());
         }
         self.first_checkpoint = taken;
         Ok(())
@@ -573,7 +595,8 @@ impl TextRunWriter {
         let written = self.put(&record);
         self.record = record;
         written?;
-        self.items = ItemScan::new(self.payload, false);
+        self.entities = entities;
+        self.items = ItemScan::new(false);
         self.next_checkpoint = self.written + RUN_INDEX_STRIDE;
 
         self.mark = fingerprint(term);
@@ -641,9 +664,10 @@ impl TextRunWriter {
             entity,
             positions,
         );
+        self.mark(self.last_entity, self.entities - self.owed);
         self.last_entity = entity;
         self.started = true;
-        let written = self.put_entities(&record);
+        let written = self.put(&record);
         self.record = record;
         written?;
         self.wrote(1, anchor);
@@ -653,9 +677,10 @@ impl TextRunWriter {
     /// Write a whole record: `term`, and its `count` entities already encoded by
     /// [`encode_entity`], the first with its entity for its gap, and `anchor` the sum of what each
     /// call returned. `body` hands the encoded bytes, in order and in as many pieces as it likes,
-    /// to the function it is given.
+    /// to the function it is given, saying where each entity begins where it knows, so that only
+    /// a body that does not is read for its checkpoints.
     ///
-    /// **The body is trusted**: it is written as given, and nothing here decodes it. A body that
+    /// **The body is trusted**: it is written as given, and nothing here checks it. A body that
     /// does not hold `count` well-formed entities ascending, or whose anchor is not `anchor`, is
     /// refused by the run's reader when it checks the receipt.
     pub(crate) fn push_body(
@@ -663,12 +688,31 @@ impl TextRunWriter {
         term: &[u8],
         count: u32,
         anchor: u64,
-        body: impl FnOnce(&mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()>,
+        body: impl FnOnce(&mut dyn FnMut(Piece<'_>) -> io::Result<()>) -> io::Result<()>,
     ) -> io::Result<()> {
         self.begin(term, count)?;
-        body(&mut |piece| self.put_entities(piece))?;
+        let (mut rank, mut previous) = (0, 0);
+        body(&mut |piece| match piece {
+            Piece::Entity(entity, bytes) => {
+                self.mark(previous, rank);
+                (rank, previous) = (rank + 1, entity);
+                self.put(bytes)
+            }
+            Piece::Rest(bytes) => self.put(bytes),
+            Piece::Unread(bytes) => self.put_unread(bytes),
+        })?;
         self.wrote(count, anchor);
         Ok(())
+    }
+
+    /// Take a checkpoint at the open record's entity of rank `rank`, which begins at the next
+    /// byte after `previous`, where it is a stride past the last.
+    fn mark(&mut self, previous: u32, rank: u32) {
+        if self.payload == RunPayload::Positions && rank > 0 && self.written >= self.next_checkpoint
+        {
+            checkpoint(&mut self.checkpoints, previous, rank.into(), self.written);
+            self.next_checkpoint = self.written + RUN_INDEX_STRIDE;
+        }
     }
 
     /// Count `pairs` of the open term's entities as written, and fold their `anchor` into the
@@ -929,7 +973,14 @@ impl RunFile {
             1 + next,
         )?;
         let (first, items) = entries[0];
-        let end = entries.get(1).map_or(self.checkpoints, |next| next.0);
+        let (first, end) = self.named(ordinal, first, entries.get(1).map(|next| next.0))?;
+        Ok((first, end, items))
+    }
+
+    /// The checkpoints checkpointed term `ordinal` names: from `first` to the next term's first,
+    /// or to the last where it is the last, checked to be among the run's.
+    fn named(&self, ordinal: u32, first: u64, next: Option<u64>) -> io::Result<(u64, u64)> {
+        let end = next.unwrap_or(self.checkpoints);
         if first > end || end > self.checkpoints {
             return Err(malformed(
                 &self.path,
@@ -939,24 +990,19 @@ impl RunFile {
                 ),
             ));
         }
-        Ok((first, end, items))
+        Ok((first, end))
     }
 
     /// The checkpoints of `term`'s record and the entities it holds, where it has any.
     fn checkpoints_of(&self, term: &[u8]) -> io::Result<Option<(u64, u64, u64)>> {
-        let index_error = |e: mosaica_filter::DictError| malformed(&self.path, e);
-        let rank = self.terms.rank(term).map_err(index_error)?;
-        if rank == self.terms.len()
-            || self
-                .terms
-                .key_of(rank, &mut Vec::new())
-                .map_err(index_error)?
-                .as_bytes()
-                != term
-        {
+        let Ok(term) = std::str::from_utf8(term) else {
             return Ok(None);
+        };
+        match self.terms.resolve(term) {
+            Ok(Some(ordinal)) => self.checkpoints_at(ordinal).map(Some),
+            Ok(None) => Ok(None),
+            Err(e) => Err(malformed(&self.path, e)),
         }
-        self.checkpoints_at(rank).map(Some)
     }
 
     /// Checkpoint `i`, as `(previous entity, rank, offset)`.
@@ -1117,10 +1163,9 @@ impl Weigh for RunFile {
         let table = self.entries(self.table_at, u64::from(self.terms.len()))?;
         let mut scratch = Vec::new();
         for (ordinal, entry) in table.iter().enumerate() {
-            let end = table
-                .get(ordinal + 1)
-                .map_or(self.checkpoints, |next| next.0);
-            if (end.saturating_sub(entry.0) + 1) * RUN_INDEX_STRIDE >= bytes {
+            let next = table.get(ordinal + 1).map(|next| next.0);
+            let (first, end) = self.named(ordinal as u32, entry.0, next)?;
+            if (end - first + 1).saturating_mul(RUN_INDEX_STRIDE) >= bytes {
                 let key = self
                     .terms
                     .key_of(ordinal as u32, &mut scratch)

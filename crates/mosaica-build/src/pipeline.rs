@@ -7084,22 +7084,17 @@ mod tests {
         )
         .expect("typed column");
         let mut files: Vec<[Vec<u8>; 4]> = Vec::new();
-        for (k, (plan, divided)) in [
-            (TextIndexPlan::explicit(1, 1 << 30, 1 << 22), false),
+        // One window spills a run of about a pool page: two pages, its terms' state and a spill's
+        // buffer would pass the budget, and one does not.
+        let one_page = (1 << 19) + (180 << 10);
+        let held = TextIndexPlan::explicit(7, 1 << 30, 1 << 22);
+        for (k, (plan, divided, spilled)) in [
+            (TextIndexPlan::explicit(1, 1 << 30, 1 << 22), false, false),
+            (held.in_ranges(ranges(3, 3, 3, 1)), true, false),
+            (held.in_ranges(ranges(4, 4, 8, 16 << 10)), true, false),
             (
-                TextIndexPlan::explicit(7, 1 << 30, 1 << 22).in_ranges(ranges(3, 3, 3, 1)),
+                TextIndexPlan::explicit(1, one_page, 1).in_ranges(ranges(5, 4, 8, 1)),
                 true,
-            ),
-            (
-                TextIndexPlan::explicit(7, 1 << 30, 1 << 22).in_ranges(ranges(4, 4, 8, 64 << 10)),
-                true,
-            ),
-            (
-                TextIndexPlan::explicit(7, 3 << 18, 1 << 22).in_ranges(ranges(5, 4, 8, 1)),
-                true,
-            ),
-            (
-                TextIndexPlan::explicit(7, 3 << 18, 1).in_ranges(ranges(2, 2, 2, 64)),
                 true,
             ),
         ]
@@ -7116,12 +7111,9 @@ mod tests {
                 Steps::default(),
             )
             .expect("text index");
-            assert_eq!(
-                written.merge.divided > 0,
-                divided,
-                "spread plan {k}: {:?}",
-                written.merge
-            );
+            let merge = written.merge;
+            assert_eq!(merge.divided > 0, divided, "spread plan {k}: {merge:?}");
+            assert_eq!(merge.runs > 0, spilled, "spread plan {k}: {merge:?}");
             files.push(index_files(&column_dir));
         }
         assert_same_files(&files);
@@ -7138,7 +7130,7 @@ mod tests {
         }
     }
 
-    /// Prose at every 23rd entity, repeating `common` up to 250 times, with `edge` repeated in
+    /// Prose at every 23rd entity, repeating `common` up to 40 times, with `edge` repeated in
     /// the second and fourth blocks, and alone at the last three entities of the first block and
     /// the first three of the third, and `late` from part way through the second block on.
     fn spread_prose(entity: usize) -> ScalarValue {
@@ -7147,10 +7139,10 @@ mod tests {
         if !entity.is_multiple_of(23) && !tie {
             return ScalarValue::Null;
         }
-        let mut prose = "common ".repeat(1 + entity % 250);
+        let mut prose = "common ".repeat(1 + entity % 40);
         prose.push_str(&format!("w{}", entity % 3));
         if tie || (entity >> 16) % 2 == 1 {
-            prose.push_str(&" edge".repeat(if tie { 1 } else { 50 }));
+            prose.push_str(&" edge".repeat(if tie { 1 } else { 10 }));
         }
         if entity >= 100_000 {
             prose.push_str(" late");

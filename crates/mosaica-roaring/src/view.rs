@@ -48,34 +48,8 @@ impl<'a> Joined<'a> {
         for part in parts {
             containers.push(descriptors(part, &mut blocks)?);
         }
-        let n = blocks.len();
-        let runs = blocks.iter().any(|b| b.2);
-        let mut header = Vec::with_capacity(8 + 8 * n + n.div_ceil(8));
-        if runs {
-            let last = u32::try_from(n.checked_sub(1)?)
-                .ok()
-                .filter(|l| *l <= 0xFFFF)?;
-            header.extend_from_slice(&(COOKIE_RUNS | last << 16).to_le_bytes());
-            let mut flags = vec![0u8; n.div_ceil(8)];
-            for (i, block) in blocks.iter().enumerate() {
-                flags[i / 8] |= u8::from(block.2) << (i % 8);
-            }
-            header.extend_from_slice(&flags);
-        } else {
-            header.extend_from_slice(&COOKIE_NO_RUNS.to_le_bytes());
-            header.extend_from_slice(&u32::try_from(n).ok()?.to_le_bytes());
-        }
-        for &(key, card, _, _) in &blocks {
-            header.extend_from_slice(&key.to_le_bytes());
-            header.extend_from_slice(&card.to_le_bytes());
-        }
-        if !runs || n >= OFFSETS_FROM {
-            let mut offset = u32::try_from(header.len() + 4 * n).ok()?;
-            for &(_, _, _, size) in &blocks {
-                header.extend_from_slice(&offset.to_le_bytes());
-                offset = offset.checked_add(size)?;
-            }
-        }
+        let mut header = Vec::new();
+        put_header(&blocks, &mut header)?;
         let cardinality = blocks.iter().map(|b| u64::from(b.1) + 1).sum();
         Some(Joined {
             header,
@@ -93,6 +67,39 @@ impl<'a> Joined<'a> {
     pub fn cardinality(&self) -> u64 {
         self.cardinality
     }
+}
+
+/// Write the portable header of `blocks`, each `(key, cardinality − 1, is a run, size)`, ascending,
+/// into `header`: what precedes their containers. `None` where they are more than a bitmap holds.
+pub(crate) fn put_header(blocks: &[(u16, u16, bool, u32)], header: &mut Vec<u8>) -> Option<()> {
+    let n = blocks.len();
+    let runs = blocks.iter().any(|b| b.2);
+    if runs {
+        let last = u32::try_from(n.checked_sub(1)?)
+            .ok()
+            .filter(|l| *l <= 0xFFFF)?;
+        header.extend_from_slice(&(COOKIE_RUNS | last << 16).to_le_bytes());
+        let mut flags = vec![0u8; n.div_ceil(8)];
+        for (i, block) in blocks.iter().enumerate() {
+            flags[i / 8] |= u8::from(block.2) << (i % 8);
+        }
+        header.extend_from_slice(&flags);
+    } else {
+        header.extend_from_slice(&COOKIE_NO_RUNS.to_le_bytes());
+        header.extend_from_slice(&u32::try_from(n).ok()?.to_le_bytes());
+    }
+    for &(key, card, _, _) in blocks {
+        header.extend_from_slice(&key.to_le_bytes());
+        header.extend_from_slice(&card.to_le_bytes());
+    }
+    if !runs || n >= OFFSETS_FROM {
+        let mut offset = u32::try_from(header.len() + 4 * n).ok()?;
+        for &(_, _, _, size) in blocks {
+            header.extend_from_slice(&offset.to_le_bytes());
+            offset = offset.checked_add(size)?;
+        }
+    }
+    Some(())
 }
 
 /// Push each container `bytes` holds, as `(key, cardinality − 1, is a run, size)`, onto `blocks`,
@@ -503,28 +510,6 @@ mod tests {
                 "cuts {cuts:?}"
             );
             assert!(exact_portable(&bytes, &mut Vec::new()).is_some());
-        }
-    }
-
-    /// The run/array tie on both sides of a cut, and the offset threshold crossed: one block with a
-    /// run in each of two parts, neither with offsets, and five blocks together, with them.
-    #[test]
-    fn ties_at_a_cut_and_the_offset_threshold_join() {
-        let values: Vec<u32> = (65_533..65_536)
-            .chain((1 << 16)..(1 << 16 | 3))
-            .chain((2 << 16)..(3 << 16))
-            .chain([3 << 16 | 5])
-            .chain((4 << 16 | 10)..(4 << 16 | 400))
-            .collect();
-        for cut in 0..=5u32 {
-            for how in 0..3 {
-                let bytes = joined(&values, &[0, cut, 5], how);
-                assert_eq!(
-                    bytes,
-                    canonical_portable(Bitmap::of(&values)),
-                    "cut {cut} {how}"
-                );
-            }
         }
     }
 

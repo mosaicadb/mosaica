@@ -69,7 +69,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use mosaica_filter::{put_varint, take_varint, VarintError};
 
@@ -77,7 +77,7 @@ use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
 use crate::merge::{Point, RangePlan, Ranges, Spread, TermMerge, TermSource, Weigh};
 use crate::spill::{
     cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, run_largest,
-    Allowance, Beside, ItemScan, RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader,
+    Allowance, Beside, ItemScan, Piece, RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader,
     TextRunWriter, RUN_BUFFER_MIN, RUN_INDEX_STRIDE, SPILL_BUF_BYTES,
 };
 use crate::text::{write_range, TextIndexWriter};
@@ -508,9 +508,14 @@ pub fn write_text_index(
             return Err(e);
         }
     };
+    // Only a merge on several threads divides terms.
+    let divides = allowance.threads > 1;
     let each = (merge_slice_cap as u64).min(largest) * std::mem::size_of::<u32>() as u64
-        + held.iter().map(Held::copy_bytes).sum::<u64>();
-    let head = (2 * largest).min(POSTING_BYTES_MAX) + largest / 16;
+        + held.iter().map(|h| h.copy_bytes(divides)).sum::<u64>();
+    let head = match divides {
+        true => (2 * largest).min(POSTING_BYTES_MAX) + largest / 16,
+        false => 0,
+    };
     let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum::<u64>() + head);
     let figures = TextMerge {
         runs: runs.len(),
@@ -658,8 +663,12 @@ pub struct Held {
     sorted: Vec<KeyRef>,
     order: Vec<u32>,
     /// The terms read sorted by the cursors of several spans, by rank, while one of them holds it.
-    flats: Mutex<HashMap<usize, Weak<Flat>>>,
+    flats: Mutex<HashMap<usize, Weak<Shared>>>,
 }
+
+/// A term sorted for the cursors of its parts: built by the first that reads it, while the others
+/// wait for it, or the refusal building it met.
+type Shared = OnceLock<Result<Flat, String>>;
 
 /// A term's entities sorted, each with where its positions start in a copy of its chain.
 #[derive(Default)]
@@ -700,35 +709,55 @@ impl Held {
     }
 
     /// What a cursor holds to read its largest term sorted: a copy of the chain, and eight bytes an
-    /// entity. A term of several segments is read so, and a term divided by entity.
-    fn copy_bytes(&self) -> u64 {
+    /// entity. A term of several segments is read so, and, where the merge `divides` terms by
+    /// entity, any term.
+    fn copy_bytes(&self, divides: bool) -> u64 {
         (0..self.terms.len as u32)
             .map(|id| self.terms.get(id))
+            .filter(|state| divides || state.segmented)
             .map(|state| u64::from(state.bytes) + 8 * u64::from(state.pairs))
             .max()
             .unwrap_or(0)
     }
 
     /// The term at `rank` sorted, shared with every cursor that reads it while one holds it.
-    fn flat(&self, rank: usize) -> io::Result<Arc<Flat>> {
-        let mut flats = self.flats.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(flat) = flats.get(&rank).and_then(Weak::upgrade) {
-            return Ok(flat);
+    /// Different terms are sorted at once.
+    fn flat(&self, rank: usize) -> io::Result<Arc<Shared>> {
+        let shared = {
+            let mut flats = self.flats.lock().unwrap_or_else(PoisonError::into_inner);
+            match flats.get(&rank).and_then(Weak::upgrade) {
+                Some(shared) => shared,
+                None => {
+                    let shared = Arc::new(Shared::new());
+                    flats.retain(|_, held| held.strong_count() > 0);
+                    flats.insert(rank, Arc::downgrade(&shared));
+                    shared
+                }
+            }
+        };
+        let sorted = shared.get_or_init(|| {
+            let mut flat = Flat::default();
+            let state = self.terms.get(self.order[rank]);
+            let term = key_bytes(&self.keys, &self.sorted[rank]);
+            flat.fill(&self.pool, term, state)
+                .map(|()| flat)
+                .map_err(|e| e.to_string())
+        });
+        match sorted {
+            Ok(_) => Ok(shared),
+            Err(e) => Err(invalid(e.clone())),
         }
-        let mut flat = Flat::default();
-        let state = self.terms.get(self.order[rank]);
-        flat.fill(&self.pool, key_bytes(&self.keys, &self.sorted[rank]), state)?;
-        let flat = Arc::new(flat);
-        flats.retain(|_, held| held.strong_count() > 0);
-        flats.insert(rank, Arc::downgrade(&flat));
-        Ok(flat)
+    }
+
+    /// The rank of the first term at or after `key`.
+    fn rank_at(&self, key: &[u8]) -> usize {
+        self.sorted
+            .partition_point(|sorted| key_bytes(&self.keys, sorted) < key)
     }
 
     /// The rank of `term`, where it holds it.
     fn rank_of(&self, term: &[u8]) -> Option<usize> {
-        let rank = self
-            .sorted
-            .partition_point(|sorted| key_bytes(&self.keys, sorted) < term);
+        let rank = self.rank_at(term);
         (rank < self.sorted.len() && key_bytes(&self.keys, &self.sorted[rank]) == term)
             .then_some(rank)
     }
@@ -818,7 +847,7 @@ impl Weigh for Held {
         };
         let state = self.terms.get(self.order[rank]);
         let (mut items, mut at, mut next) = (
-            ItemScan::new(RunPayload::Positions, true),
+            ItemScan::new(true),
             0,
             RUN_INDEX_STRIDE,
         );
@@ -859,7 +888,7 @@ struct HeldCursor<'a> {
     /// A term of several segments, sorted by this cursor, or a term a span reads, sorted once for
     /// every cursor on it; and whether the term is read sorted.
     own: Flat,
-    shared: Option<Arc<Flat>>,
+    shared: Option<Arc<Shared>>,
     sorted: bool,
     /// Where a term of one segment is read from in the pool.
     reading: ChainAt,
@@ -884,10 +913,7 @@ impl HeldCursor<'_> {
 
 impl TermSource for HeldCursor<'_> {
     fn seek(&mut self, key: &[u8]) -> io::Result<()> {
-        let held = self.held;
-        self.next = held
-            .sorted
-            .partition_point(|sorted| key_bytes(&held.keys, sorted) < key);
+        self.next = self.held.rank_at(key);
         Ok(())
     }
 
@@ -907,12 +933,15 @@ impl TermSource for HeldCursor<'_> {
     }
 
     fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
-        let flat = self.held.flat(self.next - 1)?;
+        let shared = self.held.flat(self.next - 1)?;
+        let Some(Ok(flat)) = shared.get() else {
+            return Err(invalid("a held term was not sorted"));
+        };
         let at = |bound: Option<u32>, none: usize| {
             bound.map_or(none, |bound| flat.entries.partition_point(|e| e.0 < bound))
         };
         (self.taken, self.end) = (at(from, 0) as u32, at(to, flat.entries.len()) as u32);
-        self.shared = Some(flat);
+        self.shared = Some(shared);
         self.sorted = true;
         Ok(u64::from(self.taken))
     }
@@ -932,7 +961,8 @@ impl TermSource for HeldCursor<'_> {
         self.sort()?;
         self.positions.clear();
         let entity = if self.sorted {
-            let flat = self.shared.as_deref().unwrap_or(&self.own);
+            let shared = self.shared.as_deref().and_then(OnceLock::get);
+            let flat = shared.and_then(|sorted| sorted.as_ref().ok()).unwrap_or(&self.own);
             let (entity, start) = flat.entries[self.taken as usize];
             let mut at = start as usize;
             read_positions(|| next(&flat.chain, &mut at), &mut self.positions)?;
@@ -980,13 +1010,13 @@ enum Body<'a> {
 
 impl Body<'_> {
     /// Hand the body to `emit`, in order, in pieces.
-    fn write(&self, emit: &mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()> {
+    fn write(&self, emit: &mut dyn FnMut(Piece<'_>) -> io::Result<()>) -> io::Result<()> {
         match self {
             Body::Chain(pool, term) => {
                 let mut written = Ok(());
                 pool.slices(term, |slice| {
                     if written.is_ok() {
-                        written = emit(slice);
+                        written = emit(Piece::Unread(slice));
                     }
                 });
                 written
@@ -997,12 +1027,12 @@ impl Body<'_> {
                 for &(entity, start) in entries.iter() {
                     gap.clear();
                     put_varint(entity - previous.unwrap_or(0), &mut gap);
-                    emit(&gap)?;
+                    emit(Piece::Entity(entity, &gap))?;
                     let mut end = start as usize;
                     for _ in 0..next(chain, &mut end)? {
                         next(chain, &mut end)?;
                     }
-                    emit(&chain[start as usize..end])?;
+                    emit(Piece::Rest(&chain[start as usize..end]))?;
                     previous = Some(entity);
                 }
                 Ok(())

@@ -87,8 +87,6 @@ pub const ARRAY_MAX: u32 = 4096;
 /// Containers staged before a stream is handed to croaring, which bounds the staged bytes at
 /// about a megabyte.
 const STAGE: usize = 128;
-/// The portable format's cookie for a stream with no run containers.
-const COOKIE_NO_RUN: u32 = 12346;
 
 /// Stages containers and folds them into a bitmap a stream at a time.
 ///
@@ -268,23 +266,19 @@ impl Sink {
         self.payload.clear();
     }
 
-    /// Write the portable stream for the staged containers. This cookie requires the offset
-    /// table whatever the container count.
+    /// Write the portable stream for the staged containers, none of them a run.
     fn assemble(&mut self) {
         self.stream.clear();
-        let size = self.keys.len() as u32;
-        self.stream.extend_from_slice(&COOKIE_NO_RUN.to_le_bytes());
-        self.stream.extend_from_slice(&size.to_le_bytes());
-        for (key, card) in self.keys.iter().zip(&self.cards) {
-            self.stream.extend_from_slice(&key.to_le_bytes());
-            self.stream
-                .extend_from_slice(&((card - 1) as u16).to_le_bytes());
-        }
-        // 4 cookie + 4 count + 4 per descriptor + 4 per offset.
-        let base = 8 + 8 * size;
-        for start in &self.starts {
-            self.stream.extend_from_slice(&(base + start).to_le_bytes());
-        }
+        let ends = self.starts.iter().skip(1).copied();
+        let ends = ends.chain(std::iter::once(self.payload.len() as u32));
+        let blocks: Vec<(u16, u16, bool, u32)> = self
+            .keys
+            .iter()
+            .zip(&self.cards)
+            .zip(self.starts.iter().zip(ends))
+            .map(|((&key, &card), (start, end))| (key, (card - 1) as u16, false, end - start))
+            .collect();
+        view::put_header(&blocks, &mut self.stream).expect("a stream stages at most a stage");
         self.stream.extend_from_slice(&self.payload);
     }
 

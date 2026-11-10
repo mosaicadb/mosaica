@@ -479,9 +479,6 @@ fn item(turn: &mut Turn<'_, &mut TextIndexWriter>, positions: &[u32]) -> io::Res
 /// it: its items' positions, and its posting as [`mosaica_roaring::canonical_portable`] of its
 /// entities, which a part's span keeps to whole 2¹⁶-entity blocks. The term's first part begins
 /// it, and its last ends it.
-///
-/// A term one finished layer holds whole is copied whole by its first part, and its other parts
-/// write nothing.
 fn write_part<S: TermSource>(
     merge: &mut TermMerge<S>,
     turn: &mut Turn<'_, &mut TextIndexWriter>,
@@ -492,15 +489,6 @@ fn write_part<S: TermSource>(
         return Ok(());
     }
     let (term, items) = (text_term(merge.term())?, merge.postings());
-    if let Some(records) = merge.records() {
-        if span.from.is_none() {
-            if !turn.fits(records.posting.len() + records.positions.len()) {
-                turn.wait()?;
-            }
-            out(turn)?.copy_term(term, records)?;
-        }
-        return Ok(());
-    }
     out(turn)?.begin_part(term, items, before, span.from.is_none())?;
     let mut bitmap = Bitmap::new();
     let mut staged: Vec<u32> = Vec::new();
@@ -573,11 +561,9 @@ impl Weigh for Weighed<'_> {
     }
 
     fn spread(&self, term: &[u8], points: &mut Vec<Point>) -> io::Result<Spread> {
-        let dict = self.input.dict;
-        let ordinal = dict.rank(term)?;
-        if ordinal == dict.len() || dict.key_of(ordinal, &mut Vec::new())?.as_bytes() != term {
+        let Some(ordinal) = text_term(term).and_then(|t| Ok(self.input.dict.resolve(t)?))? else {
             return Ok(Spread::default());
-        }
+        };
         let id = AttrLocalId::new(ordinal);
         let Some(posting) = self.input.postings.posting(id)? else {
             return Ok(Spread::default());
@@ -600,7 +586,10 @@ impl Weigh for Weighed<'_> {
                         / held.max(1),
                 }))
             }
-            array => points.extend(array.iter().next().map(|entity| Point { entity, bytes })),
+            array => points.extend(array.iter().map(|entity| Point {
+                entity,
+                bytes: bytes / held.max(1),
+            })),
         }
         Ok(Spread {
             items: held - dead,
@@ -636,6 +625,7 @@ pub fn merge_text_layers(
         allowance,
         Ranges::Planned,
     )
+    .map(|_| ())
 }
 
 /// The coalesce's pass: a window of a column's extents merged into one extent.
@@ -668,12 +658,14 @@ pub fn coalesce_text_extents(
         allowance,
         Ranges::Planned,
     )
+    .map(|_| ())
 }
 
 /// Every term of every layer, in sorted order, with `tombstones` subtracted from each one's
 /// postings and positions and an emptied term dropped, and the presence of every input less
 /// `tombstones`. The terms are merged in ranges as `ranges` says, divided by the layers' postings
-/// and positions bytes, on the threads `allowance` gives.
+/// and positions bytes, on the threads `allowance` gives, and terms too large for one range
+/// divided by entity, which it returns the number of.
 fn merge(
     inputs: &[TextLayerRef<'_>],
     tombstones: &Bitmap,
@@ -681,7 +673,7 @@ fn merge(
     pass: &str,
     allowance: Allowance,
     ranges: Ranges,
-) -> io::Result<()> {
+) -> io::Result<usize> {
     let presence = crate::disjoint_union(inputs.iter().map(|input| input.present), pass)?;
     for (i, input) in inputs.iter().enumerate() {
         let counts = TextLayerCounts::of(input.dict, input.postings, input.positions);
@@ -710,7 +702,10 @@ fn merge(
     // divided term's posting, is charged at its cap. The thread that writes holds a divided term's
     // posting in parts, which is no larger than the layers' postings of it, until its last, and
     // its positions' block table, an eighth of an entity a byte at the least.
-    let head: u64 = weighed.iter().map(Weighed::largest).sum::<u64>() * 3 / 2;
+    let head: u64 = match allowance.threads > 1 {
+        true => weighed.iter().map(Weighed::largest).sum::<u64>() * 3 / 2,
+        false => 0,
+    };
     let plan = ranges.plan(
         allowance.less(head),
         bytes,
@@ -725,10 +720,10 @@ fn merge(
             })?);
         }
     }
-    let mut ranges = split(samples, plan.ranges);
+    let (mut ranges, mut divided) = (split(samples, plan.ranges), 0);
     if plan.threads > 1 {
         let weighed: Vec<&dyn Weigh> = weighed.iter().map(|w| w as &dyn Weigh).collect();
-        ranges = divide(ranges, &weighed, plan.buffer, TEXT_MERGE_SLICE_CAP as u64)?.0;
+        (ranges, divided) = divide(ranges, &weighed, plan.buffer, TEXT_MERGE_SLICE_CAP as u64)?;
     }
     merge_ranges(
         &mut writer,
@@ -748,7 +743,8 @@ fn merge(
         |_| {},
     )?;
     writer.finish()?;
-    mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))
+    mosaica_filter::write_presence(&presence_path, &presence.andnot(tombstones))?;
+    Ok(divided)
 }
 
 /// Entities a finished layer's term source decodes from its posting at a time.
@@ -891,17 +887,21 @@ impl TermSource for LayerTerms<'_> {
         let (rank, dead) = match posting {
             PostingRef::Array(bytes) => {
                 let entities = bytes.as_chunks::<4>().0;
-                let below = |entity: u32| {
-                    entities.partition_point(|chunk| u32::from_le_bytes(*chunk) < entity)
+                let below = entities.partition_point(|chunk| u32::from_le_bytes(*chunk) < from);
+                let entities = entities[..below].iter().map(|chunk| u32::from_le_bytes(*chunk));
+                let dead = match self.dead {
+                    0 => 0,
+                    _ => entities.filter(|&e| self.tombstones.contains(e)).count(),
                 };
-                let dead = self.tombstones.iter().take_while(|&t| t < from);
-                let dead = dead.filter(|&t| entities.get(below(t)) == Some(&t.to_le_bytes()));
-                (below(from) as u64, dead.count() as u64)
+                (below as u64, dead as u64)
             }
             PostingRef::Roaring(view) => {
-                let rank = from.checked_sub(1).map_or(0, |last| view.rank(last));
-                let dead = self.tombstones.iter().take_while(|&t| t < from);
-                (rank, dead.filter(|&t| view.contains(t)).count() as u64)
+                let rank = |set: &Bitmap| from.checked_sub(1).map_or(0, |last| set.rank(last));
+                let dead = match self.dead {
+                    0 => 0,
+                    _ => rank(&self.tombstones.and(view)),
+                };
+                (rank(view), dead)
             }
         };
         self.rank = rank;
@@ -1027,7 +1027,9 @@ mod tests {
     /// container is `{0, 1, 2}` once entity 3 goes, which costs the same as a run and as an array,
     /// and the base held it as a run of four; the folded presence's first container is the same.
     /// `gone`'s only carrier is tombstoned, so it leaves the dictionary though only one layer holds
-    /// it. The extent's `fresh` is copied, and `shared` is in both.
+    /// it. The extent's `fresh` is copied, and `shared` is in both. In term ranges `tie` is also
+    /// divided by entity at its blocks' edges, and the extent's few carriers of it, either side of
+    /// the third block's, one of them tombstoned, are read part way through a tag-0 posting.
     #[test]
     fn a_fold_and_a_coalesce_write_what_a_build_of_the_survivors_writes() {
         let dir = tempfile::tempdir().unwrap();
@@ -1047,9 +1049,13 @@ mod tests {
             }))
             .collect();
         let extent: Documents = (0..10u32)
-            .map(|k| (200_000 + k, vec!["fresh", "shared"]))
+            .map(|k| match k {
+                1 => (150_001, vec!["shared", "tie"]),
+                0..5 => (150_000 + k, vec!["fresh", "shared", "tie"]),
+                _ => (200_000 + k, vec!["fresh", "shared", "tie"]),
+            })
             .collect();
-        let tombstones = Bitmap::of(&[3, (1 << 16) + 4]);
+        let tombstones = Bitmap::of(&[3, (1 << 16) + 4, 150_001]);
 
         let base_files = build(dir, "base", &base);
         let extent_files = build(dir, "extent", &extent);
@@ -1080,8 +1086,7 @@ mod tests {
             .collect();
         let built = bytes(&build(dir, "survivors", &survivors));
         assert_eq!(bytes(&folded), built);
-        // In term ranges, each layer started at a range's first key, and `tie` divided by entity
-        // at its second block, the same.
+        // In term ranges, each layer started at a range's first key, the same.
         let ranged = files(dir, "ranged");
         let fixed = Ranges::Fixed {
             ranges: 4,
@@ -1089,7 +1094,7 @@ mod tests {
             window: 3,
             buffer: 1,
         };
-        merge(
+        let divided = merge(
             &inputs,
             &tombstones,
             ranged.clone(),
@@ -1098,6 +1103,7 @@ mod tests {
             fixed,
         )
         .unwrap();
+        assert!(divided > 0);
         assert_eq!(bytes(&ranged), built);
 
         let coalesced = files(dir, "coalesced");

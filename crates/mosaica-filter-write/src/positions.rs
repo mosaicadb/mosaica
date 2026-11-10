@@ -190,15 +190,8 @@ impl<R: RecordSink> PositionsWriter<R> {
         }
         let mut start = 0;
         for &end in &part.ends {
-            let state = &mut self.state;
-            if state.blocks > 0 {
-                state.table.extend_from_slice(&state.written.to_le_bytes());
-            }
-            self.file.extend_record(&part.blocks[start..end])?;
-            let state = &mut self.state;
-            state.written += (end - start) as u64;
-            state.blocks += 1;
-            state.pushed += POSITIONS_BLOCK as u64;
+            self.append_block(&part.blocks[start..end])?;
+            self.state.pushed += POSITIONS_BLOCK as u64;
             start = end;
         }
         self.take_raw(&part.tail)
@@ -434,16 +427,24 @@ impl<R: RecordSink> PositionsWriter<R> {
     }
 
     fn write_block(&mut self) -> io::Result<()> {
+        let mut bytes = std::mem::take(&mut self.state.bytes);
+        bytes.clear();
+        self.state.block.encode(&mut bytes);
+        let appended = self.append_block(&bytes);
+        self.state.bytes = bytes;
+        self.state.block.clear();
+        appended
+    }
+
+    /// Append an encoded block to the open record, naming it in the record's block table.
+    fn append_block(&mut self, block: &[u8]) -> io::Result<()> {
         let state = &mut self.state;
         if state.blocks > 0 {
             state.table.extend_from_slice(&state.written.to_le_bytes());
         }
-        state.bytes.clear();
-        state.block.encode(&mut state.bytes);
-        self.file.extend_record(&state.bytes)?;
-        state.written += state.bytes.len() as u64;
+        self.file.extend_record(block)?;
+        state.written += block.len() as u64;
         state.blocks += 1;
-        state.block.clear();
         Ok(())
     }
 }
