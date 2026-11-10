@@ -26,9 +26,14 @@ const META = meta({
 
 document.documentElement.style.height = '100%';
 document.body.style.height = '100%';
+// The page's address chooses among the values each attribute takes, and is never written into the page.
 const asked = new URLSearchParams(location.search);
-document.body.innerHTML = `<mosaica-explorer layout=${asked.get('layout') ?? 'overlay'} density=${asked.get('density') ?? 'none'} dataset-title="A dataset with ${LONG}"></mosaica-explorer>`;
-const explorer = document.querySelector('mosaica-explorer') as HTMLElement & {store: unknown};
+const oneOf = (name: string, values: readonly string[]) => values.find((v) => v === asked.get(name)) ?? values[0]!;
+const explorer = document.createElement('mosaica-explorer') as HTMLElement & {store: unknown};
+explorer.setAttribute('layout', oneOf('layout', ['overlay', 'docked']));
+explorer.setAttribute('density', oneOf('density', ['none', 'smooth', 'hex', 'grid', 'contours']));
+explorer.setAttribute('dataset-title', `A dataset with ${LONG}`);
+document.body.append(explorer);
 const store = fakeStore({meta: META, status: status({})});
 store.set('view', {...store.get('view'), id: 's0'});
 store.set('legend', {...store.get('legend'), colourBy: 'archive'});
