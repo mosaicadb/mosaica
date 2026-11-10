@@ -266,3 +266,164 @@ describe('<mosaica-colour-editor> on a category', () => {
     expect(seen.at(-1)).toEqual({column: 'archive', changes: [{value: 'math', colour: null}]});
   });
 });
+
+describe('<mosaica-colour-editor> under a keyboard and a screen reader', () => {
+  async function listed() {
+    const opened = await open('cluster:topics');
+    answerAggregate(opened.store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
+    await settle(opened.host);
+    return opened;
+  }
+
+  it('moves focus from Deselect, which goes with its bar, to the first row’s checkbox', async () => {
+    const {host, editor} = await listed();
+    const box = rowsOf(host)[1]!.querySelector('[part="check"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle(host);
+    const deselect = deep(host, '[part="deselect"]') as HTMLButtonElement;
+    deselect.focus();
+    deselect.click();
+    await settle(host);
+    expect(deep(host, '[part="selected"]')).toBeNull();
+    expect(editor.shadowRoot!.activeElement).toBe(rowsOf(host)[0]!.querySelector('[part="check"]'));
+  });
+
+  it('says what each row’s count counts, and whole names with no hover title standing in for them', async () => {
+    const {host} = await listed();
+    for (const row of rowsOf(host)) {
+      const count = row.querySelector('[part="count"]')!;
+      expect(count.parentElement!.textContent!.trim().length).toBeGreaterThan(count.textContent!.length);
+      expect(row.querySelector('[part="name"]')!.hasAttribute('title')).toBe(false);
+    }
+  });
+
+  it('says that the rows are loading, or that there are none, in a status region outside the list that is there before it speaks', async () => {
+    const {host, store} = await open('cluster:topics');
+    const list = deep(host, '[part="rows"]')!;
+    const region = deepAll(host, '[role="status"]').find((r) => r.getAttribute('part') !== 'changed')!;
+    expect(list.contains(region)).toBe(false);
+    expect(list.children).toHaveLength(0);
+    const loading = region.textContent;
+    expect(loading).not.toBe('');
+    answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: [], groups: 0}], 's0', undefined, 'tableau10'));
+    await settle(host);
+    expect(region.isConnected).toBe(true);
+    expect(region.textContent).not.toBe('');
+    expect(region.textContent).not.toBe(loading);
+    answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
+    await settle(host);
+    expect(region.isConnected).toBe(true);
+    expect(region.textContent).toBe('');
+    expect(rowsOf(host)).toHaveLength(3);
+  });
+});
+
+describe('the colour picker', () => {
+  async function picking() {
+    const opened = await open('cluster:topics');
+    answerAggregate(opened.store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
+    await settle(opened.host);
+    const swatch = rowsOf(opened.host)[1]!.querySelector('[part="swatch"]') as HTMLButtonElement;
+    swatch.click();
+    await settle(opened.host);
+    const seen: {changes: {colour: string | null}[]}[] = [];
+    opened.host.addEventListener('mosaica-clustercolour', (e) => seen.push((e as CustomEvent).detail));
+    const hex = () => deep(opened.host, '[part="hex"]') as HTMLInputElement;
+    const type = async (text: string) => {
+      hex().value = text;
+      hex().dispatchEvent(new Event('change'));
+      await settle(opened.host);
+    };
+    const key = async (on: Element, init: KeyboardEventInit) => {
+      const e = new KeyboardEvent('keydown', {bubbles: true, composed: true, cancelable: true, ...init});
+      on.dispatchEvent(e);
+      await settle(opened.host);
+      return e;
+    };
+    return {...opened, swatch, seen, hex, type, key, popover: () => deep(opened.host, '[part="colour-popover"]')};
+  }
+
+  it('keeps text in the hex field that is not a colour, marks the field invalid and says what to write, where it said the format before', async () => {
+    const {host, seen, hex, type} = await picking();
+    const format = () => deep(host, `#${hex().getAttribute('aria-describedby')}`)!;
+    expect(hex().getAttribute('aria-invalid')).toBe('false');
+    const before = format().textContent!;
+    expect(before).toContain('#');
+
+    await type('#12345');
+    expect(hex().value).toBe('#12345');
+    expect(hex().getAttribute('aria-invalid')).toBe('true');
+    expect(format().getAttribute('role')).toBe('status');
+    expect(format().textContent).not.toBe(before);
+    expect(format().textContent).toContain('#');
+    expect(seen).toEqual([]);
+
+    await type('#123456');
+    expect(hex().getAttribute('aria-invalid')).toBe('false');
+    expect(format().textContent).toBe(before);
+    expect(seen.map((d) => d.changes[0]!.colour)).toEqual(['#123456']);
+  });
+
+  it('forgets the invalid text once a colour is chosen another way', async () => {
+    const {host, hex, type} = await picking();
+    await type('nope');
+    expect(hex().getAttribute('aria-invalid')).toBe('true');
+    (deepAll(host, '[part="choice"]')[2] as HTMLButtonElement).click();
+    await settle(host);
+    expect(hex().getAttribute('aria-invalid')).toBe('false');
+    expect(hex().value).toMatch(/^#[0-9A-F]{6}$/);
+  });
+
+  it('closes on Tab past its last control and on Shift+Tab past its first, giving focus back to its swatch', async () => {
+    for (const shiftKey of [false, true]) {
+      const {host, editor, swatch, hex, key, popover} = await picking();
+      const first = popover()!.querySelector('button')!;
+      // Tab between its controls is the browser's.
+      expect((await key(shiftKey ? hex() : first, {key: 'Tab', shiftKey})).defaultPrevented).toBe(false);
+      expect(popover()).not.toBeNull();
+      const e = await key(shiftKey ? first : hex(), {key: 'Tab', shiftKey});
+      expect(e.defaultPrevented).toBe(true);
+      expect(popover()).toBeNull();
+      expect(editor.shadowRoot!.activeElement).toBe(swatch);
+      expect((deep(host, '[part="dialog"]') as HTMLDialogElement).open).toBe(true);
+      document.body.innerHTML = '';
+    }
+  });
+
+  it('takes the hex field’s text on Tab out of it, and stays where the text is not a colour', async () => {
+    const {seen, hex, key, popover} = await picking();
+    hex().value = 'nope';
+    await key(hex(), {key: 'Tab'});
+    expect(popover()).not.toBeNull();
+    expect(hex().getAttribute('aria-invalid')).toBe('true');
+    hex().value = '#abcdef';
+    await key(hex(), {key: 'Tab'});
+    expect(popover()).toBeNull();
+    expect(seen.map((d) => d.changes[0]!.colour)).toEqual(['#abcdef']);
+  });
+
+  it('gives each slider its value in words, and names the custom controls as a group', async () => {
+    const {host} = await picking();
+    const sv = deep(host, '[part="sv"]')!;
+    const hue = deep(host, '[part="hue"]')!;
+    expect(sv.getAttribute('aria-valuetext')).toMatch(/\d+%.*\d+%/);
+    expect(hue.getAttribute('aria-valuetext')).toContain(hue.getAttribute('aria-valuenow')!);
+    hue.dispatchEvent(new KeyboardEvent('keydown', {key: 'End', bubbles: true}));
+    await settle(host);
+    expect(hue.getAttribute('aria-valuetext')).toContain('359');
+    const group = sv.closest('[role="group"]')!;
+    expect(group.contains(hue)).toBe(true);
+    expect(group.contains(deep(host, '[part="hex"]'))).toBe(true);
+    expect(deep(host, `#${group.getAttribute('aria-labelledby')}`)!.textContent?.trim()).not.toBe('');
+  });
+
+  it('marks the colour in use with a tick as well as its pressed state', async () => {
+    const {host} = await picking();
+    (deepAll(host, '[part="choice"]')[3] as HTMLButtonElement).click();
+    await settle(host);
+    const choices = deepAll(host, '[part="choice"]');
+    expect(choices.map((c) => c.getAttribute('aria-pressed') === 'true')).toEqual(choices.map((_, i) => i === 3));
+    expect(choices.map((c) => c.querySelector('svg') !== null)).toEqual(choices.map((_, i) => i === 3));
+  });
+});
