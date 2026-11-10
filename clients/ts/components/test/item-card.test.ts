@@ -144,23 +144,29 @@ describe('<mosaica-item-card> says what happened', () => {
     expect(region.textContent).not.toBe('');
   });
 
-  it('says that the Open link opens in a new tab, and draws the same icon on the full card and the compact one', async () => {
-    for (const attrs of ['', 'compact']) {
-      const {host} = await card(`${attrs} open-url="https://example.org/{mosaica_id}"`);
-      const open = deep(host, '[part="open"]')!;
-      expect(open.getAttribute('target'), attrs).toBe('_blank');
-      expect(open.textContent, attrs).toContain('Open');
-      expect(open.textContent, attrs).toContain('new tab');
-      expect(open.querySelector('svg'), attrs).not.toBeNull();
-      document.body.innerHTML = '';
-    }
-    // A function says nothing of where it opens, so its button does not either.
+  it('adds to the name of the Open link, which opens in a new tab, a note that is read and not drawn, and draws the same icon on the full card and the compact one', async () => {
+    // A function says nothing of where it opens, so its button's name is its visible text.
     const {host, el} = await card('compact');
     el.open = () => {};
     await settle(host);
     const button = deep(host, '[part="open"]')!;
-    expect(button.textContent).not.toContain('new tab');
+    expect(button.querySelector('.sr-only')).toBeNull();
     expect(button.querySelector('svg')).not.toBeNull();
+    const visible = button.textContent!.trim();
+    document.body.innerHTML = '';
+
+    for (const attrs of ['', 'compact']) {
+      const {host} = await card(`${attrs} open-url="https://example.org/{mosaica_id}"`);
+      const open = deep(host, '[part="open"]')!;
+      expect(open.getAttribute('target'), attrs).toBe('_blank');
+      const note = open.querySelector('.sr-only')!;
+      expect(note.textContent!.trim(), attrs).not.toBe('');
+      // The name holds the visible text and the note after it.
+      expect(open.textContent!.trim().startsWith(visible), attrs).toBe(true);
+      expect(open.textContent!.trim().length, attrs).toBeGreaterThan(visible.length);
+      expect(open.querySelector('svg'), attrs).not.toBeNull();
+      document.body.innerHTML = '';
+    }
   });
 });
 

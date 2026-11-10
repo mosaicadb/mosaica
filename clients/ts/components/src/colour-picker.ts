@@ -33,7 +33,8 @@ type Host = ReactiveElement & {renderRoot: HTMLElement | DocumentFragment};
  * The colour picker a swatch opens: the palette's colours and a lighter row of them, a custom area
  * with a saturation and brightness square, a hue bar and a hex field, and Reset. A choice applies
  * at once. It is shown in the top layer beside the rectangle `beside` gives, level with the swatch
- * it was opened from, and focus goes into it; Escape, Tab past either end of it, or a press outside
+ * it was opened from, or under or over that swatch's row where the window has no room beside, and
+ * focus goes into it; Escape, Tab past either end of it, or a press outside
  * it and its swatch, closes it, the keys giving focus back to the swatch. A custom colour shows on
  * the map as it is dragged and is reported as it is let go; a drag cancelled, or ended by closing
  * the picker, puts back the colour from before it. Text in the hex field that is not a colour is
@@ -266,7 +267,10 @@ export class ColourPicker implements ReactiveController {
     </div>`;
   }
 
-  /** Show the picker in the top layer, beside {@link beside} and level with its swatch; focus goes into it as it opens. */
+  /**
+   * Show the picker in the top layer, beside {@link beside} and level with its swatch, or, where
+   * neither side has room, under or over its swatch's row; focus goes into it as it opens.
+   */
   private place(): void {
     const pop = this.host.renderRoot.querySelector<HTMLElement>('.pop');
     const from = this.from;
@@ -280,14 +284,28 @@ export class ColourPicker implements ReactiveController {
     }
     const a = from.getBoundingClientRect();
     const own = this.beside();
+    pop.style.maxHeight = '';
     const width = pop.offsetWidth || WIDTH;
-    const height = pop.offsetHeight || 0;
+    let height = pop.offsetHeight || 0;
     const vw = typeof innerWidth === 'number' ? innerWidth : 1024;
     const vh = typeof innerHeight === 'number' ? innerHeight : 768;
     let left = own.right + 12;
     if (left + width > vw - 8) left = own.left - width - 12;
+    let top = a.top - 8;
+    if (left < 8) {
+      // No room on either side: under the row it was opened from, or over it where that has more
+      // room, and no taller than the room, so the row stays in sight.
+      const row = (from.closest('[part~="row"]') ?? from).getBoundingClientRect();
+      const under = vh - row.bottom - 16;
+      const over = row.top - 16;
+      const below = under >= height || under >= over;
+      height = Math.min(height, Math.max(0, below ? under : over));
+      pop.style.maxHeight = `${height}px`;
+      left = a.left;
+      top = below ? row.bottom + 8 : row.top - 8 - height;
+    }
     pop.style.left = `${Math.round(Math.max(8, Math.min(left, vw - width - 8)))}px`;
-    pop.style.top = `${Math.round(Math.max(8, Math.min(a.top - 8, vh - height - 8)))}px`;
+    pop.style.top = `${Math.round(Math.max(8, Math.min(top, vh - height - 8)))}px`;
     if (this.focusNext) {
       this.focusNext = false;
       (pop.querySelector<HTMLElement>('[aria-pressed="true"]') ?? pop.querySelector<HTMLElement>('button'))?.focus();

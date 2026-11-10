@@ -237,18 +237,19 @@ export class MosaicaArtifactCard extends MosaicaElement {
     </button>`;
   }
 
-  /** The parent or child pressed, and the artifact it was pressed on, until the card shows another. */
-  private opening: {id: bigint; from: bigint | null} | null = null;
+  /** The parent or child pressed, its button, and the artifact it was pressed on, until the card shows another. */
+  private opening: {id: bigint; from: bigint | null; button: HTMLElement} | null = null;
 
   /** Open a parent or child in the card's place. */
-  private openRow(id: bigint): void {
-    this.opening = {id, from: this.shown.artifact?.id ?? null};
+  private openRow(id: bigint, button: HTMLElement): void {
+    this.opening = {id, from: this.shown.artifact?.id ?? null, button};
     void this.resolvedStore?.openArtifact(id);
   }
 
   /**
    * Once the card shows the parent or child that was pressed, focus goes to its name, since the
-   * row that had it is gone; where it was refused, to the close button.
+   * row that had it is gone; where it was refused, to the close button. Focus that has gone
+   * anywhere else meanwhile stays there.
    */
   protected override updated(): void {
     const opening = this.opening;
@@ -256,6 +257,8 @@ export class MosaicaArtifactCard extends MosaicaElement {
     const {artifact, refusal} = this.shown;
     if (!refusal && artifact?.id === opening.from) return;
     this.opening = null;
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (this.shadowRoot?.activeElement !== opening.button && !(lost && !opening.button.isConnected)) return;
     if (refusal) this.renderRoot.querySelector<HTMLElement>('[part="close"]')?.focus();
     else if (artifact?.id === opening.id) this.renderRoot.querySelector<HTMLElement>('[part="headline"]')?.focus();
   }
@@ -267,7 +270,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
     return html`<h3 part="label" class="xs muted" id=${id}>${children ? 'Children in this view' : 'Parents'}</h3>
       <ul part=${children ? 'children' : 'parents'} aria-labelledby=${id}>
         ${rows.map(
-          (a) => html`<li><button part=${children ? 'child' : 'parent'} type="button" data-id=${idString(a.mosaicaId)} @click=${() => this.openRow(a.mosaicaId)}>
+          (a) => html`<li><button part=${children ? 'child' : 'parent'} type="button" data-id=${idString(a.mosaicaId)} @click=${(e: Event) => this.openRow(a.mosaicaId, e.currentTarget as HTMLElement)}>
             ${nameSpan(artifactName(a, attached))}
             <mosaica-count .masked=${{value: Number(a.maskedCount), exact: true} as Masked} .stale=${stale}></mosaica-count>
           </button></li>`

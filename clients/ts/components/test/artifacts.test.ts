@@ -228,6 +228,29 @@ describe('<mosaica-artifact-card> follows the served set', () => {
     expect(card.shadowRoot!.activeElement).toBe(deep(host, '[part="close"]'));
   });
 
+  it('leaves focus where it has gone while the parent or child it opens was on its way', async () => {
+    const {host, card, show} = await between();
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    const child = deep(host, '[part="child"]') as HTMLButtonElement;
+    child.focus();
+    child.click();
+    elsewhere.focus();
+    await show(3n);
+    expect(deep(host, '[part="headline"]')!.textContent).toBe('Gamma');
+    expect(document.activeElement).toBe(elsewhere);
+    expect(card.shadowRoot!.activeElement).toBeNull();
+
+    // And to another control of the card.
+    const parent = deep(host, '[part="parent"]') as HTMLButtonElement;
+    parent.focus();
+    parent.click();
+    const fit = deep(host, '[part="fit"]') as HTMLButtonElement;
+    fit.focus();
+    await show(2n);
+    expect(card.shadowRoot!.activeElement).toBe(fit);
+  });
+
   it('keeps focus where it is when the card changes for any other reason', async () => {
     const {host, card, show} = await between();
     const fit = deep(host, '[part="fit"]') as HTMLButtonElement;
