@@ -357,12 +357,50 @@ describe('the map in the notebook\u2019s page', () => {
     for (const line of lines) expect(line.textContent).toContain('filters');
     // A basemap one view's map refuses is that view's to say, under the refusal it already shows.
     other.querySelector('mosaica-explorer')!.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal: 'View s0 has no map projection.', note: null}, bubbles: true, composed: true}));
-    expect(await written()).toEqual([1, 3]);
+    expect(await written()).toEqual([1, 2]);
     expect(lines[0]!.textContent).not.toContain('projection');
     expect(lines[1]!.textContent).toContain('projection');
     model.set('filters', {year: {range: {gte: 2000}}});
     expect(lines[0]!.textContent).toBe('');
     expect(lines[1]!.children).toHaveLength(1);
+  });
+
+  it('leaves a line that stands untouched while another trait is refused, reworded or put right', async () => {
+    const {model, store, el} = setUp({colour_by: 'cluster:nope'});
+    store.set('meta', {...META, layers: [clusters('topics')], filterOperands: operands} as never);
+    const region = statusOf(el);
+    // Each line is read out as it changes, not the region whole.
+    expect(region.getAttribute('aria-atomic')).toBe('false');
+    const colour = region.firstElementChild!;
+    expect(colour.textContent).toContain('nope');
+    // Every node a change in the region added, removed or wrote into.
+    const touched: Node[] = [];
+    new MutationObserver((records) => {
+      for (const r of records) touched.push(r.target, ...r.addedNodes, ...r.removedNodes);
+    }).observe(region, {childList: true, subtree: true, characterData: true});
+    const standing = async () => {
+      await Promise.resolve();
+      return region.firstElementChild === colour && !touched.some((node) => colour.contains(node));
+    };
+
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    expect(region.children).toHaveLength(2);
+    const filters = region.children[1]!;
+    const first = filters.textContent;
+    expect(await standing()).toBe(true);
+
+    // Another refusal of the same trait rewords its line where it is.
+    model.set('filters', {nope: {eq: 'x'}});
+    expect(region.children[1]).toBe(filters);
+    expect(filters.textContent).not.toBe(first);
+    expect(await standing()).toBe(true);
+
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect([...region.children]).toEqual([colour]);
+    expect(await standing()).toBe(true);
+
+    model.set('colour_by', 'cluster:topics');
+    expect(region.children).toHaveLength(0);
   });
 });
 

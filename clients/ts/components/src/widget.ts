@@ -63,9 +63,10 @@ import './explorer.js';
  *
  * `label` is the explorer's `aria-label`, which names its map; with none set the explorer has no
  * such attribute. Whatever a view refuses of `filters`, `colour_by` or the basemap goes to the
- * kernel as an `error` message and is written once in the status line above that view's map,
- * until the kernel sets that trait to something the view takes or that trait is changed in its
- * map.
+ * kernel as an `error` message and is written once, on a line of its own, in the status region
+ * above that view's map, until the kernel sets that trait to something the view takes or that
+ * trait is changed in its map. Writing or removing one trait's line leaves the others as they
+ * are.
  *
  * A notebook runs its own shortcuts for a key press whose target is not an input, and the target
  * it sees for a key pressed anywhere in the map is the explorer. The explorer carries
@@ -100,10 +101,10 @@ export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'base
 
 type ViewState = {
   explorer: MosaicaExplorer;
-  /** The line above the map that says what the page refused. */
+  /** The region above the map that says what the page refused, a line to a trait. */
   status: HTMLElement;
-  /** What the page last refused of each trait for this view, by the trait's name. */
-  refusals: Map<string, string>;
+  /** The line saying what the page last refused of each trait for this view, by the trait's name. */
+  refusals: Map<string, HTMLElement>;
   /** Each trait's value as this view last sent it up, as JSON, since the page last refused that trait for it. */
   sentUp: Map<string, string>;
   store: Store | null;
@@ -486,13 +487,22 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   const report = (v: ViewState, what: string, e: unknown) => {
     const detail = e instanceof Error ? e.message : String(e);
     model.send({type: 'error', what, detail} satisfies PageMessage);
-    v.refusals.set(what, detail);
     v.sentUp.delete(what);
-    writeRefusals(v.status, v.refusals);
+    // Worded as the kernel's `last_error` is. A line already saying it is left as it is.
+    const text = `${what}: ${detail}`;
+    const held = v.refusals.get(what);
+    if (held?.textContent === text) return;
+    const line = held ?? document.createElement('div');
+    line.textContent = text;
+    if (!held) {
+      v.refusals.set(what, line);
+      v.status.append(line);
+    }
   };
   /** View `v`'s refusal of `what` no longer stands: it took a value for it, or it was changed in its map. */
   const accept = (v: ViewState, what: string) => {
-    if (v.refusals.delete(what)) writeRefusals(v.status, v.refusals);
+    v.refusals.get(what)?.remove();
+    v.refusals.delete(what);
   };
 
   // Up-sync: one `save_changes` per settle or region answer. `from` is the view whose settle it is.
@@ -834,17 +844,6 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   return () => state.dispose();
 }
 
-/** Write each refusal on a line of its own in `status`, as the kernel's `last_error` words it. */
-function writeRefusals(status: HTMLElement, refusals: ReadonlyMap<string, string>): void {
-  status.replaceChildren(
-    ...[...refusals].map(([what, detail]) => {
-      const line = document.createElement('div');
-      line.textContent = `${what}: ${detail}`;
-      return line;
-    })
-  );
-}
-
 /** Name the explorer's map with the label the kernel set, and leave it unnamed where it set none. */
 function applyLabel(explorer: MosaicaExplorer, model: WidgetModel): void {
   const label = model.get('label');
@@ -949,6 +948,8 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   applyBasemap(explorer, model, state.images);
   const status = document.createElement('div');
   status.setAttribute('role', 'status');
+  // A line that is added or reworded is read out alone, not with the lines that stand.
+  status.setAttribute('aria-atomic', 'false');
   el.append(status, explorer);
   fitHeight(explorer, model);
   const refit = () => fitHeight(explorer, model);
