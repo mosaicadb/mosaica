@@ -55,7 +55,7 @@ The table lists those keys and the others the components add.
 | | Shift with Left or Right | Widen or narrow the range. |
 | | Enter | Opens the range box on the range chosen, or on the range the field holds. |
 | | Escape | Drops the range. |
-| The range box | Escape | Closes the box and returns focus to the plot or the Set range button, whichever opened it. |
+| The range box | Escape | Closes the box and returns focus to the plot or the Set range button, whichever opened it. Tab past either end of the box closes it too. |
 | A row of the hierarchy, with the focus or the pointer in it | Escape | Puts the row's buttons away and shows its counts again. Focus on one of the buttons moves to the row's name. |
 | The colour editor | Escape | Closes the dialog. |
 | The colour picker | Escape | Closes the picker and returns focus to the swatch that opened it. Tab past its last control, or Shift and Tab before its first, does the same. |
@@ -63,9 +63,9 @@ The table lists those keys and the others the components add.
 | | Up, Down | Change the brightness by 1%, or by 10% with Shift. |
 | The picker's hue bar | Arrow keys, Home, End | Change the hue by 1°, or by 10° with Shift. Home and End go to its ends. |
 
-A histogram's range does not need the plot's keys. The Set range button under the plot opens a box with a From and a To field, which take a typed number or date. A number is typed in digits, and a comma, a space or a narrow no-break space is taken only where it groups thousands: `1,250` and `1 250` are both 1250, and `1,5` is refused with words that say what the comma is for.
+A histogram's range does not need the plot's keys or a drag. The range box floats beside the plot and holds a From and a To field, which take a typed number or date. A press on one bin opens it, and so does Set range, a button after the plot in the Tab order that is drawn only while the keyboard's focus is on it. A number is typed in digits, and a comma, a space or a narrow no-break space is taken only where it groups thousands: `1,250` and `1 250` are both 1250, and `1,5` is refused with words that say what the comma is for.
 
-A row of the hierarchy shows its Highlight, Filter and Fit buttons in place of its counts while the pointer or the focus is in the row, and each of them is a Tab stop. Where there is no pointer to hover with, as on a touch screen, the buttons and the counts are both drawn.
+A row of a category or cluster field card shows its Highlight and Filter buttons in place of its counts while the pointer is over the row or the keyboard's focus is in it, and a row of the hierarchy does the same with its Highlight, Filter and Fit buttons. The buttons are Tab stops while they are not drawn, so Tab reaches and shows them, and a screen reader has the counts at all times. On a screen with no pointer that hovers, such as a touch screen, the buttons are always drawn beside the counts, which is how Highlight is reached there.
 
 When an action removes the control that has focus, focus moves to a control beside it. Removing a filter's chip, for example, moves focus to the × of the chip after it, or of the one before it, and to Add field when no chip is left. A panel that shows chips alone has no Add field, so it shows the words No filters, which take the focus.
 
@@ -100,7 +100,7 @@ Every element announces what only it knows, inside an explorer or outside one:
 
 - **What a search box lists.** The value and cluster search boxes each say how many rows are listed, that nothing matched, or, once an answer has been awaited for a quarter of a second, that they are loading. Add field's list says how many fields are listed, or that none has that name.
 - **A range being chosen.** While the arrow keys choose a range on a histogram, the card announces the range and its count. The range box says what to type when a field holds no number or date.
-- **A copy.** The item card's Copy id says whether the id was copied.
+- **A copy.** The item card's Copy id tells a screen reader whether the id was copied, in words that are not drawn.
 - **A card's own state.** The item card, the artifact card, the hierarchy and the colour editor each say when they have nothing to show, are loading or were refused.
 
 A map on its own announces the states it shows over its canvas, and how many items match inside a selected region, once, when the query that counts it has finished loading. A selection card on its own announces Counting, then the counts once, or a refusal.
@@ -131,11 +131,17 @@ Every control shows the same focus ring, 2 pixels wide in `--mosaica-focus`, and
 
 The status strip's counts that wait for an answer, or that stand from before a refusal, are drawn in the faint ink, `--mosaica-ink-3`, which keeps 4.5:1 on the surface. The state cell beside them says why they wait, in words or by the shape of its dot.
 
-A state is not shown by colour alone. A pressed segment and a chosen row carry a bar, the entry chosen in a menu carries a tick, a highlight's chip carries the word, and the dot for a view that is updating is a ring where the dot for one that is up to date is solid.
+A state is not shown by colour alone. A pressed segment and a chosen row carry a bar, the entry chosen in a menu carries a tick, a highlight's chip carries a pen with the word as hidden text, a field card's row carries a tick where its value is filtered to and a pen where it is highlighted, and the dot for a view that is updating is a ring where the dot for one that is up to date is solid. A value the field's filter leaves out is named in the faint ink, which keeps 4.5:1, with its swatch dimmed.
 
 Under forced colours, as in Windows' contrast themes, a pressed, checked or chosen control takes the system's highlight colours and the switch, the dots and the spinner are drawn in system colours. The focus ring on such a control is drawn inside its edge in the highlight's text colour, where a ring in the highlight colour would not show. Colour that is data keeps its own value: a swatch, a bar, a ramp and the colour picker.
 
 With `ground` unset the map follows the page's colour scheme, and draws for the other background at once when the page's or the system's scheme changes.
+
+A title or a name too long for its line is cut with an ellipsis in the wide and compact forms and keeps its whole text in the page, so a screen reader reads all of it, and a pointer's hover shows it in a `title`. The token `--mosaica-long-text` chooses this: `nowrap`, the default, cuts a long name, and `normal` wraps it. The explorer's narrow form sets it to `normal`, and a host can set it on any element or ancestor.
+
+Not built yet: a way for a sighted keyboard user to read a name that is cut. A viewer who does not use a pointer, or who has widened the text's spacing so that more is cut, cannot read the cut part unless the host sets `--mosaica-long-text: normal`. A row of the hierarchy has its name in its accessible name and not in a `title`, so a pointer's hover does not show a cut name there either.
+
+Not built yet: two notes for a sighted keyboard user. Which layers are drawn with a layer, and why Size by offers nothing, are each a `title` for a pointer and a description for a screen reader, and are not drawn.
 
 Where the viewer's system asks for reduced motion, the components run no transition or animation. The components do not animate the map's camera under either setting: a key press, Fit to matches or a switch of view puts it in its new place at once.
 
@@ -148,7 +154,7 @@ Not built yet: the category palettes do not reach 3:1 against a light map. Each 
 | Set 2 | 1.2:1 to 2.0:1 | 4.8:1 or more | 3.5:1 or more |
 | Dark 2 | 1.7:1 to 3.4:1 | 3:1 or more, except grey at 2.5:1 | six of eight under 3:1 |
 
-At opacity 0.8 every figure on the light background is lower than the one shown. A host that needs each value's colour at 3:1 draws the map on a dark background, with a dark `color-scheme` or with `--mosaica-map-bg` and `ground="dark"` on `<mosaica-map>`, and uses Set 2 or sets its own colours with `valueColours`. Points with no colouring are drawn in a single blue chosen for the background, which is at 3:1 or more against both default backgrounds at opacity 0.8.
+At opacity 0.8 every figure on the light background is lower than the one shown. A host that needs each value's colour at 3:1 draws the map on a dark background, with a dark `color-scheme` or with `--mosaica-map-bg` and `ground="dark"` on `<mosaica-map>`, and uses Set 2 or sets its own colours with `valueColours`. Points with no colouring are drawn in one pale blue on either background. At `point-opacity="1"` it is at 1.6:1 against the default light background and 6.2:1 against the dark one, and at opacity 0.8 at 1.5:1 and 4.4:1, so on a light map a host that needs 3:1 colours the points by a column with its own colours, or draws the map dark.
 
 ## Small windows and zoom
 
@@ -162,7 +168,7 @@ The explorer lays itself out by the width of its container, so it has the same t
 
 The full-width strip and the bar of buttons, the parts `strip-row` and `tabs`, are in the page only in the narrow form, so the wider forms hold one status strip.
 
-The browser suite checks the narrow form at 640 by 400 px and at 320 by 480 px, which are a 1280 by 800 px window at 200% and at 400% zoom. At both sizes the status strip and the bar of buttons stay inside the explorer with nothing drawn over them, and the map keeps a height of 100 px or more. In a frame shorter than the map's floor and the bars together, the explorer scrolls. At 320 px wide no text is cut off and nothing scrolls sideways, with a field card open and with the Layers sheet open, and the same holds in the compact form at 900 px wide. Neither changes when line, letter and word spacing are widened to 1.5, 0.12em and 0.16em.
+The browser suite checks the narrow form at 640 by 400 px and at 320 by 480 px, which are a 1280 by 800 px window at 200% and at 400% zoom. At both sizes the status strip and the bar of buttons stay inside the explorer with nothing drawn over them, and the map keeps a height of 100 px or more. In a frame shorter than the map's floor and the bars together, the explorer scrolls. At 320 px wide no text is cut off and nothing scrolls sideways, with a field card open and with the Layers sheet open. In the compact form at 900 px wide the only text cut is a long name's, with an ellipsis. Neither changes when line, letter and word spacing are widened to 1.5, 0.12em and 0.16em.
 
 In every state the suite builds, a pointer target is at least 24 by 24 CSS pixels, or far enough from the next one that a 24-pixel circle centred on it reaches no other target.
 
@@ -189,7 +195,7 @@ The components' browser suite builds the explorer in each of its main states in 
 
 - every rule of axe-core 4.14 tagged WCAG 2.0, 2.1 or 2.2 at level A or AA;
 - the contrast of text in the light and the dark scheme, including text drawn over the map, which is measured against the map's background;
-- that no text is cut off and nothing scrolls sideways, in the compact form, down to 320 px wide and with text spacing widened;
+- that no text is cut off and nothing scrolls sideways, in the compact form, down to 320 px wide and with text spacing widened. In a window wider than 720 px a name cut with an ellipsis is not counted, where it does not wrap by the long-text rule and its whole text is its own or its control's `title` or accessible name. At 720 px and under nothing may be cut;
 - that no pointer target under 24 by 24 px is too close to another;
 - that every Tab stop is drawn, inside the window, not covered at its centre and shows a focus indicator.
 

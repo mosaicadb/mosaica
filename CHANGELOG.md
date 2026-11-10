@@ -41,12 +41,13 @@ container image.
   basemap note and a basemap it refuses. Set it on all but one of the elements that would say the
   same thing, so that each change is announced once. The explorer sets it on its own map and
   selection card, and its status strip speaks.
-- A histogram field card has a Set range button, and its range box has From and To fields that
-  take a typed number or date, so a range needs no drag and can fall between bins. The card
-  writes out the range its filter and its highlight hold, and lists its bins' counts in a table
-  for a screen reader. A number in the box is written in full, and a comma, a space or a narrow
-  no-break space is taken where it groups thousands, so `1,250` and `1 250` are 1250 and `1,5` is
-  refused. Its new parts are `range`, `brush-from` and `brush-to`.
+- A histogram field card's range box has From and To fields that take a typed number or date, so
+  a range needs no drag and can fall between bins. A press on one bin opens the box, and so does
+  Set range, a button drawn only while the keyboard's focus is on it. A screen reader is given
+  the range the filter and the highlight hold, and the bins' counts in a table. A number in the
+  box is written in full, and a comma, a space or a narrow no-break space is taken where it
+  groups thousands, so `1,250` and `1 250` are 1250 and `1,5` is refused. The new parts are
+  `range`, `brush-from` and `brush-to`.
 - The item card has a Show more button, part `more`, under a long value that is cut short, and
   Show all on the compact card shows the headline whole. Through the explorer the button is
   `::part(item-card-more)`.
@@ -54,8 +55,9 @@ container image.
   removed, and they take the focus the chip's × had.
 - `--mosaica-focus` sets the colour of the focus ring, which is 2 px wide on every control and on
   the map's canvas.
-- `<mosaica-layer-picker>` says in words which layers are drawn with a layer, in the part
-  `linked`.
+- `--mosaica-long-text` chooses what a title or a name too long for its line does: `nowrap`, the
+  default, cuts it with an ellipsis as before, and `normal` wraps it. The explorer's narrow
+  layout wraps them. A cut name keeps its whole text for a screen reader.
 - The notebook map writes what it refuses of `filters`, `colour_by` or `basemap` above the map,
   as well as sending it to the kernel. Each trait's refusal has a line of its own, in the view
   that refused it, so a screen reader reads the line that changed.
@@ -93,10 +95,10 @@ container image.
 - A request after a flush or merge is no longer refused with 429 while the server brings each
   viewer's visible set up to date. It brings its own up to date and is answered.
   `refresh_in_flight` in `GET /control/status` still reports the work in progress.
-- A field card's row always shows its Highlight and Filter buttons beside its counts, each filled
-  with a solid icon while it is on. They used to take the counts' place under the pointer or the
-  focus. The range box sits under the histogram, where it used to float over it. A value the
-  filter leaves out is drawn in faint text, and long value and cluster names wrap.
+- A field card's Highlight and Filter buttons stay in the Tab order while they are not drawn,
+  and are always drawn on a screen with no pointer that hovers. Before a row's counts a tick
+  marks a value the filter keeps and a pen one that is highlighted. A screen reader is given a
+  row's counts at all times, each with what it counts.
 - In a value or cluster search box, Enter chooses the suggestion the arrow keys reached. It used
   to take the first row, which could change as counts arrived. Home and End go to the first and
   last suggestion.
@@ -111,8 +113,6 @@ container image.
 - Tab from the map goes on in the page's order, to the region's Clear button, the selection card
   and the status strip, and then to the card beside the point. The Layers popover takes the focus
   as it opens and closes when the focus leaves it.
-- Points with no colouring are a deep blue on a light map, and the pale blue they were on a dark
-  one.
 - The status strip says "Nothing visible to you" in words, wraps its cells onto further lines
   where it is short of room, and draws a ring for Updating where Up to date is a solid dot.
   Counts that wait for an answer, or stand from before a refusal, are drawn in the faint text
@@ -126,18 +126,18 @@ container image.
   pairs of a name and a value are `<dl>` lists, and the rows of the selection card and of the
   artifact card's parents and children hold buttons. Page styles that select these parts by
   element need the new elements.
-- A highlight's chip carries the word "highlight", the entry chosen in a menu carries a tick, and
-  a pressed segment and a chosen row carry a bar, so no state is shown by colour alone. Under
+- A highlight's chip carries a pen, the entry chosen in a menu carries a tick, and a pressed
+  segment and a chosen row carry a bar, so no state is shown by colour alone. Under
   forced colours these states take the system's highlight colours, with the focus ring drawn
   inside the control.
 - Faint text reaches 4.5:1 on every surface, and the off switch's track and the warning dot reach
   3:1. Small buttons, sliders, switches, swatches, a chip's text and its ×, Clear all and a field
-  card's "N more" are 24 px targets.
-- The colour picker wraps a palette's colours onto rows of 24 px squares, and keeps text in its
-  hex field that is not a colour, marked and with the format to write. In a window too narrow
-  for it to stand beside the colour editor, it opens under the row it was opened from, or over
-  that row where there is more room. Add field's list closes on a press outside it and when the
-  focus leaves it.
+  card's "N more" take a press from 24 px around them, drawn at the size they were.
+- The colour picker wraps a palette of more than ten colours onto rows of 24 px squares, and
+  keeps text in its hex field that is not a colour, marked and with the format to write. In a
+  window too narrow for it to stand beside the colour editor, it opens under the row it was
+  opened from, or over that row where there is more room. Add field's list closes on a press
+  outside it and when the focus leaves it.
 
 ### Fixed
 
@@ -168,8 +168,7 @@ container image.
 - Focus stays on a control when the one it was on is removed: on the next chip's × after a chip
   is removed, on the hierarchy's row after a filter fetches its rows again, in the list of
   density colours while the arrow keys move through it, and on the swatch when the colour picker
-  closes. A field card's row keeps the focus when its value moves in the list, and keeps its
-  counts while it has the focus.
+  closes. A field card's row keeps the focus when its value moves in the list.
 - The hierarchy keeps its open rows when a filter changes, where pressing Filter on a nested row
   used to close the tree.
 - A search box whose list closed no longer reads "No value starts with that" while values
