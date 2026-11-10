@@ -10,7 +10,8 @@ export function results(store: Store): void {
     if (view.inView?.status !== 'shown') return;
     const matched = formatMasked(view.inView.matched);
     const visible = formatMasked(view.inView.visible);
-    count.textContent = `${matched} of the ${visible} papers in view match`;
+    const text = `${matched} of the ${visible} papers in view match`;
+    if (count.textContent !== text) count.textContent = text;
   });
 
   let reading: AbortController | null = null;
