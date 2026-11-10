@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {BrowseRow, Meta} from '@mosaicajs/client';
 import '../src/cluster-filter.js';
 import type {MosaicaClusterFilter} from '../src/cluster-filter.js';
@@ -12,6 +12,7 @@ import {UNNAMED} from '../src/base.js';
 
 afterEach(() => {
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 const layer = (name: string, over: Partial<Meta['layers'][number]> = {}) =>
@@ -93,6 +94,142 @@ describe('<mosaica-cluster-filter> asking', () => {
     await settle(host);
     expect(deep(host, '[part="refusal"]')).toBeNull();
     expect(names(host)).toEqual(['Physics']);
+  });
+});
+
+describe('<mosaica-cluster-filter> from the keyboard', () => {
+  const three = {artifacts: [row(1n, 'Physics'), row(2n, 'Biology'), row(3n, 'Chemistry')], parents: [], next: null};
+  const press = async (host: HTMLElement, box: HTMLInputElement, key: string) => {
+    const event = new KeyboardEvent('keydown', {key, cancelable: true});
+    box.dispatchEvent(event);
+    await settle(host);
+    return event;
+  };
+  const active = (host: HTMLElement) => deep(host, '[part~="option"][data-active]');
+
+  it('chooses the row the arrow keys reach on Enter, and no row before they reach one', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('roots', three);
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    // The rows change order as their counts land, so the first is not Enter's until a key reaches it.
+    await press(host, box(), 'Enter');
+    expect(store.calls.filter((c) => c.name === 'setMembers')).toHaveLength(0);
+    expect(active(host)).toBeNull();
+    expect(box().hasAttribute('aria-activedescendant')).toBe(false);
+    await press(host, box(), 'ArrowDown');
+    expect(active(host)!.querySelector('[part="name"]')!.textContent).toBe('Physics');
+    expect(box().getAttribute('aria-activedescendant')).toBe(active(host)!.id);
+    // The counts put another row first; the row reached stays the one Enter takes.
+    answerAggregate(store, 'clusters', aggregateEntry([{rows: [{key: 1n, count: 5}, {key: 2n, count: 90}, {key: 3n, count: 50}]}]));
+    await settle(host);
+    expect(names(host)[0]).toBe('Biology');
+    await press(host, box(), 'Enter');
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 1n, outside: false, verb: 'filter', label: 'Physics'}]);
+  });
+
+  it('moves to the first and the last row with Home and End once a row is reached, leaving them to the text before, and scrolls the row reached into view', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('roots', three);
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    const scrolled: string[] = [];
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push(this.querySelector('[part="name"]')?.textContent ?? '');
+    });
+    expect((await press(host, box(), 'End')).defaultPrevented).toBe(false);
+    expect(active(host)).toBeNull();
+    await press(host, box(), 'ArrowUp');
+    expect(active(host)!.querySelector('[part="name"]')!.textContent).toBe('Chemistry');
+    expect((await press(host, box(), 'Home')).defaultPrevented).toBe(true);
+    expect(active(host)!.querySelector('[part="name"]')!.textContent).toBe('Physics');
+    await press(host, box(), 'End');
+    expect(active(host)!.querySelector('[part="name"]')!.textContent).toBe('Chemistry');
+    expect(scrolled).toEqual(['Chemistry', 'Physics', 'Chemistry']);
+  });
+});
+
+describe('<mosaica-cluster-filter> for a screen reader', () => {
+  it('names its box by the layer and the placeholder it shows, as a list autocomplete whose rows toggle', async () => {
+    const {host, store, box, el} = await mountField();
+    expect(box().getAttribute('aria-label')).toContain('Topics');
+    expect(box().getAttribute('aria-label')).toContain(box().getAttribute('placeholder'));
+    expect(box().getAttribute('aria-autocomplete')).toBe('list');
+    store.setBrowse('roots', {artifacts: [row(1n, 'Physics')], parents: [], next: null});
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    expect(deep(host, '[role="listbox"]')!.getAttribute('aria-multiselectable')).toBe('true');
+    // As a picker, a row is chosen once and nothing stays selected.
+    el.choose = () => {};
+    await settle(host);
+    expect(deep(host, '[role="listbox"]')!.hasAttribute('aria-multiselectable')).toBe(false);
+  });
+
+  it('says in a status line, there before the list, how many clusters are listed and that none match', async () => {
+    const {host, store, box} = await mountField();
+    const status = () => deep(host, '[role="status"]')!;
+    expect(status().textContent!.trim()).toBe('');
+    store.setBrowse('roots', {artifacts: [row(1n, 'Physics'), row(2n, 'Biology')], parents: [], next: null});
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    expect(status().textContent).toContain('2');
+    box().value = 'zzz';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(status().querySelector('[part="more"]')!.textContent!.trim()).not.toBe('');
+    expect(status().textContent).not.toContain('2');
+  });
+
+  it('says that the clusters are loading only once they have been awaited a while, and once however much is typed meanwhile', async () => {
+    const {host, store, box} = await mountField();
+    const said = () => deep(host, '[role="status"]')!.textContent!.trim();
+    // Every answer is held back until the test lets it go.
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const answered = store.browse;
+    store.browse = (async (req: never) => {
+      await held;
+      return answered(req);
+    }) as never;
+    store.setBrowse('q:phys', {artifacts: [row(1n, 'Physics')], parents: [], next: null});
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    // At once the list's place is drawn, and nothing is said.
+    expect(deep(host, '[role="status"] .skel')).not.toBeNull();
+    expect(said()).toBe('');
+    await wait(300);
+    await settle(host);
+    const loading = said();
+    expect(loading).not.toBe('');
+    for (const text of ['p', 'ph', 'phy', 'phys']) {
+      box().value = text;
+      box().dispatchEvent(new Event('input'));
+      await settle(host);
+      expect(said()).toBe(loading);
+    }
+    await wait(300);
+    release();
+    await settle(host);
+    await settle(host);
+    expect(said()).toContain('1');
+    expect(said()).not.toBe(loading);
+  });
+
+  it('says nothing about a list that closed as focus left, while clusters match', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('q:phy', {artifacts: [row(1n, 'Physics')], parents: [], next: null});
+    box().value = 'phy';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(deep(host, '[role="status"]')!.textContent).toContain('1');
+    box().dispatchEvent(new Event('blur'));
+    await settle(host);
+    expect(deep(host, '[part="values"]')).toBeNull();
+    expect(deep(host, '[role="status"]')!.textContent!.trim()).toBe('');
   });
 });
 

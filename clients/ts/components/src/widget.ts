@@ -36,7 +36,7 @@ import './explorer.js';
  * `height` is the map's height in the notebook's flow. While the output holding the map is shown full
  * screen, the map fills the room below its top instead, and takes `height` again on the way out.
  *
- * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`,
+ * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`, `label`,
  * `title_field`, `image_fields`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_budget_min` and `cluster_budget_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
  * `size_max`, `size_scale` and `filters` go both ways, and so do `budget`, sent up when Most points is let go,
  * `cluster_budget`, sent up when Most clusters is let go, `palette`, sent up when one is chosen, and
@@ -60,6 +60,19 @@ import './explorer.js';
  * new read arrives, and the explorer is given `none` while a listed path has none at all. An
  * object URL is revoked when its path's new read arrives or the path is no longer listed, and
  * when the model is torn down. A basemap the map refuses goes to the kernel as an `error` message.
+ *
+ * `label` is the explorer's `aria-label`, which names its map; with none set the explorer has no
+ * such attribute. Whatever a view refuses of `filters`, `colour_by` or the basemap goes to the
+ * kernel as an `error` message and is written once, on a line of its own, in the status region
+ * above that view's map, until the kernel sets that trait to something the view takes or that
+ * trait is changed in its map. Writing or removing one trait's line leaves the others as they
+ * are.
+ *
+ * A notebook runs its own shortcuts for a key press whose target is not an input, and the target
+ * it sees for a key pressed anywhere in the map is the explorer. The explorer carries
+ * `data-lm-suppress-shortcuts`, which keeps JupyterLab's commands from such a press, and a
+ * `keydown` stops at the explorer, so a listener on the document does not hear it. Tab goes on,
+ * and so does an Escape that nothing in the map took.
  *
  * Backbone fires `change:<key>` for a `model.set` made here as well as one from the kernel, so
  * each up-sync sets a flag the down-sync handlers check. Without it a `bbox` from Python would fit
@@ -88,6 +101,12 @@ export type PageMessage = {type: 'ready'} | {type: 'reauthorise'} | {type: 'base
 
 type ViewState = {
   explorer: MosaicaExplorer;
+  /** The region above the map that says what the page refused, a line to a trait. */
+  status: HTMLElement;
+  /** The line saying what the page last refused of each trait for this view, by the trait's name. */
+  refusals: Map<string, HTMLElement>;
+  /** Each trait's value as this view last sent it up, as JSON, since the page last refused that trait for it. */
+  sentUp: Map<string, string>;
   store: Store | null;
   unsubscribe: (() => void) | null;
   /** The box this view's camera last reported, in data coordinates, which its settle syncs up. */
@@ -464,17 +483,41 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   });
   pullImages();
 
-  const report = (what: string, e: unknown) => {
-    model.send({type: 'error', what, detail: e instanceof Error ? e.message : String(e)} satisfies PageMessage);
+  /** Tell the kernel what view `v` refused of `what`, and write it in that view's status line. */
+  const report = (v: ViewState, what: string, e: unknown) => {
+    const detail = e instanceof Error ? e.message : String(e);
+    model.send({type: 'error', what, detail} satisfies PageMessage);
+    v.sentUp.delete(what);
+    // Worded as the kernel's `last_error` is. A line already saying it is left as it is.
+    const text = `${what}: ${detail}`;
+    const held = v.refusals.get(what);
+    if (held?.textContent === text) return;
+    const line = held ?? document.createElement('div');
+    line.textContent = text;
+    if (!held) {
+      v.refusals.set(what, line);
+      v.status.append(line);
+    }
+  };
+  /** View `v`'s refusal of `what` no longer stands: it took a value for it, or it was changed in its map. */
+  const accept = (v: ViewState, what: string) => {
+    v.refusals.get(what)?.remove();
+    v.refusals.delete(what);
   };
 
-  // Up-sync: one `save_changes` per settle or region answer.
-  const syncUp = (patch: Record<string, unknown>) => {
+  // Up-sync: one `save_changes` per settle or region answer. `from` is the view whose settle it is.
+  const syncUp = (patch: Record<string, unknown>, from?: ViewState) => {
     state.syncingUp = true;
     try {
       let dirty = false;
       for (const [k, v] of Object.entries(patch)) {
-        if (JSON.stringify(model.get(k)) === JSON.stringify(v)) continue;
+        const next = JSON.stringify(v);
+        if (from) {
+          // A value that differs from the one the view last sent up was changed in its map.
+          if (from.sentUp.has(k) && from.sentUp.get(k) !== next) accept(from, k);
+          from.sentUp.set(k, next);
+        }
+        if (JSON.stringify(model.get(k)) === next) continue;
         model.set(k, v);
         dirty = true;
       }
@@ -484,11 +527,12 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     }
   };
 
-  const applyFilters = (store: Store, expr: FilterExpr | null) => {
-    const meta = store.get('meta');
+  const applyFilters = (v: ViewState, expr: FilterExpr | null) => {
+    const store = v.store;
+    const meta = store?.get('meta');
     // Before `/v1/meta` there is no operand list to check against; `follow` applies the kernel's
     // expression when meta arrives.
-    if (!meta) return;
+    if (!store || !meta) return;
     try {
       // The traitlet is the `filters` expression, so the highlight is kept, and so are the
       // highlight clauses beside the filter's `member_of` clauses.
@@ -505,8 +549,9 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       });
       store.setMembers([...held.members.filter((c) => c.verb !== 'filter'), ...named]);
       askMemberNames(store, named);
+      accept(v, 'filters');
     } catch (e) {
-      report('filters', e);
+      report(v, 'filters', e);
     }
   };
 
@@ -514,14 +559,17 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
    * A `cluster:<layer>` naming no layer this view can colour by is reported, as a bad filter is;
    * the store still takes it and draws the points uniform. Checked once `/v1/meta` is in hand.
    */
-  const checkColour = (store: Store, colourBy: unknown) => {
-    const meta = store.get('meta');
-    if (!meta || typeof colourBy !== 'string' || !colourBy.startsWith(CLUSTER_PREFIX)) return;
+  const checkColour = (v: ViewState, colourBy: unknown) => {
+    const meta = v.store?.get('meta');
+    if (!meta) return;
     const offered = colourLayers(meta.layers).map((l) => l.name);
-    const layer = colourBy.slice(CLUSTER_PREFIX.length);
-    if (offered.includes(layer)) return;
+    const layer = typeof colourBy === 'string' && colourBy.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
+    if (layer === null || offered.includes(layer)) {
+      accept(v, 'colour_by');
+      return;
+    }
     const instead = offered.length === 0 ? 'this view has no layer to colour by' : `use one of ${offered.map((n) => CLUSTER_PREFIX + n).join(', ')}`;
-    report('colour_by', new Error(`${layer} is not a layer this view can colour by; ${instead}`));
+    report(v, 'colour_by', new Error(`${layer} is not a layer this view can colour by; ${instead}`));
   };
 
   /** The size range and scale the kernel holds, shared with every element over `store`; `null` leaves the choice standing. */
@@ -548,8 +596,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     if (typeof palette === 'string' && palette) store.setPalette(palette as PaletteName);
   };
 
-  // Down-sync: what the kernel holds, applied to one store (a new one, or one whose meta arrived).
-  const applyControls = (store: Store) => {
+  // Down-sync: what the kernel holds, applied to one view's new store.
+  const applyControls = (v: ViewState, store: Store) => {
     // `null` leaves the explorer's default; `[]` is none.
     const layers = model.get('layers');
     if (Array.isArray(layers)) store.setLayers(layers.map(String));
@@ -560,7 +608,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     const sizeBy = model.get('size_by');
     if (typeof sizeBy === 'string' && sizeBy) applySizeBy(store);
     const filters = model.get('filters');
-    if (filters !== null && filters !== undefined) applyFilters(store, filters as FilterExpr);
+    if (filters !== null && filters !== undefined) applyFilters(v, filters as FilterExpr);
   };
 
   const fit = (bbox: [number, number, number, number]) => {
@@ -580,8 +628,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       if (!metaSeen && store.get('meta')) {
         metaSeen = true;
         const filters = model.get('filters');
-        if (filters !== null && filters !== undefined) applyFilters(store, filters as FilterExpr);
-        checkColour(store, model.get('colour_by'));
+        if (filters !== null && filters !== undefined) applyFilters(v, filters as FilterExpr);
+        checkColour(v, model.get('colour_by'));
         if (state.pendingFit) fit(state.pendingFit);
       }
       if (state.active !== v) return;
@@ -627,7 +675,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
         patch.selected = selection.item ? idString(selection.item.id) : null;
         patch.selected_artifact = selection.artifact ? idString(selection.artifact.id) : null;
       }
-      if (Object.keys(patch).length) syncUp(patch);
+      if (Object.keys(patch).length) syncUp(patch, v);
     });
   };
 
@@ -645,7 +693,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     v.store = buildStore(model, state);
     if (v.store) {
       follow(v, v.store);
-      applyControls(v.store);
+      applyControls(v, v.store);
     }
     v.explorer.store = v.store;
   };
@@ -677,7 +725,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     for (const v of state.views.values()) {
       if (!v.store) continue;
       v.store.setColourBy(typeof c === 'string' && c ? c : null);
-      checkColour(v.store, c);
+      checkColour(v, c);
     }
   });
   model.on('change:palette', () => {
@@ -697,7 +745,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   model.on('change:filters', () => {
     if (state.syncingUp) return;
     const expr = (model.get('filters') as FilterExpr | null) ?? null;
-    for (const v of state.views.values()) if (v.store) applyFilters(v.store, expr);
+    for (const v of state.views.values()) applyFilters(v, expr);
   });
   model.on('change:bbox', () => {
     if (state.syncingUp) return;
@@ -707,6 +755,9 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   });
   model.on('change:height', () => {
     for (const v of state.views.values()) fitHeight(v.explorer, model);
+  });
+  model.on('change:label', () => {
+    for (const v of state.views.values()) applyLabel(v.explorer, model);
   });
   model.on('change:title_field', () => {
     for (const v of state.views.values()) v.explorer.titleField = titleFieldOf(model);
@@ -729,8 +780,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   model.on('destroy', () => state.dispose());
 
   // What `render` calls, kept on the state so a test can mount through it.
-  mounts.set(state, (explorer) => {
-    const v: ViewState = {explorer, store: null, unsubscribe: null, lastBbox: null};
+  mounts.set(state, (explorer, status) => {
+    const v: ViewState = {explorer, status, refusals: new Map(), sentUp: new Map(), store: null, unsubscribe: null, lastBbox: null};
     state.views.set(explorer, v);
     state.active = v;
     equip(v);
@@ -774,7 +825,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     // draws nothing under a view switched to later stays in the map's corner.
     const onBasemap = (e: Event) => {
       const {refusal} = (e as CustomEvent<{refusal: string | null}>).detail;
-      if (refusal) report('basemap', new Error(refusal));
+      if (refusal) report(v, 'basemap', new Error(refusal));
+      else accept(v, 'basemap');
     };
     explorer.addEventListener('mosaica-basemapchange', onBasemap);
     return () => {
@@ -790,6 +842,19 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     };
   });
   return () => state.dispose();
+}
+
+/** Name the explorer's map with the label the kernel set, and leave it unnamed where it set none. */
+function applyLabel(explorer: MosaicaExplorer, model: WidgetModel): void {
+  const label = model.get('label');
+  if (typeof label === 'string' && label) explorer.setAttribute('aria-label', label);
+  else explorer.removeAttribute('aria-label');
+}
+
+/** Keep a key pressed in the map from a notebook's listener on the document; Tab goes on, and an Escape nothing in the map took. */
+function keepKey(e: KeyboardEvent): void {
+  if (e.key === 'Tab' || (e.key === 'Escape' && !e.defaultPrevented)) return;
+  e.stopPropagation();
 }
 
 /** The record field that titles a point, as the kernel set it; empty where it set none. */
@@ -862,7 +927,7 @@ function applyBasemap(explorer: MosaicaExplorer, model: WidgetModel, images: Rea
   explorer.basemap = (waiting ? 'none' : given) as MosaicaExplorer['basemap'];
 }
 
-const mounts = new WeakMap<ModelState, (explorer: MosaicaExplorer) => () => void>();
+const mounts = new WeakMap<ModelState, (explorer: MosaicaExplorer, status: HTMLElement) => () => void>();
 
 export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement; signal?: AbortSignal}): () => void {
   let state = states.get(model);
@@ -873,17 +938,24 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
   }
   const explorer = document.createElement('mosaica-explorer') as MosaicaExplorer;
   explorer.layout = (model.get('explorer_layout') as 'docked' | 'overlay') || 'docked';
+  applyLabel(explorer, model);
+  explorer.dataset.lmSuppressShortcuts = 'true';
+  explorer.addEventListener('keydown', keepKey);
   explorer.titleField = titleFieldOf(model);
   explorer.imageFields = imageFieldsOf(model);
   applyBudget(explorer, model);
   applyColours(explorer, model);
   applyBasemap(explorer, model, state.images);
-  el.append(explorer);
+  const status = document.createElement('div');
+  status.setAttribute('role', 'status');
+  // A line that is added or reworded is read out alone, not with the lines that stand.
+  status.setAttribute('aria-atomic', 'false');
+  el.append(status, explorer);
   fitHeight(explorer, model);
   const refit = () => fitHeight(explorer, model);
   document.addEventListener('fullscreenchange', refit);
   addEventListener('resize', refit);
-  const unmount = mounts.get(state)!(explorer);
+  const unmount = mounts.get(state)!(explorer, status);
   const v = state.views.get(explorer)!;
   const onView = (e: Event) => {
     v.lastBbox = (e as CustomEvent<{bbox: [number, number, number, number]}>).detail.bbox;
@@ -902,6 +974,7 @@ export function render({model, el, signal}: {model: WidgetModel; el: HTMLElement
     explorer.removeEventListener('mosaica-viewchange', onView);
     unmount();
     explorer.remove();
+    status.remove();
   };
   signal?.addEventListener('abort', cleanup, {once: true});
   return cleanup;

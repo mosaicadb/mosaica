@@ -8,8 +8,8 @@ afterEach(() => {
 });
 
 /**
- * A viewer who can see no item in the view at all is told so once, by the map, and is not told
- * Nothing in view, which reads as "pan elsewhere".
+ * A viewer who can see no item in the view at all is told so, in words on the map and on the
+ * strip, and is not told Nothing in view, which reads as "pan elsewhere".
  */
 describe('a viewer who can see nothing', () => {
   async function page() {
@@ -20,19 +20,25 @@ describe('a viewer who can see nothing', () => {
     return {host, store, map: host.querySelector('mosaica-map')!, strip: host.querySelector('mosaica-status')!};
   }
   const text = (el: Element) => deep(el.shadowRoot!, '[part="state"]')?.textContent?.trim() ?? '';
+  const live = (el: Element) => deep(el.shadowRoot!, '[part="state"] [role="status"]')!;
 
-  it('is counted over the whole visible set once while the view is empty, and named by the map alone', async () => {
+  it('is counted over the whole visible set once while the view is empty, and named in words that are drawn and announced, by the map and by the strip', async () => {
     const {host, store, map, strip} = await page();
     const asked = [...registered(store)].filter(([id]) => id.startsWith('visible-total'));
     expect(asked.map(([, spec]) => spec)).toEqual([{groupings: [{count: true}], subject: 'visible'}]);
     const camera = text(map);
     expect(camera).toBe(text(strip));
+    const regions = [live(map), live(strip)];
     answerAggregate(store, 'visible-total', aggregateEntry([{rows: [], total: 0}]));
     await settle(host);
     expect(deep(map.shadowRoot!, '[part="state"]')?.getAttribute('data-visible')).toBe('none');
     expect(text(map)).not.toBe(camera);
-    expect(text(strip)).toBe('');
-    expect(deep(strip.shadowRoot!, '[part="state"] [role="img"]')?.getAttribute('aria-label')).toBe(text(map));
+    expect(text(strip)).toBe(text(map));
+    for (const [i, el] of [map, strip].entries()) {
+      expect(live(el)).toBe(regions[i]);
+      expect(live(el).textContent?.trim()).toBe(text(map));
+      expect(live(el).closest('.sr-only')).toBeNull();
+    }
   });
 
   it('is not claimed where the viewer can see items outside the camera', async () => {

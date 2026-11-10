@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useState} from 'react';
-import {useProjection, useMosaicaStore} from '@mosaicajs/react';
+import {useMosaicaStore} from '@mosaicajs/react';
 import {MosaicaExplorer} from '@mosaicajs/react/components';
 import {ItemCard} from './ItemCard.js';
 
@@ -27,7 +27,7 @@ export function App() {
   return (
     <div style={{display: 'grid', gridTemplateRows: 'auto 1fr', height: '100%'}}>
       <header style={{display: 'flex', gap: '1rem', alignItems: 'center', padding: '0.5rem 1rem', borderBottom: '1px solid #ddd'}}>
-        <strong>Mosaica</strong>
+        <h1 style={{margin: 0, fontSize: 'inherit'}}>Mosaica</h1>
         <label>
           signed in as{' '}
           <select id="principal" value={user} onChange={(e) => setUser(e.target.value)}>
@@ -39,7 +39,7 @@ export function App() {
           </select>
         </label>
       </header>
-      {user ? <Session key={user} user={user} /> : null}
+      <main style={{display: 'grid', minHeight: 0}}>{user ? <Session key={user} user={user} /> : null}</main>
     </div>
   );
 }
@@ -53,10 +53,9 @@ function Session({user}: {user: string}) {
   }, [user]);
   // The most clusters each level shows in one tile of the map, largest first.
   const store = useMosaicaStore({viewerUrl: location.origin, authorise, artifacts: {perTile: 50}});
-  const status = useProjection(store, 'status');
   if (!store) return null;
   return (
-    <MosaicaExplorer store={store} layout="overlay" style={{minHeight: 0}} title={status?.status}>
+    <MosaicaExplorer store={store} layout="overlay" style={{minHeight: 0}} aria-label={`Map of the items ${user} may see`}>
       <div slot="detail">
         <ItemCard store={store} />
       </div>

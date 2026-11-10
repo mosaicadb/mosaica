@@ -4,7 +4,9 @@ import {type ArtifactsProjection, type MarksProjection} from '@mosaicajs/client'
 import {SessionArtifactTable, servedLineage} from '@mosaicajs/client/internal';
 import {band} from '../../core/test/support.js';
 import {MosaicaLayer, type MosaicaLayerInternalProps} from '../src/layer.js';
+import {UNIFORM} from '../src/colour.js';
 import {DULL_COLOUR} from '../src/marks-layer.js';
+import {MarkSlab} from '../src/slab.js';
 import {fakeDevice} from './fake-device.js';
 
 /**
@@ -71,5 +73,17 @@ describe('highlight rendering', () => {
     const drawn = passes({highlighting: false});
     expect(Object.keys(drawn)).toEqual(['all']);
     expect(drawn.all!.highlighting).toBe(false);
+  });
+});
+
+describe('the points with no column colouring them', () => {
+  it('are drawn in the one colour of the ground', () => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const slab = new MarkSlab();
+      passes({scheme, slab});
+      const {draw} = slab.layers()[0]!;
+      expect(draw.length).toBe(4);
+      expect([...draw.colours.subarray(0, 4)], scheme).toEqual([...UNIFORM[scheme]]);
+    }
   });
 });

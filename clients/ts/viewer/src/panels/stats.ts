@@ -1,4 +1,4 @@
-import {panel, row} from '../html.js';
+import {row} from '../html.js';
 import type {AppState} from '../state.js';
 
 /**
@@ -39,20 +39,9 @@ const STAGE_FIELDS = [
 const INTERESTING = ['count_ns', 'select_ns', 'gather_ns', 'arrow_serialise_ns', 'total_ns'];
 
 /**
- * Whether the instrument drawer is open. The panels are rebuilt from `innerHTML` on every store
- * change, so a `<details>` element cannot keep its own open flag.
- */
-let drawerOpen = false;
-
-/** Called by the click handler in `main.ts`. */
-export function toggleStatsDrawer(open: boolean): void {
-  drawerOpen = open;
-}
-
-/**
- * What the last view cost, and what the replica saved: six rows, with the stage breakdown and the
- * replica's residency in a drawer. `residency` comes from the slab, not the store, so a redraw
- * that changes nothing is not a state change.
+ * What the last view cost, and what the replica saved: six rows. The stage breakdown and the
+ * replica's residency are {@link renderDrawer}'s, in a drawer under them. `residency` comes from
+ * the slab, not the store, so a redraw that changes nothing is not a state change.
  */
 export function renderStats(state: AppState, residency: {drawn: number; departed: number}): string {
   const t = state.lastTimings;
@@ -68,22 +57,17 @@ export function renderStats(state: AppState, residency: {drawn: number; departed
     ? `${state.lastPlan.omitted} of ${state.lastPlan.omitted + state.lastPlan.fetched}`
     : '—';
 
-  const core = `${row('server', t ? `${(t.serverUs / 1000).toFixed(1)} ms` : '—')}
+  return `${headline}${row('server', t ? `${(t.serverUs / 1000).toFixed(1)} ms` : '—')}
      ${row('fetch + decode', l ? `${l.fetch} ms` : '—')}
      ${row('bytes', state.lastBytes.toLocaleString('en-GB'))}
      ${row('marks drawn', drawn.toLocaleString('en-GB'))}
      ${row('tiles from cache', cache)}
      ${row('replica held', `${((state.replicaBytes ?? 0) / 1e6).toFixed(1)} MB`)}`;
-
-  return panel('Last request', `${headline}${core}${drawer(state, residency, provisional)}`);
 }
 
-/** The drawer's rows. */
-function drawer(
-  state: AppState,
-  residency: {drawn: number; departed: number},
-  provisional: number
-): string {
+/** The rows of the drawer, whose `<details>` element `main.ts` keeps across repaints. */
+export function renderDrawer(state: AppState, residency: {drawn: number; departed: number}): string {
+  const provisional = state.frame?.provisional ?? 0;
   const t = state.lastTimings;
   const stage = t?.stageNs
     ? INTERESTING.map((name) => {
@@ -96,9 +80,7 @@ function drawer(
         error.</div>`;
 
   const l = state.latency;
-  return `<details id="stats-drawer"${drawerOpen ? ' open' : ''}>
-      <summary>replica and stage timings</summary>
-      ${row('waited (debounce)', l ? `${l.waited} ms` : '—')}
+  return `${row('waited (debounce)', l ? `${l.waited} ms` : '—')}
       ${row('admission', t ? `${(t.admissionUs / 1000).toFixed(1)} ms` : '—')}
       ${row('in flight', String(state.inFlight))}
       ${row('tiles in view', String(state.frame?.tiles.length ?? 0))}
@@ -108,6 +90,5 @@ function drawer(
       ${row('replica bands', (state.replicaBands ?? 0).toLocaleString('en-GB'))}
       ${row('bytes/point', state.replicaPoints ? `${Math.round((state.replicaBytes ?? 0) / state.replicaPoints)} B` : '—')}
       ${row('prefetched ahead', String(state.prefetched ?? 0))}
-      ${stage}
-    </details>`;
+      ${stage}`;
 }

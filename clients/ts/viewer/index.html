@@ -13,13 +13,17 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <!-- The explorer is the map with its status strip, tools, field cards, display popover,
-         selection and item card; the instruments beside it are the demo's own: dataset and
-         principal, where the session credential stays, and the readouts that measure rather than
-         show. -->
-    <mosaica-explorer id="explorer" layout="overlay"></mosaica-explorer>
-    <aside id="instruments"></aside>
+    <h1 class="sr-only">Mosaica viewer</h1>
+    <!-- The instruments are the demo's own: dataset and principal, where the session credential
+         stays, and the readouts that measure rather than show. They come before the explorer, as
+         the page shows them, and the button that opens them on a narrow window comes first. -->
     <button id="instruments-toggle" type="button" aria-controls="instruments" aria-expanded="false">Instruments</button>
+    <aside id="instruments" aria-label="Instruments"></aside>
+    <!-- The explorer is the map with its status strip, tools, field cards, display popover,
+         selection and item card. -->
+    <main>
+      <mosaica-explorer id="explorer" layout="overlay"></mosaica-explorer>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -82,7 +82,7 @@ Here is the whole page. Replace `index.html` with it:
 --8<-- "clients/ts/examples/own-ui/web/index.html"
 ```
 
-The left column holds our controls, the right one a panel for a paper, a count and a list, and between them a `<mosaica-map>` inside a `<mosaica-store>`. The map has one attribute, `title-field="title"`, so hovering over a paper shows its title rather than its id. None of the controls do anything yet: the rest of the tutorial wires them up one at a time.
+The left column holds our controls, the right one a panel for a paper, a count and a list, and between them a `<mosaica-map>` inside a `<mosaica-store>`. The map has two attributes. `aria-label` names it for someone using a screen reader, and `title-field="title"` makes hovering over a paper show its title rather than its id. Two elements carry `role="status"`, the count on the right and the line that names a chosen topic. That asks a screen reader to read them out when their text changes, because someone who can't see the page has no other way to learn that a filter changed the numbers. None of the controls do anything yet: the rest of the tutorial wires them up one at a time.
 
 Vite keeps the page's scripts and stylesheet in `src`. Replace `style.css` there with a three-column grid:
 
@@ -90,7 +90,7 @@ Vite keeps the page's scripts and stylesheet in `src`. Replace `style.css` there
 --8<-- "clients/ts/examples/own-ui/web/src/style.css"
 ```
 
-Most of it is ordinary layout. The last rule matters: the map is 420 pixels tall unless told otherwise, and `--mosaica-map-height: 100%` makes it fill its grid cell instead. `<mosaica-store>` takes no space of its own, so the map is the grid's middle column.
+Most of it is ordinary layout. The `mosaica-map` rule matters: the map is 420 pixels tall unless told otherwise, and `--mosaica-map-height: 100%` makes it fill its grid cell instead. The `@media` rule after it stacks the three columns in a window 900 pixels wide or narrower, with the map between the controls and the results, so that none of them is squeezed. `<mosaica-store>` takes no space of its own, so the map is the grid's middle column.
 
 Now make the store. Create `mosaica.ts` in `src`:
 
@@ -175,7 +175,7 @@ The count comes from subscribing to `view`. `formatMasked` writes a count with t
 
 For the list, `store.items` takes the fields to return, here only `title`. `inView: true` limits the read to the area the in-view counts cover, which is the part of the map on screen, so the list and the count agree. `pageRows: 20` and `pages: 1` ask for one page of twenty, and `order: 'map'` returns them in the order they lie on the map. We read that first page and stop the read with `read.return()`.
 
-The map fires `mosaica-viewchange` each time the camera moves, and the store publishes `filters` each time they change, so both ask for the list again. `soon` waits until they have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces.
+The map fires `mosaica-viewchange` each time the camera moves, and the store publishes `filters` each time they change, so both ask for the list again. They also set the count's `ariaLive`, which decides whether a screen reader announces the new count: a change of filter is announced, and a move of the map is not, because a pan would otherwise read out a new figure each time the camera came to rest. `soon` waits until they have been still for a quarter of a second before asking, so a pan sends one request rather than one per frame. An `AbortController` cancels a read the next one replaces.
 
 Add it to `main.ts`:
 
@@ -232,6 +232,8 @@ Create `topics.ts`:
 Clicking a topic's name, or anywhere inside its outline, opens the cluster, and the map fires `mosaica-artifactopen` once its details arrive. The event's `id` is the artifact's `mosaica_id` as a decimal string, since it doesn't fit in a JavaScript number, and `detail.layer` is its layer. The name comes from the store's `artifacts` projection, whose `attached` map holds each cluster's name by its id.
 
 `store.setMembers` filters to an artifact's members, the papers in the cluster. It takes a list of clauses, each naming an artifact by layer and id, with `outside: false` to keep the members and `verb: 'filter'` to narrow the map to them. The other verb, `highlight`, would keep every paper and light the members. Member clauses join the filters, so the topic combines with the archive, title and dates. Clear passes an empty list.
+
+The handler also writes the topic's name into the `role="status"` line from the first step, which is how a screen reader comes to announce the topic, and shows the Clear button beside it. Clear empties the line and hides itself again.
 
 Add the import and the call to `main.ts`, which is now complete:
 

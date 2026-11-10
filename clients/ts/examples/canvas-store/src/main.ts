@@ -89,7 +89,11 @@ async function open(user: string) {
       const state = st.status === 'shown' && st.stale ? 'stale' : st.status;
       const status = el('status');
       status.dataset['state'] = state;
-      status.textContent = st.refusal ? `${state} — ${st.refusal.code}: ${st.refusal.detail}` : state;
+      status.textContent = state;
+      // A refusal or a stale view is read out by a screen reader. The state is not, since it
+      // changes with every move of the camera.
+      const notice = st.refusal ? `${st.refusal.code}: ${st.refusal.detail}` : st.stale ? 'the view is out of date' : '';
+      if (el('notice').textContent !== notice) el('notice').textContent = notice;
       (el('refresh') as HTMLButtonElement).hidden = !st.stale;
       numbers();
     }),
@@ -132,6 +136,21 @@ canvas.addEventListener('wheel', (e) => {
   cam = zoomAt(cam, w, h, e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY / 300));
   tell();
 }, {passive: false});
+// The same camera from the keyboard, while the canvas has focus: the arrow keys pan, and + and -
+// zoom about the centre. A key held with Ctrl, Alt or Meta is the browser's.
+const PAN: Record<string, [number, number]> = {ArrowLeft: [64, 0], ArrowRight: [-64, 0], ArrowUp: [0, 64], ArrowDown: [0, -64]};
+const ZOOM: Record<string, number> = {'+': 2, '=': 2, '-': 0.5, _: 0.5};
+canvas.addEventListener('keydown', (e) => {
+  if (!cam || e.ctrlKey || e.altKey || e.metaKey) return;
+  const by = PAN[e.key];
+  const factor = ZOOM[e.key];
+  const {w, h} = size();
+  if (by) cam = pan(cam, by[0], by[1]);
+  else if (factor) cam = zoomAt(cam, w, h, w / 2, h / 2, factor);
+  else return;
+  e.preventDefault();
+  tell();
+});
 new ResizeObserver(() => tell()).observe(canvas);
 
 // Who is signed in.

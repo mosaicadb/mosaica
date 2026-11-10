@@ -18,4 +18,6 @@ document.body.append(explorer);
 
 Each element has its own subpath, such as `@mosaicajs/components/map`. A page with no build step can load `dist/mosaica-components.js` instead: every element and its dependencies in one ES module, with its `sha384` integrity hash in `dist/mosaica-components.js.sri` and the notices of the third-party code inside it in `dist/mosaica-components.js.LICENSE.txt`.
 
+Give each map an `aria-label`, and set `lang` on your page. [Accessibility](https://github.com/mosaicadb/mosaica/blob/main/docs/system/accessibility.md) lists the keys the elements take, what a screen reader is told and what is not built yet.
+
 Documentation: [Components reference](https://github.com/mosaicadb/mosaica/blob/main/docs/reference/components.md). Licence: Apache-2.0.

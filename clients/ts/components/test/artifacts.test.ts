@@ -81,7 +81,17 @@ describe('<mosaica-layer-picker>', () => {
     const entries = deepAll(host, '[part="entry"]').map((e) => e.getAttribute('data-layer'));
     // `labels` depends on `clusters`, so it is inside that entry and not one of its own.
     expect(entries).toEqual(['clusters', 'districts']);
-    expect(deep(host, '[part="entry"][data-layer="clusters"]')?.getAttribute('title')).toContain('labels');
+    // The entry says which layers are drawn with it: to a pointer in its title, and in text that
+    // describes its checkbox and is not drawn.
+    const entry = deep(host, '[part="entry"][data-layer="clusters"]')!;
+    expect(entry.getAttribute('title')).toContain('labels');
+    const said = deep(host, `#${entry.querySelector('input')!.getAttribute('aria-describedby')}`)!;
+    expect(said.getAttribute('data-layers')).toBe('labels');
+    expect(said.textContent).toContain('labels');
+    expect(said.classList.contains('sr-only')).toBe(true);
+    // The row holds its name alone, and a layer that brings no other is described by nothing.
+    expect(entry.textContent!.trim()).toBe(entry.querySelector('[part="name"]')!.textContent!.trim());
+    expect(deep(host, '[part="entry"][data-layer="districts"] input')!.hasAttribute('aria-describedby')).toBe(false);
     expect(deep(host, 'mosaica-count')).toBeNull();
     const box = deep(host, '[part="entry"][data-layer="clusters"] input') as HTMLInputElement;
     box.checked = true;
@@ -177,23 +187,123 @@ describe('<mosaica-artifact-card> follows the served set', () => {
     expect(clause).not.toHaveProperty('label');
   });
 
-  it('opens a parent or a child row on Enter and on Space, as on a click', async () => {
-    const host = await mount('<mosaica-artifact-card></mosaica-artifact-card>');
+  /** A card on `Beta`, between its parent `Alpha` and its child `Gamma`. */
+  async function between() {
+    const host = await mount('<mosaica-artifact-card><button slot="actions">Pin</button></mosaica-artifact-card>');
     const served = [artifact(1n, 100n, null, ['Alpha']), artifact(2n, 40n, 1n, ['Beta']), artifact(3n, 10n, 2n, ['Gamma'])];
     const store = fakeStore({meta: META, status: status({}), artifacts: artifactsProjection(served)});
-    (host.querySelector('mosaica-artifact-card') as unknown as {store: unknown}).store = store;
-    store.set('selection', {item: null, itemRefusal: null, artifact: {id: 2n, detail: {layer: 'clusters', key: 'c-2', maskedCount: 40n, centroid: null, box: null, shape: null}}, artifactRefusal: null});
-    await settle(host);
-    const press = (selector: string, key: string) => {
-      const row = deep(host, selector)!;
-      const e = new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
-      row.dispatchEvent(e);
-      return e.defaultPrevented;
+    const card = host.querySelector('mosaica-artifact-card') as HTMLElement & {store: unknown};
+    card.store = store;
+    const show = async (id: bigint) => {
+      store.set('selection', {item: null, itemRefusal: null, artifact: {id, detail: {layer: 'clusters', key: `c-${id}`, maskedCount: 40n, centroid: null, box: null, shape: null}}, artifactRefusal: null});
+      await settle(host);
     };
-    expect(press('[part="parent"]', 'Enter')).toBe(true);
-    expect(press('[part="child"]', ' ')).toBe(true);
-    expect(press('[part="child"]', 'a')).toBe(false);
+    await show(2n);
+    return {host, store, card, show};
+  }
+
+  it('lists each parent and child as a button in a list named by its heading, which opens it', async () => {
+    const {host, store} = await between();
+    for (const [list, row] of [['parents', 'parent'], ['children', 'child']] as const) {
+      const ul = deep(host, `[part="${list}"]`)!;
+      const button = ul.querySelector(`[part="${row}"]`)!;
+      expect(button.tagName).toBe('BUTTON');
+      expect(button.parentElement!.tagName).toBe('LI');
+      const heading = deep(host, `#${ul.getAttribute('aria-labelledby')}`)!;
+      expect(heading.tagName).toBe('H3');
+      expect(heading.getAttribute('part')).toBe('label');
+      (button as HTMLButtonElement).click();
+    }
     expect(store.calls.filter((c) => c.name === 'openArtifact').map((c) => c.args[0])).toEqual([1n, 3n]);
+  });
+
+  it('moves focus to the name of the parent or child it opens, and to Close where that is refused', async () => {
+    const {host, store, card, show} = await between();
+    const child = deep(host, '[part="child"]') as HTMLButtonElement;
+    child.focus();
+    child.click();
+    await show(3n);
+    const name = deep(host, '[part="headline"]') as HTMLElement;
+    expect(name.textContent).toBe('Gamma');
+    expect(card.shadowRoot!.activeElement).toBe(name);
+
+    (deep(host, '[part="parent"]') as HTMLButtonElement).click();
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: {code: 'not-found', detail: 'no', status: 404}});
+    await settle(host);
+    expect(card.shadowRoot!.activeElement).toBe(deep(host, '[part="close"]'));
+  });
+
+  it('leaves focus where it has gone while the parent or child it opens was on its way', async () => {
+    const {host, card, show} = await between();
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    const child = deep(host, '[part="child"]') as HTMLButtonElement;
+    child.focus();
+    child.click();
+    elsewhere.focus();
+    await show(3n);
+    expect(deep(host, '[part="headline"]')!.textContent).toBe('Gamma');
+    expect(document.activeElement).toBe(elsewhere);
+    expect(card.shadowRoot!.activeElement).toBeNull();
+
+    // And to another control of the card.
+    const parent = deep(host, '[part="parent"]') as HTMLButtonElement;
+    parent.focus();
+    parent.click();
+    const fit = deep(host, '[part="fit"]') as HTMLButtonElement;
+    fit.focus();
+    await show(2n);
+    expect(card.shadowRoot!.activeElement).toBe(fit);
+  });
+
+  it('keeps focus where it is when the card changes for any other reason', async () => {
+    const {host, card, show} = await between();
+    const fit = deep(host, '[part="fit"]') as HTMLButtonElement;
+    fit.focus();
+    await show(3n);
+    expect(card.shadowRoot!.activeElement).toBe(fit);
+  });
+
+  it('heads the card with the layer and the artifact’s name under it, the buttons beside the heading', async () => {
+    const {host} = await between();
+    const title = deep(host, '[part="title"]')!;
+    expect(title.tagName).toBe('H2');
+    expect(title.textContent).toBe('clusters');
+    expect(title.querySelector('button, slot')).toBeNull();
+    expect(title.parentElement!.querySelector('[part="close"]')).not.toBeNull();
+    expect(title.parentElement!.querySelector('slot[name="actions"]')).not.toBeNull();
+    const name = deep(host, '[part="headline"]')!;
+    expect(name.tagName).toBe('H3');
+    expect(name.textContent).toBe('Beta');
+  });
+
+  it('gives the layer, the key and the shape as terms and their values', async () => {
+    const {host} = await between();
+    const pairs = [...deep(host, 'dl')!.children].map((el) => [el.tagName, el.textContent]);
+    expect(pairs).toEqual([
+      ['DT', 'Layer'],
+      ['DD', 'clusters'],
+      ['DT', 'Key'],
+      ['DD', 'c-2']
+    ]);
+  });
+
+  it('says its state in a status region that is there before the state changes', async () => {
+    const host = await mount('<mosaica-artifact-card></mosaica-artifact-card>');
+    const store = fakeStore({meta: META, status: status({}), artifacts: artifactsProjection([artifact(1n, 100n, null, ['Alpha'])])});
+    (host.querySelector('mosaica-artifact-card') as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const region = deep(host, '[role="status"]')!;
+    expect(region.querySelector('[part="state"]')!.getAttribute('data-state')).toBe('empty');
+    expect(region.textContent?.trim()).not.toBe('');
+    store.set('selection', {item: null, itemRefusal: null, artifact: {id: 1n, detail: {layer: 'clusters', key: 'c-1', maskedCount: 100n, centroid: null, box: null, shape: null}}, artifactRefusal: null});
+    await settle(host);
+    expect(deep(host, '[role="status"]')).toBe(region);
+    expect(region.textContent?.trim()).toBe('');
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: {code: 'not-found', detail: 'no', status: 404}});
+    await settle(host);
+    expect(deep(host, '[role="status"]')).toBe(region);
+    expect(region.querySelector('[part="refusal"]')!.getAttribute('data-code')).toBe('not-found');
   });
 
   it('lists a child on the card of each served parent it names (decision 0117)', async () => {

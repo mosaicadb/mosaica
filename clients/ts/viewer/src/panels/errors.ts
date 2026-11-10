@@ -3,7 +3,7 @@ import type {AppState} from '../state.js';
 
 /**
  * The refusals the store reported, so a failed viewport (unknown) is not read as an empty one
- * (zero).
+ * (zero). `main.ts` writes them into a status region it keeps, so a new one is announced.
  */
 export function renderErrors(state: AppState): string {
   if (state.failures.length === 0) return '';

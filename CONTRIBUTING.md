@@ -39,6 +39,14 @@ early binary does not hide the count of the rest. `check-clients.sh` needs Playw
 (`cd clients/ts && npx playwright install chromium`). The continuous integration workflow
 (`.github/workflows/ci.yml`) runs the same checks, the conformance suite and `cargo deny`.
 
+The components' browser suite, which `check-clients.sh` runs, checks the explorer in each of its
+states for accessibility: every axe-core rule for WCAG 2.2 A and AA, the contrast of text in both
+colour schemes, text cut off at 320 px wide or under wider text spacing, pointer targets under
+24 px that crowd another, and that every Tab stop is visible and shows the focus. A new control
+needs a name a screen reader can read, a 24 px target and a test beside its element. If it appears
+in a state the suite does not build, add that state to
+`clients/ts/components/test/browser/accessibility-page.ts`.
+
 `bash scripts/install-hooks.sh` installs a pre-commit hook that refuses a commit in which `rustfmt`
 reformatted files the change did not touch.
 

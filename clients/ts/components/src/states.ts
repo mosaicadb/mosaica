@@ -110,12 +110,113 @@ function retryButton(onRetry: (() => void) | null | undefined): TemplateResult |
 }
 
 /**
+ * What a state's line is made of: the class of the dot before its words, the words, and the button
+ * the state offers. An element whose state is a live region puts the words inside it and the
+ * button beside it, so the button's name is not read out as part of the state.
+ */
+export type StateLine = {
+  dot: string | null;
+  words: TemplateResult | string | typeof nothing;
+  action: TemplateResult | typeof nothing;
+  /** The dot's tooltip, for a line whose words are not drawn. */
+  title?: string;
+};
+
+/**
+ * The refused state's line: its words with the refusal's code, the server's reason on a line under
+ * them where `reason` is given, and Retry where `onRetry` is given.
+ */
+export function refusedLine(words: string, code: string | null | undefined, onRetry?: (() => void) | null, reason?: string | null): StateLine {
+  const said = reason ? html`<span class="said">${refusalText(words, code)}<span part="reason">${reason}</span></span>` : refusalText(words, code);
+  return {dot: 'dot refuse', words: said, action: retryButton(onRetry)};
+}
+
+/** The line each state needs; `detached` and `shown` need none. */
+export function stateLine(state: PanelState, status: StatusProjection | null | undefined, actions: StateActions = {}): StateLine {
+  const refusal = status?.refusal ?? null;
+  const words = stateWord(state, status);
+  switch (state) {
+    // Empty: "empty" and "refused" are answers, and a detached panel has none.
+    case 'detached':
+    case 'shown':
+      return {dot: null, words: nothing, action: nothing};
+    case 'loading':
+      return {dot: 'dot quiet', words: actions.first && status?.sessionWarm ? 'Loading' : words, action: nothing};
+    case 'retrying':
+      return {dot: 'dot warn', words, action: nothing};
+    case 'unanswered':
+      return {dot: 'dot warn', words, action: retryButton(actions.onRetry)};
+    case 'busy':
+      return {dot: 'dot warn', words: refusalText(words, refusal?.code), action: retryButton(actions.onRetry)};
+    case 'empty':
+      return {dot: null, words, action: nothing};
+    case 'refused':
+      return refusedLine(words, refusal?.code, actions.onRetry, reasonOf(refusal));
+    case 'expired':
+      return {
+        dot: 'dot refuse',
+        words,
+        action: actions.onReauthorise ? html`<button part="reauthorise" class="btn small" type="button" @click=${actions.onReauthorise}>Sign in</button>` : nothing
+      };
+    case 'stale':
+      return {dot: 'dot warn', words, action: html`<button part="refresh" class="btn small" type="button" @click=${actions.onRefresh ?? undefined}>Refresh</button>`};
+  }
+}
+
+/** The dot before a line's words. */
+function stateDot(line: StateLine): TemplateResult | typeof nothing {
+  return line.dot ? html`<span class=${line.dot} title=${line.title ?? nothing}></span>` : nothing;
+}
+
+/**
+ * A line for an element that announces its state: the dot, the words in a `role="status"` element,
+ * `after`, and the line's button beside them. An element renders this in the same place in every
+ * state, so the live element stays and each change of its words is announced. With `unsaid`, the
+ * words sit beside the live element instead, read and not announced, and the live element holds
+ * `unsaid.heard`, undrawn.
+ */
+export function liveLine(line: StateLine, unsaid: {heard: unknown} | null = null, after: unknown = nothing): TemplateResult {
+  return html`${stateDot(line)}${unsaid ? line.words : nothing}<span class=${unsaid ? 'sr-only' : nothing} role="status">${unsaid ? unsaid.heard : line.words}</span>${after}${line.action}`;
+}
+
+/** What {@link liveLine} takes for words that are shown and never announced. */
+export const UNSAID = {heard: nothing};
+
+/**
+ * Whether the view's emptiness is a query's answer, which an element announces, or where a pan
+ * went, which it does not. An element calls {@link note} once for each update.
+ */
+export class EmptyAnswer {
+  private wasQuerying = false;
+  private answered = false;
+
+  /** Whether `state` is `empty` and a query ended in it. It stays so until the view is no longer empty. */
+  note(state: PanelState, querying: boolean): boolean {
+    if (state !== 'empty') this.answered = false;
+    else if (this.wasQuerying && !querying) this.answered = true;
+    this.wasQuerying = querying;
+    return this.answered;
+  }
+}
+
+/** The element with the focus in `doc`, looked for through the shadow roots that hold it. */
+export function focusedElement(doc: Document): Element | null {
+  let focused = doc.activeElement;
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+  return focused;
+}
+
+/** A line as a `part="state"` carrying `data-state`, with `after` between its words and its button. */
+function stateRegion(state: PanelState, line: StateLine, after: TemplateResult | typeof nothing = nothing): TemplateResult {
+  return html`<span part="state" data-state=${state}>${stateDot(line)}${line.words}${after}${line.action}</span>`;
+}
+
+/**
  * The refused state: its dot, its words with the refusal's code, the server's reason on a line
  * under them where `reason` is given, and Retry where `onRetry` is given.
  */
 export function refusedState(words: string, code: string | null | undefined, onRetry?: (() => void) | null, reason?: string | null): TemplateResult {
-  const said = reason ? html`<span class="said">${refusalText(words, code)}<span part="reason">${reason}</span></span>` : refusalText(words, code);
-  return html`<span part="state" data-state="refused"><span class="dot refuse"></span>${said}${retryButton(onRetry)}</span>`;
+  return stateRegion('refused', refusedLine(words, code, onRetry, reason));
 }
 
 /**
@@ -127,33 +228,27 @@ export function renderState(
   status: StatusProjection | null | undefined,
   actions: StateActions = {}
 ): TemplateResult | typeof nothing {
-  const refusal = status?.refusal ?? null;
-  switch (state) {
-    case 'detached':
-      // Empty: "empty" and "refused" are answers, and a detached panel has none.
-      return html`<span part="state" data-state="detached"></span>`;
-    case 'loading': {
-      const words = actions.first && status?.sessionWarm ? 'Loading' : stateWord(state, status);
-      return html`<span part="state" data-state="loading"><span class="dot quiet"></span>${words}${status && !status.sessionWarm ? nothing : html`<span class="skel" aria-hidden="true"></span>`}</span>`;
-    }
-    case 'retrying':
-      return html`<span part="state" data-state="retrying"><span class="dot warn"></span>${stateWord(state, status)}</span>`;
-    case 'unanswered':
-      return html`<span part="state" data-state="unanswered"><span class="dot warn"></span>${stateWord(state, status)}${retryButton(actions.onRetry)}</span>`;
-    case 'busy':
-      return html`<span part="state" data-state="busy"><span class="dot warn"></span>${refusalText(stateWord(state, status), refusal?.code)}${retryButton(actions.onRetry)}</span>`;
-    case 'shown':
-      return html`<span part="state" data-state="shown"></span>`;
-    case 'empty':
-      return html`<span part="state" data-state="empty">${stateWord(state, status)}</span>`;
-    case 'refused':
-      return refusedState(stateWord(state, status), refusal?.code, actions.onRetry, reasonOf(refusal));
-    case 'expired':
-      return html`<span part="state" data-state="expired"><span class="dot refuse"></span>${stateWord(state, status)}${actions.onReauthorise
-          ? html`<button part="reauthorise" class="btn small" type="button" @click=${actions.onReauthorise}>Sign in</button>`
-          : nothing}</span>`;
-    case 'stale':
-      return html`<span part="state" data-state="stale"><span class="dot warn"></span>${stateWord(state, status)}<button part="refresh" class="btn small" type="button" @click=${actions.onRefresh ?? undefined}>Refresh</button></span>`;
+  const skeleton = state === 'loading' && !(status && !status.sessionWarm) ? html`<span class="skel" aria-hidden="true"></span>` : nothing;
+  return stateRegion(state, stateLine(state, status, actions), skeleton);
+}
+
+/**
+ * Where focus goes when a state's button leaves with its state. An element calls {@link note} from
+ * `willUpdate` and {@link keep} from `updated`, naming the element that takes the focus.
+ */
+export class ActionFocus {
+  private held: Element | null = null;
+
+  /** Remember the button with focus in a state line inside `root`, if there is one. */
+  note(root: DocumentFragment | HTMLElement | null): void {
+    const focused = root ? focusedElement(root.ownerDocument) : null;
+    this.held = focused instanceof HTMLButtonElement && root!.contains(focused) && focused.closest('[part~="state"]') ? focused : null;
+  }
+
+  /** Focus `to` if the remembered button has left the page. */
+  keep(to: HTMLElement | null): void {
+    if (this.held && !this.held.isConnected) to?.focus();
+    this.held = null;
   }
 }
 

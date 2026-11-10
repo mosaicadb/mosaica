@@ -54,6 +54,18 @@ describe('a bare map drops the selection', () => {
     expect(map.pickedAt).toBeNull();
   });
 
+  it('takes Escape only when it clears something, so a dialog round the map still closes on it', async () => {
+    const {map} = await picked();
+    const press = () => {
+      const key = new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, cancelable: true});
+      map.focusTarget!.dispatchEvent(key);
+      return key.defaultPrevented;
+    };
+    expect(press()).toBe(true);
+    expect(map.selectedWorldXY).toBeNull();
+    expect(press()).toBe(false);
+  });
+
   it('but Escape clears a selected region first and keeps the pick', async () => {
     const {host, map, store, cleared} = await picked();
     store.set('region', {shape: {kind: 'box', bbox: [0, 0, 1, 1]}, status: 'loading', refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}} as never);
