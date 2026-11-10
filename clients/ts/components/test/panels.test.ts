@@ -484,6 +484,39 @@ describe('<mosaica-filter> on text', () => {
     expect(entry.value).toBe(JSON.stringify(expr));
   });
 
+  it('shows a spinner in the box that started a query, once it has run a quarter of a second, and in no other box', async () => {
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const host = await mount('<mosaica-filter id="asked" column="title"></mosaica-filter><mosaica-filter id="other" column="title"></mosaica-filter>');
+    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {title: {family: 'text', query: '', phrase: true}}, highlight: {}})});
+    for (const el of host.querySelectorAll('mosaica-filter')) (el as MosaicaFilter).store = store;
+    await settle(host);
+    const box = (id: string) => host.querySelector(`#${id}`)!.shadowRoot!;
+    const spinning = (id: string) => box(id).querySelector('.spinner') !== null;
+
+    // The store says a query is running as soon as the box's change is set.
+    store.set('status', status({status: 'loading', querying: true}));
+    const entry = box('asked').querySelector('[part="entry"]') as HTMLInputElement;
+    entry.value = 'lattice';
+    entry.dispatchEvent(new Event('input'));
+    await wait(400);
+    await settle(host);
+    expect(drafts(store)).toHaveLength(1);
+    expect(spinning('asked')).toBe(false);
+
+    await wait(300);
+    await settle(host);
+    expect(spinning('asked')).toBe(true);
+    expect(spinning('other')).toBe(false);
+
+    store.set('status', status({}));
+    await settle(host);
+    expect(spinning('asked')).toBe(false);
+    // The next query is another control's.
+    store.set('status', status({status: 'loading', querying: true}));
+    await wait(300);
+    await settle(host);
+    expect(spinning('asked')).toBe(false);
+  });
 });
 
 describe('<mosaica-filter> on a keyword column', () => {

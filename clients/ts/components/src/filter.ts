@@ -6,6 +6,7 @@ import {FloatingList} from './float.js';
 import {MosaicaElement, columnCaption, emit} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
+import {NamedQuery} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /** The operators a keyword control can send. */
@@ -32,7 +33,9 @@ const BAR_FLOOR = 2;
  * - A keyword column has a menu for choosing how to match, by `contains`, `prefix` or `eq`.
  *
  * The box sets the filter 350 ms after the last keystroke, so that the map does not redraw for
- * every letter. If your code sets a text filter the box cannot express, the box shows it read-only.
+ * every letter. While the query that change started is still loading, and once it has run for a
+ * quarter of a second, a spinner takes the search icon's place. If your code sets a text filter the
+ * box cannot express, the box shows it read-only.
  *
  * @summary A search box that filters the map by one column.
  * @tagname mosaica-filter
@@ -68,6 +71,10 @@ export class MosaicaFilter extends MosaicaElement {
       }
       .input input {
         font-size: 12px;
+      }
+      /* In the search icon's place, at its width. */
+      .input .spinner {
+        margin: 0 1px;
       }
       .ctl-row {
         display: flex;
@@ -247,6 +254,9 @@ export class MosaicaFilter extends MosaicaElement {
   /** Whether a keyword column's operator menu is open. @internal */
   @state() accessor operatorsOpen = false;
   private sent: ColumnDraft | null = null;
+  /** Whether the query the store is running was started by this box. */
+  private asked = false;
+  private readonly query = new NamedQuery(this);
   private readonly floating = new FloatingList(() => {
     const list = this.renderRoot.querySelector<HTMLElement>('[part="values"]');
     const anchor = this.renderRoot.querySelector<HTMLElement>('.combo');
@@ -278,6 +288,7 @@ export class MosaicaFilter extends MosaicaElement {
     // The draft being edited was the previous store's; the next is seeded from the one adopted.
     this.draft = null;
     this.sent = null;
+    this.asked = false;
   }
 
   private get resolvedOperand(): FilterOperandSet | null {
@@ -310,6 +321,7 @@ export class MosaicaFilter extends MosaicaElement {
     this.ask('');
     this.floating.stop();
     this.operatorMenu.stop();
+    this.query.stop();
     super.disconnectedCallback();
   }
 
@@ -343,6 +355,17 @@ export class MosaicaFilter extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     this.operatorMenu.update();
+    if (!this.querying) this.asked = false;
+    this.query.track(this.asked);
+  }
+
+  private get querying(): boolean {
+    return this.resolvedStore?.get('status').querying ?? false;
+  }
+
+  /** The search icon, or a spinner while the query this box started has run long enough to name. */
+  private lead(): TemplateResult {
+    return this.asked && this.querying && this.query.named ? html`<span class="spinner" role="img" aria-label="Running query"></span>` : icon('search', 12);
   }
 
   /** The box's draft: the one being edited, else the store's, else the client's empty one, which also sets a keyword's starting operator. */
@@ -362,6 +385,8 @@ export class MosaicaFilter extends MosaicaElement {
       const draft = {...held, filter: {...held.filter, [column]: next}};
       this.sent = next;
       s.setFilters(draft);
+      this.asked = s.get('status').querying;
+      this.requestUpdate();
       emit(this, 'mosaica-filterchange', {column, verb: 'filter', expr: composeFilters(draft, 'filter')});
     };
     if (immediate) apply();
@@ -394,7 +419,7 @@ export class MosaicaFilter extends MosaicaElement {
     if (draft.expr !== undefined) {
       return html`<div class="input">${icon('search', 12)}<input id="ctl" part="entry" readonly aria-label=${this.label()} .value=${JSON.stringify(draft.expr)} /></div>`;
     }
-    return html`<div class="input">${icon('search', 12)}<input id="ctl" part="entry" type="search" .value=${draft.query} placeholder=${this.placeholder || 'Search the text'} autocomplete="off"
+    return html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.query} placeholder=${this.placeholder || 'Search the text'} autocomplete="off"
         aria-label=${this.label()} @input=${(e: Event) => this.change({family: 'text', query: (e.target as HTMLInputElement).value, phrase: draft.phrase}, false)} /></div>`;
   }
 
@@ -428,7 +453,7 @@ export class MosaicaFilter extends MosaicaElement {
       void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[part~="operator"][aria-checked="true"]')?.focus());
     };
     return html`<div class="ctl-row">
-      <div class="input grow">${icon('search', 12)}<input id="ctl" part="entry" type="search" .value=${draft.needle} autocomplete="off" placeholder=${this.placeholder || nothing} aria-label=${this.label()}
+      <div class="input grow">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.needle} autocomplete="off" placeholder=${this.placeholder || nothing} aria-label=${this.label()}
         @input=${(e: Event) => this.change({...draft, needle: (e.target as HTMLInputElement).value}, false)} /></div>
       <div class="op" @focusout=${(e: FocusEvent) => {
         const to = e.relatedTarget as Node | null;
@@ -497,7 +522,7 @@ export class MosaicaFilter extends MosaicaElement {
       const at = active ? rows.indexOf(active) : -1;
       this.activeCode = rows[(at + by + rows.length) % rows.length]!.code;
     };
-    const field = html`<div class="input">${icon('search', 12)}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${this.placeholder || 'Type a value'}
+    const field = html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${this.placeholder || 'Type a value'}
         aria-label=${this.label()} role="combobox" aria-expanded=${rows.length > 0 ? 'true' : 'false'} aria-controls="values" aria-activedescendant=${active ? `value-${active.code}` : nothing}
         .value=${this.search}
         @focus=${() => (this.focused = true)}

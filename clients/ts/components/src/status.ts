@@ -1,14 +1,11 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
-import {property, state} from 'lit/decorators.js';
+import {property} from 'lit/decorators.js';
 import {NO_COUNT, NO_MASKED, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {NOTHING_VISIBLE, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
+import {NOTHING_VISIBLE, NamedQuery, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
-
-/** How long a query has run before the strip names it, so one answered at once does not flicker it. */
-const QUERY_NAMED_AFTER_MS = 250;
 
 /**
  * Use the status line with a map so that viewers know whether what they see is current and how much
@@ -116,20 +113,7 @@ export class MosaicaStatus extends MosaicaElement {
       [part='state']:not(:has(.btn)) {
         padding-right: 7px;
       }
-      .spinner {
-        flex: none;
-        width: 9px;
-        height: 9px;
-        border: 1.5px solid var(--_mosaica-line);
-        border-top-color: var(--_mosaica-ink-2);
-        border-radius: 50%;
-        animation: mosaica-spin 0.8s linear infinite;
-      }
-      @keyframes mosaica-spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
+
       .cell mosaica-count::part(count) {
         font-weight: 600;
       }
@@ -177,9 +161,7 @@ export class MosaicaStatus extends MosaicaElement {
   /** A function the Sign in button calls when the session has expired. Without it there is no Sign in button. */
   @property({attribute: false}) accessor reauthorise: (() => void) | null = null;
 
-  /** Whether the query in flight has run long enough to be named. @internal */
-  @state() accessor queryNamed = false;
-  private queryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly query = new NamedQuery(this);
   private lastState: PanelState | null = null;
   private expiryFired = false;
 
@@ -192,13 +174,12 @@ export class MosaicaStatus extends MosaicaElement {
   }
 
   override disconnectedCallback(): void {
-    if (this.queryTimer !== null) clearTimeout(this.queryTimer);
-    this.queryTimer = null;
+    this.query.stop();
     super.disconnectedCallback();
   }
 
   protected override updated(): void {
-    this.timeQuery();
+    this.query.track(this.status?.querying ?? false);
     const state = stateOf(this.status);
     if (state !== this.lastState) {
       const from = this.lastState;
@@ -211,21 +192,6 @@ export class MosaicaStatus extends MosaicaElement {
     } else if (state !== 'expired') {
       this.expiryFired = false;
     }
-  }
-
-  /** Names a query once it has run for {@link QUERY_NAMED_AFTER_MS}, and forgets it when it ends. */
-  private timeQuery(): void {
-    if (!this.status?.querying) {
-      if (this.queryTimer !== null) clearTimeout(this.queryTimer);
-      this.queryTimer = null;
-      if (this.queryNamed) this.queryNamed = false;
-      return;
-    }
-    if (this.queryNamed || this.queryTimer !== null) return;
-    this.queryTimer = setTimeout(() => {
-      this.queryTimer = null;
-      this.queryNamed = true;
-    }, QUERY_NAMED_AFTER_MS);
   }
 
   override render(): TemplateResult | typeof nothing {
@@ -241,7 +207,7 @@ export class MosaicaStatus extends MosaicaElement {
     const nothingVisible = seesNothing(this.resolvedStore, state);
     // A query that has run long enough to name. The map may have drawn its answer while the
     // counts still load, and a refusal, an expiry or a lost server is said in its own words.
-    const running = status?.querying === true && this.queryNamed && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
+    const running = status?.querying === true && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
     const dotAlone = !running && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible);
     const inner = running
       ? html`<span part="state" data-state=${state} data-querying><span class="spinner" aria-hidden="true"></span>Running query<button part="cancel" class="btn small" type="button" @click=${() => this.resolvedStore?.cancelQuery()}>Cancel</button></span>`

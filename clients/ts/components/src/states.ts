@@ -157,6 +157,41 @@ export function renderState(
   }
 }
 
+/** How long a query has run before an element names it, so one answered at once does not flicker it. */
+const QUERY_NAMED_AFTER_MS = 250;
+
+/**
+ * Whether a query has run long enough to name. An element calls {@link track} from `updated` with
+ * whether its query is running, reads {@link named} when it renders, and is asked to update when
+ * the query has run for {@link QUERY_NAMED_AFTER_MS}.
+ */
+export class NamedQuery {
+  named = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(private readonly host: {requestUpdate(): void}) {}
+
+  track(running: boolean): void {
+    if (!running) {
+      this.stop();
+      this.named = false;
+      return;
+    }
+    if (this.named || this.timer !== null) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.named = true;
+      this.host.requestUpdate();
+    }, QUERY_NAMED_AFTER_MS);
+  }
+
+  /** Forget the wait, as an element leaving the page does. */
+  stop(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+  }
+}
+
 /** The words for a viewer who can see no item in the view at all, where `empty` would read as "pan elsewhere". */
 export const NOTHING_VISIBLE = 'Nothing visible to you';
 
