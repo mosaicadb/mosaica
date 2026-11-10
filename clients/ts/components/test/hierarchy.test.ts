@@ -392,17 +392,16 @@ describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
     const expander = control(host, '1', 'expander');
     expander.click();
     await settle(host);
-    const state = deep(host, '[part="state"]')!;
-    expect(state.getAttribute('role')).toBe('status');
+    const region = deep(host, '[role="status"]')!;
     expect(expander.getAttribute('aria-expanded')).toBe('false');
     expect(expander.querySelector('.spinner')).not.toBeNull();
-    expect(state.textContent).toContain('Neoplasms');
+    expect(region.textContent).toContain('Neoplasms');
     land({artifacts: [row(11n, 'Cysts', 900n)], parents: [], next: null});
     await settle(host);
     await settle(host);
     expect(expander.getAttribute('aria-expanded')).toBe('true');
     expect(expander.querySelector('.spinner')).toBeNull();
-    expect(state.textContent).not.toContain('Neoplasms');
+    expect(region.textContent).not.toContain('Neoplasms');
     expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Anatomy']);
   });
 
@@ -462,14 +461,175 @@ describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
     expect(active(el)).toBe(control(host, '3', 'name'));
   });
 
+  it('leaves focus where it has gone while a page More asked for, or a refetch, was on its way', async () => {
+    const {host, el, store} = await panel();
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    store.setBrowse('roots:p2', {artifacts: [row(3n, 'Chemicals', 5n)], parents: [], next: null});
+    const more = deep(host, '[part="more"]') as HTMLButtonElement;
+    more.focus();
+    more.click();
+    elsewhere.focus();
+    await settle(host);
+    await settle(host);
+    expect(names(host)).toEqual(['Neoplasms', 'Anatomy', 'Chemicals']);
+    expect(document.activeElement).toBe(elsewhere);
+    expect(active(el)).toBeNull();
+
+    // A row's Filter pressed, then focus taken elsewhere before the refetched rows land.
+    store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n)], parents: [], next: null});
+    control(host, '1', 'expander').click();
+    await settle(host);
+    await settle(host);
+    control(host, '11', 'filter').focus();
+    clausesOn(store, 'filter');
+    elsewhere.focus();
+    await settle(host);
+    await settle(host);
+    expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Anatomy', 'Chemicals']);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('puts a row’s buttons away on Escape, wherever focus is in the row, until focus leaves it', async () => {
+    const {host, el} = await walked();
+    const rowOf = (id: string) => deep(host, `[part="row"][data-id="${id}"]`) as HTMLElement;
+    const escape = () => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    control(host, '11', 'filter').focus();
+    escape();
+    await settle(host);
+    expect(rowOf('11').hasAttribute('data-quiet')).toBe(true);
+    expect(rowOf('12').hasAttribute('data-quiet')).toBe(false);
+    // Focus was on a button that is put away, so it goes to the row's name.
+    expect(active(el)).toBe(control(host, '11', 'name'));
+    // Tab on to the buttons brings them back.
+    control(host, '11', 'highlight').focus();
+    await settle(host);
+    expect(rowOf('11').hasAttribute('data-quiet')).toBe(false);
+    escape();
+    await settle(host);
+    expect(rowOf('11').hasAttribute('data-quiet')).toBe(true);
+    control(host, '12', 'name').focus();
+    await settle(host);
+    expect(rowOf('11').hasAttribute('data-quiet')).toBe(false);
+    // With focus in no row, Escape is not the tree's.
+    (deep(host, '[part="search"] input') as HTMLElement).focus();
+    escape();
+    await settle(host);
+    expect(deepAll(host, '[part="row"][data-quiet]')).toEqual([]);
+  });
+
+  it('refetches as many pages as More had loaded, of the roots and of an open row', async () => {
+    const {host, store} = await panel();
+    store.setBrowse('roots:p2', {artifacts: [row(3n, 'Chemicals', 5n)], parents: [], next: null});
+    store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n)], parents: [], next: 'c2'});
+    store.setBrowse('p:1:c2', {artifacts: [row(12n, 'Hamartoma', 40n)], parents: [], next: null});
+    control(host, '1', 'expander').click();
+    await settle(host);
+    await settle(host);
+    for (const more of deepAll(host, '[part="more"]')) (more as HTMLButtonElement).click();
+    await settle(host);
+    await settle(host);
+    const walk = ['Neoplasms', 'Cysts', 'Hamartoma', 'Anatomy', 'Chemicals'];
+    expect(names(host)).toEqual(walk);
+    const asked = store.calls.filter((c) => c.name === 'browse').length;
+    clausesOn(store, 'filter');
+    await settle(host);
+    await settle(host);
+    expect(names(host)).toEqual(walk);
+    // Each page again, from the first: a cursor is good only under the filters that served it.
+    const again = store.calls.filter((c) => c.name === 'browse').slice(asked).map((c) => c.args[0] as {parent?: bigint; cursor?: string});
+    expect(again.map((r) => `${r.parent ?? 'roots'}:${r.cursor ?? ''}`).sort()).toEqual(['1:', '1:c2', 'roots:', 'roots:p2']);
+  });
+
+  it('asks for a few open rows’ children at a time when it refetches, and for none once the filters have moved on', async () => {
+    const ids = [1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n];
+    const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
+    const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;
+    const store = fakeStore({meta: META, status: status({})});
+    let flying = 0;
+    let most = 0;
+    const waiting: (() => void)[] = [];
+    let hold = false;
+    const asked: (bigint | undefined)[] = [];
+    store.browse = (async (req: {parent?: bigint}) => {
+      asked.push(req.parent);
+      flying += 1;
+      most = Math.max(most, flying);
+      if (hold) await new Promise<void>((go) => waiting.push(go));
+      else await Promise.resolve();
+      flying -= 1;
+      return req.parent === undefined
+        ? {artifacts: ids.map((id) => row(id, `Root ${id}`, 10n, {childCount: 1})), parents: [], next: null}
+        : {artifacts: [row(req.parent * 100n, `Child of ${req.parent}`, 1n)], parents: [], next: null};
+    }) as typeof store.browse;
+    el.store = store;
+    await settle(host);
+    await settle(host);
+    for (const id of ids) control(host, String(id), 'expander').click();
+    await settle(host);
+    await settle(host);
+    expect(deepAll(host, '[part="row"]')).toHaveLength(16);
+
+    // A refetch whose requests do not answer until they are let go, one at a time.
+    hold = true;
+    asked.length = 0;
+    most = 0;
+    clausesOn(store, 'filter');
+    await settle(host);
+    waiting.shift()!();
+    await settle(host);
+    expect(most).toBeLessThan(ids.length);
+    const before = asked.length;
+    expect(before).toBeLessThan(1 + ids.length);
+    // The filters move on: what the first refetch had not asked for yet, it never asks for.
+    clausesOn(store, 'filter', 'highlight');
+    clausesOn(store);
+    await settle(host);
+    hold = false;
+    while (waiting.length > 0) {
+      waiting.shift()!();
+      await settle(host);
+    }
+    await settle(host);
+    await settle(host);
+    expect(most).toBeLessThan(ids.length);
+    // One more walk of the roots and the eight rows, and no more of the first.
+    expect(asked.length - before).toBe(1 + ids.length);
+    expect(deepAll(host, '[part="row"]')).toHaveLength(16);
+  });
+
+  it('opens a row pressed while a refetch is on its way, at that one press', async () => {
+    const {host, store} = await walked();
+    store.setBrowse('p:2', {artifacts: [row(21n, 'Tissues', 30n)], parents: [], next: null});
+    const lands: (() => void)[] = [];
+    const answer = store.browse;
+    store.browse = ((req: {parent?: bigint}) => new Promise((resolve) => lands.push(() => resolve(answer(req as never))))) as typeof store.browse;
+    clausesOn(store, 'filter');
+    await settle(host);
+    control(host, '2', 'expander').click();
+    await settle(host);
+    store.browse = answer;
+    while (lands.length > 0) {
+      lands.shift()!();
+      await settle(host);
+    }
+    await settle(host);
+    await settle(host);
+    expect(control(host, '2', 'expander').getAttribute('aria-expanded')).toBe('true');
+    expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Tumours', 'Anatomy', 'Tissues']);
+  });
+
   it('says No match, a refused layer and refused children in one status region that is there before them', async () => {
     const {host, store} = await panel();
-    const state = deep(host, '[part="state"]')!;
-    expect(deepAll(host, '[role="status"]')).toEqual([state]);
-    expect(state.textContent?.trim()).toBe('');
+    // The region holds the state's part, which is hidden while empty, and is not that part.
+    const region = deep(host, '[role="status"]')!;
+    const state = region.querySelector('[part="state"]')!;
+    expect(deepAll(host, '[role="status"]')).toEqual([region]);
+    expect(region.textContent?.trim()).toBe('');
 
     await type(host, 'zzz');
-    expect(deep(host, '[part="state"]')).toBe(state);
+    expect(deep(host, '[role="status"]')).toBe(region);
+    expect(region.querySelector('[part="state"]')).toBe(state);
     expect(state.getAttribute('data-state')).toBe('empty');
     expect(state.textContent?.trim()).not.toBe('');
 
@@ -480,7 +640,7 @@ describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
     await settle(host);
     await settle(host);
     expect(deep(host, '[part="also"][data-code="layer-withheld"]')).not.toBeNull();
-    expect(state.textContent).toContain('Neoplasms');
+    expect(region.textContent).toContain('Neoplasms');
 
     store.browse = () => Promise.reject({code: 'layer-withheld', detail: ''});
     clausesOn(store, 'filter');

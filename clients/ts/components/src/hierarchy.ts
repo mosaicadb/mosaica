@@ -29,6 +29,21 @@ type RowElement = HTMLElement & {path: string};
 /** The control in a row that focus is on: the row's path and place among the rows, and the control's part and verb. */
 type Held = {path: string; at: number; part: string; verb: string | null};
 
+/** How many requests a refetch of the rows has in flight at once. */
+const REFETCH_AT_ONCE = 4;
+
+/**
+ * What a request for rows is part of. A `refetch` waits its turn among {@link REFETCH_AT_ONCE};
+ * nothing more is asked for once `wanted` is false.
+ */
+type Fetch = {wanted: () => boolean; refetch: boolean};
+
+/** A row's press, which waits for nothing. */
+const PRESSED: Fetch = {wanted: () => true, refetch: false};
+
+/** Whether focus is on nothing, as it is once the element that had it has left the page. */
+const focusLost = (): boolean => document.activeElement === null || document.activeElement === document.body;
+
 /**
  * Use the hierarchy when viewers should be able to reach a layer's artifacts at any level, wherever
  * the camera is. It opens on the top-level artifacts and does not change as the map moves.
@@ -39,10 +54,14 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  *
  * Each row shows how many of the artifact's items the viewer may see. While filters are set, it
  * also shows how many of those items match. A parent the viewer may not see is left out, so its
- * children appear at the top level. When the filters change, the rows are fetched again with the
- * children of every row that is open, and focus stays on the control it was on.
+ * children appear at the top level. When the filters change, the rows are fetched again, a few
+ * requests at a time: as many pages of the roots and of each open row as More had loaded, since a
+ * page's cursor is good only for the filters it was served under. Focus stays on the control it
+ * was on.
  *
- * A row's buttons highlight or filter the map by its artifact. Its Fit button only fires
+ * A row's buttons highlight or filter the map by its artifact. They are shown in place of its
+ * counts while the pointer or focus is in the row, and Escape puts them away again; where there is
+ * no pointer to hover with, they stand beside the counts. Its Fit button only fires
  * `mosaica-artifactfit`, so you handle the event by passing its id to the map's `fitTo`. The
  * explorer does this for a hierarchy you put in one of its slots. `fitTo` finds only the artifacts
  * the map currently draws, so Fit does nothing for a row whose artifact is not drawn at this zoom.
@@ -57,24 +76,26 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-artifactfit']>} mosaica-artifactfit - A row's Fit
  *   button was pressed.
  * @csspart title - The heading.
- * @csspart state - The state line, with `data-state`. It is a `role="status"` region, which also
+ * @csspart state - The state line, with `data-state`, inside a `role="status"` region, which also
  *   says which rows are loading children and which were refused them.
  * @csspart refusal - The words "View refused" or "Layer unavailable", with `data-code`.
  * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart layer - The layer select, shown if there are several layers.
  * @csspart search - The search box.
  * @csspart tree - The tree of rows, named by the layer.
- * @csspart row - One row, with `data-id`, and `data-clause` (`filter`, `highlight` or both,
- *   separated by a space) while its artifact is filtered or highlighted.
+ * @csspart row - One row, with `data-id`, `data-clause` (`filter`, `highlight` or both, separated
+ *   by a space) while its artifact is filtered or highlighted, and `data-quiet` once Escape has put
+ *   its buttons away.
  * @csspart expander - A row's expand button, with `aria-expanded` while its children are shown. On
  *   a row with no children it has `data-leaf` and is hidden, keeping the names aligned.
  * @csspart name - A row's name, with `data-unnamed` if it has none. Pressing it highlights the
  *   artifact, and it has `aria-pressed` while the artifact is highlighted.
- * @csspart counts - A row's counts.
+ * @csspart counts - A row's counts. They are not drawn while the row's buttons are shown over them.
  * @csspart count-matched - The `<mosaica-count>` of a row's items that match the filters, while a
  *   filter is set.
  * @csspart count-masked - The `<mosaica-count>` of a row's items the viewer may see.
- * @csspart actions - A row's buttons, shown while the pointer or focus is in the row.
+ * @csspart actions - A row's buttons, shown over its counts while the pointer or focus is in the
+ *   row.
  * @csspart highlight - A row's highlight button, with `aria-pressed`.
  * @csspart filter - A row's filter button, with `aria-pressed`.
  * @csspart fit - A row's Fit button, on a layer that draws.
@@ -111,6 +132,7 @@ export class MosaicaHierarchy extends MosaicaElement {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
+        column-gap: 3px;
         min-height: 28px;
         padding: 0 4px 0 calc(4px + var(--depth, 0) * 14px);
         border-radius: var(--_mosaica-radius-control);
@@ -138,18 +160,18 @@ export class MosaicaHierarchy extends MosaicaElement {
       [part='expander'][data-leaf] {
         visibility: hidden;
       }
-      /* A name too long to stand beside the counts and buttons has them under it, and wraps. */
+      /* A name wraps beside the counts; where that would leave it less than this, they go under it. */
       .lead {
         display: flex;
         align-items: center;
-        flex: 1 1 auto;
+        flex: 1 1 7em;
         min-width: 0;
       }
       [part='name'] {
         flex: 1 1 auto;
         min-width: 0;
         min-height: 24px;
-        padding: 2px 4px;
+        padding: 2px 3px;
         border-radius: 4px;
         text-align: left;
         overflow-wrap: anywhere;
@@ -170,21 +192,37 @@ export class MosaicaHierarchy extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-2);
       }
-      /* Keeps its place in the row while not drawn, so showing it moves nothing; still reachable by Tab. */
+      /* The counts and the row's buttons. Where there is no pointer to hover with, side by side. */
+      .figures {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+        min-height: 24px;
+      }
       [part='actions'] {
         display: inline-flex;
-        opacity: 0;
-        pointer-events: none;
       }
-      [part='row']:hover [part='actions'],
-      [part='row']:focus-within [part='actions'] {
-        opacity: 1;
-        pointer-events: auto;
-      }
-      @media (hover: none) {
+      /* With a pointer, the buttons take no room: they are shown over the counts, which are not
+         drawn meanwhile, while the pointer or focus is in the row and Escape has not put them
+         away. The counts' place is at least as wide as the buttons, so they never reach the name. */
+      @media (hover: hover) {
+        .figures {
+          min-width: calc(var(--buttons) * 24px);
+        }
         [part='actions'] {
+          position: absolute;
+          right: 0;
+          opacity: 0;
+          pointer-events: none;
+        }
+        [part='row']:not([data-quiet]):is(:hover, :focus-within) [part='actions'] {
           opacity: 1;
           pointer-events: auto;
+        }
+        [part='row']:not([data-quiet]):is(:hover, :focus-within) [part='counts'] {
+          opacity: 0;
         }
       }
       [part='actions'] button {
@@ -224,13 +262,13 @@ export class MosaicaHierarchy extends MosaicaElement {
         background: var(--_mosaica-surface-3);
       }
       [part='also'] {
-        padding-left: calc(32px + var(--depth, 0) * 14px);
+        padding-left: calc(31px + var(--depth, 0) * 14px);
         font-size: 11px;
         color: var(--_mosaica-ink-3);
       }
       [part='more'] {
         min-height: 24px;
-        margin: 2px 0 2px calc(32px + var(--depth, 0) * 14px);
+        margin: 2px 0 2px calc(31px + var(--depth, 0) * 14px);
       }
       [part='children'] {
         list-style: none;
@@ -261,6 +299,14 @@ export class MosaicaHierarchy extends MosaicaElement {
   @state() private accessor open = new Set<string>();
   /** Bumped to re-render after a node's children land, since the tree in `roots` is mutated. */
   @state() private accessor revision = 0;
+  /** The paths of the rows whose buttons Escape has put away, each until the pointer and focus leave it. */
+  @state() private accessor quiet: ReadonlySet<string> = new Set();
+
+  /** How many pages More has loaded under each path, and under `''` for the roots, so a refetch loads as many. */
+  private pages = new Map<string, number>();
+  /** How many of a refetch's requests are in flight, and those waiting for a place. */
+  private asking = 0;
+  private waiting: (() => void)[] = [];
 
   /** The question the roots were fetched under; see {@link question}. */
   private fetchedUnder = '';
@@ -281,6 +327,8 @@ export class MosaicaHierarchy extends MosaicaElement {
     this.loading = false;
     this.refusal = null;
     this.open = new Set();
+    this.pages.clear();
+    this.quiet = new Set();
     this.names.clear();
     this.fetchedUnder = '';
     if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -319,6 +367,7 @@ export class MosaicaHierarchy extends MosaicaElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    document.addEventListener('keydown', this.onEscape);
     if (typeof IntersectionObserver === 'undefined') return;
     this.observer ??= new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting) || this.shown) return;
@@ -329,9 +378,38 @@ export class MosaicaHierarchy extends MosaicaElement {
   }
 
   override disconnectedCallback(): void {
+    document.removeEventListener('keydown', this.onEscape);
     this.observer?.disconnect();
     this.observer = null;
     super.disconnectedCallback();
+  }
+
+  /**
+   * Escape puts away the buttons shown over a row's counts, wherever focus is, since the pointer
+   * alone shows them. Focus on one of them goes to the row's name.
+   */
+  private onEscape = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') return;
+    const active = this.shadowRoot?.activeElement ?? null;
+    const focused = active?.closest<RowElement>('[part="row"]') ?? null;
+    const shown = [focused, this.renderRoot.querySelector<RowElement>('[part="row"]:hover')].filter((row) => row !== null && !this.quiet.has(row.path));
+    if (shown.length === 0) return;
+    this.quiet = new Set([...this.quiet, ...shown.map((row) => row!.path)]);
+    if (active?.closest('[part="actions"]')) focused?.querySelector<HTMLElement>('[part="name"]')?.focus();
+  };
+
+  /** The buttons Escape put away come back once the pointer and focus have both left the row. */
+  private leftRow(e: Event, path: string): void {
+    if (!this.quiet.has(path)) return;
+    const row = e.currentTarget as HTMLElement;
+    const to = e.type === 'focusout' ? ((e as FocusEvent).relatedTarget as Element | null) : (this.shadowRoot?.activeElement ?? null);
+    if (row.contains(to) || (e.type === 'focusout' && row.matches(':hover'))) return;
+    this.shownAgain(path);
+  }
+
+  /** Let a row show its buttons again. */
+  private shownAgain(path: string): void {
+    if (this.quiet.has(path)) this.quiet = new Set([...this.quiet].filter((p) => p !== path));
   }
 
   /** Whether this element is displayed; see {@link shown}. */
@@ -377,28 +455,65 @@ export class MosaicaHierarchy extends MosaicaElement {
     return s.browse({...req, layer: layer.name, limit: Math.max(1, Math.min(this.limit, ceiling))});
   }
 
+  /** Run `ask` in one of a refetch's {@link REFETCH_AT_ONCE} places, once one is free. */
+  private async placed<T>(ask: () => Promise<T>): Promise<T> {
+    if (this.asking < REFETCH_AT_ONCE) this.asking++;
+    else await new Promise<void>((free) => this.waiting.push(free));
+    try {
+      return await ask();
+    } finally {
+      // A waiting request takes the place over; with none, the place is free.
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.asking--;
+    }
+  }
+
   /**
-   * A page of the roots, with the children of every row on it that is open. The page replaces or
-   * joins the rows once those have landed, so a walk under one question is drawn whole under the
-   * next. A page asked under a question since replaced is dropped. Returns the rows it added.
+   * The rows under `parent`, or the roots: the page at `cursor`, or from the first page as many as
+   * More had loaded there. The store aborts no request, so a fetch no longer wanted asks for
+   * nothing more and returns `null`.
+   */
+  private async rowsUnder(parent: Node | null, cursor: string | undefined, fetch: Fetch): Promise<{nodes: Node[]; next: string | null} | null> {
+    const path = parent?.path ?? '';
+    const pages = cursor === undefined ? (this.pages.get(path) ?? 1) : 1;
+    const nodes: Node[] = [];
+    let next = cursor ?? null;
+    for (let i = 0; i < pages && (i === 0 || next !== null); i++) {
+      const ask = async () => (fetch.wanted() ? this.page({...(parent ? {parent: parent.row.mosaicaId} : {}), ...(next === null ? {} : {cursor: next})}) : null);
+      const page = await (fetch.refetch ? this.placed(ask) : ask());
+      if (!page) return null;
+      nodes.push(...page.artifacts.map((row) => this.node(row, path)));
+      next = page.next;
+    }
+    if (cursor !== undefined) this.pages.set(path, (this.pages.get(path) ?? 1) + 1);
+    return {nodes, next};
+  }
+
+  /**
+   * The roots, with the children of every row among them that is open. They replace the rows, or
+   * the page at `cursor` joins them, once those have landed, so a walk under one question is drawn
+   * whole under the next. Rows asked for under a question since replaced are dropped. Returns the
+   * rows it added.
    */
   private async loadRoots(cursor?: string): Promise<Node[]> {
-    const request = this.page(cursor === undefined ? {} : {cursor});
-    if (!request) return [];
+    if (!this.resolvedStore || !this.current()) return [];
     const epoch = this.epoch;
     const under = this.fetchedUnder;
     const wanted = () => epoch === this.epoch && under === this.fetchedUnder;
+    const fetch: Fetch = {wanted, refetch: cursor === undefined};
     this.loading = true;
     this.refusal = null;
     try {
-      const page = await request;
+      const got = await this.rowsUnder(null, cursor, fetch);
+      if (!got || !wanted()) return [];
+      await this.reopen(got.nodes, fetch);
       if (!wanted()) return [];
-      const nodes = page.artifacts.map((row) => this.node(row, ''));
-      await this.reopen(nodes);
-      if (!wanted()) return [];
-      this.roots = cursor === undefined ? nodes : [...(this.roots ?? []), ...nodes];
-      this.rootsNext = page.next;
-      return nodes;
+      this.roots = cursor === undefined ? got.nodes : [...(this.roots ?? []), ...got.nodes];
+      this.rootsNext = got.next;
+      // A row pressed open while these were on their way has no children yet.
+      void this.reopen(got.nodes, fetch);
+      return got.nodes;
     } catch (error) {
       if (!wanted()) return [];
       this.refusal = refusalOf(error);
@@ -409,12 +524,12 @@ export class MosaicaHierarchy extends MosaicaElement {
     }
   }
 
-  /** Fetch the children of each of `nodes` that is open, and of each of those. */
-  private async reopen(nodes: readonly Node[]): Promise<void> {
+  /** Fetch the children of each open row among `nodes` and under them that has none yet. */
+  private async reopen(nodes: readonly Node[], fetch: Fetch): Promise<void> {
     await Promise.all(
       nodes
-        .filter((n) => this.open.has(n.path) && n.row.childCount > 0 && n.children === null)
-        .map((n) => this.expand(n))
+        .filter((n) => this.open.has(n.path) && n.row.childCount > 0)
+        .map((n) => (n.children !== null ? this.reopen(n.children, fetch) : n.loading ? undefined : this.expand(n, false, fetch)))
     );
   }
 
@@ -433,21 +548,19 @@ export class MosaicaHierarchy extends MosaicaElement {
    * Expand a node: its children, paged. A node keeps what it fetched while {@link question} is
    * unchanged, so reopening it fetches nothing.
    */
-  private async expand(node: Node, more = false): Promise<Node[]> {
-    const request = this.page({parent: node.row.mosaicaId, ...(more && node.next ? {cursor: node.next} : {})});
-    if (!request) return [];
+  private async expand(node: Node, more = false, fetch: Fetch = PRESSED): Promise<Node[]> {
+    if (!this.resolvedStore || !this.current()) return [];
     const epoch = this.epoch;
     node.loading = true;
     node.refusal = null;
     this.revision++;
     try {
-      const page = await request;
-      if (epoch !== this.epoch) return [];
-      const nodes = page.artifacts.map((row) => this.node(row, node.path));
-      await this.reopen(nodes);
-      node.children = more ? [...(node.children ?? []), ...nodes] : nodes;
-      node.next = page.next;
-      return nodes;
+      const got = await this.rowsUnder(node, more ? (node.next ?? undefined) : undefined, fetch);
+      if (!got || epoch !== this.epoch) return [];
+      await this.reopen(got.nodes, fetch);
+      node.children = more ? [...(node.children ?? []), ...got.nodes] : got.nodes;
+      node.next = got.next;
+      return got.nodes;
     } catch (error) {
       node.refusal = refusalOf(error);
       node.children = node.children ?? [];
@@ -471,14 +584,15 @@ export class MosaicaHierarchy extends MosaicaElement {
 
   /**
    * Load the next page of the roots, or of `parent`'s children, and move focus from the More
-   * button, which the page replaces or removes, to the first row it added.
+   * button, which the page replaces or removes, to the first row it added. Focus that has gone
+   * anywhere else meanwhile stays there.
    */
   private async more(button: HTMLElement, parent: Node | null): Promise<void> {
     const added = await (parent ? this.expand(parent, true) : this.loadRoots(this.rootsNext ?? undefined));
     await this.updateComplete;
-    const active = this.shadowRoot?.activeElement ?? null;
     const first = added[0];
-    if (!first || (active !== null && active !== button)) return;
+    const onButton = this.shadowRoot?.activeElement === button || (!button.isConnected && focusLost());
+    if (!first || !onButton) return;
     this.rowElements()
       .find((r) => r.path === first.path)
       ?.querySelector<HTMLElement>('[part="name"]')
@@ -506,6 +620,8 @@ export class MosaicaHierarchy extends MosaicaElement {
   private keepFocus(held: Held): void {
     const rows = this.rowElements();
     const active = this.shadowRoot?.activeElement ?? null;
+    // Focus is still in the tree, or the render removed the control that had it.
+    if (!active && !focusLost()) return;
     const same = rows.find((r) => r.path === held.path);
     const row = same ?? (active ? null : rows[Math.min(held.at, rows.length - 1)]);
     if (!row) {
@@ -603,6 +719,7 @@ export class MosaicaHierarchy extends MosaicaElement {
             this.roots = null;
             this.searching = null;
             this.open = new Set();
+            this.pages.clear();
           }}>
             ${offered.map((l) => html`<option value=${l.name} ?selected=${l.name === layer.name}>${l.title || l.name}</option>`)}
           </select>`
@@ -615,7 +732,7 @@ export class MosaicaHierarchy extends MosaicaElement {
         autocomplete="off"
         @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)}
       /></div>
-      <span part="state" role="status" data-state=${state}>${said}${notes.length > 0 ? html`<span class="sr-only">${notes.join('. ')}</span>` : nothing}</span>
+      <div role="status"><span part="state" data-state=${state}>${said}</span>${notes.length > 0 ? html`<span class="sr-only">${notes.join('. ')}</span>` : nothing}</div>
       ${rows === null || rows.length === 0 ? nothing : html`<ul part="tree" aria-label=${title}>${rows.map((n) => this.renderNode(n, 0, layer, filtered))}</ul>`}
       ${this.searching === null && this.rootsNext
         ? html`<button part="more" class="more-link" type="button" @click=${(e: Event) => void this.more(e.currentTarget as HTMLElement, null)}>More</button>`
@@ -635,7 +752,8 @@ export class MosaicaHierarchy extends MosaicaElement {
     const drawn = !isFilterLayer(layer);
     const pressed = (verb: ClauseVerb) => (clauses.includes(verb) ? 'true' : 'false');
     return html`<li>
-      <div part="row" style=${`--depth:${depth}`} .path=${node.path} data-id=${idString(id)} data-clause=${clauses.length > 0 ? clauses.sort().join(' ') : nothing}>
+      <div part="row" style=${`--depth:${depth};--buttons:${drawn ? 3 : 2}`} .path=${node.path} data-id=${idString(id)} data-clause=${clauses.length > 0 ? clauses.sort().join(' ') : nothing}
+        data-quiet=${this.quiet.has(node.path) ? '' : nothing} @pointerleave=${(e: Event) => this.leftRow(e, node.path)} @focusout=${(e: Event) => this.leftRow(e, node.path)}>
         <span class="lead"><button part="expander" type="button" data-leaf=${node.row.childCount === 0 ? '' : nothing}
           aria-expanded=${open ? 'true' : 'false'}
           aria-label=${open ? `Collapse ${name ?? 'row'}` : `Expand ${name ?? 'row'}`}
@@ -644,7 +762,8 @@ export class MosaicaHierarchy extends MosaicaElement {
           aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')} title="Highlight"
           @click=${() => this.apply(id, 'highlight')}>${called}</button></span>
         <span class="tail">
-          <span part="actions">
+          <span class="figures">
+          <span part="actions" @focusin=${() => this.shownAgain(node.path)}>
             <button part="highlight" type="button" data-verb="highlight" aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')}
               title="Highlight this" @click=${() => this.apply(id, 'highlight')}>${icon('highlight', 13)}</button>
             <button part="filter" type="button" data-verb="filter" aria-label=${`Filter to ${called}`} aria-pressed=${pressed('filter')}
@@ -661,6 +780,7 @@ export class MosaicaHierarchy extends MosaicaElement {
             ${filtered && node.row.matchedCount !== null
               ? html`<mosaica-count part="count-matched" .masked=${masked(node.row.matchedCount)}></mosaica-count>/`
               : nothing}<mosaica-count part="count-masked" .masked=${masked(node.row.maskedCount)}></mosaica-count>
+          </span>
           </span>
           ${clauses.map(
             (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${called}` : `Stop filtering to ${called}`}
