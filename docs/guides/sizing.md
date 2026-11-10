@@ -59,11 +59,10 @@ For example, 100 million items, 200 sets of attributes in use, the other caches 
 
 ### What happens beyond the hot set
 
-While the memory beyond the caches holds the hot set, the server runs at full speed. Once it can't, nearly every request waits on the disc. The table was measured on one 4-core machine with 100 million items of about 60 bytes each (a 5.6 GiB bundle). Ten users panned across the whole map at random, which is close to the worst case, since real users gather on the busy parts of a map. The hot set was about 2 GiB. Each figure is one 20-second run, and repeated runs differed by up to 30%.
+While the memory beyond the caches holds the hot set, the server runs at full speed. Once it can't, nearly every request waits on the disc. The table was measured on one 4-core machine with 100 million items of about 60 bytes each (a 5.6 GiB bundle). Ten users panned across the whole map at random, which is close to the worst case, since real users gather on the busy parts of a map. The hot set was about 2 GiB, and at a 2 GiB cap the server ran as fast as it did with none. Each figure is one 20-second run, and repeated runs differed by up to 30%.
 
 | Memory cap | Bundle ÷ cap | Views per second | p99 latency |
 |---|---|---|---|
-| None | | 671 | 83 ms |
 | 2 GiB | 2.8 | 811 | 71 ms |
 | 1 GiB | 5.6 | 468 | 130 ms |
 | 512 MiB | 11 | 116 | 755 ms |
