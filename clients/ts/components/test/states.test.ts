@@ -1050,11 +1050,17 @@ describe('<mosaica-selection> — a panel renders the states the same way', () =
     const counting = live.textContent?.trim();
     expect(counting).not.toBe('');
 
-    // The frame's estimate is shown below, and the line still says it is counting.
+    // The frame's estimate is shown below. The line goes on saying it is counting, from the
+    // element that said it, and no longer draws it.
+    const said = live.firstElementChild!;
+    expect(said.classList.contains('sr-only')).toBe(false);
     store.set('status', status({querying: true}));
     store.set('region', {...counted, matched: {value: 790, exact: false}, visible: null} as never);
     await settle(host);
     expect(live.textContent?.trim()).toBe(counting);
+    expect(live.firstElementChild).toBe(said);
+    expect(said.classList.contains('sr-only')).toBe(true);
+    expect(root.querySelector('[part="state"] .dot')).toBeNull();
     expect(deepAll(host, '[part="count-matched"] [part="count"]').map((c) => c.textContent)).toEqual(['≈ 790']);
 
     store.set('region', counted as never);
@@ -1093,15 +1099,31 @@ describe('<mosaica-selection> — a panel renders the states the same way', () =
     expect(silent()).toBe(true);
   });
 
-  it('says in words on the state line whether the counts are exact for the shape', async () => {
+  it('says whether the counts are exact for the shape in the state line’s tooltip and to a screen reader, and draws nothing on the line', async () => {
     const {host, store, root} = await card(counted);
-    const drawn = () => [...root.querySelector('[part="state"] [role="status"]')!.childNodes].filter((n) => !(n instanceof Element && n.classList.contains('sr-only'))).map((n) => n.textContent).join('').trim();
-    const approximate = drawn();
-    expect(approximate).not.toBe('');
+    const state = root.querySelector('[part="state"]')!;
+    const live = state.querySelector('[role="status"]')!;
+    /** What the line draws: its text outside anything hidden for a screen reader alone. */
+    const drawn = () => {
+      let text = '';
+      const walk = (node: Node) => {
+        if (node.nodeType === Node.TEXT_NODE) text += node.textContent;
+        if (node instanceof Element && !node.classList.contains('sr-only')) node.childNodes.forEach(walk);
+      };
+      walk(state);
+      return text.trim();
+    };
+    const approximate = state.getAttribute('title')!;
+    expect(approximate.trim()).not.toBe('');
+    expect(live.textContent).toContain(approximate);
+    expect(drawn()).toBe('');
     store.set('region', {...counted, visible: {value: 900, exact: true}, matched: {value: 800, exact: true}, verdict: {exact: true, depth: null}} as never);
     await settle(host);
-    expect(drawn()).not.toBe('');
-    expect(drawn()).not.toBe(approximate);
+    const exact = state.getAttribute('title')!;
+    expect(exact.trim()).not.toBe('');
+    expect(exact).not.toBe(approximate);
+    expect(live.textContent).toContain(exact);
+    expect(drawn()).toBe('');
   });
 
   it('keeps Retry outside the live element, and moves the focus to the state line when it goes', async () => {

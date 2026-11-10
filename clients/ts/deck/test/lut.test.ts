@@ -255,7 +255,7 @@ describe('every colouring interaction is a texture rewrite, never an attribute u
 
     // Two bands land: positions, colours and ordinals upload by the ordinary write path.
     const bands = [band(1, [a, a, 0]), band(2, [b, root])];
-    slab.sync(bands, 2, {kind: 'uniform', ground: 'dark'}, null, 'l');
+    slab.sync(bands, 2, {kind: 'uniform'}, null, 'l');
     const uploadsAfterBands = device.bufferWrites;
     expect(uploadsAfterBands).toBeGreaterThan(0);
     // The colour map is held per palette, as the store holds it: `update` compares it by
@@ -287,7 +287,7 @@ describe('every colouring interaction is a texture rewrite, never an attribute u
 
     // The switch between cluster and column colour is a uniform: the slab is asked for the same
     // column encoding with the same carried layer, and uploads nothing.
-    slab.sync(bands, 2, {kind: 'uniform', ground: 'dark'}, null, 'l');
+    slab.sync(bands, 2, {kind: 'uniform'}, null, 'l');
     expect(device.bufferWrites).toBe(uploadsAfterBands);
     expect(lut.writes).toBe(5);
   });
@@ -296,16 +296,16 @@ describe('every colouring interaction is a texture rewrite, never an attribute u
     const device = fakeDevice();
     const slab = new MarkSlab();
     slab.attach(device);
-    const draw = slab.sync([band(1, [5, 0, 7])], 2, {kind: 'uniform', ground: 'dark'}, null, 'l');
+    const draw = slab.sync([band(1, [5, 0, 7])], 2, {kind: 'uniform'}, null, 'l');
     expect([...draw.ordinals]).toEqual([5, 0, 7]);
     // Buffers are created in the order positions, colours, picking, ordinals; the ordinals buffer
     // took exactly one write for the band.
     expect(device.writesByBuffer[3]).toBe(1);
     // A band without the carried layer's column reads as no artifact.
-    const next = slab.sync([band(1, [5, 0, 7]), band(2, [9], 'other')], 2, {kind: 'uniform', ground: 'dark'}, null, 'l');
+    const next = slab.sync([band(1, [5, 0, 7]), band(2, [9], 'other')], 2, {kind: 'uniform'}, null, 'l');
     expect([...next.ordinals]).toEqual([5, 0, 7, 0]);
     // Switching the carried layer rewrites the ordinals from the columns the bands already hold.
-    const switched = slab.sync([band(1, [5, 0, 7]), band(2, [9], 'other')], 2, {kind: 'uniform', ground: 'dark'}, null, 'other');
+    const switched = slab.sync([band(1, [5, 0, 7]), band(2, [9], 'other')], 2, {kind: 'uniform'}, null, 'other');
     expect([...switched.ordinals]).toEqual([0, 0, 0, 9]);
   });
 });

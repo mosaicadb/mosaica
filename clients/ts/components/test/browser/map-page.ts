@@ -43,6 +43,7 @@ const w = window as unknown as {
   hovered: string[];
   points: [number, number][];
   selectRegion(bbox: [number, number, number, number]): void;
+  regionEdge(): [number, number];
   setStatus(over: Partial<StatusProjection>): void;
   ready: boolean;
 };
@@ -65,6 +66,14 @@ w.selectRegion = (bbox) => {
     held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}
   };
   store.set('region', region);
+};
+/** Where in the page the middle of the selected box's left edge is drawn. */
+w.regionEdge = () => {
+  const [x0, y0, , y1] = (store.get('region')!.shape as {bbox: [number, number, number, number]}).bbox;
+  // The view's coordinates run from 0 to 1 across the 512-unit world.
+  const [x, y] = map.screenOf([x0 * 512, ((y0 + y1) / 2) * 512]);
+  const now = map.getBoundingClientRect();
+  return [now.left + x, now.top + y];
 };
 w.setStatus = (over) => store.set('status', status(over));
 w.ready = true;

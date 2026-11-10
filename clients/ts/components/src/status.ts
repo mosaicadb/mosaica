@@ -99,8 +99,6 @@ export class MosaicaStatus extends MosaicaElement {
       [part='strip'][data-state='detached'] {
         display: none;
       }
-      /* A rule on each cell's leading edge, drawn one pixel outside the cell, so the strip's own
-         edge covers it where the cell starts a line. */
       .cell {
         display: flex;
         flex-wrap: wrap;
@@ -110,11 +108,12 @@ export class MosaicaStatus extends MosaicaElement {
         padding: 7px 12px;
         flex: 0 1 auto;
         min-width: 0;
-        margin-left: -1px;
-        border-left: 1px solid var(--_mosaica-line-2);
       }
       .cell mosaica-count {
         font-size: inherit;
+      }
+      .cell + .cell {
+        border-left: 1px solid var(--_mosaica-line-2);
       }
       /* Figures that wait for an answer, or stand from before a refusal, are all drawn in the
          faint ink, which keeps a text's contrast. The state cell says why, by its dot's shape
@@ -171,11 +170,8 @@ export class MosaicaStatus extends MosaicaElement {
       .cell mosaica-count::part(label) {
         margin-left: 0.3em;
       }
-      :host([compact]) .cell {
-        margin-left: 0;
-        border-left: 0;
-      }
       :host([compact]) .cell + .cell {
+        border-left: 0;
         padding-left: 0;
       }
       :host([compact]) .cell.state {

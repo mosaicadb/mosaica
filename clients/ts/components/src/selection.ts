@@ -17,13 +17,15 @@ import './count.js';
  *
  * The region acts as a filter, which means the map and every other count narrow to it once it
  * settles. Outside flips it to everything outside the shape, and Clear removes it. The counts are
- * approximate when the server had to count an area around the shape, and the state line says
- * whether that is so. Export and Save as artifact are shown disabled because they are not
+ * approximate when the server had to count an area around the shape, and the state line's tooltip
+ * says when that is so. Export and Save as artifact are shown disabled because they are not
  * available yet.
  *
- * Screen readers announce the state line as it changes: that the selection is being counted, the
- * matched and visible counts once, when the query has finished loading, and a refusal. With `quiet`,
- * the card shows the same and announces nothing.
+ * Screen readers announce the state line as it changes: that the selection is being counted, a
+ * refusal, and, once, when the query has finished loading, the matched and visible counts with
+ * whether they are exact for the shape. The counts and that verdict are read out and not drawn on
+ * the line, since the figures are below it. With `quiet`, the card shows the same and announces
+ * nothing.
  *
  * @summary A card showing the counts and marks inside the selected region.
  * @tagname mosaica-selection
@@ -31,8 +33,8 @@ import './count.js';
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Clear,
  *   Outside or Inside was pressed.
  * @csspart title - The heading, with the shape's kind.
- * @csspart state - The state line, with `data-state`. Once the selection is counted, it says whether
- *   the counts are exact for the shape.
+ * @csspart state - The state line, with `data-state`. Its tooltip says whether the counts are exact
+ *   for the shape.
  * @csspart refusal - The words "Selection refused", or "Server busy", with `data-code` set to the
  *   refusal's code.
  * @csspart reason - The server's reason for the refusal, under "Selection refused".
@@ -54,9 +56,6 @@ export class MosaicaSelection extends MosaicaElement {
     css`
       :host {
         display: block;
-      }
-      [part='state'][data-state='shown'] {
-        margin-bottom: 6px;
       }
       [part='counts'] {
         margin: 0 0 4px;
@@ -80,9 +79,11 @@ export class MosaicaSelection extends MosaicaElement {
         max-height: 160px;
         overflow-y: auto;
       }
-      /* The row is its button, which fills it. */
       [part='item'] {
         min-height: 26px;
+      }
+      /* The row is its button, which fills it and takes the row's own padding. */
+      .list > [part='item'] {
         padding: 0;
       }
       [part='item'] button {
@@ -94,7 +95,9 @@ export class MosaicaSelection extends MosaicaElement {
         font-family: var(--_mosaica-font-mono);
         font-size: 12px;
         text-align: left;
-        overflow-wrap: anywhere;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       [part='item'] button:focus-visible {
         outline-offset: -2px;
@@ -131,8 +134,11 @@ export class MosaicaSelection extends MosaicaElement {
     this.actionFocus.keep(this.renderRoot.querySelector<HTMLElement>('[part="state"]'));
   }
 
-  /** The state and its line for a region: what the server said of its count, or how the count stands. */
-  private stateOfRegion(r: RegionProjection, status: StatusProjection | null): {state: PanelState; line: StateLine} {
+  /**
+   * The state and its line for a region: what the server said of its count, or how the count
+   * stands. Once it is counted, `verdict` says whether the counts are exact for the shape.
+   */
+  private stateOfRegion(r: RegionProjection, status: StatusProjection | null): {state: PanelState; line: StateLine; verdict?: string} {
     // A server that cannot be reached, did not answer or is too busy is named as the status strip
     // names it, since nothing about the selection was refused.
     const unreachable = stateOf(status) === 'retrying' && status?.unreachable === true;
@@ -143,24 +149,28 @@ export class MosaicaSelection extends MosaicaElement {
     }
     // Busy only where the selection's own count was shed, so the code shown is its own.
     if (r.status === 'refused' && isBusy(r.refusal) && status) return {state: 'busy', line: stateLine('busy', {...status, refusal: r.refusal}, {onRetry: () => this.resolvedStore?.refresh()})};
-    // Counting until the query has finished loading: the figures a frame gives first are an
-    // estimate, shown below as they stand, and the counts that follow are said once.
-    if (r.status === 'loading' || (r.status === 'shown' && status?.querying)) return {state: 'loading', line: {dot: 'dot quiet', words: 'Counting', action: nothing}};
+    // Counting until the query has finished loading. The figures a frame gives first are an
+    // estimate, shown below as they stand with no line above them; the line goes on saying
+    // Counting, undrawn, from the same element, so the counts that follow are said once.
+    const estimate = r.status === 'shown' && status?.querying === true;
+    const counting = html`<span class=${estimate ? 'sr-only' : nothing}>Counting</span>`;
+    if (r.status === 'loading') return {state: 'loading', line: {dot: 'dot quiet', words: counting, action: nothing}};
     if (r.status === 'refused') return {state: 'refused', line: refusedLine('Selection refused', r.refusal?.code, null, reasonOf(r.refusal))};
-    if (status?.stale) return {state: 'stale', line: {dot: 'dot warn', words: 'Data updated', action: nothing}};
-    // The counts in words, heard as they arrive and not drawn, since the figures are below; then
-    // whether they are exact for the shape.
+    const verdict = r.verdict === null ? 'Not counted yet' : r.verdict.exact ? 'Exact for the shape' : 'Approximate: counted over cells around the shape';
+    if (status?.stale) return {state: 'stale', line: {dot: 'dot warn', words: 'Data updated', action: nothing}, verdict};
+    if (estimate) return {state: 'shown', line: {dot: null, words: counting, action: nothing}, verdict};
+    // The counts in words and whether they are exact for the shape: heard as they arrive and not
+    // drawn, since the figures are below and the verdict is the line's tooltip.
     const side = r.shape.outside ? 'outside' : 'inside';
     const counted = `${formatMasked(r.matched)} matched ${side}${r.visible ? `, ${formatMasked(r.visible)} visible ${side}` : ''}.`;
-    const verdict = r.verdict === null ? 'Not counted yet' : r.verdict.exact ? 'Exact for the shape' : 'Approximate: counted over cells around the shape';
-    return {state: 'shown', line: {dot: null, words: this.quiet ? verdict : html`<span class="sr-only">${counted} </span>${verdict}`, action: nothing}};
+    return {state: 'shown', line: {dot: null, words: html`<span class="sr-only">${this.quiet ? nothing : counted} ${verdict}</span>`, action: nothing}, verdict};
   }
 
   override render(): TemplateResult | typeof nothing {
     const r = this.shown;
     const status = this.resolvedStore?.get('status') ?? null;
     const stale = status?.stale ?? false;
-    const {state, line} = r ? this.stateOfRegion(r, status) : {state: 'detached' as const, line: stateLine('detached', null)};
+    const {state, line, verdict} = r ? this.stateOfRegion(r, status) : {state: 'detached' as const, line: stateLine('detached', null)};
     const pair = (label: string, count: unknown) => html`<dt class="k">${label}</dt><dd class="v">${count}</dd>`;
     const counts =
       r?.status === 'shown'
@@ -178,7 +188,7 @@ export class MosaicaSelection extends MosaicaElement {
     // when the button goes.
     return html`<div class="panel">
       <h2 part="title">Selection <span class="summary">${r ? (r.shape.outside ? `outside ${r.shape.kind}` : r.shape.kind) : nothing}</span></h2>
-      <span part="state" data-state=${state} tabindex="-1">${liveLine(line, this.quiet ? UNSAID : null, state === 'loading' ? html`<span class="skel" aria-hidden="true"></span>` : nothing)}</span>
+      <span part="state" data-state=${state} tabindex="-1" title=${verdict ?? nothing}>${liveLine(line, this.quiet ? UNSAID : null, state === 'loading' ? html`<span class="skel" aria-hidden="true"></span>` : nothing)}</span>
       ${counts}
       ${r && ids.length > 0
         ? html`<div part="label" id="items-label" class="xs muted items-label">Shown items</div>

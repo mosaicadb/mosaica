@@ -21,7 +21,7 @@ afterAll(async () => {
   await served?.close();
 });
 
-type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; setStatus(over: object): void; ready?: boolean};
+type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; regionEdge(): [number, number]; setStatus(over: object): void; ready?: boolean};
 type Box = {left: number; top: number; right: number; bottom: number; width: number; height: number};
 
 const frames = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -146,10 +146,15 @@ describe('the map’s tooltip in a browser', () => {
 });
 
 describe('the map’s ground in a browser', () => {
-  /** How far the mark at the map's centre stands from the ground beside it, as a contrast ratio. */
-  async function markContrast(page: Page): Promise<number> {
-    const [x, y] = (await page.evaluate(() => (window as unknown as Seen).points))[0]!;
-    const png = (await page.screenshot({clip: {x: x - 12, y, width: 13, height: 1}})).toString('base64');
+  /**
+   * How far the selected region's outline stands from the ground beside it, as a contrast ratio.
+   * The outline is drawn in the ink of the ground the map last drew for: dark on a light ground
+   * and light on a dark one, so it stands well clear of the ground it is on only when the map has
+   * drawn for that ground.
+   */
+  async function outlineContrast(page: Page): Promise<number> {
+    const [x, y] = await page.evaluate(() => (window as unknown as Seen).regionEdge());
+    const png = (await page.screenshot({clip: {x: Math.round(x) - 10, y: Math.round(y), width: 14, height: 1}})).toString('base64');
     return page.evaluate(async (data) => {
       const image = new Image();
       image.src = `data:image/png;base64,${data}`;
@@ -164,58 +169,64 @@ describe('the map’s ground in a browser', () => {
         });
         return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
       };
-      // The row's last pixel is the mark's centre, and its first is bare ground.
-      const [mark, ground] = [luminance(image.width - 1), luminance(0)];
-      return (Math.max(mark, ground) + 0.05) / (Math.min(mark, ground) + 0.05);
+      // The row's first pixel is bare ground, and the outline crosses it further along.
+      const ground = luminance(0);
+      let most = 1;
+      for (let at = 1; at < image.width; at++) most = Math.max(most, (Math.max(luminance(at), ground) + 0.05) / (Math.min(luminance(at), ground) + 0.05));
+      return most;
     }, png);
   }
 
-  /** Wait for the map to draw its points in the colour of the ground it is now on. */
+  /** Wait for the map to draw the outline in the ink of the ground it is now on. */
   async function redrawn(page: Page): Promise<number> {
     let contrast = 0;
     for (let tries = 0; tries < 60; tries++) {
       await frames(page);
-      contrast = await markContrast(page);
-      if (contrast >= 2.5) break;
+      contrast = await outlineContrast(page);
+      if (contrast >= 4) break;
     }
     return contrast;
   }
+  const select = (page: Page) => page.evaluate(() => (window as unknown as Seen).selectRegion([0.3, 0.3, 0.45, 0.7]));
 
-  it('draws its points for the other ground when the page’s colour scheme changes, and when the system’s does', async () => {
+  it('draws for the other ground when the page’s colour scheme changes, and when the system’s does', async () => {
     const page = await open();
+    await select(page);
     const dark = () => page.evaluate(() => (document.querySelector('mosaica-map') as unknown as {drawnGround: string}).drawnGround === 'dark');
     expect(await dark()).toBe(false);
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
 
     await page.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
     expect(await dark()).toBe(true);
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
     await page.evaluate(() => (document.documentElement.style.colorScheme = 'light'));
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
 
     // A page that allows both follows the system.
     await page.evaluate(() => (document.documentElement.style.colorScheme = 'light dark'));
     await page.emulateMedia({colorScheme: 'dark'});
     expect(await dark()).toBe(true);
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
     await page.emulateMedia({colorScheme: 'light'});
     expect(await dark()).toBe(false);
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
   }, 120_000);
 
   it('does so inside an explorer for a viewer who asks for reduced motion, and under a page’s own rule for the map’s transitions', async () => {
     const page = await open('?explorer', 'reduce');
+    await select(page);
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
     await page.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
     await page.evaluate(() => (document.documentElement.style.colorScheme = 'light'));
-    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(4);
 
     const bare = await open();
+    await select(bare);
     await bare.addStyleTag({content: 'mosaica-map { transition: none !important; }'});
     await bare.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
-    expect(await redrawn(bare)).toBeGreaterThanOrEqual(2.5);
+    expect(await redrawn(bare)).toBeGreaterThanOrEqual(4);
   }, 120_000);
 });
 
@@ -232,17 +243,18 @@ describe('the region’s tag in a browser', () => {
       const tag = (await boxOf(page, 'mosaica-map', '[part="region-tag"]'))!;
       const clear = (await boxOf(page, 'mosaica-map', '[part="region-tag"] button'))!;
       expect(within(tag, map), `${x},${y}: ${JSON.stringify(tag)}`).toBe(true);
-      expect(clear.width, `${x},${y}`).toBeGreaterThanOrEqual(24);
-      expect(clear.height, `${x},${y}`).toBeGreaterThanOrEqual(24);
-      // The button is what a click at its middle lands on.
+      // The button is what a click lands on anywhere in the 24 px square about its middle, which
+      // lies inside the tag.
       const hit = await page.evaluate(
         ([cx, cy]) => {
           const root = document.querySelector('mosaica-map')!.shadowRoot!;
-          return root.elementFromPoint(cx!, cy!)?.closest('button') === root.querySelector('[part="region-tag"] button');
+          const clear = root.querySelector('[part="region-tag"] button');
+          return [[0, 0], [-11, -11], [11, -11], [-11, 11], [11, 11]].every(([dx, dy]) => root.elementFromPoint(cx! + dx!, cy! + dy!)?.closest('button') === clear);
         },
         [clear.left + clear.width / 2, clear.top + clear.height / 2]
       );
       expect(hit, `${x},${y}`).toBe(true);
+      expect(within({...clear, left: clear.left - 2, top: clear.top - 2, right: clear.right + 2, bottom: clear.bottom + 2}, tag), `${x},${y}`).toBe(true);
     }
   }, 120_000);
 });
