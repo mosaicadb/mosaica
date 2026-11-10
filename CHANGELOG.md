@@ -12,9 +12,9 @@ container image.
 
 - `mosaica demo NAME...` builds datasets and opens their map in a browser, with a picker for the
   dataset and one for whom to view it as, from the Python package with the new `demo` extra:
-  `pip install 'mosaica[demo]'`, then `mosaica demo places`, or `uv run mosaica demo places` in a
-  clone. `mosaica.datasets.load` does the same steps
-  and returns the `Database`, and `mosaica.datasets.prepared` stops before the build. The datasets
+  `pip install 'mosaica[demo]'`, then `mosaica demo places`, or
+  `uvx --from 'mosaica[demo]' mosaica demo places`, or `uv run mosaica demo places` in a clone.
+  `mosaica.datasets.load` does the same steps and returns the `Database`, and `mosaica.datasets.prepared` stops before the build. The datasets
   are the two in-git samples, the whole GeoNames dump, downloaded from GeoNames, and GBIF's
   occurrence snapshot, read from its public copy on Amazon S3 whole or as a sample of its parts.
   [Datasets to try](docs/start/datasets.md) lists their views, fields, layers and sizes.

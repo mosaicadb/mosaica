@@ -11,6 +11,8 @@ pip install 'mosaica[demo]'
 mosaica demo places
 ```
 
+With [uv](https://docs.astral.sh/uv/), `uvx --from 'mosaica[demo]' mosaica demo places` does the same in a temporary environment, without installing the package.
+
 The command prints the map's address and keeps serving it until you press Ctrl-C. The next run reuses what the first one built, so the map opens straight away. Name several datasets to put them on one page, as in `mosaica demo places arxiv-sample`, and use `mosaica demo --list` to see them all with their sizes. A large dataset can be built from part of itself: `gbif:64` reads 64 parts of GBIF instead of all of them. `--title` sets the page's title, and `--dir` keeps the datasets somewhere other than `~/.cache/mosaica/datasets/`.
 
 In a clone of the repository, run `uv run mosaica demo places` instead. Its first run builds the `mosaica` binary and the map's JavaScript, so it needs cargo and npm.

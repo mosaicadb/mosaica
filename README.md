@@ -38,7 +38,7 @@ We served one map of GBIF's species records, from Mosaica and compared it to del
 pip install 'mosaica[demo]' && mosaica demo places
 ```
 
-This builds 150,000 GeoNames places into a database and opens its map in your browser. `mosaica demo --list` lists the other datasets, up to GBIF's 3.5 billion occurrences, and [Datasets to try](docs/start/datasets.md) says what each one holds. In a clone of this repository, `uv run mosaica demo places` does the same from the source.
+This builds 150,000 GeoNames places into a database and opens its map in your browser. `mosaica demo --list` lists the other datasets, up to GBIF's 3.5 billion occurrences, and [Datasets to try](docs/start/datasets.md) says what each one holds. With [uv](https://docs.astral.sh/uv/), `uvx --from 'mosaica[demo]' mosaica demo places` does the same in a temporary environment. In a clone of this repository, `uv run mosaica demo places` does the same from the source.
 
 ## Try it in a notebook
 

@@ -1,48 +1,74 @@
 # Mosaica
 
-Mosaica is a database for interactive maps of very large sets of points. Give it records that each have a position, such as every place name in a gazetteer, or millions of papers laid out by what their abstracts say, and it serves a map of them that people can pan, zoom, filter and search. Whatever is on screen, the counts and densities are worked out for exactly that view.
+**Interactive maps of billions of points.**
 
-It is designed to hold billions of points on one machine and to serve them to many viewers at once. The data can change while it serves. New records appear on the map at the next flush, every 90 seconds by default, and a deletion applies to every request that starts after the server accepts it.
+Mosaica is a database for serving interactive maps over billions of points, with access control on every point. It takes records with a position, such as locations in geo datasets, specimens in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map that people can pan, zoom, filter and search, in a browser or a notebook.
 
 ![150,000 GeoNames places in the Mosaica explorer, coloured by feature class](assets/brand/mosaica_example.png)
 
-## What a map can show
+## Why Mosaica
 
 <div class="grid cards" markdown>
 
--   **Clusters and topics**
+-   **Nothing is thrown away**
 
-    Draw clusters over the points, each with a count and, if you give one, a title. Nest them into a hierarchy, such as fields, then subfields, then topics, and let viewers colour or filter by any level.
+    Tile pipelines drop points to keep tiles small, so a filter can only narrow what survived. Mosaica answers each view from the full data, so a filter down to ten points shows those ten points.
 
--   **Regions and shapes**
+-   **Big data, small hardware**
 
-    Add polygons such as country borders, or have the server work out a hull around each cluster's points. The map outlines one when a viewer points at it or opens it.
+    Built to serve billions of points from a single machine to many viewers at once, and it gracefully handles datasets that don't fit in memory. In the comparison below it serves a billion records, 37 GiB on disk, under a 24 GB memory cap.
 
--   **Filters on every kind of field**
+-   **Live data**
 
-    Ranges on numbers and dates, values of a category, exact or partial matches on keywords, and words in free text. Draw a box or a freehand shape to select an area, and combine any of these with and, or and not.
+    Insert, delete and hide records while it serves, with no rebuild. New records appear on the map within 90 seconds by default, and a deletion applies to every request after the server accepts it.
 
--   **Counts and breakdowns**
+-   **A map per viewer**
 
-    Count the matching points by category or by cluster, compare them with another set, or divide them into a grid of cells. Every count follows the filters.
+    Give records access labels, and each viewer's map is computed only from what they may see: every point, every count and every cluster. The [security](system/security.md) chapter lists what response times can still reveal.
 
--   **Several layouts of the same records**
+-   **Use it from anywhere**
 
-    Lay one set of records out in several ways, such as on a world map and by an embedding, or one layout per year. A viewer can switch between them and keep their filters.
+    Deploy it as a server with the bundled explorer, put the map inside your own UI, run it in a Python notebook, or script it from the command line or the HTTP API.
 
--   **A map for each viewer**
+-   **Secure enrichments**
 
-    Give records access labels, and each viewer sees a map computed only from the records they may see. That covers every count and cluster as well as the points, so no count includes a record the viewer may not see. The [security](system/security.md) chapter lists what response times can still reveal.
+    Layer clusters, regions and hierarchies over your data as [annotations](system/annotations.md), each with access control of its own, or shown only to viewers who can see enough of the points it was made from.
+
+-   **Powerful filters**
+
+    Combine a box or a polygon on the map with ranges, categories, keywords and free-text search, using and, or and not. Every count and breakdown follows the filters.
+
+-   **Multiple views**
+
+    Lay the same records out in several ways, on a world map and by an embedding, or one layout per year, and let viewers switch between them without losing their filters.
 
 </div>
 
+## Compared with other databases
+
+![Typical and slowest frame time against the number of records, for Mosaica, ClickHouse, OpenSearch and PostgreSQL](assets/comparison/four-systems.png)
+
+We served the same map of GBIF's species records from Mosaica and from three other databases, each tuned for the map's queries and enforcing the same access rules, in a container capped at 24 GB of memory. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse, the fastest of the others. [Compared with other databases](system/comparison.md) gives the method, each system's setup and more detailed measurements.
+
+## Try it in your browser
+
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves two maps from one machine: 73.6 million places from Overture Maps on a world map, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the European Union's places or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
+
 ## Where to start
 
-- **See it working first.** [demo.mosaicadb.com](https://demo.mosaicadb.com/) serves 73.6 million places from Overture Maps and 50,000 arXiv papers, with a picker for whom to view each map as. Nothing to install.
+- **See a map on your own machine.** `pip install 'mosaica[demo]' && mosaica demo places`, or `uvx --from 'mosaica[demo]' mosaica demo places` with [uv](https://docs.astral.sh/uv/), builds 150,000 GeoNames places into a database and opens its map in your browser. [Datasets to try](start/datasets.md) lists the other datasets, up to GBIF's 3.5 billion occurrences.
 - **Explore your own data in a notebook.** The Python client turns a pandas or polars data frame into a map in Jupyter, and answers counts and filters from code. It runs the database on your own machine, or connects to a shared server. Start with the [Python client](reference/python/index.md).
 - **Run a map that other people open in a browser.** Describe your Parquet files, build them with the `mosaica` command, and serve the result. [Your first map from files](start/first-map.md) walks through it, and the [Docker](guides/docker.md) and [systemd](guides/systemd.md) guides cover running it for real.
 - **Put a map inside your own web application.** The TypeScript client and its web components add a map, filters and record cards to a page, in any framework, or a layer to your own deck.gl scene. See the [TypeScript client](reference/typescript.md) and the [components](reference/components.md).
 - **Work with it from another language.** A running server answers an HTTP API, which both clients are built on. The [HTTP API reference](reference/http.md) describes every route.
+
+## When to use something else
+
+- Your data fits in the browser: draw it there, with deck.gl or a plotting library.
+- It never changes and has no access rules: static tiles such as PMTiles are cheaper to host.
+- You need ad hoc SQL: use a columnar database such as ClickHouse.
+
+Mosaica runs on one machine, and search filters rather than ranks. It is an alpha, so expect formats and APIs to change before 1.0.
 
 ## About these pages
 
