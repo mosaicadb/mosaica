@@ -16,19 +16,25 @@ import {chrome, tokens} from './tokens.js';
  *
  * The headline is the `title-field` field, or the item's `mosaica_id` when that field is unset or
  * empty. To render a field your own way, as a link for example, put an element in its
- * `field-<name>` slot.
+ * `field-<name>` slot. The card is headed "Item" for a screen reader, with the headline a heading
+ * under it.
+ *
+ * A value over 60 characters is kept to six lines, with a Show more button under it where that
+ * cuts it short. A `compact` card also keeps its headline to three lines and its subtitle to two,
+ * and its Show all button shows every field and all of each.
  *
  * A field named in `image-fields` whose value is an `http:` or `https:` address, or a path
  * resolved against the page, is drawn as the image at that address, across the card's width. The viewer's browser loads it from the host
- * that serves it, without a referrer. A value that is not such an address, and an image that does
- * not load, are shown as text.
+ * that serves it, without a referrer. Its alternative text is the item's `title-field` value, or
+ * the field's name where the item has none. A value that is not such an address, and an image that
+ * does not load, are shown as text.
  *
  * The Open button appears only when you set `open-url` or `open`. `open-url` is a link template
  * such as `https://www.geonames.org/{geonameid}`, in which each `{name}` is replaced by the item's
  * value for that field. Because the values are URL-encoded, a template cannot open an address that
  * a field already holds, so set `open` to a function for that. An item gets no Open button when it
- * has no value for a field the template names. A function in `open` is called with the item's
- * `mosaica_id` and fields, and it takes precedence over `open-url`.
+ * has no value for a field the template names. The link opens in a new tab. A function in `open`
+ * is called with the item's `mosaica_id` and fields, and it takes precedence over `open-url`.
  *
  * @summary A card showing an item's fields, with an optional Open button.
  * @tagname mosaica-item-card
@@ -43,23 +49,26 @@ import {chrome, tokens} from './tokens.js';
  * @csspart title - The header row: the headline or the state, and the close button.
  * @csspart close - The close button.
  * @csspart state - The state line, with `data-state`: `shown`, `empty` (no item, or a click that
- *   found nothing), `refused` or `detached`.
+ *   found nothing), `refused` or `detached`. It is inside a `role="status"` region.
  * @csspart refusal - The words "Item unavailable", with `data-code` set to the refusal's code if
  *   the server refused the record. For a broken pick, the details are in the map's `lastPick`.
  * @csspart reason - The server's reason for refusing the record, under "Item unavailable".
- * @csspart headline - The headline, with `data-name` set to the field it shows.
+ * @csspart headline - The headline, an `<h3>`, with `data-name` set to the field it shows.
  * @csspart subtitle - The `subtitle-field` value under the headline, when `compact` is set.
  * @csspart show-all - The "Show all N fields" button, when `compact` is set, with `aria-expanded`.
- * @csspart view-chip - One view the item is in, with `data-view` and `aria-current` on the current
- *   view.
+ *   It reads "Show all" where every field is shown and only text is cut short.
+ * @csspart view-chip - One view the item is in, with `data-view`, and `aria-current` and a tick on
+ *   the current view.
  * @csspart field - One field, with `data-name`, and `data-prose` on a value over 60 characters.
- * @csspart label - A field's name, and the heading above the view chips.
- * @csspart value - A field's value.
+ * @csspart label - A field's name, a `<dt>`, and the heading above the view chips.
+ * @csspart value - A field's value, a `<dd>`.
+ * @csspart more - The Show more button under a long value that is cut short, with `aria-expanded`.
  * @csspart image - A field's value drawn as an image, under `image-fields`.
  * @csspart scoped - The group-scoped values, grouped by key.
  * @csspart key - One key's heading among the group-scoped values, with `data-key`.
  * @csspart open - The Open button.
- * @csspart copy - The Copy id button, which copies the `mosaica_id` to the clipboard.
+ * @csspart copy - The Copy id button, which copies the `mosaica_id` to the clipboard and says
+ *   beside it whether it did.
  */
 export class MosaicaItemCard extends MosaicaElement {
   static override styles = [
@@ -73,7 +82,7 @@ export class MosaicaItemCard extends MosaicaElement {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
-        gap: 10px;
+        gap: 0;
         margin: 0 0 10px;
         font-size: 13px;
         font-weight: 400;
@@ -81,6 +90,11 @@ export class MosaicaItemCard extends MosaicaElement {
         text-transform: none;
         color: var(--_mosaica-ink);
       }
+      /* The state's region is in the row whether or not it says anything, and takes room only when it does. */
+      .said {
+        min-width: 0;
+      }
+      .said.alone,
       .head [part='headline'],
       .head .headline {
         flex: 1 1 auto;
@@ -90,6 +104,13 @@ export class MosaicaItemCard extends MosaicaElement {
         display: flex;
         flex-direction: column;
         gap: 3px;
+      }
+      h3[part='headline'] {
+        display: block;
+        margin: 0;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--_mosaica-ink);
       }
       [part='subtitle'] {
         font-size: 12px;
@@ -101,19 +122,32 @@ export class MosaicaItemCard extends MosaicaElement {
       :host([compact]) .card-title {
         font-size: 14px;
       }
-      /* The compact card keeps its headline to three lines and its subtitle to two; Open shows them whole. */
-      :host([compact]) .card-title,
-      :host([compact]) [part='subtitle'] {
+      /* Text kept to a few lines until Show all, or its own Show more, shows it whole: a compact
+         card's headline to three and its subtitle to two, a long value to six. */
+      .clamp {
         display: -webkit-box;
-        -webkit-line-clamp: 3;
-        line-clamp: 3;
+        -webkit-line-clamp: 6;
+        line-clamp: 6;
         -webkit-box-orient: vertical;
         overflow: hidden;
         overflow-wrap: anywhere;
       }
-      :host([compact]) [part='subtitle'] {
+      h3[part='headline'].clamp {
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        line-clamp: 3;
+      }
+      [part='subtitle'].clamp {
         -webkit-line-clamp: 2;
         line-clamp: 2;
+      }
+      [part='show-all'],
+      [part='more'] {
+        min-height: 24px;
+      }
+      dl,
+      dd {
+        margin: 0;
       }
       :host([compact]) .foot {
         display: flex;
@@ -135,6 +169,7 @@ export class MosaicaItemCard extends MosaicaElement {
       }
       ::slotted([slot='actions']) {
         flex: none;
+        margin-left: 10px;
       }
       .head [part='state'] {
         min-height: 24px;
@@ -151,14 +186,6 @@ export class MosaicaItemCard extends MosaicaElement {
         border-radius: 6px;
         object-fit: contain;
       }
-      [part='field'][data-prose] [part='value'] {
-        display: -webkit-box;
-        -webkit-line-clamp: 6;
-        line-clamp: 6;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        overflow-wrap: anywhere;
-      }
       .field .v.mono {
         font-size: 12px;
       }
@@ -168,11 +195,15 @@ export class MosaicaItemCard extends MosaicaElement {
       .actions {
         margin-top: 12px;
       }
+      .copied {
+        font-size: 12px;
+        color: var(--_mosaica-ink-2);
+      }
       [part='close'] {
         flex: none;
         width: 24px;
         height: 24px;
-        margin: -2px -4px 0 0;
+        margin: -2px -4px 0 10px;
         display: grid;
         place-items: center;
         border-radius: 5px;
@@ -240,6 +271,13 @@ export class MosaicaItemCard extends MosaicaElement {
   /** Whether "Show all" was pressed, for the item it was pressed on. @internal */
   @state() accessor expanded = false;
   private expandedFor: bigint | null = null;
+  /** The long values shown whole on the full card, by field, for the item shown. @internal */
+  @state() accessor opened: ReadonlySet<string> = new Set();
+  /** The fields whose headline, subtitle or value is cut short where it is drawn. @internal */
+  @state() accessor clipped: ReadonlySet<string> = new Set();
+  /** What the last press of Copy id came to, for the item shown. @internal */
+  @state() accessor copied = '';
+  private resized: ResizeObserver | null = null;
   /** The image addresses that failed to load, shown as text. @internal */
   @state() accessor broken: ReadonlySet<string> = new Set();
   /** `image-fields` as a list, kept in step by `willUpdate`. */
@@ -266,6 +304,9 @@ export class MosaicaItemCard extends MosaicaElement {
     if (id !== this.expandedFor) {
       this.expandedFor = id;
       this.expanded = false;
+      this.opened = new Set();
+      this.clipped = new Set();
+      this.copied = '';
     }
     const store = this.resolvedStore;
     if (!store || !store.get('meta') || !meta || !this.isConnected) return;
@@ -282,6 +323,53 @@ export class MosaicaItemCard extends MosaicaElement {
     }
   }
 
+  override connectedCallback(): void {
+    super.connectedCallback();
+    if (typeof ResizeObserver === 'undefined') return;
+    this.resized ??= new ResizeObserver(() => this.measure());
+    this.resized.observe(this);
+  }
+
+  override disconnectedCallback(): void {
+    this.resized?.disconnect();
+    super.disconnectedCallback();
+  }
+
+  protected override updated(changed: PropertyValues<this>): void {
+    super.updated(changed);
+    this.measure();
+  }
+
+  /**
+   * Note which clamped texts are cut short at the card's width, so each is offered whole. A text
+   * shown whole keeps what was noted while it was clamped, so the button that shows it stays.
+   */
+  private measure(): void {
+    const clipped = new Set(this.clipped);
+    for (const el of Array.from(this.renderRoot.querySelectorAll<HTMLElement>('.clamp'))) {
+      const name = el.closest<HTMLElement>('[data-name]')?.dataset.name;
+      if (name === undefined) continue;
+      if (el.scrollHeight > el.clientHeight + 1) clipped.add(name);
+      else clipped.delete(name);
+    }
+    if (clipped.size !== this.clipped.size || [...clipped].some((name) => !this.clipped.has(name))) this.clipped = clipped;
+  }
+
+  /** Copy the id to the clipboard and say in the status region how that went. */
+  private async copy(id: string): Promise<void> {
+    const shown = this.expandedFor;
+    this.copied = '';
+    await this.updateComplete;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(id);
+      copied = true;
+    } catch {
+      // No clipboard on a page that is not secure, or the browser refused.
+    }
+    if (shown === this.expandedFor) this.copied = copied ? 'Copied' : 'Could not copy';
+  }
+
   private get shown(): {item: {id: bigint; detail: ItemDetail} | null; refusal: Refusal | null; meta: Meta | null} {
     // A card fed by property still takes the schema from an adopted store: declaration order and
     // view names and frames belong to the bundle.
@@ -294,105 +382,110 @@ export class MosaicaItemCard extends MosaicaElement {
 
   override render(): TemplateResult | typeof nothing {
     const {item, refusal, meta} = this.shown;
-    const close = html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'item'})}>${icon('close', 14)}</button>`;
-    // The header row: what the card shows, and the close button where there is something to close.
-    const head = (content: unknown, closable: boolean) => html`<div part="title" class="head">${content}${closable ? close : nothing}</div>`;
-    const unavailable = (code: string | null, reason: string | null) =>
-      html`<div class="panel">${head(refusedState('Item unavailable', code, null, reason), true)}</div>`;
-    if (refusal) return unavailable(refusal.code, reasonOf(refusal));
-    if (!item) {
+    // The close button appears only where there is something to close.
+    let closable = true;
+    let state: unknown = html`<span part="state" data-state="shown"></span>`;
+    if (refusal) state = refusedState('Item unavailable', refusal.code, null, reasonOf(refusal));
+    else if (!item) {
       const pick = this.pick;
       // A broken pick is a fault in the layer; its details stay on the map's `lastPick`.
-      if (pick?.kind === 'broken') return unavailable(null, null);
-      if (pick?.kind === 'miss') return html`<div class="panel">${head(html`<span part="state" data-state="empty">No item here</span>`, true)}</div>`;
-      const state = stateOf(this.resolvedStore?.get('status'));
-      if (state === 'detached') return html`<div class="panel">${head(renderState('detached', null), false)}</div>`;
-      return html`<div class="panel">${head(html`<span part="state" data-state="empty">No item selected</span>`, false)}</div>`;
+      if (pick?.kind === 'broken') state = refusedState('Item unavailable', null, null, null);
+      else if (pick?.kind === 'miss') state = html`<span part="state" data-state="empty">No item here</span>`;
+      else {
+        closable = false;
+        state = stateOf(this.resolvedStore?.get('status')) === 'detached' ? renderState('detached', null) : html`<span part="state" data-state="empty">No item selected</span>`;
+      }
     }
+    const card = item && !refusal ? this.card(item, meta) : null;
+    // One template whatever the card shows, so the state's region is in the page before its words change.
+    return html`<div class="panel">
+      <div part="title" class="head">
+        <h2 class="sr-only">Item</h2>
+        <div class=${card ? 'said' : 'said alone'} role="status">${state}</div>
+        ${card?.headline ?? nothing}
+        ${closable
+          ? html`<slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'item'})}>${icon('close', 14)}</button>`
+          : nothing}
+      </div>
+      ${card?.body ?? nothing}
+    </div>`;
+  }
+
+  /** An item's headline, for the header row, and what the card shows under it: the full card's, or under `compact` the shorter one's. */
+  private card(item: {id: bigint; detail: ItemDetail}, meta: Meta | null): {headline: TemplateResult; body: TemplateResult} {
     const declared = meta?.declaredScalars ?? [];
+    const column = (name: string) => declared.find((c) => c.name === name);
     const {fields} = item.detail;
     const names = Object.keys(fields);
     const ordered = [...declared.map((c) => c.name).filter((n) => n in fields), ...names.filter((n) => !declared.some((c) => c.name === n))];
     const id = idString(item.id);
-    const titleName = this.titleField && fields[this.titleField] !== undefined && fields[this.titleField] !== null ? this.titleField : null;
+    const has = (name: string) => fields[name] !== undefined && fields[name] !== null;
+    const titleName = this.titleField && has(this.titleField) ? this.titleField : null;
+    const title = titleName ? this.text(titleName, fields[titleName], column(titleName)) : null;
     const rest = this.namedFirst(ordered.filter((n) => n !== titleName));
-    const copy = () => void navigator.clipboard?.writeText(id);
-    if (this.compact) return this.compactBody(item, meta, titleName, rest, id);
-    return html`<div class="panel">
-      ${head(
-        titleName
-          ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
-          : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`,
-        true
-      )}
-      <span part="state" data-state="shown"></span>
-      ${this.views(item.detail.views, meta)}
-      <div class="field">
-        ${rest.map((name) => this.field(name, fields[name], declared.find((c) => c.name === name)))}
-        ${titleName
-          ? html`<div part="field" data-name="mosaica_id" style="display:contents"><span part="label" class="k">mosaica_id</span><span part="value" class="v mono">${id}</span></div>`
-          : nothing}
-      </div>
-      ${this.scoped(item.detail.scoped)}
-      <div class="row actions">
-        ${this.openButton(id, fields, html`${icon('open', 14)}Open`)}
-        <button part="copy" class="btn" type="button" @click=${copy}>Copy id</button>
-      </div>
-    </div>`;
-  }
-
-  /** The card under `compact`: headline and subtitle, three fields, and Show all beside Open. */
-  private compactBody(item: {id: bigint; detail: ItemDetail}, meta: Meta | null, titleName: string | null, rest: string[], id: string): TemplateResult {
-    const declared = meta?.declaredScalars ?? [];
-    const {fields} = item.detail;
-    const subtitleName = this.subtitleField && this.subtitleField !== titleName && fields[this.subtitleField] !== undefined && fields[this.subtitleField] !== null ? this.subtitleField : null;
+    const whole = !this.compact || this.expanded;
+    const h3 = titleName
+      ? html`<h3 part="headline" class=${whole ? 'card-title' : 'card-title clamp'} data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${title}</span></slot></h3>`
+      : html`<h3 part="headline" class="card-title mono" data-name="mosaica_id">${id}</h3>`;
+    const idField = titleName
+      ? html`<div part="field" data-name="mosaica_id" style="display:contents"><dt part="label" class="k">mosaica_id</dt><dd part="value" class="v mono">${id}</dd></div>`
+      : nothing;
+    const field = (name: string) => this.field(name, fields[name], column(name), title);
+    const open = this.openButton(id, fields);
+    if (!this.compact) {
+      return {
+        headline: h3,
+        body: html`${this.views(item.detail.views, meta)}
+          <dl class="field">${rest.map(field)}${idField}</dl>
+          ${this.scoped(item.detail.scoped)}
+          <div class="row actions">
+            ${open}
+            <button part="copy" class="btn" type="button" @click=${() => void this.copy(id)}>Copy id</button>
+            <span class="copied" role="status">${this.copied}</span>
+          </div>`
+      };
+    }
+    const subtitleName = this.subtitleField && this.subtitleField !== titleName && has(this.subtitleField) ? this.subtitleField : null;
     const others = rest.filter((n) => n !== subtitleName);
     const total = others.length + (titleName ? 1 : 0);
-    const shown = this.expanded ? others : this.cardFields ? this.named(others) : others.slice(0, 3);
-    const headline = titleName
-      ? html`<div part="headline" class="card-title" data-name=${titleName}><slot name=${`field-${titleName}`}><span part="value">${this.text(titleName, fields[titleName], declared.find((c) => c.name === titleName))}</span></slot></div>`
-      : html`<div part="headline" class="card-title mono" data-name="mosaica_id">${id}</div>`;
+    const few = this.cardFields ? this.named(others) : others.slice(0, 3);
+    const more = total > few.length;
+    // Show all is there for the fields left out, and for any text the card cuts short.
     const showAll =
-      total > shown.length || this.expanded
-        ? html`<button part="show-all" class="more-link" type="button" aria-expanded=${this.expanded ? 'true' : 'false'} @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? 'Show fewer' : `Show all ${total.toLocaleString('en-GB')} fields`}</button>`
+      more || this.expanded || this.clipped.size > 0
+        ? html`<button part="show-all" class="more-link" type="button" aria-expanded=${this.expanded ? 'true' : 'false'} @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? (more ? 'Show fewer' : 'Show less') : more ? `Show all ${total.toLocaleString('en-GB')} fields` : 'Show all'}</button>`
         : null;
-    const open = this.openButton(id, fields, 'Open');
     const subtitle = subtitleName
-      ? html`<div part="subtitle" data-name=${subtitleName}><slot name=${`field-${subtitleName}`}>${this.text(subtitleName, fields[subtitleName], declared.find((c) => c.name === subtitleName))}</slot></div>`
+      ? html`<div part="subtitle" class=${whole ? '' : 'clamp'} data-name=${subtitleName}><slot name=${`field-${subtitleName}`}>${this.text(subtitleName, fields[subtitleName], column(subtitleName))}</slot></div>`
       : nothing;
-    return html`<div class="panel">
-      <div part="title" class="head"><div class="headline">${headline}${subtitle}</div><slot name="actions"></slot><button part="close" type="button" aria-label="Close" @click=${() => emit(this, 'mosaica-close', {what: 'item'})}>${icon('close', 14)}</button></div>
-      <span part="state" data-state="shown"></span>
-      <div class="body">
-        ${this.expanded ? this.views(item.detail.views, meta) : nothing}
-        <div class="field">
-          ${shown.map((name) => this.field(name, fields[name], declared.find((c) => c.name === name)))}
-          ${this.expanded && titleName
-            ? html`<div part="field" data-name="mosaica_id" style="display:contents"><span part="label" class="k">mosaica_id</span><span part="value" class="v mono">${id}</span></div>`
-            : nothing}
+    return {
+      headline: html`<div class="headline">${h3}${subtitle}</div>`,
+      body: html`<div class="body">
+          ${this.expanded ? this.views(item.detail.views, meta) : nothing}
+          <dl class="field">${(this.expanded ? others : few).map(field)}${this.expanded ? idField : nothing}</dl>
+          ${this.expanded ? this.scoped(item.detail.scoped) : nothing}
         </div>
-        ${this.expanded ? this.scoped(item.detail.scoped) : nothing}
-      </div>
-      ${showAll || open !== nothing ? html`<div class="foot">${showAll || html`<span></span>`}${open}</div>` : nothing}
-    </div>`;
+        ${showAll || open !== nothing ? html`<div class="foot">${showAll || html`<span></span>`}${open}</div>` : nothing}`
+    };
   }
 
   /**
    * Open, where the host says what it does: a button that calls `open`, else a link to `open-url`
-   * filled from the item, else nothing. Each fires `mosaica-open`.
+   * filled from the item, which opens in a new tab and says so, else nothing. Each fires
+   * `mosaica-open`.
    */
-  private openButton(id: string, fields: Record<string, unknown>, label: TemplateResult | string): TemplateResult | typeof nothing {
+  private openButton(id: string, fields: Record<string, unknown>): TemplateResult | typeof nothing {
     const pressed = () => emit(this, 'mosaica-open', {id, fields});
     const open = this.open;
     if (open)
       return html`<button part="open" class="btn" type="button" @click=${() => {
         pressed();
         open({id, fields});
-      }}>${label}</button>`;
+      }}>${icon('open', 14)}Open</button>`;
     const href = this.openUrl ? openAddress(this.openUrl, {mosaica_id: id, ...fields}) : null;
     if (!href) return nothing;
     // A middle-click opens the link too, and is a press.
-    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed} @auxclick=${(e: MouseEvent) => e.button === 1 && pressed()}>${label}</a>`;
+    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed} @auxclick=${(e: MouseEvent) => e.button === 1 && pressed()}>${icon('open', 14)}Open<span class="sr-only"> (opens in a new tab)</span></a>`;
   }
 
   /** The fields of `fields` that `card-fields` names, in its order. */
@@ -423,13 +516,13 @@ export class MosaicaItemCard extends MosaicaElement {
   private views(positions: ItemViewPosition[], meta: Meta | null) {
     if (positions.length === 0) return nothing;
     const current = this.resolvedStore?.get('view').id ?? '';
-    return html`<span part="label" class="xs muted">In views</span>
-      <div class="chips">
+    return html`<span part="label" class="xs muted" id="views">In views</span>
+      <div class="chips" role="group" aria-labelledby="views">
         ${positions.map((p) => {
           const view = meta?.views.find((v) => v.id === p.id) ?? null;
           const here = p.id === current;
           return html`<button part="view-chip" class="chip" type="button" data-view=${p.id} aria-current=${here ? 'true' : 'false'} @click=${() => this.follow(p, view?.quantisation ?? null)}>
-            ${view?.displayName ?? p.id}
+            ${here ? icon('check', 12, 1.6) : nothing}${view?.displayName ?? p.id}
           </button>`;
         })}
       </div>`;
@@ -458,32 +551,41 @@ export class MosaicaItemCard extends MosaicaElement {
     if (keys.length === 0) return nothing;
     return html`<div part="scoped">
       ${keys.map(
-        (key) => html`<div part="key" class="hd" data-key=${key}>${key}</div>
-          <div class="field" data-key=${key}>
+        (key) => html`<h4 part="key" class="hd" data-key=${key}>${key}</h4>
+          <dl class="field" data-key=${key}>
             ${Object.keys(scoped)
               .filter((family) => key in (scoped[family] ?? {}))
-              .map((family) => html`<div part="field" data-name=${family} data-key=${key} style="display:contents"><span part="label" class="k">${columnCaption(family)}</span><span part="value" class="v">${present(scoped[family]![key], undefined)}</span></div>`)}
-          </div>`
+              .map((family) => html`<div part="field" data-name=${family} data-key=${key} style="display:contents"><dt part="label" class="k">${columnCaption(family)}</dt><dd part="value" class="v">${present(scoped[family]![key], undefined)}</dd></div>`)}
+          </dl>`
       )}
     </div>`;
   }
 
-  /** One field, presented by its declared type; prose and images span the grid. */
-  private field(name: string, value: unknown, column: DeclaredScalar | undefined) {
+  /**
+   * One field, presented by its declared type; prose and images span the grid. An image's
+   * alternative text is the item's `headline` where it has one, since its caption is the label
+   * above it. On the full card, prose a clamp cuts short has a button that shows it whole.
+   */
+  private field(name: string, value: unknown, column: DeclaredScalar | undefined, headline: string | null) {
     const caption = column ? columnCaption(name) : name;
     const image = this.imageOf(name, value);
     if (image) {
       const failed = () => (this.broken = new Set([...this.broken, image]));
       return html`<div part="field" data-name=${name} data-image>
-        <span part="label" class="k">${caption}</span>
-        <slot name=${`field-${name}`}><img part="image" src=${image} alt=${caption} loading="lazy" referrerpolicy="no-referrer" @error=${failed} /></slot>
+        <dt part="label" class="k">${caption}</dt>
+        <dd part="value" class="v"><slot name=${`field-${name}`}><img part="image" src=${image} alt=${headline ?? caption} loading="lazy" referrerpolicy="no-referrer" @error=${failed} /></slot></dd>
       </div>`;
     }
     const text = this.text(name, value, column);
     const prose = text.length > 60;
+    const whole = this.compact ? this.expanded : this.opened.has(name);
+    const toggle = () => (this.opened = new Set(whole ? [...this.opened].filter((n) => n !== name) : [...this.opened, name]));
     return html`<div part="field" data-name=${name} ?data-prose=${prose} style=${prose ? nothing : 'display:contents'}>
-      <span part="label" class="k">${caption}</span>
-      <slot name=${`field-${name}`}><span part="value" class="v" title=${prose ? text : nothing}>${text}</span></slot>
+      <dt part="label" class="k">${caption}</dt>
+      <dd part="value" class="v"><slot name=${`field-${name}`}>${prose && !whole ? html`<span class="clamp">${text}</span>` : text}</slot></dd>
+      ${prose && !this.compact && (whole || this.clipped.has(name))
+        ? html`<dd><button part="more" class="more-link" type="button" aria-expanded=${whole ? 'true' : 'false'} aria-label=${`${whole ? 'Show less' : 'Show more'} of ${caption}`} @click=${toggle}>${whole ? 'Show less' : 'Show more'}</button></dd>`
+        : nothing}
     </div>`;
   }
 }
