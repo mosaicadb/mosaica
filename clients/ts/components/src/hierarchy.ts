@@ -84,7 +84,7 @@ const focusLost = (): boolean => document.activeElement === null || document.act
  * @csspart search - The search box.
  * @csspart tree - The tree of rows, named by the layer.
  * @csspart row - One row, with `data-id`, `data-clause` (`filter`, `highlight` or both, separated
- *   by a space) while its artifact is filtered or highlighted, and `data-quiet` once Escape has put
+ *   by a space) while its artifact is filtered or highlighted, and `data-buttons-away` once Escape has put
  *   its buttons away.
  * @csspart expander - A row's expand button, with `aria-expanded` while its children are shown. On
  *   a row with no children it has `data-leaf` and is hidden, keeping the names aligned.
@@ -211,18 +211,21 @@ export class MosaicaHierarchy extends MosaicaElement {
         .figures {
           min-width: calc(var(--buttons) * 24px);
         }
+        /* Above the counts, which come after them and, not drawn, would still lie over them. */
         [part='actions'] {
           position: absolute;
           right: 0;
+          z-index: 1;
           opacity: 0;
           pointer-events: none;
         }
-        [part='row']:not([data-quiet]):is(:hover, :focus-within) [part='actions'] {
+        [part='row']:not([data-buttons-away]):is(:hover, :focus-within) [part='actions'] {
           opacity: 1;
           pointer-events: auto;
         }
-        [part='row']:not([data-quiet]):is(:hover, :focus-within) [part='counts'] {
+        [part='row']:not([data-buttons-away]):is(:hover, :focus-within) [part='counts'] {
           opacity: 0;
+          pointer-events: none;
         }
       }
       [part='actions'] button {
@@ -300,7 +303,7 @@ export class MosaicaHierarchy extends MosaicaElement {
   /** Bumped to re-render after a node's children land, since the tree in `roots` is mutated. */
   @state() private accessor revision = 0;
   /** The paths of the rows whose buttons Escape has put away, each until the pointer and focus leave it. */
-  @state() private accessor quiet: ReadonlySet<string> = new Set();
+  @state() private accessor buttonsAway: ReadonlySet<string> = new Set();
 
   /** How many pages More has loaded under each path, and under `''` for the roots, so a refetch loads as many. */
   private pages = new Map<string, number>();
@@ -328,7 +331,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     this.refusal = null;
     this.open = new Set();
     this.pages.clear();
-    this.quiet = new Set();
+    this.buttonsAway = new Set();
     this.names.clear();
     this.fetchedUnder = '';
     if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -392,15 +395,15 @@ export class MosaicaHierarchy extends MosaicaElement {
     if (e.key !== 'Escape') return;
     const active = this.shadowRoot?.activeElement ?? null;
     const focused = active?.closest<RowElement>('[part="row"]') ?? null;
-    const shown = [focused, this.renderRoot.querySelector<RowElement>('[part="row"]:hover')].filter((row) => row !== null && !this.quiet.has(row.path));
+    const shown = [focused, this.renderRoot.querySelector<RowElement>('[part="row"]:hover')].filter((row) => row !== null && !this.buttonsAway.has(row.path));
     if (shown.length === 0) return;
-    this.quiet = new Set([...this.quiet, ...shown.map((row) => row!.path)]);
+    this.buttonsAway = new Set([...this.buttonsAway, ...shown.map((row) => row!.path)]);
     if (active?.closest('[part="actions"]')) focused?.querySelector<HTMLElement>('[part="name"]')?.focus();
   };
 
   /** The buttons Escape put away come back once the pointer and focus have both left the row. */
   private leftRow(e: Event, path: string): void {
-    if (!this.quiet.has(path)) return;
+    if (!this.buttonsAway.has(path)) return;
     const row = e.currentTarget as HTMLElement;
     const to = e.type === 'focusout' ? ((e as FocusEvent).relatedTarget as Element | null) : (this.shadowRoot?.activeElement ?? null);
     if (row.contains(to) || (e.type === 'focusout' && row.matches(':hover'))) return;
@@ -409,7 +412,7 @@ export class MosaicaHierarchy extends MosaicaElement {
 
   /** Let a row show its buttons again. */
   private shownAgain(path: string): void {
-    if (this.quiet.has(path)) this.quiet = new Set([...this.quiet].filter((p) => p !== path));
+    if (this.buttonsAway.has(path)) this.buttonsAway = new Set([...this.buttonsAway].filter((p) => p !== path));
   }
 
   /** Whether this element is displayed; see {@link shown}. */
@@ -753,7 +756,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     const pressed = (verb: ClauseVerb) => (clauses.includes(verb) ? 'true' : 'false');
     return html`<li>
       <div part="row" style=${`--depth:${depth};--buttons:${drawn ? 3 : 2}`} .path=${node.path} data-id=${idString(id)} data-clause=${clauses.length > 0 ? clauses.sort().join(' ') : nothing}
-        data-quiet=${this.quiet.has(node.path) ? '' : nothing} @pointerleave=${(e: Event) => this.leftRow(e, node.path)} @focusout=${(e: Event) => this.leftRow(e, node.path)}>
+        data-buttons-away=${this.buttonsAway.has(node.path) ? '' : nothing} @pointerleave=${(e: Event) => this.leftRow(e, node.path)} @focusout=${(e: Event) => this.leftRow(e, node.path)}>
         <span class="lead"><button part="expander" type="button" data-leaf=${node.row.childCount === 0 ? '' : nothing}
           aria-expanded=${open ? 'true' : 'false'}
           aria-label=${open ? `Collapse ${name ?? 'row'}` : `Expand ${name ?? 'row'}`}

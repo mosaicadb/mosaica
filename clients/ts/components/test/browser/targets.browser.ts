@@ -17,6 +17,7 @@ type Result = {
     outside: string[];
     cut: string[];
     swap: string[];
+    covered: string[];
     status: {rendered: boolean; said: string};
     /** Each row's height by the length of its name, without a filter and with one. */
     rowHeights: {plain: Record<string, number>; filtered: Record<string, number>};
@@ -38,6 +39,8 @@ let served: Awaited<ReturnType<typeof servePage>>;
 let browser: Browser;
 let r: Result;
 let narrow: Result;
+/** What a real pointer's press on a row's Filter button, shown by hovering the row, set on the store. */
+let pressed: {before: string[]; after: string[]};
 
 /** What the page measures in a window `width` px wide. */
 async function measured(width: number): Promise<Result> {
@@ -46,6 +49,15 @@ async function measured(width: number): Promise<Result> {
   await page.goto(served.origin);
   await Promise.race([failed, page.waitForFunction(() => (window as unknown as {result?: unknown}).result !== undefined, undefined, {timeout: 80_000})]);
   const result = await page.evaluate(() => (window as unknown as {result: Result}).result);
+  if (width === 1200) {
+    type Row = {name: {x: number; y: number}; filter: {x: number; y: number}; pressed: string[]};
+    const row = () => page.evaluate(() => (window as unknown as {plainRow(): Row}).plainRow());
+    const {name, filter, pressed: before} = await row();
+    await page.mouse.move(name.x, name.y);
+    await page.mouse.move(filter.x, filter.y, {steps: 4});
+    await page.mouse.click(filter.x, filter.y);
+    pressed = {before, after: (await row()).pressed};
+  }
   await page.close();
   return result;
 }
@@ -71,6 +83,11 @@ describe('pointer targets and whole text', () => {
 
   it('draws a hierarchy row’s counts at rest, its buttons in their place while focus is in the row, and the counts again after Escape', () => {
     expect(r.tree.swap).toEqual([]);
+  });
+
+  it('puts a hierarchy row’s buttons above its counts while they are shown, so a pointer’s press on Filter filters', () => {
+    expect(r.tree.covered).toEqual([]);
+    expect(pressed.after).toEqual([...pressed.before, 'filter 99, filter 2']);
   });
 
   it('keeps a hierarchy row to one line at 300 px for a name of up to 23 characters, or 9 beside a filter’s two counts, and a longer one to two', () => {

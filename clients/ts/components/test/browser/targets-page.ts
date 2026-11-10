@@ -60,7 +60,7 @@ const status0 = {rendered: getComputedStyle(region).display !== 'none', said: re
 (hierarchy.shadowRoot!.querySelector('[part="expander"]') as HTMLButtonElement).click();
 await settled();
 await settled();
-const tree: {small: string[]; overlaps: string[]; outside: string[]; cut: string[]; swap: string[]} = {small: [], overlaps: [], outside: [], cut: [], swap: []};
+const tree: {small: string[]; overlaps: string[]; outside: string[]; cut: string[]; swap: string[]; covered: string[]} = {small: [], overlaps: [], outside: [], cut: [], swap: [], covered: []};
 /** Which of a row's buttons and counts are drawn: the buttons over the counts, or the counts. */
 const drawn = (row: HTMLElement) => `${getComputedStyle(row.querySelector('[part="actions"]')!).opacity === '1' ? 'buttons' : ''}${getComputedStyle(row.querySelector('[part="counts"]')!).opacity === '1' ? 'counts' : ''}`;
 for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="row"]')) {
@@ -74,6 +74,12 @@ for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="ro
   const targets = [...row.querySelectorAll<HTMLElement>('button:not([data-leaf])')].map(box);
   tree.small.push(...small(targets));
   tree.overlaps.push(...overlaps(targets));
+  // A press at the middle of each button shown lands on it, not on the counts it stands in for.
+  for (const b of row.querySelectorAll<HTMLElement>('[part="actions"] button')) {
+    const r = b.getBoundingClientRect();
+    const at = hierarchy.shadowRoot!.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!at || !b.contains(at)) tree.covered.push(`${box(b).name} under ${at?.getAttribute('part') ?? at?.localName}`);
+  }
   // The counts, when they are drawn, are clear of every button that is.
   tree.overlaps.push(...overlaps([boxOf(`${id} counts`, row.querySelector('[part="counts"]')!), ...[...row.querySelectorAll<HTMLElement>('.lead button:not([data-leaf]), [part="dismiss"]')].map(box)]));
   const rowBox = boxOf(id, row);
@@ -102,6 +108,19 @@ plainStore.set('filters', {...plainStore.get('filters'), members: [{layer: 'topi
 await settled();
 await settled();
 rowHeights.filtered = heights();
+// For the test's pointer: where the second row's name and Filter button are, and what was pressed.
+(window as unknown as {plainRow: unknown}).plainRow = () => {
+  const row = plain.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-id="2"]')!;
+  const middle = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+  };
+  return {
+    name: middle(row.querySelector('[part="name"]')!),
+    filter: middle(row.querySelector('[part="filter"]')!),
+    pressed: plainStore.calls.filter((c) => c.name === 'setMembers').map((c) => (c.args[0] as {artifact: bigint; verb: string}[]).map((m) => `${m.verb} ${m.artifact}`).join(', '))
+  };
+};
 
 // The colour editor: a long name, a ticked row, and the picker over Kelly's 22 colours.
 const editor = document.querySelector('mosaica-colour-editor') as HTMLElement & {store: unknown; show(): Promise<void>};

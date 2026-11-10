@@ -497,25 +497,25 @@ describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
     control(host, '11', 'filter').focus();
     escape();
     await settle(host);
-    expect(rowOf('11').hasAttribute('data-quiet')).toBe(true);
-    expect(rowOf('12').hasAttribute('data-quiet')).toBe(false);
+    expect(rowOf('11').hasAttribute('data-buttons-away')).toBe(true);
+    expect(rowOf('12').hasAttribute('data-buttons-away')).toBe(false);
     // Focus was on a button that is put away, so it goes to the row's name.
     expect(active(el)).toBe(control(host, '11', 'name'));
     // Tab on to the buttons brings them back.
     control(host, '11', 'highlight').focus();
     await settle(host);
-    expect(rowOf('11').hasAttribute('data-quiet')).toBe(false);
+    expect(rowOf('11').hasAttribute('data-buttons-away')).toBe(false);
     escape();
     await settle(host);
-    expect(rowOf('11').hasAttribute('data-quiet')).toBe(true);
+    expect(rowOf('11').hasAttribute('data-buttons-away')).toBe(true);
     control(host, '12', 'name').focus();
     await settle(host);
-    expect(rowOf('11').hasAttribute('data-quiet')).toBe(false);
+    expect(rowOf('11').hasAttribute('data-buttons-away')).toBe(false);
     // With focus in no row, Escape is not the tree's.
     (deep(host, '[part="search"] input') as HTMLElement).focus();
     escape();
     await settle(host);
-    expect(deepAll(host, '[part="row"][data-quiet]')).toEqual([]);
+    expect(deepAll(host, '[part="row"][data-buttons-away]')).toEqual([]);
   });
 
   it('refetches as many pages as More had loaded, of the roots and of an open row', async () => {
