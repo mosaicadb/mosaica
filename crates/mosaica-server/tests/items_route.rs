@@ -490,7 +490,7 @@ async fn every_refusal_has_its_status() {
         json!({ "view": "s0", "fields": [], "order": "random" }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),
         json!({ "view": "s0", "fields": [], "unknown": 1 }),
-        json!({ "view": "s0" }),
+        json!({ "fields": [] }),
         json!({ "view": "s0", "fields": [], "filters": { "no_such_column": { "eq": 1 } } }),
         json!({ "view": "s0", "fields": [], "cursor": tampered }),
         json!({ "view": "s0", "fields": [], "cursor": "not a cursor" }),

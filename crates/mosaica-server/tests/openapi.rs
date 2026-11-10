@@ -2090,7 +2090,7 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
     // The request schema refuses what the server refuses.
     for body in [
         json!({ "view": "s0", "fields": [], "unknown": 1 }),
-        json!({ "view": "s0" }),
+        json!({ "fields": [] }),
         json!({ "view": "s0", "fields": [], "page_rows": 0 }),
         json!({ "view": "s0", "fields": [], "order": "random" }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),
