@@ -322,3 +322,183 @@ describe('<mosaica-hierarchy> across a change of viewer', () => {
     expect(deepAll(host, '[part="row"] [part="name"]').map((n) => n.textContent?.trim())).toEqual(['Other']);
   });
 });
+
+describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
+  const active = (el: MosaicaHierarchy) => el.shadowRoot!.activeElement as HTMLElement | null;
+  const control = (host: HTMLElement, id: string, part: string) => deep(host, `[part="row"][data-id="${id}"] [part="${part}"]`) as HTMLButtonElement;
+  const names = (host: HTMLElement) => deepAll(host, '[part="row"] [part="name"]').map((n) => n.textContent?.trim());
+  /** Put these clauses on row 11, as the store does once a row's button is pressed. */
+  const clausesOn = (store: Awaited<ReturnType<typeof panel>>['store'], ...verbs: ('filter' | 'highlight')[]) =>
+    store.set('filters', {...store.get('filters'), members: verbs.map((verb) => ({layer: 'mesh/descriptors', artifact: 11n, outside: false, verb}))});
+  const type = async (host: HTMLElement, text: string) => {
+    const box = deep(host, '[part="search"] input') as HTMLInputElement;
+    box.value = text;
+    vi.useFakeTimers();
+    box.dispatchEvent(new Event('input'));
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    await settle(host);
+  };
+
+  /** The panel with its first root open on two children. */
+  async function walked() {
+    const p = await panel();
+    p.store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n), row(12n, 'Tumours', 800n)], parents: [], next: null});
+    control(p.host, '1', 'expander').click();
+    await settle(p.host);
+    await settle(p.host);
+    return p;
+  }
+
+  it('keeps the open rows and the focused button when a row’s Filter refetches the tree', async () => {
+    const {host, el, store} = await walked();
+    control(host, '11', 'filter').focus();
+    const asked = store.calls.filter((c) => c.name === 'browse').length;
+    clausesOn(store, 'filter');
+    await settle(host);
+    await settle(host);
+    // The roots and the open row's children were both asked for again.
+    expect(store.calls.filter((c) => c.name === 'browse').slice(asked).map((c) => (c.args[0] as {parent?: bigint}).parent)).toEqual([undefined, 1n]);
+    expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Tumours', 'Anatomy']);
+    expect(control(host, '1', 'expander').getAttribute('aria-expanded')).toBe('true');
+    expect(active(el)).toBe(control(host, '11', 'filter'));
+    expect(active(el)!.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('follows the focused row where the refetched tree lists it elsewhere, and falls to a row beside it where it is gone', async () => {
+    const {host, el, store} = await walked();
+    control(host, '12', 'name').focus();
+    store.setBrowse('p:1', {artifacts: [row(12n, 'Tumours', 800n), row(11n, 'Cysts', 900n)], parents: [], next: null});
+    clausesOn(store, 'filter');
+    await settle(host);
+    await settle(host);
+    expect(names(host)).toEqual(['Neoplasms', 'Tumours', 'Cysts', 'Anatomy']);
+    expect(active(el)).toBe(control(host, '12', 'name'));
+
+    store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n)], parents: [], next: null});
+    clausesOn(store);
+    await settle(host);
+    await settle(host);
+    expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Anatomy']);
+    expect(active(el)?.getAttribute('part')).toBe('name');
+    expect(active(el)?.closest('[part="row"]')).not.toBeNull();
+  });
+
+  it('says a row is expanded only once its children are shown, and that it is loading until then', async () => {
+    const {host, store} = await panel();
+    let land: (page: {artifacts: BrowseRow[]; parents: []; next: null}) => void = () => {};
+    const roots = store.browse;
+    store.browse = ((req: {parent?: bigint}) => (req.parent === undefined ? roots(req as never) : new Promise((resolve) => (land = resolve)))) as typeof store.browse;
+    const expander = control(host, '1', 'expander');
+    expander.click();
+    await settle(host);
+    const state = deep(host, '[part="state"]')!;
+    expect(state.getAttribute('role')).toBe('status');
+    expect(expander.getAttribute('aria-expanded')).toBe('false');
+    expect(expander.querySelector('.spinner')).not.toBeNull();
+    expect(state.textContent).toContain('Neoplasms');
+    land({artifacts: [row(11n, 'Cysts', 900n)], parents: [], next: null});
+    await settle(host);
+    await settle(host);
+    expect(expander.getAttribute('aria-expanded')).toBe('true');
+    expect(expander.querySelector('.spinner')).toBeNull();
+    expect(state.textContent).not.toContain('Neoplasms');
+    expect(names(host)).toEqual(['Neoplasms', 'Cysts', 'Anatomy']);
+  });
+
+  it('names each row button by its row, the tree by its layer, and says which rows are highlighted', async () => {
+    const {host, store} = await panel({meta: {...META, layers: [layer('clusters/kmeans', 'nested', ['centroid', 'box', 'hull'])]} as Meta});
+    expect(deep(host, '[part="tree"]')!.getAttribute('aria-label')).toContain('clusters/kmeans');
+    for (const part of ['name', 'highlight', 'filter', 'fit']) {
+      expect(control(host, '1', part).getAttribute('aria-label'), part).toContain('Neoplasms');
+      expect(control(host, '2', part).getAttribute('aria-label'), part).toContain('Anatomy');
+    }
+    expect(new Set(['highlight', 'filter', 'fit'].map((part) => control(host, '1', part).getAttribute('aria-label'))).size).toBe(3);
+    expect(control(host, '1', 'name').getAttribute('aria-pressed')).toBe('false');
+    store.set('filters', {
+      ...store.get('filters'),
+      members: [
+        {layer: 'clusters/kmeans', artifact: 1n, outside: false, verb: 'highlight'},
+        {layer: 'clusters/kmeans', artifact: 1n, outside: false, verb: 'filter'}
+      ]
+    });
+    await settle(host);
+    await settle(host);
+    expect(control(host, '1', 'name').getAttribute('aria-pressed')).toBe('true');
+    expect(control(host, '2', 'name').getAttribute('aria-pressed')).toBe('false');
+    // The two removing buttons differ by more than colour: by name, and by what each draws.
+    const dismiss = deepAll(host, '[part="row"][data-id="1"] [part="dismiss"]');
+    expect(dismiss.every((b) => b.getAttribute('aria-label')!.includes('Neoplasms'))).toBe(true);
+    expect(new Set(dismiss.map((b) => b.getAttribute('aria-label'))).size).toBe(2);
+    expect(new Set(dismiss.map((b) => [...b.querySelectorAll('path')].map((p) => p.getAttribute('d')).join(' '))).size).toBe(2);
+  });
+
+  it('moves focus from a × that removed itself to the row’s other ×, then to the button that makes the clause', async () => {
+    const {host, el, store} = await walked();
+    clausesOn(store, 'filter', 'highlight');
+    await settle(host);
+    await settle(host);
+    const dismiss = (verb: string) => deep(host, `[part="row"][data-id="11"] [part="dismiss"][data-verb="${verb}"]`) as HTMLButtonElement;
+    dismiss('highlight').focus();
+    clausesOn(store, 'filter');
+    await settle(host);
+    await settle(host);
+    expect(active(el)).toBe(dismiss('filter'));
+    clausesOn(store);
+    await settle(host);
+    await settle(host);
+    expect(active(el)).toBe(control(host, '11', 'filter'));
+  });
+
+  it('moves focus from More to the first row its page added', async () => {
+    const {host, el, store} = await panel();
+    store.setBrowse('roots:p2', {artifacts: [row(3n, 'Chemicals', 5n), row(4n, 'Organisms', 4n)], parents: [], next: null});
+    const more = deep(host, '[part="more"]') as HTMLButtonElement;
+    more.focus();
+    more.click();
+    await settle(host);
+    await settle(host);
+    expect(deep(host, '[part="more"]')).toBeNull();
+    expect(active(el)).toBe(control(host, '3', 'name'));
+  });
+
+  it('says No match, a refused layer and refused children in one status region that is there before them', async () => {
+    const {host, store} = await panel();
+    const state = deep(host, '[part="state"]')!;
+    expect(deepAll(host, '[role="status"]')).toEqual([state]);
+    expect(state.textContent?.trim()).toBe('');
+
+    await type(host, 'zzz');
+    expect(deep(host, '[part="state"]')).toBe(state);
+    expect(state.getAttribute('data-state')).toBe('empty');
+    expect(state.textContent?.trim()).not.toBe('');
+
+    await type(host, '');
+    const roots = store.browse;
+    store.browse = ((req: {parent?: bigint}) => (req.parent === undefined ? roots(req as never) : Promise.reject({code: 'layer-withheld', detail: ''}))) as typeof store.browse;
+    control(host, '1', 'expander').click();
+    await settle(host);
+    await settle(host);
+    expect(deep(host, '[part="also"][data-code="layer-withheld"]')).not.toBeNull();
+    expect(state.textContent).toContain('Neoplasms');
+
+    store.browse = () => Promise.reject({code: 'layer-withheld', detail: ''});
+    clausesOn(store, 'filter');
+    await settle(host);
+    await settle(host);
+    expect(state.getAttribute('data-state')).toBe('refused');
+    expect(state.querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('layer-withheld');
+  });
+
+  it('loads the roots of a layer chosen in the select', async () => {
+    const {host, store} = await panel({meta: {...META, layers: [layer('mesh/descriptors', 'dag', []), layer('topics', 'nested', [])]} as Meta});
+    const before = store.calls.filter((c) => c.name === 'browse').length;
+    const select = deep(host, '[part="layer"]') as HTMLSelectElement;
+    select.value = 'topics';
+    select.dispatchEvent(new Event('change'));
+    await settle(host);
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'browse').slice(before).map((c) => (c.args[0] as {layer: string}).layer)).toEqual(['topics']);
+    expect(names(host)).toEqual(['Neoplasms', 'Anatomy']);
+  });
+});
