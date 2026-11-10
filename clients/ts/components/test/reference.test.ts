@@ -244,7 +244,7 @@ describe('each element documents what it renders', () => {
             ...[...text.matchAll(/(?<![\w-])part=\$\{([^}]*)\}/g)].flatMap((m) => literals(m[1]!))
           ])
         );
-        const states = /\brenderState\(/.test(element.text);
+        const states = /\b(?:renderState|stateLine)\(/.test(element.text);
         for (const part of literal) expect(plain, `@csspart ${part}`).toContain(part);
         if (states) expect(plain, '@csspart state').toContain('state');
         for (const part of plain) expect([...literal, ...(states ? STATE_PARTS : [])], `${part} is rendered`).toContain(part);

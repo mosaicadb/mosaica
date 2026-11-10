@@ -5,6 +5,7 @@ import {
   MAX_DEPTH,
   WORLD_SIZE,
   dataToWorldXY,
+  formatMasked,
   type ArtifactsProjection,
   type MarksProjection,
   type Store,
@@ -17,7 +18,7 @@ import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, Densit
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {NOTHING_VISIBLE, refusedState, renderState, seesNothing, stateOf, type PanelState} from './states.js';
+import {ActionFocus, NOTHING_VISIBLE, refusedLine, seesNothing, stateDot, stateLine, stateOf, type PanelState, type StateLine} from './states.js';
 import {MapBasemap, basemapChanged, type BasemapChoice} from './basemap.js';
 import {icon} from './icons.js';
 import {sameFrame} from './view-switch.js';
@@ -120,13 +121,19 @@ let mapsMade = 0;
  * A box or lasso drawn with the toolbar becomes the store's selected region, which narrows the map
  * and every count to the items inside it. Shift-drag draws a box without changing tool. With the
  * map focused, the arrow keys pan and `+` and `-` zoom. Escape cancels a shape being drawn, or
- * clears the region when there is no shape, or drops the picked item when there is neither.
+ * clears the region when there is no shape, or drops the picked item when there is neither. With
+ * none of the three, the map leaves Escape to the page, so a dialog holding the map still closes.
  *
- * When the map cannot draw the view, it says why over the canvas.
+ * The hover tooltip follows the pointer and stays inside the map. Escape dismisses it wherever the
+ * focus is, and does nothing else on that press; the tooltip stays away until the pointer moves
+ * onto another point.
+ *
+ * When the map cannot draw the view, it says why over the canvas, and screen readers announce it.
+ * They also announce how many items match inside the selected region when its count arrives.
  *
  * The canvas is a single tab stop, and it takes any `tabindex` or `aria-label` you set on the map.
- * Without an `aria-label`, the canvas is labelled with its keys, "map: arrow keys pan, + and -
- * zoom", so that someone using a screen reader knows how to move it.
+ * Without an `aria-label` the canvas is named "Map". Either way its description lists its keys, so
+ * that someone using a screen reader knows how to move it.
  *
  * @summary An interactive map with no panels around it.
  * @tagname mosaica-map
@@ -155,19 +162,21 @@ let mapsMade = 0;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The
  *   `layers` attribute changed.
  * @csspart canvas - The deck.gl canvas's container.
- * @csspart overlay - The message over the canvas when the view is refused, expired or empty, or the
- *   server cannot be reached, did not answer or is too busy. If the viewer may see no item in the
- *   view at all, it says so instead of "Nothing in view".
+ * @csspart overlay - The layer over the canvas that holds the state line.
  * @csspart state - The state line inside the overlay, with `data-state`, and `data-visible="none"`
- *   if the viewer may see no item in the view.
+ *   if the viewer may see no item in the view. It shows a message when the view is refused,
+ *   expired or empty, or the server cannot be reached, did not answer or is too busy; if the viewer
+ *   may see no item in the view at all, it says so instead of "Nothing in view". It is in the page
+ *   in every state, and drawn only while it has a message.
  * @csspart retry - The Retry button in the overlay, after a refusal, no answer or a busy server.
  * @csspart refusal - The words "View refused", or "Server busy", inside the overlay, with
  *   `data-code` set to the refusal's code.
  * @csspart reason - The server's reason for a refusal, as it sent it, on a line under "View
  *   refused".
  * @csspart controls - The toolbar.
- * @csspart region-tag - The tag on the selected region's top-left corner, with how many items
- *   match inside it (or outside it, for its complement) and a button that clears it.
+ * @csspart region-tag - The tag above the selected region's top-left corner, with how many items
+ *   match inside it (or outside it, for its complement) and a button that clears it. It stays
+ *   inside the map when the corner is off it.
  * @csspart tooltip - The hover tooltip.
  * @csspart density-key - The key to density's colours in items per cell, in the bottom-left corner.
  *   Shown while density is drawn in a colour ramp or without the points.
@@ -196,9 +205,10 @@ export class MosaicaMap extends MosaicaElement {
         position: absolute;
         inset: 0;
       }
-      [part='canvas']:focus-visible {
-        outline: 1.5px solid color-mix(in srgb, var(--_mosaica-accent) 40%, transparent);
-        outline-offset: -1.5px;
+      /* Inside the canvas's edge, which the map clips at. deck's own canvas takes the focus on a click. */
+      [part='canvas']:focus-visible,
+      [part='canvas'] canvas:focus-visible {
+        outline-offset: -2px;
       }
       :host([mode='box']) [part='canvas'],
       :host([mode='lasso']) [part='canvas'] {
@@ -260,14 +270,18 @@ export class MosaicaMap extends MosaicaElement {
         background: var(--_mosaica-accent);
         color: var(--_mosaica-accent-ink);
       }
-      /* The drawn region's count and clear button, on its top edge. */
+      /* The drawn region's count and clear button, above its top-left corner. It and the tooltip
+         are laid out at the map's own corner, so neither is squeezed against an edge, and moved
+         to their places once their sizes are known. */
       [part='region-tag'] {
         position: absolute;
         z-index: 3;
+        left: 0;
+        top: 0;
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 2px 3px 2px 8px;
+        padding: 0 0 0 8px;
         background: var(--_mosaica-surface);
         border: 1px solid var(--_mosaica-line);
         border-radius: var(--_mosaica-radius-control);
@@ -275,7 +289,6 @@ export class MosaicaMap extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-2);
         white-space: nowrap;
-        transform: translateY(calc(-100% - 4px));
       }
       [part='region-tag'] mosaica-count {
         font-size: inherit;
@@ -285,8 +298,8 @@ export class MosaicaMap extends MosaicaElement {
         font-weight: 600;
       }
       [part='region-tag'] button {
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
         display: grid;
         place-items: center;
         border-radius: 4px;
@@ -295,18 +308,23 @@ export class MosaicaMap extends MosaicaElement {
       [part='region-tag'] button:hover {
         background: var(--_mosaica-surface-2);
       }
+      [part='region-tag'] button:focus-visible {
+        outline-offset: -2px;
+      }
       [part='tooltip'] {
         position: absolute;
         z-index: 4;
+        left: 0;
+        top: 0;
         pointer-events: none;
         padding: 8px 10px;
-        max-width: 260px;
+        max-width: min(260px, 100%);
         background: var(--_mosaica-surface);
         border: 1px solid var(--_mosaica-line);
         border-radius: var(--_mosaica-radius);
         box-shadow: var(--_mosaica-shadow);
         font-size: 12px;
-        transform: translate(14px, 14px);
+        overflow-wrap: anywhere;
       }
       [part='tooltip'] .t {
         font-weight: 500;
@@ -326,7 +344,8 @@ export class MosaicaMap extends MosaicaElement {
         justify-content: center;
         pointer-events: none;
       }
-      [part='overlay'] [part='state'] {
+      /* A card while the state has words to show; otherwise it is kept, undrawn, for what it announces. */
+      [part='overlay'] [part='state']:not(.sr-only) {
         pointer-events: auto;
         min-height: 40px;
         padding: 6px 8px 6px 14px;
@@ -338,7 +357,7 @@ export class MosaicaMap extends MosaicaElement {
         font-weight: 500;
         color: var(--_mosaica-ink);
       }
-      [part='overlay'] [part='state']:not(:has(button)) {
+      [part='overlay'] [part='state']:not(.sr-only, :has(button)) {
         padding-right: 14px;
       }
       [part='density-key'] {
@@ -370,11 +389,13 @@ export class MosaicaMap extends MosaicaElement {
         border: 0;
         background: color-mix(in srgb, var(--_mosaica-surface) 80%, transparent);
       }
+      /* The ramp's colours are what it shows, so forced colours leave them. */
       [part='density-key'] .ramp {
         display: block;
         width: 120px;
         height: 8px;
         border-radius: 2px;
+        forced-color-adjust: none;
       }
       [part='density-key'] .ends {
         display: grid;
@@ -591,7 +612,7 @@ export class MosaicaMap extends MosaicaElement {
     marks: 0,
     requests: 0,
     densityRequests: 0,
-    encoding: 'uniform',
+    encoding: 'uniform|dark',
     basemap: [],
     view: {depth: 0, status: 'idle', stale: false, visible: 0, matched: 0, served: 0, provisional: 0},
     region: null,
@@ -667,6 +688,7 @@ export class MosaicaMap extends MosaicaElement {
     super.connectedCallback();
     this.askPointColumns(this.resolvedStore);
     this.syncBasemap();
+    this.watchTooltipKeys();
     if (this.finalizeTimer) {
       clearTimeout(this.finalizeTimer);
       this.finalizeTimer = null;
@@ -692,6 +714,7 @@ export class MosaicaMap extends MosaicaElement {
       clearTimeout(this.describeTimer);
       this.describeTimer = null;
     }
+    this.watchTooltipKeys();
     this.stopFrameLoop();
     this.finalizeTimer = setTimeout(() => {
       this.finalizeTimer = null;
@@ -702,6 +725,9 @@ export class MosaicaMap extends MosaicaElement {
 
   protected override updated(changed: PropertyValues<this>): void {
     this.ensureDeck();
+    this.watchTooltipKeys();
+    this.placeFloats();
+    this.actionFocus.keep(this.focusTarget);
     if (changed.has('measure')) {
       if (this.measure && this.isConnected) this.startFrameLoop();
       else this.stopFrameLoop();
@@ -863,6 +889,9 @@ export class MosaicaMap extends MosaicaElement {
   /** A store adopted since the last update, to which the host's settings are not yet written. */
   private unpushed: Store | null = null;
 
+  /** Keeps the focus on the map when the overlay's Retry goes with its state. */
+  private readonly actionFocus = new ActionFocus();
+
   /**
    * Write the host's settings to the store before the render: every one to a store adopted since
    * the last update, else those that changed. `layers` set or changed in this update fires
@@ -872,6 +901,7 @@ export class MosaicaMap extends MosaicaElement {
    */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
+    this.actionFocus.note(this.renderRoot);
     const s = this.resolvedStore;
     if (!s) return;
     const all = this.unpushed === s;
@@ -933,7 +963,7 @@ export class MosaicaMap extends MosaicaElement {
     };
     const legend = s.get('legend');
     const clusterLayer = clusterLayerOf(legend.colourBy);
-    p.encoding = clusterLayer ? `cluster|${clusterLayer}` : encodingSignature(encodingOf(s.get('meta'), legend, colouringOf(s)));
+    p.encoding = clusterLayer ? `cluster|${clusterLayer}` : encodingSignature(encodingOf(s.get('meta'), legend, colouringOf(s), this.scheme()));
     if (this.measure) this.measureStore(s);
 
     // Events for what arrived: the selected item's record, the opened artifact, the region's counts.
@@ -1075,8 +1105,7 @@ export class MosaicaMap extends MosaicaElement {
       parent,
       views: VIEW,
       viewState: this.viewState,
-      // The map takes the keys itself, on its canvas, so deck's keyboard is off.
-      controller: {keyboard: false},
+      controller: this.controller(),
       pickingRadius: MosaicaMap.PICK_RADIUS_PX,
       // Presses draw no pick, which would count against the press's time to be a click (`clickPick`).
       layerFilter: ({isPicking, renderPass}) => !isPicking || renderPass.startsWith('picking:hover') || this.picking,
@@ -1192,12 +1221,16 @@ export class MosaicaMap extends MosaicaElement {
         })
       );
     }
-    this.deck.setProps({
-      layers,
-      viewState: this.viewState,
-      // In box and lasso modes the drag is the selection's; the wheel still zooms.
-      controller: this.mode === 'box' || this.mode === 'lasso' ? {dragPan: false, dragRotate: false} : true
-    });
+    this.deck.setProps({layers, viewState: this.viewState, controller: this.controller()});
+  }
+
+  /**
+   * What deck's own input handling does. Its keyboard is off in every mode, since the map takes
+   * the keys itself and a key would otherwise move the camera twice. In box and lasso modes the
+   * drag is the selection's; the wheel still zooms.
+   */
+  private controller(): {keyboard: false; dragPan?: false; dragRotate?: false} {
+    return this.mode === 'box' || this.mode === 'lasso' ? {keyboard: false, dragPan: false, dragRotate: false} : {keyboard: false};
   }
 
   /**
@@ -1281,7 +1314,9 @@ export class MosaicaMap extends MosaicaElement {
     this.hoveredArtifact = picked.kind === 'artifact' ? picked.id : world ? this.artifactAt(world, own) : null;
     // The viewport carries no shapes; fetch the hovered one. `needShape` asks once per artifact.
     if (this.hoveredArtifact !== null) this.resolvedStore?.needShape(this.hoveredArtifact);
-    if (picked.kind !== 'mark' || this.pressed || picked.id === this.resolvedStore?.get('selection').item?.id) {
+    // A tooltip Escape dismissed stays away while the pointer is on its mark.
+    if (picked.kind !== 'mark' || picked.id !== this.dismissedHover) this.dismissedHover = null;
+    if (picked.kind !== 'mark' || this.pressed || picked.id === this.dismissedHover || picked.id === this.resolvedStore?.get('selection').item?.id) {
       if (this.hover) this.hover = null;
       return;
     }
@@ -1324,6 +1359,52 @@ export class MosaicaMap extends MosaicaElement {
         this.hover = {...this.hover, title: hoverText(value, arrowType)};
       });
     }, HOVER_DESCRIBE_MS);
+  }
+
+  /** The mark whose tooltip Escape dismissed, while the pointer stays on it. */
+  private dismissedHover: bigint | null = null;
+  /** Whether the document is listened to for the Escape that dismisses the tooltip. */
+  private tooltipKeys = false;
+
+  /** Listen to the document for Escape while a tooltip shows, wherever the focus is. */
+  private watchTooltipKeys(): void {
+    const on = this.hover !== null && this.isConnected;
+    if (on === this.tooltipKeys) return;
+    this.tooltipKeys = on;
+    if (on) this.ownerDocument.addEventListener('keydown', this.onTooltipKey, true);
+    else this.ownerDocument.removeEventListener('keydown', this.onTooltipKey, true);
+  }
+
+  /** Escape dismisses the tooltip and does nothing else, so the same press clears no selection and closes no dialog. */
+  private onTooltipKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape' || !this.hover) return;
+    this.dismissedHover = this.hover.id;
+    this.hover = null;
+    e.preventDefault();
+  };
+
+  /**
+   * Move the tooltip beside the pointer and the region's tag above its region's corner, each kept
+   * inside the map, now that they are laid out and their sizes known.
+   */
+  private placeFloats(): void {
+    const {width, height} = this.size;
+    const tip = this.renderRoot.querySelector<HTMLElement>('[part="tooltip"]');
+    if (tip && this.hover) {
+      const [left, top] = tooltipCorner([this.hover.x, this.hover.y], [tip.offsetWidth, tip.offsetHeight], [width, height]);
+      tip.style.transform = `translate(${left}px, ${top}px)`;
+    }
+    const tag = this.renderRoot.querySelector<HTMLElement>('[part="region-tag"]');
+    const corner = this.regionCorner();
+    if (tag && corner) {
+      const [x, y] = this.screenOf(corner);
+      // No further left than the top-left corner's content starts, right of whatever the host
+      // keeps over the map's left side.
+      const inset = this.renderRoot.querySelector<HTMLElement>('.corner.top-left')?.offsetLeft ?? 0;
+      const size: [number, number] = [tag.offsetWidth, tag.offsetHeight];
+      const [left, top] = keptInside([x, y - size[1] - REGION_TAG_GAP_PX], size, [inset, REGION_TAG_GAP_PX], [width - REGION_TAG_GAP_PX, height - REGION_TAG_GAP_PX]);
+      tag.style.transform = `translate(${left}px, ${top}px)`;
+    }
   }
 
   /** The element that takes the map's focus: the canvas, a tab stop of its own. @internal */
@@ -1506,30 +1587,35 @@ export class MosaicaMap extends MosaicaElement {
   }
 
   /**
-   * The drawn region's tag at its top-left corner: how many items match inside it (or outside, for
-   * its complement) and a button that clears it. A region drawn as an artifact's outline has none.
+   * The drawn region's tag: how many items match inside it (or outside, for its complement) and a
+   * button that clears it. A region drawn as an artifact's outline has none. {@link placeFloats}
+   * puts it above the region's top-left corner.
    */
   private regionTag(): TemplateResult | typeof nothing {
     const region = this.resolvedStore?.get('region');
-    if (!region) return nothing;
-    let corner: [number, number] | null = null;
-    if (this.regionWorld) corner = [this.regionWorld[0], this.regionWorld[1]];
-    else if (this.regionPolygon && this.regionPolygon.length > 0) {
-      corner = [Math.min(...this.regionPolygon.map((p) => p[0])), Math.min(...this.regionPolygon.map((p) => p[1]))];
-    }
-    if (!corner) return nothing;
-    // The orthographic camera, y down: world units scale by 2^zoom about the target at the centre.
-    const {width, height} = this.size;
-    const scale = 2 ** this.viewState.zoom;
-    const [tx, ty] = this.viewState.target;
-    // Kept inside the map where the corner is off its top edge, and no further left than the
-    // top-left corner's content starts, right of whatever the host keeps over the map's left side.
-    const left = (corner[0] - tx!) * scale + width / 2;
-    const top = Math.max(30, (corner[1] - ty!) * scale + height / 2);
-    return html`<div part="region-tag" style=${`left:max(calc(var(--_mosaica-space) + var(--mosaica-map-inset-left, 0px)), ${left}px);top:${top}px`}>
+    if (!region || !this.regionCorner()) return nothing;
+    return html`<div part="region-tag">
       <mosaica-count .masked=${region.matched}></mosaica-count><span>${region.shape.outside ? 'outside' : 'inside'}</span>
       <button type="button" aria-label="Clear selection" title="Clear selection" @click=${() => this.select(null)}>${icon('close', 12, 1.4)}</button>
     </div>`;
+  }
+
+  /** The top-left corner of the drawn region's bounds, in world coordinates; `null` where no shape is drawn. */
+  private regionCorner(): [number, number] | null {
+    if (this.regionWorld) return [this.regionWorld[0], this.regionWorld[1]];
+    if (!this.regionPolygon || this.regionPolygon.length === 0) return null;
+    return [Math.min(...this.regionPolygon.map((p) => p[0])), Math.min(...this.regionPolygon.map((p) => p[1]))];
+  }
+
+  /**
+   * What the map announces of the selected region: how many items match inside it (or outside)
+   * once they are counted, and nothing while they are being counted, so that a count that arrives
+   * is announced each time.
+   */
+  private regionSaid(): string | typeof nothing {
+    const region = this.resolvedStore?.get('region');
+    if (!region || region.status !== 'shown') return nothing;
+    return `${formatMasked(region.matched)} ${region.shape.outside ? 'outside' : 'inside'} the selection`;
   }
 
   /** The level clusters are drawn at: `cluster-level` where set, else the top level of a levelled layer. */
@@ -1631,8 +1717,9 @@ export class MosaicaMap extends MosaicaElement {
   }
 
   private onKey = (e: KeyboardEvent): void => {
-    // From the canvas's container, or deck's canvas inside it, which a click focuses.
-    if (e.target !== e.currentTarget && !(e.target instanceof HTMLCanvasElement)) return;
+    // From the canvas's container, or deck's canvas inside it, which a click focuses. A key that
+    // has already dismissed the tooltip does no more.
+    if (e.defaultPrevented || (e.target !== e.currentTarget && !(e.target instanceof HTMLCanvasElement))) return;
     const step = 64 / 2 ** this.viewState.zoom;
     const [x, y] = this.viewState.target;
     switch (e.key) {
@@ -1665,6 +1752,9 @@ export class MosaicaMap extends MosaicaElement {
           this.select(null);
         } else if (this.pickedAt || this.selectedWorldXY) {
           this.clearPick();
+        } else {
+          // Nothing to clear, so the key is left for whatever holds the map, such as a dialog.
+          return;
         }
         break;
       default:
@@ -1713,14 +1803,17 @@ export class MosaicaMap extends MosaicaElement {
     const scale = drawnDensityScale(this.densityScale);
     const middle = Math.round(densityCountAt(0.5, max, scale));
     const label = `Density in ${DENSITY_COLOUR_TITLES[colours]}, ${max > 0 ? `from 0 to ${countText(max)} items per cell on a ${scale} scale` : 'from fewer items to more'}`;
-    return html`<div part="density-key" role="img" aria-label=${label}>
+    // What the largest figure counts is a tooltip on the figure and, for a reader of the key's
+    // name, its description.
+    const densest = 'The densest cell in view and around it';
+    return html`<div part="density-key" role="img" aria-label=${label} aria-describedby=${max > 0 ? 'densest' : nothing}>
       <span class="caption">${max > 0 ? 'Items per cell' : 'Density'}</span>
       <span class="ramp" style=${`background:linear-gradient(to right, ${stops.join(', ')})`}></span>
       <span class="ends"
         >${max > 0
-          ? html`<span>0</span><span>${middle >= 1 && middle < max ? countText(middle) : ''}</span><span title="The densest cell in view and around it">${countText(max)}</span>`
+          ? html`<span>0</span><span>${middle >= 1 && middle < max ? countText(middle) : ''}</span><span title=${densest}>${countText(max)}</span>`
           : html`<span>Fewer</span><span></span><span>More items</span>`}</span
-      >
+      >${max > 0 ? html`<span id="densest" class="sr-only">${densest}</span>` : nothing}
     </div>`;
   }
 
@@ -1740,13 +1833,21 @@ export class MosaicaMap extends MosaicaElement {
     // strip's alone.
     const refresh = () => this.resolvedStore?.refresh();
     const nothingVisible = seesNothing(this.resolvedStore, state);
-    const overlay = nothingVisible
-      ? html`<div part="overlay"><span part="state" data-state="empty" data-visible="none">${NOTHING_VISIBLE}</span></div>`
+    const said: {state: PanelState; line: StateLine} | null = nothingVisible
+      ? {state, line: {dot: null, words: NOTHING_VISIBLE, action: nothing}}
       : state === 'refused' || state === 'unanswered' || state === 'busy' || state === 'expired' || state === 'empty' || (state === 'retrying' && status?.unreachable)
-        ? html`<div part="overlay">${renderState(state, status, {onRefresh: refresh, onRetry: refresh})}</div>`
+        ? {state, line: stateLine(state, status, {onRefresh: refresh, onRetry: refresh})}
         : this.drawnBasemap.refusal
-          ? html`<div part="overlay">${refusedState(this.drawnBasemap.refusal, 'basemap')}</div>`
-          : nothing;
+          ? {state: 'refused', line: refusedLine(this.drawnBasemap.refusal, 'basemap')}
+          : null;
+    // One template whatever the state, so the live element is there before its words are and
+    // each change of them is announced. With no state to show it is not drawn, and holds the
+    // selected region's count. A state's button sits beside the live element, not inside it.
+    const overlay = html`<div part="overlay">
+      <span part="state" class=${said ? nothing : 'sr-only'} data-state=${said?.state ?? state} data-visible=${nothingVisible ? 'none' : nothing}
+        >${said ? stateDot(said.line) : nothing}<span role="status">${said ? said.line.words : this.regionSaid()}</span>${said?.line.action ?? nothing}</span
+      >
+    </div>`;
     const controls = this.noControls
       ? nothing
       : html`<div part="controls" role="toolbar" aria-label="Map tools">
@@ -1775,11 +1876,13 @@ export class MosaicaMap extends MosaicaElement {
         part="canvas"
         tabindex=${this.canvasTab}
         role="application"
-        aria-label=${this.getAttribute('aria-label') ?? 'map: arrow keys pan, + and - zoom'}
+        aria-label=${this.getAttribute('aria-label') ?? 'Map'}
+        aria-describedby="keys"
         @keydown=${this.onKey}
         @pointerleave=${() => {
           // deck reports picks only while the pointer is over the canvas, so clear the hover here.
           if (this.hover) this.hover = null;
+          this.dismissedHover = null;
         }}
         @pointerdown=${{handleEvent: this.onPointerDown, capture: true}}
         @pointermove=${{handleEvent: this.onPointerMove, capture: true}}
@@ -1787,11 +1890,12 @@ export class MosaicaMap extends MosaicaElement {
         @pointercancel=${{handleEvent: this.onPointerUp, capture: true}}
         @lostpointercapture=${{handleEvent: this.onPointerUp, capture: true}}
       ></div>
+      <span id="keys" class="sr-only">Arrow keys pan, plus and minus zoom, Escape clears the selection.</span>
       ${overlay}
       ${this.regionTag()}
       ${corners.filter((c) => c !== this.controlsCorner).map(corner)}
       ${this.hover
-        ? html`<div part="tooltip" style=${`left:${this.hover.x}px;top:${this.hover.y}px`}>
+        ? html`<div part="tooltip" role="tooltip">
             <slot name="tooltip"><div class="t">${this.hover.title}</div>${this.hover.lines.length > 0 ? html`<div class="s">${this.hover.lines.join(' · ')}</div>` : nothing}</slot>
           </div>`
         : nothing}`;
@@ -1801,6 +1905,34 @@ export class MosaicaMap extends MosaicaElement {
 /** A count as the density key shows it. */
 function countText(n: number): string {
   return n.toLocaleString('en-GB', {maximumFractionDigits: 0});
+}
+
+/** How far the tooltip sits from the pointer along each axis, in pixels. */
+const TOOLTIP_GAP_PX = 14;
+/** The gap between the region's tag and its region, and the least between the tag and the map's edges, in pixels. */
+const REGION_TAG_GAP_PX = 4;
+
+/**
+ * A box's top-left corner, moved as little as keeps the box between `min` and `max` on each axis.
+ * A box larger than that room starts at `min`.
+ *
+ * @internal
+ */
+export function keptInside(at: readonly [number, number], size: readonly [number, number], min: readonly [number, number], max: readonly [number, number]): [number, number] {
+  const axis = (i: 0 | 1) => Math.max(min[i], Math.min(at[i], max[i] - size[i]));
+  return [axis(0), axis(1)];
+}
+
+/**
+ * The tooltip's top-left corner for a pointer at `pointer` on a map of size `map`: below and right
+ * of the pointer, on the pointer's other side along an axis where it would cross the map's far
+ * edge, and inside the map either way.
+ *
+ * @internal
+ */
+export function tooltipCorner(pointer: readonly [number, number], size: readonly [number, number], map: readonly [number, number]): [number, number] {
+  const axis = (i: 0 | 1) => (pointer[i] + TOOLTIP_GAP_PX + size[i] > map[i] ? pointer[i] - TOOLTIP_GAP_PX - size[i] : pointer[i] + TOOLTIP_GAP_PX);
+  return keptInside([axis(0), axis(1)], size, [0, 0], map);
 }
 
 /** The density scale drawn: `linear` where set, else `log`. */

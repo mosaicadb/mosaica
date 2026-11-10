@@ -1,7 +1,9 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {Meta} from '@mosaicajs/client';
+import {DENSITY_SETTLE_MS} from '@mosaicajs/deck';
 import '../src/map.js';
-import {fakeStore, mount, settle, status} from './fake-store.js';
+import {tooltipCorner} from '../src/map.js';
+import {aggregateEntry, answerAggregate, fakeStore, meta as deployment, mount, settle, status} from './fake-store.js';
 
 /**
  * What a hover says a point is. The host names the field that titles a point (`title-field`);
@@ -226,6 +228,203 @@ describe('the map in the tab order', () => {
     await (el as unknown as {updateComplete: Promise<unknown>}).updateComplete;
     expect(canvas.tabIndex).toBe(2);
     expect(host.getAttribute('tabindex')).toBe('-1');
+  });
+
+  it('has a short name of its own without one from the host, and describes its keys either way', async () => {
+    const {el} = await map([]);
+    const host = el as unknown as HTMLElement;
+    const canvas = host.shadowRoot!.querySelector<HTMLElement>('[part="canvas"]')!;
+    const keys = () => host.shadowRoot!.getElementById(canvas.getAttribute('aria-describedby') ?? '')?.textContent ?? '';
+    const own = canvas.getAttribute('aria-label')!;
+    expect(own.trim()).not.toBe('');
+    expect(own).not.toMatch(/arrow/i);
+    for (const key of [/arrow/i, /zoom/i, /escape/i]) expect(keys()).toMatch(key);
+    const unnamed = keys();
+    host.setAttribute('aria-label', 'Papers');
+    await (el as unknown as {updateComplete: Promise<unknown>}).updateComplete;
+    expect(canvas.getAttribute('aria-label')).toBe('Papers');
+    expect(keys()).toBe(unnamed);
+  });
+});
+
+describe('the map’s keys', () => {
+  /** A map 1000 × 800 px over a store whose `meta` has arrived, and the zoom of each camera move it reports. */
+  async function keyed() {
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const el = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; mode: string; focusTarget: HTMLElement; zoom: number};
+    Object.defineProperty(el, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(el, 'clientHeight', {configurable: true, value: 800});
+    const store = fakeStore({meta: deployment(), status: status({})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    el.store = store;
+    await settle(host);
+    const moves: {zoom: number; bbox: number[]}[] = [];
+    el.addEventListener('mosaica-viewchange', (e) => moves.push((e as CustomEvent<{zoom: number; bbox: number[]}>).detail));
+    const press = (key: string) => {
+      const event = new KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+      el.focusTarget.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    return {host, el, moves, press};
+  }
+
+  it('zoom one level for each press of + or -, in every mode', async () => {
+    const {host, el, moves, press} = await keyed();
+    for (const mode of ['pan', 'box', 'lasso']) {
+      el.mode = mode;
+      await settle(host);
+      moves.length = 0;
+      const from = el.zoom;
+      expect(press('+')).toBe(true);
+      expect(press('+')).toBe(true);
+      expect(press('-')).toBe(true);
+      expect(moves.map((m) => m.zoom - from), mode).toEqual([1, 2, 1]);
+    }
+  });
+
+  it('pan one step for each arrow, and leave any other key to the page', async () => {
+    const {moves, press} = await keyed();
+    // Zoomed in, so the box the camera shows lies inside the view's extent and moves with it.
+    for (let i = 0; i < 3; i++) press('+');
+    moves.length = 0;
+    expect(press('ArrowRight')).toBe(true);
+    expect(press('ArrowRight')).toBe(true);
+    expect(press('ArrowDown')).toBe(true);
+    expect(moves).toHaveLength(3);
+    expect(new Set(moves.map((m) => m.zoom)).size).toBe(1);
+    expect(moves[1]!.bbox[0]).toBeGreaterThan(moves[0]!.bbox[0]!);
+    expect(moves[1]!.bbox[1]).toBe(moves[0]!.bbox[1]);
+    expect(moves[2]!.bbox[0]).toBe(moves[1]!.bbox[0]);
+    expect(moves[2]!.bbox[1]).toBeGreaterThan(moves[1]!.bbox[1]!);
+    expect(press('a')).toBe(false);
+    expect(press('Escape')).toBe(false);
+    expect(moves).toHaveLength(3);
+  });
+});
+
+describe('the density key', () => {
+  it('describes what its largest figure counts to a reader of its name, in the words of the figure’s tooltip', async () => {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    const host = await mount('<mosaica-map density="grid" no-points></mosaica-map>');
+    const el = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; fit(): Promise<void>};
+    Object.defineProperty(el, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(el, 'clientHeight', {configurable: true, value: 800});
+    const store = fakeStore({meta: deployment(), status: status({})});
+    el.store = store;
+    await settle(host);
+    const key = () => el.shadowRoot!.querySelector('[part="density-key"]')!;
+    // No counts yet, so no figure to qualify.
+    expect(key().hasAttribute('aria-describedby')).toBe(false);
+
+    const fitted = el.fit();
+    answerAggregate(store, 'frame#', aggregateEntry([{rows: []}], store.get('view').id));
+    await fitted;
+    vi.advanceTimersByTime(DENSITY_SETTLE_MS);
+    answerAggregate(store, 'density#', aggregateEntry([{rows: [1, 99].map((count, i) => ({cell: BigInt(i), count}))}], store.get('view').id));
+    await settle(host);
+    const described = el.shadowRoot!.getElementById(key().getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent?.trim()).not.toBe('');
+    expect(described?.textContent?.trim()).toBe(key().querySelector('.ends > :last-child')!.getAttribute('title'));
+  });
+});
+
+describe('the tooltip without a pointer move', () => {
+  const tooltip = (el: HoverMap) => (el as unknown as HTMLElement).shadowRoot!.querySelector('[part="tooltip"]');
+  const escape = (target: EventTarget) => {
+    const key = new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true, cancelable: true});
+    target.dispatchEvent(key);
+    return key.defaultPrevented;
+  };
+
+  it('is a tooltip to a screen reader', async () => {
+    const {el} = await map([]);
+    el.onHover(markAt(5n));
+    await settle(document.body);
+    expect(tooltip(el)?.getAttribute('role')).toBe('tooltip');
+  });
+
+  it('goes on Escape wherever the focus is, and stays away until the pointer is on another mark', async () => {
+    const {el} = await map([]);
+    const elsewhere = document.createElement('button');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    el.onHover(markAt(5n));
+    await settle(document.body);
+    expect(tooltip(el)).not.toBeNull();
+
+    expect(escape(elsewhere)).toBe(true);
+    await settle(document.body);
+    expect(tooltip(el)).toBeNull();
+    // The pointer moves on the same mark.
+    el.onHover({...markAt(5n), x: 11});
+    await settle(document.body);
+    expect(tooltip(el)).toBeNull();
+
+    el.onHover(markAt(6n));
+    await settle(document.body);
+    expect(tooltip(el)).not.toBeNull();
+    // And back on the first, it shows again.
+    el.onHover(markAt(5n));
+    expect(el.hover?.title).toBe('#5');
+  });
+
+  it('takes only the Escape that dismisses it: that press clears no selection, and the next is left to the page', async () => {
+    const {el, store} = await map([]);
+    const canvas = (el as unknown as HTMLElement).shadowRoot!.querySelector('[part="canvas"]')!;
+    store.set('region', {shape: {kind: 'box', bbox: [0, 0, 1, 1]}, status: 'loading', refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}} as never);
+    el.onHover(markAt(5n));
+    await settle(document.body);
+    const cleared = () => store.calls.filter((c) => c.name === 'select').length;
+
+    expect(escape(canvas)).toBe(true);
+    await settle(document.body);
+    expect(tooltip(el)).toBeNull();
+    expect(cleared()).toBe(0);
+
+    expect(escape(canvas)).toBe(true);
+    expect(cleared()).toBe(1);
+
+    // With no tooltip, a press elsewhere on the page is not the map's.
+    expect(escape(document.body)).toBe(false);
+  });
+
+  it('stops listening to the page once it has gone, and when the map leaves the page', async () => {
+    const {el} = await map([]);
+    const host = el as unknown as HTMLElement;
+    el.onHover(markAt(5n));
+    await settle(document.body);
+    host.remove();
+    expect(escape(document.body)).toBe(false);
+    expect(el.hover?.title).toBe('#5');
+  });
+});
+
+describe('where the tooltip is put', () => {
+  const bounds: [number, number] = [800, 500];
+  const size: [number, number] = [200, 60];
+  const inside = ([left, top]: [number, number]) => left >= 0 && top >= 0 && left + size[0] <= bounds[0] && top + size[1] <= bounds[1];
+
+  it('is below and right of the pointer where there is room', () => {
+    const [left, top] = tooltipCorner([100, 100], size, bounds);
+    expect(left).toBeGreaterThan(100);
+    expect(top).toBeGreaterThan(100);
+  });
+
+  it('is on the pointer’s other side along an axis where it would cross the map’s far edge', () => {
+    const [left, top] = tooltipCorner([790, 100], size, bounds);
+    expect(left + size[0]).toBeLessThan(790);
+    expect(top).toBeGreaterThan(100);
+    const [left2, top2] = tooltipCorner([100, 495], size, bounds);
+    expect(left2).toBeGreaterThan(100);
+    expect(top2 + size[1]).toBeLessThan(495);
+  });
+
+  it('stays inside the map for a pointer anywhere on it', () => {
+    for (let x = 0; x <= bounds[0]; x += 25) for (let y = 0; y <= bounds[1]; y += 25) expect(inside(tooltipCorner([x, y], size, bounds)), `${x},${y}`).toBe(true);
+  });
+
+  it('starts at the map’s corner where the map is smaller than the tooltip', () => {
+    expect(tooltipCorner([50, 20], [300, 100], [120, 60])).toEqual([0, 0]);
   });
 });
 
