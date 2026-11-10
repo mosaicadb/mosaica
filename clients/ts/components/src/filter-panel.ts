@@ -477,7 +477,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const arrived = this.emptied ? this.renderRoot.querySelector<HTMLElement>('[part="chip"] > button:last-child') : null;
     if (arrived) {
       this.emptied = false;
-      if (this.wordsHeld && (!document.activeElement || document.activeElement === document.body)) arrived.focus();
+      if (this.wordsHeld && focusLost()) arrived.focus();
     }
     if (changed.has('adding')) {
       if (this.adding) document.addEventListener('pointerdown', this.onPressOutsideAdd, true);

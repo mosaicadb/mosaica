@@ -25,7 +25,7 @@ import {
 import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, levelOf, listedGroups, rankedGrouping} from './aggregate.js';
-import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey} from './base.js';
+import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -911,7 +911,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   private keepFocus(): void {
     const before = this.focusedBefore;
     this.focusedBefore = null;
-    if (!before || (document.activeElement && document.activeElement !== document.body)) return;
+    if (!before || !focusLost()) return;
     if (before.el.isConnected) return before.el.focus();
     if (before.row < 0) return;
     const rows = Array.from(this.renderRoot.querySelectorAll('[part~="row"]'));
