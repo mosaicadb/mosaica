@@ -890,8 +890,8 @@ impl Executor {
     /// descriptors, so no projection is invalidated and no session pays anything. What it swaps is
     /// content-preserving, so a request holding either version agrees on every answer.
     ///
-    /// The consumed files are not deleted: every side-manifest below this `n` still names them, and
-    /// reclaiming them is compaction's.
+    /// The consumed files are not deleted here: the side-manifests below this `n` still name them.
+    /// They are deleted once the last of those is pruned and nothing holds a generation naming them.
     pub(super) fn publish_coalesce(&mut self, completed: crate::coalesce::CompletedCoalesce) {
         let started = std::time::Instant::now();
         // Same `may_publish` guard as `publish_merge`.

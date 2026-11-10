@@ -1,6 +1,6 @@
 # Schedule compactions
 
-Deleted and edited items stay in the bundle, hidden from every viewer, until a compaction removes them. Compaction also merges the segments that new data adds and frees the disc space that merging leaves behind. The server compacts on its own, mostly in a nightly window, so the main thing to decide is when that window falls. This page explains what starts a compaction, what it needs, and how to start one yourself and check it worked.
+Deleted and edited items stay in the bundle, hidden from every viewer, until a compaction removes them. Compaction also rewrites the segments that new data adds as one segment per view, and frees the disc space that a failed or interrupted write leaves behind. The server compacts on its own, mostly in a nightly window, so the main thing to decide is when that window falls. This page explains what starts a compaction, what it needs, and how to start one yourself and check it worked.
 
 The examples use the [systemd install](systemd.md), whose control address is a Unix socket. Under Docker, write `--control http://127.0.0.1:9163` instead.
 
