@@ -23,6 +23,10 @@ container image.
   zooming with the filter does not work them out again. Deletions and suppressions still apply to
   the next request. `serve.filter_rows_cache_bytes` bounds it (256 MiB by default, `0` keeps
   none), and `GET /control/status` reports it as `filter_rows_cache`.
+- **A viewer is no longer refused with 429 after a flush or merge.** While the server brings each
+  viewer's visible set up to date after a flush or merge, a viewer it has not reached yet used to
+  be refused until it had. Now that request brings its own visible set up to date and is answered.
+  `refresh_in_flight` in `GET /control/status` still reports the work in progress.
 
 ## [0.2.0] - 2026-11-05
 

@@ -194,8 +194,8 @@ fn engine_at(tmp: &std::path::Path, root: &std::path::Path, total: u64) -> Engin
     engine
 }
 
-/// A whole-extent viewport, retried past the bounded `ProjectionBuilding` a merge's refresh window
-/// answers with (decision 0044's permitted residual).
+/// A whole-extent viewport, retried past the `ProjectionBuilding` a request answers with when
+/// another's build of the same projection outlasts its wait budget.
 fn viewport_k(
     engine: &Engine,
     session: &Session,
