@@ -28,6 +28,20 @@ export type SelectionShape = (
 };
 
 /**
+ * A selection held in a view other than the current one, which keeps filtering every view: the
+ * items inside `shape` in `view`, wherever the current view places them. Switching to `view` makes
+ * it the selected region again.
+ *
+ * @category Projections
+ */
+export type HeldRegion = {
+  /** The view the shape is in, by its id. */
+  view: string;
+  /** The shape, in `view`'s data coordinates. */
+  shape: SelectionShape;
+};
+
+/**
  * The `region` projection: the selected region and its counts. It is `null` while nothing is
  * selected.
  *

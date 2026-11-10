@@ -24,7 +24,7 @@ import {insideBox, regionOperand, withRegion} from './region.js';
 import type {RegionOperand} from './types.js';
 import type {RecordsRead} from './records.js';
 import {DEFAULT_CACHE_BYTES, Replica, type ReplicaOptions} from './replica.js';
-import {SelectedRegion, type RegionProjection, type SelectionShape} from './selectedRegion.js';
+import {SelectedRegion, type HeldRegion, type RegionProjection, type SelectionShape} from './selectedRegion.js';
 import {Suggestions, type SuggestState} from './suggestions.js';
 import {TokenSupply, type TokenSupplier} from './token.js';
 import type {
@@ -67,7 +67,7 @@ export type {Count, Masked} from './counts.js';
 export {formatCount, formatMasked} from './counts.js';
 export type {TokenSupplier} from './token.js';
 export {CLUSTER_PREFIX, type LegendProjection} from './legend.js';
-export {REGION_HELD_LIMIT, type RegionProjection, type SelectionShape} from './selectedRegion.js';
+export {REGION_HELD_LIMIT, type HeldRegion, type RegionProjection, type SelectionShape} from './selectedRegion.js';
 export type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregatesProjection, DrawnLayerBy, FieldSummary} from './aggregates.js';
 
 /**
@@ -485,6 +485,12 @@ export type FiltersProjection = {
   highlight: FilterExpr | null;
   /** The `member_of` clauses as `setMembers` last set them. */
   members: MemberClause[];
+  /**
+   * The selection held in each view other than the current one, which every request carries as a
+   * filter. A switch away from a view with a selected region adds it here, and a switch to a view
+   * listed here makes its shape the selected region again.
+   */
+  regions: HeldRegion[];
 } & SuggestState;
 
 /**
@@ -588,6 +594,13 @@ export interface Store {
    * `filters.members` and fetches the map again.
    */
   setMembers(clauses: readonly MemberClause[]): void;
+  /**
+   * Replace the selections held in views other than the current one, published as
+   * `filters.regions`, and fetch the map again. Each keeps the map to the items inside its shape
+   * in its own view. An entry for the current view is selected as {@link select} selects it, and
+   * of several entries for one view the last is kept.
+   */
+  setRegions(regions: readonly HeldRegion[]): void;
   /**
    * Read one page of a layer's hierarchy: its roots, an artifact's children and parents, or the
    * results of a name search. Each row carries its count of visible items. An artifact the store
@@ -735,9 +748,11 @@ export interface Store {
    * Switch to view `id`. An id `meta.views` does not list is ignored. Called before `/v1/meta` has
    * loaded, it sets the view to open with.
    *
-   * Between views that share an extent, the camera and the selected region carry over and the new
-   * view draws what it already holds at once. A view with another extent drops both, and the next
-   * `setView` sets the camera. A switch clears the marks, the tiles, the typeahead pages and the
+   * Between views that share an extent, the camera carries over and the new view draws what it
+   * already holds at once; a view with another extent drops the camera, and the next `setView` sets
+   * it. The selected region carries over to a view of the same group that shares its extent and
+   * holds no region of its own. Otherwise it moves to `filters.regions`, where it keeps filtering,
+   * and the region held for the incoming view, if there is one, is selected. A switch clears the marks, the tiles, the typeahead pages and the
    * fetched shapes, and publishes `status` as `loading`.
    */
   setCurrentView(id: string): void;
@@ -816,8 +831,9 @@ export interface Store {
   dataXY(worldX: number, worldY: number): [number, number];
   /**
    * Forget the current viewer, so the map can be shown to another. The store drops its token, its
-   * metadata, everything it has fetched, the `member_of` clauses, the region and the selection, and
-   * abandons every request in flight. It publishes empty projections with `status` as `idle`, then
+   * metadata, everything it has fetched, the `member_of` clauses, every region that names an
+   * artifact (the selected one and those held in other views) and the selection, and abandons
+   * every request in flight. It publishes empty projections with `status` as `idle`, then
    * asks `authorise` for a new token and loads again. A store created with a fixed `token` keeps it.
    *
    * The filters, layers, colouring, point columns, current view and camera are kept. Any that name
@@ -1301,7 +1317,7 @@ export function createStore(options: StoreOptions): Store {
     artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
-    filters: {draft: emptyDraft([]), expr: null, highlight: null, members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
+    filters: {draft: emptyDraft([]), expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
     legend: EMPTY_LEGEND,
     replica: {bytes: 0, points: 0, bands: 0, views: 0, lastPlan: null},
     aggregates: new Map()
@@ -1655,6 +1671,9 @@ export function createStore(options: StoreOptions): Store {
       });
     }
     layersOn = layersOn.filter((name) => layerNames.has(name));
+    const {regions} = projections.filters;
+    const offeredRegions = regions.filter((r) => m.views.some((v) => v.id === r.view));
+    if (offeredRegions.length !== regions.length) replaceProjection('filters', {...projections.filters, regions: offeredRegions});
     const colourBy = legend.colourBy;
     const offered =
       colourBy === null ||
@@ -2031,14 +2050,25 @@ export function createStore(options: StoreOptions): Store {
     colourAsked.clear();
     shapes.forget('all');
 
-    // The selection is in the outgoing frame's data coordinates too.
-    if (!kept) region.drop();
+    // The selection is in the outgoing view's layout. It carries to another view of its group laid
+    // out over the same extent, unless that view holds a selection of its own; otherwise it is held
+    // under the view it was drawn in.
+    const outgoing = region.selected;
+    const held = projections.filters.regions;
+    const heldHere = held.find((r) => r.view === id)?.shape ?? null;
+    const group = (view: string) => meta!.views.find((v) => v.id === view)?.roster?.group ?? null;
+    const carried = kept && heldHere === null && group(from) !== null && group(from) === group(id);
+    const regions = held.filter((r) => r.view !== id && r.view !== from);
+    if (!carried && outgoing) regions.push({view: from, shape: outgoing});
+    if (!carried) region.drop();
+    if (regions.length !== held.length || regions.some((r, i) => r !== held[i])) replaceProjection('filters', {...projections.filters, regions});
 
     // No marks until the incoming view presents, and the incoming channel's artifacts. A subscriber
     // that refits the camera here reaches the incoming view with its settings in place.
     replaceProjection('view', noFrame(id));
     replaceProjection('marks', {...projections.marks, bands: [], standIn: [], count: NO_COUNT});
     replaceProjection('tiles', {tiles: []});
+    if (heldHere && region.select(heldHere, projections.marks)) areaChanged();
     onArtifacts(incoming.channel.current);
     replaceProjection('status', {...projections.status, status: 'loading', refusal: null, stale: false});
     publishReplica(projections.replica.lastPlan);
@@ -2150,9 +2180,9 @@ export function createStore(options: StoreOptions): Store {
     return withMembers(composeFilters(draft, 'filter'), projections.filters.members, 'filter');
   }
 
-  /** One composition for the point path, the artifact channel and the region's count. */
-  function requestFilters(): FilterExpr | null {
-    return withSelected(filtersBesideRegion(projections.filters.draft));
+  /** One composition for the point path, the artifact channel and the region's count, for a request to `view`. */
+  function requestFilters(view = views.id): FilterExpr | null {
+    return withSelected(filtersBesideRegion(projections.filters.draft), view);
   }
 
   /** {@link requestFilters} without `column`'s filter-position control. */
@@ -2333,10 +2363,15 @@ export function createStore(options: StoreOptions): Store {
     return shown;
   }
 
-  /** `expr` with the selected region's leaf joined. */
-  function withSelected(expr: FilterExpr | null): FilterExpr | null {
+  /**
+   * `expr` with the region held in each other view, and the selected region's leaf, joined, for a
+   * request to `view`. Each region names the view it was drawn in where that is not `view`.
+   */
+  function withSelected(expr: FilterExpr | null, view = views.id): FilterExpr | null {
+    let out = expr;
+    for (const held of projections.filters.regions) out = withRegion(out, regionOperand(held.shape, held.view), held.shape.outside ?? false);
     const selected = region.selected;
-    return withRegion(expr, selected ? regionOperand(selected) : null, selected?.outside ?? false);
+    return withRegion(out, selected ? regionOperand(selected, view === views.id ? undefined : views.id) : null, selected?.outside ?? false);
   }
 
   /**
@@ -2372,7 +2407,8 @@ export function createStore(options: StoreOptions): Store {
   async function readDefaults(req: {view?: string; filters?: FilterExpr | null}) {
     const asked = await viewed();
     const own = req.filters !== undefined;
-    return {token: asked.token, current: asked.view, view: req.view ?? asked.view, filters: own ? req.filters! : requestFilters(), own};
+    const view = req.view ?? asked.view;
+    return {token: asked.token, current: asked.view, view, filters: own ? req.filters! : requestFilters(view), own};
   }
 
   async function browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage> {
@@ -2435,6 +2471,28 @@ export function createStore(options: StoreOptions): Store {
     if (same) return;
     region.loading(projections.marks);
     requery();
+  }
+
+  function setRegions(list: readonly HeldRegion[]): void {
+    const byView = new Map<string, SelectionShape>();
+    for (const {view, shape} of list) byView.set(view, shape);
+    const mine = byView.get(views.id);
+    byView.delete(views.id);
+    const regions = [...byView].map(([view, shape]) => ({view, shape}));
+    const sent = (held: readonly HeldRegion[]) => JSON.stringify(held.map(({view, shape}) => [view, regionOperand(shape), shape.outside ?? false]));
+    const same = sent(projections.filters.regions) === sent(regions);
+    replaceProjection('filters', {...projections.filters, regions});
+    const selected = mine !== undefined && region.select(mine, projections.marks);
+    if (selected) areaChanged();
+    else if (!same) region.loading(projections.marks);
+    if (selected || !same) requery();
+  }
+
+  function selectRegion(shape: SelectionShape | null): void {
+    if (region.select(shape, projections.marks)) {
+      requery();
+      areaChanged();
+    }
   }
 
   function setFilters(draft: FilterDraft): void {
@@ -2617,6 +2675,7 @@ export function createStore(options: StoreOptions): Store {
     replaceProjection('filters', {
       ...projections.filters,
       members: [],
+      regions: projections.filters.regions.filter((r) => r.shape.kind !== 'artifact'),
       ...(filtersSet ? {} : {draft: emptyDraft([]), expr: null, highlight: null})
     });
     legend.clear();
@@ -2713,6 +2772,7 @@ export function createStore(options: StoreOptions): Store {
     setAggregate,
     setFilters,
     setMembers,
+    setRegions,
     suggest: (column, q, verb) => suggestions.suggest(column, q, verb),
     forgetSuggestions: (column) => suggestions.forget(column),
     setLayers,
@@ -2738,12 +2798,7 @@ export function createStore(options: StoreOptions): Store {
     openArtifact,
     needShape: (id) => shapes.need(id),
     clearSelection,
-    select(shape) {
-      if (region.select(shape, projections.marks)) {
-        requery();
-        areaChanged();
-      }
-    },
+    select: selectRegion,
     extentOf,
     dataXY,
     async basemapWorld() {

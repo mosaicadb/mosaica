@@ -394,14 +394,25 @@ pub fn write_points_n(path: &Path, n: u64) {
 
 /// [`write_points_n`]'s points for the `entity_id`s `ids` alone.
 pub fn write_points_of(path: &Path, ids: std::ops::Range<u64>) {
+    write_points_at(path, ids, |e| {
+        (((e * 37) % 1000) as f64, ((e * 53) % 1000) as f64)
+    });
+}
+
+/// The points of `ids`, each at `position(entity_id)`.
+pub fn write_points_at(
+    path: &Path,
+    ids: impl IntoIterator<Item = u64>,
+    position: impl Fn(u64) -> (f64, f64),
+) {
     let schema = Arc::new(Schema::new(vec![
         Field::new("entity_id", DataType::UInt64, false),
         Field::new("x", DataType::Float64, false),
         Field::new("y", DataType::Float64, false),
     ]));
-    let ids: Vec<u64> = ids.collect();
-    let xs: Vec<f64> = ids.iter().map(|e| ((e * 37) % 1000) as f64).collect();
-    let ys: Vec<f64> = ids.iter().map(|e| ((e * 53) % 1000) as f64).collect();
+    let ids: Vec<u64> = ids.into_iter().collect();
+    let xs: Vec<f64> = ids.iter().map(|&e| position(e).0).collect();
+    let ys: Vec<f64> = ids.iter().map(|&e| position(e).1).collect();
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![

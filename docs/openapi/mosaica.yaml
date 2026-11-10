@@ -6426,7 +6426,13 @@ components:
       type: object
       description: |
         Exactly one of `polygon`, `bbox`, `circle` and `ellipse`, a shape in the view's own space
-        (its quantisation extent, as `/v1/meta` publishes it), with `space`. `space` is `view`, the
+        (its quantisation extent, as `/v1/meta` publishes it), with `space`. `view` names another
+        view, by its id or key, that the shape or artifact is in: the leaf is then the items this
+        principal may see inside it in that view, as their rows in the request's view, so a
+        selection drawn in one layout filters another. An item the request's view does not hold
+        has no row there. A view this principal's `/v1/meta` does not list is `404`, as an unknown
+        view is everywhere. `x-mosaica-region` reports the leaf's verdict as it was reached in its
+        own view. `space` is `view`, the
         default, or `wgs84` on a view that declares a projection: degrees, densified before they
         are projected so each edge is straight in the plane it was declared in. `wgs84` on a view
         that projects nothing is `422`. Or `artifact`: a published shape named by its
@@ -6442,7 +6448,7 @@ components:
         before anything is tested, so a client highlighting its own points quantises the same way.
       additionalProperties: false
       minProperties: 1
-      maxProperties: 2
+      maxProperties: 3
       properties:
         polygon:
           type: array
@@ -6476,6 +6482,9 @@ components:
         space:
           type: string
           enum: [view, wgs84]
+        view:
+          type: string
+          description: The view the shape or artifact is in, by its id or key. Defaults to the request's view.
 
     FilterLeafOperator:
       type: object

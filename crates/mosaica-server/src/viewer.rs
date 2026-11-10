@@ -943,7 +943,7 @@ pub(crate) struct FilterParser<'a> {
     meta: &'a mosaica_engine::EngineMeta,
     view: &'a mosaica_engine::MetaView,
     visible: &'a mosaica_engine::gate::VisibleViews,
-    region: crate::filter_dto::RegionContext,
+    max_region_vertices: u64,
     /// Each category's vocabulary by the leaf's bare name, entity-scoped columns and group-scoped
     /// families alike. Names are unique across the two lists, so one map cannot answer two things.
     vocab_of: std::cell::OnceCell<std::collections::HashMap<&'a str, &'a str>>,
@@ -960,11 +960,7 @@ impl<'a> FilterParser<'a> {
             meta,
             view,
             visible,
-            region: crate::filter_dto::RegionContext {
-                extent: crate::filter_dto::view_extent(view),
-                projection: view.projection,
-                max_vertices: max_region_vertices,
-            },
+            max_region_vertices,
             vocab_of: std::cell::OnceCell::new(),
         }
     }
@@ -985,6 +981,16 @@ impl<'a> FilterParser<'a> {
                 )
                 .collect()
         });
+        use crate::filter_dto::{RegionContext, RegionFrame};
+        let frame_of = |name: &str| {
+            meta.resolve_visible_view(name, self.visible)
+                .map(RegionFrame::of)
+        };
+        let region = RegionContext {
+            frame: RegionFrame::of(self.view),
+            frame_of: &frame_of,
+            max_vertices: self.max_region_vertices,
+        };
         crate::filter_dto::parse(
             value,
             &|leaf| meta.resolve_filter_column(leaf, &self.view.id, self.visible),
@@ -997,7 +1003,7 @@ impl<'a> FilterParser<'a> {
                 let vocabulary = vocab_of.get(name)?;
                 meta.vocabularies.get(vocabulary)?.code_of(key)
             },
-            &self.region,
+            &region,
         )
     }
 }

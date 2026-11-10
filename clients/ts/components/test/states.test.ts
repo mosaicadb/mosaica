@@ -343,7 +343,7 @@ describe('<mosaica-status> renders every state through part="state"', () => {
 
     // A filter on the same column narrows it too, so the match cell stays beside the highlight's.
     const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs.LG', 'cs.CV']}}, highlight: {archive: {family: 'category', keys: ['cs.CV']}}};
-    const filters = {draft, expr: composeFilters(draft, 'filter'), highlight: composeFilters(draft, 'highlight'), members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0};
+    const filters = {draft, expr: composeFilters(draft, 'filter'), highlight: composeFilters(draft, 'highlight'), members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0};
     el.store = fakeStore({status: status({}), view: lit, filters});
     await settle(host);
     expect(deepAll(host, '[part="count"]').map((c) => c.textContent)).toEqual(['3,210', '12,040', '812', '3,210', '500']);

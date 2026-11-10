@@ -199,7 +199,7 @@ impl Set {
                 if let Some(held) = part.entities.get() {
                     return Ok(held);
                 }
-                let crossed = crossing(cx.engine, cx.open, place, rows)?;
+                let crossed = cx.engine.entities_of_rows(&cx.open.served, place, rows)?;
                 part.crossed
                     .fetch_add(rows.cardinality(), Ordering::Relaxed);
                 Ok(part.entities.get_or_init(|| crossed))
@@ -223,26 +223,6 @@ pub(crate) fn in_view(open: &OpenView<'_>, place: usize, entities: &Bitmap) -> R
         .ok_or_else(|| {
             EngineError::Malformed(format!(
                 "view '{}' no longer holds the extent its projection was taken through",
-                open.served.name
-            ))
-        })
-}
-
-/// The entities of `rows` in the side at `place`, on the engine's pool.
-pub(super) fn crossing(
-    engine: &Engine,
-    open: &OpenView<'_>,
-    place: usize,
-    rows: &Bitmap,
-) -> Result<Bitmap> {
-    let row_space = &open.served.sides[place].data.row_space;
-    engine
-        .pool
-        .install(|| row_space.entities_of_rows(rows))
-        .ok_or_else(|| {
-            EngineError::Malformed(format!(
-                "view '{}' has no row-to-entity table, so a set routed by its rows cannot be \
-                 counted by entity; rebuild the bundle",
                 open.served.name
             ))
         })
@@ -383,7 +363,7 @@ pub(crate) fn entities_passing(
         check_cancelled(cancel)?;
         let entities = match part.held {
             Held::Entities(entities) => entities,
-            Held::Rows(rows) => crossing(engine, open, place, &rows)?,
+            Held::Rows(rows) => engine.entities_of_rows(&open.served, place, &rows)?,
             Held::Whole => unreachable!("a routed filter is never the whole view"),
         };
         Ok((entities, region))
