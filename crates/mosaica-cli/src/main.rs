@@ -131,8 +131,8 @@ enum Command {
         memory_budget: Option<u64>,
 
         /// Print each build stage's wall time, row count and peak resident memory to stderr as
-        /// the stage ends, and for the text index and filter postings stages the cascade passes
-        /// their merges took.
+        /// the stage ends, and for the `text_index` and `filter_postings` stages the cascade
+        /// passes their merges took.
         ///
         /// Peak resident memory is the process's high-water mark when the stage ended, so it
         /// shows the stage in which the peak was reached.
