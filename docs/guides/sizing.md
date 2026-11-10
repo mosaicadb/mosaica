@@ -64,7 +64,7 @@ As an example of the shape, the table below was measured on one 4-core machine w
 
 With these users, a bundle up to about three times the memory beyond the caches served at full speed. A narrower map, users who stay in one region, or a lower [point cap](#points-drawn-per-tile) lets the ratio go higher; more columns, indexed text and filters make the hot set larger.
 
-The hot set should grow more slowly than the corpus, so a larger corpus should tolerate a higher ratio under the same users, because an unfiltered view reads a bounded amount of the bundle. A tile reads the positions and fields of at most its point cap of items, so once a tile holds many times more items than a page, those reads touch about one page per item drawn, whatever the corpus size. Below zoom 10, a tile finds those items from copies kept for the purpose without reading the rest of the tile; above it, a tile holds few enough items that reading them all is cheap. The two corpora measured agree: the hot set was over half of the bundle at 10 million items and a third at 100 million. This is inferred from how a view reads and from those two sizes, and it doesn't hold for a filtered view, which reads the identifier of every item that matches in view and so grows with the corpus.
+The hot set should grow more slowly than the corpus, so a larger corpus should tolerate a higher ratio under the same users, because an unfiltered view reads a bounded amount of the bundle. A tile reads the positions and fields of at most its point cap of items, so once a tile holds many times more items than a page, those reads touch about one page per item drawn, whatever the corpus size. Below zoom 10, a tile finds those items from copies kept for the purpose without reading the rest of the tile; above it, a tile holds few enough items that reading them all is cheap. The two corpora measured agree: the hot set was over half of the bundle at 10 million items and a third at 100 million. This is inferred from how a view reads and from those two sizes. A filtered view reads more: where many of a tile's items match, it finds its points from the same copies but passes over the ones that don't match, and where few match, it reads the identifier of every match in the tile. Either way its reads grow with the corpus, though more slowly than the corpus does.
 
 ### Users who see different items
 
@@ -84,7 +84,7 @@ The cache limits are fixed, so a server capped below their total keeps filling i
 
 ### Points drawn per tile
 
-`k_max_marks` (500 by default) is the most points a tile draws, and `max_k` (1,000) the most a request may ask for. A tile reads its points' positions and rendered fields from the bundle, so a lower cap reads fewer pages for each view and shrinks the hot set. It doesn't change the memory each set of access attributes holds, and a filtered view still reads the identifier of every item that matches in view, whatever the cap.
+`k_max_marks` (500 by default) is the most points a tile draws, and `max_k` (1,000) the most a request may ask for. A tile reads its points' positions and rendered fields from the bundle, so a lower cap reads fewer pages for each view and shrinks the hot set. It doesn't change the memory each set of access attributes holds, and it bounds a filtered view less well, since that view also reads items that don't match on its way to the ones it draws.
 
 Measured with the example above at a 2 GiB cap, with 100 users panning without pause:
 
