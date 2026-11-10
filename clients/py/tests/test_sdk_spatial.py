@@ -226,8 +226,9 @@ def test_a_sample_of_a_box_on_a_projected_view_is_drawn_from_inside_it(world):
     sample = db.view("world").within(EUROPE).sample(zoom=3, k=1024)
     counts = json.loads(sample.schema.metadata[b"mosaica.counts"])
     assert counts["matched"] == sample.num_rows == len(expected)
-    # The whole view, by comparison, is every row.
-    assert db.view("world").sample(zoom=0, k=1024).num_rows == len(rows)
+    # The whole view, by comparison, counts every row.
+    whole = db.view("world").sample(zoom=0, k=1)
+    assert json.loads(whole.schema.metadata[b"mosaica.counts"])["matched"] == len(rows)
 
 
 def test_a_map_of_a_box_on_a_projected_view_is_framed_in_the_views_coordinates(world, stub_bundle):
