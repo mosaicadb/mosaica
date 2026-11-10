@@ -193,6 +193,9 @@ fn canonical(column: &str, query: LeafQuery<'_>) -> Vec<u8> {
 
 pub(crate) type FilterCache = SingleFlightCache<LeafKey, KeptLeaf>;
 
+/// A leaf's evaluation under a candidate, ended once the token it is given has gone.
+type Evaluate<'a> = dyn Fn(&Bitmap, &Option<CancelToken>) -> Result<Bitmap, FilterError> + 'a;
+
 /// The requests waiting on each entry being computed.
 pub(crate) type FilterInterest = Interests<LeafKey>;
 
@@ -249,7 +252,7 @@ pub(crate) fn answer(
     fragment: Option<&Bitmap>,
     candidate: &Bitmap,
     cancel: &Option<CancelToken>,
-    evaluate: &dyn Fn(&Bitmap, &Option<CancelToken>) -> Result<Bitmap, FilterError>,
+    evaluate: &Evaluate<'_>,
 ) -> Result<Bitmap, FilterError> {
     if cache.bound_bytes() == 0 {
         return evaluate(candidate, cancel);
@@ -416,9 +419,10 @@ mod tests {
             started.wait();
             release.wait();
             seen.store(crate::cancel::gone(watch), Ordering::Relaxed);
-            crate::cancel::gone(watch)
-                .then(|| Err(FilterError::Cancelled))
-                .unwrap_or_else(|| Ok(candidate.and(&matches)))
+            match crate::cancel::gone(watch) {
+                true => Err(FilterError::Cancelled),
+                false => Ok(candidate.and(&matches)),
+            }
         };
         let unreached = |_: &Bitmap, _: &Option<CancelToken>| -> Result<Bitmap, FilterError> {
             panic!("the request waiting reads the first's entry")

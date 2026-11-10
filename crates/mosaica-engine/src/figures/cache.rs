@@ -40,6 +40,7 @@ use rustc_hash::FxHashMap;
 use mosaica_cache::{CacheWeight, Cancel, SingleFlightCache, WaitEnded, WaitingBuildError};
 use mosaica_types::LayerSpace;
 
+use crate::cancel::{Interest, Interests};
 use super::counts::{CountsAt, Deltas, Reserves};
 use super::denied::DenyCorrection;
 use super::field::{FieldDeny, FieldLeft, Held};
