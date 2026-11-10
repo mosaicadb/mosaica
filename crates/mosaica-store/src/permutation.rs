@@ -1467,15 +1467,28 @@ impl Permutation {
         mask: &croaring::Bitmap,
         scratch: &mut ProjectScratch,
     ) -> croaring::Bitmap {
+        self.project_until(mask, scratch, &|| false)
+            .expect("a walk nothing stops runs to its end")
+    }
+
+    /// [`Self::project_with`], given up once `stop` answers true: `None`, and the rows walked so
+    /// far are dropped. `stop` is asked before each round of the walk, so a caller whose reader
+    /// has gone pays for at most [`PROJECT_WINDOW_ROWS`] more entities.
+    pub fn project_until(
+        &self,
+        mask: &croaring::Bitmap,
+        scratch: &mut ProjectScratch,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<croaring::Bitmap> {
         if mask.is_empty() {
-            return croaring::Bitmap::new();
+            return Some(croaring::Bitmap::new());
         }
         if let Some(&rows) = self.dense_rows.get() {
             if self.covers_domain(mask) {
-                return Self::row_range(rows);
+                return Some(Self::row_range(rows));
             }
         }
-        self.project_windowed(mask, scratch, PROJECT_WINDOW_ROWS)
+        self.walk_until(mask, scratch, PROJECT_WINDOW_ROWS, PARALLEL_MIN_ENTITIES, stop)
     }
 
     /// The image of `mask`, computed from the entities **outside** it:
@@ -1571,6 +1584,19 @@ impl Permutation {
         window_rows: usize,
         parallel_min: usize,
     ) -> croaring::Bitmap {
+        self.walk_until(mask, scratch, window_rows, parallel_min, &|| false)
+            .expect("a walk nothing stops runs to its end")
+    }
+
+    /// [`Self::walk`], given up with `None` once `stop`, asked before each round, answers true.
+    fn walk_until(
+        &self,
+        mask: &croaring::Bitmap,
+        scratch: &mut ProjectScratch,
+        window_rows: usize,
+        parallel_min: usize,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<croaring::Bitmap> {
         let readable = Readable::of(mask);
         let containers = readable.containers();
         // The pages the mask holds entities in that this permutation holds slots for, in entity
@@ -1592,7 +1618,7 @@ impl Permutation {
             });
         }
         if held == 0 {
-            return croaring::Bitmap::new();
+            return Some(croaring::Bitmap::new());
         }
         let threads = if scratch.serial || held < parallel_min {
             1
@@ -1637,6 +1663,9 @@ impl Permutation {
 
         let mut rows = croaring::Bitmap::new();
         for round in pieces.chunks(used) {
+            if stop() {
+                return None;
+            }
             let workers = &mut scratch.workers[..round.len()];
             let walk_piece = |worker: &mut Worker, piece: &std::ops::Range<usize>| {
                 worker.prepare(nbuckets, widest, chunk_rows);
@@ -1671,7 +1700,7 @@ impl Permutation {
                 rows.or_inplace(&part);
             }
         }
-        rows
+        Some(rows)
     }
 
     /// Whether `mask` holds every entity this permutation covers, `[0, bound)`.
@@ -2552,6 +2581,24 @@ impl RowSpace {
         rows
     }
 
+    /// [`Self::project`], given up with `None` once `stop` answers true
+    /// ([`Permutation::project_until`]). It is asked through the base's walk and before the
+    /// extents'.
+    pub fn project_until(
+        &self,
+        mask: &croaring::Bitmap,
+        stop: &dyn Fn() -> bool,
+    ) -> Option<croaring::Bitmap> {
+        let mut rows = self
+            .base
+            .project_until(mask, &mut ProjectScratch::default(), stop)?;
+        if stop() {
+            return None;
+        }
+        rows.or_inplace(&self.project_extents_from(mask, 0));
+        Some(rows)
+    }
+
     /// Project into the **base** rows alone, ignoring every extent above them.
     ///
     /// **What the fold writes.** A durable derived structure — a row-major column, a tile
@@ -2748,6 +2795,30 @@ mod tests {
                 "density {density}, declared"
             );
         }
+    }
+
+    /// A row space's stoppable projection is its projection where nothing stops it, the extents'
+    /// rows with the base's, and nothing where it is stopped before the extents.
+    #[test]
+    fn a_row_spaces_stoppable_projection_is_its_projection_unless_stopped() {
+        const BOUND: u64 = (2 << PAGE_SHIFT) + 500;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut rng = StdRng::seed_from_u64(5);
+        let (space, extents) = row_space_fixture(dir.path(), BOUND, 0.7, &mut rng);
+        let top = space.entity_floor() + 50;
+        let mask: croaring::Bitmap = (0..top)
+            .filter(|_| rng.gen_bool(0.5))
+            .map(|e| e as u32)
+            .collect();
+        let whole = space.project(&mask);
+        assert!(
+            extents
+                .iter()
+                .any(|extent| !extent.project(&mask).is_empty()),
+            "the mask holds entities of the extents"
+        );
+        assert_eq!(space.project_until(&mask, &|| false), Some(whole));
+        assert_eq!(space.project_until(&mask, &|| true), None);
     }
 
     /// `restrict_to_view(set, through)` keeps the members of `set` with a row in the base or in the
@@ -2957,6 +3028,37 @@ mod tests {
                  {WINDOW}-row window over {BOUND} rows"
             );
         }
+    }
+
+    /// A walk stopped part of the way gives no rows, and the scratch it used projects the next
+    /// mask as a fresh one does.
+    #[test]
+    fn a_stopped_projection_gives_nothing_and_leaves_its_scratch_usable() {
+        const BOUND: u64 = (4 << PAGE_SHIFT) + 100;
+        // A quarter of the mask a round, on one thread.
+        const WINDOW: usize = BOUND as usize / 4;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut rng = StdRng::seed_from_u64(13);
+        let perm = fixture(dir.path(), BOUND, 1.0, &mut rng);
+        let mask = croaring::Bitmap::from_range(1..BOUND as u32);
+        let asked = std::cell::Cell::new(0u32);
+        let mut scratch = ProjectScratch::serial();
+        let stopped = perm.walk_until(&mask, &mut scratch, WINDOW, usize::MAX, &|| {
+            asked.set(asked.get() + 1);
+            asked.get() == 2
+        });
+        assert!(stopped.is_none(), "a stopped walk gives no rows");
+        assert_eq!(asked.get(), 2, "the walk ends at the ask that stops it");
+        assert_eq!(
+            perm.project_with(&mask, &mut scratch),
+            perm.project(&mask),
+            "the scratch a stopped walk used projects as a fresh one"
+        );
+        assert_eq!(
+            perm.project_until(&mask, &mut scratch, &|| false),
+            Some(perm.project(&mask))
+        );
+        assert_eq!(perm.project_until(&mask, &mut scratch, &|| true), None);
     }
 
     /// **The case the pool exists for:** rows arriving in order, so each window lands in one

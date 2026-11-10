@@ -21,6 +21,8 @@ The key can mint a session for any principal holding `read`. This app server the
 
 The page calls the viewer routes on its own origin. `server.mjs` proxies `/v1/*` to the viewer listener and forwards every response header. The client reads `etag`, `x-mosaica-identity-key`, `x-mosaica-pin`, `x-mosaica-stale`, `x-mosaica-region`, `x-mosaica-server-us` and `x-mosaica-admission-us`, so a proxy in front of the viewer listener has to pass them through.
 
+A proxy also has to pass on a request the page abandons. The store abandons a request whenever a newer filter, camera or `cancelQuery()` takes its place, and closing the connection is how Mosaica learns that nobody is waiting for the answer. `proxy()` aborts its request to the viewer listener when the page's connection closes before the answer has ended.
+
 A deployment can instead list the page's origin in `serve.cors_origins`. That admits the page to the viewer listener only, and the session listener stays closed to browsers. `serve.dev_cors_origins`, which the demo uses, also opens the session listener and is for development only.
 
 ## The other examples

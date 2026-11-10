@@ -252,6 +252,11 @@ export class Aggregates {
     );
   }
 
+  /** Whether any registered aggregate has a request in flight or waits to send one again. */
+  get busy(): boolean {
+    return this.asking.size > 0 || this.waiting.size > 0;
+  }
+
   /** Abort every request in flight. Nothing lands afterwards. */
   dispose(): void {
     this.disposed = true;
@@ -295,8 +300,9 @@ export class Aggregates {
       }
     }
     if (ids.every((id) => next.get(id) === this.entries.get(id))) return;
-    this.replace(next);
+    // Begun before the entries are published, so a subscriber finds them in flight.
     for (const id of asked) void this.one(id, this.specs.get(id)!, 0);
+    this.replace(next);
   }
 
   private async one(id: string, spec: AggregateSpec, attempt: number): Promise<void> {
@@ -310,9 +316,10 @@ export class Aggregates {
       const body = this.compose(spec);
       if (body === null) {
         // Not sendable under the meta just read, as a `view` aggregate with no camera; it stays
-        // loading until a refresh finds it sendable.
+        // loading until a refresh finds it sendable. Published so a subscriber sees it at rest.
         this.asking.delete(id);
         this.sent.delete(id);
+        this.replace(new Map(this.entries));
         return;
       }
       this.sent.set(id, jsonBody(body));
@@ -329,17 +336,19 @@ export class Aggregates {
     // A newer ask for this id, a drop or a dispose has taken its place.
     if (this.asking.get(id) !== controller || controller.signal.aborted) return;
     this.asking.delete(id);
+    // Armed before the entry is published, so a subscriber finds the retry waiting.
+    if (wait !== null) {
+      this.waiting.set(
+        id,
+        this.clock.after(wait, () => {
+          this.waiting.delete(id);
+          if (!this.disposed && this.specs.get(id) === spec) void this.one(id, spec, attempt + 1);
+        })
+      );
+    }
     const next = new Map(this.entries);
     next.set(id, entry);
     this.replace(next);
-    if (wait === null) return;
-    this.waiting.set(
-      id,
-      this.clock.after(wait, () => {
-        this.waiting.delete(id);
-        if (!this.disposed && this.specs.get(id) === spec) void this.one(id, spec, attempt + 1);
-      })
-    );
   }
 
   private replace(next: Map<string, AggregateEntry>): void {

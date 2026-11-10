@@ -311,6 +311,39 @@ fn the_walk_visits_every_key_exactly_once_in_order() {
     }
 }
 
+/// A walk given up part of the way has visited the keys before the block it stopped at, in order,
+/// and says it did not finish; one nothing stops is the whole walk.
+#[test]
+fn a_stopped_walk_has_visited_the_keys_before_it_stopped_and_says_so() {
+    let keys: Vec<String> = (0..1000).map(|i| format!("w{:04}", i)).collect();
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let dict = open(&refs, 1);
+
+    let asked = std::cell::Cell::new(0u32);
+    let mut seen = Vec::new();
+    let finished = dict
+        .walk_until(
+            &|| {
+                asked.set(asked.get() + 1);
+                asked.get() == 3
+            },
+            |ordinal, key| seen.push((ordinal, key.to_string())),
+        )
+        .unwrap();
+    assert!(!finished);
+    assert_eq!(asked.get(), 3, "the walk ends at the ask that stops it");
+    assert!(!seen.is_empty() && seen.len() < keys.len());
+    for (i, (ordinal, key)) in seen.iter().enumerate() {
+        assert_eq!((*ordinal, key), (i as u32, &keys[i]));
+    }
+
+    let mut all = Vec::new();
+    assert!(dict
+        .walk_until(&|| false, |_, key| all.push(key.to_string()))
+        .unwrap());
+    assert_eq!(all, keys);
+}
+
 /// Every operation cross-checked against a plain sorted `Vec`, over pseudo-random key sets at
 /// pseudo-random restart intervals.
 ///

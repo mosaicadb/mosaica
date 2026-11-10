@@ -160,7 +160,10 @@ impl HeldFilter {
         level.filtered = match held {
             Some(counts) => counts.counts.clone(),
             None => {
-                let counts = level.filtered_counts(engine, mask, &self.rows);
+                // Counted to the end whoever is waiting, since the counts are held for every page.
+                let counts = level
+                    .filtered_counts(engine, mask, &self.rows, &None)
+                    .expect("a walk with no token is never cancelled");
                 self.levels.insert(
                     key,
                     HeldCounts {

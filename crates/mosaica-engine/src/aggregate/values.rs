@@ -178,13 +178,19 @@ impl Field {
         let mut sides = Vec::new();
         for place in cx.reads() {
             cx.check_clock()?;
-            sides.push(match self.held && (set.has_entities(place) || !self.drawn) {
-                true => self.counts_by_entity(cx, place, set.entities(cx, place)?)?,
-                false => cx
-                    .engine
-                    .pool
-                    .install(|| tally_rows(set.cells(cx, place), cx.segments(place), &self.column)),
-            });
+            sides.push(
+                match self.held && (set.has_entities(place) || !self.drawn) {
+                    true => self.counts_by_entity(cx, place, set.entities(cx, place)?)?,
+                    false => cx.engine.pool.install(|| {
+                        tally_rows(
+                            set.cells(cx, place),
+                            cx.segments(place),
+                            &self.column,
+                            cx.cancel(),
+                        )
+                    })?,
+                },
+            );
         }
         Ok(Counts::summed(sides))
     }
@@ -335,12 +341,15 @@ fn sizes(codes: &[u32], set: &Counts, reference: Option<&Counts>) -> Vec<(u64, u
 }
 
 /// A drawn column's codes over a set's rows, counted in one parallel pass. Code 0 and a segment
-/// without the column count as no value.
+/// without the column count as no value. Once the request holding `cancel` has gone the pieces not
+/// yet begun are skipped and the pass answers [`EngineError::Cancelled`], never a count of some
+/// pieces.
 fn tally_rows(
     set: CellSet<'_>,
     segments: &[(&mosaica_store::read::SegmentData, u32)],
     column: &str,
-) -> Counts {
+    cancel: &Option<crate::CancelToken>,
+) -> Result<Counts> {
     let pieces = pieces(segments);
     // Indexed by code up to the widest code any segment stores, a map where one stores 32 bits.
     let width = segments
@@ -357,6 +366,9 @@ fn tally_rows(
     let tally = pieces
         .par_iter()
         .fold(empty, |mut tally, (s, rows)| {
+            if crate::cancel::gone(cancel) {
+                return tally;
+            }
             let (segment, row_base) = segments[*s];
             let base = row_base as usize;
             match segment.columns.scalar(column) {
@@ -380,7 +392,8 @@ fn tally_rows(
             tally
         })
         .reduce(empty, Tally::merge);
-    tally.into_counts()
+    crate::cancel::check_cancelled(cancel)?;
+    Ok(tally.into_counts())
 }
 
 /// The view's rows cut into pieces of at most [`PIECE_ROWS`], each within one segment: the segment's

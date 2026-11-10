@@ -572,4 +572,19 @@ export const chrome = css`
   .dot.refuse {
     background: var(--_mosaica-refuse);
   }
+  /* A query running: on the status strip, and in the control that asked for it. */
+  .spinner {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--_mosaica-line);
+    border-top-color: var(--_mosaica-ink-2);
+    border-radius: 50%;
+    animation: mosaica-spin 0.8s linear infinite;
+  }
+  @keyframes mosaica-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 `;

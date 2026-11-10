@@ -4,7 +4,7 @@ import {tileRectOfBbox} from './budget.js';
 import {MAX_DEPTH, WORLD_SIZE, mortonOfTile, rectToRequestBbox} from './coords.js';
 import {gridOfData} from './projection.js';
 import {worldBbox, type Viewport} from './prefetch.js';
-import type {ViewState} from './driver.js';
+import {RETRY_DEFAULTS, retryDelayMs, type RetryOptions, type ViewState} from './driver.js';
 import type {AggregateCut, Artifact, FilterExpr, Layer, MapProjection, Quantisation, ViewportArtifactsFrame} from './types.js';
 import {SessionArtifactTable, type ArtifactRef} from './artifactTable.js';
 import {refusalOf, type Refusal} from './presented.js';
@@ -229,6 +229,8 @@ export type ArtifactChannelOptions = {
   prefetch: boolean;
   onChange(state: ArtifactChannelState): void;
   clock?: ArtifactChannelClock;
+  /** How a request the server sheds (`429`) or is not ready for (`503`) is sent again. Defaults to {@link RETRY_DEFAULTS}. */
+  retry?: RetryOptions;
   settleMs?: number;
   /** How long the view must be quiet before a prefetch goes out. See {@link PREFETCH_IDLE_MS}. */
   idleMs?: number;
@@ -260,6 +262,7 @@ export class ArtifactChannel {
   /** The request's `palette_size`; `undefined` asks for no slots. */
   private paletteSize: number | undefined;
   private readonly clock: ArtifactChannelClock;
+  private readonly retry: RetryOptions;
   private readonly settleMs: number;
   private readonly idleMs: number;
   private readonly table: SessionArtifactTable | null;
@@ -291,6 +294,7 @@ export class ArtifactChannel {
     private readonly opts: ArtifactChannelOptions
   ) {
     this.clock = opts.clock ?? defaultClock();
+    this.retry = opts.retry ?? RETRY_DEFAULTS;
     this.settleMs = opts.settleMs ?? SETTLE_MS;
     this.idleMs = opts.idleMs ?? PREFETCH_IDLE_MS;
     this.table = opts.table ?? null;
@@ -344,6 +348,11 @@ export class ArtifactChannel {
 
   get current(): ArtifactChannelState {
     return this.state;
+  }
+
+  /** Whether a request for the noted view is in flight, or waits to be sent or sent again. */
+  get pending(): boolean {
+    return this.timer !== null || this.inFlight !== null;
   }
 
   /** How many tiles are held. */
@@ -458,6 +467,9 @@ export class ArtifactChannel {
     if (!contentKey || !this.heldUnder || this.heldUnder.contentKey === contentKey) return;
     this.dropHeld();
     if (this.view && this.state.layers.length > 0) {
+      // This request stands in for one waiting to be sent or sent again.
+      if (this.timer) this.clock.cancel(this.timer);
+      this.timer = null;
       void this.request();
       return;
     }
@@ -698,7 +710,14 @@ export class ArtifactChannel {
     return true;
   }
 
-  private async request(): Promise<void> {
+  /**
+   * Asks for the noted view. A request the server sheds or is not ready for is sent again after
+   * {@link retryDelayMs}, with what is drawn kept as loading meanwhile; a newer ask takes the
+   * wait's place.
+   *
+   * @param attempt - Retries already made, from 0.
+   */
+  private async request(attempt = 0): Promise<void> {
     // A prefetch is idle work under what was held; this request may hold something else.
     this.cancelPrefetch();
     const view = this.view;
@@ -746,6 +765,15 @@ export class ArtifactChannel {
     } catch (error) {
       if (signal.signal.aborted || this.inFlight !== signal) return;
       this.inFlight = null;
+      const wait = retryDelayMs(error, attempt, this.retry);
+      if (wait !== null) {
+        if (this.timer) this.clock.cancel(this.timer);
+        this.timer = this.clock.after(wait, () => {
+          this.timer = null;
+          void this.request(attempt + 1);
+        });
+        return;
+      }
       // A refusal drops the served set, which answered a superseded request. The tiles are kept: a
       // failed request says nothing about whether they are still true.
       this.state = {...this.state, artifacts: [], status: 'refused', refusal: refusalOf(error), version: this.state.version + 1};

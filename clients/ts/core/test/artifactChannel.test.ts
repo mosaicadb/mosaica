@@ -8,7 +8,7 @@ import {
   type ArtifactChannelState
 } from '../src/artifactChannel.js';
 import {SessionArtifactTable} from '../src/artifactTable.js';
-import {MosaicaClient, type TileSink} from '../src/client.js';
+import {MosaicaClient, MosaicaError, type TileSink} from '../src/client.js';
 import {GRID32, WORLD_SIZE, mortonOfTile} from '../src/coords.js';
 import type {Artifact, Layer, Quantisation, ViewportArtifactsRequest} from '../src/types.js';
 import {artifact, layer, manualClock, settle, tileAnswers} from './support.js';
@@ -152,6 +152,54 @@ describe('the artifact channel asks by tile', () => {
     expect(ch.current.status).toBe('refused');
     expect(ch.current.artifacts).toEqual([]);
     expect(ch.heldTiles).toBe(4);
+  });
+
+  it('sends a shed request again after a wait, keeping what is drawn, and refuses only once its retries are spent', async () => {
+    const {client, viewportArtifacts} = fakeClient();
+    const {ch, clock} = channel(client);
+    ch.setLayer('clusters/x');
+    ch.refresh(view, 200, 150);
+    await settle();
+    const drawn = served(ch);
+    const shed = () => new MosaicaError(429, 'backpressure', 'busy', 1);
+
+    viewportArtifacts.mockRejectedValueOnce(shed());
+    ch.refresh({target: [66, 50, 0], zoom: 3}, 200, 150);
+    await settle();
+    expect(ch.current.status).toBe('loading');
+    expect(served(ch).some((id) => drawn.includes(id))).toBe(true);
+    expect(clock.pending).toBe(1);
+    clock.fire();
+    await settle();
+    expect(ch.current.status).toBe('shown');
+    expect(viewportArtifacts).toHaveBeenCalledTimes(3);
+
+    // Two retries by default: the third refusal in a row stands.
+    viewportArtifacts.mockRejectedValueOnce(shed()).mockRejectedValueOnce(shed()).mockRejectedValueOnce(shed());
+    ch.refresh({target: [82, 50, 0], zoom: 3}, 200, 150);
+    await settle();
+    clock.fire();
+    await settle();
+    expect(ch.current.status).toBe('loading');
+    clock.fire();
+    await settle();
+    expect(ch.current.status).toBe('refused');
+    expect(ch.current.refusal?.status).toBe(429);
+  });
+
+  it('drops a waiting retry when a newer view is asked for', async () => {
+    const {client, viewportArtifacts} = fakeClient();
+    const {ch, clock} = channel(client);
+    ch.setLayer('clusters/x');
+    viewportArtifacts.mockRejectedValueOnce(new MosaicaError(429, 'backpressure', 'busy', 1));
+    ch.refresh(view, 200, 150);
+    await settle();
+    expect(clock.pending).toBe(1);
+    ch.refresh({target: [66, 50, 0], zoom: 3}, 200, 150);
+    await settle();
+    expect(clock.pending).toBe(0);
+    expect(ch.current.status).toBe('shown');
+    expect(viewportArtifacts).toHaveBeenCalledTimes(2);
   });
 
   it('asks nothing and shows nothing with no layer, and keeps the tiles for when one is back', async () => {

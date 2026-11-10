@@ -108,9 +108,14 @@ impl Engine {
                         match self.route_over_view(
                             served, side, &resolved, cancel, route, expr, choice,
                         )? {
-                            crate::viewport::OverView::Entities(entities) => {
-                                (side.data.row_space.project(&entities), None)
-                            }
+                            crate::viewport::OverView::Entities(entities) => (
+                                crate::viewport::project_until(
+                                    &side.data.row_space,
+                                    &entities,
+                                    cancel,
+                                )?,
+                                None,
+                            ),
                             crate::viewport::OverView::Rows { rows, region } => (rows, region),
                         },
                     )
@@ -588,20 +593,26 @@ impl ReadLevel {
     /// Every artifact's visible members in `filter_rows` (indexed like `served.sides`) over every
     /// side: in each side the request reads, one walk of `visible ∩ filter` through the side's
     /// column, which needs no per-artifact membership, summed. `None` unless every side the request
-    /// reads has a column.
+    /// reads has a column. Each walk reads `cancel` between its chunks and ends with
+    /// [`crate::EngineError::Cancelled`] once the request holding it has gone.
     pub(crate) fn filtered_counts(
         &self,
         engine: &Engine,
         mask: &ShardedMask,
         filter_rows: &[impl std::borrow::Borrow<Bitmap>],
-    ) -> Option<Arc<Vec<u64>>> {
-        let sides: Vec<Vec<u32>> = self
-            .forms
-            .filtered_inputs(mask, filter_rows)?
-            .into_iter()
-            .map(|(column, visible)| engine.pool.install(|| column.histogram_over(&visible)))
-            .collect();
-        Some(Arc::new(summed_counts(&sides)))
+        cancel: &Option<crate::CancelToken>,
+    ) -> crate::error::Result<Option<Arc<Vec<u64>>>> {
+        let Some(inputs) = self.forms.filtered_inputs(mask, filter_rows) else {
+            return Ok(None);
+        };
+        let mut sides: Vec<Vec<u32>> = Vec::with_capacity(inputs.len());
+        for (column, visible) in inputs {
+            let walked = engine
+                .pool
+                .install(|| column.accumulate(&visible, None, &|| !crate::cancel::gone(cancel)));
+            sides.push(walked.ok_or(crate::EngineError::Cancelled)?.counts);
+        }
+        Ok(Some(Arc::new(summed_counts(&sides))))
     }
 
     /// How many of the artifact's visible members are in `filter_rows` over every side, from

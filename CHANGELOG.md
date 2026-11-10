@@ -20,6 +20,13 @@ container image.
 - Python: `views()`, `attributes(view=None)` and `layers(view=None)` on `Database` and `Viewer`
   list what `/v1/meta` describes, each attribute with the filter operators it takes as
   `operands`.
+- The TypeScript store reports a query in flight. `status.querying` is true from a change of
+  filters, highlight, `member_of` clauses, selected region or regions held in other views until
+  the map, the artifacts and the counts have loaded, and `store.cancelQuery()` goes back to the ones that last finished loading.
+  `<mosaica-status>` reads Running query, with a Cancel button, once a query has run for a quarter
+  of a second, and a `<mosaica-filter>` box shows a spinner for the query it started. Cancel fires
+  `mosaica-filterchange`, `mosaica-clausechange` and `mosaica-selectchange` for what it went back
+  to.
 
 ### Changed
 
@@ -47,6 +54,25 @@ container image.
 - A request after a flush or merge is no longer refused with 429 while the server brings each
   viewer's visible set up to date. It brings its own up to date and is answered.
   `refresh_in_flight` in `GET /control/status` still reports the work in progress.
+
+### Fixed
+
+- When a client goes away, Mosaica stops working on its request inside a column, range, `in` or
+  keyword filter and inside an aggregate's passes over a column, as it already did inside a text
+  filter. Those requests used to run to their end, so a viewer changing filters quickly left the
+  server computing answers nobody was waiting for. A filter condition several requests are
+  waiting on is worked out until the last of them has gone, so a viewer who pans while a new
+  filter is first evaluated does not start it again.
+- The plain-HTML example's server abandons its request to Mosaica when the page abandons its
+  own. It used to read every proxied answer to the end, so Mosaica kept working on requests the
+  page had dropped. It also no longer exits when Mosaica fails part of the way through an answer.
+- After a change of filters the TypeScript store asks for a layer's artifacts at once, where it
+  used to wait 200 ms as it does after a camera move.
+- A `<mosaica-filter>` box empties when the store's filters no longer hold what it sent, and does
+  not send text typed before the filters were replaced underneath it.
+- The TypeScript store sends a request for a layer's artifacts again when Mosaica sheds it
+  (`429`) or is still starting (`503`), as it does a map request. It used to give up at once, so
+  the clusters and their labels stayed off the map until the camera next moved.
 
 ## [0.3.0] - 2026-11-08
 

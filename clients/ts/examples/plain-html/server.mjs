@@ -7,7 +7,7 @@
 //
 // It also serves the page and the self-contained bundle from the installed `@mosaicajs/components`,
 // and proxies `/v1/*` to the viewer server on the same origin with every response header, including
-// those the client's replica is keyed by.
+// those the client's replica is keyed by. A request the page abandons is abandoned upstream too.
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {Readable} from 'node:stream';
@@ -38,7 +38,11 @@ export async function authorise({sessionUrl, apiKey}, principal) {
 
 /**
  * Forward one request to the viewer server and stream the answer back with every response header,
- * since the client keys its replica on some of them.
+ * since the client keys its replica on some of them. Where the page goes away before the answer
+ * has ended, as it does when a newer request takes this one's place, the request to the viewer
+ * server is aborted, which is what tells Mosaica to stop working on it. Where the viewer server
+ * fails part of the way through an answer, the page's connection is cut, so the page reads an
+ * answer that stopped and not one that ended.
  *
  * @param {string} viewerUrl
  * @param {import('node:http').IncomingMessage} req
@@ -49,19 +53,31 @@ export async function proxy(viewerUrl, req, res) {
   for (const [name, value] of Object.entries(req.headers)) {
     if (typeof value === 'string' && name !== 'host' && name !== 'connection') headers.set(name, value);
   }
-  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : /** @type {ReadableStream} */ (Readable.toWeb(req));
-  const init = /** @type {RequestInit} */ ({method: req.method, headers, body, duplex: 'half'});
-  const upstream = await fetch(`${viewerUrl}${req.url}`, init);
-  /** @type {Record<string, string>} */
-  const forwarded = {};
-  upstream.headers.forEach((value, name) => {
-    forwarded[name] = value;
+  const gone = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) gone.abort();
   });
-  res.writeHead(upstream.status, forwarded);
-  if (!upstream.body) return res.end();
-  const reader = upstream.body.getReader();
-  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) res.write(chunk.value);
-  res.end();
+  const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : /** @type {ReadableStream} */ (Readable.toWeb(req));
+  const init = /** @type {RequestInit} */ ({method: req.method, headers, body, duplex: 'half', signal: gone.signal});
+  try {
+    const upstream = await fetch(`${viewerUrl}${req.url}`, init);
+    /** @type {Record<string, string>} */
+    const forwarded = {};
+    upstream.headers.forEach((value, name) => {
+      forwarded[name] = value;
+    });
+    res.writeHead(upstream.status, forwarded);
+    if (!upstream.body) return res.end();
+    const reader = upstream.body.getReader();
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) res.write(chunk.value);
+    res.end();
+  } catch (e) {
+    // Nobody is left to answer.
+    if (gone.signal.aborted) return;
+    // The status has gone out, so the failure cannot be answered as one.
+    if (res.headersSent) return void res.destroy();
+    throw e;
+  }
 }
 
 /**

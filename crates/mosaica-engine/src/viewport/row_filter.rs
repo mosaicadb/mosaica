@@ -18,7 +18,8 @@ impl Engine {
     /// Cross a filter's entity-space result into one shard's row space for the view, by whichever
     /// of two routes is cheaper ([`crossing_projects`]): projecting the whole result, or walking the
     /// request's own tiles and testing each row's entity. The two agree exactly over every range
-    /// the request can ask about.
+    /// the request can ask about. Either route ends with [`EngineError::Cancelled`] once the
+    /// request holding `cancel` has gone.
     fn cross_filter_into_row_space(
         &self,
         side: &ServedSide<'_>,
@@ -26,33 +27,37 @@ impl Engine {
         domain: &[Range<u32>],
         rows_in_ranges: u64,
         per_tile_only: bool,
-    ) -> FilterRows {
+        cancel: &Option<CancelToken>,
+    ) -> Result<FilterRows> {
         let row_space = &side.data.row_space;
         if !crossing_projects(row_space, entities.cardinality(), rows_in_ranges, per_tile_only) {
             // `None` is the row space declining to invert a row; falling through to the exact
             // route costs latency only, where trusting a partial answer would drop rows.
             if let Some(rows) = self.on_pool(rows_in_ranges, || {
-                per_tile_crossing(row_space, entities, domain, rows_in_ranges)
-            }) {
+                per_tile_crossing(row_space, entities, domain, rows_in_ranges, cancel)
+            })? {
                 self.counters
                     .filter_crossings_per_tile
                     .fetch_add(1, Ordering::Relaxed);
-                return FilterRows::Viewport {
+                return Ok(FilterRows::Viewport {
                     rows,
                     domain: domain.to_vec(),
-                };
+                });
             }
         }
+        let rows = project_until(row_space, entities, cancel)?;
         self.counters
             .filter_crossings_projected
             .fetch_add(1, Ordering::Relaxed);
-        FilterRows::Complete(row_space.project(entities))
+        Ok(FilterRows::Complete(rows))
     }
 
     /// A routed filter's answer as rows over `domain`, ascending, disjoint and merged ranges of
     /// `side`'s row space holding `rows_in_ranges` rows: an entity-space verdict crossed into row
     /// space, or a tree with row-space leaves evaluated there. `per_tile_only` holds either to the
-    /// domain rather than letting a whole-view projection be chosen where it is cheaper.
+    /// domain rather than letting a whole-view projection be chosen where it is cheaper. It ends
+    /// with [`EngineError::Cancelled`] once the request holding `cancel` has gone.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn rows_of_routed(
         &self,
         served: &ServedView<'_>,
@@ -61,6 +66,7 @@ impl Engine {
         domain: &[Range<u32>],
         rows_in_ranges: u64,
         per_tile_only: bool,
+        cancel: &Option<CancelToken>,
     ) -> Result<RoutedRows> {
         Ok(match routed {
             crate::filter::RoutedFilter::Entity(entities) => RoutedRows {
@@ -71,7 +77,8 @@ impl Engine {
                     domain,
                     rows_in_ranges,
                     per_tile_only,
-                ),
+                    cancel,
+                )?,
                 region: None,
             },
             crate::filter::RoutedFilter::Row(tree) => {
@@ -82,6 +89,7 @@ impl Engine {
                     domain,
                     rows_in_ranges,
                     per_tile_only,
+                    cancel,
                 )?;
                 self.counters.filter_row_routed.fetch_add(1, Ordering::Relaxed);
                 RoutedRows {
@@ -104,7 +112,10 @@ impl Engine {
     /// bounded by nothing but region leaves and projected verdicts comes back
     /// [`FilterRows::Complete`]; a render leaf or a per-tile crossing bounds the answer and comes
     /// back [`FilterRows::Viewport`]. A render leaf's rows are read from the filter cache over the
-    /// rows it has scanned for the leaf, and scanned over the rest ([`crate::filter_cache`]).
+    /// rows it has scanned for the leaf, and scanned over the rest ([`crate::filter_cache`]). The
+    /// crossing and each leaf's scan end with [`EngineError::Cancelled`] once the request holding
+    /// `cancel` has gone, and a scan that ends so is not kept.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn evaluate_row_route(
         &self,
         tree: &crate::filter::RowExpr,
@@ -113,6 +124,7 @@ impl Engine {
         domain: &[Range<u32>],
         rows_in_ranges: u64,
         per_tile_only: bool,
+        cancel: &Option<CancelToken>,
     ) -> Result<FilterRows> {
         let row_space = &side.data.row_space;
         let segments = &side.segments[..];
@@ -126,13 +138,12 @@ impl Engine {
         } else {
             let total_matched: u64 = verdicts.iter().map(|v| v.cardinality()).sum();
             let walks = !crossing_projects(row_space, total_matched, rows_in_ranges, per_tile_only);
-            let walked = walks
-                .then(|| {
-                    self.on_pool(rows_in_ranges, || {
-                        per_tile_crossing_multi(row_space, &verdicts, domain, rows_in_ranges)
-                    })
-                })
-                .flatten();
+            let walked = match walks {
+                true => self.on_pool(rows_in_ranges, || {
+                    per_tile_crossing_multi(row_space, &verdicts, domain, rows_in_ranges, cancel)
+                })?,
+                false => None,
+            };
             match walked {
                 Some(images) => {
                     self.counters
@@ -146,14 +157,17 @@ impl Engine {
                         .filter_crossings_projected
                         .fetch_add(1, Ordering::Relaxed);
                     if whole_view {
-                        verdicts.iter().map(|v| row_space.project(v)).collect()
+                        verdicts
+                            .iter()
+                            .map(|v| project_until(row_space, v, cancel))
+                            .collect::<Result<_>>()?
                     } else {
                         // Clamped so the combined answer never claims a row outside what
                         // `FilterRows::Viewport` says was tested.
                         verdicts
                             .iter()
-                            .map(|v| row_space.project(v).and(&domain_rows))
-                            .collect()
+                            .map(|v| Ok(project_until(row_space, v, cancel)?.and(&domain_rows)))
+                            .collect::<Result<_>>()?
                     }
                 }
             }
@@ -182,7 +196,7 @@ impl Engine {
                 key,
                 domain,
                 &domain_rows,
-                |ranges| scan_rows(segments, ranges, column, values.predicate()),
+                |ranges| scan_rows(segments, ranges, column, values.predicate(), cancel),
             )
         };
         let mut next_image = 0usize;
@@ -233,7 +247,9 @@ impl Engine {
                 let region = tree.region_verdict();
                 // Exact over the whole view: every match lies inside the bounding region, whose
                 // rows the domain holds.
-                let rows = match self.evaluate_row_route(&tree, served, side, domain, rows, false)? {
+                let rows = match self
+                    .evaluate_row_route(&tree, served, side, domain, rows, false, cancel)?
+                {
                     FilterRows::Complete(rows) | FilterRows::Viewport { rows, .. } => rows,
                 };
                 OverView::Rows { rows, region }
@@ -926,12 +942,15 @@ struct ScannedSegment<'a> {
 /// that is one chunk. `domain` ascends, which the walk through each chunk's segments relies on.
 /// A segment that holds the column
 /// at a type other than a fixed width is a malformed bundle, refused. A segment whose schema does
-/// not hold the column matches nothing, answered from the schema, never from a blob read.
+/// not hold the column matches nothing, answered from the schema, never from a blob read. The scan
+/// ends with [`EngineError::Cancelled`] at the next chunk once the request holding `cancel` has
+/// gone.
 fn scan_rows(
     segments: &[(&SegmentData, u32)],
     domain: &[Range<u32>],
     column: &str,
     predicate: RowPredicate<'_>,
+    cancel: &Option<CancelToken>,
 ) -> Result<croaring::Bitmap> {
     // Per-segment slices and presence, resolved once. `segments` is ascending by `row_base`,
     // which the per-row resolution below relies on.
@@ -967,7 +986,7 @@ fn scan_rows(
         .collect::<Result<Vec<_>>>()?;
 
     let chunks = domain_chunks(domain, domain.iter().map(|r| r.len() as u64).sum());
-    let parts: Vec<croaring::Bitmap> = over_chunks(&chunks, |chunk| {
+    let parts: Vec<croaring::Bitmap> = over_chunks(&chunks, cancel, |chunk| {
         let mut rows = croaring::Bitmap::new();
         let mut buf: Vec<u32> = Vec::with_capacity(1024);
         // The segment owning the chunk's first row, advanced as the walk crosses a boundary: a
@@ -999,7 +1018,7 @@ fn scan_rows(
             }
         }
         rows
-    });
+    })?;
     let refs: Vec<&croaring::Bitmap> = parts.iter().collect();
     Ok(croaring::Bitmap::fast_or(&refs))
 }
@@ -1276,6 +1295,7 @@ impl Engine {
                                     domain,
                                     rows_in_ranges,
                                     per_tile_only,
+                                    &req.cancel,
                                 )?
                             }
                         };
@@ -1343,9 +1363,18 @@ impl Engine {
         let matched = items.cardinality();
         if !crossing_projects(row_space, matched, rows_in_ranges, per_tile_only) {
             let routed = crate::filter::RoutedFilter::Entity(items);
-            return self.rows_of_routed(served, side, routed, domain, rows_in_ranges, per_tile_only);
+            return self.rows_of_routed(
+                served,
+                side,
+                routed,
+                domain,
+                rows_in_ranges,
+                per_tile_only,
+                cancel,
+            );
         }
-        let rows = row_space.project(&items);
+        // Kept only once the whole of it is in hand.
+        let rows = project_until(row_space, &items, cancel)?;
         let answer = rows.and(domain_rows);
         let total_rows = u32::try_from(row_space.total_rows()).unwrap_or(u32::MAX);
         crate::filter_cache::keep_projection(&self.filter_cache, side.shard, key, rows, total_rows);
@@ -1454,7 +1483,7 @@ impl Engine {
         )?;
         let candidate = FilterCandidate::Within(&candidate);
         let items = self.items_under(served, side, candidate, resolved, cancel, expr)?;
-        Ok(side.data.row_space.project(&items))
+        project_until(&side.data.row_space, &items, cancel)
     }
 
     /// The visible entities whose rows lie in `domain`, the rows a request's tiles span in `side`
@@ -1584,7 +1613,7 @@ impl Engine {
             unique_holders(&self.identity_key, served.generation, side.shard, column, keys)
         };
         let fragment = fragment.as_ref().map(|fragment| fragment.view());
-        let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, evaluate| {
+        let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, cancel, evaluate| {
             // A phrase can cost far more over the fragment than over a narrowed candidate, so a
             // text leaf is kept only where it is asked under the whole one. A value leaf costs at
             // most one scan of the fragment, about what the first leaf under the whole candidate
@@ -1595,12 +1624,15 @@ impl Engine {
                 }
                 crate::filter::LeafQuery::Value(_) => whole.is_some(),
             };
-            let on_pool = |candidate: &croaring::Bitmap| match query {
-                crate::filter::LeafQuery::Text(_) => evaluate(candidate),
-                crate::filter::LeafQuery::Value(_) => self.pool.install(|| evaluate(candidate)),
+            let on_pool = |candidate: &croaring::Bitmap, watch: &Option<CancelToken>| match query {
+                crate::filter::LeafQuery::Text(_) => evaluate(candidate, watch),
+                crate::filter::LeafQuery::Value(_) => {
+                    self.pool.install(|| evaluate(candidate, watch))
+                }
             };
             crate::filter_cache::answer(
                 &self.filter_cache,
+                &self.filter_interest,
                 side.shard,
                 crate::filter_cache::key_of(
                     side.shard,
@@ -1780,7 +1812,10 @@ impl Engine {
                     .find(|(shard, _)| *shard == side.shard.id())
                     .map(|(_, entities)| entities);
                 let rows = match (entities, mask) {
-                    (Some(entities), Some(_)) => side.data.row_space.project(entities),
+                    (Some(entities), Some(_)) => {
+                        project_until(&side.data.row_space, entities, asked)
+                            .map_err(|_| FilterError::Cancelled)?
+                    }
                     _ => croaring::Bitmap::new(),
                 };
                 Ok(RegionRows {
@@ -2077,15 +2112,19 @@ pub(crate) fn filter_refusal(e: crate::filter::FilterError) -> EngineError {
 /// serial walk here cannot move the crossover against the route it competes with; a domain of no
 /// more than one chunk, 4,096 rows, is walked on the calling thread. Chunks are cut by row count
 /// and gather consecutive ranges, so neither one huge range nor a thousand slivers defeats the
-/// split.
+/// split. The walk ends with [`EngineError::Cancelled`] at the next chunk once the request holding
+/// `cancel` has gone.
 fn per_tile_crossing(
     row_space: &mosaica_store::permutation::RowSpace,
     entities: &croaring::Bitmap,
     domain: &[Range<u32>],
     rows_in_ranges: u64,
-) -> Option<croaring::Bitmap> {
-    per_tile_crossing_multi(row_space, &[entities], domain, rows_in_ranges)
-        .map(|mut images| images.pop().expect("one set in, one image out"))
+    cancel: &Option<CancelToken>,
+) -> Result<Option<croaring::Bitmap>> {
+    Ok(
+        per_tile_crossing_multi(row_space, &[entities], domain, rows_in_ranges, cancel)?
+            .map(|mut images| images.pop().expect("one set in, one image out")),
+    )
 }
 
 /// [`per_tile_crossing`] over several entity sets at once: one walk, the rows' entities read from
@@ -2101,10 +2140,13 @@ fn per_tile_crossing_multi(
     entity_sets: &[&croaring::Bitmap],
     domain: &[Range<u32>],
     rows_in_ranges: u64,
-) -> Option<Vec<croaring::Bitmap>> {
-    let tables = row_space.row_entities()?;
+    cancel: &Option<CancelToken>,
+) -> Result<Option<Vec<croaring::Bitmap>>> {
+    let Some(tables) = row_space.row_entities() else {
+        return Ok(None);
+    };
     if domain.iter().any(|range| range.end > tables.len()) {
-        return None;
+        return Ok(None);
     }
     let readable: Vec<mosaica_roaring::Readable<'_>> = entity_sets
         .iter()
@@ -2113,7 +2155,7 @@ fn per_tile_crossing_multi(
     let probes: Vec<mosaica_roaring::Probe<'_>> = readable.iter().map(|r| r.probe()).collect();
     let chunks = domain_chunks(domain, rows_in_ranges);
 
-    let parts = over_chunks(&chunks, |chunk| {
+    let parts = over_chunks(&chunks, cancel, |chunk| {
         // Buffered so `add_many` appends a sorted run, where a per-row `add` re-locates it.
         let mut rows: Vec<croaring::Bitmap> =
             probes.iter().map(|_| croaring::Bitmap::new()).collect();
@@ -2144,14 +2186,14 @@ fn per_tile_crossing_multi(
             image.add_many(buf);
         }
         rows
-    });
+    })?;
     let images = (0..entity_sets.len())
         .map(|i| {
             let refs: Vec<&croaring::Bitmap> = parts.iter().map(|p| &p[i]).collect();
             croaring::Bitmap::fast_or(&refs)
         })
         .collect();
-    Some(images)
+    Ok(Some(images))
 }
 
 /// How many rows ahead [`per_tile_crossing_multi`] fetches the word it will test a row's entity
@@ -2194,15 +2236,30 @@ fn domain_chunks(domain: &[Range<u32>], rows_in_ranges: u64) -> Vec<Vec<Range<u3
 }
 
 /// `f` over each chunk, in order: on the calling thread where there is one, and in parallel on
-/// the current pool otherwise.
+/// the current pool otherwise. `cancel` is read before each chunk, and once the request holding it
+/// has gone no further chunk is walked and the answer is [`EngineError::Cancelled`].
 fn over_chunks<T: Send>(
     chunks: &[Vec<Range<u32>>],
+    cancel: &Option<CancelToken>,
     f: impl Fn(&[Range<u32>]) -> T + Sync + Send,
-) -> Vec<T> {
+) -> Result<Vec<T>> {
+    let one = |chunk: &Vec<Range<u32>>| check_cancelled(cancel).map(|()| f(chunk));
     match chunks {
-        [one] => vec![f(one)],
-        _ => chunks.par_iter().map(|chunk| f(chunk)).collect(),
+        [chunk] => Ok(vec![one(chunk)?]),
+        _ => chunks.par_iter().map(one).collect(),
     }
+}
+
+/// `entities`' rows in `row_space`, or [`EngineError::Cancelled`] once the request holding
+/// `cancel` has gone, which the walk reads as it goes.
+pub(crate) fn project_until(
+    row_space: &mosaica_store::permutation::RowSpace,
+    entities: &croaring::Bitmap,
+    cancel: &Option<CancelToken>,
+) -> Result<croaring::Bitmap> {
+    row_space
+        .project_until(entities, &|| crate::cancel::gone(cancel))
+        .ok_or(EngineError::Cancelled)
 }
 
 #[cfg(test)]
@@ -2302,8 +2359,10 @@ mod tests {
             domain_rows.add_range(range.clone());
         }
 
-        let per_tile = per_tile_crossing(&space, &entities, &domain, domain_rows.cardinality())
-            .expect("a row space with a table can always invert");
+        let per_tile =
+            per_tile_crossing(&space, &entities, &domain, domain_rows.cardinality(), &None)
+                .expect("a walk with no token is never cancelled")
+                .expect("a row space with a table can always invert");
         let projected = space.project(&entities);
 
         assert_eq!(
@@ -2344,8 +2403,60 @@ mod tests {
         entities.add_many(&[0, 1, 2, 3, 4, 5]);
         let domain = vec![0u32..2, 4..6];
         assert!(
-            per_tile_crossing(&space, &entities, &domain, 4).is_none(),
+            matches!(per_tile_crossing(&space, &entities, &domain, 4, &None), Ok(None)),
             "the walk must decline rather than return the rows it happened to resolve"
+        );
+    }
+
+    /// A walk over chunks answers each chunk in order while its request is live, and once the
+    /// request has gone it walks no further chunk and answers `Cancelled`, on the calling thread
+    /// and on a pool alike.
+    #[test]
+    fn a_walk_over_chunks_stops_at_the_next_chunk_once_its_request_has_gone() {
+        use std::sync::atomic::AtomicUsize;
+
+        let chunks: Vec<Vec<Range<u32>>> = (0..64u32)
+            .map(|i| std::iter::once(i * 10..i * 10 + 10).collect())
+            .collect();
+        let first_row = |chunk: &[Range<u32>]| chunk[0].start;
+        let live = Some(CancelToken::new());
+        for cancel in [&None, &live] {
+            let walked = over_chunks(&chunks, cancel, first_row).expect("a live request answers");
+            assert_eq!(walked, (0..64u32).map(|i| i * 10).collect::<Vec<_>>());
+        }
+
+        let gone = CancelToken::new();
+        gone.cancel();
+        let walked = AtomicUsize::new(0);
+        let count = |_: &[Range<u32>]| walked.fetch_add(1, Ordering::Relaxed);
+        for chunks in [&chunks[..], &chunks[..1]] {
+            let stopped = over_chunks(chunks, &Some(gone.clone()), count);
+            assert!(matches!(stopped, Err(EngineError::Cancelled)));
+        }
+        assert_eq!(
+            walked.load(Ordering::Relaxed),
+            0,
+            "no chunk is walked for a request that has gone"
+        );
+
+        // Flipped by the first chunk walked: the walk ends there on one thread.
+        let token = CancelToken::new();
+        let walked = AtomicUsize::new(0);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .expect("a pool of one");
+        let stopped = pool.install(|| {
+            over_chunks(&chunks, &Some(token.clone()), |_| {
+                token.cancel();
+                walked.fetch_add(1, Ordering::Relaxed)
+            })
+        });
+        assert!(matches!(stopped, Err(EngineError::Cancelled)));
+        assert_eq!(
+            walked.load(Ordering::Relaxed),
+            1,
+            "the chunk in hand finishes and no other begins"
         );
     }
 

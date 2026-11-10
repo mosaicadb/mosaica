@@ -5289,8 +5289,7 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
 
     flips.set(true);
     assert_eq!(routed(&Some(token.clone())).err(), Some(FilterError::Cancelled));
-    // A keyword leaf has no walk of its own to look at the token in, so only the check between
-    // leaves can stop this one.
+    // A keyword leaf after the flip is stopped the same way.
     let keyword = FilterExpr::AllOf(vec![
         leaf("id", FilterOperand::NumEquals(Scalar::Int(5))),
         leaf("title", FilterOperand::TextPrefix("paper".to_string())),

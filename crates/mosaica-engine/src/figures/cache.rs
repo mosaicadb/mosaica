@@ -40,6 +40,7 @@ use rustc_hash::FxHashMap;
 use mosaica_cache::{CacheWeight, Cancel, SingleFlightCache, WaitEnded, WaitingBuildError};
 use mosaica_types::LayerSpace;
 
+use crate::cancel::{Interest, Interests};
 use super::counts::{CountsAt, Deltas, Reserves};
 use super::denied::DenyCorrection;
 use super::field::{FieldDeny, FieldLeft, Held};
@@ -530,21 +531,6 @@ struct Drawing {
     wait_to_draw: usize,
 }
 
-/// The requests waiting for one key's build, the builder included, each by its cancellation.
-/// `None` stands for a caller with no client to lose.
-#[derive(Debug, Default)]
-struct Interest {
-    callers: Mutex<Vec<(u64, Option<crate::CancelToken>)>>,
-}
-
-impl Interest {
-    /// Every caller that wanted this build has gone.
-    fn abandoned(&self) -> bool {
-        let callers = self.callers.lock().unwrap_or_else(PoisonError::into_inner);
-        callers.iter().all(|(_, cancel)| crate::cancel::gone(cancel))
-    }
-}
-
 /// How often a build parked for a place, or giving way, looks at whether anyone still wants it.
 const ABANDON_TICK: Duration = Duration::from_millis(20);
 
@@ -635,8 +621,7 @@ pub struct FiguresCache {
     /// How long a build gives way, from its first wait (`serve.masked_count_give_way_ms`).
     give_way_ms: AtomicU64,
     /// Who wants each key's build.
-    interest: Mutex<FxHashMap<FiguresKey, Arc<Interest>>>,
-    next_caller: AtomicU64,
+    interest: Interests<FiguresKey>,
     pub(super) counters: Arc<Counters>,
 }
 
@@ -699,8 +684,7 @@ impl FiguresCache {
             drawing: Mutex::new(Drawing::default()),
             drawn: Condvar::new(),
             give_way_ms: AtomicU64::new(DEFAULT_GIVE_WAY_MS),
-            interest: Mutex::new(FxHashMap::default()),
-            next_caller: AtomicU64::new(0),
+            interest: Interests::default(),
             counters: Arc::default(),
         }
     }
@@ -846,7 +830,7 @@ impl FiguresCache {
         walk: impl FnOnce(&Build<'_>) -> Option<V>,
     ) -> Result<Arc<V>, WaitEnded> {
         let _waiting = self.turn_guard(turn, |t| t.waiting += 1, |t| t.waiting -= 1);
-        let (interest, _caller) = self.register(&key, cancel);
+        let (interest, _caller) = self.interest.register(&key, cancel);
         let polled: &dyn Cancel = match cancel {
             Some(cancel) => cancel,
             None => &mosaica_cache::NeverCancelled,
@@ -924,56 +908,6 @@ impl FiguresCache {
             after.waits_to_draw(),
         );
         self.drawn.notify_all();
-    }
-
-    /// Adds a caller with `cancel` to `key`'s interest, until the guard drops.
-    fn register<'a>(
-        &'a self,
-        key: &FiguresKey,
-        cancel: Option<&crate::CancelToken>,
-    ) -> (Arc<Interest>, impl Drop + 'a) {
-        struct Caller<'a> {
-            cache: &'a FiguresCache,
-            key: FiguresKey,
-            interest: Arc<Interest>,
-            id: u64,
-        }
-        impl Drop for Caller<'_> {
-            fn drop(&mut self) {
-                let mut map = self
-                    .cache
-                    .interest
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                let mut callers = self
-                    .interest
-                    .callers
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                callers.retain(|(id, _)| *id != self.id);
-                if callers.is_empty() {
-                    map.remove(&self.key);
-                }
-            }
-        }
-        let id = self.next_caller.fetch_add(1, Ordering::Relaxed);
-        let interest = {
-            let mut map = self.interest.lock().unwrap_or_else(PoisonError::into_inner);
-            let interest = Arc::clone(map.entry(key.clone()).or_default());
-            interest
-                .callers
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .push((id, cancel.cloned()));
-            interest
-        };
-        let caller = Caller {
-            cache: self,
-            key: key.clone(),
-            interest: Arc::clone(&interest),
-            id,
-        };
-        (interest, caller)
     }
 
     /// One of the [`CONCURRENT_BUILDS`] places to walk, held until the guard drops. `None` once
