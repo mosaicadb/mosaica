@@ -580,9 +580,9 @@ fn rows_of(engine: &Engine, entities: &[EntityId]) -> Vec<Option<u32>> {
         .collect()
 }
 
-/// A viewport, retried past the bounded `ProjectionBuilding` a merge's refresh window answers with
-/// (decision 0044), and past the `FragmentBuilding` a fresh publication answers an authorisation
-/// with — a test that did not retry would be asserting those residuals do not exist.
+/// A viewport, retried past the `ProjectionBuilding` a request answers with when another's build of
+/// the same projection outlasts its wait budget, and past the `FragmentBuilding` a fresh publication
+/// answers an authorisation with — a test that did not retry would be asserting neither happens.
 fn region_viewport(engine: &Engine, credential: &[u8], shape: &Arc<Shape>) -> ViewportOut {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {

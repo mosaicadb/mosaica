@@ -1615,26 +1615,15 @@ fn the_watermark_and_high_water_published_are_the_live_ones_not_the_snapshot() {
     );
 }
 
-/// **The flip does not refuse anything: a fold's publication does not arm the refresh shed**
-/// (decision 0053).
-///
-/// A merge arms it, and a racer inside a merge's refresh window is shed with a 429 —
-/// `merge.rs`'s `a_racer_inside_a_merges_refresh_window_is_shed_rather_than_rebuilding` is that
-/// case, and this is deliberately its mirror. The rule that separates them: *shed only while the
-/// refresh pass is shorter than the rebuild it would save.* A merge satisfies it (a ~0.7 s pass
-/// against a measured 1 277 ms rebuild); a fold inverts it by two orders (~180 s against 1.3 s),
-/// so arming would refuse every session for minutes to avoid a burst that clears in seconds.
+/// **The flip does not refuse anything: a request inside a fold's refresh window is served.** The
+/// pass has reached no entry, so the request takes an ordinary cache miss and builds against the
+/// new row space itself.
 ///
 /// The refresh is **held** here rather than switched off, because those are different states: a
-/// pass that finishes without producing anything clears the flag, and then a request builds for
-/// the ordinary reason rather than because the fold declined to arm it. Held, the flag would stay
-/// set for the whole window if anything had set it — so a request served here is a request the
-/// shed never saw.
-///
-/// **Mutation this kills:** arming `refresh.in_flight` in the rotation arm of `publish_geometry`
-/// (the request below is refused `ProjectionBuilding` instead of served).
+/// pass that finishes without producing anything leaves a request nothing but its own build
+/// anyway. Held, the pass is still in flight, which is the window this is about.
 #[test]
-fn the_flip_does_not_arm_the_refresh_shed() {
+fn a_request_inside_a_folds_refresh_window_is_served() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("bundle");
     build_fixture(
@@ -1654,7 +1643,7 @@ fn the_flip_does_not_arm_the_refresh_shed() {
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     let baseline = visible(&engine, &session);
 
-    // Hold the refresh, so a flag armed at the swap would stay armed for the whole window.
+    // Hold the refresh, so the request below lands inside the pass's window.
     engine.set_refresh_paused_for_test(true);
     fold(&engine);
 

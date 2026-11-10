@@ -221,9 +221,9 @@ impl Engine {
     /// This session's grant's fragment and row projection in every shard holding `view`, all from
     /// one generation, by three rungs: every live entry; else every shard's one-generation-stale
     /// entry, after a flush and only for a session already served this view at no later
-    /// generation; else the missing live entries from [`Self::derive_geometry`], or
-    /// `ProjectionBuilding` where the session was served the view and a refresh is building them.
-    /// A response never combines a stale shard with a live one.
+    /// generation; else the missing live entries from [`Self::derive_geometry`], which carries
+    /// each forward from its predecessor where a flush or a merge allows. A response never combines
+    /// a stale shard with a live one.
     pub(crate) fn session_geometries<'g>(
         &self,
         session: &Session,
@@ -281,7 +281,7 @@ impl Engine {
 
         // Rung 2: the generation one below is the only one retention keeps, each shard's row
         // space as it stood there.
-        // A `Ready` predecessor rung 2 does not serve: rung 3 sheds on it, or carries it forward.
+        // A `Ready` predecessor rung 2 does not serve: rung 3 carries it forward.
         let mut predecessors: Vec<Option<RowProjectionKey>> = vec![None; shards.len()];
         if let Some(previous) = generation.segments_version.checked_sub(1) {
             let mut stale = Vec::with_capacity(shards.len());
@@ -313,21 +313,8 @@ impl Engine {
             }
         }
 
-        // Rung 3. Errs towards a duplicate build over an unanswerable shed.
-        let sheds =
-            shards
-                .iter()
-                .zip(&live)
-                .zip(&predecessors)
-                .any(|(((shard, _), live), predecessor)| {
-                    live.is_none()
-                        && predecessor.is_some()
-                        && session.served_at(view, shard.id()).is_some()
-                });
-        if sheds && self.refresh_in_flight.load(Ordering::SeqCst) == generation.segments_version {
-            return Err(EngineError::ProjectionBuilding);
-        }
-
+        // Rung 3. A refresh in flight for these keys is not waited for: carrying a predecessor
+        // forward costs a request less than the pass takes to reach it.
         let mut geometries = Vec::with_capacity(shards.len());
         for (((shard, view_data), key), (live, predecessor)) in shards
             .iter()
