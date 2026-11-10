@@ -2,6 +2,7 @@
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mosaica: the layer in a host's deck</title>
     <link rel="icon" href="data:," />
     <!-- The map labels and elements fetch no font; this page loads Instrument Sans, their default face. -->
@@ -12,15 +13,21 @@
       html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; background: #111; color: #ddd; }
       body { display: grid; grid-template-rows: auto 1fr; }
       header { display: flex; gap: 1.5rem; align-items: center; padding: 0.4rem 1rem; }
+      h1 { margin: 0; font-size: inherit; }
+      main { display: grid; min-height: 0; }
       #map { position: relative; min-height: 0; }
+      /* Deck takes the browser's focus ring off its canvas, which is a tab stop. */
+      #map canvas:focus-visible { outline: 2px solid #9cf !important; outline-offset: -2px; }
     </style>
   </head>
   <body>
     <header>
-      <strong>MosaicaLayer in the host's own Deck</strong>
+      <h1>MosaicaLayer in the host's own Deck</h1>
       <label>signed in as <select id="principal"></select></label>
     </header>
-    <div id="map"></div>
+    <main>
+      <div id="map"></div>
+    </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

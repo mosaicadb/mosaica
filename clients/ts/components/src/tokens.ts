@@ -21,16 +21,18 @@ import {css} from 'lit';
  * @cssprop --mosaica-ink - The colour of body text, values and map tools.
  * @cssprop --mosaica-ink-2 - The colour of labels, section headings and secondary text.
  * @cssprop --mosaica-ink-3 - The colour of faint text: placeholders, hints and disabled controls,
- *   and of the dot in the loading states.
+ *   and of the ring in the loading states.
  * @cssprop --mosaica-line - The colour of borders around panels, cards, buttons, chips and
  *   the map toolbar.
  * @cssprop --mosaica-line-2 - The colour of the rules between sections and between the status
  *   strip's cells.
- * @cssprop --mosaica-line-control - The colour of borders around inputs and of a slider's unfilled
- *   track, at 3:1 against the surface.
+ * @cssprop --mosaica-line-control - The colour of borders around inputs, of a slider's unfilled
+ *   track and of a switch's track when it is off, at 3:1 against the surface.
  * @cssprop --mosaica-accent - The colour of the active map tool, primary buttons, badges, checked
- *   boxes and focus rings.
+ *   boxes, a switch that is on, and the bar on a pressed segment and a chosen row.
  * @cssprop --mosaica-accent-ink - The text colour on an accent background.
+ * @cssprop --mosaica-focus - The colour of the focus ring, at 3:1 or more against each surface and
+ *   the map's background.
  * @cssprop --mosaica-highlight - The colour of a highlight chip, a highlighted row's text and its ×.
  * @cssprop --mosaica-highlight-soft - The background of a highlight chip and a highlighted row.
  * @cssprop --mosaica-bar - The colour of a field card's bars for the items in view.
@@ -52,6 +54,8 @@ import {css} from 'lit';
  * @cssprop --mosaica-space - The gap between the content in the map's corners and the map's edges.
  *   Half of it separates items in one corner.
  * @cssprop --mosaica-density - A multiplier on `--mosaica-space`'s default.
+ * @cssprop --mosaica-long-text - What a title or a name too long for its line does: `nowrap`, the
+ *   default, cuts it with an ellipsis; `normal` wraps it.
  * @cssprop --mosaica-map-height - The map's height.
  */
 export const tokens = css`
@@ -62,12 +66,13 @@ export const tokens = css`
     --_mosaica-surface-3: var(--mosaica-surface-3, light-dark(#efefeb, #2a2e35));
     --_mosaica-ink: var(--mosaica-ink, light-dark(#1b1d21, #eceef1));
     --_mosaica-ink-2: var(--mosaica-ink-2, light-dark(#565c64, #a7adb6));
-    --_mosaica-ink-3: var(--mosaica-ink-3, light-dark(#6a6f76, #8b919a));
+    --_mosaica-ink-3: var(--mosaica-ink-3, light-dark(#676c73, #91979f));
     --_mosaica-line: var(--mosaica-line, light-dark(#e5e5e1, #2b2f36));
     --_mosaica-line-2: var(--mosaica-line-2, light-dark(#efefeb, #24272d));
     --_mosaica-line-control: var(--mosaica-line-control, light-dark(#8a8f96, #6b7079));
     --_mosaica-accent: var(--mosaica-accent, light-dark(#1b1d21, #eceef1));
     --_mosaica-accent-ink: var(--mosaica-accent-ink, light-dark(#ffffff, #111317));
+    --_mosaica-focus: var(--mosaica-focus, light-dark(#62666d, #999ea6));
     --_mosaica-highlight: var(--mosaica-highlight, light-dark(#5b3fc4, #c3a6ee));
     --_mosaica-highlight-soft: var(--mosaica-highlight-soft, light-dark(#f1edfb, #2c2340));
     /* Each bar stands 3:1 against the surface and a hovered row, and a solid bar 3:1 against the
@@ -75,7 +80,7 @@ export const tokens = css`
     --_mosaica-bar: var(--mosaica-bar, light-dark(#3a3e45, #d5d9df));
     --_mosaica-bar-highlight: var(--mosaica-bar-highlight, light-dark(#42269a, #d7c4f7));
     --_mosaica-bar-match: var(--mosaica-bar-match, light-dark(#868b92, #6b7079));
-    --_mosaica-warn: var(--mosaica-warn, light-dark(#c98a0a, #e0a940));
+    --_mosaica-warn: var(--mosaica-warn, light-dark(#b57c09, #e0a940));
     --_mosaica-refuse: var(--mosaica-refuse, light-dark(#b42318, #f0857a));
     --_mosaica-ok: var(--mosaica-ok, light-dark(#1f7a4d, #5cc98a));
     --_mosaica-map-bg: var(--mosaica-map-bg, light-dark(#f6f6f4, #111317));
@@ -87,6 +92,7 @@ export const tokens = css`
     --_mosaica-shadow: var(--mosaica-shadow, 0 2px 10px light-dark(rgba(0, 0, 0, 0.06), transparent), 0 4px 16px light-dark(transparent, rgba(0, 0, 0, 0.35)));
     /* A layout such as the explorer's compact form sets the private base the default scales. */
     --_mosaica-space: var(--mosaica-space, calc(var(--_mosaica-space-base, 16px) * var(--mosaica-density, 1)));
+    --_mosaica-long-text: var(--mosaica-long-text, nowrap);
     --_mosaica-map-height: var(--mosaica-map-height, 420px);
     font-family: var(--_mosaica-font);
     font-size: 13px;
@@ -122,11 +128,22 @@ export const chrome = css`
     cursor: pointer;
     padding: 0;
   }
-  /* The focus ring: the accent at half strength, close to the control, so it marks the control
-     without outshining the data. */
+  /* The focus ring, close to the control. */
   :focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--_mosaica-accent) 50%, transparent);
+    outline: 2px solid var(--_mosaica-focus);
     outline-offset: 1px;
+  }
+  /* Read out, not drawn. A control that takes focus is drawn while it has it. */
+  .sr-only:not(:focus, :focus-within) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   input[type='checkbox'],
   input[type='radio'] {
@@ -173,6 +190,7 @@ export const chrome = css`
     border-bottom: 1px solid var(--_mosaica-panel-rule, var(--_mosaica-line-2));
   }
   h2,
+  h3,
   [part='title'],
   .hd {
     margin: 0 0 10px;
@@ -188,6 +206,7 @@ export const chrome = css`
     color: var(--_mosaica-ink-2);
   }
   h2 .summary,
+  h3 .summary,
   [part='title'] .summary,
   .hd .summary {
     text-transform: none;
@@ -278,7 +297,7 @@ export const chrome = css`
     outline: none;
   }
   .input:focus-within {
-    outline: 2px solid color-mix(in srgb, var(--_mosaica-accent) 50%, transparent);
+    outline: 2px solid var(--_mosaica-focus);
     outline-offset: 1px;
   }
   /* A select drawn as text with a chevron, such as the view and colour choices. */
@@ -302,6 +321,8 @@ export const chrome = css`
     color: inherit;
     font: inherit;
     cursor: pointer;
+    white-space: var(--_mosaica-long-text);
+    overflow-wrap: anywhere;
     text-overflow: ellipsis;
   }
   .choice svg {
@@ -327,19 +348,29 @@ export const chrome = css`
   }
   .seg button[aria-pressed='true'] {
     background: var(--_mosaica-surface-2);
+    box-shadow: inset 0 -2px 0 var(--_mosaica-accent);
     color: var(--_mosaica-ink);
     font-weight: 600;
   }
-  /* An on-off switch: a button with role="switch" and a knob inside it. */
+  /* An on-off switch: a button with role="switch" and a knob inside it. The button's box is the
+     track, and the pointer's target is 24 px high around it. */
   .switch {
+    position: relative;
     width: 34px;
     height: 20px;
     padding: 2px;
     border-radius: 10px;
-    background: color-mix(in srgb, var(--_mosaica-ink-3) 35%, var(--_mosaica-surface));
+    background: var(--_mosaica-line-control);
     display: flex;
     justify-content: flex-start;
     flex: none;
+  }
+  .switch::before {
+    content: '';
+    position: absolute;
+    inset: 50% 0 auto;
+    height: 24px;
+    translate: 0 -50%;
   }
   .switch[aria-checked='true'] {
     background: var(--_mosaica-accent);
@@ -388,7 +419,7 @@ export const chrome = css`
     border-color: var(--_mosaica-accent);
   }
   .btn.small {
-    height: 22px;
+    height: 24px;
     padding: 0 8px;
     border-radius: 5px;
   }
@@ -468,6 +499,15 @@ export const chrome = css`
   .chip[data-verb='highlight'] button {
     color: inherit;
   }
+  /* A chip's last button is its ×: a 24 px target around the glyph, which the chip does not grow
+     for. */
+  .chip > button:last-child {
+    min-width: 24px;
+    min-height: 24px;
+    margin: -4px;
+    align-items: center;
+    justify-content: center;
+  }
   /* A list of rows with a count at the right. A row keeps its height and the list scrolls. */
   .list {
     display: flex;
@@ -491,6 +531,7 @@ export const chrome = css`
   .list > .item[aria-selected='true'],
   .list > .item.on {
     background: var(--_mosaica-surface-2);
+    box-shadow: inset 2px 0 0 var(--_mosaica-accent);
     font-weight: 500;
   }
   .list > .item .n {
@@ -563,8 +604,10 @@ export const chrome = css`
     background: var(--_mosaica-ok);
     flex: none;
   }
+  /* Updating or counting: a ring, so it differs from the up to date dot by more than its colour. */
   .dot.quiet {
-    background: var(--_mosaica-ink-3);
+    background: none;
+    border: 1.5px solid var(--_mosaica-ink-3);
   }
   .dot.warn {
     background: var(--_mosaica-warn);
@@ -585,6 +628,74 @@ export const chrome = css`
   @keyframes mosaica-spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+  /* Forced colours keep no author background or shadow, so what is drawn with one takes a system
+     colour here. */
+  @media (forced-colors: active) {
+    :focus-visible,
+    .input:focus-within {
+      outline-color: Highlight;
+    }
+    /* A pressed, checked, chosen or current control takes the highlight pair, whatever its own
+       rules give it. It leaves forced colours to do so, since text there is drawn on a plate of
+       the page's colour; the controls inside it stay in. A colour choice is its colour, and keeps
+       it. */
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice']) {
+      forced-color-adjust: none !important;
+      background: Highlight !important;
+      border-color: Highlight !important;
+      box-shadow: none !important;
+      color: HighlightText !important;
+    }
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice'])
+      :not(button, input, select, a) {
+      color: inherit !important;
+    }
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice'])
+      :is(button, input, select, a) {
+      forced-color-adjust: auto;
+    }
+    /* A ring in the highlight colour would not show on that control's highlight background, so
+       its ring is drawn in the text colour of the pair: where it has the focus, and where the
+       arrow keys reached it while a box keeps the focus. That colour may be the page's own, so
+       the ring is set in from the control's edge, with the highlight on both sides of it. A
+       ring round a control inside it lies on the same background, and takes the same colour. */
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice']):is(:focus-visible, [data-active]) {
+      outline-color: HighlightText !important;
+      outline-offset: -4px !important;
+    }
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice'])
+      :focus-visible {
+      outline-color: HighlightText !important;
+    }
+    /* Off, a switch is an outlined track with a solid knob. On, the track is solid. */
+    .switch {
+      padding: 1px;
+      border: 1px solid ButtonText;
+    }
+    .switch[aria-checked='true'] {
+      border-color: Highlight;
+    }
+    .switch .knob {
+      background: ButtonText;
+    }
+    .switch[aria-checked='true'] .knob {
+      background: HighlightText;
+    }
+    .dot:not(.quiet) {
+      background: CanvasText;
+    }
+    .dot.quiet {
+      border-color: CanvasText;
+    }
+    .skel,
+    .skeleton {
+      background: GrayText;
+    }
+    .spinner {
+      border-color: GrayText;
+      border-top-color: CanvasText;
     }
   }
 `;

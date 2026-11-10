@@ -222,8 +222,9 @@ export function installTrace(canvas: HTMLElement): void {
   canvas.addEventListener('wheel', (e) => trace.event('wheel', {n: e.deltaY}), {passive: true});
 
   addEventListener('keydown', (e) => {
-    // Not while typing into a panel control.
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    // Not while typing into a control, the explorer's included, which are inside shadow roots.
+    const at = e.composedPath()[0];
+    if (at instanceof HTMLInputElement || at instanceof HTMLSelectElement) return;
     if (e.key === 'm') trace.mark('felt wrong');
   });
 }

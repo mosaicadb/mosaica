@@ -1,9 +1,9 @@
-import {css, html, nothing, type TemplateResult} from 'lit';
+import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
-import {NO_COUNT, NO_MASKED, type HeldRegion, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
+import {NO_COUNT, NO_MASKED, formatMasked, type HeldRegion, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {NOTHING_VISIBLE, NamedQuery, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
+import {ActionFocus, EmptyAnswer, NOTHING_VISIBLE, NamedQuery, UNSAID, liveLine, seesNothing, showsContent, stateLine, stateOf, stateWord, type PanelState, type StateLine} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -16,15 +16,25 @@ import './count.js';
  *
  * While the view is up to date, the first cell is a dot alone. When something goes wrong, the cell
  * names the state and offers a button if the viewer can act, such as Retry when the server is busy.
- * Sign in appears when the session expires only if you have set `reauthorise`.
+ * Sign in appears when the session expires only if you have set `reauthorise`. If the viewer may see
+ * no item in the view at all, the cell says so.
+ *
+ * Where the strip is short of room, its cells wrap onto further lines.
  *
  * After a change of filters, highlight or selection, the cell reads Running query once the answer
  * has taken more than a quarter of a second, until the map, the layers and the counts have all
  * loaded. Its Cancel button goes back to the filters, highlight and selection that last finished
  * loading.
  *
- * Screen readers announce a refusal or an expiry, because the state cell is an `aria-live` region.
- * The counts sit outside it, so they are not read out every time the map pans.
+ * Screen readers announce the states the cell names in words, because the words are a live region.
+ * A pan announces nothing: up to date and updating are read but not announced, the counts sit
+ * outside the region, and Nothing in view is announced only as the answer to a change of filters,
+ * highlight or selection, not where a pan went. After such a change the region announces the counts
+ * once they have loaded, such as `3,923 of 50,000 match`, or that the view is up to date where there
+ * are no counts to say. After any state it announced, it announces that the view is up to date
+ * again. A state's button sits outside the region. When the button goes with its state while it has
+ * the focus, the state cell takes the focus. With `quiet`, the strip shows the same and announces
+ * nothing.
  *
  * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status
@@ -40,7 +50,7 @@ import './count.js';
  *   whose held region it put back or took away.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - The session expired.
  *   Fires once each time.
- * @csspart strip - The one-line strip.
+ * @csspart strip - The strip of cells.
  * @csspart state - The state's dot and words, with `data-state` set to the panel state.
  * @csspart refusal - The words "View refused", or "Server busy", with `data-code` set to the
  *   refusal's code.
@@ -69,8 +79,11 @@ export class MosaicaStatus extends MosaicaElement {
         max-width: 100%;
         vertical-align: top;
       }
+      /* The cells wrap onto further lines where the strip is short of room, and a cell wider than
+         the strip wraps its own words. */
       [part='strip'] {
         display: inline-flex;
+        flex-wrap: wrap;
         align-items: stretch;
         max-width: 100%;
         min-height: 32px;
@@ -82,17 +95,19 @@ export class MosaicaStatus extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-2);
         font-variant-numeric: tabular-nums;
-        white-space: nowrap;
       }
       [part='strip'][data-state='detached'] {
         display: none;
       }
       .cell {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 4px;
+        gap: 0 4px;
+        min-height: 30px;
         padding: 7px 12px;
-        flex: none;
+        flex: 0 1 auto;
+        min-width: 0;
       }
       .cell mosaica-count {
         font-size: inherit;
@@ -100,8 +115,11 @@ export class MosaicaStatus extends MosaicaElement {
       .cell + .cell {
         border-left: 1px solid var(--_mosaica-line-2);
       }
+      /* Figures that wait for an answer, or stand from before a refusal, are all drawn in the
+         faint ink, which keeps a text's contrast. The state cell says why, by its dot's shape
+         or in words. */
       .cell.dim {
-        opacity: 0.4;
+        color: var(--_mosaica-ink-3);
       }
       .cell.state {
         padding: 0 5px 0 12px;
@@ -109,8 +127,12 @@ export class MosaicaStatus extends MosaicaElement {
       .cell.state.bare {
         padding: 0 12px;
       }
+      .cell.state:focus-visible {
+        outline-offset: -2px;
+      }
       [part='state'] {
         gap: 7px;
+        min-width: 0;
         color: inherit;
       }
       [part='state'] .skel {
@@ -141,6 +163,10 @@ export class MosaicaStatus extends MosaicaElement {
       .cell mosaica-count.lit::part(count) {
         color: var(--_mosaica-highlight);
       }
+      .cell.dim mosaica-count::part(count),
+      .cell.dim mosaica-count::part(label) {
+        color: var(--_mosaica-ink-3);
+      }
       .cell mosaica-count::part(label) {
         margin-left: 0.3em;
       }
@@ -160,6 +186,10 @@ export class MosaicaStatus extends MosaicaElement {
         box-shadow: var(--_mosaica-shadow);
         font-size: 12px;
       }
+      [part='card'] dl,
+      [part='card'] dd {
+        margin: 0;
+      }
     `
   ];
 
@@ -169,10 +199,28 @@ export class MosaicaStatus extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor compact = false;
   /** A function the Sign in button calls when the session has expired. Without it there is no Sign in button. */
   @property({attribute: false}) accessor reauthorise: (() => void) | null = null;
+  /**
+   * Announces nothing: every state and result is still shown, and none is put in a live region. Set
+   * it when another element on the page says the same things.
+   */
+  @property({type: Boolean, reflect: true}) accessor quiet = false;
 
   private readonly query = new NamedQuery(this);
+  private readonly actionFocus = new ActionFocus();
+  private readonly emptyAnswer = new EmptyAnswer();
   private lastState: PanelState | null = null;
   private expiryFired = false;
+  /** What the strip shows now, decided before each render: `bare` is a dot alone, and `unsaid` what {@link liveLine} takes. */
+  private shown: {state: PanelState; running: boolean; bare: boolean; line: StateLine; unsaid: {heard: unknown} | null} = {state: 'detached', running: false, bare: false, line: stateLine('detached', null), unsaid: null};
+  /** What the live region says while the strip shows a dot alone: a query's result, or that the view is back up to date. */
+  private heard = '';
+  /** The dot-alone state `heard` was last decided under. */
+  private bareState: PanelState | null = null;
+  private wasQuerying = false;
+  /** Whether a query has finished and its result is still to be said. */
+  private resultDue = false;
+  /** Whether the strip has left a state it announced and has not yet said the view is up to date again. */
+  private recoveryDue = false;
 
   private get status(): StatusProjection | null {
     return this.resolvedStore?.get('status') ?? null;
@@ -187,7 +235,81 @@ export class MosaicaStatus extends MosaicaElement {
     super.disconnectedCallback();
   }
 
+  protected override willUpdate(changed: PropertyValues<this>): void {
+    super.willUpdate(changed);
+    this.actionFocus.note(this.renderRoot);
+    const status = this.status;
+    const state = stateOf(status);
+    const querying = status?.querying === true;
+    const refresh = () => this.resolvedStore?.refresh();
+    const nothingVisible = seesNothing(this.resolvedStore, state);
+    // A query that has run long enough to name. The map may have drawn its answer while the
+    // counts still load, and a refusal, an expiry or a lost server is said in its own words.
+    const running = querying && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
+    // Up to date and updating, the two states a pan moves between, are each a dot alone, so the
+    // strip keeps its width through a gesture; every other state names itself beside its dot.
+    const bare = !running && !nothingVisible && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true));
+    // Nothing in view is announced as a query's answer. Where a pan went, it is shown and not said.
+    const answered = this.emptyAnswer.note(state, querying);
+    const panned = state === 'empty' && !running && !nothingVisible && !answered;
+    this.hear(state, bare, panned);
+    const words = stateWord(state, status);
+    const line: StateLine = running
+      ? {dot: null, words: 'Running query', action: html`<button part="cancel" class="btn small" type="button" @click=${() => this.cancel()}>Cancel</button>`}
+      : bare
+        ? // Read and not drawn, and left out while the live region is saying the same words.
+          {dot: state === 'shown' ? 'dot' : 'dot quiet', title: words, words: this.heard === words && !this.quiet ? nothing : html`<span class="sr-only">${words}</span>`, action: nothing}
+        : state === 'empty'
+          ? {dot: 'dot quiet', words: nothingVisible ? NOTHING_VISIBLE : words, action: nothing}
+          : stateLine(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
+    this.shown = {state, running, bare, line, unsaid: this.quiet || panned ? UNSAID : bare ? {heard: this.heard} : null};
+  }
+
+  /**
+   * Decide what the live region says while the strip shows a dot alone. A pan moves between up to
+   * date and updating and says nothing. A query that finishes says its result once the counts are
+   * in, or that the view is up to date where there are no counts to say, and a return from a
+   * state the strip announced says the view is up to date. Either is taken away at the next
+   * change, so that it is said again when it next holds.
+   */
+  private hear(state: PanelState, bare: boolean, panned: boolean): void {
+    const querying = this.status?.querying === true;
+    if (querying) this.resultDue = false;
+    else if (this.wasQuerying) this.resultDue = true;
+    this.wasQuerying = querying;
+    if (!bare) {
+      // The words shown are the answer. Where a pan went is not announced, so leaving it is not.
+      this.heard = '';
+      this.bareState = null;
+      this.resultDue = false;
+      if (!panned) this.recoveryDue = state !== 'detached';
+      return;
+    }
+    if (state !== this.bareState || querying) this.heard = '';
+    this.bareState = state;
+    if (state !== 'shown' || querying) return;
+    if (this.resultDue) {
+      // Counts still loading are waited for; refused or absent, the state is said in their place.
+      if (this.view?.inView?.status === 'loading') return;
+      this.heard = this.result() ?? stateWord(state, this.status);
+    } else if (this.recoveryDue) this.heard = stateWord(state, this.status);
+    this.resultDue = false;
+    this.recoveryDue = false;
+  }
+
+  /** The counts as the cells show them, in full figures, or `null` where there are none to show. */
+  private result(): string | null {
+    const v = this.view;
+    const n = v?.inView;
+    if (!v || !n || n.status !== 'shown') return null;
+    const match = `${formatMasked(n.matched)} of ${formatMasked(n.visible)} match`;
+    if (!v.highlighting) return match;
+    const lit = `${formatMasked(n.highlighted)} highlighted of ${formatMasked(n.matched)}`;
+    return this.resolvedStore?.requestFilters() != null ? `${match}, ${lit}` : lit;
+  }
+
   protected override updated(): void {
+    this.actionFocus.keep(this.renderRoot.querySelector<HTMLElement>('.cell.state'));
     this.query.track(this.status?.querying ?? false);
     const state = stateOf(this.status);
     if (state !== this.lastState) {
@@ -227,33 +349,15 @@ export class MosaicaStatus extends MosaicaElement {
   }
 
   override render(): TemplateResult | typeof nothing {
-    const status = this.status;
-    const state = stateOf(status);
-    const stale = status?.stale ?? false;
+    const {state, running, bare, line, unsaid} = this.shown;
+    const stale = this.status?.stale ?? false;
     const v = this.view;
-    const refresh = () => this.resolvedStore?.refresh();
-    // Up to date and updating, the two states a pan moves between, are each a dot alone, so the
-    // strip keeps its width through a gesture; every other state names itself beside its dot.
-    const bare = (cls: string, words: string) => html`<span part="state" data-state=${state}><span class=${cls} role="img" aria-label=${words} title=${words}></span></span>`;
-    // A viewer who can see nothing is told so once, by the map; the strip keeps its dot.
-    const nothingVisible = seesNothing(this.resolvedStore, state);
-    // A query that has run long enough to name. The map may have drawn its answer while the
-    // counts still load, and a refusal, an expiry or a lost server is said in its own words.
-    const running = status?.querying === true && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
-    const dotAlone = !running && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible);
-    const inner = running
-      ? html`<span part="state" data-state=${state} data-querying><span part="spinner" class="spinner" aria-hidden="true"></span>Running query<button part="cancel" class="btn small" type="button" @click=${() => this.cancel()}>Cancel</button></span>`
-      : state === 'shown'
-        ? bare('dot', 'Up to date')
-        : nothingVisible
-          ? bare('dot quiet', NOTHING_VISIBLE)
-          : dotAlone
-            ? bare('dot quiet', 'Updating')
-            : state === 'empty'
-              ? html`<span part="state" data-state="empty"><span class="dot quiet"></span>Nothing in view</span>`
-              : renderState(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
-    // One live element across every state, so each change of state is announced from it.
-    const first = html`<div class=${`cell state${dotAlone ? ' bare' : ''}`} role="status" aria-live="polite">${inner}</div>`;
+    // One template for every state, so the live element stays and each change of its words is
+    // announced. The state's button sits outside it, and the cell takes the focus when the
+    // button goes.
+    const first = html`<div class=${`cell state${bare ? ' bare' : ''}`} tabindex="-1">
+      <span part="state" data-state=${state} ?data-querying=${running}>${running ? html`<span part="spinner" class="spinner" aria-hidden="true"></span>` : nothing}${liveLine(line, unsaid)}</span>
+    </div>`;
     return html`<div part="strip" data-state=${state}>${first}${this.counts(state, v, stale)}</div>
       ${this.expanded && showsContent(state) && v ? this.card(v, stale) : nothing}`;
   }
@@ -289,14 +393,14 @@ export class MosaicaStatus extends MosaicaElement {
   }
 
   private card(v: ViewProjection, stale: boolean) {
-    const row = (label: string, value: unknown) => html`<div class="k">${label}</div><div class="v">${value}</div>`;
+    const row = (label: string, value: unknown) => html`<dt class="k">${label}</dt><dd class="v">${value}</dd>`;
     const n = v.inView;
-    return html`<div part="card"><div class="kv">
+    return html`<div part="card"><dl class="kv">
       ${row('Shown', html`<mosaica-count .count=${n ? {shown: n.shown, total: n.matched.value, exact: true} : NO_COUNT} .stale=${stale}></mosaica-count>`)}
       ${row('Match the filters', html`<mosaica-count .masked=${n?.matched ?? NO_MASKED} .stale=${stale}></mosaica-count>`)}
       ${v.highlighting ? row('Highlighted', html`<mosaica-count .masked=${n?.highlighted ?? NO_MASKED} .stale=${stale}></mosaica-count>`) : nothing}
       ${row('In this view', html`<mosaica-count .masked=${n?.visible ?? NO_MASKED} .stale=${stale}></mosaica-count>`)}
-    </div></div>`;
+    </dl></div>`;
   }
 }
 

@@ -3,7 +3,8 @@ import type {Store} from '@mosaicajs/client';
 export function topics(store: Store): void {
   const map = document.querySelector('mosaica-map')!;
   const toggle = document.querySelector<HTMLInputElement>('#topics')!;
-  const chosen = document.querySelector<HTMLParagraphElement>('#topic')!;
+  const chosen = document.querySelector<HTMLSpanElement>('#topic [role="status"]')!;
+  const clear = document.querySelector<HTMLButtonElement>('#topic button')!;
 
   map.colourBy = 'cluster:clusters/toponymy';
 
@@ -15,12 +16,13 @@ export function topics(store: Store): void {
     const artifact = BigInt(e.detail.id);
     const name = store.get('artifacts').attached.get(artifact) ?? 'Unnamed topic';
     store.setMembers([{layer: e.detail.detail.layer, artifact, outside: false, verb: 'filter', label: name}]);
-    chosen.querySelector('strong')!.textContent = name;
-    chosen.hidden = false;
+    chosen.textContent = `Topic: ${name}`;
+    clear.hidden = false;
   });
 
-  chosen.querySelector('button')!.addEventListener('click', () => {
+  clear.addEventListener('click', () => {
     store.setMembers([]);
-    chosen.hidden = true;
+    chosen.textContent = '';
+    clear.hidden = true;
   });
 }

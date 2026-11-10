@@ -235,6 +235,175 @@ describe('the token protocol', () => {
   });
 });
 
+describe('the map in the notebook\u2019s page', () => {
+  it('names the explorer with the label the kernel set, follows a change, and leaves it unnamed where there is none', () => {
+    const {model, el} = setUp({label: 'Papers by topic'});
+    const explorer = el.querySelector('mosaica-explorer')!;
+    expect(explorer.getAttribute('aria-label')).toBe('Papers by topic');
+    model.set('label', 'Papers by venue');
+    expect(explorer.getAttribute('aria-label')).toBe('Papers by venue');
+    model.set('label', null);
+    expect(explorer.hasAttribute('aria-label')).toBe(false);
+    expect(setUp().el.querySelector('mosaica-explorer')!.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('names each view of two models by its own label', () => {
+    const a = setUp({label: 'Left'}).el.querySelector('mosaica-explorer')!;
+    const b = setUp({label: 'Right'}).el.querySelector('mosaica-explorer')!;
+    expect([a.getAttribute('aria-label'), b.getAttribute('aria-label')]).toEqual(['Left', 'Right']);
+  });
+
+  it('keeps a key pressed in the map from the notebook\u2019s shortcuts, and lets Tab and an Escape the map did not take go on', async () => {
+    const {el} = setUp();
+    await settle(el);
+    const explorer = el.querySelector('mosaica-explorer')!;
+    // What a Lumino command registry looks for on the target of a key press, which is the explorer.
+    expect(explorer.getAttribute('data-lm-suppress-shortcuts')).toBe('true');
+    const heard: string[] = [];
+    const listen = (e: Event) => void heard.push((e as KeyboardEvent).key);
+    document.addEventListener('keydown', listen);
+    onTestFinished(() => document.removeEventListener('keydown', listen));
+    const inside = explorer.shadowRoot!.querySelector('*')!;
+    const press = (key: string, taken = false) => {
+      const e = new KeyboardEvent('keydown', {key, bubbles: true, composed: true, cancelable: true});
+      if (taken) inside.addEventListener('keydown', (at) => at.preventDefault(), {once: true});
+      inside.dispatchEvent(e);
+    };
+    for (const key of ['a', 'ArrowLeft', 'Enter', ' ']) press(key);
+    expect(heard).toEqual([]);
+    press('Escape', true);
+    expect(heard).toEqual([]);
+    press('Tab');
+    press('Escape');
+    expect(heard).toEqual(['Tab', 'Escape']);
+    // A key pressed outside the map is the notebook's.
+    el.dispatchEvent(new KeyboardEvent('keydown', {key: 'b', bubbles: true}));
+    expect(heard).toEqual(['Tab', 'Escape', 'b']);
+  });
+
+  /** The status line of a view, which is in the page from the first render. */
+  const statusOf = (el: HTMLElement) => el.querySelector('[role="status"]')!;
+  const operands: FilterOperandSet[] = [{column: 'year', family: 'numeric', operands: ['range']}];
+  const settled = (store: FakeStore) => {
+    store.set('status', status({}));
+    store.set('view', {...store.get('view'), composition: {tiles: [], exact: [], standIn: [], exactDrawn: 0, exactServed: 0} as never});
+  };
+
+  it('says in a status line what it refused of a filter the kernel set, until the kernel sets one it takes', () => {
+    const {model, store, el} = setUp();
+    const line = statusOf(el);
+    expect(line.textContent).toBe('');
+    expect(el.querySelector('mosaica-explorer')!.contains(line)).toBe(false);
+    store.set('meta', {...META, filterOperands: operands} as never);
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    const sent = model.sent.at(-1)!.content as {what: string; detail: string};
+    expect(statusOf(el)).toBe(line);
+    expect(line.textContent).toContain(sent.what);
+    expect(line.textContent).toContain(sent.detail);
+    // The settle that writes the map's own filter over the refused one leaves the line standing.
+    settled(store);
+    expect(model.state.filters).toBeNull();
+    expect(line.textContent).toContain(sent.detail);
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect(line.textContent).toBe('');
+  });
+
+  it('drops the line once the filter is changed in the map', () => {
+    const {model, store, el} = setUp({filters: {nope: {eq: 'x'}}});
+    const line = statusOf(el);
+    store.set('meta', {...META, filterOperands: operands} as never);
+    expect(line.textContent).toContain('nope');
+    settled(store);
+    expect(line.textContent).toContain('nope');
+    store.set('filters', {...store.get('filters'), expr: {year: {range: {gte: 2000}}}});
+    settled(store);
+    expect(model.state.filters).toEqual({year: {range: {gte: 2000}}});
+    expect(line.textContent).toBe('');
+  });
+
+  it('says what it refused of colour_by and of the basemap on a line each, and drops each as it is put right', () => {
+    const {model, store, el} = setUp({colour_by: 'cluster:nope'});
+    store.set('meta', {...META, layers: [clusters('topics')]} as never);
+    const explorer = el.querySelector('mosaica-explorer')!;
+    const say = (refusal: string | null) => explorer.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal, note: null}, bubbles: true, composed: true}));
+    say('View s0 has no map projection.');
+    const line = statusOf(el);
+    expect(line.children).toHaveLength(2);
+    expect(line.textContent).toContain('nope');
+    expect(line.textContent).toContain('View s0 has no map projection.');
+    model.set('colour_by', 'cluster:topics');
+    expect(line.children).toHaveLength(1);
+    expect(line.textContent).not.toContain('nope');
+    say(null);
+    expect(line.textContent).toBe('');
+  });
+
+  it('writes a refusal once in the line of each view that made it, and in no other view\u2019s', async () => {
+    const {model, stores, el} = setUp();
+    const other = document.createElement('div');
+    document.body.append(other);
+    render({model, el: other});
+    const lines = [statusOf(el), statusOf(other)];
+    // How many lines of text each status was ever given; a line written again is one a screen reader reads again.
+    const writes = [0, 0];
+    lines.forEach((line, i) => new MutationObserver((records) => (writes[i]! += records.reduce((n, r) => n + r.addedNodes.length, 0))).observe(line, {childList: true}));
+    const written = async () => {
+      await Promise.resolve();
+      return [...writes];
+    };
+    for (const s of stores) s.set('meta', {...META, filterOperands: operands} as never);
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    expect(await written()).toEqual([1, 1]);
+    for (const line of lines) expect(line.textContent).toContain('filters');
+    // A basemap one view's map refuses is that view's to say, under the refusal it already shows.
+    other.querySelector('mosaica-explorer')!.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal: 'View s0 has no map projection.', note: null}, bubbles: true, composed: true}));
+    expect(await written()).toEqual([1, 2]);
+    expect(lines[0]!.textContent).not.toContain('projection');
+    expect(lines[1]!.textContent).toContain('projection');
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect(lines[0]!.textContent).toBe('');
+    expect(lines[1]!.children).toHaveLength(1);
+  });
+
+  it('leaves a line that stands untouched while another trait is refused, reworded or put right', async () => {
+    const {model, store, el} = setUp({colour_by: 'cluster:nope'});
+    store.set('meta', {...META, layers: [clusters('topics')], filterOperands: operands} as never);
+    const region = statusOf(el);
+    // Each line is read out as it changes, not the region whole.
+    expect(region.getAttribute('aria-atomic')).toBe('false');
+    const colour = region.firstElementChild!;
+    expect(colour.textContent).toContain('nope');
+    // Every node a change in the region added, removed or wrote into.
+    const touched: Node[] = [];
+    new MutationObserver((records) => {
+      for (const r of records) touched.push(r.target, ...r.addedNodes, ...r.removedNodes);
+    }).observe(region, {childList: true, subtree: true, characterData: true});
+    const standing = async () => {
+      await Promise.resolve();
+      return region.firstElementChild === colour && !touched.some((node) => colour.contains(node));
+    };
+
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    expect(region.children).toHaveLength(2);
+    const filters = region.children[1]!;
+    const first = filters.textContent;
+    expect(await standing()).toBe(true);
+
+    // Another refusal of the same trait rewords its line where it is.
+    model.set('filters', {nope: {eq: 'x'}});
+    expect(region.children[1]).toBe(filters);
+    expect(filters.textContent).not.toBe(first);
+    expect(await standing()).toBe(true);
+
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect([...region.children]).toEqual([colour]);
+    expect(await standing()).toBe(true);
+
+    model.set('colour_by', 'cluster:topics');
+    expect(region.children).toHaveLength(0);
+  });
+});
+
 describe('the up-sync', () => {
   function shown(store: FakeStore, composition: object) {
     store.set('status', status({}));

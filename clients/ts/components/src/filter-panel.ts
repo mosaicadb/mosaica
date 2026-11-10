@@ -4,7 +4,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type HeldRegion, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
 import {OPERATOR_WORDS} from './filter.js';
 import {HeldAggregate} from './aggregate.js';
-import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, keyTitle, shortCount} from './base.js';
+import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, focusLost, keyTitle, shortCount} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import type {MosaicaFieldCard} from './field-card.js';
 import {icon} from './icons.js';
@@ -42,8 +42,12 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
 
 /**
  * Use the filter panel as the place where viewers narrow the map down, as `<mosaica-explorer>` does
- * in its sidebar. Each filter or highlight in force shows as a chip above the cards, and pressing a
- * chip opens its field's card.
+ * in its sidebar. Each filter or highlight in force shows as a chip above the cards, a highlight's
+ * with a pen on it, and pressing a chip opens its field's card. When a chip is removed, focus
+ * moves to the × of the chip after it, else of the one before, else to Add field. Under
+ * `chips-only` there is no Add field, so when the last chip is removed the panel shows the words
+ * No filters, which take focus and go as focus leaves them; a chip that arrives while they hold
+ * focus takes it on its ×.
  *
  * A region selected in another view keeps filtering after the viewer switches away from it, and
  * shows as a chip naming its view, such as "Lasso in Topics". Pressing the chip switches back to
@@ -83,7 +87,8 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @csspart clear-highlight - The × beside Highlighted, which clears the highlight.
  * @csspart all - All matching and its number.
  * @csspart all-count - The number matching.
- * @csspart chips - The line of chips, while any filter or highlight is in force.
+ * @csspart chips - The line of chips, while any filter or highlight is in force, and under
+ *   `chips-only` the words that stand in it after the last chip is removed.
  * @csspart chip - One chip, with `data-verb` (`filter` or `highlight`) and `data-column`,
  *   `data-artifact`, or `data-view` for a region held in another view.
  * @csspart edit - A column chip's text, a button that opens its card; on a held region's chip, a
@@ -92,7 +97,8 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @csspart card - One `<mosaica-field-card>`, with `data-field`.
  * @csspart add - The Add field button, with `aria-expanded`.
  * @csspart add-note - How many fields are not listed.
- * @csspart add-list - The list of fields to add, while it is open.
+ * @csspart add-list - The list of fields to add, while it is open. A press outside it, or focus
+ *   leaving it, closes it.
  * @csspart add-search - The search box over that list.
  * @csspart add-option - One field in that list, with `data-column` or `data-layer`, `aria-checked`
  *   while its card is shown, and `aria-disabled` if it is pinned and cannot be taken off.
@@ -168,6 +174,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
         height: 6px;
         border-radius: 1px;
         background: var(--_mosaica-bar);
+        forced-color-adjust: none;
       }
       .swatch.lit {
         background: var(--_mosaica-bar-highlight);
@@ -187,12 +194,25 @@ export class MosaicaFilterPanel extends MosaicaElement {
         color: var(--_mosaica-ink);
       }
       [part='clear-highlight'] {
+        position: relative;
         width: 18px;
         height: 18px;
         display: grid;
         place-items: center;
         border-radius: 4px;
         color: var(--_mosaica-ink-2);
+      }
+      /* Each takes a press from 24 px around its middle, drawn no larger for it. */
+      [part='clear-highlight']::after,
+      .chip .edit::after,
+      [part='clear']::after {
+        content: '';
+        position: absolute;
+        inset: -3px;
+      }
+      .chip .edit::after,
+      [part='clear']::after {
+        inset: -4px 0;
       }
       [part='clear-highlight']:hover {
         background: var(--_mosaica-surface-3);
@@ -206,6 +226,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
         border-bottom: 1px solid var(--_mosaica-line-2);
       }
       [part='chip'] {
+        position: relative;
         min-height: 0;
         padding: 2px 4px 2px 8px;
         gap: 4px;
@@ -227,13 +248,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
           animation: none;
         }
       }
-      [part='chip'] > button:last-child {
-        width: 16px;
-        height: 16px;
-        display: grid;
-        place-items: center;
-      }
       .chip .edit {
+        position: relative;
         display: inline-flex;
         flex: 0 1 auto;
         align-items: center;
@@ -241,7 +257,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
         font: inherit;
         text-align: left;
       }
+      /* The pen on a highlight's chip, which says in a shape what the chip's colour says. */
+      [part='chip'] > svg {
+        flex: none;
+      }
       [part='clear'] {
+        position: relative;
         margin-left: auto;
         padding: 0;
         font-size: 12px;
@@ -317,6 +338,23 @@ export class MosaicaFilterPanel extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
+      .emptied {
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--_mosaica-ink-2);
+      }
+      @media (forced-colors: active) {
+        .swatch {
+          background: CanvasText;
+        }
+        .swatch.lit {
+          background: Highlight;
+        }
+        .swatch.pale {
+          background: GrayText;
+        }
+      }
     `
   ];
 
@@ -324,6 +362,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
   private readonly matching = new HeldAggregate('fields-match');
   /** The card to open, scroll to and focus once the cards are drawn. */
   private editing: string | null = null;
+  /** A pressed control that its own action removes, and the control that takes focus once it has gone. */
+  private leaving: {gone: HTMLElement; to: HTMLElement | null} | null = null;
+  /** Whether the last chip was removed from a panel with nothing else to focus, which then says so. @internal */
+  @state() accessor emptied = false;
+  /** Whether those words held focus as a render began. */
+  private wordsHeld = false;
   /** The keys of the fields shown, in the order they were first shown. */
   private listOrder: string[] = [];
   private readonly floating = new FloatingList(() => {
@@ -356,7 +400,39 @@ export class MosaicaFilterPanel extends MosaicaElement {
   override disconnectedCallback(): void {
     this.floating.stop();
     this.matching.set(null, null);
+    document.removeEventListener('pointerdown', this.onPressOutsideAdd, true);
     super.disconnectedCallback();
+  }
+
+  /** A press outside the open Add field list closes it, as Escape does. */
+  private onPressOutsideAdd = (e: PointerEvent): void => {
+    const adder = this.renderRoot.querySelector('.adder');
+    if (!adder || !e.composedPath().includes(adder)) this.adding = false;
+  };
+
+  /**
+   * Before an action that removes the pressed control `gone`, note where focus goes once it has.
+   * From a chip's ×, to the × of the chip after it, else of the chip before, as each stands then.
+   * From there, and from Clear all and the clear-highlight ×, to Add field: a × that took focus
+   * unasked would remove a filter on the next press. Under `chips-only`, which has no Add field, to
+   * the words that say no filter is left.
+   */
+  private leave(gone: HTMLElement): void {
+    const closes = Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part="chip"] > button:last-child'));
+    const at = closes.indexOf(gone);
+    this.leaving = {gone, to: at < 0 ? null : (closes[at + 1] ?? closes[at - 1] ?? null)};
+  }
+
+  /** Move focus as {@link leave} noted, once the pressed control has gone and taken focus with it. */
+  private settleFocus(): void {
+    const leaving = this.leaving;
+    if (!leaving || leaving.gone.isConnected) return;
+    this.leaving = null;
+    if (!focusLost()) return;
+    const to = (leaving.to?.isConnected ? leaving.to : null) ?? this.renderRoot.querySelector<HTMLElement>('[part="add"]');
+    if (to) return to.focus();
+    this.emptied = true;
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.emptied')?.focus());
   }
 
   /** Show `field`'s card, open it, and scroll to and focus it. Call it after `mosaica-chipopen` to show the chip's card. */
@@ -409,6 +485,17 @@ export class MosaicaFilterPanel extends MosaicaElement {
   protected override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
     this.floating.update();
+    this.settleFocus();
+    // A chip that arrives takes the words' place, and their focus where they held it.
+    const arrived = this.emptied ? this.renderRoot.querySelector<HTMLElement>('[part="chip"] > button:last-child') : null;
+    if (arrived) {
+      this.emptied = false;
+      if (this.wordsHeld && focusLost()) arrived.focus();
+    }
+    if (changed.has('adding')) {
+      if (this.adding) document.addEventListener('pointerdown', this.onPressOutsideAdd, true);
+      else document.removeEventListener('pointerdown', this.onPressOutsideAdd, true);
+    }
     const s = this.resolvedStore;
     this.matching.set(s, this.isConnected && !this.chipsOnly && !this.controlsOnly && s?.get('meta') ? {groupings: [{count: true}]} : null);
     if (!this.editing || this.chipsOnly) return;
@@ -599,7 +686,10 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const skel = html`<span class="skel" aria-hidden="true"></span>`;
     return html`<div part="subject">
       <span class="key"><span part="subject-key" class=${`swatch${lit ? ' lit' : ''}`}></span><span part="subject-name" class=${lit ? 'lit' : ''}>${lit ? 'Highlighted' : 'In view'}</span><span part="subject-count">${n === null ? skel : figure(n, this.compact)}</span>${lit
-        ? html`<button part="clear-highlight" type="button" aria-label="Clear highlight" title="Clear highlight" @click=${() => this.clearHighlight()}>${icon('close', 11, 2.4)}</button>`
+        ? html`<button part="clear-highlight" type="button" aria-label="Clear highlight" title="Clear highlight" @click=${(e: Event) => {
+            this.leave(e.currentTarget as HTMLElement);
+            this.clearHighlight();
+          }}>${icon('close', 11, 2.4)}</button>`
         : nothing}</span>
       <span part="all" class="key"><span class="swatch pale"></span><span>${this.compact ? 'All' : 'All matching'}</span><span part="all-count">${total === null ? skel : figure(total, this.compact)}</span></span>
     </div>`;
@@ -615,17 +705,32 @@ export class MosaicaFilterPanel extends MosaicaElement {
   ): TemplateResult | typeof nothing {
     const columns = [...new Set([...Object.keys(draft.filter), ...Object.keys(draft.highlight)])];
     const chips = VERBS.flatMap((verb) => columns.flatMap((c) => (holds(c, verb) ? [{c, verb, d: draft[verb][c]!}] : [])));
-    if (chips.length === 0 && members.length === 0 && regions.length === 0) return nothing;
+    if (chips.length === 0 && members.length === 0 && regions.length === 0) {
+      return this.emptied && this.chipsOnly ? html`<div part="chips"><span class="emptied" tabindex="-1" @blur=${() => (this.emptied = false)}>No filters</span></div>` : nothing;
+    }
+    // The pen on a highlight's chip, with the word for a reader; a filter's has neither.
+    const word = (verb: ClauseVerb) => (verb === 'highlight' ? html`${icon('highlight', 12, 1.6)}<span class="sr-only">highlight </span>` : nothing);
+    const pressed = (e: Event) => this.leave(e.currentTarget as HTMLElement);
     return html`<div part="chips">
-      ${chips.map(
+      ${repeat(
+        chips,
+        ({c, verb}) => `${verb} ${c}`,
         ({c, verb, d}) => html`<span part="chip" class="chip" data-verb=${verb} data-column=${c}
-          ><button part="edit" class="edit" type="button" title="Show its card" @click=${() => this.edit(c, verb)}>${this.chipText(c, d)}</button
-          ><button type="button" aria-label=${`Remove the ${columnCaption(c)} ${verb}`} @click=${() => this.clearColumn(c, verb)}>${icon('close', 10, 2.4)}</button></span
+          >${word(verb)}<button part="edit" class="edit" type="button" title="Show its card" @click=${() => this.edit(c, verb)}>${this.chipText(c, d)}</button
+          ><button type="button" aria-label=${`Remove the ${columnCaption(c)} ${verb}`} @click=${(e: Event) => {
+            pressed(e);
+            this.clearColumn(c, verb);
+          }}>${icon('close', 10, 2.4)}</button></span
         >`
       )}
-      ${[...members].sort((a, b) => VERBS.indexOf(a.verb) - VERBS.indexOf(b.verb)).map(
+      ${repeat(
+        [...members].sort((a, b) => VERBS.indexOf(a.verb) - VERBS.indexOf(b.verb)),
+        (m) => `${m.verb} ${m.layer} ${m.artifact}`,
         (m) => html`<span part="chip" class="chip" data-verb=${m.verb} data-artifact=${String(m.artifact)}
-          >${this.memberText(m)}<button type="button" aria-label=${`Remove ${this.memberText(m)}`} @click=${() => this.clearMember(m)}>${icon('close', 10, 2.4)}</button></span
+          >${word(m.verb)}${this.memberText(m)}<button type="button" aria-label=${`Remove the ${this.memberText(m)} ${m.verb}`} @click=${(e: Event) => {
+            pressed(e);
+            this.clearMember(m);
+          }}>${icon('close', 10, 2.4)}</button></span
         >`
       )}
       ${repeat(
@@ -637,11 +742,17 @@ export class MosaicaFilterPanel extends MosaicaElement {
           return html`<span part="chip" class="chip" data-verb="filter" data-view=${r.view}
             ><button part="edit" class="edit" type="button" title=${`Show in ${view}`} @click=${() => this.showRegion(meta, r.view)}
               >${icon(r.shape.kind === 'lasso' ? 'lasso' : 'box', 12)}${text}</button
-            ><button type="button" aria-label=${`Remove ${text}`} @click=${() => this.clearRegion(r.view)}>${icon('close', 10, 2.4)}</button></span
+            ><button type="button" aria-label=${`Remove the ${text} filter`} @click=${(e: Event) => {
+              pressed(e);
+              this.clearRegion(r.view);
+            }}>${icon('close', 10, 2.4)}</button></span
           >`;
         }
       )}
-      <button part="clear" type="button" @click=${() => this.clearAll()}>Clear all</button>
+      <button part="clear" type="button" @click=${(e: Event) => {
+        pressed(e);
+        this.clearAll();
+      }}>Clear all</button>
     </div>`;
   }
 
@@ -656,7 +767,11 @@ export class MosaicaFilterPanel extends MosaicaElement {
       else if (!pinned.has(key)) this.takeOff(key);
     };
     const rest = fields.length - listed.length;
-    return html`<div class="adder">
+    return html`<div class="adder" @focusout=${(e: FocusEvent) => {
+        // Focus that goes to nothing, as on a press on the list's own padding or scrollbar, has not left.
+        const to = e.relatedTarget as Node | null;
+        if (to && !(e.currentTarget as HTMLElement).contains(to)) this.adding = false;
+      }}>
       <button part="add" class="btn" type="button" aria-expanded=${this.adding ? 'true' : 'false'} aria-controls="add-list"
         @click=${() => {
           this.adding = !this.adding;
@@ -683,6 +798,9 @@ export class MosaicaFilterPanel extends MosaicaElement {
                 const unlisted = offered.find((o) => !isListed(o.key));
                 if (unlisted) this.add(unlisted.key);
               }} /></div>
+            <div role="status">${offered.length > 0
+              ? html`<span class="sr-only">${offered.length} ${offered.length === 1 ? 'field' : 'fields'} listed</span>`
+              : html`<span class="none">No field by that name</span>`}</div>
             ${offered.length > 0
               ? html`<div role="menu" aria-label="Fields">${offered.map((o, i) => {
                   const added = isListed(o.key);
@@ -692,7 +810,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
                     aria-disabled=${kept ? 'true' : nothing} title=${kept ? 'Always shown here' : added ? 'Remove from the column' : nothing} tabindex=${i === tabbed ? '0' : '-1'}
                     @click=${() => choose(o.key)} @keydown=${(e: KeyboardEvent) => this.addKeys(e, i)}><span>${o.title}</span>${added ? html`<span class="kind">Shown</span>` : o.layer ? html`<span class="kind">Clusters</span>` : nothing}</button>`;
                 })}</div>`
-              : html`<span class="none">No field by that name</span>`}
+              : nothing}
           </div>`
         : nothing}
     </div>`;
@@ -700,6 +818,9 @@ export class MosaicaFilterPanel extends MosaicaElement {
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
+    let at = this.emptied && this.isConnected ? document.activeElement : null;
+    while (at && at.getRootNode() !== this.shadowRoot) at = at.shadowRoot?.activeElement ?? null;
+    this.wordsHeld = at?.classList.contains('emptied') ?? false;
     // The search box takes focus as the list opens.
     if (changed.has('adding') && this.adding) void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[part="add-search"]')?.focus());
   }

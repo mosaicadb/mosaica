@@ -6,7 +6,7 @@ import {loadDatasets, readConfig, type Dataset} from './config.js';
 import {esc} from './html.js';
 import {renderErrors} from './panels/errors.js';
 import {renderSource} from './panels/source.js';
-import {renderStats, toggleStatsDrawer} from './panels/stats.js';
+import {renderDrawer, renderStats} from './panels/stats.js';
 import {renderDepth} from './panels/view.js';
 import {installTrace, installTraceBar, trace} from './trace.js';
 import {coalesce, createStore as createAppState, type Store} from './state.js';
@@ -156,19 +156,13 @@ function renderControls(): string {
   return renderSource(store.state, datasets, presets);
 }
 
-/** The readouts: what came back. */
-function renderReadouts(): string {
-  const slab = explorer.map?.slab;
-  return renderStats(store.state, {drawn: slab?.drawn ?? 0, departed: slab?.departed ?? 0}) + renderDepth(store.state) + renderErrors(store.state);
-}
-
 /**
  * Everything the controls' markup depends on, as one string. The controls are rebuilt only when
  * it changes, so an element is not replaced under the cursor between mouse-down and click.
  */
 function controlsSignature(): string {
   const s = store.state;
-  return [s.datasetId, s.switching ? '1' : '0', s.termsLabel, s.terms.length, s.budget, s.artifactsPerTile, s.meta?.selection.maxArtifactsPerTile ?? 0].join('|');
+  return [s.datasetId, s.termsLabel, s.terms.length, s.budget, s.artifactsPerTile, s.meta?.selection.maxArtifactsPerTile ?? 0].join('|');
 }
 
 // Under 1000 px the instruments open over the explorer from a button; see `style.css`.
@@ -180,8 +174,33 @@ instrumentsToggle?.addEventListener('click', () => {
 
 let controlsPainted = '';
 const controlsEl = document.createElement('div');
+/** Says that a dataset change is in flight. */
+const switchingEl = document.createElement('div');
+switchingEl.id = 'switching';
+switchingEl.className = 'muted';
+switchingEl.setAttribute('role', 'status');
+/**
+ * The readouts: what came back. The drawer and the two status regions are elements kept for the
+ * life of the page, so the drawer keeps focus and its open state across repaints, and a failure
+ * written into its region is announced.
+ */
 const readoutsEl = document.createElement('div');
-instrumentsEl.append(controlsEl, readoutsEl);
+readoutsEl.innerHTML = `<section class="panel"><h2>Last request</h2><div></div>
+  <details id="stats-drawer"><summary>replica and stage timings</summary><div></div></details></section>
+  <div></div>
+  <div role="status"></div>`;
+const statsEl = readoutsEl.querySelector('section > div')!;
+const drawerEl = readoutsEl.querySelector('details > div')!;
+const [depthEl, failuresEl] = Array.from(readoutsEl.querySelectorAll(':scope > div')) as [Element, Element];
+instrumentsEl.append(controlsEl, switchingEl, readoutsEl);
+
+/** Write `html` into `el` unless it is what `el` was last given, so nothing is replaced, or said again, that did not change. */
+const painted = new WeakMap<Element, string>();
+function paint(el: Element, html: string): void {
+  if (painted.get(el) === html) return;
+  painted.set(el, html);
+  el.innerHTML = html;
+}
 
 function repaintControls() {
   const active = document.activeElement as HTMLElement | null;
@@ -193,9 +212,13 @@ function repaintControls() {
 
 /** Rebuild the instruments: readouts on every change, controls when their signature changes. */
 function render() {
-  readoutsEl.innerHTML = renderReadouts();
-  const drawer = document.getElementById('stats-drawer') as HTMLDetailsElement | null;
-  drawer?.addEventListener('toggle', () => toggleStatsDrawer(drawer.open));
+  const slab = explorer.map?.slab;
+  const residency = {drawn: slab?.drawn ?? 0, departed: slab?.departed ?? 0};
+  paint(statsEl, renderStats(store.state, residency));
+  paint(drawerEl, renderDrawer(store.state, residency));
+  paint(depthEl, renderDepth(store.state));
+  paint(failuresEl, renderErrors(store.state));
+  paint(switchingEl, store.state.switching ? 'switching: establishing a session…' : '');
 
   const signature = controlsSignature();
   if (signature === controlsPainted) return;
@@ -512,8 +535,9 @@ async function activate(dataset: Dataset, requestedView: string | null = null): 
       s.switching = false;
     });
     explorer.titleField = dataset.titleField ?? '';
-    // The heading names the dataset as the dataset picker does.
+    // The heading names the dataset as the dataset picker does, and so does the map's name.
     explorer.datasetTitle = dataset.label;
+    explorer.setAttribute('aria-label', `Map of ${dataset.label}`);
     writeToUrl('view', opening.id);
     trace.event('session', {
       dataset: dataset.id,
@@ -550,7 +574,7 @@ async function start() {
 }
 
 start().catch((error) => {
-  readoutsEl.innerHTML = `<section class="panel"><h2>Startup failed</h2>
+  readoutsEl.innerHTML = `<section class="panel" role="alert"><h2>Startup failed</h2>
     <div class="bad">${esc(error)}</div>
     <div class="muted">Is <code>mosaica serve</code> running, and is this origin listed in
     <code>serve.dev_cors_origins</code>?</div></section>`;

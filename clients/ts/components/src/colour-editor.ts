@@ -16,8 +16,6 @@ import {chrome, tokens} from './tokens.js';
 import './filter.js';
 import './cluster-filter.js';
 
-/** The height of a row in pixels, from which the rows in sight are worked out. */
-const ROW_HEIGHT = 40;
 /** The rows whose paths are asked for before the list has been measured. */
 const FIRST_ROWS = 8;
 
@@ -135,7 +133,8 @@ export class MosaicaColourEditor extends MosaicaElement {
         color: var(--_mosaica-ink);
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        white-space: var(--_mosaica-long-text);
+        overflow-wrap: anywhere;
       }
       [part='sub'] {
         font-size: 12px;
@@ -173,6 +172,18 @@ export class MosaicaColourEditor extends MosaicaElement {
         font-weight: 600;
         margin-right: auto;
       }
+      /* Drawn as a line of text, each with a target 24 px high around it, inside the bar. */
+      [part='set-colour'],
+      [part='deselect'] {
+        position: relative;
+      }
+      [part='set-colour']::before,
+      [part='deselect']::before {
+        content: '';
+        position: absolute;
+        inset: -4px 0;
+        min-width: 24px;
+      }
       [part='set-colour'] {
         display: inline-flex;
         align-items: center;
@@ -184,6 +195,7 @@ export class MosaicaColourEditor extends MosaicaElement {
         height: 18px;
         border: 2px solid currentColor;
         border-radius: 5px;
+        forced-color-adjust: none;
       }
       [part='deselect'] {
         text-decoration: underline;
@@ -202,8 +214,11 @@ export class MosaicaColourEditor extends MosaicaElement {
         color: var(--_mosaica-ink-3);
       }
       [part='columns'] span:last-child,
-      [part='count'] {
+      .n {
         text-align: right;
+      }
+      .n {
+        font-size: 12px;
       }
       [part='rows'] {
         flex: 1 1 auto;
@@ -211,8 +226,9 @@ export class MosaicaColourEditor extends MosaicaElement {
         overflow-y: auto;
         padding: 2px 8px 8px;
       }
+      /* A row holds a name and a path on a line each, and grows only where a host has long names wrap. */
       [part~='row'] {
-        height: ${ROW_HEIGHT}px;
+        min-height: 40px;
         padding: 0 8px;
         border-radius: 6px;
       }
@@ -223,21 +239,43 @@ export class MosaicaColourEditor extends MosaicaElement {
       [part~='row'][data-found] {
         box-shadow: inset 2px 0 0 var(--_mosaica-ink-3);
       }
+      /* The checkbox's target, 24 px square around the box, which keeps its size and its place. */
+      .tick {
+        position: relative;
+        display: grid;
+        align-items: center;
+        height: 24px;
+        cursor: pointer;
+      }
+      .tick::before {
+        content: '';
+        position: absolute;
+        inset: 0 -1px 0 -5px;
+      }
       [part='check'] {
         width: 14px;
         height: 14px;
         margin: 0;
       }
+      /* Drawn 22 px square, with a 24 px target around it. */
       [part='swatch'] {
+        position: relative;
         width: 22px;
         height: 22px;
         border: 1px solid rgba(0, 0, 0, 0.12);
         border-radius: 5px;
         background: var(--c);
+        forced-color-adjust: none;
+      }
+      [part='swatch']::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
       }
       [part='swatch'][data-unmet] {
         background: none;
         border-color: var(--_mosaica-line-control);
+        forced-color-adjust: auto;
       }
       .label {
         display: flex;
@@ -248,7 +286,8 @@ export class MosaicaColourEditor extends MosaicaElement {
       [part='path'] {
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        white-space: var(--_mosaica-long-text);
+        overflow-wrap: anywhere;
       }
       [part='path'] {
         font-size: 12px;
@@ -260,9 +299,12 @@ export class MosaicaColourEditor extends MosaicaElement {
         font-variant-numeric: tabular-nums;
       }
       .none {
-        padding: 12px 16px;
+        padding: 14px 24px 12px;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
+      }
+      .none:empty {
+        padding: 0;
       }
       .foot {
         display: flex;
@@ -445,10 +487,21 @@ export class MosaicaColourEditor extends MosaicaElement {
     const layer = meta ? this.layerOf(meta) : null;
     if (!s || !meta || !layer || !isTree(layer)) return;
     const list = this.renderRoot.querySelector<HTMLElement>('[part="rows"]');
-    const height = list?.clientHeight ?? 0;
-    const first = height > 0 ? Math.floor(list!.scrollTop / ROW_HEIGHT) : 0;
-    const last = height > 0 ? Math.ceil((list!.scrollTop + height) / ROW_HEIGHT) : FIRST_ROWS;
-    this.paths.ask(s, layer, this.rows(s, meta).slice(first, last).filter((r) => !r.found).map((r) => BigInt(r.key)));
+    const rows = this.rows(s, meta);
+    const box = list?.getBoundingClientRect();
+    // A row is as tall as its name needs, so the rows in sight are those whose boxes are.
+    const inSight =
+      list && box && box.height > 0
+        ? new Set(
+            Array.from(list.querySelectorAll<HTMLElement>('[part~="row"]'))
+              .filter((el) => {
+                const r = el.getBoundingClientRect();
+                return r.bottom > box.top && r.top < box.bottom;
+              })
+              .map((el) => el.dataset.key)
+          )
+        : new Set(rows.slice(0, FIRST_ROWS).map((r) => r.key));
+    this.paths.ask(s, layer, rows.filter((r) => inSight.has(r.key) && !r.found).map((r) => BigInt(r.key)));
   }
 
   /**
@@ -542,6 +595,13 @@ export class MosaicaColourEditor extends MosaicaElement {
     this.ticked = next;
   }
 
+  /** Untick every row. The bar Deselect is on goes with them, so focus moves to the first row's checkbox. */
+  private async deselect(): Promise<void> {
+    this.ticked = new Set();
+    await this.updateComplete;
+    this.renderRoot.querySelector<HTMLElement>('[part="check"]')?.focus();
+  }
+
   /** A match the search box found: its row gets focus where the list holds it; else it goes at the top. */
   private onFound(f: Found, listed: readonly Row[]): void {
     const at = listed.find((r) => r.key === f.key);
@@ -594,19 +654,19 @@ export class MosaicaColourEditor extends MosaicaElement {
         ? html`<div part="selected" role="group" aria-label="Ticked rows">
             <b>${ticked.length.toLocaleString('en-GB')} selected</b>
             <button part="set-colour" type="button" aria-haspopup="dialog" @click=${(e: Event) => this.pick(e, `${ticked.length.toLocaleString('en-GB')} selected`, ticked)}>Set colour<span style=${`background:${ticked[0]!.colour}`}></span></button>
-            <button part="deselect" type="button" @click=${() => (this.ticked = new Set())}>Deselect</button>
+            <button part="deselect" type="button" @click=${() => void this.deselect()}>Deselect</button>
           </div>`
         : nothing;
     const row = (r: Row) => {
       const on = this.ticked.has(r.key);
       return html`<div part="row" role="listitem" data-key=${r.key} ?data-found=${r.found} ?data-ticked=${on}>
-        <input part="check" type="checkbox" .checked=${on} aria-label=${`Select ${r.name}`} @change=${(e: Event) => this.tick(r.key, (e.target as HTMLInputElement).checked)} />
-        <button part="swatch" type="button" style=${`--c:${r.colour}`} ?data-unmet=${r.unmet} aria-haspopup="dialog" aria-label=${`Colour of ${r.name}`} title=${r.unmet ? 'Not drawn yet' : r.colour} @click=${(e: Event) => this.pick(e, r.name, [r])}></button>
+        <label class="tick"><input part="check" type="checkbox" .checked=${on} aria-label=${`Select ${r.name}`} @change=${(e: Event) => this.tick(r.key, (e.target as HTMLInputElement).checked)} /></label>
+        <button part="swatch" type="button" style=${`--c:${r.colour}`} ?data-unmet=${r.unmet} aria-haspopup="dialog" aria-label=${`Colour of ${r.name}${r.unmet ? ', not drawn yet' : ''}`} title=${r.unmet ? 'Not drawn yet' : r.colour} @click=${(e: Event) => this.pick(e, r.name, [r])}></button>
         <span class="label"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path" title=${r.path}>${r.path}</span>` : nothing}</span>
-        <span part="count">${r.count === null ? '' : countText(r.count)}</span>
+        <span class="n">${r.count === null ? nothing : html`<span part="count">${countText(r.count)}</span><span class="sr-only"> items</span>`}</span>
       </div>`;
     };
-    const empty = rows.length === 0 ? html`<div class="none">${ranked?.status === 'refused' ? `${layer ? 'Clusters' : 'Values'} unavailable` : ranked?.result ? 'Nothing to colour' : 'Loading…'}</div>` : nothing;
+    const empty = rows.length > 0 ? nothing : ranked?.status === 'refused' ? `${layer ? 'Clusters' : 'Values'} unavailable` : ranked?.result ? 'Nothing to colour' : 'Loading…';
     const chosen = this.chosenKeys(s);
     return dialog(html`<div class="box">
       <div class="head">
@@ -615,7 +675,8 @@ export class MosaicaColourEditor extends MosaicaElement {
       </div>
       ${search}${bar}
       <div part="columns" aria-hidden="true"><span></span><span></span><span>${layer ? 'Cluster' : 'Value'}</span><span>Items</span></div>
-      <div part="rows" role="list" aria-label=${`${name}: ${noun} by size`} @scroll=${this.onScroll}>${repeat(rows, (r) => r.key, row)}${empty}</div>
+      <div class="none" role="status">${empty}</div>
+      <div part="rows" role="list" aria-label=${`${name}: ${noun} by size`} @scroll=${this.onScroll}>${repeat(rows, (r) => r.key, row)}</div>
       <div class="foot">
         <button part="reset-all" class="btn" type="button" ?disabled=${chosen.length === 0} @click=${() => this.apply(chosen, null, true)}>Reset to palette</button>
         <span part="changed" role="status">${chosen.length === 1 ? '1 colour changed' : `${chosen.length.toLocaleString('en-GB')} colours changed`}</span>

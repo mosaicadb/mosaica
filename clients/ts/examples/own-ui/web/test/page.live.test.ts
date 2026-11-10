@@ -147,7 +147,9 @@ it.skipIf(!binary)('filters to a topic whose name is clicked on the map, and sea
   // not opened, as a reader clicks again. The map takes a press as a click when it handles the
   // release within a quarter of a second of the press, and a starved browser can run a frame of
   // seconds between the two.
-  const chosen = page.locator('#topic strong');
+  const chosen = page.locator('#topic [role="status"]');
+  // The line that says the topic is on the page, unhidden and empty, before there is one to say.
+  expect(await chosen.evaluate((el) => el.closest('[hidden]') === null && el.textContent === '')).toBe(true);
   await expect
     .poll(
       async () => {
@@ -160,7 +162,7 @@ it.skipIf(!binary)('filters to a topic whose name is clicked on the map, and sea
       },
       {timeout: 60_000, interval: 5_000}
     )
-    .toBe('Nanodevices');
+    .toBe('Topic: Nanodevices');
 
   await expect.poll(() => count.textContent(), {timeout: 60_000}).toBe('1,242 of the 50,000 papers in view match');
   await expect.poll(() => page.locator('#results li').count(), {timeout: 60_000}).toBe(20);

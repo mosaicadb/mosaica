@@ -10,7 +10,8 @@ export function results(store: Store): void {
     if (view.inView?.status !== 'shown') return;
     const matched = formatMasked(view.inView.matched);
     const visible = formatMasked(view.inView.visible);
-    count.textContent = `${matched} of the ${visible} papers in view match`;
+    const text = `${matched} of the ${visible} papers in view match`;
+    if (count.textContent !== text) count.textContent = text;
   });
 
   let reading: AbortController | null = null;
@@ -36,6 +37,13 @@ export function results(store: Store): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(listFirst, 250);
   }
-  map.addEventListener('mosaica-viewchange', soon);
-  store.subscribe('filters', soon);
+  // A screen reader reads the count out when the filters change it, and not on each move of the map.
+  map.addEventListener('mosaica-viewchange', () => {
+    count.ariaLive = 'off';
+    soon();
+  });
+  store.subscribe('filters', () => {
+    count.ariaLive = 'polite';
+    soon();
+  });
 }

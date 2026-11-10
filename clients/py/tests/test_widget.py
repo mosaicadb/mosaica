@@ -152,7 +152,7 @@ def test_the_synced_surface_is_exactly_the_design_s(make):
     synced = set(Map.class_traits(sync=True)) - set(anywidget.AnyWidget.class_traits(sync=True))
     synced = {k for k in synced if not k.startswith("_")}  # `_esm` and `_css` are anywidget's
     assert synced == {
-        "url", "view", "explorer_layout", "height", "title_field", "image_fields", "artifacts_per_tile",
+        "url", "view", "explorer_layout", "height", "label", "title_field", "image_fields", "artifacts_per_tile",
         "budget", "budget_min", "budget_max", "cluster_budget", "cluster_budget_min", "cluster_budget_max", "bbox", "layers", "colour_by", "palette", "value_colours", "cluster_colours", "size_by", "size_min", "size_max", "size_scale", "filters",
         "selected", "selected_artifact", "region",
     }
@@ -230,6 +230,18 @@ def test_the_point_budget_and_its_range_are_synced_down_with_their_defaults(make
 def test_title_field_is_synced_down_and_defaults_to_none(make):
     assert make(token="t").get_state()["title_field"] is None
     assert make(token="t", title_field="title").get_state()["title_field"] == "title"
+
+
+def test_the_label_is_synced_down_follows_a_change_and_defaults_to_none(make):
+    assert make(token="t").get_state()["label"] is None
+    m = make(token="t", label="Papers by topic")
+    assert m.get_state()["label"] == "Papers by topic"
+    m.label = "Papers by venue"
+    assert m.get_state()["label"] == "Papers by venue"
+    m.label = None
+    assert m.get_state()["label"] is None
+    with pytest.raises(traitlets.TraitError):
+        m.label = 7
 
 
 def test_image_fields_are_synced_down_as_a_list(make):

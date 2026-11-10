@@ -688,6 +688,10 @@ counts, `m.bbox` where the camera settled; setting `m.filters`, `m.layers`, `m.c
 `m.bbox` redraws. Ids are decimal strings (a `mosaica_id` is a `u64`). Marimo users: the widget's
 `.value` re-runs a cell at every settle; `m.observe(fn, names="selected")` reacts to a pick alone.
 
+`label` names the map for a screen reader, which reads it out when focus reaches the map. Give
+each map one where a notebook shows several, so that they can be told apart; `None`, the default,
+gives the map no name of its own. `db.map`, `viewer.map` and `selection.map` all take it.
+
 `budget` is how many points the map aims to draw on screen. Its default, `0`, leaves the map's own,
 250,000, and setting `m.budget` in a later cell applies it. `budget_min` and `budget_max`, 1,000 and 2,000,000
 unless you give others, are the fewest and the most a control for it offers; neither changes
@@ -774,7 +778,7 @@ skipped and `Map(url)` takes no `token`.
 | page → kernel | `{type: "basemap-images", reads: {path: read}}` | whenever `_basemap` lists local images' reads the page does not hold, naming them |
 | kernel → page | `{type: "basemap-image", path, read, mime}` and the bytes as a buffer | in answer to `basemap-images`, for each read it names that the kernel holds |
 
-Traitlets: `url`, `explorer_layout`, `height`, `title_field`, `artifacts_per_tile`,
+Traitlets: `url`, `explorer_layout`, `height`, `label`, `title_field`, `artifacts_per_tile`,
 `budget_min`, `budget_max`, `cluster_budget_min`, `cluster_budget_max` and `_basemap` (the
 `basemap` value with each local image as `{"local": path}`, the path as written, and that path's
 read number, never its bytes) down; `view`, `bbox`,

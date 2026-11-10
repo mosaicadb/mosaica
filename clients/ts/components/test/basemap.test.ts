@@ -61,7 +61,10 @@ async function switchTo(host: HTMLElement, store: FakeStore, id: string): Promis
 }
 
 const refusal = (el: Element) => deep(el.shadowRoot!, '[part="overlay"] [part="refusal"][data-code="basemap"]');
-const note = (el: Element) => deep(el.shadowRoot!, '[part="note"]');
+/** The note's element, which is in the page whether or not it has words. */
+const noteElement = (el: Element) => deep(el.shadowRoot!, '[part="note"]')!;
+/** The note the map shows, or null while it shows none. */
+const note = (el: Element) => (noteElement(el).textContent?.trim() ? noteElement(el) : null);
 const attribution = (el: Element) => deep(el.shadowRoot!, '[part="attribution"]');
 const asked = (store: FakeStore) => store.calls.filter((c) => c.name === 'basemapWorld').length;
 
@@ -108,6 +111,38 @@ describe('<mosaica-map> basemap', () => {
     expect(note(el)?.textContent?.trim()).toBeTruthy();
     await switchTo(host, store, 'round');
     expect(note(el)).toBeNull();
+  });
+
+  it('announces its note from an element that is there before the note is, and is drawn only with it', async () => {
+    const {host, el, store} = await map('geo', 'basemap="world"');
+    const live = noteElement(el);
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.classList.contains('sr-only')).toBe(true);
+    await switchTo(host, store, 'flat');
+    expect(noteElement(el)).toBe(live);
+    expect(live.textContent?.trim()).not.toBe('');
+    expect(live.classList.contains('sr-only')).toBe(false);
+  });
+
+  it('announces its note and its refusal when quiet too, since no other element knows of them', async () => {
+    const {host, el, store} = await map('geo', 'basemap="world" quiet');
+    const live = noteElement(el);
+    expect(live.getAttribute('role')).toBe('status');
+    await switchTo(host, store, 'flat');
+    expect(noteElement(el)).toBe(live);
+    expect(live.textContent?.trim()).not.toBe('');
+    expect(live.classList.contains('sr-only')).toBe(false);
+
+    const refused = await map('geo', 'basemap="osm" quiet');
+    const words = refusal(refused.el)!;
+    expect(words.closest('[role="status"]')).not.toBeNull();
+    // The view's own states are still left to the other element.
+    refused.store.set('status', status({status: 'refused', refusal: {code: 'contract', detail: 'the box is outside the view', status: 422}}));
+    await drawn(refused.host);
+    expect(refusal(refused.el)).toBeNull();
+    const state = deep(refused.el.shadowRoot!, '[part="overlay"] [part="state"]')!;
+    expect(state.textContent).toContain('the box is outside the view');
+    expect(state.querySelector('[role="status"]')!.textContent?.trim()).toBe('');
   });
 
   it('refuses what a mapping names for a view that it does not fit, and follows the mapping per view', async () => {

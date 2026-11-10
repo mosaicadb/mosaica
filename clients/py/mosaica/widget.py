@@ -242,6 +242,9 @@ class Map(anywidget.AnyWidget):
     - `height`: the widget's height in pixels in the notebook, 480 by default. The map fills the
       screen instead while its output is shown full screen. Its width is its container's, or the
       one an ipywidgets `layout=` states.
+    - `label`: the map's name, which a screen reader reads out for it and which tells one map
+      from another where a notebook shows several. `None`, the default, gives the map no name
+      of its own.
     - `basemap`: what is drawn under the points, as one of the values described below, or as a
       dictionary from view id to value for the views the map can switch to. `None`, the default,
       draws the world outline on a view with a map projection and nothing on any other view.
@@ -318,7 +321,9 @@ class Map(anywidget.AnyWidget):
       of its `shape`, `status`, the counts `visible`, `matched` and `served` inside it, a
       `verdict` saying whether they are exact for the shape or cover the grid cells around it,
       and any `refusal`. It changes when the region's counts arrive.
-    - `last_error`: why the page last refused something set from Python, or `None`.
+    - `last_error`: why the page last refused something set from Python, or `None`. The map
+      shows the same words in a line above it, until the attribute is set to a value the page
+      takes or is changed in the map.
     - `tokens_sent`: how many tokens the kernel has sent the page.
 
     To run code when someone picks an item on the map, call `m.observe(fn, names="selected")`.
@@ -340,6 +345,8 @@ class Map(anywidget.AnyWidget):
     # Not `layout`: ipywidgets' DOMWidget already has one, the CSS Layout model the frontend reads.
     explorer_layout = traitlets.Enum(["docked", "overlay"], default_value="docked").tag(sync=True)
     height = traitlets.Int(480).tag(sync=True)
+    # The map's accessible name; `None` gives it none.
+    label = traitlets.Unicode(None, allow_none=True).tag(sync=True)
     # The record field that titles a point in the hover and the item card; `None` titles it by id.
     title_field = traitlets.Unicode(None, allow_none=True).tag(sync=True)
     # The record fields the item card draws as images.
@@ -403,6 +410,7 @@ class Map(anywidget.AnyWidget):
         filters: Optional[dict] = None,
         bbox: Optional[Sequence[float]] = None,
         height: int = 480,
+        label: Optional[str] = None,
         explorer_layout: str = "docked",
         title_field: Optional[str] = None,
         image_fields: Union[str, Sequence[str], None] = None,
@@ -447,6 +455,7 @@ class Map(anywidget.AnyWidget):
             filters=filters,
             bbox=None if bbox is None else [float(v) for v in bbox],
             height=height,
+            label=label,
             explorer_layout=explorer_layout,
             title_field=title_field,
             image_fields=[] if image_fields is None else listed(image_fields),

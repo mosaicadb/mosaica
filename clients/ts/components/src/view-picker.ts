@@ -38,6 +38,11 @@ export class MosaicaViewPicker extends MosaicaElement {
         font-weight: 600;
         line-height: 1.3;
       }
+      /* The select's box is 24 px high for the pointer, in the room its one line takes. */
+      [part='select'] {
+        min-height: 24px;
+        margin-block: calc((1lh - 24px) / 2);
+      }
     `
   ];
 

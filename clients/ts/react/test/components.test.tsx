@@ -212,6 +212,25 @@ describe('@mosaicajs/react/components', () => {
     expect(seen).toEqual(['archive']);
   });
 
+  it('aria-label, role and tabIndex on a wrapper reach the element as attributes, and follow a change', async () => {
+    const store = fakeStore({meta: meta(), status: status({})});
+    for (const [Wrapper, tag] of [[MosaicaExplorer, 'mosaica-explorer'], [MosaicaMap, 'mosaica-map'], [MosaicaStatus, 'mosaica-status'], [MosaicaStore, 'mosaica-store']] as const) {
+      const given = (label: string, role: string, tabIndex: number) => createElement(Wrapper as typeof MosaicaStatus, {store, 'aria-label': label, role, tabIndex});
+      const read = async () => {
+        await settle(host);
+        const element = host.querySelector(tag)!;
+        // A map hands the tab index it is given to its canvas, which is its one tab stop.
+        const stop = tag === 'mosaica-map' ? element.shadowRoot!.querySelector('[part="canvas"]')! : element;
+        return [tag, element.getAttribute('aria-label'), element.getAttribute('role'), stop.getAttribute('tabindex')];
+      };
+      await act(async () => root.render(given('Papers by topic', 'region', 0)));
+      expect(await read()).toEqual([tag, 'Papers by topic', 'region', '0']);
+      await act(async () => root.render(given('Papers by venue', 'group', -1)));
+      expect(await read()).toEqual([tag, 'Papers by venue', 'group', '-1']);
+      await act(async () => root.render(null));
+    }
+  });
+
   it('an inline authorise arrow does not rebuild the element’s own store on a re-render', async () => {
     // The store opens a session at once; there is no server here.
     const fetched = globalThis.fetch;

@@ -21,7 +21,8 @@ import {chrome, tokens} from './tokens.js';
  * @csspart label - The caption, the group's name.
  * @csspart entry - The row of buttons and select.
  * @csspart select - The select.
- * @csspart step - A previous or next button, with `data-direction` set to `prev` or `next`.
+ * @csspart step - A previous or next button, named with the group, with `data-direction` set to
+ *   `prev` or `next`.
  */
 export class MosaicaKeyPicker extends MosaicaElement {
   static override styles = [
@@ -110,11 +111,11 @@ export class MosaicaKeyPicker extends MosaicaElement {
     return html`<div part="field">
       <span part="label" class="muted">${heading}</span>
       <div part="entry" class="row">
-        ${step('prev', previous, -1, 'Previous')}
+        ${step('prev', previous, -1, `Previous ${heading}`)}
         <select part="select" aria-label=${heading} @change=${(e: Event) => switchView(this, s, meta, (e.target as HTMLSelectElement).value)}>
           ${views.map((v) => html`<option value=${v.id} ?selected=${v.id === current.id}>${this.option(meta, v)}</option>`)}
         </select>
-        ${step('next', next, 1, 'Next')}
+        ${step('next', next, 1, `Next ${heading}`)}
       </div>
     </div>`;
   }
