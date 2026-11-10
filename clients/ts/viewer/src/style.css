@@ -8,6 +8,16 @@ body {
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* The explorer takes the window right of the instruments column, so the map's corner controls
    are not under it. */
 #explorer {
@@ -31,18 +41,19 @@ body {
   z-index: 10;
 }
 
-/* Below this the explorer takes the whole window, so its own layout has the width, and the
-   instruments open over it from a button. */
+/* Below this the explorer takes the window's width, so its own layout has it, and the
+   instruments open over it from a button in a bar of the page's own above the explorer. */
 #instruments-toggle {
   display: none;
 }
 @media (max-width: 1000px) {
   #explorer {
-    left: 0;
+    inset: 40px 0 0;
   }
   #instruments {
     display: none;
-    height: 100%;
+    top: 40px;
+    height: calc(100% - 40px);
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   }
   body.instruments-open #instruments {
@@ -51,11 +62,10 @@ body {
   #instruments-toggle {
     display: block;
     position: absolute;
-    top: 8px;
-    left: 50%;
-    transform: translateX(-50%);
+    top: 6px;
+    left: 8px;
     width: max-content;
-    z-index: 11;
+    margin: 0;
     padding: 5px 10px;
     font: 500 12px 'Instrument Sans', system-ui, sans-serif;
     color: #dfe3e8;
@@ -193,6 +203,11 @@ button:hover {
   width: auto;
   flex: 0 0 auto;
   margin-bottom: 0;
+}
+
+/* The line under the Source panel that says a session is being established. */
+#switching:not(:empty) {
+  margin: -8px 0 14px;
 }
 
 details {

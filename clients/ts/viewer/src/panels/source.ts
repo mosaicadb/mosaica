@@ -19,13 +19,15 @@ import type {Dataset, Preset} from '../config.js';
  * `artifacts per tile` is the most artifacts one level of a drawn layer shows in one tile, up to
  * the deployment's `max_artifacts_per_tile`. The store takes it when it opens, so a change opens
  * the session's store again.
+ *
+ * That a dataset change is in flight is said in the page's own status line, which `main.ts` keeps.
  */
 export function renderSource(state: AppState, datasets: Dataset[], presets: Preset[]): string {
   const current = datasets.find((d) => d.id === state.datasetId);
 
   const dataset =
     datasets.length > 1
-      ? `<select id="dataset">${datasets
+      ? `<label class="muted" for="dataset">bundle</label><select id="dataset">${datasets
           .map(
             (d) =>
               `<option value="${esc(d.id)}"${d.id === state.datasetId ? ' selected' : ''}>${esc(
@@ -37,7 +39,7 @@ export function renderSource(state: AppState, datasets: Dataset[], presets: Pres
 
   const principal =
     presets.length > 0
-      ? `<select id="principal">${presets
+      ? `<label class="muted" for="principal">principal</label><select id="principal">${presets
           .map(
             (p, i) =>
               `<option value="${i}"${p.label === state.termsLabel ? ' selected' : ''}>${esc(
@@ -56,12 +58,16 @@ export function renderSource(state: AppState, datasets: Dataset[], presets: Pres
     'Source',
     `${dataset}
      ${principal}
+     ${labelRow('budget', 'mark budget', fmt(state.budget))}
      <input id="budget" type="range" min="1000" max="2000000" step="1000" value="${state.budget}" />
-     ${row('mark budget', fmt(state.budget))}
+     ${labelRow('per-tile', 'artifacts per tile', fmt(state.artifactsPerTile))}
      <input id="per-tile" type="range" min="0" max="${perTileMax}" step="1" value="${state.artifactsPerTile}" />
-     ${row('artifacts per tile', fmt(state.artifactsPerTile))}
      ${row('visible at build', active ? fmt(active.visible) : '—')}
-     ${row('prose indexed', current?.prose.length ? current.prose.join(', ') : 'none')}
-     ${state.switching ? '<div class="muted">switching: establishing a session…</div>' : ''}`
+     ${row('prose indexed', current?.prose.length ? current.prose.join(', ') : 'none')}`
   );
+}
+
+/** A row whose label names the control `id`, which follows it, beside the control's value. */
+function labelRow(id: string, label: string, value: string): string {
+  return `<div class="row"><label class="muted" for="${id}">${esc(label)}</label><span class="v">${esc(value)}</span></div>`;
 }
