@@ -636,8 +636,9 @@ export interface Store {
    * The aggregate counts what the map counts ({@link Store.requestFilters}). `spec.without` leaves
    * one column's filter out, so a filter control can still show the values its own clause
    * excludes; `spec.withoutMembersOf` does the same for a layer's `member_of` clauses.
-   * `spec.subject: 'view'` limits the counts to the area in view, and `'visible'` ignores the
-   * filters and counts everything the viewer may see.
+   * `spec.filters` narrows the counts further. `spec.subject: 'view'` limits the counts to the area
+   * in view, and `'visible'` ignores the store's filters and counts everything the viewer may see
+   * that matches `spec.filters`.
    *
    * The store asks again whenever the filters, highlight, selected region or view change, and for
    * a `view` aggregate once the camera comes to rest. Each call sends a new request, so call it
@@ -2162,8 +2163,8 @@ export function createStore(options: StoreOptions): Store {
 
   /**
    * {@link requestFilters} less the filter-position control `spec.without` names and the
-   * filter-position `member_of` clauses on the layer `spec.withoutMembersOf` names, and with
-   * `spec.highlighted` the highlight joined to it.
+   * filter-position `member_of` clauses on the layer `spec.withoutMembersOf` names, with
+   * `spec.filters` joined to it, and with `spec.highlighted` the highlight joined too.
    */
   function aggregateFilters(spec: AggregateSpec): FilterExpr | null {
     const {draft, members} = projections.filters;
@@ -2172,8 +2173,9 @@ export function createStore(options: StoreOptions): Store {
     const clauses = layer === undefined ? members : members.filter((m) => m.verb !== 'filter' || m.layer !== layer);
     const filters = withSelected(withMembers(composeFilters(kept, 'filter'), clauses, 'filter'));
     const highlight = spec.highlighted === true ? requestHighlight() : null;
-    if (highlight === null) return filters;
-    return filters === null ? highlight : {all_of: [filters, highlight]};
+    const joined = [filters, spec.filters ?? null, highlight].filter((f): f is FilterExpr => f !== null);
+    if (joined.length === 0) return null;
+    return joined.length === 1 ? joined[0]! : {all_of: joined};
   }
 
   /**
@@ -2187,6 +2189,7 @@ export function createStore(options: StoreOptions): Store {
     let filters: FilterExpr | null = null;
     let reference: FilterExpr | undefined = spec.reference === 'visible' ? {} : spec.reference;
     if (subject === 'match') filters = aggregateFilters(spec);
+    if (subject === 'visible') filters = spec.filters ?? null;
     if (subject === 'view') {
       const area = countedArea();
       if (area === null) return null;

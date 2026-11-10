@@ -94,8 +94,11 @@ export class MosaicaFilterPanel extends MosaicaElement {
   @property() accessor pinned = '';
   /** Keeps one card open at a time, and shortens the subject row's figures. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level that cards for layers with levels count at. `null` is the coarsest level. */
-  @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
+  /**
+   * The level each card for a `stacked` or `tiered` layer counts at, keyed by layer name. A layer
+   * with no entry counts at its coarsest level. Set it as a property; it has no attribute.
+   */
+  @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
 
   /** The fields the user added, which stay listed. @internal */
   @state() accessor opened: ReadonlySet<string> = new Set();
@@ -527,7 +530,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const listed = this.listOrder.map((k) => shown.find((f) => f.key === k)!);
     const open = this.compact ? (listed.some((f) => f.key === this.openCard) ? this.openCard : null) : null;
     const card = (f: (typeof fields)[number]) =>
-      html`<mosaica-field-card part="card" exportparts=${CARD_PARTS} data-field=${f.key} field=${f.key} .store=${s} .level=${this.clusterLevel}
+      html`<mosaica-field-card part="card" exportparts=${CARD_PARTS} data-field=${f.key} field=${f.key} .store=${s} .level=${f.layer ? (this.clusterLevels.get(f.layer.name) ?? null) : null}
         ?compact=${this.compact} .folded=${this.compact ? f.key !== open : this.folded.has(f.key)}
         @mosaica-fold=${(e: Event) => this.onToggle(f.key, e.currentTarget as MosaicaFieldCard)}
         @mosaica-filterchange=${() => this.keepListed(f.key)} @mosaica-clausechange=${() => this.keepListed(f.key)}></mosaica-field-card>`;

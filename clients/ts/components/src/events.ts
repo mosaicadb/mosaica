@@ -75,8 +75,11 @@ export type MosaicaEventDetails = {
   'mosaica-budgetchange': {budget: number};
   /** The Most clusters slider was released. A `nested` or `dag` layer is now cut to at most `budget` clusters. */
   'mosaica-clusterbudgetchange': {budget: number};
-  /** The level that clusters are coloured and labelled at is now `level`. Null is the default level. */
-  'mosaica-levelchange': {level: number | null};
+  /**
+   * The level that the clusters of the layer `layer` are counted, coloured and labelled at is now
+   * `level`. Null is that layer's default level. Other layers keep theirs.
+   */
+  'mosaica-levelchange': {layer: string; level: number | null};
   /**
    * The viewer chose or reset colours for values of the category column `column`, in a colour
    * picker or in Edit colours. Each change names a category key and its new colour as `#rrggbb`, or

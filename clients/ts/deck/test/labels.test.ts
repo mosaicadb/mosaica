@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {LABEL_SIZE_MAX, LABEL_SIZE_MIN, MAX_DISPLACEMENT, MAX_LABEL_CHARS, labelSize, placeLabels, labelLine, type LabelCandidate} from '../src/labels.js';
 import type {Meta} from '@mosaicajs/client';
-import {drawnLevel} from '../src/layer.js';
+import {colourLayerOf, drawnLevel} from '../src/layer.js';
 
 const at = (id: number, x: number, y: number, priority: number, width = 60, height = 24): LabelCandidate => ({id: BigInt(id), x, y, width, height, priority});
 
@@ -143,19 +143,34 @@ describe('a name on one line', () => {
 
 describe('drawnLevel', () => {
   const layer = (name: string, kind: string, levels: number[]) => ({name, hierarchy: {kind, pruneChildren: false}, levels: levels.map((level) => ({level, title: null}))}) as unknown as Meta['layers'][number];
-  const META = {layers: [layer('bands', 'tiered', [0, 1, 2]), layer('tree', 'nested', [])]} as unknown as Meta;
+  const META = {layers: [layer('bands', 'tiered', [0, 1, 2]), layer('strata', 'stacked', [0, 1]), layer('tree', 'nested', [])]} as unknown as Meta;
+  const none = {served: [] as never[]};
 
-  it('is the chosen level, else the top level served of the layer coloured by or drawn first, and the cut served on a tree', () => {
-    const none = [] as never[];
-    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, undefined)).toBe(0);
-    expect(drawnLevel(META, {layers: ['tree'], served: none}, 'cluster:bands', undefined)).toBe(0);
-    expect(drawnLevel(META, {layers: ['bands'], served: none}, null, 2)).toBe(2);
-    expect(drawnLevel(META, {layers: ['tree'], served: none}, null, undefined)).toBeUndefined();
+  it('is the level chosen for the layer, else its top level served', () => {
+    expect(drawnLevel(META, none, 'bands', undefined)).toBe(0);
+    expect(drawnLevel(META, none, 'bands', new Map([['bands', 2]]))).toBe(2);
+    // Another layer's choice and a level the layer does not declare leave it at its top level.
+    expect(drawnLevel(META, none, 'bands', new Map([['strata', 1]]))).toBe(0);
+    expect(drawnLevel(META, none, 'bands', new Map([['bands', 7]]))).toBe(0);
+    expect(drawnLevel(META, none, 'strata', new Map([['bands', 2], ['strata', 1]]))).toBe(1);
+  });
+
+  it('is no level on a tree, whatever is chosen for it, nor on a layer the roster does not list', () => {
+    expect(drawnLevel(META, none, 'tree', undefined)).toBeUndefined();
+    expect(drawnLevel(META, none, 'tree', new Map([['tree', 1]]))).toBeUndefined();
+    expect(drawnLevel(META, none, 'gone', new Map([['gone', 1]]))).toBeUndefined();
+    expect(drawnLevel(META, none, undefined, undefined)).toBeUndefined();
   });
 
   it('follows the levels the camera’s zoom serves: where the top level is not served, the next one down', () => {
     const at = (rungs: number[]) => rungs.map((rung, i) => ({layer: 'bands', rung, mosaicaId: BigInt(i)})) as never;
-    expect(drawnLevel(META, {layers: ['bands'], served: at([1, 2, 1])}, null, undefined)).toBe(1);
-    expect(drawnLevel(META, {layers: ['bands'], served: at([2, 0, 1])}, null, undefined)).toBe(0);
+    expect(drawnLevel(META, {served: at([1, 2, 1])}, 'bands', undefined)).toBe(1);
+    expect(drawnLevel(META, {served: at([2, 0, 1])}, 'bands', undefined)).toBe(0);
+  });
+
+  it('colours marks at the level of the layer coloured by, else of the first layer drawn', () => {
+    expect(colourLayerOf({layers: ['tree']}, 'cluster:bands')).toBe('bands');
+    expect(colourLayerOf({layers: ['strata', 'bands']}, 'year')).toBe('strata');
+    expect(colourLayerOf({layers: []}, null)).toBeUndefined();
   });
 });

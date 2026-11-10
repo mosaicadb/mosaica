@@ -596,10 +596,14 @@ describe('<mosaica-field-card> on a levelled layer', () => {
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
     const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
     expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['Broad', true], ['Fine', false]]);
+    const chosen: unknown[] = [];
+    host.addEventListener('mosaica-levelchange', (e) => chosen.push(e.detail));
     select.value = '1';
     select.dispatchEvent(new Event('change'));
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+    // The choice names the card's layer, so a listener sets that layer's level alone.
+    expect(chosen).toEqual([{layer: 'bands', level: 1}]);
   });
 
   it('counts at the top level the camera’s zoom serves, where the top declared level is not served', async () => {

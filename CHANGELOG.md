@@ -6,6 +6,24 @@ All notable changes to Mosaica are recorded here. The format follows
 crates, the `mosaica` and `mosaica-native` Python packages, the `@mosaicajs` npm packages and the
 container image.
 
+## [Unreleased]
+
+### Added
+
+- **An aggregate can carry its own filter.** `AggregateSpec.filters` in the TypeScript client is
+  joined with `all_of` to what the aggregate counts, under every `subject`, including `visible`,
+  which otherwise sends none of the store's filters.
+
+### Changed
+
+- **A level is chosen for each layer.** The explorer keeps a level for each `stacked` or `tiered`
+  layer, and choosing one, on a card or in Colour by, leaves the other layers drawn at theirs. A
+  `nested` or `dag` layer is never cut at a level. `mosaica-levelchange` now reports
+  `{layer, level}`. The `cluster-level` attribute of `<mosaica-map>`, `<mosaica-filter-panel>` and
+  `<mosaica-colour-editor>` is replaced by a `clusterLevels` property, a `Map` from layer name to
+  level, and the deck layer's `clusterLevel` prop by `clusterLevels`. `<mosaica-field-card>` keeps
+  its one `level`.
+
 ## [0.2.0] - 2026-11-05
 
 An alpha, like 0.1.0. The bundle format has changed, so 0.2.0 refuses a bundle that 0.1.0 built,

@@ -12,7 +12,7 @@ import {
 } from '@mosaicajs/client';
 import {assertCompositionMatchesServed, chosenColour, hasValue} from '@mosaicajs/client/internal';
 import {DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DensityCounter, MosaicaLayer, cameraFitting, densityCountAt, frameMatches, resolvePick, viewInputOf, type Picked, type ResolutionStop} from '@mosaicajs/deck';
-import {DENSITY_COLOUR_TITLES, MarkSlab, artifactOfMark, clusterLayerOf, contourShapes, drawnLevel, densityStops, drawnCells, encodingOf, encodingSignature, hoverAt, maxCount, type ContourShape} from '@mosaicajs/deck/internal';
+import {DENSITY_COLOUR_TITLES, MarkSlab, artifactOfMark, clusterLayerOf, contourShapes, drawnLevel, drawnLevels, densityStops, drawnCells, encodingOf, encodingSignature, hoverAt, levelsKey, maxCount, type ContourShape} from '@mosaicajs/deck/internal';
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail, timestampText, type PickOutcome} from './base.js';
@@ -431,10 +431,11 @@ export class MosaicaMap extends MosaicaElement {
    */
   @property() accessor palette: PaletteName | '' = '';
   /**
-   * The level of a `stacked` or `tiered` layer at which clusters are coloured, labelled and
-   * outlined. Unset, the coarsest level. A `nested` or `dag` layer ignores it.
+   * The level at which each `stacked` or `tiered` layer's clusters are coloured, labelled and
+   * outlined, keyed by layer name. A layer with no entry is drawn at its coarsest level. A `nested`
+   * or `dag` layer ignores its entry. Set it as a property; it has no attribute.
    */
-  @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
+  @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
   /**
    * What is drawn under the points. `world` is the server's outline of land, coastlines and country
    * borders, and needs a view with a map projection. `{tiles, attribution}` is a tile server's URL
@@ -710,7 +711,7 @@ export class MosaicaMap extends MosaicaElement {
     if (changed.has('density') || changed.has('densityResolution')) this.pushDensity();
     if (changed.has('basemap')) this.drawnBasemap.reset();
     if (changed.has('basemap') || changed.has('ground')) this.syncBasemap();
-    const repaint = ['mode', 'drag', 'dragPolygon', 'basemap', 'ground', 'radius', 'clusterLevel', 'hoveredArtifact', 'noPoints', 'pointOpacity', 'density', 'densityColours', 'densityStrength', 'densityScale'] as const;
+    const repaint = ['mode', 'drag', 'dragPolygon', 'basemap', 'ground', 'radius', 'clusterLevels', 'hoveredArtifact', 'noPoints', 'pointOpacity', 'density', 'densityColours', 'densityStrength', 'densityScale'] as const;
     if (repaint.some((k) => changed.has(k))) this.paint();
   }
 
@@ -1038,7 +1039,7 @@ export class MosaicaMap extends MosaicaElement {
     const rows = clusterLayer ? a.colourServed : a.served;
     const rowOrdinals = clusterLayer ? new Set(rows.map((x) => a.table.ordinalOf(x.layer, x.mosaicaId))) : a.servedOrdinals;
     const sample: {ordinal: number; resolvedId: string | null}[] = [];
-    const level = this.drawnLevel();
+    const level = this.levelOf(layer);
     let coloured = 0;
     if (layer) {
       for (const band of bands) {
@@ -1146,7 +1147,7 @@ export class MosaicaMap extends MosaicaElement {
           id: 'mosaica',
           store: s,
           slab: this.slab,
-          clusterLevel: this.drawnLevel(),
+          clusterLevels: this.clusterLevels,
           selectedWorldXY: this.selectedWorldXY,
           openedArtifact: s.get('selection').artifact?.id ?? null,
           hoveredArtifact: this.hoveredArtifact,
@@ -1202,22 +1203,23 @@ export class MosaicaMap extends MosaicaElement {
 
   /**
    * The shapes a hover or click is resolved against ({@link contourShapes}), held until the served
-   * set, the fetched shapes, the level or the roster change. Each is the artifact's box until its
+   * set, the fetched shapes, the levels or the roster change. Each is the artifact's box until its
    * shape is fetched; where boxes overlap, depth and the mark under the pointer decide.
    */
-  private contoursHeld: {served: object; fetched: object; level: number | null; meta: object | null; opened: bigint | null; shapes: ContourShape[]} | null = null;
+  private contoursHeld: {served: object; fetched: object; levels: string; meta: object | null; opened: bigint | null; shapes: ContourShape[]} | null = null;
 
   private contours(): ContourShape[] {
     const s = this.resolvedStore;
     const a = s?.get('artifacts') ?? null;
     if (!a) return [];
     const meta = s?.get('meta') ?? null;
-    const level = this.drawnLevel() ?? null;
+    const levels = this.drawnLevels();
+    const key = levelsKey(levels);
     const opened = s?.get('selection').artifact?.id ?? null;
     const held = this.contoursHeld;
-    if (held && held.served === a.served && held.fetched === a.shapes && held.level === level && held.meta === meta && held.opened === opened) return held.shapes;
-    const shapes = contourShapes(a, {level: level ?? undefined, meta, opened});
-    this.contoursHeld = {served: a.served, fetched: a.shapes, level, meta, opened, shapes};
+    if (held && held.served === a.served && held.fetched === a.shapes && held.levels === key && held.meta === meta && held.opened === opened) return held.shapes;
+    const shapes = contourShapes(a, {levels, meta, opened});
+    this.contoursHeld = {served: a.served, fetched: a.shapes, levels: key, meta, opened, shapes};
     return shapes;
   }
 
@@ -1244,7 +1246,7 @@ export class MosaicaMap extends MosaicaElement {
   /** What decides what is under a pixel: the camera, the map's size, and the marks and names drawn and their sizes. */
   private drawnKey(): unknown[] {
     const s = this.resolvedStore;
-    return [this.viewState, this.clientWidth, this.clientHeight, s?.get('marks'), s?.get('artifacts'), s?.get('legend'), s?.get('selection').artifact?.id, this.drawnLevel(), this.noPoints, this.radius];
+    return [this.viewState, this.clientWidth, this.clientHeight, s?.get('marks'), s?.get('artifacts'), s?.get('legend'), s?.get('selection').artifact?.id, levelsKey(this.drawnLevels()), this.noPoints, this.radius];
   }
 
   /** Whether the map is running a pick of its own, which the deck's `layerFilter` lets draw. */
@@ -1276,7 +1278,7 @@ export class MosaicaMap extends MosaicaElement {
     const at = slot ? this.slab.markAt(Number(slot[1]), info.index) : null;
     const artifacts = this.resolvedStore?.get('artifacts') ?? null;
     // The mark's own artifact, preferred where shapes interleave.
-    const own = at && artifacts ? artifactOfMark(at.band, at.i, artifacts, this.drawnLevel()) : null;
+    const own = at && artifacts ? artifactOfMark(at.band, at.i, artifacts, this.levelOf(artifacts.layers[0])) : null;
     const world = this.worldAt(info.x, info.y);
     this.hoveredArtifact = picked.kind === 'artifact' ? picked.id : world ? this.artifactAt(world, own) : null;
     // The viewport carries no shapes; fetch the hovered one. `needShape` asks once per artifact.
@@ -1532,10 +1534,16 @@ export class MosaicaMap extends MosaicaElement {
     </div>`;
   }
 
-  /** The level clusters are drawn at: `cluster-level` where set, else the top level of a levelled layer. */
-  private drawnLevel(): number | undefined {
+  /** The level the layer `name` is drawn at: its entry in `clusterLevels`, else the top level of a levelled layer. */
+  private levelOf(name: string | null | undefined): number | undefined {
     const s = this.resolvedStore;
-    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, s?.get('legend').colourBy, this.clusterLevel ?? undefined);
+    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, name ?? undefined, this.clusterLevels);
+  }
+
+  /** {@link levelOf} for each layer drawn. */
+  private drawnLevels(): Map<string, number> {
+    const s = this.resolvedStore;
+    return drawnLevels(s?.get('meta') ?? null, s?.get('artifacts') ?? null, this.clusterLevels);
   }
 
   /** Whether the map is drawn on a light or dark background now: `ground` if set, else the page's scheme. */

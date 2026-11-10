@@ -332,6 +332,36 @@ describe('an aggregate that leaves out one layer’s clauses', () => {
   });
 });
 
+describe('an aggregate that carries its own filter', () => {
+  const remainder = {all_of: [{member_of: {layer: 'topics', artifact: '7'}}, {none_of: [{member_of: {layer: 'topics', artifact: '70'}}, {member_of: {layer: 'topics', artifact: '71'}}]}]};
+
+  it('counts the items that match it as well as the store’s filters and highlight', async () => {
+    const {store, pending} = await storeWith();
+    store.setFilters(DRAFT);
+    const venue = {layer: 'venues', artifact: 9n, outside: false, verb: 'filter' as const};
+    const lit = {layer: 'topics', artifact: 8n, outside: false, verb: 'highlight' as const};
+    store.setMembers([venue, lit]);
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder, highlighted: true});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual({all_of: [store.requestFilters(), remainder, {member_of: {layer: 'topics', artifact: '8'}}]});
+  });
+
+  it('is sent alone where the store has no filters', async () => {
+    const {store, pending} = await storeWith();
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual(remainder);
+  });
+
+  it('still applies to an aggregate over everything the viewer may see', async () => {
+    const {store, pending} = await storeWith();
+    store.setFilters(DRAFT);
+    store.setAggregate('rest', {groupings: [{count: true}], subject: 'visible', filters: remainder});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual(remainder);
+  });
+});
+
 describe('an aggregate the server sheds', () => {
   it('is sent again after the backoff, or the Retry-After where longer, and shows retrying meanwhile', async () => {
     const {store, pending, clock} = await storeWith();
