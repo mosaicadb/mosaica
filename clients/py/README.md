@@ -688,6 +688,10 @@ counts, `m.bbox` where the camera settled; setting `m.filters`, `m.layers`, `m.c
 `m.bbox` redraws. Ids are decimal strings (a `mosaica_id` is a `u64`). Marimo users: the widget's
 `.value` re-runs a cell at every settle; `m.observe(fn, names="selected")` reacts to a pick alone.
 
+`label` names the map for a screen reader, which reads it out when focus reaches the map. Give
+each map one where a notebook shows several, so that they can be told apart; `None`, the default,
+gives the map no name of its own. `db.map`, `viewer.map` and `selection.map` all take it.
+
 `budget` is how many points the map aims to draw on screen. Its default, `0`, leaves the map's own,
 250,000, and setting `m.budget` in a later cell applies it. `budget_min` and `budget_max`, 1,000 and 2,000,000
 unless you give others, are the fewest and the most a control for it offers; neither changes

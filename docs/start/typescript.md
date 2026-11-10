@@ -178,7 +178,7 @@ The [components reference](../reference/components/mosaica-explorer.md) lists th
 
 ## Fit it into a page
 
-The explorer is an element like any other, so it goes wherever your layout puts it. Give the page a header and a column of its own beside the map. Replace `index.html` with this. The explorer keeps the attributes from the last step.
+The explorer is an element like any other, so it goes wherever your layout puts it. Give the page a header and a column of its own beside the map. Replace `index.html` with this. The explorer keeps the attributes from the last step and gains one, `aria-label`. A screen reader reads it out when its user reaches the map, so it says what the map is of.
 
 ```html
 --8<-- "clients/ts/examples/getting-started/web/index.html"
@@ -190,7 +190,7 @@ And replace `src/style.css` with a grid:
 --8<-- "clients/ts/examples/getting-started/web/src/style.css"
 ```
 
-The explorer asks two things of the space it's given. Its height is 100% of its container's, so the container needs a height of its own. Here the grid gives the body the window's height, the header what it needs, and `main` the rest. `min-height: 0` lets `main` shrink to that row instead of growing to fit what's inside it. The explorer takes its width from its container as well, never from what's inside it, because it lays out its panels by how wide it is. In a grid that is its column, here everything the 260-pixel side column leaves. In a flex row, give it `flex: 1` or a width. Below 1000 pixels wide it puts the filters in a card over the map, and at 720 or narrower it moves them behind tabs.
+The explorer asks two things of the space it's given. Its height is 100% of its container's, so the container needs a height of its own. Here the grid gives the body the window's height, the header what it needs, and `main` the rest. `min-height: 0` lets `main` shrink to that row instead of growing to fit what's inside it. The explorer takes its width from its container as well, never from what's inside it, because it lays out its panels by how wide it is. In a grid that is its column, here everything the 260-pixel side column leaves. In a flex row, give it `flex: 1` or a width. Below 1000 pixels wide it puts the filters in a card over the map, and at 720 or narrower it opens them from a bar of buttons under the map. The `@media` rule at the end of the stylesheet is for the same narrow window, a phone's or one zoomed far in: it moves the side column under the map, so the map keeps the window's whole width.
 
 Save, and the map sits between the header and the column, as wide as the window allows.
 

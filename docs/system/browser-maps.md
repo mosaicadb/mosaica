@@ -103,6 +103,7 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 - **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
 - **Density shading**, counted with the aggregate route, so it follows the filter and the highlight as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
 - **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
+- **Keyboard and screen-reader support** for the panels and controls: every control is reached with Tab, and the changes a viewer needs to hear are announced. [Accessibility](accessibility.md) lists the keys, what is announced, what your page supplies and what has been checked.
 - **Status in plain words**, on the status strip and over the map: Connecting or Updating, Running query with Cancel on the strip once a query has run for a quarter of a second, with a spinner in the search box that started it, Up to date, Nothing in view, View refused with the server's reason under it, Server did not answer and Server busy (each with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
 
 ## Basemaps
@@ -113,3 +114,5 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 
 - **Fetching a view before it is chosen.** A view the viewer has not visited is fetched when they switch to it.
 - **An adapter for tile-based map libraries.** The store asks for an area at a time, and nothing sits between it and a library that asks for one tile at a time.
+- **A keyboard and screen-reader route to the points.** A point is picked, a cluster opened and a region drawn with a pointer. Without one a viewer can filter, search, read every count and move the map, and [Accessibility](accessibility.md#not-built-yet) says what else is missing.
+- **Translated words.** The components' own words are English, with numbers and dates formatted for `en-GB`.

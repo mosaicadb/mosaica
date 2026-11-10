@@ -81,6 +81,12 @@ To show the images of points already on the map, read the field for those points
 
 Style an element's parts with `::part()`. An element that renders another forwards the inner element's parts under its name, so through `<mosaica-explorer>` the map's toolbar is `::part(map-controls)` and the item card's title is `::part(item-card-title)`. `PARTS` in `@mosaicajs/components` lists each element's parts, for an app that renders an element in its own shadow root and forwards them. [Theme tokens](components/tokens.md) lists every CSS custom property with its defaults.
 
+## Accessibility
+
+Set two things yourself. Give each map an `aria-label` that says what it is a map of, on `<mosaica-map>` or `<mosaica-explorer>`: a screen reader reads it when focus reaches the map, and without it every map is called "Map". Set `lang` on your page's `<html>` element, since the elements' own words are English.
+
+[Accessibility](../system/accessibility.md) lists the keys each element takes, what a screen reader is told, the contrast to keep if you override a theme token, and what is not built, which includes reaching the map's points from the keyboard.
+
 ## When the server is busy
 
 The store retries a request the server sheds with `429`, as [When the server is busy](typescript.md#when-the-server-is-busy) in the TypeScript reference describes. Meanwhile the status strip reads Reconnecting and the map keeps what it drew. If the server still refuses, the status strip and the map show Server busy, in the `busy` panel state, with a Retry button and `data-code="backpressure"` on the refusal part. A `429` from a proxy in front of the server looks the same, with the proxy's code on `data-code`. An item record the server sheds shows Item unavailable on the item card.
