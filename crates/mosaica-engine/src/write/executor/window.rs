@@ -1056,13 +1056,18 @@ impl Executor {
             }
         }
         drop(generation);
+        // A window with no edit reads no artifact, so it never waits on the store's lock, which a
+        // compaction's thread holds while it composes the derived files.
         let moved = mosaica_types::by_shard(pairs);
-        let carried: Vec<WalRecord> = self.live.with_artifacts(|store| {
-            moved
-                .iter()
-                .flat_map(|(shard, moved)| store.carried_over(*shard, moved))
-                .collect()
-        });
+        let carried: Vec<WalRecord> = match moved.is_empty() {
+            true => Vec::new(),
+            false => self.live.with_artifacts(|store| {
+                moved
+                    .iter()
+                    .flat_map(|(shard, moved)| store.carried_over(*shard, moved))
+                    .collect()
+            }),
+        };
 
         mark = self.health.lap(WriteStage::DeriveRecords, mark);
 

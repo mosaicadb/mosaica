@@ -64,9 +64,9 @@ A compaction rewrites one shard at a time, and one compaction runs at a time. `c
 | 1. Rewriting rows | `row_space` |
 | 2. Indexing records | `postings`, `term_images`, `unique_indexes`, `edited_items`, `attributes`, `entity_terms`, `field_tallies` |
 | 3. Verifying | `digests` |
-| 4. Publishing | `hand_off`, `memberships`, `derived`, `report`, `manifest`, `flip`, `retire`, `open`, `adopt`, `warm`, `wal`, `reclaim` |
+| 4. Publishing | `derived`, `hand_off`, `memberships`, `report`, `manifest`, `flip`, `retire`, `open`, `adopt`, `warm`, `wal`, `reclaim` |
 
-The steps of phases 1 to 3 are the passes of `compact::execute` on the compaction's own thread, and the steps of phase 4 are the parts of `publish_fold` on the write executor. The `Staircase` that times each pass for `compaction.passes` opens its step through `mosaica_types::progress::Stages`, so a pass's cost row and its step are one boundary, and the error of a pass that fails names its step. `row_space` counts the rows it reads, `postings` the terms of the dictionary and `digests` the bytes it digests. The other steps count nothing.
+The steps of phases 1 to 3 are the passes of `compact::execute` on the compaction's own thread. `derived` runs on that thread too, writing the new prefix's derived files before the hand-off, and the steps after `hand_off` are the parts of `publish_fold` on the write executor. The `Staircase` that times each pass for `compaction.passes` opens its step through `mosaica_types::progress::Stages`, so a pass's cost row and its step are one boundary, and the error of a pass that fails names its step. `row_space` counts the rows it reads, `postings` the terms of the dictionary and `digests` the bytes it digests. The other steps count nothing.
 
 A compaction's record is listed from its dispatch until its publication ends, and it is failed where the compaction fails on its thread or is discarded at publication.
 

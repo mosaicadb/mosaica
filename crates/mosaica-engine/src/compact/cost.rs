@@ -24,8 +24,8 @@ pub struct PassCost {
     pub total: Option<u64>,
 }
 
-/// The passes of a compaction in the order they run: [`super::execute`]'s on the compaction's
-/// thread, then `Executor::publish_fold`'s on the executor's.
+/// The passes of a compaction in the order they run: [`super::execute`]'s and the derived files'
+/// on the compaction's thread, then `Executor::publish_fold`'s on the executor's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Pass {
     RowSpace,
@@ -37,10 +37,10 @@ pub(crate) enum Pass {
     EntityTerms,
     FieldTallies,
     Digests,
+    Derived,
     /// From the end of the passes to the publication's start, and its checks.
     HandOff,
     Memberships,
-    Derived,
     Report,
     Manifest,
     Flip,
@@ -99,9 +99,9 @@ impl Stage for Pass {
             | Pass::EntityTerms
             | Pass::FieldTallies => 1,
             Pass::Digests => 2,
-            Pass::HandOff
+            Pass::Derived
+            | Pass::HandOff
             | Pass::Memberships
-            | Pass::Derived
             | Pass::Report
             | Pass::Manifest
             | Pass::Flip

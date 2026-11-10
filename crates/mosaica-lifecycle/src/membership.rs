@@ -47,7 +47,7 @@ fn edge(space: LayerSpace, record: &ArtifactRecord) -> Option<(ArtifactAt, Artif
 
 /// What a fold retires: the point entities it executed in its shard, and each layer space's
 /// artifacts it executed. A point and an artifact may share an entity number and never a set.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Retired {
     /// The shard whose slice `points` and `released` leave.
     pub shard: ShardId,

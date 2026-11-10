@@ -49,7 +49,7 @@ pub(super) struct Executor {
     /// Held separately since it publishes its own swap.
     pub(super) merge: Background<crate::merge::CompletedMerge>,
     /// Runs on its own thread: it takes minutes to hours and the pool serves viewports.
-    pub(super) fold: Background<crate::compact::CompletedFold>,
+    pub(super) fold: Background<WrittenFold>,
     /// Reads a vocabulary out of the generation and writes files the manifest does not name.
     pub(super) suggest: Background<crate::suggest::CompletedSuggest>,
     /// Its in-flight flag is [`ExecutorHealth::flush_in_flight`], which status reads.

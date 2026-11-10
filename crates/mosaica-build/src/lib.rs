@@ -2224,7 +2224,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
     //
     // After every file they read: the segment, the row-to-entity table, the entity terms and the
     // value columns. The streaming build calls the same function at the same point.
-    other_paths.push(mosaica_store::field_tallies::derive_view(
+    let (tallies, _) = mosaica_store::field_tallies::derive_view(
         &prefix_dir,
         layout,
         &view.view_id,
@@ -2232,7 +2232,8 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         n as u32,
         &declared_scalars_of(&args.schema),
         &|name| mosaica_filter::base_numbers(&prefix_dir.join(layout.column_rel(name))),
-    )?);
+    )?;
+    other_paths.push(tallies);
 
     // ---- 9. manifests ------------------------------------------------------------------
     other_paths.extend([permutation_path, row_entity_path]);

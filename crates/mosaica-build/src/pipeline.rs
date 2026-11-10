@@ -2419,7 +2419,7 @@ fn build_bundle(
             // and the value columns. The in-memory build calls the same function at the same
             // point.
             if !filled.is_empty() {
-                view_files.push(mosaica_store::field_tallies::derive_view(
+                let (tallies, _) = mosaica_store::field_tallies::derive_view(
                     &prefix_dir,
                     layout,
                     &view.view_id,
@@ -2427,7 +2427,8 @@ fn build_bundle(
                     rows_in_view,
                     &crate::declared_scalars_of(&args.schema),
                     &|name| mosaica_filter::base_numbers(&prefix_dir.join(layout.column_rel(name))),
-                )?);
+                )?;
+                view_files.push(tallies);
             }
             shards[k]
                 .segments
