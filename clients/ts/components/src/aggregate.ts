@@ -56,6 +56,11 @@ export function isTree(layer: Pick<Layer, 'hierarchy'>): boolean {
   return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag';
 }
 
+/** Whether `layer` declares parent edges, `tiered`, `nested` or `dag`, so its artifacts can be walked by their parents and children. */
+export function isLinked(layer: Pick<Layer, 'hierarchy'>): boolean {
+  return layer.hierarchy.kind === 'tiered' || isTree(layer);
+}
+
 /**
  * The level of a `stacked` or `tiered` layer that is counted and coloured: `chosen` where the layer
  * declares it, else its top (coarsest) level among those `served` at the camera's zoom, as the

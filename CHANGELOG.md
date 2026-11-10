@@ -86,6 +86,20 @@ container image.
   `<mosaica-colour-editor>` is replaced by a `clusterLevels` property, a `Map` from layer name to
   level, and the deck layer's `clusterLevel` prop by `clusterLevels`. `<mosaica-field-card>` keeps
   its one `level`.
+- **The cluster card drills down a layer's parent edges.** On a `tiered`, `nested` or `dag` layer,
+  `<mosaica-field-card>` shows the layer's filter clauses as a breadcrumb, each with a × that
+  removes it, and lists the children of the deepest crumb, or the top-level clusters, from the
+  browse route a page at a time. Each row counts the items matching every filter, the layer's own
+  clauses among them, beside every item of it the viewer may see, so a row whose matching count is 0
+  is still listed, and a pick adds a clause that combines with the others by AND. A `tiered` layer's
+  rows stand under their levels' titles, a `dag` row names its other parents, and while every child
+  is on one page a row counts the crumb's items in none of them. Below a crumb with no children, and
+  on a `stacked` layer, the card ranks the clusters at the next level under every filter. A `flat`
+  layer's card is unchanged. The new parts are `crumbs`, `crumb`, `crumb-name`, `crumb-remove`,
+  `level`, `also`, `remainder` and `refusal`.
+- `<mosaica-cluster-filter>` searches every level of a levelled layer in one request with no
+  `level`, and walks the parents of a `tiered` layer's matches. A step of a path, there and on a
+  field card, names every served parent of the step below it.
 - **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
   takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees

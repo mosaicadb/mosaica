@@ -1,9 +1,9 @@
 import {artifactName, type BrowseRow, type Layer, type Store} from '@mosaicajs/client';
-import {isTree} from './aggregate.js';
+import {isLinked} from './aggregate.js';
 import {UNNAMED} from './base.js';
 
 /**
- * The names of clusters' parents on a `nested` or `dag` layer, learnt from browse pages: for each
+ * The names of clusters' parents on a layer with parent edges, learnt from browse pages: for each
  * cluster asked about, a page of its served parents, and then one of its first parent's. Each is
  * asked for once until {@link reset}, which also drops an answer still loading.
  */
@@ -30,9 +30,15 @@ export class ClusterPaths {
     return this.met.get(id)?.rung;
   }
 
-  /** Ask for the parents of each of `ids` and of its first parent, on a `nested` or `dag` layer. */
+  /** The name a page gave a cluster, or `null` where no page has met it. */
+  nameOf(id: bigint): string | null {
+    const row = this.met.get(id);
+    return row ? (artifactName(row) ?? UNNAMED) : null;
+  }
+
+  /** Ask for the parents of each of `ids` and of its first parent, on a layer with parent edges. */
   ask(store: Store, layer: Layer, ids: readonly bigint[]): void {
-    if (!isTree(layer)) return;
+    if (!isLinked(layer)) return;
     const epoch = this.epoch;
     const ask = (id: bigint) => {
       if (this.asked.has(id)) return;
@@ -54,16 +60,20 @@ export class ClusterPaths {
     }
   }
 
-  /** A cluster's two nearest parents' names, nearest last, as far up as the pages have named them. */
+  /**
+   * A cluster's path of parents two steps up, nearest last, as far up as the pages have named
+   * them. A step names every served parent of the one below it, and the step above is taken from
+   * the first of them.
+   */
   pathOf(id: bigint): string {
-    const names: string[] = [];
+    const steps: string[] = [];
     let parents = this.parentsOf.get(id) ?? this.met.get(id)?.parentIds ?? [];
     for (let i = 0; i < 2 && parents.length > 0; i++) {
-      const at = this.met.get(parents[0]!);
-      if (!at) break;
-      names.unshift(artifactName(at) ?? UNNAMED);
-      parents = this.parentsOf.get(at.mosaicaId) ?? at.parentIds;
+      const named = parents.flatMap((p) => this.met.get(p) ?? []);
+      if (named.length === 0) break;
+      steps.unshift(named.map((r) => artifactName(r) ?? UNNAMED).join(', '));
+      parents = this.parentsOf.get(named[0]!.mosaicaId) ?? named[0]!.parentIds;
     }
-    return names.join(' › ');
+    return steps.join(' › ');
   }
 }

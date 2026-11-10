@@ -3,7 +3,7 @@ import {property, state} from 'lit/decorators.js';
 import {repeat} from 'lit/directives/repeat.js';
 import {artifactName, withMember, withoutMember, type BrowseRow, type Layer, type MemberClause, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
-import {HeldAggregate, artifactGroupings, countsByKey} from './aggregate.js';
+import {HeldAggregate, artifactGroupings, countsByKey, isLinked} from './aggregate.js';
 import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
 import {FloatingList} from './float.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -53,7 +53,8 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  * @csspart option - One cluster in the list, with `data-id`, `aria-selected` while its clause is
  *   on, and `data-active` on the one the arrow keys reached.
  * @csspart name - A row's name, with `data-unnamed` if the cluster has none.
- * @csspart path - A row's path of parents' names.
+ * @csspart path - A row's path of parents' names, each step naming every served parent of the step
+ *   below it.
  * @csspart value-count - A row's exact count.
  * @csspart more - The note under the box when there is nothing to list, or when more match than
  *   are listed.
@@ -223,10 +224,10 @@ export class MosaicaClusterFilter extends MosaicaElement {
     return this.resolvedStore?.get('meta')?.layers.find((l) => l.name === this.layer) ?? null;
   }
 
-  /** The levels a request addresses on the layer: each declared level on a levelled one, else one request with none. */
-  private levels(layer: Layer): (number | undefined)[] {
+  /** The first declared level of a levelled layer, whose clusters are the top level; `undefined` on any other. */
+  private firstLevel(layer: Layer): number | undefined {
     const levelled = layer.hierarchy.kind === 'stacked' || layer.hierarchy.kind === 'tiered';
-    return levelled && layer.levels.length > 0 ? layer.levels.map((l) => l.level) : [undefined];
+    return levelled ? layer.levels[0]?.level : undefined;
   }
 
   /** One browse page of the layer. Counts come from the aggregate, so the page is asked unfiltered. */
@@ -252,7 +253,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
     if (key === this.fetchedFor) return;
     this.fetchedFor = key;
     const epoch = this.epoch;
-    const level = this.levels(layer)[0];
+    const level = this.firstLevel(layer);
     this.browse({limit: TOP_LEVEL_ROWS, ...(level === undefined ? {} : {level})})
       .then((page) => {
         if (epoch !== this.epoch) return;
@@ -268,20 +269,22 @@ export class MosaicaClusterFilter extends MosaicaElement {
       });
   }
 
-  /** Search the layer's names for `q`, at every level of a levelled layer, and walk each match's path. */
+  /**
+   * Search the layer's names for `q` and walk each match's path. One request with no level
+   * searches every level of a levelled layer.
+   */
   private searchFor(q: string): void {
     const layer = this.declared();
     if (!layer) return;
     const epoch = this.epoch;
     const limit = this.resolvedStore?.get('meta')?.selection.maxBrowseRows ?? 50;
-    Promise.all(this.levels(layer).map((level) => this.browse({q, limit: Math.min(limit, 50), ...(level === undefined ? {} : {level})})))
-      .then((pages) => {
+    this.browse({q, limit: Math.min(limit, 50)})
+      .then((page) => {
         if (epoch !== this.epoch || this.search.trim() !== q) return;
-        const offers = pages.flatMap((p) => p.artifacts.map((r) => this.offer(r)));
-        this.found = {q, offers, more: pages.some((p) => p.next !== null)};
+        const offers = page.artifacts.map((r) => this.offer(r));
+        this.found = {q, offers, more: page.next !== null};
         this.refusal = null;
-        const walkable = layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag';
-        for (const o of offers) void this.walk(o, walkable, epoch);
+        for (const o of offers) void this.walk(o, isLinked(layer), epoch);
       })
       .catch((error: unknown) => {
         if (epoch !== this.epoch) return;
@@ -291,28 +294,28 @@ export class MosaicaClusterFilter extends MosaicaElement {
   }
 
   /**
-   * Fill in an offer's path, its first parent's name and so on up to {@link PATH_DEPTH} parents. On
-   * a layer whose children form needs no level, a missing parent is asked for; on a levelled layer
-   * only parents already met are named.
+   * Fill in an offer's path up to {@link PATH_DEPTH} steps. A step names every served parent of
+   * the one below it, and the step above is taken from the first of them. With `ask`, on a layer
+   * with parent edges, parents not yet met are asked for.
    */
   private async walk(o: Offer, ask: boolean, epoch: number): Promise<void> {
     const names: string[] = [];
     let at: BrowseRow = o.row;
     for (let i = 0; i < PATH_DEPTH && at.parentIds.length > 0; i++) {
-      const up = at.parentIds[0]!;
-      let parent = this.rows.get(up);
-      if (!parent && ask) {
+      const met = () => at.parentIds.flatMap((p) => this.rows.get(p) ?? []);
+      let parents = met();
+      if (parents.length < at.parentIds.length && ask) {
         let held = this.parentsOf.get(at.mosaicaId);
         if (!held) {
           held = this.browse({parent: at.mosaicaId, limit: 1}).then((p) => p.parents, () => []);
           this.parentsOf.set(at.mosaicaId, held);
         }
         for (const r of await held) this.rows.set(r.mosaicaId, r);
-        parent = this.rows.get(up);
+        parents = met();
       }
-      if (!parent) break;
-      names.unshift(artifactName(parent) ?? UNNAMED);
-      at = parent;
+      if (parents.length === 0) break;
+      names.unshift(parents.map((p) => artifactName(p) ?? UNNAMED).join(', '));
+      at = parents[0]!;
     }
     if (epoch !== this.epoch) return;
     o.path = names;

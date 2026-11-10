@@ -1,25 +1,15 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type BrowsePage, type BrowseRow, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
+import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type ClauseVerb, type Layer, type Masked} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
 import {MosaicaElement, UNNAMED, emit, focusLost, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
+import {Lineage, otherParents, type Node} from './lineage.js';
 import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
-
-/** One node of the walk: a row, its children once fetched, and where its paging got to. */
-type Node = {
-  row: BrowseRow;
-  /** The path that reached it; a `dag` node under two parents is two nodes with different paths. */
-  path: string;
-  children: Node[] | null;
-  next: string | null;
-  loading: boolean;
-  refusal: Refusal | null;
-};
 
 const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
 
@@ -28,18 +18,6 @@ type RowElement = HTMLElement & {path: string};
 
 /** The control in a row that focus is on: the row's path and place among the rows, and the control's part and verb. */
 type Held = {path: string; at: number; part: string; verb: string | null};
-
-/** How many requests a refetch of the rows has in flight at once. */
-const REFETCH_AT_ONCE = 4;
-
-/**
- * What a request for rows is part of. A `refetch` waits its turn among {@link REFETCH_AT_ONCE};
- * nothing more is asked for once `wanted` is false.
- */
-type Fetch = {wanted: () => boolean; refetch: boolean};
-
-/** A row's press, which waits for nothing. */
-const PRESSED: Fetch = {wanted: () => true, refetch: false};
 
 /**
  * Use the hierarchy when viewers should be able to reach a layer's artifacts at any level, wherever
@@ -297,48 +275,31 @@ export class MosaicaHierarchy extends MosaicaElement {
   /** Rows per page, from 1 up to the server's `maxBrowseRows`. */
   @property({type: Number}) accessor limit = 50;
 
-  @state() private accessor roots: Node[] | null = null;
-  @state() private accessor rootsNext: string | null = null;
   @state() private accessor query = '';
   @state() private accessor searching: Node[] | null = null;
-  @state() private accessor loading = false;
-  @state() private accessor refusal: Refusal | null = null;
   /** Which paths are open, so a re-render of the tree keeps the walk. */
   @state() private accessor open = new Set<string>();
-  /** Bumped to re-render after a node's children land, since the tree in `roots` is mutated. */
-  @state() private accessor revision = 0;
   /** The paths of the rows whose buttons Escape has put away, each until the pointer and focus leave it. */
   @state() private accessor buttonsAway: ReadonlySet<string> = new Set();
 
-  /** How many pages More has loaded under each path, and under `''` for the roots, so a refetch loads as many. */
-  private pages = new Map<string, number>();
-  /** How many of a refetch's requests are in flight, and those waiting for a place. */
-  private asking = 0;
-  private waiting: (() => void)[] = [];
-
-  /** The question the roots were fetched under; see {@link question}. */
-  private fetchedUnder = '';
-  /**
-   * Every name the walk has seen, by identifier. A filter layer's artifacts are never served in a
-   * viewport, so this is the client's only source of their names.
-   */
-  private names = new Map<bigint, string>();
+  /** The browse pages of the current layer: its roots and the children of the rows opened. */
+  private readonly lineage = new Lineage({
+    store: () => this.resolvedStore,
+    layer: () => this.current(),
+    limit: () => this.limit,
+    isOpen: (path) => this.open.has(path),
+    changed: () => this.requestUpdate()
+  });
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
-  /** Moved by {@link resetServerData}, so a page asked for before it is dropped. */
+  /** Moved by {@link resetServerData}, so a search asked for before it is dropped. */
   private epoch = 0;
 
   protected override resetServerData(): void {
     this.epoch += 1;
-    this.roots = null;
-    this.rootsNext = null;
+    this.lineage.reset();
     this.searching = null;
-    this.loading = false;
-    this.refusal = null;
     this.open = new Set();
-    this.pages.clear();
     this.buttonsAway = new Set();
-    this.names.clear();
-    this.fetchedUnder = '';
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = null;
     this.query = '';
@@ -351,16 +312,6 @@ export class MosaicaHierarchy extends MosaicaElement {
   private current(): Layer | null {
     const offered = this.layers();
     return offered.find((l) => l.name === this.layer) ?? offered[0] ?? null;
-  }
-
-  /**
-   * The question the panel is asking, as a string: the layer and the map's filter. A change
-   * refetches the roots and the children of the open rows, whose counts answer the old question.
-   */
-  private question(): string {
-    // Hashed from `requestFilters()`, what `store.browse` sends, which includes the drawn region.
-    // A `member_of` leaf holds its artifact as a decimal string, so it serialises.
-    return `${this.current()?.name ?? ''}|${JSON.stringify(this.resolvedStore?.requestFilters() ?? null)}`;
   }
 
   /**
@@ -427,11 +378,7 @@ export class MosaicaHierarchy extends MosaicaElement {
 
   /** The roots, where the question they were fetched under is no longer the one being asked. */
   private loadRootsIfStale(): void {
-    const q = this.question();
-    if (this.shown && q !== this.fetchedUnder && this.current()) {
-      this.fetchedUnder = q;
-      void this.loadRoots();
-    }
+    if (this.shown) this.lineage.loadIfStale();
   }
 
   protected override onStoreChange(): void {
@@ -454,138 +401,13 @@ export class MosaicaHierarchy extends MosaicaElement {
     this.loadRootsIfStale();
   }
 
-  /** One page of the current layer, under the map's filter, which the store supplies. */
-  private page(req: {parent?: bigint; q?: string; cursor?: string}): Promise<BrowsePage> | null {
-    const s = this.resolvedStore;
-    const layer = this.current();
-    if (!s || !layer) return null;
-    const ceiling = s.get('meta')?.selection.maxBrowseRows ?? this.limit;
-    return s.browse({...req, layer: layer.name, limit: Math.max(1, Math.min(this.limit, ceiling))});
-  }
-
-  /** Run `ask` in one of a refetch's {@link REFETCH_AT_ONCE} places, once one is free. */
-  private async placed<T>(ask: () => Promise<T>): Promise<T> {
-    if (this.asking < REFETCH_AT_ONCE) this.asking++;
-    else await new Promise<void>((free) => this.waiting.push(free));
-    try {
-      return await ask();
-    } finally {
-      // A waiting request takes the place over; with none, the place is free.
-      const next = this.waiting.shift();
-      if (next) next();
-      else this.asking--;
-    }
-  }
-
-  /**
-   * The rows under `parent`, or the roots: the page at `cursor`, or from the first page as many as
-   * More had loaded there. The store aborts no request, so a fetch no longer wanted asks for
-   * nothing more and returns `null`.
-   */
-  private async rowsUnder(parent: Node | null, cursor: string | undefined, fetch: Fetch): Promise<{nodes: Node[]; next: string | null} | null> {
-    const path = parent?.path ?? '';
-    const pages = cursor === undefined ? (this.pages.get(path) ?? 1) : 1;
-    const nodes: Node[] = [];
-    let next = cursor ?? null;
-    for (let i = 0; i < pages && (i === 0 || next !== null); i++) {
-      const ask = async () => (fetch.wanted() ? this.page({...(parent ? {parent: parent.row.mosaicaId} : {}), ...(next === null ? {} : {cursor: next})}) : null);
-      const page = await (fetch.refetch ? this.placed(ask) : ask());
-      if (!page) return null;
-      nodes.push(...page.artifacts.map((row) => this.node(row, path)));
-      next = page.next;
-    }
-    if (cursor !== undefined) this.pages.set(path, (this.pages.get(path) ?? 1) + 1);
-    return {nodes, next};
-  }
-
-  /**
-   * The roots, with the children of every row among them that is open. They replace the rows, or
-   * the page at `cursor` joins them, once those have landed, so a walk under one question is drawn
-   * whole under the next. Rows asked for under a question since replaced are dropped. Returns the
-   * rows it added.
-   */
-  private async loadRoots(cursor?: string): Promise<Node[]> {
-    if (!this.resolvedStore || !this.current()) return [];
-    const epoch = this.epoch;
-    const under = this.fetchedUnder;
-    const wanted = () => epoch === this.epoch && under === this.fetchedUnder;
-    const fetch: Fetch = {wanted, refetch: cursor === undefined};
-    this.loading = true;
-    this.refusal = null;
-    try {
-      const got = await this.rowsUnder(null, cursor, fetch);
-      if (!got || !wanted()) return [];
-      await this.reopen(got.nodes, fetch);
-      if (!wanted()) return [];
-      this.roots = cursor === undefined ? got.nodes : [...(this.roots ?? []), ...got.nodes];
-      this.rootsNext = got.next;
-      // A row pressed open while these were on their way has no children yet.
-      void this.reopen(got.nodes, fetch);
-      return got.nodes;
-    } catch (error) {
-      if (!wanted()) return [];
-      this.refusal = refusalOf(error);
-      this.roots = this.roots ?? [];
-      return [];
-    } finally {
-      if (wanted()) this.loading = false;
-    }
-  }
-
-  /** Fetch the children of each open row among `nodes` and under them that has none yet. */
-  private async reopen(nodes: readonly Node[], fetch: Fetch): Promise<void> {
-    await Promise.all(
-      nodes
-        .filter((n) => this.open.has(n.path) && n.row.childCount > 0)
-        .map((n) => (n.children !== null ? this.reopen(n.children, fetch) : n.loading ? undefined : this.expand(n, false, fetch)))
-    );
-  }
-
-  private node(row: BrowseRow, parentPath: string): Node {
-    const name = artifactName(row);
-    if (name !== null) this.names.set(row.mosaicaId, name);
-    return {row, path: `${parentPath}/${row.mosaicaId}`, children: null, next: null, loading: false, refusal: null};
-  }
-
-  /** What to call an artifact: its name where the walk has met one. */
-  private nameOf(id: bigint): string {
-    return this.names.get(id) ?? UNNAMED;
-  }
-
-  /**
-   * Expand a node: its children, paged. A node keeps what it fetched while {@link question} is
-   * unchanged, so reopening it fetches nothing.
-   */
-  private async expand(node: Node, more = false, fetch: Fetch = PRESSED): Promise<Node[]> {
-    if (!this.resolvedStore || !this.current()) return [];
-    const epoch = this.epoch;
-    node.loading = true;
-    node.refusal = null;
-    this.revision++;
-    try {
-      const got = await this.rowsUnder(node, more ? (node.next ?? undefined) : undefined, fetch);
-      if (!got || epoch !== this.epoch) return [];
-      await this.reopen(got.nodes, fetch);
-      node.children = more ? [...(node.children ?? []), ...got.nodes] : got.nodes;
-      node.next = got.next;
-      return got.nodes;
-    } catch (error) {
-      node.refusal = refusalOf(error);
-      node.children = node.children ?? [];
-      return [];
-    } finally {
-      node.loading = false;
-      this.revision++;
-    }
-  }
-
   /** Open a row, fetching its children where it has none yet, or close one that is open or opening. */
   private toggle(node: Node): void {
     const open = new Set(this.open);
     if (open.has(node.path) && (node.children !== null || node.loading)) open.delete(node.path);
     else {
       open.add(node.path);
-      if (node.children === null && !node.loading) void this.expand(node);
+      if (node.children === null && !node.loading) void this.lineage.expand(node);
     }
     this.open = open;
   }
@@ -596,7 +418,7 @@ export class MosaicaHierarchy extends MosaicaElement {
    * anywhere else meanwhile stays there.
    */
   private async more(button: HTMLElement, parent: Node | null): Promise<void> {
-    const added = await (parent ? this.expand(parent, true) : this.loadRoots(this.rootsNext ?? undefined));
+    const added = await (parent ? this.lineage.expand(parent, true) : this.lineage.loadRoots(this.lineage.rootsNext ?? undefined));
     await this.updateComplete;
     const first = added[0];
     const onButton = this.shadowRoot?.activeElement === button || (!button.isConnected && focusLost());
@@ -653,16 +475,16 @@ export class MosaicaHierarchy extends MosaicaElement {
         this.searching = null;
         return;
       }
-      const request = this.page({q});
+      const request = this.lineage.page({q});
       if (!request) return;
       const epoch = this.epoch;
       void request
         .then((page) => {
-          if (epoch === this.epoch) this.searching = page.artifacts.map((row) => this.node(row, 'q'));
+          if (epoch === this.epoch) this.searching = page.artifacts.map((row) => this.lineage.node(row, 'q'));
         })
         .catch((error: unknown) => {
           if (epoch !== this.epoch) return;
-          this.refusal = refusalOf(error);
+          this.lineage.refusal = refusalOf(error);
           this.searching = [];
         });
     }, 250);
@@ -681,7 +503,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     if (!s || !layer) return;
     const held = s.get('filters').members;
     const on = this.clausesOn(id).includes(verb);
-    const label = this.names.get(id);
+    const label = this.lineage.names.get(id);
     s.setMembers(
       on
         ? withoutMember(held, layer.name, id, verb)
@@ -708,10 +530,11 @@ export class MosaicaHierarchy extends MosaicaElement {
     const layer = this.current()!;
     const title = layer.title || layer.name;
     const filtered = s.get('filters').expr !== null || s.get('filters').members.length > 0;
-    const rows = this.searching ?? this.roots;
-    const state = this.refusal ? 'refused' : rows === null ? (this.loading ? 'loading' : 'shown') : rows.length === 0 ? 'empty' : 'shown';
-    const said = this.refusal
-      ? html`<span part="refusal" data-code=${this.refusal.code}><span class="dot refuse"></span>Layer unavailable</span>`
+    const {refusal, roots, rootsNext, loading} = this.lineage;
+    const rows = this.searching ?? roots;
+    const state = refusal ? 'refused' : rows === null ? (loading ? 'loading' : 'shown') : rows.length === 0 ? 'empty' : 'shown';
+    const said = refusal
+      ? html`<span part="refusal" data-code=${refusal.code}><span class="dot refuse"></span>Layer unavailable</span>`
       : state === 'loading'
         ? html`<span class="sr-only">Loading</span>`
         : state === 'empty'
@@ -724,10 +547,9 @@ export class MosaicaHierarchy extends MosaicaElement {
       ${offered.length > 1
         ? html`<select part="layer" aria-label="Hierarchy layer" .value=${layer.name} @change=${(e: Event) => {
             this.layer = (e.target as HTMLSelectElement).value;
-            this.roots = null;
+            this.lineage.clear();
             this.searching = null;
             this.open = new Set();
-            this.pages.clear();
           }}>
             ${offered.map((l) => html`<option value=${l.name} ?selected=${l.name === layer.name}>${l.title || l.name}</option>`)}
           </select>`
@@ -742,7 +564,7 @@ export class MosaicaHierarchy extends MosaicaElement {
       /></div>
       <div role="status"><span part="state" data-state=${state}>${said}</span>${notes.length > 0 ? html`<span class="sr-only">${notes.join('. ')}</span>` : nothing}</div>
       ${rows === null || rows.length === 0 ? nothing : html`<ul part="tree" aria-label=${title}>${rows.map((n) => this.renderNode(n, 0, layer, filtered))}</ul>`}
-      ${this.searching === null && this.rootsNext
+      ${this.searching === null && rootsNext
         ? html`<button part="more" class="more-link" type="button" @click=${(e: Event) => void this.more(e.currentTarget as HTMLElement, null)}>More</button>`
         : nothing}
     </div>`;
@@ -756,7 +578,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     const name = artifactName(node.row);
     const called = name ?? UNNAMED;
     // A `dag` node is drawn under each served parent; the row names the others.
-    const also = node.row.parentIds.filter((p) => String(p) !== node.path.split('/').at(-2));
+    const also = otherParents(node);
     const drawn = !isFilterLayer(layer);
     const pressed = (verb: ClauseVerb) => (clauses.includes(verb) ? 'true' : 'false');
     return html`<li>
@@ -794,7 +616,7 @@ export class MosaicaHierarchy extends MosaicaElement {
               title=${verb === 'highlight' ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.apply(id, verb)}>${icon('close', 12)}</button>`
         )}
       </div>
-      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.map((p) => this.nameOf(p)).join(', ')}</div>` : nothing}
+      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.map((p) => this.lineage.nameOf(p)).join(', ')}</div>` : nothing}
       ${node.refusal ? html`<div part="also" style=${`--depth:${depth}`} data-code=${node.refusal.code}>Children unavailable</div>` : nothing}
       ${open
         ? html`<ul part="children" aria-label=${`Children of ${called}`}>
