@@ -1,7 +1,7 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
 import {artifactName, isFilterLayer, withMember, withoutMember, type Artifact, type ArtifactDetail, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
-import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
+import {MosaicaElement, UNNAMED, emit, focusLost, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {reasonOf, refusedState, renderState} from './states.js';
@@ -257,8 +257,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
     const {artifact, refusal} = this.shown;
     if (!refusal && artifact?.id === opening.from) return;
     this.opening = null;
-    const lost = document.activeElement === null || document.activeElement === document.body;
-    if (this.shadowRoot?.activeElement !== opening.button && !(lost && !opening.button.isConnected)) return;
+    if (this.shadowRoot?.activeElement !== opening.button && !(focusLost() && !opening.button.isConnected)) return;
     if (refusal) this.renderRoot.querySelector<HTMLElement>('[part="close"]')?.focus();
     else if (artifact?.id === opening.id) this.renderRoot.querySelector<HTMLElement>('[part="headline"]')?.focus();
   }

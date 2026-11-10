@@ -4,7 +4,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type HeldRegion, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
 import {OPERATOR_WORDS} from './filter.js';
 import {HeldAggregate} from './aggregate.js';
-import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, keyTitle, shortCount} from './base.js';
+import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, focusLost, keyTitle, shortCount} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import type {MosaicaFieldCard} from './field-card.js';
 import {icon} from './icons.js';
@@ -415,7 +415,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const leaving = this.leaving;
     if (!leaving || leaving.gone.isConnected) return;
     this.leaving = null;
-    if (document.activeElement && document.activeElement !== document.body) return;
+    if (!focusLost()) return;
     const to = (leaving.to?.isConnected ? leaving.to : null) ?? this.renderRoot.querySelector<HTMLElement>('[part="add"]');
     if (to) return to.focus();
     this.emptied = true;

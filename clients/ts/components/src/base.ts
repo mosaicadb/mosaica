@@ -244,6 +244,15 @@ export function emit<K extends keyof MosaicaEventDetails>(from: HTMLElement, nam
 }
 
 /**
+ * Whether focus is on nothing in the page, as it is once the control that had it has left: an
+ * element that removed that control may then place focus. Focus anywhere else is the viewer's to
+ * keep.
+ */
+export function focusLost(): boolean {
+  return document.activeElement === null || document.activeElement === document.body;
+}
+
+/**
  * A count shortened to its first figures and a letter, `250K`, `25.2M`, `3.5B`, where room is
  * short; below a thousand, whole.
  */

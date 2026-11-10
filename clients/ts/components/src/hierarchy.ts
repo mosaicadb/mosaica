@@ -2,7 +2,7 @@ import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit'
 import {property, state} from 'lit/decorators.js';
 import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type BrowsePage, type BrowseRow, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
-import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
+import {MosaicaElement, UNNAMED, emit, focusLost, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {renderState, stateOf} from './states.js';
@@ -40,9 +40,6 @@ type Fetch = {wanted: () => boolean; refetch: boolean};
 
 /** A row's press, which waits for nothing. */
 const PRESSED: Fetch = {wanted: () => true, refetch: false};
-
-/** Whether focus is on nothing, as it is once the element that had it has left the page. */
-const focusLost = (): boolean => document.activeElement === null || document.activeElement === document.body;
 
 /**
  * Use the hierarchy when viewers should be able to reach a layer's artifacts at any level, wherever
