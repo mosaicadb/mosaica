@@ -82,6 +82,6 @@ The same works for any route from your browser to the server, such as a proxy in
 
 ## Next
 
-- [Count and chart from Python](../guides/analysis.md) asks the server for counts, histograms, comparisons and density grids.
+- [Count and chart from Python](../guides/analysis.md) shows how to ask the server for counts, histograms and density grids.
 - The [Python client reference](../reference/python/index.md) covers every call, from `create()` to the notebook map.
 - [Install and configure](install.md) explains the two files the client writes, and how to serve its database without Python.

@@ -663,19 +663,14 @@ class Selection:
         that applies `all_of`, `any_of` or `none_of` to a list of expressions. An item must match
         every filter added.
 
-        The tests a column takes depend on its type.
-
-        - A category takes `eq` and `in`, with a value's key or its code.
-        - A keyword takes `eq`, `in`, `prefix` and `contains`, compared exactly.
-        - A text column takes `match`, which finds every word given, and `phrase`, which finds
-          them together and in order.
-        - A number, timestamp or bool column takes `eq`, `in` and `range`, whose bounds are
-          `gte`, `gt`, `lte` and `lt`.
+        The tests a column takes depend on its type: `eq` and `in` on every type but text,
+        `prefix` and `contains` on a keyword, `match` and `phrase` on text, and `range` on a
+        number, timestamp or bool. The filters page of the reference describes each.
 
         Three expressions name no column. `{"region": {...}}` keeps the items inside a `bbox`,
         `circle`, `ellipse` or `polygon`. `{"member_of": {"layer": name, "artifact":
-        mosaica_id}}`, or with `"key"` and `"level"` in place of `"artifact"`, keeps the members
-        of one annotation. `{"mosaica_id": {"in": [...]}}` keeps the items named.
+        mosaica_id}}` keeps the members of one annotation, which `"key"` and `"level"` can name
+        in place of `"artifact"`. `{"mosaica_id": {"in": [...]}}` keeps the items with those ids.
 
         A test on a timestamp column takes a `datetime`, a `date`, a pandas `Timestamp` or a
         NumPy `datetime64`, and the client sends it as microseconds since the Unix epoch. A
@@ -699,10 +694,12 @@ class Selection:
         selection.
 
         `box` is `(min_x, min_y, max_x, max_y)` in the view's own coordinates. On a view with no
-        projection they are the ones the rows were inserted with. On a view with a projection
-        they are the projected ones, a unit square for `web_mercator`, so for a box in longitude
-        and latitude use `filter({"region": {"bbox": [...], "space": "wgs84"}})`. An item on the
-        edge is inside, and a box whose minimum is above its maximum is refused.
+        projection these are the coordinates the rows were inserted with. On a view with a
+        projection they are the projected coordinates, which for `web_mercator` lie in a unit
+        square. For a box in longitude and latitude, use
+        `filter({"region": {"bbox": [...], "space": "wgs84"}})`.
+
+        An item on the edge is inside. A box whose minimum is above its maximum is refused.
 
             db.view("papers").within((0.0, 0.0, 100.0, 50.0)).count()
         """
@@ -1439,10 +1436,10 @@ class Viewer:
 
         `"cells": {"depth": d}` divides the set, or each group, into the view's cells at a depth
         from 0 to 32, where up to 16 they are the map's tiles at that zoom. Adding `"area": [x0,
-        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells. A row's
-        `cell` holds the cell's column and row with their bits alternating: bit 0 is the lowest
-        bit of the column, counted from the view's `x_min`, and bit 1 the lowest bit of the row,
-        counted from its `y_min`.
+        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells. `cell` is
+        one number that interleaves the bits of the cell's column and its grid row. Bit 0 is the
+        lowest bit of the column and bit 1 is the lowest bit of the row. Columns are counted
+        from the view's `x_min` and rows from its `y_min`.
 
         A table's columns come in this order, each where it applies: `group` (`listed`, `rest` or
         `none`), `key` (a category's key, or an annotation's `mosaica_id` as its decimal string,

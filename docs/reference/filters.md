@@ -1,16 +1,16 @@
 # Filters
 
-A filter is an expression that selects items. It is the same JSON on every surface, and a Python dictionary is written the same way. The examples run against the arXiv example in `examples/data/arxiv`, and those on `population` and `geonameid` against the GeoNames example in `examples/data/geonames`.
+A filter is an expression that selects items. It is the same JSON on every surface, and a Python dictionary is written the same way. The examples use the arXiv data in `examples/data/arxiv`. Those that filter on `population` or `geonameid` use the GeoNames data in `examples/data/geonames`.
 
 An expression is a leaf or a combinator. A leaf names one field and one operator, as in `{"archive": {"eq": "cs"}}`, or is one of the three leaves that name no field: [`region`](#region), [`member_of`](#member_of) and [`mosaica_id`](#mosaica_id). A combinator is [`all_of`, `any_of` or `none_of`](#combining) over a list of expressions.
 
-A filter selects among the items the reader may see. It can hide items and cannot reveal any.
+A filter selects among the items the viewer may see, where the viewer is whoever the request's token identifies. It can hide items and cannot reveal any.
 
 ## Which fields can be filtered
 
-A field takes filters when it is declared with `index` or `render`. `keyword` and `text` fields cannot be rendered, so they need `index`. A field declared `unique` takes `eq` and `in` with neither, and takes its type's other operators once it is indexed.
+A field takes filters when it is declared with `index` or `render`. `keyword` and `text` fields cannot be rendered, so they need `index`. A field declared `unique` takes `eq` and `in` with neither. It takes its type's other operators once it is indexed.
 
-`/v1/meta` lists the fields a database filters by, with each one's operators, as `filter_operands`. In Python that is `db.meta()["filter_operands"]`:
+`/v1/meta` lists the fields a database filters by as `filter_operands`, and gives each field's operators. In Python that is `db.meta()["filter_operands"]`:
 
 ```json
 [
@@ -38,7 +38,7 @@ The types are those an [`[[attribute]]`](schema-toml.md#attribute) declares.
 
 The shipped examples declare no `bool` field, so `is_capital` stands for one of your own.
 
-An operator outside the field's list is refused with `422`, and the refusal names the operators the field takes:
+An operator outside the field's list is refused with `422`. The refusal names the operators the field takes, and calls the field a column, as every refusal does:
 
 ```
 column 'archive' is a category column, which takes ["eq", "in"]; it does not take 'range' (HTTP 422)
@@ -66,11 +66,11 @@ A test that keeps the items whose value is any of those listed. It applies to ev
 {"archive": {"in": ["cs", "stat"]}}
 ```
 
-11,486 papers match, the 10,478 in `cs` and the 1,008 in `stat`.
+11,486 papers match: the 10,478 in `cs` and the 1,008 in `stat`.
 
 ### `range`
 
-A test that keeps the items whose value lies between bounds. It applies to number, `timestamp_us` and `bool` fields. The bounds are `gte`, `gt`, `lte` and `lt`, of which a range carries at least one, and at most one for each side.
+A test that keeps the items whose value lies between bounds. It applies to number, `timestamp_us` and `bool` fields. A range carries at least one of the bounds `gte`, `gt`, `lte` and `lt`, and at most one lower and one upper bound.
 
 ```json
 {"population": {"range": {"gte": 100000, "lt": 1000000}}}
@@ -86,7 +86,7 @@ A test on a `keyword` field that keeps the items whose value starts with the str
 {"arxiv_id": {"prefix": "2401."}}
 ```
 
-302 papers match, those numbered in January 2024.
+302 papers match. Their identifiers were issued in January 2024.
 
 ### `contains`
 
@@ -96,7 +96,7 @@ A test on a `keyword` field that keeps the items whose value holds the string gi
 {"arxiv_id": {"contains": "hep-th"}}
 ```
 
-869 papers match, those with an identifier in the older form `hep-th/9901001`.
+869 papers match. Each has an identifier in the older form, such as `hep-th/9901001`.
 
 ### `match`
 
@@ -126,11 +126,11 @@ A search of a `text` field that keeps the items holding the words given next to 
 
 ## Values
 
-**Categories.** A category value is named by its key in the vocabulary, such as `"cs"`, or by its code as an integer, and one list may mix them. A value the vocabulary does not hold, or one the reader may not see, matches no item and is not refused.
+**Categories.** A category value is named by its key in the vocabulary, such as `"cs"`, or by its integer code. One list may mix keys and codes. A value the vocabulary does not hold, or one the viewer may not see, matches no item and is not refused.
 
 **Keywords.** A keyword is compared byte for byte, so case counts: `{"arxiv_id": {"contains": "HEP-TH"}}` matches nothing.
 
-**Text.** A text field is searched by word, ignoring case, so `"Graphene"` and `"graphene"` find the same 234 titles. Words are matched as written and are not reduced to a stem: `"network"` finds 751 titles and `"networks"` 1,169. Results are not ranked.
+**Text.** A text field is searched by word, ignoring case, so `"Graphene"` and `"graphene"` find the same 234 titles. Words are matched as written and are not reduced to a stem: `"network"` finds 751 titles and `"networks"` finds 1,169. Results are not ranked.
 
 **Numbers.** An integer may be written as a string of its decimal digits, optionally after `-` or `+`. Use that form for an integer past 2^53, which a JSON number does not carry exactly.
 
@@ -150,13 +150,13 @@ column 'submitted_at': '2020-01-01T00:00:00' is a date-time with no offset; add 
 
 In Python, [`Selection.filter`](python/reading.md#mosaica._viewer.Selection.filter) also takes a `datetime`, a `date`, a pandas `Timestamp` or a NumPy `datetime64` and sends it as microseconds.
 
-**Unique fields.** `eq` and `in` on a unique field are answered from its index, which is the quick way to find items by an identifier of your own:
+**Unique fields.** `eq` and `in` on a unique field are answered from its index. Use them to find items by an identifier of your own:
 
 ```json
 {"geonameid": {"in": [2964574, 2643743]}}
 ```
 
-That finds Dublin and London. An identifier held by an item the reader may not see matches nothing, as one that no item holds does.
+That finds Dublin and London. An identifier held only by an item the viewer may not see matches nothing.
 
 ## Leaves that name no field
 
@@ -172,9 +172,9 @@ A leaf that keeps the items positioned inside a shape on the map. It carries one
 | `polygon` | a list of at least three `[x, y]` vertices, closed for you | `{"region": {"polygon": [[0, 0], [10, 0], [5, 10]]}}` |
 | `artifact` | the `mosaica_id` of an artifact on this view, whose members are kept | `{"region": {"artifact": "9561593462133387664"}}` |
 
-On the arXiv view `topics` the four drawn shapes above hold 13,132, 7,390, 6,115 and 6,534 papers, and the artifact, the topic "Condensed Matter", holds 3,923.
+On the arXiv view `topics` the bbox holds 13,132 papers, the circle 7,390, the ellipse 6,115 and the polygon 6,534. The artifact is the topic "Condensed Matter" and holds 3,923.
 
-On a view with a projection, the view's coordinates are the projected ones, which for `web_mercator` is a unit square. To give a shape in longitude and latitude, add `"space": "wgs84"`:
+On a view with a projection, the view's coordinates are the projected ones. For `web_mercator` they lie in a unit square. To give a shape in longitude and latitude, add `"space": "wgs84"`:
 
 ```json
 {"region": {"bbox": [-10.7, 51.3, -5.3, 55.5], "space": "wgs84"}}
@@ -182,13 +182,13 @@ On a view with a projection, the view's coordinates are the projected ones, whic
 
 That box around Ireland holds 341 of the GeoNames places. `"space": "wgs84"` on a view with no projection is refused.
 
-An answer over a `region` says how exact it is, in the `x-mosaica-region` response header, which Python gives as the table's `mosaica.region` metadata. It is `exact` unless the shape's outline crosses more grid cells than the deployment's `max_region_cells`. The answer is then exact for a slightly larger shape that covers the one asked for, and reads `cover; depth=<d>`. A polygon with more vertices than `max_region_vertices` is refused.
+The `x-mosaica-region` response header says how exact an answer over a `region` is. Python gives it as the table's `mosaica.region` metadata. The value is `exact` unless the shape's outline crosses more grid cells than the deployment's `max_region_cells`. Past that limit the value is `cover; depth=<d>`, and the answer is exact for a slightly larger shape that covers the one asked for. A polygon with more vertices than `max_region_vertices` is refused.
 
 In Python, [`Selection.within(box)`](python/reading.md#mosaica._viewer.Selection.within) adds a `bbox` region in the view's coordinates.
 
 ### `member_of`
 
-A leaf that keeps the members of one artifact of a layer, such as the papers in one topic. It names the layer, and the artifact in one of two ways.
+A leaf that keeps the members of one artifact of a layer, such as the papers in one topic. It names the layer, and names the artifact in one of two ways.
 
 | Names the artifact by | Written as |
 |---|---|
@@ -197,17 +197,17 @@ A leaf that keeps the members of one artifact of a layer, such as the papers in 
 
 `level` defaults to 0, the only level of a layer that declares none. The second example keeps 92 papers.
 
-A layer the reader's `/v1/meta` does not list is refused with `422`, and so is a level the layer does not hold. An artifact or key that names nothing, or names an artifact the reader is not served, matches no item and is not refused.
+A layer the viewer's `/v1/meta` does not list is refused with `422`, and so is a level the layer does not hold. An artifact or key that names nothing the viewer is served matches no item.
 
 ### `mosaica_id`
 
-A leaf that keeps the items named by the identifiers responses hand out, with `eq` or `in`.
+A leaf that keeps the items whose `mosaica_id` is given. It takes `eq` or `in`.
 
 ```json
 {"mosaica_id": {"in": ["9711030025428260651", "12573669445876031793"]}}
 ```
 
-It is the way to read fields of points already drawn. An identifier that names nothing, an artifact, or an item the reader may not see matches nothing. A `mosaica_id` belongs to one database, so these two name items only in the database they were read from.
+Use it to read fields of points already drawn. An identifier matches nothing when it names nothing, names an artifact, or names an item the viewer may not see. A `mosaica_id` belongs to one database, so these two name items only in the database they were read from.
 
 ## Combining
 
@@ -229,9 +229,15 @@ A combinator carries a list of expressions, each a leaf or another combinator.
 
 6,042 papers match: those in computer science since 2020, outside cryptography and networking.
 
-`none_of` keeps an item that holds no value in the field tested. `{"none_of": [{"archive": {"eq": "cs"}}]}` keeps every paper whose archive is not `cs`, including any paper with no archive. Its expressions may name different fields, and may be text searches or regions.
+`none_of` keeps an item that holds no value in the field tested. `{"none_of": [{"archive": {"eq": "cs"}}]}` keeps every paper whose archive is not `cs`, including any paper with no archive. The expressions under `none_of` may name different fields, and may be text searches or regions.
 
-A node carries one key. Two fields in one object are refused, with a refusal that says to join them under `all_of` or `any_of`. An expression nests at most four levels deep, counting a leaf as one level, and a deeper one is refused:
+Each object in an expression carries one key, and two fields in one object are refused:
+
+```
+a filter node must carry exactly one key, a column name or `all_of`/`any_of`/`none_of`, and this one carries 2; join several under `all_of` or `any_of` (HTTP 422)
+```
+
+An expression nests at most four levels deep, where a leaf counts as one level. A deeper expression is refused:
 
 ```
 the filter nests 5 deep and the limit is 4; flatten it (HTTP 422)
@@ -243,11 +249,11 @@ the filter nests 5 deep and the limit is 4; flatten it (HTTP 422)
 |---|---|
 | A field that is not declared, or is neither indexed, rendered nor unique | `422`, naming the fields that can be filtered |
 | An operator the field's type does not take | `422`, naming the operators it takes |
-| A value the field does not hold, or that the reader may not see | No items match |
-| A layer in `member_of` that the reader is not served | `422` |
-| An artifact, key or `mosaica_id` that names nothing the reader is served | No items match |
+| A value the field does not hold, or that the viewer may not see | No items match |
+| A layer in `member_of` that the viewer is not served | `422` |
+| An artifact, key or `mosaica_id` that names nothing the viewer is served | No items match |
 
-A value that exists and one that does not answer alike, so a filter does not tell a reader whether a value is held by items they may not see.
+A value that exists and one that does not answer alike, so a filter does not tell a viewer whether a value is held by items they may not see.
 
 ## Where a filter goes
 
@@ -258,6 +264,6 @@ A value that exists and one that does not answer alike, so a filter does not tel
 | TypeScript | `filters` on the `MosaicaClient` methods; `Store.setFilters` |
 | CLI | `--filters` on `mosaica items`, `mosaica artifacts` and `mosaica aggregate` |
 
-A highlight is a second expression in the same form. It marks the points that match and leaves every point drawn. HTTP takes it as `highlight` on the two viewport routes, and Python as `highlight=` on `Selection.sample`. The reference set of an [aggregation](aggregations.md#the-request) is a third use of the same form.
+A highlight is a second expression in the same form. It marks the points that match and leaves every point drawn. HTTP takes it as `highlight` on the two viewport routes, and Python takes it as `highlight=` on `Selection.sample`. The reference set of an [aggregation](aggregations.md#the-request) is a third use of the same form.
 
 [Capabilities](capabilities.md) names every call that takes a filter, and [Queries](../system/queries.md#filters) explains how filters are answered.

@@ -1,8 +1,8 @@
 # Aggregations
 
-An aggregation counts a set of items without returning them: its size, its breakdown by a category or a layer, a histogram of a field, a grid of counts over the map, and a field's smallest, largest and mean value. Every figure is computed over the items the reader may see.
+An aggregation returns figures about a set of items in place of the items. It gives the set's size, a breakdown by a category or a layer, a histogram of a field, a grid of counts over the map, or a field's smallest, largest and mean value. Every figure is computed over the items the viewer may see, where the viewer is whoever the request's token identifies.
 
-The request is the same JSON on every surface, and a Python dictionary is written the same way. The examples run against the arXiv example in `examples/data/arxiv`, and those on `population` against the GeoNames example in `examples/data/geonames`. [Count and chart from Python](../guides/analysis.md) works through them as tasks.
+The request is the same JSON on every surface, and a Python dictionary is written the same way. The examples use the arXiv data in `examples/data/arxiv`. Those on `population` use the GeoNames data in `examples/data/geonames`. [Count and chart from Python](../guides/analysis.md) works through them as tasks.
 
 ## The request
 
@@ -10,8 +10,8 @@ The request is the same JSON on every surface, and a Python dictionary is writte
 |---|---|---|
 | `view` | string, required | The view the items are counted in. An item with no position in it is not counted. |
 | `groupings` | list, required | One [grouping](#groupings) for each table wanted. The answer holds one table for each, in this order. |
-| `filters` | [filter](filters.md) | The set counted. Without it the set is every item the reader may see in the view. |
-| `reference` | [filter](filters.md) | A second set to compare with, where `{}` is every item the reader may see in the view. Each table that counts then has `reference_count` and `lift`. |
+| `filters` | [filter](filters.md) | The set counted. Without it the set is every item the viewer may see in the view. |
+| `reference` | [filter](filters.md) | A second set to compare with, where `{}` is every item the viewer may see in the view. Each table that counts then has `reference_count` and `lift`. |
 
 ```json
 {
@@ -41,11 +41,10 @@ A figure is a key of a grouping that says what each row of its table holds.
 | `mean` | `"mean": [field, ...]` | `mean_<field>` | The mean, as a float, or as a UTC timestamp on a `timestamp_us` field. |
 | `summary` | `"summary": [field, ...]` | all five above | `values`, `missing`, `min`, `max` and `mean` of each field. |
 
-`count` goes with every grouping. The other six are the field figures, and they are narrower:
+`count` goes with every grouping. The other six are the field figures.
 
-- They take number, `timestamp_us` and `bool` fields declared with `index` or `render`. A `bool` counts as 0 and 1, so its mean is the share that are true.
-- They cover every item the reader may see in the view. A grouping that names one takes neither `by` nor `cells`, and a request that names one takes neither `filters` nor `reference`. Not built yet: field figures under a filter or for each group. Read the items and compute them instead.
-- They are exact.
+- **Fields.** A field figure takes number, `timestamp_us` and `bool` fields declared with `index` or `render`. A `bool` counts as 0 and 1, so its mean is the share that are true. Every field figure is exact.
+- **Scope.** A field figure covers every item the viewer may see in the view. A grouping that names one takes neither `by` nor `cells`, and a request that names one takes neither `filters` nor `reference`. Not built yet: field figures under a filter or for each group. Read the items and compute them instead.
 
 ```json
 {"view": "world", "groupings": [{"count": true, "summary": ["population"]}]}
@@ -77,9 +76,9 @@ A grouping that counts the set by the values of a `category` field. A field of a
 |---|---|---|
 | `field` | string | The category field. |
 | `top` | integer | List the `n` values with the most items, largest first and ties by key. At most the deployment's `max_aggregate_top`. |
-| `values` | list of keys | List these values, in the order given. At most `max_aggregate_named`. A key the reader is not served gets no row. |
+| `values` | list of keys | List these values, in the order given. At most `max_aggregate_named`. A key the viewer is not served gets no row. |
 
-`by` takes `top` or `values`. After the listed rows come a `rest` row, the items holding any other value, and a `none` row, the items holding no value, each only where its count is above 0. Every item holds one value, so the rows sum to the set.
+`by` takes `top` or `values`. After the listed rows comes a `rest` row, which counts the items holding any other value, and then a `none` row, which counts the items holding no value. Every item holds at most one value, so the rows sum to the set.
 
 ```json
 {"view": "topics", "groupings": [{"count": true, "by": {"field": "archive", "top": 3}}]}
@@ -101,11 +100,11 @@ A grouping that counts the set by the artifacts of an annotation layer, such as 
 | `layer` | string | The layer. |
 | `level` | integer | The level counted. Required on a layer with several levels and refused on a layer with one. |
 | `top` | integer | List the `n` artifacts with the most items of the set. |
-| `artifacts` | list of `mosaica_id` | List these artifacts. An id that names nothing the reader is served gets no row. |
-| `cut` | object | On a `nested` or `dag` layer, which artifacts `top` ranks: `{"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}` ranks those a map draws at that zoom, box and cluster budget, and without `budget` the finest. `top` on such a layer requires it, and any other layer refuses it. |
+| `artifacts` | list of `mosaica_id` | List these artifacts. An id that names nothing the viewer is served gets no row. |
+| `cut` | object | On a `nested` or `dag` layer, chooses the artifacts `top` ranks. `{"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}` ranks the artifacts a map draws at that zoom and box with that cluster budget. Without `budget` it ranks the finest artifacts. `top` requires `cut` on these layers, and a layer of any other kind refuses it. |
 | `palette_size` | integer | Add each artifact's palette slot among that many colours, as the `slot` column. |
 
-`rest` counts the items in an artifact of the level other than those listed, and `none` the items in no artifact of the level. Artifacts can overlap, so the rows can sum to more than the set. Which artifacts the reader is served is decided on everything the reader may see and not on the filtered set, so a filter changes an artifact's count and never whether it is listed.
+`rest` counts the items that are in an unlisted artifact of the level. `none` counts the items in no artifact of the level. Artifacts can overlap, so the rows can sum to more than the set. The server decides which artifacts a viewer is served from everything the viewer may see, before the filter applies. A filter therefore changes an artifact's count and never whether it is listed.
 
 ```json
 {"view": "topics", "groupings": [{"count": true, "by": {"layer": "clusters/toponymy", "level": 0, "top": 3}}]}
@@ -119,11 +118,11 @@ A grouping that counts the set by the artifacts of an annotation layer, such as 
 | `rest` | | | 17222 |
 | `none` | | | 22696 |
 
-`key` is the artifact's `mosaica_id`, which a [`member_of`](filters.md#member_of) filter takes as it is. It belongs to one database, so another database built from the same files shows other numbers.
+`key` is the artifact's `mosaica_id`, and a [`member_of`](filters.md#member_of) filter takes it as it is. A `mosaica_id` belongs to one database, so another database built from the same files shows other numbers.
 
 ### Histogram
 
-A grouping that counts a number, `timestamp_us` or `bool` field in bins. The field is declared with `index` or `render`.
+A grouping that counts a number, `timestamp_us` or `bool` field in bins. The field must be declared with `index` or `render`.
 
 | Key of `by` | Type | What it does |
 |---|---|---|
@@ -132,9 +131,9 @@ A grouping that counts a number, `timestamp_us` or `bool` field in bins. The fie
 | `range` | `[lower, upper]` | Cut this range into `bins` equal widths. `rest` then counts the values outside it. |
 | `sample` | integer | Count over about this many of the set's items and scale each count to the set's size. |
 
-Without `range`, the server chooses readable edges around the smallest and largest value the reader may see in the view, and returns the fewest bins of one width that cover them, at most `bins`. On a number field the width is 1, 2, 2.5 or 5 times a power of ten. On a timestamp field it is a round interval from microseconds up to years, such as a day, a week, a month or five years. The edges do not depend on `filters`, so a filtered histogram and an unfiltered one share their bins. A `bool` has a bin for false, from 0 to 1, and one for true, from 1 to 2.
+Without `range`, the server chooses readable edges around the smallest and largest value the viewer may see in the view. It returns the fewest bins of one width that cover both values, and no more than `bins`. On a number field the width is 1, 2, 2.5 or 5 times a power of ten. On a timestamp field it is a round interval from microseconds up to years, such as a day or five years. The edges do not depend on `filters`, so a filtered histogram and an unfiltered one share their bins. A `bool` has a bin for false, from 0 to 1, and one for true, from 1 to 2.
 
-A bin holds the values from `lower` up to but not including `upper`, and the last bin also holds its `upper`. Every bin has a row, including one with a count of 0. After the bins come `rest`, the values in no bin, and `none`, the items with no value.
+A bin holds the values from `lower` up to but not including `upper`, and the last bin also holds its `upper`. Every bin has a row, including one with a count of 0. After the bins comes a `rest` row for the values in no bin, and then a `none` row for the items with no value.
 
 ```json
 {"view": "topics", "groupings": [{"count": true, "by": {"field": "submitted_at", "bins": 10}}]}
@@ -166,26 +165,33 @@ With `range`:
 | `rest` | | | 611 |
 | `none` | | | 110458 |
 
-With `sample`, a set larger than `sample` is counted over the items whose `mosaica_id` falls below a cut, which is about `sample` of them, and the counts are scaled. A set no larger than `sample` is counted exactly, and so is one where `sample` is more than about one item in 64 of the set. The table's head says which happened, as `sample.sampled`, and the edges are the exact ones either way. A histogram's table is one page.
+With `sample`, the server counts a large set over part of it. It counts the items whose `mosaica_id` falls below a cut, which selects about `sample` of them, and scales each count to the set's size. It counts exactly when the set is no larger than `sample`, or when `sample` is more than about one item in 64 of the set. `sample.sampled` in the table's head says whether any count was scaled. The edges are exact in both cases.
 
 ### Cells
 
-A level of a grouping that divides the set, or each group of `by`, into the cells of the view, for a density grid.
+A division of the set into the cells of a grid over the view, used for a density grid. With `by`, each group is divided.
 
 | Key of `cells` | Type | What it does |
 |---|---|---|
 | `depth` | integer, 0 to 32 | The grid has `2^depth` cells on each side. Up to 16 they are the map's tiles at that zoom. |
 | `area` | `[x0, y0, x1, y1]` | List only the cells that meet this box, in the view's coordinates. Each listed cell still counts all of its items. |
 
-There is one row for each cell that holds an item, in ascending order of `cell`. With `by`, the cells of each group follow one another in group order. The cells at `depth` in the area may number at most `max_aggregate_cells`, which by default allows the whole view at depth 10.
+There is one row for each cell that holds an item, in ascending order of `cell`. With `by`, the cells of each group follow one another in group order. The cells at `depth` in the area may number at most `max_aggregate_cells`. The default allows the whole view at depth 10.
 
 ```json
 {"view": "topics", "filters": {"archive": {"eq": "cs"}}, "groupings": [{"count": true, "cells": {"depth": 2}}]}
 ```
 
-`cell` holds the cell's position as one number, in which the bits of its column and its row alternate. Bit 0 is the lowest bit of the column, bit 1 the lowest bit of the row, bit 2 the next bit of the column, and so on for `depth` bits of each. Columns are counted from the view's `x_min` and rows from its `y_min`, as `/v1/meta` gives them in the view's `quantisation`. On a view with a projection the extent is the projection's unit square, where row 0 is the northern edge. At depth 2, cell 6 is binary `0110`, which is column 2 and row 1.
+| `cell` | `count` |
+|---|---|
+| 3 | 2892 |
+| 6 | 2426 |
+| 9 | 4143 |
+| 12 | 1017 |
 
-A histogram takes no `cells`. Not built yet: a histogram divided into cells.
+`cell` holds the cell's position as one number that interleaves the bits of its column and its row. The even bits, from bit 0, are the column and the odd bits, from bit 1, are the row, for `depth` bits of each. Cell 6 above is binary `0110`, so its column is 2 and its row is 1. Columns are counted from `x_min` and rows from `y_min` of the view's `quantisation` in `/v1/meta`. On a view with a projection, `quantisation` is the projection's unit square and row 0 is the northern edge.
+
+Not built yet: a histogram divided into cells. A grouping with `bins` and `cells` is refused.
 
 ## The answer
 
@@ -193,9 +199,9 @@ Each table has these columns, in this order, each only where it applies.
 
 | Column | Present with | Holds |
 |---|---|---|
-| `group` | `by` | `listed`, `rest` or `none`. |
+| `group` | `by` | `listed` for a row the grouping lists, `rest` for the items in any other group, and `none` for the items in no group. A `rest` or `none` row whose count is 0 is left out. |
 | `key` | `by` a field or a layer | A category value's key, or an artifact's `mosaica_id`. Null on `rest` and `none`. |
-| `title` | `by` a layer, and `by` a field whose vocabulary holds titles | The value's title, or the artifact's name as the reader is served it. |
+| `title` | `by` a layer, and `by` a field whose vocabulary holds titles | The value's title, or the artifact's name as the viewer is served it. |
 | `slot` | `by` a layer | The artifact's palette slot. Null without `palette_size`. |
 | `lower`, `upper` | `bins` | The bin's edges, in the field's type. An integer field has float edges when a bound of `range` is fractional. |
 | `cell` | `cells` | The cell's number, as [Cells](#cells) describes. |
@@ -217,7 +223,7 @@ Each table also has a head.
 
 On HTTP the head is a frame before the table's rows, as [Wire framing](../openapi/README.md) describes. In Python it is the table's schema metadata `mosaica.head`, as JSON.
 
-A large table comes in pages. The Python client and the CLI read every page and return whole tables. On HTTP the trailer's `next` is passed back as `cursor` until it is null. Each page counts the database as it then is, and `recomposed` in the trailer, `mosaica.recomposed` in Python, is true when the pages of one read counted a database that changed between them.
+A large table comes in pages. The Python client and the CLI read every page and return whole tables. On HTTP, pass the trailer's `next` back as `cursor` until it is null. A histogram's table is always one page. Each page counts the database as it is when that page is read. When the database changed between the pages of one read, `recomposed` in the trailer is true. Python gives it as `mosaica.recomposed`.
 
 ## What is refused
 
@@ -229,10 +235,10 @@ Each of these is `422`, with a refusal that says what to write instead.
 | A field figure beside `by` or `cells`, or in a request with `filters` or `reference` | Field figures cover the whole view only. |
 | A field figure or `bins` on a `category`, `keyword` or `text` field, or on a field with neither `index` nor `render` | They take number, `timestamp_us` and `bool` fields the server can read. |
 | `top` or `values` on a field that is not a category | A breakdown by value takes a category. |
-| `bins` beside `top` or `values`, or on a layer | A `by` is one kind of grouping. |
-| `bins` beside `cells` | A histogram has no cell level. |
+| `bins` beside `top` or `values`, or on a layer | `by` takes `bins`, or `top` or a named list, on a field. |
+| `bins` beside `cells` | Not built yet: a histogram divided into cells. |
 | A layer with several levels and no `level` | The level counted has to be named. |
-| `cut` on a layer that is not `nested` or `dag` | Only a tree has a cut. |
+| `cut` on a layer that is not `nested` or `dag` | `cut` applies to `nested` and `dag` layers. |
 | A `depth` above 32 | Positions are stored to 32 bits an axis. |
 | More than a limit below allows | The refusal names the limit and the most it allows. |
 
@@ -250,9 +256,7 @@ A deployment sets these in [`mosaica.toml`](mosaica-toml.md) and publishes them 
 
 ## Not built yet
 
-- **Field figures under a filter, or for each group**, such as the mean of a number field in each category value. Read the items in bulk and compute them.
 - **Breakdowns by value of a `keyword` or integer field.** `top` and `values` take a category.
-- **A histogram divided into cells.**
 - **Counts across views.** A request counts in one view.
 
 ## Where to ask

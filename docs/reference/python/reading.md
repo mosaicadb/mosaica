@@ -10,7 +10,7 @@ Use `connect` for a reader whose access terms come from its token, or `Database.
 | Read records | [`Selection.items`](#mosaica._viewer.Selection.items), [`Viewer.items`](#mosaica._viewer.Viewer.items), [`Viewer.item`](#mosaica._viewer.Viewer.item) |
 | List a category's values | [`Viewer.categories`](#mosaica._viewer.Viewer.categories) |
 
-A filter is a dictionary, and the [filters](../filters.md) page lists every operator. A grouping is a dictionary too, and the [aggregations](../aggregations.md) page lists every one. [Count and chart from Python](../../guides/analysis.md) works through counting, histograms, comparisons and density grids.
+The [filters](../filters.md) page lists every operator a filter takes, and the [aggregations](../aggregations.md) page lists every figure and grouping. [Count and chart from Python](../../guides/analysis.md) is the guide to both.
 
 The `Database` methods on this page read with the operator's own token, which [`authorise`](connecting.md#mosaica._auth.authorise) describes under `read_all`.
 

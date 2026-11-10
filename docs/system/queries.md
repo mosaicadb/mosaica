@@ -174,7 +174,7 @@ A histogram picks readable bin edges, such as whole decades or months, around th
 
 A grouping can also ask for a field's figures, such as `{"summary": ["citations"]}`: how many items hold a value, and the smallest, largest and mean. These are taken over everything the viewer may see in the view, so they go in a request of their own, and one with a filter or a reference is refused. Not built yet: field figures under a filter or per group.
 
-The [aggregations reference](../reference/aggregations.md) lists every grouping and figure, the columns of each table and what is refused, and [Count and chart from Python](../guides/analysis.md) works through them. The [HTTP API reference](../reference/http.md) states how a large table continues over several pages.
+The [aggregations reference](../reference/aggregations.md) lists every grouping and figure, with the columns of each table. [Count and chart from Python](../guides/analysis.md) works through the common ones. The [HTTP API reference](../reference/http.md) states how a large table continues over several pages.
 
 ## Not built yet
 
