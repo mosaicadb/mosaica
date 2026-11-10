@@ -235,6 +235,115 @@ describe('the token protocol', () => {
   });
 });
 
+describe('the map in the notebook\u2019s page', () => {
+  it('names the explorer with the label the kernel set, follows a change, and leaves it unnamed where there is none', () => {
+    const {model, el} = setUp({label: 'Papers by topic'});
+    const explorer = el.querySelector('mosaica-explorer')!;
+    expect(explorer.getAttribute('aria-label')).toBe('Papers by topic');
+    model.set('label', 'Papers by venue');
+    expect(explorer.getAttribute('aria-label')).toBe('Papers by venue');
+    model.set('label', null);
+    expect(explorer.hasAttribute('aria-label')).toBe(false);
+    expect(setUp().el.querySelector('mosaica-explorer')!.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('names each view of two models by its own label', () => {
+    const a = setUp({label: 'Left'}).el.querySelector('mosaica-explorer')!;
+    const b = setUp({label: 'Right'}).el.querySelector('mosaica-explorer')!;
+    expect([a.getAttribute('aria-label'), b.getAttribute('aria-label')]).toEqual(['Left', 'Right']);
+  });
+
+  it('keeps a key pressed in the map from the notebook\u2019s shortcuts, and lets Tab and an Escape the map did not take go on', async () => {
+    const {el} = setUp();
+    await settle(el);
+    const explorer = el.querySelector('mosaica-explorer')!;
+    // What a Lumino command registry looks for on the target of a key press, which is the explorer.
+    expect(explorer.getAttribute('data-lm-suppress-shortcuts')).toBe('true');
+    const heard: string[] = [];
+    const listen = (e: Event) => void heard.push((e as KeyboardEvent).key);
+    document.addEventListener('keydown', listen);
+    onTestFinished(() => document.removeEventListener('keydown', listen));
+    const inside = explorer.shadowRoot!.querySelector('*')!;
+    const press = (key: string, taken = false) => {
+      const e = new KeyboardEvent('keydown', {key, bubbles: true, composed: true, cancelable: true});
+      if (taken) inside.addEventListener('keydown', (at) => at.preventDefault(), {once: true});
+      inside.dispatchEvent(e);
+    };
+    for (const key of ['a', 'ArrowLeft', 'Enter', ' ']) press(key);
+    expect(heard).toEqual([]);
+    press('Escape', true);
+    expect(heard).toEqual([]);
+    press('Tab');
+    press('Escape');
+    expect(heard).toEqual(['Tab', 'Escape']);
+    // A key pressed outside the map is the notebook's.
+    el.dispatchEvent(new KeyboardEvent('keydown', {key: 'b', bubbles: true}));
+    expect(heard).toEqual(['Tab', 'Escape', 'b']);
+  });
+
+  /** The status line of a view, which is in the page from the first render. */
+  const statusOf = (el: HTMLElement) => el.querySelector('[role="status"]')!;
+  const operands: FilterOperandSet[] = [{column: 'year', family: 'numeric', operands: ['range']}];
+  const settled = (store: FakeStore) => {
+    store.set('status', status({}));
+    store.set('view', {...store.get('view'), composition: {tiles: [], exact: [], standIn: [], exactDrawn: 0, exactServed: 0} as never});
+  };
+
+  it('says in a status line what it refused of a filter the kernel set, until the kernel sets one it takes', () => {
+    const {model, store, el} = setUp();
+    const line = statusOf(el);
+    expect(line.textContent).toBe('');
+    expect(el.querySelector('mosaica-explorer')!.contains(line)).toBe(false);
+    store.set('meta', {...META, filterOperands: operands} as never);
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    const sent = model.sent.at(-1)!.content as {what: string; detail: string};
+    expect(statusOf(el)).toBe(line);
+    expect(line.textContent).toContain(sent.what);
+    expect(line.textContent).toContain(sent.detail);
+    // The settle that writes the map's own filter over the refused one leaves the line standing.
+    settled(store);
+    expect(model.state.filters).toBeNull();
+    expect(line.textContent).toContain(sent.detail);
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect(line.textContent).toBe('');
+  });
+
+  it('drops the line once the filter is changed in the map', () => {
+    const {model, store, el} = setUp({filters: {nope: {eq: 'x'}}});
+    const line = statusOf(el);
+    store.set('meta', {...META, filterOperands: operands} as never);
+    expect(line.textContent).toContain('nope');
+    settled(store);
+    expect(line.textContent).toContain('nope');
+    store.set('filters', {...store.get('filters'), expr: {year: {range: {gte: 2000}}}});
+    settled(store);
+    expect(model.state.filters).toEqual({year: {range: {gte: 2000}}});
+    expect(line.textContent).toBe('');
+  });
+
+  it('says what it refused of colour_by and of the basemap on a line each, in every view, and drops each as it is put right', () => {
+    const {model, store, el} = setUp({colour_by: 'cluster:nope'});
+    const other = document.createElement('div');
+    document.body.append(other);
+    render({model, el: other});
+    store.set('meta', {...META, layers: [clusters('topics')]} as never);
+    const explorer = el.querySelector('mosaica-explorer')!;
+    const say = (refusal: string | null) => explorer.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal, note: null}, bubbles: true, composed: true}));
+    say('View s0 has no map projection.');
+    for (const line of [statusOf(el), statusOf(other)]) {
+      expect(line.children).toHaveLength(2);
+      expect(line.textContent).toContain('nope');
+      expect(line.textContent).toContain('View s0 has no map projection.');
+    }
+    model.set('colour_by', 'cluster:topics');
+    expect(statusOf(other).children).toHaveLength(1);
+    expect(statusOf(other).textContent).not.toContain('nope');
+    say(null);
+    expect(statusOf(el).textContent).toBe('');
+    expect(statusOf(other).textContent).toBe('');
+  });
+});
+
 describe('the up-sync', () => {
   function shown(store: FakeStore, composition: object) {
     store.set('status', status({}));
