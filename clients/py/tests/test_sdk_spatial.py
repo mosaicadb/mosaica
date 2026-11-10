@@ -11,6 +11,7 @@ import pyarrow as pa
 import pytest
 
 from conftest import browse
+from mosaica._refusal import Refusal
 
 from test_sdk_corpus import declare_notebook
 
@@ -148,12 +149,26 @@ def test_an_inline_roster_built_at_the_first_commit_is_not_offered_again(served,
 #: A box in degrees whose edges fall between the grid's points.
 EUROPE = (-25.0, 5.0, 45.0, 65.0)
 
+#: Each projection over the whole world, and one view whose extent is part of it.
+WORLDS = [
+    ("web_mercator", {"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]}),
+    ("equirectangular", {"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]}),
+    ("gall_isographic", {"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]}),
+    ("web_mercator", {"lon": [-60.0, 80.0], "lat": [-20.0, 75.0]}),
+]
 
-def graticule():
-    """A point every ten degrees, as the rows a projected view is inserted with."""
+
+def graticule(extent):
+    """A point every ten degrees inside `extent`, as the rows a projected view is inserted
+    with."""
     import pandas as pd
 
-    places = [(lon, lat) for lon in range(-170, 171, 10) for lat in range(-70, 71, 10)]
+    places = [
+        (lon, lat)
+        for lon in range(-170, 171, 10)
+        for lat in range(-70, 71, 10)
+        if extent["lon"][0] < lon < extent["lon"][1] and extent["lat"][0] < lat < extent["lat"][1]
+    ]
     return pd.DataFrame({
         "id": range(len(places)),
         "lon": [float(lon) for lon, _ in places],
@@ -167,50 +182,55 @@ def held(rows, box):
     return sorted(inside.id)
 
 
-def mercator(box):
-    """`box` in a whole-world Web Mercator view's own coordinates, where y runs south."""
+def unit_square(box, projection):
+    """`box` in the unit square `projection` draws the world in, where y runs south."""
     import math
 
     def y(lat):
-        return 0.5 - math.asinh(math.tan(math.radians(lat))) / (2 * math.pi)
+        if projection == "web_mercator":
+            return 0.5 - math.asinh(math.tan(math.radians(lat))) / (2 * math.pi)
+        return 0.5 - lat / 180
 
     return [(box[0] + 180) / 360, y(box[3]), (box[2] + 180) / 360, y(box[1])]
 
 
-@pytest.fixture
-def world(tmp_path):
-    """A database with one Web Mercator view, `world`, and the graticule in it; and the rows."""
+@pytest.fixture(params=WORLDS, ids=lambda world: f"{world[0]}-{world[1]['lon'][0]:g}")
+def world(request, tmp_path):
+    """A database with one projected view, `world`, and the graticule in it; its rows; and its
+    projection."""
     from conftest import binary
     from mosaica._database import create
 
     binary()
+    projection, extent = request.param
     db = create(tmp_path / "world")
-    rows = graticule()
-    db.declare_view("world", projection="web_mercator",
-                    extent={"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]})
+    rows = graticule(extent)
+    db.declare_view("world", projection=projection, extent=extent)
     db.declare_attribute("id", type="i64", unique=True)
     db.insert("world", rows, lon="lon", lat="lat")
     assert db.commit().ok
-    yield db, rows
+    yield db, rows, projection
     db.close()
 
 
 def test_a_box_on_a_projected_view_is_in_the_degrees_its_rows_were_inserted_with(world):
-    db, rows = world
+    db, rows, projection = world
     expected = held(rows, EUROPE)
     assert 0 < len(expected) < len(rows)
     selection = db.view("world").within(EUROPE)
     assert selection.count() == len(expected)
     assert sorted(selection.items(["id"]).to_pandas().id) == expected
     # The same box, stated in each space through the filter.
-    stated = {"region": {"bbox": list(EUROPE), "space": "wgs84"}}
-    assert db.view("world").filter(stated).count() == len(expected)
-    in_view = {"region": {"bbox": mercator(EUROPE), "space": "view"}}
-    assert db.view("world").filter(in_view).count() == len(expected)
+    for region in (
+        {"bbox": list(EUROPE), "space": "wgs84"},
+        {"bbox": list(EUROPE), "space": "inserted"},
+        {"bbox": unit_square(EUROPE, projection), "space": "view"},
+    ):
+        assert db.view("world").filter({"region": region}).count() == len(expected), region
 
 
 def test_two_boxes_on_a_projected_view_keep_their_overlap(world):
-    db, rows = world
+    db, rows, _ = world
     north = (-180.0, 35.0, 180.0, 75.0)
     overlap = (EUROPE[0], 35.0, EUROPE[2], EUROPE[3])
     selection = db.view("world").within(EUROPE).within(north)
@@ -221,7 +241,7 @@ def test_two_boxes_on_a_projected_view_keep_their_overlap(world):
 def test_a_sample_of_a_box_on_a_projected_view_is_drawn_from_inside_it(world):
     import json
 
-    db, rows = world
+    db, rows, _ = world
     expected = held(rows, EUROPE)
     sample = db.view("world").within(EUROPE).sample(zoom=3, k=1024)
     counts = json.loads(sample.schema.metadata[b"mosaica.counts"])
@@ -232,16 +252,35 @@ def test_a_sample_of_a_box_on_a_projected_view_is_drawn_from_inside_it(world):
 
 
 def test_a_map_of_a_box_on_a_projected_view_is_framed_in_the_views_coordinates(world, stub_bundle):
-    db, _ = world
+    db, _, projection = world
+    framed = pytest.approx(unit_square(EUROPE, projection))
     m = db.view("world").within(EUROPE).map()
     assert m.view == "world" and m.filters is None
-    assert m.bbox == pytest.approx(mercator(EUROPE))
+    assert m.bbox == framed
+    # The reader's own map takes the same box in each space it can be stated in.
+    reader = db.viewer()
+    assert reader.map(view="world", bbox=EUROPE, bbox_space="wgs84").bbox == framed
+    assert reader.map(view="world", bbox=EUROPE, bbox_space="inserted").bbox == framed
+    stated = unit_square(EUROPE, projection)
+    assert reader.map(view="world", bbox=stated).bbox == stated
+    with pytest.raises(Refusal):
+        reader.map(bbox=EUROPE, bbox_space="wgs84")
+    with pytest.raises(Refusal):
+        reader.map(view="world", bbox=EUROPE, bbox_space="utm")
+
+
+def test_the_annotation_tiles_of_a_box_in_degrees_are_those_of_its_projected_box(world):
+    db, _, projection = world
+    in_view = db.viewport_artifacts("world", 4, per_tile=1, bbox=unit_square(EUROPE, projection))
+    for space in ("wgs84", "inserted"):
+        tiles = db.viewport_artifacts("world", 4, per_tile=1, bbox=EUROPE, space=space)
+        assert tiles.equals(in_view), space
 
 
 def test_a_box_on_a_projected_view_selects_the_same_after_a_restart(world, tmp_path):
     from mosaica._database import open as open_database
 
-    db, rows = world
+    db, rows, _ = world
     db.close()
     again = open_database(tmp_path / "world")
     try:

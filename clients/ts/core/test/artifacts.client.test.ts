@@ -66,6 +66,18 @@ describe('the viewport request', () => {
     expect('space' in seen[1]!.body).toBe(false);
   });
 
+  it('sends the space an artifacts box is written in, and none when unset', async () => {
+    const seen = stubFetch(() => new Response(new ArrayBuffer(0), {status: 200}));
+    const c = client();
+
+    // The stub's empty body is not a whole response; what was sent is the subject here.
+    await c.viewportArtifacts('tok', {view: 'world', zoom: 4, perTile: 2, bbox: [-10.7, 51.3, -5.3, 55.5], space: 'inserted'}).catch(() => {});
+    await c.viewportArtifacts('tok', {view: 'world', zoom: 4, perTile: 2, bbox: [0.4, 0.3, 0.5, 0.4]}).catch(() => {});
+
+    expect(seen[0]!.body).toEqual({view: 'world', zoom: 4, per_tile: 2, bbox: [-10.7, 51.3, -5.3, 55.5], space: 'inserted'});
+    expect('space' in seen[1]!.body).toBe(false);
+  });
+
   it("sends the string 'all' verbatim, and never substitutes it for an array", async () => {
     const seen = stubFetch(() => new Response(new ArrayBuffer(0), {status: 200}));
     const c = client();

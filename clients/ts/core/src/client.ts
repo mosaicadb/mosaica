@@ -854,6 +854,7 @@ export class MosaicaClient {
     const {signal, background = false, onTile} = opts;
     const body: Record<string, unknown> = {view: req.view, zoom: req.zoom, per_tile: req.perTile};
     if (req.bbox) body.bbox = req.bbox;
+    if (req.space) body.space = req.space;
     if (req.tiles) body.tiles = req.tiles.map(Number);
     if (req.layers !== undefined) body.layers = req.layers;
     if (req.levels !== undefined) body.levels = req.levels;

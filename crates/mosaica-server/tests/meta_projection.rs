@@ -240,84 +240,173 @@ async fn world_viewport(server: &TestServer, token: &str, body: Value) -> (u16, 
     (status, tiles, points)
 }
 
-/// A box in degrees, sent as `space = "wgs84"`, is answered as the same box sent in the view's own
-/// coordinates: as the viewport's `bbox`, and as a `region` filter.
+/// `degrees` in the unit square `projection` draws the world in, from the projection's published
+/// definition and not from the server's own transform. y runs south, so the northern edge is the
+/// smaller y.
+fn unit_square(degrees: [f64; 4], projection: Projection) -> [f64; 4] {
+    let y = |lat: f64| match projection {
+        Projection::WebMercator => {
+            0.5 - lat.to_radians().tan().asinh() / (2.0 * std::f64::consts::PI)
+        }
+        _ => 0.5 - lat / 180.0,
+    };
+    [
+        (degrees[0] + 180.0) / 360.0,
+        y(degrees[3]),
+        (degrees[2] + 180.0) / 360.0,
+        y(degrees[1]),
+    ]
+}
+
+/// One `POST` of `body` to `path`: the status and the body's bytes.
+async fn posted(server: &TestServer, token: &str, path: &str, body: Value) -> (u16, Vec<u8>) {
+    let resp = server
+        .client
+        .post(server.viewer_url(path))
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    (resp.status().as_u16(), resp.bytes().await.unwrap().to_vec())
+}
+
+/// How many items a `region` filter keeps over `whole`, the view's frame.
+async fn matched(server: &TestServer, token: &str, whole: [f64; 4], region: Value) -> u64 {
+    let (status, tiles, _) = world_viewport(
+        server,
+        token,
+        serde_json::json!({
+            "view": "s0", "zoom": 0, "bbox": whole, "k": 0,
+            "filters": {"region": region},
+        }),
+    )
+    .await;
+    assert_eq!(status, 200);
+    tiles.iter().map(|t| t.2).sum()
+}
+
+/// The tiles an artifacts viewport over `bbox` answers for, in order.
+async fn artifact_tiles(
+    server: &TestServer,
+    token: &str,
+    bbox: [f64; 4],
+    space: &str,
+) -> Vec<Option<u32>> {
+    let (status, bytes) = posted(
+        server,
+        token,
+        "/v1/artifacts/viewport",
+        serde_json::json!({"view": "s0", "zoom": 6, "bbox": bbox, "space": space, "per_tile": 1}),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
+    decode_artifact_frames(&bytes)
+        .frames
+        .iter()
+        .map(|frame| frame.0)
+        .collect()
+}
+
+/// The rows of a count over the depth-6 cells that touch `area`.
+async fn cell_rows(
+    server: &TestServer,
+    token: &str,
+    area: [f64; 4],
+    space: Option<&str>,
+) -> Vec<(u64, AggregateRow)> {
+    let mut cells = serde_json::json!({"depth": 6, "area": area});
+    if let Some(space) = space {
+        cells["space"] = space.into();
+    }
+    let (status, bytes) = posted(
+        server,
+        token,
+        "/v1/aggregate",
+        serde_json::json!({"view": "s0", "groupings": [{"count": true, "cells": cells}]}),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&bytes));
+    decode_aggregate(&bytes).rows()
+}
+
+/// A box in degrees, sent as `space = "wgs84"` or as `inserted`, is answered as the same box sent
+/// in the view's own coordinates, under every projection and in a frame that is part of the
+/// world: as the viewport's `bbox`, as a `region` filter, as the artifacts viewport's `bbox` and
+/// as an aggregate's `cells.area`. The `region` filter keeps the places the degrees say it does.
 #[tokio::test]
-async fn a_wgs84_box_is_answered_as_its_projected_box() {
-    let tmp = TempDir::new().unwrap();
-    let bundle_root = tmp.path().join("bundle");
-    build_projected(
-        &bundle_root,
-        tmp.path(),
-        Projection::WebMercator,
-        AlignedSquare::WORLD.bounds(),
-    );
-    let server = spawn_server(
-        &bundle_root,
-        &tmp.path().join("cache"),
-        &tmp.path().join("wal.log"),
-    )
-    .await;
-    let auth = authorise(&server, &["0"]).await;
-    let token = auth["token"].as_str().unwrap();
+async fn a_box_in_degrees_is_answered_as_its_projected_box() {
+    // Longitude −90°…0° and latitude 0°…66.5°, the z2 tile (1, 1) of a Web Mercator world.
+    let part = AlignedSquare { z: 2, x: 1, y: 1 }.bounds();
+    for (projection, frame, degrees) in [
+        (Projection::WebMercator, AlignedSquare::WORLD.bounds(), [-10.5, 0.5, 60.5, 60.5]),
+        (Projection::PLATE_CARREE, AlignedSquare::WORLD.bounds(), [-10.5, 0.5, 60.5, 60.5]),
+        (Projection::GALL_ISOGRAPHIC, AlignedSquare::WORLD.bounds(), [-10.5, 0.5, 60.5, 60.5]),
+        (Projection::WebMercator, part, [-70.5, 10.5, -20.5, 50.5]),
+    ] {
+        let name = format!("{} in {frame:?}", projection.name());
+        let tmp = TempDir::new().unwrap();
+        let bundle_root = tmp.path().join("bundle");
+        build_projected(&bundle_root, tmp.path(), projection, frame);
+        let server = spawn_server(
+            &bundle_root,
+            &tmp.path().join("cache"),
+            &tmp.path().join("wal.log"),
+        )
+        .await;
+        let auth = authorise(&server, &["0"]).await;
+        let token = auth["token"].as_str().unwrap();
+        let projected = unit_square(degrees, projection);
+        let whole = [frame.x_min, frame.y_min, frame.x_max, frame.y_max];
 
-    let degrees = [-10.5, 0.5, 60.5, 60.5];
-    // y runs south, so the northern edge is the smaller y.
-    let (x0, y1) = Projection::WebMercator.forward(degrees[0], degrees[1]);
-    let (x1, y0) = Projection::WebMercator.forward(degrees[2], degrees[3]);
-    let projected = [x0, y0, x1, y1];
+        // The viewport's own box.
+        let viewport = |bbox: [f64; 4], space: Option<&str>| {
+            let mut body = serde_json::json!({"view": "s0", "zoom": 6, "bbox": bbox, "k": 50});
+            if let Some(space) = space {
+                body["space"] = space.into();
+            }
+            world_viewport(&server, token, body)
+        };
+        let in_view = viewport(projected, Some("view")).await;
+        assert_eq!(in_view.0, 200, "{name}");
+        assert!(!in_view.1.is_empty() && !in_view.2.is_empty(), "{name}");
+        assert_eq!(viewport(degrees, Some("wgs84")).await, in_view, "{name}");
+        assert_eq!(viewport(degrees, Some("inserted")).await, in_view, "{name}");
+        // The same numbers with no `space` are view coordinates, and name a different box.
+        let unstated = viewport(degrees, None).await;
+        assert_eq!(unstated.0, 200, "{name}");
+        assert_ne!(unstated.1, in_view.1, "{name}");
 
-    // The viewport's own box.
-    let in_degrees = world_viewport(
-        &server,
-        token,
-        serde_json::json!({"view": "s0", "zoom": 4, "bbox": degrees, "space": "wgs84", "k": 50}),
-    )
-    .await;
-    let in_view = world_viewport(
-        &server,
-        token,
-        serde_json::json!({"view": "s0", "zoom": 4, "bbox": projected, "space": "view", "k": 50}),
-    )
-    .await;
-    assert_eq!((in_degrees.0, in_view.0), (200, 200));
-    assert!(!in_degrees.1.is_empty() && !in_degrees.2.is_empty());
-    assert_eq!(in_degrees, in_view);
-    // The same numbers with no `space` are view coordinates, and name a different box.
-    let unstated = world_viewport(
-        &server,
-        token,
-        serde_json::json!({"view": "s0", "zoom": 4, "bbox": degrees, "k": 50}),
-    )
-    .await;
-    assert_eq!(unstated.0, 200);
-    assert_ne!(unstated.1, in_degrees.1);
+        // The `region` filter, over the whole frame.
+        // The fixture's own places: a point per degree of longitude along diagonals of latitude.
+        let expected = (0..N_ITEMS)
+            .map(|e| (-180.0 + (e % 360) as f64, -80.0 + (e % 160) as f64))
+            .filter(|(lon, lat)| {
+                (degrees[0]..=degrees[2]).contains(lon) && (degrees[1]..=degrees[3]).contains(lat)
+            })
+            .count() as u64;
+        assert!(expected > 0, "{name}");
+        for region in [
+            serde_json::json!({"bbox": degrees, "space": "wgs84"}),
+            serde_json::json!({"bbox": degrees, "space": "inserted"}),
+            serde_json::json!({"bbox": projected}),
+        ] {
+            assert_eq!(matched(&server, token, whole, region.clone()).await, expected, "{name}: {region}");
+        }
 
-    // The `region` filter, over the whole map.
-    let world = [0.0, 0.0, 1.0, 1.0];
-    let matched = |tiles: &[TileRow]| tiles.iter().map(|t| t.2).sum::<u64>();
-    let by_degrees = world_viewport(
-        &server,
-        token,
-        serde_json::json!({
-            "view": "s0", "zoom": 0, "bbox": world, "k": 0,
-            "filters": {"region": {"bbox": degrees, "space": "wgs84"}},
-        }),
-    )
-    .await;
-    let by_view = world_viewport(
-        &server,
-        token,
-        serde_json::json!({
-            "view": "s0", "zoom": 0, "bbox": world, "k": 0,
-            "filters": {"region": {"bbox": projected}},
-        }),
-    )
-    .await;
-    assert_eq!((by_degrees.0, by_view.0), (200, 200));
-    assert!(matched(&by_degrees.1) > 0);
-    assert!(matched(&by_degrees.1) < by_degrees.1.iter().map(|t| t.1).sum::<u64>());
-    assert_eq!(matched(&by_degrees.1), matched(&by_view.1));
+        // The artifacts viewport's box and an aggregate's area.
+        let artifacts = |bbox: [f64; 4], space: &'static str| artifact_tiles(&server, token, bbox, space);
+        let in_view = artifacts(projected, "view").await;
+        assert_eq!(artifacts(degrees, "wgs84").await, in_view, "{name}");
+        assert_eq!(artifacts(degrees, "inserted").await, in_view, "{name}");
+
+        let cells = |area: [f64; 4], space: Option<&'static str>| cell_rows(&server, token, area, space);
+        let in_view = cells(projected, None).await;
+        assert!(!in_view.is_empty(), "{name}");
+        assert_eq!(cells(degrees, Some("wgs84")).await, in_view, "{name}");
+        assert_eq!(cells(degrees, Some("inserted")).await, in_view, "{name}");
+        assert_ne!(cells(degrees, None).await, in_view, "{name}");
+    }
 }
 
 /// A viewport `space` is refused where it cannot be honoured: `wgs84` on a view with no
@@ -336,6 +425,35 @@ async fn a_viewport_space_is_refused_where_it_cannot_be_honoured() {
     ] {
         assert_eq!(world_viewport(&server, token, body.clone()).await.0, 422, "{body}");
     }
+    for (path, body) in [
+        (
+            "/v1/artifacts/viewport",
+            serde_json::json!({"view": "s0", "zoom": 0, "bbox": [0.0, 0.0, 10.0, 10.0], "space": "wgs84", "per_tile": 1}),
+        ),
+        (
+            "/v1/artifacts/viewport",
+            serde_json::json!({"view": "s0", "zoom": 0, "tiles": [0], "space": "view", "per_tile": 1}),
+        ),
+        (
+            "/v1/aggregate",
+            serde_json::json!({"view": "s0", "groupings": [{"count": true, "cells": {"depth": 2, "area": [0.0, 0.0, 10.0, 10.0], "space": "wgs84"}}]}),
+        ),
+        (
+            "/v1/aggregate",
+            serde_json::json!({"view": "s0", "groupings": [{"count": true, "cells": {"depth": 2, "space": "view"}}]}),
+        ),
+    ] {
+        assert_eq!(posted(&server, token, path, body.clone()).await.0, 422, "{path} {body}");
+    }
+    // `inserted` on a view with no projection is the view's own space.
+    let inserted = world_viewport(
+        &server,
+        token,
+        serde_json::json!({"view": "s0", "zoom": 0, "bbox": [0.0, 0.0, 1000.0, 1000.0], "space": "inserted"}),
+    )
+    .await;
+    assert_eq!(inserted.0, 200);
+    assert!(!inserted.1.is_empty());
     // Stated as the view's own space, the box is read as it always was.
     let stated = world_viewport(
         &server,

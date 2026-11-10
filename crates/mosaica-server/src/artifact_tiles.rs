@@ -25,7 +25,7 @@ use crate::error::{map_engine_error, ApiError};
 use crate::state::{ApiJson, AppState, ViewerSession};
 use crate::stream::{CancelGuard, Producer};
 use crate::viewer::{
-    check_extent, distinct_tiles, layer_names, layer_selection, layers_named, level_numbers,
+    check_extent, check_space, distinct_tiles, layer_names, layer_selection, layers_named, level_numbers,
     level_selection, FilterParser, LayersReq, LevelsReq, PinDto,
 };
 
@@ -38,6 +38,9 @@ pub(crate) struct ViewportArtifactsReq {
     /// Absent exactly when `tiles` is present.
     #[serde(default)]
     bbox: Option<[f64; 4]>,
+    /// What `bbox` is written in, as the viewport names it.
+    #[serde(default)]
+    space: Option<String>,
     /// The depth-`zoom` Morton prefixes to answer for, in the order the frames follow.
     #[serde(default)]
     tiles: Option<Vec<u64>>,
@@ -177,6 +180,18 @@ fn run(
             return;
         }
     };
+    let bbox = match crate::filter_dto::bbox_in_view(
+        req.bbox.unwrap_or([0.0; 4]),
+        req.space.as_deref(),
+        "bbox",
+        view,
+    ) {
+        Ok(bbox) => bbox,
+        Err(e) => {
+            sink.producer.refuse(e);
+            return;
+        }
+    };
     let tiles = distinct_tiles(req.tiles);
     let names = layer_names(req.layers.as_ref());
     let numbers = level_numbers(req.levels.as_ref());
@@ -190,7 +205,7 @@ fn run(
     let mut request = ViewportArtifactsRequest::new(
         &view.id,
         req.zoom,
-        req.bbox.unwrap_or([0.0; 4]),
+        bbox,
         req.per_tile,
     )
     .tiles(tiles.as_deref())
@@ -255,6 +270,7 @@ pub(crate) async fn viewport_artifacts(
     ApiJson(req): ApiJson<ViewportArtifactsReq>,
 ) -> Result<Response, ApiError> {
     check_extent(req.zoom, req.bbox.as_ref(), req.tiles.as_deref())?;
+    check_space(req.space.as_deref(), req.bbox.as_ref())?;
     let ceiling = state.limits.max_artifacts_per_tile;
     if req.per_tile > ceiling {
         return Err(ApiError::Contract(format!(

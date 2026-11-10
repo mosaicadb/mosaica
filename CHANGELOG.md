@@ -13,6 +13,11 @@ container image.
 - `POST /v1/viewport` takes `space` beside `bbox`: `"wgs84"` gives the box in degrees of
   longitude and latitude on a view with a map projection. The TypeScript client's
   `ViewportRequest` and `region` filter take it too.
+- `space` takes `"inserted"`, the coordinates a view's items were inserted with: degrees on a view
+  with a map projection and the view's own otherwise. `POST /v1/artifacts/viewport` takes `space`
+  beside `bbox`, and `POST /v1/aggregate` beside `cells.area` and `cut.bbox`. In Python,
+  `viewport_artifacts` takes `space` and `Viewer.map` and `Database.map` take `bbox_space`; the
+  TypeScript request types take `space`.
 - `POST /v1/items` takes `fields` as optional. A request without it returns every field the view
   reads under its bare name, and its cursor is refused once that set of fields changes.
   `mosaica items --fields`, `ItemsRequest.fields` in TypeScript and `fields` on the Python

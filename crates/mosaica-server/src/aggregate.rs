@@ -27,6 +27,7 @@ use crate::control::present;
 use crate::error::ApiError;
 use crate::records::{bulk_read, limits, view_and_filter, CompressionReq, FrameSink, Lane, Opening, Read};
 use crate::state::{ApiJson, AppState, ViewerSession};
+use crate::filter_dto::bbox_in_view;
 use crate::viewer::{check_bbox, field_column, FieldColumn, FilterParser};
 
 /// The request body. Every field but `view` and `groupings` may be left out; an unknown one is a
@@ -131,6 +132,9 @@ struct ByReq {
 struct CutReq {
     zoom: u8,
     bbox: [f64; 4],
+    /// What `bbox` is written in, as the viewport names it.
+    #[serde(default)]
+    space: Option<String>,
     #[serde(default)]
     budget: Option<u32>,
 }
@@ -142,6 +146,9 @@ struct CellsReq {
     /// As the viewport's `bbox`; absent is the view's whole extent.
     #[serde(default)]
     area: Option<[f64; 4]>,
+    /// What `area` is written in, as the viewport names its `bbox`'s.
+    #[serde(default)]
+    space: Option<String>,
 }
 
 /// The table heads and pages of an aggregate response. It has no head frame of its own: the
@@ -230,7 +237,7 @@ fn run_aggregate(
             let groupings = req
                 .groupings
                 .iter()
-                .map(|grouping| grouping_of(&meta, &view.id, session, grouping))
+                .map(|grouping| grouping_of(&meta, view, session, grouping))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((view, filter, reference, groupings))
         });
@@ -284,7 +291,7 @@ fn run_aggregate(
 /// One grouping as the engine takes it, with its field resolved under `view`.
 fn grouping_of(
     meta: &mosaica_engine::EngineMeta,
-    view: &str,
+    view: &mosaica_engine::MetaView,
     session: &mosaica_engine::Session,
     grouping: &GroupingReq,
 ) -> Result<Grouping, ApiError> {
@@ -294,10 +301,17 @@ fn grouping_of(
     };
     let area = match &grouping.cells {
         Some(CellsReq {
-            area: Some(area), ..
+            area: Some(area),
+            space,
+            ..
         }) => {
             check_bbox("area", area)?;
-            Some(*area)
+            Some(bbox_in_view(*area, space.as_deref(), "area", view)?)
+        }
+        Some(CellsReq { space: Some(_), .. }) => {
+            return Err(ApiError::Contract(
+                "`cells.space` says what `area` is written in; send it with `area`".to_string(),
+            ))
         }
         _ => None,
     };
@@ -328,7 +342,7 @@ fn grouping_of(
         let Some(fields) = fields else { continue };
         let fields = fields
             .iter()
-            .map(|field| figure_field(meta, view, session, field))
+            .map(|field| figure_field(meta, &view.id, session, field))
             .collect::<Result<_, _>>()?;
         figures.push(FigureList { figure, fields });
     }
@@ -381,10 +395,11 @@ fn resolved_column(
 
 fn by_of(
     meta: &mosaica_engine::EngineMeta,
-    view: &str,
+    frame: &mosaica_engine::MetaView,
     session: &mosaica_engine::Session,
     by: &ByReq,
 ) -> Result<By, ApiError> {
+    let view = frame.id.as_str();
     let bad = |detail: &str| Err(ApiError::Contract(detail.to_string()));
     match (&by.field, &by.layer) {
         (Some(field), None) => {
@@ -484,7 +499,7 @@ fn by_of(
                     check_bbox("cut.bbox", &cut.bbox)?;
                     Some(Cut {
                         zoom: cut.zoom,
-                        bbox: cut.bbox,
+                        bbox: bbox_in_view(cut.bbox, cut.space.as_deref(), "cut.bbox", frame)?,
                         budget: cut.budget,
                     })
                 }
