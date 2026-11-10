@@ -594,27 +594,26 @@ impl ReadLevel {
     /// Every artifact's visible members in `filter_rows` (indexed like `served.sides`) over every
     /// side: in each side the request reads, one walk of `visible ∩ filter` through the side's
     /// column, which needs no per-artifact membership, summed. `None` unless every side the request
-    /// reads has a column, and once the request holding `cancel` has gone, which each walk reads
-    /// between its chunks; a caller that passes a token reads it again where this answers `None`.
+    /// reads has a column. Each walk reads `cancel` between its chunks and ends with
+    /// [`crate::EngineError::Cancelled`] once the request holding it has gone.
     pub(crate) fn filtered_counts(
         &self,
         engine: &Engine,
         mask: &ShardedMask,
         filter_rows: &[impl std::borrow::Borrow<Bitmap>],
         cancel: &Option<crate::CancelToken>,
-    ) -> Option<Arc<Vec<u64>>> {
-        let sides: Vec<Vec<u32>> = self
-            .forms
-            .filtered_inputs(mask, filter_rows)?
-            .into_iter()
-            .map(|(column, visible)| {
-                let walked = engine.pool.install(|| {
-                    column.accumulate(&visible, None, &|| !crate::cancel::gone(cancel))
-                });
-                walked.map(|level| level.counts)
-            })
-            .collect::<Option<_>>()?;
-        Some(Arc::new(summed_counts(&sides)))
+    ) -> crate::error::Result<Option<Arc<Vec<u64>>>> {
+        let Some(inputs) = self.forms.filtered_inputs(mask, filter_rows) else {
+            return Ok(None);
+        };
+        let mut sides: Vec<Vec<u32>> = Vec::with_capacity(inputs.len());
+        for (column, visible) in inputs {
+            let walked = engine
+                .pool
+                .install(|| column.accumulate(&visible, None, &|| !crate::cancel::gone(cancel)));
+            sides.push(walked.ok_or(crate::EngineError::Cancelled)?.counts);
+        }
+        Ok(Some(Arc::new(summed_counts(&sides))))
     }
 
     /// How many of the artifact's visible members are in `filter_rows` over every side, from

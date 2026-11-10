@@ -188,12 +188,10 @@ impl Field {
                             &self.column,
                             cx.cancel(),
                         )
-                    }),
+                    })?,
                 },
             );
         }
-        // A pass the client left part of the way through counted only some pieces.
-        crate::cancel::check_cancelled(cx.cancel())?;
         Ok(Counts::summed(sides))
     }
 
@@ -344,13 +342,14 @@ fn sizes(codes: &[u32], set: &Counts, reference: Option<&Counts>) -> Vec<(u64, u
 
 /// A drawn column's codes over a set's rows, counted in one parallel pass. Code 0 and a segment
 /// without the column count as no value. Once the request holding `cancel` has gone the pieces not
-/// yet begun are skipped, so the caller reads the clock before it uses the counts.
+/// yet begun are skipped and the pass answers [`EngineError::Cancelled`], never a count of some
+/// pieces.
 fn tally_rows(
     set: CellSet<'_>,
     segments: &[(&mosaica_store::read::SegmentData, u32)],
     column: &str,
     cancel: &Option<crate::CancelToken>,
-) -> Counts {
+) -> Result<Counts> {
     let pieces = pieces(segments);
     // Indexed by code up to the widest code any segment stores, a map where one stores 32 bits.
     let width = segments
@@ -393,7 +392,8 @@ fn tally_rows(
             tally
         })
         .reduce(empty, Tally::merge);
-    tally.into_counts()
+    crate::cancel::check_cancelled(cancel)?;
+    Ok(tally.into_counts())
 }
 
 /// The view's rows cut into pieces of at most [`PIECE_ROWS`], each within one segment: the segment's

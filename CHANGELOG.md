@@ -19,9 +19,11 @@ container image.
 ### Fixed
 
 - When a client goes away, Mosaica stops working on its request inside a column, range, `in` or
-  keyword filter and inside an aggregate's count, as it already did inside a text filter. Those
-  requests used to run to their end, so a viewer changing filters quickly left the server
-  computing answers nobody was waiting for.
+  keyword filter and inside an aggregate's passes over a column, as it already did inside a text
+  filter. Those requests used to run to their end, so a viewer changing filters quickly left the
+  server computing answers nobody was waiting for. A filter condition several requests are
+  waiting on is worked out until the last of them has gone, so a viewer who pans while a new
+  filter is first evaluated does not start it again.
 - The plain-HTML example's server abandons its request to Mosaica when the page abandons its
   own. It used to read every proxied answer to the end, so Mosaica kept working on requests the
   page had dropped.

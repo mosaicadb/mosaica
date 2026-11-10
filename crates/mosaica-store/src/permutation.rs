@@ -2283,8 +2283,8 @@ impl RowSpace {
     }
 
     /// [`Self::project`], given up with `None` once `stop` answers true
-    /// ([`Permutation::project_until`]). It is asked through the base's walk and before each
-    /// extent.
+    /// ([`Permutation::project_until`]). It is asked through the base's walk and before the
+    /// extents'.
     pub fn project_until(
         &self,
         mask: &croaring::Bitmap,
@@ -2293,12 +2293,10 @@ impl RowSpace {
         let mut rows = self
             .base
             .project_until(mask, &mut ProjectScratch::default(), stop)?;
-        for extent in &self.extents {
-            if stop() {
-                return None;
-            }
-            rows.or_inplace(&extent.project(mask));
+        if stop() {
+            return None;
         }
+        rows.or_inplace(&self.project_extents_from(mask, 0));
         Some(rows)
     }
 
@@ -2498,6 +2496,30 @@ mod tests {
                 "density {density}, declared"
             );
         }
+    }
+
+    /// A row space's stoppable projection is its projection where nothing stops it, the extents'
+    /// rows with the base's, and nothing where it is stopped before the extents.
+    #[test]
+    fn a_row_spaces_stoppable_projection_is_its_projection_unless_stopped() {
+        const BOUND: u64 = (2 << PAGE_SHIFT) + 500;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut rng = StdRng::seed_from_u64(5);
+        let (space, extents) = row_space_fixture(dir.path(), BOUND, 0.7, &mut rng);
+        let top = space.entity_floor() + 50;
+        let mask: croaring::Bitmap = (0..top)
+            .filter(|_| rng.gen_bool(0.5))
+            .map(|e| e as u32)
+            .collect();
+        let whole = space.project(&mask);
+        assert!(
+            extents
+                .iter()
+                .any(|extent| !extent.project(&mask).is_empty()),
+            "the mask holds entities of the extents"
+        );
+        assert_eq!(space.project_until(&mask, &|| false), Some(whole));
+        assert_eq!(space.project_until(&mask, &|| true), None);
     }
 
     /// `restrict_to_view(set, through)` keeps the members of `set` with a row in the base or in the

@@ -4,6 +4,7 @@ use croaring::Bitmap;
 use mosaica_types::AttrLocalId;
 
 use super::{Endpoint, Family, FilterError, Scalar};
+use crate::CancelToken;
 
 /// What a request may ask of one column.
 ///
@@ -277,22 +278,32 @@ pub enum LeafQuery<'a> {
 }
 
 /// The evaluation of one leaf under a candidate, which a [`LeafResolver`] may run on any thread.
-pub type LeafEvaluation<'a> = dyn Fn(&Bitmap) -> Result<Bitmap, FilterError> + Sync + 'a;
+/// It ends with [`FilterError::Cancelled`] once the token it is given has gone.
+pub type LeafEvaluation<'a> =
+    dyn Fn(&Bitmap, &Option<CancelToken>) -> Result<Bitmap, FilterError> + Sync + 'a;
 
 /// How a text or value leaf is answered in entity space: given its column, its query, the
-/// candidate it is evaluated under and the evaluation itself, an answer equal to
-/// `evaluate(candidate)`.
-pub type LeafResolver<'a> =
-    dyn Fn(&str, LeafQuery<'_>, &Bitmap, &LeafEvaluation<'_>) -> Result<Bitmap, FilterError> + 'a;
+/// candidate it is evaluated under, the request's token and the evaluation itself, an answer
+/// equal to the evaluation's under that candidate. The resolver chooses the token an evaluation
+/// watches: the request's, or one other requests share where they wait on the same evaluation.
+pub type LeafResolver<'a> = dyn Fn(
+        &str,
+        LeafQuery<'_>,
+        &Bitmap,
+        &Option<CancelToken>,
+        &LeafEvaluation<'_>,
+    ) -> Result<Bitmap, FilterError>
+    + 'a;
 
 /// The [`LeafResolver`] that evaluates every leaf it is asked, on the calling thread.
 pub fn evaluate_leaf(
     _column: &str,
     _query: LeafQuery<'_>,
     candidate: &Bitmap,
+    cancel: &Option<CancelToken>,
     evaluate: &LeafEvaluation<'_>,
 ) -> Result<Bitmap, FilterError> {
-    evaluate(candidate)
+    evaluate(candidate, cancel)
 }
 
 /// The two row-space leaves' resolvers, how many levels a layer a `member_of` names holds where

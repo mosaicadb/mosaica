@@ -328,8 +328,7 @@ impl crate::Engine {
             let mut level_read = self.read_level(&served_view, &mask, &layer, walked, false)?;
             if let Some(filter_rows) = &filter_rows {
                 level_read.filtered =
-                    level_read.filtered_counts(self, &mask, filter_rows, &req.cancel);
-                crate::cancel::check_cancelled(&req.cancel)?;
+                    level_read.filtered_counts(self, &mask, filter_rows, &req.cancel)?;
             }
             let rows = level_read.forms.first();
             let view_of = level_read.view(self, &served_view, &mask, &layer, &|_| false);

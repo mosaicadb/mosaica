@@ -311,16 +311,6 @@ fn the_walk_visits_every_key_exactly_once_in_order() {
     }
 }
 
-/// Every operation cross-checked against a plain sorted `Vec`, over pseudo-random key sets at
-/// pseudo-random restart intervals.
-///
-/// This exists because the hand-written cases above missed a real defect: the order check inside a
-/// block is local — it compares one byte at the shared prefix's end — but a restart's `shared` is
-/// forced to 0, so the same check at a block boundary compared byte 0 of two keys that legitimately
-/// shared a prefix, and every dictionary whose block boundary fell inside a run of related keys
-/// refused itself. A fixed key list only finds that when a boundary happens to land there. Small
-/// alphabets are used deliberately: they make shared prefixes, and therefore boundaries inside
-/// them, common.
 /// A walk given up part of the way has visited the keys before the block it stopped at, in order,
 /// and says it did not finish; one nothing stops is the whole walk.
 #[test]
@@ -354,6 +344,16 @@ fn a_stopped_walk_has_visited_the_keys_before_it_stopped_and_says_so() {
     assert_eq!(all, keys);
 }
 
+/// Every operation cross-checked against a plain sorted `Vec`, over pseudo-random key sets at
+/// pseudo-random restart intervals.
+///
+/// This exists because the hand-written cases above missed a real defect: the order check inside a
+/// block is local — it compares one byte at the shared prefix's end — but a restart's `shared` is
+/// forced to 0, so the same check at a block boundary compared byte 0 of two keys that legitimately
+/// shared a prefix, and every dictionary whose block boundary fell inside a run of related keys
+/// refused itself. A fixed key list only finds that when a boundary happens to land there. Small
+/// alphabets are used deliberately: they make shared prefixes, and therefore boundaries inside
+/// them, common.
 #[test]
 fn every_operation_agrees_with_a_sorted_vec() {
     // xorshift64*, so the corpus is reproducible without a dependency.

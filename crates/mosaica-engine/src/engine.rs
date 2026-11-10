@@ -114,6 +114,8 @@ pub struct Engine {
     pub(crate) max_region_cells: AtomicU64,
     /// Each text or value filter leaf's answer per shard and grant ([`crate::filter_cache`]).
     pub(crate) filter_cache: Arc<crate::filter_cache::FilterCache>,
+    /// The requests waiting on each entry of [`Self::filter_cache`] being computed.
+    pub(crate) filter_interest: crate::filter_cache::FilterInterest,
     /// Artifact memberships in row space, one entry per `(view, layer, level)`. Keyed per
     /// *deployment*, unlike the session-keyed caches below, so it moves only when a layer is
     /// published.
@@ -1343,6 +1345,7 @@ impl Engine {
             region_cache: Arc::clone(&region_cache),
             max_region_cells: AtomicU64::new(crate::region::DEFAULT_MAX_REGION_CELLS as u64),
             filter_cache,
+            filter_interest: crate::filter_cache::FilterInterest::default(),
             artifact_projections: Arc::clone(&artifact_projections),
             shapes: Arc::clone(&shapes),
             figures: Arc::new(crate::figures::FiguresCache::new(

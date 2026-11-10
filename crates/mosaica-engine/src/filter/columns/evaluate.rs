@@ -71,9 +71,10 @@ impl FilterColumns {
             } => (layers, postings.as_deref(), *route),
         };
 
-        leaves(name, LeafQuery::Value(operand), candidate, &|candidate| {
+        let scan = |candidate: &Bitmap, cancel: &Option<CancelToken>| {
             resolve_values(name, layers, postings, route, operand, candidate, cancel)
-        })
+        };
+        leaves(name, LeafQuery::Value(operand), candidate, cancel, &scan)
     }
 
     /// Evaluate a filter expression against `candidate`.
@@ -163,8 +164,9 @@ impl FilterColumns {
     /// awaits the row-space leaves, which need the request's tile ranges.
     ///
     /// Once the request holding `cancel` has gone, the evaluation ends with
-    /// [`FilterError::Cancelled`] at the next leaf, or within [`crate::filter::CANCEL_EVERY`] entities of a walk
-    /// inside one. `None` is never cancelled, which is what [`Self::evaluate`] passes.
+    /// [`FilterError::Cancelled`] at the next leaf, or inside one: within
+    /// [`crate::filter::CANCEL_EVERY`] entities of a text leaf's walk, and at the next span of a
+    /// value leaf's scan. `None` is never cancelled, which is what [`Self::evaluate`] passes.
     pub fn evaluate_routed(
         &self,
         expr: &FilterExpr,
@@ -437,9 +439,10 @@ fn resolve_text(
     let Some(query) = text_query(analyser, operand) else {
         return Ok(Bitmap::new());
     };
-    resolver(name, LeafQuery::Text(&query), candidate, &|candidate| {
+    let walk = |candidate: &Bitmap, cancel: &Option<CancelToken>| {
         text_answer(name, text, &query, candidate, cancel)
-    })
+    };
+    resolver(name, LeafQuery::Text(&query), candidate, cancel, &walk)
 }
 
 /// `operand` as `analyser` reads it, or `None` where it is not a text operand.

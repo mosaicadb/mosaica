@@ -45,7 +45,7 @@ use mosaica_cache::{
 };
 use mosaica_types::ShardId;
 
-use crate::cancel::CancelToken;
+use crate::cancel::{CancelToken, Interests};
 use crate::filter::{FilterColumns, FilterError, FilterOperand, LeafQuery, Scalar, TextQuery};
 use crate::{Generation, Shard};
 
@@ -193,6 +193,9 @@ fn canonical(column: &str, query: LeafQuery<'_>) -> Vec<u8> {
 
 pub(crate) type FilterCache = SingleFlightCache<LeafKey, KeptLeaf>;
 
+/// The requests waiting on each entry being computed.
+pub(crate) type FilterInterest = Interests<LeafKey>;
+
 /// Drop every entry over filter columns or a fragment `live` no longer holds: no request can name
 /// it again.
 pub(crate) fn prune_superseded(cache: &FilterCache, live: &Generation) -> usize {
@@ -224,33 +227,42 @@ pub(crate) fn key_of(
     (key, canonical)
 }
 
-/// `evaluate(candidate)`, from `cache`'s entry for `leaf` in `shard` intersected with `candidate`.
+/// The leaf's answer under `candidate`, from `cache`'s entry for `leaf` in `shard` intersected
+/// with `candidate`. `evaluate` is the leaf's evaluation under a candidate, ended once the token
+/// it is given has gone.
 ///
 /// `fragment` is the grant's fragment in `shard`, given where `candidate` is the request's whole
-/// candidate. Only then is a missing entry computed, as `evaluate(fragment)`, and kept; concurrent
+/// candidate. Only then is a missing entry computed, over the fragment, and kept; concurrent
 /// requests for it compute it once, and a request waiting on another's computation stops when
-/// `cancel` reports it gone. A smaller candidate reads an entry already kept and is evaluated
-/// otherwise. An evaluation over the fragment that fails, and an entry whose canonical bytes are
-/// not the leaf's, which is a digest collision, are answered by evaluating under `candidate`.
+/// `cancel` reports it gone. The computation is every such request's, whichever of them runs it:
+/// it watches `interest` and ends only once all of them have gone, so a request that leaves does
+/// not take the entry from one still waiting. A smaller candidate reads an entry already kept and
+/// is evaluated otherwise. An evaluation over the fragment that fails, and an entry whose
+/// canonical bytes are not the leaf's, which is a digest collision, are answered by evaluating
+/// under `candidate` for this request alone.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn answer(
     cache: &FilterCache,
+    interest: &FilterInterest,
     shard: &Shard,
     (key, canonical): (LeafKey, Vec<u8>),
     fragment: Option<&Bitmap>,
     candidate: &Bitmap,
     cancel: &Option<CancelToken>,
-    evaluate: &dyn Fn(&Bitmap) -> Result<Bitmap, FilterError>,
+    evaluate: &dyn Fn(&Bitmap, &Option<CancelToken>) -> Result<Bitmap, FilterError>,
 ) -> Result<Bitmap, FilterError> {
     if cache.bound_bytes() == 0 {
-        return evaluate(candidate);
+        return evaluate(candidate, cancel);
     }
     let entry = if let Some(fragment) = fragment {
         let waiting: &dyn Cancel = match cancel {
             Some(token) => token,
             None => &NeverCancelled,
         };
+        let (wanted, _caller) = interest.register(&key, cancel.as_ref());
+        let wanted = Some(CancelToken::shared(wanted));
         let built = cache.get_or_try_build_waiting(key, waiting, || {
-            let mut entities = evaluate(fragment)?;
+            let mut entities = evaluate(fragment, &wanted)?;
             entities.run_optimize();
             entities.shrink_to_fit();
             Ok(KeptLeaf {
@@ -264,20 +276,20 @@ pub(crate) fn answer(
             Err(WaitingBuildError::Build(FilterError::Cancelled)) => {
                 return Err(FilterError::Cancelled)
             }
-            Err(WaitingBuildError::Build(_)) => return evaluate(candidate),
+            Err(WaitingBuildError::Build(_)) => return evaluate(candidate, cancel),
             Err(WaitingBuildError::Wait(WaitEnded::Cancelled)) => {
                 return Err(FilterError::Cancelled)
             }
-            Err(WaitingBuildError::Wait(WaitEnded::Budget)) => return evaluate(candidate),
+            Err(WaitingBuildError::Wait(WaitEnded::Budget)) => return evaluate(candidate, cancel),
         }
     } else {
         match cache.peek(&key) {
             Peek::Ready(entry) => entry,
-            Peek::Building | Peek::Absent => return evaluate(candidate),
+            Peek::Building | Peek::Absent => return evaluate(candidate, cancel),
         }
     };
     if entry.canonical != canonical {
-        return evaluate(candidate);
+        return evaluate(candidate, cancel);
     }
     debug_assert!(std::ptr::eq(
         entry.columns.as_ptr(),
@@ -302,6 +314,7 @@ mod tests {
         let generation = Generation::synthetic("v00000", 1, 0, Overlay::new(), IngestBuffer::new());
         let shard = generation.only_shard();
         let cache = FilterCache::new(1 << 20);
+        let interest = FilterInterest::default();
         let query = TextQuery::Phrase {
             words: vec!["of".to_string(), "the".to_string()],
         };
@@ -312,12 +325,13 @@ mod tests {
         let ask = |leaf, candidate: &Bitmap, evaluate: &dyn Fn(&Bitmap) -> _| {
             answer(
                 &cache,
+                &interest,
                 shard,
                 leaf,
                 Some(&fragment),
                 candidate,
                 &None,
-                evaluate,
+                &|candidate, _| evaluate(candidate),
             )
         };
 
@@ -348,7 +362,17 @@ mod tests {
         let lifted = Bitmap::from_range(0..13);
         assert_eq!(ask(key(), &lifted, &evaluate), Ok(Bitmap::of(&[2, 3, 12])));
         let smaller = Bitmap::of(&[3, 4]);
-        let got = answer(&cache, shard, key(), None, &smaller, &None, &evaluate);
+        let alone = |candidate: &Bitmap, _: &Option<CancelToken>| evaluate(candidate);
+        let got = answer(
+            &cache,
+            &interest,
+            shard,
+            key(),
+            None,
+            &smaller,
+            &None,
+            &alone,
+        );
         assert_eq!(got, Ok(Bitmap::of(&[3])));
         assert_eq!(evaluations.get(), 1, "every candidate reads the kept entry");
 
@@ -363,5 +387,95 @@ mod tests {
         );
         let got = ask(colliding, &whole, &|_| Ok(Bitmap::of(&[9])));
         assert_eq!(got, Ok(Bitmap::of(&[9])), "a collision is evaluated");
+    }
+
+    /// **A kept entry's computation is every waiting request's.** It watches a token that has gone
+    /// only once the request running it and every request waiting on it have, so the first to
+    /// leave does not take the entry from the rest; with all of them gone it ends, and nothing is
+    /// kept.
+    #[test]
+    fn a_computation_ends_only_once_every_request_waiting_on_it_has_gone() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Barrier;
+
+        let generation = Generation::synthetic("v00000", 1, 0, Overlay::new(), IngestBuffer::new());
+        let shard = generation.only_shard();
+        let cache = FilterCache::new(1 << 20);
+        let interest = FilterInterest::default();
+        let operand = FilterOperand::TextContains("17".to_string());
+        let key = || key_of(shard, [7; 32], "code", LeafQuery::Value(&operand));
+        let whole = Bitmap::from_range(0..10);
+        let matches = Bitmap::of(&[2, 3]);
+
+        // The first request computes, and is watched while it does: `seen` is what its
+        // computation's token said after the first request had gone, with a second one waiting.
+        let (first, second) = (CancelToken::new(), CancelToken::new());
+        let (started, release) = (Barrier::new(2), Barrier::new(2));
+        let seen = AtomicBool::new(true);
+        let computing = |candidate: &Bitmap, watch: &Option<CancelToken>| {
+            started.wait();
+            release.wait();
+            seen.store(crate::cancel::gone(watch), Ordering::Relaxed);
+            crate::cancel::gone(watch)
+                .then(|| Err(FilterError::Cancelled))
+                .unwrap_or_else(|| Ok(candidate.and(&matches)))
+        };
+        let unreached = |_: &Bitmap, _: &Option<CancelToken>| -> Result<Bitmap, FilterError> {
+            panic!("the request waiting reads the first's entry")
+        };
+        let ask = |cancel: &CancelToken, evaluate: &dyn Fn(&Bitmap, &Option<CancelToken>) -> _| {
+            let cancel = Some(cancel.clone());
+            answer(
+                &cache,
+                &interest,
+                shard,
+                key(),
+                Some(&whole),
+                &whole,
+                &cancel,
+                evaluate,
+            )
+        };
+        std::thread::scope(|scope| {
+            let running = scope.spawn(|| ask(&first, &computing));
+            started.wait();
+            let waiting = scope.spawn(|| ask(&second, &unreached));
+            while interest.callers(&key().0) < 2 {
+                std::thread::yield_now();
+            }
+            first.cancel();
+            release.wait();
+            assert_eq!(running.join().unwrap(), Ok(matches.clone()));
+            assert_eq!(waiting.join().unwrap(), Ok(matches.clone()));
+        });
+        assert!(
+            !seen.load(Ordering::Relaxed),
+            "a request still waiting keeps the computation wanted"
+        );
+        assert_eq!(
+            cache.len(),
+            1,
+            "the entry is kept for the request that waited"
+        );
+
+        // Alone, a request that has gone ends its own computation.
+        let other = FilterOperand::TextContains("23".to_string());
+        let alone = CancelToken::new();
+        alone.cancel();
+        let ended = answer(
+            &cache,
+            &interest,
+            shard,
+            key_of(shard, [7; 32], "code", LeafQuery::Value(&other)),
+            Some(&whole),
+            &whole,
+            &Some(alone),
+            &|candidate, watch| match crate::cancel::gone(watch) {
+                true => Err(FilterError::Cancelled),
+                false => Ok(candidate.clone()),
+            },
+        );
+        assert_eq!(ended, Err(FilterError::Cancelled));
+        assert_eq!(cache.len(), 1, "a computation nobody waits for is not kept");
     }
 }

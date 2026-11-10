@@ -49,12 +49,11 @@ impl Engine {
                 });
             }
         }
+        let rows = project_until(row_space, entities, cancel)?;
         self.counters
             .filter_crossings_projected
             .fetch_add(1, Ordering::Relaxed);
-        Ok(FilterRows::Complete(project_until(
-            row_space, entities, cancel,
-        )?))
+        Ok(FilterRows::Complete(rows))
     }
 
     /// A routed filter's answer as rows over `domain`, ascending, disjoint and merged ranges of
@@ -1285,7 +1284,7 @@ impl Engine {
             unique_holders(&self.identity_key, served.generation, side.shard, column, keys)
         };
         let fragment = fragment.as_ref().map(|fragment| fragment.view());
-        let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, evaluate| {
+        let leaves: &crate::filter::LeafResolver<'_> = &|column, query, at, cancel, evaluate| {
             // A phrase can cost far more over the fragment than over a narrowed candidate, so a
             // text leaf is kept only where it is asked under the whole one. A value leaf costs at
             // most one scan of the fragment, about what the first leaf under the whole candidate
@@ -1296,12 +1295,15 @@ impl Engine {
                 }
                 crate::filter::LeafQuery::Value(_) => whole.is_some(),
             };
-            let on_pool = |candidate: &croaring::Bitmap| match query {
-                crate::filter::LeafQuery::Text(_) => evaluate(candidate),
-                crate::filter::LeafQuery::Value(_) => self.pool.install(|| evaluate(candidate)),
+            let on_pool = |candidate: &croaring::Bitmap, watch: &Option<CancelToken>| match query {
+                crate::filter::LeafQuery::Text(_) => evaluate(candidate, watch),
+                crate::filter::LeafQuery::Value(_) => {
+                    self.pool.install(|| evaluate(candidate, watch))
+                }
             };
             crate::filter_cache::answer(
                 &self.filter_cache,
+                &self.filter_interest,
                 side.shard,
                 crate::filter_cache::key_of(
                     side.shard,

@@ -590,8 +590,7 @@ impl Numbers {
             let (more, without) = cx
                 .engine
                 .pool
-                .install(|| self.pass_entities(cx, place, &entities, &empty));
-            crate::cancel::check_cancelled(cx.cancel())?;
+                .install(|| self.pass_entities(cx, place, &entities, &empty))?;
             tally = tally.merge(more);
             none += without;
         }
@@ -610,32 +609,29 @@ impl Numbers {
         empty: impl Fn() -> T + Sync + Send,
     ) -> Result<(T, u64)> {
         cx.check_clock()?;
-        let found = if self.held && (!self.drawn || (set.has_entities(place) && !set.is_whole())) {
+        if self.held && (!self.drawn || (set.has_entities(place) && !set.is_whole())) {
             let entities = set.entities(cx, place)?;
-            cx.engine
+            return cx
+                .engine
                 .pool
-                .install(|| self.pass_entities(cx, place, entities, empty))
-        } else {
-            cx.engine.pool.install(|| {
-                self.pass_rows(set.cells(cx, place), cx.segments(place), empty, cx.cancel())
-            })
-        };
-        // A pass the client left part of the way through tallied only some pieces.
-        crate::cancel::check_cancelled(cx.cancel())?;
-        Ok(found)
+                .install(|| self.pass_entities(cx, place, entities, empty));
+        }
+        cx.engine.pool.install(|| {
+            self.pass_rows(set.cells(cx, place), cx.segments(place), empty, cx.cancel())
+        })
     }
 
     /// The field's per-entity values of `entities` in the side at `place`'s shard, in parallel
     /// pieces of entity space, each piece's entities walked through every layer, then the buffered
-    /// rows. Once the request has gone the pieces not yet begun are skipped, so the caller reads
-    /// the clock before it uses the tally.
+    /// rows. Once the request has gone the pieces not yet begun are skipped and the pass answers
+    /// [`EngineError::Cancelled`], never a tally of some pieces.
     fn pass_entities<K: Num, T: Tally<K>>(
         &self,
         cx: &Cx<'_>,
         place: usize,
         entities: &croaring::Bitmap,
         empty: impl Fn() -> T + Sync + Send,
-    ) -> (T, u64) {
+    ) -> Result<(T, u64)> {
         let layers = cx
             .side(place)
             .shard
@@ -673,6 +669,7 @@ impl Numbers {
                 },
             )
             .reduce(|| (empty(), 0), |(a, m), (b, n)| (a.merge(b), m + n));
+        crate::cancel::check_cancelled(cx.cancel())?;
         crate::categories::buffered_values(
             &cx.generation.bundle.manifest,
             &cx.side(place).shard.buffer,
@@ -687,22 +684,22 @@ impl Numbers {
                 }
             },
         );
-        (tally, entities.cardinality().saturating_sub(valued))
+        Ok((tally, entities.cardinality().saturating_sub(valued)))
     }
 
     /// The drawn column's values over a set's rows, in one parallel pass. A row the column's
     /// presence leaves out, and a row of a segment without the column, has no value. Once the
-    /// request holding `cancel` has gone the pieces not yet begun are skipped, so the caller reads
-    /// the clock before it uses the tally.
+    /// request holding `cancel` has gone the pieces not yet begun are skipped and the pass answers
+    /// [`EngineError::Cancelled`], never a tally of some pieces.
     fn pass_rows<K: Num, T: Tally<K>>(
         &self,
         set: CellSet<'_>,
         segments: &[(&mosaica_store::read::SegmentData, u32)],
         empty: impl Fn() -> T + Sync + Send,
         cancel: &Option<crate::CancelToken>,
-    ) -> (T, u64) {
+    ) -> Result<(T, u64)> {
         let column = self.column.as_str();
-        pieces(segments)
+        let passed = pieces(segments)
             .par_iter()
             .fold(
                 || (empty(), 0u64),
@@ -747,7 +744,9 @@ impl Numbers {
                     (tally, none)
                 },
             )
-            .reduce(|| (empty(), 0), |(a, m), (b, n)| (a.merge(b), m + n))
+            .reduce(|| (empty(), 0), |(a, m), (b, n)| (a.merge(b), m + n));
+        crate::cancel::check_cancelled(cancel)?;
+        Ok(passed)
     }
 }
 
@@ -1037,16 +1036,14 @@ impl Reader<'_> {
             let (summary, none) = cx.engine.pool.install(|| {
                 self.field
                     .pass_rows(CellSet::Rows(rows), cx.segments(place), empty, cx.cancel())
-            });
-            crate::cancel::check_cancelled(cx.cancel())?;
+            })?;
             return Ok(summary.finish(none));
         }
         let entities = super::set::crossing(cx.engine, cx.open, place, rows)?;
         let (summary, none) = cx
             .engine
             .pool
-            .install(|| self.field.pass_entities(cx, place, &entities, empty));
-        crate::cancel::check_cancelled(cx.cancel())?;
+            .install(|| self.field.pass_entities(cx, place, &entities, empty))?;
         let mut tally = summary.finish(none);
         // The kept values were read by entity, and a deny names rows: each is placed again by its
         // row.
