@@ -96,6 +96,37 @@ fn roaring_record(bitmap: Bitmap) -> Vec<u8> {
     record
 }
 
+/// Append to `writer` the tag-1 record of the set `parts` hold between them, each a
+/// [`mosaica_roaring::canonical_portable`] serialisation over whole 2¹⁶-entity blocks past the
+/// last part's: the record [`encode_posting_bitmap`] writes of their union, byte for byte, with
+/// each part's containers copied as they stand. Returns how many entities it holds.
+///
+/// Refuses parts whose union is not more than `small_term_threshold` entities, which is a tag-0
+/// record, and parts that are not such serialisations.
+pub fn append_posting_parts(
+    writer: &mut RecordWriter,
+    parts: &[Vec<u8>],
+    small_term_threshold: u32,
+) -> io::Result<u64> {
+    let joined = mosaica_roaring::Joined::of(parts.iter().map(Vec::as_slice)).ok_or_else(|| {
+        invalid_data("a posting's parts are not serialisations over ascending, disjoint blocks")
+    })?;
+    if joined.cardinality() <= u64::from(small_term_threshold) {
+        return Err(invalid_data(format!(
+            "a posting of {} entities was written in parts; one of at most {small_term_threshold} \
+             is a tag-0 record, written whole",
+            joined.cardinality()
+        )));
+    }
+    writer.begin_record(0)?;
+    writer.extend_record(&[1])?;
+    for piece in joined.pieces() {
+        writer.extend_record(piece)?;
+    }
+    writer.end_record(&[])?;
+    Ok(joined.cardinality())
+}
+
 /// A borrowed view of one term's postings, tied to the lifetime of the [`PostingsReader`] that
 /// produced it.
 #[derive(Debug)]

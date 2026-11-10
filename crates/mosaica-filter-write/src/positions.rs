@@ -135,9 +135,8 @@ struct Encoder {
     table: Vec<u8>,
     written: u64,
     blocks: u64,
-    /// The open block: its items' counts less one, and their position gaps.
-    counts: Vec<u32>,
-    gaps: Vec<u32>,
+    /// The open block.
+    block: Raw,
     bytes: Vec<u8>,
 }
 
@@ -178,6 +177,161 @@ impl PositionsWriter {
     }
 }
 
+impl<R: RecordSink> PositionsWriter<R> {
+    /// Go on with the open record from what `part` holds of its items, which must be the next
+    /// ones: its leading items complete the open block, its whole blocks are written as they
+    /// stand with the block table moved by what the record holds before them, and its trailing
+    /// items open the next block.
+    pub(crate) fn adopt_part(&mut self, part: &PartPositions) -> io::Result<()> {
+        self.go_on(part.items, part.from)?;
+        self.take_raw(&part.lead)?;
+        if !self.state.block.counts.is_empty() && !part.ends.is_empty() {
+            return Err(invalid("a part's whole blocks began inside the open block"));
+        }
+        let mut start = 0;
+        for &end in &part.ends {
+            let state = &mut self.state;
+            if state.blocks > 0 {
+                state.table.extend_from_slice(&state.written.to_le_bytes());
+            }
+            self.file.extend_record(&part.blocks[start..end])?;
+            let state = &mut self.state;
+            state.written += (end - start) as u64;
+            state.blocks += 1;
+            state.pushed += POSITIONS_BLOCK as u64;
+            start = end;
+        }
+        self.take_raw(&part.tail)
+    }
+
+    /// Go on with the open record of `items` items at item `from`, where it must be.
+    pub(crate) fn go_on(&self, items: u64, from: u64) -> io::Result<()> {
+        let state = &self.state;
+        match state.open && state.items == items && state.pushed == from {
+            true => Ok(()),
+            false => Err(invalid(format!(
+                "a part of a term's positions from item {from} of {items} arrived where the record \
+                 is at item {} of {}",
+                state.pushed, state.items
+            ))),
+        }
+    }
+
+    /// Add `items` to the open block, writing it once it is whole.
+    fn take_raw(&mut self, items: &Raw) -> io::Result<()> {
+        let state = &mut self.state;
+        if state.block.counts.len() + items.counts.len() > POSITIONS_BLOCK {
+            return Err(invalid("a part's items pass the open block's edge"));
+        }
+        state.block.counts.extend_from_slice(&items.counts);
+        state.block.gaps.extend_from_slice(&items.gaps);
+        state.pushed += items.counts.len() as u64;
+        if state.block.counts.len() == POSITIONS_BLOCK {
+            self.write_block()?;
+        }
+        Ok(())
+    }
+}
+
+/// Items' positions as a block holds them before it is encoded: each item's count less one, and
+/// every item's position gaps end to end.
+#[derive(Default)]
+struct Raw {
+    counts: Vec<u32>,
+    gaps: Vec<u32>,
+}
+
+impl Raw {
+    /// Add an item's positions, checked to be what the format holds.
+    fn push(&mut self, positions: &[u32]) -> io::Result<()> {
+        let Some((&first, _)) = positions.split_first() else {
+            return Err(invalid("an item holding a term holds it at a position"));
+        };
+        if !positions.is_sorted_by(|a, b| a < b) {
+            return Err(invalid("an item's positions must ascend strictly"));
+        }
+        self.counts.push(positions.len() as u32 - 1);
+        self.gaps.push(first);
+        self.gaps.extend(positions.windows(2).map(|w| w[1] - w[0]));
+        Ok(())
+    }
+
+    /// Encode the block it holds into `out`.
+    fn encode(&self, out: &mut Vec<u8>) {
+        put_run(&self.counts, out);
+        for run in self.gaps.chunks(POSITIONS_BLOCK) {
+            put_run(run, out);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.counts.clear();
+        self.gaps.clear();
+    }
+
+    fn bytes(&self) -> usize {
+        4 * (self.counts.len() + self.gaps.len())
+    }
+}
+
+/// The items of a term's positions record from item `from` on, of a part of the term that a range
+/// merges while the record is open elsewhere: the items before the first block edge it reaches,
+/// held raw for the record's open block, then the whole blocks it encodes, then the items past the
+/// last of them, held raw to open the next. [`PositionsWriter::adopt_part`] takes them.
+pub(crate) struct PartPositions {
+    /// The term's items, the item the part begins at, and the next item.
+    items: u64,
+    from: u64,
+    at: u64,
+    lead: Raw,
+    /// The whole blocks, end to end, and where each ends.
+    blocks: Vec<u8>,
+    ends: Vec<usize>,
+    tail: Raw,
+}
+
+impl PartPositions {
+    /// The part of a record of `items` items from item `from`.
+    pub(crate) fn new(items: u64, from: u64) -> PartPositions {
+        PartPositions {
+            items,
+            from,
+            at: from,
+            lead: Raw::default(),
+            blocks: Vec::new(),
+            ends: Vec::new(),
+            tail: Raw::default(),
+        }
+    }
+
+    /// The next item's positions, which must ascend strictly.
+    pub(crate) fn push(&mut self, positions: &[u32]) -> io::Result<()> {
+        if self.at == self.items {
+            return Err(invalid(format!(
+                "an item's positions arrived past the {} items the term's posting holds",
+                self.items
+            )));
+        }
+        let edge = self.from.next_multiple_of(POSITIONS_BLOCK as u64);
+        match self.at < edge {
+            true => self.lead.push(positions)?,
+            false => self.tail.push(positions)?,
+        }
+        self.at += 1;
+        if self.tail.counts.len() == POSITIONS_BLOCK {
+            self.tail.encode(&mut self.blocks);
+            self.ends.push(self.blocks.len());
+            self.tail.clear();
+        }
+        Ok(())
+    }
+
+    /// The bytes it holds.
+    pub(crate) fn bytes(&self) -> usize {
+        self.lead.bytes() + self.blocks.len() + self.tail.bytes()
+    }
+}
+
 impl PositionsWriter<HeldRecords> {
     pub(crate) fn held() -> PositionsWriter<HeldRecords> {
         PositionsWriter::over(HeldRecords::default())
@@ -198,7 +352,10 @@ impl<R: RecordSink> PositionsWriter<R> {
         PositionsWriter {
             file,
             state: Encoder {
-                counts: Vec::with_capacity(POSITIONS_BLOCK),
+                block: Raw {
+                    counts: Vec::with_capacity(POSITIONS_BLOCK),
+                    gaps: Vec::new(),
+                },
                 ..Encoder::default()
             },
         }
@@ -229,8 +386,7 @@ impl<R: RecordSink> PositionsWriter<R> {
         state.table.clear();
         state.written = head as u64;
         state.blocks = 0;
-        state.counts.clear();
-        state.gaps.clear();
+        state.block.clear();
         Ok(())
     }
 
@@ -243,17 +399,9 @@ impl<R: RecordSink> PositionsWriter<R> {
                 state.items
             )));
         }
-        let Some((&first, _)) = positions.split_first() else {
-            return Err(invalid("an item holding a term holds it at a position"));
-        };
-        if !positions.is_sorted_by(|a, b| a < b) {
-            return Err(invalid("an item's positions must ascend strictly"));
-        }
-        state.counts.push(positions.len() as u32 - 1);
-        state.gaps.push(first);
-        state.gaps.extend(positions.windows(2).map(|w| w[1] - w[0]));
+        state.block.push(positions)?;
         state.pushed += 1;
-        if state.counts.len() == POSITIONS_BLOCK {
+        if state.block.counts.len() == POSITIONS_BLOCK {
             self.write_block()?;
         }
         Ok(())
@@ -267,7 +415,7 @@ impl<R: RecordSink> PositionsWriter<R> {
                 self.state.pushed, self.state.items
             )));
         }
-        if !self.state.counts.is_empty() {
+        if !self.state.block.counts.is_empty() {
             self.write_block()?;
         }
         self.file.end_record(&self.state.table)?;
@@ -291,15 +439,11 @@ impl<R: RecordSink> PositionsWriter<R> {
             state.table.extend_from_slice(&state.written.to_le_bytes());
         }
         state.bytes.clear();
-        put_run(&state.counts, &mut state.bytes);
-        for run in state.gaps.chunks(POSITIONS_BLOCK) {
-            put_run(run, &mut state.bytes);
-        }
+        state.block.encode(&mut state.bytes);
         self.file.extend_record(&state.bytes)?;
         state.written += state.bytes.len() as u64;
         state.blocks += 1;
-        state.counts.clear();
-        state.gaps.clear();
+        state.block.clear();
         Ok(())
     }
 }

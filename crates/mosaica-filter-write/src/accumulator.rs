@@ -60,21 +60,25 @@
 //! it once, as a spill would, and hands it back as [`Held`] terms beside its runs, and
 //! [`write_text_index`] merges the runs and the held terms together into the index, in term
 //! ranges: a range starts in a run through the run's index and in the held terms by binary search
-//! over their ranks. The merge's read buffers are what the allowance leaves beside the held terms,
+//! over their ranks. A range over part of a term's entities starts in the held terms by binary
+//! search over the term sorted, a copy that the ranges over the term's other parts share while one
+//! of them holds it. The merge's read buffers are what the allowance leaves beside the held terms,
 //! so where that is not enough for the runs, the largest are spilled after all, one accumulator's
 //! at a time, until it is. A pass that never spilled writes no run at all.
 
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 
 use mosaica_filter::{put_varint, take_varint, VarintError};
 
 use crate::chunk_dict::{rank_table, KeyRef, KeyRow, KeyTable, Lookup, SortOn};
-use crate::merge::{Ranges, TermMerge, TermSource};
+use crate::merge::{Point, RangePlan, Ranges, Spread, TermMerge, TermSource, Weigh};
 use crate::spill::{
     cascade_sorted_runs, encode_entity, fingerprint, merge_runs, remove_runs, run_largest,
-    Allowance, Beside, RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader, TextRunWriter,
-    RUN_BUFFER_MIN, SPILL_BUF_BYTES,
+    Allowance, Beside, ItemScan, RunMerge, RunPayload, Sample, SpillReceipt, TextRunReader,
+    TextRunWriter, RUN_BUFFER_MIN, RUN_INDEX_STRIDE, SPILL_BUF_BYTES,
 };
 use crate::text::{write_range, TextIndexWriter};
 
@@ -379,6 +383,7 @@ impl TermAccumulator {
             pool,
             sorted,
             order,
+            flats: Mutex::default(),
         }))
     }
 
@@ -432,7 +437,8 @@ impl Drop for Gathered {
 }
 
 /// How a text index was written: the runs its merge read, the sources it held in memory beside
-/// them, the cascade passes the runs took first, and the threads the merge ran on.
+/// them, the cascade passes the runs took first, the threads the merge ran on, and the terms it
+/// divided by entity.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TextMerge {
     pub runs: usize,
@@ -441,6 +447,7 @@ pub struct TextMerge {
     /// The fan-in the cascade reduced the runs to, and the threads the merge after it ran on.
     pub fan_in: usize,
     pub threads: usize,
+    pub divided: usize,
 }
 
 /// Write a text index into `writer` from what the accumulators gathered, under `allowance`, with
@@ -484,11 +491,12 @@ pub fn write_text_index(
         .flat_map(|g| std::mem::take(&mut g.runs))
         .collect();
     drop(gathered);
-    let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum());
     // Each merge thread holds a term's entities as a slice, up to the cap or the most a term can
-    // gather from its sources, and a cursor on each held accumulator, each holding a copy of its
-    // largest term that arrived in several segments. A term above the cap is held as a bitmap, bounded by its posting rather than by
-    // the allowance, until such a term is merged in entity ranges.
+    // gather from its sources, or a part of a divided term's posting, which holds no more, and a
+    // cursor on each held accumulator, each holding a sorted copy of one of its terms. The thread
+    // that writes holds a divided term's posting in parts until its last, and its positions'
+    // block table. A term above the cap that is not divided is held as a bitmap, bounded by its
+    // posting rather than by the allowance.
     let largest = runs.iter().try_fold(
         held.iter().map(Held::largest).sum::<u64>(),
         |sum, run| run_largest(run).map(|largest| sum + u64::from(largest)),
@@ -502,12 +510,15 @@ pub fn write_text_index(
     };
     let each = (merge_slice_cap as u64).min(largest) * std::mem::size_of::<u32>() as u64
         + held.iter().map(Held::copy_bytes).sum::<u64>();
+    let head = (2 * largest).min(POSTING_BYTES_MAX) + largest / 16;
+    let left = allowance.less(held.iter().map(|h| h.allocated() as u64).sum::<u64>() + head);
     let figures = TextMerge {
         runs: runs.len(),
         held: held.len(),
         passes: 0,
         fan_in: left.fan_in(each, runs.len()),
         threads: 0,
+        divided: 0,
     };
 
     let cascaded = cascade_sorted_runs(
@@ -525,24 +536,25 @@ pub fn write_text_index(
         Ok((left_runs, _)) => {
             merge_gathered(left_runs, &held, writer, merge_slice_cap, each, left, ranges)
         }
-        Err(_) => Ok(0),
+        Err(_) => Ok(RangePlan::default()),
     };
     let removed = remove_runs(
         runs.iter()
             .chain(cascaded.iter().flat_map(|(left, _)| left)),
     );
     let passes = cascaded.map(|(_, passes)| passes)?;
-    let threads = merged?;
+    let plan = merged?;
     removed.map(|()| TextMerge {
         passes,
-        threads,
+        threads: plan.threads,
+        divided: plan.divided,
         ..figures
     })
 }
 
 /// Merge `runs` and `held` into `writer` in term ranges, under `allowance` and as `ranges` says,
 /// each term held as a slice of at most `slice_cap` and each thread holding `each` bytes beside its
-/// readers, returning the threads the merge ran on.
+/// readers, returning the plan the merge ran to.
 fn merge_gathered(
     runs: &[SpillReceipt],
     held: &[Held],
@@ -551,7 +563,7 @@ fn merge_gathered(
     each: u64,
     allowance: Allowance,
     ranges: Ranges,
-) -> io::Result<usize> {
+) -> io::Result<RangePlan> {
     let how = RunMerge {
         payload: RunPayload::Positions,
         allowance,
@@ -561,7 +573,9 @@ fn merge_gathered(
             bytes: held.iter().map(|h| h.allocated() as u64).sum(),
             sources: held.len(),
             samples: &|each| held.iter().flat_map(|h| h.samples(each)).collect(),
+            weighed: &held.iter().map(|h| h as &dyn Weigh).collect::<Vec<_>>(),
         },
+        parts: Some(slice_cap as u64),
     };
     merge_runs(runs, writer, how, |range, readers, turn| {
         let sources = readers
@@ -580,7 +594,7 @@ fn merge_gathered(
             })
             .collect())
     })
-    .map(|(_, plan)| plan.threads)
+    .map(|(_, plan)| plan)
 }
 
 /// One source of a text index's merge: a run, or an accumulator's held terms.
@@ -626,6 +640,12 @@ impl TermSource for Source<'_, '_> {
             Source::Held(held) => held.positions(),
         }
     }
+    fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
+        match self {
+            Source::Run(run) => run.span(from, to),
+            Source::Held(held) => held.span(from, to),
+        }
+    }
 }
 
 /// What an accumulator held when its pass ended: its terms, ranked, and each one's chain in the
@@ -637,7 +657,29 @@ pub struct Held {
     /// The terms in order, and each one's id in `terms`.
     sorted: Vec<KeyRef>,
     order: Vec<u32>,
+    /// The terms read sorted by the cursors of several spans, by rank, while one of them holds it.
+    flats: Mutex<HashMap<usize, Weak<Flat>>>,
 }
+
+/// A term's entities sorted, each with where its positions start in a copy of its chain.
+#[derive(Default)]
+struct Flat {
+    chain: Vec<u8>,
+    entries: Vec<(u32, u32)>,
+}
+
+impl Flat {
+    /// Fill it with the term `state` names, its chain one or several ascending segments.
+    fn fill(&mut self, pool: &Pool, term: &[u8], state: &TermState) -> io::Result<()> {
+        self.chain.clear();
+        let chain = &mut self.chain;
+        pool.slices(state, |slice| chain.extend_from_slice(slice));
+        sort_segments(term, &self.chain, &mut self.entries)
+    }
+}
+
+/// The most bytes one Roaring bitmap serialises to: 2¹⁶ containers of 8 KiB.
+const POSTING_BYTES_MAX: u64 = 1 << 29;
 
 impl Held {
     /// The bytes it holds.
@@ -657,15 +699,38 @@ impl Held {
             .unwrap_or(0)
     }
 
-    /// What a cursor holds to read its largest term of several segments: a copy of the chain, and
-    /// eight bytes an entity.
+    /// What a cursor holds to read its largest term sorted: a copy of the chain, and eight bytes an
+    /// entity. A term of several segments is read so, and a term divided by entity.
     fn copy_bytes(&self) -> u64 {
         (0..self.terms.len as u32)
             .map(|id| self.terms.get(id))
-            .filter(|state| state.segmented)
             .map(|state| u64::from(state.bytes) + 8 * u64::from(state.pairs))
             .max()
             .unwrap_or(0)
+    }
+
+    /// The term at `rank` sorted, shared with every cursor that reads it while one holds it.
+    fn flat(&self, rank: usize) -> io::Result<Arc<Flat>> {
+        let mut flats = self.flats.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(flat) = flats.get(&rank).and_then(Weak::upgrade) {
+            return Ok(flat);
+        }
+        let mut flat = Flat::default();
+        let state = self.terms.get(self.order[rank]);
+        flat.fill(&self.pool, key_bytes(&self.keys, &self.sorted[rank]), state)?;
+        let flat = Arc::new(flat);
+        flats.retain(|_, held| held.strong_count() > 0);
+        flats.insert(rank, Arc::downgrade(&flat));
+        Ok(flat)
+    }
+
+    /// The rank of `term`, where it holds it.
+    fn rank_of(&self, term: &[u8]) -> Option<usize> {
+        let rank = self
+            .sorted
+            .partition_point(|sorted| key_bytes(&self.keys, sorted) < term);
+        (rank < self.sorted.len() && key_bytes(&self.keys, &self.sorted[rank]) == term)
+            .then_some(rank)
     }
 
     /// About `samples` of its terms, evenly spaced by rank, each with the bytes from it to the
@@ -698,10 +763,12 @@ impl Held {
             held: self,
             next: 0,
             state: TermState::default(),
-            chain: Vec::new(),
-            entries: Vec::new(),
+            own: Flat::default(),
+            shared: None,
+            sorted: false,
             reading: ChainAt::default(),
             taken: 0,
+            end: 0,
             last: 0,
             positions: Vec::new(),
         }
@@ -715,9 +782,10 @@ impl Held {
             let mut writer = TextRunWriter::buffered(path, RunPayload::Positions, buffer)?;
             let mut cursor = self.cursor();
             while cursor.next_term()? {
+                cursor.sort()?;
                 let state = &cursor.state;
                 let body = match state.segmented {
-                    true => Body::Sorted(&cursor.chain, &cursor.entries),
+                    true => Body::Sorted(&cursor.own.chain, &cursor.own.entries),
                     false => Body::Chain(&self.pool, state),
                 };
                 let term = cursor.term();
@@ -732,26 +800,86 @@ impl Held {
     }
 }
 
+/// Held terms weigh a term by its chain: a point at the first entity at least a stride past the
+/// last point's, standing for the stride after it.
+impl Weigh for Held {
+    fn heavy(&self, bytes: u64, terms: &mut Vec<Vec<u8>>) -> io::Result<()> {
+        for (sorted, &id) in self.sorted.iter().zip(&self.order) {
+            if u64::from(self.terms.get(id).bytes) >= bytes {
+                terms.push(key_bytes(&self.keys, sorted).to_vec());
+            }
+        }
+        Ok(())
+    }
+
+    fn spread(&self, term: &[u8], points: &mut Vec<Point>) -> io::Result<Spread> {
+        let Some(rank) = self.rank_of(term) else {
+            return Ok(Spread::default());
+        };
+        let state = self.terms.get(self.order[rank]);
+        let (mut items, mut at, mut next) = (
+            ItemScan::new(RunPayload::Positions, true),
+            0,
+            RUN_INDEX_STRIDE,
+        );
+        let marked = points.len();
+        self.pool.slices(state, |slice| {
+            items.feed(slice, at, &mut next, |previous, _, _| {
+                points.push(Point {
+                    entity: previous,
+                    bytes: RUN_INDEX_STRIDE,
+                })
+            });
+            at += slice.len() as u64;
+        });
+        let marks = (points.len() - marked) as u64;
+        points.push(Point {
+            entity: self.pool.varint(&mut self.pool.chain(state))?,
+            bytes: u64::from(state.bytes).saturating_sub(RUN_INDEX_STRIDE * marks),
+        });
+        Ok(Spread {
+            items: u64::from(state.pairs),
+            whole: false,
+        })
+    }
+}
+
 /// A place in a [`Held`]'s terms, and the term it is at, as a [`TermSource`]. Several may read one
 /// `Held` at once.
 ///
 /// A term of several segments has its chain copied and its entities sorted, eight bytes an entity
-/// beside the copy, kept at the size of the largest such term.
+/// beside the copy, kept at the size of the largest such term. A span of a term's entities is
+/// found by binary search over the term sorted so, which the cursors of the term's other spans
+/// share.
 struct HeldCursor<'a> {
     held: &'a Held,
     /// The rank of the next term, and the state of the one the cursor is at.
     next: usize,
     state: TermState,
-    /// A term of several segments: its chain, and its entities sorted, each with where its
-    /// positions start in the chain.
-    chain: Vec<u8>,
-    entries: Vec<(u32, u32)>,
+    /// A term of several segments, sorted by this cursor, or a term a span reads, sorted once for
+    /// every cursor on it; and whether the term is read sorted.
+    own: Flat,
+    shared: Option<Arc<Flat>>,
+    sorted: bool,
     /// Where a term of one segment is read from in the pool.
     reading: ChainAt,
-    /// Entities of the term read, and the last of them.
+    /// Entities of the term read, the one past the last it yields, and the last read.
     taken: u32,
+    end: u32,
     last: u32,
     positions: Vec<u32>,
+}
+
+impl HeldCursor<'_> {
+    /// Sort the term it is at, where it has several segments and is not read sorted already.
+    fn sort(&mut self) -> io::Result<()> {
+        if self.state.segmented && !self.sorted {
+            let term = key_bytes(&self.held.keys, &self.held.sorted[self.next - 1]);
+            self.own.fill(&self.held.pool, term, &self.state)?;
+            self.sorted = true;
+        }
+        Ok(())
+    }
 }
 
 impl TermSource for HeldCursor<'_> {
@@ -768,20 +896,25 @@ impl TermSource for HeldCursor<'_> {
         let Some(&id) = held.order.get(self.next) else {
             return Ok(false);
         };
-        let term = key_bytes(&held.keys, &held.sorted[self.next]);
         self.next += 1;
         self.state = *held.terms.get(id);
         self.taken = 0;
-        if self.state.segmented {
-            self.chain.clear();
-            let chain = &mut self.chain;
-            held.pool
-                .slices(&self.state, |slice| chain.extend_from_slice(slice));
-            sort_segments(term, &self.chain, &mut self.entries)?;
-        } else {
-            self.reading = held.pool.chain(&self.state);
-        }
+        self.end = self.state.pairs;
+        self.shared = None;
+        self.sorted = false;
+        self.reading = held.pool.chain(&self.state);
         Ok(true)
+    }
+
+    fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
+        let flat = self.held.flat(self.next - 1)?;
+        let at = |bound: Option<u32>, none: usize| {
+            bound.map_or(none, |bound| flat.entries.partition_point(|e| e.0 < bound))
+        };
+        (self.taken, self.end) = (at(from, 0) as u32, at(to, flat.entries.len()) as u32);
+        self.shared = Some(flat);
+        self.sorted = true;
+        Ok(u64::from(self.taken))
     }
 
     fn term(&self) -> &[u8] {
@@ -793,15 +926,16 @@ impl TermSource for HeldCursor<'_> {
     }
 
     fn next_entity(&mut self) -> io::Result<Option<u32>> {
-        if self.taken == self.state.pairs {
+        if self.taken == self.end {
             return Ok(None);
         }
+        self.sort()?;
         self.positions.clear();
-        let entity = if self.state.segmented {
-            let (entity, start) = self.entries[self.taken as usize];
+        let entity = if self.sorted {
+            let flat = self.shared.as_deref().unwrap_or(&self.own);
+            let (entity, start) = flat.entries[self.taken as usize];
             let mut at = start as usize;
-            let chain = &self.chain;
-            read_positions(|| next(chain, &mut at), &mut self.positions)?;
+            read_positions(|| next(&flat.chain, &mut at), &mut self.positions)?;
             entity
         } else {
             let (pool, reading) = (&self.held.pool, &mut self.reading);

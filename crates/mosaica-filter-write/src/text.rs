@@ -14,6 +14,13 @@
 //! exactly what the writer would write, and the writer takes it over, a term it left part way
 //! through included.
 //!
+//! A term divided by entity is written by the ranges over its parts in order ([`write_part`]):
+//! each encodes its items' positions, the whole positions blocks among them as they stand, and its
+//! posting as the canonical serialisation of its 2¹⁶-entity blocks. The writer completes the
+//! positions blocks that straddle two parts, and writes the posting as one header over every
+//! part's containers ([`mosaica_authz::append_posting_parts`]), which is the record of the whole
+//! term byte for byte.
+//!
 //! What differs between the fold and the coalesce is small, and getting either wrong is silent:
 //!
 //! - The fold **retires**: `D₀`'s entities are subtracted from every posting and a term whose every
@@ -70,10 +77,10 @@ use mosaica_filter::{
 use mosaica_types::{AttrLocalId, SMALL_TERM_THRESHOLD_DEFAULT};
 
 use crate::merge::{
-    merge_ranges, samples as sample, split, DictCursor, Out, RangeWriter, Ranges, Records,
-    TermMerge, TermSource, Turn,
+    divide, merge_ranges, samples as sample, split, DictCursor, Out, Point, RangeWriter, Ranges,
+    Records, Span, Spread, TermMerge, TermSource, Turn, Weigh,
 };
-use crate::positions::{HeldRecords, PositionsWriter};
+use crate::positions::{HeldRecords, PartPositions, PositionsWriter};
 use crate::spill::{Allowance, Sample};
 
 /// Entities held as a `u32` slice for one merged term before the merge switches to a Roaring
@@ -84,7 +91,8 @@ use crate::spill::{Allowance, Sample};
 /// for one record. Above the cap the merge accumulates into a `Bitmap` instead and encodes from
 /// that; the two encoders are byte-identical over the same set (pinned by
 /// `postings::the_bitmap_and_slice_encoders_agree_byte_for_byte`), so the cap is a memory knob and
-/// not a format decision. 16 MB, which no vocabulary reaches by accident.
+/// not a format decision. 16 MB, which no vocabulary reaches by accident. A term divided by entity
+/// is cut, where its blocks allow, into parts of at most this many entities.
 pub const TEXT_MERGE_SLICE_CAP: usize = 1 << 22;
 
 /// Entities staged before each hand-off to croaring in the merge's bitmap arm: `add_many`
@@ -115,6 +123,8 @@ pub struct TextIndexWriter {
     open: OpenFiles,
     items: u64,
     terms: u64,
+    /// The posting of a term written in parts, so far.
+    parts: Vec<Vec<u8>>,
 }
 
 struct OpenFiles {
@@ -133,6 +143,7 @@ impl TextIndexWriter {
             },
             items: 0,
             terms: 0,
+            parts: Vec::new(),
         })
     }
 
@@ -156,6 +167,26 @@ impl TextIndexWriter {
         let open = &mut self.open;
         open.positions.end()?;
         open.postings.append(&record)?;
+        self.terms += 1;
+        Ok(())
+    }
+
+    /// End a term written in parts with its posting's last part.
+    fn end_parts(&mut self) -> io::Result<()> {
+        let open = &mut self.open;
+        let held = mosaica_authz::append_posting_parts(
+            &mut open.postings,
+            &self.parts,
+            SMALL_TERM_THRESHOLD_DEFAULT,
+        )?;
+        if held != self.items {
+            return Err(invalid(format!(
+                "term {} was begun for {} items and its posting's parts hold {held}",
+                self.terms, self.items
+            )));
+        }
+        open.positions.end()?;
+        self.parts.clear();
         self.terms += 1;
         Ok(())
     }
@@ -213,11 +244,17 @@ fn encode(posting: Posting<'_>, term: u64, items: u64) -> io::Result<Vec<u8>> {
 
 /// What a text layer's terms are written into: the writer, or what a range of a parallel merge
 /// holds until its turn.
+///
+/// A term divided by entity is written a part at a time, each from the item `before` on: begun by
+/// its first part and ended by its last, its posting's parts each
+/// [`mosaica_roaring::canonical_portable`] over the part's 2¹⁶-entity blocks.
 trait TermOut {
     fn begin_term(&mut self, term: &str, items: u64) -> io::Result<()>;
     fn push_item(&mut self, positions: &[u32]) -> io::Result<()>;
     fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()>;
     fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()>;
+    fn begin_part(&mut self, term: &str, items: u64, before: u64, first: bool) -> io::Result<()>;
+    fn end_part(&mut self, posting: Vec<u8>, last: bool) -> io::Result<()>;
 }
 
 impl TermOut for TextIndexWriter {
@@ -233,6 +270,19 @@ impl TermOut for TextIndexWriter {
     fn copy_term(&mut self, term: &str, records: Records<'_>) -> io::Result<()> {
         TextIndexWriter::copy_term(self, term, records)
     }
+    fn begin_part(&mut self, term: &str, items: u64, before: u64, first: bool) -> io::Result<()> {
+        match first {
+            true => TextIndexWriter::begin_term(self, term, items).map(|_| ()),
+            false => self.open.positions.go_on(items, before),
+        }
+    }
+    fn end_part(&mut self, posting: Vec<u8>, last: bool) -> io::Result<()> {
+        self.parts.push(posting);
+        match last {
+            true => self.end_parts(),
+            false => Ok(()),
+        }
+    }
 }
 
 /// The terms a range of a parallel merge has encoded while ranges before it are still being
@@ -245,6 +295,11 @@ pub struct HeldTerms {
     positions: Option<PositionsWriter<HeldRecords>>,
     /// The open term's items, where one is open.
     items: Option<u64>,
+    /// A part of a term begun before the range: its positions, its posting's parts, and whether
+    /// it is the term's last.
+    part: Option<PartPositions>,
+    parts: Vec<Vec<u8>>,
+    last: bool,
 }
 
 impl HeldTerms {
@@ -265,7 +320,10 @@ impl TermOut for HeldTerms {
         Ok(())
     }
     fn push_item(&mut self, positions: &[u32]) -> io::Result<()> {
-        self.positions().push(positions)
+        match &mut self.part {
+            Some(part) => part.push(positions),
+            None => self.positions().push(positions),
+        }
     }
     fn end_term(&mut self, posting: Posting<'_>) -> io::Result<()> {
         let items = self.items.take().unwrap_or_default();
@@ -280,6 +338,20 @@ impl TermOut for HeldTerms {
         self.keys.push(term.as_bytes());
         Ok(())
     }
+    fn begin_part(&mut self, term: &str, items: u64, before: u64, first: bool) -> io::Result<()> {
+        match first {
+            true => self.begin_term(term, items),
+            false => {
+                self.part = Some(PartPositions::new(items, before));
+                Ok(())
+            }
+        }
+    }
+    fn end_part(&mut self, posting: Vec<u8>, last: bool) -> io::Result<()> {
+        self.parts.push(posting);
+        self.last = last;
+        Ok(())
+    }
 }
 
 impl RangeWriter for TextIndexWriter {
@@ -289,6 +361,8 @@ impl RangeWriter for TextIndexWriter {
         held.keys.bytes()
             + held.postings.bytes()
             + held.positions.as_ref().map_or(0, |p| p.records().bytes())
+            + held.part.as_ref().map_or(0, PartPositions::bytes)
+            + held.parts.iter().map(Vec::len).sum::<usize>()
     }
 
     fn write_held(&mut self, held: &mut HeldTerms) -> io::Result<()> {
@@ -305,6 +379,13 @@ impl RangeWriter for TextIndexWriter {
             open.dict.push(held.key(held.postings.len()))?;
             open.positions.adopt(held.positions())?;
             self.items = items;
+        }
+        if let Some(part) = held.part.take() {
+            open.positions.adopt_part(&part)?;
+        }
+        self.parts.append(&mut held.parts);
+        if std::mem::take(&mut held.last) {
+            self.end_parts()?;
         }
         held.keys.clear();
         held.postings.clear();
@@ -327,20 +408,19 @@ fn out<'t>(turn: &'t mut Turn<'_, &mut TextIndexWriter>) -> io::Result<&'t mut d
 /// as a slice of at most `slice_cap` and as a bitmap above it. A term no source yields an entity
 /// for is not written, and a term one finished layer holds whole is copied from it. Where what the
 /// range holds reaches its buffer, it waits for its turn, part way through a term or between two.
+///
+/// Where `merge` yields part of one term's entities, the range writes that part
+/// ([`write_part`]).
 pub(crate) fn write_range<S: TermSource>(
     merge: &mut TermMerge<S>,
     turn: &mut Turn<'_, &mut TextIndexWriter>,
     slice_cap: usize,
 ) -> io::Result<()> {
+    if let Some((span, before)) = merge.part() {
+        return write_part(merge, turn, span, before);
+    }
     let mut entities: Vec<u32> = Vec::new();
     let mut staged: Vec<u32> = Vec::new();
-    let item = |turn: &mut Turn<'_, &mut TextIndexWriter>, positions: &[u32]| {
-        out(turn)?.push_item(positions)?;
-        if turn.full() {
-            turn.wait()?;
-        }
-        Ok(())
-    };
     while merge.next_term()? {
         // **The retention statement.** A term every one of whose carriers was blanked is not
         // written at all: no empty posting, no dictionary key and no positions record, so the word
@@ -383,6 +463,150 @@ pub(crate) fn write_range<S: TermSource>(
         }
     }
     Ok(())
+}
+
+/// Push an item's positions where the range's next item goes, and wait for the range's turn where
+/// what it holds has reached its buffer.
+fn item(turn: &mut Turn<'_, &mut TextIndexWriter>, positions: &[u32]) -> io::Result<()> {
+    out(turn)?.push_item(positions)?;
+    if turn.full() {
+        turn.wait()?;
+    }
+    Ok(())
+}
+
+/// Write the part `span` of the one term `merge` yields, `before` of whose entities come before
+/// it: its items' positions, and its posting as [`mosaica_roaring::canonical_portable`] of its
+/// entities, which a part's span keeps to whole 2¹⁶-entity blocks. The term's first part begins
+/// it, and its last ends it.
+///
+/// A term one finished layer holds whole is copied whole by its first part, and its other parts
+/// write nothing.
+fn write_part<S: TermSource>(
+    merge: &mut TermMerge<S>,
+    turn: &mut Turn<'_, &mut TextIndexWriter>,
+    span: Span,
+    before: u64,
+) -> io::Result<()> {
+    if !merge.next_term()? || merge.postings() == 0 {
+        return Ok(());
+    }
+    let (term, items) = (text_term(merge.term())?, merge.postings());
+    if let Some(records) = merge.records() {
+        if span.from.is_none() {
+            if !turn.fits(records.posting.len() + records.positions.len()) {
+                turn.wait()?;
+            }
+            out(turn)?.copy_term(term, records)?;
+        }
+        return Ok(());
+    }
+    out(turn)?.begin_part(term, items, before, span.from.is_none())?;
+    let mut bitmap = Bitmap::new();
+    let mut staged: Vec<u32> = Vec::new();
+    merge.drain(std::convert::identity, &mut |entity, positions| {
+        staged.push(entity);
+        if staged.len() >= TEXT_MERGE_STAGE_ENTITIES {
+            bitmap.add_many(&staged);
+            staged.clear();
+        }
+        item(turn, positions)
+    })?;
+    bitmap.add_many(&staged);
+    let outside = |bound: Option<u32>, past: bool| {
+        bound.is_some_and(|bound| match past {
+            true => bitmap.maximum().is_some_and(|last| last >= bound),
+            false => bitmap.minimum().is_some_and(|first| first < bound),
+        })
+    };
+    if outside(span.from, false) || outside(span.to, true) {
+        return Err(invalid(format!(
+            "a part of term {:?} from {:?} to {:?} yielded entities outside it",
+            String::from_utf8_lossy(merge.term()),
+            span.from,
+            span.to
+        )));
+    }
+    out(turn)?.end_part(
+        mosaica_roaring::canonical_portable(bitmap),
+        span.to.is_none(),
+    )
+}
+
+/// A finished layer as a merge weighs its terms: a term's postings and positions records, its
+/// posting's entities spread over its containers.
+struct Weighed<'a> {
+    input: &'a TextLayerRef<'a>,
+    tombstones: &'a Bitmap,
+}
+
+impl Weighed<'_> {
+    /// The bytes of term `ordinal`'s records.
+    fn bytes(&self, ordinal: u32) -> u64 {
+        let input = self.input;
+        let next = ordinal + 1;
+        input.postings.bytes_before(next) + input.positions.bytes_before(next)
+            - input.postings.bytes_before(ordinal)
+            - input.positions.bytes_before(ordinal)
+    }
+
+    /// The bytes of its largest posting record.
+    fn largest(&self) -> u64 {
+        let postings = self.input.postings;
+        (0..self.input.dict.len())
+            .map(|o| postings.bytes_before(o + 1) - postings.bytes_before(o))
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+impl Weigh for Weighed<'_> {
+    fn heavy(&self, bytes: u64, terms: &mut Vec<Vec<u8>>) -> io::Result<()> {
+        let mut scratch = Vec::new();
+        for ordinal in 0..self.input.dict.len() {
+            if self.bytes(ordinal) >= bytes {
+                let key = self.input.dict.key_of(ordinal, &mut scratch)?;
+                terms.push(key.as_bytes().to_vec());
+            }
+        }
+        Ok(())
+    }
+
+    fn spread(&self, term: &[u8], points: &mut Vec<Point>) -> io::Result<Spread> {
+        let dict = self.input.dict;
+        let ordinal = dict.rank(term)?;
+        if ordinal == dict.len() || dict.key_of(ordinal, &mut Vec::new())?.as_bytes() != term {
+            return Ok(Spread::default());
+        }
+        let id = AttrLocalId::new(ordinal);
+        let Some(posting) = self.input.postings.posting(id)? else {
+            return Ok(Spread::default());
+        };
+        let held = posting.cardinality();
+        let dead = match &posting {
+            _ if self.tombstones.is_empty() => 0,
+            PostingRef::Roaring(view) => self.tombstones.and_cardinality(view),
+            array => array
+                .iter()
+                .filter(|&e| self.tombstones.contains(e))
+                .count() as u64,
+        };
+        let bytes = self.bytes(ordinal);
+        match &posting {
+            PostingRef::Roaring(view) => {
+                points.extend(mosaica_roaring::Blocks::new(view).map(|block| Point {
+                    entity: block << 16,
+                    bytes: bytes * view.range_cardinality(mosaica_roaring::span(block))
+                        / held.max(1),
+                }))
+            }
+            array => points.extend(array.iter().next().map(|entity| Point { entity, bytes })),
+        }
+        Ok(Spread {
+            items: held - dead,
+            whole: dead == 0 && self.input.postings.record(id).is_some(),
+        })
+    }
 }
 
 /// A term as the index's dictionary holds it. The analyser gives `&str`, and a finished layer's
@@ -478,10 +702,17 @@ fn merge(
         .iter()
         .map(|input| before(input, input.positions.record_count()))
         .sum();
-    // A layer gives its largest posting only by reading every one, so the slice is charged at its
-    // cap.
+    let weighed: Vec<Weighed<'_>> = inputs
+        .iter()
+        .map(|input| Weighed { input, tombstones })
+        .collect();
+    // A layer gives its largest posting only by reading every one, so the slice, or a part of a
+    // divided term's posting, is charged at its cap. The thread that writes holds a divided term's
+    // posting in parts, which is no larger than the layers' postings of it, until its last, and
+    // its positions' block table, an eighth of an entity a byte at the least.
+    let head: u64 = weighed.iter().map(Weighed::largest).sum::<u64>() * 3 / 2;
     let plan = ranges.plan(
-        allowance,
+        allowance.less(head),
         bytes,
         0,
         (TEXT_MERGE_SLICE_CAP * std::mem::size_of::<u32>()) as u64,
@@ -494,9 +725,14 @@ fn merge(
             })?);
         }
     }
+    let mut ranges = split(samples, plan.ranges);
+    if plan.threads > 1 {
+        let weighed: Vec<&dyn Weigh> = weighed.iter().map(|w| w as &dyn Weigh).collect();
+        ranges = divide(ranges, &weighed, plan.buffer, TEXT_MERGE_SLICE_CAP as u64)?.0;
+    }
     merge_ranges(
         &mut writer,
-        &split(samples, plan.ranges),
+        &ranges,
         plan,
         |range, turn| {
             let sources = inputs
@@ -541,6 +777,8 @@ struct LayerTerms<'a> {
     batch: Vec<u32>,
     at: usize,
     current: Vec<u32>,
+    /// Where a span of the term's entities ends.
+    to: Option<u32>,
 }
 
 impl<'a> LayerTerms<'a> {
@@ -560,6 +798,7 @@ impl<'a> LayerTerms<'a> {
             batch: Vec::with_capacity(LAYER_BATCH),
             at: 0,
             current: Vec::new(),
+            to: None,
         }
     }
 
@@ -636,7 +875,41 @@ impl TermSource for LayerTerms<'_> {
         self.last = None;
         self.batch.clear();
         self.at = 0;
+        self.to = None;
         Ok(true)
+    }
+
+    /// The posting's rank of `from` and its select give where the span begins, in the posting and
+    /// in the positions, and the tombstoned entities before it are taken off its rank among those
+    /// yielded.
+    fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
+        let posting = self
+            .posting
+            .as_ref()
+            .ok_or_else(|| invalid("a span outside a term".into()))?;
+        let from = from.unwrap_or(0);
+        let (rank, dead) = match posting {
+            PostingRef::Array(bytes) => {
+                let entities = bytes.as_chunks::<4>().0;
+                let below = |entity: u32| {
+                    entities.partition_point(|chunk| u32::from_le_bytes(*chunk) < entity)
+                };
+                let dead = self.tombstones.iter().take_while(|&t| t < from);
+                let dead = dead.filter(|&t| entities.get(below(t)) == Some(&t.to_le_bytes()));
+                (below(from) as u64, dead.count() as u64)
+            }
+            PostingRef::Roaring(view) => {
+                let rank = from.checked_sub(1).map_or(0, |last| view.rank(last));
+                let dead = self.tombstones.iter().take_while(|&t| t < from);
+                (rank, dead.filter(|&t| view.contains(t)).count() as u64)
+            }
+        };
+        self.rank = rank;
+        self.last = from.checked_sub(1);
+        self.batch.clear();
+        self.at = 0;
+        self.to = to;
+        Ok(rank - dead)
     }
 
     fn term(&self) -> &[u8] {
@@ -653,6 +926,9 @@ impl TermSource for LayerTerms<'_> {
                 return Ok(None);
             }
             let entity = self.batch[self.at];
+            if self.to.is_some_and(|to| entity >= to) {
+                return Ok(None);
+            }
             self.at += 1;
             let rank = self.rank;
             self.rank += 1;
@@ -804,7 +1080,8 @@ mod tests {
             .collect();
         let built = bytes(&build(dir, "survivors", &survivors));
         assert_eq!(bytes(&folded), built);
-        // In term ranges, each layer started at a range's first key, the same.
+        // In term ranges, each layer started at a range's first key, and `tie` divided by entity
+        // at its second block, the same.
         let ranged = files(dir, "ranged");
         let fixed = Ranges::Fixed {
             ranges: 4,

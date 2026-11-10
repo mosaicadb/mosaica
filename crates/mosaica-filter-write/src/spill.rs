@@ -11,7 +11,10 @@
 //! A **sorted run** is written by [`TextRunWriter`] and read back by [`TextRunReader`], one of the
 //! sources [`TermMerge`] merges. A run ends in a sparse index of its terms, so that a reader can
 //! start at a term: a merge in term ranges ([`merge_runs`]) starts each range's readers there,
-//! and checks each run's receipt against what all its ranges decoded of it.
+//! and checks each run's receipt against what all its ranges decoded of it. Its records longer
+//! than the index's stride have checkpoints, so that a range over part of a term's entities
+//! starts there too, and each such range must begin in each run where the one before it ended,
+//! which is what keeps the receipt's sum a check that every entity was decoded once.
 //! [`cascade_sorted_runs`] reduces more runs than one merge may hold open. A malformed run is
 //! refused as [`io::ErrorKind::InvalidData`].
 //!
@@ -37,7 +40,8 @@ use mosaica_filter::{
 use mosaica_types::splitmix64;
 
 use crate::merge::{
-    merge_ranges, split, RangePlan, RangeWriter, Ranges, TermMerge, TermRange, TermSource, Turn,
+    divide, merge_ranges, split, Point, RangePlan, RangeWriter, Ranges, Spread, TermMerge,
+    TermRange, TermSource, Turn, Weigh,
 };
 
 /// Buffer size for spill I/O, both directions, and the largest read buffer a merge gives a run's
@@ -212,6 +216,107 @@ pub(crate) fn encode_entity(
     anchor
 }
 
+/// Reads a term's entities in the run format from their bytes, in pieces of any size, finding
+/// where each begins: what a run's writer takes its checkpoints by, and what a held term's chain is
+/// weighed by. A held chain's segments ([`crate::TermAccumulator`]) are read where `segments` says,
+/// a zero gap there marking an entity given whole. It decodes only what it must, the gaps and the
+/// occurrence counts, and refuses nothing: what it reads was encoded here, and a reader checks it.
+pub(crate) struct ItemScan {
+    payload: RunPayload,
+    segments: bool,
+    stage: Stage,
+    value: u32,
+    shift: u32,
+    /// The last entity read, the entities begun, and the positions left in the one being read.
+    entity: u32,
+    rank: u64,
+    left: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    Gap,
+    Whole,
+    Count,
+    Positions,
+}
+
+impl ItemScan {
+    pub(crate) fn new(payload: RunPayload, segments: bool) -> ItemScan {
+        ItemScan {
+            payload,
+            segments,
+            stage: Stage::Gap,
+            value: 0,
+            shift: 0,
+            entity: 0,
+            rank: 0,
+            left: 0,
+        }
+    }
+
+    /// The entities begun.
+    pub(crate) fn rank(&self) -> u64 {
+        self.rank
+    }
+
+    /// Read `bytes`, the first of them at `offset`, calling `mark(previous entity, rank, offset)`
+    /// for each entity but the first that begins at or after `next`, and moving `next` to
+    /// [`RUN_INDEX_STRIDE`] past it.
+    pub(crate) fn feed(
+        &mut self,
+        bytes: &[u8],
+        offset: u64,
+        next: &mut u64,
+        mut mark: impl FnMut(u32, u64, u64),
+    ) {
+        for (at, &byte) in (offset..).zip(bytes) {
+            if self.stage == Stage::Gap && self.shift == 0 && at >= *next && self.rank > 0 {
+                mark(self.entity, self.rank, at);
+                *next = at + RUN_INDEX_STRIDE;
+            }
+            self.value |= u32::from(byte & 0x7f).wrapping_shl(self.shift);
+            if byte & 0x80 != 0 {
+                self.shift += 7;
+                continue;
+            }
+            let value = std::mem::take(&mut self.value);
+            self.shift = 0;
+            match self.stage {
+                Stage::Gap if self.segments && value == 0 && self.rank > 0 => {
+                    self.stage = Stage::Whole;
+                }
+                Stage::Gap | Stage::Whole => {
+                    self.entity = match self.stage == Stage::Gap && self.rank > 0 {
+                        true => self.entity.wrapping_add(value),
+                        false => value,
+                    };
+                    self.stage = Stage::Count;
+                    if self.payload == RunPayload::Rows {
+                        self.end_entity();
+                    }
+                }
+                Stage::Count if value > 0 => {
+                    self.left = value;
+                    self.stage = Stage::Positions;
+                }
+                Stage::Count => self.end_entity(),
+                Stage::Positions => {
+                    self.left -= 1;
+                    if self.left == 0 {
+                        self.end_entity();
+                    }
+                }
+            }
+        }
+    }
+
+    fn end_entity(&mut self) {
+        self.rank += 1;
+        self.stage = Stage::Gap;
+    }
+}
+
 /// Appends one **text run**: a sorted, distinct term stream with each term's ascending entity
 /// list, spilled by a text index's [`crate::TermAccumulator`] and consumed once by its merge.
 ///
@@ -236,9 +341,19 @@ pub(crate) fn encode_entity(
 /// `u64`s in an array after it: the offset of the block's first record and of its last. Every
 /// record of a block but the last ends within the stride, so a reader that starts at a block and
 /// is past its last record's term goes to the next block without decoding that record, which may
-/// be a term of any size. A trailer ends the file:
-/// `records_len u64 ‖ index_len u64 ‖ largest u32 ‖ "MSR3"`, `largest` being the most entities one
-/// term holds. [`RunFile`] reads it.
+/// be a term of any size.
+///
+/// **Then the checkpoints of the records longer than the stride**, so that a reader can start part
+/// way through a term's entities rather than at its first ([`TermSource::span`]). Such a record has
+/// a checkpoint at the first of its entities to begin a stride or more past its first entity, and
+/// at the first a stride or more past each checkpoint: `previous entity u32 ‖ rank u32 ‖ offset
+/// u64`, the entity before it, how many of the term's entities come before it, and where it begins
+/// in the file. Their
+/// terms are the keys of a second [`SortedDict`], each naming two `u64`s in an array after it, the
+/// index of the term's first checkpoint and how many entities the term holds; the checkpoints
+/// follow, record by record. A trailer ends the file:
+/// `records_len u64 ‖ index_len u64 ‖ terms_len u64 ‖ checkpoints u64 ‖ largest u32 ‖ "MSR4"`,
+/// `largest` being the most entities one term holds. [`RunFile`] reads it.
 ///
 /// **The entity delta is per TERM, not per file**, which is where this differs from a band file. A
 /// band file's records ascend in entity across the whole file because its emitter walks items in
@@ -274,6 +389,15 @@ pub struct TextRunWriter {
     index: SortedDictWriter<Vec<u8>>,
     blocks: Vec<u64>,
     next_point: u64,
+    /// The open record's entities read as they are written, where its next checkpoint may begin,
+    /// and the index of its first checkpoint.
+    items: ItemScan,
+    next_checkpoint: u64,
+    first_checkpoint: u64,
+    /// The terms with checkpoints, each one's first checkpoint and entities, and the checkpoints.
+    checkpointed: SortedDictWriter<Vec<u8>>,
+    terms_table: Vec<u8>,
+    checkpoints: Vec<u8>,
 }
 
 /// Bytes of a run between the records its sparse index names: about what a reader that starts at
@@ -282,11 +406,15 @@ pub struct TextRunWriter {
 pub const RUN_INDEX_STRIDE: u64 = 4 << 10;
 
 /// The last four bytes of a run.
-const RUN_MAGIC: [u8; 4] = *b"MSR3";
+const RUN_MAGIC: [u8; 4] = *b"MSR4";
 
-/// The bytes of a run's trailer: the records' and the index's lengths, the most entities a term
-/// holds, and [`RUN_MAGIC`].
-const RUN_TRAILER: u64 = 24;
+/// The bytes of a run's trailer: the records', the index's and the checkpointed terms' lengths,
+/// the checkpoints, the most entities a term holds, and [`RUN_MAGIC`].
+const RUN_TRAILER: u64 = 40;
+
+/// The bytes of each entry of a run's tables: a block's offsets, a checkpointed term's first
+/// checkpoint and entities, and a checkpoint.
+const ENTRY_BYTES: u64 = 16;
 
 /// What a run carries for each entity of a term: nothing more, as the keyword column's runs, or the
 /// term's positions in it, as the text index's.
@@ -327,7 +455,41 @@ impl TextRunWriter {
             index: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
             blocks: Vec::new(),
             next_point: 0,
+            items: ItemScan::new(payload, false),
+            next_checkpoint: 0,
+            first_checkpoint: 0,
+            checkpointed: SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
+            terms_table: Vec::new(),
+            checkpoints: Vec::new(),
         })
+    }
+
+    /// Write `bytes` of the open record's entities into the records, with a checkpoint at each
+    /// entity that begins one stride past the last.
+    fn put_entities(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let (next, checkpoints) = (&mut self.next_checkpoint, &mut self.checkpoints);
+        self.items
+            .feed(bytes, self.written, next, |previous, rank, offset| {
+                checkpoints.extend_from_slice(&previous.to_le_bytes());
+                checkpoints.extend_from_slice(&(rank as u32).to_le_bytes());
+                checkpoints.extend_from_slice(&offset.to_le_bytes());
+            });
+        self.put(bytes)
+    }
+
+    /// Close the open record: a record that took checkpoints names its term and its first.
+    fn close_record(&mut self) -> io::Result<()> {
+        let taken = self.checkpoints.len() as u64 / ENTRY_BYTES;
+        if taken > self.first_checkpoint {
+            let key = std::str::from_utf8(&self.prev).expect("a run's terms are checked UTF-8");
+            self.checkpointed.push(key).map_err(io::Error::from)?;
+            self.terms_table
+                .extend_from_slice(&self.first_checkpoint.to_le_bytes());
+            self.terms_table
+                .extend_from_slice(&self.items.rank().to_le_bytes());
+        }
+        self.first_checkpoint = taken;
+        Ok(())
     }
 
     /// Write `bytes` into the records.
@@ -387,6 +549,7 @@ impl TextRunWriter {
                 ),
             ));
         }
+        self.close_record()?;
         let point = self.written >= self.next_point;
         let shared = match point {
             true => {
@@ -410,6 +573,8 @@ impl TextRunWriter {
         let written = self.put(&record);
         self.record = record;
         written?;
+        self.items = ItemScan::new(self.payload, false);
+        self.next_checkpoint = self.written + RUN_INDEX_STRIDE;
 
         self.mark = fingerprint(term);
         self.prev.clear();
@@ -478,7 +643,7 @@ impl TextRunWriter {
         );
         self.last_entity = entity;
         self.started = true;
-        let written = self.put(&record);
+        let written = self.put_entities(&record);
         self.record = record;
         written?;
         self.wrote(1, anchor);
@@ -501,7 +666,7 @@ impl TextRunWriter {
         body: impl FnOnce(&mut dyn FnMut(&[u8]) -> io::Result<()>) -> io::Result<()>,
     ) -> io::Result<()> {
         self.begin(term, count)?;
-        body(&mut |piece| self.put(piece))?;
+        body(&mut |piece| self.put_entities(piece))?;
         self.wrote(count, anchor);
         Ok(())
     }
@@ -527,11 +692,10 @@ impl TextRunWriter {
                 ),
             ));
         }
+        self.close_record()?;
         let records = self.written;
-        let index = std::mem::replace(
-            &mut self.index,
-            SortedDictWriter::new(Vec::new()).map_err(io::Error::from)?,
-        );
+        let empty = || SortedDictWriter::new(Vec::new()).map_err(io::Error::from);
+        let index = std::mem::replace(&mut self.index, empty()?);
         let (mut tail, stats) = index.into_output().map_err(io::Error::from)?;
         let index_len = stats.bytes;
         if self.terms > 0 {
@@ -540,8 +704,15 @@ impl TextRunWriter {
         for offset in &self.blocks {
             tail.extend_from_slice(&offset.to_le_bytes());
         }
+        let checkpointed = std::mem::replace(&mut self.checkpointed, empty()?);
+        let (terms, stats) = checkpointed.into_output().map_err(io::Error::from)?;
+        tail.extend_from_slice(&terms);
+        tail.extend_from_slice(&self.terms_table);
+        tail.extend_from_slice(&self.checkpoints);
         tail.extend_from_slice(&records.to_le_bytes());
         tail.extend_from_slice(&index_len.to_le_bytes());
+        tail.extend_from_slice(&stats.bytes.to_le_bytes());
+        tail.extend_from_slice(&(self.checkpoints.len() as u64 / ENTRY_BYTES).to_le_bytes());
         tail.extend_from_slice(&self.largest.to_le_bytes());
         tail.extend_from_slice(&RUN_MAGIC);
         self.put(&tail)?;
@@ -577,8 +748,24 @@ pub(crate) struct RunFile {
     index: SortedDict,
     /// Where the index's blocks start in the file.
     blocks_at: u64,
+    /// The terms with checkpoints, where the table after them starts, and where the checkpoints
+    /// start and how many there are.
+    terms: SortedDict,
+    table_at: u64,
+    checkpoints_at: u64,
+    checkpoints: u64,
     /// The records before this offset have been given back to the file system.
     released: AtomicU64,
+}
+
+/// Where a reader of part of a term's entities begins, or where one ends: where an entity begins in
+/// the run, its rank among the term's entities, and the entity before it, or 0 before the first. A
+/// reader that begins where the one before it ended decodes what that one would have decoded next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Seam {
+    offset: u64,
+    rank: u32,
+    previous: u32,
 }
 
 /// Where a reader that starts at a key begins, and where it goes past the block it begins in.
@@ -608,6 +795,8 @@ struct Trailer {
     len: u64,
     records: u64,
     index_len: u64,
+    terms_len: u64,
+    checkpoints: u64,
     largest: u32,
 }
 
@@ -619,7 +808,7 @@ impl Trailer {
             return Err(malformed(path, format_args!("{len} bytes hold no trailer")));
         }
         read_at(file, &mut trailer, len - RUN_TRAILER).map_err(|e| at(path, e))?;
-        if trailer[20..] != RUN_MAGIC {
+        if trailer[36..] != RUN_MAGIC {
             return Err(malformed(path, "the trailer does not end the file"));
         }
         let u64_at = |at: usize| u64::from_le_bytes(trailer[at..at + 8].try_into().expect("8"));
@@ -627,7 +816,9 @@ impl Trailer {
             len,
             records: u64_at(0),
             index_len: u64_at(8),
-            largest: u32::from_le_bytes(trailer[16..20].try_into().expect("four bytes")),
+            terms_len: u64_at(16),
+            checkpoints: u64_at(24),
+            largest: u32::from_le_bytes(trailer[32..36].try_into().expect("four bytes")),
         })
     }
 }
@@ -654,32 +845,38 @@ impl RunFile {
             len,
             records,
             index_len,
+            terms_len,
+            checkpoints,
             largest,
         } = Trailer::read(&file, path)?;
-        let index_end = records
-            .checked_add(index_len)
-            .filter(|end| *end <= len - RUN_TRAILER)
-            .ok_or_else(|| {
-                malformed(
-                    path,
-                    format_args!(
-                        "{len} bytes cannot hold {records} bytes of records and a {index_len}-byte \
-                         index"
-                    ),
-                )
-            })?;
-        let index = SortedDict::map_within(&file, records, index_len)
-            .map_err(|e| malformed(path, format_args!("its index: {e}")))?;
-        if index_end + 16 * u64::from(index.len()) + RUN_TRAILER != len {
-            return Err(malformed(
+        let tail = len - RUN_TRAILER;
+        let short = || {
+            malformed(
                 path,
                 format_args!(
-                    "{len} bytes where {records} of records, a {index_len}-byte index and {} \
-                     blocks make {}",
-                    index.len(),
-                    index_end + 16 * u64::from(index.len()) + RUN_TRAILER
+                    "{len} bytes cannot hold {records} bytes of records, a {index_len}-byte index, \
+                     a {terms_len}-byte dictionary of checkpointed terms and {checkpoints} \
+                     checkpoints"
                 ),
-            ));
+            )
+        };
+        let after = |at: u64, bytes: Option<u64>| {
+            bytes
+                .and_then(|bytes| at.checked_add(bytes))
+                .filter(|end| *end <= tail)
+                .ok_or_else(short)
+        };
+        let blocks_at = after(records, Some(index_len))?;
+        let index = SortedDict::map_within(&file, records, index_len)
+            .map_err(|e| malformed(path, format_args!("its index: {e}")))?;
+        let terms_at = after(blocks_at, Some(ENTRY_BYTES * u64::from(index.len())))?;
+        let table_at = after(terms_at, Some(terms_len))?;
+        let terms = SortedDict::map_within(&file, terms_at, terms_len)
+            .map_err(|e| malformed(path, format_args!("its checkpointed terms: {e}")))?;
+        let checkpoints_at = after(table_at, Some(ENTRY_BYTES * u64::from(terms.len())))?;
+        let end = after(checkpoints_at, checkpoints.checked_mul(ENTRY_BYTES))?;
+        if end != tail {
+            return Err(short());
         }
         Ok(RunFile {
             path: path.clone(),
@@ -689,7 +886,11 @@ impl RunFile {
             records,
             largest,
             index,
-            blocks_at: index_end,
+            blocks_at,
+            terms,
+            table_at,
+            checkpoints_at,
+            checkpoints,
             released: AtomicU64::new(0),
         })
     }
@@ -697,6 +898,120 @@ impl RunFile {
     /// The bytes its records take.
     pub fn records(&self) -> u64 {
         self.records
+    }
+
+    /// `count` 16-byte entries of the tail from `at`, each read as two `u64`s.
+    fn entries(&self, from: u64, count: u64) -> io::Result<Vec<(u64, u64)>> {
+        let len = usize::try_from(count * ENTRY_BYTES).map_err(|_| self.short_tail())?;
+        let mut bytes = vec![0u8; len];
+        read_at(&self.file, &mut bytes, from).map_err(|e| at(&self.path, e))?;
+        Ok(bytes
+            .as_chunks::<16>()
+            .0
+            .iter()
+            .map(|entry| {
+                let half = |at: usize| u64::from_le_bytes(entry[at..at + 8].try_into().expect("8"));
+                (half(0), half(8))
+            })
+            .collect())
+    }
+
+    fn short_tail(&self) -> io::Error {
+        malformed(&self.path, "its tail does not fit in memory")
+    }
+
+    /// The checkpoints of checkpointed term `ordinal`, as indices `first..end`, and the entities it
+    /// holds.
+    fn checkpoints_at(&self, ordinal: u32) -> io::Result<(u64, u64, u64)> {
+        let next = u64::from(ordinal + 1 < self.terms.len());
+        let entries = self.entries(
+            self.table_at + ENTRY_BYTES * u64::from(ordinal),
+            1 + next,
+        )?;
+        let (first, items) = entries[0];
+        let end = entries.get(1).map_or(self.checkpoints, |next| next.0);
+        if first > end || end > self.checkpoints {
+            return Err(malformed(
+                &self.path,
+                format_args!(
+                    "checkpointed term {ordinal} names checkpoints {first} to {end} of {}",
+                    self.checkpoints
+                ),
+            ));
+        }
+        Ok((first, end, items))
+    }
+
+    /// The checkpoints of `term`'s record and the entities it holds, where it has any.
+    fn checkpoints_of(&self, term: &[u8]) -> io::Result<Option<(u64, u64, u64)>> {
+        let index_error = |e: mosaica_filter::DictError| malformed(&self.path, e);
+        let rank = self.terms.rank(term).map_err(index_error)?;
+        if rank == self.terms.len()
+            || self
+                .terms
+                .key_of(rank, &mut Vec::new())
+                .map_err(index_error)?
+                .as_bytes()
+                != term
+        {
+            return Ok(None);
+        }
+        self.checkpoints_at(rank).map(Some)
+    }
+
+    /// Checkpoint `i`, as `(previous entity, rank, offset)`.
+    fn checkpoint(&self, i: u64) -> io::Result<(u32, u32, u64)> {
+        let (head, offset) = self.entries(self.checkpoints_at + ENTRY_BYTES * i, 1)?[0];
+        Ok((head as u32, (head >> 32) as u32, offset))
+    }
+
+    /// Where a reader of `term`, whose record of `count` entities has them from `body` on, starts
+    /// to reach its first entity at or after `entity`: the last checkpoint whose previous entity
+    /// is before `entity`, or `None` where there is none and it starts at the first. A checkpoint
+    /// that names a place outside the record is refused, and one inside it that is not an entity's
+    /// is found out where the readers either side of it meet ([`Seam`]).
+    fn start_within(
+        &self,
+        term: &[u8],
+        entity: u32,
+        body: u64,
+        count: u32,
+    ) -> io::Result<Option<(u32, u32, u64)>> {
+        let Some((first, end, items)) = self.checkpoints_of(term)? else {
+            return Ok(None);
+        };
+        if items != u64::from(count) {
+            return Err(malformed(
+                &self.path,
+                format_args!(
+                    "term {:?}'s checkpoints are of {items} entities and its record holds {count}",
+                    String::from_utf8_lossy(term)
+                ),
+            ));
+        }
+        let (mut lo, mut hi) = (first, end);
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            match self.checkpoint(mid)?.0 < entity {
+                true => lo = mid + 1,
+                false => hi = mid,
+            }
+        }
+        if lo == first {
+            return Ok(None);
+        }
+        let (previous, rank, offset) = self.checkpoint(lo - 1)?;
+        if rank == 0 || rank >= count || offset <= body || offset >= self.records {
+            return Err(malformed(
+                &self.path,
+                format_args!(
+                    "a checkpoint of term {:?} names entity {rank} of {count} at offset {offset}, \
+                     outside its record from {body}",
+                    String::from_utf8_lossy(term)
+                ),
+            ));
+        }
+        Ok(Some((previous, rank, offset)))
     }
 
     /// The offsets of the first and the last record of the block index entry `ordinal` names.
@@ -795,22 +1110,65 @@ impl RunFile {
     }
 }
 
+/// A run weighs a term by its checkpoints: each stands for the stride of the record after it. A
+/// record without them is under a stride and is not counted.
+impl Weigh for RunFile {
+    fn heavy(&self, bytes: u64, terms: &mut Vec<Vec<u8>>) -> io::Result<()> {
+        let table = self.entries(self.table_at, u64::from(self.terms.len()))?;
+        let mut scratch = Vec::new();
+        for (ordinal, entry) in table.iter().enumerate() {
+            let end = table
+                .get(ordinal + 1)
+                .map_or(self.checkpoints, |next| next.0);
+            if (end.saturating_sub(entry.0) + 1) * RUN_INDEX_STRIDE >= bytes {
+                let key = self
+                    .terms
+                    .key_of(ordinal as u32, &mut scratch)
+                    .map_err(|e| malformed(&self.path, e))?;
+                terms.push(key.as_bytes().to_vec());
+            }
+        }
+        Ok(())
+    }
+
+    fn spread(&self, term: &[u8], points: &mut Vec<Point>) -> io::Result<Spread> {
+        let Some((first, end, items)) = self.checkpoints_of(term)? else {
+            return Ok(Spread::default());
+        };
+        let checkpoints =
+            self.entries(self.checkpoints_at + ENTRY_BYTES * first, end - first)?;
+        let at = |entity: u64| Point {
+            entity: entity as u32,
+            bytes: RUN_INDEX_STRIDE,
+        };
+        points.push(at(checkpoints.first().map_or(0, |c| c.0)));
+        points.extend(checkpoints.iter().map(|c| at(c.0)));
+        Ok(Spread {
+            items,
+            whole: false,
+        })
+    }
+}
+
 /// How [`merge_runs`] merges: what its runs carry, the allowance and how it is divided, the bytes
-/// each thread holds beside its readers, and the sources it merges beside the runs.
+/// each thread holds beside its readers, the sources it merges beside the runs, and, where it
+/// divides a term too large for one range by entity, the most entities a part of one holds.
 pub struct RunMerge<'a> {
     pub payload: RunPayload,
     pub allowance: Allowance,
     pub ranges: Ranges,
     pub each: u64,
     pub beside: Beside<'a>,
+    pub parts: Option<u64>,
 }
 
-/// The sources a merge reads beside its runs: their bytes, how many there are, and `samples(n)`,
-/// about `n` keys sampled from each.
+/// The sources a merge reads beside its runs: their bytes, how many there are, `samples(n)`, about
+/// `n` keys sampled from each, and each as [`Weigh`] sees it.
 pub struct Beside<'a> {
     pub bytes: u64,
     pub sources: usize,
     pub samples: &'a dyn Fn(usize) -> Vec<Sample>,
+    pub weighed: &'a [&'a dyn Weigh],
 }
 
 impl Beside<'_> {
@@ -820,6 +1178,7 @@ impl Beside<'_> {
             bytes: 0,
             sources: 0,
             samples: &|_| Vec::new(),
+            weighed: &[],
         }
     }
 }
@@ -852,7 +1211,7 @@ pub fn merge_runs<W: RangeWriter>(
         .map(RunFile::open)
         .collect::<io::Result<Vec<_>>>()?;
     let bytes = files.iter().map(RunFile::records).sum::<u64>() + how.beside.bytes;
-    let plan = how.ranges.plan(how.allowance, bytes, files.len(), how.each);
+    let mut plan = how.ranges.plan(how.allowance, bytes, files.len(), how.each);
     let mut samples = Vec::new();
     if plan.ranges > 1 {
         let each = plan.samples(files.len() + how.beside.sources);
@@ -861,8 +1220,17 @@ pub fn merge_runs<W: RangeWriter>(
         }
         samples.extend((how.beside.samples)(each));
     }
-    let ranges = split(samples, plan.ranges);
+    let mut ranges = split(samples, plan.ranges);
+    if let Some(items) = how.parts.filter(|_| plan.threads > 1) {
+        let weighed: Vec<&dyn Weigh> = files
+            .iter()
+            .map(|file| file as &dyn Weigh)
+            .chain(how.beside.weighed.iter().copied())
+            .collect();
+        (ranges, plan.divided) = divide(ranges, &weighed, plan.buffer, items)?;
+    }
     let decoded = Mutex::new(vec![(0u64, 0u64); files.len()]);
+    let seams = Mutex::new(Seams::default());
     // Per range merged and not yet written, the offset in each run its readers began at, which no
     // later range reads before.
     let began: Mutex<HashMap<usize, Vec<u64>>> = Mutex::default();
@@ -887,6 +1255,22 @@ pub fn merge_runs<W: RangeWriter>(
                 let (pairs, anchor) = reader.share();
                 *sum = (sum.0 + pairs, sum.1.wrapping_add(anchor));
             }
+            drop(decoded);
+            let joined = |i: usize| {
+                ranges
+                    .get(i)
+                    .is_some_and(|r| r.span.is_some_and(|s| s.from.is_some()))
+            };
+            let (after, before) = (joined(index), joined(index + 1));
+            if after || before {
+                let ends = |end: usize| readers.iter().map(|r| r.seams()[end]).collect();
+                seams.lock().unwrap_or_else(PoisonError::into_inner).meet(
+                    &files,
+                    index,
+                    after.then(|| ends(0)),
+                    before.then(|| ends(1)),
+                )?;
+            }
             Ok(())
         },
         |range| {
@@ -904,6 +1288,62 @@ pub fn merge_runs<W: RangeWriter>(
         file.check(pairs, anchor)?;
     }
     Ok((writer, plan))
+}
+
+/// Where the readers of each range over part of a term began and ended in each run, until the range
+/// on the other side of the seam has been read: each must begin where the one before it ended, so
+/// that between them they decode each of the term's entities once, however a run's checkpoints
+/// sent them there.
+#[derive(Default)]
+struct Seams {
+    begun: HashMap<usize, Vec<Option<Seam>>>,
+    ended: HashMap<usize, Vec<Option<Seam>>>,
+}
+
+impl Seams {
+    /// Range `index` began at `began` in each run, where a range before it ended, and ended at
+    /// `ended`, where one after it begins: check each against the other side's, or hold it until
+    /// that side is read.
+    fn meet(
+        &mut self,
+        files: &[RunFile],
+        index: usize,
+        began: Option<Vec<Option<Seam>>>,
+        ended: Option<Vec<Option<Seam>>>,
+    ) -> io::Result<()> {
+        if let Some(began) = began {
+            match self.ended.remove(&(index - 1)) {
+                Some(ended) => Seams::check(files, &ended, &began)?,
+                None => {
+                    self.begun.insert(index, began);
+                }
+            }
+        }
+        if let Some(ended) = ended {
+            match self.begun.remove(&(index + 1)) {
+                Some(began) => Seams::check(files, &ended, &began)?,
+                None => {
+                    self.ended.insert(index, ended);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check(files: &[RunFile], ended: &[Option<Seam>], began: &[Option<Seam>]) -> io::Result<()> {
+        for ((file, ended), began) in files.iter().zip(ended).zip(began) {
+            if ended != began {
+                return Err(malformed(
+                    &file.path,
+                    format_args!(
+                        "a part of a term's entities ended at {ended:?} and the next began at \
+                         {began:?}: a checkpoint does not name the entity it says it does"
+                    ),
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What a span of a run is given back in multiples of: a multiple of a file system's block, and
@@ -1020,6 +1460,15 @@ pub struct TextRunReader<'r> {
     whole: bool,
     peeked: bool,
     done: bool,
+    /// Where a span of the head's entities ends, and whether it has: the reader then holds no
+    /// more of the run.
+    to: Option<u32>,
+    stopped: bool,
+    /// The first entity of a span, decoded by [`TermSource::span`] to find it and yielded next,
+    /// with the counts before it.
+    first: Option<(u32, (u64, u64))>,
+    /// Where a span began and ended.
+    seams: [Option<Seam>; 2],
 }
 
 /// A cursor's place in a run's records, read at its own offset (`pread`), so every cursor on one
@@ -1060,7 +1509,7 @@ impl TermSource for TextRunReader<'_> {
             self.peeked = false;
             return Ok(true);
         }
-        if self.done {
+        if self.done || self.stopped {
             return Ok(false);
         }
         // Whatever the caller did not take: decoded and anchored here, as a range's records always
@@ -1138,11 +1587,77 @@ impl TermSource for TextRunReader<'_> {
     /// One at a time, because the runs do not partition entity space: a run's entities ascend
     /// within its own record, but the build divides the arena and not entity space, so a term's
     /// merged list is produced by comparing the runs' heads.
+    ///
+    /// In a span, the entity past its end is decoded and not counted, and the reader stops there.
     fn next_entity(&mut self) -> io::Result<Option<u32>> {
-        if self.pending == 0 {
+        if self.to.is_none() && self.first.is_none() {
+            if self.pending == 0 {
+                return Ok(None);
+            }
+            return self.decode_entity().map(Some);
+        }
+        if self.stopped {
             return Ok(None);
         }
-        self.decode_entity().map(Some)
+        let here = self.here();
+        let (entity, counted, before) = match self.first.take() {
+            Some((entity, counted)) => (entity, counted, self.seams[0]),
+            None if self.pending == 0 => {
+                if self.to.is_some() {
+                    self.seams[1].get_or_insert(here);
+                }
+                return Ok(None);
+            }
+            None if self.to.is_none() => return self.decode_entity().map(Some),
+            None => {
+                let counted = (self.pairs, self.anchor);
+                (self.decode_entity()?, counted, Some(here))
+            }
+        };
+        if self.to.is_some_and(|to| entity >= to) {
+            (self.pairs, self.anchor) = counted;
+            self.seams[1] = before;
+            self.stopped = true;
+            return Ok(None);
+        }
+        Ok(Some(entity))
+    }
+
+    /// From a checkpoint, where the run has one before `from`, the reader decodes the term's
+    /// entities without counting them until it reaches the first at or after `from`, which is the
+    /// span's first and is counted. A span's first and last entity are recorded ([`Self::seams`]),
+    /// where it has a bound there.
+    fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
+        if self.taken != 0 || self.peeked || self.term.is_empty() {
+            return Err(self.malformed("a span begins before the term's first entity is read"));
+        }
+        self.to = to;
+        let Some(from) = from else {
+            return Ok(0);
+        };
+        let count = self.pending;
+        if let Some((previous, rank, offset)) =
+            self.run
+                .start_within(&self.term, from, self.offset(), count)?
+        {
+            self.jump(offset);
+            (self.taken, self.pending, self.last_entity) = (rank, count - rank, previous);
+        }
+        loop {
+            let here = self.here();
+            if self.pending == 0 {
+                self.seams[0] = Some(here);
+                return Ok(u64::from(here.rank));
+            }
+            let counted = (self.pairs, self.anchor);
+            let entity = self.decode_entity()?;
+            if entity >= from {
+                self.seams[0] = Some(here);
+                self.first = Some((entity, counted));
+                return Ok(u64::from(here.rank));
+            }
+            (self.pairs, self.anchor) = counted;
+        }
     }
 
     fn positions(&self) -> &[u32] {
@@ -1178,7 +1693,32 @@ impl<'r> TextRunReader<'r> {
             whole: true,
             peeked: false,
             done: false,
+            to: None,
+            stopped: false,
+            first: None,
+            seams: [None; 2],
         }
+    }
+
+    /// Where the span it read began and ended, where it read one with a bound there.
+    pub(crate) fn seams(&self) -> [Option<Seam>; 2] {
+        self.seams
+    }
+
+    /// Where the entity it decodes next begins.
+    fn here(&self) -> Seam {
+        Seam {
+            offset: self.offset(),
+            rank: self.taken,
+            previous: self.last_entity,
+        }
+    }
+
+    /// Go on at `offset` in the records.
+    fn jump(&mut self, offset: u64) {
+        let held = self.reader.buffer().len();
+        self.reader.consume(held);
+        self.reader.get_mut().at = offset;
     }
 
     /// The pairs this reader decoded and what they add to the anchor, for [`RunFile::check`].
@@ -1199,9 +1739,7 @@ impl<'r> TextRunReader<'r> {
 
     /// Go on at `block`, returning the term the index names there.
     fn go_to(&mut self, block: Block) -> Option<Vec<u8>> {
-        let held = self.reader.buffer().len();
-        self.reader.consume(held);
-        self.reader.get_mut().at = block.at;
+        self.jump(block.at);
         block.named
     }
 
@@ -1730,7 +2268,7 @@ mod tests {
 
     /// The records' length a run's trailer gives.
     fn open_run_len(bytes: &[u8]) -> usize {
-        let at = bytes.len() - 24;
+        let at = bytes.len() - RUN_TRAILER as usize;
         u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize
     }
 
@@ -1941,9 +2479,10 @@ mod tests {
         let records_len = open_run_len(&whole);
         let mut grown = whole[..records_len].to_vec();
         grown.extend_from_slice(&[0, 2, b'z', b'z', 1, 3]);
-        grown.extend_from_slice(&whole[records_len..whole.len() - 24]);
+        let trailer = whole.len() - RUN_TRAILER as usize;
+        grown.extend_from_slice(&whole[records_len..trailer]);
         grown.extend_from_slice(&(records_len as u64 + 6).to_le_bytes());
-        grown.extend_from_slice(&whole[whole.len() - 16..]);
+        grown.extend_from_slice(&whole[trailer + 8..]);
         fs::write(&path, grown).unwrap();
         assert_refused(read_text_run(&receipt));
     }
@@ -2041,7 +2580,8 @@ mod tests {
 
         let bytes = fs::read(&path).unwrap();
         let tail = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
-        let blocks = tail(bytes.len() - 24) + tail(bytes.len() - 16);
+        let trailer = bytes.len() - RUN_TRAILER as usize;
+        let blocks = tail(trailer) + tail(trailer + 8);
         drop(run);
 
         // Index entry 1 named at entry 2's offset.
@@ -2063,6 +2603,107 @@ mod tests {
         assert_refused(run.check(pairs, anchor));
     }
 
+    /// **A term's entities read in parts, each started from the run's checkpoints, are its
+    /// entities once**, each part beginning where the one before it ended, and between them the
+    /// parts' decoding checks against the receipt. A checkpoint whose rank, entity or offset is
+    /// not the entity's it names is refused, as is one that names a place outside the record and
+    /// a table whose terms name checkpoints it does not hold.
+    #[test]
+    fn a_term_read_in_parts_from_its_checkpoints_gives_back_each_entity_once() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("parts.spill");
+        let entities: Vec<u32> = (0..5_000).map(|k| k * 50).collect();
+        let mut writer = TextRunWriter::create(&path, RunPayload::Positions).unwrap();
+        writer.begin(b"big", entities.len() as u32).unwrap();
+        for &entity in &entities {
+            writer.push_entity(entity, &[1, 5, 9]).unwrap();
+        }
+        writer.begin(b"small", 1).unwrap();
+        writer.push_entity(3, &[0]).unwrap();
+        let receipt = writer.finish().unwrap();
+
+        // Each part, its seams checked against its neighbours', and the receipt against them all,
+        // and how many of the term's entities come before each.
+        let read = |receipt: &SpillReceipt| -> io::Result<(Vec<u32>, Vec<u64>)> {
+            let run = RunFile::open(receipt)?;
+            let bounds = [None, Some(1 << 16), Some(2 << 16), None];
+            let mut seams = Seams::default();
+            let (mut read, mut before, mut pairs, mut anchor) = (Vec::new(), Vec::new(), 0, 0u64);
+            for (index, pair) in bounds.windows(2).enumerate() {
+                let range = TermRange {
+                    lo: Some(b"big".to_vec()),
+                    hi: Some(b"big\0".to_vec()),
+                    span: Some(crate::merge::Span {
+                        from: pair[0],
+                        to: pair[1],
+                    }),
+                };
+                let reader = open_reader(&run, RunPayload::Positions);
+                let mut merge = TermMerge::range(vec![reader], &range)?;
+                before.extend(merge.part().map(|(_, before)| before));
+                while merge.next_term()? {
+                    merge.drain(std::convert::identity, &mut |entity, _| {
+                        read.push(entity);
+                        Ok(())
+                    })?;
+                }
+                let reader = &merge.into_sources()[0];
+                let (p, a) = reader.share();
+                (pairs, anchor) = (pairs + p, anchor.wrapping_add(a));
+                let [began, ended] = reader.seams();
+                let (after, before) = (index > 0, index < 2);
+                seams.meet(
+                    std::slice::from_ref(&run),
+                    index,
+                    after.then(|| vec![began]),
+                    before.then(|| vec![ended]),
+                )?;
+            }
+            // The rest of the run, which a range after the term reads.
+            let mut rest = open_reader(&run, RunPayload::Positions);
+            rest.seek(b"big\0")?;
+            while rest.next_term()? {
+                while rest.next_entity()?.is_some() {}
+            }
+            let (p, a) = rest.share();
+            run.check(pairs + p, anchor.wrapping_add(a))?;
+            Ok((read, before))
+        };
+        let (read_back, before) = read(&receipt).unwrap();
+        assert_eq!(read_back, entities);
+        assert_eq!(before, [0, 1_311, 2_622]);
+
+        let bytes = fs::read(&path).unwrap();
+        let trailer = bytes.len() - RUN_TRAILER as usize;
+        let count = u64::from_le_bytes(bytes[trailer + 24..trailer + 32].try_into().unwrap());
+        assert!(count >= 4, "{count} checkpoints");
+        let checkpoints = trailer - 16 * count as usize;
+        let damaged = |change: &dyn Fn(&mut [u8])| {
+            let mut damaged = bytes.clone();
+            change(&mut damaged);
+            fs::write(&path, damaged).unwrap();
+            read(&receipt)
+        };
+        let each = |at: usize, by: u64| {
+            move |bytes: &mut [u8]| {
+                for checkpoint in bytes[checkpoints..trailer].chunks_mut(16) {
+                    let field = &mut checkpoint[at..at + if at == 8 { 8 } else { 4 }];
+                    let value = field.iter().rev().fold(0u64, |v, b| v << 8 | u64::from(*b));
+                    field.copy_from_slice(&(value + by).to_le_bytes()[..field.len()]);
+                }
+            }
+        };
+        assert_refused(damaged(&each(0, 1)));
+        assert_refused(damaged(&each(4, 1)));
+        assert_refused(damaged(&each(8, 1)));
+        assert_refused(damaged(&each(8, 1 << 40)));
+        // The term's first checkpoint said to be past the last.
+        assert_refused(damaged(&|bytes| {
+            let table = checkpoints - 16;
+            bytes[table..table + 8].copy_from_slice(&(count + 1).to_le_bytes());
+        }));
+    }
+
     /// The ranges `bounds`, ascending, divide the terms into.
     fn ranges_between(bounds: Vec<Vec<u8>>) -> Vec<TermRange> {
         let bounds: Vec<Option<Vec<u8>>> = std::iter::once(None)
@@ -2074,6 +2715,7 @@ mod tests {
             .map(|pair| TermRange {
                 lo: pair[0].clone(),
                 hi: pair[1].clone(),
+                span: None,
             })
             .collect()
     }

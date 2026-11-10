@@ -24,6 +24,18 @@
 //! its turn. A term is never divided between the two: one that passes the buffer while it is held
 //! waits for the ranges before it and then goes on into the writer. So what a merge writes is the
 //! same bytes however many ranges and threads it took.
+//!
+//! # A term too large for one range, by entity
+//!
+//! The terms carried by a fixed share of the corpus grow with it, so a merge in term ranges alone
+//! leaves one thread writing each of the largest. A text merge on several threads therefore gives
+//! each term its sources hold more than the buffer of ([`Weigh`]) ranges of its own, one for each
+//! part of its entities ([`Span`]), cut at multiples of 2¹⁶ so that each part's posting is whole
+//! Roaring containers ([`divide`]). A source starts a part part way through the term's entities
+//! ([`TermSource::span`]): a run from a checkpoint, held terms by binary search, and a finished
+//! layer by its posting's rank. Each part's range is merged on its own thread and written in order
+//! like any other, its posting's containers and its positions' whole blocks as it encodes them,
+//! and the writer joins the parts into the one record a single range would write.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -32,6 +44,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use croaring::Bitmap;
 use mosaica_filter::SortedDict;
+use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 
 use crate::ordered::{FailOnPanic, Ordered};
 use crate::spill::{Allowance, Sample, RUN_BUFFER_MIN, SPILL_BUF_BYTES};
@@ -58,6 +71,18 @@ pub trait TermSource {
     /// The term's positions in the entity [`Self::next_entity`] last yielded: empty where the
     /// source carries none.
     fn positions(&self) -> &[u32];
+
+    /// Yield only the term's entities from `from` up to but not including `to`, a bound that is
+    /// `None` reaching the term's end, and return how many it holds before `from`. Called once the
+    /// source is at the term and before any of its entities is read. A source that stops at `to`
+    /// yields no later term.
+    fn span(&mut self, from: Option<u32>, to: Option<u32>) -> io::Result<u64> {
+        let _ = (from, to);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "this source yields a term's entities whole",
+        ))
+    }
 
     /// The term's posting and positions records as a finished layer stores them, where this source
     /// yields every entity they hold: what the term is written as when no other source holds it.
@@ -91,6 +116,8 @@ pub struct TermMerge<S> {
     heads: BinaryHeap<Reverse<(u32, usize)>>,
     /// The first term past the merge's range, where it has one.
     hi: Option<Vec<u8>>,
+    /// The part of one term's entities the merge yields, and how many of them come before it.
+    part: Option<(Span, u64)>,
 }
 
 impl<S: TermSource> TermMerge<S> {
@@ -103,7 +130,31 @@ impl<S: TermSource> TermMerge<S> {
         }
         let mut merge = TermMerge::open(sources)?;
         merge.hi = range.hi.clone();
+        if let (Some(span), Some(term)) = (range.span, &range.lo) {
+            // Each part starts with a different source, so that parts begun at once prepare
+            // different sources at once (a source may sort its copy of the term).
+            let mut at: Vec<usize> = merge
+                .heap
+                .iter()
+                .copied()
+                .filter(|&i| merge.sources[i].term() == term.as_slice())
+                .collect();
+            at.sort_unstable();
+            let first = span.from.map_or(0, |from| from as usize >> 16) % at.len().max(1);
+            at.rotate_left(first);
+            let mut before = 0;
+            for i in at {
+                before += merge.sources[i].span(span.from, span.to)?;
+            }
+            merge.part = Some((span, before));
+        }
         Ok(merge)
+    }
+
+    /// The part of one term's entities the merge yields, where it yields part of one, and how many
+    /// of the term's entities come before it.
+    pub fn part(&self) -> Option<(Span, u64)> {
+        self.part
     }
 
     /// The sources, wherever the merge left them.
@@ -130,6 +181,7 @@ impl<S: TermSource> TermMerge<S> {
             postings: 0,
             heads: BinaryHeap::new(),
             hi: None,
+            part: None,
         })
     }
 
@@ -362,18 +414,29 @@ const SAMPLES_MAX: usize = 1 << 20;
 const SAMPLE_BYTES: usize = 64;
 
 /// One range of a merge's terms: from `lo`, or the first term, up to but not including `hi`, or
-/// past the last.
+/// past the last; or, where it has a `span`, part of the entities of the one term `lo`, and `hi`
+/// is the first key past it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TermRange {
     pub lo: Option<Vec<u8>>,
     pub hi: Option<Vec<u8>>,
+    pub span: Option<Span>,
+}
+
+/// Part of a term's entities: from `from`, or its first, up to but not including `to`, or past its
+/// last. Both are multiples of 2¹⁶, so that the parts of a term's posting are whole Roaring
+/// containers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Span {
+    pub from: Option<u32>,
+    pub to: Option<u32>,
 }
 
 /// How a merge runs: how many ranges its terms are divided into and on how many threads, how many
 /// ranges may be issued and not yet written, what one of them holds of its output before it
-/// waits, the read buffer each run's reader is given, and how many keys it samples from all its
-/// sources together to place its ranges, at the most.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// waits, the read buffer each run's reader is given, how many keys it samples from all its
+/// sources together to place its ranges, at the most, and how many terms it divided by entity.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RangePlan {
     pub ranges: usize,
     pub threads: usize,
@@ -381,6 +444,7 @@ pub struct RangePlan {
     pub buffer: usize,
     pub read: usize,
     pub keys: usize,
+    pub divided: usize,
 }
 
 impl RangePlan {
@@ -439,6 +503,7 @@ impl RangePlan {
             buffer,
             read,
             keys: (window * buffer / SAMPLE_BYTES).min(SAMPLES_MAX),
+            divided: 0,
         }
     }
 
@@ -508,8 +573,144 @@ pub fn split(mut samples: Vec<Sample>, ranges: usize) -> Vec<TermRange> {
         .map(|pair| TermRange {
             lo: pair[0].clone(),
             hi: pair[1].clone(),
+            span: None,
         })
         .collect()
+}
+
+/// Bytes a source holds of a term's entities from `entity` on, up to its next point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Point {
+    pub entity: u32,
+    pub bytes: u64,
+}
+
+/// How many of a term's entities a source holds, and whether, were it the only source holding the
+/// term, the term would be written as the source stores it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Spread {
+    pub items: u64,
+    pub whole: bool,
+}
+
+/// What a merge asks of each of its sources to divide a term too large for one range by entity.
+pub trait Weigh: Sync {
+    /// Push onto `terms` the terms it holds about `bytes` or more of.
+    fn heavy(&self, bytes: u64, terms: &mut Vec<Vec<u8>>) -> io::Result<()>;
+
+    /// What it holds of `term`, pushing onto `points` where along the term's entities its bytes
+    /// lie.
+    fn spread(&self, term: &[u8], points: &mut Vec<Point>) -> io::Result<Spread>;
+}
+
+/// `ranges`, and how many terms it divided, with each term that `sources` hold more than `buffer`
+/// bytes of between them divided into ranges of its own, one for each part of its entities: cut at
+/// multiples of 2¹⁶ into parts of about `buffer` bytes and, where the cuts allow, of at most
+/// `items` entities. A term whose posting is a tag-0 record is not divided, nor one that a single
+/// source holds and writes whole, nor one whose entities lie within one 2¹⁶ block.
+///
+/// A term is a candidate where one source holds a share of `buffer` as large as its share of the
+/// sources, so a term spread thinly over many sources can be passed over, and is merged whole.
+pub(crate) fn divide(
+    ranges: Vec<TermRange>,
+    sources: &[&dyn Weigh],
+    buffer: usize,
+    items: u64,
+) -> io::Result<(Vec<TermRange>, usize)> {
+    use rayon::prelude::*;
+    let mut heavy = Vec::new();
+    let share = buffer as u64 / sources.len().max(1) as u64;
+    for source in sources {
+        source.heavy(share, &mut heavy)?;
+    }
+    heavy.sort_unstable();
+    heavy.dedup();
+    let cuts = heavy
+        .into_par_iter()
+        .map(|term| {
+            let cuts = cuts(&term, sources, buffer as u64, items)?;
+            Ok((term, cuts))
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    let cuts: Vec<_> = cuts
+        .into_iter()
+        .filter(|(_, cuts)| !cuts.is_empty())
+        .collect();
+    let divided_terms = cuts.len();
+    let mut cuts = cuts.into_iter().peekable();
+    let mut divided = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let mut lo = range.lo;
+        while let Some((term, cuts)) =
+            cuts.next_if(|(term, _)| range.hi.as_ref().is_none_or(|hi| term < hi))
+        {
+            if lo.as_ref() != Some(&term) {
+                divided.push(TermRange {
+                    lo,
+                    hi: Some(term.clone()),
+                    span: None,
+                });
+            }
+            let past = [term.as_slice(), &[0]].concat();
+            let bounds: Vec<Option<u32>> = std::iter::once(None)
+                .chain(cuts.into_iter().map(Some))
+                .chain(std::iter::once(None))
+                .collect();
+            divided.extend(bounds.windows(2).map(|pair| TermRange {
+                lo: Some(term.clone()),
+                hi: Some(past.clone()),
+                span: Some(Span {
+                    from: pair[0],
+                    to: pair[1],
+                }),
+            }));
+            lo = Some(past);
+        }
+        if lo.is_none() || lo != range.hi {
+            divided.push(TermRange {
+                lo,
+                hi: range.hi,
+                span: None,
+            });
+        }
+    }
+    Ok((divided, divided_terms))
+}
+
+/// Where to cut `term`'s entities, ascending: none where it is not divided.
+fn cuts(term: &[u8], sources: &[&dyn Weigh], buffer: u64, items: u64) -> io::Result<Vec<u32>> {
+    let mut points = Vec::new();
+    let (mut held, mut holders, mut whole) = (0u64, 0usize, false);
+    for source in sources {
+        let spread = source.spread(term, &mut points)?;
+        if spread.items > 0 {
+            held += spread.items;
+            holders += 1;
+            whole = spread.whole;
+        }
+    }
+    let bytes: u64 = points.iter().map(|point| point.bytes).sum();
+    if held <= u64::from(SMALL_TERM_THRESHOLD_DEFAULT) || (holders == 1 && whole) || bytes <= buffer
+    {
+        return Ok(Vec::new());
+    }
+    let part = buffer.min((u128::from(items) * u128::from(bytes) / u128::from(held)) as u64);
+    let parts = u128::from(bytes.div_ceil(part.max(1)));
+    points.sort_unstable_by_key(|point| point.entity);
+    let block = |entity: u32| entity & !0xFFFF;
+    let least = points.first().map_or(0, |point| block(point.entity));
+    let mut cuts: Vec<u32> = Vec::new();
+    let mut before = 0u128;
+    for point in points {
+        if before >= (cuts.len() as u128 + 1) * u128::from(bytes) / parts {
+            let cut = block(point.entity);
+            if cut > cuts.last().copied().unwrap_or(least) {
+                cuts.push(cut);
+            }
+        }
+        before += u128::from(point.bytes);
+    }
+    Ok(cuts)
 }
 
 /// What a parallel merge writes its terms into, in term order, and what a range that is not yet

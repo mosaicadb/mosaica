@@ -3310,7 +3310,7 @@ fn write_scoped_column(
             indexed = Some(Indexed {
                 stage: BuildStage::TextIndex,
                 rows: written.terms,
-                passes: written.passes,
+                passes: written.merge.passes,
             });
         }
         paths.extend(write_scoped_prose(&column_dir, values)?);
@@ -3768,7 +3768,7 @@ fn write_filter_postings_banded(
             )?;
             costs.text.elapsed += started.elapsed();
             costs.text.rows += written.terms;
-            costs.text.passes += written.passes as u64;
+            costs.text.passes += written.merge.passes as u64;
             paths.extend(written.paths);
             continue;
         }
@@ -4691,6 +4691,7 @@ fn merge_keyword_runs(
         ranges,
         each: 0,
         beside: mosaica_filter_write::Beside::none(),
+        parts: None,
     };
     mosaica_filter_write::merge_runs(runs, merged, how, |range, readers, turn| {
         let mut merge = TermMerge::range(readers, range)?;
@@ -5756,7 +5757,9 @@ impl TextValues<'_> {
 ///    forecasts before it starts, and the runs, held accumulators and passes taken as it ends.
 ///    The merge runs in term ranges on the plan's threads, each range's sources started at its
 ///    first term, and writes them in term order ([`mosaica_filter_write::merge_runs`]); a run's
-///    records are given back to the file system as the ranges that read them are written.
+///    records are given back to the file system as the ranges that read them are written. A term
+///    larger than a range's buffer is divided by entity into ranges of its own, which the writer
+///    joins into the one record, and the build reports how many terms it divided.
 ///
 /// **The output is a function of the corpus alone, never of the plan.** The dictionary is the
 /// sorted distinct term set and a posting is the set of entities carrying its term; neither
@@ -5781,7 +5784,9 @@ impl TextValues<'_> {
 ///   those buffers are charged to the allowance too ([`mosaica_filter_write::RangePlan`]). The
 ///   cascade holds the run count to the allowance's fan-in.
 /// * One merged term's entity list is capped at the plan's slice cap, above which it accumulates
-///   into a Roaring bitmap and encodes through the byte-identical bitmap encoder.
+///   into a Roaring bitmap and encodes through the byte-identical bitmap encoder. A part of a term
+///   divided by entity holds no more than the cap where its blocks allow; the thread that writes
+///   holds the term's posting in parts until its last, and its positions' block table.
 ///
 /// # Terms and postings
 ///
@@ -5896,13 +5901,14 @@ fn write_text_index(
     .map_err(|e| spill::run_error(column_dir, e))?;
     eprintln!(
         "text index '{}': {} run(s) and {} accumulator(s) held in memory, {} cascade pass(es) \
-         under a fan-in of {}, merged on {} thread(s)",
+         under a fan-in of {}, merged on {} thread(s), {} term(s) divided by entity",
         attribute.name,
         merged.runs,
         merged.held,
         merged.passes,
         merged.fan_in,
-        merged.threads
+        merged.threads,
+        merged.divided
     );
     let terms = writer.finish().map_err(failed)?;
     mosaica_filter::write_presence(&files.presence, &values.present()?)
@@ -5914,7 +5920,7 @@ fn write_text_index(
     Ok(WrittenTextIndex {
         paths: files.paths().map(Path::to_path_buf).into(),
         terms,
-        passes: merged.passes,
+        merge: merged,
     })
 }
 
@@ -5955,8 +5961,8 @@ fn index_text_window(
 struct WrittenTextIndex {
     paths: Vec<PathBuf>,
     terms: u64,
-    /// The cascade passes its merge took.
-    passes: usize,
+    /// How its merge went.
+    merge: mosaica_filter_write::TextMerge,
 }
 
 /// Does this column owe a postings file?
@@ -6949,7 +6955,8 @@ mod tests {
     /// accumulators held in memory and over a cascade's runs, on one thread and several, with a
     /// window as wide as the ranges and as narrow as the threads, many more ranges than threads,
     /// and with a range buffer of a byte, so that every range but the head waits part way through
-    /// its first term and goes on into the writer from there.
+    /// its first term and goes on into the writer from there. Nor may its division of a term by
+    /// entity, into parts held in memory or read from runs.
     #[test]
     fn chunking_the_text_index_does_not_change_its_bytes() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -7060,14 +7067,95 @@ mod tests {
             assert!(left.is_empty(), "plan {k} left {left:?} behind");
             files.push(index_files(&column_dir));
         }
-        let [dict, postings, positions, presence] =
-            files.first().expect("at least one plan").clone();
-        for (k, [d, p, q, e]) in files.iter().enumerate().skip(1) {
-            assert_eq!(d, &dict, "plan {k}'s dictionary differs");
-            assert_eq!(p, &postings, "plan {k}'s postings differ");
-            assert_eq!(q, &positions, "plan {k}'s positions differ");
-            assert_eq!(e, &presence, "plan {k}'s presence differs");
+        assert_same_files(&files);
+
+        // Terms divided by entity, over a corpus spread across four 2¹⁶-entity blocks: held in
+        // memory and read from runs whose records pass the index's stride, into parts that wait
+        // for their turn at their first item and part way through, and parts of one block. A block
+        // holds a number of a term's items that is not a multiple of a positions block, so
+        // positions blocks straddle the cuts, and `edge`'s containers before the first cut and
+        // after the second hold three consecutive entities, which cost the same as a run and as an
+        // array.
+        let spread = EntityColumn::from_values(
+            &scratch,
+            ScalarType::Text,
+            (0..4 << 16).map(spread_prose),
+            "abstract",
+        )
+        .expect("typed column");
+        let mut files: Vec<[Vec<u8>; 4]> = Vec::new();
+        for (k, (plan, divided)) in [
+            (TextIndexPlan::explicit(1, 1 << 30, 1 << 22), false),
+            (
+                TextIndexPlan::explicit(7, 1 << 30, 1 << 22).in_ranges(ranges(3, 3, 3, 1)),
+                true,
+            ),
+            (
+                TextIndexPlan::explicit(7, 1 << 30, 1 << 22).in_ranges(ranges(4, 4, 8, 64 << 10)),
+                true,
+            ),
+            (
+                TextIndexPlan::explicit(7, 3 << 18, 1 << 22).in_ranges(ranges(5, 4, 8, 1)),
+                true,
+            ),
+            (
+                TextIndexPlan::explicit(7, 3 << 18, 1).in_ranges(ranges(2, 2, 2, 64)),
+                true,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let column_dir = dir.path().join(format!("spread-{k}"));
+            std::fs::create_dir_all(&column_dir).expect("column dir");
+            let written = write_text_index(
+                &column_dir,
+                &attribute,
+                TextValues::Arena(&spread),
+                plan,
+                Steps::default(),
+            )
+            .expect("text index");
+            assert_eq!(
+                written.merge.divided > 0,
+                divided,
+                "spread plan {k}: {:?}",
+                written.merge
+            );
+            files.push(index_files(&column_dir));
         }
+        assert_same_files(&files);
+    }
+
+    /// Each set of a text index's files is the first's, byte for byte.
+    fn assert_same_files(files: &[[Vec<u8>; 4]]) {
+        let [dict, postings, positions, presence] = files.first().expect("at least one plan");
+        for (k, [d, p, q, e]) in files.iter().enumerate().skip(1) {
+            assert_eq!(d, dict, "plan {k}'s dictionary differs");
+            assert_eq!(p, postings, "plan {k}'s postings differ");
+            assert_eq!(q, positions, "plan {k}'s positions differ");
+            assert_eq!(e, presence, "plan {k}'s presence differs");
+        }
+    }
+
+    /// Prose at every 23rd entity, repeating `common` up to 250 times, with `edge` repeated in
+    /// the second and fourth blocks, and alone at the last three entities of the first block and
+    /// the first three of the third, and `late` from part way through the second block on.
+    fn spread_prose(entity: usize) -> ScalarValue {
+        let tie =
+            (65_533..65_536).contains(&entity) || ((2 << 16)..(2 << 16) + 3).contains(&entity);
+        if !entity.is_multiple_of(23) && !tie {
+            return ScalarValue::Null;
+        }
+        let mut prose = "common ".repeat(1 + entity % 250);
+        prose.push_str(&format!("w{}", entity % 3));
+        if tie || (entity >> 16) % 2 == 1 {
+            prose.push_str(&" edge".repeat(if tie { 1 } else { 50 }));
+        }
+        if entity >= 100_000 {
+            prose.push_str(" late");
+        }
+        ScalarValue::Utf8(prose)
     }
 
     /// A merge in `count` term ranges on `threads` threads, `window` in flight, each holding up to

@@ -19,6 +19,128 @@ pub fn canonical_portable(mut bitmap: Bitmap) -> Vec<u8> {
     bitmap.serialize::<Portable>()
 }
 
+/// The portable format's cookie where some container is a run, and where none is.
+const COOKIE_RUNS: u32 = 12347;
+const COOKIE_NO_RUNS: u32 = 12346;
+
+/// Below this many containers, a serialisation with a run container carries no offsets.
+const OFFSETS_FROM: usize = 4;
+
+/// Several [`canonical_portable`] serialisations of sets over ascending, disjoint spans of whole
+/// 2¹⁶-value blocks, joined into the serialisation of their union without decoding a container.
+///
+/// A container's bytes depend on its own set alone, so the union's serialisation is one header
+/// over every part's containers, then each part's containers as they stand. That is
+/// [`canonical_portable`] of the union byte for byte: the header's cookie, run flags and offsets
+/// follow from each container's key, cardinality and size, which each part's header gives.
+pub struct Joined<'a> {
+    header: Vec<u8>,
+    containers: Vec<&'a [u8]>,
+    cardinality: u64,
+}
+
+impl<'a> Joined<'a> {
+    /// The parts joined, in order, or `None` where one is not a portable serialisation or their
+    /// blocks do not ascend.
+    pub fn of(parts: impl IntoIterator<Item = &'a [u8]>) -> Option<Joined<'a>> {
+        let mut blocks: Vec<(u16, u16, bool, u32)> = Vec::new();
+        let mut containers = Vec::new();
+        for part in parts {
+            containers.push(descriptors(part, &mut blocks)?);
+        }
+        let n = blocks.len();
+        let runs = blocks.iter().any(|b| b.2);
+        let mut header = Vec::with_capacity(8 + 8 * n + n.div_ceil(8));
+        if runs {
+            let last = u32::try_from(n.checked_sub(1)?)
+                .ok()
+                .filter(|l| *l <= 0xFFFF)?;
+            header.extend_from_slice(&(COOKIE_RUNS | last << 16).to_le_bytes());
+            let mut flags = vec![0u8; n.div_ceil(8)];
+            for (i, block) in blocks.iter().enumerate() {
+                flags[i / 8] |= u8::from(block.2) << (i % 8);
+            }
+            header.extend_from_slice(&flags);
+        } else {
+            header.extend_from_slice(&COOKIE_NO_RUNS.to_le_bytes());
+            header.extend_from_slice(&u32::try_from(n).ok()?.to_le_bytes());
+        }
+        for &(key, card, _, _) in &blocks {
+            header.extend_from_slice(&key.to_le_bytes());
+            header.extend_from_slice(&card.to_le_bytes());
+        }
+        if !runs || n >= OFFSETS_FROM {
+            let mut offset = u32::try_from(header.len() + 4 * n).ok()?;
+            for &(_, _, _, size) in &blocks {
+                header.extend_from_slice(&offset.to_le_bytes());
+                offset = offset.checked_add(size)?;
+            }
+        }
+        let cardinality = blocks.iter().map(|b| u64::from(b.1) + 1).sum();
+        Some(Joined {
+            header,
+            containers,
+            cardinality,
+        })
+    }
+
+    /// The union's serialisation, in pieces: the header, then each part's containers.
+    pub fn pieces(&self) -> impl Iterator<Item = &[u8]> {
+        std::iter::once(self.header.as_slice()).chain(self.containers.iter().copied())
+    }
+
+    /// The members of the union.
+    pub fn cardinality(&self) -> u64 {
+        self.cardinality
+    }
+}
+
+/// Push each container `bytes` holds, as `(key, cardinality − 1, is a run, size)`, onto `blocks`,
+/// returning the containers' bytes, or `None` where `bytes` are not a portable serialisation or
+/// its keys do not ascend past those already in `blocks`.
+fn descriptors<'a>(bytes: &'a [u8], blocks: &mut Vec<(u16, u16, bool, u32)>) -> Option<&'a [u8]> {
+    let u16_at = |at: usize| Some(u16::from_le_bytes(bytes.get(at..at + 2)?.try_into().ok()?));
+    let u32_at = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+    let cookie = u32_at(0)?;
+    let (n, flags, mut at, offsets) = if cookie & 0xFFFF == COOKIE_RUNS {
+        let n = (cookie >> 16) as usize + 1;
+        (
+            n,
+            Some(bytes.get(4..4 + n.div_ceil(8))?),
+            4 + n.div_ceil(8),
+            n >= OFFSETS_FROM,
+        )
+    } else if cookie == COOKIE_NO_RUNS {
+        (usize::try_from(u32_at(4)?).ok()?, None, 8, true)
+    } else {
+        return None;
+    };
+    let mut keys = at;
+    at = at.checked_add(n.checked_mul(4 + 4 * usize::from(offsets))?)?;
+    let payload = bytes.get(at..)?;
+    let mut size_of_all = 0usize;
+    for i in 0..n {
+        let (key, card) = (u16_at(keys)?, u16_at(keys + 2)?);
+        keys += 4;
+        let run = flags.is_some_and(|flags| flags[i / 8] >> (i % 8) & 1 == 1);
+        let size = match run {
+            true => {
+                2 + 4 * u32::from(u16::from_le_bytes(
+                    payload.get(size_of_all..size_of_all + 2)?.try_into().ok()?,
+                ))
+            }
+            false if card >= 4096 => 8192,
+            false => 2 * (u32::from(card) + 1),
+        };
+        if blocks.last().is_some_and(|last| last.0 >= key) {
+            return None;
+        }
+        blocks.push((key, card, run, size));
+        size_of_all = size_of_all.checked_add(size as usize)?;
+    }
+    (size_of_all == payload.len()).then_some(payload)
+}
+
 /// The bitmap `bytes` hold in the portable format, or `None` unless serialising it gives back
 /// exactly `bytes`.
 ///
@@ -265,5 +387,154 @@ mod tests {
         assert_eq!(*view, bitmap);
         let cut = unsafe { OwnedView::portable(&owner[..owner.len() - 1], owner.clone()) };
         assert!(cut.is_none());
+    }
+
+    /// The union's [`canonical_portable`] serialisation, joined from parts cut at random block
+    /// edges.
+    fn joined(values: &[u32], cuts: &[u32], how: u32) -> Vec<u8> {
+        let parts: Vec<Vec<u8>> = cuts
+            .windows(2)
+            .map(|cut| {
+                let (lo, hi) = (u64::from(cut[0]) << 16, u64::from(cut[1]) << 16);
+                let sub: Vec<u32> = values
+                    .iter()
+                    .copied()
+                    .filter(|&v| (lo..hi).contains(&u64::from(v)))
+                    .collect();
+                canonical_portable(built(&sub, how))
+            })
+            .collect();
+        let joined = Joined::of(parts.iter().map(Vec::as_slice)).expect("the parts join");
+        assert_eq!(joined.cardinality(), values.len() as u64);
+        joined.pieces().flatten().copied().collect()
+    }
+
+    /// `values`, sorted, built into a bitmap one of several ways, so that a part holds the run
+    /// containers a set operation makes as well as the kinds a sorted build gives.
+    fn built(values: &[u32], how: u32) -> Bitmap {
+        match how % 3 {
+            0 => Bitmap::of(values),
+            1 => {
+                let mut bitmap = Bitmap::new();
+                for &v in values {
+                    bitmap.add_range(v..=v);
+                }
+                bitmap.run_optimize();
+                bitmap
+            }
+            _ => {
+                let mut wider = Bitmap::of(values);
+                if let (Some(&lo), Some(&hi)) = (values.first(), values.last()) {
+                    wider.add_range(lo..=hi);
+                    wider.run_optimize();
+                    wider.and_inplace(&Bitmap::of(values));
+                }
+                wider
+            }
+        }
+    }
+
+    /// **Parts joined are the union's serialisation, byte for byte**: over random sets whose blocks
+    /// are empty, sparse, dense, full, a few runs, at the array/bitset edge, or the run/array tie
+    /// (1 + 2r members in r runs, which costs the same either way) at a block's ends, cut into up
+    /// to eight parts with empty ones among them, so that some parts hold runs and others not and a
+    /// part of fewer than four containers (no offsets) joins a whole of more.
+    #[test]
+    fn joined_parts_are_the_canonical_serialisation_of_their_union() {
+        use rand::{rngs::StdRng, Rng, SeedableRng};
+        let mut rng = StdRng::seed_from_u64(7);
+        for _ in 0..300 {
+            let blocks = rng.gen_range(1..12u32);
+            let mut values = Vec::new();
+            for block in 0..blocks {
+                let mut local: Vec<u32> = match rng.gen_range(0..9) {
+                    0 => Vec::new(),
+                    1 => (0..rng.gen_range(1..200))
+                        .map(|_| rng.gen_range(0..65_536))
+                        .collect(),
+                    2 => (0..65_536).filter(|_| rng.gen_bool(0.3)).collect(),
+                    3 => (0..rng.gen_range(1..6))
+                        .flat_map(|_| {
+                            let s = rng.gen_range(0..65_000);
+                            s..s + rng.gen_range(1..500)
+                        })
+                        .collect(),
+                    4 => [65_533, 65_534, 65_535, 0, 1, 2]
+                        .into_iter()
+                        .skip(3 * rng.gen_range(0..2))
+                        .take(3)
+                        .collect(),
+                    5 => (0..65_536)
+                        .step_by(15)
+                        .take(4_096 + rng.gen_range(0..2))
+                        .collect(),
+                    6 => (0..65_536).collect(),
+                    7 => {
+                        let r = rng.gen_range(1..50u32);
+                        let mut x = rng.gen_range(0..100);
+                        let mut tie = Vec::new();
+                        for i in 0..r {
+                            let take = if i == 0 { r + 2 } else { 1 };
+                            tie.extend(x..x + take);
+                            x += take + 1 + rng.gen_range(0..20);
+                        }
+                        tie
+                    }
+                    _ => (0..rng.gen_range(1..20))
+                        .map(|_| rng.gen_range(0..65_536))
+                        .collect(),
+                };
+                local.sort_unstable();
+                local.dedup();
+                values.extend(local.into_iter().map(|x| block << 16 | x));
+            }
+            if values.is_empty() {
+                continue;
+            }
+            let mut cuts: Vec<u32> = (0..rng.gen_range(0..8))
+                .map(|_| rng.gen_range(0..=blocks))
+                .chain([0, blocks])
+                .collect();
+            cuts.sort_unstable();
+            let bytes = joined(&values, &cuts, rng.gen());
+            assert_eq!(
+                bytes,
+                canonical_portable(Bitmap::of(&values)),
+                "cuts {cuts:?}"
+            );
+            assert!(exact_portable(&bytes, &mut Vec::new()).is_some());
+        }
+    }
+
+    /// The run/array tie on both sides of a cut, and the offset threshold crossed: one block with a
+    /// run in each of two parts, neither with offsets, and five blocks together, with them.
+    #[test]
+    fn ties_at_a_cut_and_the_offset_threshold_join() {
+        let values: Vec<u32> = (65_533..65_536)
+            .chain((1 << 16)..(1 << 16 | 3))
+            .chain((2 << 16)..(3 << 16))
+            .chain([3 << 16 | 5])
+            .chain((4 << 16 | 10)..(4 << 16 | 400))
+            .collect();
+        for cut in 0..=5u32 {
+            for how in 0..3 {
+                let bytes = joined(&values, &[0, cut, 5], how);
+                assert_eq!(
+                    bytes,
+                    canonical_portable(Bitmap::of(&values)),
+                    "cut {cut} {how}"
+                );
+            }
+        }
+    }
+
+    /// Parts whose blocks do not ascend are refused.
+    #[test]
+    fn parts_out_of_order_are_refused() {
+        let low = canonical_portable(Bitmap::of(&[1, 2]));
+        let high = canonical_portable(Bitmap::of(&[1 << 16]));
+        assert!(Joined::of([high.as_slice(), low.as_slice()]).is_none());
+        assert!(Joined::of([low.as_slice(), low.as_slice()]).is_none());
+        assert!(Joined::of([&low[..low.len() - 1]]).is_none());
     }
 }
