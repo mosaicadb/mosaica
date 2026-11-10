@@ -8,7 +8,7 @@ A running server needs memory for two things: its caches, which have fixed limit
 
 With the default limits, the caches and the paged reads add up to about 7.9 GiB. You can lower them for a small database, or raise them when many users each hold their own access attributes. [The caches](#the-caches) lists each one.
 
-The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap (`MemoryMax` under systemd, or the container's memory limit) above the cache limits, and every gigabyte beyond that keeps more of the bundle in memory. A cap that's too low makes the server slower before it makes it fail, so if the whole bundle fits in memory alongside the caches, that's the fastest a server gets.
+The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap (`MemoryMax` under systemd, or the container's memory limit) above the cache limits, and leave enough beyond them for the parts of the bundle your users read most, its hot set. While the memory beyond the caches holds the hot set, the server runs at full speed; once it can't, nearly every request waits on the disc and throughput falls steeply. [Memory beyond the caches](#memory-beyond-the-caches) gives measured figures and how to find your own hot set.
 
 `mosaica status` shows what the process holds. `heap.anon_bytes` is the caches and the allocator's own memory, and `heap.file_bytes` is how much of the bundle is in memory:
 
@@ -48,6 +48,51 @@ Beside these, the server keeps what it subtracts and adds on each request for de
     An entry larger than the limit is served and not kept, and one that fits only without its extra rows is kept without them. `masked_count_cache.not_admitted` in `/control/status` counts both.
 
     On disc, `figures_disk_bytes` keeps the same entries and the labels of denied rows they're corrected with. In a bundle of several shards it also keeps each shard's pass over each set's items, which a compaction of one shard reads back so as to redo that shard alone: up to 172 B for each artifact a shard holds a member of, for each version of the level. Size it as the memory limit times the number of entries a restart should find, plus those passes, plus about 24 B per denied row per level. Past it, the files least recently written or read are removed.
+
+### Memory beyond the caches
+
+The hot set depends on where your users look, so the reliable figure is your own: run the server without a cap under real traffic and read `heap.file_bytes` from `mosaica status` once it has settled. Give the server at least that much beyond its cache limits.
+
+As an example of the shape, the table below was measured on one 4-core machine with a corpus of 100 million items of about 60 bytes each (a 5.6 GiB bundle) and default cache limits. Ten users panned close-ups across the whole map at random, which is close to the worst case for the page cache, since real users gather on the busy parts of a map. Its hot set was about 2.0 GiB, a third of the bundle. Each figure is one run of 20 seconds, and repeated runs of a cell differed by up to 30%.
+
+| Memory cap | Bundle ÷ cap | Requests per second | p99 latency | Reads from disc in 20 s |
+|---|---|---|---|---|
+| None | | 671 | 83 ms | 783 |
+| 2 GiB | 2.8 | 811 | 71 ms | 3,032 |
+| 1 GiB | 5.6 | 468 | 130 ms | 111,985 |
+| 512 MiB | 11 | 116 | 755 ms | 258,300 |
+
+With these users, a bundle up to about three times the memory beyond the caches served at full speed. A narrower map, users who stay in one region, or a lower [point cap](#points-drawn-per-tile) lets the ratio go higher; more columns, indexed text and filters make the hot set larger.
+
+### Users who see different items
+
+Each distinct set of access attributes that is in use holds two bitmaps of the items it may see: its visible set, in item order, and its row projection, in map order, one for each view and shard. Sessions holding the same attributes share both. A bitmap is stored in blocks of 65,536 rows, and each block takes the least of three forms: 2 bytes for each visible row, a flat 8 KiB (one bit for every row), or a few bytes for each run of consecutive visible rows. So, for each bitmap:
+
+- **Visible items scattered through the corpus**, a sixteenth of the items or more: about one bit for every item in the corpus, whatever the share. At 100 million items that is 12 MiB.
+- **A smaller scattered share**: about 2 bytes for each visible item.
+- **Visible items that sit together**, because the attributes follow regions of the map or the build's ordering: much less, a few bytes per run.
+
+This is worked out from the bitmap format and agrees with what was measured. In the example above, each user with attributes of their own, seeing a sixteenth of the items scattered, added 1.4 MiB at 10 million items and 13.5 MiB at 100 million, against 1.2 MiB and 11.9 MiB predicted for one bitmap.
+
+A set's bitmaps are built on its first request, which costs CPU in proportion to the corpus. At 100 million items, a thousand users arriving at once with attributes of their own were limited by that work: the server built a few hundred sets a minute on three cores, and raising `row_projection_cache_bytes` to 8 GiB and `fragment_cache_bytes` to 4 GiB did not help.
+
+### Under a small memory cap
+
+The cache limits are fixed, so a server capped below their total keeps filling its caches past the cap and is stopped by the kernel. In the example above, a server with default limits was stopped at caps of 512 MiB and 1 GiB once many users held attributes of their own. Under a cap below the default total, lower the limits yourself. Setting `row_projection_cache_bytes` to 12% of the cap, `fragment_cache_bytes` and `filter_cache_bytes` to 6% each, `masked_count_cache_bytes` and `region_cache_bytes` to 3% each and `occupancy_cache_bytes` to 1% kept every server in that run alive, though one serving many users with attributes of their own was slow at caps well below its hot set.
+
+### Points drawn per tile
+
+`k_max_marks` (500 by default) is the most points a tile draws, and `max_k` (1,000) the most a request may ask for. A tile reads its points' positions and rendered fields from the bundle, so a lower cap reads fewer pages for each view and shrinks the hot set. It doesn't change the memory each set of access attributes holds, and a filtered view still reads the identifier of every item that matches in view, whatever the cap.
+
+Measured with the example above at a 2 GiB cap, with 100 users panning without pause:
+
+| Points per tile | Requests per second | p99 latency of pans | Reads from disc in 20 s |
+|---|---|---|---|
+| 50 | 1,050 | 79 ms | 882 |
+| 200 | 879 | 84 ms | 12,817 |
+| 500 | 536 | 149 ms | 112,824 |
+
+At 500 points a tile, that server had moved past the point where its hot set fit. A lower cap moves that point, though it couldn't rescue the same server at 1 GiB, five times smaller than the bundle, where filtered views dominated.
 
 ## Annotation layers and new viewers
 
@@ -96,7 +141,9 @@ Bundle size per item varies widely with the schema: a rendered field travels wit
 | [GeoNames](../start/install.md#try-it) | 150,000 | One geographic view; an indexed text field and a rendered number | 11.7 MB | 78 B |
 | [arXiv](backend.md) | 50,000 | Two views; six fields, including indexed text and an indexed keyword; two clusterings, one with a layer of names; 175 access attributes | 15.0 MB | 300 B |
 
-To estimate your own, build a sample of your data with your real schema, read the size from the line that starts `built`, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
+The figures in [Memory](#memory) came from `scripts/bench_capacity.py` in the source repository, which builds synthetic corpora of a chosen size and shape, serves each under a range of memory caps and drives it with simulated users. To compare a machine against a corpus like yours, pick the synthetic profile closest to your schema; its `bench/README.md` explains the profiles.
+
+To estimate your own bundle size, build a sample of your data with your real schema, read the size from the line that starts `built`, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
 
 ```bash
 mosaica build 2>&1 | grep '^built'

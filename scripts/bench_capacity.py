@@ -40,6 +40,7 @@ shared box.
 from __future__ import annotations
 
 import argparse
+import itertools
 import functools
 import json
 import math
@@ -201,7 +202,7 @@ def filter_columns(profile: Profile) -> dict:
     }
 
 
-def filter_family(family: str, corpus: dict, variants: int, close: list) -> list[tuple]:
+def filter_family(family: str, corpus: dict, variants: int, close: list, k: int = 200) -> list[tuple]:
     """`variants` requests of one family over `corpus`, each `(route, body, pan, fraction)`, where
     `fraction` is the share of the corpus's items the filter is expected to match under the
     generators in `bench_ab.py`. There integers are uniform, a keyword is `k` and a uniform
@@ -234,7 +235,7 @@ def filter_family(family: str, corpus: dict, variants: int, close: list) -> list
         return {c.name: {"match": f"w{rank}"}}, word_fraction(rank, profile.text_words)
 
     def overview(leaf: dict, fraction: float) -> tuple:
-        body = {"view": view, "zoom": 2, "bbox": extent, "k": 200, "filters": leaf}
+        body = {"view": view, "zoom": 2, "bbox": extent, "k": k, "filters": leaf}
         return "/v1/viewport", body, None, fraction
 
     out = []
@@ -251,7 +252,7 @@ def filter_family(family: str, corpus: dict, variants: int, close: list) -> list
             out.append(("/v1/aggregate", body, None, fraction))
         elif family == "pan_range":
             leaf, fraction = window(i, 2, 100)
-            body = {"view": view, "zoom": 6, "bbox": close, "k": 200, "filters": leaf}
+            body = {"view": view, "zoom": 6, "bbox": close, "k": k, "filters": leaf}
             out.append(("/v1/viewport", body, extent, fraction))
         elif family == "prefix":
             c = column("keyword", "an indexed keyword column")
@@ -273,10 +274,12 @@ def filter_family(family: str, corpus: dict, variants: int, close: list) -> list
     return out
 
 
-def mix_file(corpus: dict, weights: dict, path: Path, variants: int = 20) -> dict[str, float]:
+def mix_file(
+    corpus: dict, weights: dict, path: Path, variants: int = 20, k: int = 200
+) -> dict[str, float]:
     """The workload's requests over `corpus`, weighted as the profile says: panning close-ups,
     overviews, filtered close-ups, aggregates and item pages, and the filter families of
-    `FAMILIES`. Each entry of a family weighs the family's weight and every other kind `variants`
+    `FAMILIES`, every viewport asking for at most `k` points a tile. Each entry of a family weighs the family's weight and every other kind `variants`
     times its own, so that a family weighs its weight in all. Returns the fraction of the corpus's
     items each family entry is expected to match."""
     view = corpus["view"]
@@ -285,12 +288,12 @@ def mix_file(corpus: dict, weights: dict, path: Path, variants: int = 20) -> dic
     kinds = {
         "pan": (
             "/v1/viewport",
-            {"view": view, "zoom": 6, "bbox": close, "k": 200},
+            {"view": view, "zoom": 6, "bbox": close, "k": k},
             corpus["extent"],
         ),
         "overview": (
             "/v1/viewport",
-            {"view": view, "zoom": 2, "bbox": corpus["extent"], "k": 200},
+            {"view": view, "zoom": 2, "bbox": corpus["extent"], "k": k},
             None,
         ),
         "filtered": (
@@ -299,7 +302,7 @@ def mix_file(corpus: dict, weights: dict, path: Path, variants: int = 20) -> dic
                 "view": view,
                 "zoom": 6,
                 "bbox": close,
-                "k": 200,
+                "k": k,
                 "filters": {"kind": {"in": ["kind0", "kind1", "kind2"]}},
             },
             corpus["extent"],
@@ -320,7 +323,7 @@ def mix_file(corpus: dict, weights: dict, path: Path, variants: int = 20) -> dic
     for kind, weight in weights.items():
         if kind in FAMILIES:
             for i, (route, body, pan, fraction) in enumerate(
-                filter_family(kind, corpus, variants, close)
+                filter_family(kind, corpus, variants, close, k)
             ):
                 name = f"{kind}-{i:02d}"
                 if fraction * corpus["items"] < MIN_MATCHES:
@@ -588,6 +591,7 @@ def cell_key(c: dict) -> str:
     return (
         f"{Path(c['bundle']).parent.name}/cap={human(c['cap'])}/{c['policy']}/arm={c['arm']}"
         f"/users={c['users']}/think={c['think_ms']}"
+        + (f"/k={c['k']}" if c["k"] != 200 else "")
     )
 
 
@@ -647,7 +651,9 @@ def run_cell(cell: dict, profile: dict, binary: Path, bench: Path, corpus: dict,
         if server.capped.group is not None:
             server.capped.group.evict(files_under([Path(corpus["bundle"])]))
         mix = work / "mix.json"
-        expected = mix_file(corpus, profile["mix"], mix, profile.get("filter_variants", 20))
+        expected = mix_file(
+            corpus, profile["mix"], mix, profile.get("filter_variants", 20), cell["k"]
+        )
         if expected:
             record["expected_fraction"] = expected
 
@@ -706,6 +712,7 @@ def run(args) -> int:
             profile["mix"],
             run_dir / f"mix-{Path(corpus['bundle']).parent.name}.json",
             profile.get("filter_variants", 20),
+            profile["points_per_tile"][0],
         )
 
     ceiling_path = run_dir / "ceiling.json"
@@ -727,7 +734,9 @@ def run(args) -> int:
                     continue
                 for arm in profile["arms"]:
                     for users in profile["users"]:
-                        for think_ms in profile["think_ms"]:
+                        for think_ms, k in itertools.product(
+                            profile["think_ms"], profile["points_per_tile"]
+                        ):
                             cells.append(
                                 {
                                     "profile": profile["name"],
@@ -741,6 +750,7 @@ def run(args) -> int:
                                     "arm": arm,
                                     "users": users,
                                     "think_ms": think_ms,
+                                    "k": k,
                                 }
                             )
     for index, cell in enumerate(cells):

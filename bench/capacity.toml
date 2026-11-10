@@ -30,6 +30,9 @@ shared_grants = 4
 policies = ["default", "tuned"]
 arms = ["A", "B"]
 think_ms = [0, 1000]
+# The most points each viewport request asks a tile for; the server draws at most the smaller of
+# this and its own `k_max_marks`.
+points_per_tile = [200]
 
 # Request kinds and their weights. `pan` moves each user's close-up a step from where it last
 # looked; `filtered` is the same with a category filter; `overview` draws the whole map; then a
@@ -133,3 +136,15 @@ prefix = 10
 common = 10
 rare = 10
 combined = 10
+
+# The point cap at high ratios of bundle to memory: the 100M corpus at 1 GiB (about 5.6 times the
+# memory) and 2 GiB (2.8), with tiles of 50, 200 and 500 points, all within the server's default
+# `k_max_marks` of 500.
+[profile.kcap]
+corpora = [{ profile = "scatter", items = 100_000_000 }]
+caps = ["1G", "2G"]
+policies = ["default"]
+arms = ["B"]
+users = [10, 100]
+think_ms = [0]
+points_per_tile = [50, 200, 500]

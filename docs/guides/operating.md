@@ -31,7 +31,7 @@ A viewer's session lasts at most `token_max_lifetime` seconds, set under `[discl
 
 ## Memory
 
-Set a memory cap on the server (`MemoryMax` under systemd, or the container's memory limit) above the limits on its caches, which come to about 7.7 GiB by default. Memory beyond that keeps more of the bundle in memory and makes the server faster. [Size and tune a deployment](sizing.md#memory) explains how to choose the cap and when to change the cache limits.
+Set a memory cap on the server (`MemoryMax` under systemd, or the container's memory limit) above the limits on its caches, with room beyond them for the parts of the bundle your users read most. [Size and tune a deployment](sizing.md#memory) gives the default limits, explains how to choose the cap, and says when to change the cache limits.
 
 ## Health and readiness
 

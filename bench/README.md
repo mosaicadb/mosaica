@@ -391,6 +391,7 @@ of thousands of users models people rather than saturating loops.
 | cache policy | `default`, `tuned` | `default` keeps the server's cache sizes, about 8 GiB in all, and shows where they stop fitting; `tuned` sets each to a fraction of the cap |
 | arm | `A`, `B` | `A` gives each user its own grant, so the memory a session costs; `B` shares four grants, so the request path's throughput |
 | users, think time | counts, ms | load as concurrent loops, or as people |
+| `points_per_tile` | `k` values, 200 by default | how much each view reads, and so the hot set; the `kcap` profile sweeps it at 2.8 and 5.6 times the memory |
 
 The admission gate sheds what the server cannot take with a 429, which a closed-loop user retries at
 once, so at high user counts with no think time the record's `shed_rate` is large while throughput
