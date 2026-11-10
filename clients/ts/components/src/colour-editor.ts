@@ -330,8 +330,11 @@ export class MosaicaColourEditor extends MosaicaElement {
 
   /** What the dialog colours: a rendered category column, or `cluster:<layer>`. */
   @property() accessor field = '';
-  /** The level of a `stacked` or `tiered` layer whose clusters are listed. `null` is the coarsest level. */
-  @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
+  /**
+   * The level each `stacked` or `tiered` layer's clusters are listed at, keyed by layer name. A
+   * layer with no entry is listed at its coarsest level. Set it as a property; it has no attribute.
+   */
+  @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
 
   /** Whether the dialog is open. @internal */
   @state() accessor isOpen = false;
@@ -406,12 +409,14 @@ export class MosaicaColourEditor extends MosaicaElement {
   }
 
   /**
-   * A change of field or level drops what was found and ticked and closes the picker, since each
-   * names the last field's values; the dialog closes where the field is now nothing it can edit.
+   * A change of field or of its layer's level drops what was found and ticked and closes the
+   * picker, since each names the last field's values; the dialog closes where the field is now
+   * nothing it can edit.
    */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
-    if (changed.has('field') || changed.has('level')) {
+    const levelMoved = changed.has('clusterLevels') && this.chosenIn(changed.get('clusterLevels')) !== this.chosenIn(this.clusterLevels);
+    if (changed.has('field') || levelMoved) {
       this.found = [];
       this.ticked = new Set();
       this.picker.close(false);
@@ -422,6 +427,17 @@ export class MosaicaColourEditor extends MosaicaElement {
 
   private get layerName(): string | null {
     return this.field.startsWith(CLUSTER_PREFIX) ? this.field.slice(CLUSTER_PREFIX.length) : null;
+  }
+
+  /** The level chosen in `levels` for the layer listed, or `null` where none is. */
+  private chosenIn(levels: ReadonlyMap<string, number> | undefined): number | null {
+    const name = this.layerName;
+    return name === null ? null : (levels?.get(name) ?? null);
+  }
+
+  /** The level `layer` is listed at ({@link levelOf}). */
+  private levelOf(layer: Layer): number | undefined {
+    return levelOf(layer, this.chosenIn(this.clusterLevels), this.resolvedStore?.get('artifacts').served ?? []);
   }
 
   /** The layer listed, where `field` names one the points can be coloured by. */
@@ -444,7 +460,7 @@ export class MosaicaColourEditor extends MosaicaElement {
     const top = meta.selection.maxAggregateTop;
     if (this.isCategory(meta)) return {groupings: [{count: true, by: {field: this.field, top}}], subject: 'visible'};
     const layer = this.layerOf(meta);
-    return layer ? {groupings: [rankedGrouping(layer, top, levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []) ?? null)], subject: 'visible'} : null;
+    return layer ? {groupings: [rankedGrouping(layer, top, this.levelOf(layer) ?? null)], subject: 'visible'} : null;
   }
 
   /** The aggregate that counts what the search box found. */
@@ -635,7 +651,7 @@ export class MosaicaColourEditor extends MosaicaElement {
     const rows = this.rows(s, meta);
     const ranked = this.ranked.entryOf(s, this.rankedSpec(meta));
     const table = ranked?.result?.tables[0];
-    const level = layer ? levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []) : undefined;
+    const level = layer ? this.levelOf(layer) : undefined;
     const levelTitle = layer && level !== undefined && layer.levels.length > 1 ? (layer.levels.find((l) => l.level === level)?.title ?? `Level ${level}`) : null;
     const where = layer && isTree(layer) ? 'Clusters drawn' : levelTitle;
     const sub = [where, this.palette(s).title].filter(Boolean).join(' · ');

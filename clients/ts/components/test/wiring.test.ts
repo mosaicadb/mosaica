@@ -388,12 +388,12 @@ describe('event details', () => {
     const el = document.createElement('div');
     const seen: string[] = [];
     el.addEventListener('mosaica-clausechange', (e) => seen.push(`${e.detail.layer}:${e.detail.id}:${e.detail.verb}`));
-    el.addEventListener('mosaica-levelchange', (e) => seen.push(String(e.detail.level)));
+    el.addEventListener('mosaica-levelchange', (e) => seen.push(`${e.detail.layer}@${e.detail.level}`));
     // @ts-expect-error: a close names what closed, and carries no id.
     el.addEventListener('mosaica-close', (e) => seen.push(e.detail.id));
     emit(el, 'mosaica-clausechange', {id: '7', layer: 'mesh', outside: false, verb: 'highlight', on: true});
-    emit(el, 'mosaica-levelchange', {level: 2});
-    expect(seen).toEqual(['mesh:7:highlight', '2']);
+    emit(el, 'mosaica-levelchange', {layer: 'taxonomy', level: 2});
+    expect(seen).toEqual(['mesh:7:highlight', 'taxonomy@2']);
   });
 
   it('carry an opened artifact’s count as a decimal string, so the detail is JSON', async () => {

@@ -211,7 +211,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - The paint
  *   button changed what the map is coloured by.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The Level
- *   choice of a levelled layer's card changed.
+ *   choice of a levelled layer's card changed. The detail names the card's layer.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - A category
  *   value's colour was chosen or reset in the colour picker.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clustercolour']>} mosaica-clustercolour - A
@@ -1145,9 +1145,11 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   private chooseLevel(value: string): void {
+    const layer = this.layerName;
+    if (layer === null) return;
     const level = value === '' ? null : Number(value);
     this.level = level;
-    emit(this, 'mosaica-levelchange', {level});
+    emit(this, 'mosaica-levelchange', {layer, level});
   }
 
   private fold(): void {

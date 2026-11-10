@@ -66,8 +66,8 @@ export type AggregateSpec = {
    * selected region. `view` counts the same items within the area in view: the selected region if
    * there is one, otherwise the camera's box; it is fetched again once the camera has rested for
    * 250 ms, and `reference` is limited to the same area. `visible` counts every item the viewer may
-   * see in the view, wherever the camera is, and sends no filters, so `without`, `withoutMembersOf`
-   * and `highlighted` have no effect.
+   * see in the view, wherever the camera is, and sends none of the store's filters, so `without`,
+   * `withoutMembersOf` and `highlighted` have no effect; `filters` still applies.
    */
   subject?: 'match' | 'view' | 'visible';
   /**
@@ -88,6 +88,11 @@ export type AggregateSpec = {
    * selected region still apply.
    */
   withoutMembersOf?: string;
+  /**
+   * A filter expression the counts must also match, joined to the rest with `all_of`. It applies
+   * under every `subject`. Unset adds nothing.
+   */
+  filters?: FilterExpr;
   /**
    * Whether to count only the items that also match the store's highlight, so each count matches
    * the viewport's `highlighted` count. Defaults to `false`. Has no effect when nothing is

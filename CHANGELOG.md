@@ -10,6 +10,9 @@ container image.
 
 ### Added
 
+- **An aggregate can carry its own filter.** `AggregateSpec.filters` in the TypeScript client is
+  joined with `all_of` to what the aggregate counts, under every `subject`, including `visible`,
+  which otherwise sends none of the store's filters.
 - `POST /v1/viewport` takes `space` beside `bbox`: `"wgs84"` gives the box in degrees of
   longitude and latitude on a view with a map projection. The TypeScript client's
   `ViewportRequest` and `region` filter take it too.
@@ -76,6 +79,13 @@ container image.
 
 ### Changed
 
+- **A level is chosen for each layer.** The explorer keeps a level for each `stacked` or `tiered`
+  layer, and choosing one, on a card or in Colour by, leaves the other layers drawn at theirs. A
+  `nested` or `dag` layer is never cut at a level. `mosaica-levelchange` now reports
+  `{layer, level}`. The `cluster-level` attribute of `<mosaica-map>`, `<mosaica-filter-panel>` and
+  `<mosaica-colour-editor>` is replaced by a `clusterLevels` property, a `Map` from layer name to
+  level, and the deck layer's `clusterLevel` prop by `clusterLevels`. `<mosaica-field-card>` keeps
+  its one `level`.
 - **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
   takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees

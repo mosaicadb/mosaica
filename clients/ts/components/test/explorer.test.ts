@@ -2,6 +2,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import type {Meta, RegionProjection} from '@mosaicajs/client';
 import '../src/explorer.js';
 import {aggregateEntry, answerAggregate, deep, deepAll, fakeStore, mount, registered, settle, status, meta, scalar, type FakeStore} from './fake-store.js';
+import {emit} from '../src/base.js';
 
 /** Where a callout was placed: its offset from the map's top-left corner. */
 const placedAt = (el: HTMLElement): [number, number] => {
@@ -1272,6 +1273,69 @@ describe('<mosaica-explorer> the Colour section', () => {
     await settle(host);
     expect(part('ramp-reverse')!.getAttribute('aria-pressed')).toBe('true');
     expect(changes).toEqual([{palette: 'tableau10', ramp: 'viridis', scale: 'linear', reverse: true}]);
+  });
+});
+
+describe('<mosaica-explorer> the level chosen for each layer', () => {
+  const levelled = (name: string, kind: string) =>
+    ({name, title: name, views: ['s0'], membership: 'enumerated', hierarchy: {kind, pruneChildren: false}, levels: [{level: 0, title: `${name} broad`}, {level: 1, title: `${name} fine`}], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1}) as unknown as Meta['layers'][number];
+
+  async function withLayers() {
+    const host = await mount('<mosaica-explorer></mosaica-explorer>');
+    const el = host.querySelector('mosaica-explorer') as HTMLElement & {store: unknown};
+    const store = fakeStore({meta: {...META, layers: [levelled('taxonomy', 'tiered'), levelled('strata', 'stacked')]}, status: status({})});
+    el.store = store;
+    await settle(host);
+    const shadow = el.shadowRoot!;
+    const levels = () => {
+      const held = [shadow.querySelector('mosaica-map'), shadow.querySelector('mosaica-filter-panel'), shadow.querySelector('mosaica-colour-editor')].map((e) => [...(e as unknown as {clusterLevels: ReadonlyMap<string, number>}).clusterLevels]);
+      // The map, the filter panel and Edit colours are handed the same levels.
+      expect(held[1]).toEqual(held[0]);
+      expect(held[2]).toEqual(held[0]);
+      return Object.fromEntries(held[0]!);
+    };
+    return {host, store, shadow, levels};
+  }
+
+  it('sets the level of the layer chosen in Colour by, and leaves another layer’s alone', async () => {
+    const {host, store, shadow, levels} = await withLayers();
+    const seen: unknown[] = [];
+    host.addEventListener('mosaica-levelchange', (e) => seen.push(e.detail));
+    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+    await settle(host);
+    const option = async (value: string) => {
+      if (!shadow.querySelector('[part~="colour-option"]')) {
+        shadow.querySelector<HTMLButtonElement>('[part~="colour-by"]')!.click();
+        await settle(host);
+      }
+      return shadow.querySelector<HTMLButtonElement>(`[part~="colour-option"][data-value="${value}"]`)!;
+    };
+    (await option('cluster:strata@1')).click();
+    await settle(host);
+    (await option('cluster:taxonomy@1')).click();
+    await settle(host);
+    expect(seen).toEqual([
+      {layer: 'strata', level: 1},
+      {layer: 'taxonomy', level: 1}
+    ]);
+    expect(levels()).toEqual({strata: 1, taxonomy: 1});
+    store.set('legend', {...store.get('legend'), colourBy: 'cluster:taxonomy'});
+    await settle(host);
+    expect((await option('cluster:taxonomy@1')).getAttribute('aria-checked')).toBe('true');
+    expect((await option('cluster:taxonomy@0')).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('sets only the named layer’s level when a card chooses one, and its default where the card resets it', async () => {
+    const {host, shadow, levels} = await withLayers();
+    const map = shadow.querySelector('mosaica-map')!;
+    emit(map, 'mosaica-levelchange', {layer: 'taxonomy', level: 1});
+    await settle(host);
+    emit(map, 'mosaica-levelchange', {layer: 'strata', level: 0});
+    await settle(host);
+    expect(levels()).toEqual({taxonomy: 1, strata: 0});
+    emit(map, 'mosaica-levelchange', {layer: 'taxonomy', level: null});
+    await settle(host);
+    expect(levels()).toEqual({strata: 0});
   });
 });
 

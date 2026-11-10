@@ -100,7 +100,7 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 
 ## What the deck layer and the components add
 
-- **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
+- **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom. A level is chosen for one layer at a time, and other layers drawn beside it keep theirs. A `nested` or `dag` layer takes no level: its cut follows the cluster budget.
 - **Density shading**, counted with the aggregate route, so it follows the filter and the highlight as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
 - **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
 - **Keyboard and screen-reader support** for the panels and controls: every control is reached with Tab, and the changes a viewer needs to hear are announced. [Accessibility](accessibility.md) lists the keys, what is announced, what your page supplies and what has been checked.
