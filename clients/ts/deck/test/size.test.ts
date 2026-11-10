@@ -61,11 +61,11 @@ describe('sizing by a number column', () => {
     const slab = new MarkSlab();
     const b = band(2, 1n, 4, {scalars: {citations: citations([0, 999, null, 9])}});
     const log = sizeEncodingOf(meta, legend(), 'log');
-    const first = slab.sync([b], 2, {kind: 'uniform'}, null, '', log);
+    const first = slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', log);
     expect(round(first.sizes)).toEqual([0, 1, -1, 0.333]);
-    const linear = slab.sync([b], 2, {kind: 'uniform'}, null, '', sizeEncodingOf(meta, legend(), 'linear'));
+    const linear = slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', sizeEncodingOf(meta, legend(), 'linear'));
     expect(round(linear.sizes)).toEqual([0, 1, -1, 0.009]);
-    const none = slab.sync([b], 2, {kind: 'uniform'}, null, '', {kind: 'none'});
+    const none = slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', {kind: 'none'});
     expect([...none.sizes]).toEqual([0, 0, 0, 0]);
   });
 
@@ -73,9 +73,9 @@ describe('sizing by a number column', () => {
     const slab = new MarkSlab();
     const b = band(2, 1n, 3, {scalars: {citations: citations([5, 50, 500])}});
     const first = sizeEncodingOf(meta, legend({samples: {citations: {values: [5, 6, 7, 500], seen: 4}}}), 'rank');
-    expect(round(slab.sync([b], 2, {kind: 'uniform'}, null, '', first).sizes)).toEqual([0, 0.833, 1]);
+    expect(round(slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', first).sizes)).toEqual([0, 0.833, 1]);
     const next = sizeEncodingOf(meta, legend({samples: {citations: {values: [5, 60, 70, 500], seen: 8}}}), 'rank');
-    expect(round(slab.sync([b], 2, {kind: 'uniform'}, null, '', next).sizes)).toEqual([0, 0.167, 1]);
+    expect(round(slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', next).sizes)).toEqual([0, 0.167, 1]);
   });
 
   it('draws a value NaN or infinite as one with no value', () => {
@@ -83,7 +83,7 @@ describe('sizing by a number column', () => {
     const b = band(2, 1n, 3, {scalars: {score: {arrowType: 'f64', values: Float64Array.from([1, NaN, Infinity])}}});
     const scored = {declaredScalars: [{name: 'score', arrowType: 'f64', category: null, render: true}]} as unknown as Meta;
     const encoding = sizeEncodingOf(scored, legend({sizeBy: 'score', domains: {score: {min: 0, max: 2}}}), 'linear');
-    expect(round(slab.sync([b], 2, {kind: 'uniform'}, null, '', encoding).sizes)).toEqual([0.5, -1, -1]);
+    expect(round(slab.sync([b], 2, {kind: 'uniform', ground: 'dark'}, null, '', encoding).sizes)).toEqual([0.5, -1, -1]);
   });
 });
 

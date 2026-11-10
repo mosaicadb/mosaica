@@ -501,9 +501,9 @@ export class MosaicaMap extends MosaicaElement {
   @property({hasChanged: basemapChanged}) accessor basemap: BasemapChoice | null = null;
   /**
    * Whether the map's background is `light` or `dark`, for when it differs from the page's, such as
-   * a light basemap on a dark page. Labels and density colours follow it; the toolbar and panels
-   * follow the page. Unset, it follows the page's `color-scheme`, and the system's where the page
-   * allows both.
+   * a light basemap on a dark page. The points' single colour, labels and density colours follow
+   * it; the toolbar and panels follow the page. Unset, it follows the page's `color-scheme`, and
+   * the system's where the page allows both.
    */
   @property({reflect: true}) accessor ground: 'light' | 'dark' | '' = '';
   /** Hides the points. Density, outlines, labels and the selection are still drawn. */
@@ -650,7 +650,7 @@ export class MosaicaMap extends MosaicaElement {
     marks: 0,
     requests: 0,
     densityRequests: 0,
-    encoding: 'uniform',
+    encoding: 'uniform|dark',
     basemap: [],
     view: {depth: 0, status: 'idle', stale: false, visible: 0, matched: 0, served: 0, provisional: 0},
     region: null,
@@ -1020,7 +1020,7 @@ export class MosaicaMap extends MosaicaElement {
     };
     const legend = s.get('legend');
     const clusterLayer = clusterLayerOf(legend.colourBy);
-    p.encoding = clusterLayer ? `cluster|${clusterLayer}` : encodingSignature(encodingOf(s.get('meta'), legend, colouringOf(s)));
+    p.encoding = clusterLayer ? `cluster|${clusterLayer}` : encodingSignature(encodingOf(s.get('meta'), legend, colouringOf(s), this.scheme()));
     if (this.measure) this.measureStore(s);
 
     // Events for what arrived: the selected item's record, the opened artifact, the region's counts.

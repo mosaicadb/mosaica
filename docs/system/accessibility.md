@@ -154,7 +154,7 @@ Not built yet: the category palettes do not reach 3:1 against a light map. Each 
 | Set 2 | 1.2:1 to 2.0:1 | 4.8:1 or more | 3.5:1 or more |
 | Dark 2 | 1.7:1 to 3.4:1 | 3:1 or more, except grey at 2.5:1 | six of eight under 3:1 |
 
-At opacity 0.8 every figure on the light background is lower than the one shown. A host that needs each value's colour at 3:1 draws the map on a dark background, with a dark `color-scheme` or with `--mosaica-map-bg` and `ground="dark"` on `<mosaica-map>`, and uses Set 2 or sets its own colours with `valueColours`. Points with no colouring are drawn in one pale blue on either background. At `point-opacity="1"` it is at 1.6:1 against the default light background and 6.2:1 against the dark one, and at opacity 0.8 at 1.5:1 and 4.4:1, so on a light map a host that needs 3:1 colours the points by a column with its own colours, or draws the map dark.
+At opacity 0.8 every figure on the light background is lower than the one shown. A host that needs each value's colour at 3:1 draws the map on a dark background, with a dark `color-scheme` or with `--mosaica-map-bg` and `ground="dark"` on `<mosaica-map>`, and uses Set 2 or sets its own colours with `valueColours`. Points with no colouring are drawn in one colour, chosen for the background: the theme's secondary ink, a grey, on a light background, and a pale blue on a dark one. At `point-opacity="1"` the grey is at 3.8:1 against the default light background and the blue at 6.2:1 against the dark one, and at opacity 0.8 they are at 2.8:1 and 4.4:1, so on a light map a host that needs 3:1 sets `point-opacity="1"`, or draws the map dark.
 
 ## Small windows and zoom
 

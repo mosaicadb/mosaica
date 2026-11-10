@@ -76,6 +76,10 @@ container image.
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees
   counted nothing. `sample` and `map` on the selection follow it. For a unit-square box, write
   `filter({"region": {"bbox": [...], "space": "view"}})`.
+- Points with no colouring are drawn in the theme's secondary ink, a grey, on a light map, at
+  3.8:1 against the default light background at `point-opacity="1"` and 2.8:1 at opacity 0.8.
+  They were a pale blue at 1.6:1. On a dark map they are the pale blue they were. The map draws
+  them again when its ground changes.
 - `serve.filter_cache_bytes` defaults to 1 GiB, up from 256 MiB.
 - The filter cache keeps the rows a condition on a rendered column has read from the map and
   those it matched, so a pan or a repeated viewport reads only the rows it brings into view.
