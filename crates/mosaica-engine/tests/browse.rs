@@ -10,8 +10,9 @@
 //! - **The three forms**: roots, one artifact's children with its own parents beside them, and a
 //!   name search — each row carrying the masked count the artifacts frame carries.
 //! - **The gate runs before the page.** A criterion the narrow principal fails withholds a node
-//!   from every form at once, its children become roots (C29 per entry), and a page's fill and its
-//!   `next` count only artifacts that cleared it — so a withheld artifact leaves no gap.
+//!   from every form at once, its served descendants hang from its nearest served ancestors or
+//!   are roots where it has none (C29 per entry), and a page's fill and its `next` count only
+//!   artifacts that cleared it, so a withheld artifact leaves no gap.
 //! - **The order is total and the cursor walks it exactly**: paging one row at a time reproduces
 //!   the unpaged answer, over tied counts included.
 //! - **The counts under a filter**: `matched_count` is `|membership ∩ M_auth ∩ filter|`, existence
@@ -353,7 +354,7 @@ fn id_of(fx: &Fixture, credential: &[u8], key: &str) -> MosaicaId {
 
 /// **The three forms, and every count is the oracle's.**
 ///
-/// Roots are the artifacts with no served parent; children are the artifacts naming one; a search
+/// Roots are the artifacts with no served ancestor; children are the artifacts naming one; a search
 /// matches on the key and on the supplied name alike. `parents` is present on the children form
 /// and empty on the others.
 #[test]
@@ -691,6 +692,229 @@ fn a_dag_child_counts_once_under_each_served_parent() {
         vec![("thin".to_string(), 1), ("wide".to_string(), 2)]
     );
     assert_eq!(walk(&subset_credential()), vec![("wide".to_string(), 1)]);
+}
+
+/// One page of `layer`, registered inline beside the fixture's own, at `level` where one is named.
+fn browse_layer(
+    engine: &Engine,
+    layer: &str,
+    level: Option<u32>,
+    form: BrowseForm,
+) -> BrowseOut {
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    engine
+        .browse(
+            &session,
+            BrowseRequest {
+                view: "s0",
+                layer,
+                level,
+                form,
+                filter: None,
+                limit: 100,
+                cursor: None,
+                palette_size: None,
+                cancel: None,
+            },
+        )
+        .expect("a browse answers")
+}
+
+/// The row of `out` whose key is `key`.
+fn row<'o>(out: &'o BrowseOut, key: &str) -> &'o BrowseRow {
+    out.artifacts
+        .iter()
+        .find(|r| r.key.as_deref() == Some(key))
+        .unwrap_or_else(|| panic!("{key} is on the page: {:?}", keys(out)))
+}
+
+/// One planted artifact: its key, its members' source ids and its parents' keys.
+type Planted<'a> = (&'a str, std::ops::Range<u64>, &'a [&'a str]);
+
+/// `layer`, declared as `kind` with `levels` levels, its artifacts published level by level.
+/// Returns each key's identifier, read before anything is withheld.
+fn plant(
+    fx: &Fixture,
+    layer: &str,
+    kind: HierarchyKind,
+    levels: &[&[Planted<'_>]],
+) -> HashMap<String, MosaicaId> {
+    let mut declaration = declaration(None);
+    declaration.name = layer.into();
+    declaration.hierarchy.kind = kind;
+    declaration.content = ContentDeclaration::default();
+    if kind == HierarchyKind::Tiered {
+        declaration.levels = (0..levels.len() as u32)
+            .map(|level| mosaica_types::layer::LevelDeclaration {
+                level,
+                title: None,
+                zoom: None,
+            })
+            .collect();
+    }
+    fx.engine.register_layer(declaration).unwrap();
+    let map = source_to_new_map(&fx._dir.path().join("bundle"), "v00000");
+    for (level, artifacts) in levels.iter().enumerate() {
+        let planted = artifacts
+            .iter()
+            .map(|(key, members, parents)| {
+                let mut a = IncomingArtifact::from_entities(
+                    Some(key.to_string()),
+                    members.clone().map(|s| EntityId::new(map[&s])),
+                );
+                a.parent_keys = parents.iter().map(|p| p.to_string()).collect();
+                a
+            })
+            .collect();
+        fx.engine
+            .publish_artifacts(layer.into(), level as u32, planted)
+            .unwrap();
+    }
+    browse_layer(&fx.engine, layer, None, BrowseForm::Search(String::new()))
+        .artifacts
+        .into_iter()
+        .map(|r| (r.key.unwrap_or_default(), r.mosaica_id))
+        .collect()
+}
+
+fn suppress(fx: &Fixture, id: MosaicaId) {
+    fx.engine
+        .accept_changes(vec![(
+            artifact_target(&fx.engine, id),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )])
+        .unwrap();
+}
+
+/// No row and no list on any page names `id`.
+fn names_nowhere(out: &BrowseOut, id: MosaicaId) -> bool {
+    out.artifacts
+        .iter()
+        .chain(&out.parents)
+        .all(|r| r.mosaica_id != id && !r.parent_ids.contains(&id))
+}
+
+/// **A withheld artifact's served descendants hang from its served ancestors**, as the map's cut
+/// attaches them. With the middle of a three-level tree suppressed, the leaf names the root, is
+/// listed among the root's children and counted in its `child_count`, and sits one rung below it.
+/// The middle node is named on no page and its children form is empty, identically to a leaf.
+#[test]
+fn a_withheld_parents_children_hang_from_the_grandparent() {
+    const DEEP: &str = "clusters/deep";
+    let fx = fixture(None);
+    let ids = plant(
+        &fx,
+        DEEP,
+        HierarchyKind::Nested,
+        &[&[
+            ("top", 0..300, &[]),
+            ("mid", 0..200, &["top"]),
+            ("side", 200..300, &["top"]),
+            ("leaf", 0..100, &["mid"]),
+        ]],
+    );
+    suppress(&fx, ids["mid"]);
+
+    let roots = browse_layer(&fx.engine, DEEP, None, BrowseForm::Roots);
+    assert_eq!(key_set(&roots), vec!["top"]);
+    assert_eq!(row(&roots, "top").child_count, 2, "the leaf and the side child");
+
+    let children = browse_layer(&fx.engine, DEEP, None, BrowseForm::Children(ids["top"]));
+    assert_eq!(key_set(&children), vec!["leaf", "side"]);
+    let leaf = row(&children, "leaf");
+    assert_eq!(leaf.parent_ids, vec![ids["top"]]);
+    assert_eq!(leaf.rung, 1, "the withheld node occupies no rung");
+
+    let below = browse_layer(&fx.engine, DEEP, None, BrowseForm::Children(ids["leaf"]));
+    assert_eq!(
+        below.parents.iter().map(|r| r.mosaica_id).collect::<Vec<_>>(),
+        vec![ids["top"]],
+        "the leaf's own parents, beside its children"
+    );
+    let all = browse_layer(&fx.engine, DEEP, None, BrowseForm::Search(String::new()));
+    for out in [&roots, &children, &below, &all] {
+        assert!(names_nowhere(out, ids["mid"]), "the withheld node is named nowhere");
+    }
+    let withheld = browse_layer(&fx.engine, DEEP, None, BrowseForm::Children(ids["mid"]));
+    assert!(withheld.artifacts.is_empty() && withheld.parents.is_empty());
+}
+
+/// **On a tiered layer, a root is an artifact with no served ancestor at any level.** A subject
+/// class whose archive is withheld is a root of the roots form with no `level`, and of the one at
+/// its own level, and absent from the one at level 0. A search with no `level` spans every level.
+#[test]
+fn a_tiered_artifact_whose_ancestor_is_withheld_is_a_root_of_every_level() {
+    const TIERS: &str = "taxonomy/tiers";
+    let fx = fixture(None);
+    let ids = plant(
+        &fx,
+        TIERS,
+        HierarchyKind::Tiered,
+        &[
+            &[("math", 0..300, &[]), ("physics", 300..600, &[])],
+            &[
+                ("math.AG", 0..100, &["math"]),
+                ("physics.optics", 300..400, &["physics"]),
+            ],
+        ],
+    );
+    suppress(&fx, ids["physics"]);
+
+    let roots = |level| key_set(&browse_layer(&fx.engine, TIERS, level, BrowseForm::Roots));
+    assert_eq!(roots(None), vec!["math", "physics.optics"]);
+    assert_eq!(roots(Some(0)), vec!["math"]);
+    assert_eq!(roots(Some(1)), vec!["physics.optics"]);
+
+    let every = browse_layer(&fx.engine, TIERS, None, BrowseForm::Roots);
+    let orphan = row(&every, "physics.optics");
+    assert!(orphan.parent_ids.is_empty());
+    assert_eq!(orphan.rung, 1, "a levelled layer's rung is its declared level");
+    assert_eq!(row(&every, "math").child_count, 1);
+    assert!(names_nowhere(&every, ids["physics"]));
+
+    let search = |level| {
+        key_set(&browse_layer(
+            &fx.engine,
+            TIERS,
+            level,
+            BrowseForm::Search(".".into()),
+        ))
+    };
+    assert_eq!(search(None), vec!["math.AG", "physics.optics"]);
+    assert!(search(Some(0)).is_empty());
+}
+
+/// **On a `dag` layer a withheld parent lifts its child to every served parent it had.** `ab`
+/// sits under both `a` and `b`; with `ab` suppressed, its child names both, is listed under each
+/// and is counted once by each.
+#[test]
+fn a_withheld_dag_parent_lifts_its_child_to_each_of_its_parents() {
+    const LIFT: &str = "clusters/lift";
+    let fx = fixture(None);
+    let ids = plant(
+        &fx,
+        LIFT,
+        HierarchyKind::Dag,
+        &[&[
+            ("a", 0..300, &[]),
+            ("b", 300..600, &[]),
+            ("ab", 200..400, &["a", "b"]),
+            ("child", 250..350, &["ab"]),
+        ]],
+    );
+    suppress(&fx, ids["ab"]);
+
+    let roots = browse_layer(&fx.engine, LIFT, None, BrowseForm::Roots);
+    assert_eq!(key_set(&roots), vec!["a", "b"]);
+    let mut both = vec![ids["a"], ids["b"]];
+    both.sort_unstable_by_key(|id| id.raw());
+    for parent in ["a", "b"] {
+        assert_eq!(row(&roots, parent).child_count, 1);
+        let children = browse_layer(&fx.engine, LIFT, None, BrowseForm::Children(ids[parent]));
+        assert_eq!(key_set(&children), vec!["child"]);
+        assert_eq!(row(&children, "child").parent_ids, both);
+        assert!(names_nowhere(&children, ids["ab"]));
+    }
 }
 
 /// **The order is total and the cursor walks it exactly.**

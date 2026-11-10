@@ -890,9 +890,10 @@ function merged(a: Artifact, b: Artifact): Artifact {
 
 /**
  * The parent-child links among the artifacts in {@link ArtifactsProjection.served}, built from
- * their `parentIds`. Only links between served artifacts are included, so an artifact whose parent
- * was not served is a root here. On a `dag` layer a child is listed under each served parent. The
- * links change as the camera moves and as the cluster budget changes.
+ * their `parentIds`, which name each artifact's nearest ancestors the viewer is served, as browse
+ * names them. Only links between artifacts in the list are included, so an artifact none of whose
+ * served ancestors is in it is a root here. On a `dag` layer a child is listed under each served
+ * parent. The links change as the camera moves and as the cluster budget changes.
  *
  * @category Projections
  */

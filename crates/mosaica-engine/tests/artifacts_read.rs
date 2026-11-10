@@ -655,9 +655,11 @@ fn taxon_rows(pages: &[RecordBatch]) -> Vec<TaxonRow> {
     out
 }
 
-/// **A read by identifier fills the figures of the levels its identifiers name and the levels
-/// their parents sit at, and no other**, and answers as the read of every level does. Each
-/// viewer below holds a grant of its own, so each level's figures are filled once per viewer.
+/// **A read by identifier fills the figures of the levels its identifiers name and, where it
+/// names `parents`, every level above them, and no other**, and answers as the read of every
+/// level does. The levels above are those the climb to an artifact's nearest served ancestors can
+/// pass through. Each viewer below holds a grant of its own, so each level's figures are filled
+/// once per viewer.
 #[test]
 fn a_read_by_identifier_reads_only_the_levels_it_names() {
     let fx = fixture();
@@ -696,18 +698,52 @@ fn a_read_by_identifier_reads_only_the_levels_it_names() {
     assert!(!want.is_empty(), "the subset viewer is served some family");
     assert_eq!(by_ids, want);
 
-    // Species name their genera: the genera's level and the species', and not the families'.
+    // Species name their genera: the species' level and both above it.
     let all = engine.authorise_all().unwrap();
     let before = fills();
     let by_ids = read_by_ids(&all, &species);
-    assert_eq!(fills(), before + 2, "a read of species with parents fills species and genera");
+    assert_eq!(fills(), before + 3, "a read of species with parents fills every level");
     let whole = every_level(&all);
-    assert_eq!(fills(), before + 3, "the read of every level fills the families");
+    assert_eq!(fills(), before + 3, "so the read of every level fills nothing more");
     let named: HashSet<u64> = species.iter().map(|id| id.raw()).collect();
     let want: Vec<TaxonRow> = whole.into_iter().filter(|row| named.contains(&row.0)).collect();
     assert_eq!(want.len(), species.len());
     assert!(want.iter().all(|row| row.3.len() == 1), "every species names its genus");
     assert_eq!(by_ids, want);
+}
+
+/// **A withheld parent is climbed through.** With a genus suppressed, its species name the family
+/// above it in `parents`, as browse and the artifacts frame name it, and a read under `parent`
+/// naming the family lists them after the family's served genera. The genus is named in no row.
+#[test]
+fn a_withheld_parents_children_name_the_artifact_above_it() {
+    let fx = fixture();
+    let engine = fx.engine();
+    plant_taxa(&fx);
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let fields = names(&["key", "level", "parents", "masked_count", "centroid"]);
+    let read = |req: &ArtifactsRequest<'_>| taxon_rows(&read_all(engine, &full, req));
+    let planted = read(&request(TAXA, &fields));
+    let id = |key: &str| planted.iter().find(|row| row.1 == key).unwrap().0;
+    let (family, genus) = (id("t0-0"), id("t1-0"));
+    engine
+        .accept_changes(vec![(
+            artifact_target(engine, MosaicaId::new(genus)),
+            ChangeOp::Suppress,
+        )])
+        .unwrap();
+
+    let after = read(&request(TAXA, &fields));
+    for species in ["t2-0", "t2-1"] {
+        let row = after.iter().find(|row| row.1 == species).unwrap();
+        assert_eq!(row.3, vec![family], "{species} names the family above its genus");
+    }
+    assert!(after.iter().all(|row| row.0 != genus && !row.3.contains(&genus)));
+
+    let mut under = request(TAXA, &fields);
+    under.parent = Some(MosaicaId::new(family));
+    let keys: Vec<String> = read(&under).into_iter().map(|row| row.1).collect();
+    assert_eq!(keys, vec!["t1-1", "t1-2", "t2-0", "t2-1"]);
 }
 
 /// **A read by identifier of an attached layer fills the levels of its target that the named

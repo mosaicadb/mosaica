@@ -32,8 +32,9 @@ const masked = (n: bigint): Masked => ({value: Number(n), exact: true});
  * hierarchy, filter layers among them. When there are several, a select switches between them.
  *
  * Each row shows how many of the artifact's items the viewer may see. While filters are set, it
- * also shows how many of those items match. A parent the viewer may not see is left out, so its
- * children appear at the top level.
+ * also shows how many of those items match. An artifact the viewer may not see is left out, and
+ * its children appear under its nearest ancestors the viewer may see, or at the top level where it
+ * has none.
  *
  * A row's buttons highlight or filter the map by its artifact. Its Fit button only fires
  * `mosaica-artifactfit`, so you handle the event by passing its id to the map's `fitTo`. The

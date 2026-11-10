@@ -1548,12 +1548,13 @@ struct BrowseReq {
     view: String,
     /// The layer to browse. A name outside `/v1/meta`'s list is a `422`.
     layer: String,
-    /// The level to address on a levelled layer (`stacked`, `tiered`). A 422 on `flat`, `nested`
-    /// and `dag`, which have one level.
+    /// The one level the roots and search forms list on a levelled layer (`stacked`, `tiered`),
+    /// which list every level without it. A 422 on `flat`, `nested` and `dag`, which have one
+    /// level.
     #[serde(default)]
     level: Option<u32>,
-    /// The children form: the artifacts naming this one among their parents, with its own served
-    /// parents in `parents`. A `mosaica_id`, as a number or its decimal string.
+    /// The children form: the artifacts naming this one in their `parent_ids`, at any level, with
+    /// its own `parent_ids` rows in `parents`. A `mosaica_id`, as a number or its decimal string.
     #[serde(default)]
     parent: Option<serde_json::Value>,
     /// The search form: the layer's artifacts whose key or served `name` contains this
@@ -1578,7 +1579,7 @@ struct BrowseReq {
 #[derive(Debug, Serialize)]
 struct BrowseResp {
     artifacts: Vec<BrowseRowResp>,
-    /// The requested artifact's own served parents; `[]` except in the children form.
+    /// The requested artifact's own nearest served ancestors; `[]` except in the children form.
     parents: Vec<BrowseRowResp>,
     /// The cursor for the next page, absent where this page is the last.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1598,9 +1599,10 @@ struct BrowseRowResp {
     #[serde(skip_serializing_if = "Option::is_none")]
     matched_count: Option<u64>,
     rung: u32,
-    /// This artifact's parents that this principal is also served.
+    /// The artifacts this principal is served nearest above this one on every path: its served
+    /// parents, and in place of a withheld parent that parent's own nearest served ancestors.
     parent_ids: Vec<String>,
-    /// How many artifacts this principal is served name this one among their parents.
+    /// How many artifacts this principal is served name this one in their `parent_ids`.
     child_count: u64,
     /// Null where the request named no palette size.
     slot: Option<u8>,

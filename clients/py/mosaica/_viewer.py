@@ -1657,9 +1657,12 @@ class Viewer:
         The page holds the rows in `artifacts` and the cursor for the next page in `next`, absent
         on the last page.
 
-        - `view`, `layer`, `level`: as for `artifacts`.
-        - `parent`: list the children of this annotation, given by its `mosaica_id`. Without it
-          or `q`, the page lists the top-level annotations.
+        - `view`, `layer`: as for `artifacts`.
+        - `level`: on a stacked or tiered layer, list the top-level annotations or the search
+          results of this level alone. Without it they cover every level.
+        - `parent`: list the children of this annotation, given by its `mosaica_id`, at any
+          level. Without it or `q`, the page lists the top-level annotations, those with no
+          ancestor this reader may see.
         - `q`: list the annotations whose key or name contains this text, ignoring case. It
           cannot be combined with `parent`.
         - `filters`: a filter expression. Each row then has `matched_count`, the number of its
@@ -1668,8 +1671,10 @@ class Viewer:
         - `cursor`: the `next` of the previous page.
         - `palette_size`: how many colours your palette holds, as on `artifacts`.
 
-        Each row has `masked_count`, the number of its items this reader may see, and
-        `child_count`, how many rows `parent=` would list for it. A row has a `name` when the
+        Each row has `masked_count`, the number of its items this reader may see, `parent_ids`,
+        the annotations nearest above it that this reader may see, and `child_count`, how many
+        rows `parent=` would list for it. An annotation this reader may not see is skipped, so its
+        children are listed under the annotations above it. A row has a `name` when the
         annotation has text or a label attached to it, such as a cluster's topic.
 
             page = v.browse_artifacts("papers", "clusters")

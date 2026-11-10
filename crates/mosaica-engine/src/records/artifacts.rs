@@ -61,8 +61,9 @@ pub struct ArtifactsRequest<'a> {
     pub layer: &'a str,
     /// Only artifacts at this level, on a levelled layer.
     pub level: Option<u32>,
-    /// Only artifacts naming this one among their parents. One this viewer is not served names
-    /// nothing, exactly as one with no children.
+    /// Only artifacts naming this one in their `parents`, which are each artifact's nearest served
+    /// ancestors ([`crate::lineage`]). One this viewer is not served names nothing, exactly as one
+    /// with no children.
     pub parent: Option<MosaicaId>,
     /// Only artifacts whose key, or first served text content, contains this, case-insensitively.
     pub q: Option<&'a str>,
@@ -252,6 +253,10 @@ struct Scope<'a> {
     /// This viewer's slots over each level the page reads, where `slot` is named under a palette
     /// size.
     slots: Vec<Option<Arc<crate::slots::LevelSlots>>>,
+    /// The identifier of each artifact a climb to the nearest served ancestors has asked about,
+    /// where this viewer is served it, so an ancestor many artifacts climb to is judged once a
+    /// page.
+    ancestors: std::cell::RefCell<std::collections::HashMap<(u32, u32), Option<u64>>>,
 }
 
 impl Scope<'_> {
@@ -284,6 +289,34 @@ impl Scope<'_> {
             masked_count,
             supplied,
         })
+    }
+
+    /// The artifacts nearest above `(level, ordinal)` on every path that this viewer is served
+    /// ([`crate::lineage`]), as `(mosaica_id, level, ordinal)`, ascending. The page reads every
+    /// level the climb can reach where this is asked.
+    fn nearest(&self, level: u32, ordinal: u32) -> Vec<(u64, u32, u32)> {
+        let Some(within) = crate::lineage::within_level(self.layer.declaration.hierarchy.kind)
+        else {
+            return Vec::new();
+        };
+        crate::lineage::nearest_served(
+            |level, ordinal| {
+                self.levels
+                    .get(level as usize)
+                    .and_then(Option::as_ref)
+                    .map_or(&[], |read| read.forms.first().parents(ordinal))
+            },
+            |level, ordinal| {
+                let id = *self
+                    .ancestors
+                    .borrow_mut()
+                    .entry((level, ordinal))
+                    .or_insert_with(|| self.served(level, ordinal).map(|s| s.mosaica_id));
+                id.map(|id| (id, level, ordinal))
+            },
+            (level, ordinal),
+            within,
+        )
     }
 
     /// A level this page asks about.
@@ -334,12 +367,9 @@ impl Scope<'_> {
                 return false;
             };
             let names_it = self
-                .level(level)
-                .forms
-                .first()
-                .parents(ordinal)
+                .nearest(level, ordinal)
                 .iter()
-                .any(|p| p.level == p_level && p.ordinal == p_ordinal);
+                .any(|&(_, l, o)| (l, o) == (p_level, p_ordinal));
             if !names_it {
                 return false;
             }
@@ -564,8 +594,9 @@ impl ArtifactsPager<'_> {
             .properties
             .iter()
             .any(|p| matches!(p, Property::Centroid | Property::Box));
-        // Only the levels this page can ask about are read: the ones it walks, the ones their
-        // parents sit at where parents are named, and the requested parent's.
+        // Only the levels this page can ask about are read: the ones it walks, every level above
+        // them where parents are named or narrowed by, since the climb to the nearest served
+        // ancestors can pass through any of them, and the requested parent's.
         let mut levels: Vec<Option<ReadLevel>> = layer.runs.iter().map(|_| None).collect();
         let read = |filter: &mut Option<HeldFilter>,
                     layer: &RegisteredLayer,
@@ -594,16 +625,10 @@ impl ArtifactsPager<'_> {
         for &level in &walked {
             read(&mut self.filter, &layer, &mut levels, level, geometry)?;
         }
-        if self.properties.contains(&Property::Parents) {
-            let mut above: Vec<u32> = Vec::new();
-            for (level, ordinal) in walked_positions(self.named.as_deref(), &walked, &levels) {
-                if let Some(read) = &levels[level as usize] {
-                    above.extend(read.forms.first().parents(ordinal).iter().map(|p| p.level));
-                }
-            }
-            above.sort_unstable();
-            above.dedup();
-            for level in above {
+        let climbs = crate::lineage::within_level(layer.declaration.hierarchy.kind).is_some()
+            && (self.properties.contains(&Property::Parents) || self.req.parent.is_some());
+        if climbs {
+            for level in 0..walked.iter().copied().max().unwrap_or(0) {
                 read(&mut self.filter, &layer, &mut levels, level, geometry)?;
             }
         }
@@ -697,6 +722,7 @@ impl ArtifactsPager<'_> {
             filter_rows,
             parent: None,
             slots,
+            ancestors: Default::default(),
         };
         if self.req.parent.is_some() {
             scope.parent = Some(parent.and_then(|(level, ordinal, entity)| {
@@ -764,16 +790,11 @@ impl ArtifactsPager<'_> {
                         .and_then(|s| s.get(ordinal));
                 }
                 Property::Parents => {
-                    let mut ids: Vec<u64> = read
-                        .forms
-                        .first()
-                        .parents(ordinal)
-                        .iter()
-                        .filter_map(|p| Some(scope.served(p.level, p.ordinal)?.mosaica_id))
+                    row.parents = scope
+                        .nearest(level, ordinal)
+                        .into_iter()
+                        .map(|(id, ..)| id)
                         .collect();
-                    ids.sort_unstable();
-                    ids.dedup();
-                    row.parents = ids;
                 }
                 Property::Target => {
                     row.target = read

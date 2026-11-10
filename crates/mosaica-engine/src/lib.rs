@@ -32,6 +32,7 @@ mod error;
 pub mod filter;
 mod flush;
 mod layer_read;
+mod lineage;
 pub mod gate;
 mod generation;
 mod geometry;
