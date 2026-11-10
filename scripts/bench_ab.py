@@ -194,7 +194,14 @@ PROFILES = {
 
 BLOBS = 64
 LEVELS = (16, 256, 4096)
+#: A text column's words are `w<rank>`, the rank drawn from a Zipf law of this exponent and
+#: clipped to `WORDS - 1`.
 WORDS = 50_000
+TEXT_ZIPF = 1.15
+#: A category's codes are drawn from a Zipf law of this exponent, clipped to its last code.
+CATEGORY_ZIPF = 1.3
+#: A keyword is `k` followed by an integer drawn uniformly from `0 .. KEYWORD_SPAN`.
+KEYWORD_SPAN = 2**40
 #: Rows generated and written at a time, which bounds the generator's memory.
 CHUNK = 1_000_000
 
@@ -235,6 +242,11 @@ def labelled(prefix: str, numbers: np.ndarray, *more) -> pa.Array:
     return pc.binary_join_element_wise(*parts, "")
 
 
+def category_size(column: Column) -> int:
+    """The number of codes a category column's values are drawn from."""
+    return 2000 if column.vocabulary == "catd" else 40
+
+
 def values(rng: np.random.Generator, column: Column, n: int, text_words: int) -> pa.Array:
     t = column.type
     if t in RANGES:
@@ -248,12 +260,12 @@ def values(rng: np.random.Generator, column: Column, n: int, text_words: int) ->
     if t == "timestamp_us":
         return pa.array(rng.integers(*TIME_RANGE, size=n), pa.timestamp("us", tz="UTC"))
     if t == "category":
-        size = 2000 if column.vocabulary == "catd" else 40
-        return labelled(column.vocabulary, np.minimum(rng.zipf(1.3, size=n), size) - 1)
+        size = category_size(column)
+        return labelled(column.vocabulary, np.minimum(rng.zipf(CATEGORY_ZIPF, size=n), size) - 1)
     if t == "keyword":
-        return labelled("k", rng.integers(0, 2**40, size=n))
+        return labelled("k", rng.integers(0, KEYWORD_SPAN, size=n))
     if t == "text":
-        ranks = np.minimum(rng.zipf(1.15, size=(text_words, n)), WORDS) - 1
+        ranks = np.minimum(rng.zipf(TEXT_ZIPF, size=(text_words, n)), WORDS) - 1
         return pc.binary_join_element_wise(*(labelled("w", r) for r in ranks), " ")
     raise ValueError(f"no generator for type {t}")
 

@@ -40,7 +40,9 @@ shared box.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import math
 import os
 import random
 import shutil
@@ -58,7 +60,18 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(HERE))
 
-from bench_ab import OPERATOR_CREDENTIAL, deployment  # noqa: E402
+from bench_ab import (  # noqa: E402
+    CATEGORY_ZIPF,
+    KEYWORD_SPAN,
+    OPERATOR_CREDENTIAL,
+    PROFILES,
+    RANGES,
+    TEXT_ZIPF,
+    WORDS,
+    Profile,
+    category_size,
+    deployment,
+)
 from bench_cgroup import Capped, drop_page_cache, files_under, human, parse_bytes  # noqa: E402
 
 CONFIG = REPO / "bench" / "capacity.toml"
@@ -80,6 +93,14 @@ def load_profile(path: Path, name: str) -> dict:
             merged[key] = {**merged[key], **value}
         else:
             merged[key] = value
+    if isinstance(merged.get("mix"), str):
+        mixes = config.get("mixes", {})
+        if merged["mix"] not in mixes:
+            raise SystemExit(
+                f"[profile.{name}] names mix {merged['mix']!r}, but {path} has no "
+                f"[mixes.{merged['mix']}]; it has {', '.join(sorted(mixes)) or 'none'}"
+            )
+        merged["mix"] = dict(mixes[merged["mix"]])
     merged["name"] = name
     return merged
 
@@ -114,9 +135,150 @@ def ensure_corpus(data: Path, spec: dict, binary: Path, build_cap: str) -> dict:
     return json.loads((out / "corpus.json").read_text())
 
 
-def mix_file(corpus: dict, weights: dict, path: Path) -> None:
-    """The workload's requests over `corpus`: panning close-ups, overviews, filtered close-ups,
-    aggregates and item pages, weighted as the profile says."""
+#: Filter families. A family in a mix is `filter_variants` entries named `<family>-NN` whose
+#: filters differ only in their values, so the filter cache meets as many distinct filters as the
+#: family has entries. `range`, `prefix`, `common`, `rare` and `combined` filter the overview;
+#: `pan_range` filters a panning close-up and `agg_range` a cell-count aggregate.
+FAMILIES = ("range", "pan_range", "agg_range", "prefix", "common", "rare", "combined")
+#: The fewest items of the whole corpus a filter entry is expected to match. One expected to
+#: match fewer is refused, since it would time an almost empty answer.
+MIN_MATCHES = 100
+
+
+@functools.cache
+def zipf_pmf(exponent: float, size: int) -> tuple[float, ...]:
+    """The probability of each code `numpy.minimum(rng.zipf(exponent), size) - 1` draws: the
+    Zipf law normalised by the zeta function, summed by Euler-Maclaurin, and the last code taking
+    the whole tail."""
+    n = 10_000
+    zeta = (
+        math.fsum(k**-exponent for k in range(1, n))
+        + n ** (1 - exponent) / (exponent - 1)
+        + n**-exponent / 2
+        + exponent * n ** (-exponent - 1) / 12
+    )
+    head = [(r + 1) ** -exponent / zeta for r in range(size - 1)]
+    return (*head, 1 - math.fsum(head))
+
+
+def word_fraction(rank: int, words: int) -> float:
+    """The fraction of items whose text of `words` independent draws holds the word `w<rank>`."""
+    return 1 - (1 - zipf_pmf(TEXT_ZIPF, WORDS)[rank]) ** words
+
+
+def first_word(words: int, fraction: float) -> int:
+    """The rank of the most frequent word that at most `fraction` of items hold."""
+    return next(r for r in range(WORDS - 1) if word_fraction(r, words) <= fraction)
+
+
+def prefix_fraction(digits: int) -> float:
+    """The fraction of keywords `k<n>`, `n` uniform over `0 .. KEYWORD_SPAN`, that start with
+    `k<digits>`."""
+    held, scale = 0, 1
+    while digits * scale < KEYWORD_SPAN:
+        held += min((digits + 1) * scale, KEYWORD_SPAN) - digits * scale
+        scale *= 10
+    return held / KEYWORD_SPAN
+
+
+def filter_columns(profile: Profile) -> dict:
+    """The columns the filter families read, each None where the profile has none: an indexed
+    integer column of at least 65,536 values, an indexed keyword, an indexed text column, and a
+    rendered or indexed category of 40 codes."""
+
+    def first(test):
+        return next((c for c in profile.columns if test(c)), None)
+
+    return {
+        "integer": first(
+            lambda c: c.type in RANGES and c.index and RANGES[c.type][1] - RANGES[c.type][0] >= 65_535
+        ),
+        "keyword": first(lambda c: c.type == "keyword" and c.index),
+        "text": first(lambda c: c.type == "text" and c.index),
+        "category": first(
+            lambda c: c.type == "category" and (c.render or c.index) and category_size(c) == 40
+        ),
+    }
+
+
+def filter_family(family: str, corpus: dict, variants: int, close: list) -> list[tuple]:
+    """`variants` requests of one family over `corpus`, each `(route, body, pan, fraction)`, where
+    `fraction` is the share of the corpus's items the filter is expected to match under the
+    generators in `bench_ab.py`. There integers are uniform, a keyword is `k` and a uniform
+    integer, text words are Zipf-ranked and categories Zipf-coded, each column drawn independently
+    of the others, so a conjunction's fraction is the product of its leaves'."""
+    profile = PROFILES[corpus["profile"]]()
+    columns = filter_columns(profile)
+    view, extent = corpus["view"], corpus["extent"]
+
+    def column(role: str, what: str):
+        if columns[role] is None:
+            raise SystemExit(
+                f"mix kind {family!r} filters on {what}, and a {profile.name!r} corpus has none; "
+                f"serve a `text` or `fields` corpus, or take {family!r} out of the mix"
+            )
+        return columns[role]
+
+    def window(i: int, slot: int, share: int) -> tuple[dict, float]:
+        """A range holding 1/`share` of the integer column's values, at the `i`th of `variants`
+        places; `slot` moves it a width along, so that two families' windows differ."""
+        c = column("integer", "an indexed integer column")
+        lo, hi = RANGES[c.type]
+        span = hi - lo + 1
+        width = span // share
+        start = lo + (i * (span // variants) + slot * width) % (span - width + 1)
+        return {c.name: {"range": {"gte": start, "lte": start + width - 1}}}, width / span
+
+    def word(rank: int) -> tuple[dict, float]:
+        c = column("text", "an indexed text column")
+        return {c.name: {"match": f"w{rank}"}}, word_fraction(rank, profile.text_words)
+
+    def overview(leaf: dict, fraction: float) -> tuple:
+        body = {"view": view, "zoom": 2, "bbox": extent, "k": 200, "filters": leaf}
+        return "/v1/viewport", body, None, fraction
+
+    out = []
+    for i in range(variants):
+        if family == "range":
+            out.append(overview(*window(i, 0, 100)))
+        elif family == "agg_range":
+            leaf, fraction = window(i, 1, 100)
+            body = {
+                "view": view,
+                "filters": leaf,
+                "groupings": [{"count": True, "cells": {"depth": 6}}],
+            }
+            out.append(("/v1/aggregate", body, None, fraction))
+        elif family == "pan_range":
+            leaf, fraction = window(i, 2, 100)
+            body = {"view": view, "zoom": 6, "bbox": close, "k": 200, "filters": leaf}
+            out.append(("/v1/viewport", body, extent, fraction))
+        elif family == "prefix":
+            c = column("keyword", "an indexed keyword column")
+            out.append(overview({c.name: {"prefix": f"k{11 + i}"}}, prefix_fraction(11 + i)))
+        elif family == "common":
+            out.append(overview(*word(first_word(profile.text_words, 0.25) + i)))
+        elif family == "rare":
+            out.append(overview(*word(first_word(profile.text_words, 1e-4) + i)))
+        elif family == "combined":
+            if columns["text"] is not None:
+                first, first_fraction = word(first_word(profile.text_words, 0.25) + variants + i)
+            else:
+                c = column("category", "an indexed text column or a category of 40 codes")
+                code = i % category_size(c)
+                first = {c.name: {"eq": f"{c.vocabulary}{code}"}}
+                first_fraction = zipf_pmf(CATEGORY_ZIPF, category_size(c))[code]
+            second, second_fraction = window(i, 0, 10)
+            out.append(overview({"all_of": [first, second]}, first_fraction * second_fraction))
+    return out
+
+
+def mix_file(corpus: dict, weights: dict, path: Path, variants: int = 20) -> dict[str, float]:
+    """The workload's requests over `corpus`, weighted as the profile says: panning close-ups,
+    overviews, filtered close-ups, aggregates and item pages, and the filter families of
+    `FAMILIES`. Each entry of a family weighs the family's weight and every other kind `variants`
+    times its own, so that a family weighs its weight in all. Returns the fraction of the corpus's
+    items each family entry is expected to match."""
     view = corpus["view"]
     x0, y0, x1, y1 = corpus["extent"]
     close = [x0, y0, x0 + (x1 - x0) / 8, y0 + (y1 - y0) / 8]
@@ -153,16 +315,43 @@ def mix_file(corpus: dict, weights: dict, path: Path) -> None:
             None,
         ),
     }
-    requests_ = []
+    scale = variants if any(kind in FAMILIES for kind in weights) else 1
+    requests_, expected = [], {}
     for kind, weight in weights.items():
+        if kind in FAMILIES:
+            for i, (route, body, pan, fraction) in enumerate(
+                filter_family(kind, corpus, variants, close)
+            ):
+                name = f"{kind}-{i:02d}"
+                if fraction * corpus["items"] < MIN_MATCHES:
+                    raise SystemExit(
+                        f"mix kind {name} is expected to match {fraction * corpus['items']:.0f} of "
+                        f"the corpus's {corpus['items']:,} items; serve a corpus of at least "
+                        f"{math.ceil(MIN_MATCHES / fraction):,} items, or take {kind!r} out of the mix"
+                    )
+                entry = {"kind": name, "route": route, "weight": int(weight), "body": body}
+                if pan is not None:
+                    entry["pan"] = pan
+                entry["expected_fraction"] = fraction
+                expected[name] = fraction
+                requests_.append(entry)
+            continue
         if kind not in kinds:
-            raise SystemExit(f"mix kind {kind!r} is not one of {', '.join(kinds)}")
+            raise SystemExit(f"mix kind {kind!r} is not one of {', '.join([*kinds, *FAMILIES])}")
+        if kind == "filtered" and not any(
+            c.name == "kind" for c in PROFILES[corpus["profile"]]().columns
+        ):
+            raise SystemExit(
+                f"mix kind 'filtered' filters on `kind`, which a {corpus['profile']!r} corpus "
+                "does not have; take it out of the mix"
+            )
         route, body, pan = kinds[kind]
-        entry = {"kind": kind, "route": route, "weight": int(weight), "body": body}
+        entry = {"kind": kind, "route": route, "weight": int(weight) * scale, "body": body}
         if pan is not None:
             entry["pan"] = pan
         requests_.append(entry)
     path.write_text(json.dumps({"requests": requests_}, indent=1))
+    return expected
 
 
 def cache_settings(policy: str, cap: int | None, fractions: dict) -> dict:
@@ -458,7 +647,9 @@ def run_cell(cell: dict, profile: dict, binary: Path, bench: Path, corpus: dict,
         if server.capped.group is not None:
             server.capped.group.evict(files_under([Path(corpus["bundle"])]))
         mix = work / "mix.json"
-        mix_file(corpus, profile["mix"], mix)
+        expected = mix_file(corpus, profile["mix"], mix, profile.get("filter_variants", 20))
+        if expected:
+            record["expected_fraction"] = expected
 
         for phase, duration in (("cold", profile["cold_s"]), ("warm", profile["warm_s"])):
             sampler = Sampler(server.capped)
@@ -509,6 +700,13 @@ def run(args) -> int:
 
     corpora = [ensure_corpus(data, spec, binary, profile["build_cap"]) for spec in profile["corpora"]]
     (run_dir / "profile.json").write_text(json.dumps(profile, indent=1))
+    for corpus in corpora:
+        mix_file(
+            corpus,
+            profile["mix"],
+            run_dir / f"mix-{Path(corpus['bundle']).parent.name}.json",
+            profile.get("filter_variants", 20),
+        )
 
     ceiling_path = run_dir / "ceiling.json"
     if not ceiling_path.exists():
@@ -587,6 +785,40 @@ def human_bytes(n) -> str:
     return f"{n} B"
 
 
+def family_rollup(cells: list[dict]) -> list[str]:
+    """The warm window's kinds of each cell, with the kinds `name-NN` of one family summed into a
+    row: throughput, sheds and errors summed, the p99 and p99.9 the worst entry's. Empty where no
+    cell has a family."""
+    rows = []
+    for c in sorted(
+        cells,
+        key=lambda c: (c["items"], -(c["cap"] or 1 << 62), c["policy"], c["arm"], c["users"], c["think_ms"]),
+    ):
+        groups: dict[str, list[tuple[str, dict]]] = {}
+        for kind, k in ((c.get("warm") or {}).get("kinds") or {}).items():
+            family, _, number = kind.rpartition("-")
+            groups.setdefault(family if family and number.isdigit() else kind, []).append((kind, k))
+        if all(len(members) == 1 and members[0][0] == name for name, members in groups.items()):
+            continue
+        expected = c.get("expected_fraction") or {}
+        for family, members in groups.items():
+            ks = [k for _, k in members]
+            fractions = [expected[kind] for kind, _ in members if kind in expected]
+            matched = "-"
+            if fractions:
+                matched = f"{min(fractions):.4%}"
+                if max(fractions) != min(fractions):
+                    matched += f"–{max(fractions):.4%}"
+            rows.append(
+                f"| {c['items']:,} | {human(c['cap'])} | {c['policy']} | {c['arm']} | {c['users']} "
+                f"| {c['think_ms']} | {family} | {len(ks)} "
+                f"| {sum(k['throughput_rps'] for k in ks):,.0f} | {max(k['p99_ms'] for k in ks):.1f} "
+                f"| {max(k['p999_ms'] for k in ks):.1f} | {sum(k['shed_429'] for k in ks)} "
+                f"| {sum(k['errors'] for k in ks)} | {matched} |"
+            )
+    return rows
+
+
 def report(args) -> int:
     cells = [
         json.loads(line)
@@ -650,6 +882,15 @@ def report(args) -> int:
             "\nWarm window, by request kind:\n\n"
             "| cap | policy | arm | users | think ms | kind | rps | p50 ms | p99 ms | p99.9 ms | shed | errors |\n"
             "|" + "---|" * 12 + "\n" + "\n".join(kinds) + "\n"
+        )
+    families = family_rollup(cells)
+    if families:
+        text += (
+            "\nWarm window, by request family (`name-NN` kinds summed; p99 the worst entry's; "
+            "matched the fraction of the corpus each entry's filter is expected to match):\n\n"
+            "| items | cap | policy | arm | users | think ms | family | entries | rps | p99 ms "
+            "| p99.9 ms | shed | errors | matched |\n"
+            "|" + "---|" * 14 + "\n" + "\n".join(families) + "\n"
         )
     (args.run_dir / "report.md").write_text(text)
     print(text)

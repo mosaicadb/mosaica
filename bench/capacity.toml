@@ -90,3 +90,46 @@ generator_cpus = ""
 generator_threads = 8
 cold_s = 30
 warm_s = 60
+
+# The filter strand: the same matrix over corpora with indexed text, keyword and integer columns,
+# under a mix whose filters vary from request to request. `text` has a 24-word indexed text
+# column `body`, an indexed keyword `tag` and `year`, an indexed u16; `fields` has every type,
+# rendered, indexed, both and neither, and its indexed text column holds 6 words. Both label
+# items with 16 terms, so a grant of 8 terms sees half the items and arm A's 1,000 users draw
+# from 12,870 distinct grants. The item counts are half bench_ab.py's for `text` and 2M for
+# `fields`, whose items carry about sixty columns, so that both bundles and their source fit in
+# the 18 GB of disk this box has spare. Their bytes have not been measured; `corpus.json` records
+# them and the report gives each cell's ratio of bundle to cap. The caps run from holding either
+# bundle whole to several times smaller than it.
+[profile.filters]
+corpora = [
+  { profile = "text", items = 5_000_000 },
+  { profile = "fields", items = 2_000_000 },
+]
+caps = ["256M", "512M", "1G", "2G", "unbounded"]
+users = [10, 100, 1000]
+think_ms = [0, 1000]
+grant_width = 8
+mix = "filters"
+# Entries in each filter family of the mix.
+filter_variants = 20
+
+# A mix a profile names replaces [defaults.mix], where a table in a profile adds to it. A family
+# (`range`, `pan_range`, `agg_range`, `prefix`, `common`, `rare`, `combined`) becomes
+# `filter_variants` kinds `<family>-NN` that differ only in the filter's values, each weighing the
+# family's weight, and every other kind weighs `filter_variants` times its own, so each weight
+# below is that kind's or family's share of requests. `filter_family` in
+# scripts/bench_capacity.py says what each family filters on and the fraction of items each entry
+# is expected to match.
+[mixes.filters]
+pan = 20
+overview = 5
+aggregate = 5
+items = 5
+range = 10
+pan_range = 10
+agg_range = 5
+prefix = 10
+common = 10
+rare = 10
+combined = 10

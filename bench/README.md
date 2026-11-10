@@ -399,3 +399,39 @@ and a cell within a third of it is flagged `generator_bound`. The `small` profil
 to three cores and the generator to the fourth, which suits a 4-core box. On a larger box, use the
 `large` profile, change `caps` and `corpora` to its memory and disc, and give the generator enough
 cores or run it on another machine. A `scatter` bundle is about 62 bytes an item.
+
+### The filter strand
+
+The `filters` profile runs the same matrix over two corpora whose filters touch the indexes a
+`scatter` corpus lacks. The `text` corpus has an indexed text column of 24 words drawn from a Zipf
+vocabulary, an indexed keyword and an indexed `year`, and the `fields` corpus has every attribute
+type. Its mix, `[mixes.filters]`, keeps the panning close-ups, overviews, aggregates and item pages
+as a baseline and adds filter families, where each family is twenty mix entries `range-00` to
+`range-19` whose filters differ only in their values. Because every user draws among the twenty,
+the filter cache meets twenty distinct filters per family, as it would from people choosing
+different values.
+
+| family | request | filter | items matched in each entry |
+|---|---|---|---|
+| `range` | overview | a range over an indexed integer column | 1.0% |
+| `pan_range` | panning close-up | the same, with other windows | 1.0% |
+| `agg_range` | cell-count aggregate | the same, with other windows | 1.0% |
+| `prefix` | overview | a prefix `k11` to `k30` on an indexed keyword | 1.0% |
+| `common` | overview | a text match on the words held by a quarter of items and the 19 less common after them | 23% to 6.9% (`text`), 21% to 2.3% (`fields`) |
+| `rare` | overview | a text match on the words held by one item in 10,000 | 0.01% |
+| `combined` | overview | `all_of` a text match and a range over a tenth of the integer column | 0.67% to 0.38% (`text`), 0.22% to 0.11% (`fields`) |
+
+The fractions are of the whole corpus, worked out from the generators in `bench_ab.py`
+(`filter_family` in `bench_capacity.py` has the arithmetic), and each viewer sees the share of
+them its grant reaches, which in this profile is half. Every mix entry carries its
+`expected_fraction`, the mix is kept in the run directory as `mix-<corpus>.json`, and a family
+whose entry would match fewer than 100 items of the corpus, or that names a column the corpus does
+not have, is refused before any cell runs.
+
+```bash
+python3 scripts/bench_capacity.py run --profile filters --data /data/bench --run-dir /data/runs/filters
+python3 scripts/bench_capacity.py report /data/runs/filters
+```
+
+The report adds a table by family, which sums the throughput, sheds and errors of a family's
+entries and gives the worst entry's p99, beside the per-kind table it summarises.
