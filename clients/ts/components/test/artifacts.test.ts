@@ -81,12 +81,17 @@ describe('<mosaica-layer-picker>', () => {
     const entries = deepAll(host, '[part="entry"]').map((e) => e.getAttribute('data-layer'));
     // `labels` depends on `clusters`, so it is inside that entry and not one of its own.
     expect(entries).toEqual(['clusters', 'districts']);
-    // The entry says in its own text which layers are drawn with it, so the checkbox's name holds them.
+    // The entry says which layers are drawn with it: to a pointer in its title, and in text that
+    // describes its checkbox and is not drawn.
     const entry = deep(host, '[part="entry"][data-layer="clusters"]')!;
-    expect(entry.hasAttribute('title')).toBe(false);
-    expect(entry.querySelector('[part="linked"]')!.getAttribute('data-layers')).toBe('labels');
-    expect(entry.textContent).toContain('labels');
-    expect(deep(host, '[part="entry"][data-layer="districts"] [part="linked"]')).toBeNull();
+    expect(entry.getAttribute('title')).toContain('labels');
+    const said = deep(host, `#${entry.querySelector('input')!.getAttribute('aria-describedby')}`)!;
+    expect(said.getAttribute('data-layers')).toBe('labels');
+    expect(said.textContent).toContain('labels');
+    expect(said.classList.contains('sr-only')).toBe(true);
+    // The row holds its name alone, and a layer that brings no other is described by nothing.
+    expect(entry.textContent!.trim()).toBe(entry.querySelector('[part="name"]')!.textContent!.trim());
+    expect(deep(host, '[part="entry"][data-layer="districts"] input')!.hasAttribute('aria-describedby')).toBe(false);
     expect(deep(host, 'mosaica-count')).toBeNull();
     const box = deep(host, '[part="entry"][data-layer="clusters"] input') as HTMLInputElement;
     box.checked = true;

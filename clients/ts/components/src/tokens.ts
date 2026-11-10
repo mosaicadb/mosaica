@@ -54,6 +54,8 @@ import {css} from 'lit';
  * @cssprop --mosaica-space - The gap between the content in the map's corners and the map's edges.
  *   Half of it separates items in one corner.
  * @cssprop --mosaica-density - A multiplier on `--mosaica-space`'s default.
+ * @cssprop --mosaica-long-text - What a title or a name too long for its line does: `nowrap`, the
+ *   default, cuts it with an ellipsis; `normal` wraps it.
  * @cssprop --mosaica-map-height - The map's height.
  */
 export const tokens = css`
@@ -90,6 +92,7 @@ export const tokens = css`
     --_mosaica-shadow: var(--mosaica-shadow, 0 2px 10px light-dark(rgba(0, 0, 0, 0.06), transparent), 0 4px 16px light-dark(transparent, rgba(0, 0, 0, 0.35)));
     /* A layout such as the explorer's compact form sets the private base the default scales. */
     --_mosaica-space: var(--mosaica-space, calc(var(--_mosaica-space-base, 16px) * var(--mosaica-density, 1)));
+    --_mosaica-long-text: var(--mosaica-long-text, nowrap);
     --_mosaica-map-height: var(--mosaica-map-height, 420px);
     font-family: var(--_mosaica-font);
     font-size: 13px;
@@ -318,8 +321,7 @@ export const chrome = css`
     color: inherit;
     font: inherit;
     cursor: pointer;
-    /* The chosen option's text wraps; a browser that keeps a select to one line marks the cut. */
-    white-space: normal;
+    white-space: var(--_mosaica-long-text);
     overflow-wrap: anywhere;
     text-overflow: ellipsis;
   }

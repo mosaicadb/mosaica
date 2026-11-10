@@ -18,7 +18,7 @@ export const PARTS = {
   status: ['cancel', 'card', 'spinner', 'strip', 'count-shown', 'count-matched', 'count-highlighted', 'count-of', 'count-visible', ...STATE],
   'view-picker': ['field', 'select'],
   'key-picker': ['entry', 'field', 'label', 'select', 'step'],
-  'layer-picker': ['entry', 'linked', 'name', 'note', 'title', ...STATE],
+  'layer-picker': ['entry', 'name', 'note', 'title', ...STATE],
   filter: ['bar', 'entry', 'mode', 'more', 'operator', 'operators', 'refusal', 'spinner', 'tick', 'value-count', 'values'],
   'cluster-filter': ['entry', 'more', 'name', 'option', 'path', 'refusal', 'value-count', 'values'],
   'filter-panel': ['add', 'add-list', 'add-note', 'add-option', 'add-search', 'all', 'all-count', 'card', 'chip', 'chips', 'clear', 'clear-highlight', 'edit', 'subject', 'subject-count', 'subject-key', 'subject-name', ...STATE],

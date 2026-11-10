@@ -8,7 +8,8 @@ import {chrome, tokens} from './tokens.js';
 /**
  * Put the layer picker beside a map when the bundle has annotation layers that viewers should be
  * able to turn on and off. A layer that others depend on, such as a clustering and its labels, has
- * one checkbox, so that the whole group is turned on together.
+ * one checkbox, so that the whole group is turned on together. The row's `title` names the layers
+ * it turns on, and a screen reader hears them as the checkbox's description.
  *
  * Filter layers draw nothing, so the picker names them in a note instead of giving them checkboxes.
  * Viewers filter by a filter layer from its card in `<mosaica-filter-panel>`, or browse it in
@@ -24,8 +25,8 @@ import {chrome, tokens} from './tokens.js';
  * @csspart refusal - The words "View refused", with `data-code`, in the refused state.
  * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart entry - One layer that draws, with `data-layer`.
- * @csspart name - A layer's title, or its name if it has no title.
- * @csspart linked - Under a layer's name, the layers drawn with it, such as "with Labels".
+ * @csspart name - A layer's title, or its name if it has no title, on one line unless
+ *   `--mosaica-long-text` is `normal`.
  * @csspart note - The note naming the filter layers, such as "Venues can be used as a filter
  *   only.", with `data-layers` listing their names.
  */
@@ -49,16 +50,10 @@ export class MosaicaLayerPicker extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
-      [part='entry'] .col {
-        min-width: 0;
-        padding: 4px 0;
-      }
       [part='name'] {
-        overflow-wrap: anywhere;
-      }
-      [part='linked'] {
-        font-size: 12px;
-        color: var(--_mosaica-ink-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
       }
     `
@@ -99,13 +94,11 @@ export class MosaicaLayerPicker extends MosaicaElement {
       <span part="state" data-state="shown"></span>
       <div class="col">
         ${drawn.map(
-          (e) => html`<label part="entry" class="check" data-layer=${e.root.name}>
-            <input type="checkbox" .checked=${on.has(e.root.name)} @change=${(ev: Event) => this.toggle(e, (ev.target as HTMLInputElement).checked)} />
-            <span class="col">
+          (e, i) => html`<label part="entry" class="check" data-layer=${e.root.name} title=${[e.root.name, ...linkedTo(e)].map(titled).join(' + ')}>
+              <input type="checkbox" aria-describedby=${e.closure.length > 1 ? `linked-${i}` : nothing} .checked=${on.has(e.root.name)} @change=${(ev: Event) => this.toggle(e, (ev.target as HTMLInputElement).checked)} />
               <span part="name">${e.root.title || e.root.name}</span>
-              ${e.closure.length > 1 ? html`<span part="linked" data-layers=${linkedTo(e).join(' ')}>with ${linkedTo(e).map(titled).join(', ')}</span>` : nothing}
-            </span>
-          </label>`
+            </label>
+            ${e.closure.length > 1 ? html`<span id=${`linked-${i}`} class="sr-only" data-layers=${linkedTo(e).join(' ')}>with ${linkedTo(e).map(titled).join(', ')}</span>` : nothing}`
         )}
       </div>
       ${filters.length > 0
@@ -115,7 +108,7 @@ export class MosaicaLayerPicker extends MosaicaElement {
   }
 }
 
-/** The layers an entry draws with its own. */
+/** The layers an entry draws with its own, which its row's `title` and the text its checkbox is described by name. */
 function linkedTo(entry: LayerEntry): string[] {
   return entry.closure.filter((name) => name !== entry.root.name);
 }

@@ -199,10 +199,12 @@ if (scene === 'short') {
 } else if (scene === 'targets') {
   // The height a pointer has to hit on each control of the Layers popover and of the heading.
   await press(part('layers-toggle'));
-  const toggle = part('points-toggle')!;
-  const t = toggle.getBoundingClientRect();
-  const mid = t.left + t.width / 2;
-  const hits = [-11, 0, 11].map((dy) => inside(topAt(mid, t.top + t.height / 2 + dy), toggle));
+  /** Whether a press 11 px above the control's centre, at it and 11 px below it lands on the control. */
+  const hit = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    return [-11, 0, 11].map((dy) => inside(topAt(r.left + r.width / 2, r.top + r.height / 2 + dy), el));
+  };
+  const hits = hit(part('points-toggle')!);
   const sliders = [...shadow.querySelectorAll<HTMLElement>('[part="display"] input[type="range"]')];
   const select = shadow.querySelector('mosaica-view-picker')!.shadowRoot!.querySelector('select')!;
   // No two sliders' boxes overlap.
@@ -212,7 +214,7 @@ if (scene === 'short') {
     toggle: hits,
     sliders: Object.fromEntries(sliders.map((s) => [s.getAttribute('part'), s.getBoundingClientRect().height])),
     overlap,
-    editColours: part('edit-colours')!.getBoundingClientRect().height,
+    editColours: hit(part('edit-colours')!),
     select: select.getBoundingClientRect().height
   });
 } else if (scene === 'footer') {

@@ -677,13 +677,13 @@ describe('<mosaica-explorer> the item card beside its point', () => {
     ctx.store.set('selection', item(5n));
     await settle(ctx.host);
     const pin = () => ctx.shadow.querySelector<HTMLButtonElement>('[part="pin"]')!;
-    const before = {name: pin().getAttribute('aria-label'), title: pin().getAttribute('title')};
-    expect(before.name).toContain('A5');
+    const before = pin().getAttribute('aria-label');
+    expect(before).toContain('A5');
     expect(pin().getAttribute('aria-pressed')).toBe('false');
     pin().click();
     await settle(ctx.host);
     expect(pin().getAttribute('aria-pressed')).toBe('true');
-    expect({name: pin().getAttribute('aria-label'), title: pin().getAttribute('title')}).toEqual(before);
+    expect(pin().getAttribute('aria-label')).toBe(before);
   });
 
   it('drops every card when it is given another store', async () => {
@@ -1030,15 +1030,16 @@ describe('<mosaica-explorer> layouts', () => {
       expect(options.map((o) => o.querySelector('.tick svg') !== null)).toEqual([true, false, false]);
     });
 
-    it('says in words under the button why it offers nothing, where no number column sizes points', async () => {
+    it('says why it offers nothing, where no number column sizes points: to a pointer in its title, and in text that describes it and is not drawn', async () => {
       const {shadow} = await explorer();
       shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
       await settle(shadow);
       const button = shadow.querySelector<HTMLButtonElement>('[part="size-by"]')!;
       expect(button.disabled).toBe(true);
-      expect(button.hasAttribute('title')).toBe(false);
       const note = shadow.querySelector(`#${button.getAttribute('aria-describedby')}`)!;
       expect(note.textContent!.trim()).not.toBe('');
+      expect(note.classList.contains('sr-only')).toBe(true);
+      expect(button.getAttribute('title')).toBe(note.textContent!.trim());
       // A bundle with such a column needs no note.
       document.body.innerHTML = '';
       const sized = await popover();
@@ -1270,8 +1271,6 @@ describe('<mosaica-explorer> the Colour section', () => {
     part('ramp-reverse')!.click();
     await settle(host);
     expect(part('ramp-reverse')!.getAttribute('aria-pressed')).toBe('true');
-    // Pressed, Reverse is ticked.
-    expect(part('ramp-reverse')!.querySelector('svg')).not.toBeNull();
     expect(changes).toEqual([{palette: 'tableau10', ramp: 'viridis', scale: 'linear', reverse: true}]);
   });
 });

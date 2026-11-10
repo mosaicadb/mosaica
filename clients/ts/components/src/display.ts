@@ -179,8 +179,6 @@ export const displayStyles = css`
   .resolution input[type='range'] {
     flex: 1 1 auto;
     min-width: 0;
-    height: 24px;
-    margin-block: -4px;
   }
   /* The stops the server will not count for this view, struck through on the track. */
   .resolution .past {
@@ -205,9 +203,16 @@ export const displayStyles = css`
     color: var(--_mosaica-ink);
     font-weight: 500;
   }
-  /* Edit colours sits under the choices, as wide as its words. */
-  .edit-colours {
+  /* Edit colours sits under the choices, as wide as its words, 22 px high inside a pointer's target of 24. */
+  .btn.edit-colours {
+    position: relative;
     align-self: flex-start;
+    height: 22px;
+  }
+  .btn.edit-colours::after {
+    content: '';
+    position: absolute;
+    inset: -2px -1px;
   }
   .ramp-choice {
     display: flex;
@@ -256,9 +261,6 @@ export const displayStyles = css`
     gap: 10px;
   }
   .toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
     padding: 3px 8px;
     border: 1px solid var(--_mosaica-line);
     border-radius: var(--_mosaica-radius-control);
@@ -269,24 +271,15 @@ export const displayStyles = css`
   .toggle[aria-pressed='true'] {
     border-color: var(--_mosaica-accent);
     background: var(--_mosaica-accent);
+    box-shadow: inset 0 -2px 0 var(--_mosaica-accent-ink);
     color: var(--_mosaica-accent-ink);
   }
   .ramp-choice .t {
-    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: var(--_mosaica-long-text);
     overflow-wrap: anywhere;
     text-align: left;
-  }
-  /* Why a choice is not offered, under its button. */
-  .choice-note {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    min-width: 0;
-  }
-  .choice-note .note {
-    font-size: 12px;
-    color: var(--_mosaica-ink-2);
   }
   .ramp-choice:disabled {
     opacity: 0.4;
@@ -391,7 +384,7 @@ export const displayStyles = css`
   }
   /* The Palette menu: a row per palette, its colours wrapped in a block beside its name and line. */
   .size-menu.palettes {
-    width: 388px;
+    width: 360px;
     padding: 6px;
   }
   .size-menu.palettes .hd {
@@ -433,17 +426,32 @@ export const displayStyles = css`
   }
   .size-menu .lead {
     display: flex;
-    flex: 1 1 auto;
     align-items: center;
     gap: 8px;
-    min-width: 0;
   }
-  /* The tick beside the entry chosen; the others keep its room, so the titles line up. */
+  /* The tick on the entry chosen takes no room: in a menu entry's left padding, at the right of a
+     palette's title line, and at the right of a density ramp's row. */
+  .size-menu [role='menuitemradio'],
+  .ramp-list button {
+    position: relative;
+  }
   .tick {
-    display: inline-flex;
-    flex: none;
-    width: 14px;
-    height: 14px;
+    position: absolute;
+    left: 1px;
+    top: 50%;
+    display: flex;
+    translate: 0 -50%;
+    pointer-events: none;
+  }
+  .size-menu.palettes .tick {
+    left: auto;
+    right: 10px;
+    top: 12px;
+    translate: none;
+  }
+  .ramp-list .tick {
+    left: auto;
+    right: 6px;
   }
   .size-menu .kind {
     font-size: 12px;
@@ -479,7 +487,6 @@ export const displayStyles = css`
   }
   .ramp-list button[aria-checked='true'] {
     background: var(--_mosaica-surface-2);
-    font-weight: 500;
   }
   /* A palette's or a ramp's colours are what it is, so they keep them under forced colours; a
      slider's track and thumb are drawn in backgrounds, and take system colours. */

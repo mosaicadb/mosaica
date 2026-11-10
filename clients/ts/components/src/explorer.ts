@@ -88,8 +88,8 @@ const fill = (v: number, min: number, max: number) => `--fill:${(Math.min(1, Mat
 /** A ramp as a CSS gradient, low to high. */
 const rampGradient = (ramp: RampName, reverse: boolean) => `linear-gradient(to right, ${Array.from({length: 8}, (_, k) => rgb(colourOfFraction(k / 7, ramp, reverse))).join(', ')})`;
 
-/** The room for a tick before an entry of a list of choices, ticked for the one chosen. */
-const tick = (chosen: boolean) => html`<span class="tick">${chosen ? icon('check', 14, 1.6) : nothing}</span>`;
+/** The tick on the entry chosen in a list of choices. */
+const tick = (chosen: boolean) => (chosen ? html`<span class="tick">${icon('check', 11, 1.6)}</span>` : nothing);
 
 /** The Density choices in the Layers popover, in order. */
 const DENSITY_MODES: readonly {mode: DensityMode; label: string}[] = [
@@ -160,6 +160,10 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  *
  * An `aria-label` on the explorer names its map, so a page with several explorers can tell them
  * apart.
+ *
+ * A dataset title, a view's name or a layer's name too long for its line is cut with an ellipsis
+ * and keeps all of it in its `title`. Set `--mosaica-long-text: normal` to wrap them. The narrow
+ * layout wraps them itself.
  *
  * @summary A complete map application in a single element.
  * @tagname mosaica-explorer
@@ -444,6 +448,9 @@ export class MosaicaExplorer extends MosaicaElement {
         letter-spacing: 0;
         text-transform: none;
         color: var(--_mosaica-ink);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
       }
       .compact .title {
@@ -654,9 +661,12 @@ export class MosaicaExplorer extends MosaicaElement {
         padding: 10px 16px;
       }
       @container explorer (max-width: 720px) {
-        /* The map keeps a floor under its height; a frame too short for it and the bars scrolls. */
+        /* The map keeps a floor under its height; a frame too short for it and the bars scrolls.
+           A long title or name wraps here, in the explorer and in the elements it holds. */
         [part='frame'],
         [part='frame'].docked {
+          --mosaica-long-text: normal;
+          --_mosaica-long-text: normal;
           grid-template-columns: minmax(0, 1fr);
           grid-template-rows: minmax(120px, 1fr) auto auto;
           overflow: hidden auto;
@@ -1144,8 +1154,8 @@ export class MosaicaExplorer extends MosaicaElement {
     const viewName = shown && shown.displayName !== shown.id ? shown.displayName : '';
     // The heading is the dataset's title, or without one the view's name.
     const names = this.datasetTitle
-      ? html`<div class="names"><h2 part="dataset-title" class="title">${this.datasetTitle}</h2><div class="sub">${pickers}${pickersShown || !viewName ? nothing : html`<span part="view-name">${viewName}</span>`}</div></div>`
-      : html`<div class="names">${pickers}${pickersShown || !viewName ? nothing : html`<h2 part="view-name" class="title">${viewName}</h2>`}</div>`;
+      ? html`<div class="names"><h2 part="dataset-title" class="title" title=${this.datasetTitle}>${this.datasetTitle}</h2><div class="sub">${pickers}${pickersShown || !viewName ? nothing : html`<span part="view-name">${viewName}</span>`}</div></div>`
+      : html`<div class="names">${pickers}${pickersShown || !viewName ? nothing : html`<h2 part="view-name" class="title" title=${viewName}>${viewName}</h2>`}</div>`;
     const named = pickersShown || viewName !== '' || this.datasetTitle !== '';
     const layersPanel = html`<slot name="layers"><mosaica-layer-picker exportparts=${FORWARD['layer-picker']}></mosaica-layer-picker></slot>`;
     const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevel=${level}></mosaica-filter-panel></slot>`;
@@ -1374,9 +1384,9 @@ export class MosaicaExplorer extends MosaicaElement {
     const view = this.resolvedStore?.get('view').id ?? '';
     if (!m) return nothing;
     const live = this.liveKey();
-    // Pin keeps one name, the card's, and says whether it is on by its pressed state.
+    // Pin keeps one name, the card's, and says whether it is on by its pressed state; its hint to a pointer says what a press does.
     const pinButton = (pressed: boolean, name: string, onPress: () => void) =>
-      html`<button part="pin" slot="actions" type="button" aria-pressed=${pressed ? 'true' : 'false'} aria-label=${`Pin ${name}`} title="Pin" @click=${onPress}>${icon('pin', 13, 1.5)}</button>`;
+      html`<button part="pin" slot="actions" type="button" aria-pressed=${pressed ? 'true' : 'false'} aria-label=${`Pin ${name}`} title=${pressed ? 'Unpin' : 'Keep open'} @click=${onPress}>${icon('pin', 13, 1.5)}</button>`;
     const cards: {key: string; world: [number, number]; body: TemplateResult; pinned: boolean; name: string}[] = this.pinned
       .filter((p) => p.view === view)
       .map((p) => {
@@ -1746,7 +1756,7 @@ export class MosaicaExplorer extends MosaicaElement {
     const palette = s && clusters ? PALETTES[s.get('artifacts').palette] : CATEGORY_PALETTES[colouring.palette];
     const choice = (menu: Menu, label: string, body: TemplateResult, stretch = false) =>
       html`<button part=${({size: 'size-by', colour: 'colour-by', palette: 'palette', ramp: 'ramp'} as const)[menu]} class=${`ramp-choice${stretch ? ' stretch' : ''}`} type="button" aria-haspopup="menu" aria-expanded=${this.menu === menu ? 'true' : 'false'}
-        aria-label=${label} ?disabled=${!meta} @click=${() => (this.menu = this.menu === menu ? null : menu)} @keydown=${this.onMenuButtonKey(menu)}>${body}${icon('chev', 12, 1.4)}</button>`;
+        aria-label=${label} title=${label} ?disabled=${!meta} @click=${() => (this.menu = this.menu === menu ? null : menu)} @keydown=${this.onMenuButtonKey(menu)}>${body}${icon('chev', 12, 1.4)}</button>`;
     const byName = current?.title ?? 'None';
     const palettes =
       (column?.category || clusters) && !this.hidePalettes
@@ -1764,7 +1774,7 @@ export class MosaicaExplorer extends MosaicaElement {
                     @keydown=${(e: KeyboardEvent) => radioKeys(e, scales.length, i, (j) => this.choosePalette({scale: scales[j]!}))}>${x === 'linear' ? 'Linear' : 'Log'}</button>`
                 )}
               </div>
-              <button part="ramp-reverse" class="toggle" type="button" aria-pressed=${colouring.reverse ? 'true' : 'false'} @click=${() => this.choosePalette({reverse: !colouring.reverse})}>${colouring.reverse ? icon('check', 12, 1.6) : nothing}Reverse</button>
+              <button part="ramp-reverse" class="toggle" type="button" aria-pressed=${colouring.reverse ? 'true' : 'false'} @click=${() => this.choosePalette({reverse: !colouring.reverse})}>Reverse</button>
             </div>`
         : nothing;
     // A category's values and a layer's clusters have colours of their own to edit.
@@ -1912,15 +1922,15 @@ export class MosaicaExplorer extends MosaicaElement {
     const sizing = this.sizing;
     const number = (e: Event) => Number((e.target as HTMLInputElement).value);
     const {min, max, step} = SIZE_RANGE;
-    // With no column to offer, the button says why under itself.
+    // With no column to offer, the button says why: to a pointer in its `title`, and in the text that describes it.
     const none = this.resolvedStore?.get('meta') && this.sizeColumns.length === 0;
+    const why = 'No number column to size by';
+    const shown = sizeBy === null ? 'None' : columnCaption(sizeBy);
     const choice = html`<span id="size-by-label">Size by</span>
-      <div class="choice-note">
-        <button part="size-by" class="ramp-choice" type="button" aria-haspopup="menu" aria-expanded=${this.menu === 'size' ? 'true' : 'false'} aria-label=${`Size by: ${sizeBy === null ? 'None' : columnCaption(sizeBy)}`}
-          ?disabled=${disabled || (sizeBy === null && this.sizeColumns.length === 0)} aria-describedby=${none ? 'size-by-note' : nothing}
-          @click=${() => (this.menu = this.menu === 'size' ? null : 'size')} @keydown=${this.onMenuButtonKey('size')}><span class="t">${sizeBy === null ? 'None' : columnCaption(sizeBy)}</span>${icon('chev', 12, 1.4)}</button>
-        ${none ? html`<span id="size-by-note" class="note">No number column to size by</span>` : nothing}
-      </div>`;
+      <button part="size-by" class="ramp-choice" type="button" aria-haspopup="menu" aria-expanded=${this.menu === 'size' ? 'true' : 'false'} aria-label=${`Size by: ${shown}`}
+        ?disabled=${disabled || (sizeBy === null && this.sizeColumns.length === 0)} title=${none ? why : shown} aria-describedby=${none ? 'size-by-note' : nothing}
+        @click=${() => (this.menu = this.menu === 'size' ? null : 'size')} @keydown=${this.onMenuButtonKey('size')}><span class="t">${shown}</span>${icon('chev', 12, 1.4)}</button>
+      ${none ? html`<span id="size-by-note" class="sr-only">${why}</span>` : nothing}`;
     if (sizeBy === null) {
       if (this.hideSize) return choice;
       return html`${choice}<label for="point-size">Size</label>

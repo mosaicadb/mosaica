@@ -343,12 +343,13 @@ describe('Escape while the map shows a tooltip', () => {
 
 describe('the controls of the Layers popover and the heading', () => {
   it('are 24 px high for a pointer, without one slider’s box over another’s', async () => {
-    const {result: r} = await opened<{toggle: boolean[]; sliders: Record<string, number>; overlap: boolean; editColours: number; select: number}>('targets', 1200, 800);
+    const {result: r} = await opened<{toggle: boolean[]; sliders: Record<string, number>; overlap: boolean; editColours: boolean[]; select: number}>('targets', 1200, 800);
     expect(r.toggle).toEqual([true, true, true]);
     expect(Object.keys(r.sliders).length).toBeGreaterThanOrEqual(4);
     for (const [name, height] of Object.entries(r.sliders)) expect(height, name).toBeGreaterThanOrEqual(24);
     expect(r.overlap).toBe(false);
-    expect(r.editColours).toBeGreaterThanOrEqual(24);
+    // The switch and Edit colours are drawn smaller, inside a target of that height.
+    expect(r.editColours).toEqual([true, true, true]);
     expect(r.select).toBeGreaterThanOrEqual(24);
   });
 });
