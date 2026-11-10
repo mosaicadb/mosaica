@@ -692,6 +692,7 @@ impl Bundle {
             digests,
             &identity_key,
             Verification::JustWritten,
+            None,
         )?;
         shard.seed_declared(manifest);
         data.shards.push(Arc::new(shard));
@@ -851,11 +852,15 @@ pub fn open_written_prefix(root: &Path, prefix: &str) -> Result<Bundle> {
 /// keeps the views, row spaces and segments `carried` holds for it, under the record the new
 /// prefix names, and only `opened` is opened from the prefix. The new prefix links the other
 /// shards' files, so `carried`'s mappings are of the same bytes.
+///
+/// `tallies` are the field tallies the compaction wrote for `opened`'s views, by view, taken in
+/// place of reading each view's file again.
 pub fn open_written_prefix_carrying(
     root: &Path,
     prefix: &str,
     opened: ShardId,
     carried: &Bundle,
+    tallies: &crate::field_tallies::ViewTallies,
 ) -> Result<Bundle> {
     let manifest_path = root.join(prefix).join("MANIFEST.json");
     let manifest_bytes = read_to_vec(&manifest_path)?;
@@ -864,8 +869,21 @@ pub fn open_written_prefix_carrying(
         prefix,
         manifest_bytes,
         Verification::JustWritten,
-        Some((opened, carried)),
+        Some(Carrying {
+            opened,
+            carried,
+            tallies,
+        }),
     )
+}
+
+/// What [`open_written_prefix_carrying`] holds already: every shard but `opened`, and the field
+/// tallies of `opened`'s views.
+#[derive(Clone, Copy)]
+struct Carrying<'a> {
+    opened: ShardId,
+    carried: &'a Bundle,
+    tallies: &'a crate::field_tallies::ViewTallies,
 }
 
 fn open_prefix(
@@ -873,7 +891,7 @@ fn open_prefix(
     prefix: &str,
     manifest_bytes: Vec<u8>,
     verification: Verification,
-    carrying: Option<(ShardId, &Bundle)>,
+    carrying: Option<Carrying<'_>>,
 ) -> Result<Bundle> {
     let prefix_dir = root.join(prefix);
     let manifest_path = prefix_dir.join("MANIFEST.json");
@@ -946,8 +964,8 @@ fn open_prefix(
         let mut shards = Vec::with_capacity(records.len());
         for record in records {
             let held = carrying
-                .filter(|(opened, _)| *opened != record.id)
-                .and_then(|(_, carried)| carried.partitions.get(&partition_desc.phash))
+                .filter(|carrying| carrying.opened != record.id)
+                .and_then(|carrying| carrying.carried.partitions.get(&partition_desc.phash))
                 .and_then(|partition| partition.shard(record.id));
             if let Some(held) = held {
                 let mut shard = ShardData {
@@ -967,6 +985,7 @@ fn open_prefix(
                 digests,
                 &identity_key,
                 verification,
+                carrying.map(|carrying| carrying.tallies),
             )?;
             shard.seed_declared(&manifest);
             shards.push(Arc::new(shard));
@@ -992,7 +1011,9 @@ fn open_prefix(
     })
 }
 
-/// One shard's views under `prefix_dir`, as `record` lists their segments.
+/// One shard's views under `prefix_dir`, as `record` lists their segments, taking a view's field
+/// tallies from `tallies` where it holds them.
+#[allow(clippy::too_many_arguments)]
 fn open_shard(
     prefix_dir: &Path,
     prefix: &str,
@@ -1001,6 +1022,7 @@ fn open_shard(
     digests: Digests<'_>,
     identity_key: &IdentityKey,
     verification: Verification,
+    tallies: Option<&crate::field_tallies::ViewTallies>,
 ) -> Result<ShardData> {
     // Only a view's newest incarnation is opened: a drop leaves the old one's segments listed until
     // a fold, and the two row spaces are unrelated. [`Bundle::with_views`] checks the survivor
@@ -1036,7 +1058,9 @@ fn open_shard(
         let view_entry = match views.get_mut(&seg_desc.view) {
             Some(entry) => entry,
             None => {
-                let view = open_view(prefix_dir, layout, digests, seg_desc, has_base, record.id)?;
+                let held = tallies.and_then(|tallies| tallies.get(&seg_desc.view)).cloned();
+                let view =
+                    open_view(prefix_dir, layout, digests, seg_desc, has_base, record.id, held)?;
                 views.insert(seg_desc.view.clone(), view);
                 views.get_mut(&seg_desc.view).expect("just inserted")
             }
@@ -1119,6 +1143,7 @@ fn open_shard(
 }
 
 /// A view's row space as its base segment `seg_desc` leaves it, before any segment is attached.
+/// `tallies` are its field tallies where the caller holds them.
 fn open_view(
     prefix_dir: &Path,
     layout: ShardLayout<'_>,
@@ -1126,6 +1151,7 @@ fn open_view(
     seg_desc: &SegmentDescriptor,
     has_base: bool,
     shard: ShardId,
+    tallies: Option<Arc<crate::field_tallies::FieldTallies>>,
 ) -> Result<ViewData> {
     let view_rel = layout.view_rel(&seg_desc.view);
     let view_dir = prefix_dir.join(&view_rel);
@@ -1152,8 +1178,13 @@ fn open_view(
     let field_tallies = if has_base
         && digests.names(&format!("{view_rel}/{}", crate::field_tallies::FIELD_TALLIES_FILE))
     {
-        let path = view_dir.join(crate::field_tallies::FIELD_TALLIES_FILE);
-        crate::field_tallies::read(&path)?.map(Arc::new)
+        match tallies {
+            Some(tallies) => Some(tallies),
+            None => {
+                let path = view_dir.join(crate::field_tallies::FIELD_TALLIES_FILE);
+                crate::field_tallies::read(&path)?.map(Arc::new)
+            }
+        }
     } else {
         None
     };

@@ -100,6 +100,8 @@ pub(crate) struct CompletedFold {
     pub(crate) runtime_scoped_attributes: Vec<String>,
     /// [`FoldContext::scoped_views`].
     pub(crate) scoped_views: Vec<ScopedColumn>,
+    /// Each view's field tallies, as its file holds them, so the publication's open reads none.
+    pub(crate) tallies: mosaica_store::field_tallies::ViewTallies,
 }
 
 #[derive(Default)]
@@ -181,7 +183,7 @@ pub(crate) fn execute(
     ctx.going_on()?;
 
     stairs.enter(Pass::FieldTallies, None);
-    derive_field_tallies(&plan, &ctx, &segments, &mut out)?;
+    let tallies = derive_field_tallies(&plan, &ctx, &segments, &mut out)?;
     ctx.going_on()?;
 
     // The term dictionary is carried to the new prefix by a hard link at publication, so no pass
@@ -204,6 +206,7 @@ pub(crate) fn execute(
         runtime_attributes: ctx.runtime_attributes,
         runtime_scoped_attributes: ctx.runtime_scoped_attributes,
         scoped_views: ctx.scoped_views,
+        tallies,
     })
 }
 
@@ -304,15 +307,17 @@ fn fold_row_spaces(
 
 /// Pass 4d: each view's field tallies over its new base rows, read from the files passes 1, 4a and
 /// 4c wrote, through the function a build calls ([`mosaica_store::field_tallies::derive_view`]).
+/// Returns each view's tallies.
 fn derive_field_tallies(
     plan: &FoldPlan,
     ctx: &FoldContext,
     segments: &[SegmentDescriptor],
     out: &mut FoldOutput,
-) -> Result<(), MaintenanceFailed> {
+) -> Result<mosaica_store::field_tallies::ViewTallies, MaintenanceFailed> {
     let layout = plan.layout();
+    let mut tallies = BTreeMap::new();
     for segment in segments {
-        let path = mosaica_store::field_tallies::derive_view(
+        let (path, held) = mosaica_store::field_tallies::derive_view(
             &ctx.to_prefix_dir,
             layout,
             &segment.view,
@@ -330,8 +335,9 @@ fn derive_field_tallies(
             ),
             path,
         );
+        tallies.insert(segment.view.clone(), Arc::new(held));
     }
-    Ok(())
+    Ok(tallies)
 }
 
 /// Pass 2: the new base postings and `pairs.parquet`. Every ordinal below `dict_len` gets a

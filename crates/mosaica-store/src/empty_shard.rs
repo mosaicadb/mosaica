@@ -242,7 +242,7 @@ pub fn write_empty_shard(shard: &EmptyShard<'_>) -> Result<EmptyShardWritten> {
     let mut segments = Vec::with_capacity(shard.views.len());
     for view in shard.views {
         out.row_space(layout, view, shard.seg_id, &indexed)?;
-        let tallies = crate::field_tallies::derive_view(
+        let (tallies, _) = crate::field_tallies::derive_view(
             shard.prefix_dir,
             layout,
             view.id,

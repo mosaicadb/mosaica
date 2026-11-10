@@ -1104,6 +1104,23 @@ fn observe_held(
     (shape, held.into_inner())
 }
 
+/// The members of each artifact of `layer`'s `level` that `shard`'s slice of `store` holds once
+/// `pending` has run, by ordinal: copied, so a derived writer reads them under the store's lock and
+/// projects them once it is released.
+fn held_members(
+    store: &ArtifactStore,
+    pending: &PendingRetirement,
+    shard: ShardId,
+    layer: &str,
+    level: u32,
+) -> Vec<(u32, mosaica_lifecycle::membership::Members)> {
+    let slice = slice_of(store, shard);
+    pending
+        .held(store, shard, layer, level)
+        .map(|(ordinal, record)| (ordinal, slice.members_of(record).clone()))
+        .collect()
+}
+
 /// Whether `extent` is one of the files a level holds of its layout, which a compaction that moves
 /// the level's layout writes again in every shard.
 fn superseded_by_a_move(
@@ -2697,6 +2714,7 @@ impl Executor {
             &folded_tiers,
             executed,
             executed_artifacts,
+            &completed.tallies,
         ) {
             self.diverge_from_current(&completed.prefix, &reason);
             return;
@@ -2895,7 +2913,8 @@ impl Executor {
     }
 
     /// Opens the prefix `CURRENT` now names and swaps onto it, retiring `retired` from the shard's
-    /// overlay and `retired_artifacts` from each space's.
+    /// overlay and `retired_artifacts` from each space's. The shard's views take `tallies`, the
+    /// field tallies the compaction wrote.
     #[allow(clippy::too_many_arguments)]
     fn swap_onto_folded_prefix(
         &mut self,
@@ -2905,6 +2924,7 @@ impl Executor {
         folded_tiers: &[String],
         retired: croaring::Bitmap,
         retired_artifacts: std::collections::BTreeMap<LayerSpace, croaring::Bitmap>,
+        tallies: &mosaica_store::field_tallies::ViewTallies,
     ) -> Result<(), String> {
         let shard = live.shard_of(shard_id);
         let live_tiers = &shard.data.record.deltas;
@@ -2913,7 +2933,7 @@ impl Executor {
             prefix,
             shard_id,
             retired,
-            Some(&live.bundle),
+            Some((&live.bundle, tallies)),
         )
         .map_err(|e| format!("the folded prefix would not open ({e})"))?;
         rotation.retired_artifacts = retired_artifacts;
@@ -3385,18 +3405,13 @@ impl DerivedSources {
         let space = &data.row_space;
         let row_count = u32::try_from(space.total_rows()).unwrap_or(u32::MAX);
         if !spatial {
-            return Some(self.live.with_artifacts(|store| {
-                let slice = slice_of(store, other.id());
-                observe_held(row_count, &|visit| {
-                    for (ordinal, record) in pending.held(store, other.id(), layer, level) {
-                        visit(
-                            ordinal,
-                            &slice
-                                .members_of(record)
-                                .projected(|part| space.project(part)),
-                        );
-                    }
-                })
+            let members = self
+                .live
+                .with_artifacts(|store| held_members(store, pending, other.id(), layer, level));
+            return Some(observe_held(row_count, &|visit| {
+                for (ordinal, members) in &members {
+                    visit(*ordinal, &members.projected(|part| space.project(part)));
+                }
             }));
         }
         let form = self
@@ -3476,65 +3491,67 @@ impl DerivedSources {
             // resolved against the level's shapes here, and the pieces are staged under the new
             // segment ids for the derived files this pass writes and for the flip's warm.
             let spatial = spatial_membership(&registered.declaration);
-            let (shape, held) = self.live.with_artifacts(|store| {
-                if spatial {
-                    let mut observed = None;
-                    for (view, segment) in fold_segments {
-                        let Some(incarnation) = live.bundle.manifest.incarnation_of(view) else {
-                            continue;
-                        };
-                        let held = self.shapes.level(
+            // The store's lock is held to read the level alone, and released before the level is
+            // resolved or projected, so a write waits for the read and no more.
+            let (shape, held) = if spatial {
+                let mut observed = None;
+                for (view, segment) in fold_segments {
+                    let Some(incarnation) = live.bundle.manifest.incarnation_of(view) else {
+                        continue;
+                    };
+                    let held = self.live.with_artifacts(|store| {
+                        self.shapes.level(
                             view,
                             incarnation,
                             &layer,
                             level,
                             store,
                             &crate::shapes::PersistedPieces::none(),
-                        );
-                        let (piece, cost) = held.resolve(segment);
-                        let piece = Arc::new(piece);
-                        held.stage(shard, &segment.seg_id, Arc::clone(&piece));
-                        tracing::info!(
-                            layer = %layer,
-                            level,
-                            view = %view,
-                            seg_id = %segment.seg_id,
-                            rows_tested = cost.rows_tested,
-                            rows_interior = cost.rows_interior,
-                            artifacts_empty = cost.artifacts_empty,
-                            elapsed_ms = cost.elapsed_ms,
-                            "the fold re-resolved a segment against a spatial level's shapes"
-                        );
-                        if view == first_view {
-                            observed = Some(observe_held(space.base_rows(), &|visit| {
-                                for (ordinal, rows) in piece.iter().enumerate() {
-                                    if let Some(rows) = rows {
-                                        visit(ordinal as u32, rows);
-                                    }
+                        )
+                    });
+                    let (piece, cost) = held.resolve(segment);
+                    let piece = Arc::new(piece);
+                    held.stage(shard, &segment.seg_id, Arc::clone(&piece));
+                    tracing::info!(
+                        layer = %layer,
+                        level,
+                        view = %view,
+                        seg_id = %segment.seg_id,
+                        rows_tested = cost.rows_tested,
+                        rows_interior = cost.rows_interior,
+                        artifacts_empty = cost.artifacts_empty,
+                        elapsed_ms = cost.elapsed_ms,
+                        "the fold re-resolved a segment against a spatial level's shapes"
+                    );
+                    if view == first_view {
+                        observed = Some(observe_held(space.base_rows(), &|visit| {
+                            for (ordinal, rows) in piece.iter().enumerate() {
+                                if let Some(rows) = rows {
+                                    visit(ordinal as u32, rows);
                                 }
-                            }));
-                        }
+                            }
+                        }));
                     }
-                    observed.unwrap_or_else(|| {
-                        (crate::layout::LevelShape::empty(), croaring::Bitmap::new())
-                    })
-                } else {
-                    // A borrowing level's filed column is true when written and not read
-                    // afterwards: the borrowed set moves with the target's version, so the engine
-                    // serves it artifact-major instead (`crate::artifacts::ArtifactRows::inherit`).
-                    let slice = slice_of(store, shard);
-                    observe_held(space.base_rows(), &|visit| {
-                        for (ordinal, record) in pending.held(store, shard, &layer, level) {
-                            visit(
-                                ordinal,
-                                &slice
-                                    .members_of(record)
-                                    .projected(|part| space.project_base(part)),
-                            );
-                        }
-                    })
                 }
-            });
+                observed.unwrap_or_else(|| {
+                    (crate::layout::LevelShape::empty(), croaring::Bitmap::new())
+                })
+            } else {
+                // A borrowing level's filed column is true when written and not read
+                // afterwards: the borrowed set moves with the target's version, so the engine
+                // serves it artifact-major instead (`crate::artifacts::ArtifactRows::inherit`).
+                let members = self
+                    .live
+                    .with_artifacts(|store| held_members(store, pending, shard, &layer, level));
+                observe_held(space.base_rows(), &|visit| {
+                    for (ordinal, members) in &members {
+                        visit(
+                            *ordinal,
+                            &members.projected(|part| space.project_base(part)),
+                        );
+                    }
+                })
+            };
             // The level over every shard: each other shard as it stands, beside this one as the
             // compaction leaves it.
             let mut reached = held;
@@ -3637,164 +3654,165 @@ impl DerivedSources {
             mosaica_store::manifest::DerivedForm,
             std::path::PathBuf,
         )> = Vec::with_capacity(wanted.len() * spaces.len());
-        // The store's lock is taken one level at a time, so a reader waits for one level at most.
+        // The store's lock is held to read each level alone, and released before the level is
+        // projected and its files written, so a write waits for the read and no more.
         for ((layer, level, layout), spatial) in &wanted {
-            self.live.with_artifacts(|store| {
-                let slice = slice_of(store, shard);
-                let partitions = !overlapping.contains(&(layer.clone(), *level));
-                let Some((composed_as, form)) =
-                    mosaica_store::derived::level_column(*layout, partitions)
-                else {
-                    return;
-                };
-                let Some(version) = pending.version_after(store, shard, layer, *level) else {
-                    return;
-                };
+            let partitions = !overlapping.contains(&(layer.clone(), *level));
+            let Some((composed_as, form)) =
+                mosaica_store::derived::level_column(*layout, partitions)
+            else {
+                continue;
+            };
+            let read = self.live.with_artifacts(|store| {
+                let version = pending.version_after(store, shard, layer, *level)?;
                 let ordinals = level_length(pending.records(store, layer, *level));
-                for (view, space) in spaces {
-                    let segment = fold_segments
-                        .iter()
-                        .find(|(v, _)| v == view)
-                        .map(|(_, segment)| segment);
-                    let composed = if *spatial {
-                        // The fold's segment is the whole base at row base 0, so the piece staged
-                        // in `choose_layouts` is the level's membership in this view.
-                        let piece = self.shapes.get(view, layer, *level).and_then(|held| {
-                            segment.and_then(|segment| held.staged(shard, &segment.seg_id))
-                        });
-                        match piece {
-                            Some(piece) => {
-                                let rows = piece.as_ref();
-                                mosaica_store::derived::project_row_column(
-                                    rows.len() as u32,
-                                    space.base_rows(),
-                                    composed_as,
-                                    scratch,
-                                    &|visit| {
-                                        for (ordinal, rows) in rows.iter().enumerate() {
-                                            if let Some(rows) = rows {
-                                                visit(ordinal as u32, rows);
-                                            }
+                let members = match spatial {
+                    true => Vec::new(),
+                    false => held_members(store, pending, shard, layer, *level),
+                };
+                Some((version, ordinals, members))
+            });
+            let Some((version, ordinals, members)) = read else {
+                continue;
+            };
+            for (view, space) in spaces {
+                let segment = fold_segments
+                    .iter()
+                    .find(|(v, _)| v == view)
+                    .map(|(_, segment)| segment);
+                let composed = if *spatial {
+                    // The fold's segment is the whole base at row base 0, so the piece staged
+                    // in `choose_layouts` is the level's membership in this view.
+                    let piece = self.shapes.get(view, layer, *level).and_then(|held| {
+                        segment.and_then(|segment| held.staged(shard, &segment.seg_id))
+                    });
+                    match piece {
+                        Some(piece) => {
+                            let rows = piece.as_ref();
+                            mosaica_store::derived::project_row_column(
+                                rows.len() as u32,
+                                space.base_rows(),
+                                composed_as,
+                                scratch,
+                                &|visit| {
+                                    for (ordinal, rows) in rows.iter().enumerate() {
+                                        if let Some(rows) = rows {
+                                            visit(ordinal as u32, rows);
                                         }
-                                    },
-                                )
-                            }
-                            None => Ok(None),
-                        }
-                    } else {
-                        mosaica_store::derived::project_row_column(
-                            ordinals,
-                            space.base_rows(),
-                            composed_as,
-                            scratch,
-                            &|visit| {
-                                for (ordinal, record) in pending.held(store, shard, layer, *level) {
-                                    visit(
-                                        ordinal,
-                                        &slice
-                                            .members_of(record)
-                                            .projected(|part| space.project_base(part)),
-                                    );
-                                }
-                            },
-                        )
-                    };
-                    match composed {
-                        Ok(Some(path)) => {
-                            // A served column is filed only with its members beside it.
-                            if matches!(
-                                form,
-                                mosaica_store::manifest::DerivedForm::RowColumn { .. }
-                            ) {
-                                match mosaica_store::derived::stage_row_members(
-                                    &path,
-                                    composed_as,
-                                    scratch,
-                                ) {
-                                    Ok(members) => written.push((
-                                        view.clone(),
-                                        layer.clone(),
-                                        *level,
-                                        version,
-                                        mosaica_store::manifest::DerivedForm::RowMembers,
-                                        members,
-                                    )),
-                                    Err(error) => {
-                                        tracing::warn!(
-                                            layer = %layer,
-                                            level,
-                                            view = %view,
-                                            %error,
-                                            "a row-major column's members would not be written \
-                                             at the fold; that level derives both on first use"
-                                        );
-                                        let _ = std::fs::remove_file(&path);
-                                        continue;
                                     }
-                                }
+                                },
+                            )
+                        }
+                        None => Ok(None),
+                    }
+                } else {
+                    mosaica_store::derived::project_row_column(
+                        ordinals,
+                        space.base_rows(),
+                        composed_as,
+                        scratch,
+                        &|visit| {
+                            for (ordinal, members) in &members {
+                                visit(
+                                    *ordinal,
+                                    &members.projected(|part| space.project_base(part)),
+                                );
                             }
-                            let labelled = segment.filter(|_| {
-                                composed_as == mosaica_types::layer::ServingLayout::RowMajorLabel
-                            });
-                            if let Some(segment) = labelled {
-                                match mosaica_store::derived::stage_band_labels(
-                                    &path,
-                                    &segment.bands,
-                                    scratch,
-                                ) {
-                                    Ok(copy) => written.push((
-                                        view.clone(),
-                                        layer.clone(),
-                                        *level,
-                                        version,
-                                        mosaica_store::manifest::DerivedForm::BandLabels {
-                                            seg_id: segment.seg_id.clone(),
-                                        },
-                                        copy,
-                                    )),
-                                    Err(error) => tracing::warn!(
+                        },
+                    )
+                };
+                match composed {
+                    Ok(Some(path)) => {
+                        // A served column is filed only with its members beside it.
+                        if matches!(form, mosaica_store::manifest::DerivedForm::RowColumn { .. }) {
+                            match mosaica_store::derived::stage_row_members(
+                                &path,
+                                composed_as,
+                                scratch,
+                            ) {
+                                Ok(members) => written.push((
+                                    view.clone(),
+                                    layer.clone(),
+                                    *level,
+                                    version,
+                                    mosaica_store::manifest::DerivedForm::RowMembers,
+                                    members,
+                                )),
+                                Err(error) => {
+                                    tracing::warn!(
                                         layer = %layer,
                                         level,
                                         view = %view,
                                         %error,
-                                        "a level's labels would not be copied into the order of \
-                                         its segment's bands; the level has no copy"
-                                    ),
+                                        "a row-major column's members would not be written \
+                                         at the fold; that level derives both on first use"
+                                    );
+                                    let _ = std::fs::remove_file(&path);
+                                    continue;
                                 }
                             }
-                            written.push((
-                                view.clone(),
-                                layer.clone(),
-                                *level,
-                                version,
-                                form.clone(),
-                                path,
-                            ))
                         }
-                        // A level served artifact-major whose memberships overlap has no label
-                        // column, and that is its shape rather than a fault.
-                        Ok(None) if !layout.is_row_major() => {}
-                        Ok(None) => tracing::warn!(
-                            layer = %layer,
-                            level,
-                            view = %view,
-                            layout = ?layout,
-                            "a row-major column would not compose at the fold: this level's \
-                             memberships do not partition, so it is served artifact-major. \
-                             Every answer is unchanged; the layout is not"
-                        ),
-                        Err(error) => tracing::warn!(
-                            layer = %layer,
-                            level,
-                            view = %view,
-                            %error,
-                            form = form.dir(),
-                            "a level's column would not be composed at the fold; that level \
-                             derives it on first use"
-                        ),
+                        let labelled = segment.filter(|_| {
+                            composed_as == mosaica_types::layer::ServingLayout::RowMajorLabel
+                        });
+                        if let Some(segment) = labelled {
+                            match mosaica_store::derived::stage_band_labels(
+                                &path,
+                                &segment.bands,
+                                scratch,
+                            ) {
+                                Ok(copy) => written.push((
+                                    view.clone(),
+                                    layer.clone(),
+                                    *level,
+                                    version,
+                                    mosaica_store::manifest::DerivedForm::BandLabels {
+                                        seg_id: segment.seg_id.clone(),
+                                    },
+                                    copy,
+                                )),
+                                Err(error) => tracing::warn!(
+                                    layer = %layer,
+                                    level,
+                                    view = %view,
+                                    %error,
+                                    "a level's labels would not be copied into the order of \
+                                     its segment's bands; the level has no copy"
+                                ),
+                            }
+                        }
+                        written.push((
+                            view.clone(),
+                            layer.clone(),
+                            *level,
+                            version,
+                            form.clone(),
+                            path,
+                        ))
                     }
+                    // A level served artifact-major whose memberships overlap has no label
+                    // column, and that is its shape rather than a fault.
+                    Ok(None) if !layout.is_row_major() => {}
+                    Ok(None) => tracing::warn!(
+                        layer = %layer,
+                        level,
+                        view = %view,
+                        layout = ?layout,
+                        "a row-major column would not compose at the fold: this level's \
+                         memberships do not partition, so it is served artifact-major. \
+                         Every answer is unchanged; the layout is not"
+                    ),
+                    Err(error) => tracing::warn!(
+                        layer = %layer,
+                        level,
+                        view = %view,
+                        %error,
+                        form = form.dir(),
+                        "a level's column would not be composed at the fold; that level \
+                         derives it on first use"
+                    ),
                 }
-            });
+            }
         }
         if written.is_empty() {
             return Vec::new();

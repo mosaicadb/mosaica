@@ -499,7 +499,7 @@ pub fn tallied_fields(declared: &[DeclaredScalar]) -> Vec<(String, bool, bool)> 
 /// [`derive`] over one view's base as a build or a fold has just written it, into the view's own
 /// directory: its segment `seg_id`'s columns, its permutation and the shard's entity terms.
 /// The fields are [`tallied_fields`] of `declared`, a held one read through `held` where it opens
-/// one.
+/// one. Returns the file's path and the tallies it holds.
 pub fn derive_view(
     prefix_dir: &Path,
     layout: crate::ShardLayout<'_>,
@@ -508,7 +508,7 @@ pub fn derive_view(
     base_rows: u32,
     declared: &[DeclaredScalar],
     held: &dyn Fn(&str) -> io::Result<Option<HeldValues>>,
-) -> crate::error::Result<std::path::PathBuf> {
+) -> crate::error::Result<(std::path::PathBuf, FieldTallies)> {
     let view_dir = prefix_dir.join(layout.view_rel(view));
     let path = view_dir.join(FIELD_TALLIES_FILE);
     let io_error = |path: &Path| {
@@ -538,15 +538,12 @@ pub fn derive_view(
         })
         .collect();
     if base_rows == 0 {
-        write(
-            &path,
-            &FieldTallies {
-                fields: fields.iter().map(|f| (f.name.clone(), f.float)).collect(),
-                ..FieldTallies::default()
-            },
-        )
-        .map_err(io_error(&path))?;
-        return Ok(path);
+        let tallies = FieldTallies {
+            fields: fields.iter().map(|f| (f.name.clone(), f.float)).collect(),
+            ..FieldTallies::default()
+        };
+        write(&path, &tallies).map_err(io_error(&path))?;
+        return Ok((path, tallies));
     }
     let columns = ColumnsRef::load(
         &prefix_dir
@@ -567,7 +564,7 @@ pub fn derive_view(
             .for_each_in(span, f)
             .map_err(|e| io::Error::other(e.to_string()))
     };
-    derive(
+    let tallies = derive(
         permutation.bound(),
         Some(&columns),
         &row_of,
@@ -576,7 +573,7 @@ pub fn derive_view(
         &path,
     )
     .map_err(io_error(&path))?;
-    Ok(path)
+    Ok((path, tallies))
 }
 
 fn put_number(bytes: &mut Vec<u8>, value: Number) {
@@ -586,6 +583,9 @@ fn put_number(bytes: &mut Vec<u8>, value: Number) {
     };
     bytes.extend_from_slice(&bits.to_le_bytes());
 }
+
+/// Each view's tallies, by view.
+pub type ViewTallies = std::collections::BTreeMap<String, std::sync::Arc<FieldTallies>>;
 
 /// Write `tallies` to `path` and sync it.
 pub fn write(path: &Path, tallies: &FieldTallies) -> io::Result<()> {

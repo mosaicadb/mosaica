@@ -1546,13 +1546,14 @@ impl Engine {
 /// `prefix`, since publishing a prefix `CURRENT` does not name would serve geometry a restart
 /// could not find. Opens with [`mosaica_store::open_written_prefix`], not `open_bundle`: the
 /// caller wrote and digested these bytes moments ago. `shard` is the shard whose rows the prefix
-/// renumbers; with `carried`, every other shard keeps the rows `carried` serves for it.
+/// renumbers; with `carried`, every other shard keeps the rows `carried` serves for it, and
+/// `shard`'s views take the field tallies beside it.
 pub(crate) fn open_rotation(
     bundle_root: &Path,
     prefix: &str,
     shard: mosaica_types::ShardId,
     retired: croaring::Bitmap,
-    carried: Option<&Bundle>,
+    carried: Option<(&Bundle, &mosaica_store::field_tallies::ViewTallies)>,
 ) -> std::result::Result<(Arc<Bundle>, crate::geometry::PrefixRotation), PublishGeometryError> {
     let not_openable =
         |e: &dyn std::fmt::Display| PublishGeometryError::PrefixNotOpenable(e.to_string());
@@ -1565,9 +1566,13 @@ pub(crate) fn open_rotation(
     }
     let prefix_dir = bundle_root.join(prefix);
     let mut bundle = match carried {
-        Some(carried) => {
-            mosaica_store::open_written_prefix_carrying(bundle_root, prefix, shard, carried)
-        }
+        Some((carried, tallies)) => mosaica_store::open_written_prefix_carrying(
+            bundle_root,
+            prefix,
+            shard,
+            carried,
+            tallies,
+        ),
         None => mosaica_store::open_written_prefix(bundle_root, prefix),
     }
     .map_err(|e| not_openable(&e))?;
