@@ -158,6 +158,7 @@ describe('the explorer in each state, and the elements on their own', () => {
     expect(found.dark).toEqual([]);
   });
 
+  // Above 720 px a long name cut to one line with an ellipsis is not counted, where its whole text is a title or an accessible name.
   it('cut off no text and scroll nothing sideways, in the compact form and down to 320 px wide', () => {
     expect(found.clipped).toEqual([]);
   });

@@ -69,6 +69,24 @@ const drawn = (el: Element) => el.checkVisibility({visibilityProperty: true}) &&
 /** Whether no ancestor clips an element: it is in the top layer, or fixed to the window. */
 const unclipped = (el: Element) => el.matches(':popover-open') || (el instanceof HTMLDialogElement && el.matches(':modal')) || getComputedStyle(el).position === 'fixed';
 
+/** The elements whose accessible name is what they hold. */
+const NAMED_BY_CONTENT = 'button, a[href], h1, h2, h3, h4, h5, h6, summary, [role="button"], [role="link"], [role="heading"], [role="option"], [role="radio"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+
+/**
+ * Whether `el` is a long name cut to one line in a window wider than the explorer's narrow form:
+ * it does not wrap, it ends in an ellipsis, and its whole text is the `title` or the accessible
+ * name of itself or of a control it is drawn inside. Such a name is cut by design, and a pointer's
+ * hover or a screen reader has all of it.
+ */
+function cutByDesign(el: Element): boolean {
+  if (innerWidth <= 720) return false;
+  const style = getComputedStyle(el);
+  if (style.whiteSpace !== 'nowrap' || style.textOverflow !== 'ellipsis') return false;
+  const squeezed = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim();
+  const text = squeezed(el.textContent);
+  return [el, ...drawnAncestors(el)].some((at) => squeezed(at.getAttribute('title')).includes(text) || squeezed(at.getAttribute('aria-label')).includes(text) || (at.matches(NAMED_BY_CONTENT) && !at.hasAttribute('aria-label')));
+}
+
 type Edges = {left: number; top: number; right: number; bottom: number};
 
 /** The box an element clips its content to: inside its borders. */
@@ -80,7 +98,7 @@ function clipBox(el: Element): Edges {
 /**
  * The text under `scope` that is cut off or that only a sideways scroll reaches, each as where it
  * is and how it starts. Text a viewer reaches by scrolling down is whole. Text hidden for screen
- * readers alone, a canvas's, and a native control's own are left out.
+ * readers alone, a canvas's, a native control's own and a long name cut by design are left out.
  */
 export function clippedText(scope: Element): string[] {
   const found = new Set<string>();
@@ -104,6 +122,7 @@ export function clippedText(scope: Element): string[] {
         if (style.display === 'inline') continue;
         const clip = clipBox(ancestor);
         if (style.overflowX !== 'visible' && (box.right > clip.right + 1 || box.left < clip.left - 1)) {
+          if (cutByDesign(ancestor)) break;
           cut = `${style.overflowX === 'hidden' || style.overflowX === 'clip' ? 'is cut off at the side by' : 'scrolls sideways in'} ${place(ancestor)}`;
           break;
         }
@@ -135,7 +154,7 @@ export function wideContent(scope: Element): string[] {
   for (const el of [scope, ...elementsUnder(scope)]) {
     if (!drawn(el) || el.matches('input, select, textarea, canvas, .sr-only') || el.closest('[part~="canvas"], svg')) continue;
     const style = getComputedStyle(el);
-    if (style.overflowX === 'visible' || el.scrollWidth <= el.clientWidth + 1) continue;
+    if (style.overflowX === 'visible' || el.scrollWidth <= el.clientWidth + 1 || cutByDesign(el)) continue;
     found.push(`${place(el)} holds more than its width and ${style.overflowX === 'hidden' || style.overflowX === 'clip' ? 'cuts it off' : 'scrolls sideways'}`);
   }
   if (document.documentElement.scrollWidth > innerWidth + 1) found.push('the page scrolls sideways');
