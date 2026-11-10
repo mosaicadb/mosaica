@@ -353,3 +353,49 @@ viewports differed by up to 20%, build and compaction by under 5%, and ingest by
 been measured, so rerun a red row with the same baseline before acting on it. Hosted runners
 differ from one another by more than any of these figures, so only the ratio, taken on one
 machine, means anything, and the absolutes belong to that runner.
+
+---
+
+## 11. Capacity: many users as memory shrinks
+
+[`scripts/bench_capacity.py`](../scripts/bench_capacity.py) measures one box serving many concurrent
+users while the ratio of bundle bytes to memory rises, from a bundle held whole in memory to one
+many times larger than the memory the server may use. A profile in
+[`capacity.toml`](capacity.toml) names the corpora and the matrix: memory cap, cache policy, grant
+arm, number of users and think time. The script builds any corpus it lacks with `bench_ab.py
+corpus` and keeps it, so a second run only serves.
+
+```bash
+python3 scripts/bench_capacity.py run --profile smoke --data /data/bench --run-dir /data/runs/smoke
+python3 scripts/bench_capacity.py report /data/runs/smoke
+```
+
+Each cell boots `mosaica serve` inside its own memory cgroup
+([`scripts/bench_cgroup.py`](../scripts/bench_cgroup.py)), using cgroup v2 where the host has it, then
+cgroup v1, then a `systemd-run` scope. The page cache the server reads the bundle through is charged
+to the cap, so `bundle bytes / cap` is the disk-to-memory ratio the cell runs at. Creating a group
+needs root or a delegated subtree. A server the cap kills is recorded with status `oom`, not
+treated as a failure of the run.
+
+A cell runs two windows of the load generator, a cold one straight after the boot and an eviction
+of the bundle from the page cache, then a warm one, and samples the cgroup's charge, anonymous
+memory, page cache and major faults once a second throughout. The generator draws each user's
+next request from the profile's mix of panning close-ups, filtered close-ups, overviews, aggregates
+and item pages (`mosaica-bench load --mix`; the format is in `arms/load.rs`). A user given a think
+time pauses for an exponentially distributed time of that mean between requests, so that a cell
+of thousands of users models people rather than saturating loops.
+
+| axis | values | what it isolates |
+|---|---|---|
+| cap | sizes, or `unbounded` | the disk-to-memory ratio |
+| cache policy | `default`, `tuned` | `default` keeps the server's cache sizes, about 8 GiB in all, and shows where they stop fitting; `tuned` sets each to a fraction of the cap |
+| arm | `A`, `B` | `A` gives each user its own grant, so the memory a session costs; `B` shares four grants, so the request path's throughput |
+| users, think time | counts, ms | load as concurrent loops, or as people |
+
+The admission gate sheds what the server cannot take with a 429, which a closed-loop user retries at
+once, so at high user counts with no think time the record's `shed_rate` is large while throughput
+counts only answered requests. The generator's own ceiling against `/healthz` is measured first,
+and a cell within a third of it is flagged `generator_bound`. The `small` profile pins the server
+to three cores and the generator to the fourth, which suits a 4-core box. On a larger box, use the
+`large` profile, change `caps` and `corpora` to its memory and disc, and give the generator enough
+cores or run it on another machine. A `scatter` bundle is about 62 bytes an item.

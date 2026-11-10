@@ -328,6 +328,14 @@ enum Command {
         /// pool). `0` (default) disables the split.
         #[arg(long, default_value_t = 0)]
         cold_workers: usize,
+        /// A JSON file of weighted requests to draw from instead of the fixed viewport; the
+        /// format is in `arms/load.rs`.
+        #[arg(long)]
+        mix: Option<PathBuf>,
+        /// Mean pause, in milliseconds, between one user's requests, drawn from the exponential
+        /// distribution. `0` sends the next request as soon as the last returns.
+        #[arg(long, default_value_t = 0.0)]
+        think_ms: f64,
     },
 
     /// Send a log written by `[serve] request_log` back at a server, as one viewer or as many,
@@ -455,7 +463,8 @@ fn main() -> std::process::ExitCode {
         .filter(|f| cli.label_set.is_empty() || cli.label_set.contains(&f.label_set))
         .collect();
 
-    if selected.is_empty() && !matches!(cli.command, Command::Fixtures) {
+    // `load` drives a server over HTTP and opens no fixture.
+    if selected.is_empty() && !matches!(cli.command, Command::Fixtures | Command::Load { .. }) {
         // A typo in --label-set silently selecting nothing is worse than selecting everything:
         // the run "succeeds" with no cells and a reader sees an empty file, not an error.
         eprintln!(
@@ -526,6 +535,8 @@ fn main() -> std::process::ExitCode {
             abort_after_ms,
             hang_timeout_ms,
             cold_workers,
+            mix,
+            think_ms,
         } => arms::load::run(
             &ctx,
             &viewer_url,
@@ -546,6 +557,7 @@ fn main() -> std::process::ExitCode {
                 hang_timeout_ms,
                 cold_workers,
             },
+            arms::load::Workload { mix, think_ms },
         ),
         Command::Changes {
             op,

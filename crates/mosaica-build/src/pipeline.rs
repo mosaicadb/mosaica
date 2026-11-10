@@ -484,12 +484,13 @@ impl BuildPlan {
 }
 
 /// The budget when none is given: what this process plans to take
-/// ([`mosaica_types::process::memory_to_take`]), clamped so a tiny CI box still gets a workable
-/// floor.
+/// ([`mosaica_types::process::memory_to_take`]), which a memory cap lowers. The floor is far below
+/// any cap a build can run under, so the cap is never planned past; a corpus that cannot be built
+/// within the budget is refused by the feasibility check.
 pub(crate) fn detect_memory_budget() -> u64 {
     const FALLBACK: u64 = 24 << 30;
     match mosaica_types::process::memory_to_take() {
-        Some(bound) => bound.clamp(2 << 30, 1 << 40),
+        Some(bound) => bound.clamp(256 << 20, 1 << 40),
         None => FALLBACK,
     }
 }

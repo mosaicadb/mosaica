@@ -146,21 +146,59 @@ pub fn available_memory() -> Option<u64> {
     Some(left.map_or(available, |left| left.min(available)))
 }
 
-/// What is left under the cgroup v2 memory limit of the process whose `/proc/self/cgroup` is
-/// `cgroup`, reading its files through `read`: `memory.max` less `memory.current`. `None` where
-/// the process is in no v2 group, the group has no limit, or either file cannot be read.
+/// What is left under the memory limit of the cgroup of the process whose `/proc/self/cgroup` is
+/// `cgroup`, reading its files through `read`. Under v2, `memory.max` less `memory.current` of its
+/// group. Under v1, the least of `memory.limit_in_bytes` less `memory.usage_in_bytes` over its
+/// memory group and that group's ancestors, since a limit set on an ancestor binds too. `None`
+/// where neither hierarchy sets a limit or the files cannot be read.
 fn cgroup_left(cgroup: &str, read: impl Fn(&str) -> Option<String>) -> Option<u64> {
-    let path = cgroup
-        .lines()
-        .find_map(|line| line.strip_prefix("0::"))?
-        .trim()
-        .trim_start_matches('/');
-    let dir = match path {
-        "" => "/sys/fs/cgroup".to_string(),
-        path => format!("/sys/fs/cgroup/{path}"),
+    let figure = |file: String| read(&file)?.trim().parse::<u64>().ok();
+    let v2 = || {
+        let path = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?;
+        let dir = group_dir("/sys/fs/cgroup", path);
+        Some(
+            figure(format!("{dir}/memory.max"))?
+                .saturating_sub(figure(format!("{dir}/memory.current"))?),
+        )
     };
-    let figure = |file: &str| read(&format!("{dir}/{file}"))?.trim().parse::<u64>().ok();
-    Some(figure("memory.max")?.saturating_sub(figure("memory.current")?))
+    let v1 = || {
+        let path = cgroup.lines().find_map(|line| {
+            let (_, rest) = line.split_once(':')?;
+            let (controllers, path) = rest.split_once(':')?;
+            controllers
+                .split(',')
+                .any(|c| c == "memory")
+                .then_some(path)
+        })?;
+        let mut path = path.trim().trim_end_matches('/');
+        let mut least: Option<u64> = None;
+        loop {
+            let dir = group_dir("/sys/fs/cgroup/memory", path);
+            if let Some(limit) = figure(format!("{dir}/memory.limit_in_bytes")) {
+                // The kernel writes an unset v1 limit as the largest page count it holds, just
+                // under 2^63 bytes.
+                if limit < 1 << 62 {
+                    let usage = figure(format!("{dir}/memory.usage_in_bytes")).unwrap_or(0);
+                    let left = limit.saturating_sub(usage);
+                    least = Some(least.map_or(left, |least| least.min(left)));
+                }
+            }
+            match path.rfind('/') {
+                Some(cut) => path = &path[..cut],
+                None => break,
+            }
+        }
+        least
+    };
+    v2().or_else(v1)
+}
+
+/// The directory of the group at `path` under the hierarchy mounted at `root`.
+fn group_dir(root: &str, path: &str) -> String {
+    match path.trim().trim_matches('/') {
+        "" => root.to_string(),
+        path => format!("{root}/{path}"),
+    }
 }
 
 /// The share of [`available_memory`] a process plans to take, in bytes: four fifths of it, leaving
@@ -294,6 +332,48 @@ mod tests {
             _ => None,
         };
         assert_eq!(cgroup_left("0::/\n", root), Some(1 << 30));
+    }
+
+    /// **Without a v2 limit, the v1 memory group's limit binds, and so does any ancestor's.** The
+    /// least room left over the group and its ancestors is what the process has, and the
+    /// kernel's unset v1 limit is no limit.
+    #[test]
+    fn what_is_left_under_v1_is_the_least_over_the_group_and_its_ancestors() {
+        let cgroup = "9:name=systemd:/\n4:memory:/outer/inner\n0::/\n";
+        let unset = "9223372036854771712\n";
+        let files = |outer: &'static str, inner: &'static str| {
+            move |file: &str| match file {
+                "/sys/fs/cgroup/memory/outer/memory.limit_in_bytes" => Some(outer.to_string()),
+                "/sys/fs/cgroup/memory/outer/memory.usage_in_bytes" => {
+                    Some("1073741824\n".to_string())
+                }
+                "/sys/fs/cgroup/memory/outer/inner/memory.limit_in_bytes" => {
+                    Some(inner.to_string())
+                }
+                "/sys/fs/cgroup/memory/outer/inner/memory.usage_in_bytes" => {
+                    Some("536870912\n".to_string())
+                }
+                "/sys/fs/cgroup/memory/memory.limit_in_bytes" => Some(unset.to_string()),
+                _ => None,
+            }
+        };
+        assert_eq!(
+            cgroup_left(cgroup, files(unset, "1073741824")),
+            Some(512 << 20)
+        );
+        assert_eq!(
+            cgroup_left(cgroup, files("1610612736", unset)),
+            Some(512 << 20)
+        );
+        assert_eq!(
+            cgroup_left(cgroup, files("1610612736", "2147483648")),
+            Some(512 << 20)
+        );
+        assert_eq!(cgroup_left(cgroup, files(unset, unset)), None);
+        assert_eq!(
+            cgroup_left("5:cpu,memory:/outer/inner\n", files(unset, "1073741824")),
+            Some(512 << 20)
+        );
     }
 
     #[test]
