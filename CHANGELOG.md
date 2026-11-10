@@ -27,6 +27,33 @@ container image.
   of a second, and a `<mosaica-filter>` box shows a spinner for the query it started. Cancel fires
   `mosaica-filterchange`, `mosaica-clausechange` and `mosaica-selectchange` for what it went back
   to.
+- `<mosaica-explorer>` takes an `aria-label`, which names its map for a screen reader, and the
+  Python `Map` takes `label` for the same purpose, as do `db.map`, `viewer.map` and
+  `selection.map`. A map's canvas is named "Map" without one, and its description lists its keys
+  either way.
+- The components announce what changes without the focus moving: the state of the view on the
+  status strip and over the map, a query's counts once they have loaded, a selected region's
+  count, a card opening in the explorer, how many suggestions a search box lists, and whether
+  Copy id copied. Pans and zooms announce nothing.
+- A histogram field card has a Set range button, and its range box has From and To fields that
+  take a typed number or date, so a range needs no drag and can fall between bins. The card
+  writes out the range its filter and its highlight hold, and lists its bins' counts in a table
+  for a screen reader. Its new parts are `range`, `brush-from` and `brush-to`.
+- The item card has a Show more button, part `more`, under a long value that is cut short, and
+  Show all on the compact card shows the headline whole.
+- `--mosaica-focus` sets the colour of the focus ring, which is 2 px wide on every control and on
+  the map's canvas.
+- `<mosaica-layer-picker>` says in words which layers are drawn with a layer, in the part
+  `linked`.
+- The notebook map writes what it refuses of `filters`, `colour_by` or `basemap` in a line above
+  the map, as well as sending it to the kernel.
+- The `canvas-store` example's canvas takes the arrow keys, `+` and `-`. Every example names its
+  map, has a heading and a main landmark, and the two tutorials' pages stack their columns in a
+  narrow window.
+- The documentation has an [Accessibility](docs/system/accessibility.md) page: the keys each
+  element takes, what a screen reader is told, what the page supplies, the contrast to keep when
+  overriding a theme token, and what is not built, which includes reaching the map's points from
+  the keyboard.
 
 ### Changed
 
@@ -54,6 +81,38 @@ container image.
 - A request after a flush or merge is no longer refused with 429 while the server brings each
   viewer's visible set up to date. It brings its own up to date and is answered.
   `refresh_in_flight` in `GET /control/status` still reports the work in progress.
+- A field card's row always shows its Highlight and Filter buttons beside its counts, each filled
+  with a solid icon while it is on. They used to take the counts' place under the pointer or the
+  focus. The range box sits under the histogram, where it used to float over it. A value the
+  filter leaves out is drawn in faint text, and long value and cluster names wrap.
+- In a value or cluster search box, Enter chooses the suggestion the arrow keys reached. It used
+  to take the first row, which could change as counts arrived. Home and End go to the first and
+  last suggestion.
+- The explorer's narrow layout opens the Item sheet when an item is picked, ends a sheet above
+  the status strip, and draws the `top-right` and `status` slots. Its part `tabs` is a toolbar of
+  buttons with `aria-expanded`, where it was a list of tabs.
+- Tab from the map goes on in the page's order, to the region's Clear button, the selection card
+  and the status strip, and then to the card beside the point. The Layers popover takes the focus
+  as it opens and closes when the focus leaves it.
+- Points with no colouring are a deep blue on a light map, and the pale blue they were on a dark
+  one.
+- The status strip says "Nothing visible to you" in words, wraps its cells onto further lines
+  where it is short of room, and draws a ring for Updating where Up to date is a solid dot.
+- The map takes Escape only when it cleared a shape, a region or a pick, so a dialog that holds a
+  map still closes. Escape dismisses the hover tooltip wherever the focus is, and the tooltip and
+  the selected region's tag stay inside the map.
+- Panel and card titles are headings, an `<h2>` for a panel or card and an `<h3>` inside one,
+  pairs of a name and a value are `<dl>` lists, and the rows of the selection card and of the
+  artifact card's parents and children hold buttons. Page styles that select these parts by
+  element need the new elements.
+- A highlight's chip carries the word "highlight", the entry chosen in a menu carries a tick, and
+  a pressed segment and a chosen row carry a bar, so no state is shown by colour alone. Under
+  forced colours these states take the system's highlight colours.
+- Faint text reaches 4.5:1 on every surface, and the off switch's track and the warning dot reach
+  3:1. Small buttons, sliders, switches, swatches and a chip's × are 24 px targets.
+- The colour picker wraps a palette's colours onto rows of 24 px squares, and keeps text in its
+  hex field that is not a colour, marked and with the format to write. Add field's list closes
+  on a press outside it and when the focus leaves it.
 
 ### Fixed
 
@@ -73,6 +132,23 @@ container image.
 - The TypeScript store sends a request for a layer's artifacts again when Mosaica sheds it
   (`429`) or is still starting (`503`), as it does a map request. It used to give up at once, so
   the clusters and their labels stayed off the map until the camera next moved.
+- After a click on the map, `+` and `-` zoom one level for each press. They zoomed two.
+- The notebook map keeps a key pressed in it from the notebook's shortcuts, so that typing in a
+  search box or pressing an arrow key on the map does what it does in a page. The map carries
+  `data-lm-suppress-shortcuts` for JupyterLab and stops the key at its own element, apart from
+  Tab and an Escape it did not use. This has not been tried in a running JupyterLab.
+- In the explorer's narrow layout the status strip and the bar of buttons stay inside the
+  explorer in a short window, where the map used to be drawn over them, and a menu is no larger
+  than the window.
+- Focus stays on a control when the one it was on is removed: on the next chip's × after a chip
+  is removed, on the hierarchy's row after a filter fetches its rows again, in the list of
+  density colours while the arrow keys move through it, and on the swatch when the colour picker
+  closes. A field card's row keeps the focus when its value moves in the list, and keeps its
+  counts while it has the focus.
+- The hierarchy keeps its open rows when a filter changes, where pressing Filter on a nested row
+  used to close the tree.
+- A search box whose list closed no longer reads "No value starts with that" while values
+  match.
 
 ## [0.3.0] - 2026-11-08
 
