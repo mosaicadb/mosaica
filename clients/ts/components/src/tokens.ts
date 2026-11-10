@@ -654,6 +654,18 @@ export const chrome = css`
       :is(button, input, select, a) {
       forced-color-adjust: auto;
     }
+    /* A ring in the highlight colour would not show on that control's highlight background, so
+       its ring is drawn inside its edge in the text colour of the pair: where it has the focus,
+       and where the arrow keys reached it while a box keeps the focus. A ring round a control
+       inside it lies on the same background, and takes the same colour. */
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice']):is(:focus-visible, [data-active]) {
+      outline-color: HighlightText !important;
+      outline-offset: -2px !important;
+    }
+    :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice'])
+      :focus-visible {
+      outline-color: HighlightText !important;
+    }
     /* Off, a switch is an outlined track with a solid knob. On, the track is solid. */
     .switch {
       padding: 1px;

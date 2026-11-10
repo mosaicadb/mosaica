@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, onTestFinished} from 'vitest';
 import type {RegionProjection} from '@mosaicajs/client';
 import '../src/map.js';
 import {keptInside} from '../src/map.js';
@@ -40,15 +40,35 @@ describe('<mosaica-map> region tag', () => {
     expect(store.calls.filter((c) => c.name === 'select').map((c) => c.args[0])).toEqual([null]);
   });
 
-  it('sits above the region’s corner where there is room, and stays inside the map wherever the corner is', async () => {
-    const {host} = await mapWith(region(false));
-    const map = host.querySelector('mosaica-map') as HTMLElement & {lookAt(x: number, y: number): boolean; screenOf(world: [number, number]): [number, number]};
+  it('sits above the region’s corner where there is room, and stays inside the map wherever the corner is, measured once', async () => {
     const [width, height, w, h] = [1000, 800, 120, 26];
+    // The tag lays out 120 by 26 px, and each read of its size is counted.
+    let measured = 0;
+    const laidOut = (size: number) => ({
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.getAttribute('part') !== 'region-tag') return 0;
+        measured += 1;
+        return size;
+      }
+    });
+    const real = [Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!, Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!];
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', laidOut(w));
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', laidOut(h));
+    onTestFinished(() => {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', real[0]!);
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', real[1]!);
+    });
+
+    const {host, store} = await mapWith(null);
+    const map = host.querySelector('mosaica-map') as HTMLElement & {lookAt(x: number, y: number): boolean; screenOf(world: [number, number]): [number, number]};
     Object.defineProperty(map, 'clientWidth', {configurable: true, value: width});
     Object.defineProperty(map, 'clientHeight', {configurable: true, value: height});
+    store.set('region', region(false));
+    await settle(host);
     const tag = deep(host, '[part="region-tag"]') as HTMLElement;
-    Object.defineProperty(tag, 'offsetWidth', {configurable: true, value: w});
-    Object.defineProperty(tag, 'offsetHeight', {configurable: true, value: h});
+    const once = measured;
+    expect(once).toBeGreaterThan(0);
     /** Where the tag is once the camera looks at `x`, `y` in the view's coordinates. */
     const placed = async (x: number, y: number) => {
       expect(map.lookAt(x, y)).toBe(true);
@@ -72,6 +92,8 @@ describe('<mosaica-map> region tag', () => {
       expect(l + w, `${x},${y}`).toBeLessThanOrEqual(width);
       expect(t + h, `${x},${y}`).toBeLessThanOrEqual(height);
     }
+    // Following the camera read the tag's size no more.
+    expect(measured).toBe(once);
   });
 
   it('keeps a box inside its bounds by moving it the least it can', () => {

@@ -354,11 +354,68 @@ describe('<mosaica-map> alone says over the canvas what the strip would', () => 
     const retry = map.shadowRoot!.querySelector('[part="retry"]')!;
     expect(live.contains(retry)).toBe(false);
 
-    store.set('status', status({status: 'empty'}));
+    store.set('status', status({unreachable: true}));
     await settle(host);
     expect(map.shadowRoot!.querySelector('[part="overlay"] [role="status"]')).toBe(live);
     expect(live.textContent?.trim()).not.toBe('');
     expect(live.textContent).not.toContain(refusal.detail);
+  });
+
+  it('shows Nothing in view where a pan went without announcing it, and announces it as a query’s answer', async () => {
+    const host = await mount('<mosaica-map></mosaica-map>');
+    const map = host.querySelector('mosaica-map')!;
+    const store = fakeStore({status: status({}), view});
+    (map as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const state = map.shadowRoot!.querySelector('[part="overlay"] [part="state"]')!;
+    const live = state.querySelector('[role="status"]')!;
+
+    store.set('status', status({status: 'loading'}));
+    await settle(host);
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    const words = state.textContent!.trim();
+    expect(words).not.toBe('');
+    expect(state.classList.contains('sr-only')).toBe(false);
+    expect(live.textContent?.trim()).toBe('');
+
+    store.set('status', status({status: 'loading', querying: true}));
+    await settle(host);
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    expect(state.querySelector('[role="status"]')).toBe(live);
+    expect(live.textContent?.trim()).toBe(words);
+    expect(state.textContent?.trim()).toBe(words);
+  });
+
+  it('shows what it would say and announces none of it when quiet', async () => {
+    const host = await mount('<mosaica-map quiet></mosaica-map>');
+    const map = host.querySelector('mosaica-map')!;
+    const refusal = {code: 'contract', detail: 'the box is outside the view', status: 422};
+    const store = fakeStore({status: status({status: 'refused', refusal}), view});
+    (map as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const silent = () => [...map.shadowRoot!.querySelectorAll('[role="status"]')].every((region) => region.textContent?.trim() === '');
+    const state = map.shadowRoot!.querySelector('[part="overlay"] [part="state"]')!;
+    expect(state.textContent).toContain(refusal.detail);
+    expect(state.querySelector('[part="retry"]')).not.toBeNull();
+    expect(silent()).toBe(true);
+
+    store.set('status', status({status: 'loading', querying: true}));
+    await settle(host);
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    expect(state.textContent?.trim()).not.toBe('');
+    expect(silent()).toBe(true);
+
+    store.set('status', status({}));
+    store.set('region', {shape: {kind: 'box', bbox: [0.2, 0.2, 0.6, 0.6]}, status: 'shown', refusal: null, visible: null, matched: {value: 4812, exact: true}, served: {shown: 0, total: 4812, exact: true}, verdict: {exact: true, depth: null}, held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}});
+    await settle(host);
+    expect(map.shadowRoot!.querySelector('[part="region-tag"] mosaica-count')).not.toBeNull();
+    expect(silent()).toBe(true);
+    // Its other roles stay.
+    expect(map.shadowRoot!.querySelector('[part="canvas"]')!.getAttribute('role')).toBe('application');
+    expect(map.shadowRoot!.querySelector('[part="controls"]')!.getAttribute('role')).toBe('toolbar');
   });
 
   it('keeps the focus on the map when Retry goes with its state', async () => {
@@ -375,31 +432,65 @@ describe('<mosaica-map> alone says over the canvas what the strip would', () => 
     expect(map.shadowRoot!.activeElement?.getAttribute('part')).toBe('canvas');
   });
 
-  it('announces the selected region’s count when it arrives, and again when it is counted again', async () => {
+  it('announces the selected region’s count once, when the query that counts it has loaded, whatever else it says meanwhile', async () => {
     const host = await mount('<mosaica-map></mosaica-map>');
     const map = host.querySelector('mosaica-map')!;
     const store = fakeStore({status: status({}), view});
     (map as unknown as {store: unknown}).store = store;
     await settle(host);
-    const live = map.shadowRoot!.querySelector('[part="overlay"] [role="status"]')!;
-    const region = (over: object) => ({shape: {kind: 'box' as const, bbox: [0.2, 0.2, 0.6, 0.6] as [number, number, number, number]}, status: 'loading' as const, refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}, ...over});
-    store.set('region', region({}));
-    await settle(host);
-    expect(live.textContent?.trim()).toBe('');
-    store.set('region', region({status: 'shown', matched: {value: 4812, exact: true}}));
-    await settle(host);
-    expect(live.textContent).toContain('4,812');
+    // The count's own live element, beside the state line's.
+    const live = map.shadowRoot!.querySelector('[part="overlay"] > [role="status"]')!;
+    const stateLive = map.shadowRoot!.querySelector('[part="overlay"] [part="state"] [role="status"]')!;
+    expect(live).not.toBe(stateLive);
     // Heard, not drawn: the region's tag shows the figure.
-    expect(live.closest('.sr-only')).not.toBeNull();
-    store.set('region', region({}));
-    await settle(host);
-    expect(live.textContent?.trim()).toBe('');
-    store.set('region', region({status: 'shown', matched: {value: 4812, exact: true}}));
-    await settle(host);
-    expect(live.textContent).toContain('4,812');
-    store.set('region', null);
-    await settle(host);
-    expect(live.textContent?.trim()).toBe('');
+    expect(live.classList.contains('sr-only')).toBe(true);
+    const heard = () => live.textContent!.trim();
+    const shape = {kind: 'box' as const, bbox: [0.2, 0.2, 0.6, 0.6] as [number, number, number, number]};
+    const region = (over: object) => ({shape, status: 'loading' as const, refusal: null, visible: null, matched: {value: 0, exact: false}, served: {shown: 0, total: 0, exact: false}, verdict: null, held: {ids: new BigUint64Array(0), positions: new Float32Array(0), count: 0}, ...over});
+    const set = async (r: object | null, s: Parameters<typeof status>[0] = {}) => {
+      store.set('status', status(s));
+      store.set('region', r as never);
+      await settle(host);
+    };
+
+    // Selected: the frame's estimate first, then the counts, then the query has loaded.
+    await set(region({}), {status: 'loading', querying: true});
+    expect(heard()).toBe('');
+    await set(region({status: 'shown', matched: {value: 3900, exact: false}}), {querying: true});
+    expect(heard()).toBe('');
+    await set(region({status: 'shown', matched: {value: 4812, exact: true}}), {querying: true});
+    expect(heard()).toBe('');
+    await set(region({status: 'shown', matched: {value: 4812, exact: true}}));
+    const said = heard();
+    expect(said).toContain('4,812');
+    expect(said).not.toContain('3,900');
+    expect(stateLive.textContent?.trim()).toBe('');
+
+    // A refusal and the way back, a pan onto empty ground and back: the count's words do not change.
+    const counted = region({status: 'shown', matched: {value: 4812, exact: true}});
+    for (const s of [{status: 'refused', refusal: {code: 'contract', detail: 'no', status: 422}}, {status: 'loading'}, {}, {status: 'empty'}, {status: 'loading'}, {}] as Parameters<typeof status>[0][]) {
+      await set(counted, s);
+      expect(heard()).toBe(said);
+    }
+
+    // Counted again under other filters: it keeps the last count until the new one is in.
+    await set(region({}), {status: 'loading', querying: true});
+    expect(heard()).toBe(said);
+    await set(region({status: 'shown', matched: {value: 2000, exact: false}}), {querying: true});
+    expect(heard()).toBe(said);
+    await set(region({status: 'shown', matched: {value: 1999, exact: true}}));
+    expect(heard()).toContain('1,999');
+
+    // Another shape's count is announced though the figure is the same.
+    const other = {...region({}), shape: {...shape, outside: true}};
+    await set(other, {status: 'loading', querying: true});
+    expect(heard()).toBe('');
+    await set({...other, status: 'shown', matched: {value: 1999, exact: true}});
+    expect(heard()).toContain('1,999');
+    expect(heard()).not.toBe(said);
+
+    await set(null);
+    expect(heard()).toBe('');
   });
 });
 
@@ -462,28 +553,128 @@ describe('<mosaica-status> renders every state through part="state"', () => {
     const store = fakeStore({status: status({sessionWarm: true}), view});
     el.store = store;
     await settle(host);
-    const dot = () => deep(host, '[part="state"] .dot')!.className;
+    const dot = () => deep(host, '[part="state"] .dot')!;
     const [upToDate] = undrawn(host);
-    const solid = dot();
+    const solid = dot().className;
     expect(upToDate).not.toBe('');
+    // A pointer on the dot gets the same words.
+    expect(dot().getAttribute('title')).toBe(upToDate);
     store.set('status', status({status: 'loading', sessionWarm: true}));
     await settle(host);
     const [updating] = undrawn(host);
     expect(updating).not.toBe('');
     expect(updating).not.toBe(upToDate);
+    expect(dot().getAttribute('title')).toBe(updating);
     // The two differ by the dot's shape as well as by their words.
-    expect(dot()).not.toBe(solid);
-    for (const [over, words] of [
-      [{status: 'retrying'}, 'Reconnecting'],
-      [{status: 'empty'}, 'Nothing in view']
-    ] as const) {
-      store.set('status', status(over));
+    expect(dot().className).not.toBe(solid);
+    store.set('status', status({status: 'retrying'}));
+    await settle(host);
+    expect(undrawn(host)).toEqual([]);
+    expect(deep(host, '[part="state"] .dot')).not.toBeNull();
+    expect(live(host).classList.contains('sr-only')).toBe(false);
+    expect(said(host)).not.toBe('');
+    expect(dot().hasAttribute('title')).toBe(false);
+  });
+
+  /** The words the strip draws beside its dot, in the live element or beside it. */
+  const drawn = (host: HTMLElement) =>
+    [...deep(host, '[part="state"]')!.childNodes]
+      .filter((n) => n.nodeType !== Node.COMMENT_NODE && !(n instanceof Element && (n.classList.contains('sr-only') || n.localName === 'button')))
+      .map((n) => n.textContent)
+      .join('')
+      .trim();
+
+  it('shows Nothing in view where a pan went and announces neither it nor the way back, and announces it as a query’s answer', async () => {
+    const host = await mount('<mosaica-status></mosaica-status>');
+    const store = fakeStore({status: status({}), view});
+    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
+    await settle(host);
+    const element = live(host);
+
+    // A pan onto empty ground and back.
+    store.set('status', status({status: 'loading'}));
+    await settle(host);
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    const words = drawn(host);
+    expect(words).not.toBe('');
+    expect(said(host)).toBe('');
+    store.set('status', status({status: 'loading'}));
+    await settle(host);
+    store.set('status', status({}));
+    await settle(host);
+    expect(said(host)).toBe('');
+
+    // A change of filters that matches nothing here.
+    store.set('status', status({status: 'loading', querying: true}));
+    await settle(host);
+    store.set('status', status({status: 'empty', querying: true}));
+    await settle(host);
+    expect(said(host)).toBe('');
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    expect(live(host)).toBe(element);
+    expect(said(host)).toBe(words);
+    expect(drawn(host)).toBe(words);
+    // It was announced, so the way back is.
+    store.set('status', status({status: 'loading'}));
+    await settle(host);
+    store.set('status', status({}));
+    await settle(host);
+    expect(said(host)).not.toBe('');
+  });
+
+  it('says the view is up to date after a query whose counts were refused or are absent', async () => {
+    for (const inView of [{...view.inView, status: 'refused' as const}, null]) {
+      const host = await mount('<mosaica-status></mosaica-status>');
+      const store = fakeStore({status: status({status: 'loading', querying: true}), view: {...view, inView}});
+      (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
       await settle(host);
+      expect(said(host)).toBe('');
+      store.set('status', status({}));
+      await settle(host);
+      const heard = said(host);
+      expect(heard).not.toBe('');
+      expect(heard).not.toContain('3,210');
+      // The words of the state, which are then not read a second time beside the live element.
+      expect(heard).toBe(deep(host, '[part="state"] .dot')!.getAttribute('title'));
       expect(undrawn(host)).toEqual([]);
-      expect(deep(host, '[part="state"] .dot')).not.toBeNull();
-      expect(live(host).classList.contains('sr-only')).toBe(false);
-      expect(said(host)).toBe(words);
+      host.remove();
     }
+  });
+
+  it('shows every state and result and announces none when quiet', async () => {
+    const host = await mount('<mosaica-status quiet></mosaica-status>');
+    const el = host.querySelector('mosaica-status') as MosaicaStatus;
+    const store = fakeStore({status: status({}), view});
+    el.store = store;
+    await settle(host);
+    const silent = () => deepAll(host, '[role="status"]').every((region) => region.textContent?.trim() === '');
+    expect(undrawn(host)).toHaveLength(1);
+    expect(silent()).toBe(true);
+
+    store.set('status', status({status: 'refused', refusal: {code: 'contract', detail: 'the box is outside the view', status: 422}}));
+    await settle(host);
+    expect(drawn(host)).toContain('the box is outside the view');
+    expect(deep(host, '[part="retry"]')).not.toBeNull();
+    expect(silent()).toBe(true);
+
+    // The way back, and a query's result.
+    store.set('status', status({}));
+    await settle(host);
+    expect(silent()).toBe(true);
+    store.set('status', status({status: 'loading', querying: true}));
+    await settle(host);
+    store.set('status', status({status: 'empty'}));
+    await settle(host);
+    expect(drawn(host)).not.toBe('');
+    expect(silent()).toBe(true);
+    store.set('status', status({status: 'loading', querying: true}));
+    await settle(host);
+    store.set('status', status({}));
+    await settle(host);
+    expect(deepAll(host, '[part="count"]').some((c) => c.textContent === '3,210')).toBe(true);
+    expect(silent()).toBe(true);
   });
 
   it('announces from one live element every state it names in words, and nothing as a pan moves between updating and up to date', async () => {
@@ -515,13 +706,15 @@ describe('<mosaica-status> renders every state through part="state"', () => {
     await settle(host);
     expect(live(host)).toBe(element);
     const recovered = said(host);
-    expect(recovered).not.toBe('');
-    expect(undrawn(host)).toEqual([recovered]);
+    expect(recovered).toBe(deep(host, '[part="state"] .dot')!.getAttribute('title'));
+    // The live element says it, so the words beside it are left out and are read once.
+    expect(undrawn(host)).toEqual([]);
     store.set('status', status({status: 'loading'}));
     await settle(host);
     store.set('status', status({}));
     await settle(host);
     expect(said(host)).toBe('');
+    expect(undrawn(host)).toEqual([recovered]);
   });
 
   it('announces a query’s result once its counts are in, in full figures, and not again on a pan', async () => {
@@ -846,6 +1039,58 @@ describe('<mosaica-selection> — a panel renders the states the same way', () =
     expect(root.querySelector('[part="state"] [role="status"]')).toBe(live);
     expect(live.querySelector('[part="refusal"]')?.getAttribute('data-code')).toBe('contract');
     expect(live.textContent).toContain(refusal.detail);
+  });
+
+  it('says the counts once, when the query has loaded, and not the estimate a frame gives first', async () => {
+    const {host, store, root} = await card(null);
+    const live = root.querySelector('[part="state"] [role="status"]')!;
+    store.set('status', status({status: 'loading', querying: true}));
+    store.set('region', region({}) as never);
+    await settle(host);
+    const counting = live.textContent?.trim();
+    expect(counting).not.toBe('');
+
+    // The frame's estimate is shown below, and the line still says it is counting.
+    store.set('status', status({querying: true}));
+    store.set('region', {...counted, matched: {value: 790, exact: false}, visible: null} as never);
+    await settle(host);
+    expect(live.textContent?.trim()).toBe(counting);
+    expect(deepAll(host, '[part="count-matched"] [part="count"]').map((c) => c.textContent)).toEqual(['≈ 790']);
+
+    store.set('region', counted as never);
+    await settle(host);
+    expect(live.textContent?.trim()).toBe(counting);
+
+    store.set('status', status({}));
+    await settle(host);
+    expect(live.textContent).toContain('800');
+    expect(live.textContent).not.toContain('790');
+    expect(live.textContent).not.toContain(counting);
+  });
+
+  it('shows its state and counts and announces none when quiet', async () => {
+    const host = await mount('<mosaica-selection quiet></mosaica-selection>');
+    const el = host.querySelector('mosaica-selection')!;
+    const store = fakeStore({status: status({}), view, region: region({}) as never});
+    (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    const state = el.shadowRoot!.querySelector('[part="state"]')!;
+    const silent = () => [...el.shadowRoot!.querySelectorAll('[role="status"]')].every((r) => r.textContent?.trim() === '');
+    expect(state.textContent?.trim()).not.toBe('');
+    expect(silent()).toBe(true);
+
+    store.set('region', counted as never);
+    await settle(host);
+    // The figures are in the list of counts, and the line says how exact they are.
+    expect(deepAll(host, '[part="count"]').map((c) => c.textContent)).toEqual(['2', '≈ 800', '≈ 900']);
+    expect(state.textContent?.trim()).not.toBe('');
+    expect(silent()).toBe(true);
+
+    const refusal = {code: 'contract', detail: 'the shape has too many vertices', status: 422};
+    store.set('region', region({status: 'refused', refusal}) as never);
+    await settle(host);
+    expect(state.textContent).toContain(refusal.detail);
+    expect(silent()).toBe(true);
   });
 
   it('says in words on the state line whether the counts are exact for the shape', async () => {

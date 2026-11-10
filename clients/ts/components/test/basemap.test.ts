@@ -61,7 +61,10 @@ async function switchTo(host: HTMLElement, store: FakeStore, id: string): Promis
 }
 
 const refusal = (el: Element) => deep(el.shadowRoot!, '[part="overlay"] [part="refusal"][data-code="basemap"]');
-const note = (el: Element) => deep(el.shadowRoot!, '[part="note"]');
+/** The note's element, which is in the page whether or not it has words. */
+const noteElement = (el: Element) => deep(el.shadowRoot!, '[part="note"]')!;
+/** The note the map shows, or null while it shows none. */
+const note = (el: Element) => (noteElement(el).textContent?.trim() ? noteElement(el) : null);
 const attribution = (el: Element) => deep(el.shadowRoot!, '[part="attribution"]');
 const asked = (store: FakeStore) => store.calls.filter((c) => c.name === 'basemapWorld').length;
 
@@ -108,6 +111,29 @@ describe('<mosaica-map> basemap', () => {
     expect(note(el)?.textContent?.trim()).toBeTruthy();
     await switchTo(host, store, 'round');
     expect(note(el)).toBeNull();
+  });
+
+  it('announces its note from an element that is there before the note is, and is drawn only with it', async () => {
+    const {host, el, store} = await map('geo', 'basemap="world"');
+    const live = noteElement(el);
+    expect(live.getAttribute('role')).toBe('status');
+    expect(live.classList.contains('sr-only')).toBe(true);
+    await switchTo(host, store, 'flat');
+    expect(noteElement(el)).toBe(live);
+    expect(live.textContent?.trim()).not.toBe('');
+    expect(live.classList.contains('sr-only')).toBe(false);
+  });
+
+  it('shows its note and its refusal and announces neither when quiet', async () => {
+    const {host, el, store} = await map('geo', 'basemap="world" quiet');
+    await switchTo(host, store, 'flat');
+    expect(note(el)).not.toBeNull();
+    expect(noteElement(el).classList.contains('sr-only')).toBe(false);
+    expect(noteElement(el).closest('[role="status"]')).toBeNull();
+
+    const refused = await map('geo', 'basemap="osm" quiet');
+    expect(refusal(refused.el)).not.toBeNull();
+    for (const region of refused.el.shadowRoot!.querySelectorAll('[role="status"]')) expect(region.textContent?.trim()).toBe('');
   });
 
   it('refuses what a mapping names for a view that it does not fit, and follows the mapping per view', async () => {

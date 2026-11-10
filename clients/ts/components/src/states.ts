@@ -114,7 +114,13 @@ function retryButton(onRetry: (() => void) | null | undefined): TemplateResult |
  * the state offers. An element whose state is a live region puts the words inside it and the
  * button beside it, so the button's name is not read out as part of the state.
  */
-export type StateLine = {dot: string | null; words: TemplateResult | string | typeof nothing; action: TemplateResult | typeof nothing};
+export type StateLine = {
+  dot: string | null;
+  words: TemplateResult | string | typeof nothing;
+  action: TemplateResult | typeof nothing;
+  /** The dot's tooltip, for a line whose words are not drawn. */
+  title?: string;
+};
 
 /**
  * The refused state's line: its words with the refusal's code, the server's reason on a line under
@@ -159,7 +165,45 @@ export function stateLine(state: PanelState, status: StatusProjection | null | u
 
 /** The dot before a line's words. */
 export function stateDot(line: StateLine): TemplateResult | typeof nothing {
-  return line.dot ? html`<span class=${line.dot}></span>` : nothing;
+  return line.dot ? html`<span class=${line.dot} title=${line.title ?? nothing}></span>` : nothing;
+}
+
+/**
+ * A line for an element that announces its state: the dot, the words in a `role="status"` element,
+ * `after`, and the line's button beside them. An element renders this in the same place in every
+ * state, so the live element stays and each change of its words is announced. With `unsaid`, the
+ * words sit beside the live element instead, read and not announced, and the live element holds
+ * `unsaid.heard`, undrawn.
+ */
+export function liveLine(line: StateLine, unsaid: {heard: unknown} | null = null, after: unknown = nothing): TemplateResult {
+  return html`${stateDot(line)}${unsaid ? line.words : nothing}<span class=${unsaid ? 'sr-only' : nothing} role="status">${unsaid ? unsaid.heard : line.words}</span>${after}${line.action}`;
+}
+
+/** What {@link liveLine} takes for words that are shown and never announced. */
+export const UNSAID = {heard: nothing};
+
+/**
+ * Whether the view's emptiness is a query's answer, which an element announces, or where a pan
+ * went, which it does not. An element calls {@link note} once for each update.
+ */
+export class EmptyAnswer {
+  private wasQuerying = false;
+  private answered = false;
+
+  /** Whether `state` is `empty` and a query ended in it. It stays so until the view is no longer empty. */
+  note(state: PanelState, querying: boolean): boolean {
+    if (state !== 'empty') this.answered = false;
+    else if (this.wasQuerying && !querying) this.answered = true;
+    this.wasQuerying = querying;
+    return this.answered;
+  }
+}
+
+/** The element with the focus in `doc`, looked for through the shadow roots that hold it. */
+export function focusedElement(doc: Document): Element | null {
+  let focused = doc.activeElement;
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+  return focused;
 }
 
 /** A line as a `part="state"` carrying `data-state`, with `after` between its words and its button. */
@@ -197,9 +241,7 @@ export class ActionFocus {
 
   /** Remember the button with focus in a state line inside `root`, if there is one. */
   note(root: DocumentFragment | HTMLElement | null): void {
-    // From the document down through the shadow roots that hold the focus, to the element itself.
-    let focused = root?.ownerDocument.activeElement ?? null;
-    while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement;
+    const focused = root ? focusedElement(root.ownerDocument) : null;
     this.held = focused instanceof HTMLButtonElement && root!.contains(focused) && focused.closest('[part~="state"]') ? focused : null;
   }
 

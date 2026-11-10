@@ -3,7 +3,7 @@ import {property} from 'lit/decorators.js';
 import {NO_COUNT, NO_MASKED, formatMasked, type HeldRegion, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
-import {ActionFocus, NOTHING_VISIBLE, NamedQuery, seesNothing, showsContent, stateDot, stateLine, stateOf, type PanelState, type StateLine} from './states.js';
+import {ActionFocus, EmptyAnswer, NOTHING_VISIBLE, NamedQuery, UNSAID, liveLine, seesNothing, showsContent, stateLine, stateOf, stateWord, type PanelState, type StateLine} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -26,13 +26,15 @@ import './count.js';
  * loaded. Its Cancel button goes back to the filters, highlight and selection that last finished
  * loading.
  *
- * Screen readers announce every state the cell names in words, because the words are an `aria-live`
- * region. Up to date and updating are read but not announced, and the counts sit outside the
- * region, so a pan announces nothing. After a change of filters, highlight or selection, the region
- * announces the counts once they have loaded, such as `3,923 of 50,000 match`, and after any state
- * named in words it announces that the view is up to date again. A state's button sits outside the
- * region. When the button goes with its state while it has the focus, the state cell takes the
- * focus.
+ * Screen readers announce the states the cell names in words, because the words are a live region.
+ * A pan announces nothing: up to date and updating are read but not announced, the counts sit
+ * outside the region, and Nothing in view is announced only as the answer to a change of filters,
+ * highlight or selection, not where a pan went. After such a change the region announces the counts
+ * once they have loaded, such as `3,923 of 50,000 match`, or that the view is up to date where there
+ * are no counts to say. After any state it announced, it announces that the view is up to date
+ * again. A state's button sits outside the region. When the button goes with its state while it has
+ * the focus, the state cell takes the focus. With `quiet`, the strip shows the same and announces
+ * nothing.
  *
  * @summary A status line showing whether the map is up to date and how many items it shows.
  * @tagname mosaica-status
@@ -48,7 +50,7 @@ import './count.js';
  *   whose held region it put back or took away.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - The session expired.
  *   Fires once each time.
- * @csspart strip - The one-line strip.
+ * @csspart strip - The strip of cells.
  * @csspart state - The state's dot and words, with `data-state` set to the panel state.
  * @csspart refusal - The words "View refused", or "Server busy", with `data-code` set to the
  *   refusal's code.
@@ -194,21 +196,27 @@ export class MosaicaStatus extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor compact = false;
   /** A function the Sign in button calls when the session has expired. Without it there is no Sign in button. */
   @property({attribute: false}) accessor reauthorise: (() => void) | null = null;
+  /**
+   * Announces nothing: every state and result is still shown, and none is put in a live region. Set
+   * it when another element on the page says the same things.
+   */
+  @property({type: Boolean, reflect: true}) accessor quiet = false;
 
   private readonly query = new NamedQuery(this);
   private readonly actionFocus = new ActionFocus();
+  private readonly emptyAnswer = new EmptyAnswer();
   private lastState: PanelState | null = null;
   private expiryFired = false;
-  /** What the strip shows now, decided before each render. */
-  private shown: {state: PanelState; running: boolean; quiet: boolean; line: StateLine} = {state: 'detached', running: false, quiet: false, line: stateLine('detached', null)};
+  /** What the strip shows now, decided before each render: `bare` is a dot alone, and `unsaid` what {@link liveLine} takes. */
+  private shown: {state: PanelState; running: boolean; bare: boolean; line: StateLine; unsaid: {heard: unknown} | null} = {state: 'detached', running: false, bare: false, line: stateLine('detached', null), unsaid: null};
   /** What the live region says while the strip shows a dot alone: a query's result, or that the view is back up to date. */
   private heard = '';
   /** The dot-alone state `heard` was last decided under. */
-  private quietState: PanelState | null = null;
+  private bareState: PanelState | null = null;
   private wasQuerying = false;
   /** Whether a query has finished and its result is still to be said. */
   private resultDue = false;
-  /** Whether the strip has left a state it named in words and has not yet said the view is up to date again. */
+  /** Whether the strip has left a state it announced and has not yet said the view is up to date again. */
   private recoveryDue = false;
 
   private get status(): StatusProjection | null {
@@ -229,63 +237,68 @@ export class MosaicaStatus extends MosaicaElement {
     this.actionFocus.note(this.renderRoot);
     const status = this.status;
     const state = stateOf(status);
+    const querying = status?.querying === true;
     const refresh = () => this.resolvedStore?.refresh();
     const nothingVisible = seesNothing(this.resolvedStore, state);
     // A query that has run long enough to name. The map may have drawn its answer while the
     // counts still load, and a refusal, an expiry or a lost server is said in its own words.
-    const running = status?.querying === true && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
+    const running = querying && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
     // Up to date and updating, the two states a pan moves between, are each a dot alone, so the
     // strip keeps its width through a gesture; every other state names itself beside its dot.
-    const quiet = !running && !nothingVisible && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true));
+    const bare = !running && !nothingVisible && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true));
+    // Nothing in view is announced as a query's answer. Where a pan went, it is shown and not said.
+    const answered = this.emptyAnswer.note(state, querying);
+    const panned = state === 'empty' && !running && !nothingVisible && !answered;
+    this.hear(state, bare, panned);
+    const words = stateWord(state, status);
     const line: StateLine = running
       ? {dot: null, words: 'Running query', action: html`<button part="cancel" class="btn small" type="button" @click=${() => this.cancel()}>Cancel</button>`}
-      : state === 'shown'
-        ? {dot: 'dot', words: 'Up to date', action: nothing}
-        : quiet
-          ? {dot: 'dot quiet', words: 'Updating', action: nothing}
-          : state === 'empty'
-            ? {dot: 'dot quiet', words: nothingVisible ? NOTHING_VISIBLE : 'Nothing in view', action: nothing}
-            : stateLine(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
-    this.shown = {state, running, quiet, line};
-    this.hear(state, quiet);
+      : bare
+        ? // Read and not drawn, and left out while the live region is saying the same words.
+          {dot: state === 'shown' ? 'dot' : 'dot quiet', title: words, words: this.heard === words && !this.quiet ? nothing : html`<span class="sr-only">${words}</span>`, action: nothing}
+        : state === 'empty'
+          ? {dot: 'dot quiet', words: nothingVisible ? NOTHING_VISIBLE : words, action: nothing}
+          : stateLine(state, status, {onRefresh: refresh, onRetry: refresh, onReauthorise: this.reauthorise});
+    this.shown = {state, running, bare, line, unsaid: this.quiet || panned ? UNSAID : bare ? {heard: this.heard} : null};
   }
 
   /**
    * Decide what the live region says while the strip shows a dot alone. A pan moves between up to
    * date and updating and says nothing. A query that finishes says its result once the counts are
-   * in, and a return from a state named in words says the view is up to date. Either is taken
-   * away at the next change, so that it is said again when it next holds.
+   * in, or that the view is up to date where there are no counts to say, and a return from a
+   * state the strip announced says the view is up to date. Either is taken away at the next
+   * change, so that it is said again when it next holds.
    */
-  private hear(state: PanelState, quiet: boolean): void {
+  private hear(state: PanelState, bare: boolean, panned: boolean): void {
     const querying = this.status?.querying === true;
     if (querying) this.resultDue = false;
     else if (this.wasQuerying) this.resultDue = true;
     this.wasQuerying = querying;
-    if (!quiet) {
-      // The words shown are the answer.
+    if (!bare) {
+      // The words shown are the answer. Where a pan went is not announced, so leaving it is not.
       this.heard = '';
-      this.quietState = null;
+      this.bareState = null;
       this.resultDue = false;
-      this.recoveryDue = state !== 'detached';
+      if (!panned) this.recoveryDue = state !== 'detached';
       return;
     }
-    if (state !== this.quietState || querying) this.heard = '';
-    this.quietState = state;
+    if (state !== this.bareState || querying) this.heard = '';
+    this.bareState = state;
     if (state !== 'shown' || querying) return;
     if (this.resultDue) {
-      const result = this.result();
-      if (result === null) return;
-      this.heard = result;
-    } else if (this.recoveryDue) this.heard = 'Up to date';
+      // Counts still loading are waited for; refused or absent, the state is said in their place.
+      if (this.view?.inView?.status === 'loading') return;
+      this.heard = this.result() ?? stateWord(state, this.status);
+    } else if (this.recoveryDue) this.heard = stateWord(state, this.status);
     this.resultDue = false;
     this.recoveryDue = false;
   }
 
-  /** The counts as the cells show them, in full figures, or `null` while they are not in. */
+  /** The counts as the cells show them, in full figures, or `null` where there are none to show. */
   private result(): string | null {
     const v = this.view;
     const n = v?.inView;
-    if (!v || !n || n.status !== 'shown' || this.status?.stale) return null;
+    if (!v || !n || n.status !== 'shown') return null;
     const match = `${formatMasked(n.matched)} of ${formatMasked(n.visible)} match`;
     if (!v.highlighting) return match;
     const lit = `${formatMasked(n.highlighted)} highlighted of ${formatMasked(n.matched)}`;
@@ -333,21 +346,14 @@ export class MosaicaStatus extends MosaicaElement {
   }
 
   override render(): TemplateResult | typeof nothing {
-    const {state, running, quiet, line} = this.shown;
+    const {state, running, bare, line, unsaid} = this.shown;
     const stale = this.status?.stale ?? false;
     const v = this.view;
     // One template for every state, so the live element stays and each change of its words is
-    // announced. A dot alone has its words beside the live element, read but not announced. The
-    // state's button sits outside it too, and the cell takes the focus when the button goes.
-    const first = html`<div class=${`cell state${quiet ? ' bare' : ''}`} tabindex="-1">
-      <span part="state" data-state=${state} ?data-querying=${running}
-        >${running ? html`<span part="spinner" class="spinner" aria-hidden="true"></span>` : stateDot(line)}${quiet ? html`<span class="sr-only">${line.words}</span>` : nothing}<span
-          class=${quiet ? 'sr-only' : nothing}
-          role="status"
-          aria-live="polite"
-          >${quiet ? this.heard : line.words}</span
-        >${line.action}</span
-      >
+    // announced. The state's button sits outside it, and the cell takes the focus when the
+    // button goes.
+    const first = html`<div class=${`cell state${bare ? ' bare' : ''}`} tabindex="-1">
+      <span part="state" data-state=${state} ?data-querying=${running}>${running ? html`<span part="spinner" class="spinner" aria-hidden="true"></span>` : nothing}${liveLine(line, unsaid)}</span>
     </div>`;
     return html`<div part="strip" data-state=${state}>${first}${this.counts(state, v, stale)}</div>
       ${this.expanded && showsContent(state) && v ? this.card(v, stale) : nothing}`;

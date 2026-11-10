@@ -111,14 +111,22 @@ describe('the map’s tooltip in a browser', () => {
     }
   }, 120_000);
 
-  it('goes on Escape with the focus outside the map, and comes back on another mark', async () => {
+  it('goes on Escape with the focus outside the map, leaving the press to the page, and comes back on another mark', async () => {
     const page = await open();
+    // What a handler of the page's own is given for each Escape.
+    await page.evaluate(() => {
+      const w = window as unknown as {prevented: boolean[]};
+      w.prevented = [];
+      document.addEventListener('keydown', (e) => e.key === 'Escape' && w.prevented.push(e.defaultPrevented));
+    });
+    const prevented = () => page.evaluate(() => (window as unknown as {prevented: boolean[]}).prevented);
     await hover(page, 0);
     await tooltipShown(page);
     expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
     await page.keyboard.press('Escape');
     await frames(page);
     expect(await boxOf(page, 'mosaica-map', '[part="tooltip"]')).toBeNull();
+    expect(await prevented()).toEqual([false]);
     // A move on the same mark does not bring it back.
     await hover(page, 0, 1);
     await frames(page);
@@ -126,6 +134,72 @@ describe('the map’s tooltip in a browser', () => {
     expect(await boxOf(page, 'mosaica-map', '[part="tooltip"]')).toBeNull();
     await hover(page, 1);
     await tooltipShown(page);
+
+    // With the focus in the map, the press that dismisses the tooltip is the map's alone.
+    await page.evaluate(() => (document.querySelector('mosaica-map') as HTMLElement).focus());
+    await page.keyboard.press('Escape');
+    await frames(page);
+    expect(await boxOf(page, 'mosaica-map', '[part="tooltip"]')).toBeNull();
+    expect(await prevented()).toEqual([false, true]);
+  }, 120_000);
+});
+
+describe('the map’s ground in a browser', () => {
+  /** How far the mark at the map's centre stands from the ground beside it, as a contrast ratio. */
+  async function markContrast(page: Page): Promise<number> {
+    const [x, y] = (await page.evaluate(() => (window as unknown as Seen).points))[0]!;
+    const png = (await page.screenshot({clip: {x: x - 12, y, width: 13, height: 1}})).toString('base64');
+    return page.evaluate(async (data) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const ctx = new OffscreenCanvas(image.width, 1).getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      const px = ctx.getImageData(0, 0, image.width, 1).data;
+      const luminance = (at: number) => {
+        const [r, g, b] = [0, 1, 2].map((c) => {
+          const v = px[at * 4 + c]! / 255;
+          return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+      };
+      // The row's last pixel is the mark's centre, and its first is bare ground.
+      const [mark, ground] = [luminance(image.width - 1), luminance(0)];
+      return (Math.max(mark, ground) + 0.05) / (Math.min(mark, ground) + 0.05);
+    }, png);
+  }
+
+  /** Wait for the map to draw its points in the colour of the ground it is now on. */
+  async function redrawn(page: Page): Promise<number> {
+    let contrast = 0;
+    for (let tries = 0; tries < 60; tries++) {
+      await frames(page);
+      contrast = await markContrast(page);
+      if (contrast >= 2.5) break;
+    }
+    return contrast;
+  }
+
+  it('draws its points for the other ground when the page’s colour scheme changes, and when the system’s does', async () => {
+    const page = await open();
+    const dark = () => page.evaluate(() => (document.querySelector('mosaica-map') as unknown as {drawnGround: string}).drawnGround === 'dark');
+    expect(await dark()).toBe(false);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+
+    await page.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
+    expect(await dark()).toBe(true);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    await page.evaluate(() => (document.documentElement.style.colorScheme = 'light'));
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+
+    // A page that allows both follows the system.
+    await page.evaluate(() => (document.documentElement.style.colorScheme = 'light dark'));
+    await page.emulateMedia({colorScheme: 'dark'});
+    expect(await dark()).toBe(true);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    await page.emulateMedia({colorScheme: 'light'});
+    expect(await dark()).toBe(false);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
   }, 120_000);
 });
 

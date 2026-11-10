@@ -5,7 +5,7 @@ import {isBusy, isUnanswered} from '@mosaicajs/client/internal';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {ActionFocus, reasonOf, refusedLine, stateDot, stateLine, stateOf, type PanelState, type StateLine} from './states.js';
+import {ActionFocus, UNSAID, liveLine, reasonOf, refusedLine, stateLine, stateOf, type PanelState, type StateLine} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
 
@@ -22,7 +22,8 @@ import './count.js';
  * available yet.
  *
  * Screen readers announce the state line as it changes: that the selection is being counted, the
- * matched and visible counts when they arrive, and a refusal.
+ * matched and visible counts once, when the query has finished loading, and a refusal. With `quiet`,
+ * the card shows the same and announces nothing.
  *
  * @summary A card showing the counts and marks inside the selected region.
  * @tagname mosaica-selection
@@ -109,6 +110,11 @@ export class MosaicaSelection extends MosaicaElement {
 
   /** A region to show instead of the store's `region` projection. */
   @property({attribute: false}) accessor region: RegionProjection | null = null;
+  /**
+   * Announces nothing: the state line and the counts are still shown, and none is put in a live
+   * region. Set it when another element on the page says the same things.
+   */
+  @property({type: Boolean, reflect: true}) accessor quiet = false;
 
   private get shown(): RegionProjection | null {
     return this.region ?? this.resolvedStore?.get('region') ?? null;
@@ -137,7 +143,9 @@ export class MosaicaSelection extends MosaicaElement {
     }
     // Busy only where the selection's own count was shed, so the code shown is its own.
     if (r.status === 'refused' && isBusy(r.refusal) && status) return {state: 'busy', line: stateLine('busy', {...status, refusal: r.refusal}, {onRetry: () => this.resolvedStore?.refresh()})};
-    if (r.status === 'loading') return {state: 'loading', line: {dot: 'dot quiet', words: 'Counting', action: nothing}};
+    // Counting until the query has finished loading: the figures a frame gives first are an
+    // estimate, shown below as they stand, and the counts that follow are said once.
+    if (r.status === 'loading' || (r.status === 'shown' && status?.querying)) return {state: 'loading', line: {dot: 'dot quiet', words: 'Counting', action: nothing}};
     if (r.status === 'refused') return {state: 'refused', line: refusedLine('Selection refused', r.refusal?.code, null, reasonOf(r.refusal))};
     if (status?.stale) return {state: 'stale', line: {dot: 'dot warn', words: 'Data updated', action: nothing}};
     // The counts in words, heard as they arrive and not drawn, since the figures are below; then
@@ -145,7 +153,7 @@ export class MosaicaSelection extends MosaicaElement {
     const side = r.shape.outside ? 'outside' : 'inside';
     const counted = `${formatMasked(r.matched)} matched ${side}${r.visible ? `, ${formatMasked(r.visible)} visible ${side}` : ''}.`;
     const verdict = r.verdict === null ? 'Not counted yet' : r.verdict.exact ? 'Exact for the shape' : 'Approximate: counted over cells around the shape';
-    return {state: 'shown', line: {dot: null, words: html`<span class="sr-only">${counted} </span>${verdict}`, action: nothing}};
+    return {state: 'shown', line: {dot: null, words: this.quiet ? verdict : html`<span class="sr-only">${counted} </span>${verdict}`, action: nothing}};
   }
 
   override render(): TemplateResult | typeof nothing {
@@ -170,9 +178,7 @@ export class MosaicaSelection extends MosaicaElement {
     // when the button goes.
     return html`<div class="panel">
       <h2 part="title">Selection <span class="summary">${r ? (r.shape.outside ? `outside ${r.shape.kind}` : r.shape.kind) : nothing}</span></h2>
-      <span part="state" data-state=${state} tabindex="-1"
-        >${stateDot(line)}<span role="status">${line.words}</span>${state === 'loading' ? html`<span class="skel" aria-hidden="true"></span>` : nothing}${line.action}</span
-      >
+      <span part="state" data-state=${state} tabindex="-1">${liveLine(line, this.quiet ? UNSAID : null, state === 'loading' ? html`<span class="skel" aria-hidden="true"></span>` : nothing)}</span>
       ${counts}
       ${r && ids.length > 0
         ? html`<div part="label" id="items-label" class="xs muted items-label">Shown items</div>
