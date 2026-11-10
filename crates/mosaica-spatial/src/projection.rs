@@ -13,7 +13,7 @@
 //! input latitude before the transform discards the evidence.
 //!
 //! The tests hold this module and the Python reference to the same vectors, in
-//! `test_corpora/common/projection-vectors.json`.
+//! `corpora/common/projection-vectors.json`.
 
 use std::f64::consts::PI;
 
@@ -169,7 +169,7 @@ mod tests {
     use std::process::{Command, Stdio};
 
     /// Compiled in rather than read at runtime, so a moved or renamed file fails the build.
-    const VECTORS_JSON: &str = include_str!("../../../test_corpora/common/projection-vectors.json");
+    const VECTORS_JSON: &str = include_str!("../../../corpora/common/projection-vectors.json");
 
     /// The repository root: the Python reference is outside the Cargo workspace.
     const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(Projection::None.inverse(-7.5, 1e6), (-7.5, 1e6));
     }
 
-    /// Checked against `test_corpora/common/projection.py`. The assertion is on the stored
+    /// Checked against `corpora/common/projection.py`. The assertion is on the stored
     /// position: two implementations quantising to different coordinates placed a point wrongly.
     #[test]
     fn agrees_with_the_python_reference() {
@@ -410,7 +410,7 @@ mod tests {
         let script = r#"
 import sys
 sys.path.insert(0, sys.argv[1])
-from test_corpora.common.projection import project
+from corpora.common.projection import project
 out = []
 for line in sys.stdin:
     lon, lat = line.split()

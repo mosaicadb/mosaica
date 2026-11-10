@@ -6,7 +6,7 @@
 //! frame makes a 16-bit cell *identically* an XYZ tile at zoom 16, so a place's cell is the tile
 //! address every slippy map already agrees on — and a frame mirrored north-south, or one that
 //! exchanged the axes, round-trips perfectly while failing every one of them. The figures come
-//! from `test_corpora/common/projection-vectors.json`, which is the contract this transform and
+//! from `corpora/common/projection-vectors.json`, which is the contract this transform and
 //! the Python module that placed the built geographic corpora are both held to.
 
 mod common;

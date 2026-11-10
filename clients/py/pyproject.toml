@@ -43,7 +43,8 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/mosaicadb/mosaica"
-Documentation = "https://github.com/mosaicadb/mosaica/tree/main/docs"
+Documentation = "https://docs.mosaicadb.com/"
+Demo = "https://demo.mosaicadb.com/"
 Source = "https://github.com/mosaicadb/mosaica"
 Issues = "https://github.com/mosaicadb/mosaica/issues"
 Changelog = "https://github.com/mosaicadb/mosaica/blob/main/CHANGELOG.md"
@@ -53,12 +54,16 @@ Changelog = "https://github.com/mosaicadb/mosaica/blob/main/CHANGELOG.md"
 # hook (`hatch_build.py`) builds with Node and packages under `mosaica/static/`. A user
 # installing the wheel needs no Node; a developer installing from this checkout does.
 widget = ["anywidget>=0.9"]
+# `mosaica demo` and `mosaica.datasets`: DuckDB and NumPy prepare the datasets that are fetched
+# from their publishers. The map page is the same bundle the widget carries, so it needs no
+# anywidget.
+demo = ["duckdb>=1.1", "numpy>=1.26"]
 # The tests. pandas is here because the tests compute expected answers with it; the package
 # never needs it. marimo and scikit-learn run the demo notebook; nbformat lets marimo export its
 # Jupyter copy. hatchling is imported by the tests of the wheel's build hook, and ipykernel runs
 # the test of a Jupyter kernel's shutdown.
 dev = [
-  "anywidget>=0.9", "hatchling>=1.27", "ipykernel", "marimo", "nbformat", "pandas", "pytest",
+  "anywidget>=0.9", "duckdb>=1.1", "hatchling>=1.27", "ipykernel", "marimo", "nbformat", "pandas", "pytest",
   "pytest-cov", "ruff", "scikit-learn",
 ]
 

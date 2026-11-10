@@ -28,6 +28,18 @@ Mosaica is a database for serving interactive maps over billions of spatial data
 
 We served one map of GBIF's species records, from Mosaica and compared it to delivering the same functionality from three other databases. Each was optimised for the queries run and applied the same access control requirements as Mosaica. The tests were run on a machine with 24GB RAM. At a billion records, a viewer panning and zooming waited 35 ms for a typical frame and 0.36 s for the slowest with Mosaica, and 234 ms and 6.6 s with ClickHouse, the fastest competitor. [Compared with other databases](docs/system/comparison.md) gives the method, each system's setup and more detailed measurements.
 
+## Try it in your browser
+
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves two maps from one machine: 73.6 million places from Overture Maps on a world map, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the European Union's places or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
+
+## See a map in one command
+
+```bash
+pip install 'mosaica[demo]' && mosaica demo places
+```
+
+This builds 150,000 GeoNames places into a database and opens its map in your browser. `mosaica demo --list` lists the other datasets, up to GBIF's 3.5 billion occurrences, and [Datasets to try](docs/start/datasets.md) says what each one holds. In a clone of this repository, `uv run mosaica demo places` does the same from the source.
+
 ## Try it in a notebook
 
 ```bash
@@ -81,7 +93,8 @@ Mosaica is an alpha. Expect formats and APIs to change before 1.0.
 ## Learn more
 
 - [Documentation](docs/index.md): tutorials, [how it works](docs/system/overview.md), [guides](docs/guides/index.md) and the [reference](docs/reference/index.md).
-- The same documentation as a [website](https://mosaicadb.github.io/mosaica/), with search.
+- The same documentation as a website, with search, at [docs.mosaicadb.com](https://docs.mosaicadb.com/).
+- A [hosted demo](https://demo.mosaicadb.com/) of 73.6 million places and 50,000 arXiv papers.
 - Examples for the [browser](clients/ts/examples) and [Python](clients/py/examples).
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 

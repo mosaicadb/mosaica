@@ -6,13 +6,13 @@
 // then the store's region, and the region leaf on the next request; between gestures, a glide with
 // the button up must not move the camera.
 //
-//   node clients/ts/harness/modes.mjs [--url http://localhost:5173/?dataset=2m4] [--executable /path/to/chrome] [--headless]
+//   node clients/ts/harness/modes.mjs [--url http://localhost:5173/?dataset=arxiv-sample] [--executable /path/to/chrome] [--headless]
 //
 // Headed by default, since the behaviour under test is in the browser's input handling.
 import {chromium} from 'playwright';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
-const url = args.url ?? 'http://localhost:5173/?prefetch=0&dataset=2m4';
+const url = args.url ?? 'http://localhost:5173/?prefetch=0&dataset=arxiv-sample';
 const headless = 'headless' in args;
 const executablePath = args.executable;
 

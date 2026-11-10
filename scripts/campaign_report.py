@@ -9,7 +9,7 @@ hand-maintained.
     python3 scripts/campaign_report.py --tracker T.md   # rewrite the block in T.md in place
     python3 scripts/campaign_report.py --tracker T.md --check   # non-zero if the block is stale
 
-    python3 scripts/campaign_report.py assemble --rung medcpt --out test_corpora/medcpt/measurements.json \
+    python3 scripts/campaign_report.py assemble --rung medcpt --out corpora/medcpt/measurements.json \
         --build stage-timings.json --bundle <bundle> --rows 35920666 \
         --serve serve-nocap.json --serve serve-6g.json --ingest ingest-10.json --ingest ingest-50.json
 
@@ -31,10 +31,10 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-CORPORA = REPO / "test_corpora"
+CORPORA = REPO / "corpora"
 
 #: Bumped whenever a field in `measurements.json` changes meaning or leaves. The schema itself is
-#: written down in `test_corpora/common/README.md`, with each field's unit and how it was measured.
+#: written down in `corpora/common/README.md`, with each field's unit and how it was measured.
 #:
 #: **2** — the ingest cycle publishes artifacts on the wire after their points (owner ruling,
 #: 2026-09-03), so `content_removed` is gone (an empty base carries no roster to strip a kind
@@ -203,10 +203,10 @@ def render() -> str:
     heading = [
         "### 1.1 The campaign table",
         "",
-        "**Generated** from `test_corpora/<rung>/measurements.json` by",
+        "**Generated** from `corpora/<rung>/measurements.json` by",
         "[`../scripts/campaign_report.py`](../scripts/campaign_report.py) — every figure here is a",
         "field of a committed file, and the schema those files are on is",
-        "[`../test_corpora/common/README.md`](../test_corpora/common/README.md). Do not edit this",
+        "[`../corpora/common/README.md`](../corpora/common/README.md). Do not edit this",
         "block; re-run the script.",
         "",
     ]
@@ -291,7 +291,7 @@ def ingest_cell(cell: dict) -> dict:
         "ack_p99": ((cell.get("ingest") or {}).get("ack_ms") or {}).get("p99"),
         "statuses": (cell.get("ingest") or {}).get("statuses"),
         # The byte cap the bodies were kept under and what the driver did to keep them there
-        # (`test_corpora/common/README.md` §3): a cell whose 422s are all single-row bodies over
+        # (`corpora/common/README.md` §3): a cell whose 422s are all single-row bodies over
         # the cap is a different finding from one whose driver stalled.
         "max_body_bytes": (cell.get("ingest") or {}).get("max_body_bytes"),
         "bodies_split": (cell.get("ingest") or {}).get("bodies_split"),

@@ -369,7 +369,7 @@ struct Rank {
 }
 
 /// A greedy term set covering about `target` of `total_rows`, by the rule
-/// `test_corpora/common/serve_battery.py`'s `compose_ladder` uses, so a ladder rung here is the
+/// `corpora/common/serve_battery.py`'s `compose_ladder` uses, so a ladder rung here is the
 /// same principal the battery would compose for the same corpus.
 ///
 /// Fill descending by size while the running sum stays under the budget, then consider the one

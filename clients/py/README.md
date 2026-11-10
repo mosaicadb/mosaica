@@ -43,6 +43,11 @@ prove the bundle is inside it. `.github/workflows/wheels.yml` builds the wheels;
 
 ## Try it
 
+`mosaica demo places`, with the `demo` extra installed or through `uv run` at the repository root,
+builds a dataset and opens its map in a browser, with a picker for whom to view it as;
+`mosaica demo --list` lists the datasets. `mosaica.datasets.load(name)` does the same steps and returns the database.
+[Datasets to try](../../docs/start/datasets.md) says what each dataset holds.
+
 Two notebooks under `examples/`, the same guided walk in each front end:
 
 ```
@@ -60,7 +65,7 @@ They need the package with `[widget]` and an arXiv corpus: `data/notebook-2m4-li
 million papers, or `data/notebook-sample/`, 200,000 of them, with `SCALE = "sample"`. The notebook
 looks for `data/<corpus>/` in the working directory, in its own directory and in every directory
 above them, and `MOSAICA_NOTEBOOK_DATA` names one elsewhere. Neither directory is in git.
-`python -m test_corpora.arxiv.sample --source data/notebook-2m4-live --out data/notebook-sample
+`python -m corpora.arxiv.sample --source data/notebook-2m4-live --out data/notebook-sample
 --papers 200000 --seed 0`, run at the repository root, makes the sample from the whole corpus.
 Nothing in the repository makes `data/notebook-2m4-live/` itself, so the notebooks run only where
 a copy of it is at hand.

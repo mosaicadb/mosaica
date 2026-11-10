@@ -41,27 +41,10 @@ import anywidget
 import traitlets
 
 from ._auth import Token, TokenSource, minted
+from ._bundle import bundle_path
 from ._refusal import listed
 from ._viewer import _json_value, decimal_id
 
-_HERE = pathlib.Path(__file__).parent
-_BUNDLE = "mosaica-components.js"
-
-
-def bundle_path() -> Optional[pathlib.Path]:
-    """The path of the components' JavaScript bundle that `Map` loads, or `None` when there is
-    none.
-
-    The copy packaged in the wheel under `mosaica/static/` is used when it is there, and a
-    checkout's own build in `clients/ts/components/dist/` otherwise.
-    """
-    packaged = _HERE / "static" / _BUNDLE
-    if packaged.exists():
-        return packaged
-    checkout = _HERE.parents[2] / "ts" / "components" / "dist" / _BUNDLE
-    if checkout.exists():
-        return checkout
-    return None
 
 
 def _decimal_id(value: Any, name: str) -> Optional[str]:

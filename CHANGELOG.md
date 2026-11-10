@@ -10,6 +10,15 @@ container image.
 
 ### Added
 
+- `mosaica demo NAME...` builds datasets and opens their map in a browser, with a picker for the
+  dataset and one for whom to view it as, from the Python package with the new `demo` extra:
+  `pip install 'mosaica[demo]'`, then `mosaica demo places`, or `uv run mosaica demo places` in a
+  clone. `mosaica.datasets.load` does the same steps
+  and returns the `Database`, and `mosaica.datasets.prepared` stops before the build. The datasets
+  are the two in-git samples, the whole GeoNames dump, downloaded from GeoNames, and GBIF's
+  occurrence snapshot, read from its public copy on Amazon S3 whole or as a sample of its parts.
+  [Datasets to try](docs/start/datasets.md) lists their views, fields, layers and sizes.
+
 - `POST /v1/viewport` takes `space` beside `bbox`: `"wgs84"` gives the box in degrees of
   longitude and latitude on a view with a map projection. The TypeScript client's
   `ViewportRequest` and `region` filter take it too.
@@ -35,6 +44,10 @@ container image.
 
 ### Changed
 
+- The documentation website moves to <https://docs.mosaicadb.com/>, and a hosted demo of 73.6
+  million Overture Maps places and 50,000 arXiv papers runs at <https://demo.mosaicadb.com/>. The
+  Python packages' `Documentation` link and the `mosaica demo` page's Docs link point to the new
+  site.
 - **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
   takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees

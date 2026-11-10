@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import threading
 import time
+import tomllib
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Sequence
@@ -1383,13 +1384,7 @@ class Database:
         ok, page = self._checked()
         if not ok:
             raise Refusal(_reason_first("commit: the declaration did not check", page, page))
-        with show:
-            build = self._run(
-                ["build", "--deployment", str(self.path / "mosaica.toml"),
-                 "--progress", "none" if progress is False else "json"]
-                + (["--strict"] if strict else []),
-                show,
-            )
+        build = self._build(show, progress is not False, strict)
         report = CommitReport(
             what="commit",
             ok=build.returncode == 0,
@@ -2126,6 +2121,19 @@ class Database:
         running."""
         return None if self.listening is None else f"http://{self.listening.session}"
 
+    def _build(
+        self, show: _progress.Sink, records: bool, strict: bool = False
+    ) -> subprocess.CompletedProcess:
+        """Run `mosaica build` over the directory's `mosaica.toml`, its progress records to
+        `show` when `records` is set."""
+        with show:
+            return self._run(
+                ["build", "--deployment", str(self.path / "mosaica.toml"),
+                 "--progress", "json" if records else "none"]
+                + (["--strict"] if strict else []),
+                show,
+            )
+
     def _run(
         self, arguments: Sequence[str], show: _progress.Sink | None = None
     ) -> subprocess.CompletedProcess:
@@ -2475,8 +2483,12 @@ def open(path: str | os.PathLike, port: int | None = None) -> Database:  # noqa:
     database = Database(directory, port=port)
     if held is not None:
         _load(database, held)
-    elif (directory / "schema.toml").exists():
-        database._loaded_text = (directory / "schema.toml").read_text(encoding="utf-8")
+    else:
+        deployment = directory / "mosaica.toml"
+        build = tomllib.loads(deployment.read_text(encoding="utf-8")).get("build", {})
+        schema = directory / build.get("schema", "schema.toml")
+        if schema.exists():
+            database._loaded_text = schema.read_text(encoding="utf-8")
     return database
 
 

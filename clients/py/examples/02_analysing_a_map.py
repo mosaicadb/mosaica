@@ -67,30 +67,19 @@ def _(mo):
     The papers are a sample of 50,000 from arXiv's listings, kept in `examples/data/arxiv/` in
     the Mosaica repository. Each has a position in two dimensions computed from an embedding of
     the paper, so that papers on similar subjects sit close together. The next cell uses the
-    repository's copy when this notebook runs from a clone of it, and otherwise downloads the
-    seven files it needs from GitHub into a folder called `arxiv` where you started the
-    notebook, the first time only.
+    repository's copy when this notebook runs from a clone of it, and otherwise downloads it
+    from GitHub once, into Mosaica's folder in your user cache, with `mosaica.datasets`.
     """)
     return
 
 
 @app.cell
 def _():
-    # Jupyter runs a notebook in its own directory, and marimo gives the notebook's path as
-    # __file__.
-    from pathlib import Path
-    from urllib.request import urlretrieve
+    # The repository's copy of the papers, or one this package's release fetched once into the
+    # user cache.
+    from mosaica import datasets as _datasets
 
-    here = Path(__file__).parent if "__file__" in globals() else Path.cwd()
-    arxiv = (here / "../../../examples/data/arxiv").resolve()
-    if not arxiv.is_dir():
-        arxiv = Path("arxiv")
-        arxiv.mkdir(exist_ok=True)
-        for _name in ["points", "points-umap200", "archive", "primary_category",
-                      "clusters-toponymy", "clusters-toponymy-members", "topics-toponymy"]:
-            if not (arxiv / f"{_name}.parquet").exists():
-                urlretrieve("https://raw.githubusercontent.com/mosaicadb/mosaica/main/"
-                            f"examples/data/arxiv/{_name}.parquet", arxiv / f"{_name}.parquet")
+    arxiv = _datasets.prepared("arxiv-sample").parent
     return (arxiv,)
 
 

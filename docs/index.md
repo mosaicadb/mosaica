@@ -38,6 +38,7 @@ It is designed to hold billions of points on one machine and to serve them to ma
 
 ## Where to start
 
+- **See it working first.** [demo.mosaicadb.com](https://demo.mosaicadb.com/) serves 73.6 million places from Overture Maps and 50,000 arXiv papers, with a picker for whom to view each map as. Nothing to install.
 - **Explore your own data in a notebook.** The Python client turns a pandas or polars data frame into a map in Jupyter, and answers counts and filters from code. It runs the database on your own machine, or connects to a shared server. Start with the [Python client](reference/python/index.md).
 - **Run a map that other people open in a browser.** Describe your Parquet files, build them with the `mosaica` command, and serve the result. [Your first map from files](start/first-map.md) walks through it, and the [Docker](guides/docker.md) and [systemd](guides/systemd.md) guides cover running it for real.
 - **Put a map inside your own web application.** The TypeScript client and its web components add a map, filters and record cards to a page, in any framework, or a layer to your own deck.gl scene. See the [TypeScript client](reference/typescript.md) and the [components](reference/components.md).

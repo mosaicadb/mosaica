@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5182,
     strictPort: true,
     proxy: {
-      '/v1': {target: process.env.MOSAICA_VIEWER_URL ?? 'http://127.0.0.1:37585', changeOrigin: true},
+      '/v1': {target: process.env.MOSAICA_VIEWER_URL ?? 'http://127.0.0.1:37591', changeOrigin: true},
       '/token': {target: process.env.MOSAICA_APP_URL ?? 'http://127.0.0.1:5180', changeOrigin: true},
       '/users': {target: process.env.MOSAICA_APP_URL ?? 'http://127.0.0.1:5180', changeOrigin: true}
     }

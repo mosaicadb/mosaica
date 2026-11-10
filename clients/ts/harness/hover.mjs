@@ -6,7 +6,7 @@
 // crosses a drawn boundary. The mouse moves through Playwright's input pipeline at a human pace,
 // in small steps with hover events between, and the map's `hoveredArtifact` is read after each.
 //
-//   node clients/ts/harness/hover.mjs [--url http://localhost:5173/?dataset=notebook-2m4]
+//   node clients/ts/harness/hover.mjs [--url http://localhost:5173/?dataset=arxiv-sample]
 //                                     [--shots DIR] [--tag before|after] [--executable PATH]
 //                                     [--headless]
 //
@@ -16,7 +16,7 @@ import {mkdirSync} from 'node:fs';
 import {chromium} from 'playwright';
 
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]]] : acc), []));
-const url = args.url ?? 'http://localhost:5173/?prefetch=0&dataset=notebook-2m4';
+const url = args.url ?? 'http://localhost:5173/?prefetch=0&dataset=arxiv-sample';
 const headless = 'headless' in args;
 const executablePath = args.executable;
 const shots = args.shots ?? null;

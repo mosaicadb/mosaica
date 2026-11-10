@@ -1,0 +1,99 @@
+# GBIF occurrences: every record in GBIF's snapshot that has a coordinate, on a world map.
+#
+# `mosaica.datasets.gbif.prepare` copies this file beside the files it names, and replaces the
+# `# <vocabulary>` line with the kingdoms the records carry.
+
+[sources]
+points   = "points.parquet"
+kingdom  = "vocab-kingdom.parquet"
+taxonomy = "members-taxonomy.parquet"
+
+[defaults]
+source     = "points"
+
+# Coordinates are in degrees, as GBIF publishes them, and the build projects them. A record nearer
+# a pole than Web Mercator reaches is drawn at the map's edge.
+#
+# Each record's `access` lists its country code, `y:` and its year, and `s:` and its species key,
+# and a reader sees the record when they hold any one of them. A record with no country carries
+# `UNRECORDED`, so the default below is never used.
+[[view]]
+name             = "geo"
+title            = "Where it was recorded"
+projection       = "web_mercator"
+extent           = { lon = [-180.0, 180.0], lat = [-85.0511287798066, 85.0511287798066] }
+source           = "points"
+visibility       = "public"
+point_visibility = { field = "access", default = "UNRECORDED" }
+
+# The kingdoms are public, because a kingdom says nothing about which countries a dataset covers.
+# <vocabulary>
+
+# `kingdom` colours the map. `specieskey` and `year` are indexed for filtering, and
+# `scientificname` is stored only, so it is shown when an item is opened.
+[[attribute]]
+name       = "kingdom"
+title      = "Kingdom"
+type       = "category"
+vocabulary = "kingdom"
+render     = true
+
+[[attribute]]
+name  = "specieskey"
+title = "GBIF species key"
+type  = "keyword"
+index = true
+
+[[attribute]]
+name  = "year"
+title = "Year"
+type  = "u16"
+index = true
+
+[[attribute]]
+name  = "scientificname"
+title = "Scientific name"
+type  = "keyword"
+
+# GBIF's own key for a record. The member file names each record by it.
+[[attribute]]
+name   = "gbifid"
+title  = "GBIF occurrence key"
+type   = "u64"
+unique = true
+
+# Family, genus and species. The tree starts at family because a kingdom holds billions of records,
+# and the build holds an artifact's members in memory while it sorts them. A reader is shown a
+# taxon only when they can see at least one record in it.
+[[layer]]
+name                      = "taxonomy/tree"
+title                     = "Taxonomy"
+views                     = ["geo"]
+membership                = "enumerated"
+value_set                 = "open"
+hierarchy                 = { kind = "tiered", prune_children = true }
+visibility                = "public"
+artifact_visibility       = { default = "inherited" }
+require_member_visibility = { count = 1 }
+
+[[layer.levels]]
+level = 0
+title = "Family"
+zoom  = [0, 5]
+
+[[layer.levels]]
+level = 1
+title = "Genus"
+zoom  = [4, 10]
+
+[[layer.levels]]
+level = 2
+title = "Species"
+zoom  = [9, 16]
+
+[layer.content]
+computed = ["centroid", "box"]
+
+[layer.members]
+source = "taxonomy"
+fields = { gbifid = "entity" }

@@ -18,8 +18,9 @@ DataFrame when pandas is installed. Every `mosaica_id` in it, an item's or an an
 the id's decimal string, so one id is equal wherever it appears, and every call that takes an id
 takes that string or the whole number. `Map` shows a database as an interactive map in a notebook
 cell, and `side_by_side` shows several maps in one row; both need the `widget` extra, which
-`pip install 'mosaica[widget]'` adds. `Map`, `side_by_side`, `create`, `open` and `Database` are
-loaded when first used, so `import mosaica` works without anywidget or pyarrow.
+`pip install 'mosaica[widget]'` adds. `datasets` fetches, builds and opens datasets to try, and
+`mosaica demo NAME` shows one in a browser. `Map`, `side_by_side`, `create`, `open`, `Database`
+and `datasets` are loaded when first used, so `import mosaica` works without anywidget or pyarrow.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ __all__ = [
     "authorise",
     "connect",
     "create",
+    "datasets",
     "login",
     "logout",
     "open",
@@ -71,6 +73,10 @@ def __getattr__(name: str):
         except ImportError as e:
             raise ImportError("making a database needs pyarrow: pip install 'pyarrow>=14.0.1'") from e
         return getattr(_database, _SDK[name])
+    if name == "datasets":
+        import importlib
+
+        return importlib.import_module(".datasets", __name__)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
