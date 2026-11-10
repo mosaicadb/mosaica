@@ -1,5 +1,5 @@
 import '../../src/index.js';
-import type {ItemDetail, RegionProjection} from '@mosaicajs/client';
+import type {Band, ItemDetail, RegionProjection} from '@mosaicajs/client';
 import {fakeStore, meta, scalar, settle, status} from '../fake-store.js';
 
 // Built by `explorer.browser.ts` with Vite from the packages' sources. One explorer filling the
@@ -53,7 +53,7 @@ const META = meta({
     {id: 's1', displayName: 'other', quantisation: {xMin: 0, xMax: 1, yMin: 0, yMax: 1}, projection: 'none', worldAspect: null, tileScheme: null, tile: null, roster: null}
   ],
   declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']}), ...columns],
-  filterOperands: [{column: 'archive', family: 'category', operands: ['in']}]
+  filterOperands: [{column: 'archive', family: 'category', operands: ['in']}, ...columns.slice(0, 16).map((c) => ({column: c.name, family: 'numeric' as const, operands: ['range']}))]
 });
 
 document.documentElement.style.height = '100%';
@@ -73,7 +73,7 @@ const press = async (el: HTMLElement | null) => {
   await frames(3);
 };
 const item = {id: 5n, detail: {fields: {title: 'A picked item'}, labels: [], views: [], scoped: {}} as ItemDetail};
-const map = shadow.querySelector('mosaica-map') as HTMLElement & {pickedAt: unknown; focus(): void};
+const map = shadow.querySelector('mosaica-map') as HTMLElement & {pickedAt: unknown; focus(): void; screenOf(w: [number, number]): [number, number]};
 
 const viewSelect = () => shadow.querySelector('mosaica-view-picker')!.shadowRoot!.querySelector('select')!;
 
@@ -99,6 +99,17 @@ const result: Record<string, unknown> = {};
   menu: shadow.querySelector('[role="menu"]') !== null,
   editor: (shadow.querySelector('mosaica-colour-editor')!.shadowRoot!.querySelector('dialog') as HTMLDialogElement | null)?.open ?? false
 });
+/** What is open over the map: its tooltip, the card beside a point, a sheet. */
+(window as unknown as {over: () => Record<string, boolean>}).over = () => ({
+  tooltip: map.shadowRoot!.querySelector('[part="tooltip"]') !== null,
+  card: part('callout') !== null,
+  sheet: part('sheet') !== null
+});
+/** The page as it stands once its elements have drawn. */
+(window as unknown as {settled: () => Promise<void>}).settled = async () => {
+  await settle(document.body);
+  await frames(2);
+};
 
 if (scene === 'short') {
   // The narrow layout in a short window: the strip and the bar of buttons stay in the explorer's box, on top.
@@ -204,6 +215,47 @@ if (scene === 'short') {
     editColours: part('edit-colours')!.getBoundingClientRect().height,
     select: select.getBoundingClientRect().height
   });
+} else if (scene === 'footer') {
+  // The Fields sheet with more cards than it shows at once, for the test to walk with Tab.
+  explorer.setAttribute('pinned-filters', ['archive', ...columns.slice(0, 16).map((c) => c.name)].join(' '));
+  await settle(document.body);
+  const opens = shadow.querySelector<HTMLElement>('[part="tabs"] [data-sheet="filters"]')!;
+  opens.focus();
+  /** The control with focus while it is in the sheet's scrolling part, and whether it is the top element at its own centre. */
+  (window as unknown as {stop: () => {name: string; onTop: boolean; aboveFooter: boolean} | null}).stop = () => {
+    const el = deepActive();
+    const body = shadow.querySelector('.sheet-body');
+    if (!el || !body || !inside(el, body)) return null;
+    const footer = shadow.querySelector('.sheet-footer')!.getBoundingClientRect();
+    return {name: `${el.getAttribute('aria-label') ?? el.textContent?.trim() ?? el.localName}`, onTop: onTop(el), aboveFooter: el.getBoundingClientRect().bottom <= footer.top + 0.5};
+  };
+  (window as unknown as {sheet: () => unknown}).sheet = () => {
+    const body = shadow.querySelector('.sheet-body')!;
+    return {scrolls: body.scrollHeight > body.clientHeight, footer: box(shadow.querySelector('.sheet-footer')!), sheet: box(part('sheet')!), footerOnTop: [...shadow.querySelectorAll('.sheet-footer button')].map(onTop)};
+  };
+} else if (scene === 'tooltip') {
+  // Two points on the map, large enough to hover, clear of what the test opens. A press on one picks it.
+  explorer.setAttribute('radius', '8');
+  const mb = map.getBoundingClientRect();
+  const narrow = part('tabs') !== null;
+  const points: [number, number][] = narrow ? [[mb.left + 250, mb.top + 80], [mb.left + 300, mb.top + 180]] : [[1050, 250], [1100, 600]];
+  const [cx, cy] = map.screenOf([256, 256]);
+  const perPixel = [1 / (map.screenOf([257, 256])[0] - cx), 1 / (map.screenOf([256, 257])[1] - cy)] as const;
+  const band = {
+    depth: 2, prefix: 0n, x: 0, y: 0,
+    ids: BigUint64Array.from(points.map((_, i) => BigInt(100 + i))),
+    positions: Float32Array.from(points.flatMap(([x, y]) => [256 + (x - mb.left - cx) * perPixel[0], 256 + (y - mb.top - cy) * perPixel[1]])),
+    scalars: {}, served: points.length, capUsed: 500, visible: BigInt(points.length), matched: BigInt(points.length), highlighted: BigInt(points.length),
+    highlightBits: null, membership: {}, heldBelow: 0n, identityKey: 'points', contentKey: 'points', bytes: 0, touchedAt: 0
+  } as unknown as Band;
+  store.set('marks', {bands: [band], standIn: [], count: {shown: points.length, total: points.length, exact: true}});
+  // As the store does, a pick is answered with the item's record, and a cleared selection is published.
+  store.pick = async (id: bigint) => store.set('selection', {item: {id, detail: item.detail}, itemRefusal: null, artifact: null, artifactRefusal: null});
+  store.clearSelection = () => store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+  await settle(document.body);
+  await frames(6);
+  result['points'] = points;
+  (narrow ? shadow.querySelector<HTMLElement>('[part="tabs"] [data-sheet="filters"]') : part('layers-toggle'))!.focus();
 } else if (scene === 'layers') {
   // The points coloured by a category, and focus on the Layers button, for the test to drive from the keyboard.
   store.set('legend', {...store.get('legend'), colourBy: 'archive'});

@@ -703,16 +703,24 @@ export class MosaicaExplorer extends MosaicaElement {
           right: 0;
           bottom: 0;
           max-height: max(80%, min(100%, 240px));
-          overflow-y: auto;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
           background: var(--_mosaica-surface);
           border-top: 1px solid var(--_mosaica-line);
           border-radius: 12px 12px 0 0;
           box-shadow: var(--_mosaica-shadow);
           z-index: 6;
         }
+        /* What the sheet holds scrolls between its handle and its footer, so nothing goes under the footer. */
+        .sheet-body {
+          flex: 0 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
         .sheet-footer {
-          position: sticky;
-          bottom: 0;
+          flex: none;
           display: flex;
           gap: 10px;
           padding: 10px 16px;
@@ -729,7 +737,7 @@ export class MosaicaExplorer extends MosaicaElement {
         }
         [part='sheet']::before {
           content: '';
-          display: block;
+          flex: none;
           width: 36px;
           height: 4px;
           border-radius: 2px;
@@ -1203,11 +1211,11 @@ export class MosaicaExplorer extends MosaicaElement {
     </div>`;
     const sheetBody =
       this.sheet === 'filters'
-        ? html`${filters}${sheetFooter}`
+        ? html`<div class="sheet-body">${filters}</div>${sheetFooter}`
         : this.sheet === 'layers'
-          ? html`${this.displaySection()}${layersPanel}${this.choiceMenu()}`
+          ? html`<div class="sheet-body">${this.displaySection()}${layersPanel}${this.choiceMenu()}</div>`
           : this.sheet === 'detail'
-            ? html`${selectionPanel}${detail}`
+            ? html`<div class="sheet-body">${selectionPanel}${detail}</div>`
             : nothing;
 
     // The tooltip slot is forwarded only when the host supplied one: a slot assigned another slot
@@ -2178,9 +2186,14 @@ export class MosaicaExplorer extends MosaicaElement {
     const m = this.map;
     if (!m) return;
     const sheet = this.renderRoot.querySelector('[part="sheet"]');
+    // Nothing is measured where no sheet is open, which is every draw of the wide layouts.
+    if (!sheet) {
+      if (m.inert) m.inert = false;
+      return;
+    }
     const tools = m.shadowRoot?.querySelector('[part="controls"]');
     const clear = tools ? tools.getBoundingClientRect().bottom : m.getBoundingClientRect().top;
-    m.inert = sheet !== null && sheet.getBoundingClientRect().top < clear;
+    m.inert = sheet.getBoundingClientRect().top < clear;
   }
 
   /**

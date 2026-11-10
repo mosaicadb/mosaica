@@ -331,22 +331,6 @@ describe('<mosaica-explorer> narrow layout', () => {
     expect(document.activeElement).toBe(input);
   });
 
-  it('keeps its sheet on the Escape that dismisses the map’s tooltip, and closes it on the next', async () => {
-    const {host, shadow} = await narrowed();
-    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="filters"]')!.click();
-    await settle(host);
-    const map = shadow.querySelector('mosaica-map') as unknown as {hover: unknown};
-    map.hover = {id: 9n, x: 10, y: 10, title: 'A point', lines: []};
-    await settle(host);
-    escape(sheetOf(shadow)!);
-    await settle(host);
-    expect(map.hover).toBeNull();
-    expect(sheetOf(shadow)).not.toBeNull();
-    escape(sheetOf(shadow)!);
-    await settle(host);
-    expect(sheetOf(shadow)).toBeNull();
-  });
-
   it('gives the Layers sheet the Points, Colour and Density sections over the layer picker', async () => {
     const {host, el, shadow} = await explorer();
     (el as unknown as {narrow: boolean}).narrow = true;
@@ -800,51 +784,6 @@ describe('<mosaica-explorer> layouts', () => {
     replaced.store.set('region', REGION);
     await settle(replaced.host);
     expect(quiet(replaced.shadow)).toEqual([false, false]);
-  });
-
-  it('keeps the Layers popover and the card beside a point on the Escape that dismisses the map’s tooltip', async () => {
-    const {host, shadow, store} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
-    const map = shadow.querySelector('mosaica-map') as unknown as HTMLElement & {hover: unknown; pickedAt: unknown};
-    Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
-    Object.defineProperty(map, 'clientHeight', {configurable: true, value: 600});
-    const escape = (el: Element) => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true, cancelable: true}));
-    const hover = async () => {
-      map.hover = {id: 9n, x: 10, y: 10, title: 'A point', lines: []};
-      await settle(host);
-    };
-    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
-    await settle(host);
-    await hover();
-    escape(shadow.querySelector('[part="points-toggle"]')!);
-    await settle(host);
-    expect(map.hover).toBeNull();
-    expect(shadow.querySelector('[part="layers-popover"]')).not.toBeNull();
-    // A menu and the list of density colours stay too.
-    shadow.querySelector<HTMLButtonElement>('[part="colour-by"]')!.click();
-    await settle(host);
-    await hover();
-    escape(shadow.querySelector('[part~="colour-option"]')!);
-    await settle(host);
-    expect(shadow.querySelector('[part~="colour-menu"]')).not.toBeNull();
-    escape(shadow.querySelector('[part~="colour-option"]')!);
-    await settle(host);
-    expect(shadow.querySelector('[part~="colour-menu"]')).toBeNull();
-    escape(shadow.querySelector('[part="points-toggle"]')!);
-    await settle(host);
-    expect(shadow.querySelector('[part="layers-popover"]')).toBeNull();
-    // The card beside the point.
-    map.pickedAt = {kind: 'item', id: 5n, world: [256, 256]};
-    store.set('selection', {item: {id: 5n, detail: {fields: {}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
-    await settle(host);
-    await settle(host);
-    await hover();
-    const card = shadow.querySelector('[part~="callout"]')!;
-    escape(card);
-    await settle(host);
-    expect(store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(0);
-    expect(shadow.querySelector('[part~="callout"]')).not.toBeNull();
-    escape(card);
-    expect(store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(1);
   });
 
   it('puts a selected region in the right column', async () => {

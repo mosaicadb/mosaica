@@ -239,6 +239,108 @@ describe('the Layers popover from the keyboard', () => {
   });
 });
 
+describe('the Fields sheet with more than it shows at once', () => {
+  it('keeps every control Tab stops at clear of its footer, and its footer in reach', async () => {
+    type Stop = {name: string; onTop: boolean; aboveFooter: boolean};
+    type Sheet = {scrolls: boolean; footer: Box; sheet: Box; footerOnTop: boolean[]};
+    const {page} = await opened<object>('footer', 390, 760);
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => (window as unknown as {settled: () => Promise<void>}).settled());
+    const sheet = () => page.evaluate(() => (window as unknown as {sheet: () => Sheet}).sheet());
+    expect((await sheet()).scrolls).toBe(true);
+    const stops: Stop[] = [];
+    for (let i = 0; i < 80; i++) {
+      await page.keyboard.press('Tab');
+      const stop = await page.evaluate(() => (window as unknown as {stop: () => Stop | null}).stop());
+      if (!stop) break;
+      stops.push(stop);
+    }
+    // One fold button a card at the least, and the last of them is past the first screenful.
+    expect(stops.length).toBeGreaterThanOrEqual(17);
+    expect(stops.filter((s) => !s.onTop || !s.aboveFooter).map((s) => s.name)).toEqual([]);
+    // The footer keeps its place at the sheet's bottom edge, whatever is scrolled to.
+    const after = await sheet();
+    expect(Math.abs(after.footer.bottom - after.sheet.bottom)).toBeLessThanOrEqual(1);
+    expect(after.footerOnTop).toEqual([true, true]);
+  });
+});
+
+describe('Escape while the map shows a tooltip', () => {
+  type Over = {tooltip: boolean; card: boolean; sheet: boolean};
+  /** The page with two points drawn, and what a test does with it: read what is open, hover a point, press Escape. */
+  async function drawn(width: number, height: number) {
+    const {page, result} = await opened<{points: [number, number][]}>('tooltip', width, height);
+    const settled = () => page.evaluate(() => (window as unknown as {settled: () => Promise<void>}).settled());
+    const over = () => page.evaluate(() => (window as unknown as {over: () => Over}).over());
+    const shown = () => page.evaluate(() => (window as unknown as {shown: () => Record<string, boolean>}).shown());
+    const hover = async ([x, y]: [number, number]) => {
+      await page.mouse.move(x - 60, y - 30);
+      await page.mouse.move(x, y, {steps: 5});
+      await page.waitForFunction(() => (window as unknown as {over: () => Over}).over().tooltip);
+    };
+    const escape = async () => {
+      await page.keyboard.press('Escape');
+      await settled();
+    };
+    const focus = (part: string) => page.evaluate((p) => (document.querySelector('mosaica-explorer')!.shadowRoot!.querySelector(`[part~="${p}"]`) as HTMLElement).focus(), part);
+    return {page, points: result.points, settled, over, shown, hover, escape, focus};
+  }
+
+  it('dismisses the tooltip and leaves the Layers popover, its menu, its list of colours and the card beside a point open; the next Escape closes each', async () => {
+    const {page, points, over, shown, hover, escape, focus} = await drawn(1200, 800);
+    const [a, b] = points as [[number, number], [number, number]];
+    const open = {popover: true, list: false, menu: false, editor: false};
+    // The popover.
+    await page.keyboard.press('Enter');
+    await hover(a);
+    await escape();
+    expect((await over()).tooltip).toBe(false);
+    expect(await shown()).toEqual(open);
+    // A menu.
+    await focus('colour-by');
+    await page.keyboard.press('ArrowDown');
+    await hover(b);
+    await escape();
+    expect((await over()).tooltip).toBe(false);
+    expect(await shown()).toEqual({...open, menu: true});
+    await escape();
+    expect(await shown()).toEqual(open);
+    // The list of density colours.
+    await focus('density-colours');
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Tab');
+    await hover(a);
+    await escape();
+    expect((await over()).tooltip).toBe(false);
+    expect(await shown()).toEqual({...open, list: true});
+    await escape();
+    expect(await shown()).toEqual(open);
+    await escape();
+    expect(await shown()).toEqual({...open, popover: false});
+    // The card beside a point: a press picks the point, and the pointer then rests on the other.
+    await page.mouse.click(a[0], a[1]);
+    await page.waitForFunction(() => (window as unknown as {over: () => Over}).over().card);
+    await focus('callout');
+    await hover(b);
+    await escape();
+    expect(await over()).toEqual({tooltip: false, card: true, sheet: false});
+    await escape();
+    expect(await over()).toEqual({tooltip: false, card: false, sheet: false});
+  });
+
+  it('dismisses the tooltip and leaves a sheet open in the narrow layout; the next Escape closes the sheet', async () => {
+    const {page, points, over, hover, escape} = await drawn(390, 760);
+    await page.keyboard.press('Enter');
+    await page.evaluate(() => (window as unknown as {settled: () => Promise<void>}).settled());
+    expect(await over()).toEqual({tooltip: false, card: false, sheet: true});
+    await hover(points[0]!);
+    await escape();
+    expect(await over()).toEqual({tooltip: false, card: false, sheet: true});
+    await escape();
+    expect(await over()).toEqual({tooltip: false, card: false, sheet: false});
+  });
+});
+
 describe('the controls of the Layers popover and the heading', () => {
   it('are 24 px high for a pointer, without one slider’s box over another’s', async () => {
     const {result: r} = await opened<{toggle: boolean[]; sliders: Record<string, number>; overlap: boolean; editColours: number; select: number}>('targets', 1200, 800);
