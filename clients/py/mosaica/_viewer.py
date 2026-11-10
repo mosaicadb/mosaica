@@ -663,6 +663,15 @@ class Selection:
         that applies `all_of`, `any_of` or `none_of` to a list of expressions. An item must match
         every filter added.
 
+        The tests a column takes depend on its type: `eq` and `in` on every type but text,
+        `prefix` and `contains` on a keyword, `match` and `phrase` on text, and `range` on a
+        number, timestamp or bool. The filters page of the reference describes each.
+
+        Three expressions name no column. `{"region": {...}}` keeps the items inside a `bbox`,
+        `circle`, `ellipse` or `polygon`. `{"member_of": {"layer": name, "artifact":
+        mosaica_id}}` keeps the members of one annotation, which `"key"` and `"level"` can name
+        in place of `"artifact"`. `{"mosaica_id": {"in": [...]}}` keeps the items with those ids.
+
         A test on a timestamp column takes a `datetime`, a `date`, a pandas `Timestamp` or a
         NumPy `datetime64`, and the client sends it as microseconds since the Unix epoch. A
         moment with no time zone is read as UTC, and a date stands for its midnight in UTC. A
@@ -684,9 +693,13 @@ class Selection:
         """Narrow this selection to the items whose position lies inside `box`, returning a new
         selection.
 
-        `box` is `(min_x, min_y, max_x, max_y)` in the view's own coordinates, the ones the rows
-        were inserted with. An item on the edge is inside, and a box whose minimum is above its
-        maximum is refused.
+        `box` is `(min_x, min_y, max_x, max_y)` in the view's own coordinates. On a view with no
+        projection these are the coordinates the rows were inserted with. On a view with a
+        projection they are the projected coordinates, which for `web_mercator` lie in a unit
+        square. For a box in longitude and latitude, use
+        `filter({"region": {"bbox": [...], "space": "wgs84"}})`.
+
+        An item on the edge is inside. A box whose minimum is above its maximum is refused.
 
             db.view("papers").within((0.0, 0.0, 100.0, 50.0)).count()
         """
@@ -833,12 +846,13 @@ class Selection:
             sub_cells,
         )
 
-    def items(self, fields: Sequence[str], **options):
-        """Read every item in this selection, with the fields named, as one pyarrow table.
+    def items(self, fields: Optional[Sequence[str]] = None, **options):
+        """Read every item in this selection as one pyarrow table, with the fields named or,
+        without `fields`, every field of the view.
 
         The selection's filters and box are sent as the read's `filters`, so the rows are the
-        items `count()` counts. `options` are the other keywords of `Viewer.items`. `filters` is
-        refused because the selection supplies its own.
+        items `count()` counts. `fields` and `options` are as `Viewer.items` takes them. `filters`
+        is refused because the selection supplies its own.
 
             db.view("papers").filter({"year": {"eq": 2023}}).items(["title"]).to_pandas()
         """
@@ -1069,6 +1083,69 @@ class Viewer:
         """
         return json.loads(self._request("GET", "/v1/meta", None))
 
+    def views(self) -> list:
+        """List the views this reader may see, each as `meta()` describes it.
+
+        A view's `id` is the name every other read takes. Its `group` and `key` are set for a
+        view in a view group, and `quantisation` holds the range of its coordinates.
+
+            [view["id"] for view in v.views()]
+        """
+        return self.meta().get("views") or []
+
+    def attributes(self, view: Optional[str] = None) -> list:
+        """List the attributes this reader may see, each as `meta()` describes it with one key
+        added, `operands`, the filter operators it takes, which is empty for an attribute that
+        cannot be filtered on.
+
+        The attributes of every item come first, in the order they were declared, and then those
+        declared for a view group, which carry a `scope` naming the group and the `views` that
+        hold them.
+
+        - `view`: list only the attributes this view holds, leaving out an attribute declared for
+          a view group that the view holds no column of.
+
+        ```
+        [(a["name"], a["arrow_type"], a["operands"]) for a in v.attributes("papers")]
+        ```
+        """
+        meta = self.meta()
+        if view is not None:
+            self._require_view(view, meta)
+        operators = {
+            entry["column"]: entry["operands"] for entry in meta.get("filter_operands") or []
+        }
+        scoped = [
+            entry
+            for entry in meta.get("scoped_scalars") or []
+            if view is None or view in entry["views"]
+        ]
+        return [
+            {**entry, "operands": operators.get(entry["name"], [])}
+            for entry in (meta.get("declared_scalars") or []) + scoped
+        ]
+
+    def layers(self, view: Optional[str] = None) -> list:
+        """List the annotation layers this reader may see, each as `meta()` describes it.
+
+        A layer's `name` is what `artifacts` and a map's `layers` take, and its `views` are the
+        views it is published in.
+
+        - `view`: list only the layers published in this view.
+
+        ```
+        [layer["name"] for layer in v.layers("papers")]
+        ```
+        """
+        meta = self.meta()
+        if view is not None:
+            self._require_view(view, meta)
+        return [
+            layer
+            for layer in meta.get("layers") or []
+            if view is None or view in layer["views"]
+        ]
+
     def item(self, mosaica_id: Any) -> dict:
         """Return one item's full record as a dictionary, when this reader may see the item.
 
@@ -1094,7 +1171,7 @@ class Viewer:
     def items(
         self,
         view: str,
-        fields: Sequence[str],
+        fields: Optional[Sequence[str]] = None,
         *,
         position: Optional[bool] = None,
         labels: Optional[bool] = None,
@@ -1108,8 +1185,8 @@ class Viewer:
         compression: Optional[str] = None,
         batches: bool = False,
     ):
-        """Read every item this reader may see in `view`, with the fields named, as one pyarrow
-        table.
+        """Read every item this reader may see in `view` as one pyarrow table, with the fields
+        named or, without `fields`, every field of the view.
 
         The server answers a read a page at a time, and `items` requests responses until no row
         remains and joins their pages. With `batches=True` it returns a `Batches` instead, to
@@ -1119,7 +1196,11 @@ class Viewer:
         - `view`: the view to read, as `meta()` names it. An item with no position in it is not
           returned.
         - `fields`: the declared columns to return, in this order. A column declared for a view
-          group, read under a view outside it, is named `"<column>@<key>"`.
+          group, read under a view outside it, is named `"<column>@<key>"`. Without it the server
+          returns every column: those `attributes(view)` lists, apart from a text column declared
+          for a view group. `[]` returns `mosaica_id` alone. A read without `fields` that is
+          resumed from a `cursor` is refused once the view's columns have changed, as after an
+          attribute is declared.
         - `position`: `True` adds `mosaica:x` and `mosaica:y`, each item's position in the view's
           coordinates, in degrees on a geographic view.
         - `labels`: `True` adds `mosaica:labels`, the parts of each item's labels that this
@@ -1148,10 +1229,12 @@ class Viewer:
 
             papers = db.items("papers", ["title", "year"], position=True)
             papers.to_pandas()
+            everything = db.items("papers")
             recent = db.items("papers", ["title"], filters={"year": {"range": {"gte": 2020}}})
         """
-        request: dict = {"view": view, "fields": listed(fields)}
+        request: dict = {"view": view}
         given = {
+            "fields": None if fields is None else listed(fields),
             "position": position,
             "labels": labels,
             "filters": filters,
@@ -1392,9 +1475,9 @@ class Viewer:
 
         A grouping names at least one figure. `"count": True` counts the items in each row, so
         `{"count": True}` alone is the size of the set. `"values"`, `"missing"`, `"min"`, `"max"`
-        and `"mean"` each take a list of number or timestamp fields and give a column per field,
-        such as `min_year`, and `"summary"` gives all five. They are exact and are taken over
-        every item this reader may see in the view, so they are refused beside `"by"` or
+        and `"mean"` each take a list of number, timestamp or bool fields and give a column per
+        field, such as `min_year`, and `"summary"` gives all five. They are exact and are taken
+        over every item this reader may see in the view, so they are refused beside `"by"` or
         `"cells"` and in a request with `filters` or `reference`. `min_` and `max_` have the
         field's type, and `mean_` is a float, or a UTC timestamp on a timestamp field.
 
@@ -1412,18 +1495,21 @@ class Viewer:
           `top` needs `"cut": {"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}`, so that it
           ranks the annotations a map draws at that zoom, box and cluster budget, and without
           `budget` it ranks the finest cut.
-        - By bins of a number or timestamp field, as `{"field": name, "bins": n}`, a histogram of
-          at most `n` bins in one page. With `"range": [lower, upper]` the bins divide that range
-          into equal widths and `rest` counts the values outside it. Without a range the edges
-          are round values around the smallest and largest value this reader may see in the view,
-          so they stay put as the filters change. The edges have the field's type, except that an
-          integer field gets float edges when a bound of `range` is fractional. `"sample": s`
-          counts a large set faster, over about `s` of its items, and scales each count to the
-          set's size.
+        - By bins of a number, timestamp or bool field, as `{"field": name, "bins": n}`, a
+          histogram of at most `n` bins in one page. With `"range": [lower, upper]` the bins
+          divide that range into equal widths and `rest` counts the values outside it. Without a
+          range the edges are round values around the smallest and largest value this reader may
+          see in the view, so they stay put as the filters change; a bool's are a bin for false
+          (0) and one for true (1). The edges have the field's type, except that an integer field
+          gets float edges when a bound of `range` is fractional. `"sample": s` counts a large
+          set faster, over about `s` of its items, and scales each count to the set's size.
 
         `"cells": {"depth": d}` divides the set, or each group, into the view's cells at a depth
         from 0 to 32, where up to 16 they are the map's tiles at that zoom. Adding `"area": [x0,
-        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells.
+        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells. `cell` is
+        one number that interleaves the bits of the cell's column and its grid row. Bit 0 is the
+        lowest bit of the column and bit 1 is the lowest bit of the row. Columns are counted
+        from the view's `x_min` and rows from its `y_min`.
 
         A table's columns come in this order, each where it applies: `group` (`listed`, `rest` or
         `none`), `key` (a category's key, or an annotation's `mosaica_id` as its decimal string,

@@ -2333,8 +2333,8 @@ impl ScalarSlice<'_> {
         })
     }
 
-    /// Row `local`'s slot as a number, where the column holds numbers and the slot exists:
-    /// what a field's figures are tallied from. Presence is the caller's to ask.
+    /// Row `local`'s slot as a number, where the column holds numbers or bools (as 0 and 1) and the
+    /// slot exists: what a field's figures are tallied from. Presence is the caller's to ask.
     #[inline]
     pub fn number_at(&self, local: usize) -> Option<mosaica_types::scalar::Number> {
         use mosaica_types::scalar::Number;
@@ -2350,7 +2350,9 @@ impl ScalarSlice<'_> {
             ScalarSlice::I64(s) | ScalarSlice::TimestampUs(s) => int(i128::from(*s.get(local)?)),
             ScalarSlice::F32(s) => Some(Number::Float(f64::from(*s.get(local)?))),
             ScalarSlice::F64(s) => Some(Number::Float(*s.get(local)?)),
-            ScalarSlice::Bool(_) | ScalarSlice::Utf8(_) => None,
+            ScalarSlice::Bool(a) => (local < arrow::array::Array::len(*a))
+                .then(|| Number::Int(i128::from(a.value(local)))),
+            ScalarSlice::Utf8(_) => None,
         }
     }
 

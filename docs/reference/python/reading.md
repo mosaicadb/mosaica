@@ -2,6 +2,16 @@
 
 Use `connect` for a reader whose access terms come from its token, or `Database.viewer` to read your own database as someone who holds the terms you name. Every read covers only the items the reader may see, by the rule that [`Viewer`](#mosaica._viewer.Viewer) states.
 
+| To | Call |
+|---|---|
+| Narrow a view by a filter or a box | [`Selection.filter`](#mosaica._viewer.Selection.filter), [`Selection.within`](#mosaica._viewer.Selection.within) |
+| Count, break down, bin or grid a selection | [`Selection.count`](#mosaica._viewer.Selection.count), [`Selection.aggregate`](#mosaica._viewer.Selection.aggregate), [`Viewer.aggregate`](#mosaica._viewer.Viewer.aggregate) |
+| Read the points a map draws | [`Selection.sample`](#mosaica._viewer.Selection.sample) |
+| Read records | [`Selection.items`](#mosaica._viewer.Selection.items), [`Viewer.items`](#mosaica._viewer.Viewer.items), [`Viewer.item`](#mosaica._viewer.Viewer.item) |
+| List a category's values | [`Viewer.categories`](#mosaica._viewer.Viewer.categories) |
+
+The [filters](../filters.md) page lists every operator a filter takes, and the [aggregations](../aggregations.md) page lists every figure and grouping. [Count and chart from Python](../../guides/analysis.md) is the guide to both.
+
 The `Database` methods on this page read with the operator's own token, which [`authorise`](connecting.md#mosaica._auth.authorise) describes under `read_all`.
 
 ## Database
@@ -19,6 +29,18 @@ The `Database` methods on this page read with the operator's own token, which [`
       heading_level: 3
 
 ::: mosaica._database.Database.meta
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.views
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.attributes
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.layers
     options:
       heading_level: 3
 

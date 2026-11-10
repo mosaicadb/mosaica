@@ -592,11 +592,13 @@ fn project_one(
     scratches: &Mutex<Vec<ProjectScratch>>,
 ) -> Outcome {
     let held = entities.cardinality();
+    // Serial: the derivation projects a posting a worker already, and a walk that spread over the
+    // same pool would hold a pool's worth of buckets per posting.
     let mut scratch = scratches
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .pop()
-        .unwrap_or_default();
+        .unwrap_or_else(ProjectScratch::serial);
     let mut image = space.project_base_with(entities, &mut scratch);
     scratches
         .lock()

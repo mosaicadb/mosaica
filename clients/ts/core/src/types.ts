@@ -289,14 +289,22 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  * Coordinates are in the view's data coordinates. A shape with a very long boundary may be
  * answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
+ * `view` names another view the shape or artifact is in, by its id. The filter then matches the
+ * items inside it in that view, wherever the request's view places them, so a selection drawn in
+ * one layout narrows another. A view the viewer is not served is refused with `404`.
+ *
  * @category Filters
  */
-export type RegionOperand =
+export type RegionOperand = (
   | {polygon: [number, number][]; space?: 'view'}
   | {bbox: [number, number, number, number]; space?: 'view'}
   | {circle: [number, number, number]; space?: 'view'}
   | {ellipse: [number, number, number, number, number]; space?: 'view'}
-  | {artifact: string};
+  | {artifact: string}
+) & {
+  /** The view the shape or artifact is in, by its id. Defaults to the request's view. */
+  view?: string;
+};
 
 /**
  * The `member_of` filter: the visible members of one artifact, such as a cluster. It works in
@@ -1398,9 +1406,12 @@ export type ItemsRequest = {
   view: string;
   /**
    * The columns to return, by name, each once. Pin a group-scoped column outside its group as
-   * `<field>@<key>`. `[]` returns `mosaica_id` alone. An unknown or repeated name is a `422`.
+   * `<field>@<key>`. `[]` returns `mosaica_id` alone. Unset returns every column the view reads
+   * under its bare name: the declared columns, then the group-scoped ones the viewer reaches that
+   * the view decides, apart from group-scoped text. The cursor of a read without `fields` is
+   * refused once that set changes. An unknown or repeated name is a `422`.
    */
-  fields: string[];
+  fields?: string[];
   /** Return each item's position as `mosaica:x` and `mosaica:y` (`float64`) in the view's coordinates, such as degrees on a geographic view. */
   position?: boolean;
   /** Return `mosaica:labels` (`list<utf8>`): the parts of each item's labels the viewer satisfies, as {@link ItemDetail.labels} gives them. */
@@ -1584,8 +1595,8 @@ export type AggregateRequest = {
  * cells. Name at least one figure; `{count: true}` alone counts the whole set.
  *
  * The field figures (`values`, `missing`, `min`, `max`, `mean` and `summary`) each take a list of
- * number or timestamp columns declared with `index` or `render`, and add one column per field
- * named `<figure>_<field>`. They are computed over every visible item in the view, so they cannot
+ * number, timestamp or bool columns declared with `index` or `render`, and add one column per
+ * field named `<figure>_<field>`. They are computed over every visible item in the view, so they cannot
  * be combined with `by`, `cells`, `filters` or `reference`, and their table has one row. All
  * figures are exact; `min`, `max` and `mean` are null if the field has no values. `values_` and
  * `missing_` columns are `bigint`; `min_` and `max_` are typed as a histogram's edges, and `mean_`
@@ -1624,7 +1635,9 @@ export type Grouping = {
  *   32) gives each artifact its {@link Artifact.slot}. On a `nested` or `dag` layer, `top` requires
  *   a `cut`, and lists the artifacts {@link MosaicaClient.viewportArtifacts} would draw for it. A
  *   `cut` on any other layer is a `422`.
- * - A number or timestamp column in `bins`, as a histogram. The column needs `index` or `render`.
+ * - A number, timestamp or bool column in `bins`, as a histogram. The column needs `index` or
+ *   `render`. A bool is binned as 0 and 1, and without a `range` has a bin for false and one for
+ *   true.
  *
  * Pin a group-scoped column outside its group as `<field>@<key>`. A named value or artifact the
  * viewer cannot see gets no row.

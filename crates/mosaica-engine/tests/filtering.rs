@@ -31,7 +31,7 @@ use mosaica_build::config::Config;
 use mosaica_build::{build, BuildArgs};
 use mosaica_engine::filter::{
     candidate, ComposeError, Endpoint, FilterColumns, FilterError, FilterExpr, FilterOperand,
-    OpenedExtent, Scalar, MAX_FILTER_DEPTH,
+    OpenedExtent, RouteChoice, Scalar, MAX_FILTER_DEPTH,
 };
 use mosaica_engine::ViewportRequest;
 use mosaica_lifecycle::command::UnallocatedRow;
@@ -690,6 +690,36 @@ fn ingest_and_flush_with(
         engine.write_executor_stats().flushes > flushes_before
     });
     allocated.raw()
+}
+
+/// Ingest one item carrying `archive` and no department, and wait for the commit window that
+/// buffers it, without a flush.
+fn ingest_buffered_with(engine: &mosaica_engine::Engine, external: &str, archive: WalScalar) {
+    let buffered = engine.write_executor_stats().buffered_items;
+    let row = UnallocatedRow {
+        view: "s0".to_string(),
+        join: None,
+        descriptors: vec![b"0".to_vec()],
+        x: 5.0,
+        y: 5.0,
+        scalars: vec![
+            WalScalar::Null,
+            archive,
+            WalScalar::Utf8(format!("{external}-title")),
+            WalScalar::I32(1),
+            WalScalar::Null,
+            WalScalar::Utf8(format!("shared {external}")),
+        ],
+        terms: engine.resolve_terms(&[b"0".to_vec()]),
+        scoped: Vec::new(),
+    };
+    engine
+        .ingest_rows(vec![row], external.to_string(), [0u8; 32])
+        .expect("ingest is accepted");
+    wait_until("the commit window to publish", || {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        engine.write_executor_stats().buffered_items > buffered
+    });
 }
 
 /// The candidate a full-coverage session sees against the engine's live generation.
@@ -4531,6 +4561,354 @@ fn the_row_route_and_the_entity_route_agree_over_the_domain() {
     );
 }
 
+/// **A leaf answered from postings is routed by what the postings hold, not by the visible
+/// total.** Under full coverage the whole extent's rows equal the visible total, which puts a
+/// scanned column on the row route. `archive` is `public`, so its `eq` and `in` read only the
+/// postings of the values named: one value, carried by about a quarter of the corpus, takes the
+/// entity route over the whole extent, and three, carried by four fifths of it, take the row
+/// route. On either route the marks are exactly the items carrying the values.
+#[test]
+fn a_public_category_takes_the_entity_route_where_its_postings_are_small() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-route-postings");
+    let wal = fx._dir.path().join("wal-route-postings");
+    let engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let id_of = |e: u64| {
+        engine
+            .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+            .expect("identity is computable")
+            .raw()
+    };
+    let code = |key: &str| AttrLocalId::new(fx.archive_codes[key]);
+    let cases = [
+        (FilterOperand::Equals(code("xx")), &["xx"][..], 0),
+        (
+            FilterOperand::In(vec![code("xx"), code("yy"), code("zz")]),
+            &["xx", "yy", "zz"][..],
+            1,
+        ),
+    ];
+    for (operand, keys, row_routes) in cases {
+        let before = engine.filter_row_routes();
+        let out = engine
+            .viewport(
+                &session,
+                ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000)
+                    .filter(leaf("archive", operand)),
+            )
+            .expect("the full extent answers filtered");
+        assert_eq!(engine.filter_row_routes() - before, row_routes, "{keys:?}");
+        let want: std::collections::BTreeSet<u64> = (0..N)
+            .filter(|&e| archive_of(e).is_some_and(|key| keys.contains(&key)))
+            .map(id_of)
+            .collect();
+        let drawn: std::collections::BTreeSet<u64> =
+            out.points.mosaica_ids.iter().copied().collect();
+        assert_eq!(drawn, want, "{keys:?}");
+    }
+}
+
+/// **A render leaf's rows are kept across requests and read over each request's own rows.** A
+/// window is scanned once, a pan keeps the same entry and scans only what it adds, a window inside
+/// what has been scanned is read without a scan, and a suppression still removes its item. Every
+/// answer is the one an engine keeping nothing gives. A flush renumbers the rows, so the next
+/// request scans again and finds the flushed item.
+#[test]
+fn a_render_leaf_is_answered_from_the_rows_it_has_scanned() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-row-kept");
+    let wal = fx._dir.path().join("wal-row-kept");
+    let mut engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    engine.start_write_executor(8).expect("the executor starts");
+    let bound = engine.filter_cache_stats().bound_bytes;
+    let eng = || {
+        leaf(
+            "department",
+            FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"])),
+        )
+    };
+    let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    // The answer with the cache on, checked against the same request with it off, and the
+    // change in `(misses, hits)` the request made.
+    let ask = |session: &mosaica_engine::Session, zoom: u8, window: [f64; 4]| {
+        let request = || ViewportRequest::new("s0", zoom, window, 10_000).filter(eng());
+        engine.set_filter_cache_bytes(0);
+        let unkept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        engine.set_filter_cache_bytes(bound);
+        let (before, routes) = (engine.filter_cache_stats(), engine.filter_row_routes());
+        let kept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        let after = engine.filter_cache_stats();
+        assert_eq!(engine.filter_row_routes() - routes, 1, "{window:?} takes the row route");
+        assert_eq!(kept, unkept, "{window:?}");
+        (kept, after.misses - before.misses, after.hits - before.hits)
+    };
+
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let narrow = [0.0, 0.0, 400.0, 400.0];
+    let (first, scans, _) = ask(&session, 8, narrow);
+    assert_eq!(scans, 1, "the first window is scanned and kept");
+    let (_, scans, _) = ask(&session, 8, [200.0, 200.0, 600.0, 600.0]);
+    assert_eq!(scans, 1, "a pan scans the rows it adds");
+    assert_eq!(engine.filter_cache_stats().entries, 1, "into the same entry");
+    let (again, scans, reads) = ask(&session, 8, narrow);
+    assert_eq!((again, scans), (first.clone(), 0), "a scanned window is read");
+    assert!(reads > 0);
+    let (whole, _, _) = ask(&session, 0, FULL_VIEWPORT);
+    let want: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| department_of(e) == Some("eng"))
+        .map(|e| {
+            engine
+                .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+                .expect("identity is computable")
+                .raw()
+        })
+        .collect();
+    assert_eq!(whole, want);
+
+    let hidden = *first.iter().next().expect("the window holds a match");
+    let entity = (0..N)
+        .map(|e| mosaica_types::EntityId::new(fx.entity_of[&e]))
+        .find(|&e| engine.mosaica_id_of(e).unwrap().raw() == hidden)
+        .expect("a drawn item is one of the corpus");
+    engine
+        .accept_change(entity, mosaica_lifecycle::wal::ChangeOp::Suppress)
+        .expect("a suppression is accepted");
+    let (suppressed, scans, _) = ask(&session, 8, narrow);
+    assert_eq!(scans, 0, "a suppression leaves the rows as scanned");
+    assert!(!suppressed.contains(&hidden) && suppressed.len() == first.len() - 1);
+
+    let flushed = ingest_and_flush_with(
+        &engine,
+        "row-kept",
+        WalScalar::Utf8("eng".to_string()),
+        WalScalar::Utf8("xx".to_string()),
+        "paper-88",
+        3,
+        WalScalar::Null,
+    );
+    let fresh = engine.authorise(&full_coverage_credential()).unwrap();
+    let (after, scans, _) = ask(&fresh, 8, narrow);
+    assert_eq!(scans, 1, "a flush renumbers the rows, so they are scanned again");
+    let id = engine
+        .mosaica_id_of(mosaica_types::EntityId::new(flushed))
+        .expect("identity is computable")
+        .raw();
+    assert!(after.contains(&id), "the flushed item is matched");
+}
+
+/// **Rows the filter cache already holds are not counted against the row route.** One value of
+/// `archive` takes the entity route over the whole extent while nothing is kept. Four quarters of
+/// the map each take the row route and between them keep every row, after which the whole extent
+/// takes the row route too, reads every row from the cache, scans none, and draws the same marks.
+#[test]
+fn rows_already_kept_are_read_on_the_row_route() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-route-kept");
+    let wal = fx._dir.path().join("wal-route-kept");
+    let engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let xx = || {
+        leaf(
+            "archive",
+            FilterOperand::Equals(AttrLocalId::new(fx.archive_codes["xx"])),
+        )
+    };
+    let ask = |zoom: u8, window: [f64; 4]| {
+        let (routes, scans) = (engine.filter_row_routes(), engine.filter_cache_stats().misses);
+        let out = engine
+            .viewport(
+                &session,
+                ViewportRequest::new("s0", zoom, window, 10_000).filter(xx()),
+            )
+            .expect("the window answers");
+        let ids: std::collections::BTreeSet<u64> =
+            out.points.mosaica_ids.iter().copied().collect();
+        let row_routed = engine.filter_row_routes() - routes == 1;
+        (ids, row_routed, engine.filter_cache_stats().misses - scans)
+    };
+
+    // With the cache off, so that the entity route keeps no rows of its own.
+    let bound = engine.filter_cache_stats().bound_bytes;
+    engine.set_filter_cache_bytes(0);
+    let (unkept, row_routed, _) = ask(0, FULL_VIEWPORT);
+    assert!(!row_routed, "with nothing kept the whole extent takes the entity route");
+    engine.set_filter_cache_bytes(bound);
+    for (x, y) in [(0.0, 0.0), (500.0, 0.0), (0.0, 500.0), (500.0, 500.0)] {
+        // Inside the quarter's tile, so the request reads that tile alone.
+        let (_, row_routed, _) = ask(1, [x + 1.0, y + 1.0, x + 499.0, y + 499.0]);
+        assert!(row_routed, "a quarter at ({x}, {y}) takes the row route");
+    }
+    let (kept, row_routed, scans) = ask(0, FULL_VIEWPORT);
+    assert!(row_routed, "every row is kept, so the whole extent takes the row route");
+    assert_eq!(scans, 0, "and scans nothing");
+    assert_eq!(kept, unkept);
+}
+
+/// **An entity-route filter's rows are kept per grant and read by every later viewport.** The
+/// first request over the whole extent projects the items `archive` `xx` matches and keeps their
+/// rows; a repeat, and a narrow window that would take the row route, read them and project
+/// nothing. A disjunction and a negation are kept the same way, and a filter naming a unique field
+/// is not. Another grant keeps its own, a suppression and its lift reach the kept rows' answer at
+/// once, as do a deletion and items buffered after it, and a flush projects again with the flushed
+/// item. Every answer is the one an engine keeping nothing gives, and the one the fixture's values
+/// give.
+#[test]
+fn an_entity_route_filter_keeps_its_rows_for_every_viewport() {
+    let fx = fixture();
+    let cache = fx._dir.path().join("cache-projection-kept");
+    let wal = fx._dir.path().join("wal-projection-kept");
+    let mut engine = open_engine_uncapped(&fx.bundle, &cache, &wal);
+    engine.start_write_executor(8).expect("the executor starts");
+    let bound = engine.filter_cache_stats().bound_bytes;
+    let code = |key: &str| AttrLocalId::new(fx.archive_codes[key]);
+    let xx = || leaf("archive", FilterOperand::Equals(code("xx")));
+    let id_of = |e: u64| {
+        engine
+            .mosaica_id_of(mosaica_types::EntityId::new(fx.entity_of[&e]))
+            .expect("identity is computable")
+            .raw()
+    };
+    let ids = |out: &mosaica_engine::ViewportOut| -> std::collections::BTreeSet<u64> {
+        out.points.mosaica_ids.iter().copied().collect()
+    };
+    // The marks drawn with the cache on, checked against the same request with it off, and how
+    // many projections and row routes the request took.
+    let ask = |session: &mosaica_engine::Session, zoom: u8, window: [f64; 4], expr: &FilterExpr| {
+        let request = || ViewportRequest::new("s0", zoom, window, 10_000).filter(expr.clone());
+        engine.set_filter_cache_bytes(0);
+        let unkept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        engine.set_filter_cache_bytes(bound);
+        let (projected, routes) = (engine.filter_crossing_routes().0, engine.filter_row_routes());
+        let kept = ids(&engine.viewport(session, request()).expect("the window answers"));
+        assert_eq!(kept, unkept, "{expr:?} over {window:?}");
+        (
+            kept,
+            engine.filter_crossing_routes().0 - projected,
+            engine.filter_row_routes() - routes,
+        )
+    };
+    let want = |keys: &[&str], sees: &dyn Fn(u64) -> bool| -> std::collections::BTreeSet<u64> {
+        (0..N)
+            .filter(|&e| sees(e) && archive_of(e).is_some_and(|key| keys.contains(&key)))
+            .map(id_of)
+            .collect()
+    };
+    let everyone = |_: u64| true;
+
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let (first, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((first.clone(), projected), (want(&["xx"], &everyone), 1));
+    let (again, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((again, projected), (first.clone(), 0), "the repeat reads the kept rows");
+    let narrow = [0.0, 0.0, 400.0, 400.0];
+    let (_, projected, routes) = ask(&full, 8, narrow, &xx());
+    assert_eq!((projected, routes), (0, 0), "a narrow window reads the kept rows too");
+
+    let either = FilterExpr::AnyOf(vec![xx(), leaf("archive", FilterOperand::Equals(code("zz")))]);
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &either);
+    assert_eq!((got, projected), (want(&["xx", "zz"], &everyone), 1));
+    let (_, projected, _) = ask(&full, 0, FULL_VIEWPORT, &either);
+    assert_eq!(projected, 0);
+    let neither = FilterExpr::NoneOf(vec![xx()]);
+    let others: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| archive_of(e) != Some("xx"))
+        .map(id_of)
+        .collect();
+    for want_projected in [1, 0] {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &neither);
+        assert_eq!((got, projected), (others.clone(), want_projected), "a negation is kept");
+    }
+
+    let by_id = FilterExpr::AnyOf(vec![
+        xx(),
+        leaf("id", FilterOperand::NumEquals(Scalar::Int(5))),
+    ]);
+    let five = std::collections::BTreeSet::from([id_of(5)]);
+    for _ in 0..2 {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &by_id);
+        let want: std::collections::BTreeSet<u64> =
+            want(&["xx"], &everyone).union(&five).copied().collect();
+        assert_eq!((got, projected), (want, 1), "a unique field's filter is not kept");
+    }
+
+    let part = engine.authorise(&subset_credential()).unwrap();
+    let sees = |e: u64| terms_of(e).contains(&SUBSET_TERM);
+    let (got, projected, _) = ask(&part, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((got, projected), (want(&["xx"], &sees), 1), "a grant keeps its own rows");
+
+    let hidden = (0..N)
+        .find(|&e| archive_of(e) == Some("xx"))
+        .expect("an item carries xx");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&hidden]),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )
+        .expect("a suppression is accepted");
+    let shown = |e: u64| e != hidden;
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((got, projected), (want(&["xx"], &shown), 0), "a suppression leaves the kept rows");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&hidden]),
+            mosaica_lifecycle::wal::ChangeOp::Unsuppress,
+        )
+        .expect("a lift is accepted");
+    let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &xx());
+    assert_eq!((got, projected), (first.clone(), 0), "a lift reaches the kept rows' answer");
+
+    let deleted = (0..N)
+        .find(|&e| archive_of(e).is_none())
+        .expect("an item carries no archive");
+    engine
+        .accept_change(
+            mosaica_types::EntityId::new(fx.entity_of[&deleted]),
+            mosaica_lifecycle::wal::ChangeOp::Delete,
+        )
+        .expect("a deletion is accepted");
+    for (external, archive) in [
+        ("buffered-none", WalScalar::Null),
+        ("buffered-xx", WalScalar::Utf8("xx".to_string())),
+    ] {
+        ingest_buffered_with(&engine, external, archive);
+    }
+    // A buffered item has no row in the view yet, so no answer draws it.
+    let live = |e: u64| e != deleted;
+    let not_xx: std::collections::BTreeSet<u64> = (0..N)
+        .filter(|&e| live(e) && archive_of(e) != Some("xx"))
+        .map(id_of)
+        .collect();
+    for (expr, expected) in [
+        (xx(), want(&["xx"], &live)),
+        (neither.clone(), not_xx),
+        (either.clone(), want(&["xx", "zz"], &live)),
+    ] {
+        let (got, projected, _) = ask(&full, 0, FULL_VIEWPORT, &expr);
+        assert_eq!((got, projected), (expected, 0), "{expr:?} after a deletion and an ingest");
+    }
+
+    let flushed = ingest_and_flush_with(
+        &engine,
+        "projection-kept",
+        WalScalar::Utf8("eng".to_string()),
+        WalScalar::Utf8("xx".to_string()),
+        "paper-99",
+        5,
+        WalScalar::Null,
+    );
+    let fresh = engine.authorise(&full_coverage_credential()).unwrap();
+    let (got, projected, _) = ask(&fresh, 0, FULL_VIEWPORT, &xx());
+    assert_eq!(projected, 1, "a flush renumbers the rows, so they are projected again");
+    let id = engine
+        .mosaica_id_of(mosaica_types::EntityId::new(flushed))
+        .expect("identity is computable")
+        .raw();
+    assert!(got.contains(&id), "the flushed item is matched");
+}
+
 /// **A negation is the visible set minus the matches on either route**, over two columns, one of
 /// which the row route reads from the hot column. The row route's complement holds every row of
 /// the window, a suppressed one and one outside the principal's grant among them, and only the
@@ -4896,7 +5274,7 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
     };
     let routed = |cancel: &Option<mosaica_engine::CancelToken>| {
         fx.columns
-            .evaluate_routed(&tree, &cand, false, &resolvers, cancel)
+            .evaluate_routed(&tree, &cand, RouteChoice::Entity, &resolvers, cancel)
     };
 
     match routed(&Some(token.clone())).expect("a live request answers") {
@@ -4927,13 +5305,13 @@ fn a_filter_evaluation_stops_at_the_next_leaf_once_its_request_has_gone() {
     };
     assert_eq!(
         fx.columns
-            .evaluate_routed(&keyword, &cand, false, &flipping, &Some(token.clone()))
+            .evaluate_routed(&keyword, &cand, RouteChoice::Entity, &flipping, &Some(token.clone()))
             .err(),
         Some(FilterError::Cancelled)
     );
     assert_eq!(
         fx.columns
-            .evaluate_routed(&phrase_of_five(), &cand, false, &resolvers, &cancelled())
+            .evaluate_routed(&phrase_of_five(), &cand, RouteChoice::Entity, &resolvers, &cancelled())
             .err(),
         Some(FilterError::Cancelled),
         "a phrase under a request already gone is not checked at all"

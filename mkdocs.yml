@@ -138,6 +138,7 @@ nav:
   - Guides:
       - guides/index.md
       - Call Mosaica from a backend: guides/backend.md
+      - Count and chart from Python: guides/analysis.md
       - Run Mosaica under systemd: guides/systemd.md
       - Run Mosaica with Docker: guides/docker.md
       - Operate a deployment: guides/operating.md
@@ -151,6 +152,8 @@ nav:
       - HTTP API: reference/http.md
       - Wire framing: openapi/README.md
       - Capabilities: reference/capabilities.md
+      - Filters: reference/filters.md
+      - Aggregations: reference/aggregations.md
       - CLI: reference/cli.md
       - mosaica.toml: reference/mosaica-toml.md
       - schema.toml: reference/schema-toml.md

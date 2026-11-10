@@ -3,6 +3,7 @@
 Each guide covers one task for a user who has finished a tutorial.
 
 - [Call Mosaica from a backend](backend.md): start a session for each user, and look up values, topics and records, with the requests that answer in JSON.
+- [Count and chart from Python](analysis.md): ask the server for counts, breakdowns, histograms and density grids of a selection, and compare one selection with another.
 - [Run Mosaica under systemd](systemd.md) on a Linux server, from the files the first tutorial made.
 - [Run Mosaica with Docker](docker.md), with the database in a volume and Compose to start it.
 - [Operate a deployment](operating.md): who reaches each address, health checks, backups, restarts and failed writes.

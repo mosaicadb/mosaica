@@ -33,6 +33,7 @@ pub mod row_entity;
 pub mod row_members;
 pub mod scalar_column;
 mod segment_cursor;
+mod select;
 pub mod tenancy;
 pub mod term_images;
 pub mod unique;
@@ -73,8 +74,8 @@ pub use layout::{
 };
 pub use manifest_write::{
     fsync_dir, fsync_written, prune_superseded_segments_manifests, stage_publication,
-    write_and_fsync, write_current, write_manifest_json, write_publication, StagedPublication,
-    SIDE_MANIFESTS_KEPT,
+    write_and_fsync, write_current, write_manifest_json, write_publication, Pruned,
+    StagedPublication, SIDE_MANIFESTS_KEPT,
 };
 pub use pairs::PairsParquetWriter;
 pub use permutation::{EntityBuckets, Permutation, RowEntities, RowSpace, SegmentExtent};

@@ -647,7 +647,7 @@ fn items_count(engine: &Engine, session: &Session, filter: Option<FilterExpr>) -
             session,
             ItemsRequest {
                 view: "s0",
-                fields: &[],
+                fields: Some(&[]),
                 system_fields: &[],
                 filter,
                 keep_unmatched: false,

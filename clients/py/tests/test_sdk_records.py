@@ -330,6 +330,11 @@ def test_every_request_is_the_arguments_given(db, sent):
     leaves out `count`, which the server takes on a read's first request only."""
     db.items("map", ["n"])
     assert sent.bodies == [{"view": "map", "fields": ["n"]}]
+    sent.bodies.clear()
+    every = db.items("map")
+    assert sent.bodies == [{"view": "map"}]
+    assert every.column_names == ["mosaica_id", "paper", "venue", "n", "title"]
+    assert every.equals(db.items("map", ["paper", "venue", "n", "title"]))
 
     asked = {
         "view": "map",

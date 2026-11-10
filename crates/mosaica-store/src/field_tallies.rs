@@ -1,5 +1,5 @@
-//! `field-tallies.bin` — per view, the figures of every number and timestamp field over the base
-//! rows, one tally for each distinct list of index keys the rows' items carry.
+//! `field-tallies.bin` — per view, the figures of every number, timestamp and bool field over the
+//! base rows, one tally for each distinct list of index keys the rows' items carry.
 //!
 //! A viewer's visible base rows are the rows whose item carries a key the viewer's grant satisfies,
 //! and items carrying the same key list are seen or not seen together. So a grant's figures over
@@ -476,9 +476,9 @@ pub fn derive(
 /// A held field's values over a set of entities, for a [`TallySource::Held`] field.
 pub type HeldValues = Box<dyn Fn(&croaring::Bitmap, &mut dyn FnMut(u32, Number)) + Sync + Send>;
 
-/// The fields a view's base is tallied over, from the bundle's declared scalars: every number and
-/// timestamp column without a vocabulary, drawn where it is rendered and otherwise held where it
-/// is indexed. A group-scoped field is not among them, and a request walks its base rows.
+/// The fields a view's base is tallied over, from the bundle's declared scalars: every number,
+/// timestamp and bool column without a vocabulary, drawn where it is rendered and otherwise held
+/// where it is indexed. A group-scoped field is not among them, and a request walks its base rows.
 pub fn tallied_fields(declared: &[DeclaredScalar]) -> Vec<(String, bool, bool)> {
     declared
         .iter()
@@ -486,7 +486,7 @@ pub fn tallied_fields(declared: &[DeclaredScalar]) -> Vec<(String, bool, bool)> 
         .filter(|d| {
             !matches!(
                 d.arrow_type,
-                ScalarType::Bool | ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text
+                ScalarType::Utf8 | ScalarType::Keyword | ScalarType::Text
             )
         })
         .map(|d| {

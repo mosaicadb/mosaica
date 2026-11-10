@@ -22,14 +22,19 @@
 //!
 //! [`OwnedView`] reads a bitmap in place from bytes another value keeps alive.
 //!
+//! [`Readable`] gives a bitmap's containers to read in place, as [`Containers`], and a [`Probe`]
+//! that tests membership through a table indexed by container key.
+//!
 //! The crate sits below `mosaica-filter` and `mosaica-store` because both use it and neither may
 //! depend on the other.
 
+mod containers;
 mod counts;
 mod ranks;
 mod runs;
 mod view;
 
+pub use containers::{Container, Containers, Probe, Readable, Run};
 pub use counts::{count_ranges, RangeEnds};
 pub use ranks::BlockRanks;
 pub use runs::{for_each_run_in, split_by_cardinality, RankedRuns, Runs};

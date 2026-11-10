@@ -283,6 +283,43 @@ async fn the_page_schema_is_the_named_fields_then_the_position_and_labels() {
     assert_eq!(marked, matched, "and marks the matching ones");
 }
 
+/// **A request without `fields` returns every declared field**, as the read naming them does,
+/// and its cursor continues only a read without them.
+#[tokio::test]
+async fn a_request_without_fields_returns_every_declared_field() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["1"]).await;
+    let declared: Vec<Value> = meta(&f.server, &["1"]).await["declared_scalars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].clone())
+        .collect();
+    assert!(declared.len() > 1);
+    let asked = json!({ "view": "s0", "order": "map", "page_rows": 400, "pages": 1 });
+    let every = items_ok(&f.server, &token, &asked).await;
+    let mut named = asked.clone();
+    named["fields"] = declared.clone().into();
+    let by_name = items_ok(&f.server, &token, &named).await;
+    let (batch, _) = &every.pages[0];
+    let columns: Vec<Value> = batch
+        .schema_ref()
+        .fields()
+        .iter()
+        .skip(1)
+        .map(|field| field.name().as_str().into())
+        .collect();
+    assert_eq!(columns, declared);
+    assert_eq!(batch, &by_name.pages[0].0);
+
+    // Its cursor continues the read without fields, and no read that names them.
+    let mut next = asked.clone();
+    next["cursor"] = every.trailer["next"].clone();
+    items_ok(&f.server, &token, &next).await;
+    next["fields"] = declared.into();
+    assert_eq!(post_items(&f.server, &token, &next).await.status().as_u16(), 422);
+}
+
 /// **`position` and `labels` each add their own columns**: either alone adds only its own, and
 /// neither adds none.
 #[tokio::test]
@@ -490,7 +527,7 @@ async fn every_refusal_has_its_status() {
         json!({ "view": "s0", "fields": [], "order": "random" }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),
         json!({ "view": "s0", "fields": [], "unknown": 1 }),
-        json!({ "view": "s0" }),
+        json!({ "fields": [] }),
         json!({ "view": "s0", "fields": [], "filters": { "no_such_column": { "eq": 1 } } }),
         json!({ "view": "s0", "fields": [], "cursor": tampered }),
         json!({ "view": "s0", "fields": [], "cursor": "not a cursor" }),

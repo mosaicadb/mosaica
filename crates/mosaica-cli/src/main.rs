@@ -295,15 +295,16 @@ enum Command {
         #[arg(long, value_name = "SECONDS", default_value_t = 3)]
         timeout: u64,
     },
-    /// Read every item a session token may see in one view, with the fields named, from a running
-    /// server, and write them as Arrow IPC or Parquet.
+    /// Read every item a session token may see in one view, with the fields named or every field,
+    /// from a running server, and write them as Arrow IPC or Parquet.
     ///
     /// The server answers `POST /v1/items` a page at a time, several pages to a response, and ends
     /// each response with a cursor for the next. This requests responses until no row remains and
     /// writes each page as it arrives. Each of the route's fields is the argument of the same
     /// name, sent only when given, so the server's own setting applies otherwise.
     ///
-    /// The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y`
+    /// The columns are `mosaica_id`, the fields in the order named or without `--fields` every
+    /// field the view reads under its bare name, `mosaica:x` and `mosaica:y`
     /// under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under
     /// `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's
     /// dictionary holding the keys of its own rows. A read that returns no row writes these
@@ -334,14 +335,14 @@ enum Command {
     /// The grouping is `POST /v1/aggregate`'s, as JSON, and names its figures: `"count": true`
     /// counts the items in each row, so `{"count": true}` is the size of the set. With it, `"by":
     /// {"field": "venue", "top": 10}` gives the ten commonest values of a category field; `"by":
-    /// {"field": "year", "bins": 20}` a histogram of a number or timestamp field, and with
+    /// {"field": "year", "bins": 20}` a histogram of a number, timestamp or bool field, and with
     /// `"sample": 100000` one counted over about that many of the set's items and scaled to it;
     /// `"by": {"layer": "clusters", "top": 10}` the largest artifacts of a layer, and on a `nested`
     /// or `dag` layer `"by": {"layer": "topics", "top": 10, "cut": {"zoom": 3, "bbox": [0, 0,
     /// 100, 100], "budget": 1000}}` the largest of those the map draws at that tile depth, box and
     /// cluster budget, and with `"palette_size": 10` beside `layer` a `slot` column, each
     /// artifact's colour among ten; `"cells": {"depth": 8}` a density surface. `{"summary":
-    /// ["year"]}` is one row of a number or timestamp field's `values_year`, `missing_year`,
+    /// ["year"]}` is one row of a number, timestamp or bool field's `values_year`, `missing_year`,
     /// `min_year`, `max_year` and `mean_year` over every item the token may see in the view, and
     /// `"values"`, `"missing"`, `"min"`, `"max"` and `"mean"` name one of those each; they take
     /// no `by`, `cells`, `--filters` or `--reference`. The read is carried across responses, and

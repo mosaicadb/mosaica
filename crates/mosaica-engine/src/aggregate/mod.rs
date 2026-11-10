@@ -1,9 +1,10 @@
 //! `POST /v1/aggregate`: how a set of the items a viewer may see in one view is distributed, across
-//! the values of a category field, across bins of a number or timestamp field, across the
+//! the values of a category field, across bins of a number, timestamp or bool field, across the
 //! artifacts of one level of a layer, across the cells of the map, or across a group and cells
 //! together. Each table names its figures: a count, which is exact over the viewer's visible set
-//! and can be compared with a second set, and the figures of number or timestamp fields, the items
-//! holding a value or none, the smallest, largest and mean value, over the whole visible set.
+//! and can be compared with a second set, and the figures of number, timestamp or bool fields, the
+//! items holding a value or none, the smallest, largest and mean value, over the whole visible
+//! set.
 //!
 //! [`Engine::aggregate_stream`] serves one response: a head, then each grouping's table in order,
 //! each table a head and pages of rows, then a trailer. Every page composes the visible set again
@@ -97,7 +98,7 @@ pub struct Grouping {
     pub area: Option<[f64; 4]>,
 }
 
-/// A figure a grouping names over a list of number or timestamp fields.
+/// A figure a grouping names over a list of number, timestamp or bool fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FigureList {
     pub figure: Figure,
@@ -156,10 +157,11 @@ pub enum By {
     /// The values of a category field, as a resolved column name: a group-scoped field arrives
     /// pinned to one view's column.
     Field { column: String, pick: Pick<String> },
-    /// The values of a number or timestamp field, as a resolved column name, counted in at most
-    /// `bins` bins of `range`, or with no range in readable bins around the values of the items
-    /// the viewer may see in the view. With `sample`, counted over about that many of the set's
-    /// items and scaled to the set, where the set holds more ([`bins`]'s module doc).
+    /// The values of a number, timestamp or bool field, as a resolved column name, counted in at
+    /// most `bins` bins of `range`, or with no range in readable bins around the values of the
+    /// items the viewer may see in the view, or a bool's bins for false and true. With `sample`,
+    /// counted over about that many of the set's items and scaled to the set, where the set holds
+    /// more ([`bins`]'s module doc).
     Bins {
         column: String,
         bins: u32,
@@ -314,13 +316,11 @@ pub enum AggregateRefused {
     /// Not a category field this deployment can count: undeclared, not a category, or a category
     /// with no per-value record and not drawn.
     NotCountable(String),
-    /// Not a number or timestamp field this deployment can bin: not a number, or a number
+    /// Not a number, timestamp or bool field this deployment can bin: not one of those, or one
     /// declared with neither `index` nor `render`.
     NotBinnable(String),
-    /// A grouping by bins of a `bool` field.
-    BinsOnBool(String),
-    /// Not a number or timestamp field this deployment can take field figures of: not a number,
-    /// or a number declared with neither `index` nor `render`.
+    /// Not a number, timestamp or bool field this deployment can take field figures of: not one of
+    /// those, or one declared with neither `index` nor `render`.
     NotSummarisable(String),
     /// A grouping that names no figure.
     NoFigure,
@@ -386,13 +386,13 @@ impl std::fmt::Display for AggregateRefused {
             ),
             AggregateRefused::NotBinnable(field) => write!(
                 f,
-                "field '{field}' cannot be binned; name a number or timestamp field declared \
-                 with index or render"
+                "field '{field}' cannot be binned; name a number, timestamp or bool field \
+                 declared with index or render"
             ),
             AggregateRefused::NotSummarisable(field) => write!(
                 f,
-                "field '{field}' has no figures to serve; name a number or timestamp field \
-                 declared with index or render"
+                "field '{field}' has no figures to serve; name a number, timestamp or bool \
+                 field declared with index or render"
             ),
             AggregateRefused::NoFigure => write!(
                 f,
@@ -417,11 +417,6 @@ impl std::fmt::Display for AggregateRefused {
             AggregateRefused::EmptyRange => write!(
                 f,
                 "the range is empty or reversed; give [lower, upper] with lower below upper"
-            ),
-            AggregateRefused::BinsOnBool(field) => write!(
-                f,
-                "field '{field}' is a bool, which has no bins; count true and false with a filter \
-                 on each"
             ),
             AggregateRefused::FractionalTime(field) => write!(
                 f,
@@ -563,7 +558,7 @@ impl Engine {
         }) {
             generation
                 .declared_columns()
-                .admit(expr, true, &reaches)
+                .admit(expr, &reaches)
                 .map_err(filter_refusal)?;
         }
         let prefer_row = plans.iter().any(Plan::wants_rows);

@@ -1,14 +1,15 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
 import {repeat} from 'lit/directives/repeat.js';
-import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
+import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type HeldRegion, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
 import {OPERATOR_WORDS} from './filter.js';
 import {HeldAggregate} from './aggregate.js';
-import {MosaicaElement, UNNAMED, columnCaption, dateRangeText, countText, emit, keyTitle, shortCount} from './base.js';
+import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, keyTitle, shortCount} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import type {MosaicaFieldCard} from './field-card.js';
 import {icon} from './icons.js';
 import {exportparts, forwarded} from './parts.js';
+import {switchView} from './view-switch.js';
 import {FloatingList} from './float.js';
 import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
@@ -27,6 +28,15 @@ const layerField = (layer: string) => `${CLUSTER_PREFIX}${layer}`;
 
 const VERBS: readonly ClauseVerb[] = ['filter', 'highlight'];
 
+/** A view's name as the view picker shows it, else its id. */
+const viewTitle = (meta: Meta, id: string) => meta.views.find((v) => v.id === id)?.displayName ?? id;
+
+/** A held region's chip text: its shape and the view it was drawn in. */
+function regionText(shape: HeldRegion['shape'], view: string): string {
+  const kind = shape.kind === 'box' ? 'Box' : shape.kind === 'lasso' ? 'Lasso' : 'Shape';
+  return `${shape.outside ? `Outside ${kind.toLowerCase()}` : kind} in ${view}`;
+}
+
 /** A figure in the subject row: whole, or shortened in the compact layout. */
 const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : countText(n));
 
@@ -34,6 +44,10 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * Use the filter panel as the place where viewers narrow the map down, as `<mosaica-explorer>` does
  * in its sidebar. Each filter or highlight in force shows as a chip above the cards, and pressing a
  * chip opens its field's card.
+ *
+ * A region selected in another view keeps filtering after the viewer switches away from it, and
+ * shows as a chip naming its view, such as "Lasso in Topics". Pressing the chip switches back to
+ * that view, where the region is selected again, and its × removes it.
  *
  * The row at the top says what the cards' solid bars count. That is the items in view that the
  * filters match, or the highlighted items while there is a highlight. The pale bars count
@@ -53,6 +67,10 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  *   column's chip was removed, Clear all was pressed, the highlight was cleared from the subject
  *   row, or a card was taken off in Add field. Removing a `member_of` chip fires nothing. Each card
  *   fires its own as well.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - The chip
+ *   of a region held in another view was removed, or Clear all removed one, with that `view`.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewswitch']>} mosaica-viewswitch - The chip of
+ *   a region held in another view was pressed, and the panel switched to that view.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-chipopen']>} mosaica-chipopen - A column's chip
  *   was pressed while `chips-only` is set, so you can show its card.
  * @csspart state - The state line, with `data-state`.
@@ -66,9 +84,10 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @csspart all - All matching and its number.
  * @csspart all-count - The number matching.
  * @csspart chips - The line of chips, while any filter or highlight is in force.
- * @csspart chip - One chip, with `data-verb` (`filter` or `highlight`) and `data-column` or
- *   `data-artifact`.
- * @csspart edit - A column chip's text, a button that opens its card.
+ * @csspart chip - One chip, with `data-verb` (`filter` or `highlight`) and `data-column`,
+ *   `data-artifact`, or `data-view` for a region held in another view.
+ * @csspart edit - A column chip's text, a button that opens its card; on a held region's chip, a
+ *   button that switches to its view.
  * @csspart clear - The Clear all button.
  * @csspart card - One `<mosaica-field-card>`, with `data-field`.
  * @csspart add - The Add field button, with `aria-expanded`.
@@ -190,6 +209,23 @@ export class MosaicaFilterPanel extends MosaicaElement {
         min-height: 0;
         padding: 2px 4px 2px 8px;
         gap: 4px;
+      }
+      /* A region held as the viewer leaves its view arrives here from the map's corner. */
+      [part='chip'][data-view] {
+        animation: arrive 1.2s ease-out 1;
+      }
+      @keyframes arrive {
+        from {
+          box-shadow: 0 0 0 3px var(--_mosaica-accent);
+        }
+        to {
+          box-shadow: 0 0 0 0 transparent;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        [part='chip'][data-view] {
+          animation: none;
+        }
       }
       [part='chip'] > button:last-child {
         width: 16px;
@@ -395,8 +431,10 @@ export class MosaicaFilterPanel extends MosaicaElement {
       case 'category':
         return `${caption}: ${draft.keys.map((k) => keyTitle(this.resolvedStore, column, k)).join(', ')}`;
       case 'numeric': {
-        const meta = this.resolvedStore?.get('meta');
-        if (meta?.declaredScalars.find((c) => c.name === column)?.arrowType === 'timestamp_us') return `${caption} ${dateRangeText(draft.gte, draft.lte)}`;
+        const type = this.resolvedStore?.get('meta')?.declaredScalars.find((c) => c.name === column)?.arrowType;
+        if (type === 'timestamp_us') return `${caption} ${dateRangeText(draft.gte, draft.lte)}`;
+        const kept = type === 'bool' ? boolKeys(draft) : [];
+        if (kept.length > 0) return `${caption}: ${kept.map((k) => BOOL_WORDS[k]).join(', ')}`;
         const f = (v: number) => v.toLocaleString('en-GB');
         if (draft.lte === null) return `${caption} ≥ ${f(draft.gte!)}`;
         if (draft.gte === null) return `${caption} ≤ ${f(draft.lte)}`;
@@ -416,6 +454,19 @@ export class MosaicaFilterPanel extends MosaicaElement {
     return clause.outside ? `Outside ${name}` : name;
   }
 
+  /** Switch to the view a held region is in, where the store selects it again. */
+  private showRegion(meta: Meta, view: string): void {
+    const s = this.resolvedStore;
+    if (s) switchView(this, s, meta, view);
+  }
+
+  private clearRegion(view: string): void {
+    const s = this.resolvedStore;
+    if (!s) return;
+    s.setRegions(s.get('filters').regions.filter((r) => r.view !== view));
+    emit(this, 'mosaica-selectchange', {shape: null, view, status: 'cleared'});
+  }
+
   private clearMember(clause: MemberClause): void {
     const s = this.resolvedStore;
     if (!s) return;
@@ -433,9 +484,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const s = this.resolvedStore;
     const meta = s?.get('meta');
     if (!s || !meta) return;
+    const held = s.get('filters').regions;
     s.setFilters(emptyDraft(meta.filterOperands));
     s.setMembers([]);
+    s.setRegions([]);
     emit(this, 'mosaica-filterchange', {column: null, expr: null});
+    for (const {view} of held) emit(this, 'mosaica-selectchange', {shape: null, view, status: 'cleared'});
   }
 
   /** Empty every clause in the highlight position, so the cards count what is in view again. */
@@ -504,12 +558,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const operands = meta.filterOperands;
     const layers = clusterFieldLayers(meta, s.get('view').id);
     if (operands.length === 0 && layers.length === 0) return html`<div class="panel"><span part="state" data-state="empty">Nothing to filter</span></div>`;
-    const {draft, members} = s.get('filters');
+    const {draft, members, regions} = s.get('filters');
     const holds = (column: string, verb: ClauseVerb) => {
       const d = draft[verb][column];
       return d !== undefined && isPopulated(d);
     };
-    const chips = this.chipLine(draft, members, holds);
+    const chips = this.chipLine(meta, draft, members, regions, holds);
     if (this.chipsOnly) return chips;
 
     const fields = [
@@ -552,10 +606,16 @@ export class MosaicaFilterPanel extends MosaicaElement {
   }
 
   /** Every clause as a chip, then Clear all; nothing while none is applied. */
-  private chipLine(draft: FilterDraft, members: readonly MemberClause[], holds: (column: string, verb: ClauseVerb) => boolean): TemplateResult | typeof nothing {
+  private chipLine(
+    meta: Meta,
+    draft: FilterDraft,
+    members: readonly MemberClause[],
+    regions: readonly HeldRegion[],
+    holds: (column: string, verb: ClauseVerb) => boolean
+  ): TemplateResult | typeof nothing {
     const columns = [...new Set([...Object.keys(draft.filter), ...Object.keys(draft.highlight)])];
     const chips = VERBS.flatMap((verb) => columns.flatMap((c) => (holds(c, verb) ? [{c, verb, d: draft[verb][c]!}] : [])));
-    if (chips.length === 0 && members.length === 0) return nothing;
+    if (chips.length === 0 && members.length === 0 && regions.length === 0) return nothing;
     return html`<div part="chips">
       ${chips.map(
         ({c, verb, d}) => html`<span part="chip" class="chip" data-verb=${verb} data-column=${c}
@@ -567,6 +627,19 @@ export class MosaicaFilterPanel extends MosaicaElement {
         (m) => html`<span part="chip" class="chip" data-verb=${m.verb} data-artifact=${String(m.artifact)}
           >${this.memberText(m)}<button type="button" aria-label=${`Remove ${this.memberText(m)}`} @click=${() => this.clearMember(m)}>${icon('close', 10, 2.4)}</button></span
         >`
+      )}
+      ${repeat(
+        regions,
+        (r) => r.view,
+        (r) => {
+          const view = viewTitle(meta, r.view);
+          const text = regionText(r.shape, view);
+          return html`<span part="chip" class="chip" data-verb="filter" data-view=${r.view}
+            ><button part="edit" class="edit" type="button" title=${`Show in ${view}`} @click=${() => this.showRegion(meta, r.view)}
+              >${icon(r.shape.kind === 'lasso' ? 'lasso' : 'box', 12)}${text}</button
+            ><button type="button" aria-label=${`Remove ${text}`} @click=${() => this.clearRegion(r.view)}>${icon('close', 10, 2.4)}</button></span
+          >`;
+        }
       )}
       <button part="clear" type="button" @click=${() => this.clearAll()}>Clear all</button>
     </div>`;

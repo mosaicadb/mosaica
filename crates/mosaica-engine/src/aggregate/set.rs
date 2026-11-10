@@ -20,9 +20,11 @@ use crate::cells::CellSet;
 use crate::compose::{EffectiveMask, MaskedSet, WholeMask};
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
-use crate::filter::FilterExpr;
+use crate::filter::{RouteChoice, FilterExpr};
 use crate::region::RegionVerdict;
-use crate::viewport::{FilterCandidate, OpenView, OverView, ResolvedLeaves, ServedSide};
+use crate::viewport::{
+    FilterCandidate, OpenView, OverView, ResolvedLeaves, ServedSide, ViewLeafCosts,
+};
 use crate::Generation;
 
 /// The page's set and reference set, and the entity candidates both were routed under.
@@ -197,7 +199,7 @@ impl Set {
                 if let Some(held) = part.entities.get() {
                     return Ok(held);
                 }
-                let crossed = crossing(cx.engine, cx.open, place, rows)?;
+                let crossed = cx.engine.entities_of_rows(&cx.open.served, place, rows)?;
                 part.crossed
                     .fetch_add(rows.cardinality(), Ordering::Relaxed);
                 Ok(part.entities.get_or_init(|| crossed))
@@ -226,26 +228,6 @@ pub(crate) fn in_view(open: &OpenView<'_>, place: usize, entities: &Bitmap) -> R
         })
 }
 
-/// The entities of `rows` in the side at `place`, on the engine's pool.
-pub(super) fn crossing(
-    engine: &Engine,
-    open: &OpenView<'_>,
-    place: usize,
-    rows: &Bitmap,
-) -> Result<Bitmap> {
-    let row_space = &open.served.sides[place].data.row_space;
-    engine
-        .pool
-        .install(|| row_space.entities_of_rows(rows))
-        .ok_or_else(|| {
-            EngineError::Malformed(format!(
-                "view '{}' has no row-to-entity table, so a set routed by its rows cannot be \
-                 counted by entity; rebuild the bundle",
-                open.served.name
-            ))
-        })
-}
-
 /// Compose the page's set and reference set under `open`'s mask, in each side it reads.
 pub(super) fn compose(
     engine: &Engine,
@@ -267,16 +249,20 @@ pub(super) fn compose(
         _ => None,
     };
     let resolved = ResolvedLeaves::new(&open.mask);
-    let prefers_rows = |expr: Option<&FilterExpr>| -> Result<bool> {
-        let Some(expr) = expr else {
-            return Ok(prefer_row);
-        };
-        let read = reads.iter().map(|&place| &served.sides[place]);
-        let visible = open.mask.visible_total();
-        Ok(prefer_row
-            || engine.region_prefers_rows(served, read, &resolved, &req.cancel, expr, visible)?)
+    let costs = |expr: Option<&FilterExpr>| -> Result<Option<ViewLeafCosts>> {
+        match expr {
+            Some(expr) if !prefer_row => {
+                engine.region_costs(served, &open.mask, &resolved, &req.cancel, expr)
+            }
+            _ => Ok(None),
+        }
     };
-    let (filter_rows, reference_rows) = (prefers_rows(req.filter.as_ref())?, prefers_rows(reference_expr)?);
+    let (filter_costs, reference_costs) = (costs(req.filter.as_ref())?, costs(reference_expr)?);
+    let [filter_rows, reference_rows] = [&filter_costs, &reference_costs].map(|costs| match costs {
+        _ if prefer_row => RouteChoice::Row,
+        Some(costs) => costs.routes(),
+        None => RouteChoice::Entity,
+    });
     let mut candidates: Vec<Option<Bitmap>> = vec![None; sides];
     let (mut set, mut reference) = (Set::filtered(sides), Set::filtered(sides));
     for &place in &reads {
@@ -290,7 +276,7 @@ pub(super) fn compose(
             &resolved,
             &req.cancel,
             |route| {
-            let route_one = |expr: &FilterExpr, prefer_row: bool, into: &mut Set| -> Result<()> {
+            let route_one = |expr: &FilterExpr, choice: RouteChoice<'_>, into: &mut Set| -> Result<()> {
                 clock.check_ended(moved)?;
                 let over = engine.route_over_view(
                     served,
@@ -299,7 +285,7 @@ pub(super) fn compose(
                     &req.cancel,
                     route,
                     expr,
-                    prefer_row,
+                    choice,
                 )?;
                 into.add(place, routed(open, place, over)?);
                 Ok(())
@@ -369,22 +355,15 @@ pub(crate) fn entities_passing(
     let served = &open.served;
     let side = &served.sides[place];
     let whole = FilterCandidate::Whole(candidate);
-    let read = served.filtered_sides(&open.mask).map(|(_, side, _)| side);
-    let prefer_row = engine.region_prefers_rows(
-        served,
-        read,
-        resolved,
-        cancel,
-        expr,
-        open.mask.visible_total(),
-    )?;
+    let costs = engine.region_costs(served, &open.mask, resolved, cancel, expr)?;
+    let choice = costs.as_ref().map_or(RouteChoice::Entity, ViewLeafCosts::routes);
     engine.route_filters_under(served, side, whole, resolved, cancel, |route| {
-        let over = engine.route_over_view(served, side, resolved, cancel, route, expr, prefer_row)?;
+        let over = engine.route_over_view(served, side, resolved, cancel, route, expr, choice)?;
         let (part, region) = routed(open, place, over)?;
         check_cancelled(cancel)?;
         let entities = match part.held {
             Held::Entities(entities) => entities,
-            Held::Rows(rows) => crossing(engine, open, place, &rows)?,
+            Held::Rows(rows) => engine.entities_of_rows(&open.served, place, &rows)?,
             Held::Whole => unreachable!("a routed filter is never the whole view"),
         };
         Ok((entities, region))

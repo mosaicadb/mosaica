@@ -194,8 +194,8 @@ fn engine_at(tmp: &std::path::Path, root: &std::path::Path, total: u64) -> Engin
     engine
 }
 
-/// A whole-extent viewport, retried past the bounded `ProjectionBuilding` a merge's refresh window
-/// answers with (decision 0044's permitted residual).
+/// A whole-extent viewport, retried past the `ProjectionBuilding` a request answers with when
+/// another's build of the same projection outlasts its wait budget.
 fn viewport_k(
     engine: &Engine,
     session: &Session,
@@ -241,10 +241,9 @@ fn masked_total(engine: &Engine, session: &Session) -> u64 {
 /// Total bytes on disc under `root`, orphans included.
 ///
 /// **Not the same number as [`live_bytes`], and the gap is the point.** A merge's consumed
-/// segments and a coalesce's consumed tiers stay on disc: every side-manifest below the current
-/// `n` still names them, and a step-down serves one of those (contracts §2.3). Reclaiming them is
-/// compaction's, and **this harness runs no fold** — so within a run this number only ever grows, and
-/// the ratio between the two is what a deployment would actually have to provision for today.
+/// segments and a coalesce's consumed tiers stay on disc while a kept side-manifest still names
+/// them, since a step-down serves one of those (contracts §2.3), and until no request holds a
+/// generation that names them. The ratio between the two is what a deployment provisions for.
 fn bundle_bytes(root: &std::path::Path) -> u64 {
     fn walk(dir: &std::path::Path, total: &mut u64) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -1814,7 +1813,7 @@ fn p1_one_scale(base: u64) {
     let entities = engine.generation().only_shard().watermark;
 
     // **The input the coefficient is against is the bytes the fold reads**, which is what the live
-    // manifests name — not everything on disc. A merge's consumed segments are still in the
+    // manifests name — not everything on disc. A merge's consumed segments can still be in the
     // directory and a fold does not open them, so charging the fold for them would flatter it by
     // exactly the orphan ratio.
     let input_bytes = live_before;

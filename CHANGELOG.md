@@ -10,13 +10,42 @@ container image.
 
 ### Added
 
+- `POST /v1/items` takes `fields` as optional. A request without it returns every field the view
+  reads under its bare name, and its cursor is refused once that set of fields changes.
+  `mosaica items --fields`, `ItemsRequest.fields` in TypeScript and `fields` on the Python
+  `items` calls are optional in the same way.
+- Python: `views()`, `attributes(view=None)` and `layers(view=None)` on `Database` and `Viewer`
+  list what `/v1/meta` describes, each attribute with the filter operators it takes as
+  `operands`.
 - The TypeScript store reports a query in flight. `status.querying` is true from a change of
-  filters, highlight, `member_of` clauses or selected region until the map, the artifacts and the
-  counts have loaded, and `store.cancelQuery()` goes back to the ones that last finished loading.
+  filters, highlight, `member_of` clauses, selected region or regions held in other views until
+  the map, the artifacts and the counts have loaded, and `store.cancelQuery()` goes back to the ones that last finished loading.
   `<mosaica-status>` reads Running query, with a Cancel button, once a query has run for a quarter
   of a second, and a `<mosaica-filter>` box shows a spinner for the query it started. Cancel fires
   `mosaica-filterchange`, `mosaica-clausechange` and `mosaica-selectchange` for what it went back
   to.
+
+### Changed
+
+- `serve.filter_cache_bytes` defaults to 1 GiB, up from 256 MiB.
+- The filter cache keeps the rows a condition on a rendered column has read from the map and
+  those it matched, so a pan or a repeated viewport reads only the rows it brings into view.
+- The filter cache keeps the map rows of the items a filter answered over the whole map matches,
+  for a filter answered from the items' values and naming no unique field, so a later viewport
+  with the same filter reads them instead of finding them again.
+- An `eq` or `in` on a `public` category is answered from its postings where they hold few
+  enough items, rather than by reading every row in view. A filter on a rare value over the
+  whole map no longer reads every row.
+- A filter over the map tests each row against its matches through a table of the matches'
+  blocks, reading each block before it is needed: about nine times faster per row where the
+  matches are many.
+- Working out which rows a viewer may see runs on every core the server has free, and does less
+  work on one. At 10⁹ items on four cores it takes 0.96 s rather than 5.1 s for a viewer who sees a
+  quarter of them, and 3.0 s on one core. Opening a database checks each view's rows in 2.8 s
+  rather than about 6 s on four cores.
+- A request after a flush or merge is no longer refused with 429 while the server brings each
+  viewer's visible set up to date. It brings its own up to date and is answered.
+  `refresh_in_flight` in `GET /control/status` still reports the work in progress.
 
 ### Fixed
 

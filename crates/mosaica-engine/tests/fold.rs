@@ -471,10 +471,12 @@ fn the_old_prefix_is_reclaimed_whole_and_its_carry_forwards_are_links_not_copies
         before,
         "a carried-forward file is a second name for the same inode, not a copy"
     );
-    assert!(
-        !root.join("v00000").exists(),
-        "and the superseded prefix is gone whole — the build's base, every consumed tier and \
-         every superseded side-manifest"
+    // The superseded prefix is gone whole: the build's base, every consumed tier and every
+    // superseded side-manifest. It is deleted on a thread of its own.
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists(),
     );
 
     // The bytes survived the unlink, which is the property the link buys.
@@ -1193,7 +1195,7 @@ fn a_merge_cap_above_the_base_segment_is_obeyed() {
 
     // Every file a manifest names is present and digest-clean, which is what `open_bundle`
     // checks. The files beside them are the manifests themselves and the four segments the merge
-    // consumed, which stay until the next fold reclaims the prefix.
+    // consumed, which stay while a kept side-manifest still names them.
     open_bundle(&root).expect("the published prefix opens and verifies");
     let live: Vec<&str> = generation.bundle.only_shard().views["s0"]
         .segments
@@ -1219,9 +1221,11 @@ fn a_merge_cap_above_the_base_segment_is_obeyed() {
     // A generation or a session still held pins the prefix it was served from.
     drop((generation, session, revealed));
     fold(&restarted);
-    assert!(
-        !root.join("v00001").exists(),
-        "the next fold reclaims the merge's inputs"
+    // The next fold reclaims the merge's inputs with the prefix.
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00001").exists(),
     );
     let live: Vec<String> = restarted.generation().bundle.only_shard().views["s0"]
         .segments
@@ -1611,26 +1615,15 @@ fn the_watermark_and_high_water_published_are_the_live_ones_not_the_snapshot() {
     );
 }
 
-/// **The flip does not refuse anything: a fold's publication does not arm the refresh shed**
-/// (decision 0053).
-///
-/// A merge arms it, and a racer inside a merge's refresh window is shed with a 429 —
-/// `merge.rs`'s `a_racer_inside_a_merges_refresh_window_is_shed_rather_than_rebuilding` is that
-/// case, and this is deliberately its mirror. The rule that separates them: *shed only while the
-/// refresh pass is shorter than the rebuild it would save.* A merge satisfies it (a ~0.7 s pass
-/// against a measured 1 277 ms rebuild); a fold inverts it by two orders (~180 s against 1.3 s),
-/// so arming would refuse every session for minutes to avoid a burst that clears in seconds.
+/// **The flip does not refuse anything: a request inside a fold's refresh window is served.** The
+/// pass has reached no entry, so the request takes an ordinary cache miss and builds against the
+/// new row space itself.
 ///
 /// The refresh is **held** here rather than switched off, because those are different states: a
-/// pass that finishes without producing anything clears the flag, and then a request builds for
-/// the ordinary reason rather than because the fold declined to arm it. Held, the flag would stay
-/// set for the whole window if anything had set it — so a request served here is a request the
-/// shed never saw.
-///
-/// **Mutation this kills:** arming `refresh.in_flight` in the rotation arm of `publish_geometry`
-/// (the request below is refused `ProjectionBuilding` instead of served).
+/// pass that finishes without producing anything leaves a request nothing but its own build
+/// anyway. Held, the pass is still in flight, which is the window this is about.
 #[test]
-fn the_flip_does_not_arm_the_refresh_shed() {
+fn a_request_inside_a_folds_refresh_window_is_served() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("bundle");
     build_fixture(
@@ -1650,7 +1643,7 @@ fn the_flip_does_not_arm_the_refresh_shed() {
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     let baseline = visible(&engine, &session);
 
-    // Hold the refresh, so a flag armed at the swap would stay armed for the whole window.
+    // Hold the refresh, so the request below lands inside the pass's window.
     engine.set_refresh_paused_for_test(true);
     fold(&engine);
 
@@ -2439,7 +2432,11 @@ fn the_dead_bytes_route_dispatches_a_fold_on_a_bundle_with_nothing_deleted() {
     );
     // And the fold did what the route dispatched it for: the superseded prefix is gone whole, so
     // what was dead is reclaimed rather than merely rewritten beside itself.
-    assert!(!root.join("v00000").exists());
+    wait_until(
+        "the superseded prefix to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists(),
+    );
     let generation = engine.generation();
     let prefix = root.join(&generation.prefix);
     let partition = &generation.bundle.partitions["default"];
@@ -2715,8 +2712,11 @@ fn a_second_fold_publishes_a_third_prefix_and_reclaims_the_second() {
     assert_eq!(engine.generation().prefix, "v00001");
     fold(&engine);
     assert_eq!(engine.generation().prefix, "v00002");
-    assert!(!root.join("v00000").exists());
-    assert!(!root.join("v00001").exists());
+    wait_until(
+        "both superseded prefixes to be reclaimed",
+        std::time::Duration::from_secs(30),
+        || !root.join("v00000").exists() && !root.join("v00001").exists(),
+    );
 
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     assert_eq!(visible(&engine, &session), N_ITEMS);

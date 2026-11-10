@@ -61,8 +61,8 @@
 //! invalidates the whole ladder for every session and the next request walks again — after which
 //! this refills the rest. Warming from [`crate::refresh`], which already rebuilds each resident
 //! session's projection per publication, would cover that too. It is not built: the refresh pass is
-//! a measured ~0.7 s round whose shed margin is already under 2× (`crate::refresh::RefreshDeps`),
-//! and adding a walk per entry is a change to that budget rather than to this one.
+//! a measured ~0.7 s round of pool time, and adding a walk per entry is a change to that budget
+//! rather than to this one.
 
 use std::sync::Arc;
 

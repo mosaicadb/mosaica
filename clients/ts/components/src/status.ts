@@ -1,6 +1,6 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
-import {NO_COUNT, NO_MASKED, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
+import {NO_COUNT, NO_MASKED, type HeldRegion, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {NOTHING_VISIBLE, NamedQuery, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
@@ -36,7 +36,8 @@ import './count.js';
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - Cancel
  *   put back or took away a `member_of` clause, once for each.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Cancel
- *   went back to another selected region, or to none.
+ *   went back to another selected region, or to none, and once with `view` for each other view
+ *   whose held region it put back or took away.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - The session expired.
  *   Fires once each time.
  * @csspart strip - The one-line strip.
@@ -219,6 +220,10 @@ export class MosaicaStatus extends MosaicaElement {
     for (const [key, clause] of after) if (!before.has(key)) told(clause, true);
     const shape = s.get('region')?.shape ?? null;
     if (shape !== was.shape) emit(this, 'mosaica-selectchange', {shape: shapeDetail(shape), status: shape ? 'loading' : 'cleared'});
+    const heldIn = (regions: readonly HeldRegion[]) => new Map(regions.map((r) => [r.view, r.shape]));
+    const [heldBefore, heldAfter] = [heldIn(was.regions), heldIn(now.regions)];
+    for (const view of heldBefore.keys()) if (!heldAfter.has(view)) emit(this, 'mosaica-selectchange', {shape: null, view, status: 'cleared'});
+    for (const [view, held] of heldAfter) if (heldBefore.get(view) !== held) emit(this, 'mosaica-selectchange', {shape: shapeDetail(held), view, status: 'loading'});
   }
 
   override render(): TemplateResult | typeof nothing {

@@ -274,10 +274,12 @@ pub struct RecordFieldRef<'a> {
 }
 
 impl RecordValue {
-    /// The value as a number, where it is one: every integer width, both floats and a timestamp.
+    /// The value as a number, where it is one: every integer width, both floats, a timestamp, and
+    /// a bool as 0 or 1.
     pub fn number(&self) -> Option<mosaica_types::scalar::Number> {
         use mosaica_types::scalar::Number;
         Some(match *self {
+            RecordValue::Bool(x) => Number::Int(i128::from(x)),
             RecordValue::U8(x) => Number::Int(i128::from(x)),
             RecordValue::U16(x) => Number::Int(i128::from(x)),
             RecordValue::U32(x) => Number::Int(i128::from(x)),

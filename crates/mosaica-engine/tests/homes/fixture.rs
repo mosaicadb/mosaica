@@ -471,8 +471,9 @@ pub fn served(
     view: &str,
     filter: Option<FilterExpr>,
 ) -> BTreeSet<u64> {
-    // `ProjectionBuilding` is the shed a fold's or a merge's refresh window can answer with,
-    // which a caller retries, so it is retried here on a bounded deadline.
+    // `ProjectionBuilding` is what a request answers with when another's build of the same
+    // projection outlasts its wait budget, which a caller retries, so it is retried here on a
+    // bounded deadline.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         let mut req = ViewportRequest::new(view, 0, WHOLE, 10_000);

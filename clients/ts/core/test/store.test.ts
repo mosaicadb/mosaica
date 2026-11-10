@@ -639,17 +639,32 @@ describe('a change of filters or selection after the store has loaded', () => {
     expect(store.requestFilters()).toEqual(loaded.sent);
   });
 
-  it('does not go back to a region drawn in a view over another extent', async () => {
+  it('keeps a region under the view it was drawn in through a switch of view and a cancel', async () => {
     const box = {kind: 'box' as const, bbox: [10, 10, 40, 40] as [number, number, number, number]};
     const {store} = await shown({before: (s) => s.select(box)});
     const loaded = store.get('filters').draft;
     store.setFilters(CS);
     store.setCurrentView('far');
     expect(store.get('region')).toBeNull();
+    expect(store.get('filters').regions).toEqual([{view: 's0', shape: box}]);
     store.cancelQuery();
     expect(store.get('filters').draft).toBe(loaded);
     expect(store.get('region')).toBeNull();
+    expect(store.get('filters').regions).toEqual([{view: 's0', shape: box}]);
+  });
+
+  it('goes back to the regions held in other views', async () => {
+    const held = [{view: 'far', shape: {kind: 'box' as const, bbox: [1, 1, 4, 4] as [number, number, number, number]}}];
+    const {store} = await shown({before: (s) => s.setRegions(held)});
+    const loaded = {regions: store.get('filters').regions, sent: store.requestFilters()};
+    expect(loaded.regions).toEqual(held);
+
+    store.setRegions([]);
+    expect(store.get('status').querying).toBe(true);
     expect(store.requestFilters()).toBeNull();
+    store.cancelQuery();
+    expect(store.get('filters').regions).toBe(loaded.regions);
+    expect(store.requestFilters()).toEqual(loaded.sent);
   });
 
   it('has nothing to go back to after clear(), until the store has loaded again', async () => {

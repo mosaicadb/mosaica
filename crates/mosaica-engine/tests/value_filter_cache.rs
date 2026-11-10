@@ -4,6 +4,9 @@
 //!
 //! The reference is each item's values as the fixture wrote them, never anything read back from
 //! the bundle. One column is empty on a third of the items, so its scan reads a presence bitmap.
+//!
+//! Every filter here is answered over the whole map, so beside its leaves it keeps its rows in the
+//! view, one more entry built once per filter and grant and read by every repeat.
 
 mod common;
 
@@ -294,8 +297,9 @@ fn a_repeated_value_filter_is_answered_from_the_cache_with_the_same_items() {
     let first = cache(&engine);
     assert_eq!(
         (first.misses, first.entries),
-        (2, 2),
-        "each leaf of a conjunction is evaluated once and kept, the narrowed one too"
+        (3, 3),
+        "each leaf of a conjunction is evaluated once and kept, the narrowed one too, beside the \
+         conjunction's rows"
     );
     for (filter, want) in &filters {
         let again = engine.authorise(&full_coverage_credential()).unwrap();
@@ -306,7 +310,11 @@ fn a_repeated_value_filter_is_answered_from_the_cache_with_the_same_items() {
         );
     }
     let after = cache(&engine);
-    assert_eq!(after.misses, first.misses, "no leaf is evaluated again");
+    assert_eq!(
+        after.misses,
+        first.misses + 3,
+        "no leaf is evaluated again, and each other filter keeps its rows"
+    );
     assert!(after.hits > first.hits, "every leaf is read from the cache");
 
     drop(engine);
@@ -322,8 +330,8 @@ fn a_repeated_value_filter_is_answered_from_the_cache_with_the_same_items() {
     let restarted = cache(&engine);
     assert_eq!(
         (restarted.misses, restarted.entries),
-        (2, 2),
-        "a restart keeps nothing and evaluates each leaf again"
+        (6, 6),
+        "a restart keeps nothing and evaluates each leaf and keeps each filter's rows again"
     );
 }
 
@@ -353,8 +361,8 @@ fn a_value_filter_answers_each_grant_its_own_items() {
         assert_eq!(matched(&engine, &none, n_range()), 0);
     }
     let stats = cache(&engine);
-    assert_eq!(stats.misses, 3, "each grant is evaluated once");
-    assert_eq!(stats.hits, 3, "and read from its own entry after");
+    assert_eq!(stats.misses, 6, "each grant is evaluated once and keeps its rows");
+    assert_eq!(stats.hits, 3, "and read from its own rows after");
 }
 
 /// **A suppression, a lift, a deletion and a commit window each reach the next request from the
@@ -428,8 +436,8 @@ fn a_change_reaches_the_next_value_filter_after_a_kept_answer() {
     );
     assert_eq!(
         cache(&engine).misses,
-        before.misses + 1,
-        "a flush evaluates again"
+        before.misses + 2,
+        "a flush evaluates the leaf and keeps its rows again"
     );
     assert_eq!(matched(&engine, &fresh, n_range()), count(&items, in_n));
 }

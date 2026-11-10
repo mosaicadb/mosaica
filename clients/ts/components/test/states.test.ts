@@ -261,15 +261,16 @@ describe('a query that has not finished loading', () => {
     const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {archive: {family: 'category', keys: ['math']}}};
     const kept = {layer: 'clusters', artifact: 7n, outside: false, verb: 'filter' as const};
     const added = {layer: 'clusters', artifact: 9n, outside: true, verb: 'highlight' as const};
-    const filters = (d: FilterDraft, members: (typeof kept | typeof added)[]) => ({draft: d, expr: composeFilters(d, 'filter'), highlight: composeFilters(d, 'highlight'), members, suggestions: {}, suggestErrors: {}, suggestEpoch: 0});
     const box = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
+    const filters = (d: FilterDraft, members: (typeof kept | typeof added)[], regions: {view: string; shape: typeof box}[]) => ({draft: d, expr: composeFilters(d, 'filter'), highlight: composeFilters(d, 'highlight'), members, regions, suggestions: {}, suggestErrors: {}, suggestEpoch: 0});
     const region = {shape: box} as NonNullable<ReturnType<typeof store.get<'region'>>>;
-    const store = fakeStore({status: running, view, filters: filters(draft, [kept, added]), region});
-    // What the query being cancelled had set is undone: the highlight, one clause and the region.
+    const store = fakeStore({status: running, view, filters: filters(draft, [kept, added], [{view: 's1', shape: box}]), region});
+    // What the query being cancelled had set is undone: the highlight, one clause, the region and
+    // the region held in one view, and the one it had removed from another is back.
     const back: FilterDraft = {filter: draft.filter, highlight: {}};
     Object.assign(store, {
       cancelQuery: () => {
-        store.set('filters', filters(back, [kept]));
+        store.set('filters', filters(back, [kept], [{view: 's2', shape: box}]));
         store.set('region', null);
       }
     });
@@ -281,7 +282,9 @@ describe('a query that has not finished loading', () => {
     expect(fired).toEqual([
       {type: 'mosaica-filterchange', detail: {column: null, verb: 'highlight', expr: null}},
       {type: 'mosaica-clausechange', detail: {id: '9', layer: 'clusters', outside: true, verb: 'highlight', on: false}},
-      {type: 'mosaica-selectchange', detail: {shape: null, status: 'cleared'}}
+      {type: 'mosaica-selectchange', detail: {shape: null, status: 'cleared'}},
+      {type: 'mosaica-selectchange', detail: {shape: null, view: 's1', status: 'cleared'}},
+      {type: 'mosaica-selectchange', detail: {shape: {kind: 'box', bbox: [0, 0, 1, 1]}, view: 's2', status: 'loading'}}
     ]);
   });
 });
@@ -442,7 +445,7 @@ describe('<mosaica-status> renders every state through part="state"', () => {
 
     // A filter on the same column narrows it too, so the match cell stays beside the highlight's.
     const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs.LG', 'cs.CV']}}, highlight: {archive: {family: 'category', keys: ['cs.CV']}}};
-    const filters = {draft, expr: composeFilters(draft, 'filter'), highlight: composeFilters(draft, 'highlight'), members: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0};
+    const filters = {draft, expr: composeFilters(draft, 'filter'), highlight: composeFilters(draft, 'highlight'), members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0};
     el.store = fakeStore({status: status({}), view: lit, filters});
     await settle(host);
     expect(deepAll(host, '[part="count"]').map((c) => c.textContent)).toEqual(['3,210', '12,040', '812', '3,210', '500']);

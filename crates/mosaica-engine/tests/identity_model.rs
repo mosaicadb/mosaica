@@ -1416,8 +1416,9 @@ impl Run {
 
     // ---- what is served ----------------------------------------------------------------------
 
-    /// A viewport's points. `ProjectionBuilding` is the shed a fold's refresh window can answer
-    /// with, which a caller retries, so it is retried here on a bounded deadline.
+    /// A viewport's points. `ProjectionBuilding` is what a request answers with when another's
+    /// build of the same projection outlasts its wait budget, which a caller retries, so it is
+    /// retried here on a bounded deadline.
     fn served(&self, session: &Session, view: &str, filter: Option<FilterExpr>) -> BTreeSet<u64> {
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
         loop {

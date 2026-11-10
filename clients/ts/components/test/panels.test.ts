@@ -311,6 +311,7 @@ const filtersOf = (draft: FilterDraft, over: Partial<FiltersProjection> = {}): F
   expr: null,
   highlight: null,
   members: [],
+  regions: [],
   suggestions: {},
   suggestErrors: {},
   suggestEpoch: 0,
@@ -914,6 +915,16 @@ describe('<mosaica-filter-panel>', () => {
     });
   });
 
+  it('names the values a clause on a bool keeps in its chip', async () => {
+    const host = await mount('<mosaica-filter-panel></mosaica-filter-panel>');
+    const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
+    const withBool = {...META, declaredScalars: [...META.declaredScalars, scalar('retracted', 'bool')], filterOperands: [...META.filterOperands, {column: 'retracted', family: 'numeric' as const, operands: ['eq', 'in', 'range']}]};
+    const draft: FilterDraft = {filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {retracted: {family: 'numeric', gte: 0, lte: 1}}};
+    panel.store = fakeStore({meta: withBool, status: status({}), filters: filtersOf(draft)});
+    await settle(host);
+    expect(deepAll(host, '[part="chip"]').map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Retracted: yes', 'Retracted: yes, no']);
+  });
+
   it('leaves the subject row and the chips out under controls-only, and the cards out under chips-only', async () => {
     const draft: FilterDraft = {filter: {...none().filter, archive: {family: 'category', keys: ['cs']}}, highlight: {}};
     const controls = await mountPanel(draft, 'controls-only');
@@ -953,6 +964,46 @@ describe('<mosaica-filter-panel>', () => {
     expect(chips.map((c) => c.getAttribute('data-verb'))).toEqual(['filter', 'highlight']);
     (chips[0]!.querySelector('button') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{...clause, verb: 'highlight'}]);
+  });
+});
+
+describe('<mosaica-filter-panel> regions held in other views', () => {
+  const TWO_VIEWS = {...META, views: [...META.views, {...META.views[0]!, id: 'topics', displayName: 'Topics', quantisation: {xMin: -5, xMax: 5, yMin: -5, yMax: 5}}]};
+  const lasso = {kind: 'lasso' as const, points: [[0, 0], [1, 0], [0, 1]] as [number, number][]};
+
+  async function mountHeld() {
+    const host = await mount('<mosaica-filter-panel chips-only></mosaica-filter-panel>');
+    const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
+    const store = fakeStore({meta: TWO_VIEWS, status: status({}), filters: filtersOf({filter: {}, highlight: {}}, {regions: [{view: 'topics', shape: lasso}]})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    panel.store = store;
+    await settle(host);
+    const events: {type: string; detail: unknown}[] = [];
+    for (const type of ['mosaica-selectchange', 'mosaica-viewswitch']) host.addEventListener(type, (e) => events.push({type, detail: (e as CustomEvent).detail}));
+    return {host, store, events, chip: () => deep(host, '[part="chip"][data-view="topics"]')};
+  }
+
+  it('names the shape and the view it was drawn in, and × removes it alone', async () => {
+    const {store, events, chip} = await mountHeld();
+    expect(chip()!.getAttribute('data-verb')).toBe('filter');
+    expect(chip()!.textContent).toContain('Lasso in Topics');
+    (chip()!.querySelector(':scope > button:last-child') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setRegions').at(-1)!.args[0]).toEqual([]);
+    expect(events).toEqual([{type: 'mosaica-selectchange', detail: {shape: null, view: 'topics', status: 'cleared'}}]);
+  });
+
+  it('switches to the view when pressed', async () => {
+    const {store, events, chip} = await mountHeld();
+    (chip()!.querySelector('[part="edit"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setCurrentView').map((c) => c.args[0])).toEqual(['topics']);
+    expect(events).toEqual([{type: 'mosaica-viewswitch', detail: {from: 's0', to: 'topics', sameFrame: false}}]);
+  });
+
+  it('is removed by Clear all', async () => {
+    const {host, store, events} = await mountHeld();
+    (deep(host, '[part="clear"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setRegions').at(-1)!.args[0]).toEqual([]);
+    expect(events).toContainEqual({type: 'mosaica-selectchange', detail: {shape: null, view: 'topics', status: 'cleared'}});
   });
 });
 

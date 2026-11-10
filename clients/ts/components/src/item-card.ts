@@ -3,7 +3,7 @@ import {property, state} from 'lit/decorators.js';
 import type {DeclaredScalar, ItemDetail, ItemViewPosition, Meta, Quantisation, Refusal, Store} from '@mosaicajs/client';
 import {GRID32} from '@mosaicajs/client';
 import type {MosaicaEventDetails} from './events.js';
-import {MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
+import {BOOL_WORDS, MosaicaElement, columnCaption, emit, idString, keyTitle, timestampText, type PickOutcome} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {reasonOf, refusedState, renderState, stateOf} from './states.js';
@@ -527,7 +527,7 @@ function present(value: unknown, column: DeclaredScalar | undefined): string {
   if (value === null || value === undefined) return '—';
   if (column?.arrowType === 'timestamp_us' && (typeof value === 'number' || typeof value === 'bigint')) return timestampText(value);
   if (typeof value === 'number') return Number.isInteger(value) ? value.toLocaleString('en-GB') : String(value);
-  if (typeof value === 'boolean') return value ? 'yes' : 'no';
+  if (typeof value === 'boolean') return BOOL_WORDS[value ? 'true' : 'false'];
   return String(value);
 }
 

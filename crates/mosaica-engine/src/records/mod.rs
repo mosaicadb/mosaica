@@ -42,7 +42,7 @@ pub(crate) use cursor::{Binding, CursorKey, Route};
 pub(crate) use walk::{same_publication, Clock};
 use cursor::{ItemsCursor, Position};
 use columns::{empty_page, read_page};
-use plan::FieldPlan;
+use plan::{fields_digest, unpinned_fields, FieldPlan};
 use walk::{Collected, PageCx, Walk, Walked};
 
 /// The order a read returns its rows in. Both return the same rows.
@@ -92,8 +92,11 @@ pub struct ItemsRequest<'a> {
     /// A view id from `/v1/meta`. One this session cannot reach is an unknown view.
     pub view: &'a str,
     /// Declared fields, by name, in the order their columns are wanted. A group-scoped field may
-    /// be pinned as `<field>@<key>`.
-    pub fields: &'a [String],
+    /// be pinned as `<field>@<key>`. `None` is every field the view reads without a pin: the
+    /// declared fields in declaration order, then the group-scoped ones `view` decides, leaving
+    /// out group-scoped `text`. A cursor of such a read is bound to the fields it returned, and
+    /// is refused once that set differs or by a request that names fields.
+    pub fields: Option<&'a [String]>,
     /// Any of `position` and `labels`, in the order their columns are wanted.
     pub system_fields: &'a [String],
     /// The viewport's filter, resolved as it resolves one. `None` is every visible item.
@@ -418,13 +421,18 @@ impl Engine {
         if !session.visible_views().contains_view(req.view) {
             return Err(unknown_view());
         }
+        let meta = meta_of(&generation);
+        let every = req
+            .fields
+            .is_none()
+            .then(|| unpinned_fields(&meta, req.view, session.visible_views()));
         let binding = Binding {
             route: Route::Items,
             view: req.view,
             incarnation: manifest.incarnation_of(req.view).ok_or_else(unknown_view)?,
             auth_data_hash: session.auth_data_hash(),
             layer: None,
-            request: None,
+            request: every.as_deref().map(fields_digest),
         };
         let resumed = match req.cursor {
             None => None,
@@ -436,16 +444,16 @@ impl Engine {
             }
         }
         let plan = FieldPlan::resolve(
-            &meta_of(&generation),
+            &meta,
             req.view,
             session.visible_views(),
-            req.fields,
+            every.as_deref().or(req.fields).unwrap_or_default(),
             req.system_fields,
         )?;
         if let Some(expr) = &req.filter {
             generation
                 .declared_columns()
-                .admit(expr, true, &|layer| self.layer_levels(session, layer))
+                .admit(expr, &|layer| self.layer_levels(session, layer))
                 .map_err(filter_refusal)?;
         }
         let order = resumed

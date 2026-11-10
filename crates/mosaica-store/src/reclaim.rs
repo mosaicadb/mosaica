@@ -125,8 +125,8 @@ pub fn hard_link_forward(from_prefix: &Path, to_prefix: &Path, rels: &[String]) 
 ///
 /// # The one check that makes this safe to call
 ///
-/// Nothing else in this codebase deletes a file. A wrong `prefix_dir` here is unrecoverable
-/// data loss, so before removing anything this derives the bundle root (`prefix_dir`'s parent)
+/// Nothing else in this codebase deletes a whole prefix. A wrong `prefix_dir` here is
+/// unrecoverable data loss, so before removing anything this derives the bundle root (`prefix_dir`'s parent)
 /// and the prefix name (`prefix_dir`'s own final component), reads that root's `CURRENT`, and
 /// refuses — loudly, as a typed error, never a silent no-op — if `CURRENT` still names this
 /// prefix as live. `CURRENT` is read fresh here rather than trusted from an argument: the

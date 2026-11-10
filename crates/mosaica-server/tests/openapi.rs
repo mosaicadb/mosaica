@@ -2029,6 +2029,7 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
         "compression": "zstd",
     });
     assert_valid(&doc, "ItemsRequest", &body);
+    assert_valid(&doc, "ItemsRequest", &json!({ "view": "s0" }));
     let resp = post(body, token).await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
@@ -2090,7 +2091,7 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
     // The request schema refuses what the server refuses.
     for body in [
         json!({ "view": "s0", "fields": [], "unknown": 1 }),
-        json!({ "view": "s0" }),
+        json!({ "fields": [] }),
         json!({ "view": "s0", "fields": [], "page_rows": 0 }),
         json!({ "view": "s0", "fields": [], "order": "random" }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),

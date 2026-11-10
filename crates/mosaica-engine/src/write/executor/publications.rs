@@ -689,13 +689,12 @@ impl Executor {
         any
     }
 
-    /// Publish a row-space merge: its own swap, a `segments_version` bump, and a refresh armed
-    /// before it.
+    /// Publish a row-space merge: its own swap, a `segments_version` bump, and a refresh after it.
     ///
     /// The one publication that permutes row space rather than extending it: a row id inside the
     /// merged span names a different entity afterwards, so every cached projection covering that
-    /// span is wrong and refuses to serve or extend. The refresh is armed before the swap, so a
-    /// same-key racer in that window is shed with a 429 instead of paying for the rebuild.
+    /// span is wrong and refuses to serve or extend. A request the refresh has not reached rebases
+    /// its grant's projection itself.
     ///
     /// Gets its own swap rather than riding the next flush, or the flush's zero-cost path would
     /// carry the merge's refresh.
@@ -856,8 +855,9 @@ impl Executor {
             // The consumed segments' delta tiers carry over: their entities still have rows in the
             // merged segment.
         }));
-        // The claim names the generation it is for, so a pass that is superseded mid-flight
-        // releases nothing when it ends; see `refresh::clear_if_current`.
+        // Claimed before the swap, so the pass is reported in flight from the moment its
+        // generation is live. The claim names the generation it is for, so a pass that is
+        // superseded mid-flight releases nothing when it ends; see `refresh::clear_if_current`.
         self.deps
             .refresh
             .in_flight
@@ -890,8 +890,8 @@ impl Executor {
     /// descriptors, so no projection is invalidated and no session pays anything. What it swaps is
     /// content-preserving, so a request holding either version agrees on every answer.
     ///
-    /// The consumed files are not deleted: every side-manifest below this `n` still names them, and
-    /// reclaiming them is compaction's.
+    /// The consumed files are not deleted here: the side-manifests below this `n` still name them.
+    /// They are deleted once the last of those is pruned and nothing holds a generation naming them.
     pub(super) fn publish_coalesce(&mut self, completed: crate::coalesce::CompletedCoalesce) {
         let started = std::time::Instant::now();
         // Same `may_publish` guard as `publish_merge`.
@@ -2742,12 +2742,9 @@ impl Executor {
         self.health
             .buffered_items
             .store(next.buffered(), Ordering::SeqCst);
-        // Armed before the swap, and that ordering is the mechanism. A request landing between
-        // the swap and the pool task's first insert must find the flag set, or it takes the cost
-        // of a full rebuild, where the whole design is that it be shed with a 429 for the bounded
-        // duration of the refresh instead.
-        // The claim names the generation it is for, so a pass that is superseded mid-flight
-        // releases nothing when it ends; see `refresh::clear_if_current`.
+        // Claimed before the swap, so the pass is reported in flight from the moment its
+        // generation is live. The claim names the generation it is for, so a pass that is
+        // superseded mid-flight releases nothing when it ends; see `refresh::clear_if_current`.
         self.deps
             .refresh
             .in_flight

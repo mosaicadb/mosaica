@@ -133,8 +133,8 @@ export type AggregateEntry = {
 };
 
 /**
- * Summary figures for one number or timestamp field, over every item the viewer may see in the
- * view.
+ * Summary figures for one number, timestamp or bool field, over every item the viewer may see in
+ * the view. A bool's values are 0 and 1, so its mean is the share that are true.
  *
  * @category Projections
  */
