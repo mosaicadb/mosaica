@@ -31,7 +31,7 @@ pub use conic::Conic;
 pub use decompose::{contexts_at, decompose, BoundaryCell, Class, Decomposition, Rect, Region};
 pub use encode::DecodeError;
 pub use polygon::{Part, PolyCtx, Polygon, PolygonRegion, Ring, Vertex};
-pub use project::{Space, DENSIFY_TOLERANCE_CELLS};
+pub use project::{place, Space, DENSIFY_TOLERANCE_CELLS};
 pub use wkb::{read_wkb, write_wkb, WkbError};
 pub use wkt::{read_wkt, WktError};
 

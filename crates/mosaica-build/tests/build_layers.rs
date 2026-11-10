@@ -3274,7 +3274,7 @@ fn a_shape_and_a_shape_declaration_are_refused_apart() {
     let message = run(&inputs, &inputs.at("bundle"))
         .expect_err("wgs84 is refused")
         .to_string();
-    assert!(message.contains("projections.md"), "{message}");
+    assert!(message.contains("`projection` is `none`"), "{message}");
 }
 
 // ---------------------------------------------------------------------------------------------

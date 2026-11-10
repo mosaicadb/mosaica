@@ -931,7 +931,6 @@ fn a_wgs84_shape_on_an_unprojected_view_is_refused() {
         .expect_err("an unprojected view cannot honour `wgs84`");
     let message = err.to_string();
     assert!(message.contains("`projection` is `none`"), "{message}");
-    assert!(message.contains("projections.md"), "{message}");
 }
 
 /// A `wgs84` coordinate outside ±180 × ±90 is not a coordinate, and is refused where the shape is

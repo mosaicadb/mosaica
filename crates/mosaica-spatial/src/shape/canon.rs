@@ -80,15 +80,14 @@ impl std::fmt::Display for CanonError {
             }
             CanonError::NotACoordinate => write!(
                 f,
-                "a `wgs84` coordinate is outside ±180 longitude or ±90 latitude, and a value \
-                 outside that is not a coordinate (projections.md §2)"
+                "a `wgs84` value outside ±180 longitude or ±90 latitude is not a coordinate; \
+                 write degrees within those bounds"
             ),
             CanonError::NoProjection => write!(
                 f,
-                "`space = \"wgs84\"` on a view whose `projection` is `none`: such a view has one \
-                 space and nothing to convert a degree from. Write the shape in the view's own \
-                 coordinates with `space = \"view\"`, or declare a projection on the view \
-                 (projections.md §5.3)"
+                "`space = \"wgs84\"` on a view whose `projection` is `none`, which has nothing to \
+                 convert a degree from; write the coordinates in the view's own space with \
+                 `space = \"view\"`, or declare a projection on the view"
             ),
         }
     }

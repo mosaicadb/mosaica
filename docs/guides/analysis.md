@@ -88,7 +88,7 @@ papers.filter({"arxiv_id": {"prefix": "2401."}}).count()          # a keyword: e
 papers.filter({"submitted_at": {"range": {"lt": "2000-01-01"}}}).count()  # a number or a date: eq, in, range
 ```
 
-`within` takes `(min_x, min_y, max_x, max_y)` in the view's coordinates. On a view with a projection those are the projected coordinates. To give a box in longitude and latitude there, use the [`region`](../reference/filters.md#region) filter.
+`within` takes `(min_x, min_y, max_x, max_y)` in the coordinates the rows were inserted with. On a view with a projection those are longitude and latitude, so `db.view("world").within((-10.7, 51.3, -5.3, 55.5))` is a box around Ireland. To give a box in such a view's projected coordinates, use the [`region`](../reference/filters.md#region) filter with `"space": "view"`.
 
 ``` {.python notest}
 recent_cs.within((0, 0, 10, 10)).count()

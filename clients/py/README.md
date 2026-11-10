@@ -426,8 +426,12 @@ db.viewer(["cs.LG"]).view("s0").count()       # the same view, as a narrower rea
 
 A filter is a dictionary: a column name mapped to a test (`eq`, `in`, `range`, `prefix`,
 `match` and so on, by the column's type), or `all_of`, `any_of` or `none_of` over a list of
-filters. Filters added one after another must all match. A box is in the view's own
-coordinates, the ones the rows were inserted with, and an item on its edge is inside. A view in a
+filters. Filters added one after another must all match. A box is in the coordinates the rows
+were inserted with, and an item on its edge is inside. On a view declared with a projection
+those are degrees, so `db.view("world").within((-10.7, 51.3, -5.3, 55.5))` is
+`(min_lon, min_lat, max_lon, max_lat)`; on any other view they are the view's own `x` and `y`.
+For a box in a projected view's own coordinates, the unit square the projection draws the world
+in, state the space in a filter: `{"region": {"bbox": [...], "space": "view"}}`. A view in a
 view group is named `"<group>:<key>"`, and a name the reader cannot see is refused with the list
 of names it can.
 

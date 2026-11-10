@@ -18,6 +18,7 @@ use mosaica_wire::{
     ScalarColumn,
 };
 
+use mosaica_engine::shapes::{place, ShapeF64, ShapeSpace};
 use mosaica_engine::viewport::ViewportRequest;
 use mosaica_engine::{
     CancelToken, LayerSelection, LevelSelection, SinkResult, ViewportHead, ViewportSink,
@@ -711,6 +712,10 @@ struct ViewportReq {
     /// Absent exactly when `tiles` is present.
     #[serde(default)]
     bbox: Option<[f64; 4]>,
+    /// What `bbox` is written in: `view` (the default), or `wgs84` for
+    /// `[min_lon, min_lat, max_lon, max_lat]` in degrees, put through the view's projection.
+    #[serde(default)]
+    space: Option<String>,
     /// The depth-`zoom` Morton prefixes to answer for, in place of a bbox. A client omits tiles it
     /// already holds, and an omitted tile costs the engine nothing. Sending both is refused.
     #[serde(default)]
@@ -1039,7 +1044,13 @@ fn run_viewport_stream(
 
     let tiles = distinct_tiles(req.tiles);
     // Validated as present-and-alone by the handler before admission; the default here is inert.
-    let bbox = req.bbox.unwrap_or([0.0, 0.0, 0.0, 0.0]);
+    let bbox = match bbox_in_view(req.bbox.unwrap_or([0.0, 0.0, 0.0, 0.0]), req.space.as_deref(), view) {
+        Ok(bbox) => bbox,
+        Err(e) => {
+            sink.producer.refuse(e);
+            return;
+        }
+    };
 
     // Both expressions are parsed against one schema before any compute and before the first
     // frame, while a refusal can still be a 422 rather than a truncated stream.
@@ -1259,12 +1270,55 @@ pub(crate) fn check_bbox(name: &str, bbox: &[f64; 4]) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// A request's `bbox` in the view's own frame, from the `space` it was written in. A `wgs84` box
+/// goes through the projection the view's points were placed by, as a `region` leaf's does.
+fn bbox_in_view(
+    bbox: [f64; 4],
+    space: Option<&str>,
+    view: &mosaica_engine::MetaView,
+) -> Result<[f64; 4], ApiError> {
+    let Some(word) = space else {
+        return Ok(bbox);
+    };
+    let space = ShapeSpace::parse(word)
+        .map_err(|_| ApiError::Contract(format!("`space` is `view` or `wgs84`, not '{word}'")))?
+        .resolve(view.projection)
+        .map_err(|e| ApiError::Contract(format!("`space`: {e}")))?;
+    let [min_x, min_y, max_x, max_y] = bbox;
+    let written = ShapeF64::Bbox {
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+    };
+    match place(&written, space, &crate::filter_dto::view_extent(view)) {
+        Ok(ShapeF64::Bbox {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }) => Ok([min_x, min_y, max_x, max_y]),
+        Ok(_) => unreachable!("a box is placed as a box"),
+        Err(_) => Err(ApiError::Contract(
+            "`bbox` in `space = \"wgs84\"` is [min_lon, min_lat, max_lon, max_lat] in degrees, \
+             within ±180 longitude and ±90 latitude"
+                .to_string(),
+        )),
+    }
+}
+
 async fn viewport(
     State(state): State<Arc<AppState>>,
     ViewerSession(session): ViewerSession,
     ApiJson(req): ApiJson<ViewportReq>,
 ) -> Result<Response, ApiError> {
     check_extent(req.zoom, req.bbox.as_ref(), req.tiles.as_deref())?;
+    if req.space.is_some() && req.bbox.is_none() {
+        return Err(ApiError::Contract(
+            "`space` says what `bbox` is written in; send it with `bbox`, not with `tiles`"
+                .to_string(),
+        ));
+    }
 
     // Created before admission so one token covers the whole request; the guard then moves into
     // the response body.

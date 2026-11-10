@@ -55,6 +55,17 @@ describe('the viewport request', () => {
     expect('layers' in seen[1]!.body).toBe(false);
   });
 
+  it('sends the space a box is written in, and none when unset', async () => {
+    const seen = stubFetch(() => new Response(new ArrayBuffer(0), {status: 200}));
+    const c = client();
+
+    await c.viewport('tok', {view: 'world', zoom: 4, bbox: [-10.7, 51.3, -5.3, 55.5], space: 'wgs84'});
+    await c.viewport('tok', {view: 'world', zoom: 4, bbox: [0.4, 0.3, 0.5, 0.4]});
+
+    expect(seen[0]!.body).toEqual({view: 'world', zoom: 4, bbox: [-10.7, 51.3, -5.3, 55.5], space: 'wgs84'});
+    expect('space' in seen[1]!.body).toBe(false);
+  });
+
   it("sends the string 'all' verbatim, and never substitutes it for an array", async () => {
     const seen = stubFetch(() => new Response(new ArrayBuffer(0), {status: 200}));
     const c = client();

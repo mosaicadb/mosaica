@@ -1757,11 +1757,9 @@ impl ShapeSpace {
         match self {
             ShapeSpace::View => Ok(Space::View),
             ShapeSpace::Wgs84 if projection == Projection::None => Err(ShapeRefusal(
-                "`space = \"wgs84\"` is refused on a view whose `projection` is `none`: such a \
-                 view has one space and nothing to convert a degree from, so a longitude and a \
-                 latitude would be quantised as though they were frame coordinates. Write the \
-                 shape in the view's own coordinates with `space = \"view\"`, or declare a \
-                 projection on the view (`projections.md` §5.3)"
+                "`space = \"wgs84\"` is refused on a view whose `projection` is `none`, which has \
+                 nothing to convert a degree from; write the coordinates in the view's own space \
+                 with `space = \"view\"`, or declare a projection on the view"
                     .to_string(),
             )),
             ShapeSpace::Wgs84 => Ok(Space::Wgs84(projection)),

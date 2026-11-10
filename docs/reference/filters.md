@@ -184,7 +184,7 @@ That box around Ireland holds 341 of the GeoNames places. `"space": "wgs84"` on 
 
 The `x-mosaica-region` response header says how exact an answer over a `region` is. Python gives it as the table's `mosaica.region` metadata. The value is `exact` unless the shape's outline crosses more grid cells than the deployment's `max_region_cells`. Past that limit the value is `cover; depth=<d>`, and the answer is exact for a slightly larger shape that covers the one asked for. A polygon with more vertices than `max_region_vertices` is refused.
 
-In Python, [`Selection.within(box)`](python/reading.md#mosaica._viewer.Selection.within) adds a `bbox` region in the view's coordinates.
+In Python, [`Selection.within(box)`](python/reading.md#mosaica._viewer.Selection.within) adds a `bbox` region in the coordinates the rows were inserted with. On a view with a projection those are longitude and latitude, and `within` sends `"space": "wgs84"` for you. For a box in such a view's projected coordinates, write the `region` filter with `"space": "view"`. A viewport request's own `bbox` takes `"space": "wgs84"` in the same way.
 
 ### `member_of`
 

@@ -286,8 +286,9 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  *   that does not exist, is not served to the viewer, is on another view, or has an authored shape
  *   matches nothing.
  *
- * Coordinates are in the view's data coordinates. A shape with a very long boundary may be
- * answered for a slightly larger area; the response's {@link RegionVerdict} says so.
+ * Coordinates are in the view's data coordinates, or with `space: 'wgs84'` in degrees of
+ * longitude and latitude, which a view without a map projection refuses with `422`. A shape with
+ * a very long boundary may be answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
  * `view` names another view the shape or artifact is in, by its id. The filter then matches the
  * items inside it in that view, wherever the request's view places them, so a selection drawn in
@@ -296,10 +297,10 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  * @category Filters
  */
 export type RegionOperand = (
-  | {polygon: [number, number][]; space?: 'view'}
-  | {bbox: [number, number, number, number]; space?: 'view'}
-  | {circle: [number, number, number]; space?: 'view'}
-  | {ellipse: [number, number, number, number, number]; space?: 'view'}
+  | {polygon: [number, number][]; space?: 'view' | 'wgs84'}
+  | {bbox: [number, number, number, number]; space?: 'view' | 'wgs84'}
+  | {circle: [number, number, number]; space?: 'view' | 'wgs84'}
+  | {ellipse: [number, number, number, number, number]; space?: 'view' | 'wgs84'}
   | {artifact: string}
 ) & {
   /** The view the shape or artifact is in, by its id. Defaults to the request's view. */
@@ -715,6 +716,12 @@ export type ViewportRequest = {
    * `y0 <= y1`. The response covers every tile at depth `zoom` that the box touches.
    */
   bbox?: [number, number, number, number];
+  /**
+   * What `bbox` is written in: `'view'`, the default, or `'wgs84'` for
+   * `[minLon, minLat, maxLon, maxLat]` in degrees, which a view without a map projection refuses
+   * with `422`. Sent with `bbox` only.
+   */
+  space?: 'view' | 'wgs84';
   /**
    * The tiles at depth `zoom` to answer, in place of `bbox`, as Morton prefixes (the tile's
    * position code). They are answered in the order given, without duplicates. Leave out the tiles

@@ -1046,7 +1046,7 @@ mod tests {
             (r#"{"region": {"bbox": [0,0,1,1], "circle": [0,0,1]}}"#, "exactly one of"),
             (r#"{"region": {}}"#, "exactly one of"),
             // A view with no projection has one space, and says so.
-            (r#"{"region": {"bbox": [0,0,1,1], "space": "wgs84"}}"#, "projections.md"),
+            (r#"{"region": {"bbox": [0,0,1,1], "space": "wgs84"}}"#, "`region.space`"),
             (r#"{"region": {"bbox": [0,0,1,1], "space": "utm"}}"#, "`view` or `wgs84`"),
             // The canonical form's own refusals.
             (r#"{"region": {"bbox": [5,5,1,1]}}"#, "x0 <= x1"),

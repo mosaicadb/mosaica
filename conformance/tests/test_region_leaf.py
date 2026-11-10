@@ -188,11 +188,11 @@ def test_the_meta_publishes_the_two_bounds_and_no_region_header_without_a_leaf(r
     refused = server.viewport_request(token, VIEW_ID, 0, WHOLE_MAP, k=0, filters={"region": {"polygon": many}})
     assert refused.status_code == 422, refused.text
     assert str(selection["max_region_vertices"]) in refused.text
-    # `wgs84` names the design that would admit it.
+    # `wgs84` on a view with no projection.
     refused = server.viewport_request(
         token, VIEW_ID, 0, WHOLE_MAP, k=0, filters={"region": {"bbox": [0, 0, 1, 1], "space": "wgs84"}}
     )
-    assert refused.status_code == 422 and "projections.md" in refused.text
+    assert refused.status_code == 422, refused.text
 
 
 def test_past_the_cell_budget_the_answer_is_a_cover_and_the_verdict_is_the_shapes_alone(cover_server):
