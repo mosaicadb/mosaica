@@ -392,3 +392,23 @@ def test_the_demo_checks_every_dataset_before_it_makes_any(tmp_path, capsys):
     assert not (tmp_path / "places").exists()
     with pytest.raises(SystemExit):
         demo.main(["gbif:some"])
+
+
+def test_a_step_stopped_while_clearing_its_directory_runs_again(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+
+    def make():
+        (out / "made").mkdir()
+        (out / "made" / "file").write_text("made")
+
+    _steps.made(out, {"recipe": 1}, make, "making")
+
+    def stopped(_path):
+        raise KeyboardInterrupt
+
+    with monkeypatch.context() as patch:
+        patch.setattr(_steps.shutil, "rmtree", stopped)
+        with pytest.raises(KeyboardInterrupt):
+            _steps.made(out, {"recipe": 2}, make, "making")
+    _steps.made(out, {"recipe": 2}, make, "making")
+    assert (out / "made" / "file").read_text() == "made"

@@ -97,7 +97,7 @@ When a `match` filter returns nothing, this shows how the index split the text. 
 mosaica demo [ARGUMENTS]...
 ```
 
-Show a dataset to try on a map in a browser. The demo is in the Python package, which carries the map page: `uvx --from 'mosaica[demo]' mosaica demo places`.
+Show a dataset to try on a map in a browser. The demo is in the Python package, which carries the map page: `pip install 'mosaica[demo]'`, then `mosaica demo places`.
 
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |

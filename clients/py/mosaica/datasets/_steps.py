@@ -153,7 +153,15 @@ def made(directory: Path, inputs: dict, make: Callable[[], None], doing: str) ->
                 "move them, or keep the dataset in another directory"
             )
         print(f"mosaica: {doing} again in {directory}, since its inputs changed")
-        shutil.rmtree(directory)
+        # The stamp stays until the rest is gone, so a step stopped here leaves a directory that
+        # is still this package's to clear.
+        for child in directory.iterdir():
+            if child.name == STAMP:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     else:
         print(f"mosaica: {doing} in {directory}")
     directory.mkdir(parents=True, exist_ok=True)

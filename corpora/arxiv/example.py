@@ -335,6 +335,13 @@ def main() -> None:
     for stem in CLUSTERINGS:
         members = members_of(args.source, stem, keep)
         clusters[stem] = held_artifacts(args.source, stem, members)
+        if stem == "taxonomy-arxiv":
+            # Each archive and subject class is named by arXiv's name for it, as the layer's
+            # supplied `name`.
+            names = [[[NAMES.get(key, key)]] for key in clusters[stem]["key"].to_pylist()]
+            clusters[stem] = clusters[stem].append_column(
+                "contents", pa.array(names, pa.list_(pa.list_(pa.string())))
+            )
         write(clusters[stem], args.out / f"{stem}.parquet")
         write(members, args.out / f"{stem}-members.parquet")
 
