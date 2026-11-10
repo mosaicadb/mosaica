@@ -33,6 +33,14 @@ async function explorer(markup = '<mosaica-explorer></mosaica-explorer>') {
   return {host, el, store, shadow: el.shadowRoot!};
 }
 
+/** An explorer in its narrow layout, as one 720 px wide or less takes. */
+async function narrowed(markup?: string) {
+  const ctx = await explorer(markup);
+  (ctx.el as unknown as {narrow: boolean}).narrow = true;
+  await settle(ctx.host);
+  return ctx;
+}
+
 /** The names an element's `exportparts` forwards, inner name to outer name. */
 function forwardedBy(el: Element): Map<string, string> {
   const out = new Map<string, string>();
@@ -42,6 +50,10 @@ function forwardedBy(el: Element): Map<string, string> {
   }
   return out;
 }
+
+const SEL5 = {item: {id: 5n, detail: {fields: {author: 'Ada'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null};
+const SEL6 = {item: {id: 6n, detail: {fields: {author: 'Bo'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null};
+const NONE = {item: null, itemRefusal: null, artifact: null, artifactRefusal: null};
 
 const partsIn = (root: ParentNode): string[] => [...root.querySelectorAll('[part]')].flatMap((e) => e.getAttribute('part')!.split(/\s+/));
 
@@ -201,37 +213,138 @@ describe('<mosaica-explorer> narrow layout', () => {
     expect(shadow.querySelectorAll('slot[name="top-right"]')).toHaveLength(1);
   });
 
-  it('opens the Item sheet for a picked item, with focus in it, and closes it when the pick is dropped, with focus on its button', async () => {
-    const {host, el, shadow, store} = await explorer('<mosaica-explorer title-field="author"></mosaica-explorer>');
-    (el as unknown as {narrow: boolean}).narrow = true;
+  const sheetOf = (shadow: ShadowRoot) => shadow.querySelector<HTMLElement>('[part="sheet"]');
+  const escape = (el: Element) => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true, cancelable: true}));
+
+  it('opens the Item sheet for an item picked on the map, with the focus the map held, and closes it when the pick is dropped, with focus on its button', async () => {
+    const {host, shadow, store} = await narrowed('<mosaica-explorer title-field="author"></mosaica-explorer>');
+    expect(sheetOf(shadow)).toBeNull();
+    // The viewer is at the map, where they picked.
+    (shadow.querySelector('mosaica-map') as HTMLElement).focus();
+    store.set('selection', {...SEL5});
     await settle(host);
-    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
-    store.set('selection', {item: {id: 5n, detail: {fields: {author: 'Ada'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
-    await settle(host);
-    const sheet = shadow.querySelector('[part="sheet"]')!;
+    const sheet = sheetOf(shadow)!;
     expect(sheet.querySelector('mosaica-item-card')).not.toBeNull();
     expect(shadow.activeElement).toBe(sheet);
     const button = shadow.querySelector('[part="tabs"] [data-sheet="detail"]')!;
     expect(button.getAttribute('aria-expanded')).toBe('true');
     // The sheet takes focus, so nothing is announced beside it.
-    expect(shadow.querySelector('[role="status"]:not([class~="cell"])')!.textContent).toBe('');
-    // Closed by the viewer, it stays closed until another item is picked.
-    sheet.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true}));
+    expect(shadow.querySelector('[part="frame"] > [role="status"]')!.textContent).toBe('');
+    store.set('selection', {...NONE});
     await settle(host);
-    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
-    store.set('selection', {item: {id: 6n, detail: {fields: {author: 'Bo'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
-    await settle(host);
-    expect(shadow.querySelector('[part="sheet"] mosaica-item-card')).not.toBeNull();
-    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
-    await settle(host);
-    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
+    expect(sheetOf(shadow)).toBeNull();
     expect(shadow.activeElement).toBe(button);
     // Another sheet is left open when the pick goes.
     shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="layers"]')!.click();
     await settle(host);
-    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+    store.set('selection', {...SEL6});
     await settle(host);
-    expect(shadow.querySelector('[part="sheet"] [part="display"]')).not.toBeNull();
+    store.set('selection', {...NONE});
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('[part="display"]')).not.toBeNull();
+  });
+
+  it('opens the Item sheet again when the item it was closed on is picked again', async () => {
+    const {host, shadow, store} = await narrowed();
+    store.set('selection', {...SEL5});
+    await settle(host);
+    sheetOf(shadow)!.focus();
+    escape(sheetOf(shadow)!);
+    await settle(host);
+    expect(sheetOf(shadow)).toBeNull();
+    // The selection is still item 5, and a redraw alone opens nothing.
+    (host.querySelector('mosaica-explorer') as HTMLElement & {requestUpdate(): void}).requestUpdate();
+    await settle(host);
+    expect(sheetOf(shadow)).toBeNull();
+    // The store answers a pick of the same item with its record again.
+    store.set('selection', {...SEL5, item: {...SEL5.item}});
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('mosaica-item-card')).not.toBeNull();
+  });
+
+  it('takes no focus from the page when a selection comes from outside, and gives none to its bar when it goes', async () => {
+    const {host, shadow, store} = await narrowed();
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    store.set('selection', {...SEL5});
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('mosaica-item-card')).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    store.set('selection', {...NONE});
+    await settle(host);
+    expect(sheetOf(shadow)).toBeNull();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('leaves the sheet the viewer is in when a card arrives, and opens the Item sheet over it once the viewer is at the map', async () => {
+    const {host, shadow, store} = await narrowed();
+    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="filters"]')!.click();
+    await settle(host);
+    expect(shadow.activeElement).toBe(sheetOf(shadow));
+    store.set('selection', {...SEL5});
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('mosaica-filter-panel')).not.toBeNull();
+    expect(sheetOf(shadow)!.querySelector('mosaica-item-card')).toBeNull();
+    expect(shadow.activeElement).toBe(sheetOf(shadow));
+    // Focus on the map, as a press on it gives, and the next item picked.
+    (shadow.querySelector('mosaica-map') as HTMLElement).focus();
+    store.set('selection', {...SEL6});
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('mosaica-item-card')).not.toBeNull();
+    expect(shadow.activeElement).toBe(sheetOf(shadow));
+  });
+
+  it('closes its sheet as it grows wide, giving the focus the sheet held to the map, and opens the Item sheet as it grows narrow with a card open', async () => {
+    const {host, el, shadow, store} = await narrowed();
+    const map = shadow.querySelector('mosaica-map') as HTMLElement;
+    map.focus();
+    store.set('selection', {...SEL5});
+    await settle(host);
+    expect(shadow.activeElement).toBe(sheetOf(shadow));
+    (el as unknown as {narrow: boolean}).narrow = false;
+    await settle(host);
+    // The wide layout draws the card once, and none of the narrow layout's bars.
+    expect(sheetOf(shadow)).toBeNull();
+    expect(shadow.querySelectorAll('mosaica-item-card')).toHaveLength(1);
+    expect(shadow.querySelectorAll('slot[name="detail"]')).toHaveLength(1);
+    expect(shadow.querySelector('[part="tabs"], [part="strip-row"]')).toBeNull();
+    expect(shadow.activeElement).toBe(map);
+    // Dropping the pick leaves no card and no sheet, in either layout.
+    store.set('selection', {...NONE});
+    await settle(host);
+    expect(shadow.querySelector('mosaica-item-card')).toBeNull();
+    (el as unknown as {narrow: boolean}).narrow = true;
+    await settle(host);
+    expect(sheetOf(shadow)).toBeNull();
+    // Narrow again with a card open: the Item sheet shows it, and takes no focus from the page.
+    (el as unknown as {narrow: boolean}).narrow = false;
+    store.set('selection', {...SEL6});
+    await settle(host);
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    (el as unknown as {narrow: boolean}).narrow = true;
+    await settle(host);
+    expect(sheetOf(shadow)!.querySelector('mosaica-item-card')).not.toBeNull();
+    expect(shadow.querySelectorAll('mosaica-item-card')).toHaveLength(1);
+    expect(document.activeElement).toBe(input);
+  });
+
+  it('keeps its sheet on the Escape that dismisses the map’s tooltip, and closes it on the next', async () => {
+    const {host, shadow} = await narrowed();
+    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="filters"]')!.click();
+    await settle(host);
+    const map = shadow.querySelector('mosaica-map') as unknown as {hover: unknown};
+    map.hover = {id: 9n, x: 10, y: 10, title: 'A point', lines: []};
+    await settle(host);
+    escape(sheetOf(shadow)!);
+    await settle(host);
+    expect(map.hover).toBeNull();
+    expect(sheetOf(shadow)).not.toBeNull();
+    escape(sheetOf(shadow)!);
+    await settle(host);
+    expect(sheetOf(shadow)).toBeNull();
   });
 
   it('gives the Layers sheet the Points, Colour and Density sections over the layer picker', async () => {
@@ -253,7 +366,7 @@ describe('<mosaica-explorer> narrow layout', () => {
   const key = (el: Element, k: string) => el.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, composed: true, cancelable: true}));
 
   it('offers its sheets from a named toolbar of buttons, moved between with the arrow keys, Home and End, one of them in the tab order', async () => {
-    const {host, shadow} = await explorer();
+    const {host, shadow} = await narrowed();
     const all = tabs(shadow);
     expect(all.map((t) => t.textContent!.trim())).toEqual(['Fields', 'Layers', 'Item']);
     const bar = shadow.querySelector('[part="tabs"]')!;
@@ -280,7 +393,7 @@ describe('<mosaica-explorer> narrow layout', () => {
   });
 
   it('moves focus into a sheet as it opens, closes it on Escape, and returns focus to its button', async () => {
-    const {host, shadow} = await explorer();
+    const {host, shadow} = await narrowed();
     const filters = tabs(shadow)[0]!;
     filters.click();
     await settle(host);
@@ -300,7 +413,7 @@ describe('<mosaica-explorer> narrow layout', () => {
   });
 
   it('opens a sheet over the map alone, before the status strip and the bar of buttons', async () => {
-    const {host, shadow} = await explorer();
+    const {host, shadow} = await narrowed();
     tabs(shadow)[0]!.click();
     await settle(host);
     const order = [...shadow.querySelectorAll('mosaica-map, [part="sheet"], [part="strip-row"], [part="tabs"]')].map((e) => e.getAttribute('part') ?? e.localName);
@@ -309,7 +422,7 @@ describe('<mosaica-explorer> narrow layout', () => {
   });
 
   it('clears the controls and the member_of clauses from the filters sheet, and offers Clear only while one applies', async () => {
-    const {host, shadow, store} = await explorer();
+    const {host, shadow, store} = await narrowed();
     tabs(shadow)[0]!.click();
     await settle(host);
     const clear = () => shadow.querySelector('.sheet-footer .btn:not(.primary)') as HTMLButtonElement;
@@ -660,6 +773,79 @@ describe('<mosaica-explorer> layouts', () => {
   });
 
   const REGION: RegionProjection = {shape: {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]}, status: 'shown' as const, refusal: null, visible: {value: 3, exact: true}, matched: {value: 3, exact: true}, served: {shown: 1, total: 3, exact: true}, verdict: {exact: true, depth: null}, held: {ids: BigUint64Array.of(5n), positions: new Float32Array(2), count: 1}};
+
+  it('lets the status strip alone announce, its map and its selection card set quiet, unless the host put something else in the strip’s place', async () => {
+    const quiet = (shadow: ShadowRoot) => [shadow.querySelector('mosaica-map'), shadow.querySelector('mosaica-selection')].map((e) => e!.hasAttribute('quiet'));
+    const wide = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
+    wide.store.set('region', REGION);
+    await settle(wide.host);
+    expect(quiet(wide.shadow)).toEqual([true, true]);
+    // One strip is drawn, so one speaks.
+    expect(wide.shadow.querySelectorAll('mosaica-status')).toHaveLength(1);
+    document.body.innerHTML = '';
+    const narrow = await narrowed();
+    narrow.store.set('region', REGION);
+    narrow.shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="detail"]')!.click();
+    await settle(narrow.host);
+    expect(quiet(narrow.shadow)).toEqual([true, true]);
+    expect(narrow.shadow.querySelectorAll('mosaica-status')).toHaveLength(1);
+    document.body.innerHTML = '';
+    // The host's own strip speaks as the explorer's does; anything else in the slot leaves the map and the card speaking.
+    const own = await explorer('<mosaica-explorer><mosaica-status slot="status"></mosaica-status></mosaica-explorer>');
+    own.store.set('region', REGION);
+    await settle(own.host);
+    expect(quiet(own.shadow)).toEqual([true, true]);
+    document.body.innerHTML = '';
+    const replaced = await explorer('<mosaica-explorer><span slot="status">Ready</span></mosaica-explorer>');
+    replaced.store.set('region', REGION);
+    await settle(replaced.host);
+    expect(quiet(replaced.shadow)).toEqual([false, false]);
+  });
+
+  it('keeps the Layers popover and the card beside a point on the Escape that dismisses the map’s tooltip', async () => {
+    const {host, shadow, store} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
+    const map = shadow.querySelector('mosaica-map') as unknown as HTMLElement & {hover: unknown; pickedAt: unknown};
+    Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(map, 'clientHeight', {configurable: true, value: 600});
+    const escape = (el: Element) => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true, cancelable: true}));
+    const hover = async () => {
+      map.hover = {id: 9n, x: 10, y: 10, title: 'A point', lines: []};
+      await settle(host);
+    };
+    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+    await settle(host);
+    await hover();
+    escape(shadow.querySelector('[part="points-toggle"]')!);
+    await settle(host);
+    expect(map.hover).toBeNull();
+    expect(shadow.querySelector('[part="layers-popover"]')).not.toBeNull();
+    // A menu and the list of density colours stay too.
+    shadow.querySelector<HTMLButtonElement>('[part="colour-by"]')!.click();
+    await settle(host);
+    await hover();
+    escape(shadow.querySelector('[part~="colour-option"]')!);
+    await settle(host);
+    expect(shadow.querySelector('[part~="colour-menu"]')).not.toBeNull();
+    escape(shadow.querySelector('[part~="colour-option"]')!);
+    await settle(host);
+    expect(shadow.querySelector('[part~="colour-menu"]')).toBeNull();
+    escape(shadow.querySelector('[part="points-toggle"]')!);
+    await settle(host);
+    expect(shadow.querySelector('[part="layers-popover"]')).toBeNull();
+    // The card beside the point.
+    map.pickedAt = {kind: 'item', id: 5n, world: [256, 256]};
+    store.set('selection', {item: {id: 5n, detail: {fields: {}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    await settle(host);
+    await hover();
+    const card = shadow.querySelector('[part~="callout"]')!;
+    escape(card);
+    await settle(host);
+    expect(store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(0);
+    expect(shadow.querySelector('[part~="callout"]')).not.toBeNull();
+    escape(card);
+    expect(store.calls.filter((c) => c.name === 'clearSelection')).toHaveLength(1);
+  });
 
   it('puts a selected region in the right column', async () => {
     const {host, shadow, store} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
@@ -1038,7 +1224,8 @@ describe('<mosaica-explorer aria-label>', () => {
 
   it('names the column of fields and the bar of sheet buttons differently', async () => {
     const {shadow} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
-    const names = [shadow.querySelector('[part="panel"]'), shadow.querySelector('[part="tabs"]')].map((e) => e!.getAttribute('aria-label'));
+    const bar = (await narrowed()).shadow.querySelector('[part="tabs"]');
+    const names = [shadow.querySelector('[part="panel"]'), bar].map((e) => e!.getAttribute('aria-label'));
     expect(names.every(Boolean)).toBe(true);
     expect(new Set(names).size).toBe(2);
     document.body.innerHTML = '';

@@ -40,7 +40,7 @@ describe('the narrow layout in a short window', () => {
     [320, 480]
   ] as const) {
     it(`keeps the status strip and the bar of buttons inside the explorer and on top, at ${width} by ${height}`, async () => {
-      const {result: r} = await opened<{explorer: Box; strip: Box; tabs: Box; map: Box; stripOnTop: boolean; tabsOnTop: boolean[]; titleCut: boolean; titleLines: number}>('short', width, height);
+      const {result: r} = await opened<{explorer: Box; strip: Box; tabs: Box; map: Box; stripOnTop: boolean; tabsOnTop: boolean[]; titleCut: boolean; titleLines: number; select: {cut: boolean; lines: number}}>('short', width, height);
       expect(r.strip.height).toBeGreaterThan(0);
       expect(r.tabs.height).toBeGreaterThan(0);
       expect(within(r.strip, r.explorer)).toBe(true);
@@ -53,13 +53,55 @@ describe('the narrow layout in a short window', () => {
       // A title too long for one line wraps, and none of it is cut.
       expect(r.titleCut).toBe(false);
       if (width === 320) expect(r.titleLines).toBeGreaterThan(1);
+      // So does the name of the view chosen, in its select.
+      expect(r.select.cut).toBe(false);
+      if (width === 320) expect(r.select.lines).toBeGreaterThan(1);
     });
   }
 });
 
+describe('the status strip in the narrow layout', () => {
+  it('wraps onto a second line at 320 px with every cell inside it, above the bar of buttons', async () => {
+    const {result: r} = await opened<{explorer: Box; row: Box; strip: Box; tabs: Box; cells: Box[]; clipped: boolean; tabsOnTop: boolean[]}>('strip', 320, 480);
+    expect(r.clipped).toBe(false);
+    // More than one line of cells.
+    expect(new Set(r.cells.map((c) => Math.round(c.top))).size).toBeGreaterThan(1);
+    // A cell's rule overlaps its neighbour's by a pixel, so the first of a line starts a pixel left of the strip.
+    for (const cell of r.cells) expect(within({...cell, left: Math.max(cell.left, r.strip.left)}, r.strip)).toBe(true);
+    expect(within(r.strip, r.row)).toBe(true);
+    expect(within(r.row, r.explorer)).toBe(true);
+    expect(r.row.bottom).toBeLessThanOrEqual(r.tabs.top + 0.5);
+    expect(within(r.tabs, r.explorer)).toBe(true);
+    expect(r.tabsOnTop).toEqual([true, true, true]);
+  });
+});
+
+describe('a sheet that reaches over the map’s tools', () => {
+  it('makes the map behind it inert, so Tab does not go under it, until it closes', async () => {
+    type Open = {inert: boolean; sheet: Box; tools: Box; focused: boolean};
+    const {page, result: r} = await opened<{open: Open; closed: {inert: boolean; sheet: boolean}}>('cover', 640, 400);
+    expect(r.open.sheet.top).toBeLessThan(r.open.tools.bottom);
+    expect(r.open.inert).toBe(true);
+    expect(r.open.focused).toBe(true);
+    expect(r.closed).toEqual({inert: false, sheet: false});
+    // Open again from the keyboard: Shift+Tab from the sheet goes past the map to the heading, not under the sheet.
+    const focused = () => page.evaluate(() => (window as unknown as {focused: () => string | null}).focused());
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => (document.querySelector('mosaica-explorer')!.shadowRoot!.querySelector('mosaica-map') as HTMLElement).inert);
+    const stops: string[] = [];
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('Shift+Tab');
+      const at = await focused();
+      if (at === null) break;
+      stops.push(at);
+    }
+    expect(stops.filter((s) => /^(controls|canvas): /.test(s))).toEqual([]);
+  });
+});
+
 describe('an open sheet in the narrow layout', () => {
   it('ends above the status strip, takes focus, and shows a picked item', async () => {
-    type Sheet = {sheet: Box; stripOnTop: boolean; focused: boolean};
+    type Sheet = {sheet: Box; stripOnTop: boolean; focused: boolean; inert: boolean};
     const {result: r} = await opened<{sheets: Record<string, Sheet>; strip: Box; tabs: Box; picked: {card: boolean; focused: boolean}}>('sheet', 390, 760);
     for (const [name, s] of Object.entries(r.sheets)) {
       expect(s.sheet.height, name).toBeGreaterThan(0);
@@ -67,6 +109,8 @@ describe('an open sheet in the narrow layout', () => {
       expect(s.stripOnTop, name).toBe(true);
       expect(s.focused, name).toBe(true);
     }
+    // A sheet that ends below the map's tools leaves the map above it in use.
+    expect(r.sheets['detail']!.inert).toBe(false);
     expect(r.strip.bottom).toBeLessThanOrEqual(r.tabs.top + 0.5);
     expect(r.picked).toEqual({card: true, focused: true});
   });

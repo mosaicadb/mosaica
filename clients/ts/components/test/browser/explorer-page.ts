@@ -49,7 +49,7 @@ function deepActive(): Element | null {
 const columns = Array.from({length: 40}, (_, i) => scalar(`measure_${String(i).padStart(2, '0')}`, 'u32', {render: true, homes: ['rendered']}));
 const META = meta({
   views: [
-    {id: 's0', displayName: 'default', quantisation: {xMin: 0, xMax: 1, yMin: 0, yMax: 1}, projection: 'none', worldAspect: null, tileScheme: null, tile: null, roster: null},
+    {id: 's0', displayName: 'A layout whose name is long enough to need a second line', quantisation: {xMin: 0, xMax: 1, yMin: 0, yMax: 1}, projection: 'none', worldAspect: null, tileScheme: null, tile: null, roster: null},
     {id: 's1', displayName: 'other', quantisation: {xMin: 0, xMax: 1, yMin: 0, yMax: 1}, projection: 'none', worldAspect: null, tileScheme: null, tile: null, roster: null}
   ],
   declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']}), ...columns],
@@ -74,6 +74,8 @@ const press = async (el: HTMLElement | null) => {
 };
 const item = {id: 5n, detail: {fields: {title: 'A picked item'}, labels: [], views: [], scoped: {}} as ItemDetail};
 const map = shadow.querySelector('mosaica-map') as HTMLElement & {pickedAt: unknown; focus(): void};
+
+const viewSelect = () => shadow.querySelector('mosaica-view-picker')!.shadowRoot!.querySelector('select')!;
 
 const result: Record<string, unknown> = {};
 
@@ -108,6 +110,7 @@ if (scene === 'short') {
     map: box(map),
     stripOnTop: onTop(part('strip-row')!),
     tabsOnTop: buttons.map(onTop),
+    select: {cut: viewSelect().scrollWidth > viewSelect().clientWidth, lines: Math.round(viewSelect().getBoundingClientRect().height / parseFloat(getComputedStyle(viewSelect()).lineHeight))},
     titleCut: part('dataset-title')!.scrollWidth > part('dataset-title')!.clientWidth,
     titleLines: Math.round(part('dataset-title')!.getBoundingClientRect().height / parseFloat(getComputedStyle(part('dataset-title')!).lineHeight))
   });
@@ -116,7 +119,7 @@ if (scene === 'short') {
   const sheets: Record<string, unknown> = {};
   for (const name of ['filters', 'layers', 'detail']) {
     await press(shadow.querySelector(`[part="tabs"] [data-sheet="${name}"]`));
-    sheets[name] = {sheet: box(part('sheet')!), stripOnTop: onTop(part('strip-row')!), focused: shadow.activeElement === part('sheet')};
+    sheets[name] = {sheet: box(part('sheet')!), stripOnTop: onTop(part('strip-row')!), focused: shadow.activeElement === part('sheet'), inert: map.inert};
   }
   Object.assign(result, {sheets, strip: box(part('strip-row')!), tabs: box(part('tabs')!)});
   // A picked item opens the Item sheet.
@@ -125,11 +128,37 @@ if (scene === 'short') {
   await settle(document.body);
   await frames(3);
   result['picked'] = {card: part('sheet')?.querySelector('mosaica-item-card') !== null, focused: shadow.activeElement === part('sheet')};
+} else if (scene === 'cover') {
+  // A sheet that reaches over the map's tools: what the map and the sheet are while it is open, and after Escape.
+  const tools = map.shadowRoot!.querySelector('[part="controls"]')!;
+  await press(shadow.querySelector('[part="tabs"] [data-sheet="filters"]'));
+  result['open'] = {inert: map.inert, sheet: box(part('sheet')!), tools: box(tools), focused: shadow.activeElement === part('sheet')};
+  part('sheet')!.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true, cancelable: true}));
+  await settle(document.body);
+  await frames(3);
+  result['closed'] = {inert: map.inert, sheet: part('sheet') !== null};
+  shadow.querySelector<HTMLElement>('[part="tabs"] button')!.focus();
+} else if (scene === 'strip') {
+  // The status strip with more to say than one line holds at this width.
+  store.set('status', status({stale: true}));
+  await settle(document.body);
+  await frames(3);
+  const strip = shadow.querySelector('[part="strip-row"] mosaica-status')!.shadowRoot!.querySelector('[part="strip"]')!;
+  const cells = [...strip.children].map(box);
+  Object.assign(result, {
+    explorer: box(explorer),
+    row: box(part('strip-row')!),
+    strip: box(strip),
+    tabs: box(part('tabs')!),
+    cells,
+    clipped: strip.scrollHeight > strip.clientHeight + 1 || strip.scrollWidth > strip.clientWidth + 1,
+    tabsOnTop: [...shadow.querySelectorAll('[part="tabs"] button')].map(onTop)
+  });
 } else if (scene === 'menu') {
   // The menus of the Layers sheet or popover fit the window and scroll inside it.
   store.set('legend', {...store.get('legend'), colourBy: 'archive'});
   await settle(document.body);
-  const narrow = part('tabs')!.getBoundingClientRect().height > 0;
+  const narrow = part('tabs') !== null;
   await press(narrow ? shadow.querySelector('[part="tabs"] [data-sheet="layers"]') : part('layers-toggle'));
   const menus: Record<string, unknown> = {};
   for (const name of ['palette', 'colour'] as const) {

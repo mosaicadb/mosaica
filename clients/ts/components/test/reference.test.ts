@@ -2,6 +2,7 @@ import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import ts from 'typescript';
 import {describe, expect, it} from 'vitest';
+import {PARTS} from '../src/parts.js';
 
 /**
  * The TypeScript and components reference is generated from doc comments, so a public item with no
@@ -16,7 +17,9 @@ import {describe, expect, it} from 'vitest';
  * Each element's class comment names what it renders, since the custom-elements manifest and the
  * element's page are made from it: its `@fires` against the events it emits, its `@slot` against
  * its `<slot>`s, its `@csspart` against its `part` attributes and the parts it forwards, and its
- * `@cssprop` against the tokens it reads. `tokens` documents every token its styles declare.
+ * `@cssprop` against the tokens it reads. `tokens` documents every token its styles declare. An
+ * element `PARTS` lists has there the parts its comment documents, since an element that renders
+ * it forwards its parts from that list.
  */
 
 const CLIENTS = join(import.meta.dirname, '../..');
@@ -251,6 +254,15 @@ describe('each element documents what it renders', () => {
         const forwarded = new Set(quoted(element.text, String.raw`\b(?:exportparts|forwarded)\(%s`).map((name) => `${name}-<part>`));
         expect(new Set(parts.filter((p) => p.endsWith('-<part>')))).toEqual(forwarded);
       });
+
+      const listed = (PARTS as Record<string, readonly string[]>)[element.tag.replace(/^mosaica-/, '')];
+      if (listed) {
+        it('has in PARTS the parts it documents, and no others but those of the shared state line', () => {
+          const plain = tagsOf(element, 'csspart').map((p) => p.name).filter((p) => !p.endsWith('-<part>'));
+          for (const part of plain) expect(listed, `PARTS has ${part}`).toContain(part);
+          for (const part of listed) expect([...plain, ...STATE_PARTS], `@csspart ${part}`).toContain(part);
+        });
+      }
 
       it('documents the tokens it reads beyond the shared ones', () => {
         const own = tokenNames(element.text);

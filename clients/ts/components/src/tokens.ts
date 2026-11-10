@@ -318,6 +318,9 @@ export const chrome = css`
     color: inherit;
     font: inherit;
     cursor: pointer;
+    /* The chosen option's text wraps; a browser that keeps a select to one line marks the cut. */
+    white-space: normal;
+    overflow-wrap: anywhere;
     text-overflow: ellipsis;
   }
   .choice svg {

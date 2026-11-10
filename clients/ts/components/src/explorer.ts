@@ -151,7 +151,12 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  *
  * Below 1000 px the explorer uses the overlay layout whatever `layout` says. At 720 px or less it
  * opens its panels as sheets from a bar of buttons under the map, and a picked item's card opens
- * in the Item sheet.
+ * in the Item sheet. A sheet that reaches up over the map's tools makes the map behind it inert
+ * until it closes.
+ *
+ * The status strip speaks for the explorer: its map and its selection card are set `quiet`, so a
+ * change is announced once. Where you put something other than a `<mosaica-status>` in the
+ * `status` slot, they announce for themselves.
  *
  * An `aria-label` on the explorer names its map, so a page with several explorers can tell them
  * apart.
@@ -743,8 +748,7 @@ export class MosaicaExplorer extends MosaicaElement {
           box-shadow: none;
           border-radius: 0;
           border-width: 1px 0 0;
-          height: 44px;
-          overflow-x: auto;
+          min-height: 44px;
         }
       }
       @media (forced-colors: active) {
@@ -879,8 +883,21 @@ export class MosaicaExplorer extends MosaicaElement {
   @state() accessor sheet: Sheet | null = null;
   /** The narrow layout's button focused last, which keeps the bar's one place in the tab order. */
   @state() private accessor tabFocus: Sheet | null = null;
-  /** The card the selection shows, as last seen: its key, `unavailable` for one with no record, or null for none. */
-  private cardSeen: string | null = null;
+  /**
+   * What the selection's card shows, as last seen: the record or the refusal the store holds, or
+   * the map's broken pick; null for no card. Picking the same item again brings a new record.
+   */
+  private cardSeen: object | null = null;
+  /** Where focus was before the update being drawn: in the open sheet, elsewhere in the explorer, or outside it. */
+  private focusBefore: 'sheet' | 'explorer' | null = null;
+  /** Whether the host put something other than a status strip in the `status` slot, so no strip speaks. */
+  private get stripReplaced(): boolean {
+    const given = Array.from(this.children).filter((el) => el.slot === 'status');
+    return given.length > 0 && !given.some((el) => el.localName === 'mosaica-status' || el.querySelector('mosaica-status') !== null);
+  }
+
+  /** What the host put in the `status` slot changed, and with it whether a strip speaks. */
+  private onStatusSlot = (): void => this.requestUpdate();
   /** What the status region says: the card that opened last. */
   private announced = '';
   /** The level a layer is coloured and labelled at, chosen on its card or in Colour by. @internal */
@@ -965,19 +982,42 @@ export class MosaicaExplorer extends MosaicaElement {
   }
 
   /**
-   * As the selection's card comes, changes or goes: the narrow layout opens the Item sheet for it,
-   * which takes focus, and closes that sheet with it; the other layouts leave focus where it is and
-   * say which card opened in the status region.
+   * As the selection's card comes, changes or goes. The wide layouts say which card opened in the
+   * status region. The narrow layout opens the Item sheet for it, and closes that sheet with it; a
+   * card that arrives while the viewer's focus is in another sheet leaves that sheet open. Sheets
+   * are the narrow layout's: growing wider closes the open one, and growing narrow with a card
+   * open opens the Item sheet.
    */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
-    const shown = this.has('detail') && this.hasDetail() ? (this.liveKey() ?? 'unavailable') : null;
-    if (shown === this.cardSeen) return;
-    this.cardSeen = shown;
-    this.announced = shown && !this.narrow ? `${this.cardName(this.liveKey())}, card opened` : '';
-    if (!this.narrow) return;
-    if (shown) this.sheet = 'detail';
-    else if (this.sheet === 'detail') this.sheet = null;
+    const sheet = this.renderRoot?.querySelector('[part="sheet"]') ?? null;
+    this.focusBefore = sheet && within(this.shadowRoot?.activeElement ?? null, sheet) ? 'sheet' : this.holdsFocus() ? 'explorer' : null;
+    const card = this.cardSubject();
+    const fresh = card !== this.cardSeen;
+    this.cardSeen = card;
+    if (fresh) this.announced = card && !this.narrow ? `${this.cardName(this.liveKey())}, card opened` : '';
+    if (!this.narrow) {
+      this.sheet = null;
+      return;
+    }
+    if (card && (fresh || changed.has('narrow'))) {
+      if (this.sheet === null || this.focusBefore === 'explorer') this.sheet = 'detail';
+    } else if (fresh && this.sheet === 'detail') this.sheet = null;
+  }
+
+  /** Whether focus is in the explorer: in its own tree, or in an element the host put in a slot. */
+  private holdsFocus(): boolean {
+    const active = (this.getRootNode() as Document | ShadowRoot).activeElement;
+    return active !== null && this.contains(active);
+  }
+
+  /** What the selection's card shows, or null where it has nothing to show or `panels` leaves the card out. */
+  private cardSubject(): object | null {
+    if (!this.has('detail')) return null;
+    const sel = this.resolvedStore?.get('selection');
+    const broken = this.map?.lastPick?.kind === 'broken' ? this.map.lastPick : null;
+    const artifact = sel?.artifact ?? sel?.artifactRefusal ?? null;
+    return (this.showsArtifact() ? artifact : (sel?.item ?? sel?.itemRefusal ?? artifact)) ?? broken;
   }
 
   /** Whether the selection has a card to show: a click that found nothing shows none, and a broken pick shows its fault. */
@@ -1101,7 +1141,9 @@ export class MosaicaExplorer extends MosaicaElement {
     const named = pickersShown || viewName !== '' || this.datasetTitle !== '';
     const layersPanel = html`<slot name="layers"><mosaica-layer-picker exportparts=${FORWARD['layer-picker']}></mosaica-layer-picker></slot>`;
     const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevel=${level}></mosaica-filter-panel></slot>`;
-    const selectionPanel = this.has('selection') && region ? html`<slot name="selection"><mosaica-selection exportparts=${FORWARD.selection}></mosaica-selection></slot>` : nothing;
+    // The status strip speaks for the map and the selection card, unless the host replaced it with something else.
+    const quiet = !this.stripReplaced;
+    const selectionPanel = this.has('selection') && region ? html`<slot name="selection"><mosaica-selection exportparts=${FORWARD.selection} ?quiet=${quiet}></mosaica-selection></slot>` : nothing;
     const selectionCard = selectionPanel === nothing ? nothing : html`<div part="selection-card" class="card">${selectionPanel}</div>`;
     const head = html`<div class="head" ?hidden=${!named}>${names}</div>`;
 
@@ -1139,7 +1181,9 @@ export class MosaicaExplorer extends MosaicaElement {
     const tab = ({sheet, icon: ic, label}: (typeof TABS)[number]) =>
       html`<button type="button" id=${`opens-${sheet}`} data-sheet=${sheet} tabindex=${reachable?.sheet === sheet ? '0' : '-1'}
         aria-expanded=${this.sheet === sheet ? 'true' : 'false'} aria-controls=${this.sheet === sheet ? 'sheet' : nothing}
-        @click=${() => {
+        @click=${(e: Event) => {
+          // A press does not focus a button in every browser, and the sheet takes the focus the explorer holds.
+          (e.currentTarget as HTMLElement).focus();
           this.tabFocus = sheet;
           this.sheet = this.sheet === sheet ? null : sheet;
         }}>${icon(ic, 18)}${label}</button>`;
@@ -1180,6 +1224,7 @@ export class MosaicaExplorer extends MosaicaElement {
         <mosaica-map
           exportparts=${FORWARD.map}
           aria-label=${this.getAttribute('aria-label') ?? nothing}
+          ?quiet=${quiet}
           colour-by=${this.colourBy || nothing}
           layers=${this.layers || nothing}
           tooltip-fields=${this.tooltipFields}
@@ -1216,19 +1261,19 @@ export class MosaicaExplorer extends MosaicaElement {
         >
           ${narrow ? nothing : layersButton}
           ${right}
-          ${narrow ? nothing : html`<div slot="bottom-right" class="in-map-strip"><slot name="status"><mosaica-status exportparts=${FORWARD.status} ?compact=${compact}></mosaica-status></slot></div>`}
+          ${narrow ? nothing : html`<div slot="bottom-right" class="in-map-strip"><slot name="status" @slotchange=${this.onStatusSlot}><mosaica-status exportparts=${FORWARD.status} ?compact=${compact}></mosaica-status></slot></div>`}
           ${this.querySelector('[slot="tooltip"]') ? html`<slot name="tooltip" slot="tooltip"></slot>` : nothing}
         </mosaica-map>
         ${narrow ? nothing : this.callouts(this.has('detail') && hasDetail ? anchor : null, detail)}
-        ${this.sheet && sheetBody !== nothing
+        ${narrow && this.sheet && sheetBody !== nothing
           ? html`<div part="sheet" id="sheet" role="dialog" aria-labelledby=${`opens-${this.sheet}`} tabindex="-1" @keydown=${this.onSheetKey}>${sheetBody}</div>`
           : nothing}
       </div>
       <div class="sr-only" role="status">${this.announced}</div>
-      <div part="strip-row">${narrow
-        ? html`<slot name="status"><mosaica-status exportparts=${FORWARD.status}></mosaica-status></slot>`
-        : html`<mosaica-status exportparts=${FORWARD.status}></mosaica-status>`}</div>
-      <div part="tabs" role="toolbar" aria-label="Panels" @keydown=${this.onTabKey}>${tabs.map(tab)}</div>
+      ${narrow
+        ? html`<div part="strip-row"><slot name="status" @slotchange=${this.onStatusSlot}><mosaica-status exportparts=${FORWARD.status}></mosaica-status></slot></div>
+            <div part="tabs" role="toolbar" aria-label="Panels" @keydown=${this.onTabKey}>${tabs.map(tab)}</div>`
+        : nothing}
       <mosaica-colour-editor exportparts=${FORWARD['colour-editor']} field=${s?.get('legend').colourBy ?? ''} .level=${level}></mosaica-colour-editor>
     </div>`;
   }
@@ -1420,6 +1465,7 @@ export class MosaicaExplorer extends MosaicaElement {
     });
     // A card that grew, as under Show all, keeps its side and grows down where that is clear.
     this.placeCallouts();
+    this.coverMap();
   }
 
   /** The cards over the map that callouts keep clear of, and the map's tools and the Layers button. */
@@ -1442,7 +1488,8 @@ export class MosaicaExplorer extends MosaicaElement {
       if (callouts.length > 0) this.measure();
       return;
     }
-    const now = new Set<Element>([...(m ? [m] : []), ...this.keptClear(), ...callouts]);
+    const sheet = this.renderRoot.querySelector('[part="sheet"]');
+    const now = new Set<Element>([...(m ? [m] : []), ...this.keptClear(), ...callouts, ...(sheet ? [sheet] : [])]);
     for (const el of this.observed) if (!now.has(el)) this.sizes.unobserve(el);
     for (const el of now) if (!this.observed.has(el)) this.sizes.observe(el);
     this.observed = now;
@@ -1478,7 +1525,7 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /** Escape on a card: the card not pinned closes, dropping the selection; focus goes back to the map. */
   private onCalloutKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     e.stopPropagation();
     const key = (e.currentTarget as HTMLElement).dataset.callout;
     if (key === 'live') this.closeDetail(e);
@@ -1960,6 +2007,8 @@ export class MosaicaExplorer extends MosaicaElement {
       const items = Array.from(this.renderRoot.querySelectorAll<HTMLElement>(`[part~="${menu}-option"]`));
       const next = {ArrowDown: (i + 1) % items.length, ArrowUp: (i - 1 + items.length) % items.length, Home: 0, End: items.length - 1}[e.key];
       if (e.key === 'Escape') {
+        // An Escape that has dismissed the map's tooltip does no more.
+        if (e.defaultPrevented) return;
         e.stopPropagation();
         this.closeMenu(true);
         return;
@@ -2058,7 +2107,7 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /** Escape in the list of density colours closes the list alone. */
   private onDensityColoursKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     e.stopPropagation();
     this.closeDensityColours();
   };
@@ -2072,7 +2121,7 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /** Escape closes the Layers popover and returns focus to its button. */
   private onLayersKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape' || !this.layersOpen) return;
+    if (e.key !== 'Escape' || e.defaultPrevented || !this.layersOpen) return;
     e.stopPropagation();
     this.closeLayers();
     this.renderRoot.querySelector<HTMLElement>('[part="layers-toggle"]')?.focus();
@@ -2094,25 +2143,44 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /** Escape closes the sheet. */
   private onSheetKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
     e.stopPropagation();
     this.sheet = null;
   };
 
   /**
-   * Focus goes to the first control of the Layers popover as it opens, into a sheet as it opens,
-   * and back to the sheet's button as it closes.
+   * Focus goes to the first control of the Layers popover as it opens. A sheet that opens takes
+   * the focus the explorer held, and none from the page around it. A sheet that closes gives the
+   * focus it held to its button, or to the map where the layout has grown wide and has no button.
    */
   protected override updated(changed: PropertyValues<this>): void {
     this.toggleAttribute('data-compact', this.compact);
     this.fitLayers();
     this.placeMenu(changed.has('menu') && this.menu !== null);
     this.followLayout();
+    this.coverMap();
     if (changed.has('layersOpen') && this.layersOpen) this.renderRoot.querySelector('[part="layers-popover"]')?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     if (!changed.has('sheet')) return;
     const before = changed.get('sheet');
-    if (this.sheet) this.renderRoot.querySelector<HTMLElement>('[part="sheet"]')?.focus();
-    else if (before) this.renderRoot.querySelector<HTMLElement>(`[part="tabs"] [data-sheet="${before}"]`)?.focus();
+    if (this.sheet) {
+      if (this.focusBefore) this.renderRoot.querySelector<HTMLElement>('[part="sheet"]')?.focus();
+    } else if (before && this.focusBefore === 'sheet') {
+      if (this.narrow) this.renderRoot.querySelector<HTMLElement>(`[part="tabs"] [data-sheet="${before}"]`)?.focus();
+      else this.map?.focus();
+    }
+  }
+
+  /**
+   * While an open sheet reaches up over the map's tools, the map behind it is inert: nothing under
+   * the sheet takes focus or a press. A shorter sheet leaves the map above it in use.
+   */
+  private coverMap(): void {
+    const m = this.map;
+    if (!m) return;
+    const sheet = this.renderRoot.querySelector('[part="sheet"]');
+    const tools = m.shadowRoot?.querySelector('[part="controls"]');
+    const clear = tools ? tools.getBoundingClientRect().bottom : m.getBoundingClientRect().top;
+    m.inert = sheet !== null && sheet.getBoundingClientRect().top < clear;
   }
 
   /**

@@ -474,11 +474,11 @@ export const displayStyles = css`
     font-size: 12px;
     color: var(--_mosaica-ink);
   }
-  .ramp-list button:hover,
-  .ramp-list button[aria-checked='true'] {
+  .ramp-list button:hover {
     background: var(--_mosaica-surface-2);
   }
   .ramp-list button[aria-checked='true'] {
+    background: var(--_mosaica-surface-2);
     font-weight: 500;
   }
   /* A palette's or a ramp's colours are what it is, so they keep them under forced colours; a

@@ -105,7 +105,7 @@ describe('forwarded parts', () => {
       'mosaica-explorer::part(map-controls) { border-top-color: rgb(4, 5, 6); } mosaica-explorer::part(status-strip) { color: rgb(7, 8, 9); }'
     );
     expect(await computed(p, ['mosaica-explorer', 'mosaica-map', '[part="controls"]'], 'border-top-color')).toBe('rgb(4, 5, 6)');
-    expect(await computed(p, ['mosaica-explorer', '[part="strip-row"] mosaica-status', '[part="strip"]'], 'color')).toBe('rgb(7, 8, 9)');
+    expect(await computed(p, ['mosaica-explorer', 'mosaica-status', '[part="strip"]'], 'color')).toBe('rgb(7, 8, 9)');
   });
 });
 
