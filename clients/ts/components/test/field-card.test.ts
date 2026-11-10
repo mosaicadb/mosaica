@@ -296,6 +296,18 @@ describe('<mosaica-field-card> on a category', () => {
     const pressed = (r: HTMLElement) => ['highlight', 'filter'].map((part) => r.querySelector(`[part="${part}"]`)!.getAttribute('aria-pressed'));
     expect(pressed(rows(host)[0]!)).toEqual(['true', 'true']);
     expect(pressed(rows(host)[1]!)).toEqual(['false', 'false']);
+    // At rest each is told by a shape: a tick where the swatch would stand, and a pen before the counts.
+    const cues = (r: HTMLElement) => ({tick: r.querySelector('.mark svg') !== null, inCount: [...r.querySelectorAll('[part="count"] .cue')].map((c) => (c.classList.contains('lit') ? 'pen' : 'tick'))});
+    expect(cues(rows(host)[0]!)).toEqual({tick: true, inCount: ['pen']});
+    expect(cues(rows(host)[1]!)).toEqual({tick: false, inCount: []});
+    // The map coloured by the field, the swatch stands where the tick would, and the tick goes before the counts.
+    store.set('legend', {...store.get('legend'), colourBy: 'archive', categories: {archive: [{key: 'cs', code: 1, title: null}]}, ranks: {archive: {1: 0}}});
+    await settle(host);
+    expect(rows(host)[0]!.querySelector('[part="swatch"]')).not.toBeNull();
+    expect(cues(rows(host)[0]!)).toEqual({tick: false, inCount: ['tick', 'pen']});
+    // The buttons, drawn or not, are in the row for Tab to reach, and a cut name has its whole text as its title.
+    expect(rows(host)[0]!.querySelectorAll('[part="verbs"] button')).toHaveLength(2);
+    expect(rows(host)[0]!.querySelector('[part="name"]')!.getAttribute('title')).toBe('cs');
   });
 
   it('is a group named by its heading, which holds the field’s name alone, and names its list and search box by the field', async () => {
@@ -510,6 +522,9 @@ describe('<mosaica-field-card> on a date', () => {
     await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
     const open = deep(host, '[part="range"]') as HTMLButtonElement;
     expect(open.getAttribute('aria-expanded')).toBe('false');
+    // A real button, off screen until the keyboard's focus is on it.
+    expect(open.tagName).toBe('BUTTON');
+    expect(open.classList.contains('sr-only')).toBe(true);
     expect(open.getAttribute('aria-label')).toContain(open.textContent!.trim());
     expect(open.getAttribute('aria-label')).toContain('Submitted at');
     open.click();
@@ -606,6 +621,25 @@ describe('<mosaica-field-card> on a date', () => {
     expect(focused(card)).toBe(plot);
   });
 
+  it('closes the range box as focus goes on past it, since it lies over what is under the plot, and not as focus moves inside it', async () => {
+    const {host, store} = await mountCard('submitted_at');
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    (deep(host, '[part="range"]') as HTMLButtonElement).click();
+    await settle(host);
+    const [from, to] = ends(host);
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    to.focus();
+    await settle(host);
+    expect(deep(host, '[part="brush"]')).not.toBeNull();
+    // Focus that goes to nothing, as when the window loses it, leaves the box open.
+    from.dispatchEvent(new FocusEvent('focusout', {relatedTarget: null, bubbles: true, composed: true}));
+    await settle(host);
+    expect(deep(host, '[part="brush"]')).not.toBeNull();
+    elsewhere.focus();
+    await settle(host);
+    expect(deep(host, '[part="brush"]')).toBeNull();
+  });
+
   it('gives the bins’ counts in a table, the subject’s column headed by what the subject is', async () => {
     const {host, store} = await mountCard('submitted_at');
     await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
@@ -625,13 +659,14 @@ describe('<mosaica-field-card> on a date', () => {
     expect((deep(host, '[part~="bin"]') as HTMLElement).title).not.toContain(inView!.toLowerCase());
   });
 
-  it('writes out under the plot the range each position holds, with its verb', async () => {
+  it('gives a screen reader, off screen, the range each position holds, with its verb', async () => {
     const {host, store} = await mountCard('submitted_at', {
       filter: {submitted_at: {family: 'numeric', gte: YEAR(2020) * 1000, lte: YEAR(2022) * 1000 - 1}},
       highlight: {submitted_at: {family: 'numeric', gte: YEAR(2022) * 1000, lte: null}}
     });
     await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
     const said = (verb: string) => deep(host, `.applied[data-verb="${verb}"]`)!.textContent!;
+    expect(deepAll(host, '.applied').every((words) => words.classList.contains('sr-only'))).toBe(true);
     expect(said('filter')).toMatch(/filter/i);
     expect(said('filter')).toContain('2020 – 2021');
     expect(said('highlight')).toMatch(/highlight/i);

@@ -1208,17 +1208,20 @@ describe('<mosaica-filter-panel>', () => {
     });
   });
 
-  it('writes the word on a highlight’s chip and none on a filter’s, and names each × by what it removes and its verb', async () => {
+  it('draws a pen on a highlight’s chip, with the word for a reader and not on screen, and neither on a filter’s, and names each × by what it removes and its verb', async () => {
     const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {archive: {family: 'category', keys: ['math']}}};
     const member = (id: bigint, verb: 'filter' | 'highlight') => ({layer: 'topics', artifact: id, outside: false, verb, label: `topic ${id}`});
     const {host} = await mountPanel(draft, '', {members: [member(1n, 'filter'), member(2n, 'highlight')]});
     const chips = deepAll(host, '[part="chip"]');
-    expect(chips.map((c) => [c.getAttribute('data-verb'), c.querySelector('.verb')?.textContent ?? null])).toEqual([
-      ['filter', null],
-      ['highlight', 'highlight'],
-      ['filter', null],
-      ['highlight', 'highlight']
+    const pen = (c: Element) => c.querySelector(':scope > svg');
+    expect(chips.map((c) => [c.getAttribute('data-verb'), pen(c) !== null, c.querySelector(':scope > .sr-only')?.textContent?.trim() ?? null])).toEqual([
+      ['filter', false, null],
+      ['highlight', true, 'highlight'],
+      ['filter', false, null],
+      ['highlight', true, 'highlight']
     ]);
+    // The pen is a picture of the word, so it is not read as well.
+    expect(chips.filter(pen).every((c) => pen(c)!.getAttribute('aria-hidden') === 'true')).toBe(true);
     const names = chips.map((c) => c.querySelector(':scope > button:last-child')!.getAttribute('aria-label')!);
     expect(names.map((n) => /filter/i.test(n))).toEqual([true, false, true, false]);
     expect(names.map((n) => /highlight/i.test(n))).toEqual([false, true, false, true]);
@@ -1326,10 +1329,10 @@ describe('<mosaica-filter-panel> cluster fields', () => {
     ({name, title: `${name} title`, views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1, ...over}) as Meta['layers'][number];
   const LAYERED = {...META, layers: [layer('topics'), layer('labels', {depsOn: ['topics']}), layer('elsewhere', {views: ['s9']})]};
   const topic = (id: bigint, verb: 'filter' | 'highlight', label?: string) => ({layer: 'topics', artifact: id, outside: false, verb, ...(label ? {label} : {})});
-  /** What a chip names, apart from the word that says it is a highlight. */
+  /** What a chip names, apart from the word that tells a reader it is a highlight. */
   const named = (chip: Element) => {
     const copy = chip.cloneNode(true) as Element;
-    copy.querySelector('.verb')?.remove();
+    copy.querySelector('.sr-only')?.remove();
     return copy.textContent!.trim();
   };
 

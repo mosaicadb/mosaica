@@ -43,7 +43,7 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
 /**
  * Use the filter panel as the place where viewers narrow the map down, as `<mosaica-explorer>` does
  * in its sidebar. Each filter or highlight in force shows as a chip above the cards, a highlight's
- * with the word on it, and pressing a chip opens its field's card. When a chip is removed, focus
+ * with a pen on it, and pressing a chip opens its field's card. When a chip is removed, focus
  * moves to the × of the chip after it, else of the one before, else to Add field. Under
  * `chips-only` there is no Add field, so when the last chip is removed the panel shows the words
  * No filters, which take focus and go as focus leaves them; a chip that arrives while they hold
@@ -193,15 +193,26 @@ export class MosaicaFilterPanel extends MosaicaElement {
         font-weight: 600;
         color: var(--_mosaica-ink);
       }
-      /* A 24 px target the row does not grow for. */
       [part='clear-highlight'] {
-        width: 24px;
-        height: 24px;
-        margin: -4px -2px;
+        position: relative;
+        width: 18px;
+        height: 18px;
         display: grid;
         place-items: center;
         border-radius: 4px;
         color: var(--_mosaica-ink-2);
+      }
+      /* Each takes a press from 24 px around its middle, drawn no larger for it. */
+      [part='clear-highlight']::after,
+      .chip .edit::after,
+      [part='clear']::after {
+        content: '';
+        position: absolute;
+        inset: -3px;
+      }
+      .chip .edit::after,
+      [part='clear']::after {
+        inset: -4px 0;
       }
       [part='clear-highlight']:hover {
         background: var(--_mosaica-surface-3);
@@ -215,6 +226,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
         border-bottom: 1px solid var(--_mosaica-line-2);
       }
       [part='chip'] {
+        position: relative;
         min-height: 0;
         padding: 2px 4px 2px 8px;
         gap: 4px;
@@ -236,21 +248,22 @@ export class MosaicaFilterPanel extends MosaicaElement {
           animation: none;
         }
       }
-      /* A chip's text and Clear all are 24 px targets, which the line of chips does not grow for. */
       .chip .edit {
+        position: relative;
         display: inline-flex;
         flex: 0 1 auto;
         align-items: center;
-        min-width: 24px;
-        min-height: 24px;
-        margin: -4px 0;
         color: inherit;
         font: inherit;
         text-align: left;
       }
+      /* The pen on a highlight's chip, which says in a shape what the chip's colour says. */
+      [part='chip'] > svg {
+        flex: none;
+      }
       [part='clear'] {
-        min-height: 24px;
-        margin: -1px 0 -1px auto;
+        position: relative;
+        margin-left: auto;
         padding: 0;
         font-size: 12px;
         color: var(--_mosaica-ink-2);
@@ -695,8 +708,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
     if (chips.length === 0 && members.length === 0 && regions.length === 0) {
       return this.emptied && this.chipsOnly ? html`<div part="chips"><span class="emptied" tabindex="-1" @blur=${() => (this.emptied = false)}>No filters</span></div>` : nothing;
     }
-    // The word on a highlight's chip; a filter's has none.
-    const word = (verb: ClauseVerb) => (verb === 'highlight' ? html`<span class="verb">highlight</span> ` : nothing);
+    // The pen on a highlight's chip, with the word for a reader; a filter's has neither.
+    const word = (verb: ClauseVerb) => (verb === 'highlight' ? html`${icon('highlight', 12, 1.6)}<span class="sr-only">highlight </span>` : nothing);
     const pressed = (e: Event) => this.leave(e.currentTarget as HTMLElement);
     return html`<div part="chips">
       ${repeat(

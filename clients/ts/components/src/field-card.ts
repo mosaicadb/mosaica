@@ -175,23 +175,31 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *
  * What the card shows depends on the kind of field:
  *
- * - A category or cluster card lists the values with most items in view, each with its counts and
- *   its Highlight and Filter buttons. A button is filled, and its icon solid, while its value is
- *   highlighted or filtered to.
- * - A number or date card draws a histogram of up to 20 bins, and the viewer drags across it to
- *   pick a range to filter or highlight by. From the keyboard, they press Shift and the arrow keys
- *   on the focused plot, then Enter. Either opens a box with the range in a From and a To field,
- *   which take a typed number or date, and Set range opens the same box without a drag. A field
- *   left empty leaves that end open. A field that holds no number or date, or a From above the To,
- *   is not applied, and the box says what to type. Under the plot the card writes out the range
- *   each of the filter and the highlight holds, and a screen reader finds the bins' counts in a
- *   table. Counts over about 100,000 items come from a sample, so they are marked "≈".
+ * - A category or cluster card lists the values with most items in view, each with its counts.
+ *   A row's Highlight and Filter buttons take the counts' place while the pointer is over the row
+ *   or the keyboard's focus is in it, and are always drawn on a screen with no pointer that
+ *   hovers. A button is filled, and its icon solid, while its value is highlighted or filtered to,
+ *   and before the counts a tick marks a value the filter keeps and a pen one that is highlighted.
+ *   A screen reader is given each count with what it counts.
+ * - A number or date card draws a histogram of up to 20 bins, and the viewer presses a bin or drags
+ *   across several to pick a range to filter or highlight by. From the keyboard, they press Shift
+ *   and the arrow keys on the focused plot, then Enter. Either opens a box under the range with its
+ *   two ends in fields that take a typed number or date. A field left empty leaves that end open.
+ *   The box closes on Escape, on a press outside it and as focus leaves it.
+ *   A field that holds no number or date, or a lower end above the upper, is not applied, and the
+ *   box says what to type. Set range, a button drawn only while the keyboard has it, opens the
+ *   same box with nothing chosen. A screen reader is given the range each of the filter and the
+ *   highlight holds, and the bins' counts in a table. Counts over about 100,000 items come from a
+ *   sample, so they are marked "≈".
  * - A bool card lists yes and no as a category card lists values. Its counts are taken as a
  *   histogram's, so those over about 100,000 items are marked "≈".
  * - A text or keyword field's card is a search box, `<mosaica-filter>`.
  *
  * While the paint button colours the map by the field, clicking a value's colour opens a picker
  * that changes the colour on the map.
+ *
+ * A long name is one line, cut with an ellipsis. Where `--mosaica-long-text` is `normal`, as in the
+ * explorer's narrow form, the card's name, what it notes and its rows' names wrap.
  *
  * @summary A card that charts one field's values and filters or highlights by them.
  * @tagname mosaica-field-card
@@ -224,13 +232,14 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   with the colour, set as `--c`, in a 10 px square at its middle. It opens the colour picker. It
  *   carries `data-unmet`, and the square is drawn as an outline, for a value the map has not drawn
  *   yet and so has not given a colour.
- * @csspart name - A row's name, with `data-unnamed` for a cluster that has none.
- * @csspart path - A cluster row's parents.
+ * @csspart name - A row's name, with `data-unnamed` for a cluster that has none, and the whole
+ *   name as its `title`.
+ * @csspart path - A cluster row's parents, with the whole path as its `title`.
  * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match.
  * @csspart bar-subject - A row's or a bin's solid bar, its share of the subject.
- * @csspart count - A row's counts as they are drawn. A screen reader is given them beside it, each
- *   with what it counts.
- * @csspart verbs - A row's Highlight and Filter buttons, beside its counts.
+ * @csspart count - A row's counts as they are drawn, after its tick and its pen. A screen reader is
+ *   given them beside it, each with what it counts.
+ * @csspart verbs - A row's Highlight and Filter buttons, in its counts' place.
  * @csspart highlight - A row's Highlight button, with `aria-pressed`.
  * @csspart filter - A row's Filter button, with `aria-pressed`.
  * @csspart more - The "N more" button.
@@ -240,10 +249,14 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   `brush` while one is being chosen). The highlight's is hatched.
  * @csspart axis - The values under the histogram.
  * @csspart ramp - The colour ramp under the histogram, while the map is coloured by the field.
- * @csspart range - The Set range button under the histogram, with `aria-expanded`.
- * @csspart brush - The range box, which a dragged range or Set range opens under the histogram.
- * @csspart brush-from - Its From field, with `aria-invalid` while what it holds is not applied.
- * @csspart brush-to - Its To field, with `aria-invalid` while what it holds is not applied.
+ * @csspart range - The Set range button, with `aria-expanded`, drawn over the start of the axis
+ *   while it has the keyboard's focus.
+ * @csspart brush - The range box, which a chosen range or Set range opens over what is under the
+ *   histogram.
+ * @csspart brush-from - The field for its lower end, with `aria-invalid` while what it holds is not
+ *   applied.
+ * @csspart brush-to - The field for its upper end, with `aria-invalid` while what it holds is not
+ *   applied.
  * @csspart brush-filter - Its Filter button.
  * @csspart brush-highlight - Its Highlight button.
  * @csspart colour-popover - The colour picker, while it is open.
@@ -270,67 +283,58 @@ export class MosaicaFieldCard extends MosaicaElement {
         padding-top: 6px;
         padding-bottom: 6px;
       }
-      /* The chart and the buttons go under the name, at the right, where the name's longest word
-         does not fit beside them. */
       [part='head'] {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        justify-content: flex-end;
-        gap: 2px 8px;
+        gap: 8px;
         min-height: 24px;
       }
-      /* The name and what follows it, a mark or what the name notes, which goes under the name
-         only where the two do not fit on a line. The group asks for the width of the name's longest
-         word and takes what the line has left before the chart does, up to one line of its own. */
+      /* The name, the mark after it and what the name notes stand in the heading's own row: the
+         group draws no box of its own while a long name is cut. */
       .named {
-        flex: 1000 1 min-content;
-        min-width: 0;
-        max-width: max-content;
-        margin-right: auto;
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0 8px;
+        display: contents;
       }
-      /* Not a section heading, as the shared rule for a title part draws one. It wraps between its
-         words, and inside one only where that word alone is wider than the card. */
+      /* Not a section heading, as the shared rule for a title part draws one. */
       [part='title'] {
         display: block;
-        flex: 0 1 auto;
-        min-width: 0;
+        flex: none;
         margin: 0;
         font-size: 13px;
         font-weight: 600;
         letter-spacing: 0;
         text-transform: none;
         color: var(--_mosaica-ink);
-        overflow-wrap: break-word;
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       [part='sub'] {
         flex: 1 1 auto;
         min-width: 0;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
-        overflow-wrap: anywhere;
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       [part='sub'].choice {
         flex: 0 1 auto;
         margin-right: auto;
       }
+      /* 24 px to press, which the heading does not grow for. */
       [part='sub'] select {
-        min-height: 24px;
+        padding-block: 4px;
+        margin-block: -4px;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
-      /* Two thirds of its width where the name beside it needs the rest. */
       [part='spark'] {
-        flex: 1 0 40px;
-        max-width: 60px;
+        flex: none;
         margin-left: auto;
         display: flex;
         align-items: flex-end;
         gap: 1px;
+        width: 60px;
         height: 14px;
       }
       [part='spark'] span {
@@ -341,8 +345,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         forced-color-adjust: none;
       }
       :host([compact]) [part='spark'] {
-        flex-basis: 48px;
-        max-width: 72px;
+        width: 72px;
       }
       /* Folded in the compact layout, a card is its name, a drop where it colours the map, its
          chart and its chevron. */
@@ -350,9 +353,15 @@ export class MosaicaFieldCard extends MosaicaElement {
       :host([compact][folded]) [part='sub'] {
         display: none;
       }
-      :host([compact][folded]) [part='head'],
-      :host([compact][folded]) .named {
-        column-gap: 6px;
+      :host([compact][folded]) [part='head'] {
+        gap: 6px;
+      }
+      :host([compact][folded]) [part='fold'] {
+        width: 16px;
+      }
+      :host([compact][folded]) [part='title'] {
+        flex: 0 1 auto;
+        min-width: 0;
       }
       .painted {
         display: inline-flex;
@@ -367,13 +376,29 @@ export class MosaicaFieldCard extends MosaicaElement {
       }
       [part='paint'],
       [part='fold'] {
+        position: relative;
         flex: none;
-        width: 24px;
-        height: 24px;
+        width: 22px;
+        height: 22px;
         display: grid;
         place-items: center;
         border-radius: 5px;
         color: var(--_mosaica-ink-2);
+      }
+      /* Each small button takes a press from 24 px around its middle, drawn no larger for it. */
+      [part='paint']::after,
+      [part='fold']::after,
+      [part='verbs'] button::after,
+      [part='more']::after {
+        content: '';
+        position: absolute;
+        inset: -2px;
+      }
+      [part='fold']::after {
+        inset: -1px;
+      }
+      :host([compact][folded]) [part='fold']::after {
+        inset: -1px -4px;
       }
       [part='paint'] {
         border: 1px solid var(--_mosaica-line);
@@ -389,6 +414,48 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part='paint'][aria-pressed='false']:hover {
         background: var(--_mosaica-surface-2);
       }
+      /* Where a host has long names wrap, the name and what follows it are one group: what follows
+         goes under the name only where the two do not fit on a line, and the chart and the buttons
+         go under the group, at the right, where the name's longest word does not fit beside them. */
+      @container style(--_mosaica-long-text: normal) {
+        [part='head'] {
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 2px 8px;
+        }
+        .named {
+          flex: 1000 1 min-content;
+          min-width: 0;
+          max-width: max-content;
+          margin-right: auto;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 0 8px;
+        }
+        [part='title'] {
+          flex: 0 1 auto;
+          min-width: 0;
+          overflow-wrap: break-word;
+        }
+        [part='sub'] {
+          overflow-wrap: anywhere;
+        }
+        /* Two thirds of its width where the name beside it needs the rest. */
+        [part='spark'] {
+          flex: 1 0 40px;
+          width: auto;
+          max-width: 60px;
+        }
+        :host([compact]) [part='spark'] {
+          flex-basis: 48px;
+          max-width: 72px;
+        }
+        :host([compact][folded]) [part='head'],
+        :host([compact][folded]) .named {
+          column-gap: 6px;
+        }
+      }
       .body {
         margin-top: 6px;
         display: flex;
@@ -403,7 +470,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part~='row'] {
         position: relative;
         display: grid;
-        grid-template-columns: 12px minmax(0, 1fr) auto auto;
+        grid-template-columns: 12px minmax(0, 1fr) auto;
         align-items: center;
         column-gap: 8px;
         padding: 4px 6px;
@@ -415,8 +482,12 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part~='row']:focus-within {
         background: var(--_mosaica-surface-2);
       }
+      /* A value the field's filter leaves out: its words faint, its colour dimmed. */
       [part~='row'][data-state='out'] [part='name'] {
         color: var(--_mosaica-ink-3);
+      }
+      [part~='row'][data-state='out'] [part='swatch'] {
+        opacity: 0.55;
       }
       [part~='row'][data-state='in'] [part='name'] {
         font-weight: 600;
@@ -459,19 +530,16 @@ export class MosaicaFieldCard extends MosaicaElement {
         gap: 3px;
         min-width: 0;
       }
+      /* The name and its parents on one line, cut at its end, or wrapped where long names wrap. */
       .names {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 0 6px;
         min-width: 0;
-      }
-      [part='name'],
-      [part='path'] {
-        min-width: 0;
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
         overflow-wrap: anywhere;
       }
       [part='path'] {
+        margin-left: 6px;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
@@ -511,26 +579,51 @@ export class MosaicaFieldCard extends MosaicaElement {
       :host([highlighting]) [part='count'] .sub {
         color: var(--_mosaica-highlight);
       }
+      /* Before a row's counts, a tick where the filter keeps its value and a pen where it is
+         highlighted, so neither is told by a colour alone. */
+      .cue {
+        display: inline-flex;
+        margin-right: 4px;
+        vertical-align: -1.5px;
+        color: var(--_mosaica-ink);
+      }
+      .cue.lit {
+        color: var(--_mosaica-highlight);
+      }
+      /* The verbs share the counts' cell and take their place while the row is hovered or the
+         keyboard's focus is in it. Hidden, they stay in the tab order, so Tab reaches them and
+         shows them. */
+      [part='count'],
+      [part='verbs'] {
+        grid-column: 3;
+        grid-row: 1;
+      }
       [part='verbs'] {
         display: flex;
-        gap: 2px;
+        justify-self: end;
+        gap: 4px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      [part~='row']:hover [part='verbs'],
+      [part~='row']:has(:focus-visible) [part='verbs'] {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      [part~='row']:hover [part='count'],
+      [part~='row']:has(:focus-visible) [part='count'] {
+        visibility: hidden;
       }
       [part='verbs'] button {
-        width: 24px;
-        height: 24px;
+        position: relative;
+        width: 22px;
+        height: 22px;
         display: grid;
         place-items: center;
-        border: 1px solid transparent;
+        border: 1px solid var(--_mosaica-line);
         border-radius: 5px;
-        color: var(--_mosaica-ink-2);
-      }
-      [part~='row']:hover [part='verbs'] button[aria-pressed='false'],
-      [part~='row']:focus-within [part='verbs'] button[aria-pressed='false'] {
-        border-color: var(--_mosaica-line);
         background: var(--_mosaica-surface);
-      }
-      [part='verbs'] button[aria-pressed='false']:hover {
-        background: var(--_mosaica-surface-3);
+        color: color-mix(in srgb, var(--_mosaica-ink) 82%, var(--_mosaica-surface));
       }
       /* On, a verb is filled and its icon solid. */
       [part='verbs'] button[aria-pressed='true'] {
@@ -545,10 +638,29 @@ export class MosaicaFieldCard extends MosaicaElement {
       [part='verbs'] button[aria-pressed='true'] svg {
         fill: currentColor;
       }
+      /* A screen with no pointer that hovers cannot show the verbs on hover: there they are
+         always drawn, beside the counts. */
+      @media (hover: none) {
+        [part~='row'] {
+          grid-template-columns: 12px minmax(0, 1fr) auto auto;
+        }
+        [part='verbs'] {
+          grid-column: 4;
+          opacity: 1;
+          pointer-events: auto;
+        }
+        [part~='row']:hover [part='count'],
+        [part~='row']:has(:focus-visible) [part='count'] {
+          visibility: visible;
+        }
+      }
       [part='more'] {
+        position: relative;
         align-self: flex-start;
-        min-height: 24px;
-        margin: 2px 0 0 20px;
+        margin: 4px 0 0 20px;
+      }
+      [part='more']::after {
+        inset: -4px 0;
       }
       .none {
         padding: 4px 0 0 20px;
@@ -620,80 +732,86 @@ export class MosaicaFieldCard extends MosaicaElement {
         color: var(--_mosaica-ink-2);
         font-variant-numeric: tabular-nums;
       }
-      .ranges {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 4px 10px;
-        margin-top: 6px;
-        font-size: 12px;
+      /* The button that opens the range box without a drag is drawn only while the keyboard has
+         it, over the start of the axis, so the card is no taller for it. */
+      [part='range'] {
+        position: absolute;
+        left: 0;
+        top: ${PLOT_HEIGHT + 2}px;
+        z-index: 1;
       }
-      .applied {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        font-weight: 500;
-      }
-      .applied[data-verb='highlight'] {
-        color: var(--_mosaica-highlight);
-      }
-      .applied svg {
-        flex: none;
+      /* Off screen it has no box either, which the shared button's height and padding would give it. */
+      [part='range']:not(:focus) {
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        border: 0;
       }
       [part='brush'] {
-        margin-top: 8px;
+        position: absolute;
+        top: ${PLOT_HEIGHT + 8}px;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
         padding: 10px;
         background: var(--_mosaica-surface);
         border: 1px solid var(--_mosaica-line);
         border-radius: var(--_mosaica-radius);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
         font-size: 12px;
+        white-space: nowrap;
         color: var(--_mosaica-ink-2);
       }
       [part='brush'] b {
         color: var(--_mosaica-ink);
         font-weight: 600;
       }
-      .chosen:not(:empty) {
-        margin-bottom: 8px;
+      .chosen:empty {
+        display: none;
       }
+      /* The two fields share the width the range's words and the buttons give the box, each wide
+         enough for a date. */
       .ends {
         display: flex;
-        gap: 8px;
-      }
-      .ends label {
-        flex: 1 1 0;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
+        align-items: center;
+        gap: 6px;
       }
       .ends input {
-        width: 100%;
-        height: 28px;
-        padding: 0 8px;
+        flex: 1 1 0;
+        width: 0;
+        min-width: 84px;
+        height: 26px;
+        padding: 0 6px;
         font-size: 12px;
       }
       /* A field that is not applied: a heavier border, with the words under it. */
       .ends input[aria-invalid='true'] {
-        padding: 0 7px;
+        padding: 0 5px;
         border: 2px solid var(--_mosaica-refuse);
       }
+      /* The words wrap inside the box, and make it no wider. With nothing to say they take no room. */
+      .mistakes {
+        display: flex;
+        flex-direction: column;
+        margin-top: -8px;
+      }
       .mistakes span:not(:empty) {
-        display: block;
-        margin-top: 6px;
+        width: 0;
+        min-width: 100%;
+        margin-top: 8px;
+        white-space: normal;
         color: var(--_mosaica-refuse);
         font-weight: 500;
       }
       [part='brush'] .acts {
         display: flex;
         gap: 6px;
-        margin-top: 8px;
       }
       [part='brush'] .acts button {
         display: flex;
         align-items: center;
         gap: 6px;
-        min-height: 24px;
         padding: 5px 10px;
         border-radius: 6px;
         font-size: 12px;
@@ -745,6 +863,8 @@ export class MosaicaFieldCard extends MosaicaElement {
   @state() accessor entry: RangeEntry | null = null;
   /** The part that opened the range box, which takes focus as it closes. */
   private entryOpener: 'plot' | 'range' = 'plot';
+  /** The ends of the last range the box could apply, as shares of the plot's width, which place the box. */
+  private boxAt: [number, number] = [0, 1];
   /** The control in the card that held focus as a render began, and the row it was in. */
   private focusedBefore: {el: HTMLElement; row: number} | null = null;
 
@@ -1192,8 +1312,10 @@ export class MosaicaFieldCard extends MosaicaElement {
         kind === 'category' ? this.toggleValue(r.key, v) : kind === 'bool' ? this.toggleBool(r.key as BoolKey, v) : this.toggleCluster(r.key, r.name === UNNAMED ? null : r.name, v);
       const sub = out || r.sub === null ? null : approx + countText(r.sub);
       const all = r.all === null || (!out && same) ? null : approx + countText(r.all);
+      // A tick where the filter keeps the value and the swatch stands where the tick would, and a pen where it is highlighted.
+      const cues = html`${inFilter && r.swatch ? html`<span class="cue">${icon('check', 11, 2.4)}</span>` : nothing}${onLit ? html`<span class="cue lit">${icon('highlight', 11, 1.6)}</span>` : nothing}`;
       // The figures as they are drawn, and then for a reader, each with what it counts.
-      const counts = html`<span part="count" aria-hidden="true">${out ? (all ?? '') : html`<span class="sub">${sub ?? ''}</span>${all === null ? '' : ` / ${all}`}`}</span
+      const counts = html`<span part="count" aria-hidden="true">${cues}${out ? (all ?? '') : html`<span class="sub">${sub ?? ''}</span>${all === null ? '' : ` / ${all}`}`}</span
         ><span class="sr-only">${[sub === null ? '' : `${sub} ${counted}`, all === null ? '' : `${all} matching`].filter(Boolean).join(', ')}</span>`;
       // A press on a row filters to its value or cluster, as its Filter button does; the keyboard
       // reaches the buttons.
@@ -1203,7 +1325,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         }}>
         <span class="mark">${mark}</span>
         <span class="label">
-          <span class="names"><span part="name" ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path">${r.path}</span>` : nothing}</span>
+          <span class="names"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path" title=${r.path}>${r.path}</span>` : nothing}</span>
           <span class="bars" aria-hidden="true"><span part="bar-match" style=${`width:${width(out ? 0 : pct(r.all, allTotal))}`}></span><span part="bar-subject" style=${`width:${width(out ? 0 : pct(r.sub, subTotal))}${r.swatch && !r.unmet ? `;background:${r.swatch}` : ''}`}></span></span>
         </span>
         ${counts}
@@ -1274,10 +1396,10 @@ export class MosaicaFieldCard extends MosaicaElement {
       const range = held(verb);
       return range && lo !== undefined ? between(verb, range.gte, range.lte) : nothing;
     };
-    // The range each position holds, in words beside its icon, since the bands are outlines alone.
+    // The range each position holds, in words for a reader, since the bands are outlines alone.
     const applied = (verb: ClauseVerb) => {
       const range = held(verb);
-      return range ? html`<span class="applied" data-verb=${verb}>${icon(verb, 12, 1.8)}${verb === 'filter' ? 'Filter' : 'Highlight'}: ${words(range.gte, range.lte)}</span>` : nothing;
+      return range ? html`<span class="applied sr-only" data-verb=${verb}>${verb === 'filter' ? 'Filter' : 'Highlight'}: ${words(range.gte, range.lte)}. </span>` : nothing;
     };
     const brush = this.brush;
     const range = brush && bins.length > 0 ? this.brushRange(bins, brush, timestamp, whole) : null;
@@ -1329,16 +1451,19 @@ export class MosaicaFieldCard extends MosaicaElement {
     const order = !entry || !backwards(entry) || !(entry.from.checked || entry.to.checked) ? '' : timestamp ? 'From is later than To. Type an earlier From or a later To.' : 'From is above To. Type a lower From or a higher To.';
     const described = (own: string, id: string) => [own ? id : '', order ? 'order-error' : ''].filter(Boolean).join(' ') || nothing;
     const count = typed ? countWithin(bins, typed.gte, typed.lte, discrete) : null;
+    // The box stands under the range it holds, and stays where it is while a field holds no range.
+    if (typed && lo !== undefined) this.boxAt = [typed.gte === null ? 0 : at(typed.gte), typed.lte === null ? 1 : at(typed.lte)];
     const box = entry
-      ? html`<div part="brush" role="dialog" aria-label=${`${title}: range`} @keydown=${this.onBrushKey}>
+      ? html`<div part="brush" role="dialog" aria-label=${`${title}: range`} style=${this.brushPlace()} @keydown=${this.onBrushKey} @focusout=${this.onBrushLeft}>
           <div class="chosen">${typed ? html`<b>${words(typed.gte, typed.lte)}</b>${count === null ? nothing : html` · ${approx}${countText(count)} items`}` : nothing}</div>
           <div class="ends">
-            <label><span>From</span><input part="brush-from" type="text" autocomplete="off" aria-label=${`${title}: from`} placeholder=${lo === undefined ? nothing : endText(lo, timestamp)}
+            <input part="brush-from" type="text" autocomplete="off" aria-label=${`${title}: from`} title="From" placeholder=${lo === undefined ? nothing : endText(lo, timestamp)}
               aria-invalid=${fromMistake || order ? 'true' : nothing} aria-describedby=${described(fromMistake, 'from-error')} .value=${entry.from.text}
-              @input=${(e: Event) => type('from', e, false)} @change=${(e: Event) => type('from', e, true)} /></label>
-            <label><span>To</span><input part="brush-to" type="text" autocomplete="off" aria-label=${`${title}: to`} placeholder=${last === undefined ? nothing : endText(last, timestamp)}
+              @input=${(e: Event) => type('from', e, false)} @change=${(e: Event) => type('from', e, true)} />
+            <span aria-hidden="true">–</span>
+            <input part="brush-to" type="text" autocomplete="off" aria-label=${`${title}: to`} title="To" placeholder=${last === undefined ? nothing : endText(last, timestamp)}
               aria-invalid=${toMistake || order ? 'true' : nothing} aria-describedby=${described(toMistake, 'to-error')} .value=${entry.to.text}
-              @input=${(e: Event) => type('to', e, false)} @change=${(e: Event) => type('to', e, true)} /></label>
+              @input=${(e: Event) => type('to', e, false)} @change=${(e: Event) => type('to', e, true)} />
           </div>
           <div class="mistakes" role="status"><span id="from-error">${fromMistake}</span><span id="to-error">${toMistake}</span><span id="order-error">${order}</span></div>
           <div class="acts">
@@ -1373,14 +1498,18 @@ export class MosaicaFieldCard extends MosaicaElement {
           ${clauseBand('filter')}${clauseBand('highlight')}${brushBand}
         </div>
         ${ramp}${axis}
-        <div class="ranges">
-          <button part="range" class="btn small" type="button" aria-haspopup="dialog" aria-expanded=${entry ? 'true' : 'false'} aria-label=${`Set range of ${title}`}
-            @click=${() => (this.entry ? (this.entry = null) : open('range'))}>Set range</button>
-          ${applied('filter')}${applied('highlight')}
-        </div>
-        ${box}${table}
+        <button part="range" class="btn small sr-only" type="button" aria-haspopup="dialog" aria-expanded=${entry ? 'true' : 'false'} aria-label=${`Set range of ${title}`}
+          @click=${() => (this.entry ? (this.entry = null) : open('range'))}>Set range</button>
+        ${applied('filter')}${applied('highlight')}${box}${table}
         <span class="sr-only" role="status" aria-live="polite">${said}</span>
       </div>`;
+  }
+
+  /** Where the range box stands: under its range, from the range's left end or, on the right half, its right, and never past the plot. */
+  private brushPlace(): string {
+    const [from, to] = this.boxAt;
+    const room = 'calc(100% - 210px)';
+    return from + to < 1 ? `left:clamp(0px, ${(from * 100).toFixed(2)}%, ${room})` : `right:clamp(0px, ${((1 - to) * 100).toFixed(2)}%, ${room})`;
   }
 
   /** The figures in the heading: how many hold a value and their mean, or while folded their range. */
@@ -1442,9 +1571,11 @@ export class MosaicaFieldCard extends MosaicaElement {
     this.focusOpener();
   }
 
-  /** Give focus back to the plot or to Set range, whichever opened the range box. */
+  /** Give focus back to the plot or to Set range, whichever opened the range box, unless the box is open again by then. */
   private focusOpener(): void {
-    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>(`[part="${this.entryOpener}"]`)?.focus());
+    void this.updateComplete.then(() => {
+      if (!this.entry) this.renderRoot.querySelector<HTMLElement>(`[part="${this.entryOpener}"]`)?.focus();
+    });
   }
 
   /** Which bin a pointer is over. */
@@ -1499,6 +1630,16 @@ export class MosaicaFieldCard extends MosaicaElement {
     const to = Math.min(n - 1, Math.max(0, b.to + (this.brush ? step : 0)));
     this.brush = e.shiftKey ? {from: b.from, to} : {from: to, to};
   }
+
+  /**
+   * The box lies over what is under the plot, so it closes as focus goes on to that. Focus that
+   * goes to nothing has not left, and a box already taken off the page has nothing to close.
+   */
+  private onBrushLeft = (e: FocusEvent): void => {
+    const box = e.currentTarget as HTMLElement;
+    const to = e.relatedTarget as Node | null;
+    if (box.isConnected && to && !box.contains(to)) this.entry = null;
+  };
 
   private onBrushKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;

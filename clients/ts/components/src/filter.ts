@@ -185,6 +185,9 @@ export class MosaicaFilter extends MosaicaElement {
         min-width: 0;
       }
       .opt .name {
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
         overflow-wrap: anywhere;
       }
       /* The matched span the server gave. */

@@ -15,9 +15,12 @@ import {chrome, tokens} from './tokens.js';
 const SEARCH_DEBOUNCE_MS = 250;
 /** The top-level clusters asked for, to rank by count while the box is empty. */
 const TOP_LEVEL_ROWS = 50;
-/** A path of parents' names, nearest last, led by an ellipsis where there are parents further up. */
-function pathText(path: readonly string[], beyond: boolean): string {
-  return `${beyond ? '… › ' : ''}${path.join(' › ')}`;
+/**
+ * A path of `n` of its nearest parents, nearest last, led by an ellipsis where parents further up
+ * are left out.
+ */
+function pathText(path: readonly string[], beyond: boolean, n: number): string {
+  return `${beyond || n < path.length ? '… › ' : ''}${path.slice(path.length - n).join(' › ')}`;
 }
 
 /** How many parents a match's path is walked up, nearest first. */
@@ -120,8 +123,12 @@ export class MosaicaClusterFilter extends MosaicaElement {
       }
       [part='name'],
       [part='path'] {
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
         overflow-wrap: anywhere;
       }
+      /* On one line, shortened from the left a whole name at a time, so the nearest parents stay; see pathText. */
       [part='path'] {
         font-size: 12px;
         font-weight: 400;
@@ -326,7 +333,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
       this.search = '';
       this.found = null;
       this.listOpen = false;
-      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: offer.path && offer.path.length > 0 ? pathText(offer.path, offer.beyond) : '', rung: row.rung});
+      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: offer.path && offer.path.length > 0 ? pathText(offer.path, offer.beyond, offer.path.length) : '', rung: row.rung});
       return;
     }
     const members = s.get('filters').members;
@@ -373,9 +380,46 @@ export class MosaicaClusterFilter extends MosaicaElement {
     else super.focus(options);
   }
 
+  /** How many of each offer's parents its path names, where all of them do not fit; by `mosaica_id`. */
+  private pathFits = new Map<bigint, number>();
+  /** The rows and width {@link fitPaths} last measured. */
+  private pathsMeasured = '';
+
+  /**
+   * Where a path is kept to one line, name as many of each listed path's nearest parents as fit
+   * it, dropping whole names from the left. Measured with the line's own font, after the list is
+   * placed. A path that wraps names them all.
+   */
+  private fitPaths(): void {
+    // Only while the list shows, and only when its rows or its width changed since last measured.
+    const shown = this.listOpen ? Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part="path"][data-id]')) : [];
+    const oneLine = shown[0] ? getComputedStyle(shown[0]).whiteSpace === 'nowrap' : false;
+    const key = `${oneLine}|${shown[0]?.clientWidth ?? 0}|${shown.map((el) => `${el.dataset.id}:${el.title}`).join(',')}`;
+    if (shown.length === 0 || key === this.pathsMeasured) return;
+    this.pathsMeasured = key;
+    const context = !oneLine || typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+    let changed = false;
+    for (const el of shown) {
+      const id = BigInt(el.dataset.id!);
+      const o = this.listed()?.find((x) => x.row.mosaicaId === id);
+      if (!o?.path) continue;
+      let n = o.path.length;
+      if (context && el.clientWidth > 0) {
+        context.font = getComputedStyle(el).font;
+        while (n > 1 && context.measureText(pathText(o.path, o.beyond, n)).width > el.clientWidth) n -= 1;
+      }
+      if ((this.pathFits.get(id) ?? o.path.length) !== n) {
+        this.pathFits.set(id, n);
+        changed = true;
+      }
+    }
+    if (changed) this.requestUpdate();
+  }
+
   protected override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
     this.floating.update();
+    this.fitPaths();
     if (changed.has('activeId')) this.renderRoot.querySelector('[part~="option"][data-active]')?.scrollIntoView({block: 'nearest'});
     this.awaited.track(this.listOpen && this.isConnected && this.refusal === null && this.listed() === null);
     // Counted only while the list is open: a closed list shows no counts, so asks for none.
@@ -412,11 +456,12 @@ export class MosaicaClusterFilter extends MosaicaElement {
     const option = (o: Offer) => {
       const name = artifactName(o.row);
       const count = countOf(o);
-      const path = o.path && o.path.length > 0 ? pathText(o.path, o.beyond) : '';
+      const full = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, o.path.length) : '';
+      const path = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, this.pathFits.get(o.row.mosaicaId) ?? o.path.length) : '';
       return html`<button type="button" part="option" role="option" id=${`c-${o.row.mosaicaId}`} tabindex="-1" data-id=${idString(o.row.mosaicaId)} ?data-active=${o === active}
         aria-selected=${on.has(o.row.mosaicaId) ? 'true' : 'false'}
         @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.toggle(o)}>
-        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path"><bdi>${path}</bdi></span>` : nothing}</span>
+        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
         ${count === undefined ? nothing : html`<span part="value-count">${count.toLocaleString('en-GB')}</span>`}
       </button>`;
     };
