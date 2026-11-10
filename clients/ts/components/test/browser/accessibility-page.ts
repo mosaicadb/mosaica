@@ -1,7 +1,7 @@
 import '../../src/index.js';
 import type {AggregateSpec, Artifact, ArtifactsProjection, BrowseRow, ItemDetail, Layer, Meta, RegionProjection, ViewInfo} from '@mosaicajs/client';
 import {SessionArtifactTable, attachedTextOf, servedLineage} from '@mosaicajs/client/internal';
-import {aggregateEntry, fakeStore, meta, registered, scalar, settle, status, type AggregateTableSpec, type FakeStore} from '../fake-store.js';
+import {aggregateEntry, deepText, fakeStore, meta, registered, scalar, settle, status, type AggregateTableSpec, type FakeStore} from '../fake-store.js';
 import {clippedText, contrastFault, crowdedTargets, focusStop, forgetStops, spaceText, textElements, wideContent} from './accessibility-checks.js';
 
 // Built by `accessibility.browser.ts` with Vite from the packages' sources. A page with a language,
@@ -251,8 +251,30 @@ const WIDE: Record<string, () => Promise<unknown>> = {
     await settled();
   },
   basemap: () => explorer('basemap="world"'),
-  density: () => explorer('density="smooth"')
+  density: () => explorer('density="smooth"'),
+  'range-invalid': async () => {
+    const s = await explorer(FIELDS);
+    // The compact panel folds its cards; open the number's.
+    if (fieldCard(s, 'population').querySelector('[part="range"]') === null) await s.press(fieldCard(s, 'population').querySelector('[part="fold"]'));
+    await s.press(fieldCard(s, 'population').querySelector('[part="range"]'));
+    const from = fieldCard(s, 'population').querySelector<HTMLInputElement>('[part="brush-from"]')!;
+    from.value = '1,5';
+    for (const type of ['input', 'change']) from.dispatchEvent(new Event(type, {bubbles: true, composed: true}));
+    await settled();
+  },
+  'region-counted': async () => {
+    const s = await explorer();
+    // A region is drawn, and the query that counts it runs and then finishes.
+    s.store.set('region', {...REGION, status: 'loading'});
+    await said(s, {querying: true});
+    s.store.set('region', REGION);
+    s.store.set('view', {...s.store.get('view'), inView: {...COUNTS, visible: REGION.visible!, matched: REGION.matched}});
+    await said(s, {});
+  }
 };
+
+/** The states built again at the width of the explorer's compact form, where its panel folds its cards. */
+const COMPACT = ['rest', 'fields', 'filtered', 'layers', 'item', 'region', 'refused', 'range-invalid'];
 
 /** Each state of the explorer's narrow form, by name: its bar of buttons, and each sheet open. */
 const NARROW: Record<string, () => Promise<unknown>> = {
@@ -343,8 +365,46 @@ async function colourEditor(): Promise<void> {
   await settled();
 }
 
-const LOOSE: Record<string, () => Promise<unknown>> = {elements, 'colour-editor': colourEditor};
+/** A hierarchy 320 px wide with focus on a row's name, which shows the row's buttons in place of its counts. */
+async function hierarchyRow(): Promise<void> {
+  stageEl.className = 'loose';
+  stageEl.innerHTML = '<div style="width: 320px"><mosaica-hierarchy></mosaica-hierarchy></div>';
+  const hierarchy = stageEl.querySelector('mosaica-hierarchy') as HTMLElement & {store: unknown};
+  hierarchy.store = looseStore();
+  await settled();
+  await settled();
+  hierarchy.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-id="2"] [part="name"]')!.focus();
+  await settled();
+}
+
+/** A filter panel that shows chips alone, after the × of its last chip is pressed. */
+async function noFilters(): Promise<void> {
+  stageEl.className = 'loose';
+  stageEl.innerHTML = '<div style="width: 320px"><mosaica-filter-panel chips-only></mosaica-filter-panel></div>';
+  const store = fakeStore({meta: META, status: status({})});
+  store.set('view', {...store.get('view'), id: 'places'});
+  const none = store.get('filters');
+  store.set('filters', {...none, draft: {filter: {feature_class: {family: 'category', keys: ['P']}}, highlight: {}}});
+  const panel = stageEl.querySelector('mosaica-filter-panel') as HTMLElement & {store: unknown};
+  panel.store = store;
+  await settled();
+  const remove = panel.shadowRoot!.querySelector<HTMLElement>('[part="chip"] > button:last-child')!;
+  remove.focus();
+  remove.click();
+  // The store here applies nothing itself: publish the filters the press asked for.
+  store.set('filters', none);
+  await settled();
+}
+
+const LOOSE: Record<string, () => Promise<unknown>> = {elements, 'hierarchy-row': hierarchyRow, 'no-filters': noFilters, 'colour-editor': colourEditor};
 const SCENES: Record<string, () => Promise<unknown>> = {...WIDE, ...NARROW, ...LOOSE};
+
+/** The elements under the stage that match `selector`, through shadow roots. */
+function within(selector: string, root: ParentNode = stageEl): Element[] {
+  return [...root.querySelectorAll('*')].flatMap((el) => [...(el.matches(selector) ? [el] : []), ...(el.shadowRoot ? within(selector, el.shadowRoot) : [])]);
+}
+
+const strips = () => within('mosaica-status');
 
 /** The element an axe target names: selectors, each after the first inside the last one's shadow root. */
 function at(path: string[]): Element | null {
@@ -354,7 +414,7 @@ function at(path: string[]): Element | null {
 }
 
 Object.assign(window, {
-  scenes: {wide: Object.keys(WIDE), narrow: Object.keys(NARROW), loose: Object.keys(LOOSE)},
+  scenes: {wide: Object.keys(WIDE), compact: COMPACT, narrow: Object.keys(NARROW), loose: Object.keys(LOOSE)},
   /** Build the named state from nothing. */
   async show(name: string): Promise<void> {
     const scene = SCENES[name];
@@ -380,18 +440,27 @@ Object.assign(window, {
       return stop;
     },
     stop: () => focusStop(stageEl),
-    /** What is wrong with the contrast of each element an axe target names, and of every piece of text drawn over a map. */
+    /**
+     * What is wrong with the contrast of each element an axe target names, of every piece of text
+     * drawn over a map and of every piece of text on a status strip.
+     */
     contrast(paths: string[][]): string[] {
       const named = paths.map((path) => at(path) ?? path.join(' >> '));
-      const overMaps = [...stageEl.querySelectorAll('mosaica-map'), ...[...stageEl.querySelectorAll('mosaica-explorer')].flatMap((e) => [...e.shadowRoot!.querySelectorAll('mosaica-map')])].flatMap((map) => textElements(map.shadowRoot!));
+      const drawn = [...within('mosaica-map'), ...strips()].flatMap((el) => textElements(el.shadowRoot!));
       const faults = new Set<string>();
-      for (const el of new Set([...named, ...overMaps])) {
+      for (const el of new Set([...named, ...drawn])) {
         // The Layers popover's background images are the shades at its top and bottom edges while it scrolls.
         const fault = typeof el === 'string' ? `nothing at ${el}` : contrastFault(el, '[part="layers-popover"]');
         if (fault) faults.add(fault);
       }
       return [...faults].sort();
-    }
+    },
+    /** What the status strips' cells for figures that wait for an answer hold, as text. */
+    waiting: () => strips().flatMap((strip) => [...strip.shadowRoot!.querySelectorAll('.cell.dim')].map((cell) => deepText(cell).replace(/\s+/g, ' ').trim())),
+    /** The height in pixels of each status strip that is drawn. */
+    stripHeights: () => strips().map((strip) => strip.shadowRoot!.querySelector('[part="strip"]')!.getBoundingClientRect().height).filter((h) => h > 0),
+    /** How many live regions under the stage hold `text`. */
+    saying: (text: string) => within('[role="status"], [role="alert"], [aria-live]').filter((el) => deepText(el).includes(text)).length
   },
   ready: true
 });
