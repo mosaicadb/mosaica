@@ -697,7 +697,7 @@ describe('<mosaica-field-card> on a number', () => {
     }
   });
 
-  it('takes a comma in a number only where it groups thousands, and says so of one that does not', async () => {
+  it('takes a comma or a space in a number only where it groups thousands, and says so of one that does not', async () => {
     const {host, card, store} = await mountCard('score');
     await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 90]), total: 210}]);
     (deep(host, '[part="range"]') as HTMLButtonElement).click();
@@ -720,14 +720,29 @@ describe('<mosaica-field-card> on a number', () => {
     filter.click();
     await settle(host);
     expect(lastFilters(store)).toBeUndefined();
-    for (const wrong of ['12,34', '1,2345', ',500', '1 000']) {
+    // Nor is a space between digits that are not in threes, nor two kinds of mark in one number.
+    for (const wrong of ['12,34', '1,2345', ',500', '1 00', '1  000', '10 0000', '1,234 567', '1 234,567']) {
       await type(from, wrong);
       expect(from.getAttribute('aria-invalid'), wrong).toBe('true');
     }
+    await type(from, '1 00');
+    expect(card.shadowRoot!.getElementById(from.getAttribute('aria-describedby')!)!.textContent).toMatch(/space/i);
     await type(from, '1.5');
     await type(to, '1,234,567.25');
     filter.click();
     expect(lastFilters(store)).toEqual({filter: {score: {family: 'numeric', gte: 1.5, lte: 1234567.25}}, highlight: {}});
+    // A space, or the narrow space some locales print, groups thousands as a comma does.
+    for (const [text, value] of [['1 000', 1000], ['1 234 567.25', 1234567.25], ['1\u202f234\u202f567', 1234567], ['-12 500', -12500]] as const) {
+      (deep(host, '[part="range"]') as HTMLButtonElement).click();
+      await settle(host);
+      const field = deep(host, '[part="brush-from"]') as HTMLInputElement;
+      await type(field, text);
+      await type(deep(host, '[part="brush-to"]') as HTMLInputElement, '');
+      expect(field.hasAttribute('aria-invalid'), text).toBe(false);
+      (deep(host, '[part="brush-filter"]') as HTMLButtonElement).click();
+      await settle(host);
+      expect(lastFilters(store)!.filter['score'], text).toEqual({family: 'numeric', gte: value, lte: null});
+    }
   });
 
   it('counts a range in the box only where its ends are the bins’ edges', async () => {

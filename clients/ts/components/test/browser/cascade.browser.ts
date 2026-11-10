@@ -252,14 +252,16 @@ describe('the filter panel', () => {
 
 describe('the filter panel under a pointer and a keyboard', () => {
   const LONG = 'a value with a name far too long to fit on one line of a card';
+  /** A column whose caption is longer than a folded card's line in the compact layout. */
+  const LONG_FIELD = 'toponymy_cluster_of_the_place_name';
 
   /**
    * A panel 340 px wide over a category the map is coloured by and a date, the category filtered to
    * one value and the date highlighted by a range, on a store that publishes what is set on it.
    */
-  async function panel(attributes = 'pinned="archive submitted_at"'): Promise<Page> {
-    const p = await page(`<div style="width: 340px"><mosaica-filter-panel ${attributes}></mosaica-filter-panel></div>`);
-    await p.evaluate(async (long) => {
+  async function panel(attributes = 'pinned="archive submitted_at"', width = 340, css = ''): Promise<Page> {
+    const p = await page(`<div style="width: ${width}px"><mosaica-filter-panel ${attributes}></mosaica-filter-panel></div>`, css);
+    await p.evaluate(async ([long, longField]) => {
       const values = [
         {key: 'cs', count: 30},
         {key: 'math', count: 20},
@@ -269,7 +271,8 @@ describe('the filter panel under a pointer and a keyboard', () => {
       const table = (n: number, columns: Record<string, (i: number) => unknown>) => ({numRows: n, getChild: (name: string) => (columns[name] ? {get: columns[name]} : null)});
       const category = table(values.length, {group: () => 'listed', key: (i) => values[i]!.key, title: () => null, count: (i) => BigInt(values[i]!.count)});
       const histogram = table(bins.length, {group: () => 'listed', lower: (i) => bins[i]!.lower, upper: (i) => bins[i]!.upper, count: (i) => BigInt(bins[i]!.count)});
-      const answer = (rows: {numRows: number}, total: number) => ({status: 'shown', view: 's0', palette: null, refusal: null, summaries: [null], result: {tables: [{grouping: 0, total, referenceTotal: null, groups: rows.numRows, sample: null, rows}], region: null, recomposed: false, identityKey: 'ik', next: null}});
+      // The field holds more values than the three listed, so its card offers the rest.
+      const answer = (rows: {numRows: number}, total: number) => ({status: 'shown', view: 's0', palette: null, refusal: null, summaries: [null], result: {tables: [{grouping: 0, total, referenceTotal: null, groups: rows.numRows + 6, sample: null, rows}], region: null, recomposed: false, identityKey: 'ik', next: null}});
       const listeners = new Set<() => void>();
       const publish = () => listeners.forEach((fn) => fn());
       let aggregates = new Map<string, unknown>();
@@ -283,7 +286,8 @@ describe('the filter panel under a pointer and a keyboard', () => {
           views: [],
           filterOperands: [
             {column: 'archive', family: 'category', operands: ['in']},
-            {column: 'submitted_at', family: 'numeric', operands: ['range']}
+            {column: 'submitted_at', family: 'numeric', operands: ['range']},
+            {column: longField, family: 'keyword', operands: ['eq']}
           ],
           selection: {maxAggregateTop: 1000, maxAggregateNamed: 1000}
         },
@@ -334,7 +338,7 @@ describe('the filter panel under a pointer and a keyboard', () => {
         await el.updateComplete;
         for (const card of el.shadowRoot!.querySelectorAll('mosaica-field-card')) await (card as unknown as {updateComplete: Promise<unknown>}).updateComplete;
       }
-    }, LONG);
+    }, [LONG, LONG_FIELD] as const);
     return p;
   }
 
@@ -368,13 +372,11 @@ describe('the filter panel under a pointer and a keyboard', () => {
       const cards = [...root.querySelectorAll('mosaica-field-card')].map((c) => c.shadowRoot!);
       const targets = [
         ...root.querySelectorAll('[part="chip"] button, [part="clear-highlight"], [part="clear"], [part="add"]'),
-        ...cards.flatMap((c) => [...c.querySelectorAll('[part="swatch"], [part="verbs"] button, [part="paint"], [part="fold"], [part="range"]')])
+        ...cards.flatMap((c) => [...c.querySelectorAll('[part="swatch"], [part="verbs"] button, [part="paint"], [part="fold"], [part="range"], [part="more"]')])
       ];
       const box = (e: Element) => e.getBoundingClientRect();
       const label = (e: Element) => `${e.getAttribute('part') ?? e.getAttribute('aria-label')} ${Math.round(box(e).width)}x${Math.round(box(e).height)}`;
-      // The chip's own text and Clear all are lines of text, which a target's least size leaves out.
-      const sized = targets.filter((e) => !['edit', 'clear'].includes(e.getAttribute('part') ?? ''));
-      const small = sized.filter((e) => box(e).width < 23.99 || box(e).height < 23.99).map(label);
+      const small = targets.filter((e) => box(e).width < 23.99 || box(e).height < 23.99).map(label);
       const over: string[] = [];
       for (let i = 0; i < targets.length; i++)
         for (let j = i + 1; j < targets.length; j++) {
@@ -385,14 +387,14 @@ describe('the filter panel under a pointer and a keyboard', () => {
       row.querySelector<HTMLElement>('[part="filter"]')!.focus();
       const [count, verbs] = [row.querySelector('[part="count"]')!, row.querySelector('[part="verbs"]')!];
       return {
-        kinds: [...new Set(sized.map((e) => e.getAttribute('part') ?? 'chip-close'))].sort(),
+        kinds: [...new Set(targets.map((e) => e.getAttribute('part') ?? 'chip-close'))].sort(),
         small,
         over,
         count: {visibility: getComputedStyle(count).visibility, drawn: box(count).width > 0, beside: box(count).right <= box(verbs).left + 0.5},
         plot: getComputedStyle(cards[1]!.querySelector('[part="plot"]')!).touchAction
       };
     });
-    expect(seen.kinds).toEqual(['add', 'chip-close', 'clear-highlight', 'filter', 'fold', 'highlight', 'paint', 'range', 'swatch']);
+    expect(seen.kinds).toEqual(['add', 'chip-close', 'clear', 'clear-highlight', 'edit', 'filter', 'fold', 'highlight', 'more', 'paint', 'range', 'swatch']);
     expect(seen.small).toEqual([]);
     expect(seen.over).toEqual([]);
     expect(seen.count).toEqual({visibility: 'visible', drawn: true, beside: true});
@@ -424,6 +426,26 @@ describe('the filter panel under a pointer and a keyboard', () => {
     const drawn = (part: string) => verbs.locator(`[part="${part}"]`).evaluate((b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b.querySelector('svg')!).fill]);
     expect(await drawn('filter')).toEqual(['rgb(27, 29, 33)', 'rgb(255, 255, 255)']);
     expect((await drawn('highlight'))[1]).toBe('none');
+  });
+
+  it('wraps a folded card’s name in the compact layout, at the width an explorer 900 px wide gives it and with its text spaced out', async () => {
+    // The panel of a compact explorer is 264 px wide; the spacing is what a reader's own style sheet may force.
+    const p = await panel(`compact pinned="archive ${LONG_FIELD}"`, 264, 'div { letter-spacing: 0.12em; word-spacing: 0.16em; }');
+    const seen = await p.evaluate((field) => {
+      const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
+      const card = root.querySelector(`mosaica-field-card[data-field="${field}"]`)!;
+      const title = card.shadowRoot!.querySelector('[part="title"]')!;
+      const short = root.querySelector('mosaica-field-card[data-field="archive"]')!.shadowRoot!.querySelector('[part="title"]')!;
+      const fold = card.shadowRoot!.querySelector('[part="fold"]')!.getBoundingClientRect();
+      return {
+        folded: card.hasAttribute('folded') && card.hasAttribute('compact'),
+        whole: title.scrollWidth <= title.clientWidth + 1 && getComputedStyle(title).textOverflow !== 'ellipsis',
+        lines: title.getBoundingClientRect().height > short.getBoundingClientRect().height * 1.5,
+        clear: title.getBoundingClientRect().right <= fold.left + 0.5,
+        inside: fold.right <= card.getBoundingClientRect().right + 0.5
+      };
+    }, LONG_FIELD);
+    expect(seen).toEqual({folded: true, whole: true, lines: true, clear: true, inside: true});
   });
 
   it('under chips-only, puts focus on words it draws once the last chip is removed from the keyboard', async () => {

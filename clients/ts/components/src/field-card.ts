@@ -87,18 +87,21 @@ type End = {text: string; value: number | null | undefined; checked: boolean};
 /** The range box's two ends. */
 type RangeEntry = {from: End; to: End};
 
-/** Digits in threes between commas, as a count is written: `1,234,567` and `1,250.5`, not `1,5`. */
-const GROUPED = /^[+-]?\d{1,3}(,\d{3})+(\.\d*)?$/;
+/** The marks that may group a number's thousands: a comma, a space and a narrow no-break space. */
+const GROUP_MARKS = /[, \u202f]/g;
+/** Digits in threes between one such mark, as a count is written: `1,234,567` and `1 250.5`, not `1,5` or `1,234 567`. */
+const GROUPED = /^[+-]?\d{1,3}([, \u202f])\d{3}(\1\d{3})*(\.\d*)?$/;
 
 /**
  * The value a range box's field stands for; `upper` reads a date as the last instant of the period
- * it names. In a number a comma is taken only where it groups thousands, so `1,5` is no number.
+ * it names. In a number a comma or a space is taken only where it groups thousands, so `1,5` is no
+ * number.
  */
 function endValue(text: string, timestamp: boolean, upper: boolean): number | null | undefined {
   const t = text.trim();
   if (t === '') return null;
   if (timestamp) return parseDateText(t, upper) ?? undefined;
-  const n = Number(GROUPED.test(t) ? t.replace(/,/g, '') : t);
+  const n = Number(GROUPED.test(t) ? t.replace(GROUP_MARKS, '') : t);
   return Number.isFinite(n) ? n : undefined;
 }
 
@@ -330,12 +333,6 @@ export class MosaicaFieldCard extends MosaicaElement {
       :host([compact][folded]) [part='head'] {
         gap: 6px;
       }
-      /* One line; opening the card shows the name whole. */
-      :host([compact][folded]) [part='title'] {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
       .painted {
         display: inline-flex;
         flex: none;
@@ -529,7 +526,8 @@ export class MosaicaFieldCard extends MosaicaElement {
       }
       [part='more'] {
         align-self: flex-start;
-        margin: 4px 0 0 20px;
+        min-height: 24px;
+        margin: 2px 0 0 20px;
       }
       .none {
         padding: 4px 0 0 20px;
@@ -1300,7 +1298,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const mistake = (end: End, edge: number | undefined): string => {
       if (!end.checked || end.value !== undefined) return '';
       const said = `“${end.text.trim()}”`;
-      if (!timestamp) return `${said} is not a number. Type a number such as ${edge ?? 0}${end.text.includes(',') ? '; a comma only groups thousands, as in 1,250' : ''}.`;
+      if (!timestamp) return `${said} is not a number. Type a number such as ${edge ?? 0}${end.text.trim().search(GROUP_MARKS) < 0 ? '' : '; a comma or a space only groups thousands, as in 1,250'}.`;
       const day = shortDateText(edge ?? 0);
       return `${said} is not a date. Type a day such as ${day}, a month such as ${day.replace(/^\d+ /, '')}, or a year.`;
     };

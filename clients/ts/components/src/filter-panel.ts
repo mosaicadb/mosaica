@@ -46,7 +46,8 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * with the word on it, and pressing a chip opens its field's card. When a chip is removed, focus
  * moves to the × of the chip after it, else of the one before, else to Add field. Under
  * `chips-only` there is no Add field, so when the last chip is removed the panel shows the words
- * No filters, which take focus and go as focus leaves them.
+ * No filters, which take focus and go as focus leaves them; a chip that arrives while they hold
+ * focus takes it on its ×.
  *
  * A region selected in another view keeps filtering after the viewer switches away from it, and
  * shows as a chip naming its view, such as "Lasso in Topics". Pressing the chip switches back to
@@ -235,16 +236,21 @@ export class MosaicaFilterPanel extends MosaicaElement {
           animation: none;
         }
       }
+      /* A chip's text and Clear all are 24 px targets, which the line of chips does not grow for. */
       .chip .edit {
         display: inline-flex;
         flex: 0 1 auto;
         align-items: center;
+        min-width: 24px;
+        min-height: 24px;
+        margin: -4px 0;
         color: inherit;
         font: inherit;
         text-align: left;
       }
       [part='clear'] {
-        margin-left: auto;
+        min-height: 24px;
+        margin: -1px 0 -1px auto;
         padding: 0;
         font-size: 12px;
         color: var(--_mosaica-ink-2);
@@ -347,6 +353,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
   private leaving: {gone: HTMLElement; to: HTMLElement | null} | null = null;
   /** Whether the last chip was removed from a panel with nothing else to focus, which then says so. @internal */
   @state() accessor emptied = false;
+  /** Whether those words held focus as a render began. */
+  private wordsHeld = false;
   /** The keys of the fields shown, in the order they were first shown. */
   private listOrder: string[] = [];
   private readonly floating = new FloatingList(() => {
@@ -465,7 +473,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     this.settleFocus();
-    if (this.emptied && this.renderRoot.querySelector('[part="chip"]')) this.emptied = false;
+    // A chip that arrives takes the words' place, and their focus where they held it.
+    const arrived = this.emptied ? this.renderRoot.querySelector<HTMLElement>('[part="chip"] > button:last-child') : null;
+    if (arrived) {
+      this.emptied = false;
+      if (this.wordsHeld && (!document.activeElement || document.activeElement === document.body)) arrived.focus();
+    }
     if (changed.has('adding')) {
       if (this.adding) document.addEventListener('pointerdown', this.onPressOutsideAdd, true);
       else document.removeEventListener('pointerdown', this.onPressOutsideAdd, true);
@@ -792,6 +805,9 @@ export class MosaicaFilterPanel extends MosaicaElement {
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
+    let at = this.emptied && this.isConnected ? document.activeElement : null;
+    while (at && at.getRootNode() !== this.shadowRoot) at = at.shadowRoot?.activeElement ?? null;
+    this.wordsHeld = at?.classList.contains('emptied') ?? false;
     // The search box takes focus as the list opens.
     if (changed.has('adding') && this.adding) void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[part="add-search"]')?.focus());
   }

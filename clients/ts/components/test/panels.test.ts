@@ -1175,13 +1175,14 @@ describe('<mosaica-filter-panel>', () => {
       expect(deepAll(host, '[part]')).toHaveLength(0);
     });
 
-    it('under chips-only, drops those words when a filter is set again', async () => {
+    it('under chips-only, drops those words when a filter is set again, and moves the focus they held to the chip’s ×', async () => {
       const {host, panel, store} = await mountPanel({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}}, 'chips-only');
       await press(host, store, closes(host)[0]!);
       expect(focused(panel)).not.toBeNull();
       store.set('filters', filtersOf({filter: {archive: {family: 'category', keys: ['math']}}, highlight: {}}));
       await settle(host);
       expect(deepAll(host, '[part="chip"]')).toHaveLength(1);
+      expect(focused(panel)).toBe(closes(host)[0]);
       await press(host, store, closes(host)[0]!);
       // Removed with focus elsewhere, the last chip leaves nothing behind.
       const elsewhere = document.body.appendChild(document.createElement('button'));
