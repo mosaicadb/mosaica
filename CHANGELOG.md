@@ -22,6 +22,9 @@ container image.
   keyword filter and inside an aggregate's count, as it already did inside a text filter. Those
   requests used to run to their end, so a viewer changing filters quickly left the server
   computing answers nobody was waiting for.
+- The plain-HTML example's server abandons its request to Mosaica when the page abandons its
+  own. It used to read every proxied answer to the end, so Mosaica kept working on requests the
+  page had dropped.
 - The TypeScript store sends a request for a layer's artifacts again when Mosaica sheds it
   (`429`) or is still starting (`503`), as it does a map request. It used to give up at once, so
   the clusters and their labels stayed off the map until the camera next moved.

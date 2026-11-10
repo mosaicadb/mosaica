@@ -16,6 +16,8 @@ let upstream: Server;
 let app: Server;
 let base = '';
 const seen: {path: string; auth: string | undefined; body: string}[] = [];
+/** The paths of the upstream responses cut off before they ended. */
+const cut: string[] = [];
 
 const listen = (s: Server) => new Promise<number>((r) => s.listen(0, () => r((s.address() as {port: number}).port)));
 
@@ -33,6 +35,11 @@ beforeAll(async () => {
       for (const h of SIX) headers[h] = `v-${h}`;
       res.writeHead(200, headers);
       res.write('part-1;');
+      res.on('close', () => {
+        if (!res.writableEnded) cut.push(req.url ?? '');
+      });
+      // An answer still being worked on, which ends only if its reader goes away.
+      if (req.url === '/v1/slow') return;
       setTimeout(() => res.end('part-2'), 20);
     });
   });
@@ -82,6 +89,20 @@ describe('server.mjs', () => {
     const call = seen.find((s) => s.path === '/v1/viewport')!;
     expect(call.auth).toBe('Bearer tok-1');
     expect(call.body).toBe('{"k":0}');
+  });
+
+  it('abandons the request upstream when the page abandons its own, and not one it reads to the end', async () => {
+    const abandoned = new AbortController();
+    const r = await fetch(`${base}/v1/slow`, {method: 'POST', body: '{}', signal: abandoned.signal});
+    const reader = r.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe('part-1;');
+    expect(cut).toEqual([]);
+    abandoned.abort();
+    for (let waited = 0; cut.length === 0 && waited < 2000; waited += 10) await new Promise((done) => setTimeout(done, 10));
+    expect(cut).toEqual(['/v1/slow']);
+    // The server still answers.
+    expect(await (await fetch(`${base}/v1/viewport`, {method: 'POST', body: '{}'})).text()).toBe('part-1;part-2');
+    expect(cut).toEqual(['/v1/slow']);
   });
 
   it('serves the page with the bundle’s integrity hash filled in, and the bundle itself', async () => {
