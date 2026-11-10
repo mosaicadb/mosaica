@@ -8,7 +8,19 @@ container image.
 
 ## [Unreleased]
 
+### Added
+
+- `POST /v1/viewport` takes `space` beside `bbox`: `"wgs84"` gives the box in degrees of
+  longitude and latitude on a view with a map projection. The TypeScript client's
+  `ViewportRequest` and `region` filter take it too.
+
 ### Changed
+
+- **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
+  takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
+  inserted with. It took the view's own unit-square coordinates before, so a box in degrees
+  counted nothing. `sample` and `map` on the selection follow it. For a unit-square box, write
+  `filter({"region": {"bbox": [...], "space": "view"}})`.
 
 - `serve.filter_cache_bytes` defaults to 1 GiB, up from 256 MiB.
 - The filter cache keeps the rows a condition on a rendered column has read from the map and

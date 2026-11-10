@@ -26,9 +26,10 @@ if TYPE_CHECKING:
 #: How near expiry a held token may come before the next read gets another, in seconds.
 TOKEN_MARGIN = 60.0
 
-#: The `/v1/viewport` and `/v1/artifacts/viewport` fields the server reads as integers.
-# The latitude Web Mercator stops at, north and south.
+#: The latitude Web Mercator stops at, north and south.
 _MERCATOR_LATITUDE = 85.0511287798066
+
+#: The `/v1/viewport` and `/v1/artifacts/viewport` fields the server reads as integers.
 _VIEWPORT_INTEGERS = {"k", "artifact_budget", "underlay_offset", "per_tile", "budget", "palette_size"}
 
 #: The frame kinds of a `/v1/viewport` body, and the artifacts frame of a

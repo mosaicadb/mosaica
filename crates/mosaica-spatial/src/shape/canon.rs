@@ -80,8 +80,8 @@ impl std::fmt::Display for CanonError {
             }
             CanonError::NotACoordinate => write!(
                 f,
-                "a `wgs84` coordinate is outside ±180 longitude or ±90 latitude, and a value \
-                 outside that is not a coordinate (projections.md §2)"
+                "a `wgs84` coordinate is outside ±180 longitude or ±90 latitude; write degrees \
+                 within those bounds"
             ),
             CanonError::NoProjection => write!(
                 f,

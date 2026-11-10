@@ -288,8 +288,7 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  *
  * Coordinates are in the view's data coordinates, or with `space: 'wgs84'` in degrees of
  * longitude and latitude, which a view without a map projection refuses with `422`. A shape with
- * a very long boundary may be
- * answered for a slightly larger area; the response's {@link RegionVerdict} says so.
+ * a very long boundary may be answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
  * @category Filters
  */

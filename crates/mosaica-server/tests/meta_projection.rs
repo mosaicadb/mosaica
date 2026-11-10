@@ -280,7 +280,7 @@ async fn a_wgs84_box_is_answered_as_its_projected_box() {
         serde_json::json!({"view": "s0", "zoom": 4, "bbox": projected, "space": "view", "k": 50}),
     )
     .await;
-    assert_eq!(in_degrees.0, 200);
+    assert_eq!((in_degrees.0, in_view.0), (200, 200));
     assert!(!in_degrees.1.is_empty() && !in_degrees.2.is_empty());
     assert_eq!(in_degrees, in_view);
     // The same numbers with no `space` are view coordinates, and name a different box.
@@ -290,6 +290,7 @@ async fn a_wgs84_box_is_answered_as_its_projected_box() {
         serde_json::json!({"view": "s0", "zoom": 4, "bbox": degrees, "k": 50}),
     )
     .await;
+    assert_eq!(unstated.0, 200);
     assert_ne!(unstated.1, in_degrees.1);
 
     // The `region` filter, over the whole map.
@@ -313,7 +314,7 @@ async fn a_wgs84_box_is_answered_as_its_projected_box() {
         }),
     )
     .await;
-    assert_eq!(by_degrees.0, 200);
+    assert_eq!((by_degrees.0, by_view.0), (200, 200));
     assert!(matched(&by_degrees.1) > 0);
     assert!(matched(&by_degrees.1) < by_degrees.1.iter().map(|t| t.1).sum::<u64>());
     assert_eq!(matched(&by_degrees.1), matched(&by_view.1));

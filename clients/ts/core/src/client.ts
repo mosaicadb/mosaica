@@ -619,6 +619,7 @@ export class MosaicaClient {
     // leaving the field out.
     const body: Record<string, unknown> = {view: req.view, zoom: req.zoom};
     if (req.bbox) body.bbox = req.bbox;
+    if (req.space) body.space = req.space;
     // A tile prefix at depth 16 needs 32 bits, which a JSON number holds exactly.
     if (req.tiles) body.tiles = req.tiles.map(Number);
     if (req.k !== undefined) body.k = req.k;
