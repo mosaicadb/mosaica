@@ -6,7 +6,7 @@ How much memory and disc Mosaica needs depends on how many items you have and on
 
 A running server needs memory for two things: its caches, which have fixed limits, and the bundle's files, which use whatever is left.
 
-With the default limits, the caches and the paged reads add up to about 7.9 GiB. You can lower them for a small database, or raise them when many users each hold their own access attributes. [The caches](#the-caches) lists each one.
+With the default limits, what [the caches](#the-caches) lists adds up to about 7.7 GiB, and a few small fixed buffers, such as the request log's queue, add a little more. You can lower the limits for a small database, or raise them when many users each hold their own access attributes.
 
 The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap (`MemoryMax` under systemd, or the container's memory limit) to the cache limits plus the bundle's hot set, the parts your users read most. [How much to give a server](#how-much-to-give-a-server) explains how to choose both.
 
@@ -24,19 +24,18 @@ A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the b
 
 ### The caches
 
-Each cache has a limit you can set under `[serve]` in `mosaica.toml`:
+Each limit is set under `[serve]` in `mosaica.toml`, except where the table says it is fixed:
 
 | Key | Default | What it holds |
 |---|---|---|
 | `row_projection_cache_bytes` | 2 GiB | For each set of access attributes, view and shard, which rows that set may see. Shared by every session holding the same attributes |
 | `fragment_cache_bytes` | 1 GiB | For each distinct set of access attributes, the items it admits. Copies on disc, in the cache directory, outlive the memory |
-| `masked_count_cache_bytes` | 1 GiB | The counts, centroids and boxes of annotation levels served from a column, as each set of attributes sees them, and the tallies of number and timestamp fields. Empty without such a level |
-| `figures_disk_bytes` | 8 GiB | The same counts, kept on disc in the cache directory so that a restart reads them back |
+| `masked_count_cache_bytes` | 1 GiB | The counts, centroids and boxes of annotation levels served from a column, as each set of attributes sees them, and the tallies of number and timestamp fields. Empty without such a level. A copy on disc, bounded by `figures_disk_bytes` (8 GiB), lets a restart read them back |
 | `region_cache_bytes` | 256 MiB | Drawn filter regions broken into map tiles, shared between viewers |
 | `filter_cache_bytes` | 1 GiB | The items each filter condition matches (a `match`, a `phrase`, or a range, `eq` or `in` on a column), for each set of access attributes, until the next flush, coalesce or compaction. An entry is about 12 MB at 100 million items for a condition half of them match, scattered. Each request in flight can hold one more beside the limit. A filter answered over the whole map also keeps the map rows of the items it matches, and a condition on a rendered column read from the map's rows keeps the rows read so far and their matches, so a pan reads only what it brings into view |
 | `occupancy_cache_bytes` | 32 MiB | How many tiles at each zoom hold something a set of access attributes can see |
-
-Beside these, the server keeps what it subtracts and adds on each request for deleted, suppressed and newly ingested items, and the labels of denied rows, under fixed limits that come to 1.5 GiB. The paged reads, `POST /v1/items` and `POST /v1/artifacts`, share one more: two may run at once (`bulk_admission`), each holding up to seven pages of at most 64 MiB (`max_page_bytes`). The server logs what that comes to when it starts, as `bulk_read_memory_bytes=939524096`.
+| Recent changes (fixed) | 1.5 GiB | What the server subtracts and adds on each request for deleted, suppressed and newly ingested items, and the labels of denied rows |
+| Paged reads (`bulk_admission` × 7 × `max_page_bytes`) | 896 MiB | The pages of `POST /v1/items` and `POST /v1/artifacts` in flight: two reads at once, each holding up to seven pages of at most 64 MiB. The server logs the figure when it starts, as `bulk_read_memory_bytes` |
 
 ??? info "Sizing the annotation count caches"
     `masked_count_cache_bytes` bounds two caches, each to that size: the annotation counts, and the tallies of number and timestamp fields, which are under a kilobyte each.
@@ -56,7 +55,7 @@ Give the server its cache limits plus its hot set:
 - **Cache limits.** The defaults suit a server that has the memory for them. Size `row_projection_cache_bytes` and `fragment_cache_bytes` to the distinct sets of access attributes in use at once. Each set costs up to about one bit per item in each of the two caches, so 12 MiB in each at 100 million items, and much less where the items it sees sit together on the map. A set that doesn't fit is rebuilt on its next request, which costs CPU in proportion to the corpus.
 - **Hot set.** Run the server without a cap under real traffic and read `heap.file_bytes` from `mosaica status` once it has settled.
 
-For example, 100 million items, 200 sets of attributes in use, the other caches at their defaults and a measured hot set of 2 GiB come to about 12 GiB: 2.4 GiB for each of the two access caches, 4.9 GiB for the rest and 2 GiB of hot set.
+For example, 100 million items, 200 sets of attributes in use, the other caches at their defaults and a measured hot set of 2 GiB come to about 12 GiB: 2.4 GiB for each of the two access caches, 4.7 GiB for the rest and 2 GiB of hot set.
 
 ### What happens beyond the hot set
 
