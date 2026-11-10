@@ -6027,9 +6027,7 @@ components:
           items: { type: number }
           description: "`[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. With `space` set to `wgs84` it is `[min_lon, min_lat, max_lon, max_lat]` in degrees. The request is answered for the depth-`zoom` tiles it intersects."
         space:
-          type: string
-          enum: [view, wgs84]
-          description: What `bbox` is written in. `view`, the default, is the view's own coordinates. `wgs84` is degrees, put through the view's projection, and is `422` on a view that projects nothing. Sent with `bbox` only; beside `tiles` it is `422`.
+          $ref: "#/components/schemas/BoxSpace"
         tiles:
           type: array
           items:
@@ -6151,6 +6149,8 @@ components:
           maxItems: 4
           items: { type: number }
           description: "`[x0, y0, x1, y1]`, as on `POST /v1/viewport`."
+        space:
+          $ref: "#/components/schemas/BoxSpace"
         tiles:
           type: array
           items:
@@ -6445,7 +6445,8 @@ components:
         own view. `space` is `view`, the
         default, or `wgs84` on a view that declares a projection: degrees, densified before they
         are projected so each edge is straight in the plane it was declared in. `wgs84` on a view
-        that projects nothing is `422`. Or `artifact`: a published shape named by its
+        that projects nothing is `422`. `inserted` is the space the view's rows were inserted in:
+        `wgs84` on a view with a projection and `view` on one without. Or `artifact`: a published shape named by its
         `mosaica_id`, answered from its stored membership under the artifact's own test. An
         artifact this principal would not be served, an identifier that names nothing, one on
         another view, and one whose layer draws an authored shape are an empty operand, one answer
@@ -6491,7 +6492,7 @@ components:
               pattern: "^[0-9]+$"
         space:
           type: string
-          enum: [view, wgs84]
+          enum: [view, wgs84, inserted]
         view:
           type: string
           description: The view the shape or artifact is in, by its id or key. Defaults to the request's view.
@@ -6819,7 +6820,9 @@ components:
               minItems: 4
               maxItems: 4
               items: { type: number }
-              description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Only the cells at `depth` that intersect it are listed, each with all of its items; a corner outside the extent is clamped to the edge cell, as the viewport's `bbox` is. Absent is the view's whole extent."
+              description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Only the cells at `depth` that intersect it are listed, each with all of its items; a corner outside the extent is clamped to the edge cell, as the viewport's `bbox` is. Absent is the view's whole extent. `space` beside it names another space."
+            space:
+              $ref: "#/components/schemas/BoxSpace"
 
     AggregateFields:
       type: array
@@ -6909,6 +6912,11 @@ components:
             palette_size:
               $ref: "#/components/schemas/PaletteSize"
 
+    BoxSpace:
+      type: string
+      enum: [view, wgs84, inserted]
+      description: What the box beside it is written in. `view`, the default, is the view's own coordinates. `wgs84` is `[min_lon, min_lat, max_lon, max_lat]` in degrees, put through the view's projection, and is `422` on a view that projects nothing. `inserted` is the space the view's rows were inserted in, `wgs84` on a view with a projection and `view` on one without. Sent without the box it describes it is `422`.
+
     AggregateCut:
       type: object
       additionalProperties: false
@@ -6925,7 +6933,9 @@ components:
           minItems: 4
           maxItems: 4
           items: { type: number }
-          description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Its tiles at `zoom` may number at most `max_tiles_per_request`."
+          description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Its tiles at `zoom` may number at most `max_tiles_per_request`. `space` beside it names another space."
+        space:
+          $ref: "#/components/schemas/BoxSpace"
         budget:
           type: integer
           minimum: 0

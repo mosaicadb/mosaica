@@ -275,6 +275,16 @@ export type FilterExpr =
 export type MosaicaIdOperand = {eq: string} | {in: string[]};
 
 /**
+ * What a box or a shape in a request is written in. `'view'`, the default, is the view's data
+ * coordinates. `'wgs84'` is degrees of longitude and latitude, which a view without a map
+ * projection refuses with `422`. `'inserted'` is the coordinates the view's items were inserted
+ * with: degrees on a view with a map projection, the view's data coordinates otherwise.
+ *
+ * @category Filters
+ */
+export type BoxSpace = 'view' | 'wgs84' | 'inserted';
+
+/**
  * The `region` filter: the items whose position lies inside a shape. Give exactly one of:
  *
  * - `polygon`: at least three `[x, y]` vertices, closed automatically. More than
@@ -286,9 +296,8 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  *   that does not exist, is not served to the viewer, is on another view, or has an authored shape
  *   matches nothing.
  *
- * Coordinates are in the view's data coordinates, or with `space: 'wgs84'` in degrees of
- * longitude and latitude, which a view without a map projection refuses with `422`. A shape with
- * a very long boundary may be answered for a slightly larger area; the response's {@link RegionVerdict} says so.
+ * Coordinates are in the view's data coordinates unless `space` names another {@link BoxSpace}.
+ * A shape with a very long boundary may be answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
  * `view` names another view the shape or artifact is in, by its id. The filter then matches the
  * items inside it in that view, wherever the request's view places them, so a selection drawn in
@@ -297,10 +306,10 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  * @category Filters
  */
 export type RegionOperand = (
-  | {polygon: [number, number][]; space?: 'view' | 'wgs84'}
-  | {bbox: [number, number, number, number]; space?: 'view' | 'wgs84'}
-  | {circle: [number, number, number]; space?: 'view' | 'wgs84'}
-  | {ellipse: [number, number, number, number, number]; space?: 'view' | 'wgs84'}
+  | {polygon: [number, number][]; space?: BoxSpace}
+  | {bbox: [number, number, number, number]; space?: BoxSpace}
+  | {circle: [number, number, number]; space?: BoxSpace}
+  | {ellipse: [number, number, number, number, number]; space?: BoxSpace}
   | {artifact: string}
 ) & {
   /** The view the shape or artifact is in, by its id. Defaults to the request's view. */
@@ -717,11 +726,10 @@ export type ViewportRequest = {
    */
   bbox?: [number, number, number, number];
   /**
-   * What `bbox` is written in: `'view'`, the default, or `'wgs84'` for
-   * `[minLon, minLat, maxLon, maxLat]` in degrees, which a view without a map projection refuses
-   * with `422`. Sent with `bbox` only.
+   * What `bbox` is written in; `'view'` if unset. In degrees the box is
+   * `[minLon, minLat, maxLon, maxLat]`. Sent with `bbox` only.
    */
-  space?: 'view' | 'wgs84';
+  space?: BoxSpace;
   /**
    * The tiles at depth `zoom` to answer, in place of `bbox`, as Morton prefixes (the tile's
    * position code). They are answered in the order given, without duplicates. Leave out the tiles
@@ -801,6 +809,8 @@ export type ViewportArtifactsRequest = {
   zoom: number;
   /** The area, as for {@link ViewportRequest.bbox}. */
   bbox?: [number, number, number, number];
+  /** What `bbox` is written in, as for {@link ViewportRequest.space}. */
+  space?: BoxSpace;
   /** The tiles to answer, in place of `bbox`, as for {@link ViewportRequest.tiles}. Each gets one frame. */
   tiles?: bigint[];
   /** The layers to answer for, as for {@link ViewportRequest.layers}. Unset or `[]` is none. */
@@ -1676,6 +1686,8 @@ export type AggregateCut = {
   zoom: number;
   /** The area, `[x0, y0, x1, y1]` in the view's data coordinates. */
   bbox: [number, number, number, number];
+  /** What `bbox` is written in, as for {@link ViewportRequest.space}. */
+  space?: BoxSpace;
   /** The most artifacts to draw. Unset means no limit. */
   budget?: number;
 };
@@ -1695,6 +1707,8 @@ export type AggregateCells = {
    * `meta.selection.maxAggregateCells` cells.
    */
   area?: [number, number, number, number];
+  /** What `area` is written in, as for {@link ViewportRequest.space}. Sent with `area` only. */
+  space?: BoxSpace;
 };
 
 /**

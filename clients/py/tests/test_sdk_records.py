@@ -646,7 +646,7 @@ def test_a_selection_reads_the_items_it_counts(db, sent):
         "filters": {
             "all_of": [
                 {"venue": {"in": ["icml", "iclr"]}},
-                {"region": {"bbox": [0.0, -1.0, 12.5, 2.0]}},
+                {"region": {"bbox": [0.0, -1.0, 12.5, 2.0], "space": "inserted"}},
             ]
         },
     }

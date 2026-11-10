@@ -15,7 +15,7 @@ use serde_json::Value;
 
 use mosaica_engine::filter::{Endpoint, Family, FilterExpr, FilterOperand, RegionLeaf, Scalar};
 use mosaica_engine::LeafColumn;
-use mosaica_engine::shapes::{Bounds, CanonError, Projection, ShapeF64, ShapeSpace};
+use mosaica_engine::shapes::{place, Bounds, CanonError, Projection, ShapeF64, ShapeSpace, Space};
 use mosaica_types::written::WrittenAs;
 use mosaica_types::{AttrLocalId, MosaicaId};
 
@@ -321,6 +321,64 @@ fn parse_region(body: &Value, ctx: &RegionContext<'_>) -> Result<RegionLeaf, Api
     })
 }
 
+/// The space a request wrote a shape or a box in, under the view's `projection`; `name` is the key
+/// that carried the word. Absent is `view`. `inserted` is the space the view's rows were inserted
+/// in: `wgs84` on a view with a projection and `view` on one without.
+pub(crate) fn request_space(
+    word: Option<&str>,
+    name: &str,
+    projection: Projection,
+) -> Result<Space, ApiError> {
+    let space = match word {
+        None => ShapeSpace::View,
+        Some("inserted") if projection == Projection::None => ShapeSpace::View,
+        Some("inserted") => ShapeSpace::Wgs84,
+        Some(word) => ShapeSpace::parse(word).map_err(|_| {
+            bad(format!(
+                "`{name}` is `view`, `wgs84` or `inserted`, not '{word}'"
+            ))
+        })?,
+    };
+    space
+        .resolve(projection)
+        .map_err(|e| bad(format!("`{name}`: {e}")))
+}
+
+/// A box a request wrote in `space`, in the view's own frame; `name` is the key that carried the
+/// box and `space_name` the one that carried its space. A `wgs84` box goes through the projection
+/// the view's points were placed by, as a `region` leaf's does.
+pub(crate) fn bbox_in_view(
+    bbox: [f64; 4],
+    space: Option<&str>,
+    (name, space_name): (&str, &str),
+    view: &mosaica_engine::MetaView,
+) -> Result<[f64; 4], ApiError> {
+    if space.is_none() {
+        return Ok(bbox);
+    }
+    let space = request_space(space, space_name, view.projection)?;
+    let [min_x, min_y, max_x, max_y] = bbox;
+    let written = ShapeF64::Bbox {
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+    };
+    match place(&written, space, &view_extent(view)) {
+        Ok(ShapeF64::Bbox {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }) => Ok([min_x, min_y, max_x, max_y]),
+        Ok(_) => unreachable!("a box is placed as a box"),
+        Err(_) => Err(bad(format!(
+            "`{name}` in degrees is [min_lon, min_lat, max_lon, max_lat], within ±180 longitude \
+             and ±90 latitude"
+        ))),
+    }
+}
+
 /// A `region` leaf's shape or artifact, in `frame`.
 fn region_in(
     obj: &serde_json::Map<String, Value>,
@@ -331,14 +389,11 @@ fn region_in(
     if obj.contains_key("space") && obj.get("space").and_then(Value::as_str).is_none() {
         return Err(bad("`region.space` is a string"));
     }
-    let space = match obj.get("space").and_then(Value::as_str) {
-        None => ShapeSpace::View,
-        Some(word) => ShapeSpace::parse(word)
-            .map_err(|_| bad(format!("`region.space` is `view` or `wgs84`, not '{word}'")))?,
-    };
-    let space = space
-        .resolve(frame.projection)
-        .map_err(|e| bad(format!("`region.space`: {e}")))?;
+    let space = request_space(
+        obj.get("space").and_then(Value::as_str),
+        "region.space",
+        frame.projection,
+    )?;
     if kind == "artifact" {
         if obj.contains_key("space") {
             return Err(bad("`region.artifact` names a published shape and carries no `space`"));
@@ -1047,7 +1102,7 @@ mod tests {
             (r#"{"region": {}}"#, "exactly one of"),
             // A view with no projection has one space, and says so.
             (r#"{"region": {"bbox": [0,0,1,1], "space": "wgs84"}}"#, "`region.space`"),
-            (r#"{"region": {"bbox": [0,0,1,1], "space": "utm"}}"#, "`view` or `wgs84`"),
+            (r#"{"region": {"bbox": [0,0,1,1], "space": "utm"}}"#, "not 'utm'"),
             // The canonical form's own refusals.
             (r#"{"region": {"bbox": [5,5,1,1]}}"#, "x0 <= x1"),
             (r#"{"region": {"circle": [5,5,0]}}"#, "positive"),

@@ -1562,6 +1562,8 @@ class Database:
         height: int = 480,
         size_by: str | None = None,
         basemap: Any = None,
+        bbox: Sequence[float] | None = None,
+        bbox_space: str = "view",
         **kwargs,
     ) -> Map:
         """An interactive map of this database for a notebook, showing every item.
@@ -1581,6 +1583,8 @@ class Database:
             height=height,
             size_by=size_by,
             basemap=basemap,
+            bbox=bbox,
+            bbox_space=bbox_space,
             **kwargs,
         )
 

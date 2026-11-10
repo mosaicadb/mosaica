@@ -724,7 +724,9 @@ class Selection:
         `box` is `(min_x, min_y, max_x, max_y)` in the coordinates the rows were inserted with.
         On a view declared with a projection those are degrees,
         `(min_lon, min_lat, max_lon, max_lat)`, and on any other view the view's own `x` and `y`.
-        An item on the edge is inside, and a box whose minimum is above its maximum is refused.
+        The box is sent as a `region` filter with `"space": "inserted"`, which the server reads
+        that way. An item on the edge is inside, and a box whose minimum is above its maximum is
+        refused.
 
             db.view("papers").within((0.0, 0.0, 100.0, 50.0)).count()
             db.view("world").within((-10.7, 51.3, -5.3, 55.5)).count()   # Ireland, in degrees
@@ -812,11 +814,11 @@ class Selection:
             request["tiles"] = [int(tile) for tile in listed(tiles)]
         else:
             request["bbox"] = list(self.box or _extent(meta, self._view))
-            if self.box and _projection(meta, self._view) != "none":
-                request["space"] = "wgs84"
+            if self.box:
+                request["space"] = "inserted"
         for name, value in (
             ("k", k),
-            ("filters", self._expression(meta)),
+            ("filters", self._expression()),
             ("highlight", highlight),
             ("layers", _layers(layers)),
             ("levels", levels),
@@ -953,25 +955,20 @@ class Selection:
 
             db.view("papers").filter({"year": {"range": {"gte": 2020}}}).map(colour_by="venue")
         """
-        given = sorted(set(kwargs) & {"view", "filters", "bbox"})
+        given = sorted(set(kwargs) & {"view", "filters", "bbox", "bbox_space"})
         if given:
             raise Refusal(
                 f"map: a selection's map takes {', '.join(given)} from the selection; narrow it "
                 f"with filter() or within(), or call map() on its reader"
             )
-        reader = self._reader()
-        box = self.box
-        if box is not None:
-            projection = _projection(reader.meta(), self._view)
-            if projection != "none":
-                box = _projected(box, projection)
-        return reader.map(
+        return self._reader().map(
             view=self._view,
             layers=layers,
             colour_by=colour_by,
             filters=self.filters,
             height=height,
-            bbox=box,
+            bbox=self.box,
+            bbox_space="inserted",
             size_by=size_by,
             artifacts_per_tile=artifacts_per_tile,
             budget=budget,
@@ -987,14 +984,10 @@ class Selection:
             **kwargs,
         )
 
-    def _expression(self, meta: Optional[dict] = None) -> Optional[dict]:
+    def _expression(self) -> Optional[dict]:
         """The filters and every box, as the one expression the server tests items against. A box
-        on a projected view is in degrees and says so."""
-        if not self._boxes:
-            return _all_of(self._filters)
-        meta = self._reader().meta() if meta is None else meta
-        space = {} if _projection(meta, self._view) == "none" else {"space": "wgs84"}
-        boxes = [{"region": {"bbox": list(box), **space}} for box in self._boxes]
+        is in the coordinates the view's rows were inserted with, and says so."""
+        boxes = [{"region": {"bbox": list(box), "space": "inserted"}} for box in self._boxes]
         return _all_of(list(self._filters) + boxes)
 
     def __repr__(self) -> str:
@@ -1076,14 +1069,23 @@ class Viewer:
         height: int = 480,
         size_by: Optional[str] = None,
         basemap: Any = None,
+        bbox: Optional[Sequence[float]] = None,
+        bbox_space: str = "view",
         **kwargs: Any,
     ) -> Map:
         """Open the interactive map of this database as a notebook widget, showing what this reader
         may see.
 
         The parameters are those of [`Map`][mosaica.widget.Map], which fetches its data with this
-        reader's token. A view, layer or column that this reader's `meta()` does not list is
-        refused, and the refusal names those it does.
+        reader's token, and `bbox_space`. A view, layer or column that this reader's `meta()` does
+        not list is refused, and the refusal names those it does.
+
+        - `bbox_space`: what `bbox` is written in. `"view"`, the default, is the view's own
+          coordinates, as `Map` takes them. `"wgs84"` is `(min_lon, min_lat, max_lon, max_lat)`
+          in degrees, on a view with a projection. `"inserted"` is the coordinates the view's
+          rows were inserted with: degrees on a view with a projection, the view's own otherwise.
+          The map itself holds the box in the view's coordinates, so `Map.bbox` reads back in
+          those.
         """
         from .widget import Map
 
@@ -1105,6 +1107,31 @@ class Viewer:
             _require(size_by, rendered, "rendered column to size by")
         if filters is not None:
             filters = json.loads(self._encoded({"filters": filters}))["filters"]
+        if bbox_space not in ("view", "wgs84", "inserted"):
+            raise Refusal(
+                f"map: bbox_space is 'view', 'wgs84' or 'inserted', not {bbox_space!r}"
+            )
+        if bbox is not None:
+            bbox = [float(v) for v in bbox]
+            if len(bbox) != 4 or bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+                raise Refusal(
+                    f"map: bbox is (min_x, min_y, max_x, max_y) with each minimum at or below "
+                    f"its maximum; got {tuple(bbox)!r}"
+                )
+        if bbox is not None and bbox_space != "view":
+            if view is None:
+                raise Refusal(
+                    f"map: bbox_space={bbox_space!r} is read against a view's projection. Name "
+                    f"the view with view="
+                )
+            projection = _projection(meta, view)
+            if projection != "none":
+                bbox = _projected(bbox, projection)
+            elif bbox_space == "wgs84":
+                raise Refusal(
+                    f"map: bbox_space='wgs84' needs a view with a projection, and {view!r} has "
+                    f"none. Write the box in the view's own coordinates with bbox_space='view'"
+                )
         return Map(
             self.url,
             token=self.token,
@@ -1115,6 +1142,7 @@ class Viewer:
             height=height,
             size_by=size_by,
             basemap=basemap,
+            bbox=bbox,
             **kwargs,
         )
 
@@ -1383,6 +1411,7 @@ class Viewer:
         *,
         tiles: Optional[Sequence[int]] = None,
         bbox: Optional[Sequence[float]] = None,
+        space: Optional[str] = None,
         layers: Any = None,
         levels: Any = None,
         computed: Optional[Sequence[str]] = None,
@@ -1405,6 +1434,9 @@ class Viewer:
         - `per_tile`: at most the server's `max_artifacts_per_tile`.
         - `bbox`: read the tiles touching this box, `(min_x, min_y, max_x, max_y)` in the view's
           coordinates, in place of `tiles`. Without either, every tile of the view is read.
+        - `space`: what `bbox` is written in, in place of the view's coordinates: `"wgs84"` for
+          degrees on a view with a projection, or `"inserted"` for the coordinates the view's
+          rows were inserted with.
         - `layers`: the layers to read, as a list of names or `"all"`. Without it no layer is
           read.
         - `computed`: the subset of `"centroid"` and `"box"` to compute. It can narrow what each
@@ -1433,12 +1465,18 @@ class Viewer:
         """
         import pyarrow as pa
 
+        if space is not None and bbox is None:
+            raise Refusal(
+                f"viewport_artifacts: space={space!r} says what bbox is written in. Give bbox "
+                f"beside it, or leave space out"
+            )
         request: dict = {"view": view, "zoom": int(zoom), "per_tile": int(per_tile)}
         if tiles is not None:
             request["tiles"] = [int(tile) for tile in listed(tiles)]
         else:
             request["bbox"] = [float(v) for v in (bbox or _extent(self.meta(), view))]
         for name, value in (
+            ("space", space),
             ("layers", _layers(layers)),
             ("levels", levels),
             ("computed", None if computed is None else listed(computed)),

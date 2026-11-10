@@ -101,7 +101,7 @@ A grouping that counts the set by the artifacts of an annotation layer, such as 
 | `level` | integer | The level counted. Required on a layer with several levels and refused on a layer with one. |
 | `top` | integer | List the `n` artifacts with the most items of the set. |
 | `artifacts` | list of `mosaica_id` | List these artifacts. An id that names nothing the viewer is served gets no row. |
-| `cut` | object | On a `nested` or `dag` layer, chooses the artifacts `top` ranks. `{"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}` ranks the artifacts a map draws at that zoom and box with that cluster budget. Without `budget` it ranks the finest artifacts. `top` requires `cut` on these layers, and a layer of any other kind refuses it. |
+| `cut` | object | On a `nested` or `dag` layer, chooses the artifacts `top` ranks. `{"zoom": z, "bbox": [x0, y0, x1, y1], "budget": b}` ranks the artifacts a map draws at that zoom and box with that cluster budget. The box is in the view's coordinates unless a `space` beside it says otherwise, as for a [`region`](filters.md#region). Without `budget` it ranks the finest artifacts. `top` requires `cut` on these layers, and a layer of any other kind refuses it. |
 | `palette_size` | integer | Add each artifact's palette slot among that many colours, as the `slot` column. |
 
 `rest` counts the items that are in an unlisted artifact of the level. `none` counts the items in no artifact of the level. Artifacts can overlap, so the rows can sum to more than the set. The server decides which artifacts a viewer is served from everything the viewer may see, before the filter applies. A filter therefore changes an artifact's count and never whether it is listed.
@@ -175,6 +175,7 @@ A division of the set into the cells of a grid over the view, used for a density
 |---|---|---|
 | `depth` | integer, 0 to 32 | The grid has `2^depth` cells on each side. Up to 16 they are the map's tiles at that zoom. |
 | `area` | `[x0, y0, x1, y1]` | List only the cells that meet this box, in the view's coordinates. Each listed cell still counts all of its items. |
+| `space` | string | What `area` is written in, in place of the view's coordinates: `"wgs84"` for degrees on a view with a projection, or `"inserted"` for the coordinates the view's items were inserted with. |
 
 There is one row for each cell that holds an item, in ascending order of `cell`. With `by`, the cells of each group follow one another in group order. The cells at `depth` in the area may number at most `max_aggregate_cells`. The default allows the whole view at depth 10.
 
