@@ -62,9 +62,9 @@ import './explorer.js';
  * when the model is torn down. A basemap the map refuses goes to the kernel as an `error` message.
  *
  * `label` is the explorer's `aria-label`, which names its map; with none set the explorer has no
- * such attribute. Whatever the page refuses of `filters`, `colour_by` or the basemap goes to the
- * kernel as an `error` message and is written in a status line above the map, in every view,
- * until the kernel sets that trait to something the page takes or that trait is changed in the
+ * such attribute. Whatever a view refuses of `filters`, `colour_by` or the basemap goes to the
+ * kernel as an `error` message and is written once in the status line above that view's map,
+ * until the kernel sets that trait to something the view takes or that trait is changed in its
  * map.
  *
  * A notebook runs its own shortcuts for a key press whose target is not an input, and the target
@@ -102,6 +102,10 @@ type ViewState = {
   explorer: MosaicaExplorer;
   /** The line above the map that says what the page refused. */
   status: HTMLElement;
+  /** What the page last refused of each trait for this view, by the trait's name. */
+  refusals: Map<string, string>;
+  /** Each trait's value as this view last sent it up, as JSON, since the page last refused that trait for it. */
+  sentUp: Map<string, string>;
   store: Store | null;
   unsubscribe: (() => void) | null;
   /** The box this view's camera last reported, in data coordinates, which its settle syncs up. */
@@ -478,35 +482,31 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   });
   pullImages();
 
-  /** What the page last refused of each trait, by the trait's name. */
-  const refusals = new Map<string, string>();
-  /** Each trait's value as the map last sent it up, as JSON, since the page last refused that trait. */
-  const sentUp = new Map<string, string>();
-  const showRefusals = () => {
-    for (const v of state.views.values()) writeRefusals(v.status, refusals);
-  };
-  const report = (what: string, e: unknown) => {
+  /** Tell the kernel what view `v` refused of `what`, and write it in that view's status line. */
+  const report = (v: ViewState, what: string, e: unknown) => {
     const detail = e instanceof Error ? e.message : String(e);
     model.send({type: 'error', what, detail} satisfies PageMessage);
-    refusals.set(what, detail);
-    sentUp.delete(what);
-    showRefusals();
+    v.refusals.set(what, detail);
+    v.sentUp.delete(what);
+    writeRefusals(v.status, v.refusals);
   };
-  /** The refusal of `what` no longer stands: the page took a value for it, or it was changed in the map. */
-  const accept = (what: string) => {
-    if (refusals.delete(what)) showRefusals();
+  /** View `v`'s refusal of `what` no longer stands: it took a value for it, or it was changed in its map. */
+  const accept = (v: ViewState, what: string) => {
+    if (v.refusals.delete(what)) writeRefusals(v.status, v.refusals);
   };
 
-  // Up-sync: one `save_changes` per settle or region answer.
-  const syncUp = (patch: Record<string, unknown>) => {
+  // Up-sync: one `save_changes` per settle or region answer. `from` is the view whose settle it is.
+  const syncUp = (patch: Record<string, unknown>, from?: ViewState) => {
     state.syncingUp = true;
     try {
       let dirty = false;
       for (const [k, v] of Object.entries(patch)) {
         const next = JSON.stringify(v);
-        // A value that differs from the one last sent up was changed in the map.
-        if (sentUp.has(k) && sentUp.get(k) !== next) accept(k);
-        sentUp.set(k, next);
+        if (from) {
+          // A value that differs from the one the view last sent up was changed in its map.
+          if (from.sentUp.has(k) && from.sentUp.get(k) !== next) accept(from, k);
+          from.sentUp.set(k, next);
+        }
         if (JSON.stringify(model.get(k)) === next) continue;
         model.set(k, v);
         dirty = true;
@@ -517,11 +517,12 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     }
   };
 
-  const applyFilters = (store: Store, expr: FilterExpr | null) => {
-    const meta = store.get('meta');
+  const applyFilters = (v: ViewState, expr: FilterExpr | null) => {
+    const store = v.store;
+    const meta = store?.get('meta');
     // Before `/v1/meta` there is no operand list to check against; `follow` applies the kernel's
     // expression when meta arrives.
-    if (!meta) return;
+    if (!store || !meta) return;
     try {
       // The traitlet is the `filters` expression, so the highlight is kept, and so are the
       // highlight clauses beside the filter's `member_of` clauses.
@@ -538,9 +539,9 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       });
       store.setMembers([...held.members.filter((c) => c.verb !== 'filter'), ...named]);
       askMemberNames(store, named);
-      accept('filters');
+      accept(v, 'filters');
     } catch (e) {
-      report('filters', e);
+      report(v, 'filters', e);
     }
   };
 
@@ -548,17 +549,17 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
    * A `cluster:<layer>` naming no layer this view can colour by is reported, as a bad filter is;
    * the store still takes it and draws the points uniform. Checked once `/v1/meta` is in hand.
    */
-  const checkColour = (store: Store, colourBy: unknown) => {
-    const meta = store.get('meta');
+  const checkColour = (v: ViewState, colourBy: unknown) => {
+    const meta = v.store?.get('meta');
     if (!meta) return;
     const offered = colourLayers(meta.layers).map((l) => l.name);
     const layer = typeof colourBy === 'string' && colourBy.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
     if (layer === null || offered.includes(layer)) {
-      accept('colour_by');
+      accept(v, 'colour_by');
       return;
     }
     const instead = offered.length === 0 ? 'this view has no layer to colour by' : `use one of ${offered.map((n) => CLUSTER_PREFIX + n).join(', ')}`;
-    report('colour_by', new Error(`${layer} is not a layer this view can colour by; ${instead}`));
+    report(v, 'colour_by', new Error(`${layer} is not a layer this view can colour by; ${instead}`));
   };
 
   /** The size range and scale the kernel holds, shared with every element over `store`; `null` leaves the choice standing. */
@@ -585,8 +586,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     if (typeof palette === 'string' && palette) store.setPalette(palette as PaletteName);
   };
 
-  // Down-sync: what the kernel holds, applied to one store (a new one, or one whose meta arrived).
-  const applyControls = (store: Store) => {
+  // Down-sync: what the kernel holds, applied to one view's new store.
+  const applyControls = (v: ViewState, store: Store) => {
     // `null` leaves the explorer's default; `[]` is none.
     const layers = model.get('layers');
     if (Array.isArray(layers)) store.setLayers(layers.map(String));
@@ -597,7 +598,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     const sizeBy = model.get('size_by');
     if (typeof sizeBy === 'string' && sizeBy) applySizeBy(store);
     const filters = model.get('filters');
-    if (filters !== null && filters !== undefined) applyFilters(store, filters as FilterExpr);
+    if (filters !== null && filters !== undefined) applyFilters(v, filters as FilterExpr);
   };
 
   const fit = (bbox: [number, number, number, number]) => {
@@ -617,8 +618,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       if (!metaSeen && store.get('meta')) {
         metaSeen = true;
         const filters = model.get('filters');
-        if (filters !== null && filters !== undefined) applyFilters(store, filters as FilterExpr);
-        checkColour(store, model.get('colour_by'));
+        if (filters !== null && filters !== undefined) applyFilters(v, filters as FilterExpr);
+        checkColour(v, model.get('colour_by'));
         if (state.pendingFit) fit(state.pendingFit);
       }
       if (state.active !== v) return;
@@ -664,7 +665,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
         patch.selected = selection.item ? idString(selection.item.id) : null;
         patch.selected_artifact = selection.artifact ? idString(selection.artifact.id) : null;
       }
-      if (Object.keys(patch).length) syncUp(patch);
+      if (Object.keys(patch).length) syncUp(patch, v);
     });
   };
 
@@ -682,7 +683,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     v.store = buildStore(model, state);
     if (v.store) {
       follow(v, v.store);
-      applyControls(v.store);
+      applyControls(v, v.store);
     }
     v.explorer.store = v.store;
   };
@@ -714,7 +715,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     for (const v of state.views.values()) {
       if (!v.store) continue;
       v.store.setColourBy(typeof c === 'string' && c ? c : null);
-      checkColour(v.store, c);
+      checkColour(v, c);
     }
   });
   model.on('change:palette', () => {
@@ -734,7 +735,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   model.on('change:filters', () => {
     if (state.syncingUp) return;
     const expr = (model.get('filters') as FilterExpr | null) ?? null;
-    for (const v of state.views.values()) if (v.store) applyFilters(v.store, expr);
+    for (const v of state.views.values()) applyFilters(v, expr);
   });
   model.on('change:bbox', () => {
     if (state.syncingUp) return;
@@ -770,10 +771,9 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
 
   // What `render` calls, kept on the state so a test can mount through it.
   mounts.set(state, (explorer, status) => {
-    const v: ViewState = {explorer, status, store: null, unsubscribe: null, lastBbox: null};
+    const v: ViewState = {explorer, status, refusals: new Map(), sentUp: new Map(), store: null, unsubscribe: null, lastBbox: null};
     state.views.set(explorer, v);
     state.active = v;
-    writeRefusals(status, refusals);
     equip(v);
     // Most points sets the store's budget; the kernel learns it as it is let go, not per frame.
     // The explorer's property follows, so the kernel setting the old budget back is a change.
@@ -815,8 +815,8 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     // draws nothing under a view switched to later stays in the map's corner.
     const onBasemap = (e: Event) => {
       const {refusal} = (e as CustomEvent<{refusal: string | null}>).detail;
-      if (refusal) report('basemap', new Error(refusal));
-      else accept('basemap');
+      if (refusal) report(v, 'basemap', new Error(refusal));
+      else accept(v, 'basemap');
     };
     explorer.addEventListener('mosaica-basemapchange', onBasemap);
     return () => {

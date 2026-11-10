@@ -774,7 +774,7 @@ skipped and `Map(url)` takes no `token`.
 | page → kernel | `{type: "basemap-images", reads: {path: read}}` | whenever `_basemap` lists local images' reads the page does not hold, naming them |
 | kernel → page | `{type: "basemap-image", path, read, mime}` and the bytes as a buffer | in answer to `basemap-images`, for each read it names that the kernel holds |
 
-Traitlets: `url`, `explorer_layout`, `height`, `title_field`, `artifacts_per_tile`,
+Traitlets: `url`, `explorer_layout`, `height`, `label`, `title_field`, `artifacts_per_tile`,
 `budget_min`, `budget_max`, `cluster_budget_min`, `cluster_budget_max` and `_basemap` (the
 `basemap` value with each local image as `{"local": path}`, the path as written, and that path's
 read number, never its bytes) down; `view`, `bbox`,

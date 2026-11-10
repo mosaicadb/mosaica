@@ -321,26 +321,48 @@ describe('the map in the notebook\u2019s page', () => {
     expect(line.textContent).toBe('');
   });
 
-  it('says what it refused of colour_by and of the basemap on a line each, in every view, and drops each as it is put right', () => {
+  it('says what it refused of colour_by and of the basemap on a line each, and drops each as it is put right', () => {
     const {model, store, el} = setUp({colour_by: 'cluster:nope'});
-    const other = document.createElement('div');
-    document.body.append(other);
-    render({model, el: other});
     store.set('meta', {...META, layers: [clusters('topics')]} as never);
     const explorer = el.querySelector('mosaica-explorer')!;
     const say = (refusal: string | null) => explorer.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal, note: null}, bubbles: true, composed: true}));
     say('View s0 has no map projection.');
-    for (const line of [statusOf(el), statusOf(other)]) {
-      expect(line.children).toHaveLength(2);
-      expect(line.textContent).toContain('nope');
-      expect(line.textContent).toContain('View s0 has no map projection.');
-    }
+    const line = statusOf(el);
+    expect(line.children).toHaveLength(2);
+    expect(line.textContent).toContain('nope');
+    expect(line.textContent).toContain('View s0 has no map projection.');
     model.set('colour_by', 'cluster:topics');
-    expect(statusOf(other).children).toHaveLength(1);
-    expect(statusOf(other).textContent).not.toContain('nope');
+    expect(line.children).toHaveLength(1);
+    expect(line.textContent).not.toContain('nope');
     say(null);
-    expect(statusOf(el).textContent).toBe('');
-    expect(statusOf(other).textContent).toBe('');
+    expect(line.textContent).toBe('');
+  });
+
+  it('writes a refusal once in the line of each view that made it, and in no other view\u2019s', async () => {
+    const {model, stores, el} = setUp();
+    const other = document.createElement('div');
+    document.body.append(other);
+    render({model, el: other});
+    const lines = [statusOf(el), statusOf(other)];
+    // How many lines of text each status was ever given; a line written again is one a screen reader reads again.
+    const writes = [0, 0];
+    lines.forEach((line, i) => new MutationObserver((records) => (writes[i]! += records.reduce((n, r) => n + r.addedNodes.length, 0))).observe(line, {childList: true}));
+    const written = async () => {
+      await Promise.resolve();
+      return [...writes];
+    };
+    for (const s of stores) s.set('meta', {...META, filterOperands: operands} as never);
+    model.set('filters', {any_of: [{year: {range: {gte: 1}}}]});
+    expect(await written()).toEqual([1, 1]);
+    for (const line of lines) expect(line.textContent).toContain('filters');
+    // A basemap one view's map refuses is that view's to say, under the refusal it already shows.
+    other.querySelector('mosaica-explorer')!.dispatchEvent(new CustomEvent('mosaica-basemapchange', {detail: {refusal: 'View s0 has no map projection.', note: null}, bubbles: true, composed: true}));
+    expect(await written()).toEqual([1, 3]);
+    expect(lines[0]!.textContent).not.toContain('projection');
+    expect(lines[1]!.textContent).toContain('projection');
+    model.set('filters', {year: {range: {gte: 2000}}});
+    expect(lines[0]!.textContent).toBe('');
+    expect(lines[1]!.children).toHaveLength(1);
   });
 });
 
