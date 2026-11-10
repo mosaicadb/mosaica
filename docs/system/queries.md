@@ -86,7 +86,7 @@ You write a filter as a JSON expression over the declared fields. A field can be
 | Number, true or false, date | `eq`, `in`, `range` | `{"year": {"range": {"gte": 2020, "lt": 2024}}}` |
 | Text | `match`, `phrase` | `{"abstract": {"match": "graph neural network"}}` |
 
-Keywords are compared exactly, case included, while text is matched by word, ignoring case: `match` finds items containing every word, and `phrase` the words together and in order. A unique field, such as a DOI, can be filtered with `eq` and `in` even when it's neither indexed nor rendered, which is the quick way to find a list of items. Dates can be written as text, such as `"2020-01-01"`, or in microseconds since 1970.
+The [filters reference](../reference/filters.md) describes each operator and the values it takes. Keywords are compared exactly, case included, while text is matched by word, ignoring case: `match` finds items containing every word, and `phrase` the words together and in order. A unique field, such as a DOI, can be filtered with `eq` and `in` even when it's neither indexed nor rendered, which is the quick way to find a list of items. Dates can be written as text, such as `"2020-01-01"`, or in microseconds since 1970.
 
 ??? info "Writing dates"
     1 January 2020 is `"2020-01-01"` or `1577836800000000`. A date alone is midnight UTC, and a date with a time needs an offset, as in `"2020-01-01T09:30:00Z"` or `"2020-01-01 10:30:00+01:00"`; a space may stand for the `T`. A date in a range is its first instant, so a range covering 2020 ends at `"lt": "2021-01-01"`; `"lte": "2020-12-31"` would leave out most of 31 December. A string of digits, such as `"20200101"`, is microseconds.
@@ -174,7 +174,7 @@ A histogram picks readable bin edges, such as whole decades or months, around th
 
 A grouping can also ask for a field's figures, such as `{"summary": ["citations"]}`: how many items hold a value, and the smallest, largest and mean. These are taken over everything the viewer may see in the view, so they go in a request of their own, and one with a filter or a reference is refused. Not built yet: field figures under a filter or per group.
 
-The [HTTP API reference](../reference/http.md) lists every grouping, the columns of each table, and how a large table continues over several pages.
+The [aggregations reference](../reference/aggregations.md) lists every grouping and figure, with the columns of each table. [Count and chart from Python](../guides/analysis.md) works through the common ones. The [HTTP API reference](../reference/http.md) states how a large table continues over several pages.
 
 ## Not built yet
 
