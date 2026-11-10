@@ -23,6 +23,12 @@ sheet.textContent = `
   #stage { flex: 1; min-height: 0; }
   #stage.loose { overflow: auto; padding: 12px; display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 `;
+// `?font=serif`, `?font=monospace` and `?scale=1.15` draw the elements in another font or a larger
+// one, since no check here may depend on the machine's font. Only these are ever written into style.
+const look = new URLSearchParams(location.search);
+const font = ['serif', 'monospace'].find((name) => name === look.get('font'));
+if (font) sheet.textContent += `#stage { --mosaica-font: ${font}; }`;
+if (look.get('scale') === '1.15') sheet.textContent += '#stage > *, #stage > div > * { font-size: 14.95px; }';
 document.head.append(sheet);
 document.body.innerHTML = '<main><header><h1>Places in Ireland</h1><button id="before" type="button">About this map</button></header><div id="stage"></div></main>';
 const stageEl = document.querySelector<HTMLElement>('#stage')!;

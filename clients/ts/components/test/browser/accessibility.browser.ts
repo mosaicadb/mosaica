@@ -46,10 +46,10 @@ const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
 let served: Awaited<ReturnType<typeof servePage>>;
 let browser: Browser;
 
-async function opened(width: number, height: number): Promise<Page> {
+async function opened(width: number, height: number, query = ''): Promise<Page> {
   const page = await browser.newPage({viewport: {width, height}, colorScheme: 'light'});
   const failed = new Promise<never>((_, reject) => page.on('pageerror', reject));
-  await page.goto(served.origin);
+  await page.goto(`${served.origin}/?${query}`);
   await Promise.race([failed, page.waitForFunction(() => (window as unknown as Shown).ready === true, undefined, {timeout: 50_000})]);
   await page.addScriptTag({path: AXE});
   return page;
@@ -97,16 +97,23 @@ async function walk(page: Page): Promise<{faults: string[]; names: string[]}> {
   return {faults, names};
 }
 
-/** Build each state in a window of this size and measure it; with `only`, measure nothing but the text that is cut off, as it is and with wider spacing. */
-async function measure(width: number, height: number, pick: (scenes: Scenes) => string[], only?: 'text'): Promise<void> {
-  const page = await opened(width, height);
-  const add = (kind: Kind, state: string, findings: string[]) => found[kind].push(...findings.map((f) => `${state} at ${width} px: ${f}`));
+/** The other fonts the states are drawn in, by the query that asks the page for each: nothing checked here may depend on the machine's font. */
+const FONTS = {'a serif': 'font=serif', 'a monospace': 'font=monospace', 'a larger font': 'scale=1.15'};
+
+/**
+ * Build each state in a window of this size and measure it; with `only`, measure nothing but the
+ * text that is cut off, as it is and with wider spacing. `font` names one of {@link FONTS} to draw
+ * in, and is part of what each finding is called.
+ */
+async function measure(width: number, height: number, pick: (scenes: Scenes) => string[], only?: 'text', font?: keyof typeof FONTS): Promise<void> {
+  const page = await opened(width, height, font ? FONTS[font] : '');
+  const add = (kind: Kind, state: string, findings: string[]) => found[kind].push(...findings.map((f) => `${state} at ${width} px${font ? ` in ${font}` : ''}: ${f}`));
   const clipped = () => page.evaluate(() => (window as unknown as Shown).checks.clipped());
   const contrast = (paths: string[][]) => page.evaluate((p) => (window as unknown as Shown).checks.contrast(p), paths);
   const spaced = (on: boolean) => page.evaluate((o) => (window as unknown as Shown).checks.spaced(o), on);
   for (const state of pick(await page.evaluate(() => (window as unknown as Shown).scenes))) {
     await page.evaluate((s) => (window as unknown as Shown).show(s), state);
-    const seen = (read[`${state} at ${width} px`] = {heights: await page.evaluate(() => (window as unknown as Shown).checks.stripHeights())} as (typeof read)[string]);
+    const seen = (read[`${state} at ${width} px${font ? ` in ${font}` : ''}`] = {heights: await page.evaluate(() => (window as unknown as Shown).checks.stripHeights())} as (typeof read)[string]);
     const cut = await clipped();
     add('clipped', state, cut);
     await spaced(true);
@@ -139,7 +146,15 @@ beforeAll(async () => {
   await measure(390, 760, (s) => s.narrow);
   // The width of a 1280 px window at 400% zoom.
   await measure(320, 480, (s) => s.narrow, 'text');
-}, 240_000);
+  // The text checks again in three other fonts, side by side.
+  await Promise.all(
+    (Object.keys(FONTS) as (keyof typeof FONTS)[]).map(async (font) => {
+      await measure(1200, 800, (s) => [...s.wide, ...s.loose], 'text', font);
+      await measure(900, 700, (s) => s.compact, 'text', font);
+      await measure(320, 480, (s) => s.narrow, 'text', font);
+    })
+  );
+}, 480_000);
 
 afterAll(async () => {
   await served?.close();

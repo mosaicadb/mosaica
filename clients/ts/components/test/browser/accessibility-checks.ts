@@ -73,18 +73,21 @@ const unclipped = (el: Element) => el.matches(':popover-open') || (el instanceof
 const NAMED_BY_CONTENT = 'button, a[href], h1, h2, h3, h4, h5, h6, summary, [role="button"], [role="link"], [role="heading"], [role="option"], [role="radio"], [role="tab"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
 
 /**
- * Whether `el` is a long name cut to one line in a window wider than the explorer's narrow form:
- * it does not wrap, it ends in an ellipsis, and its whole text is the `title` or the accessible
- * name of itself or of a control it is drawn inside. Such a name is cut by design, and a pointer's
- * hover or a screen reader has all of it.
+ * Whether `clipper` cuts a long name to one line by design, in a window wider than the explorer's
+ * narrow form: it does not wrap, it ends in an ellipsis, and the whole text of each of `texts`, the
+ * elements inside it that hold the text, is the `title` or the accessible name of that element or
+ * of a control it is drawn inside. The clip may sit on the name or on a box that holds it. Such a
+ * name is cut by design, and a pointer's hover or a screen reader has all of it.
  */
-function cutByDesign(el: Element): boolean {
-  if (innerWidth <= 720) return false;
-  const style = getComputedStyle(el);
+function cutByDesign(clipper: Element, texts: Element[]): boolean {
+  if (innerWidth <= 720 || texts.length === 0) return false;
+  const style = getComputedStyle(clipper);
   if (style.whiteSpace !== 'nowrap' || style.textOverflow !== 'ellipsis') return false;
   const squeezed = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim();
-  const text = squeezed(el.textContent);
-  return [el, ...drawnAncestors(el)].some((at) => squeezed(at.getAttribute('title')).includes(text) || squeezed(at.getAttribute('aria-label')).includes(text) || (at.matches(NAMED_BY_CONTENT) && !at.hasAttribute('aria-label')));
+  return texts.every((el) => {
+    const text = squeezed(el.textContent);
+    return [el, ...drawnAncestors(el)].some((at) => squeezed(at.getAttribute('title')).includes(text) || squeezed(at.getAttribute('aria-label')).includes(text) || (at.matches(NAMED_BY_CONTENT) && !at.hasAttribute('aria-label')));
+  });
 }
 
 type Edges = {left: number; top: number; right: number; bottom: number};
@@ -122,7 +125,7 @@ export function clippedText(scope: Element): string[] {
         if (style.display === 'inline') continue;
         const clip = clipBox(ancestor);
         if (style.overflowX !== 'visible' && (box.right > clip.right + 1 || box.left < clip.left - 1)) {
-          if (cutByDesign(ancestor)) break;
+          if (cutByDesign(ancestor, [parent])) break;
           cut = `${style.overflowX === 'hidden' || style.overflowX === 'clip' ? 'is cut off at the side by' : 'scrolls sideways in'} ${place(ancestor)}`;
           break;
         }
@@ -154,7 +157,7 @@ export function wideContent(scope: Element): string[] {
   for (const el of [scope, ...elementsUnder(scope)]) {
     if (!drawn(el) || el.matches('input, select, textarea, canvas, .sr-only') || el.closest('[part~="canvas"], svg')) continue;
     const style = getComputedStyle(el);
-    if (style.overflowX === 'visible' || el.scrollWidth <= el.clientWidth + 1 || cutByDesign(el)) continue;
+    if (style.overflowX === 'visible' || el.scrollWidth <= el.clientWidth + 1 || cutByDesign(el, textElements(el))) continue;
     found.push(`${place(el)} holds more than its width and ${style.overflowX === 'hidden' || style.overflowX === 'clip' ? 'cuts it off' : 'scrolls sideways'}`);
   }
   if (document.documentElement.scrollWidth > innerWidth + 1) found.push('the page scrolls sideways');
