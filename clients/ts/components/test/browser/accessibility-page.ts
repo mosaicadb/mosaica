@@ -402,7 +402,35 @@ async function noFilters(): Promise<void> {
   await settled();
 }
 
-const LOOSE: Record<string, () => Promise<unknown>> = {elements, 'hierarchy-row': hierarchyRow, 'no-filters': noFilters, 'colour-editor': colourEditor};
+/**
+ * A tiered layer's card 320 px wide, filtered to an archive and coloured by the layer: the
+ * breadcrumb, the archive's children under their levels' titles, one of them under a second parent
+ * too, the remainder row, and focus on a row's Highlight, which shows the row's buttons.
+ */
+async function clusterCard(): Promise<void> {
+  stageEl.className = 'loose';
+  stageEl.innerHTML = '<div style="width: 320px"><mosaica-field-card field="cluster:taxonomy"></mosaica-field-card></div>';
+  const taxonomy = layer('taxonomy', 'Classification', {hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Archive', zoom: null}, {level: 1, title: 'Subject class', zoom: null}, {level: 2, title: 'Topic', zoom: null}]});
+  const store = fakeStore({meta: {...META, layers: [...META.layers, taxonomy]}, status: status({})});
+  store.set('view', {...store.get('view'), id: 'places'});
+  store.set('legend', {...store.get('legend'), colourBy: 'cluster:taxonomy'});
+  store.set('filters', {...store.get('filters'), members: [{layer: 'taxonomy', artifact: 1n, outside: false, verb: 'filter', label: 'Mathematics'}]});
+  const child = (id: bigint, name: string, rung: number, parentIds: bigint[], slot: number): BrowseRow => ({...browseRow(id, name), rung, parentIds, slot});
+  store.setBrowse('p:1', {artifacts: [child(11n, 'Algebraic geometry', 1, [1n], 0), child(12n, 'Mathematical physics', 1, [1n, 2n], 1), child(21n, 'Moduli spaces', 2, [1n], 2)], parents: [], next: null});
+  store.setBrowse('p:12', {artifacts: [], parents: [{...browseRow(1n, 'Mathematics'), childCount: 3}, browseRow(2n, 'Physics')], next: null});
+  const card = stageEl.querySelector('mosaica-field-card') as HTMLElement & {store: unknown};
+  card.store = store;
+  await settled();
+  await settled();
+  const held = new Map(store.get('aggregates'));
+  for (const id of registered(store).keys()) if (id.startsWith('field-remainder')) held.set(id, aggregateEntry([{rows: [{count: 42}], total: 42}], 'places'));
+  store.set('aggregates', held);
+  await settled();
+  card.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-key="12"] [part="highlight"]')!.focus();
+  await settled();
+}
+
+const LOOSE: Record<string, () => Promise<unknown>> = {elements, 'hierarchy-row': hierarchyRow, 'no-filters': noFilters, 'colour-editor': colourEditor, 'cluster-card': clusterCard};
 const SCENES: Record<string, () => Promise<unknown>> = {...WIDE, ...NARROW, ...LOOSE};
 
 /** The elements under the stage that match `selector`, through shadow roots. */

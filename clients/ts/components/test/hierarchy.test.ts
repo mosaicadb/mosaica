@@ -77,6 +77,18 @@ describe('<mosaica-hierarchy>', () => {
     expect(asked[0]).toEqual({layer: 'mesh/descriptors', limit: 50});
   });
 
+  it('asks for a tiered layer’s roots with no level, so a root at any level is listed', async () => {
+    const tiered = {...layer('taxonomy', 'tiered', []), levels: [{level: 0, title: 'Archive', zoom: null}, {level: 1, title: 'Subject class', zoom: null}]} as Layer;
+    const {host, store} = await panel({meta: {...META, layers: [tiered]}});
+    store.setBrowse('roots', {artifacts: [row(1n, 'Mathematics', 900n, {childCount: 30}), row(9n, 'q-bio.NC', 40n, {rung: 1})], parents: [], next: null});
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['math']}}});
+    await settle(host);
+    await settle(host);
+    const asked = store.calls.filter((c) => c.name === 'browse').map((c) => c.args[0] as Record<string, unknown>);
+    expect(asked.every((r) => !('level' in r))).toBe(true);
+    expect(deepAll(host, '[part="row"] [part="name"]').map((n) => n.textContent?.trim())).toEqual(['Mathematics', 'q-bio.NC']);
+  });
+
   it('marks a row with no name as unnamed and never draws its key in the name’s place', async () => {
     const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
     const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;

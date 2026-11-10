@@ -253,5 +253,38 @@ describe('<mosaica-cluster-filter> typing', () => {
     (deep(host, '[part~="option"]') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 30n, outside: false, verb: 'filter', label: 'x-ray state'}]);
   });
+
+  it('searches every level of a levelled layer in one request with no level, and walks a match’s parents there too', async () => {
+    const tiers = layer('topics', {hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: null, zoom: null}, {level: 1, title: null, zoom: null}]});
+    const {host, store, box} = await mountField({layers: [tiers]});
+    store.setBrowse('q:geometry', {artifacts: [row(11n, 'math.AG', [1n], 1), row(12n, 'math.DG', [1n], 1)], parents: [], next: null});
+    store.setBrowse('p:11', {artifacts: [], parents: [row(1n, 'Mathematics')], next: null});
+    store.setBrowse('p:12', {artifacts: [], parents: [row(1n, 'Mathematics')], next: null});
+    box().value = 'geometry';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(browses(store)).toEqual([
+      {q: 'geometry', layer: 'topics', filters: null, limit: 50},
+      {parent: 11n, layer: 'topics', filters: null, limit: 1},
+      {parent: 12n, layer: 'topics', filters: null, limit: 1}
+    ]);
+    expect(names(host)).toEqual(['math.AG', 'math.DG']);
+    expect(deepAll(host, '[part="path"]').map((p) => p.textContent)).toEqual(['Mathematics', 'Mathematics']);
+  });
+
+  it('names every served parent of a match with several, and walks on up from the first', async () => {
+    const {host, store, box} = await mountField({layers: [layer('topics', {hierarchy: {kind: 'dag', pruneChildren: false}})]});
+    store.setBrowse('q:glioma', {artifacts: [row(30n, 'glioma', [10n, 20n])], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(10n, 'brain tumours', [1n]), row(20n, 'nerve tissue tumours', [2n])], next: null});
+    store.setBrowse('p:10', {artifacts: [], parents: [row(1n, 'neoplasms')], next: null});
+    box().value = 'glioma';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(deep(host, '[part="path"]')!.textContent).toBe('neoplasms › brain tumours, nerve tissue tumours');
+  });
 });
 
