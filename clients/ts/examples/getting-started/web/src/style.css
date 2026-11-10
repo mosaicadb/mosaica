@@ -29,3 +29,10 @@ aside {
   padding: 0 20px;
   border-left: 1px solid #ddd;
 }
+
+@media (max-width: 720px) {
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+}

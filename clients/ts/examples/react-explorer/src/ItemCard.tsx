@@ -21,7 +21,7 @@ export function ItemCard({store}: {store: Store}) {
     return (
       <section style={box} data-state="empty">
         <h2 style={{margin: 0, fontSize: '1rem'}}>Item</h2>
-        <p style={{opacity: 0.6}}>click a mark</p>
+        <p style={{opacity: 0.6}}>no item chosen</p>
       </section>
     );
   }

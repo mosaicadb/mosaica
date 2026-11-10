@@ -2,6 +2,7 @@
 <html lang="en-GB">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Mosaica — plain HTML</title>
     <link rel="icon" href="data:," />
     <!-- The elements fetch no font; this page loads Instrument Sans, their default face. -->
@@ -12,6 +13,7 @@
       html, body { margin: 0; height: 100%; font: 14px system-ui, sans-serif; }
       body { display: grid; grid-template-rows: auto 1fr; }
       header { display: flex; gap: 1rem; align-items: center; padding: 0.5rem 1rem; border-bottom: 1px solid #ddd; }
+      h1 { margin: 0; font-size: inherit; }
       mosaica-explorer { --mosaica-explorer-height: 100%; min-height: 0; }
     </style>
     <!-- The self-contained bundle, one file, by relative path, with the integrity hash it was built
@@ -20,7 +22,7 @@
   </head>
   <body>
     <header>
-      <strong>Mosaica</strong>
+      <h1>Mosaica</h1>
       <label>signed in as <select id="principal"></select></label>
       <span id="who"></span>
     </header>
@@ -44,6 +46,8 @@
         explorer.setAttribute('viewer-url', location.origin);
         explorer.setAttribute('token', token);
         explorer.setAttribute('layout', 'overlay');
+        // The map's name, which a screen reader reads out for it.
+        explorer.setAttribute('aria-label', `Map of the items ${user} may see`);
         // The most clusters each level shows in one tile of the map, largest first.
         explorer.setAttribute('artifacts-per-tile', '50');
         mount.append(explorer);

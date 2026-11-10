@@ -32,12 +32,12 @@
           Show topic names
         </label>
         <p id="topic" hidden>
-          Topic: <strong></strong>
+          <span role="status">Topic: <strong></strong></span>
           <button type="button">Clear</button>
         </p>
       </div>
       <mosaica-store>
-        <mosaica-map title-field="title"></mosaica-map>
+        <mosaica-map aria-label="Map of arXiv papers" title-field="title"></mosaica-map>
       </mosaica-store>
       <aside>
         <section id="paper" hidden>
@@ -45,7 +45,7 @@
           <p class="archive"></p>
           <p><a target="_blank">Open on arXiv</a></p>
         </section>
-        <p id="count"></p>
+        <p id="count" role="status"></p>
         <ol id="results"></ol>
       </aside>
     </main>

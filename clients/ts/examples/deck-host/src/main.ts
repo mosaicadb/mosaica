@@ -8,6 +8,9 @@ import {fitWorld, worldEdge, type ViewState} from './view.js';
  * store where the camera is through `viewInputOf`, and draws a layer of its own under the marks.
  * Each sign-in opens the camera on the items that viewer may see, through `frameMatches`.
  * The layer makes its GPU buffers on the deck's device and releases them itself.
+ *
+ * Deck makes its canvas a tab stop, and with `controller: true` the arrow keys pan it and `+` and
+ * `-` zoom it while it has focus. The canvas has no role or name until the host gives it them.
  */
 const parent = document.getElementById('map') as HTMLDivElement;
 const size = () => ({width: parent.clientWidth || 1, height: parent.clientHeight || 1});
@@ -26,6 +29,11 @@ const deck = new Deck<OrthographicView>({
   viewState,
   controller: true,
   layers: [],
+  onLoad: () => {
+    const canvas = deck.getCanvas()!;
+    canvas.setAttribute('role', 'application');
+    canvas.setAttribute('aria-label', 'Map of the items you may see: arrow keys pan, + and - zoom');
+  },
   onViewStateChange: ({viewState: next}) => {
     const v = next as {target: number[]; zoom: number};
     viewState = {...viewState, target: [v.target[0]!, v.target[1]!, 0], zoom: v.zoom};
