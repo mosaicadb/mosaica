@@ -67,7 +67,7 @@ use crate::row_column::RowColumn;
 // The publication-side vocabulary, re-exported for the server, which sees engine API types only
 // (`scripts/check-layers.sh`): what a row's shape is read into, how it is canonicalised, and what
 // that reported.
-pub use mosaica_spatial::shape::{CanonError, CanonReport, Shape, ShapeF64, Space};
+pub use mosaica_spatial::shape::{place, CanonError, CanonReport, Shape, ShapeF64, Space};
 pub use mosaica_spatial::{Bounds, Projection};
 pub use mosaica_store::derived::{
     authored_shape_input, canonical_shapes, check_shape_span, shape_input, CanonicalShapes,

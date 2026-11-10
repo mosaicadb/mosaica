@@ -85,10 +85,9 @@ impl std::fmt::Display for CanonError {
             ),
             CanonError::NoProjection => write!(
                 f,
-                "`space = \"wgs84\"` on a view whose `projection` is `none`: such a view has one \
-                 space and nothing to convert a degree from. Write the shape in the view's own \
-                 coordinates with `space = \"view\"`, or declare a projection on the view \
-                 (projections.md §5.3)"
+                "`space = \"wgs84\"` on a view whose `projection` is `none`, which has nothing to \
+                 convert a degree from; write the coordinates in the view's own space with \
+                 `space = \"view\"`, or declare a projection on the view"
             ),
         }
     }

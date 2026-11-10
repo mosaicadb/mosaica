@@ -8,6 +8,7 @@ import datetime
 import http.client
 import io
 import json
+import math
 import numbers
 import operator
 import struct
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
 TOKEN_MARGIN = 60.0
 
 #: The `/v1/viewport` and `/v1/artifacts/viewport` fields the server reads as integers.
+# The latitude Web Mercator stops at, north and south.
+_MERCATOR_LATITUDE = 85.0511287798066
 _VIEWPORT_INTEGERS = {"k", "artifact_budget", "underlay_offset", "per_tile", "budget", "palette_size"}
 
 #: The frame kinds of a `/v1/viewport` body, and the artifacts frame of a
@@ -371,13 +374,36 @@ def _as_keys(codes, keys: dict):
     )
 
 
-def _extent(meta: dict, view: str) -> list[float]:
-    """A view's whole coordinate range, `[min_x, min_y, max_x, max_y]`."""
+def _view_block(meta: dict, view: str) -> dict:
+    """What `meta` says of one view."""
     for block in meta.get("views") or []:
         if block["id"] == view:
-            q = block["quantisation"]
-            return [q["x_min"], q["y_min"], q["x_max"], q["y_max"]]
+            return block
     raise Refusal(f"there is no view named {view!r} that this reader can see")
+
+
+def _extent(meta: dict, view: str) -> list[float]:
+    """A view's whole coordinate range, `[min_x, min_y, max_x, max_y]`."""
+    q = _view_block(meta, view)["quantisation"]
+    return [q["x_min"], q["y_min"], q["x_max"], q["y_max"]]
+
+
+def _projection(meta: dict, view: str) -> str:
+    """A view's map projection as `meta` names it, `"none"` for a view without one."""
+    return _view_block(meta, view).get("projection") or "none"
+
+
+def _projected(box: Sequence[float], projection: str) -> list[float]:
+    """A longitude and latitude box in the coordinates of a view under `projection`, where the
+    widget's camera is kept. y runs south there, so the northern edge is the smaller y."""
+
+    def y(latitude: float) -> float:
+        if projection == "web_mercator":
+            latitude = max(-_MERCATOR_LATITUDE, min(_MERCATOR_LATITUDE, latitude))
+            return 0.5 - math.log(math.tan(math.pi / 4 + math.radians(latitude) / 2)) / (2 * math.pi)
+        return 0.5 - max(-90.0, min(90.0, latitude)) / 180
+
+    return [(box[0] + 180) / 360, y(box[3]), (box[2] + 180) / 360, y(box[1])]
 
 
 U64_MAX = 2**64 - 1
@@ -638,7 +664,8 @@ class Selection:
 
     @property
     def box(self) -> Optional[tuple]:
-        """The box this selection is limited to, as `(min_x, min_y, max_x, max_y)`, or `None`.
+        """The box this selection is limited to, as `(min_x, min_y, max_x, max_y)`, or `None`,
+        in the coordinates `within` took it in.
 
         After several calls to `within` it is the overlap of their boxes, and `None`, matching no
         item, when they do not overlap.
@@ -684,11 +711,17 @@ class Selection:
         """Narrow this selection to the items whose position lies inside `box`, returning a new
         selection.
 
-        `box` is `(min_x, min_y, max_x, max_y)` in the view's own coordinates, the ones the rows
-        were inserted with. An item on the edge is inside, and a box whose minimum is above its
-        maximum is refused.
+        `box` is `(min_x, min_y, max_x, max_y)` in the coordinates the rows were inserted with.
+        On a view declared with a projection those are degrees,
+        `(min_lon, min_lat, max_lon, max_lat)`, and on any other view the view's own `x` and `y`.
+        An item on the edge is inside, and a box whose minimum is above its maximum is refused.
 
             db.view("papers").within((0.0, 0.0, 100.0, 50.0)).count()
+            db.view("world").within((-10.7, 51.3, -5.3, 55.5)).count()   # Ireland, in degrees
+
+        For a box in a projected view's own coordinates, the unit square the projection draws
+        the world in, state the space in a filter:
+        `filter({"region": {"bbox": [...], "space": "view"}})`.
         """
         edges = tuple(float(v) for v in box)
         if len(edges) != 4:
@@ -769,9 +802,11 @@ class Selection:
             request["tiles"] = [int(tile) for tile in listed(tiles)]
         else:
             request["bbox"] = list(self.box or _extent(meta, self._view))
+            if self.box and _projection(meta, self._view) != "none":
+                request["space"] = "wgs84"
         for name, value in (
             ("k", k),
-            ("filters", self._expression()),
+            ("filters", self._expression(meta)),
             ("highlight", highlight),
             ("layers", _layers(layers)),
             ("levels", levels),
@@ -913,13 +948,19 @@ class Selection:
                 f"map: a selection's map takes {', '.join(given)} from the selection; narrow it "
                 f"with filter() or within(), or call map() on its reader"
             )
-        return self._reader().map(
+        reader = self._reader()
+        box = self.box
+        if box is not None:
+            projection = _projection(reader.meta(), self._view)
+            if projection != "none":
+                box = _projected(box, projection)
+        return reader.map(
             view=self._view,
             layers=layers,
             colour_by=colour_by,
             filters=self.filters,
             height=height,
-            bbox=self.box,
+            bbox=box,
             size_by=size_by,
             artifacts_per_tile=artifacts_per_tile,
             budget=budget,
@@ -935,9 +976,14 @@ class Selection:
             **kwargs,
         )
 
-    def _expression(self) -> Optional[dict]:
-        """The filters and every box, as the one expression the server tests items against."""
-        boxes = [{"region": {"bbox": list(box)}} for box in self._boxes]
+    def _expression(self, meta: Optional[dict] = None) -> Optional[dict]:
+        """The filters and every box, as the one expression the server tests items against. A box
+        on a projected view is in degrees and says so."""
+        if not self._boxes:
+            return _all_of(self._filters)
+        meta = self._reader().meta() if meta is None else meta
+        space = {} if _projection(meta, self._view) == "none" else {"space": "wgs84"}
+        boxes = [{"region": {"bbox": list(box), **space}} for box in self._boxes]
         return _all_of(list(self._filters) + boxes)
 
     def __repr__(self) -> str:

@@ -6019,7 +6019,11 @@ components:
           minItems: 4
           maxItems: 4
           items: { type: number }
-          description: "`[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. The request is answered for the depth-`zoom` tiles it intersects."
+          description: "`[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. With `space` set to `wgs84` it is `[min_lon, min_lat, max_lon, max_lat]` in degrees. The request is answered for the depth-`zoom` tiles it intersects."
+        space:
+          type: string
+          enum: [view, wgs84]
+          description: What `bbox` is written in. `view`, the default, is the view's own coordinates. `wgs84` is degrees, put through the view's projection, and is `422` on a view that projects nothing. Sent with `bbox` only; beside `tiles` it is `422`.
         tiles:
           type: array
           items:
