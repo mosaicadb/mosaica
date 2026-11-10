@@ -31,4 +31,6 @@ The package's calls return these types too. They are not imported by name.
 | `Listening` | The addresses a database's server listens on | [Operating](operating.md) |
 | `ServeRefused` | The exception raised when a server that a `Database` started does not report the addresses it listens on | [Operating](operating.md) |
 
+To count and chart what a database holds, see [Count and chart from Python](../../guides/analysis.md). A filter and a grouping are dictionaries, whose every operator and key the [filters](../filters.md) and [aggregations](../aggregations.md) pages list.
+
 The methods of `Database` are on four pages: [declaring](declaring.md), [inserting and committing](inserting.md), [reading](reading.md) and [operating](operating.md). The rest are on [connecting and creating](connecting.md).

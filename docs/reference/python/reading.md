@@ -2,6 +2,16 @@
 
 Use `connect` for a reader whose access terms come from its token, or `Database.viewer` to read your own database as someone who holds the terms you name. Every read covers only the items the reader may see, by the rule that [`Viewer`](#mosaica._viewer.Viewer) states.
 
+| To | Call |
+|---|---|
+| Narrow a view by a filter or a box | [`Selection.filter`](#mosaica._viewer.Selection.filter), [`Selection.within`](#mosaica._viewer.Selection.within) |
+| Count, break down, bin or grid a selection | [`Selection.count`](#mosaica._viewer.Selection.count), [`Selection.aggregate`](#mosaica._viewer.Selection.aggregate), [`Viewer.aggregate`](#mosaica._viewer.Viewer.aggregate) |
+| Read the points a map draws | [`Selection.sample`](#mosaica._viewer.Selection.sample) |
+| Read records | [`Selection.items`](#mosaica._viewer.Selection.items), [`Viewer.items`](#mosaica._viewer.Viewer.items), [`Viewer.item`](#mosaica._viewer.Viewer.item) |
+| List a category's values | [`Viewer.categories`](#mosaica._viewer.Viewer.categories) |
+
+A filter is a dictionary, and the [filters](../filters.md) page lists every operator. A grouping is a dictionary too, and the [aggregations](../aggregations.md) page lists every one. [Count and chart from Python](../../guides/analysis.md) works through counting, histograms, comparisons and density grids.
+
 The `Database` methods on this page read with the operator's own token, which [`authorise`](connecting.md#mosaica._auth.authorise) describes under `read_all`.
 
 ## Database
