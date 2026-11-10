@@ -351,7 +351,7 @@ describe('<mosaica-filter> on a category', () => {
     expect(store.calls.filter((c) => c.name === 'suggest').map((c) => c.args)).toEqual([['archive', 'ma', 'filter']]);
   });
 
-  it('chooses the suggestion the arrow keys reach with Enter, the first by default, and nothing for text that suggests nothing', async () => {
+  it('chooses the suggestion the arrow keys reach with Enter, and nothing before they reach one or for text that suggests nothing', async () => {
     const {host, store, el} = await mountFilter('archive', empty());
     const entry = await type(host, 'zz.unlisted');
     const key = async (k: string) => {
@@ -363,6 +363,11 @@ describe('<mosaica-filter> on a category', () => {
     await type(host, 'c');
     store.set('filters', {...store.get('filters'), suggestions: {archive: {q: 'c', verb: 'filter', values: [value(1, 'cs', 'CS'), value(2, 'cond', null), value(3, 'chem', null)], more: false, total: null}}});
     await settle(host);
+    // A page can land between the last keystroke and Enter, so Enter takes no row the keys did not reach.
+    await key('Enter');
+    expect(drafts(store)).toHaveLength(0);
+    expect(entry.hasAttribute('aria-activedescendant')).toBe(false);
+    await key('ArrowDown');
     await key('Enter');
     expect(drafts(store).at(-1)!.filter['archive']).toEqual({family: 'category', keys: ['cs']});
     await key('ArrowDown');
@@ -445,6 +450,104 @@ describe('<mosaica-filter> on a category', () => {
       ['archive', 'ma', 'filter'],
       ['archive', 'ma', 'filter']
     ]);
+  });
+});
+
+describe('<mosaica-filter> on a category, for a keyboard and a screen reader', () => {
+  const empty = () => filtersOf({filter: {archive: {family: 'category', keys: []}}, highlight: {}});
+  const page = (store: ReturnType<typeof fakeStore>, q: string, values: ReturnType<typeof value>[], more = false) =>
+    store.set('filters', {...store.get('filters'), suggestions: {archive: {q, verb: 'filter', values, more, total: null}}});
+  const status = (host: HTMLElement) => deep(host, '[role="status"]')!;
+
+  it('says in a status line, there before the list, how many values are listed, that they are loading, and that none match', async () => {
+    const {host, store} = await mountFilter('archive', empty());
+    expect(status(host).textContent!.trim()).toBe('');
+    await type(host, 'c');
+    const loading = status(host).textContent!.trim();
+    expect(loading).not.toBe('');
+    page(store, 'c', [value(1, 'cs', 'CS'), value(2, 'cond', null)]);
+    await settle(host);
+    expect(status(host).textContent).toContain('2');
+    expect(status(host).textContent!.trim()).not.toBe(loading);
+    page(store, 'c', []);
+    await settle(host);
+    expect(status(host).querySelector('[part="more"]')!.textContent!.trim()).not.toBe('');
+    expect(status(host).textContent).not.toContain('2');
+  });
+
+  it('shows no message that nothing matches for a list that closed as focus left it', async () => {
+    const {host, store} = await mountFilter('archive', empty());
+    const entry = await type(host, 'c');
+    page(store, 'c', [value(1, 'cs', 'CS')], true);
+    await settle(host);
+    expect(status(host).textContent!.trim()).not.toBe('');
+    entry.dispatchEvent(new Event('blur'));
+    await settle(host);
+    expect(deep(host, '[part="values"]')).toBeNull();
+    expect(status(host).textContent!.trim()).toBe('');
+    // A search that matched nothing still says so.
+    page(store, 'c', []);
+    await settle(host);
+    expect(status(host).textContent!.trim()).not.toBe('');
+  });
+
+  it('moves to the first and the last suggestion with Home and End once one is reached, leaving them to the text before, and scrolls the one reached into view', async () => {
+    const {host, store} = await mountFilter('archive', empty());
+    const entry = await type(host, 'c');
+    page(store, 'c', [value(1, 'cs', 'CS'), value(2, 'cond', null), value(3, 'chem', null)]);
+    await settle(host);
+    const scrolled: string[] = [];
+    vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) {
+      scrolled.push(this.id);
+    });
+    const press = async (key: string) => {
+      const event = new KeyboardEvent('keydown', {key, cancelable: true});
+      entry.dispatchEvent(event);
+      await settle(host);
+      return event;
+    };
+    const active = () => deep(host, '[part~="tick"][data-active]')?.id ?? null;
+    expect((await press('End')).defaultPrevented).toBe(false);
+    expect(active()).toBeNull();
+    await press('ArrowDown');
+    expect(active()).toBe('value-1');
+    expect((await press('End')).defaultPrevented).toBe(true);
+    expect(active()).toBe('value-3');
+    await press('Home');
+    expect(active()).toBe('value-1');
+    expect(scrolled).toEqual(['value-1', 'value-3', 'value-1']);
+    vi.restoreAllMocks();
+  });
+
+  it('is a list autocomplete whose options toggle, and as a picker one whose options do not', async () => {
+    const {host, store, el} = await mountFilter('archive', empty());
+    const entry = await type(host, 'c');
+    expect(entry.getAttribute('aria-autocomplete')).toBe('list');
+    page(store, 'c', [value(1, 'cs', 'CS')]);
+    await settle(host);
+    expect(deep(host, '[role="listbox"]')!.getAttribute('aria-multiselectable')).toBe('true');
+    el.choose = () => {};
+    await settle(host);
+    expect(deep(host, '[role="listbox"]')!.hasAttribute('aria-multiselectable')).toBe(false);
+  });
+});
+
+describe('<mosaica-filter> names its box', () => {
+  const named = (host: HTMLElement) => deep(host, '[part="entry"]')!.getAttribute('aria-label')!;
+  const shown = (host: HTMLElement) => deep(host, '[part="entry"]')!.getAttribute('placeholder')!;
+
+  it('by its column and the placeholder it shows, its own or the one it is given', async () => {
+    const category = await mountFilter('archive', filtersOf({filter: {archive: {family: 'category', keys: []}}, highlight: {}}));
+    expect(named(category.host)).toContain('Archive');
+    expect(named(category.host)).toContain(shown(category.host));
+    document.body.innerHTML = '';
+    const text = await mountFilter('title', filtersOf({filter: {title: {family: 'text', query: '', phrase: true}}, highlight: {}}));
+    expect(named(text.host)).toContain('Title');
+    expect(named(text.host)).toContain(shown(text.host));
+    document.body.innerHTML = '';
+    const given = await mountFilter('archive', filtersOf({filter: {archive: {family: 'category', keys: []}}, highlight: {}}), 'placeholder="Search 1,234 values"');
+    expect(named(given.host)).toContain('Archive');
+    expect(named(given.host)).toContain('Search 1,234 values');
   });
 });
 
@@ -769,6 +872,51 @@ describe('<mosaica-filter-panel>', () => {
     expect(focused()).toBe('add');
   });
 
+  it('closes Add field on a press outside it and as focus leaves it, and not on a press inside it', async () => {
+    const {host, panel} = await mountPanel(none());
+    const open = async () => {
+      (deep(host, '[part="add"]') as HTMLButtonElement).click();
+      await settle(host);
+    };
+    const list = () => deep(host, '[part="add-list"]');
+    await open();
+    deep(host, '[part="add-search"]')!.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, composed: true}));
+    await settle(host);
+    expect(list()).not.toBeNull();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, composed: true}));
+    await settle(host);
+    expect(list()).toBeNull();
+    await open();
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    const adder = panel.shadowRoot!.querySelector('.adder')!;
+    // Focus going to nothing, as on a press on the list's scrollbar, leaves it open.
+    adder.dispatchEvent(new FocusEvent('focusout', {relatedTarget: null, bubbles: true, composed: true}));
+    await settle(host);
+    expect(list()).not.toBeNull();
+    adder.dispatchEvent(new FocusEvent('focusout', {relatedTarget: elsewhere, bubbles: true, composed: true}));
+    await settle(host);
+    expect(list()).toBeNull();
+  });
+
+  it('says in a status line how many fields Add field lists as its search narrows them, and that none match', async () => {
+    const {host} = await mountPanel(none());
+    (deep(host, '[part="add"]') as HTMLButtonElement).click();
+    await settle(host);
+    const status = () => deep(host, '[part="add-list"] [role="status"]')!;
+    expect(status().textContent).toContain('3');
+    const search = deep(host, '[part="add-search"]') as HTMLInputElement;
+    search.value = 'sub';
+    search.dispatchEvent(new Event('input'));
+    await settle(host);
+    expect(status().textContent).toContain('1');
+    search.value = 'nothing by this name';
+    search.dispatchEvent(new Event('input'));
+    await settle(host);
+    expect(status().textContent!.trim()).not.toBe('');
+    expect(status().textContent).not.toMatch(/\d/);
+    expect(deepAll(host, '[part~="add-option"]')).toHaveLength(0);
+  });
+
   it('keeps a card listed while its clause is emptied under the user', async () => {
     vi.useFakeTimers();
     const draft: FilterDraft = {filter: {...none().filter, title: {family: 'text', query: 'graph', phrase: true}}, highlight: {}};
@@ -915,6 +1063,109 @@ describe('<mosaica-filter-panel>', () => {
     });
   });
 
+  describe('removing a chip', () => {
+    const three: FilterDraft = {
+      filter: {archive: {family: 'category', keys: ['cs']}, title: {family: 'text', query: 'graph', phrase: true}},
+      highlight: {archive: {family: 'category', keys: ['math']}}
+    };
+    const closes = (host: HTMLElement) => deepAll(host, '[part="chip"] > button:last-child') as HTMLButtonElement[];
+    /** Press a control from the keyboard, and have the store publish what the press set, as the real one does. */
+    const press = async (host: HTMLElement, store: ReturnType<typeof fakeStore>, button: HTMLButtonElement) => {
+      const before = store.calls.length;
+      button.focus();
+      button.click();
+      let filters = store.get('filters');
+      for (const {name, args} of store.calls.slice(before)) {
+        if (name === 'setFilters') filters = {...filters, draft: args[0] as FilterDraft};
+        if (name === 'setMembers') filters = {...filters, members: args[0] as FiltersProjection['members']};
+        if (name === 'setRegions') filters = {...filters, regions: args[0] as FiltersProjection['regions']};
+      }
+      store.set('filters', filters);
+      await settle(host);
+    };
+    const focused = (panel: MosaicaFilterPanel) => panel.shadowRoot!.activeElement as HTMLElement | null;
+    const chipOf = (el: HTMLElement | null) => {
+      const chip = el?.closest('[part="chip"]');
+      return chip ? [chip.getAttribute('data-verb'), chip.getAttribute('data-column') ?? chip.getAttribute('data-artifact')] : null;
+    };
+
+    it('moves focus to the × of the chip after it, else of the one before, else to Add field', async () => {
+      const {host, panel, store} = await mountPanel(three);
+      expect(closes(host).map((b) => chipOf(b))).toEqual([['filter', 'archive'], ['filter', 'title'], ['highlight', 'archive']]);
+      await press(host, store, closes(host)[1]!);
+      expect(closes(host)).toHaveLength(2);
+      expect(focused(panel)).toBe(closes(host)[1]);
+      expect(chipOf(focused(panel))).toEqual(['highlight', 'archive']);
+      await press(host, store, closes(host)[1]!);
+      expect(chipOf(focused(panel))).toEqual(['filter', 'archive']);
+      await press(host, store, closes(host)[0]!);
+      expect(closes(host)).toHaveLength(0);
+      expect(focused(panel)!.getAttribute('part')).toBe('add');
+    });
+
+    it('moves focus along the chips of clusters as it does along those of columns', async () => {
+      const clause = (id: bigint) => ({layer: 'topics', artifact: id, outside: false, verb: 'filter' as const, label: `topic ${id}`});
+      const {host, panel, store} = await mountPanel({filter: {}, highlight: {}}, '', {members: [clause(1n), clause(2n)]});
+      await press(host, store, closes(host)[0]!);
+      expect(chipOf(focused(panel))).toEqual(['filter', '2']);
+    });
+
+    it('moves focus to Add field after Clear all', async () => {
+      const {host, panel, store} = await mountPanel(three);
+      await press(host, store, deep(host, '[part="clear"]') as HTMLButtonElement);
+      expect(deep(host, '[part="chips"]')).toBeNull();
+      expect(focused(panel)!.getAttribute('part')).toBe('add');
+    });
+
+    it('moves focus to the first chip left after the highlight is cleared from the subject row', async () => {
+      const {host, panel, store} = await mountPanel(three);
+      await press(host, store, deep(host, '[part="clear-highlight"]') as HTMLButtonElement);
+      expect(deep(host, '[part="clear-highlight"]')).toBeNull();
+      expect(chipOf(focused(panel))).toEqual(['filter', 'archive']);
+    });
+
+    it('takes focus itself under chips-only once its last chip has gone, and gives up its place in the tab order as focus leaves', async () => {
+      const {host, panel, store} = await mountPanel({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}}, 'chips-only');
+      await press(host, store, closes(host)[0]!);
+      expect(deepAll(host, '[part]')).toHaveLength(0);
+      expect(document.activeElement).toBe(panel);
+      panel.blur();
+      expect(panel.hasAttribute('tabindex')).toBe(false);
+    });
+
+    it('leaves focus where the viewer has moved it', async () => {
+      const {host, panel, store} = await mountPanel(three);
+      const elsewhere = document.body.appendChild(document.createElement('button'));
+      const close = closes(host)[1]!;
+      close.focus();
+      close.click();
+      elsewhere.focus();
+      store.set('filters', filtersOf(store.calls.filter((c) => c.name === 'setFilters').at(-1)!.args[0] as FilterDraft));
+      await settle(host);
+      expect(document.activeElement).toBe(elsewhere);
+      expect(focused(panel)).toBeNull();
+    });
+  });
+
+  it('writes the word on a highlight’s chip and none on a filter’s, and names each × by what it removes and its verb', async () => {
+    const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {archive: {family: 'category', keys: ['math']}}};
+    const member = (id: bigint, verb: 'filter' | 'highlight') => ({layer: 'topics', artifact: id, outside: false, verb, label: `topic ${id}`});
+    const {host} = await mountPanel(draft, '', {members: [member(1n, 'filter'), member(2n, 'highlight')]});
+    const chips = deepAll(host, '[part="chip"]');
+    expect(chips.map((c) => [c.getAttribute('data-verb'), c.querySelector('.verb')?.textContent ?? null])).toEqual([
+      ['filter', null],
+      ['highlight', 'highlight'],
+      ['filter', null],
+      ['highlight', 'highlight']
+    ]);
+    const names = chips.map((c) => c.querySelector(':scope > button:last-child')!.getAttribute('aria-label')!);
+    expect(names.map((n) => /filter/i.test(n))).toEqual([true, false, true, false]);
+    expect(names.map((n) => /highlight/i.test(n))).toEqual([false, true, false, true]);
+    expect(names[0]).toContain('Archive');
+    expect(names[2]).toContain('topic 1');
+    expect(names[3]).toContain('topic 2');
+  });
+
   it('names the values a clause on a bool keeps in its chip', async () => {
     const host = await mount('<mosaica-filter-panel></mosaica-filter-panel>');
     const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
@@ -922,7 +1173,7 @@ describe('<mosaica-filter-panel>', () => {
     const draft: FilterDraft = {filter: {retracted: {family: 'numeric', gte: 1, lte: 1}}, highlight: {retracted: {family: 'numeric', gte: 0, lte: 1}}};
     panel.store = fakeStore({meta: withBool, status: status({}), filters: filtersOf(draft)});
     await settle(host);
-    expect(deepAll(host, '[part="chip"]').map((c) => c.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Retracted: yes', 'Retracted: yes, no']);
+    expect(deepAll(host, '[part="chip"]').map((c) => c.querySelector('[part="edit"]')!.textContent!.replace(/\s+/g, ' ').trim())).toEqual(['Retracted: yes', 'Retracted: yes, no']);
   });
 
   it('leaves the subject row and the chips out under controls-only, and the cards out under chips-only', async () => {
@@ -987,6 +1238,8 @@ describe('<mosaica-filter-panel> regions held in other views', () => {
     const {store, events, chip} = await mountHeld();
     expect(chip()!.getAttribute('data-verb')).toBe('filter');
     expect(chip()!.textContent).toContain('Lasso in Topics');
+    expect(chip()!.querySelector(':scope > button:last-child')!.getAttribute('aria-label')).toContain('Lasso in Topics');
+    expect(chip()!.querySelector(':scope > button:last-child')!.getAttribute('aria-label')).toMatch(/filter/i);
     (chip()!.querySelector(':scope > button:last-child') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setRegions').at(-1)!.args[0]).toEqual([]);
     expect(events).toEqual([{type: 'mosaica-selectchange', detail: {shape: null, view: 'topics', status: 'cleared'}}]);
@@ -1012,6 +1265,12 @@ describe('<mosaica-filter-panel> cluster fields', () => {
     ({name, title: `${name} title`, views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1, ...over}) as Meta['layers'][number];
   const LAYERED = {...META, layers: [layer('topics'), layer('labels', {depsOn: ['topics']}), layer('elsewhere', {views: ['s9']})]};
   const topic = (id: bigint, verb: 'filter' | 'highlight', label?: string) => ({layer: 'topics', artifact: id, outside: false, verb, ...(label ? {label} : {})});
+  /** What a chip names, apart from the word that says it is a highlight. */
+  const named = (chip: Element) => {
+    const copy = chip.cloneNode(true) as Element;
+    copy.querySelector('.verb')?.remove();
+    return copy.textContent!.trim();
+  };
 
   async function mountLayered(members: ReturnType<typeof topic>[] = []) {
     const host = await mount('<mosaica-filter-panel></mosaica-filter-panel>');
@@ -1038,7 +1297,7 @@ describe('<mosaica-filter-panel> cluster fields', () => {
   it('lists a layer holding a clause, and shows its clauses as chips, the filter’s first', async () => {
     const {host} = await mountLayered([topic(8n, 'highlight', 'Optics'), topic(7n, 'filter', 'Neural networks'), topic(9n, 'filter')]);
     expect(deep(host, 'mosaica-field-card[data-field="cluster:topics"]')).not.toBeNull();
-    const chips = deepAll(host, '[part="chip"]').map((c) => [c.getAttribute('data-verb'), c.textContent!.trim()]);
+    const chips = deepAll(host, '[part="chip"]').map((c) => [c.getAttribute('data-verb'), named(c)]);
     expect(chips).toEqual([
       ['filter', 'Neural networks'],
       ['filter', UNNAMED],
@@ -1051,8 +1310,8 @@ describe('<mosaica-filter-panel> cluster fields', () => {
     const elsewhere = {layer: 'elsewhere', artifact: 4n, outside: true, verb: 'filter' as const, label: 'North'};
     const {host, store} = await mountLayered([topic(7n, 'filter', 'Neural networks'), lit as never, elsewhere as never]);
     const chip = (artifact: string) => deep(host, `[part="chip"][data-artifact="${artifact}"]`)!;
-    expect(chip('3').textContent!.trim()).toBe('diffusion, guidance');
-    expect(chip('4').textContent!.trim()).toBe('Outside North');
+    expect(named(chip('3'))).toBe('diffusion, guidance');
+    expect(named(chip('4'))).toBe('Outside North');
     (chip('3').querySelector('button') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([topic(7n, 'filter', 'Neural networks'), elsewhere]);
   });

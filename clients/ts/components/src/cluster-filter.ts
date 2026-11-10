@@ -14,12 +14,9 @@ import {chrome, tokens} from './tokens.js';
 const SEARCH_DEBOUNCE_MS = 250;
 /** The top-level clusters asked for, to rank by count while the box is empty. */
 const TOP_LEVEL_ROWS = 50;
-/**
- * A path of `n` of its nearest parents, nearest last, led by an ellipsis where parents further up
- * are left out.
- */
-function pathText(path: readonly string[], beyond: boolean, n: number): string {
-  return `${beyond || n < path.length ? '… › ' : ''}${path.slice(path.length - n).join(' › ')}`;
+/** A path of parents' names, nearest last, led by an ellipsis where there are parents further up. */
+function pathText(path: readonly string[], beyond: boolean): string {
+  return `${beyond ? '… › ' : ''}${path.join(' › ')}`;
 }
 
 /** How many parents a match's path is walked up, nearest first. */
@@ -33,8 +30,9 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  * around it. Set `layer` to a layer `meta.layers` lists.
  *
  * With the box empty, the list offers the layer's top-level clusters, largest first. Typing
- * searches the cluster names at every level. In the list, the arrow keys move between rows, Enter
- * chooses one, and Escape closes the list.
+ * searches the cluster names at every level. The arrow keys move between the rows, as do Home and
+ * End once one is reached. Enter chooses the row they reached, and Escape closes the list. A line
+ * under the box says how many clusters are listed, or why none is.
  *
  * Each row counts the items the filters match in that cluster without applying this layer's own
  * filter, so a cluster the viewer has filtered out still shows its count. Choosing a row filters
@@ -47,12 +45,13 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  *   row added or removed a `member_of` clause.
  * @csspart entry - The search box.
  * @csspart values - The list, while it is open.
- * @csspart option - One cluster in the list, with `data-id` and `aria-selected` while its clause is
- *   on.
+ * @csspart option - One cluster in the list, with `data-id`, `aria-selected` while its clause is
+ *   on, and `data-active` on the one the arrow keys reached.
  * @csspart name - A row's name, with `data-unnamed` if the cluster has none.
  * @csspart path - A row's path of parents' names.
  * @csspart value-count - A row's exact count.
- * @csspart more - The note under the box when nothing matches, or when more match than are listed.
+ * @csspart more - The note under the box when there is nothing to list, or when more match than
+ *   are listed.
  * @csspart refusal - The words "Clusters unavailable", with `data-code`, if the list was refused.
  */
 export class MosaicaClusterFilter extends MosaicaElement {
@@ -107,6 +106,11 @@ export class MosaicaClusterFilter extends MosaicaElement {
         background: var(--_mosaica-surface-2);
         font-weight: 600;
       }
+      /* The box keeps focus, so the row the arrow keys reached is ringed as if it had it. */
+      [part~='option'][data-active] {
+        outline: 2px solid var(--_mosaica-focus);
+        outline-offset: -2px;
+      }
       .opt {
         display: flex;
         flex-direction: column;
@@ -114,11 +118,8 @@ export class MosaicaClusterFilter extends MosaicaElement {
       }
       [part='name'],
       [part='path'] {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
       }
-      /* Shortened from the left a whole name at a time, so the nearest parents stay; see pathText. */
       [part='path'] {
         font-size: 12px;
         font-weight: 400;
@@ -136,6 +137,14 @@ export class MosaicaClusterFilter extends MosaicaElement {
         margin-top: 6px;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
+      }
+      .skel {
+        margin-top: 8px;
+      }
+      @media (forced-colors: active) {
+        [part~='option'][data-active] {
+          outline-color: Highlight;
+        }
       }
     `
   ];
@@ -155,7 +164,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
   @state() accessor search = '';
   /** Whether the list is open. @internal */
   @state() accessor listOpen = false;
-  /** The row the arrow keys reached, by `mosaicaId`; `null` is the first that can be chosen. @internal */
+  /** The row the arrow keys reached, by `mosaicaId`; `null` before they reach one. @internal */
   @state() accessor activeId: bigint | null = null;
   /** The top-level clusters, once fetched. @internal */
   @state() accessor tops: Offer[] | null = null;
@@ -312,7 +321,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
       this.search = '';
       this.found = null;
       this.listOpen = false;
-      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: offer.path && offer.path.length > 0 ? pathText(offer.path, offer.beyond, offer.path.length) : '', rung: row.rung});
+      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: offer.path && offer.path.length > 0 ? pathText(offer.path, offer.beyond) : '', rung: row.rung});
       return;
     }
     const members = s.get('filters').members;
@@ -359,43 +368,10 @@ export class MosaicaClusterFilter extends MosaicaElement {
     else super.focus(options);
   }
 
-  /** How many of each offer's parents its path names, where all of them do not fit; by `mosaica_id`. */
-  private pathFits = new Map<bigint, number>();
-  /** The rows and width {@link fitPaths} last measured. */
-  private pathsMeasured = '';
-
-  /**
-   * Name as many of each listed path's nearest parents as fit its line, dropping whole names from
-   * the left. Measured with the line's own font, after the list is placed.
-   */
-  private fitPaths(): void {
-    // Only while the list shows, and only when its rows or its width changed since last measured.
-    const shown = this.listOpen ? Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part="path"][data-id]')) : [];
-    const key = `${shown[0]?.clientWidth ?? 0}|${shown.map((el) => `${el.dataset.id}:${el.title}`).join(',')}`;
-    if (shown.length === 0 || key === this.pathsMeasured) return;
-    this.pathsMeasured = key;
-    const context = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
-    if (!context) return;
-    let changed = false;
-    for (const el of shown) {
-      const id = BigInt(el.dataset.id!);
-      const o = this.listed()?.find((x) => x.row.mosaicaId === id);
-      if (!o?.path || el.clientWidth === 0) continue;
-      context.font = getComputedStyle(el).font;
-      let n = o.path.length;
-      while (n > 1 && context.measureText(pathText(o.path, o.beyond, n)).width > el.clientWidth) n -= 1;
-      if ((this.pathFits.get(id) ?? o.path.length) !== n) {
-        this.pathFits.set(id, n);
-        changed = true;
-      }
-    }
-    if (changed) this.requestUpdate();
-  }
-
   protected override updated(changed: PropertyValues<this>): void {
     super.updated(changed);
     this.floating.update();
-    this.fitPaths();
+    if (changed.has('activeId')) this.renderRoot.querySelector('[part~="option"][data-active]')?.scrollIntoView({block: 'nearest'});
     // Counted only while the list is open: a closed list shows no counts, so asks for none.
     const layer = this.declared();
     const limits = this.resolvedStore?.get('meta')?.selection;
@@ -419,29 +395,30 @@ export class MosaicaClusterFilter extends MosaicaElement {
     const listed = this.listed();
     // Largest first once the counts land; the server's order until then.
     const offers = listed === null ? [] : counts === null ? listed : [...listed].sort((a, b) => (countOf(b) ?? -1) - (countOf(a) ?? -1));
-    const active = offers.find((o) => o.row.mosaicaId === this.activeId) ?? offers[0] ?? null;
-    const move = (by: 1 | -1) => {
-      if (offers.length === 0) return;
-      const at = active ? offers.indexOf(active) : -1;
-      this.activeId = offers[(at + by + offers.length) % offers.length]!.row.mosaicaId;
+    // The row Enter acts on: the one the arrow keys reached. Until they reach one there is none, so
+    // Enter does not take whichever row the counts put first as they land.
+    const active = offers.find((o) => o.row.mosaicaId === this.activeId) ?? null;
+    const at = active ? offers.indexOf(active) : -1;
+    const reach = (i: number) => {
+      if (offers.length > 0) this.activeId = offers[(i + offers.length) % offers.length]!.row.mosaicaId;
     };
     const open = this.listOpen && offers.length > 0;
     const option = (o: Offer) => {
       const name = artifactName(o.row);
       const count = countOf(o);
-      const full = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, o.path.length) : '';
-      const path = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, this.pathFits.get(o.row.mosaicaId) ?? o.path.length) : '';
+      const path = o.path && o.path.length > 0 ? pathText(o.path, o.beyond) : '';
       return html`<button type="button" part="option" role="option" id=${`c-${o.row.mosaicaId}`} tabindex="-1" data-id=${idString(o.row.mosaicaId)} ?data-active=${o === active}
         aria-selected=${on.has(o.row.mosaicaId) ? 'true' : 'false'}
         @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.toggle(o)}>
-        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
+        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path"><bdi>${path}</bdi></span>` : nothing}</span>
         ${count === undefined ? nothing : html`<span part="value-count">${count.toLocaleString('en-GB')}</span>`}
       </button>`;
     };
+    const shown = this.placeholder || 'Type a name';
     const box = html`<div class="combo">
-      <div class="input">${icon('search', 12)}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${this.placeholder || 'Type a name'}
-        role="combobox" aria-expanded=${open ? 'true' : 'false'} aria-controls="values" aria-activedescendant=${open && active ? `c-${active.row.mosaicaId}` : nothing}
-        aria-label=${`${title}: find a cluster`} .value=${this.search}
+      <div class="input">${icon('search', 12)}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${shown}
+        role="combobox" aria-autocomplete="list" aria-expanded=${open ? 'true' : 'false'} aria-controls="values" aria-activedescendant=${open && active ? `c-${active.row.mosaicaId}` : nothing}
+        aria-label=${`${title}: ${shown}`} .value=${this.search}
         @focus=${() => {
           this.fetchTops();
           this.listOpen = true;
@@ -452,7 +429,11 @@ export class MosaicaClusterFilter extends MosaicaElement {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
             this.listOpen = true;
-            move(e.key === 'ArrowDown' ? 1 : -1);
+            reach(e.key === 'ArrowDown' ? at + 1 : Math.max(at, 0) - 1);
+          } else if ((e.key === 'Home' || e.key === 'End') && open && active) {
+            // Before the arrow keys reach a row, Home and End move in the text.
+            e.preventDefault();
+            reach(e.key === 'Home' ? 0 : -1);
           } else if (e.key === 'Enter') {
             if (open && active) this.toggle(active);
           } else if (e.key === 'Escape' && this.listOpen) {
@@ -460,19 +441,26 @@ export class MosaicaClusterFilter extends MosaicaElement {
             this.listOpen = false;
           }
         }} /></div>
-      ${open ? html`<div part="values" id="values" popover="manual" role="listbox" aria-label=${title}>${repeat(offers, (o) => o.row.mosaicaId, option)}</div>` : nothing}
+      ${open ? html`<div part="values" id="values" popover="manual" role="listbox" aria-multiselectable=${this.choose ? nothing : 'true'} aria-label=${title}>${repeat(offers, (o) => o.row.mosaicaId, option)}</div>` : nothing}
     </div>`;
     const typed = this.search.trim() !== '';
-    const note = this.refusal
+    // How many clusters are listed, or why none is, for a reader as the list changes under the box.
+    const said = this.refusal
       ? html`<span part="refusal" data-code=${this.refusal.code}>Clusters unavailable</span>`
-      : typed && this.found?.q === this.search.trim()
-        ? this.found.offers.length === 0
-          ? html`<span part="more">No cluster by that name</span>`
-          : this.found.more
-            ? html`<span part="more">Type more to narrow the list</span>`
-            : nothing
-        : nothing;
-    return html`${box}${note}`;
+      : listed === null
+        ? this.listOpen
+          ? html`<span class="skel" aria-hidden="true"></span><span class="sr-only">Loading clusters</span>`
+          : nothing
+        : offers.length === 0
+          ? typed
+            ? html`<span part="more">No cluster by that name</span>`
+            : this.listOpen
+              ? html`<span part="more">No clusters</span>`
+              : nothing
+          : !open
+            ? nothing
+            : html`<span class="sr-only">${offers.length} ${offers.length === 1 ? 'cluster' : 'clusters'} listed. </span>${typed && this.found?.more ? html`<span part="more">Type more to narrow the list</span>` : nothing}`;
+    return html`${box}<div role="status">${said}</div>`;
   }
 }
 

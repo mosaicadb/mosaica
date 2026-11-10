@@ -29,7 +29,9 @@ const BAR_FLOOR = 2;
  * - A text column takes words that an item must all contain. Double quotes match a phrase where the
  *   column supports phrases, and `OR` between terms matches either.
  * - A category column suggests values as the viewer types. The arrow keys move through the
- *   suggestions, Enter chooses or removes one, and Escape clears what was typed.
+ *   suggestions, as do Home and End once one is reached. Enter chooses or removes the suggestion
+ *   they reached, and Escape clears what was typed. A line under the box says how many values are
+ *   listed, or why none is.
  * - A keyword column has a menu for choosing how to match, by `contains`, `prefix` or `eq`.
  *
  * The box sets the filter 350 ms after the last keystroke, so that the map does not redraw for
@@ -48,7 +50,8 @@ const BAR_FLOOR = 2;
  * @csspart operators - The menu of a keyword column's operators.
  * @csspart operator - One operator in the menu, with `aria-checked`.
  * @csspart values - The typeahead's suggestions.
- * @csspart tick - One suggested value, with `aria-selected`.
+ * @csspart tick - One suggested value, with `aria-selected`, and `data-active` on the one the arrow
+ *   keys reached.
  * @csspart bar - A bar for a suggested value's share of the items counted.
  * @csspart value-count - A suggested value's count.
  * @csspart more - The note under the box when nothing matches, or when more values match than are
@@ -166,6 +169,11 @@ export class MosaicaFilter extends MosaicaElement {
       [part~='tick'][aria-selected='true'] {
         background: var(--_mosaica-surface-2);
       }
+      /* The box keeps focus, so the suggestion the arrow keys reached is ringed as if it had it. */
+      [part~='tick'][data-active] {
+        outline: 2px solid var(--_mosaica-focus);
+        outline-offset: -2px;
+      }
       [part~='tick'][aria-selected='true'] {
         font-weight: 600;
       }
@@ -176,9 +184,7 @@ export class MosaicaFilter extends MosaicaElement {
         min-width: 0;
       }
       .opt .name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
       }
       /* The matched span the server gave. */
       [part~='tick'] mark {
@@ -197,11 +203,13 @@ export class MosaicaFilter extends MosaicaElement {
         height: 3px;
         border-radius: 2px;
         background: var(--_mosaica-surface-3);
+        forced-color-adjust: none;
       }
       [part='bar'] {
         height: 3px;
         border-radius: 2px;
         background: color-mix(in srgb, var(--_mosaica-ink-2) 75%, var(--_mosaica-surface));
+        forced-color-adjust: none;
       }
       [aria-selected='true'] [part='bar'] {
         background: var(--_mosaica-ink);
@@ -231,6 +239,18 @@ export class MosaicaFilter extends MosaicaElement {
       .skel {
         margin-top: 8px;
       }
+      @media (forced-colors: active) {
+        [part~='tick'][data-active] {
+          outline-color: Highlight;
+        }
+        .track {
+          background: GrayText;
+        }
+        [part='bar'],
+        [aria-selected='true'] [part='bar'] {
+          background: CanvasText;
+        }
+      }
     `
   ];
 
@@ -248,7 +268,7 @@ export class MosaicaFilter extends MosaicaElement {
   @state() accessor draft: ColumnDraft | null = null;
   /** @internal */
   @state() accessor search = '';
-  /** The suggestion the arrow keys moved to, by code; `null` is the first. @internal */
+  /** The suggestion the arrow keys reached, by code; `null` before they reach one. @internal */
   @state() accessor activeCode: number | null = null;
   /** Whether the category box has focus, which its suggestions show only while it does. @internal */
   @state() accessor focused = false;
@@ -361,6 +381,7 @@ export class MosaicaFilter extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     this.operatorMenu.update();
+    if (changed.has('activeCode')) this.renderRoot.querySelector('[part~="tick"][data-active]')?.scrollIntoView({block: 'nearest'});
     if (!this.querying) this.asked = false;
     this.query.track(this.asked);
   }
@@ -416,17 +437,19 @@ export class MosaicaFilter extends MosaicaElement {
     }
   }
 
-  private label(): string {
-    return this.placeholder || columnCaption(this.column);
+  /** The box's name: the column, and the placeholder the box shows. */
+  private label(shown: string): string {
+    return shown ? `${columnCaption(this.column)}: ${shown}` : columnCaption(this.column);
   }
 
   private text(draft: ColumnDraft & {family: 'text'}) {
     // An expression set from outside that no query writes is shown as it is, and cannot be typed over.
     if (draft.expr !== undefined) {
-      return html`<div class="input">${icon('search', 12)}<input id="ctl" part="entry" readonly aria-label=${this.label()} .value=${JSON.stringify(draft.expr)} /></div>`;
+      return html`<div class="input">${icon('search', 12)}<input id="ctl" part="entry" readonly aria-label=${this.label('')} .value=${JSON.stringify(draft.expr)} /></div>`;
     }
-    return html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.query} placeholder=${this.placeholder || 'Search the text'} autocomplete="off"
-        aria-label=${this.label()} @input=${(e: Event) => this.change({family: 'text', query: (e.target as HTMLInputElement).value, phrase: draft.phrase}, false)} /></div>`;
+    const shown = this.placeholder || 'Search the text';
+    return html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.query} placeholder=${shown} autocomplete="off"
+        aria-label=${this.label(shown)} @input=${(e: Event) => this.change({family: 'text', query: (e.target as HTMLInputElement).value, phrase: draft.phrase}, false)} /></div>`;
   }
 
   /** A keyword box, offering the operators the column publishes in a menu. */
@@ -459,7 +482,7 @@ export class MosaicaFilter extends MosaicaElement {
       void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('[part~="operator"][aria-checked="true"]')?.focus());
     };
     return html`<div class="ctl-row">
-      <div class="input grow">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.needle} autocomplete="off" placeholder=${this.placeholder || nothing} aria-label=${this.label()}
+      <div class="input grow">${this.lead()}<input id="ctl" part="entry" type="search" .value=${draft.needle} autocomplete="off" placeholder=${this.placeholder || nothing} aria-label=${this.label(this.placeholder)}
         @input=${(e: Event) => this.change({...draft, needle: (e.target as HTMLInputElement).value}, false)} /></div>
       <div class="op" @focusout=${(e: FocusEvent) => {
         const to = e.relatedTarget as Node | null;
@@ -519,17 +542,19 @@ export class MosaicaFilter extends MosaicaElement {
       this.change({...draft, keys: chosen.has(key) ? draft.keys.filter((k) => k !== key) : [...draft.keys, key]}, true);
     };
     const typed = this.search !== '';
+    const listed = suggestion?.values ?? [];
     // The suggestions show while the box has focus and holds text; the list closes as focus leaves.
-    const rows = typed && this.focused ? (suggestion?.values ?? []) : [];
-    // The row the keys act on: the one the arrows reached, else the first.
-    const active = rows.find((v) => v.code === this.activeCode) ?? rows[0] ?? null;
-    const move = (by: 1 | -1) => {
-      if (rows.length === 0) return;
-      const at = active ? rows.indexOf(active) : -1;
-      this.activeCode = rows[(at + by + rows.length) % rows.length]!.code;
+    const rows = typed && this.focused ? listed : [];
+    // The row Enter acts on: the one the arrow keys reached. Until they reach one there is none, so
+    // Enter does not take whichever row a page that lands puts first.
+    const active = rows.find((v) => v.code === this.activeCode) ?? null;
+    const at = active ? rows.indexOf(active) : -1;
+    const reach = (i: number) => {
+      if (rows.length > 0) this.activeCode = rows[(i + rows.length) % rows.length]!.code;
     };
-    const field = html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${this.placeholder || 'Type a value'}
-        aria-label=${this.label()} role="combobox" aria-expanded=${rows.length > 0 ? 'true' : 'false'} aria-controls="values" aria-activedescendant=${active ? `value-${active.code}` : nothing}
+    const shown = this.placeholder || 'Type a value';
+    const field = html`<div class="input">${this.lead()}<input id="ctl" part="entry" type="search" autocomplete="off" placeholder=${shown}
+        aria-label=${this.label(shown)} role="combobox" aria-autocomplete="list" aria-expanded=${rows.length > 0 ? 'true' : 'false'} aria-controls="values" aria-activedescendant=${active ? `value-${active.code}` : nothing}
         .value=${this.search}
         @focus=${() => (this.focused = true)}
         @blur=${() => (this.focused = false)}
@@ -542,7 +567,11 @@ export class MosaicaFilter extends MosaicaElement {
         @keydown=${(e: KeyboardEvent) => {
           if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             e.preventDefault();
-            move(e.key === 'ArrowDown' ? 1 : -1);
+            reach(e.key === 'ArrowDown' ? at + 1 : Math.max(at, 0) - 1);
+          } else if ((e.key === 'Home' || e.key === 'End') && active) {
+            // Before the arrow keys reach a suggestion, Home and End move in the text.
+            e.preventDefault();
+            reach(e.key === 'Home' ? 0 : -1);
           } else if (e.key === 'Enter') {
             if (active) toggle(active);
           } else if (e.key === 'Escape' && this.search) {
@@ -565,20 +594,21 @@ export class MosaicaFilter extends MosaicaElement {
     };
     const list =
       rows.length > 0
-        ? html`<div part="values" id="values" popover="manual" role="listbox" aria-label=${`${columnCaption(this.column)} values`} style=${countWidth(rows.map((v) => v.count))}>${repeat(rows, (v) => v.code, option)}</div>`
+        ? html`<div part="values" id="values" popover="manual" role="listbox" aria-multiselectable=${choose ? nothing : 'true'} aria-label=${`${columnCaption(this.column)} values`} style=${countWidth(rows.map((v) => v.count))}>${repeat(rows, (v) => v.code, option)}</div>`
         : nothing;
-    const note = !typed
+    // How many values are listed, or why none is, for a reader as the list changes under the box.
+    const said = !typed
       ? nothing
       : refusal
         ? html`<span part="refusal" data-code=${refusal.code}><span class="dot refuse"></span>Values unavailable</span>`
         : suggestion === null
-          ? html`<span class="skel" aria-hidden="true"></span>`
-          : rows.length === 0
+          ? html`<span class="skel" aria-hidden="true"></span><span class="sr-only">Loading values</span>`
+          : listed.length === 0
             ? html`<span part="more">No value starts with that</span>`
-            : suggestion.more
-              ? html`<span part="more">Type more to narrow the list</span>`
-              : nothing;
-    return html`<div class="combo">${field}${list}</div>${note}`;
+            : rows.length === 0
+              ? nothing
+              : html`<span class="sr-only">${rows.length} ${rows.length === 1 ? 'value' : 'values'} listed. </span>${suggestion.more ? html`<span part="more">Type more to narrow the list</span>` : nothing}`;
+    return html`<div class="combo">${field}${list}</div><div role="status">${said}</div>`;
   }
 }
 
