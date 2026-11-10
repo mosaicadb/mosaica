@@ -28,6 +28,7 @@ const META = meta({
     scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']}),
     scalar('submitted_at', 'timestamp_us', {render: true, homes: ['rendered']}),
     scalar('authors', 'u16', {render: false}),
+    scalar('score', 'f64', {render: false}),
     scalar('retracted', 'bool', {render: true, homes: ['rendered']}),
     scalar('title', 'utf8')
   ],
@@ -35,6 +36,7 @@ const META = meta({
     {column: 'archive', family: 'category', operands: ['eq', 'in']},
     {column: 'submitted_at', family: 'numeric', operands: ['range']},
     {column: 'authors', family: 'numeric', operands: ['range']},
+    {column: 'score', family: 'numeric', operands: ['range']},
     {column: 'retracted', family: 'numeric', operands: ['eq', 'in', 'range']},
     {column: 'title', family: 'text', operands: ['match', 'phrase']}
   ],
@@ -231,6 +233,42 @@ describe('<mosaica-field-card> on a category', () => {
     expect(rows(host).map((r) => r.dataset.key)).toEqual(['cs', 'math']);
     expect(focused(card)!.getAttribute('part')).toBe('filter');
     expect(focused(card)!.closest('[part~="row"]')!.getAttribute('data-key')).toBe('cs');
+  });
+
+  it('moves focus to the search box when the only row goes with the button pressed', async () => {
+    const {host, card, store} = await mountCard('archive', {filter: {archive: {family: 'category', keys: ['rare']}}, highlight: {}});
+    const tables = [{rows: [], total: 0}, {rows: [{key: 'rare', count: 0}]}];
+    await answer(host, store, tables, tables);
+    expect(rows(host).map((r) => r.dataset.key)).toEqual(['rare']);
+    const filter = rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement;
+    filter.focus();
+    filter.click();
+    store.set('filters', filtersOf(lastFilters(store)!));
+    await settle(host);
+    expect(rows(host)).toHaveLength(0);
+    expect(focused(card)!.localName).toBe('mosaica-filter');
+    expect(focused(card)!.shadowRoot!.activeElement!.getAttribute('part')).toBe('entry');
+  });
+
+  it('gives focus back to a value’s swatch when Tab leaves the colour picker it opened', async () => {
+    const {host, card, store} = await mountCard('archive');
+    store.set('legend', {...store.get('legend'), colourBy: 'archive', categories: {archive: [{key: 'cs', code: 1, title: null}, {key: 'math', code: 2, title: null}]}, ranks: {archive: {1: 0, 2: 1}}});
+    const two = [{key: 'cs', count: 10}, {key: 'math', count: 5}];
+    await answer(host, store, [{rows: two, total: 15}], [{rows: two, total: 15}]);
+    const swatch = rows(host)[1]!.querySelector('[part="swatch"]') as HTMLButtonElement;
+    swatch.focus();
+    swatch.click();
+    await settle(host);
+    const picker = deep(host, '[part="colour-popover"]')!;
+    expect(picker.contains(focused(card))).toBe(true);
+    // Tab from the picker's last control leaves it.
+    const hex = deep(host, '[part="hex"]') as HTMLInputElement;
+    hex.focus();
+    hex.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, composed: true, cancelable: true}));
+    await settle(host);
+    expect(deep(host, '[part="colour-popover"]')).toBeNull();
+    expect(focused(card)).toBe(swatch);
+    expect(focused(card)!.closest('[part~="row"]')!.getAttribute('data-key')).toBe('math');
   });
 
   it('gives a screen reader each count with what it counts, the subject’s by what the subject is, beside the figures drawn', async () => {
@@ -634,6 +672,62 @@ describe('<mosaica-field-card> on a number', () => {
     await type(to, '1,250');
     (deep(host, '[part="brush-filter"]') as HTMLButtonElement).click();
     expect(lastFilters(store)).toEqual({filter: {authors: {family: 'numeric', gte: 3, lte: 1250}}, highlight: {}});
+  });
+
+  it('writes a number in a field in full, so that what the field shows types back to the same number', async () => {
+    for (const [field, held] of [['authors', 1_234_567], ['score', 0.000123]] as const) {
+      document.body.innerHTML = '';
+      const {host, store} = await mountCard(field, {filter: {[field]: {family: 'numeric', gte: held, lte: null}}, highlight: {}});
+      await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 90]), total: 210}]);
+      (deep(host, '[part="range"]') as HTMLButtonElement).click();
+      await settle(host);
+      const from = deep(host, '[part="brush-from"]') as HTMLInputElement;
+      expect(Number(from.value)).toBe(held);
+      // Typed over with what it showed, the end is the number it was.
+      const shown = from.value;
+      from.value = '';
+      from.dispatchEvent(new Event('input'));
+      from.value = shown;
+      from.dispatchEvent(new Event('input'));
+      from.dispatchEvent(new Event('change'));
+      await settle(host);
+      expect(from.hasAttribute('aria-invalid')).toBe(false);
+      (deep(host, '[part="brush-highlight"]') as HTMLButtonElement).click();
+      expect(lastFilters(store)!.highlight[field]).toEqual({family: 'numeric', gte: held, lte: null});
+    }
+  });
+
+  it('takes a comma in a number only where it groups thousands, and says so of one that does not', async () => {
+    const {host, card, store} = await mountCard('score');
+    await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 90]), total: 210}]);
+    (deep(host, '[part="range"]') as HTMLButtonElement).click();
+    await settle(host);
+    const from = deep(host, '[part="brush-from"]') as HTMLInputElement;
+    const to = deep(host, '[part="brush-to"]') as HTMLInputElement;
+    const type = async (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new Event('change'));
+      await settle(host);
+    };
+    const filter = deep(host, '[part="brush-filter"]') as HTMLButtonElement;
+    // Not fifteen, and not one and a half: nothing is applied.
+    await type(from, '1,5');
+    expect(from.getAttribute('aria-invalid')).toBe('true');
+    const said = card.shadowRoot!.getElementById(from.getAttribute('aria-describedby')!)!.textContent!;
+    expect(said).toContain('1,5');
+    expect(said).toMatch(/comma/i);
+    filter.click();
+    await settle(host);
+    expect(lastFilters(store)).toBeUndefined();
+    for (const wrong of ['12,34', '1,2345', ',500', '1 000']) {
+      await type(from, wrong);
+      expect(from.getAttribute('aria-invalid'), wrong).toBe('true');
+    }
+    await type(from, '1.5');
+    await type(to, '1,234,567.25');
+    filter.click();
+    expect(lastFilters(store)).toEqual({filter: {score: {family: 'numeric', gte: 1.5, lte: 1234567.25}}, highlight: {}});
   });
 
   it('counts a range in the box only where its ends are the bins’ edges', async () => {

@@ -257,8 +257,8 @@ describe('the filter panel under a pointer and a keyboard', () => {
    * A panel 340 px wide over a category the map is coloured by and a date, the category filtered to
    * one value and the date highlighted by a range, on a store that publishes what is set on it.
    */
-  async function panel(): Promise<Page> {
-    const p = await page('<div style="width: 340px"><mosaica-filter-panel pinned="archive submitted_at"></mosaica-filter-panel></div>');
+  async function panel(attributes = 'pinned="archive submitted_at"'): Promise<Page> {
+    const p = await page(`<div style="width: 340px"><mosaica-filter-panel ${attributes}></mosaica-filter-panel></div>`);
     await p.evaluate(async (long) => {
       const values = [
         {key: 'cs', count: 30},
@@ -324,6 +324,11 @@ describe('the filter panel under a pointer and a keyboard', () => {
       };
       const el = document.querySelector('mosaica-filter-panel') as HTMLElement & {store: unknown; updateComplete: Promise<unknown>};
       el.store = store;
+      // For a test to publish the suggestions a typed value is answered with.
+      (window as unknown as {suggested: (page: unknown) => void}).suggested = (page) => {
+        projections['filters'] = {...(projections['filters'] as object), suggestions: {archive: page}};
+        publish();
+      };
       for (let i = 0; i < 8; i++) {
         await new Promise((r) => requestAnimationFrame(r));
         await el.updateComplete;
@@ -419,6 +424,57 @@ describe('the filter panel under a pointer and a keyboard', () => {
     const drawn = (part: string) => verbs.locator(`[part="${part}"]`).evaluate((b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b.querySelector('svg')!).fill]);
     expect(await drawn('filter')).toEqual(['rgb(27, 29, 33)', 'rgb(255, 255, 255)']);
     expect((await drawn('highlight'))[1]).toBe('none');
+  });
+
+  it('under chips-only, puts focus on words it draws once the last chip is removed from the keyboard', async () => {
+    const p = await panel('chips-only');
+    await p.evaluate(() => document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector<HTMLElement>('[part="chip"] > button:last-child')!.focus());
+    await p.keyboard.press('Enter');
+    await settled(p);
+    await p.keyboard.press('Enter');
+    await settled(p);
+    const held = await p.evaluate(() => {
+      const at = document.querySelector('mosaica-filter-panel')!.shadowRoot!.activeElement as HTMLElement | null;
+      const box = at?.getBoundingClientRect();
+      return {chips: document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelectorAll('[part="chip"]').length, words: at?.textContent?.trim() !== '', drawn: !!box && box.width > 0 && box.height > 0, ringed: at?.matches(':focus-visible') ?? false};
+    });
+    expect(held).toEqual({chips: 0, words: true, drawn: true, ringed: true});
+    // Tab leaves them, and nothing is left in the tab order.
+    await p.keyboard.press('Tab');
+    await settled(p);
+    expect(await p.evaluate(() => document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelectorAll('*:not(style)').length)).toBe(0);
+  });
+
+  it('draws a chosen suggestion’s bar in the text colour of the row forced colours highlight', async () => {
+    const p = await panel();
+    await p.locator('mosaica-field-card[data-field="archive"] mosaica-filter [part="entry"]').click();
+    await p.keyboard.type('m');
+    await p.evaluate(() =>
+      (window as unknown as {suggested: (page: unknown) => void}).suggested({
+        q: 'm',
+        verb: 'filter',
+        values: [
+          {code: 2, key: 'math', title: null, match: {field: 'key', start: 0, len: 1}, count: 20},
+          {code: 4, key: 'med', title: null, match: {field: 'key', start: 0, len: 1}, count: 10}
+        ],
+        more: false,
+        total: 60
+      })
+    );
+    await settled(p);
+    await p.emulateMedia({forcedColors: 'active'});
+    const seen = await p.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('span'));
+      const system = (colour: string) => {
+        probe.style.cssText = `forced-color-adjust: none; color: ${colour}`;
+        return getComputedStyle(probe).color;
+      };
+      const list = document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector('mosaica-field-card')!.shadowRoot!.querySelector('mosaica-filter')!.shadowRoot!;
+      const bar = (selected: string) => getComputedStyle(list.querySelector(`[part~="tick"][aria-selected="${selected}"] [part="bar"]`)!).backgroundColor;
+      const row = getComputedStyle(list.querySelector('[part~="tick"][aria-selected="true"]')!).backgroundColor;
+      return {chosen: bar('true') === system('HighlightText'), other: bar('false') === system('CanvasText'), row: row === system('Highlight'), apart: system('HighlightText') !== system('Highlight')};
+    });
+    expect(seen).toEqual({chosen: true, other: true, row: true, apart: true});
   });
 
   it('keeps focus on a value as its row moves, and moves it along the chips to Add field as they are removed', async () => {

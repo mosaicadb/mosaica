@@ -31,13 +31,14 @@ const BAR_FLOOR = 2;
  * - A category column suggests values as the viewer types. The arrow keys move through the
  *   suggestions, as do Home and End once one is reached. Enter chooses or removes the suggestion
  *   they reached, and Escape clears what was typed. A line under the box says how many values are
- *   listed, or why none is.
+ *   listed, or why none is, and that they are loading once that has taken a quarter of a second.
  * - A keyword column has a menu for choosing how to match, by `contains`, `prefix` or `eq`.
  *
  * The box sets the filter 350 ms after the last keystroke, so that the map does not redraw for
  * every letter. While the query that change started is still loading, and once it has run for a
- * quarter of a second, a spinner takes the search icon's place. If your code sets a text filter the
- * box cannot express, the box shows it read-only.
+ * quarter of a second, a spinner takes the search icon's place. The spinner is not read out:
+ * `<mosaica-status>` is what announces a running query. If your code sets a text filter the box
+ * cannot express, the box shows it read-only.
  *
  * @summary A search box that filters the map by one column.
  * @tagname mosaica-filter
@@ -246,9 +247,12 @@ export class MosaicaFilter extends MosaicaElement {
         .track {
           background: GrayText;
         }
-        [part='bar'],
-        [aria-selected='true'] [part='bar'] {
+        [part='bar'] {
           background: CanvasText;
+        }
+        /* A chosen row is painted Highlight there. */
+        [aria-selected='true'] [part='bar'] {
+          background: HighlightText;
         }
       }
     `
@@ -278,6 +282,8 @@ export class MosaicaFilter extends MosaicaElement {
   /** Whether the query the store is running was started by this box. */
   private asked = false;
   private readonly query = new NamedQuery(this);
+  /** Whether the suggestions have been awaited long enough to say so. */
+  private readonly awaited = new NamedQuery(this);
   private readonly floating = new FloatingList(() => {
     const list = this.renderRoot.querySelector<HTMLElement>('[part="values"]');
     const anchor = this.renderRoot.querySelector<HTMLElement>('.combo');
@@ -343,6 +349,7 @@ export class MosaicaFilter extends MosaicaElement {
     this.floating.stop();
     this.operatorMenu.stop();
     this.query.stop();
+    this.awaited.stop();
     super.disconnectedCallback();
   }
 
@@ -384,15 +391,22 @@ export class MosaicaFilter extends MosaicaElement {
     if (changed.has('activeCode')) this.renderRoot.querySelector('[part~="tick"][data-active]')?.scrollIntoView({block: 'nearest'});
     if (!this.querying) this.asked = false;
     this.query.track(this.asked);
+    this.awaited.track(this.awaiting);
   }
 
   private get querying(): boolean {
     return this.resolvedStore?.get('status').querying ?? false;
   }
 
+  /** Whether a category box holds text whose suggestions have neither landed nor been refused. */
+  private get awaiting(): boolean {
+    const filters = this.resolvedStore?.get('filters');
+    return this.resolvedOperand?.family === 'category' && this.search !== '' && this.resolvedSuggestion === null && !filters?.suggestErrors[this.column];
+  }
+
   /** The search icon, or a spinner while the query this box started has run long enough to name. */
   private lead(): TemplateResult {
-    return this.asked && this.querying && this.query.named ? html`<span part="spinner" class="spinner" role="img" aria-label="Running query"></span>` : icon('search', 12);
+    return this.asked && this.querying && this.query.named ? html`<span part="spinner" class="spinner" aria-hidden="true"></span>` : icon('search', 12);
   }
 
   /** The box's draft: the one being edited, else the store's, else the client's empty one, which also sets a keyword's starting operator. */
@@ -602,7 +616,7 @@ export class MosaicaFilter extends MosaicaElement {
       : refusal
         ? html`<span part="refusal" data-code=${refusal.code}><span class="dot refuse"></span>Values unavailable</span>`
         : suggestion === null
-          ? html`<span class="skel" aria-hidden="true"></span><span class="sr-only">Loading values</span>`
+          ? html`<span class="skel" aria-hidden="true"></span>${this.awaited.named ? html`<span class="sr-only">Loading values</span>` : nothing}`
           : listed.length === 0
             ? html`<span part="more">No value starts with that</span>`
             : rows.length === 0

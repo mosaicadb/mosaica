@@ -165,39 +165,56 @@ describe('<mosaica-cluster-filter> for a screen reader', () => {
     expect(deep(host, '[role="listbox"]')!.hasAttribute('aria-multiselectable')).toBe(false);
   });
 
-  it('says in a status line, there before the list, how many clusters are listed, that they are loading, and that none match', async () => {
+  it('says in a status line, there before the list, how many clusters are listed and that none match', async () => {
     const {host, store, box} = await mountField();
     const status = () => deep(host, '[role="status"]')!;
     expect(status().textContent!.trim()).toBe('');
-    // The top-level clusters are held back until the test lets them go.
-    let release: () => void = () => {};
-    const held = new Promise<void>((r) => (release = r));
-    const answered = store.browse;
-    store.browse = (async (req: {q?: string}) => {
-      if (req.q === undefined) await held;
-      return answered(req as never);
-    }) as never;
     store.setBrowse('roots', {artifacts: [row(1n, 'Physics'), row(2n, 'Biology')], parents: [], next: null});
     box().dispatchEvent(new Event('focus'));
     await settle(host);
-    const loading = status().textContent!.trim();
-    expect(loading).not.toBe('');
-    expect(deep(host, '[role="status"] .skel')).not.toBeNull();
-    release();
-    await settle(host);
-    await settle(host);
     expect(status().textContent).toContain('2');
-    expect(status().textContent!.trim()).not.toBe(loading);
-    // While a search is on its way the line says so, and then that nothing matched.
     box().value = 'zzz';
     box().dispatchEvent(new Event('input'));
-    await settle(host);
-    expect(status().textContent!.trim()).toBe(loading);
     await wait(300);
     await settle(host);
     await settle(host);
     expect(status().querySelector('[part="more"]')!.textContent!.trim()).not.toBe('');
     expect(status().textContent).not.toContain('2');
+  });
+
+  it('says that the clusters are loading only once they have been awaited a while, and once however much is typed meanwhile', async () => {
+    const {host, store, box} = await mountField();
+    const said = () => deep(host, '[role="status"]')!.textContent!.trim();
+    // Every answer is held back until the test lets it go.
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const answered = store.browse;
+    store.browse = (async (req: never) => {
+      await held;
+      return answered(req);
+    }) as never;
+    store.setBrowse('q:phys', {artifacts: [row(1n, 'Physics')], parents: [], next: null});
+    box().dispatchEvent(new Event('focus'));
+    await settle(host);
+    // At once the list's place is drawn, and nothing is said.
+    expect(deep(host, '[role="status"] .skel')).not.toBeNull();
+    expect(said()).toBe('');
+    await wait(300);
+    await settle(host);
+    const loading = said();
+    expect(loading).not.toBe('');
+    for (const text of ['p', 'ph', 'phy', 'phys']) {
+      box().value = text;
+      box().dispatchEvent(new Event('input'));
+      await settle(host);
+      expect(said()).toBe(loading);
+    }
+    await wait(300);
+    release();
+    await settle(host);
+    await settle(host);
+    expect(said()).toContain('1');
+    expect(said()).not.toBe(loading);
   });
 
   it('says nothing about a list that closed as focus left, while clusters match', async () => {

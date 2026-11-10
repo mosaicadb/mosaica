@@ -8,6 +8,7 @@ import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
 import {FloatingList} from './float.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
+import {NamedQuery} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
 /** How long typing must be quiet before a name search is sent. */
@@ -32,7 +33,8 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  * With the box empty, the list offers the layer's top-level clusters, largest first. Typing
  * searches the cluster names at every level. The arrow keys move between the rows, as do Home and
  * End once one is reached. Enter chooses the row they reached, and Escape closes the list. A line
- * under the box says how many clusters are listed, or why none is.
+ * under the box says how many clusters are listed, or why none is, and that they are loading once
+ * that has taken a quarter of a second.
  *
  * Each row counts the items the filters match in that cluster without applying this layer's own
  * filter, so a cluster the viewer has filtered out still shows its count. Choosing a row filters
@@ -174,6 +176,8 @@ export class MosaicaClusterFilter extends MosaicaElement {
   @state() accessor refusal: Refusal | null = null;
 
   private readonly counts = new HeldAggregate('clusters');
+  /** Whether the open list's clusters have been awaited long enough to say so. */
+  private readonly awaited = new NamedQuery(this);
   private readonly floating = new FloatingList(() => {
     const list = this.renderRoot.querySelector<HTMLElement>('[part="values"]');
     const anchor = this.renderRoot.querySelector<HTMLElement>('.combo');
@@ -204,6 +208,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
     this.searchTimer = null;
     this.counts.set(null, null);
     this.floating.stop();
+    this.awaited.stop();
     super.disconnectedCallback();
   }
 
@@ -372,6 +377,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     if (changed.has('activeId')) this.renderRoot.querySelector('[part~="option"][data-active]')?.scrollIntoView({block: 'nearest'});
+    this.awaited.track(this.listOpen && this.isConnected && this.refusal === null && this.listed() === null);
     // Counted only while the list is open: a closed list shows no counts, so asks for none.
     const layer = this.declared();
     const limits = this.resolvedStore?.get('meta')?.selection;
@@ -449,7 +455,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
       ? html`<span part="refusal" data-code=${this.refusal.code}>Clusters unavailable</span>`
       : listed === null
         ? this.listOpen
-          ? html`<span class="skel" aria-hidden="true"></span><span class="sr-only">Loading clusters</span>`
+          ? html`<span class="skel" aria-hidden="true"></span>${this.awaited.named ? html`<span class="sr-only">Loading clusters</span>` : nothing}`
           : nothing
         : offers.length === 0
           ? typed

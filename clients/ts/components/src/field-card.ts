@@ -87,13 +87,27 @@ type End = {text: string; value: number | null | undefined; checked: boolean};
 /** The range box's two ends. */
 type RangeEntry = {from: End; to: End};
 
-/** The value a range box's field stands for; `upper` reads a date as the last instant of the period it names. */
+/** Digits in threes between commas, as a count is written: `1,234,567` and `1,250.5`, not `1,5`. */
+const GROUPED = /^[+-]?\d{1,3}(,\d{3})+(\.\d*)?$/;
+
+/**
+ * The value a range box's field stands for; `upper` reads a date as the last instant of the period
+ * it names. In a number a comma is taken only where it groups thousands, so `1,5` is no number.
+ */
 function endValue(text: string, timestamp: boolean, upper: boolean): number | null | undefined {
   const t = text.trim();
   if (t === '') return null;
   if (timestamp) return parseDateText(t, upper) ?? undefined;
-  const n = Number(t.replace(/[\s,]/g, ''));
+  const n = Number(GROUPED.test(t) ? t.replace(/,/g, '') : t);
   return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * A value as a range box's field holds it. A number is written in full, so that typing what the
+ * field shows gives the same number; the axis rounds it and writes a large one with an exponent.
+ */
+function endText(v: number, timestamp: boolean): string {
+  return timestamp ? shortDateText(v) : String(v);
 }
 
 /** Whether both ends hold a value and the lower is above the upper. */
@@ -894,7 +908,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   /**
    * Give focus back where the render took it away. A row that moved, as its value joined or left a
    * clause, keeps it; for a row that went, the same button of the row now in its place takes it,
-   * else the row before's, else the search box.
+   * else the row before's, else the search box, else the fold button of a card with none.
    */
   private keepFocus(): void {
     const before = this.focusedBefore;
@@ -904,7 +918,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     if (before.row < 0) return;
     const rows = Array.from(this.renderRoot.querySelectorAll('[part~="row"]'));
     const same = (rows[before.row] ?? rows[before.row - 1])?.querySelector<HTMLElement>(`[part="${before.el.getAttribute('part')}"]`);
-    (same ?? this.renderRoot.querySelector<HTMLElement>('.search, [part="fold"]'))?.focus();
+    (same ?? this.renderRoot.querySelector<HTMLElement>('.search') ?? this.renderRoot.querySelector<HTMLElement>('[part="fold"]'))?.focus();
   }
 
   protected override updated(changed: PropertyValues<this>): void {
@@ -1268,7 +1282,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const open = (opener: 'plot' | 'range') => {
       const chosen = this.brush && bins.length > 0 ? this.brushRange(bins, this.brush, timestamp, whole) : null;
       const {gte, lte} = chosen ?? held('filter') ?? held('highlight') ?? {gte: null, lte: null};
-      const end = (v: number | null): End => ({text: v === null ? '' : value(v), value: v, checked: false});
+      const end = (v: number | null): End => ({text: v === null ? '' : endText(v, timestamp), value: v, checked: false});
       this.entryOpener = opener;
       this.brush = null;
       this.entry = {from: end(gte), to: end(lte)};
@@ -1286,7 +1300,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const mistake = (end: End, edge: number | undefined): string => {
       if (!end.checked || end.value !== undefined) return '';
       const said = `“${end.text.trim()}”`;
-      if (!timestamp) return `${said} is not a number. Type a number such as ${formatNumber(edge ?? 0, whole)}.`;
+      if (!timestamp) return `${said} is not a number. Type a number such as ${edge ?? 0}${end.text.includes(',') ? '; a comma only groups thousands, as in 1,250' : ''}.`;
       const day = shortDateText(edge ?? 0);
       return `${said} is not a date. Type a day such as ${day}, a month such as ${day.replace(/^\d+ /, '')}, or a year.`;
     };
@@ -1300,10 +1314,10 @@ export class MosaicaFieldCard extends MosaicaElement {
       ? html`<div part="brush" role="dialog" aria-label=${`${title}: range`} @keydown=${this.onBrushKey}>
           <div class="chosen">${typed ? html`<b>${words(typed.gte, typed.lte)}</b>${count === null ? nothing : html` · ${approx}${countText(count)} items`}` : nothing}</div>
           <div class="ends">
-            <label><span>From</span><input part="brush-from" type="text" autocomplete="off" aria-label=${`${title}: from`} placeholder=${lo === undefined ? nothing : value(lo)}
+            <label><span>From</span><input part="brush-from" type="text" autocomplete="off" aria-label=${`${title}: from`} placeholder=${lo === undefined ? nothing : endText(lo, timestamp)}
               aria-invalid=${fromMistake || order ? 'true' : nothing} aria-describedby=${described(fromMistake, 'from-error')} .value=${entry.from.text}
               @input=${(e: Event) => type('from', e, false)} @change=${(e: Event) => type('from', e, true)} /></label>
-            <label><span>To</span><input part="brush-to" type="text" autocomplete="off" aria-label=${`${title}: to`} placeholder=${last === undefined ? nothing : value(last)}
+            <label><span>To</span><input part="brush-to" type="text" autocomplete="off" aria-label=${`${title}: to`} placeholder=${last === undefined ? nothing : endText(last, timestamp)}
               aria-invalid=${toMistake || order ? 'true' : nothing} aria-describedby=${described(toMistake, 'to-error')} .value=${entry.to.text}
               @input=${(e: Event) => type('to', e, false)} @change=${(e: Event) => type('to', e, true)} /></label>
           </div>

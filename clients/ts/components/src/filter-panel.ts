@@ -44,7 +44,9 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * Use the filter panel as the place where viewers narrow the map down, as `<mosaica-explorer>` does
  * in its sidebar. Each filter or highlight in force shows as a chip above the cards, a highlight's
  * with the word on it, and pressing a chip opens its field's card. When a chip is removed, focus
- * moves to the × of the chip after it, else of the one before, else to Add field.
+ * moves to the × of the chip after it, else of the one before, else to Add field. Under
+ * `chips-only` there is no Add field, so when the last chip is removed the panel shows the words
+ * No filters, which take focus and go as focus leaves them.
  *
  * A region selected in another view keeps filtering after the viewer switches away from it, and
  * shows as a chip naming its view, such as "Lasso in Topics". Pressing the chip switches back to
@@ -84,7 +86,8 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * @csspart clear-highlight - The × beside Highlighted, which clears the highlight.
  * @csspart all - All matching and its number.
  * @csspart all-count - The number matching.
- * @csspart chips - The line of chips, while any filter or highlight is in force.
+ * @csspart chips - The line of chips, while any filter or highlight is in force, and under
+ *   `chips-only` the words that stand in it after the last chip is removed.
  * @csspart chip - One chip, with `data-verb` (`filter` or `highlight`) and `data-column`,
  *   `data-artifact`, or `data-view` for a region held in another view.
  * @csspart edit - A column chip's text, a button that opens its card; on a held region's chip, a
@@ -316,6 +319,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
+      .emptied {
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: var(--_mosaica-ink-2);
+      }
       @media (forced-colors: active) {
         .swatch {
           background: CanvasText;
@@ -336,6 +345,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
   private editing: string | null = null;
   /** A pressed control that its own action removes, and the control that takes focus once it has gone. */
   private leaving: {gone: HTMLElement; to: HTMLElement | null} | null = null;
+  /** Whether the last chip was removed from a panel with nothing else to focus, which then says so. @internal */
+  @state() accessor emptied = false;
   /** The keys of the fields shown, in the order they were first shown. */
   private listOrder: string[] = [];
   private readonly floating = new FloatingList(() => {
@@ -379,16 +390,16 @@ export class MosaicaFilterPanel extends MosaicaElement {
   };
 
   /**
-   * Before an action that removes the pressed control `gone`, note where focus goes once it has:
-   * to the × of the chip after `gone`'s, else of the chip before, as each stands then, else to Add
-   * field, else to the panel itself, which holds nothing else under `chips-only`.
+   * Before an action that removes the pressed control `gone`, note where focus goes once it has.
+   * From a chip's ×, to the × of the chip after it, else of the chip before, as each stands then.
+   * From there, and from Clear all and the clear-highlight ×, to Add field: a × that took focus
+   * unasked would remove a filter on the next press. Under `chips-only`, which has no Add field, to
+   * the words that say no filter is left.
    */
   private leave(gone: HTMLElement): void {
     const closes = Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part="chip"] > button:last-child'));
     const at = closes.indexOf(gone);
-    // Pressed outside the chips: the clear-highlight × takes every highlight's chip with it, and Clear all every chip.
-    const to = at < 0 ? closes.find((b) => b.parentElement?.getAttribute('data-verb') !== 'highlight') : (closes[at + 1] ?? closes[at - 1]);
-    this.leaving = {gone, to: to ?? null};
+    this.leaving = {gone, to: at < 0 ? null : (closes[at + 1] ?? closes[at - 1] ?? null)};
   }
 
   /** Move focus as {@link leave} noted, once the pressed control has gone and taken focus with it. */
@@ -399,12 +410,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
     if (document.activeElement && document.activeElement !== document.body) return;
     const to = (leaving.to?.isConnected ? leaving.to : null) ?? this.renderRoot.querySelector<HTMLElement>('[part="add"]');
     if (to) return to.focus();
-    // Nothing is left to take it: the panel itself does, until focus moves on.
-    if (!this.hasAttribute('tabindex')) {
-      this.tabIndex = -1;
-      this.addEventListener('blur', () => this.removeAttribute('tabindex'), {once: true});
-    }
-    super.focus();
+    this.emptied = true;
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.emptied')?.focus());
   }
 
   /** Show `field`'s card, open it, and scroll to and focus it. Call it after `mosaica-chipopen` to show the chip's card. */
@@ -458,6 +465,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     super.updated(changed);
     this.floating.update();
     this.settleFocus();
+    if (this.emptied && this.renderRoot.querySelector('[part="chip"]')) this.emptied = false;
     if (changed.has('adding')) {
       if (this.adding) document.addEventListener('pointerdown', this.onPressOutsideAdd, true);
       else document.removeEventListener('pointerdown', this.onPressOutsideAdd, true);
@@ -671,7 +679,9 @@ export class MosaicaFilterPanel extends MosaicaElement {
   ): TemplateResult | typeof nothing {
     const columns = [...new Set([...Object.keys(draft.filter), ...Object.keys(draft.highlight)])];
     const chips = VERBS.flatMap((verb) => columns.flatMap((c) => (holds(c, verb) ? [{c, verb, d: draft[verb][c]!}] : [])));
-    if (chips.length === 0 && members.length === 0 && regions.length === 0) return nothing;
+    if (chips.length === 0 && members.length === 0 && regions.length === 0) {
+      return this.emptied && this.chipsOnly ? html`<div part="chips"><span class="emptied" tabindex="-1" @blur=${() => (this.emptied = false)}>No filters</span></div>` : nothing;
+    }
     // The word on a highlight's chip; a filter's has none.
     const word = (verb: ClauseVerb) => (verb === 'highlight' ? html`<span class="verb">highlight</span> ` : nothing);
     const pressed = (e: Event) => this.leave(e.currentTarget as HTMLElement);

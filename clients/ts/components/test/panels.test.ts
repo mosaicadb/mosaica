@@ -459,20 +459,52 @@ describe('<mosaica-filter> on a category, for a keyboard and a screen reader', (
     store.set('filters', {...store.get('filters'), suggestions: {archive: {q, verb: 'filter', values, more, total: null}}});
   const status = (host: HTMLElement) => deep(host, '[role="status"]')!;
 
-  it('says in a status line, there before the list, how many values are listed, that they are loading, and that none match', async () => {
+  it('says in a status line, there before the list, how many values are listed and that none match', async () => {
     const {host, store} = await mountFilter('archive', empty());
     expect(status(host).textContent!.trim()).toBe('');
     await type(host, 'c');
-    const loading = status(host).textContent!.trim();
-    expect(loading).not.toBe('');
     page(store, 'c', [value(1, 'cs', 'CS'), value(2, 'cond', null)]);
     await settle(host);
     expect(status(host).textContent).toContain('2');
-    expect(status(host).textContent!.trim()).not.toBe(loading);
     page(store, 'c', []);
     await settle(host);
     expect(status(host).querySelector('[part="more"]')!.textContent!.trim()).not.toBe('');
     expect(status(host).textContent).not.toContain('2');
+  });
+
+  it('says that the values are loading only once they have been awaited a while, and once however much is typed meanwhile', async () => {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    const {host, store} = await mountFilter('archive', empty());
+    const said = () => status(host).textContent!.trim();
+    const pass = async (ms: number) => {
+      await settle(host);
+      vi.advanceTimersByTime(ms);
+      await settle(host);
+    };
+    await type(host, 'c');
+    // At once the list's place is drawn, and nothing is said.
+    expect(status(host).querySelector('.skel')).not.toBeNull();
+    expect(said()).toBe('');
+    // An answer that lands soon is all that is said.
+    await pass(100);
+    page(store, 'c', [value(1, 'cs', 'CS')]);
+    await pass(400);
+    expect(said()).toContain('1');
+    const listed = said();
+    await type(host, 'co');
+    expect(said()).toBe('');
+    await pass(300);
+    const loading = said();
+    expect(loading).not.toBe('');
+    expect(loading).not.toBe(listed);
+    for (const text of ['con', 'cond']) {
+      await type(host, text);
+      await pass(300);
+      expect(said()).toBe(loading);
+    }
+    page(store, 'cond', [value(2, 'cond', null)]);
+    await pass(0);
+    expect(said()).toBe(listed);
   });
 
   it('shows no message that nothing matches for a list that closed as focus left it', async () => {
@@ -615,6 +647,9 @@ describe('<mosaica-filter> on text', () => {
     await pass(100);
     expect(spinning('asked')).toBe(true);
     expect(spinning('other')).toBe(false);
+    // The status strip is what says a query is running; the spinner is drawn and not read.
+    expect(box('asked').querySelector('[part="spinner"]')!.getAttribute('aria-hidden')).toBe('true');
+    expect(box('asked').querySelector('[part="spinner"]')!.hasAttribute('role')).toBe(false);
 
     store.set('status', status({}));
     await settle(host);
@@ -1117,20 +1152,45 @@ describe('<mosaica-filter-panel>', () => {
       expect(focused(panel)!.getAttribute('part')).toBe('add');
     });
 
-    it('moves focus to the first chip left after the highlight is cleared from the subject row', async () => {
+    it('moves focus to Add field after the highlight is cleared from the subject row, and not onto a filter’s ×', async () => {
       const {host, panel, store} = await mountPanel(three);
       await press(host, store, deep(host, '[part="clear-highlight"]') as HTMLButtonElement);
       expect(deep(host, '[part="clear-highlight"]')).toBeNull();
-      expect(chipOf(focused(panel))).toEqual(['filter', 'archive']);
+      // The filters' chips stay, and a second press of the key removes none of them.
+      expect(closes(host)).toHaveLength(2);
+      expect(focused(panel)!.getAttribute('part')).toBe('add');
     });
 
-    it('takes focus itself under chips-only once its last chip has gone, and gives up its place in the tab order as focus leaves', async () => {
+    it('under chips-only, says that no filter is left once its last chip has gone, in words that take focus and go as focus leaves', async () => {
       const {host, panel, store} = await mountPanel({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}}, 'chips-only');
       await press(host, store, closes(host)[0]!);
-      expect(deepAll(host, '[part]')).toHaveLength(0);
-      expect(document.activeElement).toBe(panel);
-      panel.blur();
+      expect(deepAll(host, '[part="chip"]')).toHaveLength(0);
+      const words = focused(panel)!;
+      expect(words.textContent!.trim()).not.toBe('');
+      expect(words.closest('[part="chips"]')).not.toBeNull();
+      // The panel itself, which draws nothing, is not what holds focus.
       expect(panel.hasAttribute('tabindex')).toBe(false);
+      words.blur();
+      await settle(host);
+      expect(deepAll(host, '[part]')).toHaveLength(0);
+    });
+
+    it('under chips-only, drops those words when a filter is set again', async () => {
+      const {host, panel, store} = await mountPanel({filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}}, 'chips-only');
+      await press(host, store, closes(host)[0]!);
+      expect(focused(panel)).not.toBeNull();
+      store.set('filters', filtersOf({filter: {archive: {family: 'category', keys: ['math']}}, highlight: {}}));
+      await settle(host);
+      expect(deepAll(host, '[part="chip"]')).toHaveLength(1);
+      await press(host, store, closes(host)[0]!);
+      // Removed with focus elsewhere, the last chip leaves nothing behind.
+      const elsewhere = document.body.appendChild(document.createElement('button'));
+      store.set('filters', filtersOf({filter: {archive: {family: 'category', keys: ['stat']}}, highlight: {}}));
+      await settle(host);
+      elsewhere.focus();
+      store.set('filters', filtersOf({filter: {}, highlight: {}}));
+      await settle(host);
+      expect(deepAll(host, '[part]')).toHaveLength(0);
     });
 
     it('leaves focus where the viewer has moved it', async () => {
