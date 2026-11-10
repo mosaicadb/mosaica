@@ -115,14 +115,14 @@ A viewer address of `0.0.0.0` or `[::]` is reached on loopback, so run the comma
 ## `mosaica items`
 
 ```text
-mosaica items [OPTIONS] --view <VIEW> --fields <NAMES> --server <URL>
+mosaica items [OPTIONS] --view <VIEW> --server <URL>
 ```
 
-Read every item a session token may see in one view, with the fields named, from a running server, and write them as Arrow IPC or Parquet.
+Read every item a session token may see in one view, with the fields named or every field, from a running server, and write them as Arrow IPC or Parquet.
 
 The server answers `POST /v1/items` a page at a time, several pages to a response, and ends each response with a cursor for the next. This requests responses until no row remains and writes each page as it arrives. Each of the route's fields is the argument of the same name, sent only when given, so the server's own setting applies otherwise.
 
-The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y` under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's dictionary holding the keys of its own rows. A read that returns no row writes these columns with no rows.
+The columns are `mosaica_id`, the fields in the order named or without `--fields` every field the view reads under its bare name, `mosaica:x` and `mosaica:y` under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's dictionary holding the keys of its own rows. A read that returns no row writes these columns with no rows.
 
 A read cut short leaves the whole pages read before it in the output, exits 1 and prints the cursor to read the rest with. The first response's head, with the counts under `--count`, is printed on stderr at the end.
 
@@ -131,7 +131,7 @@ For example, `mosaica items --server http://127.0.0.1:8080 --view papers --field
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--view` | `VIEW` |  | The view to read, as `/v1/meta` names it. An item with no position in it is not returned. |
-| `--fields` | `NAMES` |  | The declared fields to return, comma-separated, in the order wanted. `--fields ''` returns `mosaica_id` alone. A field declared for a view group, read under a view outside that group, is named `<field>@<key>`. An undeclared or repeated field is refused. |
+| `--fields` | `NAMES` |  | The declared fields to return, comma-separated, in the order wanted. Without it every field the view reads under its bare name is returned, and `--fields ''` returns `mosaica_id` alone. A field declared for a view group, read under a view outside that group, is named `<field>@<key>`. An undeclared or repeated field is refused. |
 | `--position` |  |  | Return each item's position in the view as the columns `mosaica:x` and `mosaica:y`. |
 | `--labels` |  |  | Return the clauses of each item's labels the token satisfies as the column `mosaica:labels`. |
 | `--filters` | `JSON` |  | A filter expression as JSON, such as `{"year": {"range": {"gte": 2020}}}`. Only the items that match are returned. |

@@ -430,6 +430,32 @@ fn an_items_read_written_as_ipc_and_as_parquet_is_the_read_over_http() {
     }
 }
 
+/// Without `--fields` the request names none, and the server returns every field the view reads:
+/// the read that names each of them.
+#[test]
+fn an_items_read_without_fields_sends_none_and_returns_every_field() {
+    let served = serve();
+    let asked = json!({"view": "s0", "order": "map"});
+    let (every, _) = served.http_read("items", &asked);
+    let columns: Vec<String> = every[0]
+        .schema()
+        .fields()
+        .iter()
+        .map(|f| f.name().clone())
+        .collect();
+    for name in ["fx_key", "bay", "tag", "seen_at", "weight", "id"] {
+        assert!(columns.iter().any(|c| c == name), "{name} is in {columns:?}");
+    }
+    let named = json!({"view": "s0", "order": "map", "fields": &columns[1..]});
+    assert_eq!(plain(&every), plain(&served.http_read("items", &named).0));
+
+    let out = served.dir.path().join("every.arrows");
+    let args = with_out(vec!["items", "--view", "s0", "--order", "map"], &out);
+    assert!(served.run(&args).status.success());
+    assert_eq!(plain(&read_output(&out)), plain(&every));
+    assert_eq!(served.proxy.bodies()[0], asked, "the arguments, and nothing else");
+}
+
 #[test]
 fn stdout_carries_the_read_in_the_format_named() {
     let served = serve();

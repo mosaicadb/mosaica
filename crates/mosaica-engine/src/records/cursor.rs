@@ -41,8 +41,8 @@ pub(crate) struct Binding<'a> {
     pub(crate) auth_data_hash: [u8; 32],
     /// The layer an artifacts read is of; `None` on the other routes.
     pub(crate) layer: Option<LayerBinding<'a>>,
-    /// A digest of the request an aggregate cursor continues, or of the identifiers an artifacts
-    /// read names; `None` otherwise.
+    /// A digest of the request an aggregate cursor continues, of the identifiers an artifacts
+    /// read names, or of the fields an items read that names none returned; `None` otherwise.
     pub(crate) request: Option<[u8; 32]>,
 }
 

@@ -32,6 +32,18 @@ The `Database` methods on this page read with the operator's own token, which [`
     options:
       heading_level: 3
 
+::: mosaica._database.Database.views
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.attributes
+    options:
+      heading_level: 3
+
+::: mosaica._database.Database.layers
+    options:
+      heading_level: 3
+
 ::: mosaica._database.Database.item
     options:
       heading_level: 3

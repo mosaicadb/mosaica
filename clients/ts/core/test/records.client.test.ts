@@ -207,6 +207,13 @@ describe('MosaicaClient.items and artifacts', () => {
     expect(sent[2]!.body).toEqual({view: 's0', layer: 'clusters', fields: ['key', 'parents'], parent: '9223372036854775813', level: 1, q: 'ab'});
   });
 
+  it('sends no fields for an items read that names none', async () => {
+    const empty = responseOf([[page([]), null]], null, {order: 'stored', page_rows: 10});
+    const {client, sent} = clientFor(() => chunked(empty));
+    await drain(await client.items('tok', {view: 's0'}));
+    expect(sent[0]!.body).toEqual({view: 's0'});
+  });
+
   it('sends a bigint comparand as its decimal digits, exact past 2^53', async () => {
     const empty = responseOf([[page([]), null]], null, {order: 'stored', page_rows: 10});
     const {client, sent} = clientFor(() => chunked(empty));

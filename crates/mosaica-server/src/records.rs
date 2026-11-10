@@ -32,13 +32,14 @@ use crate::state::{ApiJson, AppState, ViewerSession};
 use crate::stream::{CancelGuard, Producer};
 use crate::viewer::FilterParser;
 
-/// The request body. Every field but `view` and `fields` may be left out; an unknown one is a
-/// `422`.
+/// The request body. Every field but `view` may be left out; an unknown one is a `422`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ItemsReq {
     view: String,
-    fields: Vec<String>,
+    /// Absent is every field the view reads without a pin; empty is `mosaica_id` alone.
+    #[serde(default)]
+    fields: Option<Vec<String>>,
     /// Return `mosaica:x` and `mosaica:y`.
     #[serde(default)]
     position: bool,
@@ -388,7 +389,7 @@ fn run_items(
         .collect();
     let request = ItemsRequest {
         view: &view.id,
-        fields: &req.fields,
+        fields: req.fields.as_deref(),
         system_fields: &system_fields,
         filter,
         keep_unmatched: req.keep_unmatched,
