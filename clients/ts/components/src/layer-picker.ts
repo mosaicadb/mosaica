@@ -25,6 +25,7 @@ import {chrome, tokens} from './tokens.js';
  * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart entry - One layer that draws, with `data-layer`.
  * @csspart name - A layer's title, or its name if it has no title.
+ * @csspart linked - Under a layer's name, the layers drawn with it, such as "with Labels".
  * @csspart note - The note naming the filter layers, such as "Venues can be used as a filter
  *   only.", with `data-layers` listing their names.
  */
@@ -48,10 +49,17 @@ export class MosaicaLayerPicker extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
+      [part='entry'] .col {
+        min-width: 0;
+        padding: 4px 0;
+      }
       [part='name'] {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
+      }
+      [part='linked'] {
+        font-size: 12px;
+        color: var(--_mosaica-ink-2);
+        overflow-wrap: anywhere;
       }
     `
   ];
@@ -86,13 +94,17 @@ export class MosaicaLayerPicker extends MosaicaElement {
     const {drawn, filters} = this.split();
     if (drawn.length + filters.length === 0) return html`<div class="panel">${heading}<span part="state" data-state="empty">No layers</span></div>`;
     const on = new Set(s.get('artifacts').layers);
+    const titled = (name: string) => meta.layers.find((l) => l.name === name)?.title || name;
     return html`<div class="panel">${heading}
       <span part="state" data-state="shown"></span>
       <div class="col">
         ${drawn.map(
-          (e) => html`<label part="entry" class="check" data-layer=${e.root.name} title=${e.closure.length > 1 ? e.closure.join(' + ') : nothing}>
+          (e) => html`<label part="entry" class="check" data-layer=${e.root.name}>
             <input type="checkbox" .checked=${on.has(e.root.name)} @change=${(ev: Event) => this.toggle(e, (ev.target as HTMLInputElement).checked)} />
-            <span part="name">${e.root.title || e.root.name}</span>
+            <span class="col">
+              <span part="name">${e.root.title || e.root.name}</span>
+              ${e.closure.length > 1 ? html`<span part="linked" data-layers=${linkedTo(e).join(' ')}>with ${linkedTo(e).map(titled).join(', ')}</span>` : nothing}
+            </span>
           </label>`
         )}
       </div>
@@ -101,6 +113,11 @@ export class MosaicaLayerPicker extends MosaicaElement {
         : nothing}
     </div>`;
   }
+}
+
+/** The layers an entry draws with its own. */
+function linkedTo(entry: LayerEntry): string[] {
+  return entry.closure.filter((name) => name !== entry.root.name);
 }
 
 /** "Venues can be used as a filter only.", or for several, "Venues and Countries can be used as filters only." */

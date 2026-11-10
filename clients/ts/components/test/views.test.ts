@@ -176,6 +176,14 @@ describe('<mosaica-key-picker>', () => {
     expect(deepAll(layout.host, 'option').map((o) => o.textContent?.trim())).toContain('Quarter');
   });
 
+  it('names previous and next with the group they step through', async () => {
+    const {host} = await picker('mosaica-key-picker', 'quarter:2026-Q2');
+    const names = deepAll(host, 'button').map((b) => b.getAttribute('aria-label')!);
+    expect(names).toHaveLength(2);
+    for (const name of names) expect(name).toContain('quarter');
+    expect(names[0]).not.toBe(names[1]);
+  });
+
   it('disables previous at the first view and next at the last, and never wraps', async () => {
     const first = await picker('mosaica-key-picker', 'quarter:2026-Q2');
     const buttons = () => deepAll(first.host, 'button') as HTMLButtonElement[];

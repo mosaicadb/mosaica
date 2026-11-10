@@ -100,12 +100,13 @@ export const displayStyles = css`
     font-weight: 500;
   }
   /* A slider: a thin track filled to the thumb, as far as its --fill says. */
+  /* The slider's box is 24 px high for the pointer and takes 16 px of its row. */
   .slider {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: 16px;
-    margin: 0;
+    height: 24px;
+    margin: -4px 0;
     padding: 0;
     border: 0;
     background: none;
@@ -160,7 +161,7 @@ export const displayStyles = css`
   }
   .modes button[aria-checked='true'] {
     background: var(--_mosaica-surface);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 -2px 0 var(--_mosaica-accent);
     color: var(--_mosaica-ink);
     font-weight: 600;
   }
@@ -178,6 +179,8 @@ export const displayStyles = css`
   .resolution input[type='range'] {
     flex: 1 1 auto;
     min-width: 0;
+    height: 24px;
+    margin-block: -4px;
   }
   /* The stops the server will not count for this view, struck through on the track. */
   .resolution .past {
@@ -253,6 +256,9 @@ export const displayStyles = css`
     gap: 10px;
   }
   .toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 3px 8px;
     border: 1px solid var(--_mosaica-line);
     border-radius: var(--_mosaica-radius-control);
@@ -266,9 +272,21 @@ export const displayStyles = css`
     color: var(--_mosaica-accent-ink);
   }
   .ramp-choice .t {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  /* Why a choice is not offered, under its button. */
+  .choice-note {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+  .choice-note .note {
+    font-size: 12px;
+    color: var(--_mosaica-ink-2);
   }
   .ramp-choice:disabled {
     opacity: 0.4;
@@ -322,16 +340,20 @@ export const displayStyles = css`
   }
   .seg button[aria-checked='true'] {
     background: var(--_mosaica-surface);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 -2px 0 var(--_mosaica-accent);
     color: var(--_mosaica-ink);
     font-weight: 600;
   }
-  /* The Size by menu, in the top layer beside the popover. */
+  /* A choice's menu, in the top layer beside the popover: no larger than the window, scrolling inside. */
   .size-menu {
     position: fixed;
     inset: auto;
     margin: 0;
     width: 220px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 6px 0;
     box-sizing: border-box;
     background: var(--_mosaica-surface);
@@ -369,7 +391,7 @@ export const displayStyles = css`
   }
   /* The Palette menu: a row per palette, its colours wrapped in a block beside its name and line. */
   .size-menu.palettes {
-    width: 360px;
+    width: 388px;
     padding: 6px;
   }
   .size-menu.palettes .hd {
@@ -411,8 +433,17 @@ export const displayStyles = css`
   }
   .size-menu .lead {
     display: flex;
+    flex: 1 1 auto;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+  }
+  /* The tick beside the entry chosen; the others keep its room, so the titles line up. */
+  .tick {
+    display: inline-flex;
+    flex: none;
+    width: 14px;
+    height: 14px;
   }
   .size-menu .kind {
     font-size: 12px;
@@ -446,5 +477,35 @@ export const displayStyles = css`
   .ramp-list button:hover,
   .ramp-list button[aria-checked='true'] {
     background: var(--_mosaica-surface-2);
+  }
+  .ramp-list button[aria-checked='true'] {
+    font-weight: 500;
+  }
+  /* A palette's or a ramp's colours are what it is, so they keep them under forced colours; a
+     slider's track and thumb are drawn in backgrounds, and take system colours. */
+  @media (forced-colors: active) {
+    .bar,
+    .strip span,
+    .swatches span {
+      forced-color-adjust: none;
+    }
+    .slider::-webkit-slider-runnable-track {
+      forced-color-adjust: none;
+      background: linear-gradient(to right, Highlight var(--fill, 0%), GrayText var(--fill, 0%));
+    }
+    .slider::-moz-range-track {
+      forced-color-adjust: none;
+      background: linear-gradient(to right, Highlight var(--fill, 0%), GrayText var(--fill, 0%));
+    }
+    .slider::-webkit-slider-thumb {
+      forced-color-adjust: none;
+      border-color: ButtonText;
+      background: ButtonFace;
+    }
+    .slider::-moz-range-thumb {
+      forced-color-adjust: none;
+      border-color: ButtonText;
+      background: ButtonFace;
+    }
   }
 `;

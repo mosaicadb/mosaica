@@ -88,6 +88,9 @@ const fill = (v: number, min: number, max: number) => `--fill:${(Math.min(1, Mat
 /** A ramp as a CSS gradient, low to high. */
 const rampGradient = (ramp: RampName, reverse: boolean) => `linear-gradient(to right, ${Array.from({length: 8}, (_, k) => rgb(colourOfFraction(k / 7, ramp, reverse))).join(', ')})`;
 
+/** The room for a tick before an entry of a list of choices, ticked for the one chosen. */
+const tick = (chosen: boolean) => html`<span class="tick">${chosen ? icon('check', 14, 1.6) : nothing}</span>`;
+
 /** The Density choices in the Layers popover, in order. */
 const DENSITY_MODES: readonly {mode: DensityMode; label: string}[] = [
   {mode: 'none', label: 'None'},
@@ -108,7 +111,16 @@ const CALLOUT_REST_MS = 200;
 /** The shortest a callout is made to fit beside its point; what does not fit scrolls inside it. */
 const CALLOUT_MIN_HEIGHT = 180;
 
-/** The narrow layout's tabs, each opening a sheet, drawn where its panel is. */
+/** The controls Tab stops at. */
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Whether `node` is `container` or inside it, through slots and shadow roots. */
+function within(node: Node | null, container: Node): boolean {
+  for (let at = node; at; at = (at instanceof Element ? at.assignedSlot : null) ?? at.parentNode ?? (at instanceof ShadowRoot ? at.host : null)) if (at === container) return true;
+  return false;
+}
+
+/** The narrow layout's buttons, each opening a sheet, drawn where its panel is. */
 const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}[] = [
   {sheet: 'filters', icon: 'filter', label: 'Fields', panel: 'filters'},
   {sheet: 'layers', icon: 'layers', label: 'Layers', panel: 'legend'},
@@ -138,7 +150,11 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * HTML.
  *
  * Below 1000 px the explorer uses the overlay layout whatever `layout` says. At 720 px or less it
- * opens its panels as sheets from a tab bar.
+ * opens its panels as sheets from a bar of buttons under the map, and a picked item's card opens
+ * in the Item sheet.
+ *
+ * An `aria-label` on the explorer names its map, so a page with several explorers can tell them
+ * apart.
  *
  * @summary A complete map application in a single element.
  * @tagname mosaica-explorer
@@ -148,7 +164,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @slot filters - Replaces the filter panel.
  * @slot selection - Replaces the selection panel, shown while a region is selected.
  * @slot detail - Replaces the item and artifact cards, in the card beside the point.
- * @slot status - Replaces the status strip drawn on the map.
+ * @slot status - Replaces the status strip: on the map, or under it in the narrow layout.
  * @slot tooltip - Replaces the map's hover tooltip.
  * @slot top-right - Content in the map's top-right corner, above the selection's card.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-viewchange']>} mosaica-viewchange - The map's camera moved.
@@ -244,9 +260,10 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart detail - The item or artifact card in the map's top-right corner, used when the picked
  *   item or artifact has no position on the map, such as after following an item into another
  *   view.
- * @csspart sheet - The open sheet, in the narrow layout.
+ * @csspart sheet - The open sheet, over the map in the narrow layout.
  * @csspart strip-row - The full-width status strip, in the narrow layout.
- * @csspart tabs - The tab bar, in the narrow layout.
+ * @csspart tabs - The bar of buttons that open the sheets, in the narrow layout, each with
+ *   `data-sheet` and `aria-expanded`.
  * @csspart map-<part> - A part of the inner `<mosaica-map>`, such as `map-controls`.
  * @csspart status-<part> - A part of an inner `<mosaica-status>`.
  * @csspart view-picker-<part> - A part of the inner `<mosaica-view-picker>`.
@@ -311,6 +328,13 @@ export class MosaicaExplorer extends MosaicaElement {
       ::slotted(mosaica-map) {
         height: 100%;
         min-height: 320px;
+      }
+      /* The narrow layout's map takes the height its bars leave. */
+      @container explorer (max-width: 720px) {
+        mosaica-map,
+        ::slotted(mosaica-map) {
+          min-height: 0;
+        }
       }
       /* What the map draws at its top-left, its tools or a region's tag, sits right of the card; in
          the narrow layout there is no card. */
@@ -408,11 +432,14 @@ export class MosaicaExplorer extends MosaicaElement {
         min-width: 0;
       }
       .title {
+        display: block;
+        margin: 0;
         font-size: 15px;
         font-weight: 600;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        letter-spacing: 0;
+        text-transform: none;
+        color: var(--_mosaica-ink);
+        overflow-wrap: anywhere;
       }
       .compact .title {
         font-size: 14px;
@@ -490,6 +517,10 @@ export class MosaicaExplorer extends MosaicaElement {
           linear-gradient(color-mix(in srgb, var(--_mosaica-ink) 16%, transparent), transparent) top / 100% 10px no-repeat scroll,
           linear-gradient(transparent, color-mix(in srgb, var(--_mosaica-ink) 16%, transparent)) bottom / 100% 10px no-repeat scroll,
           var(--_mosaica-surface);
+      }
+      [part='layers-popover']:focus-visible,
+      [part='sheet']:focus-visible {
+        outline-offset: -2px;
       }
       [part='layers-popover'] mosaica-layer-picker,
       [part='sheet'] mosaica-layer-picker {
@@ -571,6 +602,7 @@ export class MosaicaExplorer extends MosaicaElement {
       }
       [part='pin'][aria-pressed='true'] {
         background: var(--_mosaica-surface-3);
+        box-shadow: inset 0 -2px 0 var(--_mosaica-accent);
         color: var(--_mosaica-ink);
       }
       /* The selection keeps its heading, counts and actions; only its list of marks scrolls, so the
@@ -617,18 +649,19 @@ export class MosaicaExplorer extends MosaicaElement {
         padding: 10px 16px;
       }
       @container explorer (max-width: 720px) {
+        /* The map keeps a floor under its height; a frame too short for it and the bars scrolls. */
         [part='frame'],
         [part='frame'].docked {
           grid-template-columns: minmax(0, 1fr);
-          grid-template-rows: minmax(0, 1fr) auto;
+          grid-template-rows: minmax(120px, 1fr) auto auto;
+          overflow: hidden auto;
         }
         [part='frame'].titled {
-          grid-template-rows: auto minmax(0, 1fr) auto;
+          grid-template-rows: auto minmax(120px, 1fr) auto auto;
         }
         [part='sidebar'],
         [part='panel'],
         .layers,
-        .right,
         .callouts,
         .in-map-strip {
           display: none;
@@ -652,26 +685,25 @@ export class MosaicaExplorer extends MosaicaElement {
           font-size: 11px;
           font-weight: 500;
         }
-        [part='tabs'] button[aria-selected='true'] {
+        [part='tabs'] button[aria-expanded='true'] {
+          box-shadow: inset 0 2px 0 var(--_mosaica-accent);
           color: var(--_mosaica-ink);
           font-weight: 600;
         }
+        /* The sheet opens over the map alone, so the strip and the bar under it stay in reach. A
+           short map gives the sheet all of its height. */
         [part='sheet'] {
           position: absolute;
           left: 0;
           right: 0;
-          bottom: 56px;
-          max-height: 70%;
+          bottom: 0;
+          max-height: max(80%, min(100%, 240px));
           overflow-y: auto;
           background: var(--_mosaica-surface);
           border-top: 1px solid var(--_mosaica-line);
           border-radius: 12px 12px 0 0;
           box-shadow: var(--_mosaica-shadow);
           z-index: 6;
-        }
-        /* The sheet takes focus as it opens so a keyboard lands in it; that is not a focus to show. */
-        [part='sheet']:focus-visible {
-          outline: none;
         }
         .sheet-footer {
           position: sticky;
@@ -713,6 +745,17 @@ export class MosaicaExplorer extends MosaicaElement {
           border-width: 1px 0 0;
           height: 44px;
           overflow-x: auto;
+        }
+      }
+      @media (forced-colors: active) {
+        [part='layers-toggle'] .on {
+          forced-color-adjust: none;
+          background: Highlight;
+        }
+        [part='tabs'] button[aria-expanded='true'] {
+          forced-color-adjust: none;
+          background: Highlight;
+          color: HighlightText;
         }
       }
     `
@@ -834,8 +877,12 @@ export class MosaicaExplorer extends MosaicaElement {
   @state() accessor densityColoursOpen = false;
   /** @internal */
   @state() accessor sheet: Sheet | null = null;
-  /** The narrow layout's tab focused last, which keeps the tab list's one place in the tab order. */
+  /** The narrow layout's button focused last, which keeps the bar's one place in the tab order. */
   @state() private accessor tabFocus: Sheet | null = null;
+  /** The card the selection shows, as last seen: its key, `unavailable` for one with no record, or null for none. */
+  private cardSeen: string | null = null;
+  /** What the status region says: the card that opened last. */
+  private announced = '';
   /** The level a layer is coloured and labelled at, chosen on its card or in Colour by. @internal */
   @state() accessor level: number | null = null;
   /** The cards kept open by Pin, oldest first. @internal */
@@ -907,6 +954,38 @@ export class MosaicaExplorer extends MosaicaElement {
     super.onStoreChange();
   }
 
+  static override get observedAttributes(): string[] {
+    return [...super.observedAttributes, 'aria-label'];
+  }
+
+  /** An `aria-label` on the explorer is passed to its map. */
+  override attributeChangedCallback(name: string, old: string | null, value: string | null): void {
+    super.attributeChangedCallback(name, old, value);
+    if (name === 'aria-label') this.requestUpdate();
+  }
+
+  /**
+   * As the selection's card comes, changes or goes: the narrow layout opens the Item sheet for it,
+   * which takes focus, and closes that sheet with it; the other layouts leave focus where it is and
+   * say which card opened in the status region.
+   */
+  protected override willUpdate(changed: PropertyValues<this>): void {
+    super.willUpdate(changed);
+    const shown = this.has('detail') && this.hasDetail() ? (this.liveKey() ?? 'unavailable') : null;
+    if (shown === this.cardSeen) return;
+    this.cardSeen = shown;
+    this.announced = shown && !this.narrow ? `${this.cardName(this.liveKey())}, card opened` : '';
+    if (!this.narrow) return;
+    if (shown) this.sheet = 'detail';
+    else if (this.sheet === 'detail') this.sheet = null;
+  }
+
+  /** Whether the selection has a card to show: a click that found nothing shows none, and a broken pick shows its fault. */
+  private hasDetail(): boolean {
+    const selection = this.resolvedStore?.get('selection');
+    return Boolean(selection?.item || selection?.artifact || selection?.artifactRefusal || selection?.itemRefusal || this.map?.lastPick?.kind === 'broken');
+  }
+
   override connectedCallback(): void {
     super.connectedCallback();
     if (typeof ResizeObserver === 'undefined') return;
@@ -966,6 +1045,18 @@ export class MosaicaExplorer extends MosaicaElement {
     if (group && !path.includes(group) && !(editor && path.includes(editor))) this.closeLayers();
   };
 
+  /**
+   * Focus going from the Layers button, its popover or their menus to somewhere else in the page
+   * closes the popover. The Edit colours dialog it opens is not somewhere else.
+   */
+  private onLayersFocusOut = (e: FocusEvent): void => {
+    const to = e.relatedTarget;
+    if (!this.layersOpen || !(to instanceof Node)) return;
+    const editor = this.renderRoot.querySelector('mosaica-colour-editor');
+    if (within(to, e.currentTarget as Node) || (editor && within(to, editor))) return;
+    this.closeLayers();
+  };
+
   private openLayers(): void {
     this.layersOpen = true;
     document.addEventListener('pointerdown', this.onOutside, true);
@@ -974,13 +1065,13 @@ export class MosaicaExplorer extends MosaicaElement {
   private closeLayers(): void {
     this.layersOpen = false;
     this.menu = null;
+    this.densityColoursOpen = false;
     document.removeEventListener('pointerdown', this.onOutside, true);
   }
 
   override render(): TemplateResult | typeof nothing {
     const s = this.resolvedStore;
     const region = s?.get('region') ?? null;
-    const selection = s?.get('selection');
     const meta = s?.get('meta') ?? null;
     const artifacts = s?.get('artifacts');
     const layersOn = artifacts?.layers.length ?? 0;
@@ -990,8 +1081,7 @@ export class MosaicaExplorer extends MosaicaElement {
     // Short of room, the docked layout takes the overlay's form.
     const floating = this.layout === 'overlay' || compact;
     const level = this.level;
-    // A click that found nothing shows no card; a broken pick shows its fault.
-    const hasDetail = Boolean(selection?.item || selection?.artifact || selection?.artifactRefusal || selection?.itemRefusal || this.map?.lastPick?.kind === 'broken');
+    const hasDetail = this.hasDetail();
     // The detail shows whichever changed last.
     const showArtifact = this.showsArtifact();
     const detail = this.liveCard(showArtifact);
@@ -1004,10 +1094,10 @@ export class MosaicaExplorer extends MosaicaElement {
     const shown = meta?.views.find((v) => v.id === s?.get('view').id) ?? (meta?.views.length === 1 ? meta.views[0] : undefined);
     // A name that is only the view's id says nothing to a reader.
     const viewName = shown && shown.displayName !== shown.id ? shown.displayName : '';
-    const viewText = (cls: string) => (pickersShown || !viewName ? nothing : html`<span part="view-name" class=${cls}>${viewName}</span>`);
+    // The heading is the dataset's title, or without one the view's name.
     const names = this.datasetTitle
-      ? html`<div class="names"><span part="dataset-title" class="title">${this.datasetTitle}</span><div class="sub">${pickers}${viewText('')}</div></div>`
-      : html`<div class="names">${pickers}${viewText('title')}</div>`;
+      ? html`<div class="names"><h2 part="dataset-title" class="title">${this.datasetTitle}</h2><div class="sub">${pickers}${pickersShown || !viewName ? nothing : html`<span part="view-name">${viewName}</span>`}</div></div>`
+      : html`<div class="names">${pickers}${pickersShown || !viewName ? nothing : html`<h2 part="view-name" class="title">${viewName}</h2>`}</div>`;
     const named = pickersShown || viewName !== '' || this.datasetTitle !== '';
     const layersPanel = html`<slot name="layers"><mosaica-layer-picker exportparts=${FORWARD['layer-picker']}></mosaica-layer-picker></slot>`;
     const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevel=${level}></mosaica-filter-panel></slot>`;
@@ -1019,33 +1109,36 @@ export class MosaicaExplorer extends MosaicaElement {
     // card stands in the top-right corner.
     const anchor = this.liveAnchor(showArtifact);
     const detailInColumn = this.has('detail') && hasDetail && anchor === null;
-    const right = html`<div slot="top-right" class="right"><slot name="top-right"></slot>${selectionCard}${detailInColumn ? html`<div part="detail" class="card">${detail}</div>` : nothing}</div>`;
+    // The narrow layout shows the selection and the detail in the Item sheet.
+    const right = html`<div slot="top-right" class="right"><slot name="top-right"></slot>${narrow ? nothing : selectionCard}${detailInColumn && !narrow ? html`<div part="detail" class="card">${detail}</div>` : nothing}</div>`;
 
-    const docked = html`<aside part="sidebar" aria-label="Explorer panels">
+    // The column is named for what it holds.
+    const columnName = this.has('filters') ? 'Fields' : 'View';
+    const docked = html`<aside part="sidebar" aria-label=${columnName}>
       ${this.has('toolbar') ? head : nothing}
       ${this.has('filters') ? filters : nothing}
     </aside>`;
     const panel =
       this.has('toolbar') || this.has('filters')
-        ? html`<div part="panel" class="card" role="region" aria-label="Explorer panels">${this.has('toolbar') ? head : nothing}${this.has('filters') ? filters : nothing}</div>`
+        ? html`<div part="panel" class="card" role="region" aria-label=${columnName}>${this.has('toolbar') ? head : nothing}${this.has('filters') ? filters : nothing}</div>`
         : nothing;
 
     const layersButton = this.has('legend')
-      ? html`<div class="layers" slot=${compact ? 'bottom-left' : 'top-left'} @keydown=${this.onLayersKey}>
+      ? html`<div class="layers" slot=${compact ? 'bottom-left' : 'top-left'} @keydown=${this.onLayersKey} @focusout=${this.onLayersFocusOut}>
           <div class="group"><button part="layers-toggle" type="button" aria-label=${`Layers and display, ${layersOn} layers on`} aria-expanded=${this.layersOpen ? 'true' : 'false'}
-            aria-controls="layers-popover" ?data-on=${layersOn > 0} @click=${() => (this.layersOpen ? this.closeLayers() : this.openLayers())}>${icon('layers', 16, 1.2)}${layersOn > 0 ? html`<span class="on"></span>` : nothing}</button></div>
+            aria-controls=${this.layersOpen ? 'layers-popover' : nothing} ?data-on=${layersOn > 0} @click=${() => (this.layersOpen ? this.closeLayers() : this.openLayers())}>${icon('layers', 16, 1.2)}${layersOn > 0 ? html`<span class="on"></span>` : nothing}</button></div>
           ${this.layersOpen
-            ? html`<div part="layers-popover" id="layers-popover" class="card" role="dialog" aria-label="Layers and display" @pointerdown=${this.onPopoverPress}>${this.displaySection()}${layersPanel}</div>${this.choiceMenu()}`
+            ? html`<div part="layers-popover" id="layers-popover" class="card" role="dialog" aria-label="Layers and display" tabindex="-1" @pointerdown=${this.onPopoverPress}>${this.displaySection()}${layersPanel}</div>${this.choiceMenu()}`
             : nothing}
         </div>`
       : nothing;
 
     const tabs = TABS.filter((t) => this.has(t.panel));
-    // One tab is in the page's tab order: the one focused last, else the open sheet's, else the first.
+    // One button is in the page's tab order: the one focused last, else the open sheet's, else the first.
     const reachable = tabs.find((t) => t.sheet === this.tabFocus) ?? tabs.find((t) => t.sheet === this.sheet) ?? tabs[0];
     const tab = ({sheet, icon: ic, label}: (typeof TABS)[number]) =>
-      html`<button type="button" role="tab" id=${`tab-${sheet}`} data-sheet=${sheet} tabindex=${reachable?.sheet === sheet ? '0' : '-1'}
-        aria-selected=${this.sheet === sheet ? 'true' : 'false'} aria-controls=${this.sheet === sheet ? 'sheet' : nothing}
+      html`<button type="button" id=${`opens-${sheet}`} data-sheet=${sheet} tabindex=${reachable?.sheet === sheet ? '0' : '-1'}
+        aria-expanded=${this.sheet === sheet ? 'true' : 'false'} aria-controls=${this.sheet === sheet ? 'sheet' : nothing}
         @click=${() => {
           this.tabFocus = sheet;
           this.sheet = this.sheet === sheet ? null : sheet;
@@ -1086,6 +1179,7 @@ export class MosaicaExplorer extends MosaicaElement {
         ${floating && !narrow ? panel : nothing}
         <mosaica-map
           exportparts=${FORWARD.map}
+          aria-label=${this.getAttribute('aria-label') ?? nothing}
           colour-by=${this.colourBy || nothing}
           layers=${this.layers || nothing}
           tooltip-fields=${this.tooltipFields}
@@ -1118,21 +1212,23 @@ export class MosaicaExplorer extends MosaicaElement {
           @mosaica-pick=${() => this.requestUpdate()}
           @mosaica-itemopen=${() => this.requestUpdate()}
           @mosaica-miss=${() => this.onMiss()}
-          @keydown=${this.onMapKey}
           @click=${() => this.requestUpdate()}
         >
           ${narrow ? nothing : layersButton}
-          ${narrow ? nothing : right}
+          ${right}
           ${narrow ? nothing : html`<div slot="bottom-right" class="in-map-strip"><slot name="status"><mosaica-status exportparts=${FORWARD.status} ?compact=${compact}></mosaica-status></slot></div>`}
           ${this.querySelector('[slot="tooltip"]') ? html`<slot name="tooltip" slot="tooltip"></slot>` : nothing}
         </mosaica-map>
         ${narrow ? nothing : this.callouts(this.has('detail') && hasDetail ? anchor : null, detail)}
+        ${this.sheet && sheetBody !== nothing
+          ? html`<div part="sheet" id="sheet" role="dialog" aria-labelledby=${`opens-${this.sheet}`} tabindex="-1" @keydown=${this.onSheetKey}>${sheetBody}</div>`
+          : nothing}
       </div>
-      ${this.sheet && sheetBody !== nothing
-        ? html`<div part="sheet" id="sheet" role="dialog" aria-labelledby=${`tab-${this.sheet}`} tabindex="-1" @keydown=${this.onSheetKey}>${sheetBody}</div>`
-        : nothing}
-      <div part="strip-row"><mosaica-status exportparts=${FORWARD.status}></mosaica-status></div>
-      <div part="tabs" role="tablist" aria-label="Explorer panels" @keydown=${this.onTabKey}>${tabs.map(tab)}</div>
+      <div class="sr-only" role="status">${this.announced}</div>
+      <div part="strip-row">${narrow
+        ? html`<slot name="status"><mosaica-status exportparts=${FORWARD.status}></mosaica-status></slot>`
+        : html`<mosaica-status exportparts=${FORWARD.status}></mosaica-status>`}</div>
+      <div part="tabs" role="toolbar" aria-label="Panels" @keydown=${this.onTabKey}>${tabs.map(tab)}</div>
       <mosaica-colour-editor exportparts=${FORWARD['colour-editor']} field=${s?.get('legend').colourBy ?? ''} .level=${level}></mosaica-colour-editor>
     </div>`;
   }
@@ -1225,21 +1321,24 @@ export class MosaicaExplorer extends MosaicaElement {
     const view = this.resolvedStore?.get('view').id ?? '';
     if (!m) return nothing;
     const live = this.liveKey();
-    const pinButton = (pressed: boolean, onPress: () => void) =>
-      html`<button part="pin" slot="actions" type="button" aria-pressed=${pressed ? 'true' : 'false'} aria-label=${pressed ? 'Unpin' : 'Pin'} title=${pressed ? 'Unpin' : 'Keep open'} @click=${onPress}>${icon('pin', 13, 1.5)}</button>`;
+    // Pin keeps one name, the card's, and says whether it is on by its pressed state.
+    const pinButton = (pressed: boolean, name: string, onPress: () => void) =>
+      html`<button part="pin" slot="actions" type="button" aria-pressed=${pressed ? 'true' : 'false'} aria-label=${`Pin ${name}`} title="Pin" @click=${onPress}>${icon('pin', 13, 1.5)}</button>`;
     const cards: {key: string; world: [number, number]; body: TemplateResult; pinned: boolean; name: string}[] = this.pinned
       .filter((p) => p.view === view)
       .map((p) => {
-        const unpin = pinButton(true, () => (this.pinned = this.pinned.filter((q) => q.key !== p.key)));
+        const name = this.cardName(p.key);
+        const unpin = pinButton(true, name, () => (this.pinned = this.pinned.filter((q) => q.key !== p.key)));
         const body =
           p.kind === 'item'
             ? this.itemCard(p.item, unpin)
             : html`<mosaica-artifact-card exportparts=${FORWARD['artifact-card']} .artifact=${p.artifact}>${unpin}</mosaica-artifact-card>`;
-        return {key: p.key, world: p.world, body, pinned: true, name: this.cardName(p.key)};
+        return {key: p.key, world: p.world, body, pinned: true, name};
       });
     if (anchor && !(live && this.pinned.some((p) => p.key === live && p.view === view))) {
-      const body = live ? this.liveCard(this.showsArtifact(), pinButton(false, () => this.togglePin())) : detail;
-      cards.push({key: 'live', world: anchor, body, pinned: false, name: this.cardName(live)});
+      const name = this.cardName(live);
+      const body = live ? this.liveCard(this.showsArtifact(), pinButton(false, name, () => this.togglePin())) : detail;
+      cards.push({key: 'live', world: anchor, body, pinned: false, name});
     }
     this.cards = cards.map(({key, world, pinned}) => ({key, world, pinned}));
     if (cards.length === 0) return nothing;
@@ -1258,7 +1357,8 @@ export class MosaicaExplorer extends MosaicaElement {
   /**
    * Place each callout beside its point under the camera as it stands, clear of the cards over the
    * map and of the callouts placed before it, and join it to its point. A callout whose point is off
-   * the map is hidden with its leader. Reads no layout: the sizes are those {@link measure} took.
+   * the map is hidden with its leader, and gives the focus it holds to the map. Reads no layout: the
+   * sizes are those {@link measure} took.
    */
   private placeCallouts(firm = this.moving !== null): void {
     const m = this.map;
@@ -1279,6 +1379,7 @@ export class MosaicaExplorer extends MosaicaElement {
       const last = this.placements.get(key);
       const kept = last && last.world[0] === card.world[0] && last.world[1] === card.world[1] ? {side: last.side, offset: last.offset, firm} : null;
       const at = size.width > 0 && size.height > 0 ? placeCallout(point, box, size, [...this.keepClear, ...placed], undefined, kept, CALLOUT_MIN_HEIGHT) : null;
+      if (at === null && !el.hidden && within((this.renderRoot as ShadowRoot).activeElement, el)) m.focus();
       el.hidden = at === null;
       leader?.setAttribute('visibility', at === null ? 'hidden' : 'visible');
       if (!at) continue;
@@ -1375,20 +1476,6 @@ export class MosaicaExplorer extends MosaicaElement {
     });
   }
 
-  /**
-   * Tab from the map itself goes to the card beside the point, the selection's where it shows, so
-   * the card is the next stop after the map; from there Tab goes on in the page's order.
-   */
-  private onMapKey = (e: KeyboardEvent): void => {
-    const from = e.composedPath()[0];
-    if (e.key !== 'Tab' || e.shiftKey || !this.map || (from !== this.map && from !== this.map.focusTarget)) return;
-    const shown = Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part~="callout"]')).filter((c) => !c.hidden);
-    const card = shown.find((c) => c.dataset.callout === 'live') ?? shown[0];
-    if (!card) return;
-    e.preventDefault();
-    card.focus();
-  };
-
   /** Escape on a card: the card not pinned closes, dropping the selection; focus goes back to the map. */
   private onCalloutKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;
@@ -1429,12 +1516,16 @@ export class MosaicaExplorer extends MosaicaElement {
     const change = (patch: Partial<DisplaySettings>) => this.changeDisplay(patch);
     const number = (e: Event) => Number((e.target as HTMLInputElement).value);
     const choices = Object.keys(DENSITY_COLOUR_TITLES) as DensityColours[];
+    // The arrow keys move the choice and leave the list open; a press chooses and closes it.
     const colourList = this.densityColoursOpen
-      ? html`<div id="density-colour-list" class="ramp-list" role="radiogroup" aria-labelledby="colours-label">
+      ? html`<div id="density-colour-list" class="ramp-list" role="radiogroup" aria-labelledby="colours-label" @focusout=${this.onDensityColoursFocusOut} @keydown=${this.onDensityColoursKey}>
           ${choices.map(
             (c, i) => html`<button type="button" role="radio" data-colours=${c} aria-checked=${c === colours ? 'true' : 'false'} tabindex=${c === colours ? '0' : '-1'}
-              @click=${() => change({densityColours: c})}
-              @keydown=${(e: KeyboardEvent) => radioKeys(e, choices.length, i, (j) => change({densityColours: choices[j]!}))}><span class="bar" style=${`background:${densityGradient(c, scheme)}`}></span>${DENSITY_COLOUR_TITLES[c]}</button>`
+              @click=${() => {
+                change({densityColours: c});
+                this.closeDensityColours();
+              }}
+              @keydown=${(e: KeyboardEvent) => radioKeys(e, choices.length, i, (j) => change({densityColours: choices[j]!}))}>${tick(c === colours)}<span class="bar" style=${`background:${densityGradient(c, scheme)}`}></span>${DENSITY_COLOUR_TITLES[c]}</button>`
           )}
         </div>`
       : nothing;
@@ -1446,18 +1537,19 @@ export class MosaicaExplorer extends MosaicaElement {
             ${this.densityScaleControl(s.densityScale, change)}
             ${ramped
               ? html`<span id="colours-label">Colours</span>
-                  <button part="density-colours" class="ramp-choice" type="button" aria-labelledby="colours-label" aria-expanded=${this.densityColoursOpen ? 'true' : 'false'} aria-controls="density-colour-list"
+                  <button part="density-colours" class="ramp-choice" type="button" aria-label=${`Colours: ${DENSITY_COLOUR_TITLES[colours]}`} aria-expanded=${this.densityColoursOpen ? 'true' : 'false'}
+                    aria-controls=${this.densityColoursOpen ? 'density-colour-list' : nothing} @focusout=${this.onDensityColoursFocusOut}
                     @click=${() => (this.densityColoursOpen = !this.densityColoursOpen)}><span class="bar" style=${`background:${densityGradient(colours, scheme)}`}></span>${DENSITY_COLOUR_TITLES[colours]}${icon('chev', 12, 1.4)}</button>
                   ${colourList}`
               : nothing}
             <label for="density-strength">Strength</label>
             <div class="with-readout"><input id="density-strength" part="density-strength" class="slider" type="range" min="0.1" max="1" step="0.05" .value=${String(s.densityStrength)}
-              style=${fill(s.densityStrength, 0.1, 1)} @input=${(e: Event) => change({densityStrength: number(e)})} /><span class="readout">${Math.round(s.densityStrength * 100)}%</span></div>
+              style=${fill(s.densityStrength, 0.1, 1)} aria-valuetext=${`${Math.round(s.densityStrength * 100)}%`} @input=${(e: Event) => change({densityStrength: number(e)})} /><span class="readout">${Math.round(s.densityStrength * 100)}%</span></div>
           </div>`;
     return html`<div part="display" class="display">
-      <section class="sec">
+      <section class="sec" aria-labelledby="points-label">
         <div class="sec-head">
-          <span class="hd" id="points-label">Points</span>
+          <h2 class="hd" id="points-label">Points</h2>
           <button part="points-toggle" class="switch small" type="button" role="switch" aria-checked=${s.points ? 'true' : 'false'} aria-label="Show points"
             @click=${() => change({points: !s.points})}><span class="knob"></span></button>
         </div>
@@ -1470,11 +1562,11 @@ export class MosaicaExplorer extends MosaicaElement {
         </div>
       </section>
       ${this.colourSection()}
-      <section class="sec">
-        <div class="hd" id="density-label">Density</div>
+      <section class="sec" aria-labelledby="density-label">
+        <h2 class="hd" id="density-label">Density</h2>
         <div part="density-mode" class="modes" role="radiogroup" aria-labelledby="density-label">
           ${DENSITY_MODES.map(
-            (m, i) => html`<button type="button" role="radio" data-mode=${m.mode} aria-checked=${m.mode === s.density ? 'true' : 'false'} tabindex=${i === modeAt ? '0' : '-1'}
+            (m, i) => html`<button type="button" role="radio" data-mode=${m.mode} aria-checked=${m.mode === s.density ? 'true' : 'false'} tabindex=${i === Math.max(0, modeAt) ? '0' : '-1'}
               @click=${() => change({density: m.mode})}
               @keydown=${(e: KeyboardEvent) => radioKeys(e, DENSITY_MODES.length, i, (j) => change({density: DENSITY_MODES[j]!.mode}))}>${m.label}</button>`
           )}
@@ -1617,13 +1709,13 @@ export class MosaicaExplorer extends MosaicaElement {
                     @keydown=${(e: KeyboardEvent) => radioKeys(e, scales.length, i, (j) => this.choosePalette({scale: scales[j]!}))}>${x === 'linear' ? 'Linear' : 'Log'}</button>`
                 )}
               </div>
-              <button part="ramp-reverse" class="toggle" type="button" aria-pressed=${colouring.reverse ? 'true' : 'false'} @click=${() => this.choosePalette({reverse: !colouring.reverse})}>Reverse</button>
+              <button part="ramp-reverse" class="toggle" type="button" aria-pressed=${colouring.reverse ? 'true' : 'false'} @click=${() => this.choosePalette({reverse: !colouring.reverse})}>${colouring.reverse ? icon('check', 12, 1.6) : nothing}Reverse</button>
             </div>`
         : nothing;
     // A category's values and a layer's clusters have colours of their own to edit.
     const editable = Boolean(column?.category) || clusters;
-    return html`<section class="sec">
-      <div class="hd">Colour</div>
+    return html`<section class="sec" aria-labelledby="colour-label">
+      <h2 class="hd" id="colour-label">Colour</h2>
       <div class="sliders">
         <span>Colour by</span>${choice('colour', `Colour by: ${byName}`, html`<span class="t">${byName}</span>`)}
         ${palettes}${ramps}
@@ -1731,7 +1823,7 @@ export class MosaicaExplorer extends MosaicaElement {
     return html`<span id="density-scale-label">Scale</span>
       <div part="density-scale" class="seg" role="radiogroup" aria-labelledby="density-scale-label">
         ${DENSITY_SCALES.map(
-          (x, i) => html`<button type="button" role="radio" data-scale=${x.scale} aria-checked=${x.scale === scale ? 'true' : 'false'} tabindex=${i === at ? '0' : '-1'}
+          (x, i) => html`<button type="button" role="radio" data-scale=${x.scale} aria-checked=${x.scale === scale ? 'true' : 'false'} tabindex=${i === Math.max(0, at) ? '0' : '-1'}
             @click=${() => change({densityScale: x.scale})}
             @keydown=${(e: KeyboardEvent) => radioKeys(e, DENSITY_SCALES.length, i, (j) => change({densityScale: DENSITY_SCALES[j]!.scale}))}>${x.label}</button>`
         )}
@@ -1765,10 +1857,15 @@ export class MosaicaExplorer extends MosaicaElement {
     const sizing = this.sizing;
     const number = (e: Event) => Number((e.target as HTMLInputElement).value);
     const {min, max, step} = SIZE_RANGE;
+    // With no column to offer, the button says why under itself.
+    const none = this.resolvedStore?.get('meta') && this.sizeColumns.length === 0;
     const choice = html`<span id="size-by-label">Size by</span>
-      <button part="size-by" class="ramp-choice" type="button" aria-haspopup="menu" aria-expanded=${this.menu === 'size' ? 'true' : 'false'} aria-label=${`Size by: ${sizeBy === null ? 'None' : columnCaption(sizeBy)}`}
-        ?disabled=${disabled || (sizeBy === null && this.sizeColumns.length === 0)} title=${this.sizeColumns.length === 0 ? 'No number column to size by' : nothing}
-        @click=${() => (this.menu = this.menu === 'size' ? null : 'size')} @keydown=${this.onMenuButtonKey('size')}><span class="t">${sizeBy === null ? 'None' : columnCaption(sizeBy)}</span>${icon('chev', 12, 1.4)}</button>`;
+      <div class="choice-note">
+        <button part="size-by" class="ramp-choice" type="button" aria-haspopup="menu" aria-expanded=${this.menu === 'size' ? 'true' : 'false'} aria-label=${`Size by: ${sizeBy === null ? 'None' : columnCaption(sizeBy)}`}
+          ?disabled=${disabled || (sizeBy === null && this.sizeColumns.length === 0)} aria-describedby=${none ? 'size-by-note' : nothing}
+          @click=${() => (this.menu = this.menu === 'size' ? null : 'size')} @keydown=${this.onMenuButtonKey('size')}><span class="t">${sizeBy === null ? 'None' : columnCaption(sizeBy)}</span>${icon('chev', 12, 1.4)}</button>
+        ${none ? html`<span id="size-by-note" class="note">No number column to size by</span>` : nothing}
+      </div>`;
     if (sizeBy === null) {
       if (this.hideSize) return choice;
       return html`${choice}<label for="point-size">Size</label>
@@ -1780,15 +1877,15 @@ export class MosaicaExplorer extends MosaicaElement {
     return html`${choice}<span id="size-range-label">Range</span>
       <div class="range" role="group" aria-labelledby="size-range-label">
         <input part="size-min" class="slider" type="range" min=${min} max=${max} step=${step} aria-label="Smallest size" .value=${String(sizing.min)} ?disabled=${disabled}
-          style=${fill(sizing.min, min, max)} @input=${(e: Event) => this.changeSize({min: number(e), max: Math.max(number(e), sizing.max)})} />
+          style=${fill(sizing.min, min, max)} aria-valuetext=${`${px(sizing.min)} px`} @input=${(e: Event) => this.changeSize({min: number(e), max: Math.max(number(e), sizing.max)})} />
         <span part="size-range" class="readout">${px(sizing.min)} – ${px(sizing.max)} px</span>
         <input part="size-max" class="slider" type="range" min=${min} max=${max} step=${step} aria-label="Largest size" .value=${String(sizing.max)} ?disabled=${disabled}
-          style=${fill(sizing.max, min, max)} @input=${(e: Event) => this.changeSize({max: number(e), min: Math.min(number(e), sizing.min)})} />
+          style=${fill(sizing.max, min, max)} aria-valuetext=${`${px(sizing.max)} px`} @input=${(e: Event) => this.changeSize({max: number(e), min: Math.min(number(e), sizing.min)})} />
       </div>
       <span id="size-scale-label">Scale</span>
       <div part="size-scale" class="seg" role="radiogroup" aria-labelledby="size-scale-label">
         ${SIZE_SCALES.map(
-          (x, i) => html`<button type="button" role="radio" data-scale=${x.scale} aria-checked=${x.scale === sizing.scale ? 'true' : 'false'} tabindex=${i === at ? '0' : '-1'} ?disabled=${disabled}
+          (x, i) => html`<button type="button" role="radio" data-scale=${x.scale} aria-checked=${x.scale === sizing.scale ? 'true' : 'false'} tabindex=${i === Math.max(0, at) ? '0' : '-1'} ?disabled=${disabled}
             @click=${() => this.changeSize({scale: x.scale})}
             @keydown=${(e: KeyboardEvent) => radioKeys(e, SIZE_SCALES.length, i, (j) => this.changeSize({scale: SIZE_SCALES[j]!.scale}))}>${x.label}</button>`
         )}
@@ -1867,6 +1964,12 @@ export class MosaicaExplorer extends MosaicaElement {
         this.closeMenu(true);
         return;
       }
+      // Tab closes the menu and goes back to its button, in the popover, and on from there.
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        this.closeMenu(true);
+        return;
+      }
       if (next === undefined) return;
       e.preventDefault();
       items.forEach((item, j) => (item.tabIndex = j === next ? 0 : -1));
@@ -1875,8 +1978,8 @@ export class MosaicaExplorer extends MosaicaElement {
     const at = Math.max(0, entries.findIndex((o) => o.value === checked));
     const row = (o: (typeof entries)[number]) =>
       o.line === undefined
-        ? html`<span class="lead">${o.swatch ?? nothing}<span>${o.title}</span></span><span class="kind">${o.kind}</span>`
-        : html`${o.swatch ?? nothing}<span class="named"><span class="t">${o.title}</span><span class="line">${o.line}</span></span>`;
+        ? html`<span class="lead">${tick(o.value === checked)}${o.swatch ?? nothing}<span>${o.title}</span></span><span class="kind">${o.kind}</span>`
+        : html`${tick(o.value === checked)}${o.swatch ?? nothing}<span class="named"><span class="t">${o.title}</span><span class="line">${o.line}</span></span>`;
     return html`<div part=${({size: 'size-menu', colour: 'colour-menu', palette: 'palette-menu', ramp: 'ramp-menu'} as const)[menu]} class=${`size-menu${menu === 'ramp' ? ' wide' : menu === 'palette' ? ' palettes' : ''}`} popover="manual" role="menu" aria-labelledby="menu-label" @focusout=${this.onMenuFocusOut}>
       <div class="hd" id="menu-label">${title}</div>
       ${entries.map(
@@ -1902,7 +2005,7 @@ export class MosaicaExplorer extends MosaicaElement {
     };
   }
 
-  /** Focus leaving the open menu, by Tab or otherwise, closes it; Tab goes on from where focus went. */
+  /** Focus leaving the open menu closes it. */
   private onMenuFocusOut = (e: FocusEvent): void => {
     const to = e.relatedTarget as Node | null;
     if (to && (e.currentTarget as HTMLElement).contains(to)) return;
@@ -1940,15 +2043,32 @@ export class MosaicaExplorer extends MosaicaElement {
     if (patch.radius !== undefined) this.radius = patch.radius;
     if (patch.pointOpacity !== undefined) this.pointOpacity = patch.pointOpacity;
     if (patch.density !== undefined) this.density = patch.density;
-    if (patch.densityColours !== undefined) {
-      this.densityColours = patch.densityColours ?? '';
-      this.densityColoursOpen = false;
-    }
+    if (patch.densityColours !== undefined) this.densityColours = patch.densityColours ?? '';
     if (patch.densityStrength !== undefined) this.densityStrength = patch.densityStrength;
     if (patch.densityResolution !== undefined) this.densityResolution = patch.densityResolution;
     if (patch.densityScale !== undefined) this.densityScale = patch.densityScale;
     emit(this, 'mosaica-displaychange', this.display);
   }
+
+  /** Close the list of density colours, with focus on its button. */
+  private closeDensityColours(): void {
+    this.renderRoot.querySelector<HTMLElement>('[part="density-colours"]')?.focus();
+    this.densityColoursOpen = false;
+  }
+
+  /** Escape in the list of density colours closes the list alone. */
+  private onDensityColoursKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    this.closeDensityColours();
+  };
+
+  /** Focus leaving the list of density colours and its button closes the list. */
+  private onDensityColoursFocusOut = (e: FocusEvent): void => {
+    const to = e.relatedTarget as Node | null;
+    const held = [this.renderRoot.querySelector('#density-colour-list'), this.renderRoot.querySelector('[part="density-colours"]')];
+    if (!held.some((el) => el && to && el.contains(to))) this.densityColoursOpen = false;
+  };
 
   /** Escape closes the Layers popover and returns focus to its button. */
   private onLayersKey = (e: KeyboardEvent): void => {
@@ -1958,9 +2078,9 @@ export class MosaicaExplorer extends MosaicaElement {
     this.renderRoot.querySelector<HTMLElement>('[part="layers-toggle"]')?.focus();
   };
 
-  /** The tab list's keys: the arrows move between tabs, wrapping, and Home and End go to the ends. */
+  /** The bar's keys: the arrows move between its buttons, wrapping, and Home and End go to the ends. */
   private onTabKey = (e: KeyboardEvent): void => {
-    const buttons = Array.from(this.renderRoot.querySelectorAll<HTMLButtonElement>('[part="tabs"] [role="tab"]'));
+    const buttons = Array.from(this.renderRoot.querySelectorAll<HTMLButtonElement>('[part="tabs"] button'));
     const at = buttons.indexOf(e.target as HTMLButtonElement);
     if (at < 0) return;
     const n = buttons.length;
@@ -1979,16 +2099,20 @@ export class MosaicaExplorer extends MosaicaElement {
     this.sheet = null;
   };
 
-  /** Focus goes into a sheet as it opens, and back to its tab as it closes. */
+  /**
+   * Focus goes to the first control of the Layers popover as it opens, into a sheet as it opens,
+   * and back to the sheet's button as it closes.
+   */
   protected override updated(changed: PropertyValues<this>): void {
     this.toggleAttribute('data-compact', this.compact);
     this.fitLayers();
     this.placeMenu(changed.has('menu') && this.menu !== null);
     this.followLayout();
+    if (changed.has('layersOpen') && this.layersOpen) this.renderRoot.querySelector('[part="layers-popover"]')?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     if (!changed.has('sheet')) return;
     const before = changed.get('sheet');
     if (this.sheet) this.renderRoot.querySelector<HTMLElement>('[part="sheet"]')?.focus();
-    else if (before) this.renderRoot.querySelector<HTMLElement>(`[role="tab"][data-sheet="${before}"]`)?.focus();
+    else if (before) this.renderRoot.querySelector<HTMLElement>(`[part="tabs"] [data-sheet="${before}"]`)?.focus();
   }
 
   /**

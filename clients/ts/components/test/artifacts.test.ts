@@ -81,7 +81,12 @@ describe('<mosaica-layer-picker>', () => {
     const entries = deepAll(host, '[part="entry"]').map((e) => e.getAttribute('data-layer'));
     // `labels` depends on `clusters`, so it is inside that entry and not one of its own.
     expect(entries).toEqual(['clusters', 'districts']);
-    expect(deep(host, '[part="entry"][data-layer="clusters"]')?.getAttribute('title')).toContain('labels');
+    // The entry says in its own text which layers are drawn with it, so the checkbox's name holds them.
+    const entry = deep(host, '[part="entry"][data-layer="clusters"]')!;
+    expect(entry.hasAttribute('title')).toBe(false);
+    expect(entry.querySelector('[part="linked"]')!.getAttribute('data-layers')).toBe('labels');
+    expect(entry.textContent).toContain('labels');
+    expect(deep(host, '[part="entry"][data-layer="districts"] [part="linked"]')).toBeNull();
     expect(deep(host, 'mosaica-count')).toBeNull();
     const box = deep(host, '[part="entry"][data-layer="clusters"] input') as HTMLInputElement;
     box.checked = true;

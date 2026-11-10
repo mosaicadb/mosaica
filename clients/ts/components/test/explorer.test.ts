@@ -175,7 +175,7 @@ describe('<mosaica-explorer> narrow layout', () => {
     await settle(host);
     expect(shadow.querySelector('[part="panel"], [part="sidebar"], mosaica-filter-panel')).toBeNull();
     expect([...registered(store).keys()]).toEqual([]);
-    shadow.querySelector<HTMLButtonElement>('[role="tab"][data-sheet="filters"]')!.click();
+    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="filters"]')!.click();
     await settle(host);
     // The sheet's filter panel folds its cards to a line, so they ask for their counts in view alone.
     expect([...registered(store).keys()].map((id) => id.split('#')[0]).sort()).toEqual(['field-subject', 'fields-match']);
@@ -190,25 +190,77 @@ describe('<mosaica-explorer> narrow layout', () => {
     expect(bar?.querySelector('[part="dataset-title"]')?.textContent).toBe('GeoNames places');
   });
 
+  it('keeps the host’s top-right and status slots', async () => {
+    const {host, el, shadow} = await explorer();
+    (el as unknown as {narrow: boolean}).narrow = true;
+    await settle(host);
+    expect(shadow.querySelector('mosaica-map slot[name="top-right"]')).not.toBeNull();
+    expect(shadow.querySelector('[part="strip-row"] slot[name="status"] mosaica-status')).not.toBeNull();
+    // One slot of each name, so the host's element is drawn once.
+    expect(shadow.querySelectorAll('slot[name="status"]')).toHaveLength(1);
+    expect(shadow.querySelectorAll('slot[name="top-right"]')).toHaveLength(1);
+  });
+
+  it('opens the Item sheet for a picked item, with focus in it, and closes it when the pick is dropped, with focus on its button', async () => {
+    const {host, el, shadow, store} = await explorer('<mosaica-explorer title-field="author"></mosaica-explorer>');
+    (el as unknown as {narrow: boolean}).narrow = true;
+    await settle(host);
+    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
+    store.set('selection', {item: {id: 5n, detail: {fields: {author: 'Ada'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    const sheet = shadow.querySelector('[part="sheet"]')!;
+    expect(sheet.querySelector('mosaica-item-card')).not.toBeNull();
+    expect(shadow.activeElement).toBe(sheet);
+    const button = shadow.querySelector('[part="tabs"] [data-sheet="detail"]')!;
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    // The sheet takes focus, so nothing is announced beside it.
+    expect(shadow.querySelector('[role="status"]:not([class~="cell"])')!.textContent).toBe('');
+    // Closed by the viewer, it stays closed until another item is picked.
+    sheet.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true}));
+    await settle(host);
+    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
+    store.set('selection', {item: {id: 6n, detail: {fields: {author: 'Bo'}, labels: [], views: [], scoped: {}}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    expect(shadow.querySelector('[part="sheet"] mosaica-item-card')).not.toBeNull();
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    expect(shadow.querySelector('[part="sheet"]')).toBeNull();
+    expect(shadow.activeElement).toBe(button);
+    // Another sheet is left open when the pick goes.
+    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="layers"]')!.click();
+    await settle(host);
+    store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(host);
+    expect(shadow.querySelector('[part="sheet"] [part="display"]')).not.toBeNull();
+  });
+
   it('gives the Layers sheet the Points, Colour and Density sections over the layer picker', async () => {
     const {host, el, shadow} = await explorer();
     (el as unknown as {narrow: boolean}).narrow = true;
     await settle(host);
-    shadow.querySelector<HTMLButtonElement>('[role="tab"][data-sheet="layers"]')!.click();
+    shadow.querySelector<HTMLButtonElement>('[part="tabs"] [data-sheet="layers"]')!.click();
     await settle(host);
     const sheet = shadow.querySelector('[part="sheet"]')!;
-    expect([...sheet.querySelectorAll('.sec > .hd, .sec .sec-head .hd')].map((h) => h.textContent)).toEqual(['Points', 'Colour', 'Density']);
+    // Each section is a region named by its heading.
+    const sections = [...sheet.querySelectorAll('section')];
+    expect(sections.map((sec) => sec.querySelector('h2')!.textContent)).toEqual(['Points', 'Colour', 'Density']);
+    expect(sections.map((sec) => sheet.querySelector(`#${sec.getAttribute('aria-labelledby')}`))).toEqual(sections.map((sec) => sec.querySelector('h2')));
     expect(sheet.querySelector('[part="most-points"]')).not.toBeNull();
     expect(sheet.querySelector('mosaica-layer-picker')).not.toBeNull();
   });
 
-  const tabs = (shadow: ShadowRoot) => [...shadow.querySelectorAll<HTMLButtonElement>('[part="tabs"] [role="tab"]')];
+  const tabs = (shadow: ShadowRoot) => [...shadow.querySelectorAll<HTMLButtonElement>('[part="tabs"] button')];
   const key = (el: Element, k: string) => el.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, composed: true, cancelable: true}));
 
-  it('moves between tabs with the arrow keys, Home and End, keeping one tab in the tab order', async () => {
+  it('offers its sheets from a named toolbar of buttons, moved between with the arrow keys, Home and End, one of them in the tab order', async () => {
     const {host, shadow} = await explorer();
     const all = tabs(shadow);
     expect(all.map((t) => t.textContent!.trim())).toEqual(['Fields', 'Layers', 'Item']);
+    const bar = shadow.querySelector('[part="tabs"]')!;
+    expect(bar.getAttribute('role')).toBe('toolbar');
+    expect(bar.getAttribute('aria-label')).toBeTruthy();
+    // Buttons that open a sheet: none is a tab, none is expanded, and none points at a sheet that is not there.
+    expect(all.map((t) => [t.getAttribute('role'), t.getAttribute('aria-expanded'), t.getAttribute('aria-controls')])).toEqual([[null, 'false', null], [null, 'false', null], [null, 'false', null]]);
     expect(all.map((t) => t.tabIndex)).toEqual([0, -1, -1]);
     all[0]!.focus();
     key(all[0]!, 'ArrowRight');
@@ -227,7 +279,7 @@ describe('<mosaica-explorer> narrow layout', () => {
     expect(shadow.activeElement).toBe(tabs(shadow)[2]);
   });
 
-  it('moves focus into a sheet as it opens, closes it on Escape, and returns focus to its tab', async () => {
+  it('moves focus into a sheet as it opens, closes it on Escape, and returns focus to its button', async () => {
     const {host, shadow} = await explorer();
     const filters = tabs(shadow)[0]!;
     filters.click();
@@ -235,11 +287,25 @@ describe('<mosaica-explorer> narrow layout', () => {
     const sheet = shadow.querySelector('[part="sheet"]')!;
     expect(sheet.getAttribute('role')).toBe('dialog');
     expect(shadow.activeElement).toBe(sheet);
-    expect(filters.getAttribute('aria-selected')).toBe('true');
+    // The button says it is open and which sheet it opened, and names that sheet.
+    expect(filters.getAttribute('aria-expanded')).toBe('true');
+    expect(shadow.querySelector(`#${filters.getAttribute('aria-controls')}`)).toBe(sheet);
+    expect(shadow.querySelector(`#${sheet.getAttribute('aria-labelledby')}`)).toBe(filters);
+    expect(tabs(shadow).map((t) => t.getAttribute('aria-expanded'))).toEqual(['true', 'false', 'false']);
     key(sheet, 'Escape');
     await settle(host);
     expect(shadow.querySelector('[part="sheet"]')).toBeNull();
     expect(shadow.activeElement).toBe(tabs(shadow)[0]);
+    expect(tabs(shadow)[0]!.hasAttribute('aria-controls')).toBe(false);
+  });
+
+  it('opens a sheet over the map alone, before the status strip and the bar of buttons', async () => {
+    const {host, shadow} = await explorer();
+    tabs(shadow)[0]!.click();
+    await settle(host);
+    const order = [...shadow.querySelectorAll('mosaica-map, [part="sheet"], [part="strip-row"], [part="tabs"]')].map((e) => e.getAttribute('part') ?? e.localName);
+    expect(order).toEqual(['mosaica-map', 'sheet', 'strip-row', 'tabs']);
+    expect(shadow.querySelector('[part="sheet"]')!.parentElement).toBe(shadow.querySelector('mosaica-map')!.parentElement);
   });
 
   it('clears the controls and the member_of clauses from the filters sheet, and offers Clear only while one applies', async () => {
@@ -443,7 +509,7 @@ describe('<mosaica-explorer> the item card beside its point', () => {
     expect(apart).toBe(true);
   });
 
-  it('is named by its item’s title, is the next stop after the map, closes on Escape with the selection, and gives focus back to the map', async () => {
+  it('is named by its item’s title, comes after everything on the map in the tab order, closes on Escape with the selection, and gives focus back to the map', async () => {
     const ctx = await explorer('<mosaica-explorer layout="overlay" title-field="author"></mosaica-explorer>');
     const map = ctx.shadow.querySelector('mosaica-map') as Map;
     Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
@@ -453,13 +519,15 @@ describe('<mosaica-explorer> the item card beside its point', () => {
     await settle(ctx.host);
     const [card] = callouts(ctx.shadow);
     expect(card!.getAttribute('aria-label')).toBe('A5');
-    // The left card comes first in the tab order, then the map, then the card beside the point.
+    // The left card comes first in the tab order, then the map with all it holds, then the card beside the point.
     const order = [...ctx.shadow.querySelectorAll('mosaica-map, [part~="callout"], [part="panel"]')].map((e) => e.getAttribute('part') ?? e.tagName.toLowerCase());
     expect(order).toEqual(['panel', 'mosaica-map', 'callout']);
-    // Tab from the map goes to the card.
+    // Tab from the map is the browser's, so it stops at what the map holds on its way to the card.
     map.focus();
-    map.dispatchEvent(new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, composed: true, cancelable: true}));
-    expect(ctx.shadow.activeElement).toBe(card);
+    const tab = new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, composed: true, cancelable: true});
+    map.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(false);
+    expect(ctx.shadow.activeElement).toBe(map);
     card!.querySelector('mosaica-item-card')!.shadowRoot!.querySelector<HTMLButtonElement>('[part="close"]')!.focus();
     // The ring the map draws round the picked point.
     (map as unknown as {selectedWorldXY: [number, number] | null}).selectedWorldXY = [256, 256];
@@ -469,6 +537,56 @@ describe('<mosaica-explorer> the item card beside its point', () => {
     expect(ctx.shadow.activeElement).toBe(map);
     expect(map.pickedAt).toBeNull();
     expect((map as unknown as {selectedWorldXY: [number, number] | null}).selectedWorldXY).toBeNull();
+  });
+
+  it('says which card opened in a status region that is there beforehand, and leaves focus where it is', async () => {
+    const ctx = await explorer('<mosaica-explorer layout="overlay" title-field="author"></mosaica-explorer>');
+    const map = ctx.shadow.querySelector('mosaica-map') as Map;
+    const said = ctx.shadow.querySelector('[part="frame"] > [role="status"]')!;
+    expect(said.textContent).toBe('');
+    map.focus();
+    map.pickedAt = {kind: 'item', id: 5n, world: [256, 256]};
+    ctx.store.set('selection', item(5n));
+    await settle(ctx.host);
+    expect(ctx.shadow.querySelector('[part="frame"] > [role="status"]')).toBe(said);
+    expect(said.textContent).toContain('A5');
+    expect(ctx.shadow.activeElement).toBe(map);
+    ctx.store.set('selection', item(6n));
+    await settle(ctx.host);
+    expect(said.textContent).toContain('A6');
+    ctx.store.set('selection', {item: null, itemRefusal: null, artifact: null, artifactRefusal: null});
+    await settle(ctx.host);
+    expect(said.textContent).toBe('');
+  });
+
+  it('gives its focus to the map when its point leaves the map', async () => {
+    const {host, shadow, map} = await picked([256, 256]);
+    const card = callouts(shadow)[0]!;
+    card.querySelector('mosaica-item-card')!.shadowRoot!.querySelector<HTMLButtonElement>('[part="close"]')!.focus();
+    expect(shadow.activeElement).toBe(card.querySelector('mosaica-item-card'));
+    map.pickedAt = {kind: 'item', id: 5n, world: [-100_000, 0]};
+    (host.querySelector('mosaica-explorer') as HTMLElement & {requestUpdate(): void}).requestUpdate();
+    await settle(host);
+    expect(callouts(shadow)).toHaveLength(0);
+    expect(shadow.activeElement).toBe(map);
+  });
+
+  it('keeps one name on Pin, the card’s, and says whether it is on by its pressed state', async () => {
+    const ctx = await explorer('<mosaica-explorer layout="overlay" title-field="author"></mosaica-explorer>');
+    const map = ctx.shadow.querySelector('mosaica-map') as Map;
+    Object.defineProperty(map, 'clientWidth', {configurable: true, value: 1000});
+    Object.defineProperty(map, 'clientHeight', {configurable: true, value: 600});
+    map.pickedAt = {kind: 'item', id: 5n, world: [256, 256]};
+    ctx.store.set('selection', item(5n));
+    await settle(ctx.host);
+    const pin = () => ctx.shadow.querySelector<HTMLButtonElement>('[part="pin"]')!;
+    const before = {name: pin().getAttribute('aria-label'), title: pin().getAttribute('title')};
+    expect(before.name).toContain('A5');
+    expect(pin().getAttribute('aria-pressed')).toBe('false');
+    pin().click();
+    await settle(ctx.host);
+    expect(pin().getAttribute('aria-pressed')).toBe('true');
+    expect({name: pin().getAttribute('aria-label'), title: pin().getAttribute('title')}).toEqual(before);
   });
 
   it('drops every card when it is given another store', async () => {
@@ -521,10 +639,13 @@ describe('<mosaica-explorer> layouts', () => {
     const titled = await explorer('<mosaica-explorer layout="overlay" dataset-title="arXiv abstracts"></mosaica-explorer>');
     expect(titled.shadow.querySelector('[part="dataset-title"]')?.textContent).toBe('arXiv abstracts');
     expect(titled.shadow.querySelector('[part="view-name"]')?.textContent).toBe('default');
+    // The heading is the dataset's title, and without one the view's name.
+    expect([...titled.shadow.querySelectorAll('[part="panel"] .head h2')].map((h) => h.getAttribute('part'))).toEqual(['dataset-title']);
     document.body.innerHTML = '';
     const plain = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
     expect(plain.shadow.querySelector('[part="dataset-title"]')).toBeNull();
     expect(plain.shadow.querySelector('[part="view-name"]')?.textContent).toBe('default');
+    expect([...plain.shadow.querySelectorAll('[part="panel"] .head h2')].map((h) => h.getAttribute('part'))).toEqual(['view-name']);
     // A name that is only the view's id says nothing, and is left out.
     plain.store.set('meta', {...META, views: [{...META.views[0]!, displayName: 's0'}]});
     await settle(plain.host);
@@ -567,9 +688,11 @@ describe('<mosaica-explorer> layouts', () => {
     const shadow = el.shadowRoot!;
     const toggle = shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!;
     expect(shadow.querySelector('[part="layers-popover"]')).toBeNull();
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
     toggle.click();
     await settle(host);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(shadow.querySelector(`#${toggle.getAttribute('aria-controls')}`)).toBe(shadow.querySelector('[part="layers-popover"]'));
     const seen: unknown[] = [];
     host.addEventListener('mosaica-layerchange', (e) => seen.push((e as CustomEvent).detail));
     const box = deep(shadow.querySelector('[part="layers-popover"]')!, '[part="entry"] input') as HTMLInputElement;
@@ -591,6 +714,108 @@ describe('<mosaica-explorer> layouts', () => {
     await settle(host);
     expect(shadow.querySelector('[part="layers-popover"]')).toBeNull();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('moves focus into the Layers popover as it opens, keeps it open while focus is in it, its menus or the Edit colours dialog, and closes it when focus goes elsewhere', async () => {
+    const {host, shadow} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
+    const toggle = shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!;
+    const popover = () => shadow.querySelector<HTMLElement>('[part="layers-popover"]');
+    const leave = (from: Element, to: Element | null) => from.dispatchEvent(new FocusEvent('focusout', {relatedTarget: to, bubbles: true, composed: true}));
+    toggle.focus();
+    toggle.click();
+    await settle(host);
+    // Its first control.
+    expect(shadow.activeElement).toBe(popover()!.querySelector('button, input, select'));
+    const first = shadow.activeElement!;
+    leave(first, popover()!.querySelector('[part="colour-by"]'));
+    leave(first, toggle);
+    leave(first, popover());
+    leave(first, shadow.querySelector('mosaica-colour-editor'));
+    leave(first, null);
+    await settle(host);
+    expect(popover()).not.toBeNull();
+    // Into a menu, which is drawn outside the popover's box.
+    shadow.querySelector<HTMLButtonElement>('[part="colour-by"]')!.click();
+    await settle(host);
+    const option = shadow.querySelector<HTMLElement>('[part~="colour-option"]')!;
+    leave(shadow.querySelector('[part="colour-by"]')!, option);
+    await settle(host);
+    expect(popover()).not.toBeNull();
+    // Tab in a menu closes the menu and goes back to its button, inside the popover.
+    const tab = new KeyboardEvent('keydown', {key: 'Tab', bubbles: true, composed: true, cancelable: true});
+    option.dispatchEvent(tab);
+    await settle(host);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(shadow.querySelector('[part~="colour-menu"]')).toBeNull();
+    expect(popover()).not.toBeNull();
+    expect(shadow.activeElement).toBe(shadow.querySelector('[part="colour-by"]'));
+    // Escape from there closes the popover and gives focus back to its button.
+    shadow.activeElement!.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true}));
+    await settle(host);
+    expect(popover()).toBeNull();
+    expect(shadow.activeElement).toBe(toggle);
+    // Focus going to the card of fields closes it.
+    toggle.click();
+    await settle(host);
+    leave(shadow.activeElement!, shadow.querySelector('[part="panel"]'));
+    await settle(host);
+    expect(popover()).toBeNull();
+  });
+
+  it('keeps the list of density colours open as the arrow keys move through it, and closes it on Escape, on a press or as focus leaves, without losing focus', async () => {
+    const {host, shadow} = await explorer('<mosaica-explorer density="smooth"></mosaica-explorer>');
+    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+    await settle(host);
+    const map = shadow.querySelector('mosaica-map') as unknown as {densityColours: string};
+    const button = () => shadow.querySelector<HTMLButtonElement>('[part="density-colours"]')!;
+    const list = () => shadow.querySelector<HTMLElement>('#density-colour-list');
+    const radios = () => [...list()!.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    // The button's name holds the text it shows, and it points at its list only while that is open.
+    expect(button().getAttribute('aria-label')).toContain(button().textContent!.trim());
+    expect(button().hasAttribute('aria-controls')).toBe(false);
+    button().click();
+    await settle(host);
+    expect(shadow.querySelector(`#${button().getAttribute('aria-controls')}`)).toBe(list());
+    const at = radios().findIndex((r) => r.getAttribute('aria-checked') === 'true');
+    radios()[at]!.focus();
+    radios()[at]!.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true, cancelable: true}));
+    await settle(host);
+    const next = radios()[(at + 1) % radios().length]!;
+    expect(next.getAttribute('aria-checked')).toBe('true');
+    expect(map.densityColours).toBe(next.dataset.colours);
+    expect(shadow.activeElement).toBe(next);
+    expect(button().getAttribute('aria-label')).toContain(button().textContent!.trim());
+    // Escape closes the list alone.
+    next.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true, composed: true}));
+    await settle(host);
+    expect(list()).toBeNull();
+    expect(shadow.querySelector('[part="layers-popover"]')).not.toBeNull();
+    expect(shadow.activeElement).toBe(button());
+    // A press chooses and closes.
+    button().click();
+    await settle(host);
+    radios()[0]!.focus();
+    radios()[0]!.click();
+    await settle(host);
+    expect(list()).toBeNull();
+    expect(shadow.activeElement).toBe(button());
+    // Focus going elsewhere closes it.
+    button().click();
+    await settle(host);
+    radios()[0]!.dispatchEvent(new FocusEvent('focusout', {relatedTarget: shadow.querySelector('[part="density-strength"]'), bubbles: true}));
+    await settle(host);
+    expect(list()).toBeNull();
+  });
+
+  it('gives every slider its value in words, and a choice set to nothing it offers a place in the tab order', async () => {
+    const {host, el, shadow} = await explorer('<mosaica-explorer density="smooth" density-strength="0.5"></mosaica-explorer>');
+    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+    await settle(host);
+    for (const slider of shadow.querySelectorAll('[part="display"] input[type="range"]')) expect(slider.getAttribute('aria-valuetext'), slider.getAttribute('part')!).toBeTruthy();
+    expect(shadow.querySelector('[part="density-strength"]')!.getAttribute('aria-valuetext')).toContain('50');
+    (el as unknown as {density: string}).density = 'sparkles';
+    await settle(host);
+    expect([...shadow.querySelectorAll<HTMLElement>('[part="density-mode"] [role="radio"]')].map((r) => r.tabIndex)).toEqual([0, -1, -1, -1, -1]);
   });
 
   it('changes its map’s display from the Display section and reports every setting', async () => {
@@ -676,6 +901,23 @@ describe('<mosaica-explorer> layouts', () => {
       const options = [...shadow.querySelectorAll('[part~="size-option"]')];
       expect(options.map((o) => o.getAttribute('data-value'))).toEqual(['', 'citations', 'score']);
       expect(options.map((o) => o.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false']);
+      // The one chosen is ticked, so it is told from the others without its background.
+      expect(options.map((o) => o.querySelector('.tick svg') !== null)).toEqual([true, false, false]);
+    });
+
+    it('says in words under the button why it offers nothing, where no number column sizes points', async () => {
+      const {shadow} = await explorer();
+      shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+      await settle(shadow);
+      const button = shadow.querySelector<HTMLButtonElement>('[part="size-by"]')!;
+      expect(button.disabled).toBe(true);
+      expect(button.hasAttribute('title')).toBe(false);
+      const note = shadow.querySelector(`#${button.getAttribute('aria-describedby')}`)!;
+      expect(note.textContent!.trim()).not.toBe('');
+      // A bundle with such a column needs no note.
+      document.body.innerHTML = '';
+      const sized = await popover();
+      expect(sized.part('size-by')!.hasAttribute('aria-describedby')).toBe(false);
     });
 
     /** The store's answer to a Size by choice, as the real store publishes it. */
@@ -780,6 +1022,31 @@ describe('<mosaica-explorer> layouts', () => {
   });
 });
 
+describe('<mosaica-explorer aria-label>', () => {
+  it('names its map, and follows a change', async () => {
+    const {host, el, shadow} = await explorer('<mosaica-explorer aria-label="Papers by topic"></mosaica-explorer>');
+    const map = shadow.querySelector('mosaica-map')!;
+    expect(map.getAttribute('aria-label')).toBe('Papers by topic');
+    expect(map.shadowRoot!.querySelector('[part="canvas"]')!.getAttribute('aria-label')).toBe('Papers by topic');
+    el.setAttribute('aria-label', 'Papers by year');
+    await settle(host);
+    expect(map.getAttribute('aria-label')).toBe('Papers by year');
+    el.removeAttribute('aria-label');
+    await settle(host);
+    expect(map.hasAttribute('aria-label')).toBe(false);
+  });
+
+  it('names the column of fields and the bar of sheet buttons differently', async () => {
+    const {shadow} = await explorer('<mosaica-explorer layout="overlay"></mosaica-explorer>');
+    const names = [shadow.querySelector('[part="panel"]'), shadow.querySelector('[part="tabs"]')].map((e) => e!.getAttribute('aria-label'));
+    expect(names.every(Boolean)).toBe(true);
+    expect(new Set(names).size).toBe(2);
+    document.body.innerHTML = '';
+    const docked = await explorer('<mosaica-explorer layout="docked"></mosaica-explorer>');
+    expect(docked.shadow.querySelector('[part="sidebar"]')!.getAttribute('aria-label')).toBe(names[0]);
+  });
+});
+
 describe('<mosaica-explorer> the point budget', () => {
   const budgets = (store: FakeStore) => store.calls.filter((c) => c.name === 'setBudget').map((c) => c.args[0]);
   const mapOf = (shadow: ShadowRoot) => shadow.querySelector('mosaica-map') as unknown as {budget: number};
@@ -877,6 +1144,8 @@ describe('<mosaica-explorer> the Colour section', () => {
     part('ramp-reverse')!.click();
     await settle(host);
     expect(part('ramp-reverse')!.getAttribute('aria-pressed')).toBe('true');
+    // Pressed, Reverse is ticked.
+    expect(part('ramp-reverse')!.querySelector('svg')).not.toBeNull();
     expect(changes).toEqual([{palette: 'tableau10', ramp: 'viridis', scale: 'linear', reverse: true}]);
   });
 });
