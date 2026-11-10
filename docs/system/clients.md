@@ -32,7 +32,7 @@ Writes go to the control address, with the operator credential, an API key or an
 
 ## Reading data out
 
-Each client sends a read as you wrote it, choosing no fields, order or figures for you, and follows the cursor until the read is complete:
+Each client sends a read as you wrote it, choosing no fields, order or figures for you, and follows the cursor until the read is complete. A bulk read of items that names no fields is sent without them, and the server returns every field the view holds:
 
 | Client | Bulk read | Aggregate |
 |---|---|---|

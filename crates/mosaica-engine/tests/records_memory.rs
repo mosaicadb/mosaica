@@ -114,7 +114,7 @@ fn read(
 ) -> usize {
     let req = ItemsRequest {
         view: "s0",
-        fields,
+        fields: Some(fields),
         system_fields: &[],
         filter,
         keep_unmatched: false,

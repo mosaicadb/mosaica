@@ -606,7 +606,7 @@ fn rows(engine: &Engine, session: &Session) -> Vec<(MosaicaId, Vec<String>)> {
             session,
             ItemsRequest {
                 view: "s0",
-                fields: &[],
+                fields: Some(&[]),
                 system_fields: &system,
                 filter: None,
                 keep_unmatched: false,

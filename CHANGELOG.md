@@ -8,6 +8,16 @@ container image.
 
 ## [Unreleased]
 
+### Added
+
+- `POST /v1/items` takes `fields` as optional. A request without it returns every field the view
+  reads under its bare name, and its cursor is refused once that set of fields changes.
+  `mosaica items --fields`, `ItemsRequest.fields` in TypeScript and `fields` on the Python
+  `items` calls are optional in the same way.
+- Python: `views()`, `attributes(view=None)` and `layers(view=None)` on `Database` and `Viewer`
+  list what `/v1/meta` describes, each attribute with the filter operators it takes as
+  `operands`.
+
 ### Changed
 
 - `serve.filter_cache_bytes` defaults to 1 GiB, up from 256 MiB.

@@ -92,6 +92,35 @@ impl FieldPlan {
     }
 }
 
+/// Every field `view` reads under its bare name: the declared fields in declaration order, then
+/// the group-scoped families this viewer reaches that `view` decides a stored column of.
+pub(super) fn unpinned_fields(
+    meta: &EngineMeta,
+    view: &str,
+    visible: &crate::gate::VisibleViews,
+) -> Vec<String> {
+    let declared = meta.declared_scalars.iter().map(|d| &d.name);
+    let scoped = meta.scoped_scalars.iter().map(|f| &f.name).filter(|name| {
+        matches!(
+            meta.resolve_column(name, view, visible, |_| true, scoped_has_value_column),
+            Resolution::Scoped { .. }
+        )
+    });
+    declared.chain(scoped).cloned().collect()
+}
+
+/// The digest a cursor of a read that names no fields is bound to: the fields it returned.
+pub(super) fn fields_digest(fields: &[String]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"mosaica-items-fields-v1");
+    for field in fields {
+        hasher.update((field.len() as u64).to_le_bytes());
+        hasher.update(field.as_bytes());
+    }
+    hasher.finalize().into()
+}
+
 fn resolve_field(
     meta: &EngineMeta,
     view: &str,

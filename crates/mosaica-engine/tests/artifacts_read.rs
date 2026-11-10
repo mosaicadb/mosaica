@@ -1193,7 +1193,7 @@ fn a_cursor_is_refused_outside_its_read() {
         let mut sink = Collect::default();
         let req = ItemsRequest {
             view: "s0",
-            fields: &item_fields,
+            fields: Some(&item_fields),
             system_fields: &[],
             filter: None,
             keep_unmatched: false,
@@ -1218,7 +1218,7 @@ fn a_cursor_is_refused_outside_its_read() {
     let mut sink = Collect::default();
     let items_req = ItemsRequest {
         view: "s0",
-        fields: &item_fields,
+        fields: Some(&item_fields),
         system_fields: &[],
         filter: None,
         keep_unmatched: false,

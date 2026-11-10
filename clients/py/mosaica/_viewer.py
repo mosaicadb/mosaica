@@ -846,12 +846,13 @@ class Selection:
             sub_cells,
         )
 
-    def items(self, fields: Sequence[str], **options):
-        """Read every item in this selection, with the fields named, as one pyarrow table.
+    def items(self, fields: Optional[Sequence[str]] = None, **options):
+        """Read every item in this selection as one pyarrow table, with the fields named or,
+        without `fields`, every field of the view.
 
         The selection's filters and box are sent as the read's `filters`, so the rows are the
-        items `count()` counts. `options` are the other keywords of `Viewer.items`. `filters` is
-        refused because the selection supplies its own.
+        items `count()` counts. `fields` and `options` are as `Viewer.items` takes them. `filters`
+        is refused because the selection supplies its own.
 
             db.view("papers").filter({"year": {"eq": 2023}}).items(["title"]).to_pandas()
         """
@@ -1082,6 +1083,69 @@ class Viewer:
         """
         return json.loads(self._request("GET", "/v1/meta", None))
 
+    def views(self) -> list:
+        """List the views this reader may see, each as `meta()` describes it.
+
+        A view's `id` is the name every other read takes. Its `group` and `key` are set for a
+        view in a view group, and `quantisation` holds the range of its coordinates.
+
+            [view["id"] for view in v.views()]
+        """
+        return self.meta().get("views") or []
+
+    def attributes(self, view: Optional[str] = None) -> list:
+        """List the attributes this reader may see, each as `meta()` describes it with one key
+        added, `operands`, the filter operators it takes, which is empty for an attribute that
+        cannot be filtered on.
+
+        The attributes of every item come first, in the order they were declared, and then those
+        declared for a view group, which carry a `scope` naming the group and the `views` that
+        hold them.
+
+        - `view`: list only the attributes this view holds, leaving out an attribute declared for
+          a view group that the view holds no column of.
+
+        ```
+        [(a["name"], a["arrow_type"], a["operands"]) for a in v.attributes("papers")]
+        ```
+        """
+        meta = self.meta()
+        if view is not None:
+            self._require_view(view, meta)
+        operators = {
+            entry["column"]: entry["operands"] for entry in meta.get("filter_operands") or []
+        }
+        scoped = [
+            entry
+            for entry in meta.get("scoped_scalars") or []
+            if view is None or view in entry["views"]
+        ]
+        return [
+            {**entry, "operands": operators.get(entry["name"], [])}
+            for entry in (meta.get("declared_scalars") or []) + scoped
+        ]
+
+    def layers(self, view: Optional[str] = None) -> list:
+        """List the annotation layers this reader may see, each as `meta()` describes it.
+
+        A layer's `name` is what `artifacts` and a map's `layers` take, and its `views` are the
+        views it is published in.
+
+        - `view`: list only the layers published in this view.
+
+        ```
+        [layer["name"] for layer in v.layers("papers")]
+        ```
+        """
+        meta = self.meta()
+        if view is not None:
+            self._require_view(view, meta)
+        return [
+            layer
+            for layer in meta.get("layers") or []
+            if view is None or view in layer["views"]
+        ]
+
     def item(self, mosaica_id: Any) -> dict:
         """Return one item's full record as a dictionary, when this reader may see the item.
 
@@ -1107,7 +1171,7 @@ class Viewer:
     def items(
         self,
         view: str,
-        fields: Sequence[str],
+        fields: Optional[Sequence[str]] = None,
         *,
         position: Optional[bool] = None,
         labels: Optional[bool] = None,
@@ -1121,8 +1185,8 @@ class Viewer:
         compression: Optional[str] = None,
         batches: bool = False,
     ):
-        """Read every item this reader may see in `view`, with the fields named, as one pyarrow
-        table.
+        """Read every item this reader may see in `view` as one pyarrow table, with the fields
+        named or, without `fields`, every field of the view.
 
         The server answers a read a page at a time, and `items` requests responses until no row
         remains and joins their pages. With `batches=True` it returns a `Batches` instead, to
@@ -1132,7 +1196,11 @@ class Viewer:
         - `view`: the view to read, as `meta()` names it. An item with no position in it is not
           returned.
         - `fields`: the declared columns to return, in this order. A column declared for a view
-          group, read under a view outside it, is named `"<column>@<key>"`.
+          group, read under a view outside it, is named `"<column>@<key>"`. Without it the server
+          returns every column: those `attributes(view)` lists, apart from a text column declared
+          for a view group. `[]` returns `mosaica_id` alone. A read without `fields` that is
+          resumed from a `cursor` is refused once the view's columns have changed, as after an
+          attribute is declared.
         - `position`: `True` adds `mosaica:x` and `mosaica:y`, each item's position in the view's
           coordinates, in degrees on a geographic view.
         - `labels`: `True` adds `mosaica:labels`, the parts of each item's labels that this
@@ -1161,10 +1229,12 @@ class Viewer:
 
             papers = db.items("papers", ["title", "year"], position=True)
             papers.to_pandas()
+            everything = db.items("papers")
             recent = db.items("papers", ["title"], filters={"year": {"range": {"gte": 2020}}})
         """
-        request: dict = {"view": view, "fields": listed(fields)}
+        request: dict = {"view": view}
         given = {
+            "fields": None if fields is None else listed(fields),
             "position": position,
             "labels": labels,
             "filters": filters,

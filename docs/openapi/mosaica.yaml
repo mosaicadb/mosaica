@@ -1449,7 +1449,7 @@ paths:
     post:
       tags: [viewer]
       operationId: items
-      summary: Every item this principal may see in one view that matches a filter, page by page, with the fields the caller names.
+      summary: Every item this principal may see in one view that matches a filter, page by page, with the fields the caller names or every field.
       description: |
         **The body is not JSON.** It is framed as the viewport's is, with these kinds:
 
@@ -1471,13 +1471,19 @@ paths:
         latest data with the visible set composed again, so a deletion or suppression accepted
         during a read applies from the next page. A read returns each row at most once. A row
         inserted behind the cursor during a read is not returned, and one inserted ahead of it is.
-        `fields`, `position`, `labels`, `filters`, `keep_unmatched` and `page_rows` may change
-        between the requests of one read, and the page schema changes with them.
+        Named `fields`, `position`, `labels`, `filters`, `keep_unmatched` and `page_rows` may
+        change between the requests of one read, and the page schema changes with them.
 
         **Columns.** `mosaica_id` (`uint64`) first, then the named fields in the order named, then
         the position under `position`, then the labels under `labels`, then `mosaica:matched`
         (`bool`) under `keep_unmatched`. Every named field is present whether or not an item
-        carries a value. A number or boolean arrives as its declared type, `timestamp_us` as
+        carries a value. A request without `fields` returns every field `view` reads under its
+        bare name: `declared_scalars` in the order `/v1/meta` lists them, then the group-scoped
+        fields this principal reaches that `view` decides, in the order of `scoped_scalars`. A
+        group-scoped field that would need a pin, and a group-scoped `text` field, are not among
+        them. The cursor of such a request is bound to the fields it returned: it is refused once
+        that set differs, as after an attribute is declared, and by a request that names
+        `fields`. A number or boolean arrives as its declared type, `timestamp_us` as
         `timestamp[us, UTC]`, a keyword or text field as `utf8`, and a category as
         `dictionary<int32, utf8>` holding its keys, each frame's dictionary holding only the keys
         its rows carry. An absent value is null. The position is two `float64` columns,
@@ -1498,7 +1504,7 @@ paths:
         them shard by shard, in shard number order, and within a shard in the order its record
         store holds items, which groups a shard's items by their full set of access labels. The
         two orders return the same rows. With neither `order` nor `cursor`, the
-        server takes `stored` when any named field's `homes` in `/v1/meta` is `["record"]`, and
+        server takes `stored` when any returned field's `homes` in `/v1/meta` is `["record"]`, and
         `map` otherwise; that choice may change. Reading a field held only in the record store in
         map order was measured 1.3 to 1.8 times slower than in stored order at 100,000-row pages,
         and 8 to 17 times slower at 1,000-row pages.
@@ -1598,7 +1604,7 @@ paths:
             The request needs to change:
 
             - the viewport's filter refusals;
-            - an unknown key, a missing `view` or `fields`, a `position` or `labels` that is not a boolean, or an `order` or `compression` outside its values;
+            - an unknown key, a missing `view`, a `position` or `labels` that is not a boolean, or an `order` or `compression` outside its values;
             - an unknown or repeated field;
             - an unpinned group-scoped field outside its group, a pin on a field that is not group-scoped, or a group-scoped `text` field;
             - `page_rows` or `pages` of 0;
@@ -6531,7 +6537,7 @@ components:
     ItemsRequest:
       type: object
       additionalProperties: false
-      required: [view, fields]
+      required: [view]
       properties:
         view:
           type: string
@@ -6539,7 +6545,7 @@ components:
         fields:
           type: array
           items: { type: string }
-          description: Declared fields to return, by name, each once. A group-scoped field may be pinned as `<field>@<key>`. Empty returns `mosaica_id` alone.
+          description: Declared fields to return, by name, each once. A group-scoped field may be pinned as `<field>@<key>`. Empty returns `mosaica_id` alone. Absent returns every field `view` reads under its bare name.
         position:
           type: boolean
           description: Return the item's position in `view` as `mosaica:x` and `mosaica:y`. Absent is false.
