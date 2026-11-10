@@ -171,6 +171,7 @@ export class MosaicaColourEditor extends MosaicaElement {
       }
       [part='set-colour'],
       [part='deselect'] {
+        min-width: 24px;
         min-height: 24px;
       }
       [part='set-colour'] {

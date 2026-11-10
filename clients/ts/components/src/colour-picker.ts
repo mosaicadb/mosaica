@@ -345,6 +345,7 @@ export const pickerStyles = css`
   }
   .pop [part='reset'] {
     flex: none;
+    min-width: 24px;
     min-height: 24px;
   }
   .pop .choices {

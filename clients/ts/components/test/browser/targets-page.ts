@@ -5,7 +5,9 @@ import {aggregateEntry, answerAggregate, fakeStore, meta, settle, status} from '
 // Built by `targets.browser.ts` with Vite from the packages' sources. A hierarchy with a filtered
 // and highlighted row, another with ordinary names, a colour editor over a 22-colour palette with
 // its picker open, and two item cards with long text, each 300 px wide or in its dialog;
-// `window.result` holds what the test measures.
+// `window.result` holds what the test measures. `?font=serif`, `?font=monospace` and `?scale=1.15`
+// draw the elements in another font or a larger one, since nothing measured here may depend on
+// the machine's font.
 type Box = {name: string; left: number; top: number; right: number; bottom: number};
 const boxOf = (name: string, el: Element): Box => {
   const r = el.getBoundingClientRect();
@@ -30,6 +32,13 @@ const layer = (name: string): Meta['layers'][number] =>
   ({name, title: name, views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid', 'box', 'hull'], shape: 'derived', suppliedContent: ['name'], depsOn: [], version: 1}) as unknown as Meta['layers'][number];
 const LONG = 'Neoplasms of the connective and soft tissue, including those of uncertain behaviour and unspecified site';
 const browseRow = (id: bigint, name: string, childCount = 0): BrowseRow => ({mosaicaId: id, key: `k${id}`, name, maskedCount: 27_000_000n, matchedCount: 1_234_567n, rung: 0, parentIds: [], childCount, slot: null});
+
+const look = new URLSearchParams(location.search);
+const font = {serif: 'serif', monospace: 'monospace'}[look.get('font') ?? ''];
+const scale = Number(look.get('scale')) || 1;
+const lookSheet = document.createElement('style');
+lookSheet.textContent = `mosaica-hierarchy, mosaica-colour-editor, mosaica-item-card { ${font ? `--mosaica-font: ${font};` : ''} ${scale === 1 ? '' : `font-size: ${13 * scale}px;`} }`;
+document.head.append(lookSheet);
 
 document.body.innerHTML = `<div style="width: 300px"><mosaica-hierarchy></mosaica-hierarchy></div>
   <div style="width: 300px"><mosaica-hierarchy id="plain"></mosaica-hierarchy></div>
@@ -76,6 +85,8 @@ for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="ro
   tree.overlaps.push(...overlaps(targets));
   // A press at the middle of each button shown lands on it, not on the counts it stands in for.
   for (const b of row.querySelectorAll<HTMLElement>('[part="actions"] button')) {
+    // Where the tree scrolls, a button on a row's second line may be out of sight until it is asked for.
+    b.scrollIntoView({block: 'nearest'});
     const r = b.getBoundingClientRect();
     const at = hierarchy.shadowRoot!.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     if (!at || !b.contains(at)) tree.covered.push(`${box(b).name} under ${at?.getAttribute('part') ?? at?.localName}`);
@@ -93,21 +104,52 @@ for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="ro
 }
 tree.small.push(...small([...hierarchy.shadowRoot!.querySelectorAll('[part="more"]')].map((b) => boxOf('more', b))));
 
-// Ordinary names and counts, at 300 px: how tall each row is, without a filter and with one.
+// Ordinary names and counts, at 300 px: where each row's name, counts and buttons lie, without a
+// filter and with one. Every length is measured, so none depends on the font.
 const NAMES = ['Anatomy', 'Neoplasms', 'Nervous System', 'Digestive System', 'Cardiovascular Diseases', 'Musculoskeletal Diseases', LONG];
 const plainStore = fakeStore({meta: meta({layers: [layer('topics')]}), status: status({})});
 plainStore.set('view', {...plainStore.get('view'), id: 's0'});
-plainStore.setBrowse('roots', {artifacts: NAMES.map((name, i) => ({...browseRow(BigInt(i + 1), name, i % 2), maskedCount: 2_400_000n, matchedCount: 31_200n})), parents: [], next: null});
+plainStore.setBrowse('roots', {artifacts: NAMES.map((name, i) => ({...browseRow(BigInt(i + 1), name, i % 2), maskedCount: 24_000n, matchedCount: 3_100n})), parents: [], next: null});
 const plain = document.querySelector('#plain') as HTMLElement & {store: unknown};
 plain.store = plainStore;
 await settled();
 await settled();
-const heights = () => Object.fromEntries([...plain.shadowRoot!.querySelectorAll<HTMLElement>('[part="row"]')].map((row) => [row.querySelector('[part="name"]')!.textContent!.trim().length, Math.round(row.getBoundingClientRect().height)]));
-const rowHeights = {plain: heights(), filtered: {} as Record<string, number>};
+const width = (el: Element) => el.getBoundingClientRect().width;
+const px = (value: string) => parseFloat(value) || 0;
+const rowShapes = () =>
+  [...plain.shadowRoot!.querySelectorAll<HTMLElement>('[part="row"]')].map((row) => {
+    const name = row.querySelector<HTMLElement>('[part="name"]')!;
+    const counts = row.querySelector('[part="counts"]')!.getBoundingClientRect();
+    const text = document.createRange();
+    text.selectNodeContents(name);
+    const lines = [...text.getClientRects()];
+    // The name's width on one line, whatever the room it has.
+    name.style.whiteSpace = 'nowrap';
+    const unwrapped = text.getBoundingClientRect().width;
+    name.style.whiteSpace = '';
+    const rowStyle = getComputedStyle(row);
+    const nameStyle = getComputedStyle(name);
+    const buttons = [...row.querySelectorAll('[part="actions"] button')].reduce((sum, b) => sum + width(b), 0);
+    const nameBox = name.getBoundingClientRect();
+    return {
+      name: name.textContent!.trim(),
+      lines: new Set(lines.map((r) => Math.round(r.top))).size,
+      // What the name needs on one line, and what the row leaves its button beside the expander
+      // and the counts, whose place is at least as wide as the buttons shown over them.
+      needs: unwrapped + px(nameStyle.paddingLeft) + px(nameStyle.paddingRight),
+      room: row.clientWidth - px(rowStyle.paddingLeft) - px(rowStyle.paddingRight) - width(row.querySelector('[part="expander"]')!) - px(rowStyle.columnGap) - Math.max(counts.width, buttons),
+      has: nameBox.width,
+      countsOnFirstLine: counts.top < Math.min(...lines.map((r) => r.bottom)),
+      countsBesideName: counts.top < nameBox.bottom && counts.bottom > nameBox.top,
+      // How much taller the row is than its name's lines, or than its least height, need.
+      spare: row.getBoundingClientRect().height - Math.max(px(rowStyle.minHeight), nameBox.height)
+    };
+  });
+const rows = {plain: rowShapes(), filtered: [] as ReturnType<typeof rowShapes>};
 plainStore.set('filters', {...plainStore.get('filters'), members: [{layer: 'topics', artifact: 99n, outside: false, verb: 'filter'}]});
 await settled();
 await settled();
-rowHeights.filtered = heights();
+rows.filtered = rowShapes();
 // For the test's pointer: where the second row's name and Filter button are, and what was pressed.
 (window as unknown as {plainRow: unknown}).plainRow = () => {
   const row = plain.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-id="2"]')!;
@@ -205,7 +247,7 @@ await settled();
 const headlineAfter = {height: headline().getBoundingClientRect().height, whole: whole(headline())};
 
 (window as unknown as {result: unknown}).result = {
-  tree: {...tree, status: status0, rowHeights},
+  tree: {...tree, status: status0, rows},
   editor: editorResult,
   picker,
   cards: {moreBox, proseBefore, proseAfter, proseText: value().textContent === prose, showAllBox, headlineBefore, headlineAfter}

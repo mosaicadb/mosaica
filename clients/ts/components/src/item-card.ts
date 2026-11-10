@@ -143,6 +143,7 @@ export class MosaicaItemCard extends MosaicaElement {
       }
       [part='show-all'],
       [part='more'] {
+        min-width: 24px;
         min-height: 24px;
       }
       dl,

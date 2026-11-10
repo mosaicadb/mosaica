@@ -267,6 +267,7 @@ export class MosaicaHierarchy extends MosaicaElement {
         color: var(--_mosaica-ink-3);
       }
       [part='more'] {
+        min-width: 24px;
         min-height: 24px;
         margin: 2px 0 2px calc(31px + var(--depth, 0) * 14px);
       }
