@@ -1575,7 +1575,7 @@ fn a_spatial_layer_declares_its_shape_kind_and_no_depth() {
     let view = with_space("view", "\n  [layer.shape]\n  kind = \"bbox\"\n");
     assert!(parse_str(&view).is_ok(), "{}", err(&view));
     let wgs84 = with_space("wgs84", "\n  [layer.shape]\n  kind = \"bbox\"\n");
-    assert!(err(&wgs84).contains("projections.md"), "{}", err(&wgs84));
+    assert!(err(&wgs84).contains("`projection` is `none`"), "{}", err(&wgs84));
     let spaceless = with_space("view", "");
     assert!(
         err(&spaceless).contains("neither `[layer.shape]` nor an authored shape content"),
@@ -1604,7 +1604,7 @@ fn a_spatial_layer_declares_its_shape_kind_and_no_depth() {
     assert!(parse_str(&drawn).is_ok(), "{}", err(&drawn));
     let drawn_wgs84 = authored("wgs84");
     assert!(
-        err(&drawn_wgs84).contains("projections.md"),
+        err(&drawn_wgs84).contains("`projection` is `none`"),
         "{}",
         err(&drawn_wgs84)
     );
