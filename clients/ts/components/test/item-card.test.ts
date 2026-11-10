@@ -144,14 +144,13 @@ describe('<mosaica-item-card> says what happened', () => {
     expect(region.textContent).not.toBe('');
   });
 
-  it('adds to the name of the Open link, which opens in a new tab, a note that is read and not drawn, and draws the same icon on the full card and the compact one', async () => {
+  it('adds to the name of the Open link, which opens in a new tab, a note that is read and not drawn, with the icon on the full card alone', async () => {
     // A function says nothing of where it opens, so its button's name is its visible text.
     const {host, el} = await card('compact');
     el.open = () => {};
     await settle(host);
     const button = deep(host, '[part="open"]')!;
     expect(button.querySelector('.sr-only')).toBeNull();
-    expect(button.querySelector('svg')).not.toBeNull();
     const visible = button.textContent!.trim();
     document.body.innerHTML = '';
 
@@ -164,19 +163,18 @@ describe('<mosaica-item-card> says what happened', () => {
       // The name holds the visible text and the note after it.
       expect(open.textContent!.trim().startsWith(visible), attrs).toBe(true);
       expect(open.textContent!.trim().length, attrs).toBeGreaterThan(visible.length);
-      expect(open.querySelector('svg'), attrs).not.toBeNull();
+      expect(open.querySelector('svg') !== null, attrs).toBe(attrs === '');
       document.body.innerHTML = '';
     }
   });
 });
 
 describe('<mosaica-item-card> text a clamp cuts short', () => {
-  it('has no hover title standing in for the whole text', async () => {
-    for (const attrs of ['title-field="title"', 'compact title-field="title" subtitle-field="abstract"']) {
-      const {host} = await card(attrs);
-      expect(deepAll(host, '[title]'), attrs).toEqual([]);
-      document.body.innerHTML = '';
-    }
+  it('gives a pointer a long value’s whole text as its title, and nothing else a title', async () => {
+    const {host} = await card('title-field="title"');
+    const titled = deepAll(host, '[title]');
+    expect(titled).toEqual([deep(host, '[part="field"][data-name="abstract"] [part="value"]')]);
+    expect(titled[0]!.getAttribute('title')).toBe(LONG);
   });
 
   it('offers a long value whole with its own button on the full card, named by its field', async () => {

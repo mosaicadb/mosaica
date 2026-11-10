@@ -7,7 +7,7 @@ import {aggregateEntry, answerAggregate, fakeStore, meta, settle, status} from '
 // its picker open, and two item cards with long text, each 300 px wide or in its dialog;
 // `window.result` holds what the test measures. `?font=serif`, `?font=monospace` and `?scale=1.15`
 // draw the elements in another font or a larger one, since nothing measured here may depend on
-// the machine's font.
+// the machine's font, and `?long=normal` has long names wrap, as a host may ask.
 type Box = {name: string; left: number; top: number; right: number; bottom: number};
 const boxOf = (name: string, el: Element): Box => {
   const r = el.getBoundingClientRect();
@@ -16,8 +16,22 @@ const boxOf = (name: string, el: Element): Box => {
 /** The pairs of `boxes` that share any area. */
 const overlaps = (boxes: Box[]): string[] =>
   boxes.flatMap((a, i) => boxes.slice(i + 1).flatMap((b) => (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5 ? [`${a.name} over ${b.name}`] : [])));
-/** The boxes of `boxes` narrower or shorter than a 24 px target. */
-const small = (boxes: Box[]): string[] => boxes.filter((b) => b.right - b.left < 23.5 || b.bottom - b.top < 23.5).map((b) => `${b.name} ${Math.round(b.right - b.left)}x${Math.round(b.bottom - b.top)}`);
+/**
+ * The targets short of 24 px either way: those a press 11 px left, right, above or below the
+ * middle of what they draw would miss, a pixel inside the square since boxes are drawn on whole
+ * pixels. A target is an element, or an element and the glyph inside it that its hit area is
+ * drawn around.
+ */
+const small = (root: ShadowRoot, targets: [name: string, target: Element, glyph?: Element][]): string[] =>
+  targets.flatMap(([name, target, glyph = target]) => {
+    target.scrollIntoView({block: 'center'});
+    const r = glyph.getBoundingClientRect();
+    const lands = (dx: number, dy: number) => {
+      const at = root.elementFromPoint(r.left + r.width / 2 + dx, r.top + r.height / 2 + dy);
+      return at !== null && target.contains(at);
+    };
+    return lands(-11, 0) && lands(11, 0) && lands(0, -11) && lands(0, 11) ? [] : [`${name}, drawn ${Math.round(r.width)} by ${Math.round(r.height)}`];
+  });
 const frames = (n: number) =>
   new Promise<void>((resolve) => {
     const step = () => (--n <= 0 ? resolve() : requestAnimationFrame(step));
@@ -31,13 +45,15 @@ const settled = async () => {
 const layer = (name: string): Meta['layers'][number] =>
   ({name, title: name, views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid', 'box', 'hull'], shape: 'derived', suppliedContent: ['name'], depsOn: [], version: 1}) as unknown as Meta['layers'][number];
 const LONG = 'Neoplasms of the connective and soft tissue, including those of uncertain behaviour and unspecified site';
-const browseRow = (id: bigint, name: string, childCount = 0): BrowseRow => ({mosaicaId: id, key: `k${id}`, name, maskedCount: 27_000_000n, matchedCount: 1_234_567n, rung: 0, parentIds: [], childCount, slot: null});
+const browseRow = (id: bigint, name: string, childCount = 0): BrowseRow => ({mosaicaId: id, key: `k${id}`, name, maskedCount: 270_000n, matchedCount: 12_345n, rung: 0, parentIds: [], childCount, slot: null});
 
 const look = new URLSearchParams(location.search);
-const font = {serif: 'serif', monospace: 'monospace'}[look.get('font') ?? ''];
-const scale = Number(look.get('scale')) || 1;
+// Only these fonts and this scale are ever written into the page's style.
+const font = ['serif', 'monospace'].find((name) => name === look.get('font'));
+const scale = look.get('scale') === '1.15' ? 1.15 : 1;
 const lookSheet = document.createElement('style');
-lookSheet.textContent = `mosaica-hierarchy, mosaica-colour-editor, mosaica-item-card { ${font ? `--mosaica-font: ${font};` : ''} ${scale === 1 ? '' : `font-size: ${13 * scale}px;`} }`;
+const long = look.get('long') === 'normal' ? '--mosaica-long-text: normal;' : '';
+lookSheet.textContent = `mosaica-hierarchy, mosaica-colour-editor, mosaica-item-card { ${font ? `--mosaica-font: ${font};` : ''} ${scale === 1 ? '' : `font-size: ${13 * scale}px;`} ${long} }`;
 document.head.append(lookSheet);
 
 document.body.innerHTML = `<div style="width: 300px"><mosaica-hierarchy></mosaica-hierarchy></div>
@@ -69,7 +85,7 @@ const status0 = {rendered: getComputedStyle(region).display !== 'none', said: re
 (hierarchy.shadowRoot!.querySelector('[part="expander"]') as HTMLButtonElement).click();
 await settled();
 await settled();
-const tree: {small: string[]; overlaps: string[]; outside: string[]; cut: string[]; swap: string[]; covered: string[]} = {small: [], overlaps: [], outside: [], cut: [], swap: [], covered: []};
+const tree: {small: string[]; overlaps: string[]; outside: string[]; swap: string[]; covered: string[]} = {small: [], overlaps: [], outside: [], swap: [], covered: []};
 /** Which of a row's buttons and counts are drawn: the buttons over the counts, or the counts. */
 const drawn = (row: HTMLElement) => `${getComputedStyle(row.querySelector('[part="actions"]')!).opacity === '1' ? 'buttons' : ''}${getComputedStyle(row.querySelector('[part="counts"]')!).opacity === '1' ? 'counts' : ''}`;
 for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="row"]')) {
@@ -79,9 +95,11 @@ for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="ro
   row.querySelector<HTMLElement>('[part="name"]')!.focus();
   await frames(1);
   if (drawn(row) !== 'buttons') tree.swap.push(`${id} focused: ${drawn(row)}`);
-  const box = (b: HTMLElement) => boxOf(`${id} ${b.getAttribute('part')}${b.dataset.verb ? ` ${b.dataset.verb}` : ''}`, b);
-  const targets = [...row.querySelectorAll<HTMLElement>('button:not([data-leaf])')].map(box);
-  tree.small.push(...small(targets));
+  const called = (b: HTMLElement) => `${id} ${b.getAttribute('part')}${b.dataset.verb ? ` ${b.dataset.verb}` : ''}`;
+  const box = (b: HTMLElement) => boxOf(called(b), b);
+  const buttons = [...row.querySelectorAll<HTMLElement>('button:not([data-leaf])')];
+  const targets = buttons.map(box);
+  tree.small.push(...small(hierarchy.shadowRoot!, buttons.map((b) => [called(b), b])));
   tree.overlaps.push(...overlaps(targets));
   // A press at the middle of each button shown lands on it, not on the counts it stands in for.
   for (const b of row.querySelectorAll<HTMLElement>('[part="actions"] button')) {
@@ -92,17 +110,15 @@ for (const row of hierarchy.shadowRoot!.querySelectorAll<HTMLElement>('[part="ro
     if (!at || !b.contains(at)) tree.covered.push(`${box(b).name} under ${at?.getAttribute('part') ?? at?.localName}`);
   }
   // The counts, when they are drawn, are clear of every button that is.
-  tree.overlaps.push(...overlaps([boxOf(`${id} counts`, row.querySelector('[part="counts"]')!), ...[...row.querySelectorAll<HTMLElement>('.lead button:not([data-leaf]), [part="dismiss"]')].map(box)]));
+  tree.overlaps.push(...overlaps([boxOf(`${id} counts`, row.querySelector('[part="counts"]')!), ...[...row.querySelectorAll<HTMLElement>('[part="expander"]:not([data-leaf]), [part="name"], [part="dismiss"]')].map(box)]));
   const rowBox = boxOf(id, row);
   tree.outside.push(...targets.filter((t) => t.left < rowBox.left - 0.5 || t.right > rowBox.right + 0.5).map((t) => t.name));
-  const name = row.querySelector<HTMLElement>('[part="name"]')!;
-  if (name.scrollWidth > name.clientWidth + 1 || name.scrollHeight > name.clientHeight + 1) tree.cut.push(id);
   // Escape puts the buttons away and the counts back, with focus still in the row.
   document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
   await settled();
   if (drawn(row) !== 'counts' || !row.matches(':focus-within')) tree.swap.push(`${id} after Escape: ${drawn(row)}`);
 }
-tree.small.push(...small([...hierarchy.shadowRoot!.querySelectorAll('[part="more"]')].map((b) => boxOf('more', b))));
+tree.small.push(...small(hierarchy.shadowRoot!, [...hierarchy.shadowRoot!.querySelectorAll('[part="more"]')].map((b) => ['more', b])));
 
 // Ordinary names and counts, at 300 px: where each row's name, counts and buttons lie, without a
 // filter and with one. Every length is measured, so none depends on the font.
@@ -129,16 +145,18 @@ const rowShapes = () =>
     name.style.whiteSpace = '';
     const rowStyle = getComputedStyle(row);
     const nameStyle = getComputedStyle(name);
-    const buttons = [...row.querySelectorAll('[part="actions"] button')].reduce((sum, b) => sum + width(b), 0);
     const nameBox = name.getBoundingClientRect();
     return {
       name: name.textContent!.trim(),
       lines: new Set(lines.map((r) => Math.round(r.top))).size,
       // What the name needs on one line, and what the row leaves its button beside the expander
-      // and the counts, whose place is at least as wide as the buttons shown over them.
+      // and the counts: the buttons shown over the counts take none of it.
       needs: unwrapped + px(nameStyle.paddingLeft) + px(nameStyle.paddingRight),
-      room: row.clientWidth - px(rowStyle.paddingLeft) - px(rowStyle.paddingRight) - width(row.querySelector('[part="expander"]')!) - px(rowStyle.columnGap) - Math.max(counts.width, buttons),
+      room: row.clientWidth - px(rowStyle.paddingLeft) - px(rowStyle.paddingRight) - width(row.querySelector('[part="expander"]')!) - 2 * px(rowStyle.columnGap) - counts.width,
       has: nameBox.width,
+      cut: name.scrollWidth > name.clientWidth + 1,
+      height: row.getBoundingClientRect().height,
+      least: px(rowStyle.minHeight),
       countsOnFirstLine: counts.top < Math.min(...lines.map((r) => r.bottom)),
       countsBesideName: counts.top < nameBox.bottom && counts.bottom > nameBox.top,
       // How much taller the row is than its name's lines, or than its least height, need.
@@ -153,6 +171,7 @@ rows.filtered = rowShapes();
 // For the test's pointer: where the second row's name and Filter button are, and what was pressed.
 (window as unknown as {plainRow: unknown}).plainRow = () => {
   const row = plain.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-id="2"]')!;
+  row.scrollIntoView({block: 'center'});
   const middle = (el: Element) => {
     const r = el.getBoundingClientRect();
     return {x: r.left + r.width / 2, y: r.top + r.height / 2};
@@ -180,16 +199,23 @@ const shadow = editor.shadowRoot!;
 const check = shadow.querySelector('[part="check"]') as HTMLInputElement;
 check.click();
 await settled();
-const rowTargets = [...shadow.querySelectorAll<HTMLElement>('[part~="row"]')].flatMap((row) => [
-  boxOf(`${row.dataset.key} check`, row.querySelector('[part="check"]')!.parentElement!),
-  boxOf(`${row.dataset.key} swatch`, row.querySelector('[part="swatch"]')!)
+const editorRows = [...shadow.querySelectorAll<HTMLElement>('[part~="row"]')];
+// A checkbox's target is its label, drawn around the box.
+const rowTargets = editorRows.flatMap((row): [string, Element, Element?][] => [
+  [`${row.dataset.key} check`, row.querySelector('[part="check"]')!.parentElement!, row.querySelector('[part="check"]')!],
+  [`${row.dataset.key} swatch`, row.querySelector('[part="swatch"]')!]
 ]);
-const barTargets = [boxOf('set-colour', shadow.querySelector('[part="set-colour"]')!), boxOf('deselect', shadow.querySelector('[part="deselect"]')!)];
 const firstName = shadow.querySelector<HTMLElement>('[part="name"]')!;
 const editorResult = {
-  small: small([...rowTargets, ...barTargets]),
-  overlaps: overlaps(rowTargets),
+  small: small(shadow, [...rowTargets, ['set-colour', shadow.querySelector('[part="set-colour"]')!], ['deselect', shadow.querySelector('[part="deselect"]')!]]),
+  overlaps: overlaps(rowTargets.map(([name, target]) => boxOf(name, target))),
   nameCut: firstName.scrollWidth > firstName.clientWidth + 1,
+  nameLines: (() => {
+    const text = document.createRange();
+    text.selectNodeContents(firstName);
+    return new Set([...text.getClientRects()].map((r) => Math.round(r.top))).size;
+  })(),
+  rowHeights: editorRows.map((row) => row.getBoundingClientRect().height),
   // The label's centre toggles its checkbox, as its corner does.
   cornerTicks: (() => {
     const label = check.parentElement!.getBoundingClientRect();
@@ -207,7 +233,7 @@ const picker = {
   coversRow: overlaps([popBox, boxOf('row', shadow.querySelector('[part~="row"]')!)]),
   inside: popBox.left >= 0 && popBox.top >= 0 && popBox.right <= innerWidth && popBox.bottom <= innerHeight,
   count: choices.length,
-  small: small([...choices, boxOf('reset', pop.querySelector('[part="reset"]')!)]),
+  small: small(shadow, [...[...shadow.querySelectorAll('[part="choice"]')].map((c, i): [string, Element] => [`choice ${i}`, c]), ['reset', pop.querySelector('[part="reset"]')!]]),
   overlaps: overlaps(choices),
   wide: pop.scrollWidth > pop.clientWidth,
   // The hue bar is drawn 10 px high; a press 6 px above it is still on it.
@@ -234,14 +260,14 @@ const whole = (el: HTMLElement) => el.scrollHeight <= el.clientHeight + 1;
 const value = () => full.shadowRoot!.querySelector<HTMLElement>('[part="field"][data-name="abstract"] [part="value"]')!;
 const more = full.shadowRoot!.querySelector<HTMLButtonElement>('[part="more"]');
 const proseBefore = value().getBoundingClientRect().height;
-const moreBox = more ? small([boxOf('more', more)]) : ['no more button'];
+const moreBox = more ? small(full.shadowRoot!, [['more', more]]) : ['no more button'];
 more?.click();
 await settled();
 const proseAfter = value().getBoundingClientRect().height;
 const headline = () => compact.shadowRoot!.querySelector<HTMLElement>('[part="headline"]')!;
 const showAll = compact.shadowRoot!.querySelector<HTMLButtonElement>('[part="show-all"]');
 const headlineBefore = {height: headline().getBoundingClientRect().height, whole: whole(headline())};
-const showAllBox = showAll ? small([boxOf('show-all', showAll)]) : ['no show-all button'];
+const showAllBox = showAll ? small(compact.shadowRoot!, [['show-all', showAll]]) : ['no show-all button'];
 showAll?.click();
 await settled();
 const headlineAfter = {height: headline().getBoundingClientRect().height, whole: whole(headline())};

@@ -131,6 +131,9 @@ export class MosaicaColourEditor extends MosaicaElement {
         letter-spacing: 0;
         text-transform: none;
         color: var(--_mosaica-ink);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
       }
       [part='sub'] {
@@ -159,7 +162,7 @@ export class MosaicaColourEditor extends MosaicaElement {
         align-items: center;
         gap: 10px;
         margin: 0 16px 4px;
-        padding: 3px 10px;
+        padding: 6px 10px;
         border-radius: 6px;
         background: var(--_mosaica-accent);
         color: var(--_mosaica-accent-ink);
@@ -169,10 +172,17 @@ export class MosaicaColourEditor extends MosaicaElement {
         font-weight: 600;
         margin-right: auto;
       }
+      /* Drawn as a line of text, each with a target 24 px high around it, inside the bar. */
       [part='set-colour'],
       [part='deselect'] {
+        position: relative;
+      }
+      [part='set-colour']::before,
+      [part='deselect']::before {
+        content: '';
+        position: absolute;
+        inset: -4px 0;
         min-width: 24px;
-        min-height: 24px;
       }
       [part='set-colour'] {
         display: inline-flex;
@@ -194,9 +204,9 @@ export class MosaicaColourEditor extends MosaicaElement {
       [part='columns'],
       [part~='row'] {
         display: grid;
-        grid-template-columns: 24px 24px minmax(0, 1fr) 72px;
+        grid-template-columns: 18px 26px minmax(0, 1fr) 72px;
         align-items: center;
-        column-gap: 8px;
+        column-gap: 10px;
       }
       [part='columns'] {
         padding: 6px 16px 2px;
@@ -207,16 +217,19 @@ export class MosaicaColourEditor extends MosaicaElement {
       .n {
         text-align: right;
       }
+      .n {
+        font-size: 12px;
+      }
       [part='rows'] {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
         padding: 2px 8px 8px;
       }
-      /* A row grows with a name that wraps. */
+      /* A row holds a name and a path on a line each, and grows only where a host has long names wrap. */
       [part~='row'] {
         min-height: 40px;
-        padding: 2px 8px;
+        padding: 0 8px;
         border-radius: 6px;
       }
       [part~='row']:hover,
@@ -226,26 +239,38 @@ export class MosaicaColourEditor extends MosaicaElement {
       [part~='row'][data-found] {
         box-shadow: inset 2px 0 0 var(--_mosaica-ink-3);
       }
-      /* The checkbox's target: the box keeps its size inside it. */
+      /* The checkbox's target, 24 px square around the box, which keeps its size and its place. */
       .tick {
+        position: relative;
         display: grid;
-        place-items: center;
-        width: 24px;
+        align-items: center;
         height: 24px;
         cursor: pointer;
+      }
+      .tick::before {
+        content: '';
+        position: absolute;
+        inset: 0 -1px 0 -5px;
       }
       [part='check'] {
         width: 14px;
         height: 14px;
         margin: 0;
       }
+      /* Drawn 22 px square, with a 24 px target around it. */
       [part='swatch'] {
-        width: 24px;
-        height: 24px;
+        position: relative;
+        width: 22px;
+        height: 22px;
         border: 1px solid rgba(0, 0, 0, 0.12);
         border-radius: 5px;
         background: var(--c);
         forced-color-adjust: none;
+      }
+      [part='swatch']::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
       }
       [part='swatch'][data-unmet] {
         background: none;
@@ -259,6 +284,9 @@ export class MosaicaColourEditor extends MosaicaElement {
       }
       [part='name'],
       [part='path'] {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
       }
       [part='path'] {
@@ -271,7 +299,7 @@ export class MosaicaColourEditor extends MosaicaElement {
         font-variant-numeric: tabular-nums;
       }
       .none {
-        padding: 12px 16px;
+        padding: 14px 24px 12px;
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
@@ -634,7 +662,7 @@ export class MosaicaColourEditor extends MosaicaElement {
       return html`<div part="row" role="listitem" data-key=${r.key} ?data-found=${r.found} ?data-ticked=${on}>
         <label class="tick"><input part="check" type="checkbox" .checked=${on} aria-label=${`Select ${r.name}`} @change=${(e: Event) => this.tick(r.key, (e.target as HTMLInputElement).checked)} /></label>
         <button part="swatch" type="button" style=${`--c:${r.colour}`} ?data-unmet=${r.unmet} aria-haspopup="dialog" aria-label=${`Colour of ${r.name}${r.unmet ? ', not drawn yet' : ''}`} title=${r.unmet ? 'Not drawn yet' : r.colour} @click=${(e: Event) => this.pick(e, r.name, [r])}></button>
-        <span class="label"><span part="name" ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path">${r.path}</span>` : nothing}</span>
+        <span class="label"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path" title=${r.path}>${r.path}</span>` : nothing}</span>
         <span class="n">${r.count === null ? nothing : html`<span part="count">${countText(r.count)}</span><span class="sr-only"> items</span>`}</span>
       </div>`;
     };

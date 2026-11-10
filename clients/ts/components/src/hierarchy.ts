@@ -56,9 +56,11 @@ const PRESSED: Fetch = {wanted: () => true, refetch: false};
  * page's cursor is good only for the filters it was served under. Focus stays on the control it
  * was on.
  *
- * A row's buttons highlight or filter the map by its artifact. They are shown in place of its
- * counts while the pointer or focus is in the row, and Escape puts them away again; where there is
- * no pointer to hover with, they stand beside the counts. Its Fit button only fires
+ * A row's name is one line, cut with an ellipsis where it is too long, unless
+ * `--mosaica-long-text` is `normal`. A row's buttons highlight or filter the map by its artifact.
+ * They are shown in place of its counts while the pointer or focus is in the row, and Escape puts
+ * them away again; where there is no pointer to hover with, they stand beside the counts. Its Fit
+ * button only fires
  * `mosaica-artifactfit`, so you handle the event by passing its id to the map's `fitTo`. The
  * explorer does this for a hierarchy you put in one of its slots. `fitTo` finds only the artifacts
  * the map currently draws, so Fit does nothing for a row whose artifact is not drawn at this zoom.
@@ -96,8 +98,8 @@ const PRESSED: Fetch = {wanted: () => true, refetch: false};
  * @csspart highlight - A row's highlight button, with `aria-pressed`.
  * @csspart filter - A row's filter button, with `aria-pressed`.
  * @csspart fit - A row's Fit button, on a layer that draws.
- * @csspart dismiss - A button that removes a row's filter or highlight, one for each, with
- *   `data-verb`: the clause's icon and a ×.
+ * @csspart dismiss - A × that removes a row's filter or highlight, one for each, with `data-verb`.
+ *   The highlight's has a bar under it.
  * @csspart also - The row's other parents, or "Children unavailable" with `data-code` if its
  *   children were refused.
  * @csspart children - An expanded row's children.
@@ -118,20 +120,20 @@ export class MosaicaHierarchy extends MosaicaElement {
       [part='search'] {
         margin-bottom: 8px;
       }
+      /* The box reaches 3 px left of the rows, so the expander's target at a row's edge is whole. */
       [part='tree'] {
         list-style: none;
-        margin: 0;
-        padding: 1px 0;
+        margin: 0 0 0 -3px;
+        padding: 0 0 0 3px;
         max-height: 320px;
         overflow-y: auto;
       }
       [part='row'] {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        column-gap: 3px;
+        gap: 6px;
         min-height: 28px;
-        padding: 0 4px 0 calc(4px + var(--depth, 0) * 14px);
+        padding: 0 4px 0 calc(2px + var(--depth, 0) * 14px);
         border-radius: var(--_mosaica-radius-control);
       }
       [part='row']:hover {
@@ -145,42 +147,37 @@ export class MosaicaHierarchy extends MosaicaElement {
         background: var(--_mosaica-highlight-soft);
         color: var(--_mosaica-highlight);
       }
+      /* Drawn 14 px wide. The pointer's target is 24 px square around it, in the row's own room. */
       [part='expander'] {
-        display: inline-grid;
-        place-items: center;
-        width: 24px;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        width: 14px;
         height: 24px;
         flex: none;
-        border-radius: 4px;
         color: var(--_mosaica-ink-3);
+      }
+      [part='expander']::before {
+        content: '';
+        position: absolute;
+        inset: 0 -5px;
+      }
+      [part='expander']:focus-visible {
+        outline-offset: 0;
       }
       [part='expander'][data-leaf] {
         visibility: hidden;
       }
-      /* A name wraps beside the counts; where that would leave it less than this, they go under it. */
-      .lead {
-        display: flex;
-        align-items: center;
-        flex: 1 1 7em;
-        min-width: 0;
-      }
+      /* One line, cut with an ellipsis, unless the host asks for long names to wrap. */
       [part='name'] {
-        flex: 1 1 auto;
+        flex: 1;
         min-width: 0;
         min-height: 24px;
-        padding: 2px 3px;
-        border-radius: 4px;
-        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
-      }
-      .tail {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 0 4px;
-        max-width: 100%;
-        margin-left: auto;
+        text-align: left;
       }
       [part='counts'] {
         display: inline-flex;
@@ -194,25 +191,24 @@ export class MosaicaHierarchy extends MosaicaElement {
         position: relative;
         display: inline-flex;
         align-items: center;
-        justify-content: flex-end;
         gap: 4px;
-        min-height: 24px;
+        flex: none;
       }
       [part='actions'] {
         display: inline-flex;
       }
       /* With a pointer, the buttons take no room: they are shown over the counts, which are not
-         drawn meanwhile, while the pointer or focus is in the row and Escape has not put them
-         away. The counts' place is at least as wide as the buttons, so they never reach the name. */
+         drawn meanwhile, and over the end of a name beside short counts, while the pointer or
+         focus is in the row and Escape has not put them away. They are above the counts, which
+         come after them and, not drawn, would still lie over them. */
       @media (hover: hover) {
-        .figures {
-          min-width: calc(var(--buttons) * 24px);
-        }
-        /* Above the counts, which come after them and, not drawn, would still lie over them. */
         [part='actions'] {
           position: absolute;
           right: 0;
           z-index: 1;
+          padding-left: 6px;
+          background: var(--_mosaica-surface-2);
+          border-radius: var(--_mosaica-radius-control);
           opacity: 0;
           pointer-events: none;
         }
@@ -242,34 +238,45 @@ export class MosaicaHierarchy extends MosaicaElement {
         background: var(--_mosaica-surface-3);
         box-shadow: inset 0 -2px 0 currentColor;
       }
-      /* The clause's icon and a ×, in a target 24 px high. */
+      /* Drawn 20 px square, with a 24 px target around it. */
       [part='dismiss'] {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 1px;
-        min-width: 24px;
-        height: 24px;
-        padding: 0 3px;
+        position: relative;
+        display: inline-grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
         flex: none;
         border-radius: 4px;
         color: var(--_mosaica-ink-2);
       }
+      [part='dismiss']::before {
+        content: '';
+        position: absolute;
+        inset: -2px;
+      }
+      /* The × that removes a highlight has a bar under it, so it differs from the filter's by more than its colour. */
       [part='dismiss'][data-verb='highlight'] {
         color: var(--_mosaica-highlight);
+        box-shadow: inset 0 -2px 0 currentColor;
       }
       [part='dismiss']:hover {
         background: var(--_mosaica-surface-3);
       }
       [part='also'] {
-        padding-left: calc(31px + var(--depth, 0) * 14px);
+        padding-left: calc(18px + var(--depth, 0) * 14px);
         font-size: 11px;
         color: var(--_mosaica-ink-3);
       }
+      /* Drawn as a line of text, with a target 24 px high and at least as wide around it. */
       [part='more'] {
+        position: relative;
+        margin: 4px 0 4px calc(18px + var(--depth, 0) * 14px);
+      }
+      [part='more']::before {
+        content: '';
+        position: absolute;
+        inset: -4px 0;
         min-width: 24px;
-        min-height: 24px;
-        margin: 2px 0 2px calc(31px + var(--depth, 0) * 14px);
       }
       [part='children'] {
         list-style: none;
@@ -706,7 +713,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     const said = this.refusal
       ? html`<span part="refusal" data-code=${this.refusal.code}><span class="dot refuse"></span>Layer unavailable</span>`
       : state === 'loading'
-        ? html`<span class="dot quiet"></span>Loading`
+        ? html`<span class="sr-only">Loading</span>`
         : state === 'empty'
           ? this.searching
             ? 'No match'
@@ -753,17 +760,16 @@ export class MosaicaHierarchy extends MosaicaElement {
     const drawn = !isFilterLayer(layer);
     const pressed = (verb: ClauseVerb) => (clauses.includes(verb) ? 'true' : 'false');
     return html`<li>
-      <div part="row" style=${`--depth:${depth};--buttons:${drawn ? 3 : 2}`} .path=${node.path} data-id=${idString(id)} data-clause=${clauses.length > 0 ? clauses.sort().join(' ') : nothing}
+      <div part="row" style=${`--depth:${depth}`} .path=${node.path} data-id=${idString(id)} data-clause=${clauses.length > 0 ? clauses.sort().join(' ') : nothing}
         data-buttons-away=${this.buttonsAway.has(node.path) ? '' : nothing} @pointerleave=${(e: Event) => this.leftRow(e, node.path)} @focusout=${(e: Event) => this.leftRow(e, node.path)}>
-        <span class="lead"><button part="expander" type="button" data-leaf=${node.row.childCount === 0 ? '' : nothing}
+        <button part="expander" type="button" data-leaf=${node.row.childCount === 0 ? '' : nothing}
           aria-expanded=${open ? 'true' : 'false'}
           aria-label=${open ? `Collapse ${name ?? 'row'}` : `Expand ${name ?? 'row'}`}
           @click=${() => this.toggle(node)}>${node.loading ? html`<span class="spinner"></span>` : icon(open ? 'chev' : 'chevr', 12)}</button>
         <button part="name" type="button" data-unnamed=${name === null ? '' : nothing}
           aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')} title="Highlight"
-          @click=${() => this.apply(id, 'highlight')}>${called}</button></span>
-        <span class="tail">
-          <span class="figures">
+          @click=${() => this.apply(id, 'highlight')}>${called}</button>
+        <span class="figures">
           <span part="actions" @focusin=${() => this.shownAgain(node.path)}>
             <button part="highlight" type="button" data-verb="highlight" aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')}
               title="Highlight this" @click=${() => this.apply(id, 'highlight')}>${icon('highlight', 13)}</button>
@@ -782,12 +788,11 @@ export class MosaicaHierarchy extends MosaicaElement {
               ? html`<mosaica-count part="count-matched" .masked=${masked(node.row.matchedCount)}></mosaica-count>/`
               : nothing}<mosaica-count part="count-masked" .masked=${masked(node.row.maskedCount)}></mosaica-count>
           </span>
-          </span>
-          ${clauses.map(
-            (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${called}` : `Stop filtering to ${called}`}
-              title=${verb === 'highlight' ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.apply(id, verb)}>${icon(verb, 12)}${icon('close', 10)}</button>`
-          )}
         </span>
+        ${clauses.map(
+            (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${called}` : `Stop filtering to ${called}`}
+              title=${verb === 'highlight' ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.apply(id, verb)}>${icon('close', 12)}</button>`
+        )}
       </div>
       ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.map((p) => this.nameOf(p)).join(', ')}</div>` : nothing}
       ${node.refusal ? html`<div part="also" style=${`--depth:${depth}`} data-code=${node.refusal.code}>Children unavailable</div>` : nothing}

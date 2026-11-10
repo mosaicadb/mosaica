@@ -289,12 +289,16 @@ describe('<mosaica-colour-editor> under a keyboard and a screen reader', () => {
     expect(editor.shadowRoot!.activeElement).toBe(rowsOf(host)[0]!.querySelector('[part="check"]'));
   });
 
-  it('says what each row’s count counts, and whole names with no hover title standing in for them', async () => {
+  it('says what each row’s count counts in text that is not drawn, and holds each name whole, with a title for a pointer where it is cut', async () => {
     const {host} = await listed();
+    expect(rowsOf(host).map((row) => row.querySelector('[part="name"]')!.textContent)).toEqual(['optics', 'lasers', 'fibres']);
     for (const row of rowsOf(host)) {
       const count = row.querySelector('[part="count"]')!;
-      expect(count.parentElement!.textContent!.trim().length).toBeGreaterThan(count.textContent!.length);
-      expect(row.querySelector('[part="name"]')!.hasAttribute('title')).toBe(false);
+      const said = count.parentElement!.querySelector('.sr-only')!;
+      expect(said.textContent!.trim()).not.toBe('');
+      expect(count.contains(said)).toBe(false);
+      const name = row.querySelector('[part="name"]')!;
+      expect(name.getAttribute('title')).toBe(name.textContent);
     }
   });
 

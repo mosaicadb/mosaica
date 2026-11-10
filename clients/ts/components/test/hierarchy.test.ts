@@ -425,11 +425,12 @@ describe('<mosaica-hierarchy> under a keyboard and a screen reader', () => {
     await settle(host);
     expect(control(host, '1', 'name').getAttribute('aria-pressed')).toBe('true');
     expect(control(host, '2', 'name').getAttribute('aria-pressed')).toBe('false');
-    // The two removing buttons differ by more than colour: by name, and by what each draws.
+    // The two removing buttons differ by name and by their verb, which the highlight's bar is
+    // drawn from; the browser suite checks the bar.
     const dismiss = deepAll(host, '[part="row"][data-id="1"] [part="dismiss"]');
     expect(dismiss.every((b) => b.getAttribute('aria-label')!.includes('Neoplasms'))).toBe(true);
     expect(new Set(dismiss.map((b) => b.getAttribute('aria-label'))).size).toBe(2);
-    expect(new Set(dismiss.map((b) => [...b.querySelectorAll('path')].map((p) => p.getAttribute('d')).join(' '))).size).toBe(2);
+    expect(dismiss.map((b) => b.getAttribute('data-verb')).sort()).toEqual(['filter', 'highlight']);
   });
 
   it('moves focus from a × that removed itself to the row’s other ×, then to the button that makes the clause', async () => {

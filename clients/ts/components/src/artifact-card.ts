@@ -129,7 +129,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
         margin: 0;
         padding: 0;
       }
-      /* A parent or child: its name, which wraps, and its count at the right. */
+      /* A parent or child: its name on one line, and its count at the right. */
       [part='parent'],
       [part='child'] {
         display: flex;
@@ -137,7 +137,7 @@ export class MosaicaArtifactCard extends MosaicaElement {
         gap: 8px;
         width: 100%;
         min-height: 30px;
-        padding: 2px 6px 2px 22px;
+        padding: 0 6px 0 22px;
         border-radius: var(--_mosaica-radius-control);
         text-align: left;
       }
@@ -148,6 +148,9 @@ export class MosaicaArtifactCard extends MosaicaElement {
       [part='name'] {
         flex: 1 1 0;
         min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: var(--_mosaica-long-text);
         overflow-wrap: anywhere;
       }
       [part='parent'] mosaica-count::part(count),

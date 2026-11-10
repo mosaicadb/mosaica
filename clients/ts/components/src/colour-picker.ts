@@ -7,6 +7,8 @@ import {icon} from './icons.js';
 const HUE_KNOB = 12;
 /** How far each lighter colour is taken towards white. */
 const LIGHTER = 0.45;
+/** The most colours a palette is drawn with in one row; a larger one wraps, so each stays large enough to press. */
+const ONE_ROW = 10;
 /** The picker's width before it is measured. */
 const WIDTH = 264;
 
@@ -243,7 +245,7 @@ export class ColourPicker implements ReactiveController {
         if (to && !(e.currentTarget as HTMLElement).contains(to)) this.close(false);
       }}>
       <div class="top"><span class="t">${p.title}</span><button part="reset" class="quiet" type="button" @click=${() => this.choose(null)}>Reset</button></div>
-      <div class="choices" role="group" aria-label="Palette colours">
+      <div class="choices" role="group" aria-label="Palette colours" style=${n > ONE_ROW ? nothing : `--columns:repeat(${n}, minmax(0, 1fr))`}>
         <div class="set">${choices.slice(0, n).map(choice)}</div>
         <div class="set">${choices.slice(n).map(choice)}</div>
       </div>
@@ -262,7 +264,7 @@ export class ColourPicker implements ReactiveController {
         <label>Hex<input part="hex" type="text" spellcheck="false" .value=${hexShown}
           aria-invalid=${invalid ? 'true' : 'false'} aria-describedby="picker-hex-format"
           @change=${(e: Event) => hexChanged(e.target as HTMLInputElement)} /></label>
-        <span id="picker-hex-format" class="format" role="status" ?data-invalid=${invalid}>${invalid ? 'Not a colour. Write # and six hex digits, such as #1B9E77.' : '# and six hex digits, such as #1B9E77'}</span>
+        <span id="picker-hex-format" class=${invalid ? 'format' : 'format sr-only'} role="status">${invalid ? 'Not a colour. Write # and six hex digits, such as #1B9E77.' : '# and six hex digits, such as #1B9E77'}</span>
       </div>
     </div>`;
   }
@@ -333,7 +335,7 @@ export const pickerStyles = css`
   }
   .pop .top {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 8px;
     padding: 12px 14px 8px;
@@ -341,22 +343,32 @@ export const pickerStyles = css`
   .pop .top .t {
     min-width: 0;
     font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: var(--_mosaica-long-text);
     overflow-wrap: anywhere;
   }
+  /* Drawn as a line of text, with a target 24 px high and at least as wide around it. */
   .pop [part='reset'] {
+    position: relative;
     flex: none;
+  }
+  .pop [part='reset']::before {
+    content: '';
+    position: absolute;
+    inset: -4px 0;
     min-width: 24px;
-    min-height: 24px;
   }
   .pop .choices {
     display: grid;
     gap: 6px;
     padding: 0 14px 10px;
   }
-  /* A palette's colours, in as many rows as keep each at least 24 px square. */
+  /* A palette's colours: in one row for a palette of up to ten, else in as many rows as keep
+     each at least 24 px square. */
   .pop .set {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(24px, 1fr));
+    grid-template-columns: var(--columns, repeat(auto-fit, minmax(24px, 1fr)));
     gap: 6px;
   }
   [part='choice'] {
@@ -442,11 +454,9 @@ export const pickerStyles = css`
   [part='hex'][aria-invalid='true'] {
     border-color: var(--_mosaica-refuse);
   }
+  /* What the hex field takes: read out with the field, and drawn only as what is wrong with an entry. */
   .pop .format {
     font-size: 12px;
-    color: var(--_mosaica-ink-2);
-  }
-  .pop .format[data-invalid] {
     color: var(--_mosaica-refuse);
     font-weight: 500;
   }

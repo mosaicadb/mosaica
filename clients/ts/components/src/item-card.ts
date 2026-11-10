@@ -57,8 +57,8 @@ import {chrome, tokens} from './tokens.js';
  * @csspart subtitle - The `subtitle-field` value under the headline, when `compact` is set.
  * @csspart show-all - The "Show all N fields" button, when `compact` is set, with `aria-expanded`.
  *   It reads "Show all" where every field is shown and only text is cut short.
- * @csspart view-chip - One view the item is in, with `data-view`, and `aria-current` and a tick on
- *   the current view.
+ * @csspart view-chip - One view the item is in, with `data-view`, and `aria-current` and a bar
+ *   under the current view.
  * @csspart field - One field, with `data-name`, and `data-prose` on a value over 60 characters.
  * @csspart label - A field's name, a `<dt>`, and the heading above the view chips.
  * @csspart value - A field's value, a `<dd>`.
@@ -67,8 +67,8 @@ import {chrome, tokens} from './tokens.js';
  * @csspart scoped - The group-scoped values, grouped by key.
  * @csspart key - One key's heading among the group-scoped values, with `data-key`.
  * @csspart open - The Open button.
- * @csspart copy - The Copy id button, which copies the `mosaica_id` to the clipboard and says
- *   beside it whether it did.
+ * @csspart copy - The Copy id button, which copies the `mosaica_id` to the clipboard and says to a
+ *   screen reader whether it did.
  */
 export class MosaicaItemCard extends MosaicaElement {
   static override styles = [
@@ -141,10 +141,17 @@ export class MosaicaItemCard extends MosaicaElement {
         -webkit-line-clamp: 2;
         line-clamp: 2;
       }
+      /* Each is drawn as a line of text, with a target 24 px high and at least as wide around it. */
       [part='show-all'],
       [part='more'] {
+        position: relative;
+      }
+      [part='show-all']::before,
+      [part='more']::before {
+        content: '';
+        position: absolute;
+        inset: -4px 0;
         min-width: 24px;
-        min-height: 24px;
       }
       dl,
       dd {
@@ -196,10 +203,6 @@ export class MosaicaItemCard extends MosaicaElement {
       .actions {
         margin-top: 12px;
       }
-      .copied {
-        font-size: 12px;
-        color: var(--_mosaica-ink-2);
-      }
       [part='close'] {
         flex: none;
         width: 24px;
@@ -219,9 +222,11 @@ export class MosaicaItemCard extends MosaicaElement {
         gap: 6px;
         margin: 4px 0 10px;
       }
+      /* The bar marks the current view by more than its colour, and takes no room. */
       [part='view-chip'][aria-current='true'] {
         background: var(--_mosaica-accent);
         color: var(--_mosaica-accent-ink);
+        box-shadow: inset 0 -2px 0 currentColor;
       }
       [part='scoped'] {
         margin-top: 12px;
@@ -432,7 +437,7 @@ export class MosaicaItemCard extends MosaicaElement {
       ? html`<div part="field" data-name="mosaica_id" style="display:contents"><dt part="label" class="k">mosaica_id</dt><dd part="value" class="v mono">${id}</dd></div>`
       : nothing;
     const field = (name: string) => this.field(name, fields[name], column(name), title);
-    const open = this.openButton(id, fields);
+    const open = this.openButton(id, fields, this.compact ? nothing : icon('open', 14));
     if (!this.compact) {
       return {
         headline: h3,
@@ -442,7 +447,7 @@ export class MosaicaItemCard extends MosaicaElement {
           <div class="row actions">
             ${open}
             <button part="copy" class="btn" type="button" @click=${() => void this.copy(id)}>Copy id</button>
-            <span class="copied" role="status">${this.copied}</span>
+            <span class="sr-only" role="status">${this.copied}</span>
           </div>`
       };
     }
@@ -472,21 +477,21 @@ export class MosaicaItemCard extends MosaicaElement {
 
   /**
    * Open, where the host says what it does: a button that calls `open`, else a link to `open-url`
-   * filled from the item, which opens in a new tab and says so, else nothing. Each fires
-   * `mosaica-open`.
+   * filled from the item, which opens in a new tab and says so to a screen reader, else nothing.
+   * Each fires `mosaica-open`. `mark` is drawn before the word.
    */
-  private openButton(id: string, fields: Record<string, unknown>): TemplateResult | typeof nothing {
+  private openButton(id: string, fields: Record<string, unknown>, mark: TemplateResult | typeof nothing): TemplateResult | typeof nothing {
     const pressed = () => emit(this, 'mosaica-open', {id, fields});
     const open = this.open;
     if (open)
       return html`<button part="open" class="btn" type="button" @click=${() => {
         pressed();
         open({id, fields});
-      }}>${icon('open', 14)}Open</button>`;
+      }}>${mark}Open</button>`;
     const href = this.openUrl ? openAddress(this.openUrl, {mosaica_id: id, ...fields}) : null;
     if (!href) return nothing;
     // A middle-click opens the link too, and is a press.
-    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed} @auxclick=${(e: MouseEvent) => e.button === 1 && pressed()}>${icon('open', 14)}Open<span class="sr-only"> (opens in a new tab)</span></a>`;
+    return html`<a part="open" class="btn" href=${href} target="_blank" rel="noopener noreferrer" @click=${pressed} @auxclick=${(e: MouseEvent) => e.button === 1 && pressed()}>${mark}Open<span class="sr-only"> (opens in a new tab)</span></a>`;
   }
 
   /** The fields of `fields` that `card-fields` names, in its order. */
@@ -523,7 +528,7 @@ export class MosaicaItemCard extends MosaicaElement {
           const view = meta?.views.find((v) => v.id === p.id) ?? null;
           const here = p.id === current;
           return html`<button part="view-chip" class="chip" type="button" data-view=${p.id} aria-current=${here ? 'true' : 'false'} @click=${() => this.follow(p, view?.quantisation ?? null)}>
-            ${here ? icon('check', 12, 1.6) : nothing}${view?.displayName ?? p.id}
+            ${view?.displayName ?? p.id}
           </button>`;
         })}
       </div>`;
@@ -583,7 +588,7 @@ export class MosaicaItemCard extends MosaicaElement {
     const toggle = () => (this.opened = new Set(whole ? [...this.opened].filter((n) => n !== name) : [...this.opened, name]));
     return html`<div part="field" data-name=${name} ?data-prose=${prose} style=${prose ? nothing : 'display:contents'}>
       <dt part="label" class="k">${caption}</dt>
-      <dd part="value" class="v"><slot name=${`field-${name}`}>${prose && !whole ? html`<span class="clamp">${text}</span>` : text}</slot></dd>
+      <dd part="value" class="v" title=${prose ? text : nothing}><slot name=${`field-${name}`}>${prose && !whole ? html`<span class="clamp">${text}</span>` : text}</slot></dd>
       ${prose && !this.compact && (whole || this.clipped.has(name))
         ? html`<dd><button part="more" class="more-link" type="button" aria-expanded=${whole ? 'true' : 'false'} aria-label=${`${whole ? 'Show less' : 'Show more'} of ${caption}`} @click=${toggle}>${whole ? 'Show less' : 'Show more'}</button></dd>`
         : nothing}
