@@ -1,3 +1,4 @@
+import type {LevelsInView} from './artifactChannel.js';
 import type {Layer} from './types.js';
 
 /**
@@ -98,24 +99,41 @@ export function browsableLayers(layers: readonly Layer[]): Layer[] {
   return layers.filter((l) => l.depsOn.length === 0 && l.hierarchy.kind !== 'flat');
 }
 
-const topLevels = new WeakMap<readonly unknown[], Map<string, number | undefined>>();
-
 /**
- * The top (coarsest) level of a `stacked` or `tiered` layer among those served now: the least
- * level of the layer's artifacts in `served`, which hold only the levels the camera's zoom
- * declares, or the layer's first declared level while none of its artifacts is served.
- * `undefined` on a layer of any other kind, and on one declaring no levels.
+ * Whether the level a `stacked` or `tiered` layer is drawn at follows the zoom where none is
+ * chosen: it declares levels, and none of them declares a zoom range.
  *
  * @internal
  */
-export function topLevelServed(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, served: readonly {layer: string; rung: number}[]): number | undefined {
+export function levelFollowsZoom(layer: Pick<Layer, 'hierarchy' | 'levels'>): boolean {
+  return (layer.hierarchy.kind === 'stacked' || layer.hierarchy.kind === 'tiered') && layer.levels.length > 0 && layer.levels.every((l) => l.zoom == null);
+}
+
+/**
+ * The level a `stacked` or `tiered` layer with no level chosen is drawn at, from what the tiles in
+ * view hold of it: `inView` is the artifacts projection's `levelsInView`.
+ *
+ * Where the layer follows the zoom ({@link levelFollowsZoom}), it is the finest level in view that
+ * is not crowded, else the coarsest in view. A level is crowded where a tile in view came back with
+ * its full `perTile` of it, or where more of its artifacts are in view than `budget`, the store's
+ * cluster budget; with no budget only a full tile crowds a level. Zooming in thins every level in
+ * view, so the level drawn deepens.
+ *
+ * Where a level declares a zoom range, it is the coarsest level in view, of those the camera's zoom
+ * selects. With nothing of the layer in view, it is the layer's coarsest level. `undefined` on a
+ * layer of any other kind, and on one declaring no levels.
+ *
+ * @internal
+ */
+export function levelInView(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, inView: LevelsInView, budget: number | null): number | undefined {
   if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
-  let held = topLevels.get(served);
-  if (!held) topLevels.set(served, (held = new Map()));
-  if (held.has(layer.name)) return held.get(layer.name);
-  let top: number | undefined;
-  for (const a of served) if (a.layer === layer.name && (top === undefined || a.rung < top)) top = a.rung;
-  top ??= layer.levels[0]!.level;
-  held.set(layer.name, top);
-  return top;
+  const held = inView.get(layer.name);
+  const levels = [...(held?.keys() ?? [])].sort((a, b) => a - b);
+  if (!held || levels.length === 0) return Math.min(...layer.levels.map((l) => l.level));
+  if (!levelFollowsZoom(layer)) return levels[0];
+  for (let i = levels.length - 1; i >= 0; i--) {
+    const at = held.get(levels[i]!)!;
+    if (!at.full && (budget === null || at.served <= budget)) return levels[i];
+  }
+  return levels[0];
 }

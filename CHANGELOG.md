@@ -86,6 +86,16 @@ container image.
   `<mosaica-colour-editor>` is replaced by a `clusterLevels` property, a `Map` from layer name to
   level, and the deck layer's `clusterLevel` prop by `clusterLevels`. `<mosaica-field-card>` keeps
   its one `level`.
+- **A levelled layer deepens as the map zooms in.** Where a `stacked` or `tiered` layer's levels
+  declare no zoom range and no level is chosen for it, the map draws, colours and counts it at the
+  finest level that is not crowded in view, which is the coarsest while every level is. A level is
+  crowded when a tile in view came back with its full `per_tile` of it, or when more of its
+  artifacts are in view than the cluster budget, so Most clusters in the explorer moves the zoom
+  at which each level is drawn, and shows while such a layer is drawn. The card's level choice and
+  Colour by offer Follow zoom, which clears the layer's level. A layer whose levels declare zoom
+  ranges is drawn at the coarsest level its range serves, as before. The store's `artifacts`
+  projection carries `levelsInView`, each level's count in view and whether a tile came back full
+  of it.
 - **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
   takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees

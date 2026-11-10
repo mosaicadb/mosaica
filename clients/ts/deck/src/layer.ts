@@ -18,7 +18,7 @@ import {
   type ShapeKind,
   type Store
 } from '@mosaicajs/client';
-import {NEUTRAL, topLevelServed} from '@mosaicajs/client/internal';
+import {NEUTRAL, levelInView} from '@mosaicajs/client/internal';
 import {materialiseStandIn, type StandInBuffers} from './assemble.js';
 import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
@@ -230,22 +230,32 @@ export function colourLayerOf(artifacts: Pick<ArtifactsProjection, 'layers'> | n
 
 /**
  * The level the layer `name` is coloured, named and outlined at, where it is `stacked` or `tiered`:
- * its entry in `chosen` where the layer declares that level, else the top (coarsest) level served
- * at the camera's zoom. On a layer of any other kind, or one missing from the roster, `undefined`:
- * each point takes its nearest served cluster.
+ * its entry in `chosen` where the layer declares that level, else the level in view under the
+ * cluster `budget` (`levelInView` in `@mosaicajs/client`): the finest that is not crowded where no
+ * level declares a zoom range, else the coarsest served at the camera's zoom. On a layer of any
+ * other kind, or one missing from the roster, `undefined`: each point takes its nearest served
+ * cluster.
  */
-export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'served'> | null, name: string | undefined, chosen: ReadonlyMap<string, number> | undefined): number | undefined {
+export function drawnLevel(
+  meta: Meta | null,
+  artifacts: Pick<ArtifactsProjection, 'levelsInView'> | null,
+  name: string | undefined,
+  chosen: ReadonlyMap<string, number> | undefined,
+  budget: number | null
+): number | undefined {
   const layer = name === undefined ? undefined : meta?.layers.find((l) => l.name === name);
   if (!layer || (layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered')) return undefined;
   const level = chosen?.get(layer.name);
-  return level !== undefined && layer.levels.some((l) => l.level === level) ? level : topLevelServed(layer, artifacts?.served ?? []);
+  return level !== undefined && layer.levels.some((l) => l.level === level) ? level : levelInView(layer, artifacts?.levelsInView ?? NOTHING_IN_VIEW, budget);
 }
 
+const NOTHING_IN_VIEW: ArtifactsProjection['levelsInView'] = new Map();
+
 /** {@link drawnLevel} for each layer drawn, keyed by name. A layer drawn at no level has no entry. */
-export function drawnLevels(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers' | 'served'> | null, chosen: ReadonlyMap<string, number> | undefined): Map<string, number> {
+export function drawnLevels(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers' | 'levelsInView'> | null, chosen: ReadonlyMap<string, number> | undefined, budget: number | null): Map<string, number> {
   const out = new Map<string, number>();
   for (const name of artifacts?.layers ?? []) {
-    const level = drawnLevel(meta, artifacts, name, chosen);
+    const level = drawnLevel(meta, artifacts, name, chosen, budget);
     if (level !== undefined) out.set(name, level);
   }
   return out;
@@ -1286,12 +1296,12 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
 
   /** The level marks are coloured at: that of the layer they are coloured from ({@link colourLayerOf}). */
   private colourLevel(r: Resolved): number | undefined {
-    return drawnLevel(r.meta, r.artifacts, colourLayerOf(r.artifacts, r.legend?.colourBy), this.props.clusterLevels);
+    return drawnLevel(r.meta, r.artifacts, colourLayerOf(r.artifacts, r.legend?.colourBy), this.props.clusterLevels, this.props.store?.clusterBudget ?? null);
   }
 
   /** The level each drawn layer is cut at ({@link drawnLevels}). */
   private levels(r: Resolved): Map<string, number> {
-    return drawnLevels(r.meta, r.artifacts, this.props.clusterLevels);
+    return drawnLevels(r.meta, r.artifacts, this.props.clusterLevels, this.props.store?.clusterBudget ?? null);
   }
 
   /**

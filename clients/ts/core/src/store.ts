@@ -1,5 +1,5 @@
 import {Aggregates, isDrawn, isPaletteDrawn, joinedAggregate, type AggregateBody, type AggregateSpec, type AggregatesProjection} from './aggregates.js';
-import {ArtifactChannel, requestLevels, servedLineage, type ArtifactChannelState, type ServedLineage} from './artifactChannel.js';
+import {ArtifactChannel, requestLevels, servedLineage, type ArtifactChannelState, type LevelsInView, type ServedLineage} from './artifactChannel.js';
 import {SessionArtifactTable, type ArtifactTable} from './artifactTable.js';
 import {BandBudget, bandKey, type Band, type BandKey} from './bands.js';
 import {tileRectOfBbox, type DepthChoice} from './budget.js';
@@ -392,6 +392,13 @@ export type ArtifactsProjection = {
   /** The parent-child links between the artifacts in `served`. */
   lineage: ServedLineage;
   /**
+   * What the tiles in view hold of each level of each `stacked` or `tiered` layer drawn or coloured
+   * by: how many of the level's artifacts they serve, and whether one of them came back with its
+   * full `perTile` of the level. Replaced with `served`. A level that follows the zoom is chosen
+   * from it.
+   */
+  levelsInView: LevelsInView;
+  /**
    * Text attached to artifacts, such as a clustering's topic labels, keyed by the artifact it
    * belongs to. {@link artifactName} uses it to name the artifacts in `served` and `colourServed`.
    */
@@ -747,11 +754,16 @@ export interface Store {
    * of their descendants. `null` removes the limit. The store fetches the affected layers again,
    * and any aggregate that ranks a layer at `cut: 'drawn'`. Anything but a positive whole number or
    * `null` is ignored.
+   *
+   * On a `stacked` or `tiered` layer whose levels declare no zoom range, a level with more than
+   * `budget` artifacts in view is crowded, and the components draw such a layer, where no level is
+   * chosen for it, at the finest level that is not ({@link ArtifactsProjection.levelsInView}).
    */
   setClusterBudget(budget: number | null): void;
   /**
-   * The most artifacts a `nested` or `dag` layer is drawn with, or `null` for no limit. Set by
-   * `artifacts.budget` in the options or by `setClusterBudget`.
+   * The most artifacts a `nested` or `dag` layer is drawn with, and the most a level that follows
+   * the zoom may have in view, or `null` for no limit. Set by `artifacts.budget` in the options or by
+   * `setClusterBudget`.
    */
   readonly clusterBudget: number | null;
   /**
@@ -1345,7 +1357,7 @@ export function createStore(options: StoreOptions): Store {
     view: noFrame(''),
     marks: {bands: [], standIn: [], count: NO_COUNT},
     tiles: {tiles: []},
-    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
+    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), levelsInView: new Map(), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
     filters: {draft: emptyDraft([]), expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
@@ -1974,6 +1986,7 @@ export function createStore(options: StoreOptions): Store {
       served,
       colourServed: coloured === null ? [] : state.artifacts.filter((a) => a.layer === coloured),
       lineage: servedLineage(served),
+      levelsInView: state.levelsInView,
       attached: attachedTextOf(state.artifacts, meta?.layers ?? []),
       status: state.status,
       refusal: state.refusal,
@@ -2674,6 +2687,8 @@ export function createStore(options: StoreOptions): Store {
     clusterBudget = next;
     for (const held of views.all()) held.channel.setBudget(next ?? undefined);
     aggregates.refresh(false, {which: drawsCut, changed: true});
+    // A level that follows the zoom is chosen under the budget, so what draws the artifacts reads them again.
+    replaceProjection('artifacts', {...projections.artifacts});
   }
 
   function setPalette(next: PaletteName): void {

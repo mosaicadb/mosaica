@@ -1,5 +1,5 @@
-import type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregateTable, Layer, Meta, Store} from '@mosaicajs/client';
-import {jsonBody, topLevelServed} from '@mosaicajs/client/internal';
+import type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregateTable, Layer, LevelsInView, Meta, Store} from '@mosaicajs/client';
+import {jsonBody, levelInView} from '@mosaicajs/client/internal';
 
 /**
  * One listed group of an aggregate table: its key (a vocabulary key for a field, an artifact's
@@ -58,12 +58,13 @@ export function isTree(layer: Pick<Layer, 'hierarchy'>): boolean {
 
 /**
  * The level of a `stacked` or `tiered` layer that is counted and coloured: `chosen` where the layer
- * declares it, else its top (coarsest) level among those `served` at the camera's zoom, as the
- * map draws it. `undefined` on a layer with no levels to choose.
+ * declares it, else the level the map draws from what is in view (`inView`, the artifacts
+ * projection's `levelsInView`) under the cluster `budget` ({@link levelInView}). `undefined` on a
+ * layer with no levels to choose.
  */
-export function levelOf(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, chosen: number | null, served: readonly {layer: string; rung: number}[] = []): number | undefined {
+export function levelOf(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, chosen: number | null, inView: LevelsInView = new Map(), budget: number | null = null): number | undefined {
   if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
-  return chosen !== null && layer.levels.some((l) => l.level === chosen) ? chosen : topLevelServed(layer, served);
+  return chosen !== null && layer.levels.some((l) => l.level === chosen) ? chosen : levelInView(layer, inView, budget);
 }
 
 /**

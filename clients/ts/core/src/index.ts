@@ -61,7 +61,7 @@ export type {SuggestionPage, SuggestState} from './suggestions.js';
 export type {Band, BandMembership} from './bands.js';
 export type {ComposedTile, Composition, StandInPiece} from './compose.js';
 export type {PresentedStatus, Refusal} from './presented.js';
-export {subtreeOf, type ServedLineage} from './artifactChannel.js';
+export {subtreeOf, type LevelInView, type LevelsInView, type ServedLineage} from './artifactChannel.js';
 export {NO_ORDINAL, type ArtifactEntry, type ArtifactTable, type ArtifactTableChange} from './artifactTable.js';
 export type {Domain, Ranks, ValueSample} from './encoding.js';
 export {DEFAULT_PALETTE, NEUTRAL, PALETTES, artifactColour, paletteSize, type ChosenColours, type Palette, type PaletteName, type Rgba} from './palette.js';

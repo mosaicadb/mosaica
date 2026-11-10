@@ -1280,10 +1280,10 @@ describe('<mosaica-explorer> the level chosen for each layer', () => {
   const levelled = (name: string, kind: string) =>
     ({name, title: name, views: ['s0'], membership: 'enumerated', hierarchy: {kind, pruneChildren: false}, levels: [{level: 0, title: `${name} broad`}, {level: 1, title: `${name} fine`}], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1}) as unknown as Meta['layers'][number];
 
-  async function withLayers() {
+  async function withLayers(extra: Meta['layers'] = []) {
     const host = await mount('<mosaica-explorer></mosaica-explorer>');
     const el = host.querySelector('mosaica-explorer') as HTMLElement & {store: unknown};
-    const store = fakeStore({meta: {...META, layers: [levelled('taxonomy', 'tiered'), levelled('strata', 'stacked')]}, status: status({})});
+    const store = fakeStore({meta: {...META, layers: [levelled('taxonomy', 'tiered'), levelled('strata', 'stacked'), ...extra]}, status: status({})});
     el.store = store;
     await settle(host);
     const shadow = el.shadowRoot!;
@@ -1323,6 +1323,50 @@ describe('<mosaica-explorer> the level chosen for each layer', () => {
     await settle(host);
     expect((await option('cluster:taxonomy@1')).getAttribute('aria-checked')).toBe('true');
     expect((await option('cluster:taxonomy@0')).getAttribute('aria-checked')).toBe('false');
+    expect((await option('cluster:taxonomy@')).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('offers Follow zoom where no level declares a zoom range, chosen while the layer has no level, and clears its level', async () => {
+    const ranged = {...levelled('admin', 'tiered'), levels: [{level: 0, title: 'Country', zoom: [0, 4]}, {level: 1, title: 'Region', zoom: [5, 16]}]} as unknown as Meta['layers'][number];
+    const {host, store, shadow, levels} = await withLayers([ranged]);
+    const seen: unknown[] = [];
+    host.addEventListener('mosaica-levelchange', (e) => seen.push(e.detail));
+    store.set('legend', {...store.get('legend'), colourBy: 'cluster:taxonomy'});
+    shadow.querySelector<HTMLButtonElement>('[part="layers-toggle"]')!.click();
+    await settle(host);
+    const options = async () => {
+      if (!shadow.querySelector('[part~="colour-option"]')) {
+        shadow.querySelector<HTMLButtonElement>('[part~="colour-by"]')!.click();
+        await settle(host);
+      }
+      return [...shadow.querySelectorAll<HTMLButtonElement>('[part~="colour-option"]')].filter((o) => o.dataset.value!.startsWith('cluster:'));
+    };
+    // Following the zoom, the fine level fits in view: the map draws it, and Follow zoom is checked.
+    store.set('artifacts', {...store.get('artifacts'), levelsInView: new Map([['taxonomy', new Map([[0, {served: 2, full: false}], [1, {served: 9, full: false}]])]])});
+    await settle(host);
+    expect((await options()).map((o) => [o.dataset.value, o.textContent!.trim(), o.getAttribute('aria-checked')])).toEqual([
+      ['cluster:taxonomy@', 'taxonomy, follow zoomClusters', 'true'],
+      ['cluster:taxonomy@0', 'taxonomy broadClusters', 'false'],
+      ['cluster:taxonomy@1', 'taxonomy fineClusters', 'false'],
+      ['cluster:strata@', 'strata, follow zoomClusters', 'false'],
+      ['cluster:strata@0', 'strata broadClusters', 'false'],
+      ['cluster:strata@1', 'strata fineClusters', 'false'],
+      // The publisher's zoom ranges choose the level, so there is nothing to follow.
+      ['cluster:admin@0', 'CountryClusters', 'false'],
+      ['cluster:admin@1', 'RegionClusters', 'false']
+    ]);
+    (await options()).find((o) => o.dataset.value === 'cluster:taxonomy@0')!.click();
+    await settle(host);
+    expect(levels()).toEqual({taxonomy: 0});
+    (await options()).find((o) => o.dataset.value === 'cluster:taxonomy@')!.click();
+    await settle(host);
+    expect(levels()).toEqual({});
+    expect(seen).toEqual([
+      {layer: 'taxonomy', level: 0},
+      {layer: 'taxonomy', level: null}
+    ]);
+    expect(store.calls.filter((c) => c.name === 'setColourBy').map((c) => c.args)).toEqual([['cluster:taxonomy'], ['cluster:taxonomy']]);
+    expect((await options()).find((o) => o.dataset.value === 'cluster:taxonomy@')!.getAttribute('aria-checked')).toBe('true');
   });
 
   it('sets only the named layer’s level when a card chooses one, and its default where the card resets it', async () => {
@@ -1493,6 +1537,27 @@ describe('<mosaica-explorer> the cluster budget', () => {
     expect(budgets(store)).toEqual([1_000, null]);
     const none = await withLayers('<mosaica-explorer cluster-budget="0"></mosaica-explorer>');
     expect(budgets(none.store)).toEqual([]);
+  });
+
+  it('offers Most clusters while a levelled layer that follows the zoom is drawn or coloured by, and not once a level is chosen for it', async () => {
+    const followed = {...tree, name: 'bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: null}, {level: 1, title: 'Fine', zoom: null}]} as unknown as Meta['layers'][number];
+    const ranged = {...followed, name: 'admin', levels: [{level: 0, title: 'Country', zoom: [0, 4]}, {level: 1, title: 'Region', zoom: [5, 16]}]} as unknown as Meta['layers'][number];
+    const {host, shadow, store} = await withLayers();
+    store.set('meta', {...store.get('meta')!, layers: [tree, flat, followed, ranged]});
+    const slider = () => shadow.querySelector<HTMLInputElement>('[part="most-clusters"]');
+    store.set('artifacts', {...store.get('artifacts'), layers: ['admin']});
+    await settle(host);
+    expect(slider()).toBeNull();
+    store.set('artifacts', {...store.get('artifacts'), layers: ['admin', 'bands']});
+    await settle(host);
+    expect(slider()).not.toBeNull();
+    store.set('artifacts', {...store.get('artifacts'), layers: ['flat']});
+    store.set('legend', {...store.get('legend'), colourBy: 'cluster:bands'});
+    await settle(host);
+    expect(slider()).not.toBeNull();
+    emit(shadow.querySelector('mosaica-map')!, 'mosaica-levelchange', {layer: 'bands', level: 1});
+    await settle(host);
+    expect(slider()).toBeNull();
   });
 
   it('offers Most clusters only while a tree layer is drawn, from cluster-budget-min to cluster-budget-max, and sets the cut only when it is let go', async () => {

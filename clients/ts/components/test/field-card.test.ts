@@ -1071,38 +1071,59 @@ describe('<mosaica-field-card> on text', () => {
 });
 
 describe('<mosaica-field-card> on a levelled layer', () => {
-  it('counts at the top level and shows it chosen until another is chosen', async () => {
-    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad'}, {level: 1, title: 'Fine'}]} as unknown as Meta['layers'][number];
+  const levelsIn = (levels: [number, number, boolean][]) => new Map([['bands', new Map(levels.map(([level, served, full]) => [level, {served, full}]))]]);
+
+  it('follows the zoom until a level is chosen, and Follow zoom goes back to it', async () => {
+    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: null}, {level: 1, title: 'Fine', zoom: null}]} as unknown as Meta['layers'][number];
     const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
     card.store = store;
     await settle(host);
+    // Nothing in view: the coarsest level.
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
-    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
-    expect(select.getAttribute('aria-label')).toContain('Bands');
-    expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['Broad', true], ['Fine', false]]);
+    const select = () => deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect(select().getAttribute('aria-label')).toContain('Bands');
+    expect([...select().options].map((o) => [o.textContent, o.value, o.selected])).toEqual([
+      ['Follow zoom', '', true],
+      ['Broad', '0', false],
+      ['Fine', '1', false]
+    ]);
+    // Zoomed in, the fine level fits in view, and the card counts at it.
+    store.set('artifacts', {...store.get('artifacts'), levelsInView: levelsIn([[0, 2, false], [1, 9, false]])});
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+    expect(select().value).toBe('');
     const chosen: unknown[] = [];
     host.addEventListener('mosaica-levelchange', (e) => chosen.push(e.detail));
-    select.value = '1';
-    select.dispatchEvent(new Event('change'));
+    select().value = '0';
+    select().dispatchEvent(new Event('change'));
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
+    select().value = '';
+    select().dispatchEvent(new Event('change'));
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
     // The choice names the card's layer, so a listener sets that layer's level alone.
-    expect(chosen).toEqual([{layer: 'bands', level: 1}]);
+    expect(chosen).toEqual([
+      {layer: 'bands', level: 0},
+      {layer: 'bands', level: null}
+    ]);
   });
 
-  it('counts at the top level the camera’s zoom serves, where the top declared level is not served', async () => {
+  it('counts at the coarsest level in view where the levels declare zoom ranges, and offers no Follow zoom', async () => {
     const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: [0, 5]}, {level: 1, title: 'Fine', zoom: [4, 16]}]} as unknown as Meta['layers'][number];
     const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
-    store.set('artifacts', {...store.get('artifacts'), served: [{layer: 'bands', rung: 1, mosaicaId: 5n}] as never});
+    store.set('artifacts', {...store.get('artifacts'), levelsInView: levelsIn([[1, 1, false]])});
     card.store = store;
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
-    expect((deep(host, '[part="level-select"]') as HTMLSelectElement).value).toBe('1');
+    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect(select.value).toBe('1');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Broad', 'Fine']);
   });
 });

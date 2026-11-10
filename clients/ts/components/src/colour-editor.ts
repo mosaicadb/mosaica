@@ -437,7 +437,8 @@ export class MosaicaColourEditor extends MosaicaElement {
 
   /** The level `layer` is listed at ({@link levelOf}). */
   private levelOf(layer: Layer): number | undefined {
-    return levelOf(layer, this.chosenIn(this.clusterLevels), this.resolvedStore?.get('artifacts').served ?? []);
+    const s = this.resolvedStore;
+    return levelOf(layer, this.chosenIn(this.clusterLevels), s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
   }
 
   /** The layer listed, where `field` names one the points can be coloured by. */

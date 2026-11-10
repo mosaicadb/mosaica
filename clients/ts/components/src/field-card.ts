@@ -24,6 +24,7 @@ import {
 } from '@mosaicajs/client';
 import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
+import {levelFollowsZoom} from '@mosaicajs/client/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, levelOf, listedGroups, rankedGrouping} from './aggregate.js';
 import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
@@ -211,7 +212,8 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - The paint
  *   button changed what the map is coloured by.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The Level
- *   choice of a levelled layer's card changed. The detail names the card's layer.
+ *   choice of a levelled layer's card changed. The detail names the card's layer, and a `level` of
+ *   `null` for Follow zoom.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - A category
  *   value's colour was chosen or reset in the colour picker.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clustercolour']>} mosaica-clustercolour - A
@@ -221,7 +223,8 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @csspart head - The heading: the name, what it notes, and the buttons.
  * @csspart title - The field's name, a heading that names the card.
  * @csspart sub - What the heading notes: the field's figures, or the Level choice.
- * @csspart level-select - The Level choice, on a levelled layer's card.
+ * @csspart level-select - The Level choice, on a levelled layer's card. Where no level declares a
+ *   zoom range, its first option is Follow zoom.
  * @csspart spark - The small chart of a folded card.
  * @csspart paint - The paint button, with `aria-pressed`.
  * @csspart fold - The fold button, with `aria-expanded`.
@@ -852,7 +855,10 @@ export class MosaicaFieldCard extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor folded = false;
   /** Draws a folded card in the compact style the explorer uses in narrow containers. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level a card for a layer with levels counts at. `null` is the coarsest level. */
+  /**
+   * The level a card for a layer with levels counts at. `null` is the level the map draws: where no
+   * level declares a zoom range, the finest that is not crowded in view, else the coarsest served.
+   */
   @property({type: Number, attribute: 'cluster-level'}) accessor level: number | null = null;
 
   /** Whether "N more" was pressed. @internal */
@@ -883,12 +889,13 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /**
    * Draw again only when what the card reads changed: its counts, the clauses, the colouring, the
-   * view, or the palette and chosen colours a layer's clusters take. The store publishes as each
-   * frame arrives, which changes none of these.
+   * view, the palette and chosen colours a layer's clusters take, or the level a levelled layer is
+   * drawn at. The store publishes as each frame arrives, which changes none of these.
    */
   protected override onStoreChange(): void {
     const s = this.resolvedStore;
-    const now = s ? [s.get('aggregates'), s.get('filters'), s.get('legend'), s.get('meta'), s.get('view').id, s.get('artifacts').palette, s.get('artifacts').overrides] : [];
+    const layer = this.declaredLayer(s?.get('meta') ?? null);
+    const now = s ? [s.get('aggregates'), s.get('filters'), s.get('legend'), s.get('meta'), s.get('view').id, s.get('artifacts').palette, s.get('artifacts').overrides, layer ? this.levelOf(layer) : undefined] : [];
     if (now.length === this.drawnFrom.length && now.every((v, i) => v === this.drawnFrom[i])) return;
     this.drawnFrom = now;
     super.onStoreChange();
@@ -947,9 +954,10 @@ export class MosaicaFieldCard extends MosaicaElement {
     return (kind === 'category' || kind === 'histogram') && meta.declaredScalars.some((c) => c.name === this.field && c.render);
   }
 
-  /** The level a levelled layer's card counts and browses at: the one chosen, else the top level. */
+  /** The level a levelled layer's card counts and browses at: the one chosen, else the one the map draws. */
   private levelOf(layer: Layer): number | undefined {
-    return levelOf(layer, this.level, this.resolvedStore?.get('artifacts').served ?? []);
+    const s = this.resolvedStore;
+    return levelOf(layer, this.level, s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
   }
 
   /** The keys of the field's clause in `verb`: a category's values, a bool's, or a layer's clusters by id. */
@@ -1271,10 +1279,14 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   private valueCard(s: Store, kind: Kind, layer: Layer | null, title: string, head: (sub: TemplateResult | typeof nothing) => TemplateResult, colouring: boolean): TemplateResult {
     const levelled = layer ? this.levelOf(layer) : undefined;
+    // Follow zoom is offered where no level declares a zoom range, and is chosen while no level is.
+    const follows = layer !== null && levelFollowsZoom(layer);
+    const following = follows && !layer.levels.some((l) => l.level === this.level);
     const sub =
       layer && levelled !== undefined && layer.levels.length > 1
         ? html`<span part="sub" class="choice"><select part="level-select" aria-label=${`${title} level`} @change=${(e: Event) => this.chooseLevel((e.target as HTMLSelectElement).value)}>
-              ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${levelled === l.level}>${l.title || `Level ${l.level}`}</option>`)}
+              ${follows ? html`<option value="" ?selected=${following}>Follow zoom</option>` : nothing}
+              ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${!following && levelled === l.level}>${l.title || `Level ${l.level}`}</option>`)}
             </select>${icon('chev', 12, 1.4)}</span>`
         : html`<span part="sub"></span>`;
     if (this.folded) return head(sub);

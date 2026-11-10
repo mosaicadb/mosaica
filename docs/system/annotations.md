@@ -28,7 +28,7 @@ An `enumerated` membership is fixed at what its table says: an item inserted lat
 | `tiered` | levels, each artifact naming a parent at a coarser level | field, subfield and topic; country, region and district |
 | `stacked` | levels with no relations between them | the same data clustered at three resolutions |
 
-A tiered or stacked layer declares its levels, each with an optional title and an optional zoom range, which picks the level a request that names none is answered at. A nested or dag layer has no levels: the map cuts through the tree as it zooms, as described [below](#on-the-map).
+A tiered or stacked layer declares its levels, each with an optional title and an optional zoom range, which picks the level a request that names none is answered at. A layer whose levels declare no zoom range is answered at every level, and the browser components then draw it at the finest level that is not crowded in view, so it deepens as the viewer zooms in; [the level](browser-maps.md#what-the-deck-layer-and-the-components-add) gives the rule. A nested or dag layer has no levels: the map cuts through the tree as it zooms, as described [below](#on-the-map).
 
 ### What each artifact carries
 

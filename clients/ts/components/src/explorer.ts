@@ -6,7 +6,7 @@ import type {ArtifactDetail, ItemDetail, PaletteName, Store} from '@mosaicajs/cl
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import {CATEGORY_PALETTES, DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DENSITY_CELL_SIZES, RAMPS, cellDepth, nearestStop} from '@mosaicajs/deck';
 import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, colourLayers, emptyDraft} from '@mosaicajs/client';
-import {hasOneLayout, sizesPoints} from '@mosaicajs/client/internal';
+import {hasOneLayout, levelFollowsZoom, sizesPoints} from '@mosaicajs/client/internal';
 import {DENSITY_COLOUR_TITLES, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
 import {MosaicaElement, columnCaption, emit, shortCount} from './base.js';
 import {placeCallout, type Rect, type Side} from './callout.js';
@@ -229,7 +229,8 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart points-toggle - The Points switch, with `aria-checked`.
  * @csspart most-points - The Most points slider.
  * @csspart most-points-value - The number of points it stands at, such as "250K".
- * @csspart most-clusters - The Most clusters slider, while a `nested` or `dag` layer is drawn.
+ * @csspart most-clusters - The Most clusters slider, while a `nested` or `dag` layer is drawn, or a
+ *   levelled layer whose level follows the zoom is drawn or coloured by.
  * @csspart most-clusters-value - The number of clusters it stands at, such as "1K".
  * @csspart size-by - The Size by button, naming the column the points are sized by or None, with
  *   `aria-expanded` while its menu is open.
@@ -247,7 +248,8 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  *   `aria-expanded` while its menu is open.
  * @csspart colour-menu - The Colour by menu, while it is open.
  * @csspart colour-option - An entry in the Colour by menu, with `data-value` (empty for None,
- *   `cluster:<layer>@<level>` for one level of a levelled layer) and `aria-checked`.
+ *   `cluster:<layer>@<level>` for one level of a levelled layer, `cluster:<layer>@` for Follow zoom
+ *   on one whose levels declare no zoom range) and `aria-checked`.
  * @csspart palette - The Palette button, while the points are coloured by a layer or a category.
  * @csspart palette-menu - The Palette menu, while it is open.
  * @csspart palette-option - A palette in that menu, with `data-value` and `aria-checked`.
@@ -825,8 +827,8 @@ export class MosaicaExplorer extends MosaicaElement {
   /** The highest value of the Most points slider. */
   @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to; `0` removes the limit. Most clusters in
-   * the Layers popover changes it.
+   * The most clusters a `nested` or `dag` layer is cut to, and the most a level that follows the
+   * zoom may have in view; `0` removes the limit. Most clusters in the Layers popover changes it.
    */
   @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 1_000;
   /** The lowest value of the Most clusters slider. */
@@ -1665,18 +1667,23 @@ export class MosaicaExplorer extends MosaicaElement {
   }
 
   /**
-   * Most clusters, while a `nested` or `dag` layer is drawn: a slider from `cluster-budget-min` to
-   * `cluster-budget-max` as Most points is. Letting go sets the most clusters such a layer is cut to.
+   * Most clusters, while a `nested` or `dag` layer is drawn, or a levelled layer following the zoom
+   * is drawn or coloured by: a slider from `cluster-budget-min` to `cluster-budget-max` as Most
+   * points is. Letting go sets the most clusters such a layer is cut to, or a followed level may
+   * have in view.
    */
   private mostClusters(): TemplateResult | typeof nothing {
     const s = this.resolvedStore;
     const meta = s?.get('meta') ?? null;
     if (!s || !meta) return nothing;
-    const treed = s.get('artifacts').layers.some((name) => {
-      const kind = meta.layers.find((l) => l.name === name)?.hierarchy.kind;
-      return kind === 'nested' || kind === 'dag';
+    const colourBy = s.get('legend').colourBy;
+    const coloured = colourBy?.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
+    const steered = [...s.get('artifacts').layers, ...(coloured === null ? [] : [coloured])].some((name) => {
+      const layer = meta.layers.find((l) => l.name === name);
+      if (!layer) return false;
+      return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag' || (levelFollowsZoom(layer) && !this.levels.has(name));
     });
-    if (!treed) return nothing;
+    if (!steered) return nothing;
     return this.mostSlider({
       id: 'most-clusters',
       label: 'Most clusters',
@@ -1796,7 +1803,8 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /**
    * What Colour by offers: None, every layer that can colour (a levelled layer once per level, by
-   * its levels' titles), and the rendered category and number columns.
+   * its levels' titles, after Follow zoom where no level declares a zoom range), and the rendered
+   * category and number columns.
    */
   private colourOptions(): {value: string; title: string; kind: string; checked: boolean}[] {
     const s = this.resolvedStore;
@@ -1806,14 +1814,20 @@ export class MosaicaExplorer extends MosaicaElement {
     const layers = colourLayers(meta.layers).flatMap((decl) => {
       const value = `${CLUSTER_PREFIX}${decl.name}`;
       if (decl.levels.length <= 1) return [{value, title: decl.title || decl.name, kind: 'Clusters', checked: colourBy === value}];
-      const drawn = levelOf(decl, this.levels.get(decl.name) ?? null, s?.get('artifacts').served ?? []);
-      return decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && drawn === lv.level}));
+      const chosen = this.levels.get(decl.name) ?? null;
+      const following = levelFollowsZoom(decl) && !decl.levels.some((lv) => lv.level === chosen);
+      const drawn = levelOf(decl, chosen, s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
+      const follow = levelFollowsZoom(decl) ? [{value: `${value}@`, title: `${decl.title || decl.name}, follow zoom`, kind: 'Clusters', checked: colourBy === value && following}] : [];
+      return [...follow, ...decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && !following && drawn === lv.level}))];
     });
     const columns = meta.declaredScalars.filter((c) => c.render).map((c) => ({value: c.name, title: columnCaption(c.name), kind: c.category ? 'Category' : c.arrowType === 'timestamp_us' ? 'Date' : 'Number', checked: colourBy === c.name}));
     return [{value: '', title: 'None', kind: '', checked: colourBy === null}, ...layers, ...columns];
   }
 
-  /** Colour by `value`: a column, `cluster:<layer>`, or `cluster:<layer>@<level>` for one level of a layer. */
+  /**
+   * Colour by `value`: a column, `cluster:<layer>`, `cluster:<layer>@<level>` for one level of a
+   * layer, or `cluster:<layer>@` for the level that follows the zoom.
+   */
   private chooseColour(value: string): void {
     const s = this.resolvedStore;
     if (!s) return;
@@ -1823,7 +1837,7 @@ export class MosaicaExplorer extends MosaicaElement {
     emit(this, 'mosaica-colourchange', {colourBy});
     if (at > 0 && colourBy !== null) {
       const layer = colourBy.slice(CLUSTER_PREFIX.length);
-      const level = Number(value.slice(at + 1));
+      const level = at === value.length - 1 ? null : Number(value.slice(at + 1));
       this.chooseLevel(layer, level);
       emit(this, 'mosaica-levelchange', {layer, level});
     }

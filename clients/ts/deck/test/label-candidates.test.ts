@@ -55,7 +55,7 @@ function projection(input: Artifact[]): ArtifactsProjection {
   const served = withRungs(input);
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds, rung: a.rung})));
-  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
+  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
 }
 
 const META = {layers: [{name: 'clusters', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: []}, {name: 'topics', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: ['clusters']}]} as unknown as Meta;
@@ -129,19 +129,19 @@ describe('a level chosen for one layer', () => {
 
   it('cuts that layer only: a nested layer drawn beside it keeps its leaves at every level', () => {
     const p = drawn();
-    const coarse = drawnLevels(LEVELLED, p, new Map([['taxonomy', 0]]));
+    const coarse = drawnLevels(LEVELLED, p, new Map([['taxonomy', 0]]), null);
     expect(coarse).toEqual(new Map([['taxonomy', 0]]));
     expect(ids(frontier(p, coarse))).toEqual(['1', '12']);
     expect(ids(labelCandidates(p, LEVELLED, coarse, 0, 10).candidates.map((c) => c.id))).toEqual(['1', '12']);
-    const fine = drawnLevels(LEVELLED, p, new Map([['taxonomy', 1]]));
+    const fine = drawnLevels(LEVELLED, p, new Map([['taxonomy', 1]]), null);
     expect(ids(frontier(p, fine))).toEqual(['12', '2']);
   });
 
   it('is never applied to a nested layer, whose rung is a depth', () => {
     const p = drawn();
-    // Unchosen, the tiered layer is drawn at its coarsest level served and the tree at its leaves.
-    expect(drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))).toEqual(new Map([['taxonomy', 0]]));
-    expect(ids(frontier(p, drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))))).toEqual(['1', '12']);
+    // Unchosen with nothing of it in view, the tiered layer is drawn at its coarsest level, and the tree at its leaves.
+    expect(drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]), null)).toEqual(new Map([['taxonomy', 0]]));
+    expect(ids(frontier(p, drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]), null)))).toEqual(['1', '12']);
   });
 });
 

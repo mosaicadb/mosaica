@@ -110,7 +110,7 @@ function artifactsProjection(served: Artifact[]): ArtifactsProjection {
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds})));
   return {
-    layer: 'counties', layers: ['counties'], served, colourServed: [], attached: attachedTextOf(served, META.layers), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: served.length, table,
+    layer: 'counties', layers: ['counties'], served, colourServed: [], levelsInView: new Map(), attached: attachedTextOf(served, META.layers), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: served.length, table,
     servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map([...ordinals].map((o) => [o, [31, 119, 180, 255] as const])), palette: 'tableau10', overrides: new Map(), coverage: {current: 3, stale: 0}
   };
 }

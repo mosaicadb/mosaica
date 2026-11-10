@@ -56,7 +56,7 @@ function artifactsProjection(served: Artifact[], layers = ['clusters', 'labels']
     layer: layers[0] ?? null,
     layers,
     served,
-    colourServed: [],
+    colourServed: [], levelsInView: new Map(),
     attached: attachedTextOf(served, META.layers),
     lineage: servedLineage(served),
     status: 'shown',

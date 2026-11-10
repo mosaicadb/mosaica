@@ -1732,16 +1732,16 @@ export class MosaicaMap extends MosaicaElement {
     this.regionHeard = `${formatMasked(region.matched)} ${region.shape.outside ? 'outside' : 'inside'} the selection`;
   }
 
-  /** The level the layer `name` is drawn at: its entry in `clusterLevels`, else the top level of a levelled layer. */
+  /** The level the layer `name` is drawn at: its entry in `clusterLevels`, else the level in view of a levelled layer. */
   private levelOf(name: string | null | undefined): number | undefined {
     const s = this.resolvedStore;
-    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, name ?? undefined, this.clusterLevels);
+    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, name ?? undefined, this.clusterLevels, s?.clusterBudget ?? null);
   }
 
   /** {@link levelOf} for each layer drawn. */
   private drawnLevels(): Map<string, number> {
     const s = this.resolvedStore;
-    return drawnLevels(s?.get('meta') ?? null, s?.get('artifacts') ?? null, this.clusterLevels);
+    return drawnLevels(s?.get('meta') ?? null, s?.get('artifacts') ?? null, this.clusterLevels, s?.clusterBudget ?? null);
   }
 
   /** Whether the map is drawn on a light or dark background now: `ground` if set, else the page's scheme. */

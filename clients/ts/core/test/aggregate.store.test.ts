@@ -780,8 +780,13 @@ describe('an aggregate ranking a layer at the drawn cut', () => {
     expect(cut.bbox[2]).toBeGreaterThanOrEqual(BOX[2]);
     expect('budget' in cut).toBe(false);
     expect(store.clusterBudget).toBeNull();
+    // A level that follows the zoom is chosen under the budget, so what draws the artifacts is told.
+    const told: unknown[] = [];
+    const unsubscribe = store.subscribe('artifacts', (a) => told.push(a));
     store.setClusterBudget(40);
     await flush();
+    unsubscribe();
+    expect(told.length).toBeGreaterThan(0);
     expect(pending.filter(ranked).map(cutOf)).toEqual([cut, {...cut, budget: 40}]);
     expect(store.clusterBudget).toBe(40);
     // Not a whole number above zero, or the same budget: nothing changes and nothing is asked.
