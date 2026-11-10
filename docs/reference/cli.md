@@ -115,7 +115,7 @@ A viewer address of `0.0.0.0` or `[::]` is reached on loopback, so run the comma
 ## `mosaica items`
 
 ```text
-mosaica items [OPTIONS] --view <VIEW> --fields <NAMES> --server <URL>
+mosaica items [OPTIONS] --view <VIEW> --server <URL>
 ```
 
 Read every item a session token may see in one view, with the fields named, from a running server, and write them as Arrow IPC or Parquet.
@@ -131,7 +131,7 @@ For example, `mosaica items --server http://127.0.0.1:8080 --view papers --field
 | Argument | Value | Default | Description |
 | --- | --- | --- | --- |
 | `--view` | `VIEW` |  | The view to read, as `/v1/meta` names it. An item with no position in it is not returned. |
-| `--fields` | `NAMES` |  | The declared fields to return, comma-separated, in the order wanted. `--fields ''` returns `mosaica_id` alone. A field declared for a view group, read under a view outside that group, is named `<field>@<key>`. An undeclared or repeated field is refused. |
+| `--fields` | `NAMES` |  | The declared fields to return, comma-separated, in the order wanted. Without it every field the view reads under its bare name is returned, and `--fields ''` returns `mosaica_id` alone. A field declared for a view group, read under a view outside that group, is named `<field>@<key>`. An undeclared or repeated field is refused. |
 | `--position` |  |  | Return each item's position in the view as the columns `mosaica:x` and `mosaica:y`. |
 | `--labels` |  |  | Return the clauses of each item's labels the token satisfies as the column `mosaica:labels`. |
 | `--filters` | `JSON` |  | A filter expression as JSON, such as `{"year": {"range": {"gte": 2020}}}`. Only the items that match are returned. |
