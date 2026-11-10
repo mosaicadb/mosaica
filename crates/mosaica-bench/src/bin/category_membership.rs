@@ -161,7 +161,7 @@ fn main() {
         // Run-encode before measuring: it is what a writer would store, and the difference it
         // makes *is* the contiguity this probe is about.
         optimised.run_optimize();
-        // Portable format: the same encoding `postings.arrow` stores, so the figure is the
+        // Portable format: the same encoding `postings` stores, so the figure is the
         // artefact's real size rather than an in-memory one.
         let bytes = optimised.get_serialized_size_in_bytes::<Portable>();
         let container_count = containers(bitmap);

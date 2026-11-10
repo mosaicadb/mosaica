@@ -79,11 +79,19 @@
 //!
 //! ⊘ **The memory figure is a lower bound, and measured to be about half the real peak.**
 //! Transients inside a stage — a Parquet decode buffer, an analyser's scratch, the allocator's own
-//! slack — are not enumerated, and [`SLACK`] is one constant standing in for all of them. The one build it has been
-//! checked against ([`tests::the_model_is_checked_against_an_observed_peak`], 10⁶ items, one `text`
-//! column, 10⁶ member rows) read **190 MiB against an observed 407 MiB**, and the trace shows why:
-//! the process was already at 331 MiB in its first stage, reading the points file, before a single
-//! term below existed.
+//! slack — are not enumerated, and [`SLACK`] is one constant standing in for all of them. The one
+//! build it has been measured against ([`tests::the_model_is_measured_against_an_observed_peak`],
+//! 10⁶ items, one `text` column, 10⁶ member rows) read **208 MiB against an observed 338 MiB**,
+//! leaving out the stages sized to what their phase leaves, and the trace shows why: the process
+//! was already at 332 MiB in its first stage, reading the points file, before a single term below
+//! existed.
+//!
+//! **A term index's pass takes what its phase leaves of the budget**, and is charged at that
+//! ([`Residency::with_term_indexes`], [`mosaica_filter_write::Allowance`]): the text index and the
+//! keyword dictionaries in the index phase, a group-scoped family's in the join. So the phase a
+//! text column is indexed in is charged the whole budget, a budget that cannot pay for the pass's
+//! floor beside the rest of its phase is refused, and the warning below a refusal doubles only what
+//! the phase holds beside the allowance, which the pass keeps as a bound of its own.
 //!
 //! ⊘ **The largest transient this leaves out is the member merge's own vector**, and it is not a
 //! function of anything the plan knows. `layers::merge_member_runs` holds every source id of the
@@ -105,7 +113,7 @@
 //!
 //! ⊘ **The disk figure is neither a bound nor a measurement, and it decides nothing.** Most terms
 //! are arithmetic over a fixed width and are exact; several are stated ceilings a term of the right
-//! shape sits far below (`postings.arrow` over a relation whose terms encode as runs — GBIF's 253
+//! shape sits far below (`postings` over a relation whose terms encode as runs — GBIF's 253
 //! country terms are 33,714 bytes against the hundreds of megabytes charged); and four are
 //! estimates that a corpus shape can exceed, each saying so at itself: the record blob's blocks at
 //! half the characters ([`EXTENT_SHARE`]), a published member entry at three bytes
@@ -254,8 +262,8 @@ pub(crate) struct Term {
     pub constant: bool,
 }
 
-/// What the plan sizes to the memory its stage has left: the three stages that hold as much as
-/// they are given rather than a fixed amount.
+/// What the plan sizes to the memory its stage has left: the stages that hold as much as they are
+/// given rather than a fixed amount.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Sizing {
     /// Member entries in one publication batch.
@@ -264,6 +272,12 @@ pub(crate) struct Sizing {
     pub unique_spill: u64,
     /// Workers the term-image pass runs across.
     pub term_image_workers: u64,
+    /// What each bundle-wide term index's pass may hold: the text index and the keyword
+    /// dictionaries, one column at a time, in the index phase. `None` where no column takes one.
+    pub term_index: Option<mosaica_filter_write::Allowance>,
+    /// What each group-scoped family's term index may hold, in the join phase, beside the
+    /// attribute join. `None` where no family takes one.
+    pub scoped_term_index: Option<mosaica_filter_write::Allowance>,
 }
 
 /// The entity-order residency, term by term, and the sizes it was fitted at.
@@ -292,6 +306,65 @@ impl Residency {
             .filter(|t| !t.mapped && t.phases.holds(phase))
             .map(|t| t.bytes)
             .sum()
+    }
+
+    /// **The term indexes' allowances, charged in the phases their passes run in.** A term index's
+    /// pass takes what its phase leaves of the budget ([`mosaica_filter_write::Allowance`]), so it
+    /// is sized after every other term of that phase, the stages sized to their own room among
+    /// them. `bundle` and `scoped` say whether a bundle-wide or a group-scoped column takes such a
+    /// pass, and only a phase one runs in is charged. The pass's floor is charged where the room
+    /// is less, so a budget that cannot pay for it is refused.
+    pub(crate) fn with_term_indexes(
+        mut self,
+        memory_budget: u64,
+        threads: usize,
+        bundle: bool,
+        scoped: bool,
+    ) -> Residency {
+        for (runs, phase, phases, what) in [
+            (bundle, Phase::Index, Phases::INDEX, "bundle-wide"),
+            (scoped, Phase::Join, Phases::JOIN, "group-scoped"),
+        ] {
+            if !runs {
+                continue;
+            }
+            let allowance =
+                mosaica_filter_write::Allowance::new(memory_budget, self.memory_at(phase), threads);
+            match phase {
+                Phase::Index => self.sizing.term_index = Some(allowance),
+                _ => self.sizing.scoped_term_index = Some(allowance),
+            }
+            self.terms.push(Term {
+                what: format!(
+                    "the {what} term index's allowance, one column at a time over {threads} \
+                     thread(s): what the {} phase leaves of the budget",
+                    phase.name()
+                ),
+                bytes: allowance.bytes,
+                mapped: false,
+                phases,
+                constant: true,
+            });
+        }
+        self
+    }
+
+    /// The allowance of the term index whose pass runs in `phase`, if one does.
+    pub fn term_index_at(&self, phase: Phase) -> Option<mosaica_filter_write::Allowance> {
+        match phase {
+            Phase::Index => self.sizing.term_index,
+            Phase::Join => self.sizing.scoped_term_index,
+            _ => None,
+        }
+    }
+
+    /// What `phase` holds beside its term index's allowance: the terms the model is a lower bound
+    /// over, the allowance being a bound the pass keeps itself.
+    pub fn memory_outside_term_indexes(&self, phase: Phase) -> u64 {
+        self.memory_at(phase)
+            - self
+                .term_index_at(phase)
+                .map_or(0, |allowance| allowance.bytes)
     }
 
     /// The phase that asks the machine for most, and what it comes to: the figure
@@ -543,7 +616,7 @@ const RECORD_UTF8_FIELD_BYTES: u64 = RECORD_FIELD_BYTES + 4;
 const ORACLE_BYTES_PER_PAIR_TENTHS: u64 = 42;
 
 /// What a `text` column's **token index** costs against its characters, in hundredths:
-/// `postings.arrow` and `dict.bin` together.
+/// `postings` and `dict.bin` together.
 ///
 /// ⊘ **An estimate above every measurement, not a ceiling.** Measured on the 10⁷ MedCPT sample:
 /// 0.166 of the characters on `abstract` (1.365 GB over 8.21 GB), 0.282 on `title`, 0.198 on
@@ -557,13 +630,35 @@ const ORACLE_BYTES_PER_PAIR_TENTHS: u64 = 42;
 /// column will be.
 const TEXT_INDEX_SHARE_PERCENT: u64 = 35;
 
-/// What a `text` column's `positions.arrow` costs against its characters, in hundredths.
+/// What a `text` column's `positions` costs against its characters, in hundredths.
 ///
 /// ⊘ **An estimate, not a ceiling.** A position is a gap packed to its run's width, a byte or less
 /// for every word but the rarest. Measured on the 2.4×10⁶ arXiv sample: 0.204 of the characters on
 /// `abstract` (471 MB over 2.31 GB), 0.137 on `title`, 0.227 on `authors`. Charged a little above
 /// the largest.
 const TEXT_POSITIONS_SHARE_PERCENT: u64 = 25;
+
+/// What a spilled text run holds against the bytes its accumulator had allocated, in hundredths.
+///
+/// ⊘ **Measured at one size, and low above it.** On 10⁶ synthetic English-like documents at 32 MiB
+/// an accumulator, runs averaged 8.9 MB: 0.27 of what wrote them. Most terms in a run occur once,
+/// so the share rises as an accumulator grows and holds more of each term, and a forecast at this
+/// share counts more runs than a larger allowance spills.
+const TEXT_RUN_SHARE_PERCENT: u64 = 25;
+
+/// The runs a text index over `characters` bytes of prose is forecast to spill under `allowance`:
+/// its fills, at the column's characters as [`entity_order_residency`] charges them, over a run's
+/// forecast size, less one a thread, since what each accumulator holds at the end of the pass is
+/// merged from memory.
+pub(crate) fn expected_text_runs(
+    characters: u64,
+    allowance: mosaica_filter_write::Allowance,
+) -> usize {
+    let run = (allowance.per_worker() as u64 * TEXT_RUN_SHARE_PERCENT / 100).max(1);
+    usize::try_from(characters.div_ceil(run))
+        .unwrap_or(usize::MAX)
+        .saturating_sub(allowance.threads)
+}
 
 /// What one `dict.bin` entry costs beyond the characters it holds, in tenths of a byte: two
 /// varints a key — the shared prefix length and the suffix length — and 8 bytes of restart offset
@@ -604,7 +699,7 @@ fn term_image_bitmap_bytes(n: u64) -> u64 {
     n.div_ceil(values_per_byte).saturating_mul(3)
 }
 
-/// What `terms/postings.arrow` comes to for a relation whose terms have these pre-dedup row
+/// What `terms/postings` comes to for a relation whose terms have these pre-dedup row
 /// counts, over an entity space of `n`.
 ///
 /// **Not `4 × pairs`, in either direction.** The file is one `LargeBinaryArray` record a term —
@@ -1311,6 +1406,7 @@ fn fit(
         publication_batch,
         unique_spill,
         term_image_workers,
+        ..Sizing::default()
     };
     residency
 }
@@ -1452,11 +1548,12 @@ pub(crate) fn plan_routes(
     numbers: NumberFiles,
     payloads: &[f64],
     free: Option<u64>,
+    budget: u64,
 ) -> (crate::pipeline::ColumnRoutes, Residency) {
     let spilled = crate::pipeline::ColumnRoutes::every_available(&args.schema);
     let (columns, entries, level_entries, layer_entries) =
         model_inputs(args, n, payloads, &spilled);
-    choose_routes(
+    let (routes, tail) = choose_routes(
         &args.schema,
         n,
         numbers,
@@ -1466,14 +1563,30 @@ pub(crate) fn plan_routes(
         level_entries,
         layer_entries,
         free,
-        args.memory_budget
-            .unwrap_or_else(crate::pipeline::detect_memory_budget),
-    )
+        budget,
+    );
+    (routes, with_term_indexes(args, tail, budget))
+}
+
+/// [`Residency::with_term_indexes`] for the passes this build's declaration takes: a text index or
+/// a keyword dictionary over a bundle-wide column, and over a group-scoped family.
+fn with_term_indexes(args: &crate::BuildArgs, tail: Residency, budget: u64) -> Residency {
+    let term_index = |ty: ScalarType| matches!(ty, ScalarType::Text | ScalarType::Keyword);
+    let bundle = args.schema.attributes.iter().any(|attribute| {
+        term_index(attribute.ty) && crate::pipeline::postings_are_owed(&args.schema, attribute)
+    });
+    let scoped = args.scoped_attributes.iter().any(|family| {
+        let attribute = &family.attribute;
+        attribute.ty == ScalarType::Keyword || (attribute.ty == ScalarType::Text && attribute.index)
+    });
+    tail.with_term_indexes(budget, rayon::current_num_threads(), bundle, scoped)
 }
 
 /// [`plan_routes`] unless the caller named the route ([`crate::ExtentRoute`]), in which case the
 /// named one is taken and the model is rebuilt over it — so the disk forecast a forced build
-/// prints describes the build it is about to run.
+/// prints describes the build it is about to run. `budget` is the one the caller checks the model
+/// against: a term index's allowance is what its phase leaves of it, so a second reading of the
+/// available memory would put that phase over or under the figure it is checked against.
 pub(crate) fn routes_for(
     args: &crate::BuildArgs,
     n: u64,
@@ -1481,19 +1594,19 @@ pub(crate) fn routes_for(
     payloads: &[f64],
     free: Option<u64>,
     route: crate::ExtentRoute,
+    budget: u64,
 ) -> (crate::pipeline::ColumnRoutes, Residency) {
     let numbers = NumberFiles {
         bytes: numbers_bytes,
     };
     let forced = match route {
-        crate::ExtentRoute::Derived => return plan_routes(args, n, numbers, payloads, free),
+        crate::ExtentRoute::Derived => {
+            return plan_routes(args, n, numbers, payloads, free, budget)
+        }
         crate::ExtentRoute::Arena => crate::pipeline::ColumnRoutes::forced_only(&args.schema),
         crate::ExtentRoute::Extents => crate::pipeline::ColumnRoutes::every_available(&args.schema),
     };
     let (columns, entries, level_entries, layer_entries) = model_inputs(args, n, payloads, &forced);
-    let budget = args
-        .memory_budget
-        .unwrap_or_else(crate::pipeline::detect_memory_budget);
     let tail = entity_order_residency(
         n,
         numbers,
@@ -1504,7 +1617,7 @@ pub(crate) fn routes_for(
         layer_entries,
         budget,
     );
-    (forced, tail)
+    (forced, with_term_indexes(args, tail, budget))
 }
 
 /// The **group-scoped render columns one view's row space carries**, at the view that carries the
@@ -1816,8 +1929,8 @@ pub(crate) fn disk(
     );
     push(
         format!(
-            "postings.arrow, one record over each of {} term(s) at its own row count — 8 B of \
-             Arrow offset and a tag each, then 4 B an entity below 32 of them and a ceiling of \
+            "the postings, one record over each of {} term(s) at its own row count — 8 B of \
+             offset and a tag each, then 4 B an entity below 32 of them and a ceiling of \
              Roaring above",
             term_rows.len()
         ),
@@ -1877,7 +1990,7 @@ pub(crate) fn disk(
         );
     }
     // **Blob residency and a token index are independent, and a `text` column is both.** A column
-    // whose value lives in the record blob still owes `postings.arrow` and `dict.bin` wherever it
+    // whose value lives in the record blob still owes `postings` and `dict.bin` wherever it
     // is indexed (`pipeline::blob_resident`), and those two files are in the bundle from the index
     // phase to the end of the build. Skipping the rest of this loop for a blob-resident column
     // left an indexed `text` column's whole index uncharged: **176.81 B/item on the 10⁷ MedCPT
@@ -1899,9 +2012,9 @@ pub(crate) fn disk(
             // and what they rest on; the presence bitmap is charged at a bit an item.
             push(
                 format!(
-                    "attribute '{}': the text index's postings.arrow and dict.bin, at an \
+                    "attribute '{}': the text index's postings and dict.bin, at an \
                      estimate of {TEXT_INDEX_SHARE_PERCENT}% of the column's {} MiB of \
-                     characters, its positions.arrow at {TEXT_POSITIONS_SHARE_PERCENT}%, and its \
+                     characters, its positions at {TEXT_POSITIONS_SHARE_PERCENT}%, and its \
                      presence bitmap",
                     attribute.name,
                     characters >> 20
@@ -2391,7 +2504,7 @@ pub(crate) fn payloads_per_item(args: &crate::BuildArgs) -> Vec<f64> {
 }
 
 /// `per_item` characters over `rows` items, rounded.
-fn payload(per_item: f64, rows: u64) -> u64 {
+pub(crate) fn payload(per_item: f64, rows: u64) -> u64 {
     (per_item * rows as f64).round() as u64
 }
 
@@ -2535,6 +2648,50 @@ fn uncompressed_column_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **A term index takes what its phase leaves of the budget, and a budget that cannot pay for
+    /// its floor is over.** At the other terms plus the floor the phase totals the budget exactly;
+    /// a byte less and it is over, which is what `plan_build` refuses; above it, the term index's
+    /// bytes are the budget less the rest of the phase.
+    #[test]
+    fn a_term_index_takes_what_its_phase_leaves_and_its_floor_is_charged() {
+        const THREADS: usize = 4;
+        let held = 100 << 20;
+        let model = Residency {
+            terms: vec![Term {
+                what: "the rest of the index phase".into(),
+                bytes: held,
+                mapped: false,
+                phases: Phases::INDEX,
+                constant: true,
+            }],
+            sizing: Sizing::default(),
+        };
+        let floor = mosaica_filter_write::Allowance::floor(THREADS);
+
+        let fits = model
+            .clone()
+            .with_term_indexes(held + floor, THREADS, true, false);
+        assert_eq!(fits.memory_at(Phase::Index), held + floor);
+        assert_eq!(
+            fits.term_index_at(Phase::Index).map(|a| a.bytes),
+            Some(floor)
+        );
+        assert_eq!(fits.memory_outside_term_indexes(Phase::Index), held);
+
+        let short = held + floor - 1;
+        let refused = model.clone().with_term_indexes(short, THREADS, true, false);
+        assert!(refused.memory_peak().1 > short);
+
+        let budget = 2 << 30;
+        let roomy = model.with_term_indexes(budget, THREADS, true, false);
+        assert_eq!(
+            roomy.sizing.term_index.map(|a| a.bytes),
+            Some(budget - held)
+        );
+        assert_eq!(roomy.memory_at(Phase::Index), budget);
+        assert_eq!(roomy.sizing.scoped_term_index, None);
+    }
 
     /// The model at a budget no publication batch can be the binding term of, which is what every
     /// test below wants: they read the per-entry arithmetic, and the batch sizing is
@@ -3294,7 +3451,9 @@ mod tests {
             NumberFiles::default(),
             &payloads,
             free,
-                    );
+            args.memory_budget
+                .unwrap_or_else(crate::pipeline::detect_memory_budget),
+        );
         disk(
             args,
             Corpus {
@@ -3357,7 +3516,7 @@ mod tests {
     }
 
     /// **An indexed `text` column's token index is in the bundle, and is charged.** Its
-    /// `postings.arrow` and `dict.bin` are written at the index phase and released by nothing. A
+    /// `postings` and `dict.bin` are written at the index phase and released by nothing. A
     /// model that stopped at the column's blob residency reached neither: 176.81 B/item on the
     /// 10⁷ MedCPT sample, 23% of that bundle.
     #[test]
@@ -3367,7 +3526,7 @@ mod tests {
         let term = disk
             .terms
             .iter()
-            .find(|t| t.what.contains("the text index's postings.arrow"))
+            .find(|t| t.what.contains("the text index's postings"))
             .expect("an indexed text column's token index is a term of its own");
         assert!(term.bytes > 0, "{}", term.what);
         assert!(
@@ -3533,7 +3692,7 @@ mod tests {
         );
     }
 
-    /// **`postings.arrow` is a record a term, not four bytes a pair.** A relation of singleton
+    /// **`postings` is a record a term, not four bytes a pair.** A relation of singleton
     /// terms costs thirteen bytes a pair — eight of Arrow offset, a tag and four of entity — where
     /// `4 × pairs` charges four.
     #[test]
@@ -3819,7 +3978,7 @@ require_member_visibility = "none"
         assert!(
             !written
                 .iter()
-                .any(|f| f == "columns.arrow" || f == "postings.arrow"),
+                .any(|f| f == "columns.arrow" || f == "postings"),
             "the refusal should land before any segment is written; found {written:?}"
         );
         // And the partial prefix goes back, so a retry has the disk the first attempt took. The
@@ -3867,7 +4026,9 @@ require_member_visibility = "none"
             NumberFiles::default(),
             &payloads_per_item(&args),
             None,
-                    )
+            args.memory_budget
+                .unwrap_or_else(crate::pipeline::detect_memory_budget),
+        )
         .1
     }
 
@@ -4008,9 +4169,13 @@ require_member_visibility = "none"
             .sum()
     }
 
+    /// **The model beside a real build's peak, printed and not asserted.** At 10⁶ items, one
+    /// `text` column and 10⁶ member rows it measured 208 MiB modelled against 338 MiB observed,
+    /// leaving out the stages sized to what their phases leave; the process held 332 MiB in its
+    /// first stage, reading the points file, before any term of the model existed.
     #[test]
-    #[ignore = "writes and builds a real corpus to check the model's constants against a peak"]
-    fn the_model_is_checked_against_an_observed_peak() {
+    #[ignore = "writes and builds a real corpus to measure the model's constants against a peak"]
+    fn the_model_is_measured_against_an_observed_peak() {
         const N: u64 = 1_000_000;
 
         struct Trace;
@@ -4020,10 +4185,11 @@ require_member_visibility = "none"
                 stage: crate::observer::BuildStage,
                 elapsed: std::time::Duration,
                 rows: u64,
+                passes: u64,
                 peak_rss_kib: u64,
             ) {
                 println!(
-                    "{:>16}  {:>8.2}s  rows={rows:<12} peak={:>6} MiB",
+                    "{:>16}  {:>8.2}s  rows={rows:<12} passes={passes} peak={:>6} MiB",
                     stage.name(),
                     elapsed.as_secs_f64(),
                     peak_rss_kib / 1024
@@ -4033,15 +4199,26 @@ require_member_visibility = "none"
 
         let (args, _temp) = fixture(N);
         let free = crate::pipeline::available_disk(&args.out);
-        let (_routes, model) =
-            plan_routes(
-                &args,
-                N,
-                NumberFiles::default(),
-                &payloads_per_item(&args),
-                free,
-                            );
-        println!("model: {} MiB{}", model.total() >> 20, model.describe());
+        let (_routes, model) = plan_routes(
+            &args,
+            N,
+            NumberFiles::default(),
+            &payloads_per_item(&args),
+            free,
+            args.memory_budget
+                .unwrap_or_else(crate::pipeline::detect_memory_budget),
+        );
+        let sized = model.sizing.unique_spill
+            + model
+                .sizing
+                .term_index
+                .map_or(0, |allowance| allowance.bytes);
+        println!(
+            "model: {} MiB beside the {} MiB sized to what their phases leave{}",
+            (model.total() - sized) >> 20,
+            sized >> 20,
+            model.describe()
+        );
         crate::build_observed(&args, &Trace).unwrap();
         println!(
             "observed build peak: {} MiB",

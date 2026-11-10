@@ -56,7 +56,7 @@ const LAYER: &str = "clusters/a";
 const SMALL_TERM_THRESHOLD: u32 = 32;
 
 /// The entities a flush published: they own **extent rows** above the base, and their terms are in
-/// a delta tier rather than in `terms/postings.arrow`.
+/// a delta tier rather than in `terms/postings`.
 ///
 /// A generating set holding one projects whole, so it clears the projection check and reaches the
 /// containment test. The partition composed from the base postings knows nothing of these terms,
@@ -128,10 +128,10 @@ fn build_fixture_n(artifacts: u32) -> Fixture {
         }
     }
 
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &per_term, SMALL_TERM_THRESHOLD).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
-    let tier_path = temp.path().join("tier.arrow");
+    let tier_path = temp.path().join("tier");
     let entries: Vec<(u32, Vec<u32>)> = per_term_flushed
         .into_iter()
         .enumerate()

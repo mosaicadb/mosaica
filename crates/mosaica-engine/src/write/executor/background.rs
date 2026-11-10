@@ -8,6 +8,33 @@ use mosaica_types::progress::Tracker;
 
 use crate::write::{Job, Jobs};
 
+/// The kinds of background work that can each hold much of the memory at once: a flush, whose text
+/// layers take a term index's allowance from its share, and a fold and a coalesce, each with a
+/// share of its own beside it. A fold's pre-flight refuses only what will not fit in what is
+/// available.
+const MEMORY_WRITERS: u64 = 3;
+
+/// **What one background writer may plan to take, read once at the start of its operation**: an
+/// equal share, one for each kind in [`MEMORY_WRITERS`], of what the process plans to take
+/// ([`mosaica_types::process::memory_to_take`]). At most one unit of each kind is in flight
+/// ([`Background`]) and none knows what the others hold, so a fixed share each is what keeps them
+/// together under that figure, however they overlap. `None` where the memory cannot be read.
+fn writer_memory() -> Option<u64> {
+    mosaica_types::process::memory_to_take().map(|bytes| bytes / MEMORY_WRITERS)
+}
+
+/// What each of a background writer's term indexes may hold, read once at the start of its
+/// operation: its share of the memory ([`writer_memory`]) by the rule a build's term index is sized
+/// by, and its share of the compute pool's `compute_threads`, divided as the memory is, one share
+/// for each kind in [`MEMORY_WRITERS`], rounded up and one at least. Its merges divide their terms
+/// into ranges over those threads, beside the pool, as a build's do. Its layers are written one at
+/// a time, so each takes the whole of it; where the memory cannot be read, the least a pass runs
+/// in.
+pub(crate) fn writer_allowance(compute_threads: usize) -> mosaica_filter_write::Allowance {
+    let threads = compute_threads.div_ceil(MEMORY_WRITERS as usize).max(1);
+    mosaica_filter_write::Allowance::new(writer_memory().unwrap_or(0), 0, threads)
+}
+
 /// Whether a unit of one kind is running, or finished and not yet published, read from its two
 /// flags.
 pub(crate) fn outstanding(in_flight: &AtomicBool, completed_pending: &AtomicBool) -> bool {

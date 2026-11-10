@@ -673,7 +673,7 @@ impl ScopedScalar {
     /// `filter::scoped_is_filterable` calls this and the build's `scoped_postings_are_owed` calls
     /// [`Self::licence_of`] over its own declaration. The two agreed by argument until this
     /// existed — the build spelled it `index || render` and the engine spelled it with the `text`
-    /// arm — and a divergence would have the open demand a `postings.arrow` no pass wrote.
+    /// arm — and a divergence would have the open demand a `postings` no pass wrote.
     pub fn is_filterable(&self) -> bool {
         Self::licence_of(
             self.arrow_type,
@@ -2484,7 +2484,7 @@ pub struct ShardRecord {
     ///
     /// **A path list rather than the count declaration it was.** Until r18 this carried the
     /// manifest sequence number each tier arrived at and the reader *derived* the paths from
-    /// `segments` (`…/segments/<seg_id>/delta.arrow`), checking only that the two counts agreed.
+    /// `segments` (`…/segments/<seg_id>/delta`), checking only that the two counts agreed.
     /// That derivation makes tier coalescence unexpressible: a coalesced tier covers several
     /// segments' entities, so it sits beside none of them, and a manifest naming it would open
     /// with the tiers it could derive and refuse the count. Naming the files is also what lets a

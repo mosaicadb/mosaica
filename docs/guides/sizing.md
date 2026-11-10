@@ -20,7 +20,7 @@ mosaica$ mosaica status --control unix:/run/mosaica/control.sock | jq '.heap | {
 }
 ```
 
-A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own structures within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine.
+A build sizes itself separately. `mosaica build --memory-budget 24g` keeps the build's own structures within 24 GiB. Without it, the build takes 80% of the memory available when it starts, so set one when a server runs on the same machine. A text index takes whatever its stage leaves of the budget, so a larger budget writes fewer, larger intermediate files and merges them in fewer passes; the build prints both figures before it starts. A server indexes the text of each flush within half of 80% of the memory available when the flush starts, since a compaction may run beside it and takes the other half.
 
 ### The caches
 
@@ -82,7 +82,7 @@ Keep the bundle and the log on a local disc. A fast SSD matters most when the bu
 
 ## CPU
 
-Requests run on a pool of `compute_threads`, which defaults to the number of CPUs the process may use, so more cores let more requests run at once. Lower it to leave some for other work on the same machine.
+Requests run on a pool of `compute_threads`, which defaults to the number of CPUs the process may use, so more cores let more requests run at once. Lower it to leave some for other work on the same machine. The flush, the fold and the coalesce each merge on a third of `compute_threads`, rounded up, beside that pool, so lowering it also slows them.
 
 The annotations a map draws come from `POST /v1/artifacts/viewport`, which takes one request per compute thread at a time by default (`artifact_admission`). A request past that, and past as many waiting, is answered `429`, which `/control/status` counts under `artifacts.shed_total`. `max_artifacts_per_tile`, 1,000 by default, is the most artifacts one request may ask for in each tile and level.
 

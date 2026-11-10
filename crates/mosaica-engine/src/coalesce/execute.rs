@@ -32,7 +32,7 @@ pub(super) fn coalesce_tiers(
     ctx: &CoalesceContext,
     files: &mut BTreeMap<String, FileDigest>,
 ) -> Result<OpenedTier, MaintenanceFailed> {
-    let rel = format!("{}/delta.arrow", ctx.out_rel);
+    let rel = format!("{}/delta", ctx.out_rel);
     let path = ctx.prefix_dir.join(&rel);
     let inputs: Vec<PathBuf> = tiers.iter().map(|p| ctx.prefix_dir.join(p)).collect();
     coalesce_delta_tiers(&inputs, &path, SMALL_TERM_THRESHOLD).map_err(failed("delta tiers"))?;
@@ -176,8 +176,14 @@ fn merge_keyword_window(
         .zip(&dicts)
         .map(|(values, dict)| mosaica_filter_write::KeywordLayer { values, dict })
         .collect();
-    mosaica_filter_write::coalesce_keyword_extents(&layers, values_path, presence_path, dict_path)
-        .map_err(failed(format!("keyword coalesce for '{column}'")))
+    mosaica_filter_write::coalesce_keyword_extents(
+        &layers,
+        values_path,
+        presence_path,
+        dict_path,
+        ctx.allowance,
+    )
+    .map_err(failed(format!("keyword coalesce for '{column}'")))
 }
 
 fn merge_values_window(
@@ -337,7 +343,7 @@ pub(super) fn coalesce_text_window(
         presence: format!("{column_rel}/{}", mosaica_filter::PRESENCE_FILE),
         prose,
     };
-    mosaica_filter_write::coalesce_text_extents(&inputs, out.clone())
+    mosaica_filter_write::coalesce_text_extents(&inputs, out.clone(), ctx.allowance)
         .map_err(failed(format!("text coalesce for '{column}'")))?;
     digest_outputs(
         files,

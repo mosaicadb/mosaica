@@ -143,7 +143,14 @@ struct StageCollector {
 }
 
 impl BuildObserver for StageCollector {
-    fn stage_end(&self, stage: BuildStage, elapsed: Duration, rows: u64, peak_rss_kib: u64) {
+    fn stage_end(
+        &self,
+        stage: BuildStage,
+        elapsed: Duration,
+        rows: u64,
+        _passes: u64,
+        peak_rss_kib: u64,
+    ) {
         self.stages
             .lock()
             .unwrap()

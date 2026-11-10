@@ -1,5 +1,4 @@
-//! Round-trip test for CSR postings: tagged records in a single Arrow IPC file, `posting.arrow`,
-//! record ordinal = term_id.
+//! Round-trip test for postings: tagged records in a record container, record ordinal = term_id.
 
 use mosaica_authz::{write_postings, PostingRef, PostingsReader};
 use mosaica_types::TermId;
@@ -7,7 +6,7 @@ use mosaica_types::TermId;
 #[test]
 fn round_trip_three_terms() {
     let temp = tempfile::TempDir::new().unwrap();
-    let path = temp.path().join("postings.arrow");
+    let path = temp.path().join("postings");
 
     let singleton: Vec<u32> = vec![5];
     let large: Vec<u32> = (1..=1000u32).collect();
@@ -55,28 +54,12 @@ fn round_trip_three_terms() {
         }
         PostingRef::Roaring(_) => panic!("term 2 should be tag 0 (array)"),
     };
-
-    // Byte-level cross-check via an independent Arrow reader, not `PostingsReader`.
-    let file = std::fs::File::open(&path).unwrap();
-    let mut arrow_reader = arrow::ipc::reader::FileReader::try_new(file, None).unwrap();
-    let batch = arrow_reader.next().unwrap().unwrap();
-    let array = batch
-        .column(0)
-        .as_any()
-        .downcast_ref::<arrow::array::LargeBinaryArray>()
-        .unwrap();
-    assert_eq!(
-        array.value(0),
-        &[0u8, 5, 0, 0, 0],
-        "term 0: tag 0 ‖ u32 LE 5"
-    );
-    assert_eq!(array.value(1)[0], 1u8, "term 1: tag byte must be 1");
 }
 
 #[test]
 fn open_with_mmap() {
     let temp = tempfile::TempDir::new().unwrap();
-    let path = temp.path().join("postings.arrow");
+    let path = temp.path().join("postings");
     let per_term = vec![vec![1u32, 2, 3], (1..=50u32).collect::<Vec<u32>>()];
     write_postings(&path, &per_term, 32).unwrap();
 

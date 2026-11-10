@@ -1,11 +1,11 @@
 //! The sparse delta postings tier a flush publishes: the terms its flushed items carried, and
 //! nothing else.
 //!
-//! `postings.arrow`'s ordinal-indexed layout, record *i* is term *i*, is right for a build,
-//! where the ordinals are dense. A flush's terms are an arbitrary handful of ordinals, so the
-//! same layout would write a file dense to the highest ordinal used. A tier instead stores its
-//! term ids alongside its postings and is looked up by binary search, with the same posting
-//! encoding as `postings.arrow`, byte for byte: [`crate::encode_posting`] and the same
+//! A postings file's ordinal-indexed layout, record *i* is term *i*, is right for a build, where
+//! the ordinals are dense. A flush's terms are an arbitrary handful of ordinals, so the same
+//! layout would write a file dense to the highest ordinal used. A tier is instead a keyed record
+//! container ([`crate::records`]), which stores each term id beside its posting and is looked up by
+//! binary search, with the same posting encoding: [`crate::encode_posting`] and the same
 //! [`PostingRef`].
 //!
 //! [`DeltaTier::posting`] answers `None` for a term this tier does not carry, exactly as
@@ -15,21 +15,16 @@
 //! never granted.
 
 use std::collections::BTreeMap;
-use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use arrow::array::{Array, LargeBinaryArray, LargeBinaryBuilder, UInt32Array};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::array::LargeBinaryArray;
+use arrow::buffer::ScalarBuffer;
 
 use mosaica_types::TermId;
 
-use crate::arrow_file::{decode_single_batch, invalid_data, mapped_buffer, write_single_batch};
-use crate::postings::{encode_posting, read_posting, PostingRef, RecordSpool};
-
-const TERM_COLUMN_NAME: &str = "term_id";
-const POSTING_COLUMN_NAME: &str = "posting";
+use crate::postings::{encode_posting, read_posting, PostingRef, POSTINGS_COLUMN};
+use crate::records::{open_keyed_record_column, RecordWriter};
 
 /// How many of a code's high bits the bucket table [`DeltaTier::open_indexed`] builds is indexed
 /// by. The table is `2^BUCKET_BITS + 1` `u32` offsets, small enough to keep the search inside a
@@ -59,9 +54,9 @@ fn build_bucket_table(codes: &[u32]) -> Box<[u32]> {
 }
 
 /// Write a sparse tier: `entries` is `(term, sorted entity list)` in strictly ascending term
-/// order. Ascending and distinct is checked, not trusted: the lookup is a binary search over the
-/// term column, so an unordered or duplicated file would make a posting unreachable, which on
-/// this path is items a viewer is entitled to simply not being there.
+/// order, which the writer checks: the lookup is a binary search over the keys, so an unordered or
+/// duplicated file would make a posting unreachable, which on this path is items a viewer is
+/// entitled to not being there.
 ///
 /// Each entity list must itself be sorted strictly ascending; [`encode_posting`] enforces that.
 pub fn write_delta_tier(
@@ -89,112 +84,24 @@ pub fn write_delta_tier_at(
     )
 }
 
-/// Both public writers' body, over whatever they have to iterate.
 fn write_tier_entries<'a>(
     path: &Path,
     entries: impl IntoIterator<Item = (u32, &'a [u32])>,
     small_term_threshold: u32,
 ) -> io::Result<()> {
-    let mut terms: Vec<u32> = Vec::new();
-    let mut postings = LargeBinaryBuilder::new();
+    let mut writer = RecordWriter::create_keyed(path, POSTINGS_COLUMN)?;
     for (term, entities) in entries {
-        if terms.last().is_some_and(|last| term <= *last) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "write_delta_tier: term ids must be strictly ascending (sorted, no duplicates)",
-            ));
-        }
-        terms.push(term);
-        postings.append_value(encode_posting(
-            term as usize,
-            entities,
-            small_term_threshold,
-        )?);
+        let record = encode_posting(term as usize, entities, small_term_threshold)?;
+        writer.append_keyed(term, &record)?;
     }
-
-    write_keyed_array(path, UInt32Array::from(terms), postings.finish())
-}
-
-/// [`crate::arrow_file::write_single_batch`] with the keyed tier schema. Neither column carries a
-/// validity buffer.
-fn write_keyed_array(
-    path: &Path,
-    terms: UInt32Array,
-    postings: LargeBinaryArray,
-) -> io::Result<()> {
-    let schema = Arc::new(Schema::new(vec![
-        Field::new(TERM_COLUMN_NAME, DataType::UInt32, false),
-        Field::new(POSTING_COLUMN_NAME, DataType::LargeBinary, false),
-    ]));
-    write_single_batch(path, schema, vec![Arc::new(terms), Arc::new(postings)])
-}
-
-/// A keyed postings file written key by key, across as many bands as its producer needs.
-///
-/// Streaming cannot be done by appending record batches: [`DeltaTier::open`] decodes a single
-/// batch and refuses a second. So this is the spool-then-assemble discipline
-/// [`crate::PostingsSpool`] already applies to the positional format. `finish` writes the file
-/// byte for byte what [`write_delta_tier_at`] would write from the same entries.
-///
-/// The ascending-key check holds across bands, not merely within one: it compares against the
-/// last key appended, wherever that came from.
-pub struct KeyedPostingsSpool {
-    spool: RecordSpool,
-    keys: Vec<u32>,
-    small_term_threshold: u32,
-}
-
-impl KeyedPostingsSpool {
-    /// Create (truncating) the spool file at `spool_path`.
-    pub fn create(spool_path: &Path, small_term_threshold: u32) -> io::Result<Self> {
-        Ok(KeyedPostingsSpool {
-            spool: RecordSpool::create(spool_path)?,
-            keys: Vec::new(),
-            small_term_threshold,
-        })
-    }
-
-    /// Append one key's posting. `entities` must be sorted strictly ascending, which
-    /// [`encode_posting`] enforces; `key` must be strictly above every key appended before it.
-    pub fn append(&mut self, key: u32, entities: &[u32]) -> io::Result<()> {
-        if let Some(&last) = self.keys.last() {
-            if key <= last {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "keyed postings: key {key} follows {last}, but keys must be strictly \
-                         ascending (sorted, no duplicates)"
-                    ),
-                ));
-            }
-        }
-        let record = encode_posting(key as usize, entities, self.small_term_threshold)?;
-        self.spool.append(&record)?;
-        self.keys.push(key);
-        Ok(())
-    }
-
-    /// How many keys have been appended.
-    pub fn len(&self) -> usize {
-        self.keys.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.keys.is_empty()
-    }
-
-    /// Assemble the file at `path` from the spool, and delete the spool on success.
-    pub fn finish(self, path: &Path) -> io::Result<()> {
-        let KeyedPostingsSpool { spool, keys, .. } = self;
-        spool.finish(|postings| write_keyed_array(path, UInt32Array::from(keys), postings))
-    }
+    writer.finish()
 }
 
 /// One live delta postings tier, memory-mapped. Postings borrow from the mapping without
 /// copying, exactly as [`crate::PostingsReader`]'s do.
 #[derive(Debug)]
 pub struct DeltaTier {
-    terms: UInt32Array,
+    terms: ScalarBuffer<u32>,
     postings: LargeBinaryArray,
     /// The bucket table over the key array's top [`BUCKET_BITS`] bits, or `None` where this tier
     /// was opened without one. See [`Self::open_indexed`]. Built in memory, per open.
@@ -203,41 +110,8 @@ pub struct DeltaTier {
 
 impl DeltaTier {
     pub fn open(path: &Path) -> io::Result<Self> {
-        let buffer = mapped_buffer(&File::open(path)?)?;
-
-        let batch = decode_single_batch(&buffer, "delta tier")?;
-        if batch.num_columns() != 2 {
-            return Err(invalid_data(format!(
-                "delta tier: expected two columns, found {}",
-                batch.num_columns()
-            )));
-        }
-        let terms = batch
-            .column(0)
-            .as_any()
-            .downcast_ref::<UInt32Array>()
-            .ok_or_else(|| invalid_data("delta tier: column 0 is not a UInt32Array"))?
-            .clone();
-        let postings = batch
-            .column(1)
-            .as_any()
-            .downcast_ref::<LargeBinaryArray>()
-            .ok_or_else(|| invalid_data("delta tier: column 1 is not a LargeBinaryArray"))?
-            .clone();
-        if terms.len() != postings.len() {
-            return Err(invalid_data(format!(
-                "delta tier: {} term ids against {} postings",
-                terms.len(),
-                postings.len()
-            )));
-        }
-        if !terms.values().windows(2).all(|w| w[0] < w[1]) {
-            return Err(invalid_data(
-                "delta tier: term ids are not strictly ascending, so a lookup could not find them",
-            ));
-        }
+        let (terms, postings) = open_keyed_record_column(path, POSTINGS_COLUMN)?;
         crate::postings::validate_records(&postings)?;
-
         Ok(DeltaTier {
             terms,
             postings,
@@ -250,7 +124,7 @@ impl DeltaTier {
     pub fn open_indexed(path: &Path) -> io::Result<Self> {
         let mut tier = Self::open(path)?;
         if tier.terms.len() >= BUCKET_TABLE_MIN_RECORDS {
-            tier.buckets = Some(build_bucket_table(tier.terms.values()));
+            tier.buckets = Some(build_bucket_table(&tier.terms));
         }
         Ok(tier)
     }
@@ -262,7 +136,7 @@ impl DeltaTier {
 
     /// The record index for `ordinal`, or `None` where this tier carries no such key.
     fn index_of(&self, ordinal: u32) -> Option<usize> {
-        let codes = self.terms.values();
+        let codes = &self.terms[..];
         let Some(buckets) = self.buckets.as_deref() else {
             return codes.binary_search(&ordinal).ok();
         };
@@ -277,10 +151,17 @@ impl DeltaTier {
         self.terms.len() as u32
     }
 
+    /// The bytes the records of the terms before `t` hold, for a writer that divides the file by
+    /// bytes.
+    pub fn bytes_before(&self, t: u32) -> u64 {
+        let records = self.terms.partition_point(|&term| term < t);
+        crate::records::record_bytes_before(&self.postings, records as u32)
+    }
+
     /// The term ids this tier carries, ascending. Needed because [`Self::term_count`] is a
     /// record count, not an id domain: walking `0..term_count()` would find nothing.
     pub fn terms(&self) -> impl Iterator<Item = TermId> + '_ {
-        self.terms.values().iter().map(|t| TermId::new(*t))
+        self.terms.iter().map(|t| TermId::new(*t))
     }
 
     /// This tier's posting for `t`, or `None` if it carries none. `None` is an ordinary answer:
@@ -299,7 +180,7 @@ impl DeltaTier {
 
     /// The record ordinals this tier carries, ascending: [`Self::terms`] untyped.
     pub fn ordinals(&self) -> impl Iterator<Item = u32> + '_ {
-        self.terms.values().iter().copied()
+        self.terms.iter().copied()
     }
 
     /// [`Self::posting_at`]'s first half alone: the binary search over the key array.
@@ -377,7 +258,7 @@ mod tests {
             .enumerate()
             .map(|(at, code)| (*code, vec![at as u32]))
             .collect();
-        let path = dir.path().join("bucketed.arrow");
+        let path = dir.path().join("bucketed");
         write_delta_tier_at(&path, &entries, 32).unwrap();
 
         let plain = DeltaTier::open(&path).unwrap();
@@ -406,7 +287,7 @@ mod tests {
     #[test]
     fn a_small_tier_is_not_bucketed_and_answers_the_same() {
         let dir = tempfile::TempDir::new().unwrap();
-        let path = dir.path().join("small.arrow");
+        let path = dir.path().join("small");
         let entries: Vec<(u32, Vec<u32>)> = (0..1_000u32).map(|c| (c * 7919, vec![c])).collect();
         write_delta_tier_at(&path, &entries, 32).unwrap();
 

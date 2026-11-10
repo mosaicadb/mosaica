@@ -1,11 +1,8 @@
-//! Byte-identity tests for the streaming writers: `DictStreamWriter` against `DictWriter`, and
-//! `PostingsSpool` against `write_posting_records`.
+//! Byte-identity tests: `DictStreamWriter` against `DictWriter`, and the two posting encoders.
 
 use std::fs;
 use tempfile::TempDir;
-use mosaica_authz::{
-    encode_posting, write_posting_records, Dict, DictStreamWriter, DictWriter, PostingsSpool,
-};
+use mosaica_authz::{encode_posting, Dict, DictStreamWriter, DictWriter};
 
 /// Distinct descriptors of varied lengths, including one empty descriptor. Distinctness is the
 /// streaming writer's caller contract; without it `DictWriter` would deduplicate.
@@ -74,63 +71,11 @@ fn dict_stream_writer_matches_dict_writer_bytes_when_empty() {
     );
 }
 
-/// A few hundred encoded records straddling the tag-0/tag-1 threshold, including empty entity
-/// lists (a one-byte, tag-only record).
-fn posting_records(n: usize) -> Vec<Vec<u8>> {
-    (0..n)
-        .map(|t| {
-            let count = (t * 7) % 90;
-            let entities: Vec<u32> = (0..count as u32).map(|k| k * 3 + t as u32).collect();
-            encode_posting(t, &entities, 32).unwrap()
-        })
-        .collect()
-}
-
-fn assert_spool_matches_buffered(records: &[Vec<u8>]) {
-    let temp = TempDir::new().unwrap();
-
-    let buffered_path = temp.path().join("buffered.arrow");
-    write_posting_records(&buffered_path, records).unwrap();
-
-    let spool_path = temp.path().join("postings.spool");
-    let streamed_path = temp.path().join("streamed.arrow");
-    let mut spool = PostingsSpool::create(&spool_path).unwrap();
-    for record in records {
-        spool.append(record).unwrap();
-    }
-    spool.finish(&streamed_path).unwrap();
-
-    assert!(
-        !spool_path.exists(),
-        "spool file must be deleted after a successful write"
-    );
-    assert_eq!(
-        fs::read(&streamed_path).unwrap(),
-        fs::read(&buffered_path).unwrap(),
-        "postings.arrow bytes must be identical for {} record(s)",
-        records.len()
-    );
-}
-
-#[test]
-fn postings_spool_matches_write_posting_records_bytes() {
-    assert_spool_matches_buffered(&posting_records(300));
-}
-
-#[test]
-fn postings_spool_matches_for_zero_records() {
-    assert_spool_matches_buffered(&[]);
-}
-
-#[test]
-fn postings_spool_matches_for_a_single_record() {
-    assert_spool_matches_buffered(&posting_records(1));
-}
-
-/// `encode_posting_bitmap` and `encode_posting` agree byte for byte, across the tag boundary.
-/// This sweeps the boundary explicitly: cardinalities either side of `small_term_threshold` take
-/// different arms, tag 0 raw `u32` LEs and tag 1 run-optimised portable Roaring, and both arms
-/// must match.
+/// `encode_posting_bitmap` and `encode_posting` agree byte for byte, across the tag boundary and
+/// however the bitmap was built. This sweeps the boundary explicitly: cardinalities either side of
+/// `small_term_threshold` take different arms, tag 0 raw `u32` LEs and tag 1 run-optimised
+/// portable Roaring, and both arms must match. The last set is also built as a set operation
+/// leaves it: its first container `{0, 1, 2}` held as a run, which costs what an array of it costs.
 #[test]
 fn the_bitmap_and_slice_encoders_agree_byte_for_byte() {
     use croaring::Bitmap;
@@ -138,7 +83,13 @@ fn the_bitmap_and_slice_encoders_agree_byte_for_byte() {
 
     const THRESHOLD: u32 = 8;
 
-    let cases: Vec<Vec<u32>> = vec![
+    let tie: Vec<u32> = (0..3).chain((0..20).map(|i| (1 << 16) + 2 * i)).collect();
+    let mut as_a_run = Bitmap::of(&tie);
+    as_a_run.add(3);
+    as_a_run.run_optimize();
+    as_a_run.remove(3);
+
+    let cases: Vec<(Vec<u32>, Bitmap)> = [
         vec![],
         vec![7],
         (0..THRESHOLD).collect(),     // exactly at the threshold: tag 0
@@ -146,12 +97,20 @@ fn the_bitmap_and_slice_encoders_agree_byte_for_byte() {
         (0..5_000u32).collect(),      // one long run
         (0..5_000u32).map(|i| i * 977).collect(), // scattered, no runs
         vec![0, u32::MAX / 2, u32::MAX - 1], // sparse across the whole space
-    ];
+        tie.clone(),
+    ]
+    .into_iter()
+    .map(|entities| {
+        let bitmap = Bitmap::of(&entities);
+        (entities, bitmap)
+    })
+    .chain([(tie, as_a_run)])
+    .collect();
 
-    for entities in cases {
+    for (entities, bitmap) in cases {
         let from_slice = encode_posting(0, &entities, THRESHOLD)
             .expect("the view encoder accepts sorted input");
-        let from_bitmap = encode_posting_bitmap(&Bitmap::of(&entities), THRESHOLD)
+        let from_bitmap = encode_posting_bitmap(&bitmap, THRESHOLD)
             .expect("the bitmap encoder accepts any bitmap");
         assert_eq!(
             from_slice,

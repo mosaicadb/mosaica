@@ -245,7 +245,8 @@ struct RawServe {
     ///
     /// Default: `false`.
     open: Option<bool>,
-    /// Threads in the pool that computes responses.
+    /// Threads in the pool that computes responses. The flush, the fold and the coalesce each
+    /// merge on a third of it, rounded up, beside the pool, so lowering it slows them too.
     ///
     /// Default: the number of CPUs the process may use.
     compute_threads: Option<usize>,

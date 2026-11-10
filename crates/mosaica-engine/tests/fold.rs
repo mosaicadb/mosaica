@@ -312,7 +312,7 @@ fn inode_of(path: &Path) -> u64 {
 ///
 /// **Mutations this kill:** handing the passes `executed` rather than `D₀` (nothing is dropped, so
 /// the row and the postings both survive and the item reappears); publishing without the retirement
-/// set (depth stays 1); dropping the row but carrying `postings.arrow` forward (the postings
+/// set (depth stays 1); dropping the row but carrying `postings` forward (the postings
 /// assertion fails — and the item stays invisible, which is why the count alone is not enough).
 #[test]
 fn all_three_halves_of_one_deletion() {

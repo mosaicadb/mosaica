@@ -2397,7 +2397,7 @@ fn a_range_composes_with_a_category_and_a_string() {
 
 /// Where the build wrote one column's derived postings.
 fn postings_path(fx: &Fixture, column: &str) -> std::path::PathBuf {
-    attr_dir(fx, &fx.prefix, column).join("postings.arrow")
+    attr_dir(fx, &fx.prefix, column).join("postings")
 }
 
 /// Reopen the fixture's columns from disk — used after a test has rewritten a postings file, since
@@ -3174,7 +3174,7 @@ fn a_deleted_entitys_value_leaves_the_column_and_every_predicate() {
     );
 
     let postings = mosaica_filter::ColumnPostings::open_keyed(
-        &attr_dir(&fx, "v00001", "archive").join("postings.arrow"),
+        &attr_dir(&fx, "v00001", "archive").join("postings"),
     )
     .expect("the rebuilt postings open");
     let members = postings.entities(arch).expect("the code has members");
@@ -3351,7 +3351,7 @@ fn a_suppression_changes_no_attribute_artefact_across_the_fold() {
          suppression"
     );
     let postings = mosaica_filter::ColumnPostings::open_keyed(
-        &attr_dir(&fx, "v00001", "archive").join("postings.arrow"),
+        &attr_dir(&fx, "v00001", "archive").join("postings"),
     )
     .expect("the rebuilt postings open");
     assert!(postings

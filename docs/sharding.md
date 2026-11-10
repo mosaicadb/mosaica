@@ -354,7 +354,7 @@ bundle/
       SEGMENTS-<n>.json                    # registries; each shard's and space's file by number and digest
       shards/<shard>/
         SEGMENTS-<n>.json                  # segments, extents, overlay, pool, watermark, levels, runtime-column bases
-        terms/postings.arrow, pairs.parquet  # term ids global
+        terms/postings, pairs.parquet  # term ids global
         entities/terms/                    # entity-to-term transpose
         entities/edited/{by_number,by_entity}/
         entities/unique/<attr>/            # with its key filter

@@ -73,7 +73,7 @@ fn derive(
     out: &Path,
     threads: usize,
 ) -> std::io::Result<()> {
-    let path = out.with_extension("postings.arrow");
+    let path = out.with_extension("postings");
     let per_term: Vec<Vec<u32>> = postings.iter().map(Bitmap::to_vec).collect();
     write_postings(&path, &per_term, SMALL_TERM_THRESHOLD_DEFAULT)?;
     let reader = PostingsReader::open(&path, false)?;

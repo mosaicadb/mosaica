@@ -3,6 +3,7 @@ pub mod dict;
 pub mod fragment;
 pub mod label;
 pub mod postings;
+pub mod records;
 pub mod term_sweep;
 pub mod tier;
 
@@ -18,10 +19,9 @@ pub use fragment::{
 };
 pub use label::{index_keys, LabelIndex};
 pub use postings::{
-    encode_posting, encode_posting_bitmap, open_record_column,
-    union_postings, write_posting_records, write_postings, PostingBitmap, PostingRef, PostingsReader, PostingsSpool,
+    append_posting_parts, encode_posting, encode_posting_bitmap, union_postings, write_postings,
+    PostingBitmap, PostingRef, PostingsReader, POSTINGS_COLUMN,
 };
+pub use records::{open_record_column, record_bytes_before, RecordWriter};
 pub use term_sweep::sweep_term_postings;
-pub use tier::{
-    coalesce_delta_tiers, write_delta_tier, write_delta_tier_at, DeltaTier, KeyedPostingsSpool,
-};
+pub use tier::{coalesce_delta_tiers, write_delta_tier, write_delta_tier_at, DeltaTier};

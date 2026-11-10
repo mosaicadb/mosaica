@@ -1583,7 +1583,7 @@ async fn every_scoped_family_survives_ingest_flush_layering_fold_and_restart() {
         // Text owes no value column, per view exactly as bundle-wide: a dictionary and postings.
         let dir = scoped_dir(&shard_dir, "note", key);
         assert!(
-            dir.join("postings.arrow").is_file(),
+            dir.join("postings").is_file(),
             "the fold wrote `note`'s index for {key}: {}",
             dir.display()
         );

@@ -358,7 +358,12 @@ impl<W: Write> SortedDictWriter<W> {
     }
 
     /// Write the restart table and the footer, and return what the file came to.
-    pub fn finish(mut self) -> Result<DictStats, DictError> {
+    pub fn finish(self) -> Result<DictStats, DictError> {
+        self.into_output().map(|(_, stats)| stats)
+    }
+
+    /// As [`Self::finish`], handing back what it wrote into as well.
+    pub fn into_output(mut self) -> Result<(W, DictStats), DictError> {
         let blocks = self.restarts.len() as u32;
         // The sentinel: every block's extent is `restarts[b]..restarts[b + 1]`, so the last block
         // needs a successor. Carrying it rather than deriving it from `blocks_len` is redundancy
@@ -375,13 +380,14 @@ impl<W: Write> SortedDictWriter<W> {
         self.out.write_all(&self.blocks_len.to_le_bytes())?;
         self.out.write_all(&MAGIC)?;
         self.out.flush()?;
-        Ok(DictStats {
+        let stats = DictStats {
             keys: self.keys,
             blocks,
             bytes: (MAGIC.len() + FOOTER_LEN) as u64
                 + self.blocks_len
                 + self.restarts.len() as u64 * 8,
-        })
+        };
+        Ok((self.out, stats))
     }
 }
 
@@ -397,7 +403,8 @@ where
     writer.finish()
 }
 
-fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
+/// How many leading bytes `a` and `b` share: the prefix a front-coded key stream omits.
+pub fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
@@ -531,6 +538,27 @@ impl SortedDict {
         Self::from_bytes(DictBytes::Owned(bytes), "an in-memory dictionary")
     }
 
+    /// Open the dictionary `file` holds in the `len` bytes from `offset`, mapped, for a file that
+    /// carries one after bytes of its own, such as a sorted run's index after its records.
+    pub fn map_within(file: &std::fs::File, offset: u64, len: u64) -> Result<Self, DictError> {
+        let len = usize::try_from(len)
+            .map_err(|_| malformed(format!("a {len}-byte dictionary does not fit in memory")))?;
+        if len < MIN_FILE_LEN {
+            return Err(malformed(format!(
+                "a dictionary of {len} bytes is shorter than the {MIN_FILE_LEN}-byte minimum"
+            )));
+        }
+        // SAFETY: as `open`'s mapping. The caller does not write or punch the mapped bytes while
+        // they are read; a run's index, which starts where its records end, is never punched.
+        let mapping = unsafe {
+            memmap2::MmapOptions::new()
+                .offset(offset)
+                .len(len)
+                .map(file)
+        }?;
+        Self::from_bytes(DictBytes::Mapped(mapping), "a dictionary within a file")
+    }
+
     fn from_bytes(bytes: DictBytes, origin: &str) -> Result<Self, DictError> {
         let len = bytes.len();
         if len < MIN_FILE_LEN {
@@ -622,6 +650,11 @@ impl SortedDict {
         self.key_count == 0
     }
 
+    /// The bytes of the file.
+    pub fn bytes(&self) -> u64 {
+        self.bytes.len() as u64
+    }
+
     /// Keys per block, as this file was written.
     pub fn restart_interval(&self) -> u32 {
         self.restart_interval
@@ -630,6 +663,11 @@ impl SortedDict {
     /// Blocks in this file — `len()` divided by [`Self::restart_interval`], rounded up.
     pub fn block_count(&self) -> u32 {
         self.block_count
+    }
+
+    /// How many keys sort below `key`: the ordinal of the first key at or after it.
+    pub fn rank(&self, key: &[u8]) -> Result<u32, DictError> {
+        Ok(self.lower_bound(key)?.0)
     }
 
     /// The ordinal of `needle`, or `None` if this layer does not hold it.

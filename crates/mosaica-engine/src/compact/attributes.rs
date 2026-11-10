@@ -153,9 +153,15 @@ pub(super) fn fold_text_columns(
                 present: &layer.present,
             })
             .collect();
-        mosaica_filter_write::merge_text_layers(&inputs, &plan.tombstones, to.clone()).map_err(
-            failed(Pass::Attributes.at(format!("text: column '{}'", job.name))),
-        )?;
+        mosaica_filter_write::merge_text_layers(
+            &inputs,
+            &plan.tombstones,
+            to.clone(),
+            ctx.allowance,
+        )
+        .map_err(failed(
+            Pass::Attributes.at(format!("text: column '{}'", job.name)),
+        ))?;
 
         for (name, path) in [
             mosaica_filter::DICT_FILE,
@@ -392,6 +398,7 @@ fn fold_value_column(
             &values_path,
             &presence_path,
             &dict_path,
+            ctx.allowance,
         )
         .map_err(failed(Pass::Attributes.at("the keyword merge")))?;
         out.wrote(dict_rel, dict_path.clone());

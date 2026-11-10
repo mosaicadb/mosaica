@@ -29,7 +29,8 @@ pub(crate) struct TestSwitches {
     pub(crate) fold_panics: AtomicBool,
     /// See [`crate::Engine::set_fold_publication_paused_for_test`].
     pub(crate) fold_publication_paused: AtomicBool,
-    /// The memory a compaction's pre-flight takes the host to have, in bytes; zero measures it.
+    /// The memory a compaction's pre-flight takes it may plan for, in bytes; zero reads what is
+    /// available ([`mosaica_types::process::available_memory`]).
     pub(crate) fold_memory: AtomicU64,
     /// See [`crate::Engine::set_merge_publication_paused_for_test`].
     pub(crate) merge_publication_paused: AtomicBool,

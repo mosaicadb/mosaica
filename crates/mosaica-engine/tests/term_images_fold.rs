@@ -2,7 +2,7 @@
 //!
 //! A fold rewrites the row space and the postings together, so its images cannot be carried
 //! forward from the prefix it folds: every row id moves when a deletion drops a row beneath it.
-//! Pass 2b derives them again from the fold's own new `permutation.bin` and new `postings.arrow`,
+//! Pass 2b derives them again from the fold's own new `permutation.bin` and new `postings`,
 //! and these cases are the ones a reader cannot make for itself: that each kept image is the
 //! projection of the posting the same fold wrote, that a folded deletion is in neither, and that
 //! the file the new side-manifest names is the one the reopened bundle maps.

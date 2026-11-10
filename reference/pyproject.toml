@@ -17,7 +17,7 @@ dependencies = [
   "pyarrow",
   "numpy",
   "requests",
-  # `bundle.py` reads `postings.arrow`'s Roaring bitmaps with it. Named here because the review
+  # `bundle.py` reads `terms/postings`'s Roaring bitmaps with it. Named here because the review
   # that found the other three missed it, which is the argument for the list being derived from
   # the imports rather than from memory: `test_oracle_layering.py` now checks it is complete.
   "pyroaring",

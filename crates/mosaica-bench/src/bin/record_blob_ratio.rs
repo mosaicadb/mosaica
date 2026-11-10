@@ -279,15 +279,6 @@ fn read_snapshot(path: &PathBuf, limit: usize) -> std::io::Result<Vec<Paper>> {
     Ok(out)
 }
 
-/// splitmix64 — the repo's own mask-independent hash, used here only to pick read targets.
-fn mix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = x;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut snapshot: Option<PathBuf> = None;
     let mut limit = 2_400_000usize;
@@ -386,7 +377,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut hit = 0u64;
         let t = Instant::now();
         for i in 0..reads {
-            let entity = (mix64(i as u64) % papers.len() as u64) as u32;
+            let entity = (mosaica_types::splitmix64(i as u64) % papers.len() as u64) as u32;
             if blob.fields_of(entity)?.is_some() {
                 hit += 1;
             }

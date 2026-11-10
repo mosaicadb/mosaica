@@ -10,7 +10,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow::array::{Array, Float64Array, LargeBinaryArray, UInt32Array, UInt64Array};
+use arrow::array::{Array, Float64Array, UInt32Array, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -141,11 +141,6 @@ fn read_parquet(path: &Path) -> Vec<RecordBatch> {
         .collect()
 }
 
-fn read_arrow_ipc(path: &Path) -> Vec<RecordBatch> {
-    let reader = arrow::ipc::reader::FileReader::try_new(File::open(path).unwrap(), None).unwrap();
-    reader.map(|b| b.unwrap()).collect()
-}
-
 fn posting_entities(path: &Path, term: TermId) -> BTreeSet<u64> {
     use mosaica_authz::PostingsReader;
     let reader = PostingsReader::open(path, false).unwrap();
@@ -257,7 +252,7 @@ fn build_produces_a_verifiable_signature_sorted_bundle() {
         part.manifest.files
     );
     let shard_files = [
-        "terms/postings.arrow",
+        "terms/postings",
         "terms/pairs.parquet",
         // The unique `id` column's index, and the record blob that holds its values.
         "entities/unique/id/base-0.keys",
@@ -370,7 +365,7 @@ fn build_produces_a_verifiable_signature_sorted_bundle() {
     );
 
     // ---- (c) postings row count == dictionary length ------------------------------------
-    let postings_path = pdir.join("terms/postings.arrow");
+    let postings_path = pdir.join("terms/postings");
     let reader = mosaica_authz::PostingsReader::open(&postings_path, false).unwrap();
     assert_eq!(reader.term_count(), dict.len());
     assert_eq!(dict.len() as u64, report.terms);
@@ -446,15 +441,6 @@ fn build_produces_a_verifiable_signature_sorted_bundle() {
             );
         }
     }
-
-    // ---- postings.arrow shape: one LargeBinary column, row ordinal = term_id ------------
-    let posting_batches = read_arrow_ipc(&postings_path);
-    assert_eq!(posting_batches.len(), 1);
-    assert!(posting_batches[0]
-        .column(0)
-        .as_any()
-        .downcast_ref::<LargeBinaryArray>()
-        .is_some());
 
     // ---- permutation is a bijection over the segment's rows ------------------------------
     let view = &shard.views["s0"];

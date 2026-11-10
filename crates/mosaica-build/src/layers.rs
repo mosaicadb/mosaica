@@ -93,6 +93,7 @@ use crate::shapes::{
     ShapeLayerReport, ShapeReader,
 };
 use crate::spill;
+use mosaica_filter_write::SpillReceipt;
 use mosaica_store::derived::authored_shape_input;
 use mosaica_store::unique::UniqueKey;
 
@@ -239,12 +240,11 @@ const MEMBER_ENTRY_BYTES: usize = 16;
 const MEMBER_ARTIFACT_BYTES: usize = 80;
 
 /// The share of the build's memory budget the member accumulator may hold, and its floor and
-/// ceiling. Sixteenth, floor and ceiling all follow the text index's, which is the other pass in
-/// this build that spills sorted runs — one rule rather than two constants to keep in step.
+/// ceiling.
 ///
-/// ⊘ Deliberately **not** added to `residency.rs`'s model, for that pass's reason: it is a
-/// sixteenth of the same budget the model is checked against, inside the factor of two that module
-/// states as its own error bar, and adding it would turn builds that fit today into refusals. The
+/// ⊘ Deliberately **not** added to `residency.rs`'s model: it is a sixteenth of the same budget the
+/// model is checked against, inside the factor of two that module states as its own error bar, and
+/// adding it would turn builds that fit today into refusals. The
 /// merge's open runs ([`member_merge_fan_in`]) are left out on the same argument and a second one:
 /// they are sized *from* this share and stand only while the accumulator is empty, so the two are
 /// one term and not two.
@@ -257,26 +257,10 @@ fn member_budget(memory_budget: u64) -> u64 {
     (memory_budget / MEMBER_BUDGET_SHARE).clamp(MEMBER_BUDGET_MIN, MEMBER_BUDGET_MAX)
 }
 
-/// What one open run costs the merge: its read buffer, which is [`spill::SPILL_BUF_BYTES`]. The
-/// file descriptor, the reader's own fields and its place in the heap come to under a kibibyte
-/// beside it.
-const MEMBER_MERGE_BYTES_PER_RUN: u64 = spill::SPILL_BUF_BYTES as u64;
-
-/// The most runs one merge may hold **open**, whatever the budget pays for.
-///
-/// **A merge holds a file descriptor per run, and memory is not what bounds that.** The budget
-/// share buys 256 runs at the accumulator's present ceiling, so the cap does not bind today; it
-/// binds the moment [`MEMBER_BUDGET_MAX`] is raised, where a 8 GiB share would otherwise ask for
-/// 2,048 descriptors and fail with `EMFILE` at hour two on exactly the corpus this shape exists to
-/// make buildable. The text index's merge has the same cap for the same reason
-/// ([`crate::pipeline`]'s `RUN_MERGE_FAN_IN`), at a lower number because it runs one merge per
-/// thread and this one runs a merge at a time.
-///
-/// Five hundred and twelve: half the 1,024 soft limit a Linux process ordinarily starts with. The
-/// other half is what the build holds open beside this merge — the source Parquet readers, the
-/// mapped arenas, the member table it is writing and the membership packs that follow it — none of
-/// which scales with the run count, so half is headroom rather than an estimate.
-const MEMBER_MERGE_DESCRIPTOR_CAP: usize = 512;
+/// What one open run costs the merge: its read buffer, which is
+/// [`mosaica_filter_write::SPILL_BUF_BYTES`]. The file descriptor, the reader's own fields and its
+/// place in the heap come to under a kibibyte beside it.
+const MEMBER_MERGE_BYTES_PER_RUN: u64 = mosaica_filter_write::SPILL_BUF_BYTES as u64;
 
 /// The most runs one merge opens at once: **what the accumulator's own budget share pays for**,
 /// rather than a fixed number.
@@ -295,8 +279,8 @@ const MEMBER_MERGE_DESCRIPTOR_CAP: usize = 512;
 /// flag asks for, and the floor is also what makes a pass always reduce: sixteen runs into one is
 /// a reduction where one run into one would be a copy.
 ///
-/// [`MEMBER_MERGE_DESCRIPTOR_CAP`] bounds it above, memory not being what limits how many files a
-/// process may hold open.
+/// The descriptors a merge may hold bound it above ([`mosaica_filter_write::merge_descriptors`]),
+/// memory not being what limits how many files a process may hold open.
 fn member_merge_fan_in(memory_budget: u64) -> usize {
     open_runs_for(member_budget(memory_budget))
 }
@@ -304,7 +288,7 @@ fn member_merge_fan_in(memory_budget: u64) -> usize {
 /// How many runs a budget share of `bytes` pays for, held under the descriptor cap. Split out so
 /// the cap can be read at a share the accumulator's present ceiling does not reach.
 fn open_runs_for(bytes: u64) -> usize {
-    ((bytes / MEMBER_MERGE_BYTES_PER_RUN) as usize).min(MEMBER_MERGE_DESCRIPTOR_CAP)
+    ((bytes / MEMBER_MERGE_BYTES_PER_RUN) as usize).min(mosaica_filter_write::merge_descriptors())
 }
 
 /// Every layer's member rows, accumulated as `(artifact, source)` pairs and spilled as **sorted
@@ -345,7 +329,7 @@ struct MemberSpill {
     /// run at the spill, so what a window holds is released with it; what does not is one empty
     /// `Vec` header per artifact.
     open: Vec<Vec<u64>>,
-    receipts: Vec<spill::SpillReceipt>,
+    receipts: Vec<SpillReceipt>,
     seq: usize,
     /// Every pair ever pushed, across every run — what the merge checks itself against and what
     /// the stage reports.
@@ -418,7 +402,7 @@ impl MemberSpill {
     }
 
     /// Spill the tail and hand over every run — the accumulator is empty afterwards.
-    fn finish(&mut self) -> Result<Vec<spill::SpillReceipt>> {
+    fn finish(&mut self) -> Result<Vec<SpillReceipt>> {
         self.spill()?;
         Ok(std::mem::take(&mut self.receipts))
     }
@@ -2050,7 +2034,7 @@ pub(crate) fn publish(
 /// that ladder's real contribution is 213.0×10⁶ pairs across 2,097 keys, and the corpus's whole
 /// spill is 5.07×10⁸.
 fn merge_member_runs(
-    receipts: &[spill::SpillReceipt],
+    receipts: &[SpillReceipt],
     plan: &LayerPlan,
     resolve: &(dyn Fn(u64) -> Option<u64> + Sync),
 ) -> Result<spill::MemberTable> {
@@ -2116,10 +2100,10 @@ fn merge_member_runs(
 /// disk while it runs, so what decides whether it happens is the `--memory-budget` the caller
 /// chose and never the corpus's size on its own.
 fn cascade_member_runs(
-    receipts: &[spill::SpillReceipt],
+    receipts: &[SpillReceipt],
     dir: &Path,
     fan_in: usize,
-) -> Result<Vec<spill::SpillReceipt>> {
+) -> Result<Vec<SpillReceipt>> {
     let mut receipts = receipts.to_vec();
     let mut pass = 0usize;
     while receipts.len() > fan_in {
@@ -2163,7 +2147,7 @@ struct MemberRunMerge {
 }
 
 impl MemberRunMerge {
-    fn open(receipts: &[spill::SpillReceipt]) -> Result<MemberRunMerge> {
+    fn open(receipts: &[SpillReceipt]) -> Result<MemberRunMerge> {
         let mut cursors = Vec::with_capacity(receipts.len());
         let mut heap = std::collections::BinaryHeap::with_capacity(receipts.len());
         for receipt in receipts {
@@ -4713,7 +4697,7 @@ mod tests {
     }
 
     /// One run from a list of `(artifact, sources)` records.
-    fn run(dir: &Path, seq: usize, records: &[(u32, Vec<u64>)]) -> spill::SpillReceipt {
+    fn run(dir: &Path, seq: usize, records: &[(u32, Vec<u64>)]) -> SpillReceipt {
         let mut writer =
             spill::MemberRunWriter::create(&dir.join(format!("run-{seq:04}.spill"))).unwrap();
         for (index, sources) in records {
@@ -4724,7 +4708,7 @@ mod tests {
 
     /// Drain a merge into `(artifact, sources)` records, sorting each artifact's sources — which
     /// is what both callers do, one before writing an intermediate run and one after resolving.
-    fn drain(receipts: &[spill::SpillReceipt]) -> Vec<(u32, Vec<u64>)> {
+    fn drain(receipts: &[SpillReceipt]) -> Vec<(u32, Vec<u64>)> {
         let mut merge = MemberRunMerge::open(receipts).unwrap();
         let mut out = Vec::new();
         while merge.next_artifact().unwrap() {
@@ -4774,12 +4758,12 @@ mod tests {
             vec![(0, vec![3]), (1, vec![7]), (3, vec![2])],
             vec![(1, vec![0]), (3, vec![4])],
         ];
-        let forward: Vec<spill::SpillReceipt> = records
+        let forward: Vec<SpillReceipt> = records
             .iter()
             .enumerate()
             .map(|(seq, r)| run(temp.path(), seq, r))
             .collect();
-        let reversed: Vec<spill::SpillReceipt> = records
+        let reversed: Vec<SpillReceipt> = records
             .iter()
             .rev()
             .enumerate()
@@ -4799,7 +4783,7 @@ mod tests {
         // Two full passes' worth: each run names three artifacts drawn from a space small enough
         // that every artifact is in most runs, which is the case a cascade has to gather.
         let runs = fan_in * 2 + 3;
-        let receipts: Vec<spill::SpillReceipt> = (0..runs)
+        let receipts: Vec<SpillReceipt> = (0..runs)
             .map(|seq| {
                 let records: Vec<(u32, Vec<u64>)> = (0..3)
                     .map(|i| ((seq as u32 + i) % 5, vec![seq as u64, seq as u64]))
@@ -5080,14 +5064,14 @@ mod tests {
         assert!(runs_of(1 << 20, 100_000_000) > member_merge_fan_in(1 << 20) as u64);
         // The floor is what makes a pass reduce rather than copy, at every budget.
         assert_eq!(member_merge_fan_in(0), 16);
-        // **The descriptors bound it above**, and do not bind at the present ceiling. A share
-        // eight times that ceiling pays for 2,048 open files, which is twice the soft limit a
-        // Linux process starts with: it gets the cap instead.
+        // **The descriptors bound it above.** A share eight times that ceiling pays for 2,048
+        // open files, which is twice the soft limit a Linux process starts with: it gets the
+        // merge's share of the descriptors where that is fewer.
         assert_eq!(open_runs_for(MEMBER_BUDGET_MAX), 256);
         assert_eq!(MEMBER_BUDGET_MAX * 8 / MEMBER_MERGE_BYTES_PER_RUN, 2_048);
         assert_eq!(
             open_runs_for(MEMBER_BUDGET_MAX * 8),
-            MEMBER_MERGE_DESCRIPTOR_CAP
+            mosaica_filter_write::merge_descriptors().min(2_048)
         );
     }
 }

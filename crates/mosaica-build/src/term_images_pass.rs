@@ -109,7 +109,7 @@ pub struct ViewTermImages {
 
 /// Derive `view`'s term images into `prefix_dir`, or return `None` where there are none to derive.
 ///
-/// `postings` is the prefix's `terms/postings.arrow`, opened once for the build: it is entity
+/// `postings` is the prefix's `terms/postings`, opened once for the build: it is entity
 /// space and every view projects the same postings through its own permutation.
 ///
 /// `threads` is how many terms are projected at once, each holding a posting and its image.

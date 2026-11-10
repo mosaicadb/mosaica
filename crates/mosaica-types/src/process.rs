@@ -1,11 +1,13 @@
-//! The process's own memory: what the C allocator holds, and what the kernel says is resident.
+//! The process's own resources: what the C allocator holds, what the kernel says is resident,
+//! what the machine has available, and how many files the process may hold open.
 //!
-//! Three calls, shared by the build and the serve path, which are one database
-//! ([decision 0091](../../../docs/decisions/0091-build-is-ingest-into-an-empty-database.md)) and
-//! therefore one implementation of anything they both do. The build trims at every
-//! stage boundary; the server caps the arena count at startup and trims on a growth cadence. Both
-//! want the same three primitives, and a second copy of [`resident_bytes`]' parser would be a
-//! second answer to "how much of this process is anonymous memory".
+//! Shared by the build and the serve path, which are one database and therefore one
+//! implementation of anything they both do. The build trims at every stage boundary; the server
+//! caps the arena count at startup and trims on a growth cadence. Both want the same three
+//! primitives, and a second copy of [`resident_bytes`]' parser would be a second answer to "how
+//! much of this process is anonymous memory". Both size a term index's pass from
+//! [`memory_to_take`] and [`descriptor_limit`], and the binary raises the descriptor limit for both
+//! at startup ([`raise_descriptor_limit`]).
 //!
 //! # Why an allocator call is a Mosaica concern at all
 //!
@@ -24,8 +26,9 @@
 //!
 //! `malloc_trim` and `mallopt` are glibc extensions. Both are compiled only for a glibc target and
 //! are no-ops elsewhere, so a musl or macOS build keeps the same call sites and gets an allocator
-//! that already returns pages on its own terms. [`resident_bytes`] reads `/proc/self/status` and
-//! answers zeros where it cannot, which is also what a non-Linux target gets.
+//! that already returns pages on its own terms. The descriptor limit is POSIX and is read and
+//! raised on every Unix. [`resident_bytes`] and [`available_memory`] read `/proc` and answer zeros
+//! or `None` where they cannot, which is also what a non-Linux target gets.
 
 /// Return the allocator's free pages to the kernel.
 ///
@@ -120,6 +123,127 @@ pub fn resident_bytes() -> Resident {
     }
 }
 
+/// Memory this process could take without reclaiming anything it needs, in bytes: the smaller of
+/// `MemAvailable` and what is left under this process's cgroup v2 limit, `memory.max` less
+/// `memory.current`. `None` where `/proc/meminfo` cannot be read.
+///
+/// **Both sources, because either can be the real bound.** `MemAvailable` is the kernel's estimate
+/// of what an allocation could get on the host; `memory.max` is the ceiling this process is killed
+/// at, and `memory.current` is what the cgroup already holds against it, page cache included. A
+/// process inside a 4 GiB container on a 48 GiB machine that read only the first would size itself
+/// for the machine. A cgroup with no limit, or none to be read, leaves `MemAvailable` as the
+/// answer.
+pub fn available_memory() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let available = meminfo
+        .lines()
+        .find(|line| line.starts_with("MemAvailable:"))
+        .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
+        .map(|kib| kib * 1024)?;
+    let left = std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|cgroup| cgroup_left(&cgroup, |file| std::fs::read_to_string(file).ok()));
+    Some(left.map_or(available, |left| left.min(available)))
+}
+
+/// What is left under the cgroup v2 memory limit of the process whose `/proc/self/cgroup` is
+/// `cgroup`, reading its files through `read`: `memory.max` less `memory.current`. `None` where
+/// the process is in no v2 group, the group has no limit, or either file cannot be read.
+fn cgroup_left(cgroup: &str, read: impl Fn(&str) -> Option<String>) -> Option<u64> {
+    let path = cgroup
+        .lines()
+        .find_map(|line| line.strip_prefix("0::"))?
+        .trim()
+        .trim_start_matches('/');
+    let dir = match path {
+        "" => "/sys/fs/cgroup".to_string(),
+        path => format!("/sys/fs/cgroup/{path}"),
+    };
+    let figure = |file: &str| read(&format!("{dir}/{file}"))?.trim().parse::<u64>().ok();
+    Some(figure("memory.max")?.saturating_sub(figure("memory.current")?))
+}
+
+/// The share of [`available_memory`] a process plans to take, in bytes: four fifths of it, leaving
+/// the rest for the page cache the process reads through and the allocator's slack. `None` where
+/// the available memory cannot be read.
+///
+/// The build's default `--memory-budget` is this, and a server sizes its writers from it, so
+/// neither plans to take all of what is available.
+pub fn memory_to_take() -> Option<u64> {
+    available_memory().map(|available| available / 5 * 4)
+}
+
+/// The files this process may hold open at once: its soft `RLIMIT_NOFILE`. 1,024, the soft limit
+/// a Linux process ordinarily starts with, where the limit cannot be read or is not a Unix one.
+pub fn descriptor_limit() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` writes one `rlimit` through a pointer to a live local.
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 {
+            // `rlim_t` is not `u64` on every Unix.
+            #[allow(clippy::unnecessary_cast)]
+            return limit.rlim_cur as u64;
+        }
+    }
+    1024
+}
+
+/// Raise this process's soft `RLIMIT_NOFILE` to its hard limit, and return the soft limit it then
+/// has. The binary calls it once at startup, for `build` and `serve` alike, since a merge's fan-in
+/// is bounded by [`descriptor_limit`] as well as by memory. A limit that cannot be raised is left
+/// as it is.
+pub fn raise_descriptor_limit() -> u64 {
+    #[cfg(unix)]
+    {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` and `setrlimit` read and write one `rlimit` through a pointer to a
+        // live local.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) == 0
+                && limit.rlim_cur < limit.rlim_max
+            {
+                limit.rlim_cur = limit.rlim_max;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &limit);
+            }
+        }
+    }
+    descriptor_limit()
+}
+
+/// Give back to the file system the disk the `len` bytes of `file` from `offset` take, leaving the
+/// file's length as it is and those bytes reading as zeros: `fallocate` with
+/// `FALLOC_FL_PUNCH_HOLE` on Linux. Returns whether it did. Where the platform or the file system
+/// cannot, nothing changes.
+#[cfg(target_os = "linux")]
+pub fn release_span(file: &std::fs::File, offset: u64, len: u64) -> bool {
+    use std::os::fd::AsRawFd;
+    let (Ok(offset), Ok(len)) = (libc::off_t::try_from(offset), libc::off_t::try_from(len)) else {
+        return false;
+    };
+    // SAFETY: `fallocate` acts on an open descriptor the caller's `File` owns for the call.
+    unsafe {
+        libc::fallocate(
+            file.as_raw_fd(),
+            libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+            offset,
+            len,
+        ) == 0
+    }
+}
+
+/// [`release_span`] where the platform cannot: nothing changes.
+#[cfg(not(target_os = "linux"))]
+pub fn release_span(_file: &std::fs::File, _offset: u64, _len: u64) -> bool {
+    false
+}
+
 /// A byte count to three significant figures in binary units, such as `18.2 GiB` or `512 B`, as
 /// the progress records' readers and the build's reports of the term images and unique indexes
 /// print it.
@@ -143,6 +267,34 @@ pub fn human_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **The limit is the v2 group's, and what the group holds comes off it.** The `0::` line names
+    /// the group wherever it falls among a hybrid hierarchy's v1 lines, and a limit of `max` is no
+    /// limit.
+    #[test]
+    fn what_is_left_is_the_v2_limit_less_what_the_group_holds() {
+        let cgroup = "9:name=systemd:/\n4:memory:/v1/group\n0::/app/server\n";
+        let files = |max: &'static str| {
+            move |file: &str| match file {
+                "/sys/fs/cgroup/app/server/memory.max" => Some(max.to_string()),
+                "/sys/fs/cgroup/app/server/memory.current" => Some("6442450944\n".to_string()),
+                _ => None,
+            }
+        };
+        assert_eq!(cgroup_left(cgroup, files("8589934592\n")), Some(2 << 30));
+        assert_eq!(cgroup_left(cgroup, files("max\n")), None);
+        assert_eq!(cgroup_left(cgroup, files("4294967296\n")), Some(0));
+        assert_eq!(
+            cgroup_left("4:memory:/v1/group\n", files("8589934592")),
+            None
+        );
+        let root = |file: &str| match file {
+            "/sys/fs/cgroup/memory.max" => Some("1073741824".to_string()),
+            "/sys/fs/cgroup/memory.current" => Some("0".to_string()),
+            _ => None,
+        };
+        assert_eq!(cgroup_left("0::/\n", root), Some(1 << 30));
+    }
 
     #[test]
     fn a_byte_count_reads_to_three_figures_in_binary_units() {

@@ -2085,6 +2085,7 @@ dependencies = [
  "icu_normalizer",
  "icu_properties",
  "icu_segmenter",
+ "rand 0.8.8",
  "serde_json",
  "sha2",
 ]
@@ -2098,6 +2099,7 @@ dependencies = [
  "memmap2",
  "mosaica-access",
  "mosaica-cache",
+ "mosaica-roaring",
  "mosaica-types",
  "proptest",
  "rand 0.8.8",
@@ -2297,6 +2299,7 @@ dependencies = [
  "mosaica-filter",
  "mosaica-roaring",
  "mosaica-types",
+ "proptest",
  "rayon",
  "tempfile",
  "zstd",

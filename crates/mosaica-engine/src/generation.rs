@@ -109,7 +109,7 @@ impl GenerationParts {
 pub struct ShardParts {
     /// Entities at or past this live only in `buffer`, never in the shard's permutations.
     pub watermark: u64,
-    /// The base postings — the build's `terms/postings.arrow`, unchanged by any flush.
+    /// The base postings — the build's `terms/postings`, unchanged by any flush.
     pub postings: Arc<PostingsReader>,
     /// This shard's identity (`ShardRecord::identity`) in the prefix `postings` was read from.
     pub(crate) identity: [u8; 32],
@@ -732,7 +732,7 @@ impl Generation {
             files: std::collections::BTreeMap::new(),
         };
         let dir = tempfile::TempDir::new().expect("a temp dir");
-        let postings_path = dir.path().join("postings.arrow");
+        let postings_path = dir.path().join("postings");
         mosaica_authz::write_postings(&postings_path, &[], 32).expect("an empty postings file");
         let bundle = Arc::new(Bundle {
             manifest,

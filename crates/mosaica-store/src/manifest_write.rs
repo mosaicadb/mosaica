@@ -133,8 +133,7 @@ pub fn write_and_fsync(path: &Path, bytes: &[u8]) -> Result<()> {
 ///
 /// # Why a caller needs this at all
 ///
-/// The segment and postings writers do not sync: `write_single_batch` says so at the
-/// site, and the reasoning has always been that a partially-written file is *detectable* — the
+/// The segment and postings writers (`InPlaceFile`, `RecordWriter`) do not sync, and the reasoning has always been that a partially-written file is *detectable* — the
 /// manifest digests catch it, and the producer re-runs. That holds for a build (nothing else has
 /// been deleted yet) and for a flush (the WAL still holds the rows, and the side-manifest it was
 /// committed under can be stepped past). **It does not hold for a fold**, which flips `CURRENT` onto

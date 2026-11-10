@@ -2,7 +2,7 @@
 //! peak sampled every millisecond on a second thread, the result's size, and a digest of the
 //! result that a second build can be checked against.
 //!
-//! Principals are country terms from `terms/postings.arrow` (`--country NAME=TERM,...` or
+//! Principals are country terms from `terms/postings` (`--country NAME=TERM,...` or
 //! `NAME=@PATH`) or draws of K terms over a value column (`--dim NAME=K:weighted` or
 //! `NAME=K:uniform`). A weighted draw is without replacement with probability proportional to a
 //! term's entity count (Efraimidis and Spirakis); both draw from one generator seeded by `--seed`,

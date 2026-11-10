@@ -1,11 +1,11 @@
 //! A text layer's word positions: for each term, where in each item's token sequence it occurs.
 //!
-//! `positions.arrow` is one Arrow IPC file with one non-null `LargeBinary` column, record *i* term
-//! ordinal *i*'s, beside the postings it is read with. A term's record holds one entry per item of
-//! its posting, in the posting's ascending item order, so the item at rank *k* of the posting has
-//! entry *k*. An entry is the number of times the term occurs in the item and then each position:
-//! the token's index in the sequence `Analyser::for_each_token` yields, the first absolute and each
-//! later one less the one before.
+//! A positions file is a record container (`mosaica_authz::records`) whose column is named
+//! [`POSITIONS_COLUMN`], record *i* term ordinal *i*'s, beside the postings it is read with. A
+//! term's record holds one entry per item of its posting, in the posting's ascending item order,
+//! so the item at rank *k* of the posting has entry *k*. An entry is the number of times the term
+//! occurs in the item and then each position: the token's index in the sequence
+//! `Analyser::for_each_token` yields, the first absolute and each later one less the one before.
 //!
 //! The entries are grouped in blocks of [`POSITIONS_BLOCK`] items. With `n` items in the posting
 //! there are `B = ⌈n / 128⌉` blocks, and the record is:
@@ -30,7 +30,7 @@ use mosaica_types::AttrLocalId;
 use crate::varint::take_varint;
 
 /// A text column's positions file within its directory.
-pub const POSITIONS_FILE: &str = "positions.arrow";
+pub const POSITIONS_FILE: &str = "positions";
 
 /// The name of the one column a positions file holds.
 pub const POSITIONS_COLUMN: &str = "positions";
@@ -120,8 +120,9 @@ impl ColumnPositions {
         self.array.len() as u32
     }
 
-    /// A cursor over `term`'s record, whose posting holds `items` items.
-    pub fn cursor(&self, term: AttrLocalId, items: u64) -> io::Result<PositionsCursor<'_>> {
+    /// `term`'s record as the file holds it, for a writer that copies it whole. Its bytes are
+    /// checked as a cursor decodes them, wherever the copy is read.
+    pub fn record(&self, term: AttrLocalId) -> io::Result<&[u8]> {
         let ordinal = term.raw() as usize;
         if ordinal >= self.array.len() {
             return Err(malformed(format!(
@@ -129,7 +130,19 @@ impl ColumnPositions {
                 self.array.len()
             )));
         }
-        let record = self.array.value(ordinal);
+        Ok(self.array.value(ordinal))
+    }
+
+    /// The bytes the records before ordinal `term` hold, for a writer that divides the file by
+    /// bytes. `term` may be the record count, which gives the whole.
+    pub fn bytes_before(&self, term: u32) -> u64 {
+        mosaica_authz::record_bytes_before(&self.array, term)
+    }
+
+    /// A cursor over `term`'s record, whose posting holds `items` items.
+    pub fn cursor(&self, term: AttrLocalId, items: u64) -> io::Result<PositionsCursor<'_>> {
+        let ordinal = term.raw() as usize;
+        let record = self.record(term)?;
         let blocks = items.div_ceil(POSITIONS_BLOCK as u64);
         let table = blocks
             .saturating_sub(1)
@@ -328,15 +341,11 @@ mod tests {
     fn file_of(records: &[Vec<u8>]) -> (tempfile::TempDir, ColumnPositions) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(POSITIONS_FILE);
-        let mut spool = mosaica_authz::PostingsSpool::for_column(
-            &path.with_extension("spool"),
-            POSITIONS_COLUMN,
-        )
-        .unwrap();
+        let mut writer = mosaica_authz::RecordWriter::create(&path, POSITIONS_COLUMN).unwrap();
         for record in records {
-            spool.append(record).unwrap();
+            writer.append(record).unwrap();
         }
-        spool.finish(&path).unwrap();
+        writer.finish().unwrap();
         let file = ColumnPositions::open(&path, false).unwrap();
         (dir, file)
     }

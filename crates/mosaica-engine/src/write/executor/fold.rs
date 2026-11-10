@@ -1,34 +1,5 @@
 use super::*;
 
-/// Memory this process could take without reclaiming anything it needs, in bytes. `None` where
-/// unknowable.
-///
-/// The smaller of `MemAvailable` and a cgroup v2 `memory.max`: either can be the real bound.
-pub(super) fn available_memory() -> Option<u64> {
-    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let available = meminfo
-        .lines()
-        .find(|line| line.starts_with("MemAvailable:"))
-        .and_then(|line| line.split_whitespace().nth(1)?.parse::<u64>().ok())
-        .map(|kib| kib * 1024)?;
-
-    // "max" (unlimited) parses to `None`, leaving `MemAvailable` as the answer.
-    let cgroup = std::fs::read_to_string("/proc/self/cgroup")
-        .ok()
-        .and_then(|cgroup| {
-            let path = cgroup
-                .lines()
-                .next()?
-                .split(':')
-                .nth(2)?
-                .trim_start_matches('/');
-            std::fs::read_to_string(format!("/sys/fs/cgroup/{path}/memory.max")).ok()
-        })
-        .and_then(|max| max.trim().parse::<u64>().ok());
-
-    Some(cgroup.map_or(available, |limit| limit.min(available)))
-}
-
 /// The levels a fold's retirement is about to move, and the set it retires.
 ///
 /// A fold writes its manifest before it retires, since the retirement is not reversible: a
@@ -1439,7 +1410,7 @@ impl Executor {
             self.health.overlay_diverged.load(Ordering::SeqCst),
             crate::compact::FoldResources {
                 available_memory: match self.deps.switches.fold_memory.load(Ordering::SeqCst) {
-                    0 => available_memory(),
+                    0 => mosaica_types::process::available_memory(),
                     bytes => Some(bytes),
                 },
                 free_disc: free_disc(&self.deps.bundle_root),
@@ -1553,6 +1524,7 @@ impl Executor {
             }
         }
         let ctx = crate::compact::FoldContext {
+            allowance: crate::write::writer_allowance(self.deps.pool.current_num_threads()),
             from_prefix_dir: self.prefix_dir(generation),
             to_prefix_dir: self.deps.bundle_root.join(&to_prefix),
             to_prefix: to_prefix.clone(),

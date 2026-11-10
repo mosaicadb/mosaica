@@ -777,14 +777,14 @@ mod tests {
         base: &[Vec<u32>],
         tiers: &[Vec<TierEntry>],
     ) -> (PostingsReader, Vec<Arc<DeltaTier>>) {
-        let postings_path = dir.join("postings.arrow");
+        let postings_path = dir.join("postings");
         crate::postings::write_postings(&postings_path, base, 32).unwrap();
         let reader = PostingsReader::open(&postings_path, false).unwrap();
         let opened = tiers
             .iter()
             .enumerate()
             .map(|(n, entries)| {
-                let path = dir.join(format!("tier-{n}.arrow"));
+                let path = dir.join(format!("tier-{n}"));
                 crate::tier::write_delta_tier_at(&path, entries, 32).unwrap();
                 Arc::new(DeltaTier::open(&path).unwrap())
             })

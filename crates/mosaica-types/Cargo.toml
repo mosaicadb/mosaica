@@ -20,12 +20,11 @@ mosaica-access = { workspace = true }
 # `IdentityKey::generate`: the operating system's random source, for the key every new bundle gets.
 getrandom = "0.2"
 
-# `src/process.rs`' two allocator calls, and nothing else in this crate. Declared per-target rather
-# than plainly so that off glibc *this* crate takes no edge at all and its module compiles to
-# no-ops. It says nothing about the workspace: mosaica-build and mosaica-engine depend on libc
-# unconditionally for `posix_fallocate`, `madvise`, `flock` and `statvfs`, so a musl or macOS build
-# still links it.
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+# `src/process.rs`: the descriptor limit, on every Unix, and the two allocator calls, which are
+# compiled only for glibc. Declared per-target so that off Unix this crate takes no edge at all.
+# It says nothing about the workspace: mosaica-build and mosaica-engine depend on libc
+# unconditionally for `posix_fallocate`, `madvise`, `flock` and `statvfs`.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]

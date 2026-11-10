@@ -49,11 +49,18 @@ impl BaseTier {
             BaseTier::Keyed(tier) => tier.term_count(),
         }
     }
+
+    fn bytes_before(&self, ordinal: u32) -> u64 {
+        match self {
+            BaseTier::Positional(reader) => reader.bytes_before(ordinal),
+            BaseTier::Keyed(tier) => tier.bytes_before(ordinal),
+        }
+    }
 }
 
 /// A column's postings file within its directory: a category's per-value postings, or a text
 /// column's per-term ones.
-pub const POSTINGS_FILE: &str = "postings.arrow";
+pub const POSTINGS_FILE: &str = "postings";
 
 /// One column's postings.
 ///
@@ -94,6 +101,13 @@ impl ColumnPostings {
     /// table and the dictionary know the domain.
     pub fn record_count(&self) -> u32 {
         self.base.record_count()
+    }
+
+    /// The bytes the records of the values before `value` hold, for a writer that divides the
+    /// file by bytes. `value` may be the record count of a positional column, which gives the
+    /// whole.
+    pub fn bytes_before(&self, value: u32) -> u64 {
+        self.base.bytes_before(value)
     }
 
     /// The entities carrying `value`.
@@ -161,6 +175,16 @@ impl ColumnPostings {
     /// `value`'s posting as stored, or `None` where it has no record.
     pub fn posting(&self, value: AttrLocalId) -> io::Result<Option<PostingRef<'_>>> {
         self.base.posting_at(value.raw())
+    }
+
+    /// `value`'s record as a positional file holds it, checked at open, for a writer that copies
+    /// it whole. `None` where it has no record, and for a keyed file, whose records are found by
+    /// search and are not copied.
+    pub fn record(&self, value: AttrLocalId) -> Option<&[u8]> {
+        match &self.base {
+            BaseTier::Positional(reader) => reader.record_at(value.raw()),
+            BaseTier::Keyed(_) => None,
+        }
     }
 
     /// [`Self::narrow`] with the running set narrowed in place: `live ∩= the value's entities`.
@@ -247,7 +271,7 @@ mod tests {
     const SMALL: u32 = 32;
 
     fn column_with(per_value: &[Vec<u32>], dir: &Path) -> ColumnPostings {
-        let base = dir.join("postings.arrow");
+        let base = dir.join("postings");
         write_postings(&base, per_value, SMALL).unwrap();
         ColumnPostings::open(&base, false).unwrap()
     }
@@ -386,7 +410,7 @@ mod tests {
     #[test]
     fn intersects_agrees_over_a_keyed_base() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(
             &base,
             &[(7, vec![1, 2]), (40_000, vec![3]), (65_535, vec![4, 5])],
@@ -451,7 +475,7 @@ mod tests {
     #[test]
     fn a_keyed_base_addresses_scattered_codes() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(
             &base,
             &[(7, vec![1, 2]), (40_000, vec![3]), (65_535, vec![4, 5])],
@@ -481,7 +505,7 @@ mod tests {
     #[test]
     fn an_unheld_code_is_empty_rather_than_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(&base, &[(7, vec![1])], SMALL).unwrap();
         let column = ColumnPostings::open_keyed(&base).unwrap();
 
@@ -494,7 +518,7 @@ mod tests {
     #[test]
     fn set_membership_spans_scattered_codes() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("postings.arrow");
+        let base = dir.path().join("postings");
         write_delta_tier_at(&base, &[(3, vec![1]), (50_000, vec![2, 3])], SMALL).unwrap();
         let column = ColumnPostings::open_keyed(&base).unwrap();
 

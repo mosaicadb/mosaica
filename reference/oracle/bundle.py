@@ -1,7 +1,7 @@
 """Read a Mosaica bundle directly off disk (Reference Sheet R4, contracts §2.1-§2.3).
 
 Independent of `mosaica-store`: this module re-parses `CURRENT`/`MANIFEST.json`/
-`SEGMENTS-<n>.json`, `permutation.bin`, `morton.u32`, `cuts.u32`, `postings.arrow` and
+`SEGMENTS-<n>.json`, `permutation.bin`, `morton.u32`, `cuts.u32`, `terms/postings` and
 `columns.arrow` from
 their byte-level definitions, verifying every file digest the manifests name along the way. Tag-1
 postings records are read via `pyroaring.BitMap.deserialize`, which reads the portable Roaring
@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
 import pyarrow.ipc as ipc
 from pyroaring import BitMap
 
@@ -732,16 +731,16 @@ class Bundle:
         return self._unique_cache[attribute]
 
     def postings(self, term_id: int) -> np.ndarray:
-        """Term `term_id`'s items, ascending: each shard's `terms/postings.arrow` decoded and keyed
+        """Term `term_id`'s items, ascending: each shard's `terms/postings` decoded and keyed
         by [`item_key`], shard by shard."""
-        if not hasattr(self, "_postings_arrays"):
-            self._postings_arrays = [
-                (shard, _read_postings_array(self._shard_dir(shard) / "terms" / "postings.arrow"))
+        if not hasattr(self, "_postings_records"):
+            self._postings_records = [
+                (shard, _read_records(self._shard_dir(shard) / "terms" / "postings", "posting"))
                 for shard in (record["id"] for record in self.shards)
             ]
         held = [
-            item_keys(shard, _decode_posting(array, term_id))
-            for shard, array in self._postings_arrays
+            item_keys(shard, _decode_posting(records, term_id))
+            for shard, records in self._postings_records
         ]
         return np.concatenate(held)
 
@@ -1073,15 +1072,39 @@ def _read_segment(seg_dir: Path, perm_path: Path | None = None) -> Segment:
     )
 
 
-def _read_postings_array(path: Path) -> pa.Array:
-    with ipc.open_file(path) as reader:
-        table = reader.read_all()
-    return table.column("posting").combine_chunks()
+RECORD_MAGIC = b"MOSAREC\0"
+RECORD_VERSION = 1
+RECORD_TRAILER = struct.Struct("<8sIB3s16sQQ")
 
 
-def _decode_posting(array: pa.Array, term_id: int) -> np.ndarray:
-    """Term `term_id`'s sorted entity ids in one shard's `postings.arrow`."""
-    record = array[term_id].as_py()
+def _read_records(path: Path, column: str) -> tuple[bytes, np.ndarray]:
+    """An unkeyed record file's values and offsets, record `i` being `values[offsets[i]:offsets[i +
+    1]]`. The file is the records, zeros to a multiple of 8, `n + 1` little-endian `i64` offsets and
+    a 48-byte trailer: magic, version, keys flag, three zero bytes, the column name zero-padded to
+    16 bytes, `n` and the values' length."""
+    data = path.read_bytes()
+    if len(data) < RECORD_TRAILER.size:
+        raise ValueError(f"{path}: shorter than a record file's trailer")
+    magic, version, keyed, reserved, name, records, values = RECORD_TRAILER.unpack(
+        data[-RECORD_TRAILER.size :]
+    )
+    if magic != RECORD_MAGIC or version != RECORD_VERSION or reserved != bytes(3):
+        raise ValueError(f"{path}: not a version {RECORD_VERSION} record file")
+    if keyed != 0 or name.rstrip(b"\0") != column.encode():
+        raise ValueError(f"{path}: not an unkeyed record file of column '{column}'")
+    offsets_at = values + (-values % 8)
+    if len(data) != offsets_at + 8 * (records + 1) + RECORD_TRAILER.size:
+        raise ValueError(f"{path}: {len(data)} bytes, which is not what its trailer describes")
+    offsets = np.frombuffer(data, dtype="<i8", count=records + 1, offset=offsets_at)
+    if offsets[0] != 0 or offsets[-1] != values or np.any(np.diff(offsets) < 0):
+        raise ValueError(f"{path}: offsets do not ascend from 0 to the values' length")
+    return data, offsets
+
+
+def _decode_posting(records: tuple[bytes, np.ndarray], term_id: int) -> np.ndarray:
+    """Term `term_id`'s sorted entity ids in one shard's `terms/postings`."""
+    data, offsets = records
+    record = data[offsets[term_id] : offsets[term_id + 1]]
     tag = record[0]
     payload = record[1:]
     if tag == 0:
@@ -1089,7 +1112,7 @@ def _decode_posting(array: pa.Array, term_id: int) -> np.ndarray:
     if tag == 1:
         bm = BitMap.deserialize(payload)
         return np.fromiter(bm, dtype=np.uint32, count=len(bm))
-    raise ValueError(f"postings.arrow: term {term_id} has unknown tag {tag}")
+    raise ValueError(f"postings: term {term_id} has unknown tag {tag}")
 
 
 def _concatenate(parts: list[tuple[int, Segment]]) -> Segment:

@@ -402,6 +402,7 @@ impl Executor {
             self.coalesce.next_attempt()
         );
         let ctx = crate::coalesce::CoalesceContext {
+            allowance: crate::write::writer_allowance(self.deps.pool.current_num_threads()),
             prefix_dir: self.prefix_dir(generation),
             prefix: generation.prefix.clone(),
             out_rel: ShardLayout::new(partition, plan.shard).coalesced_rel(&id),
@@ -1455,6 +1456,7 @@ impl Executor {
                 .map(|lane| families.iter().position(|f| f.name == lane.name))
                 .collect();
             crate::flush::FlushContext {
+                allowance: crate::write::writer_allowance(self.deps.pool.current_num_threads()),
                 prefix_dir: self.prefix_dir(generation),
                 partition: partition.clone(),
                 view: view.clone(),

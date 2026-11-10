@@ -2,9 +2,8 @@
 //! loader, and the tile lookup — `tile_ranges` for one tile, `tile_ranges_all` for the whole
 //! tile set of a viewport in one sweep.
 //!
-//! This module has its own Arrow IPC reader: `columns.arrow`'s schema (fixed-width primitive
-//! columns) differs from `postings.arrow`'s single `LargeBinary` column, so the zero-copy
-//! technique is reused and the code is not.
+//! `columns.arrow` is decoded by [`mosaica_authz::decode_single_batch`] over a mapping this module
+//! keeps, so that it can advise the kernel on it.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
@@ -2412,8 +2411,7 @@ impl ColumnsRef {
             path: path.to_path_buf(),
             source,
         })?;
-        // SAFETY: identical justification to `mosaica_authz::postings::PostingsReader::open`'s
-        // mmap branch — `arc` outlives every `Buffer` built from it (captured as the buffer's
+        // SAFETY: `arc` outlives every `Buffer` built from it (captured as the buffer's
         // `Allocation`), the mapping is valid for `len` bytes for its whole lifetime, and
         // `memmap2::Mmap` never returns a null base pointer.
         let mapping = unsafe { Mmap::map(&file) }.map_err(|source| StoreError::Io {

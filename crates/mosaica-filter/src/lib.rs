@@ -54,8 +54,8 @@ mod varint;
 
 pub use column::{resolve_union, ColumnPostings, POSTINGS_FILE};
 pub use dict::{
-    write_sorted_dict, DictError, DictStats, KeyMatcher, SortedDict, SortedDictWriter,
-    DEFAULT_RESTART_INTERVAL, DICT_FILE, DICT_FORMAT_VERSION,
+    common_prefix_len, write_sorted_dict, DictError, DictStats, KeyMatcher, SortedDict,
+    SortedDictWriter, DEFAULT_RESTART_INTERVAL, DICT_FILE, DICT_FORMAT_VERSION,
 };
 pub use extent::{extent_paths, open_extent, write_extent, EXTENTS_DIR};
 pub use positions::{

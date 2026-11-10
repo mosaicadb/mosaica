@@ -124,7 +124,7 @@ fn build_fixture(shape: Shape) -> Fixture {
             per_term[*term as usize].push(entity as u32);
         }
     }
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &per_term, SMALL_TERM_THRESHOLD).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
 

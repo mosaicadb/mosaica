@@ -96,7 +96,7 @@ use crate::session::SatisfiedKeys;
 
 /// What composing a partition needs from the generation.
 pub struct PartitionSource<'a> {
-    /// The base postings — the build's `terms/postings.arrow`, which no flush rewrites.
+    /// The base postings — the build's `terms/postings`, which no flush rewrites.
     pub postings: &'a PostingsReader,
 }
 

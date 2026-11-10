@@ -11,7 +11,7 @@ mod unique;
 mod wal;
 mod window;
 
-pub(crate) use background::outstanding;
+pub(crate) use background::{outstanding, writer_allowance};
 pub(super) use background::Background;
 pub(super) use manifest::{DerivedByShard, HeldSpace, SideManifests};
 pub(in crate::write) use unique::UniqueDeclarations;

@@ -121,15 +121,18 @@ enum Command {
         /// Peak memory for the build's own structures, in bytes or with a `k`, `m` or `g`
         /// suffix, such as `24g`.
         ///
-        /// Default: 80% of the available memory or of the process's cgroup limit, whichever is
-        /// lower, kept between 2 GiB and 1 TiB, and 24 GiB where available memory cannot be
-        /// read. Batch and band sizes follow from it. A build that would not fit is refused
+        /// Default: 80% of the available memory or of what is left under the process's cgroup
+        /// limit, whichever is lower, kept between 2 GiB and 1 TiB, and 24 GiB where available
+        /// memory cannot be read. Batch and band sizes follow from it, and a text index or keyword
+        /// dictionary takes what the rest of its stage leaves of it; the build prints that share,
+        /// and the merge passes it expects, before it starts. A build that would not fit is refused
         /// before it assigns internal ids, with the arithmetic in the message.
         #[arg(long, value_name = "SIZE", value_parser = parse_byte_size)]
         memory_budget: Option<u64>,
 
         /// Print each build stage's wall time, row count and peak resident memory to stderr as
-        /// the stage ends.
+        /// the stage ends, and for the `text_index` and `filter_postings` stages the cascade
+        /// passes their merges took.
         ///
         /// Peak resident memory is the process's high-water mark when the stage ended, so it
         /// shows the stage in which the peak was reached.
@@ -139,8 +142,8 @@ enum Command {
         /// Write the per-stage records to this file as JSON when the build ends, including one
         /// that fails partway.
         ///
-        /// One object per stage, in order, with `stage`, `wall_s`, `rows`, `peak_rss_kib`,
-        /// `started_at` and `ended_at`. It does not need `--stage-timings`.
+        /// One object per stage, in order, with `stage`, `wall_s`, `rows`, `cascade_passes`,
+        /// `peak_rss_kib`, `started_at` and `ended_at`. It does not need `--stage-timings`.
         #[arg(long, value_name = "PATH")]
         stage_timings_json: Option<PathBuf>,
 
@@ -929,11 +932,20 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
         stage: mosaica_build::observer::BuildStage,
         elapsed: std::time::Duration,
         rows: u64,
+        passes: u64,
         peak_rss_kib: u64,
     ) {
         if self.print {
+            // A stage whose term indexes merged runs says how many cascade passes they took.
+            let passes = match stage {
+                mosaica_build::observer::BuildStage::TextIndex
+                | mosaica_build::observer::BuildStage::FilterPostings => {
+                    format!(" passes={passes}")
+                }
+                _ => String::new(),
+            };
             eprintln!(
-                "stage {:>16}  {:>8.2}s  rows={rows:<12} peak={:>6} MiB",
+                "stage {:>16}  {:>8.2}s  rows={rows:<12} peak={:>6} MiB{passes}",
                 stage.name(),
                 elapsed.as_secs_f64(),
                 peak_rss_kib / 1024,
@@ -945,6 +957,7 @@ impl mosaica_build::observer::BuildObserver for StageTimings {
                 stage,
                 elapsed,
                 rows,
+                passes,
                 peak_rss_kib,
             );
         }
@@ -1359,6 +1372,9 @@ fn write_arrow_stdout(
 }
 
 fn main() -> ExitCode {
+    // A term index's merge opens as many runs as its memory pays for, under a share of the files
+    // this process may hold open, so the share is as large as the system allows.
+    mosaica_types::process::raise_descriptor_limit();
     let cli = Cli::parse();
     match cli.command {
         Command::Build {

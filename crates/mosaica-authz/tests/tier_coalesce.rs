@@ -27,9 +27,9 @@ fn posting(path: &std::path::Path, term: u32) -> Option<Vec<u32>> {
 #[test]
 fn coalescing_deduplicates_and_drops_nothing() {
     let dir = tempfile::TempDir::new().unwrap();
-    let a = tier_at(dir.path(), "a.arrow", &[(3, &[1, 2])]);
-    let b = tier_at(dir.path(), "b.arrow", &[(3, &[2, 5])]);
-    let out = dir.path().join("merged.arrow");
+    let a = tier_at(dir.path(), "a", &[(3, &[1, 2])]);
+    let b = tier_at(dir.path(), "b", &[(3, &[2, 5])]);
+    let out = dir.path().join("merged");
 
     coalesce_delta_tiers(&[a, b], &out, SMALL_TERM_THRESHOLD).unwrap();
     assert_eq!(posting(&out, 3), Some(vec![1, 2, 5]));
@@ -39,9 +39,9 @@ fn coalescing_deduplicates_and_drops_nothing() {
 #[test]
 fn every_term_from_every_input_survives_in_term_order() {
     let dir = tempfile::TempDir::new().unwrap();
-    let a = tier_at(dir.path(), "a.arrow", &[(2, &[20]), (7, &[10])]);
-    let b = tier_at(dir.path(), "b.arrow", &[(4, &[30])]);
-    let out = dir.path().join("merged.arrow");
+    let a = tier_at(dir.path(), "a", &[(2, &[20]), (7, &[10])]);
+    let b = tier_at(dir.path(), "b", &[(4, &[30])]);
+    let out = dir.path().join("merged");
 
     coalesce_delta_tiers(&[a, b], &out, SMALL_TERM_THRESHOLD).unwrap();
     assert_eq!(posting(&out, 2), Some(vec![20]));
@@ -54,9 +54,9 @@ fn every_term_from_every_input_survives_in_term_order() {
 #[test]
 fn coalescing_retires_nothing() {
     let dir = tempfile::TempDir::new().unwrap();
-    let a = tier_at(dir.path(), "a.arrow", &[(1, &[100, 101, 102])]);
-    let b = tier_at(dir.path(), "b.arrow", &[(1, &[103])]);
-    let out = dir.path().join("merged.arrow");
+    let a = tier_at(dir.path(), "a", &[(1, &[100, 101, 102])]);
+    let b = tier_at(dir.path(), "b", &[(1, &[103])]);
+    let out = dir.path().join("merged");
 
     coalesce_delta_tiers(&[a, b], &out, SMALL_TERM_THRESHOLD).unwrap();
     assert_eq!(
@@ -72,9 +72,9 @@ fn a_wide_term_coalesces_through_the_roaring_arm() {
     let dir = tempfile::TempDir::new().unwrap();
     let first: Vec<u32> = (0..40).collect();
     let second: Vec<u32> = (30..70).collect();
-    let a = tier_at(dir.path(), "a.arrow", &[(5, &first)]);
-    let b = tier_at(dir.path(), "b.arrow", &[(5, &second)]);
-    let out = dir.path().join("merged.arrow");
+    let a = tier_at(dir.path(), "a", &[(5, &first)]);
+    let b = tier_at(dir.path(), "b", &[(5, &second)]);
+    let out = dir.path().join("merged");
 
     coalesce_delta_tiers(&[a, b], &out, SMALL_TERM_THRESHOLD).unwrap();
     assert_eq!(posting(&out, 5), Some((0..70).collect::<Vec<u32>>()));
@@ -84,8 +84,8 @@ fn a_wide_term_coalesces_through_the_roaring_arm() {
 #[test]
 fn coalescing_one_tier_preserves_it() {
     let dir = tempfile::TempDir::new().unwrap();
-    let a = tier_at(dir.path(), "a.arrow", &[(1, &[1, 2, 3]), (9, &[4])]);
-    let out = dir.path().join("merged.arrow");
+    let a = tier_at(dir.path(), "a", &[(1, &[1, 2, 3]), (9, &[4])]);
+    let out = dir.path().join("merged");
 
     coalesce_delta_tiers(&[a], &out, SMALL_TERM_THRESHOLD).unwrap();
     assert_eq!(posting(&out, 1), Some(vec![1, 2, 3]));

@@ -20,7 +20,9 @@
 //! [`count_ranges`] counts a bitmap over many ranges in one walk of its containers, and
 //! [`RangeEnds`] holds the ranges' ends for counting several bitmaps over them.
 //!
-//! [`OwnedView`] reads a bitmap in place from bytes another value keeps alive.
+//! [`OwnedView`] reads a bitmap in place from bytes another value keeps alive,
+//! [`canonical_portable`] serialises one as a function of its set alone, and [`Joined`] joins such
+//! serialisations of sets over disjoint blocks into their union's.
 //!
 //! [`Readable`] gives a bitmap's containers to read in place, as [`Containers`], and a [`Probe`]
 //! that tests membership through a table indexed by container key.
@@ -38,7 +40,7 @@ pub use containers::{Container, Containers, Probe, Readable, Run};
 pub use counts::{count_ranges, RangeEnds};
 pub use ranks::BlockRanks;
 pub use runs::{for_each_run_in, split_by_cardinality, RankedRuns, Runs};
-pub use view::OwnedView;
+pub use view::{canonical_portable, exact_portable, Joined, OwnedView};
 
 /// The values block `block` spans: one container's.
 pub fn span(block: u32) -> std::ops::RangeInclusive<u32> {
@@ -90,8 +92,6 @@ pub const ARRAY_MAX: u32 = 4096;
 /// Containers staged before a stream is handed to croaring, which bounds the staged bytes at
 /// about a megabyte.
 const STAGE: usize = 128;
-/// The portable format's cookie for a stream with no run containers.
-const COOKIE_NO_RUN: u32 = 12346;
 
 /// Stages containers and folds them into a bitmap a stream at a time.
 ///
@@ -271,23 +271,17 @@ impl Sink {
         self.payload.clear();
     }
 
-    /// Write the portable stream for the staged containers. This cookie requires the offset
-    /// table whatever the container count.
+    /// Write the portable stream for the staged containers, none of them a run.
     fn assemble(&mut self) {
         self.stream.clear();
-        let size = self.keys.len() as u32;
-        self.stream.extend_from_slice(&COOKIE_NO_RUN.to_le_bytes());
-        self.stream.extend_from_slice(&size.to_le_bytes());
-        for (key, card) in self.keys.iter().zip(&self.cards) {
-            self.stream.extend_from_slice(&key.to_le_bytes());
-            self.stream
-                .extend_from_slice(&((card - 1) as u16).to_le_bytes());
-        }
-        // 4 cookie + 4 count + 4 per descriptor + 4 per offset.
-        let base = 8 + 8 * size;
-        for start in &self.starts {
-            self.stream.extend_from_slice(&(base + start).to_le_bytes());
-        }
+        let (keys, cards, starts) = (&self.keys, &self.cards, &self.starts);
+        let last = self.payload.len() as u32;
+        let blocks = (0..keys.len()).map(|i| {
+            let end = starts.get(i + 1).map_or(last, |end| *end);
+            (keys[i], (cards[i] - 1) as u16, false, end - starts[i])
+        });
+        view::put_header(blocks, &mut self.stream)
+            .expect("a stream's keys ascend strictly, so it holds at most 2¹⁶ containers of 8 KiB");
         self.stream.extend_from_slice(&self.payload);
     }
 

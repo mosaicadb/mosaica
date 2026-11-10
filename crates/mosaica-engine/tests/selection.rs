@@ -117,7 +117,7 @@ fn mask_over_with(
     let temp = TempDir::new().unwrap();
     let bound = row_count as u64;
 
-    let postings_path = temp.path().join("postings.arrow");
+    let postings_path = temp.path().join("postings");
     write_postings(&postings_path, &[visible_rows.to_vec()], 32).unwrap();
     let postings = PostingsReader::open(&postings_path, false).unwrap();
 

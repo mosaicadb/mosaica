@@ -1487,6 +1487,9 @@ pub fn build_observed(
 /// is permanent (I9) and every digest in the bundle depends on it.
 pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
     validate_args(args)?;
+    let budget = args
+        .memory_budget
+        .unwrap_or_else(pipeline::detect_memory_budget);
     // **The oracle materialises one view.** It exists to be the byte-equality reference for the
     // streaming pipeline's entity-id assignment, and a second implementation of pass one's union
     // would be a second thing to keep in step rather than a check on the first. A multi-view
@@ -1878,6 +1881,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         &residency::payloads_per_item(args),
         pipeline::available_disk(&args.out),
         ExtentRoute::Derived,
+        budget,
     );
 
     // ---- 6b′. the unique indexes ------------------------------------------------------
@@ -1969,14 +1973,13 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         // pipeline writes.
         // The text columns' timing is the streaming pipeline's stage split (`observer.rs`); this
         // path is the equivalence oracle and is not observed, so it drops it.
-        let (mut paths, _text) = pipeline::write_filter_postings(
+        let (mut paths, _costs) = pipeline::write_filter_postings(
             &prefix_dir,
             layout,
             &args.schema,
             &by_entity,
             &open_extents,
-            args.memory_budget
-                .unwrap_or_else(pipeline::detect_memory_budget),
+            mosaica_filter_write::Allowance::new(budget, 0, rayon::current_num_threads()),
             observer::Steps::default(),
         )?;
         paths.extend(pipeline::write_record_blob(
@@ -2110,8 +2113,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
                 &args.groups,
                 mosaica_types::layer::DEFAULT_MAX_SHAPE_VERTICES,
                 tmp.path(),
-                args.memory_budget
-                    .unwrap_or_else(pipeline::detect_memory_budget),
+                budget,
             )?;
             report_shapes(&plan.shape_reports);
             let by_source: HashMap<u64, u64> = staged

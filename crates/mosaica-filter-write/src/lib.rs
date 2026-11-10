@@ -71,11 +71,34 @@
 //! just written. That sharing is §6.2's byte-identity argument — a folded column and a freshly
 //! built one over the same live entities are the same bytes — and it is why one crate holds both
 //! producers' emit rather than each holding its own.
+//!
+//! # Spill files, sorted runs and the one term merge
+//!
+//! The `spill` module holds the receipt every spill file is verified against ([`SpillReceipt`])
+//! and the sorted run a term index or a keyword dictionary spills: its writer
+//! ([`TextRunWriter`]), its reader ([`TextRunReader`]) and the cascade that reduces more runs than
+//! one merge may hold open ([`cascade_sorted_runs`]). The build's spill files and
+//! `mosaica-store`'s partition use the receipt from here. It also holds the one rule a term index's
+//! pass is sized by, [`Allowance`]: what its stage leaves of the memory to be had, which pays for
+//! the accumulators and then for the merge's fan-in.
+//!
+//! Every merge over sorted terms is one [`TermMerge`] over [`TermSource`]s: the build's keyword
+//! runs, a text index's runs and the terms its accumulators held at the end of their pass, and
+//! the fold's and the coalesce's finished layers of either family. Each runs in term ranges on
+//! several threads and writes in term order, so its output is the same bytes however it was
+//! divided; a merge over runs goes through [`merge_runs`], which checks every run's receipt. A
+//! text index's terms are gathered in a [`TermAccumulator`], which spills runs when its share of
+//! the allowance fills, and [`write_text_index`] merges what it gathered into the index. The build
+//! and the flush share both, and the fold and the coalesce write through the same merge.
 
+mod accumulator;
 mod chunk_dict;
 mod keyword;
+mod merge;
+mod ordered;
 mod positions;
 mod record;
+mod spill;
 mod text;
 
 use std::collections::BTreeMap;
@@ -84,24 +107,32 @@ use std::path::Path;
 
 use arrow::buffer::ScalarBuffer;
 use croaring::Bitmap;
-use mosaica_authz::KeyedPostingsSpool;
+use mosaica_authz::{encode_posting, RecordWriter, POSTINGS_COLUMN};
 use mosaica_types::SMALL_TERM_THRESHOLD_DEFAULT;
 
 use mosaica_filter::{Codes, ColumnKind, ValueColumn, ValueColumnWriter};
 use mosaica_roaring::RankedRuns;
 
+pub use accumulator::{write_text_index, Gathered, TermAccumulator, TextMerge};
 pub use chunk_dict::{
     dictionary_of, key_prefix, prefers_sort, rank_rows, rank_table, KeyRef, KeyRow, KeyTable,
-    Lookup, Vacant, WindowRule, KEY_WINDOW_ROWS,
+    Lookup, SortOn, Vacant, WindowRule, KEY_WINDOW_ROWS,
 };
 pub use keyword::{coalesce_keyword_extents, fold_keyword_column, KeywordLayer};
+pub use merge::{Out, RangePlan, RangeWriter, Ranges, TermMerge, TermSource, Turn};
+pub use positions::HeldRecords;
 pub use record::{
     coalesce_record_extents, fold_record_blob, merge_record_rows, write_prose, write_text_rows,
     BlobRows, BlockPool, RecordBlobWriter, RecordRows,
 };
-pub use positions::Occurrences;
+pub use spill::{
+    at_end, cascade_sorted_runs, merge_descriptors, merge_runs, read_varint, Allowance, Beside,
+    RunMerge, RunPayload, Sample, SpillFileError, SpillReceipt, TextRunReader, TextRunWriter,
+    RUN_BUFFER_MIN, SPILL_BUF_BYTES, WORKER_BYTES_MIN,
+};
 pub use text::{
     coalesce_text_extents, merge_text_layers, Posting, TextIndexWriter, TextLayerRef,
+    TEXT_MERGE_SLICE_CAP,
 };
 
 /// The vocabulary's reserved *absent* code: never drawn, never bound to a key, and carried by
@@ -466,8 +497,8 @@ impl CategorySource for ValueColumn {
 /// **A code is never split across a band**, which is what lets a band be encoded and appended the
 /// moment its scatter finishes; a code larger than the budget forms a band of its own, exactly as
 /// the authorisation build's `band_rows_budget` takes its floor from the largest single term. Bands
-/// partition ascending code space, so [`KeyedPostingsSpool`]'s ascending-key check holds across
-/// them unchanged.
+/// partition ascending code space, so the keyed file's ascending-key check ([`RecordWriter`]) holds
+/// across them unchanged.
 ///
 /// The two fail-closed scatter checks are the authorisation emit's, for its reasons: an overflow
 /// check, because one code's entities silently becoming another's is a disclosure; and a short-fill
@@ -513,8 +544,7 @@ pub fn write_category_postings(
     }
     bands.push((lo, codes.len()));
 
-    let spool_path = path.with_extension("spool");
-    let mut spool = KeyedPostingsSpool::create(&spool_path, SMALL_TERM_THRESHOLD_DEFAULT)?;
+    let mut out = RecordWriter::create_keyed(path, POSTINGS_COLUMN)?;
     for (lo, hi) in bands {
         let keys = &codes[lo..hi];
         let width = hi - lo;
@@ -559,10 +589,12 @@ pub fn write_category_postings(
         }
         for local in 0..width {
             let entities = &flat[offsets[local] as usize..offsets[local + 1] as usize];
-            spool.append(keys[local], entities)?;
+            let key = keys[local];
+            let record = encode_posting(key as usize, entities, SMALL_TERM_THRESHOLD_DEFAULT)?;
+            out.append_keyed(key, &record)?;
         }
     }
-    spool.finish(path)
+    out.finish()
 }
 
 #[cfg(test)]
@@ -729,8 +761,8 @@ mod tests {
     fn text_files(dir: &Path, tag: &str) -> TextIndexFiles {
         TextIndexFiles {
             dict: dir.join(format!("{tag}-dict.bin")),
-            postings: dir.join(format!("{tag}-postings.arrow")),
-            positions: dir.join(format!("{tag}-positions.arrow")),
+            postings: dir.join(format!("{tag}-postings")),
+            positions: dir.join(format!("{tag}-positions")),
             presence: dir.join(format!("{tag}-presence.roaring")),
         }
     }
@@ -768,11 +800,11 @@ mod tests {
         let c_present = bitmap([2]);
         let out = |tag: &str| text_files(dir, &format!("{tag}-out"));
         let fold = |inputs: &[TextLayerRef<'_>], tombstones: &Bitmap, tag: &str| {
-            merge_text_layers(inputs, tombstones, out(tag))
+            merge_text_layers(inputs, tombstones, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
         let coalesce = |inputs: &[TextLayerRef<'_>], tag: &str| {
-            coalesce_text_extents(inputs, out(tag))
+            coalesce_text_extents(inputs, out(tag), Allowance::new(0, 0, 1))
                 .map(|()| mosaica_filter::read_presence(&out(tag).presence).unwrap())
         };
 
@@ -815,9 +847,6 @@ mod tests {
             vec![("alpha".to_string(), vec![held(1), held(2)])]
         );
         assert_eq!(folded.positions.record_count(), 1);
-        for spool in ["postings.spool", "positions.spool"] {
-            assert!(!dir.join(format!("fold-beta-out-{spool}")).exists());
-        }
     }
 
     /// A category's postings source visits every present entity with its code, in order, over a
@@ -1008,7 +1037,7 @@ mod tests {
             .collect();
         let column = ValueColumn::partial(codes_u32(kept), present).expect("a column");
 
-        let path = dir.path().join("postings.arrow");
+        let path = dir.path().join("postings");
         write_category_postings(&path, "colour", &column, POSTINGS_BAND_ROWS).expect("the emit");
         let postings = mosaica_filter::ColumnPostings::open_keyed(&path).expect("open");
         let mut codes: Vec<u32> = values
@@ -1036,7 +1065,7 @@ mod tests {
         );
 
         // Banding is a memory knob, not a format one: the same bytes at every band size.
-        let narrow = dir.path().join("postings-narrow.arrow");
+        let narrow = dir.path().join("postings-narrow");
         write_category_postings(&narrow, "colour", &column, 1).expect("the emit");
         assert_eq!(
             std::fs::read(&path).expect("read"),

@@ -2,7 +2,7 @@
 //!
 //! One ascending sweep over term ordinals `0..dict_len`. Per term: the base posting, unioned
 //! with every live delta tier's posting for that term, minus the tombstone bitmap, re-encoded
-//! through [`crate::encode_posting_bitmap`] and appended to a [`crate::PostingsSpool`] at record
+//! through [`crate::encode_posting_bitmap`] and appended to a [`crate::RecordWriter`] at record
 //! ordinal = term id. A fold never adds a posting, so [`sweep_term_postings`] does not take a
 //! `Dict` at all, only the ordinal count it must produce records for.
 //!
@@ -29,16 +29,17 @@ use croaring::Bitmap;
 
 use mosaica_types::TermId;
 
-use crate::postings::{encode_posting_bitmap, union_postings, PostingsReader, PostingsSpool};
+use crate::postings::{encode_posting_bitmap, union_postings, PostingsReader};
+use crate::records::RecordWriter;
 use crate::tier::DeltaTier;
 
 /// Run the sweep: ascending term ordinals `0..dict_len`.
 ///
 /// For each term: union the base posting, if any, with every tier's posting, if any, for that
-/// term, subtract `tombstones` as one operand, encode the result and append it to `spool` at the
+/// term, subtract `tombstones` as one operand, encode the result and append it to `out` at the
 /// next ordinal.
 ///
-/// `spool` must be freshly created, no records appended yet.
+/// `out` must be freshly created, no records appended yet.
 ///
 /// `on_term(term, entities)` is called once per term, in ascending order, with the exact bitmap
 /// the record for that term was just encoded from.
@@ -52,7 +53,7 @@ pub fn sweep_term_postings<F>(
     tiers: &[Arc<DeltaTier>],
     tombstones: &Bitmap,
     small_term_threshold: u32,
-    spool: &mut PostingsSpool,
+    out: &mut RecordWriter,
     mut on_term: F,
 ) -> io::Result<()>
 where
@@ -74,7 +75,7 @@ where
         union -= tombstones;
 
         let record = encode_posting_bitmap(&union, small_term_threshold)?;
-        spool.append(&record)?;
+        out.append(&record)?;
 
         on_term(term, &union)?;
     }

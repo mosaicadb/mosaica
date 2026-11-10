@@ -243,7 +243,7 @@ fn main() {
     println!("index bytes  {:>9.1} MB", bytes as f64 / 1e6);
 
     let started = Instant::now();
-    let postings_path = dir.path().join("postings.arrow");
+    let postings_path = dir.path().join("postings");
     let record_codes = write_postings(&postings_path, &values, entities).expect("the postings write");
     let postings = ColumnPostings::open_keyed(&postings_path).expect("the postings open");
     println!(
