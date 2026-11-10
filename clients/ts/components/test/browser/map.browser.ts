@@ -21,15 +21,16 @@ afterAll(async () => {
   await served?.close();
 });
 
-type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; ready?: boolean};
+type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; setStatus(over: object): void; ready?: boolean};
 type Box = {left: number; top: number; right: number; bottom: number; width: number; height: number};
 
 const frames = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
-async function open(): Promise<Page> {
-  const page = await browser.newPage({viewport: {width: 900, height: 700}});
+/** The page with its bare map and strip, or with `?explorer` its explorer; `reducedMotion` as the viewer's system asks. */
+async function open(search = '', reducedMotion: 'reduce' | 'no-preference' = 'no-preference'): Promise<Page> {
+  const page = await browser.newPage({viewport: {width: 900, height: 700}, reducedMotion});
   const failed = new Promise<never>((_, reject) => page.on('pageerror', reject));
-  await page.goto(origin);
+  await page.goto(origin + search);
   await Promise.race([failed, page.waitForFunction(() => (window as unknown as Seen).ready === true, undefined, {timeout: 60_000})]);
   await frames(page);
   return page;
@@ -201,6 +202,21 @@ describe('the map’s ground in a browser', () => {
     expect(await dark()).toBe(false);
     expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
   }, 120_000);
+
+  it('does so inside an explorer for a viewer who asks for reduced motion, and under a page’s own rule for the map’s transitions', async () => {
+    const page = await open('?explorer', 'reduce');
+    expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    await page.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+    await page.evaluate(() => (document.documentElement.style.colorScheme = 'light'));
+    expect(await redrawn(page)).toBeGreaterThanOrEqual(2.5);
+
+    const bare = await open();
+    await bare.addStyleTag({content: 'mosaica-map { transition: none !important; }'});
+    await bare.evaluate(() => (document.documentElement.style.colorScheme = 'dark'));
+    expect(await redrawn(bare)).toBeGreaterThanOrEqual(2.5);
+  }, 120_000);
 });
 
 describe('the region’s tag in a browser', () => {
@@ -251,5 +267,52 @@ describe('a status strip short of room in a browser', () => {
     expect(new Set(strip.cells.map((c) => Math.round(c.top))).size).toBeGreaterThan(1);
     for (const cell of strip.cells) expect(within(cell, {...strip.strip, left: strip.strip.left - 1, top: strip.strip.top - 1}), JSON.stringify(cell)).toBe(true);
     for (const box of strip.held) expect(within(box, strip.strip), JSON.stringify(box)).toBe(true);
+  }, 120_000);
+});
+
+describe('a status strip’s counts that wait for an answer, in a browser', () => {
+  /** Each count and word of the strip's count cells: its contrast against the strip, its colour, and whether anything fades it. */
+  const figures = (page: Page) =>
+    page.evaluate(() => {
+      const root = document.querySelector('mosaica-status')!.shadowRoot!;
+      const channels = (colour: string) => colour.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+      const luminance = (colour: string) => {
+        const [r, g, b] = channels(colour).map((c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+      };
+      const ground = luminance(getComputedStyle(root.querySelector('[part="strip"]')!).backgroundColor);
+      const texts = [...root.querySelectorAll('.cell:not(.state)')].flatMap((cell) => [...cell.querySelectorAll('span, mosaica-count')].flatMap((e) => (e.shadowRoot ? [...e.shadowRoot.querySelectorAll('span')] : [e])));
+      return texts
+        .filter((e) => e.textContent!.trim() !== '')
+        .map((e) => {
+          const ink = luminance(getComputedStyle(e).color);
+          let faded = false;
+          for (let at: Element | null = e; at; at = at.parentElement ?? ((at.getRootNode() as ShadowRoot).host as Element | undefined) ?? null) if (getComputedStyle(at).opacity !== '1') faded = true;
+          return {text: e.textContent!.trim(), colour: getComputedStyle(e).color, contrast: (Math.max(ink, ground) + 0.05) / (Math.min(ink, ground) + 0.05), faded};
+        });
+    });
+
+  it('keeps them at 4.5 to 1 in both colour schemes, drawn fainter than the current ones and faded by nothing', async () => {
+    const page = await open();
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({colorScheme: scheme});
+      await page.evaluate(() => (window as unknown as Seen).setStatus({}));
+      await frames(page);
+      const current = await figures(page);
+      expect(current.length, scheme).toBeGreaterThanOrEqual(4);
+      for (const over of [{status: 'loading'}, {status: 'refused', refusal: {code: 'contract', detail: 'no', status: 422}}, {status: 'retrying'}, {unreachable: true}]) {
+        await page.evaluate((o) => (window as unknown as Seen).setStatus(o), over);
+        await frames(page);
+        const waiting = await figures(page);
+        expect(waiting.map((f) => f.text), scheme).toEqual(current.map((f) => f.text));
+        for (const figure of waiting) {
+          expect(figure.contrast, `${scheme} ${JSON.stringify(over)}: ${figure.text}`).toBeGreaterThanOrEqual(4.5);
+          expect(figure.faded, `${scheme}: ${figure.text}`).toBe(false);
+        }
+        // The matched count, the darkest of the current figures, is drawn in another ink.
+        expect(waiting[0]!.colour, scheme).not.toBe(current[0]!.colour);
+        expect(waiting[0]!.contrast, scheme).toBeLessThan(current[0]!.contrast);
+      }
+    }
   }, 120_000);
 });

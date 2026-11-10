@@ -116,8 +116,11 @@ export class MosaicaStatus extends MosaicaElement {
       .cell mosaica-count {
         font-size: inherit;
       }
+      /* Figures that wait for an answer, or stand from before a refusal, are all drawn in the
+         faint ink, which keeps a text's contrast. The state cell says why, by its dot's shape
+         or in words. */
       .cell.dim {
-        opacity: 0.4;
+        color: var(--_mosaica-ink-3);
       }
       .cell.state {
         padding: 0 5px 0 12px;
@@ -160,6 +163,10 @@ export class MosaicaStatus extends MosaicaElement {
       }
       .cell mosaica-count.lit::part(count) {
         color: var(--_mosaica-highlight);
+      }
+      .cell.dim mosaica-count::part(count),
+      .cell.dim mosaica-count::part(label) {
+        color: var(--_mosaica-ink-3);
       }
       .cell mosaica-count::part(label) {
         margin-left: 0.3em;

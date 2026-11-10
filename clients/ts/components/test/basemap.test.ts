@@ -124,16 +124,25 @@ describe('<mosaica-map> basemap', () => {
     expect(live.classList.contains('sr-only')).toBe(false);
   });
 
-  it('shows its note and its refusal and announces neither when quiet', async () => {
+  it('announces its note and its refusal when quiet too, since no other element knows of them', async () => {
     const {host, el, store} = await map('geo', 'basemap="world" quiet');
+    const live = noteElement(el);
+    expect(live.getAttribute('role')).toBe('status');
     await switchTo(host, store, 'flat');
-    expect(note(el)).not.toBeNull();
-    expect(noteElement(el).classList.contains('sr-only')).toBe(false);
-    expect(noteElement(el).closest('[role="status"]')).toBeNull();
+    expect(noteElement(el)).toBe(live);
+    expect(live.textContent?.trim()).not.toBe('');
+    expect(live.classList.contains('sr-only')).toBe(false);
 
     const refused = await map('geo', 'basemap="osm" quiet');
-    expect(refusal(refused.el)).not.toBeNull();
-    for (const region of refused.el.shadowRoot!.querySelectorAll('[role="status"]')) expect(region.textContent?.trim()).toBe('');
+    const words = refusal(refused.el)!;
+    expect(words.closest('[role="status"]')).not.toBeNull();
+    // The view's own states are still left to the other element.
+    refused.store.set('status', status({status: 'refused', refusal: {code: 'contract', detail: 'the box is outside the view', status: 422}}));
+    await drawn(refused.host);
+    expect(refusal(refused.el)).toBeNull();
+    const state = deep(refused.el.shadowRoot!, '[part="overlay"] [part="state"]')!;
+    expect(state.textContent).toContain('the box is outside the view');
+    expect(state.querySelector('[role="status"]')!.textContent?.trim()).toBe('');
   });
 
   it('refuses what a mapping names for a view that it does not fit, and follows the mapping per view', async () => {

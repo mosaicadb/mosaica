@@ -23,6 +23,7 @@ class ThemeProbe extends LitElement {
         outline-offset: -2px;
       }
       .reached {
+        padding: 4px 12px;
         outline: 2px solid var(--_mosaica-focus);
         outline-offset: -2px;
       }

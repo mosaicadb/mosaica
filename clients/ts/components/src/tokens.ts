@@ -655,12 +655,13 @@ export const chrome = css`
       forced-color-adjust: auto;
     }
     /* A ring in the highlight colour would not show on that control's highlight background, so
-       its ring is drawn inside its edge in the text colour of the pair: where it has the focus,
-       and where the arrow keys reached it while a box keeps the focus. A ring round a control
-       inside it lies on the same background, and takes the same colour. */
+       its ring is drawn in the text colour of the pair: where it has the focus, and where the
+       arrow keys reached it while a box keeps the focus. That colour may be the page's own, so
+       the ring is set in from the control's edge, with the highlight on both sides of it. A
+       ring round a control inside it lies on the same background, and takes the same colour. */
     :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice']):is(:focus-visible, [data-active]) {
       outline-color: HighlightText !important;
-      outline-offset: -2px !important;
+      outline-offset: -4px !important;
     }
     :is([aria-pressed='true'], [aria-checked='true'], [aria-selected='true'], [aria-current]:not([aria-current='false']), .list > .item.on):not([part~='choice'])
       :focus-visible {

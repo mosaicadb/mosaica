@@ -136,7 +136,8 @@ let mapsMade = 0;
  * only shown where a pan went. Screen readers also announce the basemap's note, and how many items
  * match inside the selected region, once, when the query that counts it has finished loading. Set
  * `quiet` where another element on the page says the same things, such as a status strip: the map
- * shows the same and announces nothing.
+ * shows the same, and announces only what it alone knows, the basemap's note and a basemap it
+ * refuses.
  *
  * With `ground` unset the map follows the page's colour scheme, and draws again when it changes.
  *
@@ -210,10 +211,18 @@ export class MosaicaMap extends MosaicaElement {
         background: var(--_mosaica-map-bg);
         outline: none;
         overflow: hidden;
-        /* Draws nothing: a colour that follows the scheme, whose transition tells the map that
-           the ground it draws on has changed. */
+      }
+      /* Draws nothing: a colour that follows the scheme, whose transition tells the map that the
+         ground it draws on has changed. It is inside the map's own tree, where no rule of the
+         page's or of an element holding the map reaches it, and its transition outranks the one
+         the theme takes away under reduced motion. */
+      #ground {
+        position: absolute;
+        width: 0;
+        height: 0;
+        pointer-events: none;
         text-decoration-color: light-dark(#000, #fff);
-        transition: text-decoration-color 1ms;
+        transition: text-decoration-color 1ms !important;
       }
       [part='canvas'] {
         position: absolute;
@@ -593,9 +602,10 @@ export class MosaicaMap extends MosaicaElement {
   /** Hides the toolbar. */
   @property({type: Boolean, attribute: 'no-controls'}) accessor noControls = false;
   /**
-   * Announces nothing: the message over the canvas, the basemap's note and the selected region's
-   * count are still shown, and none is put in a live region. Set it when another element on the
-   * page says the same things.
+   * Leaves to another element what that element also says: the view's state over the canvas and
+   * the selected region's count are still shown, and neither is put in a live region. Set it when
+   * another element on the page says the same things, such as a status strip. What only the map
+   * knows is announced either way: the basemap's note, and a basemap it refuses.
    */
   @property({type: Boolean, reflect: true}) accessor quiet = false;
   /**
@@ -710,7 +720,6 @@ export class MosaicaMap extends MosaicaElement {
     this.askPointColumns(this.resolvedStore);
     this.syncBasemap();
     this.watchTooltipKeys();
-    this.addEventListener('transitionrun', this.onGroundChange);
     if (this.finalizeTimer) {
       clearTimeout(this.finalizeTimer);
       this.finalizeTimer = null;
@@ -737,7 +746,6 @@ export class MosaicaMap extends MosaicaElement {
       this.describeTimer = null;
     }
     this.watchTooltipKeys();
-    this.removeEventListener('transitionrun', this.onGroundChange);
     this.tagSized?.disconnect();
     this.tagBox = null;
     this.stopFrameLoop();
@@ -854,10 +862,10 @@ export class MosaicaMap extends MosaicaElement {
 
   /**
    * Draw for the other ground when the page's or the system's colour scheme changes, which the
-   * host's `text-decoration-color` follows: the basemap, the points and names, and the density key.
+   * colour of the `#ground` element follows: the basemap, the points and names, and the density key.
    */
-  private onGroundChange = (e: TransitionEvent): void => {
-    if (e.target !== this || e.propertyName !== 'text-decoration-color' || this.ground !== '') return;
+  private onGroundChange = (): void => {
+    if (this.ground !== '') return;
     this.syncBasemap();
     this.paint();
     this.requestUpdate();
@@ -1919,7 +1927,7 @@ export class MosaicaMap extends MosaicaElement {
     const {note, attribution} = this.drawnBasemap;
     // The note's element is there before its words are, so they are announced, and is not drawn
     // while it has none.
-    return html`<span part="note" class=${note ? nothing : 'sr-only'} role=${this.quiet ? nothing : 'status'}>${note ?? nothing}</span>${attribution ? html`<span part="attribution">${attribution}</span>` : nothing}`;
+    return html`<span part="note" class=${note ? nothing : 'sr-only'} role="status">${note ?? nothing}</span>${attribution ? html`<span part="attribution">${attribution}</span>` : nothing}`;
   }
 
   override render(): TemplateResult | typeof nothing {
@@ -1931,18 +1939,19 @@ export class MosaicaMap extends MosaicaElement {
     // strip's alone.
     const refresh = () => this.resolvedStore?.refresh();
     const nothingVisible = seesNothing(this.resolvedStore, state);
-    const said: {state: PanelState; line: StateLine} | null = nothingVisible
+    const ofView: {state: PanelState; line: StateLine} | null = nothingVisible
       ? {state, line: {dot: null, words: NOTHING_VISIBLE, action: nothing}}
       : state === 'refused' || state === 'unanswered' || state === 'busy' || state === 'expired' || state === 'empty' || (state === 'retrying' && status?.unreachable)
         ? {state, line: stateLine(state, status, {onRefresh: refresh, onRetry: refresh})}
-        : this.drawnBasemap.refusal
-          ? {state: 'refused', line: refusedLine(this.drawnBasemap.refusal, 'basemap')}
-          : null;
+        : null;
+    const said = ofView ?? (this.drawnBasemap.refusal ? {state: 'refused' as const, line: refusedLine(this.drawnBasemap.refusal, 'basemap')} : null);
     // One template whatever the state, so the live element is there before its words are and
     // each change of them is announced. With no state to show it is not drawn. Nothing in view
-    // is announced as a query's answer; where a pan went, it is shown and not said. The selected
-    // region's count has a live element of its own, so it is said once, whatever the state does.
-    const unsaid = this.quiet || (state === 'empty' && !nothingVisible && !this.emptyAnswered);
+    // is announced as a query's answer; where a pan went, it is shown and not said. `quiet`
+    // leaves the view's states to another element; a basemap's refusal is the map's alone to
+    // say. The selected region's count has a live element of its own, so it is said once,
+    // whatever the state does.
+    const unsaid = ofView !== null && (this.quiet || (state === 'empty' && !nothingVisible && !this.emptyAnswered));
     const overlay = html`<div part="overlay">
       <span part="state" class=${said ? nothing : 'sr-only'} data-state=${said?.state ?? state} data-visible=${nothingVisible ? 'none' : nothing}>${liveLine(said?.line ?? NO_LINE, unsaid ? UNSAID : null)}</span>
       <span class="sr-only" role="status">${this.quiet ? nothing : this.regionHeard}</span>
@@ -1990,6 +1999,7 @@ export class MosaicaMap extends MosaicaElement {
         @lostpointercapture=${{handleEvent: this.onPointerUp, capture: true}}
       ></div>
       <span id="keys" class="sr-only">Arrow keys pan, plus and minus zoom, Escape clears the selection.</span>
+      <span id="ground" aria-hidden="true" @transitionrun=${this.onGroundChange}></span>
       ${overlay}
       ${this.regionTag()}
       ${corners.filter((c) => c !== this.controlsCorner).map(corner)}

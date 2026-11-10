@@ -164,7 +164,7 @@ export function stateLine(state: PanelState, status: StatusProjection | null | u
 }
 
 /** The dot before a line's words. */
-export function stateDot(line: StateLine): TemplateResult | typeof nothing {
+function stateDot(line: StateLine): TemplateResult | typeof nothing {
   return line.dot ? html`<span class=${line.dot} title=${line.title ?? nothing}></span>` : nothing;
 }
 
