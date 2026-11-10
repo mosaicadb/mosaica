@@ -74,24 +74,27 @@ export function insideBox(x: number, y: number, box: [number, number, number, nu
 }
 
 /**
- * A selection as the operand of a `region` filter leaf, in the view's data coordinates. A box is
- * normalised so either corner may come first. A lasso's points are sent as drawn. An artifact is
- * named by its `mosaica_id` as a decimal string.
+ * A selection as the operand of a `region` filter leaf, in the data coordinates of `view`, or of
+ * the request's view where `view` is left out. A box is normalised so either corner may come
+ * first. A lasso's points are sent as drawn. An artifact is named by its `mosaica_id` as a decimal
+ * string.
  *
  * @category Filters
  */
 export function regionOperand(
-  shape: {kind: 'box'; bbox: [number, number, number, number]} | {kind: 'lasso'; points: [number, number][]} | {kind: 'artifact'; id: bigint}
+  shape: {kind: 'box'; bbox: [number, number, number, number]} | {kind: 'lasso'; points: [number, number][]} | {kind: 'artifact'; id: bigint},
+  view?: string
 ): RegionOperand {
+  const at = view === undefined ? {} : {view};
   switch (shape.kind) {
     case 'box': {
       const [x0, y0, x1, y1] = shape.bbox;
-      return {bbox: [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]};
+      return {bbox: [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)], ...at};
     }
     case 'lasso':
-      return {polygon: shape.points.map(([x, y]) => [x, y])};
+      return {polygon: shape.points.map(([x, y]) => [x, y]), ...at};
     case 'artifact':
-      return {artifact: shape.id.toString()};
+      return {artifact: shape.id.toString(), ...at};
   }
 }
 

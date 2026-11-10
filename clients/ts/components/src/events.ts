@@ -49,9 +49,12 @@ export type MosaicaEventDetails = {
    * selection was cleared. It fires with `status` `loading` when a shape is selected or `cleared`
    * when it is cleared, then again with `shown` or `refused` when the server answers. Then `visible`, `matched` and
    * `served` carry the region's counts, and `verdict` says whether they are exact for the shape.
+   * `view` names the view whose selection changed where it is not the current one, as when the
+   * filter panel's chip for a selection held in another view is removed.
    */
   'mosaica-selectchange': {
     shape: SelectionShapeDetail | null;
+    view?: string;
     status?: RegionProjection['status'] | 'cleared';
     visible?: Masked | null;
     matched?: Masked;

@@ -63,7 +63,7 @@ composed verdict.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class UnknownColumn(Exception):
@@ -186,18 +186,23 @@ class RegionColumn:
     (as its decimal string) → the member entities of the artifact **this principal is served**;
     an id absent here is an empty operand — for an unknown id, a suppressed artifact, one
     withheld by criterion, exactly as the server answers. `quantise` is the build's `fixed32`
-    over the fixture's extent.
+    over the fixture's extent. `views` holds each other view's column by its id: a leaf naming
+    one with `view` is read there, among the entities this view holds.
     """
 
     positions: dict[int, tuple[int, int]]
     artifacts: dict[str, set[int]]
     quantise: "callable"
+    views: dict[str, "RegionColumn"] = field(default_factory=dict)
 
     def matches(self, entity: int, operand: dict) -> bool:
         """Is `entity`'s stored position inside the shape, or `entity` a member of the artifact?"""
         held = self.positions.get(entity)
         if held is None:
             return False
+        if "view" in operand and operand["view"] in self.views:
+            there = {k: v for k, v in operand.items() if k != "view"}
+            return self.views[operand["view"]].matches(entity, there)
         if "artifact" in operand:
             return entity in self.artifacts.get(str(operand["artifact"]), set())
         px, py = held

@@ -25,12 +25,33 @@ use crate::error::ApiError;
 use mosaica_engine::filter::UNRESOLVABLE_VALUE as UNRESOLVABLE_ID;
 const UNRESOLVABLE: u32 = UNRESOLVABLE_ID.raw();
 
-/// What a `region` leaf is canonicalised against: the request's view's extent, the projection
-/// that placed its points there, and the deployment's vertex cap.
-pub struct RegionContext {
+/// The view a `region` leaf's shape is in: its id, its quantisation extent and the projection
+/// that placed its points there.
+#[derive(Debug, Clone, Copy)]
+pub struct RegionFrame<'a> {
+    pub view: &'a str,
     pub extent: Bounds,
     /// The view's declared projection, which a `space = "wgs84"` leaf is put through.
     pub projection: Projection,
+}
+
+impl<'a> RegionFrame<'a> {
+    /// The frame of `view` as `/v1/meta` publishes it.
+    pub fn of(view: &'a mosaica_engine::MetaView) -> Self {
+        RegionFrame {
+            view: &view.id,
+            extent: view_extent(view),
+            projection: view.projection,
+        }
+    }
+}
+
+/// What a `region` leaf is canonicalised against: the request's view, every other view the
+/// principal may see by its id or key, and the deployment's vertex cap.
+pub struct RegionContext<'a> {
+    pub frame: RegionFrame<'a>,
+    /// Another view's frame, or `None` for a name the principal cannot reach or that names nothing.
+    pub frame_of: &'a dyn Fn(&str) -> Option<RegionFrame<'a>>,
     pub max_vertices: u64,
 }
 
@@ -117,7 +138,7 @@ pub fn parse(
     node: &Value,
     column_of: &dyn Fn(&str) -> LeafColumn,
     resolve: &dyn Fn(&str, &str) -> Option<u32>,
-    region: &RegionContext,
+    region: &RegionContext<'_>,
 ) -> Result<FilterExpr, ApiError> {
     let obj = node
         .as_object()
@@ -249,9 +270,10 @@ fn parse_member_of(body: &Value) -> Result<mosaica_engine::filter::MemberOfLeaf,
 }
 
 /// A `region` leaf's body: one of `polygon`, `bbox`, `circle` or `ellipse` (with `space`, `view`
-/// by default), or `artifact`. Geometry is canonicalised to grid units through the tiler's
-/// `fixed32`, so equal shapes are equal values; a shape outside the extent matches nothing.
-fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiError> {
+/// by default), or `artifact`, and the `view` it is in where that is not the request's. Geometry is
+/// canonicalised to grid units through the tiler's `fixed32` in that view's extent, so equal shapes
+/// are equal values; a shape outside the extent matches nothing.
+fn parse_region(body: &Value, ctx: &RegionContext<'_>) -> Result<RegionLeaf, ApiError> {
     let obj = body
         .as_object()
         .ok_or_else(|| bad("`region` takes an object with exactly one of polygon, bbox, circle, ellipse or artifact"))?;
@@ -273,14 +295,39 @@ fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiErro
         )));
     }
     for key in obj.keys() {
-        if key != named[0] && key != "space" {
+        if key != named[0] && key != "space" && key != "view" {
             return Err(bad(format!(
-                "`region` takes {} and `space`, not '{key}'",
+                "`region` takes {}, `space` and `view`, not '{key}'",
                 named[0]
             )));
         }
     }
     let kind = named[0];
+    // A view the principal cannot reach gets the 404 an unknown one does.
+    let frame = match obj.get("view") {
+        None => ctx.frame,
+        Some(Value::String(name)) => (ctx.frame_of)(name)
+            .ok_or_else(|| ApiError::Unknown(format!("unknown view '{name}'")))?,
+        Some(_) => return Err(bad("`region.view` is a view's id or key, as a string")),
+    };
+    let leaf = region_in(obj, kind, &frame, ctx.max_vertices)?;
+    Ok(if frame.view == ctx.frame.view {
+        leaf
+    } else {
+        RegionLeaf::InView {
+            view: frame.view.to_string(),
+            region: Box::new(leaf),
+        }
+    })
+}
+
+/// A `region` leaf's shape or artifact, in `frame`.
+fn region_in(
+    obj: &serde_json::Map<String, Value>,
+    kind: &str,
+    frame: &RegionFrame<'_>,
+    max_vertices: u64,
+) -> Result<RegionLeaf, ApiError> {
     if obj.contains_key("space") && obj.get("space").and_then(Value::as_str).is_none() {
         return Err(bad("`region.space` is a string"));
     }
@@ -290,7 +337,7 @@ fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiErro
             .map_err(|_| bad(format!("`region.space` is `view` or `wgs84`, not '{word}'")))?,
     };
     let space = space
-        .resolve(ctx.projection)
+        .resolve(frame.projection)
         .map_err(|e| bad(format!("`region.space`: {e}")))?;
     if kind == "artifact" {
         if obj.contains_key("space") {
@@ -326,12 +373,12 @@ fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiErro
                     arr.len()
                 )));
             }
-            if arr.len() as u64 > ctx.max_vertices {
+            if arr.len() as u64 > max_vertices {
                 return Err(bad(format!(
                     "`region.polygon` carries {} vertices; the deployment's `max_region_vertices` \
                      is {}, so send a simpler shape",
                     arr.len(),
-                    ctx.max_vertices
+                    max_vertices
                 )));
             }
             let mut ring = Vec::with_capacity(arr.len());
@@ -373,7 +420,7 @@ fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiErro
         }
         _ => unreachable!("the kind was checked against the five"),
     };
-    let (canonical, _report) = shape.canonical(space, &ctx.extent).map_err(|e| match e {
+    let (canonical, _report) = shape.canonical(space, &frame.extent).map_err(|e| match e {
         CanonError::NotFinite => bad(format!("`region.{kind}`: a coordinate is not finite")),
         CanonError::InvertedBox => bad(
             "`region.bbox` is [x0, y0, x1, y1] with x0 <= x1 and y0 <= y1",
@@ -391,12 +438,12 @@ fn parse_region(body: &Value, ctx: &RegionContext) -> Result<RegionLeaf, ApiErro
     })?;
     // Densifying a `wgs84` shape's edges adds vertices, so the cap is checked again.
     let vertices = canonical.vertex_count();
-    if vertices > ctx.max_vertices {
+    if vertices > max_vertices {
         return Err(bad(format!(
             "`region.{kind}` is {vertices} vertices once its edges are densified for \
              `space = \"wgs84\"`, and the deployment's `max_region_vertices` is {}; send a \
              simpler shape, or send it in the view's own space",
-            ctx.max_vertices
+            max_vertices
         )));
     }
     Ok(RegionLeaf::Shape(Arc::new(canonical)))
@@ -731,9 +778,10 @@ mod tests {
         }
     }
 
-    /// An unprojected view: its own coordinates are the only space it has.
-    fn region_ctx() -> RegionContext {
-        RegionContext {
+    /// An unprojected view, `here`: its own coordinates are the only space it has.
+    fn plain_frame(view: &'static str) -> RegionFrame<'static> {
+        RegionFrame {
+            view,
             extent: Bounds {
                 x_min: 0.0,
                 x_max: 1000.0,
@@ -741,20 +789,40 @@ mod tests {
                 y_max: 1000.0,
             },
             projection: Projection::None,
+        }
+    }
+
+    /// The views the principal may reach, `here` and `there`, both unprojected, and no other.
+    fn frame_of(name: &str) -> Option<RegionFrame<'static>> {
+        match name {
+            "here" => Some(plain_frame("here")),
+            "there" => Some(plain_frame("there")),
+            _ => None,
+        }
+    }
+
+    fn region_ctx() -> RegionContext<'static> {
+        RegionContext {
+            frame: plain_frame("here"),
+            frame_of: &frame_of,
             max_vertices: 8,
         }
     }
 
     /// A Web Mercator view over the whole world.
-    fn projected_ctx() -> RegionContext {
+    fn projected_ctx() -> RegionContext<'static> {
         RegionContext {
-            extent: Bounds {
-                x_min: 0.0,
-                x_max: 1.0,
-                y_min: 0.0,
-                y_max: 1.0,
+            frame: RegionFrame {
+                view: "here",
+                extent: Bounds {
+                    x_min: 0.0,
+                    x_max: 1.0,
+                    y_min: 0.0,
+                    y_max: 1.0,
+                },
+                projection: Projection::WebMercator,
             },
-            projection: Projection::WebMercator,
+            frame_of: &frame_of,
             max_vertices: 2_048,
         }
     }
@@ -915,6 +983,43 @@ mod tests {
             panic!("expected a 422");
         };
         assert!(detail.contains("once its edges are densified"), "{detail}");
+    }
+
+    #[test]
+    fn a_region_naming_another_view_is_placed_in_that_view() {
+        let plain = |text: &str| match parse_str(text).unwrap() {
+            FilterExpr::Region(leaf) => leaf,
+            other => panic!("a region leaf, not {other:?}"),
+        };
+        // Read in `there`'s frame, not the unit square of the projected request's own view.
+        assert_eq!(
+            parse_projected(r#"{"region": {"bbox": [0, 0, 500, 500], "view": "there"}}"#).unwrap(),
+            FilterExpr::Region(RegionLeaf::InView {
+                view: "there".to_string(),
+                region: Box::new(plain(r#"{"region": {"bbox": [0, 0, 500, 500]}}"#)),
+            })
+        );
+        assert_eq!(
+            parse_str(r#"{"region": {"artifact": 42, "view": "there"}}"#).unwrap(),
+            FilterExpr::Region(RegionLeaf::InView {
+                view: "there".to_string(),
+                region: Box::new(RegionLeaf::Artifact(MosaicaId::new(42))),
+            })
+        );
+        // The request's own view is the leaf without one.
+        assert_eq!(
+            parse_str(r#"{"region": {"bbox": [0, 0, 500, 500], "view": "here"}}"#).unwrap(),
+            parse_str(r#"{"region": {"bbox": [0, 0, 500, 500]}}"#).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_region_naming_no_view_it_may_reach_is_an_unknown_view() {
+        let err =
+            parse_str(r#"{"region": {"bbox": [0, 0, 1, 1], "view": "elsewhere"}}"#).unwrap_err();
+        assert!(matches!(err, ApiError::Unknown(_)), "{err:?}");
+        let err = parse_str(r#"{"region": {"bbox": [0, 0, 1, 1], "view": 3}}"#).unwrap_err();
+        assert!(matches!(err, ApiError::Contract(_)), "{err:?}");
     }
 
     #[test]

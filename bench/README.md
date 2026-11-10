@@ -4,8 +4,7 @@ How to run the suite at whatever scales and label sets you want, and how to read
 
 Findings and methodology live elsewhere: each arm's module doc in
 [`crates/mosaica-bench/src/arms/`](../crates/mosaica-bench/src/arms/) records what it measured and
-what it means, and the design memos in [`docs/evidence/memos/`](../docs/evidence/memos/) carry the
-individual findings. This file is operational.
+what it means. This file is operational.
 
 ---
 

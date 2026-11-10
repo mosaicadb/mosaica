@@ -691,6 +691,15 @@ class Selection:
         that applies `all_of`, `any_of` or `none_of` to a list of expressions. An item must match
         every filter added.
 
+        The tests a column takes depend on its type: `eq` and `in` on every type but text,
+        `prefix` and `contains` on a keyword, `match` and `phrase` on text, and `range` on a
+        number, timestamp or bool. The filters page of the reference describes each.
+
+        Three expressions name no column. `{"region": {...}}` keeps the items inside a `bbox`,
+        `circle`, `ellipse` or `polygon`. `{"member_of": {"layer": name, "artifact":
+        mosaica_id}}` keeps the members of one annotation, which `"key"` and `"level"` can name
+        in place of `"artifact"`. `{"mosaica_id": {"in": [...]}}` keeps the items with those ids.
+
         A test on a timestamp column takes a `datetime`, a `date`, a pandas `Timestamp` or a
         NumPy `datetime64`, and the client sends it as microseconds since the Unix epoch. A
         moment with no time zone is read as UTC, and a date stands for its midnight in UTC. A
@@ -1470,7 +1479,10 @@ class Viewer:
 
         `"cells": {"depth": d}` divides the set, or each group, into the view's cells at a depth
         from 0 to 32, where up to 16 they are the map's tiles at that zoom. Adding `"area": [x0,
-        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells.
+        y0, x1, y1]` keeps only the cells meeting that box. A histogram takes no cells. `cell` is
+        one number that interleaves the bits of the cell's column and its grid row. Bit 0 is the
+        lowest bit of the column and bit 1 is the lowest bit of the row. Columns are counted
+        from the view's `x_min` and rows from its `y_min`.
 
         A table's columns come in this order, each where it applies: `group` (`listed`, `rest` or
         `none`), `key` (a category's key, or an annotation's `mosaica_id` as its decimal string,

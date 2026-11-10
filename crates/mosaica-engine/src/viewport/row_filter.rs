@@ -1727,6 +1727,7 @@ impl Engine {
         let mask = resolved.leaf(side);
         use crate::filter::{FilterError, RegionLeaf};
         let segments = &side.segments[..];
+        let asked = cancel;
         let never_cancelled = CancelToken::new();
         let cancel = cancel.as_ref().unwrap_or(&never_cancelled);
         use crate::region::{digest_of, RegionDecomposition, RegionKey, RegionRows, RegionVerdict};
@@ -1764,6 +1765,23 @@ impl Engine {
                     domain: Some(Arc::clone(entry.domain())),
                 })
             }
+            RegionLeaf::InView { view, region } => {
+                let there = self.region_in_view(view, region, served, resolved, asked)?;
+                let entities = there
+                    .entities
+                    .iter()
+                    .find(|(shard, _)| *shard == side.shard.id())
+                    .map(|(_, entities)| entities);
+                let rows = match (entities, mask) {
+                    (Some(entities), Some(_)) => side.data.row_space.project(entities),
+                    _ => croaring::Bitmap::new(),
+                };
+                Ok(RegionRows {
+                    rows,
+                    verdict: there.verdict,
+                    domain: None,
+                })
+            }
             RegionLeaf::Artifact(id) => {
                 let gated = self
                     .gated_once(served, resolved, *id)
@@ -1787,6 +1805,86 @@ impl Engine {
                 })
             }
         }
+    }
+
+    /// The items the viewer sees inside `region` in `view`, by shard, once per request: the
+    /// region resolved there as the request's own view resolves one, under that view's mask.
+    fn region_in_view(
+        &self,
+        view: &str,
+        region: &crate::filter::RegionLeaf,
+        served: &ServedView<'_>,
+        resolved: &ResolvedLeaves<'_>,
+        cancel: &Option<CancelToken>,
+    ) -> std::result::Result<std::rc::Rc<InView>, crate::filter::FilterError> {
+        use crate::filter::FilterError;
+        let refused = |e: EngineError| match e {
+            EngineError::Cancelled => FilterError::Cancelled,
+            EngineError::UnknownView(view) => FilterError::RegionViewUnknown(view),
+            EngineError::ProjectionBuilding
+            | EngineError::FragmentBuilding
+            | EngineError::CountsBuilding => FilterError::RegionViewBuilding,
+            e => FilterError::RegionUnavailable(e.to_string()),
+        };
+        memo(
+            &resolved.in_view,
+            |(held_view, held)| held_view == view && held == region,
+            || (view.to_string(), region.clone()),
+            || {
+                let open = self
+                    .open_view(
+                        served.session,
+                        served.generation,
+                        view,
+                        cancel,
+                        &mut Probe::new(),
+                    )
+                    .map_err(refused)?;
+                let there = ResolvedLeaves::new(&open.mask);
+                let mut verdict = crate::region::RegionVerdict::Exact;
+                let mut entities = Vec::new();
+                for (place, side, leaf) in open.served.filtered_sides(&open.mask) {
+                    let rows = self.resolve_region(region, &open.served, side, &there, cancel)?;
+                    verdict = verdict.coarser(rows.verdict);
+                    // A drawn shape's interior is every row of its tiles; only the visible ones
+                    // are crossed.
+                    let visible = match &rows.domain {
+                        Some(domain) => {
+                            let mut visible = croaring::Bitmap::new();
+                            for range in domain.iter() {
+                                visible.or_inplace(&leaf.rows_in_range(range.clone()));
+                            }
+                            visible.and(&rows.rows)
+                        }
+                        None => rows.rows,
+                    };
+                    let crossed = self
+                        .entities_of_rows(&open.served, place, &visible)
+                        .map_err(refused)?;
+                    entities.push((side.shard.id(), crossed));
+                }
+                Ok(std::rc::Rc::new(InView { entities, verdict }))
+            },
+        )
+    }
+
+    /// The entities of `rows` in the side at `place`, on the engine's pool.
+    pub(crate) fn entities_of_rows(
+        &self,
+        served: &ServedView<'_>,
+        place: usize,
+        rows: &croaring::Bitmap,
+    ) -> Result<croaring::Bitmap> {
+        let row_space = &served.sides[place].data.row_space;
+        self.pool
+            .install(|| row_space.entities_of_rows(rows))
+            .ok_or_else(|| {
+                EngineError::Malformed(format!(
+                    "view '{}' has no row-to-entity table, so a set routed by its rows cannot be \
+                     counted by entity; rebuild the bundle",
+                    served.name
+                ))
+            })
     }
 
     /// Answer one `member_of` leaf in one side of one request, whose layer the filter's admission
@@ -1860,6 +1958,17 @@ pub(crate) struct ResolvedLeaves<'m> {
         Vec<((ShardId, crate::filter::RegionLeaf), crate::region::RegionRows)>,
     >,
     members: std::cell::RefCell<Vec<((ShardId, crate::filter::MemberOfLeaf), croaring::Bitmap)>>,
+    in_view: std::cell::RefCell<Vec<((String, crate::filter::RegionLeaf), InViewHeld)>>,
+}
+
+/// A region of another view as one request holds it, shared by every side that reads it.
+type InViewHeld = std::rc::Rc<InView>;
+
+/// A region of another view, answered for one request: the items the viewer sees inside it in
+/// each shard, and how exactly it was answered there.
+pub(crate) struct InView {
+    entities: Vec<(ShardId, croaring::Bitmap)>,
+    verdict: crate::region::RegionVerdict,
 }
 
 impl<'m> ResolvedLeaves<'m> {
@@ -1871,6 +1980,7 @@ impl<'m> ResolvedLeaves<'m> {
             keys: Default::default(),
             regions: Default::default(),
             members: Default::default(),
+            in_view: Default::default(),
         }
     }
 
@@ -1945,14 +2055,13 @@ pub(crate) fn unique_holders(
 ///
 /// [`FilterError`]: crate::filter::FilterError
 pub(crate) fn filter_refusal(e: crate::filter::FilterError) -> EngineError {
-    if e == crate::filter::FilterError::Cancelled {
-        return EngineError::Cancelled;
-    }
-    let detail = e.to_string();
-    if e.is_callers_fault() {
-        EngineError::FilterMalformed(detail)
-    } else {
-        EngineError::FilterRefused(detail)
+    use crate::filter::FilterError;
+    match e {
+        FilterError::Cancelled => EngineError::Cancelled,
+        FilterError::RegionViewBuilding => EngineError::ProjectionBuilding,
+        FilterError::RegionViewUnknown(view) => EngineError::UnknownView(view),
+        e if e.is_callers_fault() => EngineError::FilterMalformed(e.to_string()),
+        e => EngineError::FilterRefused(e.to_string()),
     }
 }
 

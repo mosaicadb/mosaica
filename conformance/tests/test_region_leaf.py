@@ -23,6 +23,10 @@ What is asserted, and by which second reader:
 - **An unknown id, a suppressed artifact and one withheld by the principal's criterion are one
   response, byte for byte** (C17): the leaf is an empty operand for each, and nothing in the
   status, the headers this test reads or the body's frames — the trailer's clock aside — says which.
+- **A region naming another view is read there.** A second view places three items in four at
+  transposed positions; the lasso sent with `view` naming the first is the oracle's walk over the
+  first view's positions, among the items the second holds, and composes with the second's own
+  box. A view no principal is served is a `404`, as an unknown view is.
 - **`region` is a reserved column name** — a declaration naming it is refused at the build.
 """
 
@@ -30,12 +34,15 @@ from __future__ import annotations
 
 import subprocess
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from oracle.filters import NumericColumn, RegionColumn, evaluate
 from oracle.harness import (
     CLI_BIN,
     REPO_ROOT,
+    cli_build,
     spawn_server,
     stop_server,
     write_deployment,
@@ -313,3 +320,93 @@ def test_region_is_a_reserved_column_name(tmp_path):
     )
     assert result.returncode != 0
     assert "region" in (result.stderr + result.stdout) and "reserved" in (result.stderr + result.stdout).lower()
+
+
+#: The second view: items placed by the source `transposed`.
+TRANSPOSED = "t"
+
+
+def in_transposed(sid: int) -> bool:
+    """What the second view holds: three items in four, so some of a shape's items in `s0` have
+    no row there."""
+    return sid % 4 != 0
+
+
+@pytest.fixture(scope="module")
+def two_view_server(tmp_path_factory):
+    """The shape fixture with a second view over [`in_transposed`]'s items, each at its `s0`
+    position with x and y swapped."""
+    points = fixture_points()
+    work = tmp_path_factory.mktemp("two-view-fixture")
+    build_bundle(work, points)
+    transposed = [(sid, y, x) for sid, x, y in points if in_transposed(sid)]
+    pq.write_table(
+        pa.table(
+            {
+                "entity_id": pa.array([p[0] for p in transposed], type=pa.uint64()),
+                "x": pa.array([p[1] for p in transposed], type=pa.float32()),
+                "y": pa.array([p[2] for p in transposed], type=pa.float32()),
+            }
+        ),
+        work / "transposed.parquet",
+    )
+    schema = work / "two-views.toml"
+    schema.write_text(
+        config_toml()
+        .replace('pairs  = "pairs.parquet"\n', 'pairs  = "pairs.parquet"\ntransposed = "transposed.parquet"\n', 1)
+        .replace('source = "points"\n', f'source = "points"\nallocation_view = "{VIEW_ID}"\n', 1)
+        + f"""
+[[view]]
+name             = "{TRANSPOSED}"
+extent           = {{ min = 0.0, max = 65536.0 }}
+source           = "transposed"
+point_visibility = {{ source = "pairs", default = "public" }}
+"""
+    )
+    bundle = work / "bundle-two-views"
+    cli_build(write_deployment(work / "mosaica-two-views.toml", bundle=bundle, schema=schema), bundle)
+    server, proc = spawn_server(
+        bundle,
+        tmp_path_factory.mktemp("two-view-server"),
+        max_k=100_000,
+        k_max_marks=100_000,
+        theta_target_marks=10**12,
+    )
+    yield server, points, transposed
+    stop_server(proc)
+
+
+def test_a_region_naming_another_view_is_read_there(two_view_server):
+    server, points, transposed = two_view_server
+    column = RegionColumn(
+        positions={p[0]: (q(p[1]), q(p[2])) for p in transposed},
+        artifacts={},
+        quantise=q,
+        views={VIEW_ID: region_column(points)},
+    )
+    lasso = {"region": {"polygon": LASSO, "view": VIEW_ID}}
+    box = {"region": {"bbox": [1000.5, 2000.25, 40000.75, 30000.5]}}
+    for terms in PRINCIPALS:
+        token = server.authorise(terms)["token"]
+        candidate = {p[0] for p in visible(points, terms)}
+
+        def served(filters: dict) -> tuple[int, str | None]:
+            resp = server.viewport_response(token, TRANSPOSED, 0, WHOLE_MAP, k=0, filters=filters)
+            assert resp.status_code == 200, resp.text
+            tiles, _points = decode_viewport(resp.content)
+            return sum(t[2] for t in tiles), resp.headers.get("x-mosaica-region")
+
+        expected = len(evaluate(lasso, {"region": column}, candidate))
+        assert 0 < expected, f"principal {terms}: a real subset"
+        got, verdict = served(lasso)
+        assert got == expected, f"principal {terms}: served {got}, oracle {expected}"
+        assert verdict == "exact"
+        both = {"all_of": [lasso, box]}
+        got, _ = served(both)
+        assert got == len(evaluate(both, {"region": column}, candidate)), f"principal {terms}"
+
+    token = server.authorise(PRINCIPALS[0])["token"]
+    refused = server.viewport_request(
+        token, TRANSPOSED, 0, WHOLE_MAP, k=0, filters={"region": {"polygon": LASSO, "view": "nowhere"}}
+    )
+    assert refused.status_code == 404, refused.text

@@ -290,14 +290,22 @@ export type MosaicaIdOperand = {eq: string} | {in: string[]};
  * longitude and latitude, which a view without a map projection refuses with `422`. A shape with
  * a very long boundary may be answered for a slightly larger area; the response's {@link RegionVerdict} says so.
  *
+ * `view` names another view the shape or artifact is in, by its id. The filter then matches the
+ * items inside it in that view, wherever the request's view places them, so a selection drawn in
+ * one layout narrows another. A view the viewer is not served is refused with `404`.
+ *
  * @category Filters
  */
-export type RegionOperand =
+export type RegionOperand = (
   | {polygon: [number, number][]; space?: 'view' | 'wgs84'}
   | {bbox: [number, number, number, number]; space?: 'view' | 'wgs84'}
   | {circle: [number, number, number]; space?: 'view' | 'wgs84'}
   | {ellipse: [number, number, number, number, number]; space?: 'view' | 'wgs84'}
-  | {artifact: string};
+  | {artifact: string}
+) & {
+  /** The view the shape or artifact is in, by its id. Defaults to the request's view. */
+  view?: string;
+};
 
 /**
  * The `member_of` filter: the visible members of one artifact, such as a cluster. It works in
