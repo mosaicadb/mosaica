@@ -508,8 +508,7 @@ pub fn write_text_index(
             return Err(e);
         }
     };
-    // Only a merge on several threads divides terms.
-    let divides = allowance.threads > 1;
+    let divides = ranges.threads(allowance) > 1;
     let each = (merge_slice_cap as u64).min(largest) * std::mem::size_of::<u32>() as u64
         + held.iter().map(|h| h.copy_bytes(divides)).sum::<u64>();
     let head = match divides {
@@ -961,8 +960,11 @@ impl TermSource for HeldCursor<'_> {
         self.sort()?;
         self.positions.clear();
         let entity = if self.sorted {
-            let shared = self.shared.as_deref().and_then(OnceLock::get);
-            let flat = shared.and_then(|sorted| sorted.as_ref().ok()).unwrap_or(&self.own);
+            let flat = match self.shared.as_deref().map(OnceLock::get) {
+                None => &self.own,
+                Some(Some(Ok(flat))) => flat,
+                Some(_) => return Err(invalid("a held term was not sorted")),
+            };
             let (entity, start) = flat.entries[self.taken as usize];
             let mut at = start as usize;
             read_positions(|| next(&flat.chain, &mut at), &mut self.positions)?;

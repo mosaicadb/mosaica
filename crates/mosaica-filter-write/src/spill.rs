@@ -691,15 +691,23 @@ impl TextRunWriter {
         body: impl FnOnce(&mut dyn FnMut(Piece<'_>) -> io::Result<()>) -> io::Result<()>,
     ) -> io::Result<()> {
         self.begin(term, count)?;
-        let (mut rank, mut previous) = (0, 0);
-        body(&mut |piece| match piece {
-            Piece::Entity(entity, bytes) => {
-                self.mark(previous, rank);
-                (rank, previous) = (rank + 1, entity);
-                self.put(bytes)
+        let (mut rank, mut previous, mut unread) = (0, 0, None);
+        body(&mut |piece| {
+            let given = matches!(piece, Piece::Unread(_));
+            debug_assert_eq!(
+                *unread.get_or_insert(given),
+                given,
+                "a body is given all as unread bytes or none"
+            );
+            match piece {
+                Piece::Entity(entity, bytes) => {
+                    self.mark(previous, rank);
+                    (rank, previous) = (rank + 1, entity);
+                    self.put(bytes)
+                }
+                Piece::Rest(bytes) => self.put(bytes),
+                Piece::Unread(bytes) => self.put_unread(bytes),
             }
-            Piece::Rest(bytes) => self.put(bytes),
-            Piece::Unread(bytes) => self.put_unread(bytes),
         })?;
         self.wrote(count, anchor);
         Ok(())

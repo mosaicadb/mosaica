@@ -7035,6 +7035,7 @@ mod tests {
                     expected_text_postings().len() as u64,
                     "plan {k} source {source} wrote the wrong term count"
                 );
+                // Nothing but the artefacts is left behind: every run this plan spilled is gone.
                 let left: Vec<String> = std::fs::read_dir(&column_dir)
                     .expect("read dir")
                     .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
@@ -7043,29 +7044,6 @@ mod tests {
                 assert!(left.is_empty(), "plan {k} source {source} left {left:?}");
                 files.push(index_files(&column_dir));
             }
-            let column_dir = dir.path().join(format!("plan-{k}"));
-            std::fs::create_dir_all(&column_dir).expect("column dir");
-            let written = write_text_index(
-                &column_dir,
-                &attribute,
-                TextValues::Arena(&values),
-                plan,
-                Steps::default(),
-            )
-            .expect("text index");
-            assert_eq!(
-                written.terms,
-                expected_text_postings().len() as u64,
-                "plan {k} wrote the wrong term count"
-            );
-            // Nothing but the artefacts is left behind: every run this plan spilled is gone.
-            let left: Vec<String> = std::fs::read_dir(&column_dir)
-                .expect("read dir")
-                .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
-                .filter(|name| name.ends_with(".spill"))
-                .collect();
-            assert!(left.is_empty(), "plan {k} left {left:?} behind");
-            files.push(index_files(&column_dir));
         }
         assert_same_files(&files);
 

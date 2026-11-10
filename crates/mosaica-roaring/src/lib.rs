@@ -269,16 +269,14 @@ impl Sink {
     /// Write the portable stream for the staged containers, none of them a run.
     fn assemble(&mut self) {
         self.stream.clear();
-        let ends = self.starts.iter().skip(1).copied();
-        let ends = ends.chain(std::iter::once(self.payload.len() as u32));
-        let blocks: Vec<(u16, u16, bool, u32)> = self
-            .keys
-            .iter()
-            .zip(&self.cards)
-            .zip(self.starts.iter().zip(ends))
-            .map(|((&key, &card), (start, end))| (key, (card - 1) as u16, false, end - start))
-            .collect();
-        view::put_header(&blocks, &mut self.stream).expect("a stream stages at most a stage");
+        let (keys, cards, starts) = (&self.keys, &self.cards, &self.starts);
+        let last = self.payload.len() as u32;
+        let blocks = (0..keys.len()).map(|i| {
+            let end = starts.get(i + 1).map_or(last, |end| *end);
+            (keys[i], (cards[i] - 1) as u16, false, end - starts[i])
+        });
+        view::put_header(blocks, &mut self.stream)
+            .expect("a stream's keys ascend strictly, so it holds at most 2¹⁶ containers of 8 KiB");
         self.stream.extend_from_slice(&self.payload);
     }
 

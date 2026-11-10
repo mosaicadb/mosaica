@@ -528,6 +528,15 @@ pub enum Ranges {
 }
 
 impl Ranges {
+    /// The most threads a merge divided so runs on under `allowance`. Its plan runs on no more,
+    /// so a merge charges for dividing terms by entity where this is more than one.
+    pub fn threads(self, allowance: Allowance) -> usize {
+        match self {
+            Ranges::Planned => allowance.threads,
+            Ranges::Fixed { threads, .. } => threads,
+        }
+    }
+
     /// The plan for a merge over `bytes` of input, `runs` of its sources runs, under `allowance`,
     /// where each thread holds `each` bytes beside its readers.
     pub fn plan(self, allowance: Allowance, bytes: u64, runs: usize, each: u64) -> RangePlan {

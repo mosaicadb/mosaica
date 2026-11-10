@@ -702,7 +702,7 @@ fn merge(
     // divided term's posting, is charged at its cap. The thread that writes holds a divided term's
     // posting in parts, which is no larger than the layers' postings of it, until its last, and
     // its positions' block table, an eighth of an entity a byte at the least.
-    let head: u64 = match allowance.threads > 1 {
+    let head: u64 = match ranges.threads(allowance) > 1 {
         true => weighed.iter().map(Weighed::largest).sum::<u64>() * 3 / 2,
         false => 0,
     };
