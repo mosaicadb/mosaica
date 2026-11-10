@@ -280,13 +280,15 @@ describe('the filter panel under a pointer and a keyboard', () => {
         meta: {
           declaredScalars: [
             {name: 'archive', arrowType: 'u16', category: {}, render: true},
-            {name: 'submitted_at', arrowType: 'timestamp_us', category: null, render: true}
+            {name: 'submitted_at', arrowType: 'timestamp_us', category: null, render: true},
+            {name: 'population', arrowType: 'u32', category: null, render: true}
           ],
           layers: [],
           views: [],
           filterOperands: [
             {column: 'archive', family: 'category', operands: ['in']},
             {column: 'submitted_at', family: 'numeric', operands: ['range']},
+            {column: 'population', family: 'numeric', operands: ['range']},
             {column: longField, family: 'keyword', operands: ['eq']}
           ],
           selection: {maxAggregateTop: 1000, maxAggregateNamed: 1000}
@@ -312,9 +314,11 @@ describe('the filter panel under a pointer and a keyboard', () => {
           listeners.add(fn);
           return () => listeners.delete(fn);
         },
-        setAggregate: (id: string, spec: {groupings: {by?: {bins?: number}}[]} | null) => {
+        setAggregate: (id: string, spec: {groupings: {by?: {bins?: number}; summary?: string[]}[]} | null) => {
           aggregates = new Map(aggregates);
           if (spec === null) aggregates.delete(id);
+          // The population's figures, which its card's heading writes beside its name.
+          else if (spec.groupings[0]?.summary?.includes('population')) aggregates.set(id, {...answer(category, 60), summaries: [new Map([['population', {values: 25n, missing: 0n, min: 1000, max: 9_000_000, mean: 1_234_567.5}]])]});
           else aggregates.set(id, spec.groupings[0]?.by?.bins ? answer(histogram, 100) : answer(category, 60));
           queueMicrotask(publish);
         },
@@ -428,9 +432,30 @@ describe('the filter panel under a pointer and a keyboard', () => {
     expect((await drawn('highlight'))[1]).toBe('none');
   });
 
-  it('wraps a folded card’s name in the compact layout, at the width an explorer 900 px wide gives it and with its text spaced out', async () => {
+  it('wraps a card’s name between its words in the compact layout, at the width an explorer 900 px wide gives it and with its text spaced out', async () => {
     // The panel of a compact explorer is 264 px wide; the spacing is what a reader's own style sheet may force.
-    const p = await panel(`compact pinned="archive ${LONG_FIELD}"`, 264, 'div { letter-spacing: 0.12em; word-spacing: 0.16em; }');
+    const p = await panel(`compact pinned="archive population ${LONG_FIELD}"`, 264, 'div { letter-spacing: 0.12em; word-spacing: 0.16em; }');
+    // A name of one word that fits the card is on one line, folded and open, where its figures stand beside it.
+    const oneWord = () =>
+      p.evaluate(() => {
+        const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
+        const card = root.querySelector('mosaica-field-card[data-field="population"]')!.shadowRoot!;
+        const title = card.querySelector('[part="title"]')!;
+        const short = root.querySelector('mosaica-field-card[data-field="archive"]')!.shadowRoot!.querySelector('[part="title"]')!;
+        const head = card.querySelector('[part="head"]')!.getBoundingClientRect();
+        const fold = card.querySelector('[part="fold"]')!.getBoundingClientRect();
+        return {
+          name: title.textContent,
+          figures: (card.querySelector('[part="sub"]')?.textContent ?? '').trim() !== '' && getComputedStyle(card.querySelector('[part="sub"]')!).display !== 'none',
+          oneLine: Math.abs(title.getBoundingClientRect().height - short.getBoundingClientRect().height) < 1,
+          whole: title.scrollWidth <= title.clientWidth + 1,
+          inside: fold.right <= head.right + 0.5 && title.getBoundingClientRect().left >= head.left - 0.5
+        };
+      });
+    expect(await oneWord()).toEqual({name: 'Population', figures: false, oneLine: true, whole: true, inside: true});
+    await p.locator('mosaica-field-card[data-field="population"] [part="fold"]').click();
+    await settled(p);
+    expect(await oneWord()).toEqual({name: 'Population', figures: true, oneLine: true, whole: true, inside: true});
     const seen = await p.evaluate((field) => {
       const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
       const card = root.querySelector(`mosaica-field-card[data-field="${field}"]`)!;

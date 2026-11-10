@@ -270,13 +270,28 @@ export class MosaicaFieldCard extends MosaicaElement {
         padding-top: 6px;
         padding-bottom: 6px;
       }
+      /* The chart and the buttons go under the name, at the right, where the name's longest word
+         does not fit beside them. */
       [part='head'] {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: 8px;
+        justify-content: flex-end;
+        gap: 2px 8px;
         min-height: 24px;
       }
-      /* Not a section heading, as the shared rule for a title part draws one. */
+      /* The name and what it notes, which goes under the name where the two do not fit on a line.
+         The group asks for the width of the name's longest word, and takes what the line has left. */
+      .named {
+        flex: 1 1 min-content;
+        min-width: 0;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0 8px;
+      }
+      /* Not a section heading, as the shared rule for a title part draws one. It wraps between its
+         words, and inside one only where that word alone is wider than the card. */
       [part='title'] {
         display: block;
         flex: 0 1 auto;
@@ -287,7 +302,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         letter-spacing: 0;
         text-transform: none;
         color: var(--_mosaica-ink);
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
       }
       [part='sub'] {
         flex: 1 1 auto;
@@ -330,8 +345,9 @@ export class MosaicaFieldCard extends MosaicaElement {
       :host([compact][folded]) [part='sub'] {
         display: none;
       }
-      :host([compact][folded]) [part='head'] {
-        gap: 6px;
+      :host([compact][folded]) [part='head'],
+      :host([compact][folded]) .named {
+        column-gap: 6px;
       }
       .painted {
         display: inline-flex;
@@ -1031,7 +1047,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       : nothing;
     const fold = html`<button part="fold" type="button" aria-expanded=${this.folded ? 'false' : 'true'} aria-label=${this.folded ? `Open ${title}` : `Fold ${title}`} @click=${() => this.fold()}>${icon(this.folded ? 'chev' : 'chevup', 12, 2)}</button>`;
     const head = (sub: TemplateResult | string | typeof nothing) =>
-      html`<div part="head"><h3 part="title" id="title">${title}</h3>${this.folded && this.compact && colouring ? html`<span class="painted" role="img" aria-label="Colouring the map">${icon('drop', 11, 2)}</span>` : nothing}${sub}${this.folded ? this.spark(s, kind, colouring) : nothing}${paint}${fold}</div>`;
+      html`<div part="head"><div class="named"><h3 part="title" id="title">${title}</h3>${this.folded && this.compact && colouring ? html`<span class="painted" role="img" aria-label="Colouring the map">${icon('drop', 11, 2)}</span>` : nothing}${sub}</div>${this.folded ? this.spark(s, kind, colouring) : nothing}${paint}${fold}</div>`;
     const card =
       kind === 'histogram'
         ? this.histogram(s, meta, title, head, colouring)
