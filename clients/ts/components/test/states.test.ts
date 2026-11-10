@@ -187,6 +187,77 @@ describe('<mosaica-selection> on a busy server', () => {
   });
 });
 
+describe('a query that has not finished loading', () => {
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const running = status({status: 'loading', querying: true});
+
+  it('is named on the strip once it has run a quarter of a second, with Cancel, and not before', async () => {
+    const host = await mount('<mosaica-status></mosaica-status>');
+    const store = fakeStore({status: status({}), view});
+    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
+    await settle(host);
+    const state = () => deep(host, '[part="state"]')!;
+
+    store.set('status', running);
+    await settle(host);
+    expect(state().textContent?.trim()).toBe('');
+    expect(deep(host, '[part="cancel"]')).toBeNull();
+
+    await wait(300);
+    await settle(host);
+    expect(state().hasAttribute('data-querying')).toBe(true);
+    expect(state().textContent?.replace('Cancel', '').trim()).toBe('Running query');
+    (deep(host, '[part="cancel"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'cancelQuery')).toHaveLength(1);
+
+    store.set('status', status({}));
+    await settle(host);
+    expect(state().getAttribute('data-state')).toBe('shown');
+    expect(deep(host, '[part="cancel"]')).toBeNull();
+  });
+
+  it('is not named where it is answered within that quarter of a second, nor is the next one named early', async () => {
+    const host = await mount('<mosaica-status></mosaica-status>');
+    const store = fakeStore({status: status({}), view});
+    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
+    await settle(host);
+    store.set('status', running);
+    await settle(host);
+    await wait(100);
+    store.set('status', status({}));
+    await settle(host);
+    await wait(300);
+    await settle(host);
+    expect(deep(host, '[part="cancel"]')).toBeNull();
+
+    store.set('status', running);
+    await settle(host);
+    await wait(100);
+    await settle(host);
+    expect(deep(host, '[part="cancel"]')).toBeNull();
+  });
+
+  it('stays named while the map has drawn and the counts still load, and gives way to a refusal', async () => {
+    const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');
+    const store = fakeStore({status: running, view});
+    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    await wait(300);
+    store.set('status', status({status: 'shown', querying: true}));
+    await settle(host);
+    const state = () => host.querySelector('mosaica-status')!.shadowRoot!.querySelector('[part="state"]')!;
+    expect(state().textContent?.replace('Cancel', '').trim()).toBe('Running query');
+    expect(state().getAttribute('data-state')).toBe('shown');
+    // Nothing is drawn over the map for a query.
+    expect(host.querySelector('mosaica-map')!.shadowRoot!.querySelector('[part="overlay"]')).toBeNull();
+
+    store.set('status', status({status: 'refused', refusal: {code: 'contract', detail: 'no', status: 422}}));
+    await settle(host);
+    expect(state().getAttribute('data-state')).toBe('refused');
+    expect(deep(host, '[part="cancel"]')).toBeNull();
+  });
+});
+
 describe('a refusal shows the server’s reason under its words', () => {
   it('on the strip and over the map, as the server sent it, and no reason where no server refused', async () => {
     const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');

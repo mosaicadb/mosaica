@@ -350,6 +350,11 @@ export class ArtifactChannel {
     return this.state;
   }
 
+  /** Whether a request for the noted view is in flight, or waits to be sent or sent again. */
+  get pending(): boolean {
+    return this.timer !== null || this.inFlight !== null;
+  }
+
   /** How many tiles are held. */
   get heldTiles(): number {
     return this.tiles.size;

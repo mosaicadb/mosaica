@@ -1,11 +1,14 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
-import {property} from 'lit/decorators.js';
+import {property, state} from 'lit/decorators.js';
 import {NO_COUNT, NO_MASKED, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
 import {MosaicaElement, emit} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {NOTHING_VISIBLE, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
+
+/** How long a query has run before the strip names it, so one answered at once does not flicker it. */
+const QUERY_NAMED_AFTER_MS = 250;
 
 /**
  * Use the status line with a map so that viewers know whether what they see is current and how much
@@ -17,6 +20,11 @@ import './count.js';
  * While the view is up to date, the first cell is a dot alone. When something goes wrong, the cell
  * names the state and offers a button if the viewer can act, such as Retry when the server is busy.
  * Sign in appears when the session expires only if you have set `reauthorise`.
+ *
+ * After a change of filters, highlight or selection, the cell reads Running query once the answer
+ * has taken more than a quarter of a second, until the map, the layers and the counts have all
+ * loaded. Its Cancel button goes back to the filters, highlight and selection that last finished
+ * loading.
  *
  * Screen readers announce a refusal or an expiry, because the state cell is an `aria-live` region.
  * The counts sit outside it, so they are not read out every time the map pans.
@@ -35,6 +43,7 @@ import './count.js';
  * @csspart reason - The server's reason for a refusal, under "View refused".
  * @csspart refresh - The Refresh button, shown when the data has changed.
  * @csspart retry - The Retry button, after a refusal, no answer or a busy server.
+ * @csspart cancel - The Cancel button, while a query runs.
  * @csspart reauthorise - The Sign in button, shown on expiry if `reauthorise` is set.
  * @csspart count-shown - The `<mosaica-count>` of marks shown.
  * @csspart count-matched - The `<mosaica-count>` of items the filters match.
@@ -107,6 +116,20 @@ export class MosaicaStatus extends MosaicaElement {
       [part='state']:not(:has(.btn)) {
         padding-right: 7px;
       }
+      .spinner {
+        flex: none;
+        width: 9px;
+        height: 9px;
+        border: 1.5px solid var(--_mosaica-line);
+        border-top-color: var(--_mosaica-ink-2);
+        border-radius: 50%;
+        animation: mosaica-spin 0.8s linear infinite;
+      }
+      @keyframes mosaica-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
       .cell mosaica-count::part(count) {
         font-weight: 600;
       }
@@ -154,6 +177,9 @@ export class MosaicaStatus extends MosaicaElement {
   /** A function the Sign in button calls when the session has expired. Without it there is no Sign in button. */
   @property({attribute: false}) accessor reauthorise: (() => void) | null = null;
 
+  /** Whether the query in flight has run long enough to be named. @internal */
+  @state() accessor queryNamed = false;
+  private queryTimer: ReturnType<typeof setTimeout> | null = null;
   private lastState: PanelState | null = null;
   private expiryFired = false;
 
@@ -165,7 +191,14 @@ export class MosaicaStatus extends MosaicaElement {
     return this.resolvedStore?.get('view') ?? null;
   }
 
+  override disconnectedCallback(): void {
+    if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+    this.queryTimer = null;
+    super.disconnectedCallback();
+  }
+
   protected override updated(): void {
+    this.timeQuery();
     const state = stateOf(this.status);
     if (state !== this.lastState) {
       const from = this.lastState;
@@ -180,6 +213,21 @@ export class MosaicaStatus extends MosaicaElement {
     }
   }
 
+  /** Names a query once it has run for {@link QUERY_NAMED_AFTER_MS}, and forgets it when it ends. */
+  private timeQuery(): void {
+    if (!this.status?.querying) {
+      if (this.queryTimer !== null) clearTimeout(this.queryTimer);
+      this.queryTimer = null;
+      if (this.queryNamed) this.queryNamed = false;
+      return;
+    }
+    if (this.queryNamed || this.queryTimer !== null) return;
+    this.queryTimer = setTimeout(() => {
+      this.queryTimer = null;
+      this.queryNamed = true;
+    }, QUERY_NAMED_AFTER_MS);
+  }
+
   override render(): TemplateResult | typeof nothing {
     const status = this.status;
     const state = stateOf(status);
@@ -191,9 +239,13 @@ export class MosaicaStatus extends MosaicaElement {
     const bare = (cls: string, words: string) => html`<span part="state" data-state=${state}><span class=${cls} role="img" aria-label=${words} title=${words}></span></span>`;
     // A viewer who can see nothing is told so once, by the map; the strip keeps its dot.
     const nothingVisible = seesNothing(this.resolvedStore, state);
-    const dotAlone = state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible;
-    const inner =
-      state === 'shown'
+    // A query that has run long enough to name. The map may have drawn its answer while the
+    // counts still load, and a refusal, an expiry or a lost server is said in its own words.
+    const running = status?.querying === true && this.queryNamed && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
+    const dotAlone = !running && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible);
+    const inner = running
+      ? html`<span part="state" data-state=${state} data-querying><span class="spinner" aria-hidden="true"></span>Running query<button part="cancel" class="btn small" type="button" @click=${() => this.resolvedStore?.cancelQuery()}>Cancel</button></span>`
+      : state === 'shown'
         ? bare('dot', 'Up to date')
         : nothingVisible
           ? bare('dot quiet', NOTHING_VISIBLE)

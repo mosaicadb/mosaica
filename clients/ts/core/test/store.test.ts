@@ -413,6 +413,174 @@ describe('the drops', () => {
   });
 });
 
+describe('a change of filters or selection after the store has loaded', () => {
+  const CS: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}};
+  type Sent = {filters: unknown; signal: AbortSignal | undefined; answered: boolean; answer: (reply: ViewportResponse | Error) => void};
+
+  /**
+   * A store that has loaded, whose map requests from then on wait until the test answers them, and
+   * whose aggregate requests wait too where `counts` is set.
+   */
+  async function shown(counts = false) {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {client, viewport} = fakeClient(() => response('ck'));
+    const sent: Sent[] = [];
+    let holding = false;
+    const counted = {tables: [], region: null, recomposed: false, identityKey: '', next: null};
+    const counting: (() => void)[] = [];
+    const aggregate = (_token: string, _req: unknown, signal?: AbortSignal) =>
+      !(holding && counts)
+        ? Promise.resolve(counted)
+        : new Promise((resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+            counting.push(() => resolve(counted));
+          });
+    Object.assign(client, {aggregate});
+    const first = viewport.getMockImplementation()!;
+    viewport.mockImplementation((token: string, req: FakeRequest, opts?: {signal?: AbortSignal}) => {
+      if (!holding) return first(token, req);
+      return new Promise((resolve, reject) => {
+        opts?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        sent.push({
+          filters: req.filters ?? null,
+          signal: opts?.signal,
+          answered: false,
+          answer: (reply) => (reply instanceof Error ? reject(reply) : resolve({...reply, region: null}))
+        });
+      });
+    });
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
+    await clock.advance(1);
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 400, 400));
+    await clock.advance(600);
+    scheduler.flush();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+    holding = true;
+    const live = () => sent.filter((s) => !s.signal?.aborted && !s.answered);
+    const land = async () => {
+      await clock.advance(600);
+      scheduler.flush();
+    };
+    /** Answers every request in flight, and those that follow, with `reply`: the counts, then the points. */
+    const answer = async (reply: ViewportResponse | Error = response('ck')) => {
+      for (let round = 0; round < 4 && live().length > 0; round++) {
+        for (const request of live()) {
+          request.answered = true;
+          request.answer(reply);
+        }
+        await land();
+      }
+    };
+    /** Answers every aggregate request in flight. */
+    const count = async () => {
+      for (const done of counting.splice(0)) done();
+      await land();
+    };
+    return {store, sent, live, land, answer, count};
+  }
+
+  it('says it is querying until the new answer has loaded, and keeps the frame on screen until it draws', async () => {
+    const {store, live, land, answer} = await shown();
+    const drawn = store.get('marks').bands;
+    expect(drawn.length).toBeGreaterThan(0);
+
+    store.setFilters(CS);
+    expect(store.get('status').querying).toBe(true);
+    await land();
+    expect(store.get('status')).toMatchObject({status: 'loading', querying: true});
+    expect(store.get('marks').bands).toBe(drawn);
+    expect(live().map((s) => s.filters)).toEqual([{archive: {in: ['cs']}}]);
+
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+    expect(store.get('marks').bands).not.toBe(drawn);
+  });
+
+  it('is querying until the counts in view have answered as well as the map', async () => {
+    const {store, land, answer, count} = await shown(true);
+    store.setFilters(CS);
+    await land();
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: true});
+    await count();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+  });
+
+  it('stops querying when the new answer is empty or refused', async () => {
+    const {store, land, answer} = await shown();
+    store.setFilters(CS);
+    await land();
+    await answer(responseOf(servedResult(0, []), {contentKey: 'ck', identityKey: 'ik'}));
+    expect(store.get('status')).toMatchObject({status: 'empty', querying: false});
+    store.setFilters({filter: {}, highlight: {}});
+    expect(store.get('status').querying).toBe(true);
+    await land();
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+
+    store.setFilters(CS);
+    expect(store.get('status').querying).toBe(true);
+    await land();
+    await answer(new MosaicaError(422, 'contract', 'no such column'));
+    expect(store.get('status')).toMatchObject({status: 'refused', querying: false});
+  });
+
+  it('goes back on cancelQuery to what last finished loading, and abandons the requests', async () => {
+    const {store, sent, live, land, answer} = await shown();
+    const before = store.get('filters').draft;
+    const drawn = store.get('marks').bands;
+    const box = {kind: 'box' as const, bbox: [10, 10, 40, 40] as [number, number, number, number]};
+
+    store.setFilters(CS);
+    store.select(box);
+    await land();
+    const abandoned = live();
+    expect(abandoned.length).toBeGreaterThan(0);
+    expect(store.get('status').querying).toBe(true);
+
+    store.cancelQuery();
+    expect(store.get('status').querying).toBe(false);
+    expect(store.get('filters').draft).toBe(before);
+    expect(store.get('filters').expr).toBeNull();
+    expect(store.get('region')).toBeNull();
+    expect(store.requestFilters()).toBeNull();
+    expect(abandoned.every((s) => s.signal?.aborted)).toBe(true);
+    // The frame stays until the one fetched for the filters gone back to replaces it.
+    expect(store.get('marks').bands).toBe(drawn);
+    await land();
+    expect(live().map((s) => s.filters)).toEqual([null]);
+    expect(sent.length).toBeGreaterThan(abandoned.length);
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+  });
+
+  it('keeps the first question through several changes, and ignores cancelQuery when nothing is in flight', async () => {
+    const {store, live, land, answer} = await shown();
+    store.cancelQuery();
+    expect(live()).toEqual([]);
+
+    store.setFilters(CS);
+    await land();
+    await answer();
+    const answered = store.get('filters').draft;
+
+    store.setFilters({filter: {archive: {family: 'category', keys: ['math']}}, highlight: {}});
+    store.setFilters({filter: {archive: {family: 'category', keys: ['stat']}}, highlight: {}});
+    store.cancelQuery();
+    expect(store.get('filters').draft).toBe(answered);
+    expect(store.get('filters').expr).toEqual({archive: {in: ['cs']}});
+  });
+
+  it('is not querying for a change made before the store has first loaded', async () => {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {store} = await warm(() => response('ck'), {clock, scheduler});
+    store.setFilters(CS);
+    expect(store.get('status').querying).toBe(false);
+  });
+});
+
 describe('suggest in the store', () => {
   it('asks under the store’s token and view, and clear() drops every column’s held page, refusal and debounce dedupe', async () => {
     const clock = fakeClock();

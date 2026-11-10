@@ -263,6 +263,15 @@ export type StatusProjection = {
    * created with a `client`.
    */
   unreachable: boolean;
+  /**
+   * Whether the filters, the highlight, the `member_of` clauses or the selected region have changed
+   * since everything last finished loading, and the answer to them has not: the map, the drawn
+   * layers' artifacts, the counts in view or a registered aggregate is still being fetched. It
+   * clears when all of them have answered, or the map's request is refused. Until then
+   * {@link Store.cancelQuery} goes back to the ones that last finished loading. It is `false`
+   * while the store loads for the first time, when there are none to go back to.
+   */
+  querying: boolean;
 };
 
 /**
@@ -835,6 +844,13 @@ export interface Store {
    */
   basemapWorld(): Promise<ArrayBuffer>;
   /**
+   * Go back to the filters, highlight, `member_of` clauses and selected region that last finished
+   * loading, dropping the ones set since, and abandon the requests made for those. It does nothing
+   * unless `status.querying`. Publishes `filters`, `region` and `status`, and fetches again for
+   * what it went back to.
+   */
+  cancelQuery(): void;
+  /**
    * Fetch the current view again, as after a refusal. The artifacts are fetched afresh, and the
    * points wherever the held tiles do not cover the view.
    */
@@ -933,7 +949,8 @@ const NO_STATUS: StatusProjection = {
   stale: false,
   expired: false,
   retrying: false,
-  unreachable: false
+  unreachable: false,
+  querying: false
 };
 
 /**
@@ -1155,7 +1172,17 @@ export function createStore(options: StoreOptions): Store {
     return {result, view: asked.view};
   }
 
-  const aggregates = new Aggregates(ready, askRegistered, (entries) => replaceProjection('aggregates', entries), clock, {...RETRY_DEFAULTS, ...options.driver}, aggregateBody);
+  const aggregates = new Aggregates(
+    ready,
+    askRegistered,
+    (entries) => {
+      replaceProjection('aggregates', entries);
+      settleQuery();
+    },
+    clock,
+    {...RETRY_DEFAULTS, ...options.driver},
+    aggregateBody
+  );
 
   /**
    * The legend's asks for a colour column's commonest values over everything this viewer may see,
@@ -1267,7 +1294,10 @@ export function createStore(options: StoreOptions): Store {
       if (result.identityKey !== '' && !admit(asked.view, result.identityKey, asked.token)) throw identityChanged();
       return {result, view: asked.view};
     },
-    (entries) => publishInView(entries),
+    (entries) => {
+      publishInView(entries);
+      settleQuery();
+    },
     clock,
     {...RETRY_DEFAULTS, ...options.driver},
     (spec) => {
@@ -1669,6 +1699,7 @@ export function createStore(options: StoreOptions): Store {
 
   function onStatus(status: PresentedStatus, refusal: Refusal | null): void {
     const expired = tokens.isExpiry(refusal);
+    if (status === 'shown' || status === 'empty' || status === 'refused') awaitingMap = false;
     replaceProjection('status', {
       status,
       sessionWarm: projections.status.sessionWarm || status === 'shown',
@@ -1676,9 +1707,37 @@ export function createStore(options: StoreOptions): Store {
       stale: projections.status.stale,
       expired,
       retrying: status === 'retrying',
-      unreachable
+      unreachable,
+      querying: projections.status.querying && status !== 'refused'
     });
     if (status === 'refused' && refusal) region.refuse(refusal);
+    settleQuery();
+  }
+
+  /** What is asked beside the camera: the controls, the `member_of` clauses and the region. */
+  type Question = {draft: FilterDraft; members: MemberClause[]; region: SelectionShape | null};
+
+  function question(): Question {
+    return {draft: projections.filters.draft, members: projections.filters.members, region: region.selected};
+  }
+
+  /** The question whose answer last finished loading, which {@link cancelQuery} goes back to. */
+  let loadedFor: Question | null = null;
+  /** Set where a change of question has a map request to come, until that request answers. */
+  let awaitingMap = false;
+
+  /**
+   * Note the question as loaded once everything a change of it fetches again has answered: the
+   * map, the artifacts, the counts in view and the registered aggregates. Called wherever one of
+   * them answers.
+   */
+  function settleQuery(): void {
+    const status = projections.status.status;
+    if (awaitingMap || (status !== 'shown' && status !== 'empty')) return;
+    if (views.current?.channel.pending || aggregates.busy || inView.busy) return;
+    const now = question();
+    if (loadedFor === null || now.draft !== loadedFor.draft || now.members !== loadedFor.members || now.region !== loadedFor.region) loadedFor = now;
+    if (projections.status.querying) replaceProjection('status', {...projections.status, querying: false});
   }
 
   /**
@@ -1754,6 +1813,7 @@ export function createStore(options: StoreOptions): Store {
 
     // A frame with marks means the session answered, while the request may still be streaming.
     if (!projections.status.sessionWarm && frame.exactDrawn + frame.provisional > 0) replaceProjection('status', {...projections.status, sessionWarm: true});
+
     // A switch published `loading`; a frame drawn from the view's own bands, with no request
     // behind it, ends that.
     if (awaitingSwitchFrame) {
@@ -1807,6 +1867,7 @@ export function createStore(options: StoreOptions): Store {
       replaceProjection('status', {...projections.status, stale, sessionWarm: true});
     }
     if (p.fetched) observeArtifactRotation();
+    settleQuery();
     if (options.instruments?.onFrame && replica && p.fetched) {
       options.instruments.onFrame({
         plan: {choice: p.plan.choice},
@@ -1866,6 +1927,7 @@ export function createStore(options: StoreOptions): Store {
       overrides: colours.overrides
     });
     checkColourCoverage();
+    settleQuery();
   }
 
   /**
@@ -2350,9 +2412,14 @@ export function createStore(options: StoreOptions): Store {
 
   /**
    * The filters or the selection changed, so every view's held bands answer another question. A
-   * held view is reset without asking, and refills when it is next current.
+   * held view is reset without asking, and refills when it is next current. The status says a
+   * query is running where the question is no longer the one that last finished loading.
    */
   function requery(): void {
+    awaitingMap = lastView !== null && meta !== null && views.current !== null;
+    const now = question();
+    const querying = loadedFor !== null && (now.draft !== loadedFor.draft || now.members !== loadedFor.members || now.region !== loadedFor.region);
+    if (querying !== projections.status.querying) replaceProjection('status', {...projections.status, querying});
     for (const held of views.all()) {
       held.presenter.cancel();
       held.replica.reset();
@@ -2444,6 +2511,23 @@ export function createStore(options: StoreOptions): Store {
     replaceProjection('filters', {...projections.filters, draft, expr, highlight: composeFilters(draft, 'highlight')});
     region.loading(projections.marks);
     requery();
+  }
+
+  function select(shape: SelectionShape | null): void {
+    if (!region.select(shape, projections.marks)) return;
+    requery();
+    areaChanged();
+  }
+
+  function cancelQuery(): void {
+    const back = loadedFor;
+    if (!projections.status.querying || back === null) return;
+    const {draft, members} = back;
+    replaceProjection('filters', {...projections.filters, draft, expr: composeFilters(draft, 'filter'), highlight: composeFilters(draft, 'highlight'), members});
+    if (region.selected === back.region) region.loading(projections.marks);
+    else region.select(back.region, projections.marks);
+    requery();
+    areaChanged();
   }
 
   function setLayers(names: string[]): void {
@@ -2606,6 +2690,8 @@ export function createStore(options: StoreOptions): Store {
     corpusKey = '';
     colourAsked.clear();
     awaitingSwitchFrame = false;
+    loadedFor = null;
+    awaitingMap = false;
     replaceProjection('view', noFrame(views.id));
     replaceProjection('marks', {...projections.marks, bands: [], standIn: [], count: NO_COUNT});
     replaceProjection('tiles', {tiles: []});
@@ -2739,12 +2825,7 @@ export function createStore(options: StoreOptions): Store {
     openArtifact,
     needShape: (id) => shapes.need(id),
     clearSelection,
-    select(shape) {
-      if (region.select(shape, projections.marks)) {
-        requery();
-        areaChanged();
-      }
-    },
+    select,
     extentOf,
     dataXY,
     async basemapWorld() {
@@ -2765,6 +2846,7 @@ export function createStore(options: StoreOptions): Store {
       return asked;
     },
     clear,
+    cancelQuery,
     refresh,
     dispose
   };

@@ -8,6 +8,14 @@ container image.
 
 ## [Unreleased]
 
+### Added
+
+- The TypeScript store reports a query in flight. `status.querying` is true from a change of
+  filters, highlight, `member_of` clauses or selected region until the map, the artifacts and the
+  counts have loaded, and `store.cancelQuery()` goes back to the ones that last finished loading.
+  `<mosaica-status>` reads Running query, with a Cancel button, once a query has run for a quarter
+  of a second.
+
 ### Fixed
 
 - When a client goes away, Mosaica stops working on its request inside a column, range, `in` or

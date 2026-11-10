@@ -70,10 +70,11 @@ The store reports the state of the view, so your page can say what's happening:
 
 A refusal carries Mosaica's error code and the HTTP status. An error with no answer from Mosaica in it, such as a gateway's `504`, has the code `http-error`.
 
-Beside the state, three flags tell you about the data and the connection:
+Beside the state, four flags tell you about the data, the connection and a query in flight:
 
 - **`stale`**: the data has changed since the points on screen were fetched. The store keeps the points on screen and marks the view, and a refresh is one action away. It fetches the topics and the panels' counts again at once.
 - **`unreachable`**: a request could not reach Mosaica, or a proxy in front of it answered `502`. The store asks again after a second, then twice as long each time, up to 30 seconds, and redraws once it answers. A refused request, or an `authorise` that fails, is not an outage.
+- **`querying`**: the filters, the highlight or the selected region have changed since everything last finished loading, and the answer has not: the map, the layers' artifacts, the counts in view or a panel's counts are still being fetched. `cancelQuery()` goes back to the filters, highlight and region that last finished loading, and abandons the requests made since. A request the store abandons is one Mosaica stops working on.
 - **`expired`**: the session has ended, and a new token is needed. On a `401` for a token that had worked, the store calls `authorise` once for a new one. When Mosaica answers `403 expired-token`, because it ended the session, the store shows `expired` and leaves renewal to the host.
 
 A store given a `MosaicaClient` of its own does not watch that client's requests, so `unreachable` stays false and a `401` does not call `authorise`.
@@ -102,7 +103,7 @@ The store keeps what it has fetched for each view the viewer has visited, so a v
 - **The level.** On a layer with levels, a map with no level chosen colours, names and counts the topics at the top level served at the camera's zoom.
 - **Density shading**, counted with the aggregate route, so it follows the filter and the highlight as the points do. The scale is logarithmic by default, since counts on most maps are skewed.
 - **Colours.** A category is coloured from Tableau 10 by default, Okabe-Ito, Set 2 or Dark 2, and a number from a ramp: Viridis by default, Cividis, Magma, Greys or Red-blue. A user can pick a value's or a topic's colour on a field card or in the colour editor. Each choice is reported in an event, and the client keeps none of them: a host that wants them kept stores them and passes them back.
-- **Status in plain words**, on the status strip and over the map: Connecting or Updating, Up to date, Nothing in view, View refused with the server's reason under it, Server did not answer and Server busy (each with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
+- **Status in plain words**, on the status strip and over the map: Connecting or Updating, Running query with Cancel on the strip once a query has run for a quarter of a second, Up to date, Nothing in view, View refused with the server's reason under it, Server did not answer and Server busy (each with Retry), Reconnecting or Server unreachable, Session expired, and Data updated.
 
 ## Basemaps
 
