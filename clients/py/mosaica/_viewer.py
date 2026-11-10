@@ -1082,7 +1082,7 @@ class Viewer:
 
     def attributes(self, view: Optional[str] = None) -> list:
         """List the attributes this reader may see, each as `meta()` describes it with one key
-        added, `filters`, the filter operators it takes, which is empty for an attribute that
+        added, `operands`, the filter operators it takes, which is empty for an attribute that
         cannot be filtered on.
 
         The attributes of every item come first, in the order they were declared, and then those
@@ -1090,10 +1090,10 @@ class Viewer:
         hold them.
 
         - `view`: list only the attributes this view holds, leaving out an attribute declared for
-          a view group that the view is not in.
+          a view group that the view holds no column of.
 
         ```
-        [(a["name"], a["arrow_type"], a["filters"]) for a in v.attributes("papers")]
+        [(a["name"], a["arrow_type"], a["operands"]) for a in v.attributes("papers")]
         ```
         """
         meta = self.meta()
@@ -1108,7 +1108,7 @@ class Viewer:
             if view is None or view in entry["views"]
         ]
         return [
-            {**entry, "filters": operators.get(entry["name"], [])}
+            {**entry, "operands": operators.get(entry["name"], [])}
             for entry in (meta.get("declared_scalars") or []) + scoped
         ]
 
@@ -1185,7 +1185,9 @@ class Viewer:
         - `fields`: the declared columns to return, in this order. A column declared for a view
           group, read under a view outside it, is named `"<column>@<key>"`. Without it the server
           returns every column: those `attributes(view)` lists, apart from a text column declared
-          for a view group. `[]` returns `mosaica_id` alone.
+          for a view group. `[]` returns `mosaica_id` alone. A read without `fields` that is
+          resumed from a `cursor` is refused once the view's columns have changed, as after an
+          attribute is declared.
         - `position`: `True` adds `mosaica:x` and `mosaica:y`, each item's position in the view's
           coordinates, in degrees on a geographic view.
         - `labels`: `True` adds `mosaica:labels`, the parts of each item's labels that this

@@ -118,11 +118,11 @@ A viewer address of `0.0.0.0` or `[::]` is reached on loopback, so run the comma
 mosaica items [OPTIONS] --view <VIEW> --server <URL>
 ```
 
-Read every item a session token may see in one view, with the fields named, from a running server, and write them as Arrow IPC or Parquet.
+Read every item a session token may see in one view, with the fields named or every field, from a running server, and write them as Arrow IPC or Parquet.
 
 The server answers `POST /v1/items` a page at a time, several pages to a response, and ends each response with a cursor for the next. This requests responses until no row remains and writes each page as it arrives. Each of the route's fields is the argument of the same name, sent only when given, so the server's own setting applies otherwise.
 
-The columns are `mosaica_id`, the fields in the order named, `mosaica:x` and `mosaica:y` under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's dictionary holding the keys of its own rows. A read that returns no row writes these columns with no rows.
+The columns are `mosaica_id`, the fields in the order named or without `--fields` every field the view reads under its bare name, `mosaica:x` and `mosaica:y` under `--position`, `mosaica:labels` under `--labels`, then `mosaica:matched` under `--keep-unmatched`. A category field is a dictionary column of its value keys, each page's dictionary holding the keys of its own rows. A read that returns no row writes these columns with no rows.
 
 A read cut short leaves the whole pages read before it in the output, exits 1 and prints the cursor to read the rest with. The first response's head, with the counts under `--count`, is printed on stderr at the end.
 

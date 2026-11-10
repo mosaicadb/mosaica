@@ -1974,6 +1974,50 @@ fn a_read_naming_no_fields_returns_every_field_the_view_reads() {
     }
 }
 
+/// **A cursor of a read naming no fields is bound to the fields it returned**: it continues while
+/// they stand, and is refused once an attribute is declared, and by a request that names fields.
+#[test]
+fn a_cursor_of_a_read_naming_no_fields_is_refused_once_its_fields_change() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let respond_from = |fields: Option<&[String]>, cursor: Option<&str>| {
+        let mut req = request("s0", &[]);
+        req.fields = fields;
+        req.page_rows = Some(100);
+        req.pages = Some(1);
+        req.cursor = cursor;
+        respond(&fx.engine, &session, req)
+    };
+    let (_, first) = respond_from(None, None).unwrap();
+    let cursor = first.next.expect("rows remain");
+    let (second, _) = respond_from(None, Some(&cursor)).unwrap();
+    assert_eq!(second.pages[0].0.num_rows(), 100);
+    assert!(matches!(
+        respond_from(Some(&names(&["band"])), Some(&cursor)),
+        Err(EngineError::CursorRefused)
+    ));
+
+    fx.engine
+        .declare_attribute(mosaica_engine::AttributeRequest {
+            name: "late".to_string(),
+            title: None,
+            ty: "i32".to_string(),
+            vocabulary: None,
+            analyser: None,
+            index: false,
+            render: false,
+            scope: mosaica_types::layer::LayerScope::Entity,
+            unique: false,
+        })
+        .unwrap();
+    assert!(matches!(
+        respond_from(None, Some(&cursor)),
+        Err(EngineError::CursorRefused)
+    ));
+    let (restarted, _) = respond_from(None, None).unwrap();
+    assert!(restarted.pages[0].0.column_by_name("late").is_some());
+}
+
 /// **A phrase over a group-scoped text column answers from that view's own text**, exactly as a
 /// `match` over it does: the items of the view whose `blurb` says the words adjacent and in order.
 #[test]

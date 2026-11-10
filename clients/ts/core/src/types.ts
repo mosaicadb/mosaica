@@ -1399,8 +1399,9 @@ export type ItemsRequest = {
   /**
    * The columns to return, by name, each once. Pin a group-scoped column outside its group as
    * `<field>@<key>`. `[]` returns `mosaica_id` alone. Unset returns every column the view reads
-   * under its bare name: the declared columns, then the group-scoped ones the view decides. An
-   * unknown or repeated name is a `422`.
+   * under its bare name: the declared columns, then the group-scoped ones the viewer reaches that
+   * the view decides, apart from group-scoped text. The cursor of a read without `fields` is
+   * refused once that set changes. An unknown or repeated name is a `422`.
    */
   fields?: string[];
   /** Return each item's position as `mosaica:x` and `mosaica:y` (`float64`) in the view's coordinates, such as degrees on a geographic view. */

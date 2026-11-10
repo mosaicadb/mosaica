@@ -2029,6 +2029,7 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
         "compression": "zstd",
     });
     assert_valid(&doc, "ItemsRequest", &body);
+    assert_valid(&doc, "ItemsRequest", &json!({ "view": "s0" }));
     let resp = post(body, token).await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(

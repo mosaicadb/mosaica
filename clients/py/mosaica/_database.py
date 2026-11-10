@@ -1605,11 +1605,11 @@ class Database:
 
     def attributes(self, view: str | None = None) -> list:
         """The attributes of the database, or those one view holds, each as `meta()` describes it
-        with the filter operators it takes as `filters`.
+        with the filter operators it takes as `operands`.
 
         This is `Viewer.attributes` read as the operator.
 
-            [(a["name"], a["arrow_type"], a["filters"]) for a in db.attributes("papers")]
+            [(a["name"], a["arrow_type"], a["operands"]) for a in db.attributes("papers")]
         """
         self._refuse_before_the_first_commit("attributes")
         return self.viewer().attributes(view)

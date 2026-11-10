@@ -53,24 +53,15 @@ pub(super) struct FieldPlan {
 impl FieldPlan {
     /// Resolve the request's `fields` and `system_fields` under `view`. A group-scoped field
     /// resolves as a filter leaf on it does, through the same resolution, with every family
-    /// admitted since a field need not be filterable to be read. Without `fields`, the plan is
-    /// [`unpinned_fields`].
+    /// admitted since a field need not be filterable to be read.
     pub(super) fn resolve(
         meta: &EngineMeta,
         view: &str,
         visible: &crate::gate::VisibleViews,
-        fields: Option<&[String]>,
+        fields: &[String],
         system_fields: &[String],
     ) -> Result<FieldPlan> {
         let refused = |why| Err(EngineError::RecordsRefused(why));
-        let every;
-        let fields = match fields {
-            Some(fields) => fields,
-            None => {
-                every = unpinned_fields(meta, view, visible);
-                &every
-            }
-        };
         let mut named: Vec<Named> = Vec::with_capacity(fields.len());
         for spelling in fields {
             if named.iter().any(|n| &n.name == spelling) {
@@ -103,7 +94,7 @@ impl FieldPlan {
 
 /// Every field `view` reads under its bare name: the declared fields in declaration order, then
 /// the group-scoped families this viewer reaches that `view` decides a stored column of.
-fn unpinned_fields(
+pub(super) fn unpinned_fields(
     meta: &EngineMeta,
     view: &str,
     visible: &crate::gate::VisibleViews,
@@ -116,6 +107,18 @@ fn unpinned_fields(
         )
     });
     declared.chain(scoped).cloned().collect()
+}
+
+/// The digest a cursor of a read that names no fields is bound to: the fields it returned.
+pub(super) fn fields_digest(fields: &[String]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"mosaica-items-fields-v1");
+    for field in fields {
+        hasher.update((field.len() as u64).to_le_bytes());
+        hasher.update(field.as_bytes());
+    }
+    hasher.finalize().into()
 }
 
 fn resolve_field(

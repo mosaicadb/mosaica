@@ -221,25 +221,23 @@ def test_each_view_of_a_group_has_its_own_row_space(grouped):
 
 
 def test_views_attributes_and_layers_list_what_meta_describes(grouped):
-    """Each accessor returns the entries of `/v1/meta`, an attribute with its filter operators
-    added, and the operator and a reader are given the same lists."""
-    meta = grouped.meta()
-    assert grouped.views() == meta["views"]
-    assert grouped.layers() == meta["layers"]
+    """Each accessor returns the entries of `/v1/meta`, and an attribute carries the filter
+    operators it takes as `operands`."""
+    assert [view["id"] for view in grouped.views()] == ["slices:a", "slices:b"]
+    assert grouped.views()[0]["metadata"]["label"] == {"type": "text", "value": "A"}
+    assert [layer["name"] for layer in grouped.layers()] == ["clusters"]
     assert [layer["name"] for layer in grouped.layers("slices:a")] == ["clusters"]
 
-    attributes = grouped.attributes()
-    described = meta["declared_scalars"] + meta["scoped_scalars"]
-    assert [a["name"] for a in attributes] == ["entity_id", "quality", "coverage"]
-    assert [{k: v for k, v in a.items() if k != "filters"} for a in attributes] == described
-    operators = {entry["column"]: entry["operands"] for entry in meta["filter_operands"]}
-    assert {a["name"]: a["filters"] for a in attributes} == operators
-    assert "range" in operators["quality"]
+    attributes = {a["name"]: a for a in grouped.attributes()}
+    assert list(attributes) == ["entity_id", "quality", "coverage"]
+    assert attributes["entity_id"]["unique"] is True
+    assert attributes["entity_id"]["operands"] == ["eq", "in"]
+    assert attributes["quality"]["arrow_type"] == "f32"
+    assert attributes["quality"]["scope"] == {"group": "slices"}
+    assert attributes["quality"]["operands"] == ["eq", "in", "range"]
 
-    reader = grouped.viewer()
-    assert reader.views() == grouped.views()
-    assert reader.attributes("slices:b") == grouped.attributes("slices:b")
-    assert reader.layers() == grouped.layers()
+    # A reader holding one term is given the same structure as the operator.
+    assert grouped.viewer(["alpha"]).attributes("slices:b") == grouped.attributes("slices:b")
     for accessor in (grouped.attributes, grouped.layers):
         with pytest.raises(Refusal):
             accessor("slices:nowhere")
@@ -256,6 +254,18 @@ def test_a_read_naming_no_fields_returns_the_attributes_its_view_holds(grouped):
         assert every.num_rows == len(IDS)
         assert every.equals(grouped.items(view, held)), view
         assert grouped.view(view).items().equals(every), view
+
+
+def test_an_attribute_no_filter_takes_is_listed_with_no_operands_and_is_read(grouped):
+    """A keyword held only in the records takes no operator, and a read naming no fields returns
+    it."""
+    db = grouped
+    db.declare_attribute("remark", type="keyword")
+    report = db.commit()
+    assert report.ok, report.refusals
+    attributes = {a["name"]: a for a in db.attributes()}
+    assert attributes["remark"]["operands"] == []
+    assert "remark" in db.items("slices:a").column_names
 
 
 def test_a_group_scoped_attribute_filters_inside_the_view_it_was_read_for(grouped):

@@ -577,7 +577,7 @@ own; narrow the selection with `filter` instead. A selection holds no layer, so 
 ```python
 db.meta()                                     # the views, layers and columns, as a dictionary
 db.views()                                    # the views, as a list of meta's entries
-db.attributes("s0")                           # the attributes a view holds, each with its filters
+db.attributes("s0")                           # the attributes a view holds, each with its operands
 db.layers("s0")                               # the layers published in a view
 db.item(mosaica_id)                           # one item's record: fields, labels, views
 db.categories("primary_category")             # every value of a category column, as a table
