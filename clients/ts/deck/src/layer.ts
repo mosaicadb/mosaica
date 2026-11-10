@@ -77,7 +77,8 @@ export type MosaicaLayerProps = CompositeLayerProps & {
   labels?: boolean;
   /**
    * Whether the map's background is `light` or `dark`. The colours of names, outlines, the
-   * picked mark's ring and the selected region are chosen to suit it. Defaults to `dark`.
+   * picked mark's ring, the selected region and the points while no column colours them are
+   * chosen to suit it. Defaults to `dark`.
    */
   scheme?: 'light' | 'dark';
   /**
@@ -296,21 +297,23 @@ const PLATE: [number, number, number, number] = [13, 15, 18, 235];
 
 /**
  * The current column colour encoding, from the store's legend, the schema and the colour choices.
- * Uniform where nothing is ready to colour by yet, such as a column chosen before any of its codes
- * were counted. Unmapped where `/v1/categories` refused the column, so the legend can say the
- * values could not be named. A chosen value colour applies once the legend has named its key.
+ * Uniform, in the one colour for `ground`, where nothing is ready to colour by yet, such as a
+ * column chosen before any of its codes were counted. Unmapped where `/v1/categories` refused the
+ * column, so the legend can say the values could not be named. A chosen value colour applies once
+ * the legend has named its key.
  */
-export function encodingOf(meta: Meta | null, legend: LegendProjection | null, colouring: Colouring = DEFAULT_COLOURING): Encoding {
+export function encodingOf(meta: Meta | null, legend: LegendProjection | null, colouring: Colouring = DEFAULT_COLOURING, ground: 'light' | 'dark' = 'dark'): Encoding {
+  const uniform: Encoding = {kind: 'uniform', ground};
   const colourBy = legend?.colourBy ?? null;
-  if (!colourBy || !meta || !legend || colourBy.startsWith(CLUSTER_PREFIX)) return {kind: 'uniform'};
+  if (!colourBy || !meta || !legend || colourBy.startsWith(CLUSTER_PREFIX)) return uniform;
   const column = meta.declaredScalars.find((c) => c.name === colourBy);
-  if (!column) return {kind: 'uniform'};
+  if (!column) return uniform;
   if (legend.categoryErrors[colourBy]) return {kind: 'unmapped'};
   if (column.category) {
     // The ranks come from codes counted in held bands, so the map is coloured without waiting
     // for `/v1/categories`, which only names the legend's entries.
     const rankOfCode = legend.ranks[colourBy];
-    if (!rankOfCode || Object.keys(rankOfCode).length === 0) return {kind: 'uniform'};
+    if (!rankOfCode || Object.keys(rankOfCode).length === 0) return uniform;
     const chosen = new Map<number, Rgb>();
     const picked = colouring.values[colourBy];
     if (picked) {
@@ -322,7 +325,7 @@ export function encodingOf(meta: Meta | null, legend: LegendProjection | null, c
     return {kind: 'category', column: colourBy, rankOfCode, palette: colouring.palette, chosen};
   }
   const domain = legend.domains[colourBy];
-  if (!domain) return {kind: 'uniform'};
+  if (!domain) return uniform;
   return {kind: 'numeric', column: colourBy, domain, ramp: colouring.ramp, scale: colouring.scale, reverse: colouring.reverse};
 }
 
@@ -1012,9 +1015,10 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     // texture, so switching to it leaves the attribute holding the last column encoding.
     const colourBy = r.legend?.colourBy ?? null;
     const clusterLayer = clusterLayerOf(colourBy);
-    let column = heldColumnEncoding.get(slab) ?? {encoding: {kind: 'uniform'} as Encoding, colourBy: null};
+    const ground = this.props.scheme ?? 'dark';
+    let column = heldColumnEncoding.get(slab) ?? {encoding: {kind: 'uniform', ground} as Encoding, colourBy: null};
     if (!clusterLayer) {
-      column = {encoding: encodingOf(r.meta, r.legend, this.props.colouring ?? DEFAULT_COLOURING), colourBy};
+      column = {encoding: encodingOf(r.meta, r.legend, this.props.colouring ?? DEFAULT_COLOURING, ground), colourBy};
       heldColumnEncoding.set(slab, column);
     }
     const encoding = column.encoding;

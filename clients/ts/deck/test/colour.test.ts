@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest';
 import type {LegendProjection, Meta, ScalarColumn} from '@mosaicajs/client';
 import {encodingOf} from '../src/layer.js';
-import {CATEGORY_PALETTES, DEFAULT_COLOURING, RAMPS, UNMAPPED, colourOfFraction, formatScalar, fractionOf, hexOf, rgbOfHex, valueAtFraction, writeColours, type CategoryPaletteName, type Encoding, type RampName, type Rgb} from '../src/colour.js';
+import {CATEGORY_PALETTES, DEFAULT_COLOURING, RAMPS, UNIFORM, UNMAPPED, colourOfFraction, formatScalar, fractionOf, hexOf, rgbOfHex, valueAtFraction, writeColours, type CategoryPaletteName, type Encoding, type RampName, type Rgb} from '../src/colour.js';
+import {markStyle} from '../src/marks-style.js';
 
 /** The colour `writeColours` wrote for each mark. */
 function colours(column: ScalarColumn, domain: {min: number; max: number}): number[][] {
@@ -125,5 +126,44 @@ describe('encodingOf', () => {
     const encoding = encodingOf(meta, legend, {...DEFAULT_COLOURING, palette: 'dark2', values: {field: {'cs.CV': '#010203', 'not-drawn': '#ffffff'}}});
     expect(encoding).toMatchObject({kind: 'category', palette: 'dark2'});
     expect(encoding.kind === 'category' && [...encoding.chosen]).toEqual([[2, [1, 2, 3]]]);
+  });
+
+  it('is the one colour of the ground where no column colours the points, and where the column has nothing to colour by yet', () => {
+    for (const ground of ['light', 'dark'] as const) {
+      expect(encodingOf(meta, {...legend, colourBy: null}, DEFAULT_COLOURING, ground)).toEqual({kind: 'uniform', ground});
+      expect(encodingOf(meta, {...legend, ranks: {}}, DEFAULT_COLOURING, ground)).toEqual({kind: 'uniform', ground});
+    }
+  });
+});
+
+describe('the one colour of the points when no column colours them', () => {
+  /** The map's default background per ground, `--mosaica-map-bg`. */
+  const GROUND: Record<'light' | 'dark', Rgb> = {light: [246, 246, 244], dark: [17, 19, 23]};
+  const luminance = (c: readonly number[]) => {
+    const [r, g, b] = c.slice(0, 3).map((v) => (v / 255 <= 0.04045 ? v / 255 / 12.92 : ((v / 255 + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  /** The contrast of `colour`, composited at `alpha` over `ground`, against `ground`. */
+  const contrast = (colour: readonly number[], alpha: number, ground: Rgb) => {
+    const drawn = ground.map((v, i) => colour[i]! * alpha + v * (1 - alpha));
+    const [hi, lo] = [luminance(drawn), luminance(ground)].sort((a, b) => b - a);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+
+  it('stands 3:1 against each ground’s default background, at its own alpha and at a sparse map’s', () => {
+    const sparse = markStyle(1, 0).alpha;
+    for (const ground of ['light', 'dark'] as const) {
+      const colour = UNIFORM[ground];
+      expect(contrast(colour, colour[3] / 255, GROUND[ground]), ground).toBeGreaterThanOrEqual(3);
+      expect(contrast(colour, (colour[3] / 255) * sparse, GROUND[ground]), ground).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('is written for the ground the encoding names', () => {
+    for (const ground of ['light', 'dark'] as const) {
+      const out = new Uint8Array(8);
+      writeColours(out, 0, 2, undefined, {kind: 'uniform', ground});
+      expect([...out]).toEqual([...UNIFORM[ground], ...UNIFORM[ground]]);
+    }
   });
 });

@@ -17,8 +17,14 @@ export type Rgb = readonly [number, number, number];
 
 const ALPHA = 200;
 
-/** The colour of every mark when no column is encoded. */
-export const UNIFORM: Rgba = [120, 190, 255, ALPHA];
+/**
+ * The colour of every mark when no column is encoded, per ground: a deep blue on a light ground and
+ * a pale one on a dark ground. Each stands 3:1 or more against its ground's default background
+ * (`#f6f6f4` and `#111317`), at its own alpha and at the alpha a mark is composited at while ten
+ * thousand or fewer are drawn. Past that the marks turn more translucent and are read as a
+ * density, where they overlap.
+ */
+export const UNIFORM: Record<'light' | 'dark', Rgba> = {light: [20, 80, 170, ALPHA], dark: [120, 190, 255, ALPHA]};
 
 /**
  * Everything unmappable: the absent sentinel (code 0), a number with no value, a code no key
@@ -166,9 +172,12 @@ export type Colouring = {
  */
 export const DEFAULT_COLOURING: Colouring = {palette: 'tableau10', ramp: 'viridis', scale: 'linear', reverse: false, values: {}};
 
-/** How a column is being coloured. `uniform` is the default and the fallback for anything unmapped. */
+/**
+ * How a column is being coloured. `uniform` is the default and the fallback for anything unmapped:
+ * one colour, chosen for the ground the marks are drawn on.
+ */
 export type Encoding =
-  | {kind: 'uniform'}
+  | {kind: 'uniform'; ground: 'light' | 'dark'}
   | {kind: 'unmapped'}
   | {
       kind: 'category';
@@ -187,6 +196,7 @@ export type Encoding =
 export function encodingSignature(encoding: Encoding): string {
   switch (encoding.kind) {
     case 'uniform':
+      return `uniform|${encoding.ground}`;
     case 'unmapped':
       return encoding.kind;
     case 'category': {
@@ -295,7 +305,7 @@ export function writeColours(
   const out32 = new Uint32Array(out.buffer, out.byteOffset + offset * 4, count);
 
   if (encoding.kind === 'uniform' || encoding.kind === 'unmapped') {
-    out32.fill(packRgba(encoding.kind === 'uniform' ? UNIFORM : UNMAPPED));
+    out32.fill(packRgba(encoding.kind === 'uniform' ? UNIFORM[encoding.ground] : UNMAPPED));
     return;
   }
   if (!column) {

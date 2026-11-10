@@ -3,7 +3,7 @@ import type {Band, ScalarColumn} from '@mosaicajs/client';
 import {MarkSlab} from '../src/slab.js';
 import {UNIFORM, UNMAPPED, colourOfRank, type Encoding} from '../src/colour.js';
 
-const UNIFORM_ENCODING: Encoding = {kind: 'uniform'};
+const UNIFORM_ENCODING: Encoding = {kind: 'uniform', ground: 'dark'};
 
 /**
  * A band of `n` marks whose ids and positions are derived from `tag`, so a slot can be checked to
@@ -276,7 +276,7 @@ describe('MarkSlab', () => {
     expect(draw.ids[79_999]).toBe(BigInt(40 * 1000 + 1999));
     // The last mark written before the final growth step still carries its colour, so the copy
     // that grows the buffers carries all three arrays and not only the ones under test above.
-    expect([...draw.colours.subarray(79_999 * 4, 80_000 * 4)]).toEqual([...UNIFORM]);
+    expect([...draw.colours.subarray(79_999 * 4, 80_000 * 4)]).toEqual([...UNIFORM.dark]);
   });
 
   it('replaces a refetched tile in place rather than drawing it twice', () => {
@@ -319,7 +319,17 @@ describe('MarkSlab', () => {
   it('colours uniformly by default', () => {
     const slab = new MarkSlab();
     const draw = slab.sync([band(1, 1)], 2, UNIFORM_ENCODING, null);
-    expect([...draw.colours.subarray(0, 4)]).toEqual([...UNIFORM]);
+    expect([...draw.colours.subarray(0, 4)]).toEqual([...UNIFORM.dark]);
+  });
+
+  it('recolours every resident mark in the other ground’s colour when the ground changes', () => {
+    const slab = new MarkSlab();
+    const a = band(1, 2);
+    const away = band(2, 1);
+    slab.sync([a, away], 2, UNIFORM_ENCODING, null);
+    const draw = slab.sync([a], 2, {kind: 'uniform', ground: 'light'}, null);
+    expect(draw.length).toBe(3);
+    for (let i = 0; i < draw.length; i++) expect([...draw.colours.subarray(i * 4, i * 4 + 4)]).toEqual([...UNIFORM.light]);
   });
 });
 
