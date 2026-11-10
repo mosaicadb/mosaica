@@ -19,10 +19,12 @@ body {
 }
 
 /* The explorer takes the window right of the instruments column, so the map's corner controls
-   are not under it. */
-#explorer {
+   are not under it. Its height is its container's, so the container is what is placed. */
+main {
   position: absolute;
   inset: 0 0 0 300px;
+}
+#explorer {
   --mosaica-explorer-height: 100%;
 }
 
@@ -47,13 +49,14 @@ body {
   display: none;
 }
 @media (max-width: 1000px) {
-  #explorer {
+  main {
     inset: 40px 0 0;
   }
   #instruments {
     display: none;
     top: 40px;
     height: calc(100% - 40px);
+    background: #0d0f12;
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
   }
   body.instruments-open #instruments {
@@ -146,6 +149,12 @@ input[type='range'] {
   margin-bottom: 6px;
 }
 
+/* Tall enough to press. */
+input[type='range'] {
+  height: 24px;
+  margin-top: 0;
+}
+
 select,
 input[type='search'],
 input[type='number'],
@@ -220,6 +229,7 @@ details summary {
   cursor: pointer;
   color: #7d8794;
   list-style: none;
+  line-height: 24px;
 }
 
 details summary::before {
