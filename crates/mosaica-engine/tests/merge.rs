@@ -118,9 +118,8 @@ fn whole_extent() -> ViewportRequest<'static> {
     ViewportRequest::new("s0", 2, [0.0, 0.0, 1000.0, 1000.0], N_ITEMS as usize)
 }
 
-/// A viewport, retried past the bounded `ProjectionBuilding` a merge's refresh window answers
-/// with. Decision 0044 permits exactly that residual — stale-serve is unsound across a merge —
-/// and a test that did not retry would be asserting the residual does not exist.
+/// A viewport, retried past the `ProjectionBuilding` a request answers with when another's build
+/// of the same projection outlasts its wait budget, which a caller retries.
 fn viewport(
     engine: &Engine,
     session: &mosaica_engine::Session,
@@ -934,75 +933,16 @@ fn a_reboot_after_a_merge_reads_back_the_watermark_the_process_served() {
     );
 }
 
-/// **A racer inside a merge's refresh window is shed, not made to pay the rebuild** — decision
-/// 0044's bounded 429 residual, and the one place the design accepts a refusal.
+/// **A request inside a merge's refresh window is served at the live generation, and rebases its
+/// grant's projection rather than building it.**
 ///
 /// Stale-serve is unsound across a merge: the stale entry's bits inside the merged span name
-/// different entities now. So rung 2 refuses, and rung 3's choice is the whole of what 0044
-/// bought — shed for the refresh's bounded duration, or pay the *measured* 1 277 ms rebuild on
-/// the request thread. The refresh is **held** here rather than switched off, because those are
-/// different states: a refresh that finishes without producing anything clears the flag and rung 3
-/// builds, which is the liveness floor, not this.
-///
-/// **Mutation:** clear `refresh_in_flight` before the swap instead of setting it, and the racer
-/// takes the rebuild silently.
+/// different entities now, so rung 2 refuses. Rung 3 then carries the projection across the merge
+/// itself, by the rebase the pass would take, for a session already served the view and for one
+/// served nothing alike. The refresh is **held** here rather than switched off, because those are
+/// different states: held, the pass has reached nothing, so what each request is served it made.
 #[test]
-fn a_racer_inside_a_merges_refresh_window_is_shed_rather_than_rebuilding() {
-    let tmp = tempfile::TempDir::new().unwrap();
-    let root = tmp.path().join("bundle");
-    let (engine, items) = engine_with_pending_merge(&tmp, &root);
-    let entities: Vec<EntityId> = items.iter().map(|(e, _)| *e).collect();
-
-    let session = engine.authorise(&full_coverage_credential()).unwrap();
-    viewport(&engine, &session);
-    let builds_before = engine.full_projection_builds();
-
-    // Hold the refresh, then let the merge publish: the window stays open until we release it.
-    engine.set_refresh_paused_for_test(true);
-    run_merge(&engine, &entities);
-
-    let refused = engine
-        .viewport(&session, whole_extent())
-        .expect_err("a racer inside the refresh window must be shed");
-    assert!(
-        matches!(refused, mosaica_engine::EngineError::ProjectionBuilding),
-        "and shed as backpressure with a Retry-After, never as a failure: {refused}"
-    );
-    assert_eq!(
-        engine.full_projection_builds(),
-        builds_before,
-        "the racer must not have rebuilt — that is the 1 277 ms this residual exists to avoid"
-    );
-
-    // Released, the window closes and the same request is served.
-    engine.set_refresh_paused_for_test(false);
-    wait_until("the refresh to land", WAIT, || engine.refreshes() >= 1);
-    let served = viewport(&engine, &session);
-    assert_eq!(
-        served.tiles.iter().map(|t| t.visible).sum::<u64>(),
-        (64 + TIER_WIDTH * ROWS_EACH) as u64,
-        "every item is visible once the refresh has replaced the entry"
-    );
-    assert_eq!(
-        engine.full_projection_builds(),
-        builds_before,
-        "and the replacement was an extents-only re-projection, not a rebuild"
-    );
-}
-
-/// **A session established inside the refresh window is served at the live generation, rather
-/// than waiting out the pass.**
-///
-/// Rung 3's shed is for a session already served the view, which has an answer coming from the
-/// pass. A session authorised after the publication has been served nothing, so it carries its
-/// grant's projection across the merge itself, by the rebase the pass would take, and is not
-/// shed. The same window is a correct shed for the session beside it — asserted here together,
-/// because a rung 3 that never sheds would pass either half alone.
-///
-/// **Mutation:** drop `served_at.is_some()` from rung 3's test and the arriving session is refused
-/// for as long as the pass is held.
-#[test]
-fn a_session_established_inside_a_merges_refresh_window_is_served_rather_than_shed() {
+fn a_request_inside_a_merges_refresh_window_is_served_by_rebasing() {
     let tmp = tempfile::TempDir::new().unwrap();
     let root = tmp.path().join("bundle");
     let (engine, items) = engine_with_pending_merge(&tmp, &root);
@@ -1015,29 +955,23 @@ fn a_session_established_inside_a_merges_refresh_window_is_served_rather_than_sh
     // Hold the refresh, then let the merge publish: the window stays open until we release it.
     engine.set_refresh_paused_for_test(true);
     run_merge(&engine, &entities);
-
-    // The window is genuinely open, which is what makes the second half of this test a claim.
-    let refused = engine
-        .viewport(&established, whole_extent())
-        .expect_err("the session with a resident predecessor is shed");
-    assert!(
-        matches!(refused, mosaica_engine::EngineError::ProjectionBuilding),
-        "and shed as backpressure: {refused}"
-    );
+    assert!(engine.refresh_in_flight(), "the window is open");
 
     let arrived = engine.authorise(&full_coverage_credential()).unwrap();
-    let served = engine
-        .viewport(&arrived, whole_extent())
-        .expect("a session served nothing must be answered inside the window, not refused");
-    assert_eq!(
-        served.tiles.iter().map(|t| t.visible).sum::<u64>(),
-        (64 + TIER_WIDTH * ROWS_EACH) as u64,
-        "and what it is served is the live geometry, every item drawn"
-    );
+    for (who, session) in [("established", &established), ("arrived", &arrived)] {
+        let served = engine
+            .viewport(session, whole_extent())
+            .unwrap_or_else(|e| panic!("{who}: a request inside the window is served: {e}"));
+        assert_eq!(
+            served.tiles.iter().map(|t| t.visible).sum::<u64>(),
+            (64 + TIER_WIDTH * ROWS_EACH) as u64,
+            "{who}: what it is served is the live geometry, every item drawn"
+        );
+    }
     assert_eq!(
         engine.full_projection_builds(),
         builds_before,
-        "the arriving session rebased its grant's projection rather than building it"
+        "each request rebased its grant's projection rather than building it"
     );
 
     engine.set_refresh_paused_for_test(false);

@@ -482,9 +482,8 @@ fn a_restart_rotates_the_content_key() {
     assert_ne!(before.coordinates.content_key, after.coordinates.content_key);
 }
 
-/// A viewport, retried past the bounded `ProjectionBuilding` a refresh window can answer with.
-/// Decision 0044 permits exactly this residual, and a test that did not retry would be asserting
-/// that the residual does not exist.
+/// A viewport, retried past the `ProjectionBuilding` a request answers with when another's build of
+/// the same projection outlasts its wait budget, which a caller retries.
 fn wait_for_viewport(
     engine: &Engine,
     session: &mosaica_engine::Session,

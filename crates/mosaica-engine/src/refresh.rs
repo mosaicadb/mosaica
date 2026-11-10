@@ -47,12 +47,15 @@
 //! *superseded* one — every folded-away entity back in every refreshed mask, published under the
 //! new geometry's key.
 //!
-//! ## The two orderings that are load-bearing
+//! ## What a request does meanwhile
 //!
-//! **`refresh_in_flight` is set before the swap**, by the executor, not here. A racer landing
-//! between the swap and this task's first insert must see it set, or after a merge it pays the
-//! measured 1 277 ms rebuild inline — which is the 429 residual's whole point (review finding F5,
-//! 2026-08-04).
+//! Nothing waits for the pass. A session already served the view is served its previous entry
+//! after a flush (the ladder's rung 2), and any other request the pass has not reached carries its
+//! grant's projection forward itself, by the extend or rebase the pass would take, or builds it
+//! (rung 3). `refresh_in_flight` is set before the swap, by the executor, and reports the pass to
+//! an operator; nothing is refused while it is set.
+//!
+//! ## The ordering that is load-bearing
 //!
 //! **The fragment and the projection are produced together, into one entry.** Resolving them
 //! separately is what stale-serve breaks: a projection built over a live fragment but published
@@ -73,8 +76,7 @@ use crate::Generation;
 /// compaction publishes into a new prefix and a new shard identity and rewrites `permutation.bin`,
 /// so every row-space artefact in the process is invalid — but the *grant* is not, and its entry
 /// still names the grant, the shard and the view a rebuild needs. Refusing to refresh it would
-/// leave every resident grant's next request to an inline 1 277 ms rebuild instead of the bounded
-/// 429 the ladder's rung 3 exists to give.
+/// leave every resident grant's next request to rebuild inline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Carry {
     /// Nothing to do: this entry already addresses `generation`'s geometry, or a later one.
@@ -111,16 +113,12 @@ fn carry_for(
 /// Refresh each grant's newest resident entry per view and shard to `generation`, returning how
 /// many were produced.
 ///
-/// **Most-recently-used first** (`SingleFlightCache::ready_entries`). This is a serial loop over a
-/// rebuild that costs a *measured* 1 277 ms at 10⁹, so across a compaction it runs for minutes and
-/// the keys it has not reached are shed 429; ordering it does not shorten that window, it puts the
-/// tail of it on the sessions least likely to be asking.
+/// **Most-recently-used first** (`SingleFlightCache::ready_entries`). This is a serial loop over
+/// rebuilds, so across a compaction it runs for minutes, and a key it has not reached is built by
+/// its own next request; the order puts that cost on the sessions least likely to be asking.
 ///
 /// **Every failure is per key and silent-but-counted.** A fragment build that cannot run leaves
-/// that grant's entry stale, and its next request takes rung 3 of the ladder — which, with the
-/// pass finished and `refresh_in_flight` cleared, is a build rather than a 429. That is the
-/// liveness floor under the whole mechanism: a refresh that never succeeds degrades to the
-/// pre-0044 behaviour rather than wedging a session at 429 for ever.
+/// that grant's entry stale, and its next request takes rung 3 of the ladder and builds it.
 pub(crate) fn refresh_resident(
     cache: &RowProjectionCache,
     fragments: &FragmentCache,
@@ -266,7 +264,8 @@ pub(crate) const NO_REFRESH: u64 = u64::MAX;
 ///
 /// An unconditional store is what made two overlapping passes unsafe: the first to finish cleared
 /// a flag the second was relying on. The compare-exchange makes the release belong to the pass
-/// that took it, so a superseded pass finishing late is a no-op rather than a hole in the shed.
+/// that took it, so a superseded pass finishing late is a no-op rather than reporting idle a pass
+/// that is still running.
 fn clear_if_current(in_flight: &std::sync::atomic::AtomicU64, mine: u64) {
     let _ = in_flight.compare_exchange(mine, NO_REFRESH, Ordering::SeqCst, Ordering::SeqCst);
 }
@@ -278,44 +277,24 @@ pub(crate) struct RefreshDeps {
     /// The engine's fragment cache, which the refresh builds each grant's next fragment in.
     pub(crate) fragments: Arc<FragmentCache>,
     pub(crate) pool: Arc<rayon::ThreadPool>,
-    /// The `segments_version` whose refresh pass is in flight, or [`NO_REFRESH`].
+    /// The `segments_version` whose refresh pass is in flight, or [`NO_REFRESH`]: what
+    /// `/control/status` reports as `refresh_in_flight`, and what a test waits on before it asks
+    /// something the pass would change. A flush and a merge claim it before their swap; a fold
+    /// does not.
     ///
-    /// **⊘ A fold's publication must not arm this** (decision 0053). The rule, so a future
-    /// publication kind does not have to re-litigate it: *shed only while the refresh pass is
-    /// shorter than the rebuild it would save.* Flush and merge satisfy it — a ~0.7 s pass against a
-    /// measured 1 277 ms rebuild, so shedding turns a 1.3 s inline build into a 0.7 s retry.
-    ///
-    /// **That margin was 6.5× and is now under 2×**, because the projection got faster and the pass
-    /// did not. The rule still selects the same
-    /// answer for both publication kinds, so nothing here changes — but it is now close enough that
-    /// a further improvement to `Permutation::project`, or a slower pass, would invert it for
-    /// flush and merge, and the shed would start costing more than it saves. It is the one
-    /// consequence of that change that wants re-deciding rather than re-wording.
-    ///
-    /// A fold inverts the rule by two orders (a ~180 s pass against a 1.3 s build), so arming this would refuse
-    /// every session for minutes to avoid a burst that clears in seconds — and the burst is already
-    /// bounded by `ComputeGate`, by the single-flight cache, and by `RowProjection::new` fanning out across
-    /// the whole pool so concurrent rebuilds contend rather than multiply. After a fold, a missing
-    /// projection is an ordinary cache miss.
-    ///
-    /// **A generation, not a boolean, and the difference only became reachable at compaction.**
-    /// A flush's pass is ~0.7 s against a 90 s tick, so two never overlapped; a fold's is 76 s–3
-    /// minutes against that same tick (compaction §6.2), so one or two flushes publish *inside*
-    /// it, each arming the flag and each spawning its own pass. With a boolean, whichever pass
-    /// finished first cleared it while the other still had un-refreshed keys — and every request
-    /// for a key neither had reached fell past rung 3 to an inline `RowProjection::new`, the
-    /// measured 1 277 ms, concurrently, across sessions. That is exactly the unbounded
-    /// inline-rebuild herd decision 0044's D2 withdrew the pre-swap refresh to avoid, arriving
-    /// through duration instead of through omission.
+    /// **A generation, not a boolean.** A fold's pass runs for minutes against a 90 s tick, so a
+    /// flush can publish inside it and spawn a pass of its own. With a boolean, whichever pass
+    /// finished first cleared the flag while the other still had keys to reach.
     pub(crate) in_flight: Arc<std::sync::atomic::AtomicU64>,
     /// `refreshes`, the entries this pass has produced.
     pub(crate) counters: Arc<crate::status::ServeCounters>,
     /// `refresh_enabled`, whether the pass runs at all, and `refresh_paused`, whether it **holds**.
     /// A test disables it to model a refresh that **produces nothing and finishes** — the degraded
-    /// case, where the in-flight flag clears and the ladder's rung 3 becomes a build rather than a
-    /// 429 — and pauses it to model one that is merely *slow*, the in-flight flag staying set for
-    /// as long as it is held, which is the window rung 3 sheds a racer in. The two hooks are
-    /// different states and a test that used one for the other would assert the wrong thing.
+    /// case, where the in-flight flag clears and every request builds at the ladder's rung 3 — and
+    /// pauses it to model one that is merely *slow*, the in-flight flag staying set for as long as
+    /// it is held, the window in which a request is served stale or carries its own projection
+    /// forward. The two hooks are different states and a test that used one for the other would
+    /// assert the wrong thing.
     pub(crate) switches: Arc<crate::switches::TestSwitches>,
     /// The engine's projection-route counters and forced route, shared so that rung 3's builds
     /// are counted where the request path's are and a forced route reaches both.
@@ -338,8 +317,7 @@ impl RefreshDeps {
         // release only their own claim — see [`clear_if_current`].
         let mine = generation.segments_version;
         if !self.switches.refresh_enabled.load(Ordering::SeqCst) {
-            // Nothing will produce the live key, so the flag must not stay set: rung 3 of the
-            // ladder would 429 for ever instead of building.
+            // No pass runs, so none is reported in flight.
             clear_if_current(&in_flight, mine);
             return;
         }

@@ -29,6 +29,16 @@ container image.
 - An `eq` or `in` on a `public` category is answered from its postings where they hold few
   enough items, rather than by reading every row in view. A filter on a rare value over the
   whole map no longer reads every row.
+- A filter over the map tests each row against its matches through a table of the matches'
+  blocks, reading each block before it is needed: about nine times faster per row where the
+  matches are many.
+- Working out which rows a viewer may see runs on every core the server has free, and does less
+  work on one. At 10⁹ items on four cores it takes 0.96 s rather than 5.1 s for a viewer who sees a
+  quarter of them, and 3.0 s on one core. Opening a database checks each view's rows in 2.8 s
+  rather than about 6 s on four cores.
+- A request after a flush or merge is no longer refused with 429 while the server brings each
+  viewer's visible set up to date. It brings its own up to date and is answered.
+  `refresh_in_flight` in `GET /control/status` still reports the work in progress.
 
 ## [0.3.0] - 2026-11-08
 

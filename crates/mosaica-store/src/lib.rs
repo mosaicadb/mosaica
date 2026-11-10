@@ -33,6 +33,7 @@ pub mod row_entity;
 pub mod row_members;
 pub mod scalar_column;
 mod segment_cursor;
+mod select;
 pub mod tenancy;
 pub mod term_images;
 pub mod unique;
