@@ -83,7 +83,9 @@ Style an element's parts with `::part()`. An element that renders another forwar
 
 ## Accessibility
 
-Set two things yourself. Give each map an `aria-label` that says what it is a map of, on `<mosaica-map>` or `<mosaica-explorer>`: a screen reader reads it when focus reaches the map, and without it every map is called "Map". Set `lang` on your page's `<html>` element, since the elements' own words are English.
+Set two things on every page. Give each map an `aria-label` that says what it is a map of, on `<mosaica-map>` or `<mosaica-explorer>`: a screen reader reads it when focus reaches the map, and without it every map is called "Map". Set `lang` on your page's `<html>` element, since the elements' own words are English.
+
+In a layout of your own, `<mosaica-map>`, `<mosaica-status>` and `<mosaica-selection>` each announce the state of the view or a selected region's count to a screen reader. Set the `quiet` attribute on all but one of the elements that would say the same thing, so that each change is announced once. A quiet element shows everything it showed. `<mosaica-explorer>` sets it on its own map and selection card, and its status strip speaks.
 
 [Accessibility](../system/accessibility.md) lists the keys each element takes, what a screen reader is told, the contrast to keep if you override a theme token, and what is not built, which includes reaching the map's points from the keyboard.
 

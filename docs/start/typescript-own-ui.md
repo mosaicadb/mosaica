@@ -233,6 +233,8 @@ Clicking a topic's name, or anywhere inside its outline, opens the cluster, and 
 
 `store.setMembers` filters to an artifact's members, the papers in the cluster. It takes a list of clauses, each naming an artifact by layer and id, with `outside: false` to keep the members and `verb: 'filter'` to narrow the map to them. The other verb, `highlight`, would keep every paper and light the members. Member clauses join the filters, so the topic combines with the archive, title and dates. Clear passes an empty list.
 
+The handler also writes the topic's name into the `role="status"` line from the first step, which is how a screen reader comes to announce the topic, and shows the Clear button beside it. Clear empties the line and hides itself again.
+
 Add the import and the call to `main.ts`, which is now complete:
 
 ```ts
