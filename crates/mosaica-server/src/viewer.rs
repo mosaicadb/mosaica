@@ -1047,7 +1047,7 @@ fn run_viewport_stream(
     let bbox = match crate::filter_dto::bbox_in_view(
         req.bbox.unwrap_or([0.0, 0.0, 0.0, 0.0]),
         req.space.as_deref(),
-        "bbox",
+        ("bbox", "space"),
         view,
     ) {
         Ok(bbox) => bbox,

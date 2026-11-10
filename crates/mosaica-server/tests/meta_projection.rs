@@ -396,9 +396,13 @@ async fn a_box_in_degrees_is_answered_as_its_projected_box() {
 
         // The artifacts viewport's box and an aggregate's area.
         let artifacts = |bbox: [f64; 4], space: &'static str| artifact_tiles(&server, token, bbox, space);
+        // The fixture has no layer, so what is compared is how many tiles the box was answered
+        // for: the degrees read as view coordinates cover a different number.
         let in_view = artifacts(projected, "view").await;
+        assert!(!in_view.is_empty(), "{name}");
         assert_eq!(artifacts(degrees, "wgs84").await, in_view, "{name}");
         assert_eq!(artifacts(degrees, "inserted").await, in_view, "{name}");
+        assert_ne!(artifacts(degrees, "view").await.len(), in_view.len(), "{name}");
 
         let cells = |area: [f64; 4], space: Option<&'static str>| cell_rows(&server, token, area, space);
         let in_view = cells(projected, None).await;

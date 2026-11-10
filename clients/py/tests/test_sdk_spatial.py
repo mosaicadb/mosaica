@@ -149,6 +149,10 @@ def test_an_inline_roster_built_at_the_first_commit_is_not_offered_again(served,
 #: A box in degrees whose edges fall between the grid's points.
 EUROPE = (-25.0, 5.0, 45.0, 65.0)
 
+#: A shape inside `EUROPE`, in degrees, and a box in degrees well away from it.
+EUROPE_SHAPE = "POLYGON ((-20 10, 40 10, 40 60, -20 60, -20 10))"
+ELSEWHERE = (55.0, -15.0, 75.0, 0.0)
+
 #: Each projection over the whole world, and one view whose extent is part of it.
 WORLDS = [
     ("web_mercator", {"lon": [-180.0, 180.0], "lat": [-80.0, 80.0]}),
@@ -207,6 +211,14 @@ def world(request, tmp_path):
     rows = graticule(extent)
     db.declare_view("world", projection=projection, extent=extent)
     db.declare_attribute("id", type="i64", unique=True)
+    db.declare_layer(
+        "regions",
+        kind="flat",
+        membership="spatial",
+        shape={"kind": "polygon"},
+        artifacts=[{"key": "europe", "wkt": EUROPE_SHAPE, "space": "wgs84"}],
+        title="Regions",
+    )
     db.insert("world", rows, lon="lon", lat="lat")
     assert db.commit().ok
     yield db, rows, projection
@@ -269,12 +281,20 @@ def test_a_map_of_a_box_on_a_projected_view_is_framed_in_the_views_coordinates(w
         reader.map(view="world", bbox=EUROPE, bbox_space="utm")
 
 
-def test_the_annotation_tiles_of_a_box_in_degrees_are_those_of_its_projected_box(world):
+def test_the_annotations_of_a_box_in_degrees_are_those_drawn_inside_it(world):
     db, _, projection = world
-    in_view = db.viewport_artifacts("world", 4, per_tile=1, bbox=unit_square(EUROPE, projection))
+
+    def keys(bbox, **options):
+        tiles = db.viewport_artifacts("world", 4, per_tile=4, layers=["regions"], bbox=bbox, **options)
+        return sorted(set(tiles.column("key").to_pylist()))
+
+    assert keys(unit_square(EUROPE, projection)) == ["europe"]
     for space in ("wgs84", "inserted"):
-        tiles = db.viewport_artifacts("world", 4, per_tile=1, bbox=EUROPE, space=space)
-        assert tiles.equals(in_view), space
+        assert keys(EUROPE, space=space) == ["europe"], space
+        assert keys(ELSEWHERE, space=space) == [], space
+    # A space describes a box, so one given alone is refused and not read against the whole view.
+    with pytest.raises(Refusal):
+        db.viewport_artifacts("world", 4, per_tile=4, layers=["regions"], space="inserted")
 
 
 def test_a_box_on_a_projected_view_selects_the_same_after_a_restart(world, tmp_path):

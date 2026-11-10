@@ -183,7 +183,7 @@ fn run(
     let bbox = match crate::filter_dto::bbox_in_view(
         req.bbox.unwrap_or([0.0; 4]),
         req.space.as_deref(),
-        "bbox",
+        ("bbox", "space"),
         view,
     ) {
         Ok(bbox) => bbox,

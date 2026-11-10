@@ -1111,6 +1111,13 @@ class Viewer:
             raise Refusal(
                 f"map: bbox_space is 'view', 'wgs84' or 'inserted', not {bbox_space!r}"
             )
+        if bbox is not None:
+            bbox = [float(v) for v in bbox]
+            if len(bbox) != 4 or bbox[0] > bbox[2] or bbox[1] > bbox[3]:
+                raise Refusal(
+                    f"map: bbox is (min_x, min_y, max_x, max_y) with each minimum at or below "
+                    f"its maximum; got {tuple(bbox)!r}"
+                )
         if bbox is not None and bbox_space != "view":
             if view is None:
                 raise Refusal(
@@ -1458,6 +1465,11 @@ class Viewer:
         """
         import pyarrow as pa
 
+        if space is not None and bbox is None:
+            raise Refusal(
+                f"viewport_artifacts: space={space!r} says what bbox is written in. Give bbox "
+                f"beside it, or leave space out"
+            )
         request: dict = {"view": view, "zoom": int(zoom), "per_tile": int(per_tile)}
         if tiles is not None:
             request["tiles"] = [int(tile) for tile in listed(tiles)]

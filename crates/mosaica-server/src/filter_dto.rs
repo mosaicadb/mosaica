@@ -345,18 +345,18 @@ pub(crate) fn request_space(
 }
 
 /// A box a request wrote in `space`, in the view's own frame; `name` is the key that carried the
-/// box. A `wgs84` box goes through the projection the view's points were placed by, as a `region`
-/// leaf's does.
+/// box and `space_name` the one that carried its space. A `wgs84` box goes through the projection
+/// the view's points were placed by, as a `region` leaf's does.
 pub(crate) fn bbox_in_view(
     bbox: [f64; 4],
     space: Option<&str>,
-    name: &str,
+    (name, space_name): (&str, &str),
     view: &mosaica_engine::MetaView,
 ) -> Result<[f64; 4], ApiError> {
     if space.is_none() {
         return Ok(bbox);
     }
-    let space = request_space(space, "space", view.projection)?;
+    let space = request_space(space, space_name, view.projection)?;
     let [min_x, min_y, max_x, max_y] = bbox;
     let written = ShapeF64::Bbox {
         min_x,

@@ -306,7 +306,7 @@ fn grouping_of(
             ..
         }) => {
             check_bbox("area", area)?;
-            Some(bbox_in_view(*area, space.as_deref(), "area", view)?)
+            Some(bbox_in_view(*area, space.as_deref(), ("cells.area", "cells.space"), view)?)
         }
         Some(CellsReq { space: Some(_), .. }) => {
             return Err(ApiError::Contract(
@@ -499,7 +499,12 @@ fn by_of(
                     check_bbox("cut.bbox", &cut.bbox)?;
                     Some(Cut {
                         zoom: cut.zoom,
-                        bbox: bbox_in_view(cut.bbox, cut.space.as_deref(), "cut.bbox", frame)?,
+                        bbox: bbox_in_view(
+                            cut.bbox,
+                            cut.space.as_deref(),
+                            ("cut.bbox", "cut.space"),
+                            frame,
+                        )?,
                         budget: cut.budget,
                     })
                 }

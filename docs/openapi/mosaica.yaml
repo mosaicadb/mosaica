@@ -6820,7 +6820,7 @@ components:
               minItems: 4
               maxItems: 4
               items: { type: number }
-              description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Only the cells at `depth` that intersect it are listed, each with all of its items; a corner outside the extent is clamped to the edge cell, as the viewport's `bbox` is. Absent is the view's whole extent."
+              description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Only the cells at `depth` that intersect it are listed, each with all of its items; a corner outside the extent is clamped to the edge cell, as the viewport's `bbox` is. Absent is the view's whole extent. `space` beside it names another space."
             space:
               $ref: "#/components/schemas/BoxSpace"
 
@@ -6933,7 +6933,7 @@ components:
           minItems: 4
           maxItems: 4
           items: { type: number }
-          description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Its tiles at `zoom` may number at most `max_tiles_per_request`."
+          description: "As the viewport's `bbox`: `[x0, y0, x1, y1]` in the coordinates of the view's quantisation extent, with `x0 ≤ x1`, `y0 ≤ y1`, all finite. Its tiles at `zoom` may number at most `max_tiles_per_request`. `space` beside it names another space."
         space:
           $ref: "#/components/schemas/BoxSpace"
         budget:
