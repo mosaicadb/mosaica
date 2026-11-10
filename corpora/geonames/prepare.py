@@ -93,8 +93,8 @@ def main() -> None:
     print("coordinates   WGS84 degrees — the build projects and quantises them")
     print(f"data bounds   lon [{bounds[0]:.6f}, {bounds[1]:.6f}]  lat [{bounds[2]:.6f}, {bounds[3]:.6f}]")
     print(
-        f"beyond domain {sum(clipped):,} past ±{projection.MAX_LATITUDE:.4f}° "
-        f"({clipped[0]:,} north, {clipped[1]:,} south) — the build clips and counts these"
+        f"beyond domain {sum(clipped):,} past Web Mercator's latitude limit "
+        f"({clipped[0]:,} north, {clipped[1]:,} south), which the build clips and counts"
     )
     print("\nvocabularies")
     for name, size in sizes.items():

@@ -96,7 +96,6 @@ from mosaica.datasets.gbif import (
 from mosaica.datasets.gbif import write_declaration as _write_declaration
 
 from ..common.paths import ladder
-from ..common.projection import MAX_LATITUDE
 from ..common.timing import Steps
 from . import sources
 
@@ -690,7 +689,7 @@ def main() -> None:
     print(f"placed {rows_placed:,} of {rows_read:,} ({rows_placed / rows_read:.2%}); "
           f"{no_coordinate:,} carry no coordinate ({no_coordinate / rows_read:.2%}), "
           f"{out_of_range:,} lie outside ±90/±180", flush=True)
-    print(f"  {beyond_mercator:,} placed rows are beyond ±{MAX_LATITUDE:.4f}° and clamp to the "
+    print(f"  {beyond_mercator:,} placed rows are beyond Web Mercator's latitude limit and clamp to the "
           f"extent boundary ({beyond_mercator / max(rows_placed, 1):.3%})", flush=True)
 
     # **The markers must not collide with a name the source wrote.** A rank value spelled
