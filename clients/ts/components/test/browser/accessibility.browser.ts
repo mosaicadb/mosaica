@@ -136,12 +136,11 @@ async function measure(width: number, height: number, pick: (scenes: Scenes) => 
 beforeAll(async () => {
   served = await servePage('accessibility-page.ts');
   browser = served.browser;
-  await Promise.all([
-    measure(1200, 800, (s) => [...s.wide, ...s.loose]),
-    measure(390, 760, (s) => s.narrow),
-    // The width of a 1280 px window at 400% zoom.
-    measure(320, 480, (s) => s.narrow, 'text')
-  ]);
+  // One window at a time: each page holds a WebGL context, and the suite's other files draw beside this one.
+  await measure(1200, 800, (s) => [...s.wide, ...s.loose]);
+  await measure(390, 760, (s) => s.narrow);
+  // The width of a 1280 px window at 400% zoom.
+  await measure(320, 480, (s) => s.narrow, 'text');
 }, 240_000);
 
 afterAll(async () => {
