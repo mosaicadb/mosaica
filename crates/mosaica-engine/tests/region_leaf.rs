@@ -765,8 +765,8 @@ fn in_s1(e: u64) -> bool {
 }
 
 /// The fixture with a second view, `s1`, over [`in_s1`]'s items at [`transposed`] positions, in
-/// several shards.
-fn build_two_views(dir: &std::path::Path) -> std::path::PathBuf {
+/// shards of `shard_size` items, or one.
+fn build_two_views(dir: &std::path::Path, shard_size: Option<u64>) -> std::path::PathBuf {
     let (points, s1_points, pairs) = (
         dir.join("points.parquet"),
         dir.join("s1-points.parquet"),
@@ -796,7 +796,7 @@ fn build_two_views(dir: &std::path::Path) -> std::path::PathBuf {
         attribute_sources: mosaica_build::config::AttributeSource::over(points.clone(), &schema),
         out: out.clone(),
         limit: None,
-        shard_size: Some(N_ITEMS / 3),
+        shard_size,
         strict: false,
         identity_key: test_key(),
         layers: Vec::new(),
@@ -830,7 +830,7 @@ fn viewport_of(engine: &Engine, view: &str, credential: &[u8], filter: FilterExp
 #[test]
 fn a_region_of_another_view_is_the_items_inside_it_there() {
     let tmp = tempfile::TempDir::new().unwrap();
-    let root = build_two_views(tmp.path());
+    let root = build_two_views(tmp.path(), Some(N_ITEMS / 3));
     let engine = open_engine_uncapped(&root, &tmp.path().join("cache"), &tmp.path().join("wal"));
     let a = lasso();
     let b = circle();
@@ -896,6 +896,66 @@ fn a_region_of_another_view_is_the_items_inside_it_there() {
             matched(&from_s1),
             want_from_s1,
             "the circle drawn in s1, counted in s0"
+        );
+    }
+}
+
+/// An item moved in `s0` leaves its old row there denied: a region of `s0` holds it where it is
+/// now, never where it was, counted in `s1`, which still holds it.
+#[test]
+fn a_region_of_another_view_reads_each_item_where_that_view_now_places_it() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = build_two_views(tmp.path(), None);
+    let engine = engine_at(tmp.path(), &root, 1);
+    let a = lasso();
+    let away = (999.0, 999.0);
+    let ext = extent();
+    assert!(!a.contains((
+        fixed32(away.0, ext.x_min, ext.x_max),
+        fixed32(away.1, ext.y_min, ext.y_max)
+    )));
+    // Items inside the lasso and held by `s1`, moved out of it in `s0`.
+    let moved: Vec<u64> = (0..N_ITEMS)
+        .filter(|&e| in_s1(e) && e.is_multiple_of(7) && a.contains(quantised(e)))
+        .collect();
+    assert!(!moved.is_empty(), "some items move");
+    let rows = items_by_id(&engine, moved.iter().copied())
+        .into_iter()
+        .zip(&moved)
+        .map(|(at, &e)| {
+            let descriptors: Vec<Vec<u8>> = terms_of(e)
+                .iter()
+                .map(|t| t.to_string().into_bytes())
+                .collect();
+            mosaica_lifecycle::command::UnallocatedRow {
+                view: "s0".to_string(),
+                join: Some(at.expect("the item exists")),
+                terms: engine.resolve_terms(&descriptors),
+                descriptors,
+                x: away.0,
+                y: away.1,
+                scalars: Vec::new(),
+                scoped: Vec::new(),
+            }
+        })
+        .collect();
+    engine
+        .ingest_rows(rows, "move".to_string(), [7u8; 32])
+        .expect("the batch is accepted");
+    wait_until("the move to flush", WAIT, || {
+        engine.write_executor_stats().flushes >= 1
+    });
+
+    for credential in [full_coverage_credential(), subset_credential()] {
+        let sees = |e: u64| credential == full_coverage_credential() || subset_sees(e);
+        let want = (0..N_ITEMS)
+            .filter(|&e| sees(e) && in_s1(e) && !moved.contains(&e) && a.contains(quantised(e)))
+            .count() as u64;
+        let got = viewport_of(&engine, "s1", &credential, in_view("s0", &a));
+        assert_eq!(
+            matched(&got),
+            want,
+            "the moved items are outside the lasso now"
         );
     }
 }

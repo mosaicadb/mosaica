@@ -748,10 +748,11 @@ export interface Store {
    * Switch to view `id`. An id `meta.views` does not list is ignored. Called before `/v1/meta` has
    * loaded, it sets the view to open with.
    *
-   * Between views that share an extent, the camera and the selected region carry over and the new
-   * view draws what it already holds at once. A view with another extent drops the camera, and the
-   * next `setView` sets it; the selected region moves to `filters.regions`, where it keeps
-   * filtering, and the region held for the incoming view, if there is one, is selected. A switch clears the marks, the tiles, the typeahead pages and the
+   * Between views that share an extent, the camera carries over and the new view draws what it
+   * already holds at once; a view with another extent drops the camera, and the next `setView` sets
+   * it. The selected region carries over to a view of the same group that shares its extent and
+   * holds no region of its own. Otherwise it moves to `filters.regions`, where it keeps filtering,
+   * and the region held for the incoming view, if there is one, is selected. A switch clears the marks, the tiles, the typeahead pages and the
    * fetched shapes, and publishes `status` as `loading`.
    */
   setCurrentView(id: string): void;
@@ -2049,13 +2050,17 @@ export function createStore(options: StoreOptions): Store {
     colourAsked.clear();
     shapes.forget('all');
 
-    // The selection is in the outgoing frame's data coordinates too, so it is held under that view.
+    // The selection is in the outgoing view's layout. It carries to another view of its group laid
+    // out over the same extent, unless that view holds a selection of its own; otherwise it is held
+    // under the view it was drawn in.
     const outgoing = region.selected;
     const held = projections.filters.regions;
     const heldHere = held.find((r) => r.view === id)?.shape ?? null;
+    const group = (view: string) => meta!.views.find((v) => v.id === view)?.roster?.group ?? null;
+    const carried = kept && heldHere === null && group(from) !== null && group(from) === group(id);
     const regions = held.filter((r) => r.view !== id && r.view !== from);
-    if (!kept && outgoing) regions.push({view: from, shape: outgoing});
-    if (!kept) region.drop();
+    if (!carried && outgoing) regions.push({view: from, shape: outgoing});
+    if (!carried) region.drop();
     if (regions.length !== held.length || regions.some((r, i) => r !== held[i])) replaceProjection('filters', {...projections.filters, regions});
 
     // No marks until the incoming view presents, and the incoming channel's artifacts. A subscriber
@@ -2063,8 +2068,7 @@ export function createStore(options: StoreOptions): Store {
     replaceProjection('view', noFrame(id));
     replaceProjection('marks', {...projections.marks, bands: [], standIn: [], count: NO_COUNT});
     replaceProjection('tiles', {tiles: []});
-    // A region carried over from a view with the same extent stands in for the one held here.
-    if (heldHere && !region.selected && region.select(heldHere, projections.marks)) areaChanged();
+    if (heldHere && region.select(heldHere, projections.marks)) areaChanged();
     onArtifacts(incoming.channel.current);
     replaceProjection('status', {...projections.status, status: 'loading', refusal: null, stale: false});
     publishReplica(projections.replica.lastPlan);
@@ -2176,9 +2180,9 @@ export function createStore(options: StoreOptions): Store {
     return withMembers(composeFilters(draft, 'filter'), projections.filters.members, 'filter');
   }
 
-  /** One composition for the point path, the artifact channel and the region's count. */
-  function requestFilters(): FilterExpr | null {
-    return withSelected(filtersBesideRegion(projections.filters.draft));
+  /** One composition for the point path, the artifact channel and the region's count, for a request to `view`. */
+  function requestFilters(view = views.id): FilterExpr | null {
+    return withSelected(filtersBesideRegion(projections.filters.draft), view);
   }
 
   /** {@link requestFilters} without `column`'s filter-position control. */
@@ -2359,12 +2363,15 @@ export function createStore(options: StoreOptions): Store {
     return shown;
   }
 
-  /** `expr` with the region held in each other view, and the selected region's leaf, joined. */
-  function withSelected(expr: FilterExpr | null): FilterExpr | null {
+  /**
+   * `expr` with the region held in each other view, and the selected region's leaf, joined, for a
+   * request to `view`. Each region names the view it was drawn in where that is not `view`.
+   */
+  function withSelected(expr: FilterExpr | null, view = views.id): FilterExpr | null {
     let out = expr;
-    for (const {view, shape} of projections.filters.regions) out = withRegion(out, regionOperand(shape, view), shape.outside ?? false);
+    for (const held of projections.filters.regions) out = withRegion(out, regionOperand(held.shape, held.view), held.shape.outside ?? false);
     const selected = region.selected;
-    return withRegion(out, selected ? regionOperand(selected) : null, selected?.outside ?? false);
+    return withRegion(out, selected ? regionOperand(selected, view === views.id ? undefined : views.id) : null, selected?.outside ?? false);
   }
 
   /**
@@ -2400,7 +2407,8 @@ export function createStore(options: StoreOptions): Store {
   async function readDefaults(req: {view?: string; filters?: FilterExpr | null}) {
     const asked = await viewed();
     const own = req.filters !== undefined;
-    return {token: asked.token, current: asked.view, view: req.view ?? asked.view, filters: own ? req.filters! : requestFilters(), own};
+    const view = req.view ?? asked.view;
+    return {token: asked.token, current: asked.view, view, filters: own ? req.filters! : requestFilters(view), own};
   }
 
   async function browse(req: Omit<BrowseRequest, 'filters' | 'view'> & {filters?: FilterExpr | null; view?: string}): Promise<BrowsePage> {

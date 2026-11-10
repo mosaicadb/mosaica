@@ -1496,6 +1496,7 @@ impl Engine {
         use crate::filter::FilterError;
         let refused = |e: EngineError| match e {
             EngineError::Cancelled => FilterError::Cancelled,
+            EngineError::UnknownView(view) => FilterError::RegionViewUnknown(view),
             EngineError::ProjectionBuilding
             | EngineError::FragmentBuilding
             | EngineError::CountsBuilding => FilterError::RegionViewBuilding,
@@ -1730,16 +1731,13 @@ pub(crate) fn unique_holders(
 ///
 /// [`FilterError`]: crate::filter::FilterError
 pub(crate) fn filter_refusal(e: crate::filter::FilterError) -> EngineError {
+    use crate::filter::FilterError;
     match e {
-        crate::filter::FilterError::Cancelled => return EngineError::Cancelled,
-        crate::filter::FilterError::RegionViewBuilding => return EngineError::ProjectionBuilding,
-        _ => {}
-    }
-    let detail = e.to_string();
-    if e.is_callers_fault() {
-        EngineError::FilterMalformed(detail)
-    } else {
-        EngineError::FilterRefused(detail)
+        FilterError::Cancelled => EngineError::Cancelled,
+        FilterError::RegionViewBuilding => EngineError::ProjectionBuilding,
+        FilterError::RegionViewUnknown(view) => EngineError::UnknownView(view),
+        e if e.is_callers_fault() => EngineError::FilterMalformed(e.to_string()),
+        e => EngineError::FilterRefused(e.to_string()),
     }
 }
 

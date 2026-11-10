@@ -11,7 +11,8 @@ import {tileRectOfBbox} from '../src/budget.js';
  * channel per view, and a switch that changes which view is current.
  *
  * `v0`, `v1` and `v2` share one frame and one group, as a slider's views do; `far` quantises
- * against another frame. Runs against a fake client, clock and frame scheduler, and asserts which
+ * against another frame; `loose` shares their frame and belongs to no group, another layout that
+ * happens to have the same extent. Runs against a fake client, clock and frame scheduler, and asserts which
  * requests went out, under which view, and what the projections said.
  */
 
@@ -21,10 +22,10 @@ const OTHER_FRAME = {xMin: -1000, xMax: 1000, yMin: -500, yMax: 500};
 const inGroup = (id: string, quantisation: typeof FRAME, group: string | null) =>
   view(id, {quantisation, roster: group ? {group, key: id, metadata: {}} : null});
 
-const everyView = {views: ['v0', 'v1', 'v2', 'far'], computedContent: ['centroid', 'box']};
+const everyView = {views: ['v0', 'v1', 'v2', 'far', 'loose'], computedContent: ['centroid', 'box']};
 
 const META = meta({
-  views: [inGroup('far', OTHER_FRAME, null), inGroup('v0', FRAME, 'g'), inGroup('v1', FRAME, 'g'), inGroup('v2', FRAME, 'g')],
+  views: [inGroup('far', OTHER_FRAME, null), inGroup('v0', FRAME, 'g'), inGroup('v1', FRAME, 'g'), inGroup('v2', FRAME, 'g'), inGroup('loose', FRAME, null)],
   groups: [{name: 'g', title: 'quarters', membersOf: null, views: ['v0', 'v1', 'v2']}],
   declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']})],
   layers: [layer('l', everyView), layer('m', everyView)],
@@ -113,6 +114,7 @@ function open(opts: {
     viewport,
     viewportArtifacts,
     item: async () => ({fields: {}}),
+    browse: vi.fn(async () => ({rows: [], more: false})),
     artifact: async () => ({layer: 'l', key: 'k', maskedCount: 42n, centroid: null, box: null, shape: null}),
     categories: async () => [],
     suggest: async (_token: string, column: string, q: string) => ({status: 'ok' as const, column, q, values: [], more: false}),
@@ -134,7 +136,7 @@ function open(opts: {
   const asked = (id: string) => [...viewport.mock.calls, ...viewportArtifacts.mock.calls].filter((c) => (c[1] as FakeRequest).view === id);
   /** Holds the next `/v1/meta` read open, as a `clear` waiting for the next viewer's meta. */
   const holdMeta = () => Object.assign(client, {meta: () => new Promise<never>(() => {})});
-  return {store, viewport, asked, traces, holdMeta};
+  return {store, viewport, asked, traces, holdMeta, client};
 }
 
 /** Brings a store to its first shown frame in whichever view it opened on. */
@@ -304,6 +306,62 @@ describe('a switch across frames holds the selection under the view it was drawn
     expect(store.get('filters').regions).toEqual([{view: 'v0', shape: {kind: 'box', bbox: [3, 3, 4, 4]}}]);
     expect(store.get('region')!.shape).toEqual({kind: 'box', bbox: [-10, -10, 10, 10]});
     expect(regionsIn(lastFilters(asked, 'far'))).toEqual([{bbox: [3, 3, 4, 4], view: 'v0'}, {bbox: [-10, -10, 10, 10]}]);
+  });
+});
+
+describe('a switch between layouts over one extent', () => {
+  const box = {kind: 'box' as const, bbox: [10, 10, 20, 20] as [number, number, number, number]};
+  const other = {kind: 'box' as const, bbox: [30, 30, 40, 40] as [number, number, number, number]};
+  async function opened(view: string) {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const o = open({view, clock, scheduler});
+    await clock.advance(1);
+    await shown(o.store, clock, scheduler);
+    const settled = async () => {
+      await clock.advance(600);
+      scheduler.flush();
+    };
+    return {...o, settled};
+  }
+
+  it('holds the selection under its view where the next view is in no group with it', async () => {
+    const {store, settled} = await opened('v0');
+    store.select(box);
+    await settled();
+    store.setCurrentView('loose');
+    expect(store.get('region')).toBeNull();
+    expect(store.get('filters').regions).toEqual([{view: 'v0', shape: box}]);
+  });
+
+  it('carries it within the group, and selects a held region of the incoming view in place of carrying', async () => {
+    const {store, settled} = await opened('v0');
+    store.select(box);
+    await settled();
+    store.setCurrentView('v1');
+    expect(store.get('region')!.shape).toEqual(box);
+    expect(store.get('filters').regions).toEqual([]);
+
+    // `v0`'s region is held while the viewer is in another layout; `v1` then gets its own.
+    store.setCurrentView('v0');
+    store.setCurrentView('far');
+    store.setCurrentView('v1');
+    expect(store.get('filters').regions).toEqual([{view: 'v0', shape: box}]);
+    store.select(other);
+    await settled();
+    // Back to `v0`: neither region is lost.
+    store.setCurrentView('v0');
+    expect(store.get('region')!.shape).toEqual(box);
+    expect(store.get('filters').regions).toEqual([{view: 'v1', shape: other}]);
+  });
+
+  it('places the selected region in its own view on a read of another view', async () => {
+    const {store, settled, client} = await opened('v0');
+    store.select(box);
+    await settled();
+    await store.browse({layer: 'l', view: 'far'} as Parameters<typeof store.browse>[0]);
+    const sent = (client.browse as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as {filters: unknown};
+    expect(regionsIn(sent.filters)).toEqual([{bbox: [10, 10, 20, 20], view: 'v0'}]);
   });
 });
 
