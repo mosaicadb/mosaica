@@ -280,6 +280,7 @@ describe('the filter panel under a pointer and a keyboard', () => {
         meta: {
           declaredScalars: [
             {name: 'archive', arrowType: 'u16', category: {}, render: true},
+            {name: 'toponymy_clusters', arrowType: 'u16', category: {}, render: true},
             {name: 'submitted_at', arrowType: 'timestamp_us', category: null, render: true},
             {name: 'population', arrowType: 'u32', category: null, render: true}
           ],
@@ -287,6 +288,7 @@ describe('the filter panel under a pointer and a keyboard', () => {
           views: [],
           filterOperands: [
             {column: 'archive', family: 'category', operands: ['in']},
+            {column: 'toponymy_clusters', family: 'category', operands: ['in']},
             {column: 'submitted_at', family: 'numeric', operands: ['range']},
             {column: 'population', family: 'numeric', operands: ['range']},
             {column: longField, family: 'keyword', operands: ['eq']}
@@ -332,6 +334,11 @@ describe('the filter panel under a pointer and a keyboard', () => {
       };
       const el = document.querySelector('mosaica-filter-panel') as HTMLElement & {store: unknown; updateComplete: Promise<unknown>};
       el.store = store;
+      // For a test to colour the map by another field.
+      (window as unknown as {coloured: (field: string) => void}).coloured = (field) => {
+        projections['legend'] = {...(projections['legend'] as object), colourBy: field};
+        publish();
+      };
       // For a test to publish the suggestions a typed value is answered with.
       (window as unknown as {suggested: (page: unknown) => void}).suggested = (page) => {
         projections['filters'] = {...(projections['filters'] as object), suggestions: {archive: page}};
@@ -432,9 +439,51 @@ describe('the filter panel under a pointer and a keyboard', () => {
     expect((await drawn('highlight'))[1]).toBe('none');
   });
 
+  /** Where the mark of the folded card that colours the map stands by its name, and whether the chart is whole on their line. */
+  const marked = (p: Page) =>
+    p.evaluate(() => {
+      const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
+      const card = root.querySelector('mosaica-field-card[data-field="toponymy_clusters"]')!.shadowRoot!;
+      const box = (selector: string) => card.querySelector(selector)!.getBoundingClientRect();
+      const [title, mark, spark, fold, head] = ['[part="title"]', '.painted', '[part="spark"]', '[part="fold"]', '[part="head"]'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect, DOMRect];
+      const line = root.querySelector('mosaica-field-card[data-field="archive"]')!.shadowRoot!.querySelector('[part="title"]')!.getBoundingClientRect().height;
+      return {
+        name: card.querySelector('[part="title"]')!.textContent,
+        oneLine: Math.abs(title.height - line) < 1,
+        after: mark.left >= title.right - 2.5 && mark.left - title.right < 12,
+        level: mark.top >= title.top && mark.bottom <= title.top + line,
+        // The chart gives up no more than a third of its width, and stands between the mark and the chevron.
+        chart: spark.width >= 47.5 && spark.left >= mark.right && spark.right <= fold.left && spark.top >= title.top && spark.bottom <= title.top + line && fold.right <= head.right + 0.5
+      };
+    });
+
+  it('keeps what follows a card’s name on the name’s line where it fits, at both widths of the explorer’s panel', async () => {
+    for (const width of [264, 340]) {
+      const p = await panel('compact pinned="archive toponymy_clusters population"', width);
+      await p.evaluate(() => (window as unknown as {coloured: (field: string) => void}).coloured('toponymy_clusters'));
+      await settled(p);
+      expect(await marked(p), `${width} px`).toEqual({name: 'Toponymy clusters', oneLine: true, after: true, level: true, chart: true});
+      // The open card's figures stand beside its name where the line holds both, and under it where it does not.
+      await p.locator('mosaica-field-card[data-field="population"] [part="fold"]').click();
+      await settled(p);
+      const figures = await p.evaluate(() => {
+        const card = document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector('mosaica-field-card[data-field="population"]')!.shadowRoot!;
+        const [title, sub, named] = ['[part="title"]', '[part="sub"]', '.named'].map((selector) => card.querySelector(selector)!.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+        const fits = card.querySelector('[part="title"]')!.scrollWidth + 8 + card.querySelector('[part="sub"]')!.scrollWidth <= card.querySelector('[part="head"]')!.getBoundingClientRect().width - 2 * (24 + 8);
+        return {fits, beside: sub.left >= title.right && sub.top < title.bottom && sub.bottom > title.top, under: sub.top >= title.bottom - 1 && sub.left - named.left < 1, whole: title.height < 24};
+      });
+      expect(figures, `${width} px`).toEqual({fits: width === 340, beside: width === 340, under: width === 264, whole: true});
+      await p.close();
+    }
+  });
+
   it('wraps a card’s name between its words in the compact layout, at the width an explorer 900 px wide gives it and with its text spaced out', async () => {
     // The panel of a compact explorer is 264 px wide; the spacing is what a reader's own style sheet may force.
-    const p = await panel(`compact pinned="archive population ${LONG_FIELD}"`, 264, 'div { letter-spacing: 0.12em; word-spacing: 0.16em; }');
+    const p = await panel(`compact pinned="archive toponymy_clusters population ${LONG_FIELD}"`, 264, 'div { letter-spacing: 0.12em; word-spacing: 0.16em; }');
+    // A folded card that colours the map has a mark after its name, on the name's line where both fit before the chart.
+    await p.evaluate(() => (window as unknown as {coloured: (field: string) => void}).coloured('toponymy_clusters'));
+    await settled(p);
+    expect(await marked(p)).toEqual({name: 'Toponymy clusters', oneLine: true, after: true, level: true, chart: true});
     // A name of one word that fits the card is on one line, folded and open, where its figures stand beside it.
     const oneWord = () =>
       p.evaluate(() => {

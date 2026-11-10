@@ -280,11 +280,14 @@ export class MosaicaFieldCard extends MosaicaElement {
         gap: 2px 8px;
         min-height: 24px;
       }
-      /* The name and what it notes, which goes under the name where the two do not fit on a line.
-         The group asks for the width of the name's longest word, and takes what the line has left. */
+      /* The name and what follows it, a mark or what the name notes, which goes under the name
+         only where the two do not fit on a line. The group asks for the width of the name's longest
+         word and takes what the line has left before the chart does, up to one line of its own. */
       .named {
-        flex: 1 1 min-content;
+        flex: 1000 1 min-content;
         min-width: 0;
+        max-width: max-content;
+        margin-right: auto;
         display: flex;
         flex-wrap: wrap;
         align-items: center;
@@ -320,13 +323,14 @@ export class MosaicaFieldCard extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
+      /* Two thirds of its width where the name beside it needs the rest. */
       [part='spark'] {
-        flex: none;
+        flex: 1 0 40px;
+        max-width: 60px;
         margin-left: auto;
         display: flex;
         align-items: flex-end;
         gap: 1px;
-        width: 60px;
         height: 14px;
       }
       [part='spark'] span {
@@ -337,7 +341,8 @@ export class MosaicaFieldCard extends MosaicaElement {
         forced-color-adjust: none;
       }
       :host([compact]) [part='spark'] {
-        width: 72px;
+        flex-basis: 48px;
+        max-width: 72px;
       }
       /* Folded in the compact layout, a card is its name, a drop where it colours the map, its
          chart and its chevron. */
