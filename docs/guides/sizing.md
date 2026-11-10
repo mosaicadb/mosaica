@@ -8,7 +8,7 @@ A running server needs memory for two things: its caches, which have fixed limit
 
 With the default limits, the caches and the paged reads add up to about 7.9 GiB. You can lower them for a small database, or raise them when many users each hold their own access attributes. [The caches](#the-caches) lists each one.
 
-The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap (`MemoryMax` under systemd, or the container's memory limit) above the cache limits, and leave enough beyond them for the parts of the bundle your users read most, its hot set. While the memory beyond the caches holds the hot set, the server runs at full speed; once it can't, nearly every request waits on the disc and throughput falls steeply. [Memory beyond the caches](#memory-beyond-the-caches) gives measured figures and how to find your own hot set.
+The bundle isn't loaded into memory. Mosaica maps its files, so the kernel keeps the parts people are looking at in memory and drops the rest when memory runs short. Set the server's memory cap (`MemoryMax` under systemd, or the container's memory limit) to the cache limits plus the bundle's hot set, the parts your users read most. [How much to give a server](#how-much-to-give-a-server) explains how to choose both.
 
 `mosaica status` shows what the process holds. `heap.anon_bytes` is the caches and the allocator's own memory, and `heap.file_bytes` is how much of the bundle is in memory:
 
@@ -49,52 +49,58 @@ Beside these, the server keeps what it subtracts and adds on each request for de
 
     On disc, `figures_disk_bytes` keeps the same entries and the labels of denied rows they're corrected with. In a bundle of several shards it also keeps each shard's pass over each set's items, which a compaction of one shard reads back so as to redo that shard alone: up to 172 B for each artifact a shard holds a member of, for each version of the level. Size it as the memory limit times the number of entries a restart should find, plus those passes, plus about 24 B per denied row per level. Past it, the files least recently written or read are removed.
 
-### Memory beyond the caches
+### How much to give a server
 
-The hot set depends on where your users look, so the reliable figure is your own: run the server without a cap under real traffic and read `heap.file_bytes` from `mosaica status` once it has settled. Give the server at least that much beyond its cache limits.
+Give the server its cache limits plus its hot set:
 
-As an example of the shape, the table below was measured on one 4-core machine with a corpus of 100 million items of about 60 bytes each (a 5.6 GiB bundle) and default cache limits. Ten users panned close-ups across the whole map at random, which is close to the worst case for the page cache, since real users gather on the busy parts of a map. Its hot set was about 2.0 GiB, a third of the bundle. Each figure is one run of 20 seconds, and repeated runs of a cell differed by up to 30%.
+- **Cache limits.** The defaults suit a server that has the memory for them. Size `row_projection_cache_bytes` and `fragment_cache_bytes` to the distinct sets of access attributes in use at once. Each set costs up to about one bit per item in each of the two caches, so 12 MiB in each at 100 million items, and much less where the items it sees sit together on the map. A set that doesn't fit is rebuilt on its next request, which costs CPU in proportion to the corpus.
+- **Hot set.** Run the server without a cap under real traffic and read `heap.file_bytes` from `mosaica status` once it has settled.
 
-| Memory cap | Bundle ÷ cap | Requests per second | p99 latency | Reads from disc in 20 s |
-|---|---|---|---|---|
-| None | | 671 | 83 ms | 783 |
-| 2 GiB | 2.8 | 811 | 71 ms | 3,032 |
-| 1 GiB | 5.6 | 468 | 130 ms | 111,985 |
-| 512 MiB | 11 | 116 | 755 ms | 258,300 |
+For example, 100 million items, 200 sets of attributes in use, the other caches at their defaults and a measured hot set of 2 GiB come to about 12 GiB: 2.4 GiB for each of the two access caches, 4.9 GiB for the rest and 2 GiB of hot set.
 
-With these users, a bundle up to about three times the memory beyond the caches served at full speed. A narrower map, users who stay in one region, or a lower [point cap](#points-drawn-per-tile) lets the ratio go higher; more columns, indexed text and filters make the hot set larger.
+### What happens beyond the hot set
 
-The hot set should grow more slowly than the corpus, so a larger corpus should tolerate a higher ratio under the same users, because an unfiltered view reads a bounded amount of the bundle. A tile reads the positions and fields of at most its point cap of items, so once a tile holds many times more items than a page, those reads touch about one page per item drawn, whatever the corpus size. Below zoom 10, a tile finds those items from copies kept for the purpose without reading the rest of the tile; above it, a tile holds few enough items that reading them all is cheap. The two corpora measured agree: the hot set was over half of the bundle at 10 million items and a third at 100 million. This is inferred from how a view reads and from those two sizes. A filtered view reads more: where many of a tile's items match, it finds its points from the same copies but passes over the ones that don't match, and where few match, it reads the identifier of every match in the tile. Either way its reads grow with the corpus, though more slowly than the corpus does.
+While the memory beyond the caches holds the hot set, the server runs at full speed. Once it can't, nearly every request waits on the disc. The table was measured on one 4-core machine with 100 million items of about 60 bytes each (a 5.6 GiB bundle). Ten users panned across the whole map at random, which is close to the worst case, since real users gather on the busy parts of a map. The hot set was about 2 GiB. Each figure is one 20-second run, and repeated runs differed by up to 30%.
 
-### Users who see different items
+| Memory cap | Bundle ÷ cap | Views per second | p99 latency |
+|---|---|---|---|
+| None | | 671 | 83 ms |
+| 2 GiB | 2.8 | 811 | 71 ms |
+| 1 GiB | 5.6 | 468 | 130 ms |
+| 512 MiB | 11 | 116 | 755 ms |
 
-Each distinct set of access attributes that is in use holds two bitmaps of the items it may see: its visible set, in item order, and its row projection, in map order, one for each view and shard. Sessions holding the same attributes share both. A bitmap is stored in blocks of 65,536 rows, and each block takes the least of three forms: 2 bytes for each visible row, a flat 8 KiB (one bit for every row), or a few bytes for each run of consecutive visible rows. So, for each bitmap:
-
-- **Visible items scattered through the corpus**, a sixteenth of the items or more: about one bit for every item in the corpus, whatever the share. At 100 million items that is 12 MiB.
-- **A smaller scattered share**: about 2 bytes for each visible item.
-- **Visible items that sit together**, because the attributes follow regions of the map or the build's ordering: much less, a few bytes per run.
-
-This is worked out from the bitmap format and agrees with what was measured. In the example above, each user with attributes of their own, seeing a sixteenth of the items scattered, added 1.4 MiB at 10 million items and 13.5 MiB at 100 million, against 1.2 MiB and 11.9 MiB predicted for one bitmap.
-
-A set's bitmaps are built on its first request, which costs CPU in proportion to the corpus. At 100 million items, a thousand users arriving at once with attributes of their own were limited by that work: the server built a few hundred sets a minute on three cores, and raising `row_projection_cache_bytes` to 8 GiB and `fragment_cache_bytes` to 4 GiB did not help.
-
-### Under a small memory cap
-
-The cache limits are fixed, so a server capped below their total keeps filling its caches past the cap and is stopped by the kernel. In the example above, a server with default limits was stopped at caps of 512 MiB and 1 GiB once many users held attributes of their own. Under a cap below the default total, lower the limits yourself. Setting `row_projection_cache_bytes` to 12% of the cap, `fragment_cache_bytes` and `filter_cache_bytes` to 6% each, `masked_count_cache_bytes` and `region_cache_bytes` to 3% each and `occupancy_cache_bytes` to 1% kept every server in that run alive, though one serving many users with attributes of their own was slow at caps well below its hot set.
+A larger corpus has a smaller hot set for its size: it was over half of the bundle at 10 million items and a third at 100 million.
 
 ### Points drawn per tile
 
-`k_max_marks` (500 by default) is the most points a tile draws, and `max_k` (1,000) the most a request may ask for. A tile reads its points' positions and rendered fields from the bundle, so a lower cap reads fewer pages for each view and shrinks the hot set. It doesn't change the memory each set of access attributes holds, and it bounds a filtered view less well, since that view also reads items that don't match on its way to the ones it draws.
+`k_max_marks` (500 by default) is the most points a tile draws, and `max_k` (1,000) the most a request may ask for. Fewer points per tile means fewer pages read per view and a smaller hot set. With the example above at a 2 GiB cap and 100 users panning without pause:
 
-Measured with the example above at a 2 GiB cap, with 100 users panning without pause:
+| Points per tile | Points per view | Views per second | p99 latency | Reads from disc in 20 s |
+|---|---|---|---|---|
+| 50 | about 1,300 | 1,050 | 120 ms | 882 |
+| 200 | about 2,900 | 879 | 141 ms | 12,817 |
+| 500 | about 4,500 | 536 | 242 ms | 112,824 |
 
-| Points per tile | Requests per second | p99 latency of pans | Reads from disc in 20 s |
-|---|---|---|---|
-| 50 | 1,050 | 79 ms | 882 |
-| 200 | 879 | 84 ms | 12,817 |
-| 500 | 536 | 149 ms | 112,824 |
+At 500 points a tile the hot set no longer fitted, and the server delivered fewer points a second in all than at 200. A view shows fewer points than the cap times its tiles, since many tiles hold fewer items than the cap.
 
-At 500 points a tile, that server had moved past the point where its hot set fit. A lower cap moves that point, though it couldn't rescue the same server at 1 GiB, five times smaller than the bundle, where filtered views dominated.
+### Under a small memory cap
+
+The cache limits don't follow the memory cap, so a server capped below their total fills its caches past the cap and is stopped by the kernel. Under such a cap, set each cache to a share of it. These shares kept every server alive in the runs above, at caps from 512 MiB to 8 GiB; for a 2 GiB cap:
+
+```toml
+[serve]
+row_projection_cache_bytes = 268435456  # 256 MiB, about 12% of the cap
+fragment_cache_bytes = 134217728        # 128 MiB, about 6%
+filter_cache_bytes = 134217728          # 128 MiB, about 6%
+masked_count_cache_bytes = 67108864     # 64 MiB, about 3%
+region_cache_bytes = 67108864           # 64 MiB, about 3%
+occupancy_cache_bytes = 16777216        # 16 MiB, about 1%
+```
+
+??? info "How these figures arise"
+    **The access caches.** Each set of access attributes in use holds its visible items twice: as a bitmap in item order, in `fragment_cache_bytes`, and as one in map order for each view and shard, in `row_projection_cache_bytes`. A bitmap stores each block of 65,536 rows in the least of three forms: 2 bytes per visible row, a flat 8 KiB, or a few bytes per run of consecutive visible rows. So a set seeing a sixteenth or more of the items, scattered, costs about one bit per item; a smaller scattered share costs about 2 bytes per visible item; and items that sit together cost far less. This is worked out from the format. Measured, each set seeing a scattered sixteenth added 1.4 MiB at 10 million items and 13.5 MiB at 100 million, against 1.2 MiB and 11.9 MiB predicted for one bitmap. At 100 million items, a thousand new sets arriving at once were limited by the CPU that building them takes, a few hundred a minute on three cores, and larger caches didn't help.
+
+    **Why the hot set grows more slowly than the corpus.** A tile reads the positions and fields of at most its point cap of items. Once it holds many more items than fit in a page, those reads touch about one page per point drawn, whatever the corpus size. Below zoom 10 a tile finds its points from copies kept for the purpose, without reading the rest of the tile, and above it tiles are small. A filtered view reads more: where many of a tile's items match it passes over those that don't, and where few match it reads the identifier of every match. Its reads grow with the corpus either way, though more slowly than the corpus does.
 
 ## Annotation layers and new viewers
 
