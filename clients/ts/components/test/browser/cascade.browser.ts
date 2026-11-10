@@ -249,3 +249,199 @@ describe('the filter panel', () => {
     expect(focused).toEqual({part: 'highlight', row: 'cs', shown: '1'});
   });
 });
+
+describe('the filter panel under a pointer and a keyboard', () => {
+  const LONG = 'a value with a name far too long to fit on one line of a card';
+
+  /**
+   * A panel 340 px wide over a category the map is coloured by and a date, the category filtered to
+   * one value and the date highlighted by a range, on a store that publishes what is set on it.
+   */
+  async function panel(): Promise<Page> {
+    const p = await page('<div style="width: 340px"><mosaica-filter-panel pinned="archive submitted_at"></mosaica-filter-panel></div>');
+    await p.evaluate(async (long) => {
+      const values = [
+        {key: 'cs', count: 30},
+        {key: 'math', count: 20},
+        {key: long, count: 10}
+      ];
+      const bins = [10, 20, 30, 40].map((count, i) => ({lower: Date.UTC(2019 + i, 0, 1), upper: Date.UTC(2020 + i, 0, 1), count}));
+      const table = (n: number, columns: Record<string, (i: number) => unknown>) => ({numRows: n, getChild: (name: string) => (columns[name] ? {get: columns[name]} : null)});
+      const category = table(values.length, {group: () => 'listed', key: (i) => values[i]!.key, title: () => null, count: (i) => BigInt(values[i]!.count)});
+      const histogram = table(bins.length, {group: () => 'listed', lower: (i) => bins[i]!.lower, upper: (i) => bins[i]!.upper, count: (i) => BigInt(bins[i]!.count)});
+      const answer = (rows: {numRows: number}, total: number) => ({status: 'shown', view: 's0', palette: null, refusal: null, summaries: [null], result: {tables: [{grouping: 0, total, referenceTotal: null, groups: rows.numRows, sample: null, rows}], region: null, recomposed: false, identityKey: 'ik', next: null}});
+      const listeners = new Set<() => void>();
+      const publish = () => listeners.forEach((fn) => fn());
+      let aggregates = new Map<string, unknown>();
+      const projections: Record<string, unknown> = {
+        meta: {
+          declaredScalars: [
+            {name: 'archive', arrowType: 'u16', category: {}, render: true},
+            {name: 'submitted_at', arrowType: 'timestamp_us', category: null, render: true}
+          ],
+          layers: [],
+          views: [],
+          filterOperands: [
+            {column: 'archive', family: 'category', operands: ['in']},
+            {column: 'submitted_at', family: 'numeric', operands: ['range']}
+          ],
+          selection: {maxAggregateTop: 1000, maxAggregateNamed: 1000}
+        },
+        status: {status: 'shown', sessionWarm: true, refusal: null, stale: false, expired: false, retrying: false, unreachable: false},
+        view: {id: 's0', inView: null},
+        filters: {
+          draft: {filter: {archive: {family: 'category', keys: ['math']}}, highlight: {submitted_at: {family: 'numeric', gte: Date.UTC(2020, 0, 1) * 1000, lte: null}}},
+          expr: null,
+          highlight: null,
+          members: [],
+          regions: [],
+          suggestions: {},
+          suggestErrors: {},
+          suggestEpoch: 0
+        },
+        legend: {colourBy: 'archive', categories: {archive: values.map((v, i) => ({key: v.key, code: i + 1, title: null}))}, ranks: {archive: {1: 0, 2: 1, 3: 2}}, domains: {}},
+        artifacts: {served: [], colours: new Map(), palette: 'tableau10', overrides: new Map()}
+      };
+      const store = {
+        get: (name: string) => (name === 'aggregates' ? aggregates : projections[name]),
+        subscribe: (fn: () => void) => {
+          listeners.add(fn);
+          return () => listeners.delete(fn);
+        },
+        setAggregate: (id: string, spec: {groupings: {by?: {bins?: number}}[]} | null) => {
+          aggregates = new Map(aggregates);
+          if (spec === null) aggregates.delete(id);
+          else aggregates.set(id, spec.groupings[0]?.by?.bins ? answer(histogram, 100) : answer(category, 60));
+          queueMicrotask(publish);
+        },
+        setFilters: (draft: unknown) => {
+          projections['filters'] = {...(projections['filters'] as object), draft};
+          publish();
+        },
+        setMembers: () => {},
+        suggest: () => {},
+        forgetSuggestions: () => {}
+      };
+      const el = document.querySelector('mosaica-filter-panel') as HTMLElement & {store: unknown; updateComplete: Promise<unknown>};
+      el.store = store;
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        await el.updateComplete;
+        for (const card of el.shadowRoot!.querySelectorAll('mosaica-field-card')) await (card as unknown as {updateComplete: Promise<unknown>}).updateComplete;
+      }
+    }, LONG);
+    return p;
+  }
+
+  /** The control holding focus, through every shadow root: its part, its name, its row and its chip's column. */
+  const focused = (p: Page) =>
+    p.evaluate(() => {
+      let at: Element | null = document.activeElement;
+      while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+      return {
+        tag: at?.localName ?? null,
+        part: at?.getAttribute('part') ?? null,
+        name: at?.getAttribute('aria-label') ?? null,
+        row: at?.closest('[part~="row"]')?.getAttribute('data-key') ?? null,
+        chip: at?.closest('[part="chip"]')?.getAttribute('data-column') ?? null
+      };
+    });
+  const settled = (p: Page) =>
+    p.evaluate(async () => {
+      const el = document.querySelector('mosaica-filter-panel') as HTMLElement & {updateComplete: Promise<unknown>};
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => requestAnimationFrame(r));
+        await el.updateComplete;
+        for (const card of el.shadowRoot!.querySelectorAll('mosaica-field-card')) await (card as unknown as {updateComplete: Promise<unknown>}).updateComplete;
+      }
+    });
+
+  it('gives every pointer target 24 px each way, none over another, and a row its counts beside its buttons', async () => {
+    const p = await panel();
+    const seen = await p.evaluate(() => {
+      const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
+      const cards = [...root.querySelectorAll('mosaica-field-card')].map((c) => c.shadowRoot!);
+      const targets = [
+        ...root.querySelectorAll('[part="chip"] button, [part="clear-highlight"], [part="clear"], [part="add"]'),
+        ...cards.flatMap((c) => [...c.querySelectorAll('[part="swatch"], [part="verbs"] button, [part="paint"], [part="fold"], [part="range"]')])
+      ];
+      const box = (e: Element) => e.getBoundingClientRect();
+      const label = (e: Element) => `${e.getAttribute('part') ?? e.getAttribute('aria-label')} ${Math.round(box(e).width)}x${Math.round(box(e).height)}`;
+      // The chip's own text and Clear all are lines of text, which a target's least size leaves out.
+      const sized = targets.filter((e) => !['edit', 'clear'].includes(e.getAttribute('part') ?? ''));
+      const small = sized.filter((e) => box(e).width < 23.99 || box(e).height < 23.99).map(label);
+      const over: string[] = [];
+      for (let i = 0; i < targets.length; i++)
+        for (let j = i + 1; j < targets.length; j++) {
+          const [a, b] = [box(targets[i]!), box(targets[j]!)];
+          if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5) over.push(`${label(targets[i]!)} / ${label(targets[j]!)}`);
+        }
+      const row = cards[0]!.querySelector('[part~="row"]')!;
+      row.querySelector<HTMLElement>('[part="filter"]')!.focus();
+      const [count, verbs] = [row.querySelector('[part="count"]')!, row.querySelector('[part="verbs"]')!];
+      return {
+        kinds: [...new Set(sized.map((e) => e.getAttribute('part') ?? 'chip-close'))].sort(),
+        small,
+        over,
+        count: {visibility: getComputedStyle(count).visibility, drawn: box(count).width > 0, beside: box(count).right <= box(verbs).left + 0.5},
+        plot: getComputedStyle(cards[1]!.querySelector('[part="plot"]')!).touchAction
+      };
+    });
+    expect(seen.kinds).toEqual(['add', 'chip-close', 'clear-highlight', 'filter', 'fold', 'highlight', 'paint', 'range', 'swatch']);
+    expect(seen.small).toEqual([]);
+    expect(seen.over).toEqual([]);
+    expect(seen.count).toEqual({visibility: 'visible', drawn: true, beside: true});
+    expect(seen.plot).toBe('pan-y');
+  });
+
+  it('wraps a long value’s name inside its row, and tells a highlighted range from a filtered one by more than its colour', async () => {
+    const p = await panel();
+    const seen = await p.evaluate((long) => {
+      const cards = [...document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelectorAll('mosaica-field-card')].map((c) => c.shadowRoot!);
+      const row = [...cards[0]!.querySelectorAll<HTMLElement>('[part~="row"]')].find((r) => r.dataset['key'] === long)!;
+      const name = row.querySelector('[part="name"]')!;
+      const short = cards[0]!.querySelector('[part~="row"] [part="name"]')!;
+      const band = cards[1]!.querySelector('[part~="band"][data-verb="highlight"]')!;
+      return {
+        whole: name.scrollWidth <= name.clientWidth + 1 && name.getBoundingClientRect().right <= row.getBoundingClientRect().right,
+        lines: name.getBoundingClientRect().height > short.getBoundingClientRect().height * 1.5,
+        hatched: getComputedStyle(band).backgroundImage.includes('gradient'),
+        said: cards[1]!.querySelector('.applied[data-verb="highlight"]')!.textContent
+      };
+    }, LONG);
+    expect(seen.whole).toBe(true);
+    expect(seen.lines).toBe(true);
+    expect(seen.hatched).toBe(true);
+    expect(seen.said).toContain('2020');
+    // A pressed Filter stays filled, its icon solid, under the pointer, beside a Highlight that is not.
+    const verbs = p.locator('mosaica-field-card [part~="row"][data-key="math"] [part="verbs"]');
+    await verbs.locator('[part="filter"]').hover();
+    const drawn = (part: string) => verbs.locator(`[part="${part}"]`).evaluate((b) => [getComputedStyle(b).backgroundColor, getComputedStyle(b.querySelector('svg')!).fill]);
+    expect(await drawn('filter')).toEqual(['rgb(27, 29, 33)', 'rgb(255, 255, 255)']);
+    expect((await drawn('highlight'))[1]).toBe('none');
+  });
+
+  it('keeps focus on a value as its row moves, and moves it along the chips to Add field as they are removed', async () => {
+    const p = await panel();
+    await p.evaluate((long) => {
+      const card = document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector('mosaica-field-card')!.shadowRoot!;
+      const row = [...card.querySelectorAll<HTMLElement>('[part~="row"]')].find((r) => r.dataset['key'] === long)!;
+      row.querySelector<HTMLElement>('[part="filter"]')!.focus();
+    }, LONG);
+    await p.keyboard.press('Enter');
+    await settled(p);
+    const order = await p.evaluate(() => [...document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector('mosaica-field-card')!.shadowRoot!.querySelectorAll<HTMLElement>('[part~="row"]')].map((r) => r.dataset['key']));
+    // In the filter, the value is listed with the other the filter names, above the rest.
+    expect(order).toEqual(['math', LONG, 'cs']);
+    expect(await focused(p)).toMatchObject({part: 'filter', row: LONG});
+    expect((await focused(p)).name).toContain(LONG);
+
+    await p.evaluate(() => document.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelector<HTMLElement>('[part="chip"][data-column="archive"] > button:last-child')!.focus());
+    await p.keyboard.press('Enter');
+    await settled(p);
+    expect(await focused(p)).toMatchObject({tag: 'button', chip: 'submitted_at'});
+    await p.keyboard.press('Enter');
+    await settled(p);
+    expect(await focused(p)).toMatchObject({tag: 'button', part: 'add'});
+  });
+});

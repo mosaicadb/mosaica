@@ -57,6 +57,8 @@ async function mountCard(field: string, draft: FilterDraft = {filter: {}, highli
 const spec = (store: FakeStore, prefix: string) => [...registered(store)].find(([id]) => id.startsWith(prefix))?.[1];
 const lastFilters = (store: FakeStore) => store.calls.filter((c) => c.name === 'setFilters').at(-1)?.args[0] as FilterDraft | undefined;
 const rows = (host: HTMLElement) => deepAll(host, '[part~="row"]') as HTMLElement[];
+/** The control holding focus inside the card. */
+const focused = (card: MosaicaFieldCard) => card.shadowRoot!.activeElement as HTMLElement | null;
 
 /** Answer the card's counts in view and over everything matching. */
 async function answer(host: HTMLElement, store: FakeStore, subject: Parameters<typeof aggregateEntry>[0], match: Parameters<typeof aggregateEntry>[0]) {
@@ -196,6 +198,81 @@ describe('<mosaica-field-card> on a category', () => {
     expect(math!.dataset.state).toBe('out');
     expect(math!.querySelector('[part="count"]')!.textContent).toBe('900');
     expect(parseFloat((math!.querySelector('[part="bar-match"]') as HTMLElement).style.width)).toBe(0);
+  });
+
+  it('keeps focus on the value whose button was pressed as its row moves to the top', async () => {
+    const {host, card, store} = await mountCard('archive');
+    const three = [{key: 'cs', count: 30}, {key: 'math', count: 20}, {key: 'stat', count: 10}];
+    await answer(host, store, [{rows: three, total: 60}], [{rows: three, total: 60}]);
+    const filter = rows(host)[2]!.querySelector('[part="filter"]') as HTMLButtonElement;
+    filter.focus();
+    filter.click();
+    // The store publishes the clause the press set, and the value its clause names is listed first.
+    store.set('filters', filtersOf(lastFilters(store)!));
+    await settle(host);
+    expect(rows(host).map((r) => r.dataset.key)).toEqual(['stat', 'cs', 'math']);
+    expect(focused(card)!.getAttribute('part')).toBe('filter');
+    expect(focused(card)!.getAttribute('aria-label')).toContain('stat');
+    expect(focused(card)!.closest('[part~="row"]')!.getAttribute('data-key')).toBe('stat');
+  });
+
+  it('moves focus to the row that takes its place when the row whose button was pressed goes', async () => {
+    const {host, card, store} = await mountCard('archive', {filter: {archive: {family: 'category', keys: ['rare']}}, highlight: {}});
+    const inView = [{key: 'cs', count: 30}, {key: 'math', count: 20}];
+    const tables = [{rows: inView, total: 50}, {rows: [{key: 'rare', count: 0}]}];
+    await answer(host, store, tables, tables);
+    expect(rows(host).map((r) => r.dataset.key)).toEqual(['rare', 'cs', 'math']);
+    const filter = rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement;
+    filter.focus();
+    filter.click();
+    // Out of the clause, a value with nothing in view is no longer listed.
+    store.set('filters', filtersOf(lastFilters(store)!));
+    await settle(host);
+    expect(rows(host).map((r) => r.dataset.key)).toEqual(['cs', 'math']);
+    expect(focused(card)!.getAttribute('part')).toBe('filter');
+    expect(focused(card)!.closest('[part~="row"]')!.getAttribute('data-key')).toBe('cs');
+  });
+
+  it('gives a screen reader each count with what it counts, the subject’s by what the subject is, beside the figures drawn', async () => {
+    const {host, store} = await mountCard('archive');
+    await answer(host, store, [{rows: [{key: 'cs', count: 60}], total: 200}], [{rows: [{key: 'cs', count: 500}], total: 5000}]);
+    const count = () => rows(host)[0]!.querySelector('[part="count"]')!;
+    /** What follows each figure in the words beside the count. */
+    const said = () => /^60 (.+), 500 (.+)$/.exec(count().nextElementSibling!.textContent!)!.slice(1);
+    expect(count().getAttribute('aria-hidden')).toBe('true');
+    expect(count().nextElementSibling!.classList.contains('sr-only')).toBe(true);
+    const inView = said();
+    expect(inView[0]).not.toBe(inView[1]);
+    // With a highlight set, the first count is of the highlighted items.
+    store.set('filters', filtersOf({filter: {}, highlight: {title: {family: 'text', query: 'lattice', phrase: true}}}));
+    await settle(host);
+    expect(said()[0]).not.toBe(inView[0]);
+    expect(said()[1]).toBe(inView[1]);
+  });
+
+  it('shows a value both filtered to and highlighted with both its buttons pressed', async () => {
+    const both = {family: 'category' as const, keys: ['cs']};
+    const {host, store} = await mountCard('archive', {filter: {archive: both}, highlight: {archive: both}});
+    const tables = [{rows: [{key: 'cs', count: 10}, {key: 'math', count: 5}], total: 15}, {rows: [{key: 'cs', count: 10}]}];
+    await answer(host, store, tables, tables);
+    const pressed = (r: HTMLElement) => ['highlight', 'filter'].map((part) => r.querySelector(`[part="${part}"]`)!.getAttribute('aria-pressed'));
+    expect(pressed(rows(host)[0]!)).toEqual(['true', 'true']);
+    expect(pressed(rows(host)[1]!)).toEqual(['false', 'false']);
+  });
+
+  it('is a group named by its heading, which holds the field’s name alone, and names its list and search box by the field', async () => {
+    const {host, store} = await mountCard('archive');
+    await answer(host, store, [{rows: [{key: 'cs', count: 10}], total: 10}], [{rows: [{key: 'cs', count: 20}], total: 20, groups: 3}]);
+    const title = deep(host, '[part="title"]')!;
+    expect(title.tagName).toBe('H3');
+    expect(title.textContent).toBe('Archive');
+    expect(title.children).toHaveLength(0);
+    expect(deep(host, '[role="group"][aria-labelledby]')!.getAttribute('aria-labelledby')).toBe(title.id);
+    expect(deep(host, '[part="rows"]')!.getAttribute('aria-label')).toContain('Archive');
+    const entry = deep(host, 'mosaica-filter')!.shadowRoot!.querySelector('[part="entry"]')!;
+    expect(entry.getAttribute('placeholder')).toContain('3');
+    expect(entry.getAttribute('aria-label')).toContain('Archive');
+    expect(entry.getAttribute('aria-label')).toContain(entry.getAttribute('placeholder'));
   });
 
   it('colours the map by the field from its paint button, pressed while it does, and by nothing when pressed again', async () => {
@@ -375,11 +452,207 @@ describe('<mosaica-field-card> on a date', () => {
     expect(live()).toBe('2019 – 2020, 30 items');
   });
 
+  /** Type `text` into a field of the range box and leave it. */
+  const typeIn = async (host: HTMLElement, input: HTMLInputElement, text: string) => {
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('change'));
+    await settle(host);
+  };
+  /** What a field's `aria-describedby` points at says. */
+  const described = (card: MosaicaFieldCard, input: HTMLInputElement) =>
+    (input.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .filter(Boolean)
+      .map((id) => card.shadowRoot!.getElementById(id)!);
+  const ends = (host: HTMLElement) => [deep(host, '[part="brush-from"]') as HTMLInputElement, deep(host, '[part="brush-to"]') as HTMLInputElement] as const;
+
+  it('opens the range box from Set range with nothing dragged, and applies the dates typed in its two fields', async () => {
+    const {host, card, store} = await mountCard('submitted_at');
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    const open = deep(host, '[part="range"]') as HTMLButtonElement;
+    expect(open.getAttribute('aria-expanded')).toBe('false');
+    expect(open.getAttribute('aria-label')).toContain(open.textContent!.trim());
+    expect(open.getAttribute('aria-label')).toContain('Submitted at');
+    open.click();
+    await settle(host);
+    expect(open.getAttribute('aria-expanded')).toBe('true');
+    const [from, to] = ends(host);
+    expect(focused(card)).toBe(from);
+    expect([from.value, to.value]).toEqual(['', '']);
+    for (const input of [from, to]) expect(input.getAttribute('aria-label')).toContain('Submitted at');
+    expect(from.getAttribute('aria-label')).not.toBe(to.getAttribute('aria-label'));
+    // A day, and a month read to its last instant: neither is a bin's edge.
+    await typeIn(host, from, '15 Mar 2020');
+    await typeIn(host, to, 'June 2021');
+    expect(deep(host, '[part~="band"][data-verb="brush"]')).not.toBeNull();
+    (deep(host, '[part="brush-filter"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {submitted_at: {family: 'numeric', gte: Date.UTC(2020, 2, 15) * 1000, lte: Date.UTC(2021, 6, 1) * 1000 - 1}}, highlight: {}});
+    await settle(host);
+    expect(deep(host, '[part="brush"]')).toBeNull();
+    expect(focused(card)).toBe(open);
+  });
+
+  it('shows a dragged range’s ends in the fields, an open end empty, and applies an end that is typed over', async () => {
+    const {host, store} = await mountCard('submitted_at');
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    const plot = deep(host, '[part="plot"]') as HTMLElement;
+    const key = (k: string, shiftKey = false) => plot.dispatchEvent(new KeyboardEvent('keydown', {key: k, shiftKey, bubbles: true}));
+    key('ArrowRight');
+    key('ArrowRight');
+    key('ArrowRight', true);
+    key('ArrowRight', true);
+    key('Enter');
+    await settle(host);
+    const [from, to] = ends(host);
+    // 2020 to the last bin, whose upper end is left open.
+    expect(from.value).toContain('2020');
+    expect(to.value).toBe('');
+    await typeIn(host, to, '2020');
+    (deep(host, '[part="brush-highlight"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {}, highlight: {submitted_at: {family: 'numeric', gte: YEAR(2020) * 1000, lte: YEAR(2021) * 1000 - 1}}});
+  });
+
+  it('does not apply a field that holds no date, or a from after the to: it keeps what was typed and says what to type', async () => {
+    const {host, card, store} = await mountCard('submitted_at');
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    (deep(host, '[part="range"]') as HTMLButtonElement).click();
+    await settle(host);
+    const [from, to] = ends(host);
+    const filter = deep(host, '[part="brush-filter"]') as HTMLButtonElement;
+    // The words about a field are in the page, in a status region, before there is anything to say.
+    expect(deep(host, '[part="brush"] [role="status"]')!.textContent!.trim()).toBe('');
+    await typeIn(host, from, 'soon');
+    expect(from.getAttribute('aria-invalid')).toBe('true');
+    expect(to.hasAttribute('aria-invalid')).toBe(false);
+    expect(described(card, from)).toHaveLength(1);
+    expect(described(card, from)[0]!.textContent).toContain('soon');
+    expect(described(card, from)[0]!.closest('[role="status"]')).not.toBeNull();
+    to.focus();
+    filter.click();
+    await settle(host);
+    expect(lastFilters(store)).toBeUndefined();
+    expect(from.value).toBe('soon');
+    expect(focused(card)).toBe(from);
+    // Two dates the wrong way round are no range.
+    await typeIn(host, from, '2022');
+    await typeIn(host, to, '2020');
+    expect([from, to].map((input) => input.getAttribute('aria-invalid'))).toEqual(['true', 'true']);
+    expect(described(card, to).map((d) => d.textContent!.trim()).join('')).not.toBe('');
+    filter.click();
+    await settle(host);
+    expect(lastFilters(store)).toBeUndefined();
+    expect([from.value, to.value]).toEqual(['2022', '2020']);
+    await typeIn(host, to, '2023');
+    expect([from, to].map((input) => input.hasAttribute('aria-invalid'))).toEqual([false, false]);
+    filter.click();
+    expect(lastFilters(store)).toEqual({filter: {submitted_at: {family: 'numeric', gte: YEAR(2022) * 1000, lte: YEAR(2024) * 1000 - 1}}, highlight: {}});
+  });
+
+  it('opens the range box on Enter with no range chosen, on the range the field holds, and gives focus back to the plot on Escape', async () => {
+    const {host, card, store} = await mountCard('submitted_at', {filter: {submitted_at: {family: 'numeric', gte: YEAR(2020) * 1000, lte: null}}, highlight: {}});
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    const plot = deep(host, '[part="plot"]') as HTMLElement;
+    expect(plot.getAttribute('aria-label')).toContain('Submitted at');
+    expect(plot.getAttribute('aria-label')).not.toMatch(/drag/i);
+    plot.focus();
+    plot.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    await settle(host);
+    const [from, to] = ends(host);
+    expect(from.value).toContain('2020');
+    expect(to.value).toBe('');
+    expect(focused(card)).toBe(from);
+    from.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    await settle(host);
+    expect(deep(host, '[part="brush"]')).toBeNull();
+    expect(focused(card)).toBe(plot);
+  });
+
+  it('gives the bins’ counts in a table, the subject’s column headed by what the subject is', async () => {
+    const {host, store} = await mountCard('submitted_at');
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    const table = deep(host, 'table')!;
+    const heads = () => [...table.querySelectorAll('thead th')].map((h) => h.textContent!.trim());
+    expect(table.querySelector('caption')!.textContent).toContain('Submitted at');
+    expect(heads()).toHaveLength(3);
+    const body = [...table.querySelectorAll('tbody tr')].map((r) => [...r.children].map((c) => c.textContent!.trim()));
+    expect(body.map((r) => r.slice(1))).toEqual([['1', '10'], ['2', '20'], ['3', '30'], ['4', '40']]);
+    expect(body.map((r) => r[0])).toEqual([2019, 2020, 2021, 2022].map((y) => expect.stringContaining(String(y))));
+    // The bars themselves are not read twice.
+    expect(deepAll(host, '[part~="bin"]').every((b) => b.getAttribute('aria-hidden') === 'true')).toBe(true);
+    const inView = heads()[1];
+    store.set('filters', filtersOf({filter: {}, highlight: {title: {family: 'text', query: 'lattice', phrase: true}}}));
+    await settle(host);
+    expect(heads()[1]).not.toBe(inView);
+    expect((deep(host, '[part~="bin"]') as HTMLElement).title).not.toContain(inView!.toLowerCase());
+  });
+
+  it('writes out under the plot the range each position holds, with its verb', async () => {
+    const {host, store} = await mountCard('submitted_at', {
+      filter: {submitted_at: {family: 'numeric', gte: YEAR(2020) * 1000, lte: YEAR(2022) * 1000 - 1}},
+      highlight: {submitted_at: {family: 'numeric', gte: YEAR(2022) * 1000, lte: null}}
+    });
+    await answer(host, store, [{rows: bins([1, 2, 3, 4]), total: 10}], [{rows: bins([10, 20, 30, 40]), total: 100}]);
+    const said = (verb: string) => deep(host, `.applied[data-verb="${verb}"]`)!.textContent!;
+    expect(said('filter')).toMatch(/filter/i);
+    expect(said('filter')).toContain('2020 – 2021');
+    expect(said('highlight')).toMatch(/highlight/i);
+    expect(said('highlight')).toContain('2022');
+    store.set('filters', filtersOf({filter: {}, highlight: {}}));
+    await settle(host);
+    expect(deepAll(host, '.applied')).toHaveLength(0);
+  });
+
   it('gives the field’s figures in its heading', async () => {
     const {host, store} = await mountCard('submitted_at');
     answerAggregate(store, 'field-summary', aggregateEntry([{rows: []}], 's0', [new Map([['submitted_at', {values: 25n, missing: 5n, min: YEAR(1990), max: YEAR(2020), mean: YEAR(2011)}]])]));
     await settle(host);
     expect(deep(host, '[part="sub"]')!.textContent).toBe('n 25 · mean 1 Jan 2011');
+  });
+});
+
+describe('<mosaica-field-card> on a number', () => {
+  const tens = (counts: number[]) => counts.map((count, i) => ({lower: i * 10, upper: (i + 1) * 10, count}));
+
+  it('takes typed numbers for a range, between the bins’ edges too, and no text that is not a number', async () => {
+    const {host, card, store} = await mountCard('authors');
+    await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 90]), total: 210}]);
+    (deep(host, '[part="range"]') as HTMLButtonElement).click();
+    await settle(host);
+    const from = deep(host, '[part="brush-from"]') as HTMLInputElement;
+    const to = deep(host, '[part="brush-to"]') as HTMLInputElement;
+    const type = async (input: HTMLInputElement, text: string) => {
+      input.value = text;
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new Event('change'));
+      await settle(host);
+    };
+    await type(from, 'a few');
+    expect(from.getAttribute('aria-invalid')).toBe('true');
+    expect(card.shadowRoot!.getElementById(from.getAttribute('aria-describedby')!)!.textContent).toContain('a few');
+    await type(from, '3');
+    await type(to, '1,250');
+    (deep(host, '[part="brush-filter"]') as HTMLButtonElement).click();
+    expect(lastFilters(store)).toEqual({filter: {authors: {family: 'numeric', gte: 3, lte: 1250}}, highlight: {}});
+  });
+
+  it('counts a range in the box only where its ends are the bins’ edges', async () => {
+    const {host, store} = await mountCard('authors');
+    await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 90]), total: 210}]);
+    const plot = deep(host, '[part="plot"]') as HTMLElement;
+    plot.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}));
+    plot.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}));
+    plot.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+    await settle(host);
+    const chosen = () => deep(host, '[part="brush"] .chosen')!.textContent!;
+    expect(chosen()).toContain('70');
+    const from = deep(host, '[part="brush-from"]') as HTMLInputElement;
+    from.value = '12';
+    from.dispatchEvent(new Event('input'));
+    from.dispatchEvent(new Event('change'));
+    await settle(host);
+    expect(chosen()).toContain('12');
+    expect(chosen()).not.toContain('70');
   });
 });
 
@@ -474,6 +747,10 @@ describe('<mosaica-field-card> on a layer', () => {
     answerAggregate(store, 'field-match', aggregateEntry([{rows: [{key: 8n, count: 50}, {key: 7n, count: 90}], total: 140}, {rows: [{key: 7n, count: 90}], groups: 12}]));
     await settle(host);
     expect(deep(host, 'mosaica-cluster-filter')!.getAttribute('placeholder')).toBe('Search 12 clusters');
+    const entry = deep(host, 'mosaica-cluster-filter')!.shadowRoot!.querySelector('[part="entry"]')!;
+    expect(entry.getAttribute('aria-label')).toContain('Topics');
+    expect(entry.getAttribute('aria-label')).toContain('Search 12 clusters');
+    expect(deep(host, '[part="rows"]')!.getAttribute('aria-label')).toContain('Topics');
     // A share of a few per cent still reads as a bar; plain percentages otherwise.
     const optics = rows(host)[0]!;
     expect((optics.querySelector('[part="bar-match"]') as HTMLElement).getAttribute('style')).toContain('max(3px, 64.3%)');
@@ -494,7 +771,7 @@ describe('<mosaica-field-card> on a layer', () => {
     expect(clauses).toEqual([{id: '8', layer: 'topics', outside: false, verb: 'highlight', on: true}]);
   });
 
-  it('filters to a cluster from a click on its row and shows its buttons, the row taking no focus', async () => {
+  it('filters to a cluster from a click on its row, the row taking no focus', async () => {
     const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
@@ -509,7 +786,6 @@ describe('<mosaica-field-card> on a layer', () => {
     await settle(host);
     expect(store.calls.filter((c) => c.name === 'setMembers').map((c) => c.args[0])).toEqual([[{layer: 'topics', artifact: 7n, outside: false, verb: 'filter', label: 'optics'}]]);
     expect(clauses).toEqual([{id: '7', layer: 'topics', outside: false, verb: 'filter', on: true}]);
-    expect(rows(host)[0]!.hasAttribute('data-shown')).toBe(true);
     expect(rows(host)[0]!.hasAttribute('tabindex')).toBe(false);
   });
 
@@ -661,6 +937,7 @@ describe('<mosaica-field-card> on a levelled layer', () => {
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
     const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect(select.getAttribute('aria-label')).toContain('Bands');
     expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['Broad', true], ['Fine', false]]);
     select.value = '1';
     select.dispatchEvent(new Event('change'));
