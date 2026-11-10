@@ -14,9 +14,6 @@ pub(crate) struct ServeCounters {
     /// not bench-gated, so it catches a deployment the routing model does not match.
     pub(crate) filter_crossings_projected: AtomicU64,
     pub(crate) filter_crossings_per_tile: AtomicU64,
-    /// Crossings answered from rows a projection of the same matches kept
-    /// ([`crate::filter_rows_cache`]), counted in neither route.
-    pub(crate) filter_crossings_kept: AtomicU64,
     /// Filtered viewports whose tree evaluated, wholly or partly, in row space rather than
     /// crossing into it.
     pub(crate) filter_row_routed: AtomicU64,
@@ -263,12 +260,6 @@ impl Engine {
         )
     }
 
-    /// Crossings answered from the rows an earlier projection of the same matches kept, which
-    /// [`Self::filter_crossing_routes`] does not count.
-    pub fn filter_crossings_kept(&self) -> u64 {
-        self.counters.filter_crossings_kept.load(Ordering::Relaxed)
-    }
-
     /// Filtered viewports that evaluated in row space. A mixed tree counts here and in whichever
     /// crossing its entity sub-trees took.
     pub fn filter_row_routes(&self) -> u64 {
@@ -383,13 +374,6 @@ impl Engine {
         self.text_filter_cache.set_bound_bytes(bytes);
     }
 
-    /// Bound the filter matches kept crossed into row space (`serve.filter_rows_cache_bytes`). Zero
-    /// keeps none and crosses every filter afresh. Unset, an embedder gets
-    /// [`crate::filter_rows_cache::DEFAULT_FILTER_ROWS_CACHE_BYTES`].
-    pub fn set_filter_rows_cache_bytes(&self, bytes: u64) {
-        self.filter_rows_cache.set_bound_bytes(bytes);
-    }
-
     /// `serve.max_region_cells`: the boundary-cell budget a region's descent stops at, published
     /// on `/v1/meta`. Default [`crate::region::DEFAULT_MAX_REGION_CELLS`].
     pub fn set_max_region_cells(&self, cells: usize) {
@@ -406,11 +390,6 @@ impl Engine {
         self.text_filter_cache.stats()
     }
 
-    /// The gauges of the filter matches kept crossed into row space.
-    pub fn filter_rows_cache_stats(&self) -> mosaica_cache::CacheStats {
-        self.filter_rows_cache.stats()
-    }
-
     /// The occupancy memo's gauges, one entry per `(session, view, depth, generation)` rung.
     /// `evictions` rising is the memo removing rungs taken against a superseded generation.
     pub fn occupancy_cache_stats(&self) -> mosaica_cache::CacheStats {
@@ -423,14 +402,13 @@ impl Engine {
     }
 
     /// How long a request waits on another request's in-flight row-projection or fragment build
-    /// before it is refused, or on a text filter leaf's evaluation or a filter's crossing into row
-    /// space before it does the work itself (`serve.single_flight_wait_ms`). Unset, an embedder gets
+    /// before it is refused, or on a text filter leaf's evaluation before it evaluates the leaf
+    /// itself (`serve.single_flight_wait_ms`). Unset, an embedder gets
     /// [`crate::DEFAULT_SINGLE_FLIGHT_WAIT_MS`].
     pub fn set_single_flight_wait_ms(&self, wait_budget_ms: u64) {
         self.row_projection_cache.set_wait_budget_ms(wait_budget_ms);
         self.fragments.set_wait_budget_ms(wait_budget_ms);
         self.text_filter_cache.set_wait_budget_ms(wait_budget_ms);
-        self.filter_rows_cache.set_wait_budget_ms(wait_budget_ms);
     }
 
     /// The row count at which a commit window closes (`ingest.commit_window_max_items`, which

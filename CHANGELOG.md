@@ -18,11 +18,6 @@ container image.
   less work on one: at 10⁹ items, measured on four cores, 0.96 s rather than 5.1 s for a viewer
   who sees a quarter of them, and 3.0 s on one core. Opening a database checks each map's points
   in 2.8 s rather than 19 s on four cores.
-- **A filter is kept crossed onto the map.** Where a filter's matches are few beside the map's
-  points, the points they fall on are kept for every viewer with the same access, so panning and
-  zooming with the filter does not work them out again. Deletions and suppressions still apply to
-  the next request. `serve.filter_rows_cache_bytes` bounds it (256 MiB by default, `0` keeps
-  none), and `GET /control/status` reports it as `filter_rows_cache`.
 - **A viewer is no longer refused with 429 after a flush or merge.** While the server brings each
   viewer's visible set up to date after a flush or merge, a viewer it has not reached yet used to
   be refused until it had. Now that request brings its own visible set up to date and is answered.

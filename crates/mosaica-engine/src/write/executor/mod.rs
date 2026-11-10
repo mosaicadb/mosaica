@@ -503,7 +503,6 @@ impl Executor {
     pub(super) fn publish_arc(&self, next: Arc<Generation>, started: std::time::Instant) {
         let replaced = self.generation.swap(Arc::clone(&next));
         crate::text_filter_cache::prune_superseded(&self.deps.text_filter_cache, &next);
-        crate::filter_rows_cache::prune_superseded(&self.deps.filter_rows_cache, &next);
         let mut superseded = self.superseded.lock().unwrap_or_else(|e| e.into_inner());
         superseded.retain(|held| held.strong_count() > 0);
         superseded.push(Arc::downgrade(&replaced));

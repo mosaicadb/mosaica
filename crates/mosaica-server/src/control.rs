@@ -2861,7 +2861,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
     let masked_counts = state.engine.figures_stats();
     let region_cache: mosaica_engine::CacheStats = state.engine.region_cache_stats();
     let text_filter_cache: mosaica_engine::CacheStats = state.engine.text_filter_cache_stats();
-    let filter_rows_cache: mosaica_engine::CacheStats = state.engine.filter_rows_cache_stats();
     let derived_cache = state.engine.derived_cache_stats();
     let suggest_sets = state.engine.suggest_set_stats();
     let occupancy: mosaica_engine::CacheStats = state.engine.occupancy_cache_stats();
@@ -3250,7 +3249,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::V
         },
         "region_cache": shared_cache_status(&region_cache),
         "text_filter_cache": shared_cache_status(&text_filter_cache),
-        "filter_rows_cache": shared_cache_status(&filter_rows_cache),
         "derived_cache": {
             "entries": derived_cache.entries,
             "bytes": derived_cache.resident_bytes,

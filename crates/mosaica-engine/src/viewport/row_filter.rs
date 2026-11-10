@@ -21,10 +21,6 @@ impl Engine {
     /// agree exactly over every range the request can ask about. A view with no `row-entity.u32`
     /// gets the projecting route regardless — also `per_tile_only`'s fallback, the highlight's
     /// route, since its answers are all inside the request's own tiles.
-    ///
-    /// A projection is kept ([`crate::filter_rows_cache`]), and a result whose projection is kept
-    /// takes it whichever route would otherwise be cheaper: the next viewport over the same filter
-    /// reads its rows rather than crossing again.
     fn cross_filter_into_row_space(
         &self,
         side: &ServedSide<'_>,
@@ -34,18 +30,6 @@ impl Engine {
         per_tile_only: bool,
     ) -> FilterRows {
         let row_space = &side.data.row_space;
-        if let Some(rows) = crate::filter_rows_cache::kept_rows(
-            &self.filter_rows_cache,
-            side.shard,
-            side.view,
-            side.grant,
-            entities,
-        ) {
-            self.counters
-                .filter_crossings_kept
-                .fetch_add(1, Ordering::Relaxed);
-            return FilterRows::Complete(rows);
-        }
         let per_tile_looks_cheaper = per_tile_only
             || entities.cardinality() > rows_in_ranges.saturating_mul(PER_TILE_CROSSING_RATIO);
         if per_tile_looks_cheaper && row_space.can_invert() {
@@ -66,14 +50,7 @@ impl Engine {
         self.counters
             .filter_crossings_projected
             .fetch_add(1, Ordering::Relaxed);
-        FilterRows::Complete(crate::filter_rows_cache::rows_of(
-            &self.filter_rows_cache,
-            side.shard,
-            side.view,
-            side.grant,
-            entities,
-            || row_space.project(entities),
-        ))
+        FilterRows::Complete(row_space.project(entities))
     }
 
     /// A routed filter's answer as rows over `domain`, ascending, disjoint and merged ranges of
@@ -138,25 +115,8 @@ impl Engine {
         // Every entity-space verdict's row image, crossed together in one walk.
         let verdicts = tree.entity_verdicts();
         let mut whole_view = tree.is_whole_view();
-        let kept: Option<Vec<croaring::Bitmap>> = verdicts
-            .iter()
-            .map(|verdict| {
-                crate::filter_rows_cache::kept_rows(
-                    &self.filter_rows_cache,
-                    side.shard,
-                    side.view,
-                    side.grant,
-                    verdict,
-                )
-            })
-            .collect();
         let images: Vec<croaring::Bitmap> = if verdicts.is_empty() {
             Vec::new()
-        } else if let Some(kept) = kept {
-            self.counters
-                .filter_crossings_kept
-                .fetch_add(1, Ordering::Relaxed);
-            kept
         } else {
             let total_matched: u64 = verdicts.iter().map(|v| v.cardinality()).sum();
             // `per_tile_only` is the highlight's route — see [`Engine::cross_filter_into_row_space`].
@@ -181,18 +141,8 @@ impl Engine {
                     self.counters
                         .filter_crossings_projected
                         .fetch_add(1, Ordering::Relaxed);
-                    let projected = |verdict: &croaring::Bitmap| {
-                        crate::filter_rows_cache::rows_of(
-                            &self.filter_rows_cache,
-                            side.shard,
-                            side.view,
-                            side.grant,
-                            verdict,
-                            || row_space.project(verdict),
-                        )
-                    };
                     if whole_view {
-                        verdicts.iter().map(|v| projected(v)).collect()
+                        verdicts.iter().map(|v| row_space.project(v)).collect()
                     } else {
                         // Clamped so the combined answer never claims a row outside what
                         // `FilterRows::Viewport` says was tested.
@@ -202,7 +152,7 @@ impl Engine {
                         }
                         verdicts
                             .iter()
-                            .map(|v| projected(v).and(&domain_rows))
+                            .map(|v| row_space.project(v).and(&domain_rows))
                             .collect()
                     }
                 }
@@ -904,8 +854,7 @@ fn present_rows(segment: &SegmentData, column: &str, row_base: u32) -> Option<cr
 /// the pool's threads, on a 4-core Xeon over 10⁹ entities with a result scattered across them: over
 /// a 4.2-million-row domain the projection was faster up to 2× and the per-tile crossing from 4×,
 /// on one thread and on four. Over a 1-million-row domain the per-tile crossing was faster at
-/// every ratio from 0.25× up, so a projection taken there costs a little more the first time, and
-/// is kept for the next viewport ([`crate::filter_rows_cache`]).
+/// every ratio from 0.25× up, so a projection taken there costs a little more.
 const PER_TILE_CROSSING_RATIO: u64 = 3;
 
 /// Split a chunk of the crossing domain no smaller than this, so a viewport small enough that the
