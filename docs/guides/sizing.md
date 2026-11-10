@@ -64,6 +64,8 @@ As an example of the shape, the table below was measured on one 4-core machine w
 
 With these users, a bundle up to about three times the memory beyond the caches served at full speed. A narrower map, users who stay in one region, or a lower [point cap](#points-drawn-per-tile) lets the ratio go higher; more columns, indexed text and filters make the hot set larger.
 
+A larger corpus should tolerate a higher ratio under the same users, because an unfiltered view reads a bounded amount of the bundle. A tile reads the positions and fields of at most its point cap of items, so once a tile holds many times more items than a page, those reads touch about one page per item drawn, whatever the corpus size. Below zoom 10, a tile finds those items from copies kept for the purpose without reading the rest of the tile; above it, a tile holds few enough items that reading them all is cheap. The two corpora measured agree: the hot set was over half of the bundle at 10 million items and a third at 100 million. This is inferred from how a view reads and from those two sizes, and it doesn't hold for a filtered view, which reads the identifier of every item that matches in view and so grows with the corpus.
+
 ### Users who see different items
 
 Each distinct set of access attributes that is in use holds two bitmaps of the items it may see: its visible set, in item order, and its row projection, in map order, one for each view and shard. Sessions holding the same attributes share both. A bitmap is stored in blocks of 65,536 rows, and each block takes the least of three forms: 2 bytes for each visible row, a flat 8 KiB (one bit for every row), or a few bytes for each run of consecutive visible rows. So, for each bitmap:
