@@ -34,7 +34,7 @@ The TypeScript store handles these, and a client built on the HTTP API alone has
 - **Topics come from their own request.** Each point carries its topic's `mosaica_id` in each layer named. The topics' names, counts and positions come from [annotations by tile](../system/queries.md#annotations-on-the-map).
 - **Held tiles answer for one filter and one identity key.** Drop them when either changes. A change of content key means the data has moved on, and the held tiles are older than it.
 - **A proxy in front of the viewer address must pass Mosaica's response headers through:** `x-mosaica-identity-key`, `x-mosaica-pin` and the `ETag`. Without them, a client cannot tell when to drop what it holds.
-- **Close the connection to abandon a request**, as when a newer filter takes its place. Mosaica stops working on a request once its client has gone, and on nothing else, so a proxy in front of the viewer address must close its own request when its client does.
+- **Close the connection to abandon a request**, as when a newer filter takes its place. That is how Mosaica learns that nobody is waiting for an answer, and it then stops working on it. A proxy in front of the viewer address must close its own request when its client does.
 
 ## The framing
 

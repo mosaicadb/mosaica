@@ -1,4 +1,4 @@
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 import {composeFilters, type FilterDraft} from '@mosaicajs/client';
 import '../src/status.js';
 import '../src/selection.js';
@@ -15,6 +15,7 @@ import {deep, deepAll, fakeStore, mount, settle, status} from './fake-store.js';
  */
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.innerHTML = '';
 });
 
@@ -188,23 +189,32 @@ describe('<mosaica-selection> on a busy server', () => {
 });
 
 describe('a query that has not finished loading', () => {
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const running = status({status: 'loading', querying: true});
+  /** A strip over `store`, on a clock the test moves. */
+  async function strip(store: ReturnType<typeof fakeStore>, also = '') {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    const host = await mount(`<mosaica-status></mosaica-status>${also}`);
+    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
+    await settle(host);
+    /** Lets the elements render what the store now holds, then moves the clock. */
+    const pass = async (ms: number) => {
+      await settle(host);
+      vi.advanceTimersByTime(ms);
+      await settle(host);
+    };
+    const state = () => host.querySelector('mosaica-status')!.shadowRoot!.querySelector('[part="state"]')!;
+    return {host, pass, state};
+  }
 
   it('is named on the strip once it has run a quarter of a second, with Cancel, and not before', async () => {
-    const host = await mount('<mosaica-status></mosaica-status>');
     const store = fakeStore({status: status({}), view});
-    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
-    await settle(host);
-    const state = () => deep(host, '[part="state"]')!;
-
+    const {host, pass, state} = await strip(store);
     store.set('status', running);
-    await settle(host);
+    await pass(200);
     expect(state().textContent?.trim()).toBe('');
     expect(deep(host, '[part="cancel"]')).toBeNull();
 
-    await wait(300);
-    await settle(host);
+    await pass(100);
     expect(state().hasAttribute('data-querying')).toBe(true);
     expect(state().textContent?.replace('Cancel', '').trim()).toBe('Running query');
     (deep(host, '[part="cancel"]') as HTMLButtonElement).click();
@@ -217,35 +227,25 @@ describe('a query that has not finished loading', () => {
   });
 
   it('is not named where it is answered within that quarter of a second, nor is the next one named early', async () => {
-    const host = await mount('<mosaica-status></mosaica-status>');
     const store = fakeStore({status: status({}), view});
-    (host.querySelector('mosaica-status') as MosaicaStatus).store = store;
-    await settle(host);
+    const {host, pass} = await strip(store);
     store.set('status', running);
-    await settle(host);
-    await wait(100);
+    await pass(200);
     store.set('status', status({}));
-    await settle(host);
-    await wait(300);
-    await settle(host);
+    await pass(300);
     expect(deep(host, '[part="cancel"]')).toBeNull();
 
     store.set('status', running);
-    await settle(host);
-    await wait(100);
-    await settle(host);
+    await pass(200);
     expect(deep(host, '[part="cancel"]')).toBeNull();
   });
 
   it('stays named while the map has drawn and the counts still load, and gives way to a refusal', async () => {
-    const host = await mount('<mosaica-status></mosaica-status><mosaica-map></mosaica-map>');
     const store = fakeStore({status: running, view});
-    for (const el of host.querySelectorAll('mosaica-status, mosaica-map')) (el as unknown as {store: unknown}).store = store;
-    await settle(host);
-    await wait(300);
+    const {host, pass, state} = await strip(store, '<mosaica-map></mosaica-map>');
+    await pass(300);
     store.set('status', status({status: 'shown', querying: true}));
     await settle(host);
-    const state = () => host.querySelector('mosaica-status')!.shadowRoot!.querySelector('[part="state"]')!;
     expect(state().textContent?.replace('Cancel', '').trim()).toBe('Running query');
     expect(state().getAttribute('data-state')).toBe('shown');
     // Nothing is drawn over the map for a query.
@@ -255,6 +255,34 @@ describe('a query that has not finished loading', () => {
     await settle(host);
     expect(state().getAttribute('data-state')).toBe('refused');
     expect(deep(host, '[part="cancel"]')).toBeNull();
+  });
+
+  it('tells the page what Cancel went back to, as the controls that set those would', async () => {
+    const draft: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {archive: {family: 'category', keys: ['math']}}};
+    const kept = {layer: 'clusters', artifact: 7n, outside: false, verb: 'filter' as const};
+    const added = {layer: 'clusters', artifact: 9n, outside: true, verb: 'highlight' as const};
+    const filters = (d: FilterDraft, members: (typeof kept | typeof added)[]) => ({draft: d, expr: composeFilters(d, 'filter'), highlight: composeFilters(d, 'highlight'), members, suggestions: {}, suggestErrors: {}, suggestEpoch: 0});
+    const box = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
+    const region = {shape: box} as NonNullable<ReturnType<typeof store.get<'region'>>>;
+    const store = fakeStore({status: running, view, filters: filters(draft, [kept, added]), region});
+    // What the query being cancelled had set is undone: the highlight, one clause and the region.
+    const back: FilterDraft = {filter: draft.filter, highlight: {}};
+    Object.assign(store, {
+      cancelQuery: () => {
+        store.set('filters', filters(back, [kept]));
+        store.set('region', null);
+      }
+    });
+    const {host, pass} = await strip(store);
+    const fired: {type: string; detail: unknown}[] = [];
+    for (const type of ['mosaica-filterchange', 'mosaica-clausechange', 'mosaica-selectchange']) host.addEventListener(type, (e) => fired.push({type, detail: (e as CustomEvent).detail}));
+    await pass(300);
+    (deep(host, '[part="cancel"]') as HTMLButtonElement).click();
+    expect(fired).toEqual([
+      {type: 'mosaica-filterchange', detail: {column: null, verb: 'highlight', expr: null}},
+      {type: 'mosaica-clausechange', detail: {id: '9', layer: 'clusters', outside: true, verb: 'highlight', on: false}},
+      {type: 'mosaica-selectchange', detail: {shape: null, status: 'cleared'}}
+    ]);
   });
 });
 

@@ -43,6 +43,7 @@ const BAR_FLOOR = 2;
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - The box
  *   changed the column's filter.
  * @csspart entry - The box.
+ * @csspart spinner - The spinner in the search icon's place while the box's own query runs.
  * @csspart mode - The keyword column's operator button, which opens its menu.
  * @csspart operators - The menu of a keyword column's operators.
  * @csspart operator - One operator in the menu, with `aria-checked`.
@@ -326,11 +327,16 @@ export class MosaicaFilter extends MosaicaElement {
   }
 
   protected override onStoreChange(): void {
-    // Re-seed from the store only when its draft changed underneath (a clear all, or the first
-    // meta), not while the user's own edit is in flight.
+    // Re-seed from the store only when its draft changed underneath (a clear all, a cancelled
+    // query, or the first meta), not while the user's own edit is in flight. A draft that no
+    // longer holds the control this box sent has dropped it.
     const stored = this.resolvedStore?.get('filters').draft.filter[this.column] ?? null;
-    if (stored && stored !== this.sent && JSON.stringify(stored) !== JSON.stringify(this.draft)) {
-      this.draft = structuredClone(stored);
+    const changed = stored ? stored !== this.sent && JSON.stringify(stored) !== JSON.stringify(this.draft) : this.sent !== null;
+    if (changed) {
+      // What was typed since is not sent over the draft that replaced it.
+      if (this.typing) clearTimeout(this.typing);
+      this.typing = null;
+      this.draft = stored ? structuredClone(stored) : null;
       this.sent = stored;
     }
     if (this.resolvedOperand?.family === 'category') {
@@ -365,7 +371,7 @@ export class MosaicaFilter extends MosaicaElement {
 
   /** The search icon, or a spinner while the query this box started has run long enough to name. */
   private lead(): TemplateResult {
-    return this.asked && this.querying && this.query.named ? html`<span class="spinner" role="img" aria-label="Running query"></span>` : icon('search', 12);
+    return this.asked && this.querying && this.query.named ? html`<span part="spinner" class="spinner" role="img" aria-label="Running query"></span>` : icon('search', 12);
   }
 
   /** The box's draft: the one being edited, else the store's, else the client's empty one, which also sets a keyword's starting operator. */

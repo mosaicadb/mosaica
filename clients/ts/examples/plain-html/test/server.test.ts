@@ -40,6 +40,8 @@ beforeAll(async () => {
       });
       // An answer still being worked on, which ends only if its reader goes away.
       if (req.url === '/v1/slow') return;
+      // A server that fails part of the way through its answer.
+      if (req.url === '/v1/broken') return void setTimeout(() => res.destroy(), 20);
       setTimeout(() => res.end('part-2'), 20);
     });
   });
@@ -103,6 +105,13 @@ describe('server.mjs', () => {
     // The server still answers.
     expect(await (await fetch(`${base}/v1/viewport`, {method: 'POST', body: '{}'})).text()).toBe('part-1;part-2');
     expect(cut).toEqual(['/v1/slow']);
+  });
+
+  it('cuts the page’s answer short when the viewer server fails part of the way through, and goes on serving', async () => {
+    const r = await fetch(`${base}/v1/broken`, {method: 'POST', body: '{}'});
+    expect(r.status).toBe(200);
+    await expect(r.text()).rejects.toThrow();
+    expect(await (await fetch(`${base}/v1/viewport`, {method: 'POST', body: '{}'})).text()).toBe('part-1;part-2');
   });
 
   it('serves the page with the bundle’s integrity hash filled in, and the bundle itself', async () => {

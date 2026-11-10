@@ -485,26 +485,30 @@ describe('<mosaica-filter> on text', () => {
   });
 
   it('shows a spinner in the box that started a query, once it has run a quarter of a second, and in no other box', async () => {
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
     const host = await mount('<mosaica-filter id="asked" column="title"></mosaica-filter><mosaica-filter id="other" column="title"></mosaica-filter>');
     const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {title: {family: 'text', query: '', phrase: true}}, highlight: {}})});
     for (const el of host.querySelectorAll('mosaica-filter')) (el as MosaicaFilter).store = store;
     await settle(host);
     const box = (id: string) => host.querySelector(`#${id}`)!.shadowRoot!;
-    const spinning = (id: string) => box(id).querySelector('.spinner') !== null;
+    const spinning = (id: string) => box(id).querySelector('[part="spinner"]') !== null;
+    const pass = async (ms: number) => {
+      await settle(host);
+      vi.advanceTimersByTime(ms);
+      await settle(host);
+    };
 
     // The store says a query is running as soon as the box's change is set.
     store.set('status', status({status: 'loading', querying: true}));
     const entry = box('asked').querySelector('[part="entry"]') as HTMLInputElement;
     entry.value = 'lattice';
     entry.dispatchEvent(new Event('input'));
-    await wait(400);
-    await settle(host);
+    await pass(400);
     expect(drafts(store)).toHaveLength(1);
+    await pass(200);
     expect(spinning('asked')).toBe(false);
 
-    await wait(300);
-    await settle(host);
+    await pass(100);
     expect(spinning('asked')).toBe(true);
     expect(spinning('other')).toBe(false);
 
@@ -513,9 +517,43 @@ describe('<mosaica-filter> on text', () => {
     expect(spinning('asked')).toBe(false);
     // The next query is another control's.
     store.set('status', status({status: 'loading', querying: true}));
-    await wait(300);
-    await settle(host);
+    await pass(300);
     expect(spinning('asked')).toBe(false);
+  });
+
+  it('drops what was typed and not yet sent when the draft is replaced underneath, as a cancelled query replaces it', async () => {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    const loaded = filtersOf({filter: {title: {family: 'text', query: 'lattice', phrase: true}}, highlight: {}});
+    const {host, store} = await mountFilter('title', loaded);
+    const entry = await type(host, 'lattice gauge');
+    vi.advanceTimersByTime(400);
+    await settle(host);
+    expect(drafts(store)).toHaveLength(1);
+    store.set('filters', filtersOf(drafts(store)[0]!));
+    await type(host, 'lattice gauge theory');
+
+    // The query is cancelled before the typing pause ends.
+    store.set('filters', loaded);
+    await settle(host);
+    vi.advanceTimersByTime(400);
+    await settle(host);
+    expect(drafts(store)).toHaveLength(1);
+    expect(entry.value).toBe('lattice');
+  });
+
+  it('empties when the draft no longer holds the control the box sent', async () => {
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+    const {host, store} = await mountFilter('title', filtersOf({filter: {title: {family: 'text', query: '', phrase: true}}, highlight: {}}));
+    const entry = await type(host, 'lattice');
+    vi.advanceTimersByTime(400);
+    await settle(host);
+    store.set('filters', filtersOf(drafts(store)[0]!));
+    await settle(host);
+    expect(entry.value).toBe('lattice');
+
+    store.set('filters', filtersOf({filter: {}, highlight: {}}));
+    await settle(host);
+    expect((deep(host, '[part="entry"]') as HTMLInputElement).value).toBe('');
   });
 });
 

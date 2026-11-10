@@ -1,7 +1,7 @@
 import {css, html, nothing, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
-import {NO_COUNT, NO_MASKED, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
-import {MosaicaElement, emit} from './base.js';
+import {NO_COUNT, NO_MASKED, type MemberClause, type StatusProjection, type ViewProjection} from '@mosaicajs/client';
+import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {NOTHING_VISIBLE, NamedQuery, renderState, seesNothing, showsContent, stateOf, type PanelState} from './states.js';
 import {chrome, tokens} from './tokens.js';
@@ -31,6 +31,12 @@ import './count.js';
  * @category Elements
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-statechange']>} mosaica-statechange - The panel
  *   state changed, including on the first render.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - Cancel
+ *   went back to other filters or another highlight, once for each that changed, with `column` null.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - Cancel
+ *   put back or took away a `member_of` clause, once for each.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - Cancel
+ *   went back to another selected region, or to none.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-expired']>} mosaica-expired - The session expired.
  *   Fires once each time.
  * @csspart strip - The one-line strip.
@@ -41,6 +47,8 @@ import './count.js';
  * @csspart refresh - The Refresh button, shown when the data has changed.
  * @csspart retry - The Retry button, after a refusal, no answer or a busy server.
  * @csspart cancel - The Cancel button, while a query runs.
+ * @csspart spinner - The spinner beside the words Running query. The state part carries
+ *   `data-querying` while it shows.
  * @csspart reauthorise - The Sign in button, shown on expiry if `reauthorise` is set.
  * @csspart count-shown - The `<mosaica-count>` of marks shown.
  * @csspart count-matched - The `<mosaica-count>` of items the filters match.
@@ -194,6 +202,25 @@ export class MosaicaStatus extends MosaicaElement {
     }
   }
 
+  /** Cancel the query, and tell the page what it went back to, as the controls that set those do. */
+  private cancel(): void {
+    const s = this.resolvedStore;
+    if (!s) return;
+    const was = {...s.get('filters'), shape: s.get('region')?.shape ?? null};
+    s.cancelQuery();
+    const now = s.get('filters');
+    const differ = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+    if (differ(was.expr, now.expr)) emit(this, 'mosaica-filterchange', {column: null, verb: 'filter', expr: now.expr});
+    if (differ(was.highlight, now.highlight)) emit(this, 'mosaica-filterchange', {column: null, verb: 'highlight', expr: now.highlight});
+    const keyed = (clauses: readonly MemberClause[]) => new Map(clauses.map((c) => [`${c.verb} ${c.outside} ${c.artifact} ${c.layer}`, c]));
+    const [before, after] = [keyed(was.members), keyed(now.members)];
+    const told = (c: MemberClause, on: boolean) => emit(this, 'mosaica-clausechange', {id: idString(c.artifact), layer: c.layer, outside: c.outside, verb: c.verb, on});
+    for (const [key, clause] of before) if (!after.has(key)) told(clause, false);
+    for (const [key, clause] of after) if (!before.has(key)) told(clause, true);
+    const shape = s.get('region')?.shape ?? null;
+    if (shape !== was.shape) emit(this, 'mosaica-selectchange', {shape: shapeDetail(shape), status: shape ? 'loading' : 'cleared'});
+  }
+
   override render(): TemplateResult | typeof nothing {
     const status = this.status;
     const state = stateOf(status);
@@ -210,7 +237,7 @@ export class MosaicaStatus extends MosaicaElement {
     const running = status?.querying === true && this.query.named && (state === 'loading' || state === 'shown' || state === 'empty' || state === 'stale');
     const dotAlone = !running && (state === 'shown' || (state === 'loading' && status?.sessionWarm === true) || nothingVisible);
     const inner = running
-      ? html`<span part="state" data-state=${state} data-querying><span class="spinner" aria-hidden="true"></span>Running query<button part="cancel" class="btn small" type="button" @click=${() => this.resolvedStore?.cancelQuery()}>Cancel</button></span>`
+      ? html`<span part="state" data-state=${state} data-querying><span part="spinner" class="spinner" aria-hidden="true"></span>Running query<button part="cancel" class="btn small" type="button" @click=${() => this.cancel()}>Cancel</button></span>`
       : state === 'shown'
         ? bare('dot', 'Up to date')
         : nothingVisible

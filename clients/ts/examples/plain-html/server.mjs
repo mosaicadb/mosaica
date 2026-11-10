@@ -40,7 +40,9 @@ export async function authorise({sessionUrl, apiKey}, principal) {
  * Forward one request to the viewer server and stream the answer back with every response header,
  * since the client keys its replica on some of them. Where the page goes away before the answer
  * has ended, as it does when a newer request takes this one's place, the request to the viewer
- * server is aborted, which is what tells Mosaica to stop working on it.
+ * server is aborted, which is what tells Mosaica to stop working on it. Where the viewer server
+ * fails part of the way through an answer, the page's connection is cut, so the page reads an
+ * answer that stopped and not one that ended.
  *
  * @param {string} viewerUrl
  * @param {import('node:http').IncomingMessage} req
@@ -71,7 +73,10 @@ export async function proxy(viewerUrl, req, res) {
     res.end();
   } catch (e) {
     // Nobody is left to answer.
-    if (!gone.signal.aborted) throw e;
+    if (gone.signal.aborted) return;
+    // The status has gone out, so the failure cannot be answered as one.
+    if (res.headersSent) return void res.destroy();
+    throw e;
   }
 }
 

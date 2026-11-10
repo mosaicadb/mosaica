@@ -417,26 +417,45 @@ describe('a change of filters or selection after the store has loaded', () => {
   const CS: FilterDraft = {filter: {archive: {family: 'category', keys: ['cs']}}, highlight: {}};
   type Sent = {filters: unknown; signal: AbortSignal | undefined; answered: boolean; answer: (reply: ViewportResponse | Error) => void};
 
+  /** `s0` with a layer to draw, and `far`, a view over another extent. */
+  const TWO = meta({
+    ...META,
+    views: [...META.views, view('far', {quantisation: {xMin: 0, xMax: 10, yMin: 0, yMax: 10}})],
+    layers: [layer('clusters/x', {views: ['s0', 'far'], computedContent: ['centroid', 'box']})]
+  });
+
   /**
-   * A store that has loaded, whose map requests from then on wait until the test answers them, and
-   * whose aggregate requests wait too where `counts` is set.
+   * A store that has loaded, whose map requests from then on wait until the test answers them.
+   * Its aggregate requests wait too where `counts` is set, and its artifact requests where
+   * `artifacts` is. `before` sets the store up while every request is still answered at once.
    */
-  async function shown(counts = false) {
+  async function shown(over: {counts?: boolean; artifacts?: boolean; before?: (store: Store) => void} = {}) {
     const clock = fakeClock();
     const scheduler = fakeScheduler();
-    const {client, viewport} = fakeClient(() => response('ck'));
+    const {client, viewport, viewportArtifacts} = fakeClient(() => response('ck'), TWO, (tile) => [artifact(tile + 100n, {layer: 'clusters/x'})]);
     const sent: Sent[] = [];
     let holding = false;
     const counted = {tables: [], region: null, recomposed: false, identityKey: '', next: null};
-    const counting: (() => void)[] = [];
-    const aggregate = (_token: string, _req: unknown, signal?: AbortSignal) =>
-      !(holding && counts)
+    /** The aggregate requests in flight: the counts in view carry a reference, a registered one here does not. */
+    const counting: {inView: boolean; done: () => void}[] = [];
+    const aggregate = (_token: string, req: {reference?: unknown}, signal?: AbortSignal) =>
+      !(holding && over.counts)
         ? Promise.resolve(counted)
         : new Promise((resolve, reject) => {
-            signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
-            counting.push(() => resolve(counted));
+            const waiting = {inView: req.reference !== undefined, done: () => resolve(counted)};
+            signal?.addEventListener('abort', () => {
+              counting.splice(counting.indexOf(waiting), 1);
+              reject(new DOMException('aborted', 'AbortError'));
+            });
+            counting.push(waiting);
           });
     Object.assign(client, {aggregate});
+    const tiling: (() => void)[] = [];
+    const tilesNow = viewportArtifacts.getMockImplementation()!;
+    viewportArtifacts.mockImplementation(async (token, req, opts) => {
+      if (holding && over.artifacts) await new Promise<void>((release) => tiling.push(release));
+      return tilesNow(token, req, opts);
+    });
     const first = viewport.getMockImplementation()!;
     viewport.mockImplementation((token: string, req: FakeRequest, opts?: {signal?: AbortSignal}) => {
       if (!holding) return first(token, req);
@@ -452,9 +471,11 @@ describe('a change of filters or selection after the store has loaded', () => {
     });
     const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
     await clock.advance(1);
+    over.before?.(store);
     store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 400, 400));
     await clock.advance(600);
     scheduler.flush();
+    await clock.advance(600);
     expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
     holding = true;
     const live = () => sent.filter((s) => !s.signal?.aborted && !s.answered);
@@ -472,12 +493,21 @@ describe('a change of filters or selection after the store has loaded', () => {
         await land();
       }
     };
-    /** Answers every aggregate request in flight. */
-    const count = async () => {
-      for (const done of counting.splice(0)) done();
+    /** Answers the aggregate requests in flight: the counts in view, the registered ones, or both. */
+    const count = async (which: 'inView' | 'registered' | 'all' = 'all') => {
+      const answered = counting.filter((c) => which === 'all' || c.inView === (which === 'inView'));
+      for (const c of answered) {
+        counting.splice(counting.indexOf(c), 1);
+        c.done();
+      }
       await land();
     };
-    return {store, sent, live, land, answer, count};
+    /** Answers every artifact request in flight. */
+    const tiles = async () => {
+      for (const release of tiling.splice(0)) release();
+      await land();
+    };
+    return {store, clock, sent, live, land, answer, count, tiles, tiling};
   }
 
   it('says it is querying until the new answer has loaded, and keeps the frame on screen until it draws', async () => {
@@ -498,13 +528,141 @@ describe('a change of filters or selection after the store has loaded', () => {
   });
 
   it('is querying until the counts in view have answered as well as the map', async () => {
-    const {store, land, answer, count} = await shown(true);
+    const {store, land, answer, count} = await shown({counts: true});
     store.setFilters(CS);
     await land();
     await answer();
     expect(store.get('status')).toMatchObject({status: 'shown', querying: true});
     await count();
     expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+  });
+
+  it('is querying until a registered aggregate has answered', async () => {
+    const {store, land, answer, count} = await shown({counts: true, before: (s) => s.setAggregate('total', {groupings: [{count: true}]})});
+    store.setFilters(CS);
+    await land();
+    await answer();
+    await count('inView');
+    expect(store.get('aggregates').get('total')?.status).toBe('loading');
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: true});
+    await count('registered');
+    expect(store.get('aggregates').get('total')?.status).toBe('shown');
+    expect(store.get('status').querying).toBe(false);
+  });
+
+  it('asks for the drawn layers’ artifacts at once, and is querying until they have answered', async () => {
+    const {store, clock, land, answer, tiles, tiling} = await shown({artifacts: true, before: (s) => s.setLayers(['clusters/x'])});
+    expect(store.get('artifacts').status).toBe('shown');
+    store.setFilters(CS);
+    // Without the wait a camera move's request sits out.
+    await clock.advance(1);
+    expect(tiling).toHaveLength(1);
+    await land();
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: true});
+    await tiles();
+    expect(store.get('artifacts').status).toBe('shown');
+    // The points are fetched once more, with the layer's column the served artifacts colour by.
+    await answer();
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+  });
+
+  it('is querying while the map’s request for the change waits out the camera’s debounce', async () => {
+    const {store, clock, live} = await shown();
+    // A pan answered a moment ago, so the next request is not sent at once.
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 6, 12], 400, 400));
+    await clock.advance(150);
+    for (let round = 0; round < 4 && live().length > 0; round++) {
+      for (const request of live()) {
+        request.answered = true;
+        request.answer(response('ck'));
+      }
+      await clock.advance(1);
+    }
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+
+    store.setFilters(CS);
+    await clock.advance(1);
+    // Every count has answered, and the map still says what it said of the filters before.
+    expect(live()).toEqual([]);
+    expect(store.get('status')).toMatchObject({status: 'shown', querying: true});
+  });
+
+  it('stays querying through a refresh and a switch of view made while only the artifacts load', async () => {
+    for (const interrupt of [(s: Store) => s.refresh(), (s: Store) => s.setCurrentView('far')]) {
+      const {store, land, answer, tiles} = await shown({artifacts: true, before: (s) => s.setLayers(['clusters/x'])});
+      const loaded = store.get('filters').draft;
+      store.setFilters(CS);
+      await land();
+      await answer();
+      expect(store.get('status').querying).toBe(true);
+
+      interrupt(store);
+      expect(store.get('status').querying).toBe(true);
+      // The filters set were never loaded, so they are not what a cancel goes back to.
+      store.cancelQuery();
+      expect(store.get('filters').draft).toBe(loaded);
+      store.setView(camera(TWO.views.find((v) => v.id === store.get('view').id)!.quantisation, [0, 0, 10, 10], 400, 400));
+      await land();
+      for (let round = 0; round < 3; round++) {
+        await answer();
+        await tiles();
+      }
+      expect(store.get('status')).toMatchObject({status: 'shown', querying: false});
+      store.dispose();
+    }
+  });
+
+  it('goes back to the member_of clauses, the highlight and the region that had loaded', async () => {
+    const clause = {layer: 'clusters/x', artifact: 7n, outside: false, verb: 'filter' as const};
+    const lit: FilterDraft = {filter: {}, highlight: {archive: {family: 'category', keys: ['cs']}}};
+    const box = {kind: 'box' as const, bbox: [10, 10, 40, 40] as [number, number, number, number]};
+    const {store} = await shown({
+      before: (s) => {
+        s.setFilters(lit);
+        s.setMembers([clause]);
+        s.select(box);
+      }
+    });
+    const loaded = {members: store.get('filters').members, highlight: store.get('filters').highlight, sent: store.requestFilters()};
+    expect(loaded.members).toEqual([clause]);
+    expect(loaded.highlight).toEqual({archive: {in: ['cs']}});
+
+    store.setFilters(CS);
+    store.setMembers([]);
+    store.select({kind: 'box', bbox: [50, 50, 60, 60]});
+    expect(store.get('filters').highlight).toBeNull();
+    store.cancelQuery();
+    expect(store.get('filters').members).toBe(loaded.members);
+    expect(store.get('filters').highlight).toEqual(loaded.highlight);
+    expect(store.get('region')?.shape).toBe(box);
+    expect(store.requestFilters()).toEqual(loaded.sent);
+  });
+
+  it('does not go back to a region drawn in a view over another extent', async () => {
+    const box = {kind: 'box' as const, bbox: [10, 10, 40, 40] as [number, number, number, number]};
+    const {store} = await shown({before: (s) => s.select(box)});
+    const loaded = store.get('filters').draft;
+    store.setFilters(CS);
+    store.setCurrentView('far');
+    expect(store.get('region')).toBeNull();
+    store.cancelQuery();
+    expect(store.get('filters').draft).toBe(loaded);
+    expect(store.get('region')).toBeNull();
+    expect(store.requestFilters()).toBeNull();
+  });
+
+  it('has nothing to go back to after clear(), until the store has loaded again', async () => {
+    const clause = {layer: 'clusters/x', artifact: 7n, outside: false, verb: 'filter' as const};
+    const {store} = await shown({before: (s) => s.setMembers([clause])});
+    store.setFilters(CS);
+    expect(store.get('status').querying).toBe(true);
+    store.clear();
+    expect(store.get('status').querying).toBe(false);
+    store.setFilters({filter: {}, highlight: {}});
+    expect(store.get('status').querying).toBe(false);
+    store.cancelQuery();
+    expect(store.get('filters').members).toEqual([]);
   });
 
   it('stops querying when the new answer is empty or refused', async () => {

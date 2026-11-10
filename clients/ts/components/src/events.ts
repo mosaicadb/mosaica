@@ -113,9 +113,10 @@ export type MosaicaEventDetails = {
   };
   /**
    * A filter or highlight changed. `column` is the column whose control changed, or null for Clear
-   * all and for clearing the highlight. `verb` is `filter` or `highlight` (`filter` if absent).
-   * After an edit, `expr` is the combined expression of every control's clause for that `verb`, or
-   * null if there are none. When a chip is removed, or Clear all is pressed, `expr` is null.
+   * all, for clearing the highlight and for a cancelled query. `verb` is `filter` or `highlight`
+   * (`filter` if absent). After an edit or a cancelled query, `expr` is the combined expression of
+   * every control's clause for that `verb`, or null if there are none. When a chip is removed, or
+   * Clear all is pressed, `expr` is null.
    * `member_of` clauses are reported by `mosaica-clausechange`.
    */
   'mosaica-filterchange': {column: string | null; expr?: FilterExpr | null; verb?: ClauseVerb};

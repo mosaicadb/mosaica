@@ -316,9 +316,10 @@ export class Aggregates {
       const body = this.compose(spec);
       if (body === null) {
         // Not sendable under the meta just read, as a `view` aggregate with no camera; it stays
-        // loading until a refresh finds it sendable.
+        // loading until a refresh finds it sendable. Published so a subscriber sees it at rest.
         this.asking.delete(id);
         this.sent.delete(id);
+        this.replace(new Map(this.entries));
         return;
       }
       this.sent.set(id, jsonBody(body));

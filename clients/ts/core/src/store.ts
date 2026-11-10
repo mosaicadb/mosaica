@@ -1721,10 +1721,31 @@ export function createStore(options: StoreOptions): Store {
     return {draft: projections.filters.draft, members: projections.filters.members, region: region.selected};
   }
 
+  function sameQuestion(a: Question, b: Question): boolean {
+    return a.draft === b.draft && a.members === b.members && a.region === b.region;
+  }
+
   /** The question whose answer last finished loading, which {@link cancelQuery} goes back to. */
   let loadedFor: Question | null = null;
   /** Set where a change of question has a map request to come, until that request answers. */
   let awaitingMap = false;
+  /** How many {@link reasking} calls are part of the way through. */
+  let asking = 0;
+
+  /**
+   * Run `ask`, which asks again for what is on screen or for another view, and only then look at
+   * whether the question has loaded: part of the way through, the status and the requests in
+   * flight are still those of what was asked before.
+   */
+  function reasking(ask: () => void): void {
+    asking += 1;
+    try {
+      ask();
+    } finally {
+      asking -= 1;
+    }
+    settleQuery();
+  }
 
   /**
    * Note the question as loaded once everything a change of it fetches again has answered: the
@@ -1733,10 +1754,10 @@ export function createStore(options: StoreOptions): Store {
    */
   function settleQuery(): void {
     const status = projections.status.status;
-    if (awaitingMap || (status !== 'shown' && status !== 'empty')) return;
+    if (asking > 0 || awaitingMap || (status !== 'shown' && status !== 'empty')) return;
     if (views.current?.channel.pending || aggregates.busy || inView.busy) return;
     const now = question();
-    if (loadedFor === null || now.draft !== loadedFor.draft || now.members !== loadedFor.members || now.region !== loadedFor.region) loadedFor = now;
+    if (loadedFor === null || !sameQuestion(now, loadedFor)) loadedFor = now;
     if (projections.status.querying) replaceProjection('status', {...projections.status, querying: false});
   }
 
@@ -1813,7 +1834,6 @@ export function createStore(options: StoreOptions): Store {
 
     // A frame with marks means the session answered, while the request may still be streaming.
     if (!projections.status.sessionWarm && frame.exactDrawn + frame.provisional > 0) replaceProjection('status', {...projections.status, sessionWarm: true});
-
     // A switch published `loading`; a frame drawn from the view's own bands, with no request
     // behind it, ends that.
     if (awaitingSwitchFrame) {
@@ -2072,6 +2092,11 @@ export function createStore(options: StoreOptions): Store {
       return;
     }
 
+    reasking(() => switchView(id));
+  }
+
+  /** {@link setCurrentView} for a view `meta` lists that is not the current one. */
+  function switchView(id: string): void {
     const from = views.id;
     const kept = sameFrame(quantisationOf(from), quantisationOf(id));
     // A suggestion page answers one view.
@@ -2094,8 +2119,12 @@ export function createStore(options: StoreOptions): Store {
     colourAsked.clear();
     shapes.forget('all');
 
-    // The selection is in the outgoing frame's data coordinates too.
-    if (!kept) region.drop();
+    // The selection is in the outgoing frame's data coordinates too, and so is the one a
+    // cancelled query would go back to.
+    if (!kept) {
+      region.drop();
+      if (loadedFor) loadedFor = {...loadedFor, region: null};
+    }
 
     // No marks until the incoming view presents, and the incoming channel's artifacts. A subscriber
     // that refits the camera here reaches the incoming view with its settings in place.
@@ -2417,8 +2446,7 @@ export function createStore(options: StoreOptions): Store {
    */
   function requery(): void {
     awaitingMap = lastView !== null && meta !== null && views.current !== null;
-    const now = question();
-    const querying = loadedFor !== null && (now.draft !== loadedFor.draft || now.members !== loadedFor.members || now.region !== loadedFor.region);
+    const querying = loadedFor !== null && !sameQuestion(question(), loadedFor);
     if (querying !== projections.status.querying) replaceProjection('status', {...projections.status, querying});
     for (const held of views.all()) {
       held.presenter.cancel();
@@ -2426,6 +2454,11 @@ export function createStore(options: StoreOptions): Store {
     }
     contentKeyAtFrame = '';
     if (lastView) setView(lastView.input);
+    // A change of question is not a gesture, so the artifacts are asked for without the settle a
+    // camera move waits out.
+    const current = views.current;
+    const at = current?.presenter.view;
+    if (current && at) current.channel.refresh(at.view, at.width, at.height);
     // Each suggestion count is taken under the filter.
     suggestions.refresh();
     aggregates.refresh(false, {changed: true});
@@ -2722,12 +2755,14 @@ export function createStore(options: StoreOptions): Store {
   }
 
   function refresh(): void {
-    // Redraw against the current content key, refetching the artifacts with it.
-    views.current?.channel.reset();
-    region.loading(projections.marks);
-    if (lastView) setView(lastView.input);
-    aggregates.refresh(false);
-    askInView(false);
+    reasking(() => {
+      // Redraw against the current content key, refetching the artifacts with it.
+      views.current?.channel.reset();
+      region.loading(projections.marks);
+      if (lastView) setView(lastView.input);
+      aggregates.refresh(false);
+      askInView(false);
+    });
   }
 
   /** Thrown into an answer {@link admit} refused, so nothing in it is held. */

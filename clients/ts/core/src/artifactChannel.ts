@@ -467,6 +467,9 @@ export class ArtifactChannel {
     if (!contentKey || !this.heldUnder || this.heldUnder.contentKey === contentKey) return;
     this.dropHeld();
     if (this.view && this.state.layers.length > 0) {
+      // This request stands in for one waiting to be sent or sent again.
+      if (this.timer) this.clock.cancel(this.timer);
+      this.timer = null;
       void this.request();
       return;
     }
