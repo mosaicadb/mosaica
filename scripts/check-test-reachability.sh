@@ -28,8 +28,9 @@
 # workspace member, so it recompiles the world several times over. Run it when a feature gate or a
 # dev-dependency changes.
 #
-# Exit non-zero on: a bare `#[ignore]`, or an undeclared file in `tests/it/`. Everything else is reported and does not fail — a test that
-# exists only under `--workspace` is a fact the operator dispositions, not a build to block.
+# Exit non-zero on: a bare `#[ignore]`, or an undeclared file in `tests/it/`. Everything else is
+# reported and does not fail — a test that exists only under `--workspace` is a fact the operator
+# dispositions, not a build to block.
 #
 # **Why a refusal here does not contradict CLAUDE.md's "report loudly and do not block a build".**
 # That rule governs operator-facing behaviour over real data — joins, coverage, extents — where a
