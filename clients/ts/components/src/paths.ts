@@ -1,8 +1,8 @@
-import {artifactName, type BrowseRow, type Layer, type Store} from '@mosaicajs/client';
+import {type BrowseRow, type Layer, type Store} from '@mosaicajs/client';
 import {isLinked} from './aggregate.js';
-import {UNNAMED} from './base.js';
+import {called, type Called} from './base.js';
 
-/** A cluster's path of parents' names, nearest last, and whether parents above the first step are left out. */
+/** A cluster's path of what its parents are called, nearest last, and whether parents above the first step are left out. */
 export type Path = {steps: string[]; beyond: boolean};
 
 /**
@@ -40,10 +40,10 @@ export class ClusterPaths {
     for (const r of rows) this.met.set(r.mosaicaId, r);
   }
 
-  /** The name a page gave a cluster, or `null` where no page has met it. */
-  nameOf(id: bigint): string | null {
+  /** What a cluster is called from the row a page served, or `null` where no page has met it. */
+  nameOf(id: bigint): Called | null {
     const row = this.met.get(id);
-    return row ? (artifactName(row) ?? UNNAMED) : null;
+    return row ? called(row.name, row.key) : null;
   }
 
   private parentsOf(id: bigint): readonly bigint[] | undefined {
@@ -104,7 +104,7 @@ export class ClusterPaths {
       const named = parents.flatMap((p) => this.met.get(p) ?? []);
       if (named.length < parents.length && this.asked.has(at) && !this.done.has(at)) return null;
       if (named.length === 0) break;
-      steps.unshift(named.map((r) => artifactName(r) ?? UNNAMED).join(', '));
+      steps.unshift(named.map((r) => called(r.name, r.key).text).join(', '));
       at = named[0]!.mosaicaId;
       parents = this.parentsOf(at) ?? [];
     }

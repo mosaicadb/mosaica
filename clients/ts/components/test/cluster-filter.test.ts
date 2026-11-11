@@ -18,7 +18,7 @@ afterEach(() => {
 const layer = (name: string, over: Partial<Meta['layers'][number]> = {}) =>
   ({name, title: 'Topics', views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1, ...over}) as Meta['layers'][number];
 
-const row = (id: bigint, name: string | null, parentIds: bigint[] = [], rung = 0): BrowseRow => ({mosaicaId: id, key: null, name, maskedCount: 10n, matchedCount: null, rung, parentIds, childCount: 0, slot: null});
+const row = (id: bigint, name: string | null, parentIds: bigint[] = [], rung = 0, key: string | null = null): BrowseRow => ({mosaicaId: id, key, name, maskedCount: 10n, matchedCount: null, rung, parentIds, childCount: 0, slot: null});
 
 async function mountField(over: {layers?: Meta['layers']; verb?: 'filter' | 'highlight'; members?: unknown[]} = {}) {
   const host = await mount(`<mosaica-cluster-filter layer="topics" verb="${over.verb ?? 'filter'}"></mosaica-cluster-filter>`);
@@ -252,6 +252,25 @@ describe('<mosaica-cluster-filter> typing', () => {
     expect(deep(host, '[part="path"]')!.textContent).toBe('… › physics › galaxies › clusters x-ray');
     (deep(host, '[part~="option"]') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 30n, outside: false, verb: 'filter', label: 'x-ray state'}]);
+  });
+
+  it('calls a match with no name by its key, marked as one, in its row and in a path, and a pick labels its clause with the key', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('q:astro', {artifacts: [row(30n, null, [20n], 0, 'astro-ph.CO'), row(31n, null)], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(20n, null, [], 0, 'astro-ph')], next: null});
+    box().value = 'astro';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    const shown = deepAll(host, '[part~="option"] [part="name"]');
+    expect(shown.map((n) => [n.textContent, n.hasAttribute('data-key-name'), n.hasAttribute('data-unnamed')])).toEqual([
+      ['astro-ph.CO', true, false],
+      [UNNAMED, false, true]
+    ]);
+    expect(deep(host, '[part="path"]')!.textContent).toBe('astro-ph');
+    (deep(host, '[part~="option"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 30n, outside: false, verb: 'filter', label: 'astro-ph.CO'}]);
   });
 
   it('searches every level of a levelled layer in one request with no level, and walks a match’s parents there too', async () => {

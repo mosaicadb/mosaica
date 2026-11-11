@@ -1,8 +1,8 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
+import {browsableLayers, isFilterLayer, withMember, withoutMember, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
-import {MosaicaElement, UNNAMED, emit, focusLost, idString} from './base.js';
+import {MosaicaElement, called, calledList, emit, focusLost, idString, labelOf} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {Lineage, focusAdded, spokenCounts, type Node} from './lineage.js';
@@ -67,8 +67,10 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  *   its buttons away.
  * @csspart expander - A row's expand button, with `aria-expanded` while its children are shown. On
  *   a row with no children it has `data-leaf` and is hidden, keeping the names aligned.
- * @csspart name - A row's name, with `data-unnamed` if it has none. Pressing it highlights the
- *   artifact, and it has `aria-pressed` while the artifact is highlighted.
+ * @csspart name - A row's name. Where the artifact has none it is the artifact's key, with
+ *   `data-key-name`, and where it has no key either it is the word Unnamed, with `data-unnamed`.
+ *   Pressing it highlights the artifact, and it has `aria-pressed` while the artifact is
+ *   highlighted.
  * @csspart counts - A row's counts as they are drawn, hidden from a screen reader, which is given
  *   them beside it with what each counts. They are not drawn while the row's buttons are shown
  *   over them.
@@ -82,8 +84,8 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  * @csspart fit - A row's Fit button, on a layer that draws.
  * @csspart dismiss - A × that removes a row's filter or highlight, one for each, with `data-verb`.
  *   The highlight's has a bar under it.
- * @csspart also - The row's other parents, or "Children unavailable" with `data-code` if its
- *   children were refused.
+ * @csspart also - The row's other parents, each with `data-key-name` where it is called by its key,
+ *   or "Children unavailable" with `data-code` if its children were refused.
  * @csspart children - An expanded row's children.
  * @csspart more - The More button, which loads the next page and moves focus to its first row.
  */
@@ -248,6 +250,9 @@ export class MosaicaHierarchy extends MosaicaElement {
         padding-left: calc(18px + var(--depth, 0) * 14px);
         font-size: 11px;
         color: var(--_mosaica-ink-3);
+      }
+      [part='also'] [data-key-name] {
+        color: inherit;
       }
       /* Drawn as a line of text, with a target 24 px high and at least as wide around it. */
       [part='more'] {
@@ -507,19 +512,14 @@ export class MosaicaHierarchy extends MosaicaElement {
     if (!s || !layer) return;
     const held = s.get('filters').members;
     const on = this.clausesOn(id).includes(verb);
-    const label = this.lineage.knownName(id);
-    s.setMembers(
-      on
-        ? withoutMember(held, layer.name, id, verb)
-        : withMember(held, {layer: layer.name, artifact: id, outside: false, verb, ...(label === null ? {} : {label})})
-    );
+    s.setMembers(on ? withoutMember(held, layer.name, id, verb) : withMember(held, {layer: layer.name, artifact: id, outside: false, verb, ...labelOf(this.lineage.nameOf(id))}));
     emit(this, 'mosaica-clausechange', {id: idString(id), layer: layer.name, outside: false, verb, on: !on});
   }
 
   /** What the rows' own fetches say, for the status region: the rows loading children, and those refused them. */
   private rowNotes(nodes: readonly Node[]): string[] {
     return nodes.flatMap((n) => {
-      const name = artifactName(n.row) ?? UNNAMED;
+      const name = called(n.row.name, n.row.key).text;
       return [...(n.loading ? [`Loading children of ${name}`] : []), ...(n.refusal ? [`Children of ${name} unavailable`] : []), ...this.rowNotes(n.children ?? [])];
     });
   }
@@ -579,8 +579,8 @@ export class MosaicaHierarchy extends MosaicaElement {
     const open = this.open.has(node.path) && node.children !== null;
     const id = node.row.mosaicaId;
     const clauses = this.clausesOn(id);
-    const name = artifactName(node.row);
-    const called = name ?? UNNAMED;
+    const name = called(node.row.name, node.row.key);
+    const text = name.text;
     // A `dag` node is drawn under each served parent; the row names the others.
     const also = this.lineage.alsoUnder(node);
     const drawn = !isFilterLayer(layer);
@@ -590,21 +590,21 @@ export class MosaicaHierarchy extends MosaicaElement {
         data-buttons-away=${this.buttonsAway.has(node.path) ? '' : nothing} @pointerleave=${(e: Event) => this.leftRow(e, node.path)} @focusout=${(e: Event) => this.leftRow(e, node.path)}>
         <button part="expander" type="button" data-leaf=${node.row.childCount === 0 ? '' : nothing}
           aria-expanded=${open ? 'true' : 'false'}
-          aria-label=${open ? `Collapse ${name ?? 'row'}` : `Expand ${name ?? 'row'}`}
+          aria-label=${open ? `Collapse ${name.from === 'none' ? 'row' : text}` : `Expand ${name.from === 'none' ? 'row' : text}`}
           @click=${() => this.toggle(node)}>${node.loading ? html`<span class="spinner"></span>` : icon(open ? 'chev' : 'chevr', 12)}</button>
-        <button part="name" type="button" data-unnamed=${name === null ? '' : nothing}
-          aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')} title="Highlight"
-          @click=${() => this.apply(id, 'highlight')}>${called}</button>
+        <button part="name" type="button" ?data-key-name=${name.from === 'key'} ?data-unnamed=${name.from === 'none'}
+          aria-label=${`Highlight ${text}`} aria-pressed=${pressed('highlight')} title="Highlight"
+          @click=${() => this.apply(id, 'highlight')}>${text}</button>
         <span class="figures">
           <span part="actions" @focusin=${() => this.shownAgain(node.path)}>
-            <button part="highlight" type="button" data-verb="highlight" aria-label=${`Highlight ${called}`} aria-pressed=${pressed('highlight')}
+            <button part="highlight" type="button" data-verb="highlight" aria-label=${`Highlight ${text}`} aria-pressed=${pressed('highlight')}
               title="Highlight this" @click=${() => this.apply(id, 'highlight')}>${icon('highlight', 13)}</button>
-            <button part="filter" type="button" data-verb="filter" aria-label=${`Filter to ${called}`} aria-pressed=${pressed('filter')}
+            <button part="filter" type="button" data-verb="filter" aria-label=${`Filter to ${text}`} aria-pressed=${pressed('filter')}
               title="Filter to this" @click=${() => this.apply(id, 'filter')}>${icon('filter', 13)}</button>
             ${
               // A filter layer draws nothing, so there is nothing to fit to.
               drawn
-                ? html`<button part="fit" type="button" aria-label=${`Fit the map to ${called}`} title="Fit the map to it"
+                ? html`<button part="fit" type="button" aria-label=${`Fit the map to ${text}`} title="Fit the map to it"
                     @click=${() => emit(this, 'mosaica-artifactfit', {id: idString(id)})}>${icon('fit', 13)}</button>`
                 : nothing
             }
@@ -616,14 +616,14 @@ export class MosaicaHierarchy extends MosaicaElement {
           </span><span class="sr-only">${spokenCounts(node.row)}</span>
         </span>
         ${clauses.map(
-            (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${called}` : `Stop filtering to ${called}`}
+            (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${text}` : `Stop filtering to ${text}`}
               title=${verb === 'highlight' ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.apply(id, verb)}>${icon('close', 12)}</button>`
         )}
       </div>
-      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.join(', ')}</div>` : nothing}
+      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${calledList(also)}</div>` : nothing}
       ${node.refusal ? html`<div part="also" style=${`--depth:${depth}`} data-code=${node.refusal.code}>Children unavailable</div>` : nothing}
       ${open
-        ? html`<ul part="children" aria-label=${`Children of ${called}`}>
+        ? html`<ul part="children" aria-label=${`Children of ${text}`}>
             ${node.children!.map((c) => this.renderNode(c, depth + 1, layer))}
             ${node.next
               ? html`<li><button part="more" class="more-link" style=${`--depth:${depth + 1}`} type="button" @click=${(e: Event) => void this.more(e.currentTarget as HTMLElement, node)}>More</button></li>`

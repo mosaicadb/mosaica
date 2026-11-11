@@ -4,7 +4,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import {artifactName, withMember, withoutMember, type BrowseRow, type Layer, type MemberClause, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
 import {HeldAggregate, artifactGroupings, countsByKey} from './aggregate.js';
-import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
+import {MosaicaElement, called, emit, idString, labelOf} from './base.js';
 import {FloatingList} from './float.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
@@ -53,9 +53,10 @@ type Offer = {row: BrowseRow};
  * @csspart values - The list, while it is open.
  * @csspart option - One cluster in the list, with `data-id`, `aria-selected` while its clause is
  *   on, and `data-active` on the one the arrow keys reached.
- * @csspart name - A row's name, with `data-unnamed` if the cluster has none.
- * @csspart path - A row's path of parents' names, each step naming every served parent of the step
- *   below it.
+ * @csspart name - A row's name. Where the cluster has none it is the cluster's key, with
+ *   `data-key-name`, and where it has no key either it is the word Unnamed, with `data-unnamed`.
+ * @csspart path - A row's path of its parents' names, each step naming every served parent of the
+ *   step below it, by its key where it has no name.
  * @csspart value-count - A row's exact count.
  * @csspart more - The note under the box when there is nothing to list, or when more match than
  *   are listed.
@@ -316,11 +317,10 @@ export class MosaicaClusterFilter extends MosaicaElement {
     }
     const members = s.get('filters').members;
     const on = this.held().some((m) => m.artifact === row.mosaicaId && !m.outside);
-    const name = artifactName(row);
     s.setMembers(
       on
         ? withoutMember(members, this.layer, row.mosaicaId, 'filter')
-        : withMember(members, {layer: this.layer, artifact: row.mosaicaId, outside: false, verb: 'filter', ...(name === null ? {} : {label: name})})
+        : withMember(members, {layer: this.layer, artifact: row.mosaicaId, outside: false, verb: 'filter', ...labelOf(called(row.name, row.key))})
     );
     emit(this, 'mosaica-clausechange', {id: idString(row.mosaicaId), layer: this.layer, outside: false, verb: 'filter', on: !on});
     this.search = '';
@@ -433,7 +433,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
     };
     const open = this.listOpen && offers.length > 0;
     const option = (o: Offer) => {
-      const name = artifactName(o.row);
+      const name = called(o.row.name, o.row.key);
       const count = countOf(o);
       const walked = this.pathOf(o);
       const full = walked && walked.steps.length > 0 ? pathText(walked, walked.steps.length) : '';
@@ -441,7 +441,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
       return html`<button type="button" part="option" role="option" id=${`c-${o.row.mosaicaId}`} tabindex="-1" data-id=${idString(o.row.mosaicaId)} ?data-active=${o === active}
         aria-selected=${on.has(o.row.mosaicaId) ? 'true' : 'false'}
         @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.toggle(o)}>
-        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
+        <span class="opt"><span part="name" ?data-key-name=${name.from === 'key'} ?data-unnamed=${name.from === 'none'}>${name.text}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
         ${count === undefined ? nothing : html`<span part="value-count">${count.toLocaleString('en-GB')}</span>`}
       </button>`;
     };

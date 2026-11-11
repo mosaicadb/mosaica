@@ -130,6 +130,12 @@ container image.
 - `<mosaica-cluster-filter>` searches every level of a levelled layer in one request with no
   `level`, and walks the parents of a `tiered` layer's matches. A step of a path, there and in the
   colour editor, names every served parent of the step below it.
+- A cluster with no name is called by its key in `<mosaica-field-card>`'s rows, crumbs and chips,
+  `<mosaica-cluster-filter>`'s rows and paths and `<mosaica-hierarchy>`'s rows, drawn in the
+  secondary ink and the identifiers' font with `data-key-name`, and a clause set on it carries the
+  key as its `label`. Unnamed stands only where a cluster has neither. A field card inside
+  `<mosaica-filter-panel>` leaves out the chips the panel already shows, through its new
+  `hide-chips` attribute, which the panel sets except under `controls-only`.
 - **Breaking:** in the Python client, `Selection.within` on a view declared with a projection
   takes its box in degrees, `(min_lon, min_lat, max_lon, max_lat)`, the coordinates the rows were
   inserted with. It took the view's own unit-square coordinates before, so a box in degrees
