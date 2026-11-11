@@ -6235,7 +6235,7 @@ fn extent_payload(extent: &Extent) -> serde_json::Value {
 ///
 /// **One test a block kind**, each asking the same two questions: is every acquisition key gone,
 /// and is everything else there in the shape the route takes? The round trip — that a running
-/// service accepts what comes out — is `mosaica-server`'s `tests/payload_emitter.rs`, because only
+/// service accepts what comes out — is `mosaica-server`'s `tests/it/payload_emitter.rs`, because only
 /// a server can answer it.
 #[cfg(test)]
 mod payload_tests {

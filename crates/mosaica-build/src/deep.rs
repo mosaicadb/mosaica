@@ -15,7 +15,7 @@
 //! manifest). Re-running those loops here would be code no input can reach — the same reasoning
 //! §11 records for the rejected residual-in-cell check, which cannot fail because the residual is
 //! the low half of the same 32-bit split whose high half is the cell code. What holds the claim
-//! instead of a comment is the deliberate-damage pair in `tests/verify_deep.rs` (§18 obligation
+//! instead of a comment is the deliberate-damage pair in `tests/it/verify_deep.rs` (§18 obligation
 //! 9): if the loader's refusals are ever relaxed, those tests fail, and the checks move here.
 //!
 //! ## The pairs check is scoped to the base, deliberately

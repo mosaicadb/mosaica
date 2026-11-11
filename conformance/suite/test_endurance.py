@@ -106,7 +106,7 @@ regress a durable scalar, so the same shape on the next field is a loud refusal 
 silent regression. The one-batch allowance the assertions below carried while the defect was
 pinned is deleted: the watermark is held strictly monotone, live and durable alike, and the
 durable value may never trail the served one. The interleaving itself is pinned
-deterministically in `crates/mosaica-engine/tests/merge.rs`.
+deterministically in `crates/mosaica-engine/tests/it/merge.rs`.
 
 A second defect fell out of running long before any assertion could: the driver's spawn pipes
 the server's stdout/stderr and nothing reads it, so after roughly one pipe buffer of logging the

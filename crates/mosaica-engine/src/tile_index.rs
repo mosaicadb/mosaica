@@ -555,7 +555,7 @@ impl Candidates {
     }
 
     /// How many occupied nodes the walk popped. **Instrumentation, not a served fact** — it names
-    /// no artifact and no principal, and it is what `tests/artifact_tile_index.rs` asserts is far
+    /// no artifact and no principal, and it is what `tests/it/artifact_tile_index.rs` asserts is far
     /// below the population at a narrow viewport.
     pub fn nodes_visited(&self) -> u64 {
         self.nodes_visited

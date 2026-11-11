@@ -33,7 +33,7 @@
 //!   what it holds. Served is bounded by the cut and the budget; rows by the viewport and `k`.
 //!
 //! The two agree ordinal for ordinal wherever a level's memberships nest along its lineage, which
-//! a treed layer's do by construction; `tests/membership_column.rs` asserts it over the same
+//! a treed layer's do by construction; `tests/it/membership_column.rs` asserts it over the same
 //! corpus under both layouts, and the tests below over a flat layer with overlapping artifacts
 //! and over a DAG.
 //!

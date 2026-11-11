@@ -820,7 +820,7 @@ every shard. A corpus no larger than `shards.size` builds one shard.
 The linear build, the in-memory build the streaming build is compared with, writes one shard and
 refuses a corpus larger than the size. A property test checks instead that each per-entity file of
 a shard is the one-shard build's, restricted to the shard's items and renumbered
-(`crates/mosaica-build/tests/several_shards.rs`).
+(`crates/mosaica-build/tests/it/several_shards.rs`).
 
 ## 6. Security
 

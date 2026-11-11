@@ -81,7 +81,7 @@ pub(super) fn assembled(records: ArtifactRecords, membership: MembershipRows) ->
         layout: ServingLayout::ArtifactMajor,
         column: None,
         // Every row these fixtures name is a base row, so the partition answers for all of
-        // them. A generating set reaching above the base rows is `tests/artifact_containment.rs`,
+        // them. A generating set reaching above the base rows is `tests/it/artifact_containment.rs`,
         // against a row space that has an extent.
         base_rows: u32::MAX,
         covered: Vec::new(),

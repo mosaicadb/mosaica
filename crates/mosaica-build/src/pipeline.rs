@@ -119,7 +119,7 @@
 //! Entity IDs are assigned by signature order and are **permanent** (I9): a build that ordered
 //! items differently would not be a slower or faster build, it would be a *different corpus*,
 //! and every posting, permutation and handle derived from it would be invalidated. So this
-//! module is not licensed to reorder anything, and `tests/build_equivalence.rs` holds it to
+//! module is not licensed to reorder anything, and `tests/it/build_equivalence.rs` holds it to
 //! producing directory-recursively byte-identical bundles against `build_in_memory`.
 //!
 //! The three places the equivalence is subtle, and how it is preserved:
@@ -6036,7 +6036,7 @@ fn category_code(value: &ScalarValue, column: &str) -> Result<u32> {
 /// legal value.
 ///
 /// Shared by the streaming and linear builds because they hold their values in different shapes
-/// but must write the same bytes — the property `tests/build_equivalence.rs` exists to hold them
+/// but must write the same bytes — the property `tests/it/build_equivalence.rs` exists to hold them
 /// to.
 /// Takes presence per row rather than the values themselves: the entity-major columns are typed
 /// now (see [`EntityColumn`]), so absence is a bit beside the value and never a variant of it.
@@ -7328,7 +7328,7 @@ mod tests {
     /// source order; one entity is written twice next to itself and one far apart, so which value
     /// an entity ends with is the arena's last write on one route and the extents' live sets on
     /// the other; and the chunkings put those two rows in one extent and in different ones.
-    /// `tests/extent_route.rs` holds the same property over a whole bundle; what is here is the
+    /// `tests/it/extent_route.rs` holds the same property over a whole bundle; what is here is the
     /// case a corpus of 400 rows in one chunk cannot reach.
     #[test]
     fn the_keyword_column_is_the_same_files_from_an_arena_and_from_extents() {

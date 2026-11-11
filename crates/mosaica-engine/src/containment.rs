@@ -319,7 +319,7 @@ impl ContainmentPartition {
     ///
     /// **Test-only, and it exists so a predicate case is about the predicate.** Composing from
     /// postings would put the signature inversion inside every assertion about which rank is
-    /// served; the inversion has its own cases, and `tests/artifact_containment.rs` drives both
+    /// served; the inversion has its own cases, and `tests/it/artifact_containment.rs` drives both
     /// together against the masked-count route.
     pub(crate) fn of_clauses(ordinals: &[&[&[&[u32]]]]) -> Self {
         let sized: Vec<Vec<SizedSet<'_>>> = ordinals

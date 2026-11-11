@@ -15,7 +15,7 @@ pub(super) const MAX_POINTS_FRAME_BYTES: usize = 1 << 30;
 /// any underlay cell demand (pre-mask), `Engine::viewport` folds `tile_sweep` serially instead of
 /// calling `self.pool.install`.
 ///
-/// `pub` (unlike [`TILE_PAR_MIN_LEN`]) so the byte-equality tests in `tests/viewport.rs` can
+/// `pub` (unlike [`TILE_PAR_MIN_LEN`]) so the byte-equality tests in `tests/it/viewport.rs` can
 /// assert a fixture genuinely cleared it, rather than duplicating the number and risking drift.
 ///
 /// Measured across three corpus scales (2.42M, 1e8, 1e9 rows), no single row-count threshold

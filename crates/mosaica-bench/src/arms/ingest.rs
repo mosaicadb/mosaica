@@ -91,8 +91,8 @@
 //! * **Absorption — partly measured, and not here.** Flush, both halves of merge and the
 //!   background refresh exist; the compaction fold does not. What these arms still cannot show is
 //!   the steady state of a database that has been *running* and absorbing writes for a while.
-//!   `crates/mosaica-engine/tests/soak.rs` covers the *shape* of it (40 flushes → 2 segments,
-//!   5 delta tiers, one full projection build); **`tests/scale.rs` covers it at size** since
+//!   `crates/mosaica-engine/tests/it/soak.rs` covers the *shape* of it (40 flushes → 2 segments,
+//!   5 delta tiers, one full projection build); **`tests/it/scale.rs` covers it at size** since
 //!   2026-08-05, with the figures in `docs/evidence/memos/2026-08-05-write-path-at-scale.md`.
 //!
 //!   **What that measured, and it is not reassuring: the segment axis is not bounded.** The
@@ -1038,7 +1038,7 @@ fn stage_split(
 
 /// Distinct signatures the descriptor pool can express, and the pool's size.
 ///
-/// 1,024 is the widest column `crates/mosaica-engine/tests/ingest_shape.rs`' signature-diversity
+/// 1,024 is the widest column `crates/mosaica-engine/tests/it/ingest_shape.rs`' signature-diversity
 /// sweep reaches, so the two harnesses describe the same regime. Above it that sweep found no
 /// further movement; below ~8 the window sort degenerates into an all-ties tie-break and measures
 /// the fixture rather than the system.

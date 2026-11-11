@@ -2180,7 +2180,7 @@ mod tests {
 
     /// The column and the row form agree about every artifact's size and every artifact's masked
     /// count — which is the property the whole route rests on, asserted here at the structure and
-    /// again end to end in `tests/artifact_row_major.rs`.
+    /// again end to end in `tests/it/artifact_row_major.rs`.
     #[test]
     fn the_column_and_the_row_form_agree_artifact_for_artifact() {
         let sets: Vec<Vec<u32>> = (0..64u32)
