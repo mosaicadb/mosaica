@@ -229,6 +229,8 @@ Create `topics.ts`:
 
 `map.colourBy` colours the dots. Given `cluster:` and a layer, it gives each cluster a colour and each paper its cluster's. The checkbox sets `map.layers`, the layers the map draws. Asking for the names draws the clusters they name as well. These are the same properties as the `colour-by` and `layers` attributes, set from code here because the checkbox changes them.
 
+`map.clusterSpacing` gives each cluster a square 200 pixels on a side of the map, so the map draws the topics at the finest level that leaves about one per square. With the whole map in view on most screens that is the 16 broad topics, and narrower ones take their place as you zoom in. Without a spacing the map draws narrow topics even with the whole map in view, more of them than there is room to name. It is the `cluster-spacing` attribute set from code.
+
 Clicking a topic's name, or anywhere inside its outline, opens the cluster, and the map fires `mosaica-artifactopen` once its details arrive. The event's `id` is the artifact's `mosaica_id` as a decimal string, since it doesn't fit in a JavaScript number, and `detail.layer` is its layer. The name comes from the store's `artifacts` projection, whose `attached` map holds each cluster's name by its id.
 
 `store.setMembers` filters to an artifact's members, the papers in the cluster. It takes a list of clauses, each naming an artifact by layer and id, with `outside: false` to keep the members and `verb: 'filter'` to narrow the map to them. The other verb, `highlight`, would keep every paper and light the members. Member clauses join the filters, so the topic combines with the archive, title and dates. Clear passes an empty list.
