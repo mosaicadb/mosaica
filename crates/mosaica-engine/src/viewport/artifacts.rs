@@ -68,6 +68,10 @@ fn take_authored_shapes(
     shapes
 }
 
+/// The most artifacts whose content one hold of the live store reads. The store is one lock for
+/// the whole server, so a walk over a level releases it between batches.
+pub(crate) const CONTENT_BATCH: usize = 4096;
+
 /// An artifact's supplied content as it may leave the engine: the values, with an authored
 /// shape's slot blank, and the shapes taken from that slot.
 pub(crate) struct Supplied {
@@ -639,6 +643,25 @@ impl Engine {
             authored,
             shape_slot: declaration.authored_shape().map(|(slot, _)| slot),
         })
+    }
+
+    /// `read` of each of `items`, given `level` of `layer`'s slots in the live store, which is
+    /// held once for each [`CONTENT_BATCH`] of them and released between.
+    pub(crate) fn read_held<T, R>(
+        &self,
+        layer: &str,
+        level: u32,
+        items: &[T],
+        mut read: impl FnMut(&T, &[Option<Box<mosaica_lifecycle::ArtifactRecord>>]) -> R,
+    ) -> Vec<R> {
+        let mut out = Vec::with_capacity(items.len());
+        for batch in items.chunks(CONTENT_BATCH) {
+            self.write.live().with_artifacts(|store| {
+                let held = store.slots(layer, level);
+                out.extend(batch.iter().map(|item| read(item, held)));
+            });
+        }
+        out
     }
 
     /// [`Engine::supplied_content`]'s values as the store holds them, the shape slot included.
@@ -1253,29 +1276,23 @@ impl Engine {
             (a.is_none(), a, at.0).cmp(&(b.is_none(), b, bt.0))
         });
         let layer = level.layer;
-        let supplied: Vec<Option<Supplied>> = self.write.live().with_artifacts(|store| {
-            let held = store.slots(&layer.name, level.level);
-            keyed
-                .iter()
-                .map(|(_, at)| {
-                    self.supplied_content(
-                        layer
-                            .pass
-                            .served
-                            .generation
-                            .space_content(layer.registered.space)
-                            .map(Arc::as_ref),
-                        &layer.registered.declaration,
-                        level.level,
-                        at.0,
-                        at.1,
-                        at.3,
-                        layer.pass.ask.rows == ArtifactRows::Full,
-                        contents.as_deref(),
-                        Some(held),
-                    )
-                })
-                .collect()
+        let supplied = self.read_held(&layer.name, level.level, &keyed, |(_, at), held| {
+            self.supplied_content(
+                layer
+                    .pass
+                    .served
+                    .generation
+                    .space_content(layer.registered.space)
+                    .map(Arc::as_ref),
+                &layer.registered.declaration,
+                level.level,
+                at.0,
+                at.1,
+                at.3,
+                layer.pass.ask.rows == ArtifactRows::Full,
+                contents.as_deref(),
+                Some(held),
+            )
         });
         for ((key, at), supplied) in keyed.into_iter().zip(supplied) {
             let content = match supplied {

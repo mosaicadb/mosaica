@@ -642,16 +642,6 @@ struct Gate<'a> {
 impl Gate<'_> {
     /// The artifact at `ordinal` of `level` where this viewer is served it, by its index.
     fn served(&self, level: u32, ordinal: u32) -> Option<usize> {
-        self.served_holding(level, ordinal, None)
-    }
-
-    /// [`Self::served`], `held` being the level's slots where the caller holds the live store.
-    fn served_holding(
-        &self,
-        level: u32,
-        ordinal: u32,
-        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
-    ) -> Option<usize> {
         let len = self.levels.get(level as usize)?.forms.first().len();
         if ordinal as usize >= len {
             return None;
@@ -673,7 +663,7 @@ impl Gate<'_> {
             WITHHELD => return None,
             at => return Some((at - FIRST_SERVED) as usize),
         }
-        let at = self.verdict(level, ordinal, held).map(|(gated, name)| {
+        let at = self.verdict(level, ordinal).map(|(gated, name)| {
             self.names.borrow_mut().push(name);
             let mut held = self.gated.borrow_mut();
             held.push(gated);
@@ -684,12 +674,7 @@ impl Gate<'_> {
         at
     }
 
-    fn verdict(
-        &self,
-        level: u32,
-        ordinal: u32,
-        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
-    ) -> Option<(Gated, Option<String>)> {
+    fn verdict(&self, level: u32, ordinal: u32) -> Option<(Gated, Option<String>)> {
         let read = &self.levels[level as usize];
         let entity = self.layer.runs[level as usize]
             .entity_of(u64::from(ordinal))
@@ -707,7 +692,7 @@ impl Gate<'_> {
         // generating set receives no artifact at all rather than one with its description
         // missing (decision 0076), which is why this runs inside the gate and not beside the row
         // build.
-        let content = read.content(self.engine, self.layer, ordinal, entity, position, held)?;
+        let content = read.content(self.engine, self.layer, ordinal, entity, position, None)?;
         let gated = Gated {
             level,
             ordinal,
@@ -734,24 +719,17 @@ impl Gate<'_> {
         f(self.names.borrow()[at].as_deref())
     }
 
-    /// Every served artifact of the layer, or of `level` where one is named, each level gated
-    /// under one hold of the live store. The gate's verdicts ask no dependency, so nothing under
-    /// the hold takes the store again.
+    /// Every served artifact of the layer, or of `level` where one is named.
     fn every(&self, level: Option<u32>) -> Vec<usize> {
-        let name = self.layer.declaration.name.as_str();
         let mut every = Vec::new();
         for (walked, read) in self.levels.iter().enumerate() {
             let walked = walked as u32;
             if level.is_some_and(|level| level != walked) {
                 continue;
             }
-            self.engine.write.live().with_artifacts(|store| {
-                let held = store.slots(name, walked);
-                every.extend(
-                    (0..read.forms.first().len() as u32)
-                        .filter_map(|o| self.served_holding(walked, o, Some(held))),
-                );
-            });
+            every.extend(
+                (0..read.forms.first().len() as u32).filter_map(|o| self.served(walked, o)),
+            );
         }
         every
     }

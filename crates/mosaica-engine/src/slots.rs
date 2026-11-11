@@ -762,8 +762,8 @@ impl Engine {
             }
             let len = read.forms.first().len();
             let mut at = vec![u32::MAX; len];
-            // The verdicts first, since a dependency's verdict takes the live store, and then
-            // every served artifact's content under one hold of it.
+            // The verdicts first, since a dependency's verdict takes the live store, and then the
+            // served artifacts' content, a batch to each hold of it.
             let mut passing = Vec::new();
             for ordinal in 0..len as u32 {
                 if ordinal.is_multiple_of(CHUNK) && stop() {
@@ -784,14 +784,20 @@ impl Engine {
                 }
                 passing.push((ordinal, entity, masked_count, position));
             }
-            self.write.live().with_artifacts(|store| {
-                let held = store.slots(&layer.declaration.name, at_level);
-                passing.retain(|&(ordinal, entity, _, position)| {
+            let readable = self.read_held(
+                &layer.declaration.name,
+                at_level,
+                &passing,
+                |&(ordinal, entity, _, position), held| {
                     read.content(self, layer, ordinal, entity, position, Some(held))
                         .is_some()
-                });
-            });
-            for (ordinal, entity, masked_count, _) in passing {
+                },
+            );
+            for ((ordinal, entity, masked_count, _), _) in passing
+                .into_iter()
+                .zip(readable)
+                .filter(|(_, readable)| *readable)
+            {
                 let Some(id) = self.artifact_id(layer.space, entity) else {
                     continue;
                 };

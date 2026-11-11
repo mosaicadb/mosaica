@@ -170,21 +170,24 @@ impl Layer {
                 // With a cut, the level's figures are the entry the map's treed frame reads.
                 let read =
                     engine.read_level(served_view, mask, layer, self.level, self.cut.is_some())?;
-                // The served artifacts whose content reads back, under one hold of the live
+                // The served artifacts whose content reads back, a batch to each hold of the live
                 // store. Called after the verdicts, since a dependency's verdict takes the store.
                 let mut readable = |served: Vec<(u32, EntityId, Option<u32>)>| {
-                    engine.write.live().with_artifacts(|store| {
-                        let held = store.slots(&layer.declaration.name, self.level);
-                        for (ordinal, entity, position) in served {
-                            if read
-                                .content(engine, layer, ordinal, entity, position, Some(held))
+                    let read_back = engine.read_held(
+                        &layer.declaration.name,
+                        self.level,
+                        &served,
+                        |&(ordinal, entity, position), held| {
+                            read.content(engine, layer, ordinal, entity, position, Some(held))
                                 .is_some()
-                            {
-                                ordinals.push(ordinal);
-                                positions.insert(ordinal, position);
-                            }
-                        }
-                    })
+                        },
+                    );
+                    for ((ordinal, _, position), _) in
+                        served.into_iter().zip(read_back).filter(|(_, ok)| *ok)
+                    {
+                        ordinals.push(ordinal);
+                        positions.insert(ordinal, position);
+                    }
                 };
                 match &self.cut {
                     Some(cut) => {
