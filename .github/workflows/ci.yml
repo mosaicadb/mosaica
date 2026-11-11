@@ -340,12 +340,6 @@ jobs:
       # It installs in the background, and a failed install fails no step.
       - name: gdb, for the stacks of a server a failed walk leaves running
         run: nohup bash -c 'sudo apt-get update -q && sudo apt-get install -yq gdb' > "$RUNNER_TEMP/gdb.log" 2>&1 &
-      # The suite builds no `mosaica` binary (`MOSAICA_CONFORMANCE_PREBUILT`), but
-      # `conformance/suite/verification.py` compiles and runs a shim over the corpus crate.
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          key: part-${{ matrix.part }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -357,7 +351,8 @@ jobs:
         with:
           name: conformance-faults
           path: target/faults/release
-      # An artifact does not keep the executable bit.
+      # The suite runs no cargo (`MOSAICA_CONFORMANCE_PREBUILT`). An artifact does not keep the
+      # executable bit.
       - run: chmod +x target/release/mosaica target/faults/release/mosaica
       # The dependencies are read from `reference/pyproject.toml`, so the list has one copy. The
       # package is not installed: both suites reach `oracle` through the `sys.path` insert their
