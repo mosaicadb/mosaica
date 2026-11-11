@@ -260,8 +260,8 @@ layouts stop being an assertion.
 
 Three numbers make that a healthy build. The data's bounds sit **inside** the frame with headroom.
 Nothing **clamps** — quantisation clamps rather than filters, so a point outside the frame is stored
-on its edge, and the build counts every one it stored there. And nearly every point keeps **a
-position of its own**, so two papers far apart in the embedding are far apart on the map.
+on its edge, and the build counts every one it stored there. And nearly every point has **a
+cell to itself**, so the map's finest tiles and counts keep apart papers the embedding keeps apart.
 
 **What the failure looks like, since this pipeline used to produce it.** Writing raw UMAP
 coordinates against a stated frame of `0,65536,0,65536` puts the whole corpus in the bottom-left
@@ -321,8 +321,8 @@ view 'pca64': quantising against x [-20.70003490447998, 19.814113426208497], y [
 The resolution, one per view:
 
 ```
-view 'knn': 2422486 point(s) landed in 2387592 distinct cell(s) — 98.6% of them have a position of their own
-view 'pca64': 2422486 point(s) landed in 2330210 distinct cell(s) — 96.2% of them have a position of their own
+view 'knn': 2422486 point(s) landed in 2387592 distinct cell(s), 1.0 per occupied cell
+view 'pca64': 2422486 point(s) landed in 2330210 distinct cell(s), 1.0 per occupied cell
 ```
 
 **And the per-view artifact layouts**, which are why `knn` is the anchor. The same 256 artifacts
