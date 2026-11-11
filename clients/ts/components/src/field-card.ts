@@ -735,7 +735,10 @@ export class MosaicaFieldCard extends MosaicaElement {
           pointer-events: auto;
         }
         [part~='row'].steps {
-          grid-template-columns: 12px minmax(0, 1fr) auto auto minmax(30px, auto);
+          grid-template-columns: 12px minmax(0, 1fr) auto auto var(--_mosaica-step-w, 30px);
+        }
+        [part='remainder'] {
+          grid-template-columns: 12px minmax(0, 1fr) auto 48px var(--_mosaica-step-w, 30px);
         }
         .step {
           grid-column: 5;
@@ -878,7 +881,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       }
       [part='remainder'] {
         display: grid;
-        grid-template-columns: 12px minmax(0, 1fr) auto;
+        grid-template-columns: 12px minmax(0, 1fr) auto var(--_mosaica-step-w, 30px);
         align-items: center;
         column-gap: 8px;
         padding: 4px 6px;
@@ -889,7 +892,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       /* A row that steps has a fourth column, kept on a row with nothing to step into so the
          counts stand in line. */
       [part~='row'].steps {
-        grid-template-columns: 12px minmax(0, 1fr) auto minmax(30px, auto);
+        grid-template-columns: 12px minmax(0, 1fr) auto var(--_mosaica-step-w, 30px);
       }
       .step {
         grid-column: 4;
@@ -902,11 +905,14 @@ export class MosaicaFieldCard extends MosaicaElement {
         display: inline-flex;
         align-items: center;
         justify-content: flex-end;
-        gap: 3px;
+        gap: 2px;
         min-width: 24px;
         height: 22px;
-        padding: 0 4px;
+        box-sizing: border-box;
+        padding: 0 3px 0 6px;
+        border: 1px solid var(--_mosaica-line);
         border-radius: 5px;
+        background: var(--_mosaica-surface);
         font-size: 12px;
         font-variant-numeric: tabular-nums;
         color: var(--_mosaica-ink-2);
@@ -917,6 +923,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         inset: -1px 0;
       }
       [part='step']:hover {
+        border-color: var(--_mosaica-ink-3);
         background: var(--_mosaica-surface-3);
         color: var(--_mosaica-ink);
       }
@@ -1784,7 +1791,9 @@ export class MosaicaFieldCard extends MosaicaElement {
           : roots.length === 0
             ? html`<span class="none">No clusters</span>`
             : nothing;
-    return html`<div class="body">${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
+    // One width for every row's step button, so the counts beside it line up down the card.
+    const widest = Math.max(0, ...(roots ?? []).map((n) => (n.row.childCount > 0 ? countText(n.row.childCount).length : 0)));
+    return html`<div class="body" style=${`--_mosaica-step-w: calc(${widest}ch + 27px)`}>${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
   }
 
   /** What an overlap list inside a position lists, which heads it; `null` at the top. */
@@ -1908,7 +1917,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         ? nothing
         : step === null
           ? html`<span class="step"></span>`
-          : html`<span class="step"><button part="step" type="button" aria-label=${step.label} title="Open" @click=${() => this.stepIn(step.step)}>${step.count === null ? '' : countText(step.count)}<span aria-hidden="true">›</span></button></span>`;
+          : html`<span class="step"><button part="step" type="button" aria-label=${step.label} title="Open" @click=${() => this.stepIn(step.step)}>${step.count === null ? '' : countText(step.count)}${icon('chevr', 12, 2)}</button></span>`;
     return html`<div part="row" class=${step === undefined ? '' : 'steps'} data-key=${r.key} data-state=${look.state}
       @click=${(e: Event) => {
         if (!(e.target as HTMLElement).closest('button')) verb('filter')();
