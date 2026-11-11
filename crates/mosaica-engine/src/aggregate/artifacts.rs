@@ -170,9 +170,21 @@ impl Layer {
                 // With a cut, the level's figures are the entry the map's treed frame reads.
                 let read =
                     engine.read_level(served_view, mask, layer, self.level, self.cut.is_some())?;
-                let readable = |ordinal: u32, entity: EntityId, position: Option<u32>| {
-                    read.content(engine, layer, ordinal, entity, position)
-                        .is_some()
+                // The served artifacts whose content reads back, under one hold of the live
+                // store. Called after the verdicts, since a dependency's verdict takes the store.
+                let mut readable = |served: Vec<(u32, EntityId, Option<u32>)>| {
+                    engine.write.live().with_artifacts(|store| {
+                        let held = store.slots(&layer.declaration.name, self.level);
+                        for (ordinal, entity, position) in served {
+                            if read
+                                .content(engine, layer, ordinal, entity, position, Some(held))
+                                .is_some()
+                            {
+                                ordinals.push(ordinal);
+                                positions.insert(ordinal, position);
+                            }
+                        }
+                    })
                 };
                 match &self.cut {
                     Some(cut) => {
@@ -191,17 +203,21 @@ impl Layer {
                                 true => drawn.served.clone(),
                                 false => crate::cut::frontier_of(&drawn.lineage, &drawn.served),
                             };
-                            for (ordinal, entity, _, position) in drawn.passing_in(&listed) {
-                                if readable(ordinal, entity, position) {
-                                    ordinals.push(ordinal);
-                                    positions.insert(ordinal, position);
-                                }
-                            }
+                            readable(
+                                drawn
+                                    .passing_in(&listed)
+                                    .into_iter()
+                                    .map(|(ordinal, entity, _, position)| {
+                                        (ordinal, entity, position)
+                                    })
+                                    .collect(),
+                            );
                         }
                     }
                     None => {
                         let view = read.view(engine, served_view, mask, layer, &dependency_served);
                         let runs = &layer.runs[self.level as usize];
+                        let mut served = Vec::new();
                         for ordinal in 0..read.forms.first().len() as u32 {
                             if ordinal % CHUNK == 0 {
                                 cx.check_clock()?;
@@ -216,11 +232,9 @@ impl Layer {
                             else {
                                 continue;
                             };
-                            if readable(ordinal, entity, position) {
-                                ordinals.push(ordinal);
-                                positions.insert(ordinal, position);
-                            }
+                            served.push((ordinal, entity, position));
                         }
+                        readable(served);
                     }
                 }
                 targets = Targets::of(cx, &read, &ordinals, &dependency_served)?;
@@ -440,7 +454,7 @@ impl Layer {
                         let position = *positions.get(&o)?;
                         let entity = EntityId::new(entity_at(o)?);
                         let own = read
-                            .content(engine, layer, o, entity, position)
+                            .content(engine, layer, o, entity, position, None)
                             .and_then(|content| content.name());
                         namer.name(own, self.level, o)
                     })
@@ -563,6 +577,7 @@ impl Targets {
                 attachment.ordinal,
                 attachment.entity,
                 position,
+                None,
             );
             if content.is_some() {
                 targets.counted.insert(ordinal);

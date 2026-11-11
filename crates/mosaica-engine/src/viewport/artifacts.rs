@@ -460,6 +460,7 @@ impl Engine {
             true,
             // Reads the row directly: one artifact does not justify building the level's table.
             None,
+            None,
         ) else {
             return Ok(None);
         };
@@ -601,6 +602,9 @@ impl Engine {
     /// `table` is the level's contents, read once by the viewport pass, keeping a response off
     /// one zstd block read per artifact. `None` reads the one entity's row directly.
     ///
+    /// `held` is the level's slots in the live store, where the caller walks the level under one
+    /// hold of it; `None` takes the store for this artifact alone.
+    ///
     /// Every route that serves or searches supplied content takes it from here. An authored
     /// shape's slot names every view of its layer and holds each one's canonical shape, so it is
     /// taken out of the values here and returned beside them, for drawing one view's shape.
@@ -615,6 +619,7 @@ impl Engine {
         position: Option<u32>,
         materialise: bool,
         table: Option<&crate::artifact_content::LevelContent>,
+        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
     ) -> Option<Supplied> {
         let mut values = self.supplied_values(
             content,
@@ -626,6 +631,7 @@ impl Engine {
             position,
             materialise,
             table,
+            held,
         )?;
         let authored = take_authored_shapes(declaration, &mut values);
         Some(Supplied {
@@ -648,6 +654,7 @@ impl Engine {
         position: Option<u32>,
         materialise: bool,
         table: Option<&crate::artifact_content::LevelContent>,
+        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
     ) -> Option<Vec<String>> {
         let Some(position) = position else {
             return Some(Vec::new());
@@ -655,15 +662,22 @@ impl Engine {
         // The publication's own copy, the only home the content has before the manifest carries it.
         // A content withdrawn since the verdict's version of the record is not served, and no other
         // content is read in its place.
-        let held = self.write.live().with_artifacts(|store| {
-            let record = store.get(layer, level, ordinal)?;
+        let read = |slots: &[Option<Box<mosaica_lifecycle::ArtifactRecord>>]| {
+            let record = slots.get(ordinal as usize)?.as_deref()?;
             let set = record.contents.get(record.rank_at(position as usize)?)?;
             Some(match (&set.values, materialise) {
                 (Some(values), true) => Some(values.clone()),
                 (Some(_), false) => Some(Vec::new()),
                 (None, _) => None,
             })
-        });
+        };
+        let held = match held {
+            Some(slots) => read(slots),
+            None => self
+                .write
+                .live()
+                .with_artifacts(|store| read(store.slots(layer, level))),
+        };
         if let Some(values) = held? {
             return Some(values);
         }
@@ -1238,23 +1252,33 @@ impl Engine {
         keyed.sort_unstable_by(|(a, at), (b, bt)| {
             (a.is_none(), a, at.0).cmp(&(b.is_none(), b, bt.0))
         });
-        for (key, at) in keyed {
-            let content = match self.supplied_content(
-                level
-                    .layer
-                    .pass
-                    .served
-                    .generation
-                    .space_content(level.layer.registered.space)
-                    .map(Arc::as_ref),
-                &level.layer.registered.declaration,
-                level.level,
-                at.0,
-                at.1,
-                at.3,
-                level.layer.pass.ask.rows == ArtifactRows::Full,
-                contents.as_deref(),
-            ) {
+        let layer = level.layer;
+        let supplied: Vec<Option<Supplied>> = self.write.live().with_artifacts(|store| {
+            let held = store.slots(&layer.name, level.level);
+            keyed
+                .iter()
+                .map(|(_, at)| {
+                    self.supplied_content(
+                        layer
+                            .pass
+                            .served
+                            .generation
+                            .space_content(layer.registered.space)
+                            .map(Arc::as_ref),
+                        &layer.registered.declaration,
+                        level.level,
+                        at.0,
+                        at.1,
+                        at.3,
+                        layer.pass.ask.rows == ArtifactRows::Full,
+                        contents.as_deref(),
+                        Some(held),
+                    )
+                })
+                .collect()
+        });
+        for ((key, at), supplied) in keyed.into_iter().zip(supplied) {
+            let content = match supplied {
                 Some(supplied) => supplied.values,
                 // Content restored from a packed extent carries no values yet, and is withheld
                 // rather than served with its description missing. Asked under the identity
@@ -1293,6 +1317,7 @@ impl Engine {
             position,
             false,
             contents,
+            None,
         )
         .is_some()
             && self.artifact_id(layer.registered.space, entity).is_some()

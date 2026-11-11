@@ -1442,6 +1442,65 @@ impl Default for Slices {
 
 type ShapeSlots = Vec<Option<Box<ArtifactShapes>>>;
 
+/// One level of one layer, as the store's per-level maps are keyed by it, comparing as the
+/// `(String, u32)` key does. A map keyed by `(String, u32)` is probed with `&(layer, level) as
+/// &dyn LevelKey`, which borrows the layer's name rather than allocating a `String` for it.
+trait LevelKey {
+    fn key(&self) -> (&str, u32);
+}
+
+impl LevelKey for (String, u32) {
+    fn key(&self) -> (&str, u32) {
+        (&self.0, self.1)
+    }
+}
+
+impl LevelKey for (&str, u32) {
+    fn key(&self) -> (&str, u32) {
+        *self
+    }
+}
+
+impl<'a> std::borrow::Borrow<dyn LevelKey + 'a> for (String, u32) {
+    fn borrow(&self) -> &(dyn LevelKey + 'a) {
+        self
+    }
+}
+
+impl PartialEq for dyn LevelKey + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.key() == other.key()
+    }
+}
+
+impl Eq for dyn LevelKey + '_ {}
+
+impl PartialOrd for dyn LevelKey + '_ {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for dyn LevelKey + '_ {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.key().cmp(&other.key())
+    }
+}
+
+/// `map`'s entry for `level` of `layer`.
+fn at_level<'m, V>(map: &'m BTreeMap<(String, u32), V>, layer: &str, level: u32) -> Option<&'m V> {
+    map.get(&(layer, level) as &dyn LevelKey)
+}
+
+/// [`at_level`], mutably.
+fn at_level_mut<'m, V>(
+    map: &'m mut BTreeMap<(String, u32), V>,
+    layer: &str,
+    level: u32,
+) -> Option<&'m mut V> {
+    map.get_mut(&(layer, level) as &dyn LevelKey)
+}
+
 /// Whether every slice of an [`ArtifactStore`] holds a record of an artifact: it has a shape, or it
 /// declares no member in any shard and is attached or has no generating entity in any shard.
 fn held_in_every_slice(
@@ -2055,8 +2114,7 @@ impl ArtifactStore {
     /// it is not reclaimed either (decision 0072 is settled and unbuilt), and handing the ordinal
     /// back while the entity stays spent is how the two would come to disagree.
     pub fn next_ordinal(&self, layer: &str, level: u32) -> u32 {
-        self.levels
-            .get(&(layer.to_string(), level))
+        at_level(&self.levels, layer, level)
             .map(|slots| slots.len() as u32)
             .unwrap_or(0)
     }
@@ -2552,8 +2610,7 @@ impl ArtifactStore {
 
     /// See [`Self::lineage_versions`]: what a lineage derived from this level is valid for.
     pub fn lineage_version(&self, layer: &str, level: u32) -> u64 {
-        self.lineage_versions
-            .get(&(layer.to_string(), level))
+        at_level(&self.lineage_versions, layer, level)
             .copied()
             .unwrap_or(0)
     }
@@ -2913,19 +2970,18 @@ impl ArtifactStore {
         ordinal: u32,
         members: Members,
     ) -> bool {
-        // The layer's name once, for all three lookups: this runs once per artifact of a level.
-        let address = (layer.to_string(), level);
+        let address: &dyn LevelKey = &(layer, level);
         // **A vacated artifact is checked against the cardinality it had before the vacate**, not
         // against the placeholder standing in for it: the placeholder is empty, so the check that
         // is the whole of this method's value would otherwise pass for any short membership.
         let vacated = self
             .vacated
-            .get(&address)
+            .get(address)
             .and_then(|level| level.get(&ordinal))
             .copied();
         let Some(record) = self
             .levels
-            .get_mut(&address)
+            .get_mut(address)
             .and_then(|slots| slots.get_mut(ordinal as usize))
             .and_then(Option::as_mut)
         else {
@@ -2936,10 +2992,10 @@ impl ArtifactStore {
         }
         record.members = members;
         if vacated.is_some() {
-            if let Some(level) = self.vacated.get_mut(&address) {
+            if let Some(level) = self.vacated.get_mut(address) {
                 level.remove(&ordinal);
                 if level.is_empty() {
-                    self.vacated.remove(&address);
+                    self.vacated.remove(address);
                 }
             }
         }
@@ -3012,8 +3068,7 @@ impl ArtifactStore {
     }
 
     pub fn get(&self, layer: &str, level: u32, ordinal: u32) -> Option<&ArtifactRecord> {
-        self.levels
-            .get(&(layer.to_string(), level))
+        at_level(&self.levels, layer, level)
             .and_then(|slots| slots.get(ordinal as usize))
             .and_then(Option::as_deref)
     }
@@ -3121,15 +3176,12 @@ impl ArtifactStore {
 
     /// One level's slots by ordinal, a hole being `None`. Empty for a level nothing holds.
     pub fn slots(&self, layer: &str, level: u32) -> &[Option<Box<ArtifactRecord>>] {
-        self.levels
-            .get(&(layer.to_string(), level))
-            .map_or(&[], Vec::as_slice)
+        at_level(&self.levels, layer, level).map_or(&[], Vec::as_slice)
     }
 
     /// Every artifact of one level, with its ordinal. Holes are skipped.
     pub fn level(&self, layer: &str, level: u32) -> impl Iterator<Item = (u32, &ArtifactRecord)> {
-        self.levels
-            .get(&(layer.to_string(), level))
+        at_level(&self.levels, layer, level)
             .into_iter()
             .flat_map(|slots| {
                 slots
@@ -3191,7 +3243,10 @@ impl ArtifactStore {
         layer: &'a str,
     ) -> impl Iterator<Item = (u32, u32, &'a ArtifactRecord)> + 'a {
         self.levels
-            .range((layer.to_string(), 0)..)
+            .range::<dyn LevelKey, _>((
+                std::ops::Bound::Included(&(layer, 0u32) as &dyn LevelKey),
+                std::ops::Bound::Unbounded,
+            ))
             .take_while(move |((l, _), _)| l == layer)
             .flat_map(|((_, level), slots)| {
                 slots
@@ -3255,16 +3310,12 @@ impl ArtifactStore {
     /// it — which is right rather than a coincidence: there are no records, so the empty
     /// derivation a cache would hold is the correct one, and the first write moves it off zero.
     pub fn level_version(&self, layer: &str, level: u32) -> u64 {
-        self.versions
-            .get(&(layer.to_string(), level))
-            .copied()
-            .unwrap_or(0)
+        at_level(&self.versions, layer, level).copied().unwrap_or(0)
     }
 
     /// See [`Self::records_versions`].
     pub fn records_version(&self, layer: &str, level: u32) -> u64 {
-        self.records_versions
-            .get(&(layer.to_string(), level))
+        at_level(&self.records_versions, layer, level)
             .copied()
             .unwrap_or(0)
     }
@@ -3358,9 +3409,7 @@ impl ArtifactStore {
     /// level it was not built from.
     pub fn fold_publication_versions(&mut self, layer: &str, level: u32, records: u64) {
         debug_assert!(
-            self.versions
-                .get(&(layer.to_string(), level))
-                .is_none_or(|version| *version >= records),
+            at_level(&self.versions, layer, level).is_none_or(|version| *version >= records),
             "a level published in {records} record(s) counted fewer than that many versions"
         );
         let extra = records.saturating_sub(1);
@@ -3369,7 +3418,7 @@ impl ArtifactStore {
             &mut self.records_versions,
             &mut self.lineage_versions,
         ] {
-            if let Some(version) = counter.get_mut(&(layer.to_string(), level)) {
+            if let Some(version) = at_level_mut(counter, layer, level) {
                 *version = version.saturating_sub(extra);
             }
         }
@@ -3466,10 +3515,7 @@ impl ArtifactStore {
     pub fn pending_ranges(&self) -> Vec<PendingRange> {
         let mut ready = Vec::new();
         for ((layer, level), slots) in &self.levels {
-            let from = *self
-                .published_through
-                .get(&(layer.clone(), *level))
-                .unwrap_or(&0) as usize;
+            let from = *at_level(&self.published_through, layer, *level).unwrap_or(&0) as usize;
             if from >= slots.len() {
                 continue;
             }
@@ -3840,8 +3886,7 @@ impl ArtifactStore {
         level: u32,
         ordinal: u32,
     ) -> Option<&mut Option<Box<ArtifactRecord>>> {
-        self.levels
-            .get_mut(&(layer.to_string(), level))
+        at_level_mut(&mut self.levels, layer, level)
             .and_then(|slots| slots.get_mut(ordinal as usize))
     }
 
@@ -3888,14 +3933,12 @@ impl ArtifactStore {
     pub fn unpublished_content(&self) -> Vec<ContentRow> {
         let mut out = Vec::new();
         for ((layer, level), slots) in &self.levels {
-            let from = *self
-                .published_through
-                .get(&(layer.clone(), *level))
-                .unwrap_or(&0) as usize;
-            let pending = (0..from.min(slots.len())).filter(|ordinal| {
-                self.content_pending
-                    .contains(&(layer.clone(), *level, *ordinal as u32))
-            });
+            let from = *at_level(&self.published_through, layer, *level).unwrap_or(&0) as usize;
+            let below = from.min(slots.len()) as u32;
+            let pending = self
+                .content_pending
+                .range((layer.clone(), *level, 0)..(layer.clone(), *level, below))
+                .map(|(_, _, ordinal)| *ordinal as usize);
             let tail = from..slots.len();
             for slot in pending.chain(tail).map(|ordinal| &slots[ordinal]) {
                 let Some(record) = slot else { continue };
@@ -3988,10 +4031,7 @@ impl ArtifactStore {
     /// with anything outstanding contributes the position it was applied at.
     fn recompute_pin(&mut self) {
         let outstanding = self.levels.iter().any(|((layer, level), slots)| {
-            let through = *self
-                .published_through
-                .get(&(layer.clone(), *level))
-                .unwrap_or(&0) as usize;
+            let through = *at_level(&self.published_through, layer, *level).unwrap_or(&0) as usize;
             through < slots.len()
         });
         if !outstanding {

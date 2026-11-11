@@ -11,6 +11,9 @@
 //! - **The children form down a deep tree**, on a synthetic `nested` layer published over the
 //!   same synthetic bundle (`--tree ROWS:BRANCHING:DEPTH`): its cost follows the requested
 //!   artifact's neighbourhood, so a page deep in the tree should cost what one near the roots does.
+//!   `--tree-content` declares one supplied `text` content on that layer and publishes a name with
+//!   every artifact, so the gate reads each artifact's content back from the live store and the
+//!   search matches names as well as keys.
 //!
 //! # Why the scan needs a fixture of its own, and what that costs the figure
 //!
@@ -34,6 +37,7 @@
 //!     --bundle data/ladder/arxiv/bundle --view knn --layer clusters/kmeans
 //! cargo run --release -p mosaica-bench --bin browse_cost -- --scan-rows 2422486
 //! cargo run --release -p mosaica-bench --bin browse_cost -- --tree 4_000_000:8:6
+//! cargo run --release -p mosaica-bench --bin browse_cost -- --tree 4_000_000:8:6 --tree-content
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -56,6 +60,7 @@ fn main() {
     let mut scan_rows: Option<u64> = None;
     let mut repeat = 5usize;
     let mut tree: Option<(u64, u32, u32)> = None;
+    let mut tree_content = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -71,6 +76,7 @@ fn main() {
                     .collect();
                 tree = Some((parts[0], parts[1] as u32, parts[2] as u32));
             }
+            "--tree-content" => tree_content = true,
             "--repeat" => repeat = args.next().and_then(|n| n.parse().ok()).unwrap_or(5),
             other => panic!("unknown argument {other}"),
         }
@@ -79,7 +85,7 @@ fn main() {
         measure_scan(rows, repeat);
     }
     if let Some((rows, branching, depth)) = tree {
-        measure_tree(rows, branching, depth, repeat);
+        measure_tree(rows, branching, depth, tree_content, repeat);
     }
     if let Some(root) = bundle {
         measure_pages(&root, &view, layer.as_deref(), repeat);
@@ -321,8 +327,9 @@ fn measure_scan(rows: u64, repeat: usize) {
 /// The roots, a search and the children form down a deep `nested` layer: `branching` children
 /// under every artifact to `depth` generations below the one root, each artifact holding a
 /// contiguous run of the `rows` rows, so the layer holds the sum of `branching^k` for `k` from 0
-/// to `depth` artifacts.
-fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
+/// to `depth` artifacts. With `content`, the layer declares one supplied `text` content and every
+/// artifact publishes a name, `name {level}/{index}`.
+fn measure_tree(rows: u64, branching: u32, depth: u32, content: bool, repeat: usize) {
     let tmp = tempfile::TempDir::new().expect("a scratch dir");
     let started = Instant::now();
     let bundle = build_scan_fixture(tmp.path(), rows);
@@ -339,6 +346,13 @@ fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
     let mut declaration = scan_layer();
     declaration.name = "bench/tree".into();
     declaration.hierarchy.kind = mosaica_types::layer::HierarchyKind::Nested;
+    if content {
+        declaration.content.supplied = vec![mosaica_types::layer::SuppliedContent {
+            name: "name".into(),
+            ty: "text".into(),
+            require_member_visibility: mosaica_types::layer::SuppliedRequirement::Inherited,
+        }];
+    }
     engine
         .register_layer(declaration)
         .expect("the layer registers");
@@ -356,6 +370,12 @@ fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
                     Some(format!("{at}/{j}")),
                     members,
                 );
+                if content {
+                    artifact.contents = vec![mosaica_lifecycle::membership::IncomingContent::new(
+                        vec![format!("name {at}/{j}")],
+                        [],
+                    )];
+                }
                 if at > 0 {
                     artifact.parent_keys = vec![format!("{}/{}", at - 1, j / u64::from(branching))];
                 }
@@ -373,7 +393,10 @@ fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
         }
         ids.push(published);
     }
-    println!("{artifacts} artifacts published in {:?}", started.elapsed());
+    println!(
+        "{artifacts} artifacts published in {:?}, supplied content: {content}",
+        started.elapsed()
+    );
     let session = engine
         .authorise(&credential(&all_terms(&bundle)))
         .expect("the credential authorises");

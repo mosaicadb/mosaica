@@ -358,6 +358,7 @@ impl Engine {
                         position,
                         false,
                         table.flatten().as_deref(),
+                        None,
                     )?;
                     self.artifact_id(registered.space, entity).map(|id| id.raw())
                 })
