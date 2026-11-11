@@ -55,7 +55,7 @@ function projection(input: Artifact[]): ArtifactsProjection {
   const served = withRungs(input);
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds, rung: a.rung})));
-  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
+  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), followedLevels: new Map(), lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
 }
 
 const META = {layers: [{name: 'clusters', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: []}, {name: 'topics', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: ['clusters']}]} as unknown as Meta;
@@ -129,19 +129,35 @@ describe('a level chosen for one layer', () => {
 
   it('cuts that layer only: a nested layer drawn beside it keeps its leaves at every level', () => {
     const p = drawn();
-    const coarse = drawnLevels(LEVELLED, p, new Map([['taxonomy', 0]]), null);
+    const coarse = drawnLevels(LEVELLED, p, new Map([['taxonomy', 0]]));
     expect(coarse).toEqual(new Map([['taxonomy', 0]]));
     expect(ids(frontier(p, coarse))).toEqual(['1', '12']);
     expect(ids(labelCandidates(p, LEVELLED, coarse, 0, 10).candidates.map((c) => c.id))).toEqual(['1', '12']);
-    const fine = drawnLevels(LEVELLED, p, new Map([['taxonomy', 1]]), null);
+    const fine = drawnLevels(LEVELLED, p, new Map([['taxonomy', 1]]));
     expect(ids(frontier(p, fine))).toEqual(['12', '2']);
   });
 
   it('is never applied to a nested layer, whose rung is a depth', () => {
     const p = drawn();
     // Unchosen with nothing of it in view, the tiered layer is drawn at its coarsest level, and the tree at its leaves.
-    expect(drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]), null)).toEqual(new Map([['taxonomy', 0]]));
-    expect(ids(frontier(p, drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]), null)))).toEqual(['1', '12']);
+    expect(drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))).toEqual(new Map([['taxonomy', 0]]));
+    expect(ids(frontier(p, drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))))).toEqual(['1', '12']);
+  });
+
+  it('draws a stacked layer at that level alone, since nothing links its levels', () => {
+    const STACKED = {layers: [{name: 'strata', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Coarse'}, {level: 1, title: 'Fine'}], depsOn: []}]} as unknown as Meta;
+    const served = [
+      {...artifact(1n, 50n, ['North'], 'strata'), rung: 0},
+      {...artifact(2n, 40n, ['South'], 'strata'), rung: 0},
+      {...artifact(3n, 30n, ['Harbour'], 'strata'), rung: 1},
+      {...artifact(4n, 20n, ['Ridge'], 'strata'), rung: 1},
+      {...artifact(5n, 10n, ['Marsh'], 'strata'), rung: 1}
+    ];
+    const p: ArtifactsProjection = {...projection([]), layers: ['strata'], served, lineage: servedLineage(served), attached: attachedTextOf(served, STACKED.layers)};
+    const fine = drawnLevels(STACKED, p, new Map([['strata', 1]]));
+    expect(ids(frontier(p, fine, null, STACKED))).toEqual(['3', '4', '5']);
+    expect(ids(labelCandidates(p, STACKED, fine, 0, 10).candidates.map((c) => c.id))).toEqual(['3', '4', '5']);
+    expect(ids(frontier(p, drawnLevels(STACKED, p, new Map([['strata', 0]])), null, STACKED))).toEqual(['1', '2']);
   });
 });
 

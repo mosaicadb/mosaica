@@ -121,7 +121,8 @@ export class MosaicaFilterPanel extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor compact = false;
   /**
    * The level each card for a `stacked` or `tiered` layer counts at, keyed by layer name. A layer
-   * with no entry counts at its coarsest level. Set it as a property; it has no attribute.
+   * with no entry counts at the level the map draws it at, which follows the zoom where its levels
+   * declare no zoom range. Set it as a property; it has no attribute.
    */
   @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
 

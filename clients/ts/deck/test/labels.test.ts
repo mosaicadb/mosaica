@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {LABEL_SIZE_MAX, LABEL_SIZE_MIN, MAX_DISPLACEMENT, MAX_LABEL_CHARS, labelSize, placeLabels, labelLine, type LabelCandidate} from '../src/labels.js';
 import type {Meta} from '@mosaicajs/client';
-import {colourLayerOf, drawnLevel} from '../src/layer.js';
+import {colourLayerOf, drawnLevel, drawnLevels} from '../src/layer.js';
 
 const at = (id: number, x: number, y: number, priority: number, width = 60, height = 24): LabelCandidate => ({id: BigInt(id), x, y, width, height, priority});
 
@@ -152,46 +152,37 @@ describe('drawnLevel', () => {
       layer('ranged', 'tiered', [0, 1, 2], (l) => [l * 4, l * 4 + 3])
     ]
   } as unknown as Meta;
-  const none = {levelsInView: new Map()};
-  /** What the tiles in view hold of `name`: each level's count served, and whether a tile came back full of it. */
-  const inView = (name: string, levels: [number, number, boolean][]) => ({levelsInView: new Map([[name, new Map(levels.map(([level, served, full]) => [level, {served, full}]))]])});
+  const none = {followedLevels: new Map()};
+  /** The levels the store draws layers at where none is chosen. */
+  const followed = (levels: [string, number][]) => ({followedLevels: new Map(levels)});
 
-  it('is the level chosen for the layer, else its coarsest level while nothing of it is in view', () => {
-    expect(drawnLevel(META, none, 'bands', undefined, null)).toBe(0);
-    expect(drawnLevel(META, none, 'bands', new Map([['bands', 2]]), null)).toBe(2);
+  it('is the level chosen for the layer, else its coarsest level while the store follows none', () => {
+    expect(drawnLevel(META, none, 'bands', undefined)).toBe(0);
+    expect(drawnLevel(META, none, 'bands', new Map([['bands', 2]]))).toBe(2);
     // Another layer's choice and a level the layer does not declare leave it at its default level.
-    expect(drawnLevel(META, none, 'bands', new Map([['strata', 1]]), null)).toBe(0);
-    expect(drawnLevel(META, none, 'bands', new Map([['bands', 7]]), null)).toBe(0);
-    expect(drawnLevel(META, none, 'strata', new Map([['bands', 2], ['strata', 1]]), null)).toBe(1);
+    expect(drawnLevel(META, none, 'bands', new Map([['strata', 1]]))).toBe(0);
+    expect(drawnLevel(META, none, 'bands', new Map([['bands', 7]]))).toBe(0);
+    expect(drawnLevel(META, none, 'strata', new Map([['bands', 2], ['strata', 1]]))).toBe(1);
   });
 
   it('is no level on a tree, whatever is chosen for it, nor on a layer the roster does not list', () => {
-    expect(drawnLevel(META, none, 'tree', undefined, null)).toBeUndefined();
-    expect(drawnLevel(META, none, 'tree', new Map([['tree', 1]]), null)).toBeUndefined();
-    expect(drawnLevel(META, none, 'gone', new Map([['gone', 1]]), null)).toBeUndefined();
-    expect(drawnLevel(META, none, undefined, undefined, null)).toBeUndefined();
+    expect(drawnLevel(META, none, 'tree', undefined)).toBeUndefined();
+    expect(drawnLevel(META, none, 'tree', new Map([['tree', 1]]))).toBeUndefined();
+    expect(drawnLevel(META, none, 'gone', new Map([['gone', 1]]))).toBeUndefined();
+    expect(drawnLevel(META, none, undefined, undefined)).toBeUndefined();
   });
 
-  it('with no zoom range declared, is the finest level in view that no full tile and no budget crowds', () => {
-    // Nothing crowded: the finest.
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, false]]), 'bands', undefined, null)).toBe(2);
-    // A full tile of the finest steps up one.
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, true]]), 'bands', undefined, null)).toBe(1);
-    // Within the budget the finest is drawn; past it, the next coarser that fits.
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, false]]), 'bands', undefined, 40)).toBe(2);
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, false]]), 'bands', undefined, 39)).toBe(1);
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, false]]), 'bands', undefined, 5)).toBe(0);
-    // Every level crowded: the coarsest.
-    expect(drawnLevel(META, inView('bands', [[0, 3, true], [1, 12, true], [2, 40, true]]), 'bands', undefined, null)).toBe(0);
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, false]]), 'bands', undefined, 2)).toBe(0);
-    // A chosen level is drawn whatever is in view.
-    expect(drawnLevel(META, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, true]]), 'bands', new Map([['bands', 2]]), 5)).toBe(2);
-  });
-
-  it('with a zoom range declared, is the coarsest level the camera’s zoom serves, however thin', () => {
-    expect(drawnLevel(META, inView('ranged', [[1, 2, false], [2, 1, false]]), 'ranged', undefined, null)).toBe(1);
-    expect(drawnLevel(META, inView('ranged', [[2, 1, false]]), 'ranged', undefined, 1000)).toBe(2);
-    expect(drawnLevel(META, inView('ranged', [[1, 50, true], [2, 1, false]]), 'ranged', new Map([['ranged', 2]]), null)).toBe(2);
+  it('where no level the layer declares is chosen, is the level the store follows for it', () => {
+    expect(drawnLevel(META, followed([['bands', 2]]), 'bands', undefined)).toBe(2);
+    expect(drawnLevel(META, followed([['bands', 2]]), 'bands', new Map([['bands', 7]]))).toBe(2);
+    expect(drawnLevel(META, followed([['bands', 2]]), 'bands', new Map([['bands', 1]]))).toBe(1);
+    expect(drawnLevel(META, followed([['bands', 2], ['ranged', 1]]), 'ranged', undefined)).toBe(1);
+    expect(drawnLevels(META, {layers: ['bands', 'tree', 'strata'], ...followed([['bands', 2]])}, new Map([['strata', 1]]))).toEqual(
+      new Map([
+        ['bands', 2],
+        ['strata', 1]
+      ])
+    );
   });
 
   it('colours marks at the level of the layer coloured by, else of the first layer drawn', () => {

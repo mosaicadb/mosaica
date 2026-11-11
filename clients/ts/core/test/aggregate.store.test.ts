@@ -343,7 +343,31 @@ describe('an aggregate that carries its own filter', () => {
     store.setMembers([venue, lit]);
     store.setAggregate('rest', {groupings: [{count: true}], filters: remainder, highlighted: true});
     await flush();
-    expect(pending[0]!.req.filters).toEqual({all_of: [store.requestFilters(), remainder, {member_of: {layer: 'topics', artifact: '8'}}]});
+    expect(pending[0]!.req.filters).toEqual({
+      all_of: [{archive: {in: ['cs']}}, {member_of: {layer: 'venues', artifact: '9'}}, ...remainder.all_of, {member_of: {layer: 'topics', artifact: '8'}}]
+    });
+  });
+
+  it('stays within the four levels of nesting the server takes under several controls, clauses and a region', async () => {
+    const depth = (expr: unknown): number => {
+      const node = expr as Record<string, unknown>;
+      const kids = ['all_of', 'any_of', 'none_of'].flatMap((key) => (Array.isArray(node[key]) ? (node[key] as unknown[]) : []));
+      return kids.length === 0 && !['all_of', 'any_of', 'none_of'].some((key) => key in node) ? 1 : 1 + Math.max(0, ...kids.map(depth));
+    };
+    const {store, pending} = await storeWith();
+    store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}, year: {family: 'numeric', gte: 2020, lte: null}}, highlight: {archive: {family: 'category', keys: ['math']}}});
+    store.setMembers([
+      {layer: 'topics', artifact: 7n, outside: false, verb: 'filter'},
+      {layer: 'venues', artifact: 9n, outside: true, verb: 'filter'},
+      {layer: 'topics', artifact: 8n, outside: false, verb: 'highlight'}
+    ]);
+    store.select({kind: 'box', bbox: [0, 0, 0.5, 0.5]});
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder, highlighted: true});
+    await flush();
+    const sent = pending.at(-1)!.req.filters;
+    expect(JSON.stringify(sent)).toContain('"region"');
+    expect(JSON.stringify(sent)).toContain('"year"');
+    expect(depth(sent)).toBeLessThanOrEqual(4);
   });
 
   it('is sent alone where the store has no filters', async () => {

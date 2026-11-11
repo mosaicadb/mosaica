@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {colourLayers, drawableLayers, isFilterLayer, layerClosure, layerEntries} from '../src/layers.js';
+import type {LevelsInView} from '../src/artifactChannel.js';
+import {colourLayers, drawableLayers, follows, isFilterLayer, layerClosure, layerEntries, levelInView, levelOfLayer} from '../src/layers.js';
 import type {Layer} from '../src/types.js';
 import {layer as declared} from './support.js';
 
@@ -56,5 +57,66 @@ describe('the layers points may be coloured by', () => {
     const districts = {...layer('districts'), computedContent: ['box']};
     const roster = [clusters, layer('labels', ['clusters']), layer('descriptors'), districts];
     expect(colourLayers(roster).map((l) => l.name)).toEqual(['clusters', 'districts']);
+  });
+});
+
+describe('the level a levelled layer follows', () => {
+  const levelled = (name: string, kind: 'tiered' | 'stacked' | 'nested', levels: number[], zoom: (l: number) => [number, number] | null = () => null): Layer =>
+    declared(name, {hierarchy: {kind, pruneChildren: false}, levels: levels.map((level) => ({level, title: null, zoom: zoom(level)}))});
+  const bands = levelled('bands', 'tiered', [0, 1, 2]);
+  const ranged = levelled('ranged', 'tiered', [0, 1, 2], (l) => [l * 4, l * 4 + 3]);
+  /** What the tiles in view hold of `name`: each level's count drawn, and whether a tile came back full of it. */
+  const inView = (name: string, levels: [number, number, boolean][]): LevelsInView => new Map([[name, new Map(levels.map(([level, served, full]) => [level, {served, full}]))]]);
+  const thin = inView('bands', [
+    [0, 3, false],
+    [1, 12, false],
+    [2, 40, false]
+  ]);
+
+  it('is the finest level in view that no full tile crowds', () => {
+    expect(levelInView(bands, thin, null)).toBe(2);
+    expect(levelInView(bands, inView('bands', [[0, 3, false], [1, 12, false], [2, 40, true]]), null)).toBe(1);
+    // Every level crowded: the coarsest.
+    expect(levelInView(bands, inView('bands', [[0, 3, true], [1, 12, true], [2, 40, true]]), null)).toBe(0);
+  });
+
+  it('is the finest level in view with no more artifacts drawn than the cluster budget', () => {
+    expect(levelInView(bands, thin, 40)).toBe(2);
+    expect(levelInView(bands, thin, 39)).toBe(1);
+    expect(levelInView(bands, thin, 5)).toBe(0);
+    expect(levelInView(bands, thin, 2)).toBe(0);
+  });
+
+  it('moves to a finer level only within four fifths of the budget, and back only past the whole budget', () => {
+    // Drawn at level 1, level 2's 40 in view do not move it under a budget of 49, and do under 50.
+    expect(levelInView(bands, thin, 49, 1)).toBe(1);
+    expect(levelInView(bands, thin, 50, 1)).toBe(2);
+    // Drawn at level 2, it stays there while its 40 are within the budget, and steps up past it.
+    expect(levelInView(bands, thin, 40, 2)).toBe(2);
+    expect(levelInView(bands, thin, 39, 2)).toBe(1);
+    // A full tile crowds a level whatever the budget.
+    expect(levelInView(bands, inView('bands', [[0, 3, false], [1, 12, false], [2, 4, true]]), 1000, 2)).toBe(1);
+  });
+
+  it('is the coarsest level the camera’s zoom serves where a zoom range is declared, however thin', () => {
+    expect(levelInView(ranged, inView('ranged', [[1, 2, false], [2, 1, false]]), null)).toBe(1);
+    expect(levelInView(ranged, inView('ranged', [[2, 1, false]]), 1000, 1)).toBe(2);
+  });
+
+  it('is the coarsest level while nothing of the layer is in view, and no level on a tree', () => {
+    expect(levelInView(bands, new Map(), 10, 2)).toBe(0);
+    expect(levelInView(levelled('tree', 'nested', []), thin, 10)).toBeUndefined();
+  });
+
+  it('is drawn where no level the layer declares is chosen, and the choice stands otherwise', () => {
+    const followed = new Map([['bands', 2]]);
+    expect(follows(bands, undefined)).toBe(true);
+    expect(follows(bands, 7)).toBe(true);
+    expect(follows(bands, 1)).toBe(false);
+    expect(follows(ranged, null)).toBe(false);
+    expect(levelOfLayer(bands, 7, followed)).toBe(2);
+    expect(levelOfLayer(bands, 1, followed)).toBe(1);
+    expect(levelOfLayer(bands, null, new Map())).toBe(0);
+    expect(levelOfLayer(levelled('tree', 'nested', []), 1, followed)).toBeUndefined();
   });
 });

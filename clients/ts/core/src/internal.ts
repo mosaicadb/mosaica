@@ -7,7 +7,7 @@ export {SessionArtifactTable} from './artifactTable.js';
 export {servedLineage} from './artifactChannel.js';
 export {jsonBody} from './client.js';
 export {attachedTextOf} from './names.js';
-export {levelFollowsZoom, levelInView} from './layers.js';
+export {follows, levelFollowsZoom, levelOfLayer} from './layers.js';
 export {bandsOfResult} from './bands.js';
 export type {DepthChoice} from './budget.js';
 export {compose, fold} from './compose.js';

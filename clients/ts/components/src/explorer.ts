@@ -6,8 +6,8 @@ import type {ArtifactDetail, ItemDetail, PaletteName, Store} from '@mosaicajs/cl
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import {CATEGORY_PALETTES, DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DENSITY_CELL_SIZES, RAMPS, cellDepth, nearestStop} from '@mosaicajs/deck';
 import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, colourLayers, emptyDraft} from '@mosaicajs/client';
-import {hasOneLayout, levelFollowsZoom, sizesPoints} from '@mosaicajs/client/internal';
-import {DENSITY_COLOUR_TITLES, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
+import {follows, hasOneLayout, levelFollowsZoom, levelOfLayer, sizesPoints} from '@mosaicajs/client/internal';
+import {DENSITY_COLOUR_TITLES, clusterLayerOf, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
 import {MosaicaElement, columnCaption, emit, shortCount} from './base.js';
 import {placeCallout, type Rect, type Side} from './callout.js';
 import {colouringOf, setColouring, sizingOf, watchChoices} from './colouring.js';
@@ -32,7 +32,6 @@ import './key-picker.js';
 import './artifact-card.js';
 import './colour-editor.js';
 import type {MosaicaColourEditor} from './colour-editor.js';
-import {levelOf} from './aggregate.js';
 import type {MosaicaEventDetails} from './events.js';
 
 /** Every part of every element the explorer renders, forwarded. */
@@ -1676,12 +1675,11 @@ export class MosaicaExplorer extends MosaicaElement {
     const s = this.resolvedStore;
     const meta = s?.get('meta') ?? null;
     if (!s || !meta) return nothing;
-    const colourBy = s.get('legend').colourBy;
-    const coloured = colourBy?.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
+    const coloured = clusterLayerOf(s.get('legend').colourBy);
     const steered = [...s.get('artifacts').layers, ...(coloured === null ? [] : [coloured])].some((name) => {
       const layer = meta.layers.find((l) => l.name === name);
       if (!layer) return false;
-      return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag' || (levelFollowsZoom(layer) && !this.levels.has(name));
+      return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag' || follows(layer, this.levels.get(name));
     });
     if (!steered) return nothing;
     return this.mostSlider({
@@ -1814,9 +1812,9 @@ export class MosaicaExplorer extends MosaicaElement {
     const layers = colourLayers(meta.layers).flatMap((decl) => {
       const value = `${CLUSTER_PREFIX}${decl.name}`;
       if (decl.levels.length <= 1) return [{value, title: decl.title || decl.name, kind: 'Clusters', checked: colourBy === value}];
-      const chosen = this.levels.get(decl.name) ?? null;
-      const following = levelFollowsZoom(decl) && !decl.levels.some((lv) => lv.level === chosen);
-      const drawn = levelOf(decl, chosen, s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
+      const chosen = this.levels.get(decl.name);
+      const following = follows(decl, chosen);
+      const drawn = levelOfLayer(decl, chosen, s?.get('artifacts').followedLevels);
       const follow = levelFollowsZoom(decl) ? [{value: `${value}@`, title: `${decl.title || decl.name}, follow zoom`, kind: 'Clusters', checked: colourBy === value && following}] : [];
       return [...follow, ...decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && !following && drawn === lv.level}))];
     });

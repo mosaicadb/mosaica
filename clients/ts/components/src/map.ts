@@ -13,7 +13,7 @@ import {
 } from '@mosaicajs/client';
 import {assertCompositionMatchesServed, chosenColour, hasValue} from '@mosaicajs/client/internal';
 import {DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DensityCounter, MosaicaLayer, cameraFitting, densityCountAt, frameMatches, resolvePick, viewInputOf, type Picked, type ResolutionStop} from '@mosaicajs/deck';
-import {DENSITY_COLOUR_TITLES, MarkSlab, artifactOfMark, clusterLayerOf, contourShapes, drawnLevel, drawnLevels, densityStops, drawnCells, encodingOf, encodingSignature, hoverAt, levelsKey, maxCount, type ContourShape} from '@mosaicajs/deck/internal';
+import {DENSITY_COLOUR_TITLES, MarkSlab, artifactOfMark, clusterLayerOf, colourLayerOf, contourShapes, drawnLevel, drawnLevels, densityStops, drawnCells, encodingOf, encodingSignature, hoverAt, levelsKey, maxCount, type ContourShape} from '@mosaicajs/deck/internal';
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import type {PaletteName, Quantisation, Rgba} from '@mosaicajs/client';
 import {MosaicaElement, emit, idString, shapeDetail, timestampText, type PickOutcome} from './base.js';
@@ -460,6 +460,12 @@ export class MosaicaMap extends MosaicaElement {
   /**
    * The most clusters a `nested` or `dag` layer is cut to (`Store.setClusterBudget`). `0` keeps the
    * store's setting; setting `0` after another value removes the limit, giving the finest cut.
+   *
+   * The budget also steers a `stacked` or `tiered` layer whose levels declare no zoom range and
+   * which `clusterLevels` leaves to follow the zoom: it is drawn at the finest level with no more
+   * than this many clusters in view, and no tile in view holding the most a tile is served. Without
+   * a budget only a full tile holds a level back, so such a layer is drawn at its finest level at
+   * every zoom until its tiles fill, world zoom included.
    */
   @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 0;
   /**
@@ -483,8 +489,10 @@ export class MosaicaMap extends MosaicaElement {
   @property() accessor palette: PaletteName | '' = '';
   /**
    * The level at which each `stacked` or `tiered` layer's clusters are coloured, labelled and
-   * outlined, keyed by layer name. A layer with no entry is drawn at its coarsest level. A `nested`
-   * or `dag` layer ignores its entry. Set it as a property; it has no attribute.
+   * outlined, keyed by layer name. A layer with no entry is drawn at the level that follows the zoom
+   * where its levels declare no zoom range (see `cluster-budget`), and otherwise at the coarsest
+   * level the camera's zoom serves. A `nested` or `dag` layer ignores its entry. Set it as a
+   * property; it has no attribute.
    */
   @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
   /**
@@ -1117,12 +1125,13 @@ export class MosaicaMap extends MosaicaElement {
     if (artifacts === this.probedArtifacts && view.composition === this.probedComposition) return;
     this.probedArtifacts = artifacts;
     this.probedComposition = view.composition;
-    this.probe.cluster = this.clusterProbe(clusterLayerOf(s.get('legend').colourBy), artifacts, s.get('marks').bands);
+    this.probe.cluster = this.clusterProbe(s.get('legend').colourBy, artifacts, s.get('marks').bands);
   }
 
   /** A sample of carried ordinals, each resolved through the table; see {@link MapProbe.cluster}. */
-  private clusterProbe(clusterLayer: string | null, a: ArtifactsProjection, bands: MarksProjection['bands']): MapProbe['cluster'] {
-    const layer = clusterLayer ?? a.layers[0] ?? null;
+  private clusterProbe(colourBy: string | null, a: ArtifactsProjection, bands: MarksProjection['bands']): MapProbe['cluster'] {
+    const clusterLayer = clusterLayerOf(colourBy);
+    const layer = colourLayerOf(a, colourBy) ?? null;
     const rows = clusterLayer ? a.colourServed : a.served;
     const rowOrdinals = clusterLayer ? new Set(rows.map((x) => a.table.ordinalOf(x.layer, x.mosaicaId))) : a.servedOrdinals;
     const sample: {ordinal: number; resolvedId: string | null}[] = [];
@@ -1735,13 +1744,13 @@ export class MosaicaMap extends MosaicaElement {
   /** The level the layer `name` is drawn at: its entry in `clusterLevels`, else the level in view of a levelled layer. */
   private levelOf(name: string | null | undefined): number | undefined {
     const s = this.resolvedStore;
-    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, name ?? undefined, this.clusterLevels, s?.clusterBudget ?? null);
+    return drawnLevel(s?.get('meta') ?? null, s?.get('artifacts') ?? null, name ?? undefined, this.clusterLevels);
   }
 
   /** {@link levelOf} for each layer drawn. */
   private drawnLevels(): Map<string, number> {
     const s = this.resolvedStore;
-    return drawnLevels(s?.get('meta') ?? null, s?.get('artifacts') ?? null, this.clusterLevels, s?.clusterBudget ?? null);
+    return drawnLevels(s?.get('meta') ?? null, s?.get('artifacts') ?? null, this.clusterLevels);
   }
 
   /** Whether the map is drawn on a light or dark background now: `ground` if set, else the page's scheme. */

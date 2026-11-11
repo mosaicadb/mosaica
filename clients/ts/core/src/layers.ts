@@ -99,6 +99,21 @@ export function browsableLayers(layers: readonly Layer[]): Layer[] {
   return layers.filter((l) => l.depsOn.length === 0 && l.hierarchy.kind !== 'flat');
 }
 
+/** Whether `layer` is drawn at one of its levels: a `stacked` or `tiered` layer that declares some. */
+function isLevelled(layer: Pick<Layer, 'hierarchy' | 'levels'>): boolean {
+  return (layer.hierarchy.kind === 'stacked' || layer.hierarchy.kind === 'tiered') && layer.levels.length > 0;
+}
+
+/** Whether `level` is one `layer` declares, so a choice of it stands. */
+function declares(layer: Pick<Layer, 'levels'>, level: number | null | undefined): level is number {
+  return level != null && layer.levels.some((l) => l.level === level);
+}
+
+/** A layer's coarsest declared level. */
+function coarsest(layer: Pick<Layer, 'levels'>): number {
+  return Math.min(...layer.levels.map((l) => l.level));
+}
+
 /**
  * Whether the level a `stacked` or `tiered` layer is drawn at follows the zoom where none is
  * chosen: it declares levels, and none of them declares a zoom range.
@@ -106,18 +121,40 @@ export function browsableLayers(layers: readonly Layer[]): Layer[] {
  * @internal
  */
 export function levelFollowsZoom(layer: Pick<Layer, 'hierarchy' | 'levels'>): boolean {
-  return (layer.hierarchy.kind === 'stacked' || layer.hierarchy.kind === 'tiered') && layer.levels.length > 0 && layer.levels.every((l) => l.zoom == null);
+  return isLevelled(layer) && layer.levels.every((l) => l.zoom == null);
 }
 
 /**
+ * Whether `layer` is drawn at the level that follows the zoom: it can follow the zoom
+ * ({@link levelFollowsZoom}), and `chosen` is not one of its levels.
+ *
+ * @internal
+ */
+export function follows(layer: Pick<Layer, 'hierarchy' | 'levels'>, chosen: number | null | undefined): boolean {
+  return levelFollowsZoom(layer) && !declares(layer, chosen);
+}
+
+/**
+ * The share of the cluster budget a finer level's artifacts in view must be within before a layer
+ * that follows the zoom moves to it. The layer then stays at that level until its artifacts in view
+ * are over the whole budget, so a count near the budget does not move the level back and forth as
+ * the map pans.
+ */
+const DEEPEN_WITHIN = 0.8;
+
+/**
  * The level a `stacked` or `tiered` layer with no level chosen is drawn at, from what the tiles in
- * view hold of it: `inView` is the artifacts projection's `levelsInView`.
+ * view hold of it: `inView` is the artifacts projection's `levelsInView`, and `current` the level
+ * the layer is drawn at now, if any.
  *
  * Where the layer follows the zoom ({@link levelFollowsZoom}), it is the finest level in view that
  * is not crowded, else the coarsest in view. A level is crowded where a tile in view came back with
- * its full `perTile` of it, or where more of its artifacts are in view than `budget`, the store's
- * cluster budget; with no budget only a full tile crowds a level. Zooming in thins every level in
- * view, so the level drawn deepens.
+ * its full `perTile` of it, or where more of its artifacts are drawn in view than a limit set by
+ * `budget`, the store's cluster budget. The limit is `budget` itself for `current` and the levels
+ * coarser than it, and {@link DEEPEN_WITHIN} of `budget` for the levels finer than `current`. With
+ * no budget only a full tile crowds a level, so the layer is drawn at the finest level no tile in
+ * view is full of, however many of its artifacts are in view. Zooming in thins every level in view,
+ * so the level drawn deepens.
  *
  * Where a level declares a zoom range, it is the coarsest level in view, of those the camera's zoom
  * selects. With nothing of the layer in view, it is the layer's coarsest level. `undefined` on a
@@ -125,15 +162,46 @@ export function levelFollowsZoom(layer: Pick<Layer, 'hierarchy' | 'levels'>): bo
  *
  * @internal
  */
-export function levelInView(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, inView: LevelsInView, budget: number | null): number | undefined {
-  if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
+export function levelInView(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, inView: LevelsInView, budget: number | null, current?: number): number | undefined {
+  if (!isLevelled(layer)) return undefined;
   const held = inView.get(layer.name);
   const levels = [...(held?.keys() ?? [])].sort((a, b) => a - b);
-  if (!held || levels.length === 0) return Math.min(...layer.levels.map((l) => l.level));
+  if (!held || levels.length === 0) return coarsest(layer);
   if (!levelFollowsZoom(layer)) return levels[0];
   for (let i = levels.length - 1; i >= 0; i--) {
-    const at = held.get(levels[i]!)!;
-    if (!at.full && (budget === null || at.served <= budget)) return levels[i];
+    const level = levels[i]!;
+    const at = held.get(level)!;
+    const limit = budget === null ? Infinity : current !== undefined && level > current ? budget * DEEPEN_WITHIN : budget;
+    if (!at.full && at.served <= limit) return level;
   }
   return levels[0];
+}
+
+/**
+ * {@link levelInView} for each `stacked` or `tiered` layer of `layers`, each from the level `before`
+ * gives for it, keyed by name.
+ *
+ * @internal
+ */
+export function levelsDrawnInView(layers: readonly Pick<Layer, 'name' | 'hierarchy' | 'levels'>[], inView: LevelsInView, budget: number | null, before: ReadonlyMap<string, number>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const layer of layers) {
+    const level = levelInView(layer, inView, budget, before.get(layer.name));
+    if (level !== undefined) out.set(layer.name, level);
+  }
+  return out;
+}
+
+/**
+ * The level a `stacked` or `tiered` layer is coloured, named, outlined and counted at: `chosen`
+ * where the layer declares it, else its entry in `followed` (the artifacts projection's
+ * `followedLevels`), else its coarsest level. `undefined` on a layer of any other kind, and on one
+ * declaring no levels.
+ *
+ * @internal
+ */
+export function levelOfLayer(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, chosen: number | null | undefined, followed: ReadonlyMap<string, number> | undefined): number | undefined {
+  if (!isLevelled(layer)) return undefined;
+  if (declares(layer, chosen)) return chosen;
+  return followed?.get(layer.name) ?? coarsest(layer);
 }

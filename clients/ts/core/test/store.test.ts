@@ -972,6 +972,44 @@ describe('subscription', () => {
   });
 });
 
+describe('the level a stacked layer follows', () => {
+  it('moves to the finer level only well within the cluster budget, and back only once it is over it', async () => {
+    const strata = layer('strata', {
+      hierarchy: {kind: 'stacked', pruneChildren: false},
+      computedContent: ['centroid'],
+      levels: [
+        {level: 0, title: 'Coarse', zoom: null},
+        {level: 1, title: 'Fine', zoom: null}
+      ]
+    });
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const rows = (t: bigint) => [artifact(t * 10n, {layer: 'strata', rung: 0}), ...[1n, 2n, 3n].map((i) => artifact(t * 10n + i, {layer: 'strata', rung: 1}))];
+    const {client} = fakeClient(() => response('ck'), {...META, layers: [strata]}, rows);
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
+    await clock.advance(1);
+    store.setLayers(['strata']);
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 800, 800));
+    await clock.advance(600);
+    scheduler.flush();
+    await clock.advance(600);
+    const fine = store.get('artifacts').levelsInView.get('strata')!.get(1)!.served;
+    expect(fine).toBeGreaterThan(4);
+    const level = () => store.get('artifacts').followedLevels.get('strata');
+    // With no budget no tile is full, so the finest.
+    expect(level()).toBe(1);
+    store.setClusterBudget(fine);
+    expect(level()).toBe(1);
+    store.setClusterBudget(fine - 1);
+    expect(level()).toBe(0);
+    store.setClusterBudget(fine);
+    expect(level()).toBe(0);
+    store.setClusterBudget(Math.ceil(fine / 0.8));
+    expect(level()).toBe(1);
+    store.dispose();
+  });
+});
+
 describe('setLayers before meta', () => {
   it('is honoured once the channel exists, and the projection shows the intent meanwhile', async () => {
     const clock = fakeClock();
