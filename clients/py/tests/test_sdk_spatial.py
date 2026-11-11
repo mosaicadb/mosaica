@@ -8,6 +8,7 @@ produced over the viewer's own visible rows.
 from __future__ import annotations
 
 import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 from conftest import browse
@@ -19,6 +20,10 @@ pytest.importorskip("pyarrow")
 
 #: The lower-left quarter of the notebook corpus's own coordinates, in the view's space.
 REGION = "POLYGON ((0 0, 30000 0, 30000 30000, 0 30000, 0 0))"
+
+
+def papers(corpus) -> int:
+    return pq.read_metadata(corpus / "points.parquet").num_rows
 
 
 def test_a_layer_of_inline_polygons_is_built_and_served_with_a_masked_count(served, corpus):
@@ -37,9 +42,9 @@ def test_a_layer_of_inline_polygons_is_built_and_served_with_a_masked_count(serv
     assert "[[layer.artifacts]]" in db.declaration
     rows = browse(db, "s0", "regions")["artifacts"]
     assert [row["key"] for row in rows] == ["lower_left"]
-    # The corpus holds 50,000 papers and the polygon is a quarter of the frame, so the shape
-    # selected some of them and not all of them.
-    assert 0 < rows[0]["masked_count"] < 50_000
+    # The polygon is a quarter of the frame, so the shape selected some of the papers and not all
+    # of them.
+    assert 0 < rows[0]["masked_count"] < papers(corpus)
 
 
 def test_a_spatial_layer_published_after_the_first_commit_carries_its_wkt_and_its_space(
@@ -81,7 +86,7 @@ def test_a_spatial_layer_published_after_the_first_commit_carries_its_wkt_and_it
 
     rows = browse(db, "s0", "regions")["artifacts"]
     assert [row["key"] for row in rows] == ["lower_left"]
-    assert 0 < rows[0]["masked_count"] < 50_000
+    assert 0 < rows[0]["masked_count"] < papers(corpus)
 
 
 def test_a_polygon_in_wkb_at_the_publication_route_is_a_finding(served, corpus):
@@ -132,7 +137,7 @@ def test_an_inline_roster_built_at_the_first_commit_is_not_offered_again(served,
     db = served(declare)
     rows = browse(db, "s0", "cohorts")["artifacts"]
     assert [row["key"] for row in rows] == ["all_but_three"]
-    assert rows[0]["masked_count"] == 49_997
+    assert rows[0]["masked_count"] == papers(corpus) - 3
 
     plan = db.check()
     assert plan.ok, plan
@@ -141,7 +146,7 @@ def test_an_inline_roster_built_at_the_first_commit_is_not_offered_again(served,
     assert report.ok, report
 
     rows = browse(db, "s0", "cohorts")["artifacts"]
-    assert rows[0]["masked_count"] == 49_997
+    assert rows[0]["masked_count"] == papers(corpus) - 3
 
 
 # ------------------------------------------------------------- a box on a projected view

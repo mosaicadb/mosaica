@@ -169,6 +169,39 @@ fn items_refuses_a_non_decimal_key() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("not-a-key"));
 }
 
+/// `materialise --ingest` writes the generator's ingest body for the range, which may start past
+/// the built items, and writes none without it.
+#[test]
+fn materialise_writes_the_ingest_body_of_the_range_it_is_given() {
+    let dir = tempfile::tempdir().unwrap();
+    let materialise = |out: &std::path::Path, extra: &[&str]| {
+        let run = mosaica()
+            .args([
+                "corpus",
+                "materialise",
+                "--seed",
+                "7",
+                "--n",
+                "100",
+                "--out",
+            ])
+            .arg(out)
+            .args(extra)
+            .output()
+            .unwrap();
+        assert!(run.status.success(), "{run:?}");
+    };
+    let with = dir.path().join("with");
+    materialise(&with, &["--ingest", "90..130"]);
+    let batches = decode_stream(&std::fs::read(with.join("ingest.arrows")).unwrap());
+    let expected = Corpus::new(7, 100, grid()).unwrap().ingest_batch(90..130);
+    assert_eq!(batches, vec![expected]);
+
+    let without = dir.path().join("without");
+    materialise(&without, &[]);
+    assert!(!without.join("ingest.arrows").exists());
+}
+
 /// The corpus's declaration parses under the build's own `schema.toml` parser — the loop from
 /// generator to `mosaica build --config` closed with the real consumer, so a drifted spelling in
 /// the generated declaration fails here rather than at the first suite run.

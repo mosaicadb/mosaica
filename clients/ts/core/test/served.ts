@@ -10,9 +10,10 @@ import {createInterface} from 'node:readline';
  *
  * The binary is `MOSAICA_BIN`, then this checkout's own `target/release` or `target/debug`, then
  * `mosaica` on `PATH`, then a target directory above the checkout; the one used is printed. The
- * corpus is `MOSAICA_NOTEBOOK_DATA`, then `data/notebook/` beside the git common directory, which
- * every worktree of a checkout shares. Where either is missing, `start` returns the reason instead
- * of a server, and each test skips with it. A `MOSAICA_BIN` naming no file is an error.
+ * corpus is the one `python3 -m corpora.notebook` writes from the example data and a seed, once,
+ * into the temporary directory. Where the binary is missing or the corpus cannot be written,
+ * `start` returns the reason instead of a server, and each test skips with it. A `MOSAICA_BIN`
+ * naming no file is an error.
  *
  * The declaration served is the notebook's own `schema.toml` with one view group added, two views
  * over the same points, so `/v1/meta` has a group and a roster to decode. A caller may pass another
@@ -55,17 +56,12 @@ export function findBinary(): {path: string; from: string} | null {
   return null;
 }
 
-function findCorpus(): string | null {
-  const named = process.env.MOSAICA_NOTEBOOK_DATA;
-  if (named) return existsSync(join(named, 'schema.toml')) ? named : null;
-  const roots: string[] = [];
-  const common = spawnSync('git', ['rev-parse', '--git-common-dir'], {cwd: here, encoding: 'utf8'});
-  if (common.status === 0) roots.push(dirname(resolve(here, common.stdout.trim())));
-  roots.push(resolve(here, '../../../..'));
-  for (const root of roots) {
-    if (existsSync(join(root, 'data', 'notebook', 'schema.toml'))) return join(root, 'data', 'notebook');
-  }
-  return null;
+/** The notebook corpus's directory, or the reason there is none. */
+function findCorpus(): {directory: string} | {reason: string} {
+  const written = spawnSync('python3', ['-m', 'corpora.notebook'], {cwd: resolve(here, '../../../..'), encoding: 'utf8'});
+  if (written.error) return {reason: `python3 could not be run to write the notebook corpus: ${written.error.message}`};
+  if (written.status !== 0) return {reason: `python3 -m corpora.notebook failed: ${written.stderr.trim().split('\n').at(-1)}`};
+  return {directory: written.stdout.trim()};
 }
 
 /** The notebook declaration, anchored on its own view, with the group appended. */
@@ -133,8 +129,8 @@ function listening(child: ChildProcess, errors: () => string, timeoutMs: number)
  * Build a corpus into a temporary deployment and serve it: the notebook's, or `corpus`, and with
  * `open`, as `mosaica serve --open`.
  *
- * Returns a string, the reason, where the binary or the notebook corpus is not on this machine. A
- * build or a serve that fails throws: those are failures, not absences.
+ * Returns a string, the reason, where the binary is not on this machine or the notebook corpus
+ * cannot be written. A build or a serve that fails throws: those are failures, not absences.
  */
 export async function start(
   options: {corpus?: {directory: string; schema: string}; open?: boolean} = {}
@@ -146,8 +142,8 @@ export async function start(
   console.log(`live test: serving with ${binary}, from ${found.from}`);
   if (!corpus) {
     const notebook = findCorpus();
-    if (!notebook) return 'data/notebook/ is not in this checkout; set MOSAICA_NOTEBOOK_DATA';
-    corpus = {directory: notebook, schema: declaration(notebook)};
+    if ('reason' in notebook) return notebook.reason;
+    corpus = {directory: notebook.directory, schema: declaration(notebook.directory)};
   }
 
   const directory = mkdtempSync(join(tmpdir(), 'mosaica-ts-live-'));

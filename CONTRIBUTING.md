@@ -61,7 +61,11 @@ The `ci` profile runs every test after a failure, so a failure early in the run 
 count of the rest.
 
 `check-clients.sh` needs Playwright's Chromium (`cd clients/ts && npx playwright install
-chromium`), and `check-docs.sh` needs the documentation's Python packages, which its header says
+chromium`). Its live tests serve with the `mosaica` binary, so build it first; without it they
+skip and say so. They and the Python suite's serve a corpus of arXiv papers that
+`python3 -m corpora.notebook` writes from `examples/data/arxiv/` once, into the temporary
+directory, for which `check-clients.sh` needs `numpy` and `pyarrow` in `python3`.
+`check-docs.sh` needs the documentation's Python packages, which its header says
 how to install.
 
 The components' browser suite, which `check-clients.sh` runs, checks the explorer in each of its

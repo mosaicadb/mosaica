@@ -276,6 +276,17 @@ fn a_refused_publication_re_plans_above_the_number_it_was_refused_at() {
         dir.join(format!("SEGMENTS-{taken}.json")),
     )
     .unwrap();
+    // The refusal re-arms the flush, which retries a second later. Holding the executor's work
+    // pass keeps the retry from publishing until the refusal has been observed. Let go on drop, so
+    // a failed assertion does not leave the executor held and the engine's drop waiting on it.
+    struct HeldWorkPass<'a>(&'a Engine);
+    impl Drop for HeldWorkPass<'_> {
+        fn drop(&mut self) {
+            self.0.set_work_pass_paused_for_test(false);
+        }
+    }
+    engine.set_work_pass_paused_for_test(true);
+    let held = HeldWorkPass(&engine);
     faults.release();
 
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -299,7 +310,7 @@ fn a_refused_publication_re_plans_above_the_number_it_was_refused_at() {
 
     // The retry: a number above what is on disc, and the row with it. The row count is taken
     // after the swap, so the wait is on both.
-    engine.request_flush();
+    drop(held);
     let deadline = Instant::now() + Duration::from_secs(30);
     while engine.generation().segments_version == 0
         || engine.write_executor_stats().flush_rows_published == 0

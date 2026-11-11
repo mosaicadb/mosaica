@@ -117,6 +117,7 @@ from oracle.harness import (
     exited_early,
     free_port,
     kill_server,
+    prebuilt,
     stop_server,
 )
 from oracle.layout import named_files
@@ -302,8 +303,11 @@ def ensure_faults_cli_built() -> None:
     tracks the feature set, so a stale or wrong-featured binary at this path is rebuilt rather
     than trusted. The separate ``--target-dir`` is what keeps the two binaries from ever
     overwriting each other — a stage carrying a kill boots this one, every other stage boots
-    `CLI_BIN`.
+    `CLI_BIN`. Like `ensure_cli_built`, it builds nothing where `PREBUILT_ENV` says the binary
+    was built before the run.
     """
+    if prebuilt(FAULTS_CLI_BIN):
+        return
     subprocess.run(
         [
             "cargo",

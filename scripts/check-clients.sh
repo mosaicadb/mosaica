@@ -12,8 +12,10 @@
 # The operator scripts are plain `.mjs` and are checked with `checkJs`, so a block-scoped variable
 # used before its declaration (TS2448) fails here rather than at run time.
 #
-# The live test builds `data/notebook/` with the `mosaica` binary. Where either is missing it skips
-# each test and prints the reason, as the Python suite's server tests do.
+# The live tests serve with the `mosaica` binary, and core's serve the notebook corpus, which
+# `python3 -m corpora.notebook` writes with numpy and pyarrow. Where the binary is missing, or the
+# corpus cannot be written, each test skips and prints the reason, as the Python suite's server
+# tests do.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
