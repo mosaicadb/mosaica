@@ -843,7 +843,6 @@ impl Engine {
                 position,
                 true,
                 contents,
-                None,
             )?;
             let mosaica_id = self.artifact_id(level.layer.registered.space, entity)?.raw();
             Some(Arc::new(Admitted {

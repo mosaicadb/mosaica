@@ -284,7 +284,6 @@ impl Scope<'_> {
             ordinal,
             entity,
             position,
-            None,
         )?;
         let mosaica_id = self.engine.artifact_id(self.layer.space, entity)?.raw();
         Some(Served {
@@ -353,7 +352,6 @@ impl Scope<'_> {
             attachment.ordinal,
             attachment.entity,
             position,
-            None,
         )?;
         Some(read)
     }

@@ -692,7 +692,7 @@ impl Gate<'_> {
         // generating set receives no artifact at all rather than one with its description
         // missing (decision 0076), which is why this runs inside the gate and not beside the row
         // build.
-        let content = read.content(self.engine, self.layer, ordinal, entity, position, None)?;
+        let content = read.content(self.engine, self.layer, ordinal, entity, position)?;
         let gated = Gated {
             level,
             ordinal,
@@ -1020,8 +1020,7 @@ impl<'a, 'c> Namer<'a, 'c> {
                         else {
                             return None;
                         };
-                        read.content(engine, label, at, entity, position, None)?
-                            .name()
+                        read.content(engine, label, at, entity, position)?.name()
                     })
                 })
             })

@@ -569,8 +569,7 @@ impl ReadLevel {
     }
 
     /// The content the verdict's `position` names, with any authored shape taken out of it, or
-    /// `None` where it cannot be read back, which withholds the artifact. `held` is this level's
-    /// slots where the caller holds the live store, as [`Engine::supplied_content`] takes them.
+    /// `None` where it cannot be read back, which withholds the artifact.
     pub(crate) fn content(
         &self,
         engine: &Engine,
@@ -578,7 +577,6 @@ impl ReadLevel {
         ordinal: u32,
         entity: EntityId,
         position: Option<u32>,
-        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
     ) -> Option<crate::viewport::Supplied> {
         engine.supplied_content(
             self.space_content.as_deref(),
@@ -589,7 +587,6 @@ impl ReadLevel {
             position,
             true,
             self.contents.as_deref(),
-            held,
         )
     }
 

@@ -68,10 +68,6 @@ fn take_authored_shapes(
     shapes
 }
 
-/// The most artifacts whose content one hold of the live store reads. The store is one lock for
-/// the whole server, so a walk over a level releases it between batches.
-pub(crate) const CONTENT_BATCH: usize = 4096;
-
 /// An artifact's supplied content as it may leave the engine: the values, with an authored
 /// shape's slot blank, and the shapes taken from that slot.
 pub(crate) struct Supplied {
@@ -464,7 +460,6 @@ impl Engine {
             true,
             // Reads the row directly: one artifact does not justify building the level's table.
             None,
-            None,
         ) else {
             return Ok(None);
         };
@@ -606,9 +601,6 @@ impl Engine {
     /// `table` is the level's contents, read once by the viewport pass, keeping a response off
     /// one zstd block read per artifact. `None` reads the one entity's row directly.
     ///
-    /// `held` is the level's slots in the live store, where the caller walks the level under one
-    /// hold of it; `None` takes the store for this artifact alone.
-    ///
     /// Every route that serves or searches supplied content takes it from here. An authored
     /// shape's slot names every view of its layer and holds each one's canonical shape, so it is
     /// taken out of the values here and returned beside them, for drawing one view's shape.
@@ -623,7 +615,6 @@ impl Engine {
         position: Option<u32>,
         materialise: bool,
         table: Option<&crate::artifact_content::LevelContent>,
-        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
     ) -> Option<Supplied> {
         let mut values = self.supplied_values(
             content,
@@ -635,7 +626,6 @@ impl Engine {
             position,
             materialise,
             table,
-            held,
         )?;
         let authored = take_authored_shapes(declaration, &mut values);
         Some(Supplied {
@@ -643,25 +633,6 @@ impl Engine {
             authored,
             shape_slot: declaration.authored_shape().map(|(slot, _)| slot),
         })
-    }
-
-    /// `read` of each of `items`, given `level` of `layer`'s slots in the live store, which is
-    /// held once for each [`CONTENT_BATCH`] of them and released between.
-    pub(crate) fn read_held<T, R>(
-        &self,
-        layer: &str,
-        level: u32,
-        items: &[T],
-        mut read: impl FnMut(&T, &[Option<Box<mosaica_lifecycle::ArtifactRecord>>]) -> R,
-    ) -> Vec<R> {
-        let mut out = Vec::with_capacity(items.len());
-        for batch in items.chunks(CONTENT_BATCH) {
-            self.write.live().with_artifacts(|store| {
-                let held = store.slots(layer, level);
-                out.extend(batch.iter().map(|item| read(item, held)));
-            });
-        }
-        out
     }
 
     /// [`Engine::supplied_content`]'s values as the store holds them, the shape slot included.
@@ -677,7 +648,6 @@ impl Engine {
         position: Option<u32>,
         materialise: bool,
         table: Option<&crate::artifact_content::LevelContent>,
-        held: Option<&[Option<Box<mosaica_lifecycle::ArtifactRecord>>]>,
     ) -> Option<Vec<String>> {
         let Some(position) = position else {
             return Some(Vec::new());
@@ -685,22 +655,15 @@ impl Engine {
         // The publication's own copy, the only home the content has before the manifest carries it.
         // A content withdrawn since the verdict's version of the record is not served, and no other
         // content is read in its place.
-        let read = |slots: &[Option<Box<mosaica_lifecycle::ArtifactRecord>>]| {
-            let record = slots.get(ordinal as usize)?.as_deref()?;
+        let held = self.write.live().with_artifacts(|store| {
+            let record = store.get(layer, level, ordinal)?;
             let set = record.contents.get(record.rank_at(position as usize)?)?;
             Some(match (&set.values, materialise) {
                 (Some(values), true) => Some(values.clone()),
                 (Some(_), false) => Some(Vec::new()),
                 (None, _) => None,
             })
-        };
-        let held = match held {
-            Some(slots) => read(slots),
-            None => self
-                .write
-                .live()
-                .with_artifacts(|store| read(store.slots(layer, level))),
-        };
+        });
         if let Some(values) = held? {
             return Some(values);
         }
@@ -1275,27 +1238,23 @@ impl Engine {
         keyed.sort_unstable_by(|(a, at), (b, bt)| {
             (a.is_none(), a, at.0).cmp(&(b.is_none(), b, bt.0))
         });
-        let layer = level.layer;
-        let supplied = self.read_held(&layer.name, level.level, &keyed, |(_, at), held| {
-            self.supplied_content(
-                layer
+        for (key, at) in keyed {
+            let content = match self.supplied_content(
+                level
+                    .layer
                     .pass
                     .served
                     .generation
-                    .space_content(layer.registered.space)
+                    .space_content(level.layer.registered.space)
                     .map(Arc::as_ref),
-                &layer.registered.declaration,
+                &level.layer.registered.declaration,
                 level.level,
                 at.0,
                 at.1,
                 at.3,
-                layer.pass.ask.rows == ArtifactRows::Full,
+                level.layer.pass.ask.rows == ArtifactRows::Full,
                 contents.as_deref(),
-                Some(held),
-            )
-        });
-        for ((key, at), supplied) in keyed.into_iter().zip(supplied) {
-            let content = match supplied {
+            ) {
                 Some(supplied) => supplied.values,
                 // Content restored from a packed extent carries no values yet, and is withheld
                 // rather than served with its description missing. Asked under the identity
@@ -1334,7 +1293,6 @@ impl Engine {
             position,
             false,
             contents,
-            None,
         )
         .is_some()
             && self.artifact_id(layer.registered.space, entity).is_some()
