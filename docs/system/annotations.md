@@ -86,7 +86,7 @@ A client asks for the artifacts in each map tile, as described under [annotation
 - **Filters mark matches.** Filtering the map does not change which artifacts are served or their counts. Each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight, so a client can dull the topics with no matches.
 - **Colours.** A request can ask for a colour slot for each artifact, from a palette of 2 to 32 colours. Mosaica tries to give neighbouring artifacts different slots, keeps a viewer's slot for an artifact the same at every zoom, and gives the largest child of a topic its parent's colour where it can, so a cluster usually keeps its colour as the viewer zooms into it. Two viewers with different access may see one cluster in different colours.
 
-An artifact deep in a large tree, or a small one in tiles crowded with larger ones, may not be drawn at any zoom a viewer reaches. `POST /v1/artifacts/browse` lists a layer's artifacts without a map: a page of its top-level artifacts, one artifact's children, or a search by name, each with the count the map would show.
+An artifact deep in a large tree, or a small one in tiles crowded with larger ones, may not be drawn at any zoom a viewer reaches. `POST /v1/artifacts/browse` lists a layer's artifacts without a map: a page of its top-level artifacts, one artifact's children, or a search by name, each with the count the map would show. On a stacked or tiered layer the top-level artifacts and the search cover every level unless the request names one.
 
 ## Who sees an annotation
 
@@ -106,7 +106,7 @@ A viewer is served an artifact only if it passes three tests.
 
 Use `"none"` for a region that exists whether or not a viewer can see anything in it, such as a country. Such a region is served by its `mosaica_id`, in browse and in bulk reads, but the map's tiles draw only artifacts with a member the viewer can see in that tile. Use a stricter requirement where the artifact itself says something about its members, such as a cluster of confidential documents.
 
-An artifact a viewer is not served does not exist for them: no row, no count, no gap in a list, no parent naming it, and a 404 when named directly. On the map, its children attach to its nearest ancestor the viewer is served. In browse and bulk reads they show no parent, as roots.
+An artifact a viewer is not served does not exist for them: no row, no count, no gap in a list, no parent naming it, and a 404 when named directly. Its served children attach to its nearest ancestors the viewer is served, or are roots where it has none. The map, browse and bulk reads all name parents by this one rule, so a client walking any of them sees the same tree, and a map frame names only the parents it carries. A tiered artifact whose ancestors are all withheld is a root at its own level.
 
 ```mermaid
 flowchart TB
@@ -123,7 +123,7 @@ flowchart TB
   end
 ```
 
-*Topic X is withheld. On the map its children attach to the root, so the viewer sees a whole tree with no gap.*
+*Topic X is withheld. On the map, in browse and in bulk reads its children attach to the root, so the viewer sees a whole tree with no gap.*
 
 ### Names generated from the members
 

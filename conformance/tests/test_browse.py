@@ -13,9 +13,12 @@ What is asserted, and by which second reader:
   the reader that already exists for those numbers — so a browse that computed its counts a second
   way is caught rather than ratified.
 - **A row's `child_count` is the children the principal is served.** A `nested` layer beside the
-  flat ones has a child only term "2" can see; each row's count is compared with how many of the
-  frame's artifacts name it in `parent_ids`, for every principal, and with the length of its
-  children page.
+  flat ones has a child only term "2" can see, and that child has a child of its own every
+  principal can see; each row's count is compared with how many of the frame's artifacts name it
+  in `parent_ids`, for every principal, and with the length of its children page.
+- **A withheld artifact's children hang from its nearest served ancestors.** Every row's
+  `parent_ids` is the oracle's `induced()` over the artifacts the frame serves that principal,
+  so the child under the gated node names `top` for the principal not served the gated node.
 - **The gate runs before the page.** The artifact withheld from the narrow principal is absent from
   every form at once, and their page's `next` counts only rows they may see.
 - **The order is total and the cursor walks it exactly**: paging one row at a time reproduces the
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import pytest
 
+from oracle.aggregate import induced
 from oracle.harness import spawn_server, stop_server
 from oracle.wire import decode_viewport_artifacts
 
@@ -53,13 +57,19 @@ from test_shape_membership import (
 TREE = "regions/tree"
 
 
+#: Each node of `tree_layer_toml`'s layer, by key, with its parents' keys.
+TREE_PARENTS = {"left": ["top"], "strip": ["top"], "corner": ["left"], "band": ["strip"]}
+
+
 def tree_layer_toml() -> str:
     """A `nested` spatial layer: `top` over the map, `left` and `strip` under it, `corner` under
-    `left`. `strip` is the gated strip, whose members only term "2" holds, so a principal holding
-    only "1" is not served it and `top` has one child for them."""
+    `left` and `band` under `strip`. `strip` is the gated strip, whose members only term "2" holds,
+    so a principal holding only "1" is not served it. `band` reaches past the strip to lattice
+    rows term "1" holds, so that principal is served `band` under `top`."""
     top = "POLYGON ((0 0, 65535 0, 65535 65535, 0 65535, 0 0))"
     left = "POLYGON ((0 0, 32768 0, 32768 65535, 0 65535, 0 0))"
     corner = "POLYGON ((4096 4096, 8192 4096, 8192 8192, 4096 8192, 4096 4096))"
+    band = "POLYGON ((0 1000, 16384 1000, 16384 3000, 0 3000, 0 1000))"
     return f"""
 [[layer]]
 name = "{TREE}"
@@ -74,7 +84,8 @@ artifacts = [
   {{ key = "top", wkt = "{top}" }},
   {{ key = "left", wkt = "{left}", parent = "top" }},
   {{ key = "strip", wkt = "{GATED_STRIP}", parent = "top" }},
-  {{ key = "corner", wkt = "{corner}", parent = "left" }}
+  {{ key = "corner", wkt = "{corner}", parent = "left" }},
+  {{ key = "band", wkt = "{band}", parent = "strip" }}
 ]
 
   [layer.shape]
@@ -141,7 +152,8 @@ def test_a_page_is_the_artifacts_frames_own_rows(browse_server):
 
 def test_a_rows_child_count_is_the_children_the_principal_is_served(browse_server):
     server, _points = browse_server
-    want_top = {("1",): 1, ("2",): 2, ("1", "2"): 2}
+    # `left` and `strip`, or for the principal not served `strip`, `left` and `band`.
+    want_top = {("1",): 2, ("2",): 2, ("1", "2"): 2}
     for terms in PRINCIPALS:
         token = server.authorise(terms)["token"]
         frame = served_artifacts(server, token, TREE)
@@ -159,7 +171,27 @@ def test_a_rows_child_count_is_the_children_the_principal_is_served(browse_serve
         assert counts == children_in_frame, f"principal {terms}: browse and the frame disagree"
         by_key = {row.get("key"): row["child_count"] for row in rows}
         assert by_key["top"] == want_top[tuple(terms)], f"principal {terms}: {by_key}"
-        assert by_key["left"] == 1 and by_key["corner"] == 0
+        assert by_key["left"] == 1 and by_key["corner"] == 0 and by_key["band"] == 0
+
+
+def test_a_withheld_artifacts_children_hang_from_its_nearest_served_ancestors(browse_server):
+    server, _points = browse_server
+    for terms in PRINCIPALS:
+        token = server.authorise(terms)["token"]
+        frame = served_artifacts(server, token, TREE)
+        key_of = {tid: a.key for tid, a in frame.items()}
+        passing = set(key_of.values())
+        assert "band" in passing, f"principal {terms}: the band is served"
+        rows = page(server, token, layer=TREE, q="", limit=200)["artifacts"]
+        assert {row["key"] for row in rows} == passing, f"principal {terms}"
+        for row in rows:
+            named = {key_of[tid] for tid in row["parent_ids"]}
+            want = induced(TREE_PARENTS, passing, row["key"])
+            assert named == want, f"principal {terms}/{row['key']}: {named} != {want}"
+            in_frame = {key_of[str(tid)] for tid in frame[row["mosaica_id"]].parent_ids}
+            assert in_frame == want, f"principal {terms}/{row['key']}: the frame names {in_frame}"
+        roots = page(server, token, layer=TREE, limit=200)["artifacts"]
+        assert [row["key"] for row in roots] == ["top"], f"principal {terms}: {roots}"
 
 
 def test_the_gate_runs_before_the_page(browse_server):

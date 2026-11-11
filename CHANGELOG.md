@@ -79,6 +79,16 @@ container image.
 
 ### Changed
 
+- **A withheld annotation's children hang from its nearest served ancestors everywhere.** Browse
+  (`POST /v1/artifacts/browse`), the map's artifacts frames and bulk reads (`POST /v1/artifacts`)
+  now name a parent the way the map's cut already attached it: where a viewer is not served an
+  annotation, its served children list the annotations above it that the viewer is served, in
+  `parent_ids` and `parents`, under `parent`, in the children form and in `child_count`. Before,
+  browse and bulk reads showed such a child as a root, and a frame named no parent for it. A map
+  frame names only the parents it carries, and does not climb past a level the request did not
+  read. Browse with no `level` on a stacked or tiered layer now lists the top-level annotations,
+  and searches, at every level; name a `level` for one level, as before. A bulk read that names
+  `parents` or `parent` reads every level above the ones it walks.
 - **A level is chosen for each layer.** The explorer keeps a level for each `stacked` or `tiered`
   layer, and choosing one, on a card or in Colour by, leaves the other layers drawn at theirs. A
   `nested` or `dag` layer is never cut at a level. `mosaica-levelchange` now reports

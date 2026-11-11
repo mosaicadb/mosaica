@@ -830,6 +830,113 @@ fn a_withheld_parent_is_named_no_differently_from_a_root() {
     );
 }
 
+/// **A withheld parent is passed through to the artifact above it.** With the state between them
+/// suppressed, the county names the country it lies in, as browse and the map's cut attach it,
+/// and the state's identifier appears nowhere in the frame. A request that does not read the
+/// state's level names no parent for the county, since that frame does not know whether the
+/// state is served and names only parents browse would name.
+#[test]
+fn a_withheld_parent_is_passed_through_to_the_grandparent() {
+    let fx = fixture();
+    let engine = fx.open();
+    engine.register_layer(tiered("admin/boundaries", 3)).unwrap();
+    for (level, artifact) in [
+        (0, node(&fx, "country", None, 0..300)),
+        (1, node(&fx, "state", Some("country"), 0..200)),
+        (2, node(&fx, "county", Some("state"), 0..100)),
+    ] {
+        engine
+            .publish_artifacts("admin/boundaries".into(), level, vec![artifact])
+            .unwrap();
+    }
+    let credential = full_coverage_credential();
+    let id = |served: &[ArtifactOut], key: &str| {
+        served
+            .iter()
+            .find(|a| a.key.as_deref() == Some(key))
+            .unwrap_or_else(|| panic!("{key} is served"))
+            .mosaica_id
+    };
+    let state = id(
+        &levelled_artifacts_of(&engine, &credential, None, "admin/boundaries"),
+        "state",
+    );
+    engine
+        .accept_changes(vec![(
+            artifact_target(&engine, state),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )])
+        .unwrap();
+
+    let served = levelled_artifacts_of(&engine, &credential, None, "admin/boundaries");
+    assert_eq!(keys(&served), vec!["country", "county"]);
+    let county = served
+        .iter()
+        .find(|a| a.key.as_deref() == Some("county"))
+        .unwrap();
+    assert_eq!(county.parent_ids, vec![id(&served, "country")]);
+    assert!(
+        served
+            .iter()
+            .all(|a| a.mosaica_id != state && !a.parent_ids.contains(&state)),
+        "the withheld state is named nowhere"
+    );
+
+    // The nested shape, through the treed frame: the leaf names the root, one rung below it.
+    engine
+        .register_layer(treed_whole("clusters/tree", None))
+        .unwrap();
+    engine
+        .publish_artifacts(
+            "clusters/tree".into(),
+            0,
+            vec![
+                node(&fx, "root", None, 0..300),
+                node(&fx, "mid", Some("root"), 0..200),
+                node(&fx, "leaf", Some("mid"), 0..100),
+            ],
+        )
+        .unwrap();
+    let mid = id(
+        &levelled_artifacts_of(&engine, &credential, None, "clusters/tree"),
+        "mid",
+    );
+    engine
+        .accept_changes(vec![(
+            artifact_target(&engine, mid),
+            mosaica_lifecycle::wal::ChangeOp::Suppress,
+        )])
+        .unwrap();
+    let tree = levelled_artifacts_of(&engine, &credential, None, "clusters/tree");
+    assert_eq!(keys(&tree), vec!["leaf", "root"]);
+    let leaf = tree
+        .iter()
+        .find(|a| a.key.as_deref() == Some("leaf"))
+        .unwrap();
+    assert_eq!(leaf.parent_ids, vec![id(&tree, "root")]);
+    assert_eq!(leaf.rung, 1, "the withheld node occupies no rung");
+
+    // The state served again, and its level left out of the request.
+    engine
+        .accept_changes(vec![(
+            artifact_target(&engine, state),
+            mosaica_lifecycle::wal::ChangeOp::Unsuppress,
+        )])
+        .unwrap();
+    let session = engine.authorise(&credential).unwrap();
+    let skipped = engine
+        .viewport_artifacts(
+            &session,
+            mosaica_engine::ViewportArtifactsRequest::new("s0", 0, WHOLE_MAP, usize::MAX)
+                .layers(LayerSelection::Named(&["admin/boundaries"]))
+                .levels(LevelSelection::Named(&[0, 2])),
+        )
+        .expect("a viewport over the whole map")
+        .artifacts();
+    assert_eq!(keys(&skipped), vec!["country", "county"]);
+    assert!(skipped.iter().all(|a| a.parent_ids.is_empty()));
+}
+
 /// The frontier drops ancestors, so a pruned layer carries no links — correct, and worth pinning:
 /// the field's presence follows the response's own membership rather than the stored lineage.
 #[test]

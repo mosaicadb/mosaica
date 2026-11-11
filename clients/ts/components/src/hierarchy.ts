@@ -28,11 +28,11 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  * hierarchy, filter layers among them. When there are several, a select switches between them.
  *
  * Each row shows how many of the artifact's items the viewer may see. While filters are set, it
- * also shows how many of those items match. A parent the viewer may not see is left out, so its
- * children appear at the top level. When the filters change, the rows are fetched again, a few
- * requests at a time: as many pages of the roots and of each open row as More had loaded, since a
- * page's cursor is good only for the filters it was served under. Focus stays on the control it
- * was on.
+ * also shows how many of those items match. An artifact the viewer may not see is left out, and
+ * its children appear under its nearest ancestors the viewer may see, or at the top level where it
+ * has none. When the filters change, the rows are fetched again, a few requests at a time: as many
+ * pages of the roots and of each open row as More had loaded, since a page's cursor is good only
+ * for the filters it was served under. Focus stays on the control it was on.
  *
  * A row's name is one line, cut with an ellipsis where it is too long, unless
  * `--mosaica-long-text` is `normal`. A row's buttons highlight or filter the map by its artifact.

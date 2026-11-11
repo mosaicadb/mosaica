@@ -867,6 +867,11 @@ impl Engine {
                 walked.treed.insert(layer.name.clone());
             }
             let mut served_levels: Vec<ServedLevel> = Vec::new();
+            // Each level this walk reads, with the ordinals whose verdict passed, held until the
+            // layer's parents are named.
+            let mut read: Vec<Option<(LevelPass<'_>, Vec<u32>)>> =
+                layer.registered.runs.iter().map(|_| None).collect();
+            let from = walked.placed.len();
             for (number, runs) in layer.registered.runs.iter().enumerate() {
                 let number = number as u32;
                 // Skipped before the projection is built: costs nothing here, which matters for
@@ -885,6 +890,7 @@ impl Engine {
                     passing,
                     served: cut,
                 } = self.level_cut(&level, sets);
+                let passed: Vec<u32> = passing.iter().map(|&(ordinal, ..)| ordinal).collect();
                 served_levels.push(ServedLevel {
                     level: number,
                     rows: level.forms.rows.clone(),
@@ -904,6 +910,42 @@ impl Engine {
                     )
                 };
                 self.assemble_level(&level, passing, &cut, &bits, &mut walked)?;
+                read[number as usize] = Some((level, passed));
+            }
+            if let Some(within) =
+                crate::lineage::within_level(layer.registered.declaration.hierarchy.kind)
+            {
+                let views: Vec<Option<_>> = read
+                    .iter()
+                    .map(|at| at.as_ref().map(|(level, _)| self.level_view(level)))
+                    .collect();
+                let mut verdicts: rustc_hash::FxHashMap<(u32, u32), bool> = Default::default();
+                walked.name_parents(
+                    from,
+                    &layer.name,
+                    within,
+                    |level| {
+                        let (pass, _) = read.get(level as usize)?.as_ref()?;
+                        Some(&**pass.forms.first())
+                    },
+                    |level, ordinal| {
+                        let (Some((pass, passed)), Some(view)) = (
+                            read.get(level as usize).and_then(Option::as_ref),
+                            views.get(level as usize).and_then(Option::as_ref),
+                        ) else {
+                            return true;
+                        };
+                        if passed.binary_search(&ordinal).is_ok() {
+                            return true;
+                        }
+                        *verdicts.entry((level, ordinal)).or_insert_with(|| {
+                            pass.runs
+                                .entity_of(u64::from(ordinal))
+                                .map(EntityId::new)
+                                .is_some_and(|entity| view.verdict(entity, ordinal).is_served())
+                        })
+                    },
+                );
             }
             walked.served_layers.push(ServedLayer {
                 name: layer.name,
@@ -1304,11 +1346,6 @@ impl Engine {
                 .clone(),
             }
         };
-        let parents: Vec<(String, u32, u32)> = rows
-            .parents(ordinal)
-            .iter()
-            .map(|p| (name.clone(), p.level, p.ordinal))
-            .collect();
         // Recorded, not resolved: a parent or attachment target may sit in a level this loop has
         // not reached yet.
         walked
@@ -1316,7 +1353,8 @@ impl Engine {
             .insert((name.clone(), number, ordinal), mosaica_id);
         walked.placed.push(Placement {
             at: (name.clone(), number, ordinal),
-            parents,
+            // Named once the walk of the layer has read every level the climb can reach.
+            parents: Vec::new(),
             attached_to: rows
                 .attachment(ordinal)
                 .map(|a| (a.layer.clone(), a.level, a.ordinal)),
@@ -1571,6 +1609,33 @@ impl Walked {
     pub(super) fn serves(&self, at: &(String, u32, u32)) -> bool {
         self.served_at.contains_key(at)
     }
+
+    /// Name the parents of every artifact of `layer` placed from `from` on: the artifacts
+    /// nearest above it on every path ([`crate::lineage`]) at which `stops` holds, which are the
+    /// ones this viewer is served and any at a level `rows` does not hold. The climb passes
+    /// through every other artifact, so a withheld artifact's descendants hang from its served
+    /// ancestors, and a frame names a subset of the parents browse names. Only those the response
+    /// also holds are kept, by [`settle_response`].
+    pub(super) fn name_parents<'r>(
+        &mut self,
+        from: usize,
+        layer: &str,
+        within: bool,
+        rows: impl Fn(u32) -> Option<&'r crate::artifacts::ArtifactRows>,
+        mut stops: impl FnMut(u32, u32) -> bool,
+    ) {
+        for place in self.placed[from..].iter_mut().filter(|p| p.at.0 == layer) {
+            place.parents = crate::lineage::nearest_served(
+                |level, ordinal| rows(level).map_or(&[], |rows| rows.parents(ordinal)),
+                |level, ordinal| stops(level, ordinal).then_some((level, ordinal)),
+                (place.at.1, place.at.2),
+                within,
+            )
+            .into_iter()
+            .map(|(level, ordinal)| (layer.to_string(), level, ordinal))
+            .collect();
+        }
+    }
 }
 
 /// What one walk of the requested layers produced, before the response's own membership settles
@@ -1646,10 +1711,10 @@ pub(super) fn settle_response(
         })
         .collect();
 
-    // A parent, and a target, are named only where also in this response — the whole disclosure
-    // rule for both fields. One withheld — below its own criterion, suppressed, or dropped by
-    // the budget — carries no entry, indistinguishable from a root or an unattached row; naming
-    // it would tell the viewer a coarser artifact exists that they are not cleared to see.
+    // A parent, and a target, are named only where also in this response, which is the whole
+    // disclosure rule for both fields. A withheld parent was climbed through, so its served
+    // ancestors stand in its place; one dropped by the budget or outside this response carries no
+    // entry, indistinguishable from a root or an unattached row.
     let mut served = Vec::with_capacity(out.len());
     let mut kept = Vec::with_capacity(out.len());
     for (((mut artifact, place), dropped), target_bit) in
@@ -1802,7 +1867,8 @@ pub(crate) fn response_rungs(
 struct Placement {
     /// Its own address — `(layer, level, ordinal)`.
     at: (String, u32, u32),
-    /// The addresses of its parents, where it names any. Within its own layer by construction.
+    /// The addresses of the artifacts nearest above it that the climb stopped at
+    /// ([`Walked::name_parents`]). Within its own layer by construction.
     parents: Vec<(String, u32, u32)>,
     /// The address of the artifact it depends on, where its layer declares a dependency.
     attached_to: Option<(String, u32, u32)>,
