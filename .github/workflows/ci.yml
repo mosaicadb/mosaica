@@ -21,6 +21,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 # A force-push or a second push to the same PR makes the earlier run's answer worthless.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
