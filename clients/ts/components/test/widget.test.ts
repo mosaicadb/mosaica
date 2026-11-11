@@ -165,19 +165,19 @@ describe('the token protocol', () => {
     expect([explorer.budget, explorer.budgetMin, explorer.budgetMax]).toEqual([60_000, 500, 100_000]);
   });
 
-  it('hands the cluster budget and its range to every view’s explorer, and sends it up when Most clusters is let go', async () => {
-    const {model, el} = setUp({cluster_budget: 300, cluster_budget_min: 5, cluster_budget_max: 5_000});
-    const explorer = el.querySelector('mosaica-explorer') as unknown as HTMLElement & {clusterBudget: number; clusterBudgetMin: number; clusterBudgetMax: number};
-    expect([explorer.clusterBudget, explorer.clusterBudgetMin, explorer.clusterBudgetMax]).toEqual([300, 5, 5_000]);
-    model.set('cluster_budget_max', 8_000);
-    expect(explorer.clusterBudgetMax).toBe(8_000);
-    explorer.dispatchEvent(new CustomEvent('mosaica-clusterbudgetchange', {detail: {budget: 1_200}, bubbles: true, composed: true}));
-    expect(model.get('cluster_budget')).toBe(1_200);
-    expect(explorer.clusterBudget).toBe(1_200);
-    model.set('cluster_budget', 300);
-    expect(explorer.clusterBudget).toBe(300);
-    model.set('cluster_budget', 0);
-    expect(explorer.clusterBudget).toBe(0);
+  it('hands the cluster spacing and its range to every view’s explorer, and sends it up when Most clusters is let go', async () => {
+    const {model, el} = setUp({cluster_spacing: 150, cluster_spacing_min: 30, cluster_spacing_max: 600});
+    const explorer = el.querySelector('mosaica-explorer') as unknown as HTMLElement & {clusterSpacing: number; clusterSpacingMin: number; clusterSpacingMax: number};
+    expect([explorer.clusterSpacing, explorer.clusterSpacingMin, explorer.clusterSpacingMax]).toEqual([150, 30, 600]);
+    model.set('cluster_spacing_max', 800);
+    expect(explorer.clusterSpacingMax).toBe(800);
+    explorer.dispatchEvent(new CustomEvent('mosaica-clusterspacingchange', {detail: {spacing: 70}, bubbles: true, composed: true}));
+    expect(model.get('cluster_spacing')).toBe(70);
+    expect(explorer.clusterSpacing).toBe(70);
+    model.set('cluster_spacing', 150);
+    expect(explorer.clusterSpacing).toBe(150);
+    model.set('cluster_spacing', 0);
+    expect(explorer.clusterSpacing).toBe(0);
   });
 
   it('sends the budget up when Most points is let go, and takes the old one back from the kernel', async () => {

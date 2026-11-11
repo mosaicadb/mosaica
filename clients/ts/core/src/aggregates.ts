@@ -8,8 +8,8 @@ import type {AggregateBy, AggregateCut, AggregateRequest, AggregateResult, Aggre
 /**
  * One grouping in an {@link AggregateSpec}. The same as a {@link Grouping}, except that a layer
  * grouping's `cut` and `paletteSize` can be `'drawn'` to use the map's current values.
- * `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut the map currently draws,
- * under the cluster budget ({@link Store.setClusterBudget}). `paletteSize: 'drawn'` returns each
+ * `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut the map draws,
+ * under the cluster count ({@link Store.clusterCount}). `paletteSize: 'drawn'` returns each
  * artifact's slot in the palette the map colours clusters from ({@link Store.setPalette}). Both
  * are read when each request is sent.
  *

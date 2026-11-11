@@ -37,9 +37,9 @@ import './explorer.js';
  * screen, the map fills the room below its top instead, and takes `height` again on the way out.
  *
  * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`, `label`,
- * `title_field`, `image_fields`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_budget_min` and `cluster_budget_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
+ * `title_field`, `image_fields`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_spacing_min` and `cluster_spacing_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
  * `size_max`, `size_scale` and `filters` go both ways, and so do `budget`, sent up when Most points is let go,
- * `cluster_budget`, sent up when Most clusters is let go, `palette`, sent up when one is chosen, and
+ * `cluster_spacing`, sent up when Most clusters is let go, `palette`, sent up when one is chosen, and
  * `value_colours` and `cluster_colours`, sent up as each colour is chosen on a card or in Edit
  * colours; `selected`, `selected_artifact` and `region` go up. Up-syncs happen at the settle (a new
  * composition shown, or a region's counts), not per frame. Ids cross as decimal strings, since a
@@ -765,7 +765,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
   model.on('change:image_fields', () => {
     for (const v of state.views.values()) v.explorer.imageFields = imageFieldsOf(model);
   });
-  for (const key of ['budget', 'budget_min', 'budget_max', 'cluster_budget', 'cluster_budget_min', 'cluster_budget_max']) {
+  for (const key of ['budget', 'budget_min', 'budget_max', 'cluster_spacing', 'cluster_spacing_min', 'cluster_spacing_max']) {
     model.on(`change:${key}`, () => {
       if (state.syncingUp) return;
       for (const v of state.views.values()) applyBudget(v.explorer, model);
@@ -794,12 +794,12 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
     };
     explorer.addEventListener('mosaica-budgetchange', onBudget);
     // Most clusters likewise.
-    const onClusterBudget = (e: Event) => {
-      const {budget} = (e as CustomEvent<{budget: number}>).detail;
-      explorer.clusterBudget = budget;
-      syncUp({cluster_budget: budget});
+    const onClusterSpacing = (e: Event) => {
+      const {spacing} = (e as CustomEvent<{spacing: number}>).detail;
+      explorer.clusterSpacing = spacing;
+      syncUp({cluster_spacing: spacing});
     };
-    explorer.addEventListener('mosaica-clusterbudgetchange', onClusterBudget);
+    explorer.addEventListener('mosaica-clusterspacingchange', onClusterSpacing);
     // A palette chosen in the Colour section reaches the kernel at once.
     const onPalette = (e: Event) => syncUp({palette: (e as CustomEvent<{palette: PaletteName}>).detail.palette});
     explorer.addEventListener('mosaica-clusterpalettechange', onPalette);
@@ -834,7 +834,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       explorer.removeEventListener('mosaica-valuecolour', onValueColour);
       explorer.removeEventListener('mosaica-clustercolour', onClusterColour);
       explorer.removeEventListener('mosaica-budgetchange', onBudget);
-      explorer.removeEventListener('mosaica-clusterbudgetchange', onClusterBudget);
+      explorer.removeEventListener('mosaica-clusterspacingchange', onClusterSpacing);
       explorer.removeEventListener('mosaica-clusterpalettechange', onPalette);
       state.views.delete(explorer);
       teardown(v);
@@ -870,17 +870,17 @@ function imageFieldsOf(model: WidgetModel): string {
 }
 
 /**
- * The point budget, the cluster budget and the range a control for each offers, as the kernel set
+ * The point budget, the cluster spacing and the range a control for each offers, as the kernel set
  * them; a value it left unset leaves the explorer's.
  */
 function applyBudget(explorer: MosaicaExplorer, model: WidgetModel): void {
-  const [budget, min, max, clusters, clustersMin, clustersMax] = ['budget', 'budget_min', 'budget_max', 'cluster_budget', 'cluster_budget_min', 'cluster_budget_max'].map((key) => model.get(key));
+  const [budget, min, max, spacing, spacingMin, spacingMax] = ['budget', 'budget_min', 'budget_max', 'cluster_spacing', 'cluster_spacing_min', 'cluster_spacing_max'].map((key) => model.get(key));
   if (typeof budget === 'number') explorer.budget = budget;
   if (typeof min === 'number') explorer.budgetMin = min;
   if (typeof max === 'number') explorer.budgetMax = max;
-  if (typeof clusters === 'number') explorer.clusterBudget = clusters;
-  if (typeof clustersMin === 'number') explorer.clusterBudgetMin = clustersMin;
-  if (typeof clustersMax === 'number') explorer.clusterBudgetMax = clustersMax;
+  if (typeof spacing === 'number') explorer.clusterSpacing = spacing;
+  if (typeof spacingMin === 'number') explorer.clusterSpacingMin = spacingMin;
+  if (typeof spacingMax === 'number') explorer.clusterSpacingMax = spacingMax;
 }
 
 /** The cluster colours `store` holds, by layer and `mosaica_id`, as `#rrggbb`. */

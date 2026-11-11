@@ -265,12 +265,15 @@ class Map(anywidget.AnyWidget):
       own budget, which starts at 250,000.
     - `budget_min`, `budget_max`: the ends of the Most points slider in the map's Layers popover,
       1,000 and 2,000,000 by default. Neither changes `budget`.
-    - `cluster_budget`: the most clusters a `nested` or `dag` layer is drawn with, which the map
-      meets by drawing parents in place of their children. The default is 1,000, and `0` draws
-      every cluster.
-    - `cluster_budget_min`, `cluster_budget_max`: the ends of the Most clusters slider, which the
-      Layers popover shows while such a layer is drawn. They are 10 and 10,000 by default, and
-      neither changes `cluster_budget`.
+    - `cluster_spacing`: the side in CSS pixels of the square of the map each cluster is given,
+      so the map shows about one cluster per square whatever its size. The default is 100, which
+      gives a map 1,200 by 800 pixels 96 clusters. A `nested` or `dag` layer is drawn with that
+      many, by drawing parents in place of their children, and a layer with levels that follows
+      the zoom is drawn at the finest level with no more than that many in view, so finer levels
+      appear as the map zooms in. `0` removes the limit.
+    - `cluster_spacing_min`, `cluster_spacing_max`: the spacings at the More and Fewer ends of the
+      Most clusters slider, which the Layers popover shows while such a layer is drawn. They are 50
+      and 400 by default, and neither changes `cluster_spacing`.
 
     A basemap is one of these values:
 
@@ -300,7 +303,7 @@ class Map(anywidget.AnyWidget):
     - `view`, `bbox`, `filters`, `layers`, `colour_by` and the four size settings, when the map
       settles after a change, once it has finished fetching for the new view.
     - `palette`, when one is chosen in the map's Colour section.
-    - `budget` and `cluster_budget`, when the Most points or Most clusters slider is let go.
+    - `budget` and `cluster_spacing`, when the Most points or Most clusters slider is let go.
     - `value_colours` and `cluster_colours`, as each colour is chosen on a field card or in Edit
       colours. Setting either replaces every colour of its kind that the map holds.
 
@@ -356,9 +359,9 @@ class Map(anywidget.AnyWidget):
     budget = traitlets.Int(0).tag(sync=True)
     budget_min = traitlets.Int(1_000).tag(sync=True)
     budget_max = traitlets.Int(2_000_000).tag(sync=True)
-    cluster_budget = traitlets.Int(1_000).tag(sync=True)
-    cluster_budget_min = traitlets.Int(10).tag(sync=True)
-    cluster_budget_max = traitlets.Int(10_000).tag(sync=True)
+    cluster_spacing = traitlets.Float(100).tag(sync=True)
+    cluster_spacing_min = traitlets.Float(50).tag(sync=True)
+    cluster_spacing_max = traitlets.Float(400).tag(sync=True)
     # Both ways, synced up at the settle.
     bbox = traitlets.List(traitlets.Float(), minlen=4, maxlen=4, allow_none=True, default_value=None).tag(sync=True)
     # `None` leaves the explorer's own default; `[]` is none; a list is exactly those (with their
@@ -418,9 +421,9 @@ class Map(anywidget.AnyWidget):
         budget: int = 0,
         budget_min: int = 1_000,
         budget_max: int = 2_000_000,
-        cluster_budget: int = 1_000,
-        cluster_budget_min: int = 10,
-        cluster_budget_max: int = 10_000,
+        cluster_spacing: float = 100,
+        cluster_spacing_min: float = 50,
+        cluster_spacing_max: float = 400,
         basemap: Any = None,
         **kwargs: Any,
     ) -> None:
@@ -463,9 +466,9 @@ class Map(anywidget.AnyWidget):
             budget=budget,
             budget_min=budget_min,
             budget_max=budget_max,
-            cluster_budget=cluster_budget,
-            cluster_budget_min=cluster_budget_min,
-            cluster_budget_max=cluster_budget_max,
+            cluster_spacing=cluster_spacing,
+            cluster_spacing_min=cluster_spacing_min,
+            cluster_spacing_max=cluster_spacing_max,
             basemap=basemap,
             _esm=bundle.read_text(encoding="utf-8"),
             **kwargs,

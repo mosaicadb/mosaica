@@ -82,7 +82,7 @@ export {
   type FilterDraft,
   type TextTerms
 } from './filters.js';
-export {browsableLayers, colourLayers, drawableLayers, isFilterLayer, layerClosure, layerEntries, type LayerEntry} from './layers.js';
+export {browsableLayers, clustersInView, colourLayers, drawableLayers, isFilterLayer, layerClosure, layerEntries, type LayerEntry} from './layers.js';
 export {artifactName} from './names.js';
 export {memberKey, memberLeaf, memberOf, withMember, withMembers, withoutMember, type MemberClause} from './members.js';
 

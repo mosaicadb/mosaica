@@ -351,10 +351,14 @@ export class ArtifactChannel {
     return {zoom: view.depth, bbox, ...(this.budget === undefined ? {} : {budget: this.budget})};
   }
 
-  /** Cut the treed layers to `budget`, `undefined` for the finest cut, and ask again where one is asked for. */
-  setBudget(budget: number | undefined): void {
+  /**
+   * Cut the treed layers to `budget`, `undefined` for the finest cut, and ask again where one is
+   * asked for, unless `ask` is false because the caller is about to schedule a request.
+   */
+  setBudget(budget: number | undefined, ask = true): void {
     if (budget === this.budget) return;
     this.budget = budget;
+    if (!ask) return;
     const walked = this.state.layers.some((name) => {
       const decl = this.declarations.get(name);
       return !decl || scopeKindOf(decl) === 'treed';
@@ -986,7 +990,7 @@ function merged(a: Artifact, b: Artifact): Artifact {
  * their `parentIds`, which name each artifact's nearest ancestors the viewer is served, as browse
  * names them. Only links between artifacts in the list are included, so an artifact none of whose
  * served ancestors is in it is a root here. On a `dag` layer a child is listed under each served
- * parent. The links change as the camera moves and as the cluster budget changes.
+ * parent. The links change as the camera moves and as the cluster count changes.
  *
  * @category Projections
  */

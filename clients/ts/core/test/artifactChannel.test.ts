@@ -740,7 +740,7 @@ describe('the level a levelled layer is drawn at where no level is chosen', () =
     expect(levelInView(room.decl, room.ch.current.levelsInView, null)).toBe(1);
   });
 
-  it('steps up from a level with more artifacts in view than the cluster budget', async () => {
+  it('steps up from a level with more artifacts in view than the cluster count', async () => {
     const {ch, decl} = await shown({perTile: 20});
     expect(levelInView(decl, ch.current.levelsInView, 64)).toBe(1);
     expect(levelInView(decl, ch.current.levelsInView, 63)).toBe(0);

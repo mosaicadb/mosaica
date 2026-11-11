@@ -458,16 +458,20 @@ export class MosaicaMap extends MosaicaElement {
   /** How many marks to aim for on screen. `0` keeps the store's budget, which starts at 250000. */
   @property({type: Number}) accessor budget = 0;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to (`Store.setClusterBudget`). `0` keeps the
-   * store's setting; setting `0` after another value removes the limit, giving the finest cut.
+   * The side in CSS pixels of the square of the map each cluster is given (`Store.setClusterSpacing`),
+   * so the map shows about one cluster per square whatever its size: at 100, a map 1,200 by 800
+   * pixels shows 96. `0` keeps the store's setting; setting `0` after another value removes the
+   * limit.
    *
-   * The budget also steers a `stacked` or `tiered` layer whose levels declare no zoom range and
-   * which `clusterLevels` leaves to follow the zoom: it is drawn at the finest level with no more
-   * than this many clusters in view, and no tile in view holding the most a tile is served. Without
-   * a budget only a full tile holds a level back, so such a layer is drawn at its finest level at
-   * every zoom until its tiles fill, world zoom included.
+   * A `nested` or `dag` layer is cut to that many clusters. A `stacked` or `tiered` layer whose
+   * levels declare no zoom range and which `clusterLevels` leaves to follow the zoom is drawn at the
+   * finest level with no more than that many clusters in view and no tile in view holding the most a
+   * tile is served, so the world view shows a broad level and finer ones appear as the camera zooms
+   * in. Without a spacing only a full tile holds a level back, so such a layer is drawn at its
+   * finest level at every zoom until its tiles fill, world zoom included, and a `nested` or `dag`
+   * layer is drawn at its finest cut.
    */
-  @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 0;
+  @property({type: Number, attribute: 'cluster-spacing'}) accessor clusterSpacing = 0;
   /**
    * The columns the hover tooltip shows under the point's title, separated by spaces or commas.
    * Only rendered columns arrive with the points, so another column shows nothing.
@@ -490,7 +494,7 @@ export class MosaicaMap extends MosaicaElement {
   /**
    * The level at which each `stacked` or `tiered` layer's clusters are coloured, labelled and
    * outlined, keyed by layer name. A layer with no entry is drawn at the level that follows the zoom
-   * where its levels declare no zoom range (see `cluster-budget`), and otherwise at the coarsest
+   * where its levels declare no zoom range (see `cluster-spacing`), and otherwise at the coarsest
    * level the camera's zoom serves. A `nested` or `dag` layer ignores its entry. Set it as a
    * property; it has no attribute.
    */
@@ -978,9 +982,9 @@ export class MosaicaMap extends MosaicaElement {
     if (touched('layers') && this.layers) s.setLayers(this.layers);
     if (changed.has('layers') && this.layers) emit(this, 'mosaica-layerchange', {layers: this.layers});
     if (touched('budget') && this.budget > 0) s.setBudget(this.budget);
-    if (touched('clusterBudget')) {
-      if (this.clusterBudget > 0) s.setClusterBudget(this.clusterBudget);
-      else if (!all && (changed.get('clusterBudget') ?? 0) > 0) s.setClusterBudget(null);
+    if (touched('clusterSpacing')) {
+      if (this.clusterSpacing > 0) s.setClusterSpacing(this.clusterSpacing);
+      else if (!all && (changed.get('clusterSpacing') ?? 0) > 0) s.setClusterSpacing(null);
     }
     if (touched('palette') && this.palette !== '') s.setPalette(this.palette);
     if (touched('clusterColours')) this.pushClusterColours(s);
@@ -1195,7 +1199,9 @@ export class MosaicaMap extends MosaicaElement {
         return viewState;
       },
       onClick: (info) => this.onClick(this.clickPick(info)),
-      onHover: (info) => this.onHover(info)
+      onHover: (info) => this.onHover(info),
+      // The store's cluster count follows the canvas's size.
+      onResize: () => this.pushView()
     });
     this.paint();
   }

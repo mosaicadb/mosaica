@@ -100,15 +100,31 @@ container image.
   declare no zoom range and no level is chosen for it, the map draws, colours and counts it at the
   finest level that is not crowded in view, which is the coarsest while every level is. A level is
   crowded when a tile in view came back with its full `per_tile` of it, or when more of its
-  artifacts are drawn in view than the cluster budget, so Most clusters in the explorer moves the
-  zoom at which each level is drawn, and shows while such a layer is drawn. A layer moves to a
-  finer level once that level is within four fifths of the budget and back once it is over it, and
-  the level is decided once every tile of a view has arrived. With no cluster budget, as on a bare
-  `<mosaica-map>`, only full tiles crowd a level. The card's level choice and Colour by offer
+  artifacts are drawn in view than the cluster count the map's size and cluster spacing give, so
+  the world view draws a broad level, and Most clusters in the explorer moves the zoom at which
+  each level is drawn, and shows while such a layer is drawn. A layer starts at its coarsest level,
+  moves to a finer level once that level is within four fifths of the count and back once it is
+  over it, and the level is decided once every tile of a view has arrived. With no cluster spacing,
+  as on a bare `<mosaica-map>`, only full tiles crowd a level. The card's level choice and Colour by offer
   Follow zoom, which clears the layer's level. A layer whose levels declare zoom ranges is drawn
   at the coarsest level its range serves, as before. The store's `artifacts` projection carries
   `levelsInView`, each level's count drawn in view and whether a tile came back full of it, and
   `followedLevels`, the level each layer is drawn at where none is chosen.
+- **The clusters a map shows follow its size.** The cluster budget, a fixed count, is replaced by
+  a cluster spacing: each cluster is given a square of the map on screen that many CSS pixels on a
+  side, and the count is the map's area over the square's, at least 1. One count cuts a `nested`
+  or `dag` layer and crowds a level that follows the zoom, and it is worked out again as the map is
+  resized, which `<mosaica-map>` now reports to the store. `cluster-budget` on `<mosaica-map>` and
+  `<mosaica-explorer>` is now `cluster-spacing`, `cluster-budget-min` and `cluster-budget-max` are
+  `cluster-spacing-min` and `cluster-spacing-max`, the store's `artifacts.budget` option,
+  `setClusterBudget` and `clusterBudget` are `artifacts.clusterSpacing`, `setClusterSpacing` and
+  `clusterSpacing`, with `clusterCount` for the count, `mosaica-clusterbudgetchange` is
+  `mosaica-clusterspacingchange` with `{spacing}`, the React `onClusterBudgetChange` is
+  `onClusterSpacingChange`, and the Python widget's `cluster_budget`, `cluster_budget_min` and
+  `cluster_budget_max` are `cluster_spacing`, `cluster_spacing_min` and `cluster_spacing_max`. The
+  explorer starts at 100 px, 96 clusters on a map 1,200 by 800 px, in place of 1,000 clusters, and
+  Most clusters runs from 400 px at its Fewer end to 50 px at its More end, reading out the count
+  the map shows. `clustersInView(spacing, width, height)` gives the count.
 - **The cluster card steps through a layer apart from the filter.** On a `tiered`, `nested` or
   `dag` layer, `<mosaica-field-card>` lists the children of its position, or the top-level
   clusters, from the browse route a page at a time. A row with children ends in a button with their

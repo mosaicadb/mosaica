@@ -5,7 +5,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import type {ArtifactDetail, ItemDetail, PaletteName, Store} from '@mosaicajs/client';
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import {CATEGORY_PALETTES, DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DENSITY_CELL_SIZES, RAMPS, cellDepth, nearestStop} from '@mosaicajs/deck';
-import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, colourLayers, emptyDraft} from '@mosaicajs/client';
+import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, clustersInView, colourLayers, emptyDraft} from '@mosaicajs/client';
 import {follows, hasOneLayout, levelFollowsZoom, levelOfLayer, sizesPoints} from '@mosaicajs/client/internal';
 import {DENSITY_COLOUR_TITLES, clusterLayerOf, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
 import {MosaicaElement, columnCaption, emit, shortCount} from './base.js';
@@ -191,7 +191,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-displaychange']>} mosaica-displaychange - A setting in the Points or Density section changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-sizechange']>} mosaica-sizechange - Size by, the size range or the scale changed in the Points section.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-budgetchange']>} mosaica-budgetchange - Most points was let go at a new number.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-clusterbudgetchange']>} mosaica-clusterbudgetchange - Most clusters was let go at a new number.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clusterspacingchange']>} mosaica-clusterspacingchange - Most clusters was let go at a new spacing.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-fold']>} mosaica-fold - A field card was folded to one line or opened.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - Colours were chosen or reset for values of a category, on a field card or in Edit colours.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clustercolour']>} mosaica-clustercolour - Colours were chosen or reset for clusters of a layer, on a field card or in Edit colours.
@@ -230,7 +230,7 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart most-points-value - The number of points it stands at, such as "250K".
  * @csspart most-clusters - The Most clusters slider, while a `nested` or `dag` layer is drawn, or a
  *   levelled layer whose level follows the zoom is drawn or coloured by.
- * @csspart most-clusters-value - The number of clusters it stands at, such as "1K".
+ * @csspart most-clusters-value - How many clusters it gives the map at its size, such as "96".
  * @csspart size-by - The Size by button, naming the column the points are sized by or None, with
  *   `aria-expanded` while its menu is open.
  * @csspart size-menu - The Size by menu, while it is open.
@@ -826,14 +826,16 @@ export class MosaicaExplorer extends MosaicaElement {
   /** The highest value of the Most points slider. */
   @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to, and the most a level that follows the
-   * zoom may have in view; `0` removes the limit. Most clusters in the Layers popover changes it.
+   * The side in CSS pixels of the square of the map each cluster is given, as for `<mosaica-map>`'s
+   * `cluster-spacing`: at 100, a map 1,200 by 800 pixels cuts a `nested` or `dag` layer to 96
+   * clusters, and a level that follows the zoom may have 96 in view. `0` removes the limit. Most
+   * clusters in the Layers popover changes it.
    */
-  @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 1_000;
-  /** The lowest value of the Most clusters slider. */
-  @property({type: Number, attribute: 'cluster-budget-min'}) accessor clusterBudgetMin = 10;
-  /** The highest value of the Most clusters slider. */
-  @property({type: Number, attribute: 'cluster-budget-max'}) accessor clusterBudgetMax = 10_000;
+  @property({type: Number, attribute: 'cluster-spacing'}) accessor clusterSpacing = 100;
+  /** The smallest spacing Most clusters offers, at its More end. */
+  @property({type: Number, attribute: 'cluster-spacing-min'}) accessor clusterSpacingMin = 50;
+  /** The largest spacing Most clusters offers, at its Fewer end. */
+  @property({type: Number, attribute: 'cluster-spacing-max'}) accessor clusterSpacingMax = 400;
   /**
    * What is drawn under the points, as for `<mosaica-map>`'s `basemap`. The attribute takes `world`
    * and `none`. Unset, a view with a map projection gets the world outline and any other view gets
@@ -896,7 +898,7 @@ export class MosaicaExplorer extends MosaicaElement {
   @state() accessor menu: Menu | null = null;
   /** Where Most points is being dragged, before it is let go. @internal */
   @state() accessor pointsDragged: number | null = null;
-  /** Where Most clusters is being dragged, before it is let go. @internal */
+  /** The cluster spacing Most clusters is being dragged to, before it is let go. @internal */
   @state() accessor clustersDragged: number | null = null;
   /** Whether the list of density colours in the Layers popover is open. @internal */
   @state() accessor densityColoursOpen = false;
@@ -1254,7 +1256,7 @@ export class MosaicaExplorer extends MosaicaElement {
           tooltip-fields=${this.tooltipFields}
           title-field=${this.titleField || nothing}
           budget=${this.budget || nothing}
-          .clusterBudget=${this.clusterBudget}
+          .clusterSpacing=${this.clusterSpacing}
           controls-corner=${compact ? 'bottom-left' : 'top-left'}
           .clusterLevels=${levels}
           .basemap=${this.basemap}
@@ -1653,13 +1655,24 @@ export class MosaicaExplorer extends MosaicaElement {
    */
   private mostPoints(disabled: boolean): TemplateResult {
     const s = this.resolvedStore;
+    const min = Math.max(1, this.budgetMin);
+    const max = Math.max(min * 10, this.budgetMax);
+    const span = Math.log(max / min);
+    const at = (n: number) => Math.min(1, Math.max(0, Math.log(n / min) / span));
+    const shown = this.pointsDragged ?? s?.budget ?? 250_000;
+    // A tick at each power of ten between the ends, where it leaves room for the last end's label.
+    const ticks: {at: number; text: string}[] = [];
+    for (let p = 10 ** Math.ceil(Math.log10(min) + 1e-9); p < max; p *= 10) if (at(p) > 0.08 && at(p) < 0.85) ticks.push({at: at(p), text: pointsText(p)});
     return this.mostSlider({
       id: 'most-points',
       label: 'Most points',
-      unit: 'points',
-      range: [this.budgetMin, this.budgetMax],
-      shown: this.pointsDragged ?? s?.budget ?? 250_000,
+      at: at(shown),
+      readout: pointsText(shown),
+      valueText: `${pointsText(shown)} points`,
+      ends: [pointsText(min), pointsText(max)],
+      ticks,
       disabled: disabled || !s,
+      of: (t) => Math.min(max, Math.max(min, roundPoints(min * Math.exp(t * span)))),
       drag: (n) => (this.pointsDragged = n),
       set: (n) => this.setBudget(n)
     });
@@ -1667,9 +1680,9 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /**
    * Most clusters, while a `nested` or `dag` layer is drawn, or a levelled layer following the zoom
-   * is drawn or coloured by: a slider from `cluster-budget-min` to `cluster-budget-max` as Most
-   * points is. Letting go sets the most clusters such a layer is cut to, or a followed level may
-   * have in view.
+   * is drawn or coloured by: a slider over the cluster spacing on a log scale, from
+   * `cluster-spacing-max` at its Fewer end to `cluster-spacing-min` at its More end, with how many
+   * clusters the spacing gives the map at its size. Letting go sets the store's spacing.
    */
   private mostClusters(): TemplateResult | typeof nothing {
     const s = this.resolvedStore;
@@ -1682,49 +1695,58 @@ export class MosaicaExplorer extends MosaicaElement {
       return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag' || follows(layer, this.levels.get(name));
     });
     if (!steered) return nothing;
+    const dense = Math.max(1, this.clusterSpacingMin);
+    const sparse = Math.max(dense * 2, this.clusterSpacingMax);
+    const span = Math.log(sparse / dense);
+    // With no spacing the map shows every cluster, as at the More end.
+    const shown = this.clustersDragged ?? s.clusterSpacing ?? dense;
+    const map = this.renderRoot.querySelector('mosaica-map');
+    const count = map && map.clientWidth > 0 && map.clientHeight > 0 ? clustersInView(shown, map.clientWidth, map.clientHeight) : null;
+    const square = `one per ${Math.round(shown)} px square`;
     return this.mostSlider({
       id: 'most-clusters',
       label: 'Most clusters',
-      unit: 'clusters',
-      range: [this.clusterBudgetMin, this.clusterBudgetMax],
-      shown: this.clustersDragged ?? s.clusterBudget ?? (this.clusterBudget || this.clusterBudgetMax),
+      at: Math.min(1, Math.max(0, Math.log(sparse / shown) / span)),
+      readout: count === null ? `1 per ${Math.round(shown)} px` : pointsText(count),
+      valueText: count === null ? square : `${count} clusters, ${square}`,
+      ends: ['Fewer', 'More'],
+      ticks: [],
       disabled: false,
+      of: (t) => Math.min(sparse, Math.max(dense, Math.round(sparse * Math.exp(-t * span)))),
       drag: (n) => (this.clustersDragged = n),
-      set: (n) => this.setClusterBudget(n)
+      set: (n) => this.setClusterSpacing(n)
     });
   }
 
-  /** A log-scale slider over `range` on round numbers, with the number it stands at. */
+  /**
+   * A slider standing `at` of the way along, with its readout, its ends' labels and its ticks. `of`
+   * gives the value at a share of the way along; dragging passes it to `drag`, and letting go to
+   * `set`.
+   */
   private mostSlider(o: {
     id: 'most-points' | 'most-clusters';
     label: string;
-    unit: string;
-    range: [number, number];
-    shown: number;
+    at: number;
+    readout: string;
+    valueText: string;
+    ends: [string, string];
+    ticks: readonly {at: number; text: string}[];
     disabled: boolean;
+    of: (t: number) => number;
     drag: (n: number) => void;
     set: (n: number) => void;
   }): TemplateResult {
-    const min = Math.max(1, o.range[0]);
-    const max = Math.max(min * 10, o.range[1]);
-    const span = Math.log(max / min);
-    const at = (n: number) => Math.min(1, Math.max(0, Math.log(n / min) / span));
-    const of = (t: number) => Math.min(max, Math.max(min, roundPoints(min * Math.exp(t * span))));
-    const t = at(o.shown);
-    // A tick at each power of ten between the ends, where it leaves room for the last end's label.
-    const ticks: number[] = [];
-    for (let p = 10 ** Math.ceil(Math.log10(min) + 1e-9); p < max; p *= 10) if (at(p) > 0.08 && at(p) < 0.85) ticks.push(p);
-    const read = (e: Event) => of(Number((e.target as HTMLInputElement).value) / 1000);
+    const read = (e: Event) => o.of(Number((e.target as HTMLInputElement).value) / 1000);
     return html`<div class="most">
-      <div class="most-top"><label for=${o.id}>${o.label}</label><span part=${o.id === 'most-points' ? 'most-points-value' : 'most-clusters-value'} class="most-value">${pointsText(o.shown)}</span></div>
-      <input id=${o.id} part=${o.id === 'most-points' ? 'most-points' : 'most-clusters'} class="slider" type="range" min="0" max="1000" step="1" .value=${String(Math.round(t * 1000))} ?disabled=${o.disabled}
-        style=${`--fill:${(t * 100).toFixed(1)}%`} aria-valuetext=${`${pointsText(o.shown)} ${o.unit}`}
+      <div class="most-top"><label for=${o.id}>${o.label}</label><span part=${o.id === 'most-points' ? 'most-points-value' : 'most-clusters-value'} class="most-value">${o.readout}</span></div>
+      <input id=${o.id} part=${o.id === 'most-points' ? 'most-points' : 'most-clusters'} class="slider" type="range" min="0" max="1000" step="1" .value=${String(Math.round(o.at * 1000))} ?disabled=${o.disabled}
+        style=${`--fill:${(o.at * 100).toFixed(1)}%`} aria-valuetext=${o.valueText}
         @input=${(e: Event) => o.drag(read(e))}
         @change=${(e: Event) => o.set(read(e))} />
       <div class="ticks" aria-hidden="true">
-        <span style="left:0">${pointsText(min)}</span>
-        ${ticks.map((p) => html`<span class="mid" style=${`left:${(at(p) * 100).toFixed(1)}%`}>${pointsText(p)}</span>`)}
-        <span style="right:0">${pointsText(max)}</span>
+        <span style="left:0">${o.ends[0]}</span>
+        ${o.ticks.map((p) => html`<span class="mid" style=${`left:${(p.at * 100).toFixed(1)}%`}>${p.text}</span>`)}
+        <span style="right:0">${o.ends[1]}</span>
       </div>
     </div>`;
   }
@@ -1739,14 +1761,14 @@ export class MosaicaExplorer extends MosaicaElement {
     this.requestUpdate();
   }
 
-  /** Set the most clusters a treed layer is cut to from Most clusters, and report it. */
-  private setClusterBudget(budget: number): void {
+  /** Set the store's cluster spacing from Most clusters, and report it. */
+  private setClusterSpacing(spacing: number): void {
     this.clustersDragged = null;
     const s = this.resolvedStore;
-    if (!s || budget === s.clusterBudget) return;
-    s.setClusterBudget(budget);
-    this.clusterBudget = budget;
-    emit(this, 'mosaica-clusterbudgetchange', {budget});
+    if (!s || spacing === s.clusterSpacing) return;
+    s.setClusterSpacing(spacing);
+    this.clusterSpacing = spacing;
+    emit(this, 'mosaica-clusterspacingchange', {spacing});
   }
 
   /**

@@ -135,9 +135,21 @@ export function follows(layer: Pick<Layer, 'hierarchy' | 'levels'>, chosen: numb
 }
 
 /**
- * The share of the cluster budget a finer level's artifacts in view must be within before a layer
+ * How many clusters a map `width` by `height` CSS pixels shows when each cluster is given a square
+ * `spacing` pixels on a side: the canvas's area over the square's, rounded down, and at least 1.
+ * The store cuts a `nested` or `dag` layer to this many clusters, and a level that follows the zoom
+ * is crowded when more of its clusters than this are drawn in view.
+ *
+ * @category Layers and views
+ */
+export function clustersInView(spacing: number, width: number, height: number): number {
+  return Math.max(1, Math.floor((width * height) / (spacing * spacing)));
+}
+
+/**
+ * The share of the cluster count a finer level's artifacts in view must be within before a layer
  * that follows the zoom moves to it. The layer then stays at that level until its artifacts in view
- * are over the whole budget, so a count near the budget does not move the level back and forth as
+ * are over the whole count, so a count near the limit does not move the level back and forth as
  * the map pans.
  */
 const DEEPEN_WITHIN = 0.8;
@@ -150,11 +162,12 @@ const DEEPEN_WITHIN = 0.8;
  * Where the layer follows the zoom ({@link levelFollowsZoom}), it is the finest level in view that
  * is not crowded, else the coarsest in view. A level is crowded where a tile in view came back with
  * its full `perTile` of it, or where more of its artifacts are drawn in view than a limit set by
- * `budget`, the store's cluster budget. The limit is `budget` itself for `current` and the levels
- * coarser than it, and {@link DEEPEN_WITHIN} of `budget` for the levels finer than `current`. With
- * no budget only a full tile crowds a level, so the layer is drawn at the finest level no tile in
- * view is full of, however many of its artifacts are in view. Zooming in thins every level in view,
- * so the level drawn deepens.
+ * `budget`, the cluster count the store derives from its cluster spacing ({@link clustersInView}).
+ * The limit is `budget` itself for `current` and the levels coarser than it, and
+ * {@link DEEPEN_WITHIN} of `budget` for the levels finer than `current`. With no budget only a full
+ * tile crowds a level, so the layer is drawn at the finest level no tile in view is full of,
+ * however many of its artifacts are in view. Zooming in thins every level in view, so the level
+ * drawn deepens.
  *
  * Where a level declares a zoom range, it is the coarsest level in view, of those the camera's zoom
  * selects. With nothing of the layer in view, it is the layer's coarsest level. `undefined` on a

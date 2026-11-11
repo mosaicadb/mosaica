@@ -153,7 +153,7 @@ def test_the_synced_surface_is_exactly_the_design_s(make):
     synced = {k for k in synced if not k.startswith("_")}  # `_esm` and `_css` are anywidget's
     assert synced == {
         "url", "view", "explorer_layout", "height", "label", "title_field", "image_fields", "artifacts_per_tile",
-        "budget", "budget_min", "budget_max", "cluster_budget", "cluster_budget_min", "cluster_budget_max", "bbox", "layers", "colour_by", "palette", "value_colours", "cluster_colours", "size_by", "size_min", "size_max", "size_scale", "filters",
+        "budget", "budget_min", "budget_max", "cluster_spacing", "cluster_spacing_min", "cluster_spacing_max", "bbox", "layers", "colour_by", "palette", "value_colours", "cluster_colours", "size_by", "size_min", "size_max", "size_scale", "filters",
         "selected", "selected_artifact", "region",
     }
 
@@ -258,13 +258,13 @@ def test_map_without_a_bundle_says_how_to_get_one(monkeypatch):
         Map("http://viewer.test", token="t")
 
 
-def test_the_cluster_budget_and_its_range_are_synced_down_with_their_defaults(make):
-    keys = ("cluster_budget", "cluster_budget_min", "cluster_budget_max")
-    assert [make(token="t").get_state()[k] for k in keys] == [1_000, 10, 10_000]
-    m = make(token="t", cluster_budget=300, cluster_budget_min=5, cluster_budget_max=5_000)
-    assert [m.get_state()[k] for k in keys] == [300, 5, 5_000]
-    m.cluster_budget = 40
-    assert m.get_state()["cluster_budget"] == 40
+def test_the_cluster_spacing_and_its_range_are_synced_down_with_their_defaults(make):
+    keys = ("cluster_spacing", "cluster_spacing_min", "cluster_spacing_max")
+    assert [make(token="t").get_state()[k] for k in keys] == [100, 50, 400]
+    m = make(token="t", cluster_spacing=150, cluster_spacing_min=30, cluster_spacing_max=600)
+    assert [m.get_state()[k] for k in keys] == [150, 30, 600]
+    m.cluster_spacing = 72.5
+    assert m.get_state()["cluster_spacing"] == 72.5
 
 
 def synced_basemap(m):
