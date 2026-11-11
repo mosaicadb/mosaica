@@ -292,6 +292,14 @@ export function shortCount(n: number): string {
   return `${unit === 1 ? Math.round(v) : Number(v.toFixed(Math.abs(v) < 100 ? 1 : 0))}${letter}`;
 }
 
+/**
+ * A field's number as text, grouped in thousands only from 10,000 up, so that a year reads `2012`
+ * and a large value `48,213`. `options` sets the digits.
+ */
+export function numberText(v: number, options: Intl.NumberFormatOptions = {}): string {
+  return v.toLocaleString('en-GB', {...options, useGrouping: Math.abs(v) >= 1e4});
+}
+
 /** A count as a row shows it: whole below a million, else shortened, `25.2M`. */
 export function countText(n: number): string {
   return Math.abs(n) < 1e6 ? Math.round(n).toLocaleString('en-GB') : shortCount(n);

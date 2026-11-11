@@ -196,6 +196,20 @@ if (scene === 'short') {
   map.focus();
   result['callout'] = part('callout') !== null && !part('callout')!.hidden;
   result['regionTag'] = map.shadowRoot!.querySelector('[part="region-tag"]') !== null;
+} else if (scene === 'grow') {
+  // A picked item with more fields than the compact card shows, its callout measured before and after Show all.
+  const fields = Object.fromEntries([['title', 'A picked item'], ...columns.slice(0, 10).map((c, i) => [c.name, 1000 + i])]);
+  map.pickedAt = {kind: 'item', id: 5n, world: [0.5, 0.5]};
+  store.set('selection', {item: {id: 5n, detail: {...item.detail, fields}}, itemRefusal: null, artifact: null, artifactRefusal: null});
+  await settle(document.body);
+  await frames(4);
+  const callout = part('callout')!;
+  const measured = () => ({height: callout.offsetHeight, scrolls: callout.scrollHeight > callout.clientHeight});
+  result['before'] = measured();
+  const card = callout.querySelector('mosaica-item-card') ?? callout.querySelector('slot')!.assignedElements({flatten: true})[0]!;
+  await press(card.shadowRoot!.querySelector<HTMLElement>('[part="show-all"]'));
+  await frames(4);
+  result['after'] = measured();
 } else if (scene === 'targets') {
   // The height a pointer has to hit on each control of the Layers popover and of the heading.
   await press(part('layers-toggle'));

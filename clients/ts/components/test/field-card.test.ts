@@ -677,16 +677,46 @@ describe('<mosaica-field-card> on a date', () => {
     expect(deepAll(host, '.applied')).toHaveLength(0);
   });
 
-  it('gives the field’s figures in its heading', async () => {
+  it('gives a screen reader the field’s figures in its heading, and draws none', async () => {
     const {host, store} = await mountCard('submitted_at');
     answerAggregate(store, 'field-summary', aggregateEntry([{rows: []}], 's0', [new Map([['submitted_at', {values: 25n, missing: 5n, min: YEAR(1990), max: YEAR(2020), mean: YEAR(2011)}]])]));
     await settle(host);
-    expect(deep(host, '[part="sub"]')!.textContent).toBe('n 25 · mean 1 Jan 2011');
+    const sub = deep(host, '[part="sub"]')!;
+    expect(sub.textContent).toContain('25');
+    expect(sub.textContent).toContain('1 Jan 2011');
+    expect(Array.from(sub.children).every((el) => el.classList.contains('sr-only'))).toBe(true);
+    expect(sub.title).toBe('');
   });
 });
 
 describe('<mosaica-field-card> on a number', () => {
   const tens = (counts: number[]) => counts.map((count, i) => ({lower: i * 10, upper: (i + 1) * 10, count}));
+
+  it('draws everything matching on a scale of its own, which stays put as the counts in view move inside it', async () => {
+    const {host, store} = await mountCard('authors');
+    await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 100]), total: 220}]);
+    const heights = (part: string) => deepAll(host, `[part~="bin"] [part="${part}"]`).map((el) => parseFloat((el as HTMLElement).style.height));
+    const full = heights('bar-match');
+    expect(full[2]).toBeGreaterThan(full[1]!);
+    expect(full[1]).toBeGreaterThan(full[0]!);
+    expect(heights('bar-subject').every((h, i) => h > 0 && h < full[i]!)).toBe(true);
+    // Everything in view is now in the first bin, where it is all that matches.
+    answerAggregate(store, 'field-subject', aggregateEntry([{rows: tens([50, 0, 0]), total: 50}]));
+    await settle(host);
+    expect(heights('bar-match')).toEqual(full);
+    expect(heights('bar-subject')).toEqual([full[0], 0, 0]);
+  });
+
+  it('writes a value of four figures, such as a year, without a thousands mark, and a longer one with them', async () => {
+    const {host, store} = await mountCard('authors');
+    const edges = [2010, 2012, 2014, 48_212];
+    const rows = edges.slice(0, -1).map((lower, i) => ({lower, upper: edges[i + 1]!, count: 1}));
+    await answer(host, store, [{rows, total: 3}], [{rows, total: 3}]);
+    const axis = deep(host, '[part="axis"]')!.textContent!;
+    expect(axis).toContain('2010');
+    expect(axis).not.toContain('2,010');
+    expect(axis).toContain('48,212');
+  });
 
   it('takes typed numbers for a range, between the bins’ edges too, and no text that is not a number', async () => {
     const {host, card, store} = await mountCard('authors');
