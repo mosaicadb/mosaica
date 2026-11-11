@@ -7,8 +7,7 @@ control plane would test the SDK against the SDK's own reading of the contract.
 
 from __future__ import annotations
 
-import os
-import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,25 +23,14 @@ def binary() -> str:
 
 
 def notebook_corpus() -> Path:
-    """`data/notebook/`, which is gitignored and shared by every worktree of this checkout."""
-    named = os.environ.get("MOSAICA_NOTEBOOK_DATA")
-    if named:
-        return Path(named)
-    here = Path(__file__).resolve()
-    common = subprocess.run(
-        ["git", "rev-parse", "--git-common-dir"],
-        cwd=here.parent,
-        capture_output=True,
-        text=True,
-    )
-    roots = []
-    if common.returncode == 0:
-        roots.append(Path(common.stdout.strip()).resolve().parent)
-    roots.append(here.parents[3])
-    for root in roots:
-        if (root / "data" / "notebook" / "schema.toml").exists():
-            return root / "data" / "notebook"
-    pytest.skip("data/notebook/ is not in this checkout; set MOSAICA_NOTEBOOK_DATA")
+    """The corpus `corpora.notebook` writes from the example data and a seed, once, into the
+    temporary directory."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    try:
+        from corpora import notebook
+    finally:
+        sys.path.pop(0)
+    return notebook.cached()
 
 
 @pytest.fixture

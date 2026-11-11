@@ -25,7 +25,7 @@ if [ "${1:-}" = "-n" ]; then dry=1; shift; fi
 if [ "${1:-}" = "--" ]; then shift; fi
 
 WORKSPACE_CONFIG='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.cargo/.*|\.config/nextest\.toml)$'
-RUST_READS='^(docs/reference|docs/openapi|test_corpora|examples|reference/vectors)/'
+RUST_READS='^(docs/reference|docs/openapi|corpora|examples|reference/vectors)/'
 
 base_ref=${BASE:-origin/main}
 if ! base=$(git merge-base "$base_ref" HEAD 2>/dev/null); then

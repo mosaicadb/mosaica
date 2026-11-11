@@ -69,7 +69,8 @@ system `python3`, which has all three.
 | `treeoflife` | 233,055,986 |
 | `gbif` | 3,495,729,729 |
 
-Two directories here are not rungs: [`multiview/`](multiview/README.md) is a fixture for
+Three directories here are not rungs: [`multiview/`](multiview/README.md) is a fixture for
 [`docs/system/views.md`](../docs/system/views.md), built from the GeoNames rung's output rather
-than from a publisher's bytes; `common/` is the transform, the paths and the drivers the rungs
-share.
+than from a publisher's bytes; [`notebook/`](notebook/__init__.py) is the corpus the clients' live
+tests serve, drawn from the arXiv example data by a seed; `common/` is the transform, the paths and
+the drivers the rungs share.
