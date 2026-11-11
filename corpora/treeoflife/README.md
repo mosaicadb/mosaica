@@ -276,15 +276,15 @@ name columns and the record blob together — and it buys a lookup nobody on thi
 declared because the interface asked for it; a rung that wanted the bundle smaller would drop it
 first.
 
-⊘ **Both views report RESOLUTION LOST, and only one of them is news.** `bioclip` places
-233,055,986 points in 8,330,745 distinct cells — **3.6%** have a position of their own — and the
+⊘ **Both views report CELLS SHARED, and only one of them is news.** `bioclip` places
+233,055,986 points in 8,330,745 distinct cells — **28.0** per occupied cell — and the
 frame is already `extent = "auto"`. The cause is fit-and-place at a 93:1 ratio: a row is placed at
 the similarity-weighted mean of its fifteen fit-set neighbours, so rows sharing those neighbours
 share a position exactly, and the corpus carries very large near-duplicate sets. `geo` places
-176,899,537 points in 12,002,377 cells (**6.8%**) against Web Mercator's whole domain, where a
-16-bit cell is ~600 m and specimens genuinely coincide at a locality. **Neither is a defect of the
-build**: every position written is correct, only coarse. The `bioclip` figure is a property of the
-route and is the price of not staging 346 GB.
+176,899,537 points in 12,002,377 cells (**14.7** per cell) against Web Mercator's whole domain,
+where a 16-bit cell is ~600 m and specimens genuinely coincide at a locality. **Neither is a defect
+of the build**: every position is stored exactly, and only the cells are shared. The `bioclip`
+figure is a property of the route and is the price of not staging 346 GB.
 
 ### Served, and a 24 GiB cap does not break it
 

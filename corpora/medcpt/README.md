@@ -233,7 +233,7 @@ attribute 'pmid': 35,920,666 of 35,920,666 entities have a value
 artifact layouts, chosen from the bundle's own row space (130447 ms):
   clusters/kmeans level 0 [knn]: 256 artifact(s) with rows, 0.180 everywhere, 7.3 blocks/artifact, disjoint — served rows
   mesh/descriptors level 0 [knn]: 30217 artifact(s) with rows, 0.984 everywhere, 241.4 blocks/artifact, overlapping — served list
-view 'knn': 35920666 point(s) landed in 32550278 distinct cell(s) — 90.6% of them have a position of their own
+view 'knn': 35920666 point(s) landed in 32550278 distinct cell(s), 1.1 per occupied cell
 built .../bundle (v00000): 35920666 items, 18 terms, 165272740 pairs, 11150611895 bytes on disk, 0 artifact(s) minted, 0 unclustered member row(s)
 ```
 

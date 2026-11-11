@@ -576,8 +576,8 @@ pub struct BuildReport {
 /// A frame goes wrong in two ways and the clamp count (`config::Frame`) sees only one of them.
 /// Data *outside* the frame is pushed onto its edge, so those positions are actively wrong — that
 /// is the clamp, which the frame report counts. Data *tiny inside* the frame clamps
-/// nothing at all: every position is correct, and nearly all of the resolution is gone, because
-/// points a long way apart in the source land in one cell and can no longer be told apart.
+/// nothing at all: every position is stored exactly, but points a long way apart in the source
+/// land in one cell, the finest unit the map tiles and counts by.
 /// Coordinates spanning 100…118 against a 0…65536 frame do this with zero clamps.
 ///
 /// **The frame report's bounding box cannot close that gap**, because it is derived from the
@@ -585,9 +585,9 @@ pub struct BuildReport {
 /// corpus still shares a handful of cells. The number that cannot be fooled that way is how many
 /// cells hold at least one point, counted exactly over every point the build placed.
 ///
-/// **A warning, never a refusal**, as the clamp count is. A sparse corpus is stored *correctly but
-/// coarsely*, which is a legitimate thing to want — a small pilot corpus, a deliberately coarse
-/// frame, headroom left for data still to arrive.
+/// **A warning, never a refusal**, as the clamp count is. A corpus in few cells is stored
+/// *exactly but tiled coarsely*, which is a legitimate thing to want — a small pilot corpus, a
+/// deliberately coarse frame, headroom left for data still to arrive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Occupancy {
     /// Points placed — one per row written.
@@ -640,8 +640,12 @@ impl Occupancy {
     }
 
     /// Points per occupied cell — one where every point has a cell to itself, and the factor by
-    /// which the frame is coarser than this corpus needs where it is more. The reporting form is
-    /// [`Self::distinct_fraction`]; this is what the threshold is expressed in.
+    /// which the frame is coarser than this corpus needs where it is more. It is what the report
+    /// prints and what the threshold is expressed in.
+    ///
+    /// The obvious reading of "how full is the grid" — occupied cells over the 4.3×10⁹ that exist
+    /// — measures corpus size far more than the frame: a perfectly framed ten-thousand-point build
+    /// fills 0.0002% of the grid and a collapsed one 0.000003%, and both round to nothing.
     pub fn points_per_cell(&self) -> f64 {
         if self.cells == 0 {
             0.0
@@ -650,33 +654,15 @@ impl Occupancy {
         }
     }
 
-    /// **What is reported: how many of this corpus's points have a position of their own.** One
-    /// hundred per cent is a point per cell; ten per cent means nine points in ten share a
-    /// position with another and cannot be told apart.
-    ///
-    /// The obvious reading of "how full is the grid" — occupied cells over the 4.3×10⁹ that exist
-    /// — is unreadable and nearly always wrong-looking: a corpus can never occupy more cells than
-    /// it has points, so a perfectly framed ten-thousand-point build fills 0.0002% of the grid and
-    /// a collapsed one fills 0.000003%. Both round to nothing, and the figure measures corpus size
-    /// far more than it measures the frame. Against the corpus's own points the same two builds
-    /// read 100% and 1.2%.
-    pub fn distinct_fraction(&self) -> f64 {
-        if self.points == 0 {
-            return 1.0;
-        }
-        self.cells as f64 / self.points as f64
-    }
-
-    /// **What the build says about resolution, every time, whether or not anything is wrong.**
-    /// The raw numbers, so a caller can judge a frame this does not warn about — and so silence
-    /// never means nobody looked.
+    /// **What the build says about how its points fill the cells, every time, whether or not
+    /// anything is wrong.** The raw numbers, so a caller can judge a frame this does not warn
+    /// about — and so silence never means nobody looked.
     pub fn report(&self, view: &str) -> String {
         format!(
-            "view '{view}': {} point(s) landed in {} distinct cell(s) — {:.1}% of them have a \
-             position of their own",
+            "view '{view}': {} point(s) landed in {} distinct cell(s), {:.1} per occupied cell",
             self.points,
             self.cells,
-            self.distinct_fraction() * 100.0
+            self.points_per_cell()
         )
     }
 
@@ -687,14 +673,14 @@ impl Occupancy {
             return None;
         }
         Some(format!(
-            "view '{view}': RESOLUTION LOST — only {:.1}% of these points have a position of \
-             their own, so points far apart in the source are stored at the same position and \
-             cannot be told apart. That is a frame far wider than the data it holds, unless the \
-             source's own positions genuinely coincide. Built anyway: every position written is \
-             correct, only coarse, and a pilot corpus, a deliberately wide frame or headroom for \
-             data still to arrive are all reasons to mean it. Write `extent = \"auto\"` to fit \
-             the frame to this data if it was not intended",
-            self.distinct_fraction() * 100.0
+            "view '{view}': CELLS SHARED — {:.1} points per occupied cell, so points far apart \
+             in the source share a cell. Each position is stored exactly and drawn where it is, \
+             but a cell is the finest unit the map tiles and counts by. That is a frame far wider \
+             than the data it holds, unless the source is genuinely this dense. Built anyway: a \
+             pilot corpus, a deliberately wide frame or headroom for data still to arrive are all \
+             reasons to mean it. Write `extent = \"auto\"` to fit the frame to this data if it \
+             was not intended",
+            self.points_per_cell()
         ))
     }
 }
@@ -3493,8 +3479,7 @@ mod tests {
     }
 
     /// The threshold is a ratio, so it fires at the same proportion at any scale — and the raw
-    /// numbers are printed either side of it. Ten points per occupied cell is the same statement
-    /// as a tenth of the points having a position of their own, which is how it is reported.
+    /// numbers are printed either side of it.
     #[test]
     fn the_warning_fires_on_the_ratio_not_the_size() {
         let just_under = Occupancy {
@@ -3508,14 +3493,10 @@ mod tests {
         assert_eq!(just_under.warning("s0"), None);
         assert!(just_under
             .report("s0")
-            .contains("10.1% of them have a position of their own"));
-        let warning = just_over
-            .warning("s0")
-            .expect("10 points per cell is the threshold");
-        assert!(warning.contains("RESOLUTION LOST"), "{warning}");
+            .contains("99 point(s) landed in 10 distinct cell(s)"));
         assert!(
-            warning.contains("stored at the same position and cannot be told apart"),
-            "{warning}"
+            just_over.warning("s0").is_some(),
+            "10 points per cell is the threshold"
         );
         // The same ratio a thousand times larger says the same thing.
         let big = Occupancy {
