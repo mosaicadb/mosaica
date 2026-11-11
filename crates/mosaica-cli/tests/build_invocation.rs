@@ -559,8 +559,8 @@ fn tiny_against_the_grid(e: u64) -> (f64, f64) {
 
 /// **The second way a frame goes wrong, and the case the clamp count cannot see.** Coordinates
 /// spanning 100…118 against a 0…65536 frame put every point inside the frame — nothing clamps,
-/// nothing is refused — and collapse ten thousand points into a few hundred cells, where points a
-/// long way apart in the source are stored at the same position.
+/// nothing is refused — and put ten thousand points into a few hundred cells, where points a long
+/// way apart in the source share a cell.
 #[test]
 fn data_far_too_small_for_its_frame_is_warned_about() {
     let tmp = tempfile::tempdir().unwrap();
@@ -575,13 +575,8 @@ fn data_far_too_small_for_its_frame_is_warned_about() {
     assert!(text.contains("none on the frame's edge"), "{text}");
     // The raw numbers, then the warning in the caller's terms.
     assert!(text.contains("10000 point(s) landed in"), "{text}");
-    assert!(text.contains("have a position of their own"), "{text}");
-    assert!(text.contains("RESOLUTION LOST"), "{text}");
-    assert!(
-        text.contains("stored at the same position and cannot be told apart"),
-        "{text}"
-    );
-    // A warning, not a refusal — the owner's call: the positions written are correct, only coarse.
+    assert!(text.contains("CELLS SHARED"), "{text}");
+    // A warning, not a refusal — the owner's call: every position is stored exactly.
     assert!(
         tmp.path().join("bundles/corpus/CURRENT").is_file(),
         "a sparse frame is stored correctly and must still build"
@@ -604,11 +599,7 @@ fn a_well_fitted_frame_reports_the_numbers_and_warns_about_nothing() {
         text.contains("10000 point(s) landed in 10000 distinct cell(s)"),
         "{text}"
     );
-    assert!(
-        text.contains("100.0% of them have a position of their own"),
-        "{text}"
-    );
-    assert!(!text.contains("RESOLUTION LOST"), "{text}");
+    assert!(!text.contains("CELLS SHARED"), "{text}");
 }
 
 /// **A legitimately tiny corpus is not scolded.** Ten points in ten cells is a perfectly framed
@@ -628,7 +619,7 @@ fn a_tiny_corpus_is_not_warned_about() {
         text.contains("10 point(s) landed in 10 distinct cell(s)"),
         "{text}"
     );
-    assert!(!text.contains("RESOLUTION LOST"), "{text}");
+    assert!(!text.contains("CELLS SHARED"), "{text}");
 }
 
 /// **The case the bounding-box figure missed.** A dense cluster and two far-off points: the box is
@@ -653,7 +644,7 @@ fn a_dense_cluster_behind_two_outliers_is_warned_about() {
     assert!(text.contains("of the 65536 x 65536 cells"), "{text}");
     assert!(text.contains("none on the frame's edge"), "{text}");
     // What the points actually do inside it.
-    assert!(text.contains("RESOLUTION LOST"), "{text}");
+    assert!(text.contains("CELLS SHARED"), "{text}");
 }
 
 // -------------------------------------------------------------------------------------------
