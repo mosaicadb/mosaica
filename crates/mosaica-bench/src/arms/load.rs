@@ -23,6 +23,27 @@
 //!   politely slows with it and the latency distribution never shows the queue. Open-loop is the
 //!   honest throughput number, so both are available and the report says which was used.
 //!
+//! # Mixed workloads and think time
+//!
+//! `--mix FILE` replaces the fixed viewport with weighted requests of several kinds, so a cell can
+//! model users who pan, filter, aggregate and list rather than only redraw. The file is JSON:
+//!
+//! ```json
+//! {"requests": [
+//!   {"kind": "pan", "route": "/v1/viewport", "weight": 60,
+//!    "body": {"view": "map", "zoom": 6, "bbox": [0, 0, 125, 125], "k": 200},
+//!    "pan": [0, 0, 1000, 1000]},
+//!   {"kind": "aggregate", "route": "/v1/aggregate", "weight": 10,
+//!    "body": {"view": "map", "groupings": [{"count": true}]}}
+//! ]}
+//! ```
+//!
+//! A request with `pan` (an extent) moves each user's own box, the size of the body's `bbox`, by up
+//! to half its width or height from where that user last looked, within the extent, so one user's
+//! requests overlap as a person's do. `--think-ms` pauses each user for an exponentially
+//! distributed time of that mean between requests, so a cell of many users models people rather
+//! than saturating loops. The record reports each kind apart.
+//!
 //! # Two session arms
 //!
 //! The `--tokens` file decides which. `scripts/bench_concurrency.py` writes either N *distinct*
@@ -168,6 +189,143 @@ struct Sample {
     cold: bool,
     /// New bench metric: this 200 response's summed `served` column (`0` for any other status).
     points_served: u64,
+    /// The index of this request's kind in the workload's [`Mix`].
+    kind: usize,
+}
+
+/// One kind of request in a mixed workload.
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct MixEntry {
+    pub kind: String,
+    pub route: String,
+    pub weight: u32,
+    pub body: serde_json::Value,
+    /// The extent each user's box pans within; the box is the size of `body.bbox`.
+    #[serde(default)]
+    pub pan: Option<[f64; 4]>,
+}
+
+/// The requests a cell draws from, with the users' pacing.
+#[derive(Clone, Debug, Default)]
+pub struct Workload {
+    /// The `--mix` file; `None` for the fixed viewport battery of the fixture bundles.
+    pub mix: Option<std::path::PathBuf>,
+    /// The mean pause between one user's requests, in milliseconds; `0` for none.
+    pub think_ms: f64,
+}
+
+impl Workload {
+    /// Read a `--mix` file, refusing one with no request of positive weight or a panning request
+    /// whose body has no `bbox`.
+    fn read_mix(path: &std::path::Path) -> Result<Vec<MixEntry>> {
+        #[derive(serde::Deserialize)]
+        struct File {
+            requests: Vec<MixEntry>,
+        }
+        let file: File = serde_json::from_str(&std::fs::read_to_string(path)?)?;
+        if file.requests.iter().all(|r| r.weight == 0) {
+            return Err(format!("{}: no request has a positive weight", path.display()).into());
+        }
+        for r in &file.requests {
+            if r.pan.is_some() && box_of(&r.body).is_none() {
+                return Err(format!(
+                    "{}: `{}` pans but its body has no `bbox` of four numbers; add one",
+                    path.display(),
+                    r.kind
+                )
+                .into());
+            }
+        }
+        Ok(file.requests)
+    }
+}
+
+fn box_of(body: &serde_json::Value) -> Option<[f64; 4]> {
+    let b = body.get("bbox")?.as_array()?;
+    if b.len() != 4 {
+        return None;
+    }
+    Some([
+        b[0].as_f64()?,
+        b[1].as_f64()?,
+        b[2].as_f64()?,
+        b[3].as_f64()?,
+    ])
+}
+
+/// One user's place in a mixed workload: its random stream and, for each panning kind, where it
+/// last looked.
+struct User {
+    rng: rand::rngs::StdRng,
+    boxes: Vec<Option<[f64; 4]>>,
+}
+
+impl User {
+    fn new(seed: u64, worker: usize, mix: &[MixEntry]) -> Self {
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            seed ^ (worker as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+        );
+        let boxes = mix
+            .iter()
+            .map(|entry| {
+                let extent = entry.pan?;
+                let [x0, y0, x1, y1] = box_of(&entry.body)?;
+                let (w, h) = (x1 - x0, y1 - y0);
+                let x = extent[0] + rng.gen::<f64>() * (extent[2] - extent[0] - w).max(0.0);
+                let y = extent[1] + rng.gen::<f64>() * (extent[3] - extent[1] - h).max(0.0);
+                Some([x, y, x + w, y + h])
+            })
+            .collect();
+        User { rng, boxes }
+    }
+
+    /// The next request's kind and body.
+    fn next(&mut self, mix: &[MixEntry], total_weight: u32) -> (usize, serde_json::Value) {
+        use rand::Rng;
+        let mut pick = self.rng.gen_range(0..total_weight);
+        let kind = mix
+            .iter()
+            .position(|entry| {
+                if pick < entry.weight {
+                    true
+                } else {
+                    pick -= entry.weight;
+                    false
+                }
+            })
+            .unwrap_or(0);
+        let entry = &mix[kind];
+        let mut body = entry.body.clone();
+        if let (Some(extent), Some(current)) = (entry.pan, self.boxes[kind]) {
+            let (w, h) = (current[2] - current[0], current[3] - current[1]);
+            let step = |rng: &mut rand::rngs::StdRng, at: f64, span: f64, lo: f64, hi: f64| {
+                (at + rng.gen_range(-0.5..=0.5) * span).clamp(lo, (hi - span).max(lo))
+            };
+            let x = step(&mut self.rng, current[0], w, extent[0], extent[2]);
+            let y = step(&mut self.rng, current[1], h, extent[1], extent[3]);
+            let moved = [x, y, x + w, y + h];
+            self.boxes[kind] = Some(moved);
+            body["bbox"] = serde_json::json!(moved);
+        }
+        (kind, body)
+    }
+
+    /// A pause drawn from the exponential distribution of mean `mean_ms`.
+    fn think(&mut self, mean_ms: f64) -> Duration {
+        use rand::Rng;
+        let u: f64 = self.rng.gen_range(f64::EPSILON..1.0);
+        Duration::from_secs_f64(-u.ln() * mean_ms / 1000.0)
+    }
+}
+
+/// Nearest-rank percentile of sorted `values`.
+fn percentile(sorted: &[u64], q: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = ((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
+    sorted[rank - 1]
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -186,7 +344,13 @@ pub fn run(
     zoom: u8,
     seed: u64,
     storm: StormOptions,
+    workload: Workload,
 ) -> Result<()> {
+    let mix = workload
+        .mix
+        .as_deref()
+        .map(Workload::read_mix)
+        .transpose()?;
     let mut run = ctx.open("load")?;
 
     let tokens: Vec<String> = std::fs::read_to_string(tokens_path)?
@@ -242,6 +406,9 @@ pub fn run(
         target_healthz,
         k,
         storm,
+        mix.clone(),
+        workload.think_ms,
+        seed,
     ))?;
 
     if samples.is_empty() {
@@ -344,12 +511,60 @@ pub fn run(
         flags.push("cold_build_storm".to_string());
     }
 
+    let kind_names: Vec<String> = match &mix {
+        Some(mix) => mix.iter().map(|entry| entry.kind.clone()).collect(),
+        None => vec![if target_healthz {
+            "healthz"
+        } else {
+            "viewport"
+        }
+        .to_string()],
+    };
+    let kinds: serde_json::Map<String, serde_json::Value> = kind_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let of_kind: Vec<&Sample> = samples.iter().filter(|s| s.kind == index).collect();
+            let mut wall: Vec<u64> = of_kind
+                .iter()
+                .filter(|s| s.status == 200)
+                .map(|s| s.wall_ns)
+                .collect();
+            let mut server: Vec<u64> = of_kind
+                .iter()
+                .filter(|s| s.status == 200)
+                .map(|s| s.server_us)
+                .collect();
+            wall.sort_unstable();
+            server.sort_unstable();
+            let ms = |ns: u64| ns as f64 / 1e6;
+            (
+                name.clone(),
+                serde_json::json!({
+                    "requests": of_kind.len(),
+                    "ok": wall.len(),
+                    "shed_429": of_kind.iter().filter(|s| s.status == 429).count(),
+                    "errors": of_kind.iter().filter(|s| s.status != 200 && s.status != 429 && !s.aborted).count(),
+                    "throughput_rps": wall.len() as f64 / duration_s,
+                    "mean_bytes": of_kind.iter().filter(|s| s.status == 200).map(|s| s.bytes).sum::<u64>() as f64 / wall.len().max(1) as f64,
+                    "p50_ms": ms(percentile(&wall, 0.50)),
+                    "p99_ms": ms(percentile(&wall, 0.99)),
+                    "p999_ms": ms(percentile(&wall, 0.999)),
+                    "server_us_p50": percentile(&server, 0.50),
+                    "server_us_p99": percentile(&server, 0.99),
+                }),
+            )
+        })
+        .collect();
+
     let cell_id = format!(
         "load/{}/{}/{}/{}/c{}{}{}",
         scale,
         label_set,
         if target_healthz {
             "healthz"
+        } else if mix.is_some() {
+            "mix"
         } else {
             "viewport"
         },
@@ -468,6 +683,8 @@ pub fn run(
             "hang_timeout_ms": storm.hang_timeout_ms,
             "cold_workers": storm.cold_workers,
             "cold_build": cold_block,
+            "think_ms": workload.think_ms,
+            "kinds": kinds,
             "seed": seed,
         }),
         work,
@@ -535,27 +752,26 @@ fn sum_served(body: &[u8]) -> u64 {
     total
 }
 
+/// Send one request: a `GET` of `url` where `body` is `None`, else a `POST` of `body`. Only a
+/// viewport's answer is decoded for the points it served.
 async fn issue(
     client: &reqwest::Client,
     url: &str,
-    target_healthz: bool,
     token: &str,
-    k: usize,
-    zoom: u8,
-    bbox: [f64; 4],
+    body: Option<&serde_json::Value>,
 ) -> reqwest::Result<RawOutcome> {
-    let resp = if target_healthz {
-        client.get(url).send().await?
-    } else {
-        client
-            .post(url)
-            .bearer_auth(token)
-            .json(&serde_json::json!({
-                "view": "s0", "zoom": zoom, "bbox": bbox, "k": k
-            }))
-            .send()
-            .await?
+    let resp = match body {
+        None => client.get(url).send().await?,
+        Some(body) => {
+            client
+                .post(url)
+                .bearer_auth(token)
+                .json(body)
+                .send()
+                .await?
+        }
     };
+    let viewport = body.is_some() && url.ends_with("/v1/viewport");
     let status = resp.status().as_u16();
     let server_us = resp
         .headers()
@@ -582,7 +798,7 @@ async fn issue(
             == Some(1);
     // Only a 200's body is a tile stream at all; decoding a 429's small JSON body through the
     // Arrow length-prefix path would just read garbage bytes as a "length" for nothing.
-    let points_served = if status == 200 && !target_healthz {
+    let points_served = if status == 200 && viewport {
         sum_served(&body)
     } else {
         0
@@ -608,6 +824,9 @@ async fn drive(
     target_healthz: bool,
     k: usize,
     storm: StormOptions,
+    mix: Option<Vec<MixEntry>>,
+    think_ms: f64,
+    seed: u64,
 ) -> Result<Vec<Sample>> {
     let client = http_client(concurrency, Duration::from_secs(120))?;
 
@@ -630,11 +849,18 @@ async fn drive(
     let mut handles = Vec::with_capacity(concurrency);
     for worker in 0..concurrency {
         let client = client.clone();
-        let url = if target_healthz {
+        let fixed_url = if target_healthz {
             format!("{viewer_url}/healthz")
         } else {
             format!("{viewer_url}/v1/viewport")
         };
+        let mix = mix.clone();
+        let mix_urls: Vec<String> = mix
+            .iter()
+            .flatten()
+            .map(|entry| format!("{viewer_url}{}", entry.route))
+            .collect();
+        let total_weight: u32 = mix.iter().flatten().map(|entry| entry.weight).sum();
         // The cold-build split (criterion 6): the first `cold_workers` workers hammer
         // `tokens[0]` (the shared cold key) on every request; the rest round-robin
         // `tokens[1..]` (the pre-warmed pool) — disjoint from the cold key by construction, so
@@ -660,7 +886,15 @@ async fn drive(
         handles.push(tokio::spawn(async move {
             let mut local = Vec::new();
             let mut i = worker;
+            let mut user = User::new(seed, worker, mix.as_deref().unwrap_or(&[]));
             while Instant::now() < deadline {
+                if think_ms > 0.0 {
+                    let pause = user.think(think_ms);
+                    if Instant::now() + pause >= deadline {
+                        break;
+                    }
+                    tokio::time::sleep(pause).await;
+                }
                 // Open loop: hold each worker to its share of the arrival schedule, so requests
                 // launch on a clock rather than on completion. Closed loop: no pacing at all.
                 if let Some(rate) = open_rate {
@@ -673,15 +907,27 @@ async fn drive(
                     }
                 }
 
-                let (zoom, bbox) = plan[i % plan.len()];
-                i += concurrency.max(1);
+                let (kind, url, body) = match &mix {
+                    Some(mix) => {
+                        let (kind, body) = user.next(mix, total_weight);
+                        (kind, mix_urls[kind].as_str(), Some(body))
+                    }
+                    None => {
+                        let (zoom, bbox) = plan[i % plan.len()];
+                        i += concurrency.max(1);
+                        let body = (!target_healthz).then(|| {
+                            serde_json::json!({"view": "s0", "zoom": zoom, "bbox": bbox, "k": k})
+                        });
+                        (0, fixed_url.as_str(), body)
+                    }
+                };
 
                 let start = Instant::now();
-                let outcome = issue(&client, &url, target_healthz, &token, k, zoom, bbox);
+                let outcome = issue(&client, url, &token, body.as_ref());
 
                 let sample = match watchdog {
                     Some((dur, is_abort)) => match tokio::time::timeout(dur, outcome).await {
-                        Ok(result) => from_result(result, &start, cold),
+                        Ok(result) => from_result(result, &start, cold, kind),
                         // The deadline fired first: dropping `outcome` here (it is not
                         // `.await`ed again) tears down the in-flight request — for pan-storm
                         // that IS the abort (D-C observes the disconnect and cancels
@@ -697,9 +943,10 @@ async fn drive(
                             retry_after_ok: None,
                             cold,
                             points_served: 0,
+                            kind,
                         },
                     },
-                    None => from_result(outcome.await, &start, cold),
+                    None => from_result(outcome.await, &start, cold, kind),
                 };
                 local.push(sample);
             }
@@ -727,7 +974,12 @@ pub(crate) fn http_client(users: usize, timeout: Duration) -> reqwest::Result<re
 /// Turn one request's `Result<RawOutcome, _>` into a [`Sample`]. Shared by the plain and
 /// watchdog-wrapped paths in [`drive`] so the status/header/body-derived fields are computed in
 /// exactly one place.
-fn from_result(result: reqwest::Result<RawOutcome>, start: &Instant, cold: bool) -> Sample {
+fn from_result(
+    result: reqwest::Result<RawOutcome>,
+    start: &Instant,
+    cold: bool,
+    kind: usize,
+) -> Sample {
     let wall_ns = start.elapsed().as_nanos() as u64;
     match result {
         Ok(o) => Sample {
@@ -741,6 +993,7 @@ fn from_result(result: reqwest::Result<RawOutcome>, start: &Instant, cold: bool)
                 .then_some(o.retry_after_header_is_one && o.retry_after_body_is_one),
             cold,
             points_served: o.points_served,
+            kind,
         },
         Err(_) => Sample {
             wall_ns,
@@ -752,6 +1005,56 @@ fn from_result(result: reqwest::Result<RawOutcome>, start: &Instant, cold: bool)
             retry_after_ok: None,
             cold,
             points_served: 0,
+            kind,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(kind: &str, weight: u32, bbox: [f64; 4], pan: Option<[f64; 4]>) -> MixEntry {
+        MixEntry {
+            kind: kind.to_string(),
+            route: "/v1/viewport".to_string(),
+            weight,
+            body: serde_json::json!({"view": "map", "zoom": 6, "bbox": bbox, "k": 200}),
+            pan,
+        }
+    }
+
+    /// **A panning user keeps the box's size, stays inside the extent, and moves from where it
+    /// last looked; a kind of no weight is never drawn.**
+    #[test]
+    fn a_user_pans_inside_the_extent_and_draws_only_weighted_kinds() {
+        let extent = [0.0, 0.0, 1000.0, 1000.0];
+        let mix = vec![
+            entry("pan", 3, [0.0, 0.0, 125.0, 125.0], Some(extent)),
+            entry("never", 0, [0.0, 0.0, 1.0, 1.0], None),
+            entry("overview", 1, extent, None),
+        ];
+        let mut user = User::new(7, 3, &mix);
+        let mut last: Option<[f64; 4]> = None;
+        let mut drawn = [0usize; 3];
+        for _ in 0..4000 {
+            let (kind, body) = user.next(&mix, 4);
+            drawn[kind] += 1;
+            if kind != 0 {
+                assert_eq!(box_of(&body), Some(extent));
+                continue;
+            }
+            let b = box_of(&body).unwrap();
+            assert!((b[2] - b[0] - 125.0).abs() < 1e-9 && (b[3] - b[1] - 125.0).abs() < 1e-9);
+            assert!(b[0] >= 0.0 && b[1] >= 0.0 && b[2] <= 1000.0 && b[3] <= 1000.0);
+            if let Some(prev) = last {
+                assert!(
+                    (b[0] - prev[0]).abs() <= 62.5 + 1e-9 && (b[1] - prev[1]).abs() <= 62.5 + 1e-9
+                );
+            }
+            last = Some(b);
+        }
+        assert_eq!(drawn[1], 0);
+        assert!(drawn[0] > drawn[2] * 2, "{drawn:?}");
     }
 }

@@ -3,6 +3,12 @@
     python3 scripts/bench_ab.py run --baseline A/mosaica --candidate B/mosaica \\
         --profile fields --work /tmp/ab --out ab-fields.json
     python3 scripts/bench_ab.py report ab-*.json [--summary summary.md] [--fail-on-regression]
+    python3 scripts/bench_ab.py corpus --binary target/release/mosaica --profile scatter \\
+        --items 10000000 --out /tmp/corpora/scatter-10m [--cap 2G]
+
+`corpus` writes one profile's corpus and builds it into a bundle that is kept, for benchmarks that
+serve it many times (`scripts/bench_capacity.py`). `--cap` builds under a memory cap, and
+`corpus.json` records the build's time, its peak memory and the bundle's bytes.
 
 `run` writes one profile's corpus from a seed, then runs every step against each binary in turn:
 baseline then candidate on even repetitions, candidate then baseline on odd ones, so a machine
@@ -188,7 +194,14 @@ PROFILES = {
 
 BLOBS = 64
 LEVELS = (16, 256, 4096)
+#: A text column's words are `w<rank>`, the rank drawn from a Zipf law of this exponent and
+#: clipped to `WORDS - 1`.
 WORDS = 50_000
+TEXT_ZIPF = 1.15
+#: A category's codes are drawn from a Zipf law of this exponent, clipped to its last code.
+CATEGORY_ZIPF = 1.3
+#: A keyword is `k` followed by an integer drawn uniformly from `0 .. KEYWORD_SPAN`.
+KEYWORD_SPAN = 2**40
 #: Rows generated and written at a time, which bounds the generator's memory.
 CHUNK = 1_000_000
 
@@ -229,6 +242,11 @@ def labelled(prefix: str, numbers: np.ndarray, *more) -> pa.Array:
     return pc.binary_join_element_wise(*parts, "")
 
 
+def category_size(column: Column) -> int:
+    """The number of codes a category column's values are drawn from."""
+    return 2000 if column.vocabulary == "catd" else 40
+
+
 def values(rng: np.random.Generator, column: Column, n: int, text_words: int) -> pa.Array:
     t = column.type
     if t in RANGES:
@@ -242,12 +260,12 @@ def values(rng: np.random.Generator, column: Column, n: int, text_words: int) ->
     if t == "timestamp_us":
         return pa.array(rng.integers(*TIME_RANGE, size=n), pa.timestamp("us", tz="UTC"))
     if t == "category":
-        size = 2000 if column.vocabulary == "catd" else 40
-        return labelled(column.vocabulary, np.minimum(rng.zipf(1.3, size=n), size) - 1)
+        size = category_size(column)
+        return labelled(column.vocabulary, np.minimum(rng.zipf(CATEGORY_ZIPF, size=n), size) - 1)
     if t == "keyword":
-        return labelled("k", rng.integers(0, 2**40, size=n))
+        return labelled("k", rng.integers(0, KEYWORD_SPAN, size=n))
     if t == "text":
-        ranks = np.minimum(rng.zipf(1.15, size=(text_words, n)), WORDS) - 1
+        ranks = np.minimum(rng.zipf(TEXT_ZIPF, size=(text_words, n)), WORDS) - 1
         return pc.binary_join_element_wise(*(labelled("w", r) for r in ranks), " ")
     raise ValueError(f"no generator for type {t}")
 
@@ -501,16 +519,27 @@ def timed_child(argv: list[str], log: Path) -> tuple[float, int]:
     return wall, usage.ru_maxrss * 1024
 
 
-def deployment(path: Path, bundle: Path, schema: Path, ports: tuple[int, int, int]) -> None:
+def deployment(
+    path: Path,
+    bundle: Path,
+    schema: Path,
+    ports: tuple[int, int, int],
+    state: Path | None = None,
+    serve: dict | None = None,
+) -> None:
+    """A deployment serving `bundle`. Its cache, write-ahead log and catalogue sit beside the
+    bundle, or in `state` where given; `serve` adds keys to `[serve]`."""
     viewer, session, control = ports
+    stem = state / "state" if state is not None else bundle
+    extra = "".join(f"{key} = {json.dumps(value)}\n" for key, value in (serve or {}).items())
     path.write_text(f"""
 [bundle]
 path = "{bundle}"
-cache = "{bundle}.cache"
-wal = "{bundle}.wal"
+cache = "{stem}.cache"
+wal = "{stem}.wal"
 
 [catalogue]
-dir = "{bundle}.catalogue"
+dir = "{stem}.catalogue"
 
 [build]
 schema = "{schema}"
@@ -523,7 +552,7 @@ viewer = "127.0.0.1:{viewer}"
 session = "127.0.0.1:{session}"
 control = "127.0.0.1:{control}"
 operator_credential_env = "MOSAICA_BENCH_OPERATOR_CRED"
-
+{extra}
 [ingest]
 flush_max_age_secs = 86400
 compaction_window_start = "off"
@@ -825,6 +854,63 @@ def run(args) -> int:
     return 1 if result["errors"]["candidate"] else 0
 
 
+def corpus(args) -> int:
+    """Write a profile's corpus and build it, keeping the bundle."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from bench_cgroup import Capped, parse_bytes
+
+    profile = PROFILES[args.profile]()
+    items = args.items or profile.items
+    out = Path(args.out).resolve()
+    source, bundle = out / "corpus", out / "bundle"
+    if (out / "corpus.json").exists():
+        print(f"{out}: already built; remove it to rebuild", flush=True)
+        return 0
+    start = time.perf_counter()
+    write_corpus(profile, items, args.seed, source)
+    written = time.perf_counter() - start
+    print(f"{profile.name}: {items:,} items written in {written:.1f} s", flush=True)
+    dep = out / "build.toml"
+    deployment(dep, bundle, source / "schema.toml", (free_port(), free_port(), free_port()))
+    cap = parse_bytes(args.cap)
+    argv = [str(Path(args.binary).resolve()), "build", "--deployment", str(dep), "--out", str(bundle)]
+    with (out / "build.log").open("wb") as log:
+        start = time.perf_counter()
+        with Capped(argv, cap, stdout=log, stderr=subprocess.STDOUT) as build:
+            code = build.proc.wait()
+            stats = build.stats()
+        wall = time.perf_counter() - start
+    if code != 0:
+        print(f"build exited {code}: {(out / 'build.log').read_text()[-2000:]}", file=sys.stderr)
+        print(json.dumps(stats), file=sys.stderr)
+        return 1
+    figures = {
+        "profile": profile.name,
+        "items": items,
+        "seed": args.seed,
+        "view": VIEW,
+        "extent": [0.0, 0.0, 1000.0, 1000.0]
+        if profile.projection == "none"
+        else [-180.0, -85.0, 180.0, 85.0],
+        "terms": profile.terms,
+        "bundle": str(bundle),
+        "schema": str(source / "schema.toml"),
+        "corpus_bytes": du(source),
+        "bundle_bytes": du(bundle),
+        "write_s": written,
+        "build_s": wall,
+        "build_cap_bytes": cap,
+        "build_peak_bytes": stats.get("peak"),
+        "build_oom_kills": stats.get("oom_kills"),
+    }
+    if not args.keep_source:
+        for name in ("points.parquet", "members.parquet"):
+            (source / name).unlink(missing_ok=True)
+    (out / "corpus.json").write_text(json.dumps(figures, indent=1) + "\n")
+    print(json.dumps(figures, indent=1), flush=True)
+    return 0
+
+
 def cpu_model() -> str:
     for line in Path("/proc/cpuinfo").read_text().splitlines():
         if line.startswith("model name"):
@@ -944,8 +1030,18 @@ def main() -> int:
     )
     p.add_argument("--summary", help="append the table to this file, such as $GITHUB_STEP_SUMMARY")
     p.add_argument("--fail-on-regression", action="store_true")
+    c = sub.add_parser("corpus", help="write a corpus and build its bundle, and keep it")
+    c.add_argument("--binary", required=True, help="the mosaica binary that builds")
+    c.add_argument("--profile", required=True, choices=sorted(PROFILES))
+    c.add_argument("--items", type=int, help="items in the corpus; absent is the profile's own")
+    c.add_argument("--seed", type=int, default=0)
+    c.add_argument("--out", required=True, help="directory for the corpus, bundle and corpus.json")
+    c.add_argument("--cap", default="unbounded", help="memory cap on the build: 2G, or unbounded")
+    c.add_argument(
+        "--keep-source", action="store_true", help="keep the source Parquet once built"
+    )
     args = parser.parse_args()
-    return run(args) if args.command == "run" else report(args)
+    return {"run": run, "report": report, "corpus": corpus}[args.command](args)
 
 
 if __name__ == "__main__":

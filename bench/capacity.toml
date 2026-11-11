@@ -1,0 +1,150 @@
+# Profiles for scripts/bench_capacity.py: many concurrent users, as memory shrinks below the bundle.
+#
+# A profile names the corpora to build and serve and the axes of its matrix; every key in
+# [defaults] can be overridden in a profile. A corpus is a bench_ab.py profile at a number of
+# items: `scatter` labels each item with one of 1,024 terms by hash, so a grant of `grant_width`
+# terms sees about grant_width/1024 of the items, scattered across the map.
+#
+# Bundle bytes are about 62 an item for `scatter` (62.5 MB at 1M), so the ratio of bundle to cap
+# for a profile can be read off before it runs.
+
+[defaults]
+binary = "target/release/mosaica"
+bench = "target/release/mosaica-bench"
+# Corpora are built under this cap; it bounds the build, not the cells.
+build_cap = "unbounded"
+seed = 0
+# Seconds of each window: `cold` straight after the boot and an eviction of the bundle from the
+# page cache, then `warm`.
+cold_s = 10
+warm_s = 20
+boot_timeout_s = 900
+hang_timeout_ms = 30000
+# CPUs for the server and the generator, as taskset lists; empty shares them all.
+server_cpus = "1-3"
+generator_cpus = "0"
+generator_threads = 1
+# Terms in each user's grant, and the number of grants arm B shares among all its users.
+grant_width = 64
+shared_grants = 4
+policies = ["default", "tuned"]
+arms = ["A", "B"]
+think_ms = [0, 1000]
+# The most points each viewport request asks a tile for; the server draws at most the smaller of
+# this and its own `k_max_marks`.
+points_per_tile = [200]
+
+# Request kinds and their weights. `pan` moves each user's close-up a step from where it last
+# looked; `filtered` is the same with a category filter; `overview` draws the whole map; then a
+# cell-count aggregate and a page of items.
+[defaults.mix]
+pan = 55
+filtered = 15
+overview = 10
+aggregate = 10
+items = 10
+
+# The `tuned` policy: each cache's bytes as a fraction of the cap. A third of the cap goes to the
+# caches; the rest is left to the page cache, the heap and the request buffers.
+[defaults.tuned]
+row_projection_cache_bytes = 0.12
+fragment_cache_bytes = 0.06
+masked_count_cache_bytes = 0.03
+filter_cache_bytes = 0.06
+region_cache_bytes = 0.03
+occupancy_cache_bytes = 0.01
+
+# Extra [serve] keys for every cell.
+[defaults.serve]
+
+# A few minutes: proves the tooling end to end on any box.
+[profile.smoke]
+corpora = [{ profile = "scatter", items = 1_000_000 }]
+caps = ["256M", "unbounded"]
+users = [10, 100]
+think_ms = [0]
+cold_s = 5
+warm_s = 10
+
+# A 4-core, 16 GiB box with ~30 GB of disk. Bundles of about 0.6 GB and 6 GB; caps from 512 MiB
+# to unbounded take the ratio of bundle to memory from under 0.1 to about 12.
+[profile.small]
+corpora = [
+  { profile = "scatter", items = 10_000_000 },
+  { profile = "scatter", items = 100_000_000 },
+]
+caps = ["512M", "1G", "2G", "4G", "8G", "unbounded"]
+users = [10, 100, 1000]
+think_ms = [0, 1000]
+
+# A large box: run the generator on another machine, or give it more cores here, before believing
+# the many-user cells. Bundles of about 6, 60 and 120 GB.
+[profile.large]
+corpora = [
+  { profile = "scatter", items = 100_000_000 },
+  { profile = "scatter", items = 1_000_000_000 },
+  { profile = "scatter", items = 2_000_000_000 },
+]
+caps = ["4G", "16G", "32G", "64G", "128G", "unbounded"]
+users = [100, 1000, 5000, 20000]
+think_ms = [0, 2000]
+server_cpus = ""
+generator_cpus = ""
+generator_threads = 8
+cold_s = 30
+warm_s = 60
+
+# The filter strand: the same matrix over corpora with indexed text, keyword and integer columns,
+# under a mix whose filters vary from request to request. `text` has a 24-word indexed text
+# column `body`, an indexed keyword `tag` and `year`, an indexed u16; `fields` has every type,
+# rendered, indexed, both and neither, and its indexed text column holds 6 words. Both label
+# items with 16 terms, so a grant of 8 terms sees half the items and arm A's 1,000 users draw
+# from 12,870 distinct grants. The item counts are half bench_ab.py's for `text` and 2M for
+# `fields`, whose items carry about sixty columns, so that both bundles and their source fit in
+# the 18 GB of disk this box has spare. Their bytes have not been measured; `corpus.json` records
+# them and the report gives each cell's ratio of bundle to cap. The caps run from holding either
+# bundle whole to several times smaller than it.
+[profile.filters]
+corpora = [
+  { profile = "text", items = 5_000_000 },
+  { profile = "fields", items = 2_000_000 },
+]
+caps = ["256M", "512M", "1G", "2G", "unbounded"]
+users = [10, 100, 1000]
+think_ms = [0, 1000]
+grant_width = 8
+mix = "filters"
+# Entries in each filter family of the mix.
+filter_variants = 20
+
+# A mix a profile names replaces [defaults.mix], where a table in a profile adds to it. A family
+# (`range`, `pan_range`, `agg_range`, `prefix`, `common`, `rare`, `combined`) becomes
+# `filter_variants` kinds `<family>-NN` that differ only in the filter's values, each weighing the
+# family's weight, and every other kind weighs `filter_variants` times its own, so each weight
+# below is that kind's or family's share of requests. `filter_family` in
+# scripts/bench_capacity.py says what each family filters on and the fraction of items each entry
+# is expected to match.
+[mixes.filters]
+pan = 20
+overview = 5
+aggregate = 5
+items = 5
+range = 10
+pan_range = 10
+agg_range = 5
+prefix = 10
+common = 10
+rare = 10
+combined = 10
+
+# The point cap at high ratios of bundle to memory: the 100M corpus at 1 GiB (about 5.6 times the
+# memory) and 2 GiB (2.8), with tiles of 50, 200 and 500 points, all within the server's default
+# `k_max_marks` of 500.
+[profile.kcap]
+corpora = [{ profile = "scatter", items = 100_000_000 }]
+caps = ["1G", "2G"]
+policies = ["default"]
+arms = ["B"]
+users = [10, 100]
+think_ms = [0]
+points_per_tile = [50, 200, 500]
