@@ -139,10 +139,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # llvm-profdata merges this shard's profiles. trybuild compiles the cases under
-      # crates/mosaica-types/tests/ui with this toolchain.
+      # crates/mosaica-types/tests/ui with this toolchain, and with `--offline`, so the step after
+      # it fetches the dependencies those cases build against.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
           components: llvm-tools-preview
+      - run: cargo fetch --locked
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest
