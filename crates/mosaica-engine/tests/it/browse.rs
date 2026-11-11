@@ -772,7 +772,7 @@ fn plant_sets(
     declaration.name = layer.into();
     declaration.hierarchy.kind = kind;
     declaration.content = ContentDeclaration::default();
-    if kind == HierarchyKind::Tiered {
+    if matches!(kind, HierarchyKind::Tiered | HierarchyKind::Stacked) {
         declaration.levels = (0..levels.len() as u32)
             .map(|level| mosaica_types::layer::LevelDeclaration {
                 level,
@@ -917,6 +917,129 @@ fn the_children_below_two_withheld_generations_hang_from_the_root() {
     );
     for out in [&roots, &children, &below] {
         assert!(names_nowhere(out, ids["a"]) && names_nowhere(out, ids["b"]));
+    }
+}
+
+/// A layer, its kind, its artifacts level by level and the keys suppressed.
+type KindCase<'a> = (&'a str, HierarchyKind, Vec<Vec<Planted<'a>>>, &'a [&'a str]);
+
+/// **Roots, children and child counts are the lineage every row's `parent_ids` names, on every
+/// kind.** A search with no text lists every served artifact with the served artifacts nearest
+/// above it, climbed from that artifact. On each kind, with some artifacts suppressed, the roots
+/// form is the rows naming no parent, at every level and at each level, and each row's children
+/// form and `child_count` are the rows naming it.
+#[test]
+fn roots_and_children_are_the_parents_every_row_names_on_every_kind() {
+    let fx = fixture(None);
+    let cases: [KindCase<'_>; 5] = [
+        (
+            "kinds/flat",
+            HierarchyKind::Flat,
+            vec![vec![("f1", 0..100, &[]), ("f2", 100..200, &[]), ("f3", 200..300, &[])]],
+            &["f2"],
+        ),
+        (
+            "kinds/stacked",
+            HierarchyKind::Stacked,
+            vec![
+                vec![("s0a", 0..300, &[]), ("s0b", 300..600, &[])],
+                vec![("s1a", 0..100, &[]), ("s1b", 100..200, &[])],
+            ],
+            &["s0a"],
+        ),
+        (
+            "kinds/nested",
+            HierarchyKind::Nested,
+            vec![vec![
+                ("n0", 0..400, &[]),
+                ("n1", 400..600, &[]),
+                ("na", 0..200, &["n0"]),
+                ("nb", 200..400, &["n0"]),
+                ("nc", 0..100, &["na"]),
+                ("nd", 100..200, &["na"]),
+                ("ne", 400..500, &["n1"]),
+                ("nf", 400..450, &["ne"]),
+            ]],
+            &["n0", "na", "ne"],
+        ),
+        (
+            "kinds/dag",
+            HierarchyKind::Dag,
+            vec![vec![
+                ("d0", 0..400, &[]),
+                ("d1", 300..600, &[]),
+                ("da", 0..200, &["d0"]),
+                ("db", 300..400, &["d0", "d1"]),
+                ("dc", 0..100, &["da", "d1"]),
+                ("dd", 100..200, &["da"]),
+                ("de", 350..400, &["db"]),
+            ]],
+            &["d0", "da"],
+        ),
+        (
+            "kinds/tiered",
+            HierarchyKind::Tiered,
+            vec![
+                vec![("t0", 0..600, &[]), ("t1", 600..900, &[])],
+                vec![("ta", 0..300, &["t0"]), ("tb", 300..600, &["t0"]), ("tc", 600..900, &["t1"])],
+                vec![
+                    ("tx", 0..100, &["ta"]),
+                    ("ty", 300..400, &["tb"]),
+                    ("tz", 600..700, &["t1"]),
+                ],
+            ],
+            &["t0", "ta"],
+        ),
+    ];
+    for (layer, kind, levels, withheld) in cases {
+        let planted: Vec<&[Planted<'_>]> = levels.iter().map(Vec::as_slice).collect();
+        let ids = plant(&fx, layer, kind, &planted);
+        for key in withheld {
+            suppress(&fx, ids[*key]);
+        }
+        let every = browse_layer(&fx.engine, layer, None, BrowseForm::Search(String::new()));
+        assert_eq!(
+            every.artifacts.len(),
+            ids.len() - withheld.len(),
+            "{layer}: every served artifact"
+        );
+        let keyed = |rows: &[&BrowseRow]| {
+            let mut keys: Vec<String> = rows.iter().filter_map(|r| r.key.clone()).collect();
+            keys.sort();
+            keys
+        };
+        let levels_held = levels.len() as u32;
+        let levelled = matches!(kind, HierarchyKind::Tiered | HierarchyKind::Stacked);
+        let at_levels: Vec<Option<u32>> = match levelled {
+            true => std::iter::once(None).chain((0..levels_held).map(Some)).collect(),
+            false => vec![None],
+        };
+        for level in at_levels {
+            let expected: Vec<&BrowseRow> = every
+                .artifacts
+                .iter()
+                .filter(|r| r.parent_ids.is_empty())
+                .filter(|r| level.is_none_or(|level| r.rung == level))
+                .collect();
+            let roots = browse_layer(&fx.engine, layer, level, BrowseForm::Roots);
+            assert_eq!(key_set(&roots), keyed(&expected), "{layer}: roots at {level:?}");
+        }
+        for parent in &every.artifacts {
+            let expected: Vec<&BrowseRow> = every
+                .artifacts
+                .iter()
+                .filter(|r| r.parent_ids.contains(&parent.mosaica_id))
+                .collect();
+            let children =
+                browse_layer(&fx.engine, layer, None, BrowseForm::Children(parent.mosaica_id));
+            let name = parent.key.clone().unwrap_or_default();
+            assert_eq!(key_set(&children), keyed(&expected), "{layer}: children of {name}");
+            assert_eq!(
+                parent.child_count,
+                expected.len() as u64,
+                "{layer}: child count of {name}"
+            );
+        }
     }
 }
 

@@ -423,6 +423,7 @@ fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
         },
     };
     ask("roots", BrowseForm::Roots, None);
+    ask("search '/12345'", BrowseForm::Search("/12345".into()), None);
     for at in [0, depth / 2, depth.saturating_sub(1)] {
         ask(
             &format!("children at depth {at}"),

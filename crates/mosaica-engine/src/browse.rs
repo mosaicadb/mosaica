@@ -32,15 +32,17 @@
 //!
 //! # What it costs
 //!
-//! The gate is asked one artifact at a time and keeps each answer. The roots and search forms ask
-//! it of every artifact of the layer, one masked count each. The children form asks it of the
-//! requested artifact, of the artifacts above it up to its nearest served ancestors, and of those
-//! below it down to its nearest served descendants, so its cost follows the requested artifact's
-//! neighbourhood and not the layer: a level of 3 × 10⁵ artifacts answers a children page in under
-//! a tenth of a millisecond, where the roots form takes about 0.2 s. Each row returned also walks down to its own nearest served descendants for its `child_count`, and up to
-//! its served roots for its rung. Keys are read for the rows returned, and for every candidate of
-//! a search. Under `filters`, one more `and_cardinality` per artifact gated. **A filter
-//! whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
+//! The gate is asked one artifact at a time and keeps each answer. The search form asks it of
+//! every artifact of the layer, one masked count each. The children form asks it of the requested
+//! artifact, of the artifacts above it up to its nearest served ancestors, and of those below it
+//! down to its nearest served descendants; the roots form, of the artifacts with no parent and of
+//! those below them down to the nearest served ones. Their cost follows that neighbourhood and not
+//! the layer: on a level of 3 × 10⁵ artifacts a children page takes under a tenth of a
+//! millisecond, the roots about 1.5 ms, most of it reading every artifact's parent edges, and a
+//! search about 170 ms. Each row returned also walks down to its own nearest served descendants
+//! for its `child_count`, and up to its served roots for its rung. Keys are read for the rows
+//! returned, and matched for every candidate of a search. Under `filters`, one more
+//! `and_cardinality` per artifact gated. **A filter whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
 //! ruling): a leaf over a render-only column is answered by the viewport only inside its tiles,
 //! and browse has none, so the row route's own predicate is run over every row of the view rather
 //! than over a request's ranges. Served naively its `matched_count` would be silently zero, which
@@ -426,13 +428,7 @@ impl crate::Engine {
         // The form's own candidate set, taken over the gated artifacts and never over the level's
         // population.
         let (candidates, parents): (Vec<usize>, Vec<usize>) = match &req.form {
-            BrowseForm::Roots => (
-                gate.every(req.level)
-                    .into_iter()
-                    .filter(|&at| gate.nearest(at).is_empty())
-                    .collect(),
-                Vec::new(),
-            ),
+            BrowseForm::Roots => (gate.roots(req.level), Vec::new()),
             BrowseForm::Children(id) => {
                 // The requested artifact, under its own criterion. One that fails it — or names
                 // nothing, or belongs to another layer — answers an empty page identically to a
@@ -448,20 +444,25 @@ impl crate::Engine {
             }
             BrowseForm::Search(q) => {
                 let needle = q.to_lowercase();
-                let found = |text: Option<String>| {
-                    text.is_some_and(|text| text.to_lowercase().contains(&needle))
-                };
                 let every = gate.every(req.level);
-                let keys = gate.keys(&every);
-                (
-                    every
-                        .into_iter()
-                        .zip(keys)
-                        .filter(|(at, key)| found(key.clone()) || found(name_of(*at)))
-                        .map(|(at, _)| at)
-                        .collect(),
-                    Vec::new(),
-                )
+                let keyed = gate.keys_containing(&every, &needle);
+                let found = every
+                    .into_iter()
+                    .zip(keyed)
+                    .filter(|&(at, keyed)| {
+                        keyed || {
+                            let own = gate.gated.borrow()[at]
+                                .name
+                                .as_deref()
+                                .map(|name| contains(name, &needle));
+                            own.unwrap_or_else(|| {
+                                name_of(at).is_some_and(|name| contains(&name, &needle))
+                            })
+                        }
+                    })
+                    .map(|(at, _)| at)
+                    .collect();
+                (found, Vec::new())
             }
         };
 
@@ -725,36 +726,89 @@ impl Gate<'_> {
     fn below(&self, at: usize) -> Vec<usize> {
         let g = self.get(at);
         let start = (g.level, g.ordinal);
-        let children = |(level, ordinal): (u32, u32)| -> Vec<(u32, u32)> {
-            match &self.below {
-                Below::Within(lineages) => lineages
-                    .get(level as usize)
-                    .map_or(&[][..], |lineage| lineage.children_of_node(ordinal))
-                    .iter()
-                    .map(|&child| (level, child))
-                    .collect(),
-                Below::Coarser(children) => {
-                    children.get(&(level, ordinal)).cloned().unwrap_or_default()
-                }
-                Below::None => Vec::new(),
-            }
+        self.down(self.children(start), FxHashSet::from_iter([start]))
+    }
+
+    /// The served artifacts with no served ancestor, or those at `level`, by index, ascending.
+    ///
+    /// The climb from such an artifact passes only withheld ones and ends where an artifact has no
+    /// edge to climb, so it is found by walking down from every such artifact through the
+    /// withheld ones below. An artifact reached that way can still have a served ancestor on
+    /// another path of a `dag`, so each is kept only where [`Self::nearest`] is empty. A cycle,
+    /// which both entry points refuse, has no artifact without an edge and is not reached.
+    fn roots(&self, level: Option<u32>) -> Vec<usize> {
+        let Some(within) = self.within else {
+            return self.every(level);
         };
+        let held = |level: u32, ordinal: u32| {
+            self.levels
+                .get(level as usize)
+                .is_some_and(|read| (ordinal as usize) < read.forms.first().len())
+        };
+        // Every artifact with no edge the climb follows, and every parent an edge names that no
+        // level holds, whose children the climb stops at.
+        let mut tops = Vec::new();
+        for read in self.levels {
+            let rows = read.forms.first();
+            for ordinal in 0..rows.len() as u32 {
+                let mut climbs = false;
+                for p in rows.parents(ordinal) {
+                    let followed = match within {
+                        true => p.level == read.level && p.ordinal != ordinal,
+                        false => p.level < read.level,
+                    };
+                    if followed {
+                        climbs = true;
+                        if !held(p.level, p.ordinal) {
+                            tops.push((p.level, p.ordinal));
+                        }
+                    }
+                }
+                if !climbs {
+                    tops.push((read.level, ordinal));
+                }
+            }
+        }
+        self.down(tops, FxHashSet::default())
+            .into_iter()
+            .filter(|&at| level.is_none_or(|level| self.get(at).level == level))
+            .filter(|&at| self.nearest(at).is_empty())
+            .collect()
+    }
+
+    /// The served artifacts met walking down from `walk` through withheld ones, not entering
+    /// `seen`, by index, ascending.
+    fn down(&self, mut walk: Vec<(u32, u32)>, mut seen: FxHashSet<(u32, u32)>) -> Vec<usize> {
         let mut found = Vec::new();
-        let mut seen: FxHashSet<(u32, u32)> = FxHashSet::default();
-        seen.insert(start);
-        let mut walk = children(start);
         while let Some(next) = walk.pop() {
             if !seen.insert(next) {
                 continue;
             }
             match self.served(next.0, next.1) {
                 Some(child) => found.push(child),
-                None => walk.extend(children(next)),
+                None => walk.extend(self.children(next)),
             }
         }
         found.sort_unstable();
         found.dedup();
         found
+    }
+
+    /// The artifacts whose parent edges, as [`Self::nearest`] climbs them, name `(level,
+    /// ordinal)`.
+    fn children(&self, (level, ordinal): (u32, u32)) -> Vec<(u32, u32)> {
+        match &self.below {
+            Below::Within(lineages) => lineages
+                .get(level as usize)
+                .map_or(&[][..], |lineage| lineage.children_of_node(ordinal))
+                .iter()
+                .map(|&child| (level, child))
+                .collect(),
+            Below::Coarser(children) => {
+                children.get(&(level, ordinal)).cloned().unwrap_or_default()
+            }
+            Below::None => Vec::new(),
+        }
     }
 
     /// The depth of `at` in the forest its nearest served ancestors form: the longest path from a
@@ -791,6 +845,24 @@ impl Gate<'_> {
             }
         }
         self.rungs.borrow()[&at]
+    }
+
+    /// Whether the publisher's key of each artifact of `ats` contains `needle`, ignoring case, read
+    /// under one hold of the store.
+    fn keys_containing(&self, ats: &[usize], needle: &str) -> Vec<bool> {
+        let name = self.layer.declaration.name.as_str();
+        let gated = self.gated.borrow();
+        self.engine.write.live().with_artifacts(|store| {
+            ats.iter()
+                .map(|&at| {
+                    let g = &gated[at];
+                    store
+                        .get(name, g.level, g.ordinal)
+                        .and_then(|record| record.key.as_deref())
+                        .is_some_and(|key| contains(key, needle))
+                })
+                .collect()
+        })
     }
 
     /// The publisher's key of each artifact of `ats`, read under one hold of the store.
@@ -948,6 +1020,21 @@ impl<'a, 'c> Namer<'a, 'c> {
                     })
                 })
             })
+    }
+}
+
+/// Whether `text` contains `needle`, `needle` lowercased already, ignoring case.
+fn contains(text: &str, needle: &str) -> bool {
+    match text.is_ascii() {
+        // Lowercasing ASCII gives ASCII, so a needle that is not ASCII is in no ASCII text.
+        true => {
+            needle.is_empty()
+                || text
+                    .as_bytes()
+                    .windows(needle.len())
+                    .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+        }
+        false => text.to_lowercase().contains(needle),
     }
 }
 
