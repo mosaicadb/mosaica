@@ -8,85 +8,112 @@ container image.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-11
+
+Mosaica 0.4.0 lets a viewer step through an annotation layer. A levelled layer is drawn at a finer
+level as the map zooms in, the cluster card walks a hierarchy a page at a time without changing
+the filter, and a withheld annotation's children hang from the nearest annotation the viewer is
+served. The web components can now be used from the keyboard, by a screen reader and in a small
+window. A selection drawn in one layout goes on filtering after a switch to another, and
+`mosaica demo` opens a dataset on a map with one command. Text indexes build in less than half
+the time they took, and an ingest is no longer held up while a compaction writes its files.
+
+### Upgrading from 0.3.0
+
+- Rebuild every bundle, because the bundle format is now 54 and 0.4.0 refuses a bundle built by
+  0.3.0. Writes made to a 0.3.0 service, including deletions and suppressions, are not carried
+  over.
+- Rename the cluster budget to the cluster spacing wherever you set it, and give it in CSS pixels
+  in place of a count of clusters. Replace the `cluster-level` attribute and the `clusterLevel`
+  prop with `clusterLevels`, and read `{layer, level}` from `mosaica-levelchange`. The entries
+  under Changed list each name.
+- Send `parent` without `level` to `POST /v1/artifacts/browse`, which now refuses the two
+  together with `422`. A browse cursor from 0.3.0 is refused.
+- In Python, give `Selection.within` on a view declared with a projection its box in degrees.
+- Check page styles that select the components' parts or elements: the `most-clusters` parts are
+  now `cluster-density`, the field card's rows have no `path` part, titles are headings and pairs
+  of a name and a value are `<dl>` lists.
+- `serve.filter_cache_bytes` now defaults to 1 GiB. Under a memory cap of a few GiB, set it and
+  the other cache limits as [Sizing](https://docs.mosaicadb.com/guides/sizing/) describes.
+
 ### Added
 
-- **An aggregate can carry its own filter.** `AggregateSpec.filters` in the TypeScript client is
-  joined with `all_of` to what the aggregate counts, under every `subject`, including `visible`,
-  which otherwise sends none of the store's filters.
-- `mosaica demo NAME...` builds datasets and opens their map in a browser, with a picker for the
-  dataset and one for whom to view it as, from the Python package with the new `demo` extra:
-  `pip install 'mosaica[demo]'`, then `mosaica demo places`, or
-  `uvx --from 'mosaica[demo]' mosaica demo places`, or `uv run mosaica demo places` in a clone.
-  `mosaica.datasets.load` does the same steps and returns the `Database`, and `mosaica.datasets.prepared` stops before the build. The datasets
-  are the two in-git samples, the whole GeoNames dump, downloaded from GeoNames, and GBIF's
-  occurrence snapshot, read from its public copy on Amazon S3 whole or as a sample of its parts.
-  [Datasets to try](docs/start/datasets.md) lists their views, fields, layers and sizes.
-- `POST /v1/viewport` takes `space` beside `bbox`: `"wgs84"` gives the box in degrees of
-  longitude and latitude on a view with a map projection. The TypeScript client's
-  `ViewportRequest` and `region` filter take it too.
-- `space` takes `"inserted"`, the coordinates a view's items were inserted with: degrees on a view
-  with a map projection and the view's own otherwise. `POST /v1/artifacts/viewport` takes `space`
-  beside `bbox`, and `POST /v1/aggregate` beside `cells.area` and `cut.bbox`. In Python,
-  `viewport_artifacts` takes `space` and `Viewer.map` and `Database.map` take `bbox_space`; the
-  TypeScript request types take `space`.
-- `POST /v1/items` takes `fields` as optional. A request without it returns every field the view
-  reads under its bare name, and its cursor is refused once that set of fields changes.
-  `mosaica items --fields`, `ItemsRequest.fields` in TypeScript and `fields` on the Python
-  `items` calls are optional in the same way.
-- Python: `views()`, `attributes(view=None)` and `layers(view=None)` on `Database` and `Viewer`
-  list what `/v1/meta` describes, each attribute with the filter operators it takes as
-  `operands`.
-- The TypeScript store reports a query in flight. `status.querying` is true from a change of
-  filters, highlight, `member_of` clauses, selected region or regions held in other views until
-  the map, the artifacts and the counts have loaded, and `store.cancelQuery()` goes back to the ones that last finished loading.
-  `<mosaica-status>` reads Running query, with a Cancel button, once a query has run for a quarter
-  of a second, and a `<mosaica-filter>` box shows a spinner for the query it started. Cancel fires
-  `mosaica-filterchange`, `mosaica-clausechange` and `mosaica-selectchange` for what it went back
-  to.
-- `<mosaica-explorer>` takes an `aria-label`, which names its map for a screen reader, and the
-  Python `Map` takes `label` for the same purpose, as do `db.map`, `viewer.map` and
-  `selection.map`. A map's canvas is named "Map" without one, and its description lists its keys
-  either way.
-- The components announce to a screen reader what changes without the focus moving: the state of
-  the view, a query's counts once they have loaded, a selected region's count, a card opening in
-  the explorer, the basemap's note, how many suggestions a search box lists, and whether Copy id
-  copied. Pans and zooms announce nothing, and Nothing in view is announced only as the answer to
-  a change of filters, highlight or selection.
-- `<mosaica-map>`, `<mosaica-status>` and `<mosaica-selection>` take a boolean `quiet` attribute.
-  A quiet element shows everything it showed and announces nothing, apart from the map's
-  basemap note and a basemap it refuses. Set it on all but one of the elements that would say the
-  same thing, so that each change is announced once. The explorer sets it on its own map and
-  selection card, and its status strip speaks.
-- A histogram field card's range box has From and To fields that take a typed number or date, so
-  a range needs no drag and can fall between bins. A press on one bin opens the box, and so does
-  Set range, a button drawn only while the keyboard's focus is on it. A screen reader is given
-  the range the filter and the highlight hold, and the bins' counts in a table. A number in the
-  box is written in full, and a comma, a space or a narrow no-break space is taken where it
-  groups thousands, so `1,250` and `1 250` are 1250 and `1,5` is refused. The new parts are
-  `range`, `brush-from` and `brush-to`.
-- The item card has a Show more button, part `more`, under a long value that is cut short, and
-  Show all on the compact card shows the headline whole. Through the explorer the button is
-  `::part(item-card-more)`.
-- A `<mosaica-filter-panel>` with `chips-only` shows the words No filters when its last chip is
-  removed, and they take the focus the chip's × had.
-- `--mosaica-focus` sets the colour of the focus ring, which is 2 px wide on every control and on
-  the map's canvas.
-- `--mosaica-long-text` chooses what a title or a name too long for its line does: `nowrap`, the
-  default, cuts it with an ellipsis as before, and `normal` wraps it. The explorer's narrow
-  layout wraps them. A cut name keeps its whole text for a screen reader.
-- The notebook map writes what it refuses of `filters`, `colour_by` or `basemap` above the map,
-  as well as sending it to the kernel. Each trait's refusal has a line of its own, in the view
-  that refused it, so a screen reader reads the line that changed.
-- The `canvas-store` example's canvas takes the arrow keys, `+` and `-`. Every example names its
-  map, has a heading and a main landmark, and the two tutorials' pages stack their columns in a
-  narrow window.
-- The documentation has an [Accessibility](docs/system/accessibility.md) page: the keys each
-  element takes, what a screen reader is told, what the page supplies, the contrast to keep when
-  overriding a theme token, and what is not built, which includes reaching the map's points from
-  the keyboard.
+#### Trying Mosaica
+
+- `mosaica demo NAME...` builds a dataset and opens its map in a browser, with pickers for the
+  dataset and for whom to view it as. Install it with `pip install 'mosaica[demo]'`, or run
+  `uvx --from 'mosaica[demo]' mosaica demo places`. The datasets are the two in-git samples, the
+  whole GeoNames dump and GBIF's occurrence snapshot, whole or sampled, and
+  [Datasets to try](https://docs.mosaicadb.com/start/datasets/) describes them.
+  `mosaica.datasets.load` does the same from Python and returns the `Database`.
+
+#### Queries and the HTTP API
+
+- **A selection drawn in one layout filters another.** A `region` filter leaf takes `view`, naming
+  the view its shape or artifact is in. The TypeScript store keeps one selection for each view, so
+  a selection goes on filtering after a switch to another layout and is selected again on the way
+  back, and `<mosaica-filter-panel>` shows each one held as a chip, such as "Lasso in Topics". Its
+  cost grows with the number of rows inside the selection.
+- A box takes `space`: `"wgs84"` for degrees on a view with a map projection, or `"inserted"` for
+  the coordinates the view's items were inserted with. `POST /v1/viewport`,
+  `POST /v1/artifacts/viewport`, `POST /v1/aggregate` and the `region` filter take it, and so do
+  the TypeScript request types and the Python `viewport_artifacts`, `Viewer.map` and
+  `Database.map`.
+- `fields` is optional on `POST /v1/items` and in every client, and a request without it returns
+  every field the view reads.
+- `bins` and the summary figures take a bool field, with one bin for false and one for true, and a
+  bool's field card lists yes and no with their counts.
+- In TypeScript, `AggregateSpec.filters` gives an aggregate a filter of its own, joined with
+  `all_of` to what it counts.
+
+#### Clients
+
+- Python: `views()`, `attributes()` and `layers()` on `Database` and `Viewer` list what `/v1/meta`
+  describes, each attribute with the filter operators it takes.
+- The TypeScript store reports a query in flight in `status.querying`, and `store.cancelQuery()`
+  goes back to the last results that finished loading. `<mosaica-status>` shows Running query,
+  with a Cancel button, and a `<mosaica-filter>` box shows a spinner for the query it started.
+- The notebook map writes what it refuses of `filters`, `colour_by` or `basemap` above the map, as
+  well as sending it to the kernel.
+
+#### Accessibility
+
+The components can be used from the keyboard and by a screen reader, and the
+[Accessibility](https://docs.mosaicadb.com/system/accessibility/) page says which keys each
+element takes, what a screen reader is told and what is not built yet.
+
+- The components announce changes that do not move the focus, such as a query's counts once they
+  have loaded or a card opening, and leave pans and zooms unannounced. A boolean `quiet` attribute
+  on `<mosaica-map>`, `<mosaica-status>` and `<mosaica-selection>` keeps an element from
+  announcing what another already says.
+- `<mosaica-explorer>` takes an `aria-label` that names its map, and the Python `Map`, `db.map`,
+  `viewer.map` and `selection.map` take `label` for the same purpose.
+- A histogram field card's range box takes a typed number or date in From and To fields, so a
+  range needs no drag and can fall between bins.
+- The item card has a Show more button under a long value that is cut short.
+- `--mosaica-focus` sets the colour of the focus ring, and `--mosaica-long-text: normal` wraps a
+  title or name too long for its line where the default cuts it with an ellipsis.
+- Every example names its map and has a heading and a main landmark, and the `canvas-store`
+  example's canvas takes the arrow keys, `+` and `-`.
 
 ### Changed
 
+- **Breaking:** bundles built by 0.3.0 must be rebuilt, because the bundle format is now 54.
+  Writes made to a 0.3.0 service, including deletions and suppressions, are not carried over.
+- **Text indexes are built faster and write fewer bytes.** The build, a flush and a compaction
+  now write text and keyword indexes the same way, merging term ranges on several threads, with
+  memory allowances and thread counts set from the memory the machine has. At a million items on
+  four threads, a build's text stage took 12.8 s rather than 32.1 s and wrote 380 MB rather than
+  1,223 MB, and the whole build took 27.5 s rather than 48.7 s. A compaction of a million items
+  took 12.0 s rather than 15.0 s, and the server's peak memory during it rose from 377 MiB to
+  760 MiB, because the compaction now holds in memory what it used to spill to disc.
+- **An ingest is answered while a compaction is publishing.** A compaction writes its derived
+  files on its own thread, and the previous data directory is deleted on another, where both used
+  to run on the thread that answers every write. With 256-row writes sent back to back during a
+  compaction of a million items, the slowest acknowledgement took 0.35 s at most, where it took
+  about 2 s.
+- A compaction writes each column file once, at its final size, where it used to write a
+  temporary copy first. A compaction of 4 million items wrote 319 MB rather than 487 MB.
 - **A withheld annotation's children hang from its nearest served ancestors everywhere.** Browse
   (`POST /v1/artifacts/browse`), the map's artifacts frames and bulk reads (`POST /v1/artifacts`)
   now name a parent the way the map's cut already attached it: where a viewer is not served an
@@ -288,6 +315,25 @@ container image.
 - The arXiv example dataset names every archive and subject class of its `taxonomy/arxiv` layer,
   such as Astrophysics for `astro-ph`, with arXiv's title for it, so its rows in the hierarchy and
   the cluster card no longer read Unnamed and browse finds them by name.
+- The build and the server read a cgroup v1 memory cap as well as a cgroup v2 one. Under a v1 cap
+  they used to size themselves from the host's memory, so the cap killed them. The build's
+  detected budget no longer has a 2 GiB floor, so under a 1 GiB cap it plans 815 MiB.
+- The segments a merge consumes and the extents a coalesce consumes are deleted once no kept
+  publication names them. They used to stay on disc until the next compaction, which the default
+  schedule may hold off for a day, so a service taking writes kept a growing amount of data it no
+  longer used.
+
+### Documentation
+
+- [Count and chart from Python](https://docs.mosaicadb.com/guides/analysis/) works through
+  counts, breakdowns, histograms, comparisons and density grids from the Python client, and the
+  [Filters](https://docs.mosaicadb.com/reference/filters/) and
+  [Aggregations](https://docs.mosaicadb.com/reference/aggregations/) reference pages list every
+  operator and grouping.
+- [Sizing](https://docs.mosaicadb.com/guides/sizing/) says how much memory to give the data a
+  viewer reads often, from a measured example at 100 million items, what each distinct set of
+  access attributes costs, and how to set the cache limits under a memory cap smaller than their
+  defaults.
 
 ## [0.3.0] - 2026-11-08
 
@@ -428,6 +474,7 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[0.4.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.1.0
