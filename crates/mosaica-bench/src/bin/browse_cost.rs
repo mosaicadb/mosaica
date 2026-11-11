@@ -163,15 +163,8 @@ fn median(mut samples: Vec<f64>) -> f64 {
 /// The three forms against a real corpus, with and without an entity-routed filter.
 fn measure_pages(root: &Path, view: &str, layer: Option<&str>, repeat: usize) {
     let tmp = tempfile::TempDir::new().expect("a scratch dir");
-    let engine = engine_at(
-        root,
-        &tmp.path().join("cache"),
-        &tmp.path().join("wal.log"),
-        false,
-    );
-    let layer = layer
-        .map(str::to_string)
-        .expect("--layer names the layer to browse");
+    let engine = engine_at(root, &tmp.path().join("cache"), &tmp.path().join("wal.log"), false);
+    let layer = layer.map(str::to_string).expect("--layer names the layer to browse");
     let session = engine
         .authorise(&credential(&all_terms(root)))
         .expect("the credential authorises");
@@ -254,10 +247,7 @@ fn measure_scan(rows: u64, repeat: usize) {
     let tmp = tempfile::TempDir::new().expect("a scratch dir");
     let started = Instant::now();
     let bundle = build_scan_fixture(tmp.path(), rows);
-    println!(
-        "synthetic bundle of {rows} rows built in {:?}",
-        started.elapsed()
-    );
+    println!("synthetic bundle of {rows} rows built in {:?}", started.elapsed());
     let engine = engine_at(
         &bundle,
         &tmp.path().join("cache"),
@@ -328,9 +318,10 @@ fn measure_scan(rows: u64, repeat: usize) {
     ask("render-only leaf (scan)", Some(scan));
 }
 
-/// The children form down a deep `nested` layer: `branching` children under every artifact to
-/// `depth` levels below the roots, each artifact holding a contiguous run of the `rows` rows, so
-/// the layer holds `branching^(depth+1)` leaves' worth of artifacts.
+/// The roots, a search and the children form down a deep `nested` layer: `branching` children
+/// under every artifact to `depth` generations below the one root, each artifact holding a
+/// contiguous run of the `rows` rows, so the layer holds the sum of `branching^k` for `k` from 0
+/// to `depth` artifacts.
 fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
     let tmp = tempfile::TempDir::new().expect("a scratch dir");
     let started = Instant::now();
@@ -515,8 +506,10 @@ fn build_scan_fixture(dir: &Path, rows: u64) -> PathBuf {
         limit: None,
         shard_size: None,
         strict: false,
-        identity_key: mosaica_types::IdentityKey::from_hex("07070707070707070707070707070707")
-            .expect("a well-formed key"),
+        identity_key: mosaica_types::IdentityKey::from_hex(
+            "07070707070707070707070707070707",
+        )
+        .expect("a well-formed key"),
         layers: Vec::new(),
         layer_inputs: Vec::new(),
         scoped_layers: Default::default(),
@@ -550,10 +543,7 @@ fn write_points(path: &Path, rows: u64) {
         let ids: Vec<u64> = (at..at + n).collect();
         let xs: Vec<f64> = ids.iter().map(|e| ((e * 37) % 1000) as f64).collect();
         let ys: Vec<f64> = ids.iter().map(|e| ((e * 53) % 1000) as f64).collect();
-        let scores: Vec<i32> = ids
-            .iter()
-            .map(|&e| (e as i32).wrapping_mul(7) % 101 - 50)
-            .collect();
+        let scores: Vec<i32> = ids.iter().map(|&e| (e as i32).wrapping_mul(7) % 101 - 50).collect();
         let batch = RecordBatch::try_new(
             Arc::clone(&schema),
             vec![

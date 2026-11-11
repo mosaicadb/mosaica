@@ -36,13 +36,15 @@
 //! every artifact of the layer, one masked count each. The children form asks it of the requested
 //! artifact, of the artifacts above it up to its nearest served ancestors, and of those below it
 //! down to its nearest served descendants; the roots form, of the artifacts with no parent and of
-//! those below them down to the nearest served ones. Their cost follows that neighbourhood and not
-//! the layer: on a level of 3 × 10⁵ artifacts a children page takes under a tenth of a
-//! millisecond, the roots about 1.5 ms, most of it reading every artifact's parent edges, and a
-//! search about 170 ms. Each row returned also walks down to its own nearest served descendants
-//! for its `child_count`, and up to its served roots for its rung. Keys are read for the rows
-//! returned, and matched for every candidate of a search. Under `filters`, one more
-//! `and_cardinality` per artifact gated. **A filter whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
+//! those below them down to the nearest served ones. On a `nested` or `dag` layer those are found
+//! through the level's held lineage, so the cost follows that neighbourhood and not the layer: on a
+//! `nested` level of 3 × 10⁵ artifacts a children page or the roots take about a tenth of a
+//! millisecond, and a search about 170 ms. A `tiered` layer's edges to coarser levels are turned downward on each
+//! request that walks down, reading every artifact's parent edges and no membership. Each row
+//! returned also walks down to its own nearest served descendants for its `child_count`, and up
+//! to its served roots for its rung. Keys are read for the rows returned, and matched for every
+//! candidate of a search. Under `filters`, one more `and_cardinality` per artifact gated. **A
+//! filter whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
 //! ruling): a leaf over a render-only column is answered by the viewport only inside its tiles,
 //! and browse has none, so the row route's own predicate is run over every row of the view rather
 //! than over a request's ranges. Served naively its `matched_count` would be silently zero, which
@@ -55,7 +57,6 @@
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -371,12 +372,12 @@ impl crate::Engine {
                         })
                         .collect(),
                 ),
-                Some(false) => Below::Coarser(coarser_children(&levels)),
+                Some(false) => Below::Coarser(OnceCell::new()),
                 None => Below::None,
             },
-            within,
             at: RefCell::default(),
             gated: RefCell::default(),
+            names: RefCell::default(),
             nearest: RefCell::default(),
             rungs: RefCell::default(),
         };
@@ -420,7 +421,11 @@ impl crate::Engine {
                 return name.clone();
             }
             let g = gate.get(at);
-            let name = namer.name(g.name, g.level, g.ordinal);
+            let name = namer.name(
+                gate.with_own_name(at, |own| own.map(str::to_string)),
+                g.level,
+                g.ordinal,
+            );
             resolved.borrow_mut().insert(at, name.clone());
             name
         };
@@ -440,25 +445,22 @@ impl crate::Engine {
                         next: None,
                     });
                 };
-                (gate.below(at), gate.nearest(at).to_vec())
+                (gate.below(at), gate.nearest(at))
             }
             BrowseForm::Search(q) => {
                 let needle = q.to_lowercase();
                 let every = gate.every(req.level);
-                let keyed = gate.keys_containing(&every, &needle);
+                let keyed = gate.with_keys(&every, |key| key.is_some_and(|k| contains(k, &needle)));
                 let found = every
                     .into_iter()
                     .zip(keyed)
                     .filter(|&(at, keyed)| {
-                        keyed || {
-                            let own = gate.gated.borrow()[at]
-                                .name
-                                .as_deref()
-                                .map(|name| contains(name, &needle));
-                            own.unwrap_or_else(|| {
-                                name_of(at).is_some_and(|name| contains(&name, &needle))
-                            })
-                        }
+                        keyed
+                            || gate
+                                .with_own_name(at, |own| own.map(|name| contains(name, &needle)))
+                                .unwrap_or_else(|| {
+                                    name_of(at).is_some_and(|name| contains(&name, &needle))
+                                })
                     })
                     .map(|(at, _)| at)
                     .collect();
@@ -495,7 +497,7 @@ impl crate::Engine {
             .flatten();
 
         let rows_of = |ats: &[usize]| -> Vec<BrowseRow> {
-            let keys = gate.keys(ats);
+            let keys = gate.with_keys(ats, |key| key.map(str::to_string));
             ats.iter()
                 .zip(keys)
                 .map(|(&at, key)| {
@@ -519,10 +521,7 @@ impl crate::Engine {
                         // The served artifacts naming this one among their nearest served
                         // parents, which is the children form's own candidate set. A `flat` or
                         // `stacked` layer has no links to count.
-                        child_count: match within {
-                            Some(_) => gate.below(at).len() as u64,
-                            None => 0,
-                        },
+                        child_count: gate.below(at).len() as u64,
                         slot: slots
                             .get(g.level as usize)
                             .and_then(Option::as_ref)
@@ -533,7 +532,6 @@ impl crate::Engine {
         };
         let mut parent_rows = rows_of(&parents);
         parent_rows.sort_by_key(|row| row.mosaica_id.raw());
-        parent_rows.dedup_by_key(|row| row.mosaica_id.raw());
         let artifacts = rows_of(&page);
         ctx.finish()?;
         Ok(BrowseOut {
@@ -545,7 +543,7 @@ impl crate::Engine {
 }
 
 /// One served artifact of the layer, as the gate left it: what its row needs.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Gated {
     level: u32,
     ordinal: u32,
@@ -553,38 +551,61 @@ struct Gated {
     /// `|membership ∩ M_auth ∩ filter|` under `filters`, `None` without.
     matched_count: Option<u64>,
     mosaica_id: MosaicaId,
-    /// The artifact's own first supplied text, from the content this viewer is served.
-    name: Option<String>,
 }
 
-/// Where a layer's edges lead downward: the children each artifact's parent edges make it, by the
-/// edges [`crate::lineage::nearest_served`] climbs.
+/// Where a layer's edges lead downward, by the edges [`crate::lineage::nearest_served`] climbs.
 enum Below {
     /// A `nested` or `dag` layer's in-level edges, through each level's held lineage.
     Within(Vec<Arc<crate::cut::Lineage>>),
-    /// A `tiered` layer's edges to coarser levels, by parent.
-    Coarser(FxHashMap<(u32, u32), Vec<(u32, u32)>>),
+    /// A `tiered` layer's edges to coarser levels, read from every level on first use.
+    Coarser(OnceCell<Coarser>),
     /// A kind with no edges.
     None,
 }
 
-/// A `tiered` layer's children by parent, read from every level's edges to coarser levels.
-fn coarser_children(levels: &[ReadLevel]) -> FxHashMap<(u32, u32), Vec<(u32, u32)>> {
-    let mut children: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
-    for read in levels {
-        let rows = read.forms.first();
-        for ordinal in 0..rows.len() as u32 {
-            for parent in rows.parents(ordinal) {
-                if parent.level < read.level {
-                    children
-                        .entry((parent.level, parent.ordinal))
-                        .or_default()
-                        .push((read.level, ordinal));
+/// A `tiered` layer's edges to coarser levels, turned downward.
+struct Coarser {
+    children: FxHashMap<(u32, u32), Vec<(u32, u32)>>,
+    /// The artifacts with no edge to a coarser level, and the parents an edge names that no level
+    /// holds.
+    tops: Vec<(u32, u32)>,
+}
+
+impl Coarser {
+    fn read(levels: &[ReadLevel]) -> Coarser {
+        let held = |level: u32, ordinal: u32| {
+            levels
+                .get(level as usize)
+                .is_some_and(|read| (ordinal as usize) < read.forms.first().len())
+        };
+        let mut coarser = Coarser {
+            children: FxHashMap::default(),
+            tops: Vec::new(),
+        };
+        for read in levels {
+            let rows = read.forms.first();
+            for ordinal in 0..rows.len() as u32 {
+                let mut climbs = false;
+                for p in rows.parents(ordinal) {
+                    if crate::lineage::climbs(false, read.level, p) {
+                        climbs = true;
+                        if !held(p.level, p.ordinal) {
+                            coarser.tops.push((p.level, p.ordinal));
+                        }
+                        coarser
+                            .children
+                            .entry((p.level, p.ordinal))
+                            .or_default()
+                            .push((read.level, ordinal));
+                    }
+                }
+                if !climbs {
+                    coarser.tops.push((read.level, ordinal));
                 }
             }
         }
+        coarser
     }
-    children
 }
 
 /// The viewport's gate over one layer for one request, asked one artifact at a time and holding
@@ -599,13 +620,15 @@ struct Gate<'a> {
     levels: &'a [ReadLevel],
     views: Vec<ArtifactView<'a, EffectiveMask>>,
     below: Below,
-    within: Option<bool>,
     /// Each artifact asked about, by `(level, ordinal)`, and its index in `gated` where served.
     at: RefCell<FxHashMap<(u32, u32), Option<usize>>>,
     gated: RefCell<Vec<Gated>>,
+    /// Each served artifact's own first supplied text, from the content this viewer is served,
+    /// indexed like `gated`.
+    names: RefCell<Vec<Option<String>>>,
     /// The nearest served ancestors of each served artifact asked about, by index in `gated`.
-    nearest: RefCell<FxHashMap<usize, Rc<[usize]>>>,
-    rungs: RefCell<FxHashMap<usize, u32>>,
+    nearest: RefCell<FxHashMap<usize, Vec<usize>>>,
+    rungs: RefCell<HashMap<usize, u32>>,
 }
 
 impl Gate<'_> {
@@ -614,7 +637,8 @@ impl Gate<'_> {
         if let Some(&at) = self.at.borrow().get(&(level, ordinal)) {
             return at;
         }
-        let at = self.verdict(level, ordinal).map(|gated| {
+        let at = self.verdict(level, ordinal).map(|(gated, name)| {
+            self.names.borrow_mut().push(name);
             let mut held = self.gated.borrow_mut();
             held.push(gated);
             held.len() - 1
@@ -623,7 +647,7 @@ impl Gate<'_> {
         at
     }
 
-    fn verdict(&self, level: u32, ordinal: u32) -> Option<Gated> {
+    fn verdict(&self, level: u32, ordinal: u32) -> Option<(Gated, Option<String>)> {
         let read = self.levels.get(level as usize)?;
         if ordinal as usize >= read.forms.first().len() {
             return None;
@@ -644,7 +668,7 @@ impl Gate<'_> {
         // missing (decision 0076), which is why this runs inside the gate and not beside the row
         // build.
         let content = read.content(self.engine, self.layer, ordinal, entity, position)?;
-        Some(Gated {
+        let gated = Gated {
             level,
             ordinal,
             masked_count,
@@ -652,12 +676,16 @@ impl Gate<'_> {
                 .filter_rows
                 .map(|rows| read.matched_count(ordinal, self.mask, rows)),
             mosaica_id,
-            name: content.name(),
-        })
+        };
+        Some((gated, content.name()))
     }
 
     fn get(&self, at: usize) -> Gated {
-        self.gated.borrow()[at].clone()
+        self.gated.borrow()[at]
+    }
+
+    fn with_own_name<T>(&self, at: usize, f: impl FnOnce(Option<&str>) -> T) -> T {
+        f(self.names.borrow()[at].as_deref())
     }
 
     /// Every served artifact of the layer, or of `level` where one is named.
@@ -675,7 +703,8 @@ impl Gate<'_> {
         every
     }
 
-    /// The served artifact `id` names, where it is one of this layer's.
+    /// The served artifact `id` names, where it is one of this layer's. Located in the runs the
+    /// gate reads entities from, so the artifact found is the one the gate judges.
     fn of_id(&self, id: MosaicaId) -> Option<usize> {
         let (space, entity) = self.engine.identity_key.invert_artifact(id)?;
         if space != self.layer.space {
@@ -693,13 +722,13 @@ impl Gate<'_> {
 
     /// The served artifacts nearest above `at` on every path ([`crate::lineage`]), by index,
     /// ascending.
-    fn nearest(&self, at: usize) -> Rc<[usize]> {
+    fn nearest(&self, at: usize) -> Vec<usize> {
         if let Some(held) = self.nearest.borrow().get(&at) {
-            return Rc::clone(held);
+            return held.clone();
         }
-        let nearest: Rc<[usize]> = match self.within {
-            None => Rc::from([]),
-            Some(within) => {
+        let nearest = match self.below {
+            Below::None => Vec::new(),
+            Below::Within(_) | Below::Coarser(_) => {
                 let g = self.get(at);
                 crate::lineage::nearest_served(
                     |level, ordinal| {
@@ -709,12 +738,11 @@ impl Gate<'_> {
                     },
                     |level, ordinal| self.served(level, ordinal),
                     (g.level, g.ordinal),
-                    within,
+                    matches!(self.below, Below::Within(_)),
                 )
-                .into()
             }
         };
-        self.nearest.borrow_mut().insert(at, Rc::clone(&nearest));
+        self.nearest.borrow_mut().insert(at, nearest.clone());
         nearest
     }
 
@@ -734,41 +762,25 @@ impl Gate<'_> {
     /// The climb from such an artifact passes only withheld ones and ends where an artifact has no
     /// edge to climb, so it is found by walking down from every such artifact through the
     /// withheld ones below. An artifact reached that way can still have a served ancestor on
-    /// another path of a `dag`, so each is kept only where [`Self::nearest`] is empty. A cycle,
-    /// which both entry points refuse, has no artifact without an edge and is not reached.
+    /// another path of a `dag`, so each is kept only where [`Self::nearest`] is empty. A served
+    /// artifact under a cycle of withheld ones is not listed.
     fn roots(&self, level: Option<u32>) -> Vec<usize> {
-        let Some(within) = self.within else {
-            return self.every(level);
+        let tops: Vec<(u32, u32)> = match &self.below {
+            Below::None => return self.every(level),
+            Below::Within(lineages) => lineages
+                .iter()
+                .zip(self.levels)
+                .flat_map(|(lineage, read)| {
+                    let edged = lineage.roots().iter().copied();
+                    let unedged = lineage.span() as u32..read.forms.first().len() as u32;
+                    edged.chain(unedged).map(|ordinal| (read.level, ordinal))
+                })
+                .collect(),
+            Below::Coarser(coarser) => coarser
+                .get_or_init(|| Coarser::read(self.levels))
+                .tops
+                .clone(),
         };
-        let held = |level: u32, ordinal: u32| {
-            self.levels
-                .get(level as usize)
-                .is_some_and(|read| (ordinal as usize) < read.forms.first().len())
-        };
-        // Every artifact with no edge the climb follows, and every parent an edge names that no
-        // level holds, whose children the climb stops at.
-        let mut tops = Vec::new();
-        for read in self.levels {
-            let rows = read.forms.first();
-            for ordinal in 0..rows.len() as u32 {
-                let mut climbs = false;
-                for p in rows.parents(ordinal) {
-                    let followed = match within {
-                        true => p.level == read.level && p.ordinal != ordinal,
-                        false => p.level < read.level,
-                    };
-                    if followed {
-                        climbs = true;
-                        if !held(p.level, p.ordinal) {
-                            tops.push((p.level, p.ordinal));
-                        }
-                    }
-                }
-                if !climbs {
-                    tops.push((read.level, ordinal));
-                }
-            }
-        }
         self.down(tops, FxHashSet::default())
             .into_iter()
             .filter(|&at| level.is_none_or(|level| self.get(at).level == level))
@@ -804,76 +816,33 @@ impl Gate<'_> {
                 .iter()
                 .map(|&child| (level, child))
                 .collect(),
-            Below::Coarser(children) => {
-                children.get(&(level, ordinal)).cloned().unwrap_or_default()
-            }
+            Below::Coarser(coarser) => coarser
+                .get_or_init(|| Coarser::read(self.levels))
+                .children
+                .get(&(level, ordinal))
+                .cloned()
+                .unwrap_or_default(),
             Below::None => Vec::new(),
         }
     }
 
     /// The depth of `at` in the forest its nearest served ancestors form: the longest path from a
-    /// served artifact with none. An ancestor met again on its own path adds nothing.
+    /// served artifact with none.
     fn rung(&self, at: usize) -> u32 {
-        const PENDING: u32 = u32::MAX;
-        let mut stack = vec![at];
-        while let Some(&top) = stack.last() {
-            let known = self.rungs.borrow().get(&top).copied();
-            match known {
-                None => {
-                    self.rungs.borrow_mut().insert(top, PENDING);
-                    let ups = self.nearest(top);
-                    let rungs = self.rungs.borrow();
-                    stack.extend(ups.iter().filter(|up| !rungs.contains_key(up)));
-                }
-                Some(PENDING) => {
-                    let ups = self.nearest(top);
-                    let rung = {
-                        let rungs = self.rungs.borrow();
-                        ups.iter()
-                            .filter_map(|up| rungs.get(up).copied())
-                            .filter(|&k| k != PENDING)
-                            .map(|k| k + 1)
-                            .max()
-                            .unwrap_or(0)
-                    };
-                    self.rungs.borrow_mut().insert(top, rung);
-                    stack.pop();
-                }
-                Some(_) => {
-                    stack.pop();
-                }
-            }
-        }
-        self.rungs.borrow()[&at]
+        crate::viewport::rung_of(at, |up| self.nearest(up), &mut self.rungs.borrow_mut())
     }
 
-    /// Whether the publisher's key of each artifact of `ats` contains `needle`, ignoring case, read
-    /// under one hold of the store.
-    fn keys_containing(&self, ats: &[usize], needle: &str) -> Vec<bool> {
+    /// `f` of the publisher's key of each artifact of `ats`, read under one hold of the store.
+    fn with_keys<T>(&self, ats: &[usize], f: impl Fn(Option<&str>) -> T) -> Vec<T> {
         let name = self.layer.declaration.name.as_str();
         let gated = self.gated.borrow();
         self.engine.write.live().with_artifacts(|store| {
             ats.iter()
                 .map(|&at| {
                     let g = &gated[at];
-                    store
+                    f(store
                         .get(name, g.level, g.ordinal)
-                        .and_then(|record| record.key.as_deref())
-                        .is_some_and(|key| contains(key, needle))
-                })
-                .collect()
-        })
-    }
-
-    /// The publisher's key of each artifact of `ats`, read under one hold of the store.
-    fn keys(&self, ats: &[usize]) -> Vec<Option<String>> {
-        let name = self.layer.declaration.name.as_str();
-        let gated = self.gated.borrow();
-        self.engine.write.live().with_artifacts(|store| {
-            ats.iter()
-                .map(|&at| {
-                    let g = &gated[at];
-                    store.get(name, g.level, g.ordinal)?.key.clone()
+                        .and_then(|record| record.key.as_deref()))
                 })
                 .collect()
         })

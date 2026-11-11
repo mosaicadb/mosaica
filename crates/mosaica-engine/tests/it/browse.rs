@@ -923,11 +923,12 @@ fn the_children_below_two_withheld_generations_hang_from_the_root() {
 /// A layer, its kind, its artifacts level by level and the keys suppressed.
 type KindCase<'a> = (&'a str, HierarchyKind, Vec<Vec<Planted<'a>>>, &'a [&'a str]);
 
-/// **Roots, children and child counts are the lineage every row's `parent_ids` names, on every
-/// kind.** A search with no text lists every served artifact with the served artifacts nearest
-/// above it, climbed from that artifact. On each kind, with some artifacts suppressed, the roots
-/// form is the rows naming no parent, at every level and at each level, and each row's children
-/// form and `child_count` are the rows naming it.
+/// **Roots, children, child counts and rungs are the lineage every row's `parent_ids` names, on
+/// every kind.** A search with no text lists every served artifact with the served artifacts
+/// nearest above it, climbed from that artifact. On each kind, with some artifacts suppressed, the
+/// roots form is the rows naming no parent, at every level and at each level, each row's children
+/// form and `child_count` are the rows naming it, and its rung is one below the deepest it names.
+/// Each form pages a row at a time to its one page, with and without a filter.
 #[test]
 fn roots_and_children_are_the_parents_every_row_names_on_every_kind() {
     let fx = fixture(None);
@@ -1024,6 +1025,7 @@ fn roots_and_children_are_the_parents_every_row_names_on_every_kind() {
             let roots = browse_layer(&fx.engine, layer, level, BrowseForm::Roots);
             assert_eq!(key_set(&roots), keyed(&expected), "{layer}: roots at {level:?}");
         }
+        let mut forms = vec![BrowseForm::Roots];
         for parent in &every.artifacts {
             let expected: Vec<&BrowseRow> = every
                 .artifacts
@@ -1039,6 +1041,79 @@ fn roots_and_children_are_the_parents_every_row_names_on_every_kind() {
                 expected.len() as u64,
                 "{layer}: child count of {name}"
             );
+            // A levelled layer's rung is the declared level; a treed one's is one below the
+            // deepest parent it names.
+            let rung = match levelled {
+                true => parent.rung,
+                false => parent
+                    .parent_ids
+                    .iter()
+                    .map(|id| {
+                        let up = every.artifacts.iter().find(|r| r.mosaica_id == *id).unwrap();
+                        up.rung + 1
+                    })
+                    .max()
+                    .unwrap_or(0),
+            };
+            assert_eq!(parent.rung, rung, "{layer}: rung of {name}");
+            forms.push(BrowseForm::Children(parent.mosaica_id));
+        }
+        // Each form paged a row at a time, plain and under a filter, is its one page in order,
+        // and the filter moves no row.
+        let xx = FilterExpr::Leaf {
+            column: "archive".into(),
+            operand: FilterOperand::Equals(mosaica_types::AttrLocalId::new(fx.codes["xx"])),
+        };
+        for form in forms {
+            let whole = paged(&fx.engine, layer, &form, None, 100);
+            assert_eq!(paged(&fx.engine, layer, &form, None, 1), whole, "{layer}: {form:?}");
+            let filtered = paged(&fx.engine, layer, &form, Some(xx.clone()), 100);
+            assert_eq!(
+                paged(&fx.engine, layer, &form, Some(xx.clone()), 1),
+                filtered,
+                "{layer}: {form:?} under a filter"
+            );
+            let mut moved = filtered.clone();
+            moved.sort();
+            let mut plain = whole.clone();
+            plain.sort();
+            assert_eq!(moved, plain, "{layer}: {form:?} under a filter moves no row");
+        }
+    }
+}
+
+/// The keys of every row `form` serves on `layer`, page after page of `limit` rows, in order.
+fn paged(
+    engine: &Engine,
+    layer: &str,
+    form: &BrowseForm,
+    filter: Option<FilterExpr>,
+    limit: usize,
+) -> Vec<String> {
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let mut keys = Vec::new();
+    let mut cursor = None;
+    loop {
+        let out = engine
+            .browse(
+                &session,
+                BrowseRequest {
+                    view: "s0",
+                    layer,
+                    level: None,
+                    form: form.clone(),
+                    filter: filter.clone(),
+                    limit,
+                    cursor,
+                    palette_size: None,
+                    cancel: None,
+                },
+            )
+            .expect("a browse answers");
+        keys.extend(out.artifacts.iter().filter_map(|r| r.key.clone()));
+        match out.next {
+            Some(next) => cursor = Some(next),
+            None => return keys,
         }
     }
 }
