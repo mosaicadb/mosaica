@@ -550,12 +550,17 @@ impl TestServer {
 }
 
 impl Drop for TestServer {
-    /// Stops the accept loops. It cannot wait for the engine to drop; a test that reopens the
-    /// bundle calls [`TestServer::shutdown`].
+    /// Stops the accept loops and releases every pause site. It cannot wait for the engine to drop;
+    /// a test that reopens the bundle calls [`TestServer::shutdown`].
+    ///
+    /// A handler waiting on an executor parked at a stall holds a blocking thread, and a panicking
+    /// test's runtime waits for that thread before the engine, whose drop releases the stall, can
+    /// go. Releasing here lets such a test fail instead of hanging.
     fn drop(&mut self) {
         for task in &self.serve_tasks {
             task.abort();
         }
+        self.state.faults.release();
     }
 }
 

@@ -1202,6 +1202,12 @@ impl LifecycleHandle {
     /// first window while the caller is still enqueueing, and so a `Pending` dropped without being
     /// waited on still leaves its job able to wake the executor.
     pub(crate) fn enqueue(&self, command: Command) -> std::result::Result<(), SubmitError> {
+        // A dead executor runs nothing more, so a command offered once the posture reads `Dead` is
+        // refused here, where non-enqueue is proven. The queues close only after the posture moves,
+        // and a send into them meanwhile would be answered `ReceiptLost`.
+        if self.health.posture() == ExecutorPosture::Dead {
+            return Err(SubmitError::ExecutorDead);
+        }
         if command.is_never_shed() {
             self.deny
                 .send(command)

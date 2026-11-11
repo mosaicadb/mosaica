@@ -77,31 +77,22 @@ fn clone_prefix_and_flip(root: &Path, from: &str, to: &str) {
     .unwrap();
 }
 
-/// Block until the executor has published every deny window it owes a side-manifest for.
+/// Block until the executor has published a side-manifest since `published` was read from
+/// `overlay_publications`.
 ///
-/// A deny publication is a write-then-rename into the live prefix, and it happens at drain close —
-/// *after* the ack. A case that accepts a deny and then clones the prefix directory would race it,
-/// and the failure is a copy of a `.tmp` name that no longer exists rather than anything to do with
-/// what the case is testing. Settling on the counter is the deterministic wait; there is no
-/// "publication owed" gauge to read directly, so this waits for the count to advance and then to
-/// hold still.
-fn settle_deny_publications(engine: &Engine) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let mut last = engine.write_executor_stats().overlay_publications;
-    let mut stable_since = std::time::Instant::now();
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        let now = engine.write_executor_stats().overlay_publications;
-        if now != last {
-            last = now;
-            stable_since = std::time::Instant::now();
-        } else if stable_since.elapsed() >= std::time::Duration::from_millis(100) {
-            return;
-        }
+/// A deny publication is a write-then-rename into the live prefix, and it happens after the ack. A
+/// case that accepts a deny and then clones the prefix directory would race it, and the failure is
+/// a copy of a `.tmp` name that no longer exists rather than anything to do with what the case is
+/// testing. The count moves once the publication and its pruning are done, and with no other write
+/// outstanding the next publication is the deny's.
+fn await_deny_publication(engine: &Engine, published: u64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while engine.write_executor_stats().overlay_publications <= published {
         assert!(
             std::time::Instant::now() < deadline,
-            "the executor never stopped publishing deny state"
+            "the executor never published the deny"
         );
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }
 
@@ -548,14 +539,12 @@ fn a_rotation_retires_the_deletions_it_is_given_and_leaves_suppressions_alone() 
         let session = engine.authorise(&full_coverage_credential()).unwrap();
         visible(&engine, &session)
     };
-    engine
-        .accept_change(deleted, ChangeOp::Delete)
-        .expect("a delete is accepted");
-    engine
-        .accept_change(suppressed, ChangeOp::Suppress)
-        .expect("a suppression is accepted");
+    for (entity, op) in [(deleted, ChangeOp::Delete), (suppressed, ChangeOp::Suppress)] {
+        let published = engine.write_executor_stats().overlay_publications;
+        engine.accept_change(entity, op).expect("a deny is accepted");
+        await_deny_publication(&engine, published);
+    }
     assert_eq!(engine.overlay_depth(), 2);
-    settle_deny_publications(&engine);
 
     let before = engine.generation();
     clone_prefix_and_flip(&root, "v00000", "v00001");
@@ -595,11 +584,12 @@ fn a_rotation_with_an_empty_retirement_set_retires_nothing() {
     let engine = engine_over_fixture(&tmp, &root, "cache", "wal.log");
 
     let deleted = entity_of_source(&root, 4);
+    let published = engine.write_executor_stats().overlay_publications;
     engine
         .accept_change(deleted, ChangeOp::Delete)
         .expect("a delete is accepted");
     assert_eq!(engine.overlay_depth(), 1);
-    settle_deny_publications(&engine);
+    await_deny_publication(&engine, published);
 
     let before = engine.generation();
     clone_prefix_and_flip(&root, "v00000", "v00001");

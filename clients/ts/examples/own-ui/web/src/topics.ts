@@ -7,6 +7,7 @@ export function topics(store: Store): void {
   const clear = document.querySelector<HTMLButtonElement>('#topic button')!;
 
   map.colourBy = 'cluster:clusters/toponymy';
+  map.clusterSpacing = 200;
 
   toggle.addEventListener('change', () => {
     map.layers = toggle.checked ? ['topics/toponymy'] : [];

@@ -243,8 +243,28 @@ def exited_early(returncode: int, output: str) -> RuntimeError:
     return error(f"mosaica serve exited early ({returncode}):\n{output}")
 
 
+#: Set to `1` where every binary the run spawns was built from this checkout before the run, at the
+#: path cargo gives it. Cargo is then not run, and a missing binary is an error. CI's suite jobs
+#: set it, since they download the binaries one build job made.
+PREBUILT_ENV = "MOSAICA_CONFORMANCE_PREBUILT"
+
+
+def prebuilt(binary: Path) -> bool:
+    """Whether [`PREBUILT_ENV`] says `binary` was built before the run. Raises if it says so and
+    `binary` is not an executable."""
+    if os.environ.get(PREBUILT_ENV) != "1":
+        return False
+    if not os.access(binary, os.X_OK):
+        raise RuntimeError(
+            f"{PREBUILT_ENV}=1 but {binary} is not an executable; build it, or unset "
+            f"{PREBUILT_ENV} for the suite to build it."
+        )
+    return True
+
+
 def ensure_cli_built() -> None:
-    """Build `target/release/mosaica` with **default features**, always.
+    """Build `target/release/mosaica` with **default features**, always, unless [`PREBUILT_ENV`]
+    says it was built before the run.
 
     It does not short-circuit on `CLI_BIN.exists()`: an existence check cannot tell a
     default-feature binary from one built with a measurement feature, and cargo, which tracks
@@ -252,6 +272,8 @@ def ensure_cli_built() -> None:
     when nothing else changed. Anything needing a non-default binary builds it to its own path
     and never to `CLI_BIN`.
     """
+    if prebuilt(CLI_BIN):
+        return
     subprocess.run(
         ["cargo", "build", "--release", "-p", "mosaica"],
         cwd=REPO_ROOT,

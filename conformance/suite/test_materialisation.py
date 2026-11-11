@@ -2,23 +2,22 @@
 the one worth checking.
 
 `Corpus::config_toml` is a **constant**: the declaration every build of this fixture reads names
-a fixed set of sources, and it names them whether or not anything writes them. The shim in
-[`verification.materialise_corpus`] is the other half of that pair — a hand-written list of
-writer calls, in a different crate, maintained by a different hand. Nothing links the two, so the
-declaration can grow a source and the shim not grow the call that writes it; the build is then
-the first thing to notice, and what it says is that a file is missing, several hundred lines away
-from the list that stopped matching.
+a fixed set of sources, and it names them whether or not anything writes them. `mosaica corpus
+materialise` is the other half of that pair — a list of writer calls kept apart from the
+declaration. Nothing links the two, so the declaration can grow a source and the verb not grow
+the call that writes it; the build is then the first thing to notice, and what it says is that a
+file is missing, several hundred lines away from the list that stopped matching.
 
-That is not hypothetical. Five artifact sources were declared on 2026-08-21 and the shim was
-never taught to write them, so `mosaica build` exited 1 inside a module-scoped fixture and every
-test that fixture feeds — including both of its negative controls — errored with a
-`CalledProcessError` carrying no reason, for nine days.
+That is not hypothetical. Five artifact sources were declared and the writer was never taught to
+write them, so `mosaica build` exited 1 inside a module-scoped fixture and every test that fixture
+feeds — including both of its negative controls — errored with a `CalledProcessError` carrying no
+reason, for nine days.
 
 **The invariant is that every source the declaration names is a file the materialiser wrote**,
-and it is checkable because both sides are enumerable: the sources come out of the generated
-`mosaica.toml`'s `[sources]` table, and the files are whatever is on disk beside it. The check
-costs one materialisation and no build, so it fails in seconds where the build failure took a
-server spawn, and it fails naming the file rather than an exit code.
+and it is checkable because both sides are enumerable: the sources come out of the declaration's
+`[sources]` table, and the files are whatever is on disk beside it. The check costs one
+materialisation and no build, so it fails in seconds where the build failure took a server spawn,
+and it fails naming the file rather than an exit code.
 """
 
 from __future__ import annotations
@@ -43,10 +42,10 @@ def materialised(tmp_path_factory) -> Path:
     return out
 
 
-def test_every_declared_source_is_a_file_the_shim_wrote(materialised: Path) -> None:
-    """The module doc's invariant. A source that names no file is the shim and
-    `Corpus::config_toml` having diverged, and the failure says so."""
-    declaration = tomllib.loads((materialised / "config.toml").read_text())
+def test_every_declared_source_is_a_file_the_materialiser_wrote(materialised: Path) -> None:
+    """The module doc's invariant. A source that names no file is `mosaica corpus materialise`
+    and `Corpus::config_toml` having diverged, and the failure says so."""
+    declaration = tomllib.loads((materialised / "corpus-config.toml").read_text())
     sources = declaration.get("sources", {})
     assert sources, "the declaration names no sources at all — it is not the corpus's"
     missing = sorted(
@@ -57,11 +56,10 @@ def test_every_declared_source_is_a_file_the_shim_wrote(materialised: Path) -> N
         + ("a source " if len(missing) == 1 else f"{len(missing)} sources ")
         + "its own declaration names:\n  - "
         + "\n  - ".join(missing)
-        + "\n`Corpus::config_toml` and `verification._SHIM_MAIN` have diverged: the declaration "
-        "names a file no writer call in the shim produces. Add the writer to the shim (the "
+        + "\n`Corpus::config_toml` and `mosaica corpus materialise` have diverged: the "
+        "declaration names a file the verb does not write. Add the writer to the verb (the "
         "artifact sources are one call, `Corpus::write_artifact_fixtures`) rather than removing "
-        "the source. Left unfixed this surfaces as `mosaica build` exiting 1 inside a "
-        "module-scoped fixture, with the reason swallowed by `capture_output`."
+        "the source."
     )
 
 
@@ -69,5 +67,5 @@ def test_the_declaration_names_the_sources_this_fixture_is_built_from(materialis
     """A guard on the check above, not a second copy of it: the test would pass vacuously against
     a declaration that had lost its `[sources]` table down to `points` alone, so the two relations
     every other module in this package rests on are named here as well."""
-    sources = tomllib.loads((materialised / "config.toml").read_text()).get("sources", {})
+    sources = tomllib.loads((materialised / "corpus-config.toml").read_text()).get("sources", {})
     assert {"points", "pairs"} <= set(sources)
