@@ -16,6 +16,12 @@ reference/.venv/bin/pytest conformance/suite -v
 (`oracle.harness.shards_toml`), into fixture directories of its own, and runs every test but those
 marked `own_shards`, which set their shard sizes themselves.
 
+The suite builds the release binary it spawns, and the faults build a crash test spawns
+(`cargo build --release -p mosaica --features fault-injection --target-dir target/faults`).
+`MOSAICA_CONFORMANCE_PREBUILT=1` runs no cargo and takes both as already built at
+`target/release/mosaica` and `target/faults/release/mosaica`. CI sets it, since one job builds
+both binaries for every suite job.
+
 `conformance/suite/` is the correctness suite's shared foundation: the read battery's `Query`/`Recorded`/`Canonical` types, the one
 response-canonicalisation implementation, and a recorder that issues a battery against a live
 server. The canary comparator below is refactored onto it — there is deliberately no second copy.
