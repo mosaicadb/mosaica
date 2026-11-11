@@ -2,8 +2,8 @@
 # synthesised from a seed, so they need no corpus.
 #
 # On a pull request, `changes` reads which paths the pull request changes, and the Rust jobs,
-# `clippy`, `conformance` and `clients` run only where one of their inputs did. A job skipped by its `if:`
-# reports as skipped, which `required` counts as passing. A workflow-level `paths:` filter would
+# `clippy`, `conformance` and the two clients jobs run only where one of their inputs did. A job
+# skipped by its `if:` reports as skipped, which `required` counts as passing. A workflow-level `paths:` filter would
 # leave a required check waiting instead, because a workflow that does not run reports nothing.
 # A push to main runs every job. `checks` and `docs` run on every change, because the advisories
 # `cargo deny` reads change without a commit and the docs' link check names paths anywhere in the
@@ -41,8 +41,8 @@ jobs:
   # `build` is what the `mosaica` binary and the extension module are compiled from. `rust` adds the
   # files outside `crates/` that Rust tests read, as `scripts/test-affected.sh` lists them, and
   # nextest's configuration.
-  # `conformance` adds the suite and the oracle; `clients` adds the clients, the corpora and examples
-  # their tests serve, the contract and reference pages they check, and the release version's copies.
+  # `conformance` adds the suite and the oracle; `clients` adds the clients, the notebook corpus's
+  # generator and the examples their tests serve, the contract and reference pages they check, and the release version's copies.
   changes:
     runs-on: ubuntu-24.04
     outputs:
@@ -66,7 +66,7 @@ jobs:
           {
             echo "rust=$(area "$build|^(docs/reference|docs/openapi|test_corpora|examples|reference/vectors)/|^scripts/check-test-reachability\.sh$|^\.config/nextest\.toml$")"
             echo "conformance=$(area "$build|^(conformance|reference|test_corpora)/")"
-            echo "clients=$(area "$build|^(clients|test_corpora|examples|docs/openapi|docs/reference)/|^scripts/(check-clients\.sh|version\.py)$")"
+            echo "clients=$(area "$build|^(clients|corpora/notebook|examples|docs/openapi|docs/reference)/|^scripts/(check-clients\.sh|version\.py)$")"
           } | tee -a "$GITHUB_OUTPUT"
 
   # The workspace's tests are built once here, instrumented for coverage, and `rust-tests` runs them
@@ -342,15 +342,48 @@ jobs:
             --deselect tests/test_identity.py::test_fixture_bundle_identity_column_agrees_with_the_key \
             --deselect tests/test_identity.py::test_fixture_bundle_sidecar_round_trips_through_the_locator
 
-  clients:
+  # The clients in two jobs side by side, each compiling the release `mosaica` it serves its live
+  # tests with. Node >= 22.15 for both: `check-clients.sh` refuses without npm on PATH, the core
+  # tests compress with `node:zlib`'s zstd, and `clients/py/check.sh`'s wheel is built by a
+  # hatchling hook that shells out to npm. The live tests of both serve the notebook corpus, which
+  # `python3 -m corpora.notebook` writes from the example data with numpy and pyarrow.
+  clients-ts:
     needs: changes
     if: needs.changes.outputs.clients == 'true'
+    name: clients (ts)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      # Node >= 22.15, which both scripts below need: `check-clients.sh` refuses without npm on PATH,
-      # the core tests compress with `node:zlib`'s zstd, and `clients/py/check.sh`'s wheel is built
-      # by a hatchling hook that shells out to npm.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.15"
+          cache: npm
+          cache-dependency-path: clients/ts/package-lock.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python3 -m pip install numpy pyarrow
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The live tests find it in this checkout's `target/release`.
+      - run: cargo build --release -p mosaica
+      # `check-clients.sh` requires an installed tree rather than installing one itself, so that a
+      # developer's stale `node_modules` fails loudly instead of being silently repaired.
+      - run: npm --prefix clients/ts ci
+      # The components' browser suite (`npm run test:browser`) and the examples' pages drive
+      # headless Chromium through Playwright; `check-clients.sh` refuses where it is not installed.
+      - name: Playwright's Chromium
+        working-directory: clients/ts
+        run: npx playwright install --with-deps chromium
+      - run: bash scripts/check-clients.sh
+
+  clients-py:
+    needs: changes
+    if: needs.changes.outputs.clients == 'true'
+    name: clients (py)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22.15"
@@ -363,20 +396,13 @@ jobs:
       # `mosaica` binary and the `_mosaica` extension module.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      # `check-clients.sh` requires an installed tree rather than installing one itself, so that a
-      # developer's stale `node_modules` fails loudly instead of being silently repaired.
+      # The wheel's build hook builds the components' bundle from this tree.
       - run: npm --prefix clients/ts ci
-      # The components' browser suite (`npm run test:browser`) drives headless Chromium through
-      # Playwright; `check-clients.sh` runs it and refuses where the browser is not installed.
-      - name: Playwright's Chromium
-        working-directory: clients/ts
-        run: npx playwright install --with-deps chromium
-      - run: bash scripts/check-clients.sh
       # Also runs the wheel's build hook for real, the only thing between `pip install
       # mosaica[widget]` and a widget with no JavaScript in it.
       - run: bash clients/py/check.sh
         env:
-          PYTEST_ADDOPTS: --cov=mosaica --cov-report=xml:coverage.xml
+          PYTEST_ADDOPTS: --cov=mosaica --cov-report=xml:coverage.xml -rs
       # The extension module's own tests, in the venv and on the build the step above made.
       - run: bash crates/mosaica-python/check.sh
       # coverage.py names files relative to the package; Codacy matches them from the repository root.
@@ -389,12 +415,12 @@ jobs:
           name: coverage-python
           path: clients/py/coverage.xml
 
-  # Both jobs' coverage in one upload, whether or not their tests passed, and only where both ran:
-  # an upload of one would read to Codacy as the other's files losing their coverage. The token is
+  # The Rust and Python coverage in one upload, whether or not their tests passed, and only where
+  # both ran: an upload of one would read to Codacy as the other's files losing their coverage. The token is
   # empty on a fork's pull request, which skips the upload.
   coverage:
-    needs: [rust-coverage, clients]
-    if: ${{ !cancelled() && needs.rust-coverage.result != 'skipped' && needs.clients.result != 'skipped' }}
+    needs: [rust-coverage, clients-py]
+    if: ${{ !cancelled() && needs.rust-coverage.result != 'skipped' && needs.clients-py.result != 'skipped' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -417,7 +443,7 @@ jobs:
   # The one check for branch protection to require: it fails where any job above failed or was
   # cancelled, and passes where each passed or was skipped.
   required:
-    needs: [changes, rust, rust-tests, rust-coverage, clippy, checks, docs, conformance, clients]
+    needs: [changes, rust, rust-tests, rust-coverage, clippy, checks, docs, conformance, clients-ts, clients-py]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
