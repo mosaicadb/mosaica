@@ -1539,12 +1539,12 @@ describe('<mosaica-explorer> the cluster spacing', () => {
     expect(spacings(none.store)).toEqual([]);
   });
 
-  it('offers Most clusters while a levelled layer that follows the zoom is drawn or coloured by, and not once a level is chosen for it', async () => {
+  it('offers Cluster density while a levelled layer that follows the zoom is drawn or coloured by, and not once a level is chosen for it', async () => {
     const followed = {...tree, name: 'bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: null}, {level: 1, title: 'Fine', zoom: null}]} as unknown as Meta['layers'][number];
     const ranged = {...followed, name: 'admin', levels: [{level: 0, title: 'Country', zoom: [0, 4]}, {level: 1, title: 'Region', zoom: [5, 16]}]} as unknown as Meta['layers'][number];
     const {host, shadow, store} = await withLayers();
     store.set('meta', {...store.get('meta')!, layers: [tree, flat, followed, ranged]});
-    const slider = () => shadow.querySelector<HTMLInputElement>('[part="most-clusters"]');
+    const slider = () => shadow.querySelector<HTMLInputElement>('[part="cluster-density"]');
     store.set('artifacts', {...store.get('artifacts'), layers: ['admin']});
     await settle(host);
     expect(slider()).toBeNull();
@@ -1564,14 +1564,14 @@ describe('<mosaica-explorer> the cluster spacing', () => {
     expect(slider()).not.toBeNull();
   });
 
-  it('offers Most clusters only while a tree layer is drawn, from cluster-spacing-max to cluster-spacing-min, and sets the spacing only when it is let go', async () => {
+  it('offers Cluster density only while a tree layer is drawn, from cluster-spacing-max to cluster-spacing-min, and sets the spacing only when it is let go', async () => {
     const {host, shadow, store} = await withLayers('<mosaica-explorer cluster-spacing-min="25" cluster-spacing-max="400"></mosaica-explorer>');
     store.setClusterSpacing = (spacing: number | null) => {
       store.calls.push({name: 'setClusterSpacing', args: [spacing]});
       (store as {clusterSpacing: number | null}).clusterSpacing = spacing;
     };
     (store as {clusterSpacing: number | null}).clusterSpacing = 100;
-    const slider = () => shadow.querySelector<HTMLInputElement>('[part="most-clusters"]');
+    const slider = () => shadow.querySelector<HTMLInputElement>('[part="cluster-density"]');
     expect(slider()).toBeNull();
     store.set('artifacts', {...store.get('artifacts'), layers: ['flat']});
     await settle(host);
@@ -1583,8 +1583,8 @@ describe('<mosaica-explorer> the cluster spacing', () => {
     store.set('artifacts', {...store.get('artifacts'), layers: ['flat', 'tree']});
     await settle(host);
     expect(slider()).not.toBeNull();
-    const value = () => shadow.querySelector('[part="most-clusters-value"]')!.textContent;
-    const ends = () => [...shadow.querySelectorAll('.most:has(#most-clusters) .ticks span')].map((e) => e.textContent);
+    const value = () => shadow.querySelector('[part="cluster-density-value"]')!.textContent;
+    const ends = () => [...shadow.querySelectorAll('.most:has(#cluster-density) .ticks span')].map((e) => e.textContent);
     // 100 is halfway along a log scale from 400 down to 25, and 96 squares of it fit the map.
     expect(value()).toBe('96');
     expect(slider()!.value).toBe('500');

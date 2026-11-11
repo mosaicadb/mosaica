@@ -78,7 +78,7 @@ export type MosaicaEventDetails = {
   /** The Most points slider was released. The store now aims to draw `budget` marks on screen. */
   'mosaica-budgetchange': {budget: number};
   /**
-   * The Most clusters slider was released. Each cluster is now given a square `spacing` CSS pixels
+   * The Cluster density slider was released. Each cluster is now given a square `spacing` CSS pixels
    * on a side of the map, so a `nested` or `dag` layer is cut to as many clusters as such squares
    * fit the map, and a level that follows the zoom is one with no more than that many in view.
    */

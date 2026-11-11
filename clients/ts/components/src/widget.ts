@@ -39,7 +39,7 @@ import './explorer.js';
  * Only controls and selections cross the kernel boundary. `url`, `explorer_layout`, `height`, `label`,
  * `title_field`, `image_fields`, `artifacts_per_tile`, `budget_min`, `budget_max`, `cluster_spacing_min` and `cluster_spacing_max` come down; `view`, `bbox`, `layers`, `colour_by`, `palette`, `size_by`, `size_min`,
  * `size_max`, `size_scale` and `filters` go both ways, and so do `budget`, sent up when Most points is let go,
- * `cluster_spacing`, sent up when Most clusters is let go, `palette`, sent up when one is chosen, and
+ * `cluster_spacing`, sent up when Cluster density is let go, `palette`, sent up when one is chosen, and
  * `value_colours` and `cluster_colours`, sent up as each colour is chosen on a card or in Edit
  * colours; `selected`, `selected_artifact` and `region` go up. Up-syncs happen at the settle (a new
  * composition shown, or a region's counts), not per frame. Ids cross as decimal strings, since a
@@ -793,7 +793,7 @@ export function initialize({model, storeFactory = createStore}: {model: WidgetMo
       syncUp({budget});
     };
     explorer.addEventListener('mosaica-budgetchange', onBudget);
-    // Most clusters likewise.
+    // Cluster density likewise.
     const onClusterSpacing = (e: Event) => {
       const {spacing} = (e as CustomEvent<{spacing: number}>).detail;
       explorer.clusterSpacing = spacing;

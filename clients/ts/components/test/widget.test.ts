@@ -165,7 +165,7 @@ describe('the token protocol', () => {
     expect([explorer.budget, explorer.budgetMin, explorer.budgetMax]).toEqual([60_000, 500, 100_000]);
   });
 
-  it('hands the cluster spacing and its range to every view’s explorer, and sends it up when Most clusters is let go', async () => {
+  it('hands the cluster spacing and its range to every view’s explorer, and sends it up when Cluster density is let go', async () => {
     const {model, el} = setUp({cluster_spacing: 150, cluster_spacing_min: 30, cluster_spacing_max: 600});
     const explorer = el.querySelector('mosaica-explorer') as unknown as HTMLElement & {clusterSpacing: number; clusterSpacingMin: number; clusterSpacingMax: number};
     expect([explorer.clusterSpacing, explorer.clusterSpacingMin, explorer.clusterSpacingMax]).toEqual([150, 30, 600]);

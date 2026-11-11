@@ -115,7 +115,7 @@ container image.
   finest level that is not crowded in view, which is the coarsest while every level is. A level is
   crowded when a tile in view came back with its full `per_tile` of it, or when more of its
   artifacts are drawn in view than the cluster count the map's size and cluster spacing give, so
-  the world view draws a broad level, and Most clusters in the explorer moves the zoom at which
+  the world view draws a broad level, and Cluster density in the explorer moves the zoom at which
   each level is drawn, and shows while such a layer is drawn. A layer starts at its coarsest level,
   moves to a finer level once that level is within four fifths of the count and back once it is
   over it, and the level is decided once every tile of a view has arrived. With no cluster spacing,
@@ -136,9 +136,11 @@ container image.
   `mosaica-clusterspacingchange` with `{spacing}`, the React `onClusterBudgetChange` is
   `onClusterSpacingChange`, and the Python widget's `cluster_budget`, `cluster_budget_min` and
   `cluster_budget_max` are `cluster_spacing`, `cluster_spacing_min` and `cluster_spacing_max`. The
-  explorer starts at 100 px, 96 clusters on a map 1,200 by 800 px, in place of 1,000 clusters, and
-  Most clusters runs from 400 px at its Fewer end to 50 px at its More end, reading out the count
-  the map shows. `clustersInView(spacing, width, height)` gives the count.
+  explorer starts at 100 px, 96 clusters on a map 1,200 by 800 px, in place of 1,000 clusters. Its
+  Most clusters slider is now Cluster density, with the parts `cluster-density` and
+  `cluster-density-value` in place of `most-clusters` and `most-clusters-value`, and it runs from
+  400 px at its Fewer end to 50 px at its More end, reading out the count the map shows.
+  `clustersInView(spacing, width, height)` gives the count.
 - **The cluster card steps through a layer apart from the filter.** On a `tiered`, `nested` or
   `dag` layer, `<mosaica-field-card>` lists the children of its position, or the top-level
   clusters, from the browse route a page at a time. A row with children ends in a button with their

@@ -255,7 +255,7 @@ class Map(anywidget.AnyWidget):
       the zoom is drawn at the finest level with no more than that many in view, so finer levels
       appear as the map zooms in. `0` removes the limit.
     - `cluster_spacing_min`, `cluster_spacing_max`: the spacings at the More and Fewer ends of the
-      Most clusters slider, which the Layers popover shows while such a layer is drawn. They are 50
+      Cluster density slider, which the Layers popover shows while such a layer is drawn. They are 50
       and 400 by default, and neither changes `cluster_spacing`.
 
     A basemap is one of these values:
@@ -286,7 +286,7 @@ class Map(anywidget.AnyWidget):
     - `view`, `bbox`, `filters`, `layers`, `colour_by` and the four size settings, when the map
       settles after a change, once it has finished fetching for the new view.
     - `palette`, when one is chosen in the map's Colour section.
-    - `budget` and `cluster_spacing`, when the Most points or Most clusters slider is let go.
+    - `budget` and `cluster_spacing`, when the Most points or Cluster density slider is let go.
     - `value_colours` and `cluster_colours`, as each colour is chosen on a field card or in Edit
       colours. Setting either replaces every colour of its kind that the map holds.
 
