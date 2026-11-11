@@ -47,8 +47,8 @@
 //! artifact gated. **A filter whose leaves route row space is the one whole-view scan this design
 //! adds** (§9 (d), owner ruling): a leaf over a render-only column is answered by the viewport
 //! only inside its tiles, and browse has none, so the row route's own predicate is run over every
-//! row of the view rather than over a request's ranges. Served naively its `matched_count` would be silently zero, which
-//! is the failure decision 0104 exists to prevent.
+//! row of the view rather than over a request's ranges. Served naively its `matched_count` would be
+//! silently zero, which is the failure decision 0104 exists to prevent.
 //!
 //! A row without text of its own takes its name from an attached label. The label layers are read
 //! on the first row that needs one, and a label is looked up only for the rows of a page, or for
