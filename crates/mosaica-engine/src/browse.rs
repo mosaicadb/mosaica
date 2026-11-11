@@ -10,9 +10,9 @@
 //! # What makes it safe, in four sentences
 //!
 //! - **The gate is the viewport's own**, run through [`crate::artifacts::ArtifactView::verdict`]
-//!   for every artifact of the layer, and run **before** `limit` and `cursor` are applied — so a
-//!   page's fill and its `next` count only artifacts this principal may see, and a withheld
-//!   artifact leaves no gap a caller could count.
+//!   for every artifact of the form's candidate set, and run **before** `limit` and `cursor` are
+//!   applied — so a page's fill and its `next` count only artifacts this principal may see, and a
+//!   withheld artifact leaves no gap a caller could count.
 //! - **Every count is C8's `and_cardinality` against `M_auth`**, computed per request: the masked
 //!   count is the artifacts frame's, and the filtered one is `|membership ∩ M_auth ∩ filter|`
 //!   against a verdict the filter contract's own routes produced inside `M_auth`.
@@ -32,10 +32,14 @@
 //!
 //! # What it costs
 //!
-//! One pass over the layer's artifacts — the gate, and one masked `and_cardinality` each — plus,
-//! under `filters`, one more `and_cardinality` per row against a whole-view verdict. On a linked
-//! layer a second pass over the served artifacts counts the children of the rows returned,
-//! reading each artifact's parent list against the page's handful of rows. **A filter
+//! The gate is asked one artifact at a time and keeps each answer. The roots and search forms ask
+//! it of every artifact of the layer, one masked count each. The children form asks it of the
+//! requested artifact, of the artifacts above it up to its nearest served ancestors, and of those
+//! below it down to its nearest served descendants, so its cost follows the requested artifact's
+//! neighbourhood and not the layer: a level of 3 × 10⁵ artifacts answers a children page in under
+//! a tenth of a millisecond, where the roots form takes about 0.2 s. Each row returned also walks down to its own nearest served descendants for its `child_count`, and up to
+//! its served roots for its rung. Keys are read for the rows returned, and for every candidate of
+//! a search. Under `filters`, one more `and_cardinality` per artifact gated. **A filter
 //! whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
 //! ruling): a leaf over a render-only column is answered by the viewport only inside its tiles,
 //! and browse has none, so the row route's own predicate is run over every row of the view rather
@@ -48,8 +52,11 @@
 //! kept with the label level's row form, so a page does not walk the label layer.
 
 use std::cell::{OnceCell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use mosaica_types::layer::{HierarchyKind, RegisteredLayer};
 use mosaica_types::{EntityId, MosaicaId};
@@ -59,7 +66,7 @@ use crate::compose::{EffectiveMask, ShardedMask};
 use crate::error::Result;
 use crate::filter::FilterExpr;
 use crate::layer_read::{check_level, LayerRefusal, ReadLevel};
-use crate::viewport::{response_rungs, DependencyContext, ServedView};
+use crate::viewport::{DependencyContext, ServedView};
 use crate::Engine;
 use crate::EngineError;
 use mosaica_lifecycle::membership::Attachment;
@@ -254,22 +261,6 @@ impl std::fmt::Display for BrowseRefused {
     }
 }
 
-/// One artifact of one level, as the gate left it.
-///
-/// **Its entity and its content position are consumed inside the walk and not carried out of
-/// it**: the position decides which content this viewer is served, and both are answered before
-/// the row is pushed. Keeping them here would be state a later reader could reach a second verdict
-/// from.
-struct Gated {
-    level: u32,
-    ordinal: u32,
-    masked_count: u64,
-    mosaica_id: MosaicaId,
-    /// The gated artifacts nearest above this one on every path ([`crate::lineage`]), by their
-    /// index among the gated, ascending.
-    nearest: Vec<usize>,
-}
-
 impl crate::Engine {
     /// Serve one page of a layer's hierarchy — see this module's doc.
     pub fn browse(&self, session: &crate::Session, req: BrowseRequest<'_>) -> Result<BrowseOut> {
@@ -321,7 +312,6 @@ impl crate::Engine {
             HierarchyKind::Stacked | HierarchyKind::Tiered
         );
         let within = crate::lineage::within_level(layer.declaration.hierarchy.kind);
-        let at_level = |g: &Gated| req.level.is_none_or(|level| g.level == level);
 
         // `open_view` laps into a probe; this verb publishes no per-stage timings, so it is given
         // one and its laps are dropped. Named `_probe` rather than silenced afterwards, so that a
@@ -346,113 +336,47 @@ impl crate::Engine {
             ),
         };
 
-        // **The gate, over every artifact of every level of the layer, before any page.** Every
-        // form needs the whole gated set: roots need to know which parents are served, children
-        // may sit at another level, and a page's `next` must count only rows this principal may
-        // see. The cost is the layer's artifact count, which §7 prices and which is what bounds
-        // this verb rather than the corpus.
-        let mut gated: Vec<Gated> = Vec::new();
-        let mut names: HashMap<(u32, u32), Option<String>> = HashMap::new();
-        let mut keys: HashMap<(u32, u32), Option<String>> = HashMap::new();
-        let mut filtered: HashMap<(u32, u32), u64> = HashMap::new();
-        // Every level's parent edges, the withheld artifacts' included, so a served artifact can
-        // be hung from the served ones nearest above it.
-        let mut edges: Vec<Arc<crate::artifacts::ArtifactRows>> = Vec::new();
-        for (walked, runs) in layer.runs.iter().enumerate() {
-            let walked = walked as u32;
-            let mut level_read = self.read_level(&served_view, &mask, &layer, walked, false)?;
+        let mut levels: Vec<ReadLevel> = Vec::with_capacity(layer.runs.len());
+        for level in 0..layer.runs.len() as u32 {
+            let mut read = self.read_level(&served_view, &mask, &layer, level, false)?;
             if let Some(filter_rows) = &filter_rows {
-                level_read.filtered =
-                    level_read.filtered_counts(self, &mask, filter_rows, &req.cancel)?;
+                read.filtered = read.filtered_counts(self, &mask, filter_rows, &req.cancel)?;
             }
-            let rows = level_read.forms.first();
-            let view_of = level_read.view(self, &served_view, &mask, &layer, &|_| false);
-            for ordinal in 0..rows.len() as u32 {
-                let Some(entity) = runs.entity_of(ordinal as u64).map(EntityId::new) else {
-                    continue;
-                };
-                let crate::artifacts::ArtifactVerdict::Serve {
-                    masked_count,
-                    position,
-                } = view_of.verdict(entity, ordinal)
-                else {
-                    continue;
-                };
-                let Some(mosaica_id) = self.artifact_id(layer.space, entity) else {
-                    continue;
-                };
-                // Content decides servability as well as text: a viewer containing no content's
-                // generating set receives no artifact at all rather than one with its description
-                // missing (decision 0076), which is why this runs inside the gate and not beside
-                // the row build.
-                let Some(content) = level_read.content(self, &layer, ordinal, entity, position)
-                else {
-                    continue;
-                };
-                if let Some(filter_rows) = filter_rows.as_ref() {
-                    filtered.insert(
-                        (walked, ordinal),
-                        level_read.matched_count(ordinal, &mask, filter_rows),
-                    );
-                }
-                names.insert((walked, ordinal), content.name());
-                keys.insert(
-                    (walked, ordinal),
-                    self.write
-                        .live()
-                        .with_artifacts(|store| store.get(req.layer, walked, ordinal)?.key.clone()),
-                );
-                gated.push(Gated {
-                    level: walked,
-                    ordinal,
-                    masked_count,
-                    mosaica_id,
-                    nearest: Vec::new(),
-                });
-            }
-            edges.push(Arc::clone(rows));
+            levels.push(read);
         }
-        // Every served position, so a relation can be named only where both ends are served.
-        let served: BTreeMap<(u32, u32), usize> = gated
-            .iter()
-            .enumerate()
-            .map(|(at, g)| ((g.level, g.ordinal), at))
-            .collect();
-        if let Some(within) = within {
-            for g in &mut gated {
-                g.nearest = crate::lineage::nearest_served(
-                    |level, ordinal| {
-                        edges
-                            .get(level as usize)
-                            .map_or(&[], |rows| rows.parents(ordinal))
-                    },
-                    |level, ordinal| served.get(&(level, ordinal)).copied(),
-                    (g.level, g.ordinal),
-                    within,
-                );
-            }
-        }
-
-        // **The rung.** A levelled layer's is its declared level, which is a fact about the
-        // artifact. A treed layer declares no levels and sits at level 0, so its rung is the depth
-        // of this artifact in the forest its nearest served parents form, which is the viewport's
-        // own definition read over the whole gated layer rather than over one response.
-        let rungs = if levelled {
-            HashMap::new()
-        } else {
-            let parents_of: HashMap<u64, Vec<u64>> = gated
+        let no_dependency = |_: &Attachment| false;
+        let gate = Gate {
+            engine: self,
+            layer: &layer,
+            mask: &mask,
+            filter_rows: filter_rows.as_deref(),
+            views: levels
                 .iter()
-                .map(|g| {
-                    (
-                        g.mosaica_id.raw(),
-                        g.nearest
-                            .iter()
-                            .map(|&i| gated[i].mosaica_id.raw())
-                            .collect(),
-                    )
-                })
-                .collect();
-            response_rungs(&parents_of)
+                .map(|read| read.view(self, &served_view, &mask, &layer, &no_dependency))
+                .collect(),
+            levels: &levels,
+            below: match within {
+                Some(true) => Below::Within(
+                    levels
+                        .iter()
+                        .map(|read| {
+                            self.level_lineage(
+                                &layer,
+                                read.level,
+                                read.forms.lineage,
+                                read.forms.first(),
+                            )
+                        })
+                        .collect(),
+                ),
+                Some(false) => Below::Coarser(coarser_children(&levels)),
+                None => Below::None,
+            },
+            within,
+            at: RefCell::default(),
+            gated: RefCell::default(),
+            nearest: RefCell::default(),
+            rungs: RefCell::default(),
         };
 
         // **The layers attached to this one that this principal reads**, each level under this
@@ -488,50 +412,24 @@ impl crate::Engine {
             &dependency_served,
             &attached,
         );
-        let resolved: RefCell<HashMap<(u32, u32), Option<String>>> = RefCell::default();
-        let name_of = |g: &Gated| -> Option<String> {
-            let at = (g.level, g.ordinal);
+        let resolved: RefCell<HashMap<usize, Option<String>>> = RefCell::default();
+        let name_of = |at: usize| -> Option<String> {
             if let Some(name) = resolved.borrow().get(&at) {
                 return name.clone();
             }
-            let name = namer.name(names.get(&at).cloned().flatten(), g.level, g.ordinal);
+            let g = gate.get(at);
+            let name = namer.name(g.name, g.level, g.ordinal);
             resolved.borrow_mut().insert(at, name.clone());
             name
-        };
-
-        let row_of = |g: &Gated, children: &HashMap<(u32, u32), u64>| BrowseRow {
-            mosaica_id: g.mosaica_id,
-            key: keys.get(&(g.level, g.ordinal)).cloned().flatten(),
-            name: name_of(g),
-            masked_count: g.masked_count,
-            matched_count: filtered.get(&(g.level, g.ordinal)).copied(),
-            rung: if levelled {
-                g.level
-            } else {
-                rungs.get(&g.mosaica_id.raw()).copied().unwrap_or(0)
-            },
-            parent_ids: {
-                let mut ids: Vec<MosaicaId> =
-                    g.nearest.iter().map(|&i| gated[i].mosaica_id).collect();
-                ids.sort_unstable_by_key(|id| id.raw());
-                ids
-            },
-            child_count: children.get(&(g.level, g.ordinal)).copied().unwrap_or(0),
-            slot: slots
-                .get(g.level as usize)
-                .and_then(Option::as_ref)
-                .and_then(|slots| slots.get(g.ordinal)),
         };
 
         // The form's own candidate set, taken over the gated artifacts and never over the level's
         // population.
         let (candidates, parents): (Vec<usize>, Vec<usize>) = match &req.form {
             BrowseForm::Roots => (
-                gated
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, g)| at_level(g) && g.nearest.is_empty())
-                    .map(|(at, _)| at)
+                gate.every(req.level)
+                    .into_iter()
+                    .filter(|&at| gate.nearest(at).is_empty())
                     .collect(),
                 Vec::new(),
             ),
@@ -539,42 +437,27 @@ impl crate::Engine {
                 // The requested artifact, under its own criterion. One that fails it — or names
                 // nothing, or belongs to another layer — answers an empty page identically to a
                 // leaf: this is §3's empty-operand rule, one verb over.
-                let Some(&at) = gated
-                    .iter()
-                    .position(|g| g.mosaica_id == *id)
-                    .as_ref()
-                    .map(|at| at as &usize)
-                else {
+                let Some(at) = gate.of_id(*id) else {
                     return Ok(BrowseOut {
                         artifacts: Vec::new(),
                         parents: Vec::new(),
                         next: None,
                     });
                 };
-                (
-                    gated
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, g)| g.nearest.binary_search(&at).is_ok())
-                        .map(|(i, _)| i)
-                        .collect(),
-                    gated[at].nearest.clone(),
-                )
+                (gate.below(at), gate.nearest(at).to_vec())
             }
             BrowseForm::Search(q) => {
                 let needle = q.to_lowercase();
+                let found = |text: Option<String>| {
+                    text.is_some_and(|text| text.to_lowercase().contains(&needle))
+                };
+                let every = gate.every(req.level);
+                let keys = gate.keys(&every);
                 (
-                    gated
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, g)| {
-                            let found = |text: Option<String>| {
-                                text.is_some_and(|text| text.to_lowercase().contains(&needle))
-                            };
-                            at_level(g)
-                                && (found(keys.get(&(g.level, g.ordinal)).cloned().flatten())
-                                    || found(name_of(g)))
-                        })
+                    every
+                        .into_iter()
+                        .zip(keys)
+                        .filter(|(at, key)| found(key.clone()) || found(name_of(*at)))
                         .map(|(at, _)| at)
                         .collect(),
                     Vec::new(),
@@ -586,64 +469,341 @@ impl crate::Engine {
         // its masked count, so the larger artifact comes first, and then by `mosaica_id`, so a
         // cursor over tied counts neither duplicates nor drops a row.
         let cursor_of = |at: &usize| {
-            let g = &gated[*at];
+            let g = gate.get(*at);
             BrowseCursor {
-                count: filtered
-                    .get(&(g.level, g.ordinal))
-                    .copied()
-                    .unwrap_or(g.masked_count),
+                count: g.matched_count.unwrap_or(g.masked_count),
                 masked_count: g.masked_count,
                 mosaica_id: g.mosaica_id.raw(),
             }
         };
-        let mut candidates = candidates;
-        candidates.sort_by_key(|at| cursor_of(at).key());
+        let mut candidates: Vec<(usize, BrowseCursor)> =
+            candidates.iter().map(|at| (*at, cursor_of(at))).collect();
+        candidates.sort_by_key(|(_, cursor)| cursor.key());
         let after = match req.cursor {
             None => 0,
-            Some(cursor) => candidates.partition_point(|at| cursor_of(at).key() <= cursor.key()),
+            Some(cursor) => candidates.partition_point(|(_, at)| at.key() <= cursor.key()),
         };
         let page: Vec<usize> = candidates
             .iter()
             .skip(after)
             .take(req.limit)
-            .copied()
+            .map(|&(at, _)| at)
             .collect();
         let next = (after + page.len() < candidates.len())
             .then(|| page.last().map(cursor_of))
             .flatten();
 
-        // The children of each row returned, counted over the gated artifacts by the same nearest
-        // served parents the children form lists, so both ends are served. A `flat` or `stacked`
-        // layer has no links to count.
-        let mut returned = vec![false; gated.len()];
-        for &at in page.iter().chain(&parents) {
-            returned[at] = true;
-        }
-        let mut children: HashMap<(u32, u32), u64> = HashMap::new();
-        if within.is_some() && !(page.is_empty() && parents.is_empty()) {
-            for g in &gated {
-                for &at in g.nearest.iter().filter(|&&at| returned[at]) {
-                    *children
-                        .entry((gated[at].level, gated[at].ordinal))
-                        .or_default() += 1;
-                }
-            }
-        }
-        let mut parent_rows: Vec<BrowseRow> = parents
-            .iter()
-            .map(|&at| row_of(&gated[at], &children))
-            .collect();
+        let rows_of = |ats: &[usize]| -> Vec<BrowseRow> {
+            let keys = gate.keys(ats);
+            ats.iter()
+                .zip(keys)
+                .map(|(&at, key)| {
+                    let g = gate.get(at);
+                    BrowseRow {
+                        mosaica_id: g.mosaica_id,
+                        key,
+                        name: name_of(at),
+                        masked_count: g.masked_count,
+                        matched_count: g.matched_count,
+                        rung: if levelled { g.level } else { gate.rung(at) },
+                        parent_ids: {
+                            let mut ids: Vec<MosaicaId> = gate
+                                .nearest(at)
+                                .iter()
+                                .map(|&up| gate.get(up).mosaica_id)
+                                .collect();
+                            ids.sort_unstable_by_key(|id| id.raw());
+                            ids
+                        },
+                        // The served artifacts naming this one among their nearest served
+                        // parents, which is the children form's own candidate set. A `flat` or
+                        // `stacked` layer has no links to count.
+                        child_count: match within {
+                            Some(_) => gate.below(at).len() as u64,
+                            None => 0,
+                        },
+                        slot: slots
+                            .get(g.level as usize)
+                            .and_then(Option::as_ref)
+                            .and_then(|slots| slots.get(g.ordinal)),
+                    }
+                })
+                .collect()
+        };
+        let mut parent_rows = rows_of(&parents);
         parent_rows.sort_by_key(|row| row.mosaica_id.raw());
         parent_rows.dedup_by_key(|row| row.mosaica_id.raw());
-        let artifacts = page
-            .iter()
-            .map(|&at| row_of(&gated[at], &children))
-            .collect();
+        let artifacts = rows_of(&page);
         ctx.finish()?;
         Ok(BrowseOut {
             artifacts,
             parents: parent_rows,
             next,
+        })
+    }
+}
+
+/// One served artifact of the layer, as the gate left it: what its row needs.
+#[derive(Clone)]
+struct Gated {
+    level: u32,
+    ordinal: u32,
+    masked_count: u64,
+    /// `|membership ∩ M_auth ∩ filter|` under `filters`, `None` without.
+    matched_count: Option<u64>,
+    mosaica_id: MosaicaId,
+    /// The artifact's own first supplied text, from the content this viewer is served.
+    name: Option<String>,
+}
+
+/// Where a layer's edges lead downward: the children each artifact's parent edges make it, by the
+/// edges [`crate::lineage::nearest_served`] climbs.
+enum Below {
+    /// A `nested` or `dag` layer's in-level edges, through each level's held lineage.
+    Within(Vec<Arc<crate::cut::Lineage>>),
+    /// A `tiered` layer's edges to coarser levels, by parent.
+    Coarser(FxHashMap<(u32, u32), Vec<(u32, u32)>>),
+    /// A kind with no edges.
+    None,
+}
+
+/// A `tiered` layer's children by parent, read from every level's edges to coarser levels.
+fn coarser_children(levels: &[ReadLevel]) -> FxHashMap<(u32, u32), Vec<(u32, u32)>> {
+    let mut children: FxHashMap<(u32, u32), Vec<(u32, u32)>> = FxHashMap::default();
+    for read in levels {
+        let rows = read.forms.first();
+        for ordinal in 0..rows.len() as u32 {
+            for parent in rows.parents(ordinal) {
+                if parent.level < read.level {
+                    children
+                        .entry((parent.level, parent.ordinal))
+                        .or_default()
+                        .push((read.level, ordinal));
+                }
+            }
+        }
+    }
+    children
+}
+
+/// The viewport's gate over one layer for one request, asked one artifact at a time and holding
+/// each answer, so a form reads the artifacts its answer depends on and no others: the children
+/// form the artifacts below the one requested down to the nearest served ones, and its parents the
+/// ones above it up to the nearest served ones.
+struct Gate<'a> {
+    engine: &'a Engine,
+    layer: &'a RegisteredLayer,
+    mask: &'a ShardedMask,
+    filter_rows: Option<&'a [croaring::Bitmap]>,
+    levels: &'a [ReadLevel],
+    views: Vec<ArtifactView<'a, EffectiveMask>>,
+    below: Below,
+    within: Option<bool>,
+    /// Each artifact asked about, by `(level, ordinal)`, and its index in `gated` where served.
+    at: RefCell<FxHashMap<(u32, u32), Option<usize>>>,
+    gated: RefCell<Vec<Gated>>,
+    /// The nearest served ancestors of each served artifact asked about, by index in `gated`.
+    nearest: RefCell<FxHashMap<usize, Rc<[usize]>>>,
+    rungs: RefCell<FxHashMap<usize, u32>>,
+}
+
+impl Gate<'_> {
+    /// The artifact at `ordinal` of `level` where this viewer is served it, by its index.
+    fn served(&self, level: u32, ordinal: u32) -> Option<usize> {
+        if let Some(&at) = self.at.borrow().get(&(level, ordinal)) {
+            return at;
+        }
+        let at = self.verdict(level, ordinal).map(|gated| {
+            let mut held = self.gated.borrow_mut();
+            held.push(gated);
+            held.len() - 1
+        });
+        self.at.borrow_mut().insert((level, ordinal), at);
+        at
+    }
+
+    fn verdict(&self, level: u32, ordinal: u32) -> Option<Gated> {
+        let read = self.levels.get(level as usize)?;
+        if ordinal as usize >= read.forms.first().len() {
+            return None;
+        }
+        let entity = self.layer.runs[level as usize]
+            .entity_of(u64::from(ordinal))
+            .map(EntityId::new)?;
+        let ArtifactVerdict::Serve {
+            masked_count,
+            position,
+        } = self.views[level as usize].verdict(entity, ordinal)
+        else {
+            return None;
+        };
+        let mosaica_id = self.engine.artifact_id(self.layer.space, entity)?;
+        // Content decides servability as well as text: a viewer containing no content's
+        // generating set receives no artifact at all rather than one with its description
+        // missing (decision 0076), which is why this runs inside the gate and not beside the row
+        // build.
+        let content = read.content(self.engine, self.layer, ordinal, entity, position)?;
+        Some(Gated {
+            level,
+            ordinal,
+            masked_count,
+            matched_count: self
+                .filter_rows
+                .map(|rows| read.matched_count(ordinal, self.mask, rows)),
+            mosaica_id,
+            name: content.name(),
+        })
+    }
+
+    fn get(&self, at: usize) -> Gated {
+        self.gated.borrow()[at].clone()
+    }
+
+    /// Every served artifact of the layer, or of `level` where one is named.
+    fn every(&self, level: Option<u32>) -> Vec<usize> {
+        let mut every = Vec::new();
+        for (walked, read) in self.levels.iter().enumerate() {
+            let walked = walked as u32;
+            if level.is_some_and(|level| level != walked) {
+                continue;
+            }
+            every.extend(
+                (0..read.forms.first().len() as u32).filter_map(|o| self.served(walked, o)),
+            );
+        }
+        every
+    }
+
+    /// The served artifact `id` names, where it is one of this layer's.
+    fn of_id(&self, id: MosaicaId) -> Option<usize> {
+        let (space, entity) = self.engine.identity_key.invert_artifact(id)?;
+        if space != self.layer.space {
+            return None;
+        }
+        self.layer
+            .runs
+            .iter()
+            .enumerate()
+            .find_map(|(level, runs)| {
+                let ordinal = u32::try_from(runs.ordinal_of(entity.raw())?).ok()?;
+                self.served(level as u32, ordinal)
+            })
+    }
+
+    /// The served artifacts nearest above `at` on every path ([`crate::lineage`]), by index,
+    /// ascending.
+    fn nearest(&self, at: usize) -> Rc<[usize]> {
+        if let Some(held) = self.nearest.borrow().get(&at) {
+            return Rc::clone(held);
+        }
+        let nearest: Rc<[usize]> = match self.within {
+            None => Rc::from([]),
+            Some(within) => {
+                let g = self.get(at);
+                crate::lineage::nearest_served(
+                    |level, ordinal| {
+                        self.levels
+                            .get(level as usize)
+                            .map_or(&[], |read| read.forms.first().parents(ordinal))
+                    },
+                    |level, ordinal| self.served(level, ordinal),
+                    (g.level, g.ordinal),
+                    within,
+                )
+                .into()
+            }
+        };
+        self.nearest.borrow_mut().insert(at, Rc::clone(&nearest));
+        nearest
+    }
+
+    /// The served artifacts that name `at` among their nearest served ancestors, by index,
+    /// ascending: its children where they are served, and a withheld child's own nearest served
+    /// descendants in its place. Walks down from `at` through the withheld artifacts below it, by
+    /// the edges [`Self::nearest`] climbs, so an artifact is listed here exactly where `at` is in
+    /// its [`Self::nearest`].
+    fn below(&self, at: usize) -> Vec<usize> {
+        let g = self.get(at);
+        let start = (g.level, g.ordinal);
+        let children = |(level, ordinal): (u32, u32)| -> Vec<(u32, u32)> {
+            match &self.below {
+                Below::Within(lineages) => lineages
+                    .get(level as usize)
+                    .map_or(&[][..], |lineage| lineage.children_of_node(ordinal))
+                    .iter()
+                    .map(|&child| (level, child))
+                    .collect(),
+                Below::Coarser(children) => {
+                    children.get(&(level, ordinal)).cloned().unwrap_or_default()
+                }
+                Below::None => Vec::new(),
+            }
+        };
+        let mut found = Vec::new();
+        let mut seen: FxHashSet<(u32, u32)> = FxHashSet::default();
+        seen.insert(start);
+        let mut walk = children(start);
+        while let Some(next) = walk.pop() {
+            if !seen.insert(next) {
+                continue;
+            }
+            match self.served(next.0, next.1) {
+                Some(child) => found.push(child),
+                None => walk.extend(children(next)),
+            }
+        }
+        found.sort_unstable();
+        found.dedup();
+        found
+    }
+
+    /// The depth of `at` in the forest its nearest served ancestors form: the longest path from a
+    /// served artifact with none. An ancestor met again on its own path adds nothing.
+    fn rung(&self, at: usize) -> u32 {
+        const PENDING: u32 = u32::MAX;
+        let mut stack = vec![at];
+        while let Some(&top) = stack.last() {
+            let known = self.rungs.borrow().get(&top).copied();
+            match known {
+                None => {
+                    self.rungs.borrow_mut().insert(top, PENDING);
+                    let ups = self.nearest(top);
+                    let rungs = self.rungs.borrow();
+                    stack.extend(ups.iter().filter(|up| !rungs.contains_key(up)));
+                }
+                Some(PENDING) => {
+                    let ups = self.nearest(top);
+                    let rung = {
+                        let rungs = self.rungs.borrow();
+                        ups.iter()
+                            .filter_map(|up| rungs.get(up).copied())
+                            .filter(|&k| k != PENDING)
+                            .map(|k| k + 1)
+                            .max()
+                            .unwrap_or(0)
+                    };
+                    self.rungs.borrow_mut().insert(top, rung);
+                    stack.pop();
+                }
+                Some(_) => {
+                    stack.pop();
+                }
+            }
+        }
+        self.rungs.borrow()[&at]
+    }
+
+    /// The publisher's key of each artifact of `ats`, read under one hold of the store.
+    fn keys(&self, ats: &[usize]) -> Vec<Option<String>> {
+        let name = self.layer.declaration.name.as_str();
+        let gated = self.gated.borrow();
+        self.engine.write.live().with_artifacts(|store| {
+            ats.iter()
+                .map(|&at| {
+                    let g = &gated[at];
+                    store.get(name, g.level, g.ordinal)?.key.clone()
+                })
+                .collect()
         })
     }
 }

@@ -868,6 +868,58 @@ fn a_withheld_parents_children_hang_from_the_grandparent() {
     assert!(withheld.artifacts.is_empty() && withheld.parents.is_empty());
 }
 
+/// **A run of withheld generations is passed through whole.** With two generations under the root
+/// suppressed, the served artifacts below them are the root's children and counted in its
+/// `child_count`, one rung below it, and their own children sit one rung lower again.
+#[test]
+fn the_children_below_two_withheld_generations_hang_from_the_root() {
+    const DEEP: &str = "clusters/deeper";
+    let fx = fixture(None);
+    let ids = plant(
+        &fx,
+        DEEP,
+        HierarchyKind::Nested,
+        &[&[
+            ("top", 0..300, &[]),
+            ("a", 0..200, &["top"]),
+            ("side", 200..300, &["top"]),
+            ("b", 0..200, &["a"]),
+            ("c", 0..100, &["b"]),
+            ("d", 100..200, &["b"]),
+            ("f", 0..50, &["c"]),
+        ]],
+    );
+    suppress(&fx, ids["a"]);
+    suppress(&fx, ids["b"]);
+
+    let roots = browse_layer(&fx.engine, DEEP, None, BrowseForm::Roots);
+    assert_eq!(key_set(&roots), vec!["top"]);
+    assert_eq!(row(&roots, "top").child_count, 3);
+
+    let children = browse_layer(&fx.engine, DEEP, None, BrowseForm::Children(ids["top"]));
+    assert_eq!(key_set(&children), vec!["c", "d", "side"]);
+    for key in ["c", "d", "side"] {
+        assert_eq!(row(&children, key).parent_ids, vec![ids["top"]]);
+        assert_eq!(row(&children, key).rung, 1);
+    }
+    assert_eq!(row(&children, "c").child_count, 1);
+
+    let below = browse_layer(&fx.engine, DEEP, None, BrowseForm::Children(ids["c"]));
+    assert_eq!(key_set(&below), vec!["f"]);
+    assert_eq!(row(&below, "f").rung, 2);
+    assert_eq!(
+        below
+            .parents
+            .iter()
+            .map(|r| r.mosaica_id)
+            .collect::<Vec<_>>(),
+        vec![ids["top"]]
+    );
+    for out in [&roots, &children, &below] {
+        assert!(names_nowhere(out, ids["a"]) && names_nowhere(out, ids["b"]));
+    }
+}
+
 /// **On a tiered layer, a root is an artifact with no served ancestor at any level.** A subject
 /// class whose archive is withheld is a root of the roots form with no `level`, and of the one at
 /// its own level, and absent from the one at level 0. A search with no `level` spans every level.

@@ -1866,7 +1866,7 @@ pub(super) fn lineage_kind(kind: mosaica_types::layer::HierarchyKind) -> Option<
 ///
 /// Iterative depth-first, ancestors memoised. The in-progress mark guards a cycle: a malformed
 /// store contributes nothing rather than looping.
-pub(crate) fn response_rungs(
+fn response_rungs(
     parents_of: &std::collections::HashMap<u64, Vec<u64>>,
 ) -> std::collections::HashMap<u64, u32> {
     const PENDING: u32 = u32::MAX;

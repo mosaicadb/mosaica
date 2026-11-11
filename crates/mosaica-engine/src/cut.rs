@@ -318,7 +318,7 @@ impl Lineage {
     }
 
     /// The children of `ordinal`, ascending — building the index on the first call.
-    fn children_of_node(&self, ordinal: u32) -> &[u32] {
+    pub(crate) fn children_of_node(&self, ordinal: u32) -> &[u32] {
         let (child_at, children) = self.child_index.get_or_init(|| self.children_of());
         let at = ordinal as usize;
         if at + 1 >= child_at.len() {
