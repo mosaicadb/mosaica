@@ -692,19 +692,25 @@ describe('<mosaica-field-card> on a date', () => {
 describe('<mosaica-field-card> on a number', () => {
   const tens = (counts: number[]) => counts.map((count, i) => ({lower: i * 10, upper: (i + 1) * 10, count}));
 
-  it('draws everything matching on a scale of its own, which stays put as the counts in view move inside it', async () => {
+  it('keeps everything matching on a scale of its own as the counts in view move, drawing those in view as shares on it', async () => {
     const {host, store} = await mountCard('authors');
-    await answer(host, store, [{rows: tens([5, 7, 9]), total: 21}], [{rows: tens([50, 70, 100]), total: 220}]);
+    await answer(host, store, [{rows: tens([10, 20, 70]), total: 100}], [{rows: tens([50, 100, 200]), total: 350}]);
     const heights = (part: string) => deepAll(host, `[part~="bin"] [part="${part}"]`).map((el) => parseFloat((el as HTMLElement).style.height));
     const full = heights('bar-match');
-    expect(full[2]).toBeGreaterThan(full[1]!);
-    expect(full[1]).toBeGreaterThan(full[0]!);
-    expect(heights('bar-subject').every((h, i) => h > 0 && h < full[i]!)).toBe(true);
-    // Everything in view is now in the first bin, where it is all that matches.
+    // The tallest share of the match fills the plot, and the others stand in proportion to it.
+    expect(full[2]).toBeCloseTo(56);
+    expect(full[1]! / full[2]!).toBeCloseTo(0.5);
+    // A view holding few items still draws their shape: shares, not counts.
+    answerAggregate(store, 'field-subject', aggregateEntry([{rows: tens([1, 1, 2]), total: 4}]));
+    await settle(host);
+    expect(heights('bar-match')).toEqual(full);
+    expect(heights('bar-subject')[2]).toBeGreaterThan(full[2]! * 0.8);
+    expect(heights('bar-subject')[0]! / heights('bar-subject')[2]!).toBeCloseTo(0.5);
+    // Everything in view in one bin: its bar is cut at the plot's top, and the columns stay put.
     answerAggregate(store, 'field-subject', aggregateEntry([{rows: tens([50, 0, 0]), total: 50}]));
     await settle(host);
     expect(heights('bar-match')).toEqual(full);
-    expect(heights('bar-subject')).toEqual([full[0], 0, 0]);
+    expect(heights('bar-subject')).toEqual([56, 0, 0]);
   });
 
   it('writes a value of four figures, such as a year, without a thousands mark, and a longer one with them', async () => {

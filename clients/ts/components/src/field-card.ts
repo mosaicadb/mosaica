@@ -339,10 +339,10 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   its children.
  * @csspart refusal - The words "Clusters unavailable", with `data-code`, where the rows were
  *   refused.
- * @csspart bar-match - A row's pale bar, its share of the whole match; or a bin's, its count on a
- *   scale the whole match sets.
- * @csspart bar-subject - A row's solid bar, its share of the subject; or a bin's, its count on the
- *   same scale, inside the bin's pale bar.
+ * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match. A bin's is on a
+ *   scale the whole match's tallest share sets, which the camera does not move.
+ * @csspart bar-subject - A row's or a bin's solid bar, its share of the subject; a bin's on the same
+ *   scale as the pale bars, cut at the plot's top.
  * @csspart count - A row's counts as they are drawn, after its tick and its pen, with what they
  *   count as its `title`. A screen reader is given them beside it, each with what it counts.
  * @csspart verbs - A row's Highlight and Filter buttons, in its counts' place.
@@ -2117,14 +2117,16 @@ export class MosaicaFieldCard extends MosaicaElement {
     const subjectBins = binsOf(subjectTable, timestamp);
     const matchBins = binsOf(matchTable, timestamp);
     const bins = matchBins.length > 0 ? matchBins : subjectBins;
+    const subTotal = subjectTable?.total ?? 0;
+    const allTotal = matchTable?.total ?? 0;
     const subOf = (b: Bin) => subjectBins.find((x) => x.lower === b.lower)?.count ?? 0;
     const allOf = (b: Bin) => matchBins.find((x) => x.lower === b.lower)?.count ?? 0;
-    // One scale for both, set by the whole match, so its columns stay put as the camera moves and
-    // the subject's bars stand inside them. Two samples can disagree, so a subject bar is kept
-    // within its column, and one with anything in it stays visible.
-    const tallest = Math.max(1, ...bins.map((b) => (matchTable ? allOf(b) : subOf(b))));
-    const height = (n: number) => `${n > 0 ? Math.max(1, (Math.min(n, tallest) / tallest) * PLOT_HEIGHT).toFixed(1) : 0}px`;
-    const subHeight = (b: Bin) => height(matchTable ? Math.min(subOf(b), allOf(b)) : subOf(b));
+    const share = (n: number, total: number) => (total > 0 ? n / total : 0);
+    // Each bar is its share of its own set, on one scale the whole match's tallest share sets, so
+    // the match's columns stay put as the camera moves. A subject bar taller than the plot is cut
+    // at its top, and one with anything in it stays visible.
+    const tallest = Math.max(1e-9, ...bins.map((b) => (matchTable ? share(allOf(b), allTotal) : share(subOf(b), subTotal))));
+    const height = (n: number, total: number) => `${n > 0 ? Math.max(1, Math.min(1, share(n, total) / tallest) * PLOT_HEIGHT).toFixed(1) : 0}px`;
     const approx = approxMark(subjectTable, matchTable);
     const lo = bins[0]?.lower;
     const hi = bins.at(-1)?.upper;
@@ -2241,7 +2243,7 @@ export class MosaicaFieldCard extends MosaicaElement {
           @pointerdown=${(e: PointerEvent) => this.brushStart(e, bins.length)} @pointermove=${(e: PointerEvent) => this.brushMove(e, bins.length)}
           @pointerup=${(e: PointerEvent) => this.brushEnd(e, bins.length, open)} @pointercancel=${() => (this.brush = null)} @keydown=${(e: KeyboardEvent) => this.brushKey(e, bins.length, open)}>
           ${bins.map(
-            (b, i) => html`<div part="bin" data-index=${i} title=${binTitle(b)} aria-hidden="true"><span part="bar-match" style=${`height:${height(allOf(b))}`}></span><span part="bar-subject" style=${`height:${subHeight(b)}`}></span></div>`
+            (b, i) => html`<div part="bin" data-index=${i} title=${binTitle(b)} aria-hidden="true"><span part="bar-match" style=${`height:${height(allOf(b), allTotal)}`}></span><span part="bar-subject" style=${`height:${height(subOf(b), subTotal)}`}></span></div>`
           )}
           ${clauseBand('filter')}${clauseBand('highlight')}${brushBand}
         </div>
