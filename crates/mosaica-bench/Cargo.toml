@@ -1,3 +1,48 @@
+# The probes under `src/bin` hold no tests, so `cargo test` builds no harness for them; `--all-targets`
+# still checks them. A new probe is tested until it is listed here.
+bin = [
+    { name = "aggregate_cost", test = false },
+    { name = "artifact_campaign_census", test = false },
+    { name = "artifact_campaign_fixture", test = false },
+    { name = "artifact_campaign_ingest", test = false },
+    { name = "artifact_campaign_load", test = false },
+    { name = "artifact_cut_cost", test = false },
+    { name = "artifact_serving_scale", test = false },
+    { name = "blob_framing_probe", test = false },
+    { name = "browse_cost", test = false },
+    { name = "buffer_read_cost", test = false },
+    { name = "category_membership", test = false },
+    { name = "code_shapes", test = false },
+    { name = "epoch_shard_projection", test = false },
+    { name = "epoch_shard_tile_index", test = false },
+    { name = "epoch_shard_treemap_mask", test = false },
+    { name = "field_tallies_scale", test = false },
+    { name = "field_tallies_shape", test = false },
+    { name = "fold_artifact_pass", test = false },
+    { name = "gather_shape", test = false },
+    { name = "hull_cost", test = false },
+    { name = "identity_bands_build", test = false },
+    { name = "identity_bands_probe", test = false },
+    { name = "key_index_scale", test = false },
+    { name = "maintenance_steady_state", test = false },
+    { name = "membership_residency", test = false },
+    { name = "occupancy_sketch", test = false },
+    { name = "predicate_membership_cost", test = false },
+    { name = "project_transient_probe", test = false },
+    { name = "record_blob_ratio", test = false },
+    { name = "record_walk_scale", test = false },
+    { name = "route_probe", test = false },
+    { name = "row_entity_crossing", test = false },
+    { name = "row_members_size", test = false },
+    { name = "row_route_cost", test = false },
+    { name = "slot_cost", test = false },
+    { name = "suggest_walk", test = false },
+    { name = "underlay_route", test = false },
+    { name = "viewport_latency", test = false },
+    { name = "viewport_sweep", test = false },
+    { name = "write_cost", test = false },
+]
+
 [package]
 name = "mosaica-bench"
 version.workspace = true
