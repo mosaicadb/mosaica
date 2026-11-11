@@ -1,8 +1,8 @@
 # The checks every pull request and every push to main must pass. Every fixture they use is
 # synthesised from a seed, so they need no corpus.
 #
-# On a pull request, `changes` reads which paths the pull request changes, and `rust`, `clippy`,
-# `conformance` and `clients` run only where one of their inputs did. A job skipped by its `if:`
+# On a pull request, `changes` reads which paths the pull request changes, and the Rust jobs,
+# `clippy`, `conformance` and `clients` run only where one of their inputs did. A job skipped by its `if:`
 # reports as skipped, which `required` counts as passing. A workflow-level `paths:` filter would
 # leave a required check waiting instead, because a workflow that does not run reports nothing.
 # A push to main runs every job. `checks` and `docs` run on every change, because the advisories
@@ -36,7 +36,8 @@ jobs:
   # the diff fails.
   #
   # `build` is what the `mosaica` binary and the extension module are compiled from. `rust` adds the
-  # files outside `crates/` that Rust tests read, as `scripts/test-affected.sh` lists them.
+  # files outside `crates/` that Rust tests read, as `scripts/test-affected.sh` lists them, and
+  # nextest's configuration.
   # `conformance` adds the suite and the oracle; `clients` adds the clients, the corpora and examples
   # their tests serve, the contract and reference pages they check, and the release version's copies.
   changes:
@@ -60,15 +61,27 @@ jobs:
           fi
           build='^(crates/|Cargo\.(toml|lock)$|\.cargo/|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'
           {
-            echo "rust=$(area "$build|^(docs/reference|docs/openapi|test_corpora|examples|reference/vectors)/|^scripts/check-test-reachability\.sh$")"
+            echo "rust=$(area "$build|^(docs/reference|docs/openapi|test_corpora|examples|reference/vectors)/|^scripts/check-test-reachability\.sh$|^\.config/nextest\.toml$")"
             echo "conformance=$(area "$build|^(conformance|reference|test_corpora)/")"
             echo "clients=$(area "$build|^(clients|test_corpora|examples|docs/openapi|docs/reference)/|^scripts/(check-clients\.sh|version\.py)$")"
           } | tee -a "$GITHUB_OUTPUT"
 
+  # The workspace's tests are built once here, instrumented for coverage, and `rust-tests` runs them
+  # in three shards. `show-env` instruments only the workspace's crates, so the cached dependencies
+  # still serve. The archive holds every test binary and the binaries they spawn, at the paths the
+  # build gave them under `target/`.
+  #
+  # nextest does not run doc-tests, so `--doc` does. The reachability check asks the compiled
+  # harnesses what they would run, so it shares this build rather than compiling the workspace
+  # again. Both run after the archive is made, and `archived` lets the shards run where either
+  # of them fails.
   rust:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
+    name: rust (build)
     runs-on: ubuntu-24.04
+    outputs:
+      archived: ${{ steps.archive.outputs.archived }}
     env:
       # Debug info is most of what the test binaries occupy on disk. Without it a backtrace names a
       # function but not a line.
@@ -77,7 +90,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # A rolling channel, as rust-toolchain.toml names it. The `.stderr` fixtures under
-      # crates/mosaica-types/tests/ui are compiler output, so a new rustc can turn this job red on
+      # crates/mosaica-types/tests/ui are compiler output, so a new rustc can turn the tests red on
       # wording alone.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
         with:
@@ -86,12 +99,59 @@ jobs:
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov,cargo-nextest
+      - name: test binaries, instrumented for coverage
+        id: archive
+        run: |
+          source <(cargo llvm-cov show-env --sh)
+          cargo llvm-cov clean --workspace
+          cargo nextest archive --workspace --archive-file "$RUNNER_TEMP/rust-tests.tar.zst"
+          echo archived=true >> "$GITHUB_OUTPUT"
+      # The archive is already compressed.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rust-tests
+          path: ${{ runner.temp }}/rust-tests.tar.zst
+          compression-level: 0
+          retention-days: 1
+      - name: doc-tests and test reachability
+        if: ${{ !cancelled() && steps.archive.outputs.archived == 'true' }}
+        run: |
+          source <(cargo llvm-cov show-env --sh)
+          status=0
+          cargo test --workspace --doc --no-fail-fast || status=1
+          bash scripts/check-test-reachability.sh --quick || status=1
+          exit $status
+
+  # Each shard runs a third of the tests with `--profile ci` (.config/nextest.toml), which runs the
+  # slow tier too and does not stop at the first failure. `count:` deals each test binary's tests
+  # round-robin, which spreads the few tests of a minute or more across the shards. The archive is
+  # unpacked at the workspace root, so the binaries sit where the build put them and the paths
+  # compiled into the tests resolve.
+  rust-tests:
+    needs: rust
+    if: ${{ !cancelled() && needs.rust.outputs.archived == 'true' }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    name: rust (tests ${{ matrix.shard }}/3)
+    steps:
+      - uses: actions/checkout@v7
+      # llvm-profdata merges this shard's profiles. trybuild compiles the cases under
+      # crates/mosaica-types/tests/ui with this toolchain.
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-nextest
       # A test process that runs past ten minutes is taken to be hung: the watchdog writes every
       # thread's stack once per such process, attaching with gdb as root because Ubuntu's
       # `ptrace_scope` of 1 refuses a non-root attach to a process that is not a child. gdb stops
-      # the process for the few seconds of the dump and detaches, so the watchdog kills nothing.
-      # gdb installs in the background, since the first dump is ten minutes away, and a failed
-      # install fails no step. The runner ends the watchdog with the job.
+      # the process for the few seconds of the dump and detaches, and the `ci` profile ends the test
+      # at fifteen minutes. gdb installs in the background, since the first dump is ten minutes
+      # away, and a failed install fails no step. The runner ends the watchdog with the job.
       - name: watchdog for hung tests
         continue-on-error: true
         run: |
@@ -108,49 +168,77 @@ jobs:
                   timeout 120 sudo gdb -iex "set debuginfod enabled off" -p "$pid" -batch -ex "thread apply all bt"; } > "$out" 2>&1
               done
             done' > "$RUNNER_TEMP/hang/watchdog.log" 2>&1 &
-      # One instrumented run gives the test results and Codacy's coverage. `show-env` instruments only the
-      # workspace's crates, so the cached dependencies still serve.
-      #
-      # nextest runs each test in its own process, so a fixture a test binary shares between its
-      # tests is built once per test. It does not run doc-tests, so `--doc` does. Each command runs
-      # whatever the one before it returned, and the step fails if any of them did.
-      #
-      # The reachability check asks the compiled harnesses what they would run, so it shares this
-      # step's instrumented build rather than compiling the workspace again.
-      #
-      # The step's limit sits under the job's so that a hang fails the step and the diagnostics
-      # below are still uploaded. `build_equals_ingest` appends each phase it reaches to the trace
-      # directory.
-      - name: tests, instrumented for coverage
-        timeout-minutes: 90
+      - uses: actions/download-artifact@v8
+        with:
+          name: rust-tests
+          path: ${{ runner.temp }}
+      # Each test process writes its own profile, named by its process id. The step's limit sits
+      # under the job's so that a hang fails the step and the diagnostics below are still uploaded.
+      # `build_equals_ingest` appends each phase it reaches to the trace directory.
+      - name: tests, shard ${{ matrix.shard }} of 3
+        timeout-minutes: 45
         env:
+          LLVM_PROFILE_FILE: ${{ github.workspace }}/target/mosaica-%p-%m.profraw
           MOSAICA_TEST_TRACE_DIR: ${{ runner.temp }}/hang/trace
         run: |
-          source <(cargo llvm-cov show-env --sh)
-          cargo llvm-cov clean --workspace
-          status=0
-          cargo nextest run --workspace --no-fail-fast || status=1
-          cargo test --workspace --doc --no-fail-fast || status=1
-          bash scripts/check-test-reachability.sh --quick || status=1
-          exit $status
-      # Paths relative to the repository root, as Codacy matches them.
-      - name: coverage report
+          cargo nextest run --profile ci --partition count:${{ matrix.shard }}/3 \
+            --archive-file "$RUNNER_TEMP/rust-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap .
+      - name: this shard's coverage, as one profile
         if: ${{ !cancelled() }}
         run: |
+          profdata="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-profdata"
+          find target -maxdepth 1 -name '*.profraw' > "$RUNNER_TEMP/profraw-list"
+          "$profdata" merge -sparse -f "$RUNNER_TEMP/profraw-list" -o "$RUNNER_TEMP/rust-${{ matrix.shard }}.profdata"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: rust-profile-${{ matrix.shard }}
+          path: ${{ runner.temp }}/rust-${{ matrix.shard }}.profdata
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() || cancelled() }}
+        with:
+          name: hang-diagnostics-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hang
+          if-no-files-found: ignore
+
+  # The shards' profiles merged into the profile `cargo llvm-cov report` reads, and reported over
+  # the archived binaries, whether or not the tests passed. Paths are made relative to the
+  # repository root, as Codacy matches them.
+  rust-coverage:
+    needs: [rust, rust-tests]
+    if: ${{ !cancelled() && needs.rust.outputs.archived == 'true' }}
+    name: rust (coverage)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+        with:
+          components: llvm-tools-preview
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-llvm-cov
+      - uses: actions/download-artifact@v8
+        with:
+          name: rust-tests
+          path: ${{ runner.temp }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rust-profile-*
+          path: ${{ runner.temp }}/profiles
+          merge-multiple: true
+      - name: coverage report
+        run: |
+          tar --zstd -xf "$RUNNER_TEMP/rust-tests.tar.zst"
+          profdata="$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-profdata"
+          "$profdata" merge -sparse "$RUNNER_TEMP"/profiles/*.profdata -o target/mosaica.profdata
           source <(cargo llvm-cov show-env --sh)
           cargo llvm-cov report --lcov --output-path rust.lcov
           sed -i "s|^SF:$PWD/|SF:|" rust.lcov
       - uses: actions/upload-artifact@v7
-        if: ${{ !cancelled() }}
         with:
           name: coverage-rust
           path: rust.lcov
-      - uses: actions/upload-artifact@v7
-        if: ${{ failure() || cancelled() }}
-        with:
-          name: hang-diagnostics
-          path: ${{ runner.temp }}/hang
-          if-no-files-found: ignore
 
   # A check build, which shares nothing with the instrumented test build, so it runs beside it.
   clippy:
@@ -300,8 +388,8 @@ jobs:
   # an upload of one would read to Codacy as the other's files losing their coverage. The token is
   # empty on a fork's pull request, which skips the upload.
   coverage:
-    needs: [rust, clients]
-    if: ${{ !cancelled() && needs.rust.result != 'skipped' && needs.clients.result != 'skipped' }}
+    needs: [rust-coverage, clients]
+    if: ${{ !cancelled() && needs.rust-coverage.result != 'skipped' && needs.clients.result != 'skipped' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -324,7 +412,7 @@ jobs:
   # The one check for branch protection to require: it fails where any job above failed or was
   # cancelled, and passes where each passed or was skipped.
   required:
-    needs: [changes, rust, clippy, checks, docs, conformance, clients]
+    needs: [changes, rust, rust-tests, rust-coverage, clippy, checks, docs, conformance, clients]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:

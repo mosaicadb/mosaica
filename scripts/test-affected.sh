@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Runs the Rust tests a change can reach: the packages it touches and every package that depends
-# on them, by any kind of edge. The changes are those since this branch left the base (origin/main
-# unless BASE names another ref), plus uncommitted and untracked files.
+# Runs the Rust tests a change can reach, with `cargo nextest run`: the packages it touches and
+# every package that depends on them, by any kind of edge. The changes are those since this branch
+# left the base (origin/main unless BASE names another ref), plus uncommitted and untracked files.
+# nextest's default profile leaves out the slow tier that .config/nextest.toml names, and
+# `--profile ci` runs it too.
 #
-#   bash scripts/test-affected.sh                # run them
-#   bash scripts/test-affected.sh -n             # print the choice and run nothing
-#   bash scripts/test-affected.sh -- --test foo  # arguments after -- go to cargo test
+#   bash scripts/test-affected.sh                   # run them
+#   bash scripts/test-affected.sh -n                # print the choice and run nothing
+#   bash scripts/test-affected.sh -- --profile ci   # arguments after -- go to cargo nextest run
 #
 # A change to the workspace's own configuration runs `--workspace`. A changed file outside
 # `crates/` that a Rust test reads (RUST_READS, the same trees as the `rust` filter in
@@ -22,7 +24,7 @@ dry=0
 if [ "${1:-}" = "-n" ]; then dry=1; shift; fi
 if [ "${1:-}" = "--" ]; then shift; fi
 
-WORKSPACE_CONFIG='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.cargo/.*)$'
+WORKSPACE_CONFIG='^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|\.cargo/.*|\.config/nextest\.toml)$'
 RUST_READS='^(docs/reference|docs/openapi|test_corpora|examples|reference/vectors)/'
 
 base_ref=${BASE:-origin/main}
@@ -39,7 +41,7 @@ config=$(printf '%s\n' "$changed" | grep -E "$WORKSPACE_CONFIG" || true)
 if [ -n "$config" ]; then
   echo "test-affected: the workspace's configuration changed, so every package is tested:"
   printf '  %s\n' $config
-  command=(cargo test --workspace --no-fail-fast "$@")
+  command=(cargo nextest run --workspace --no-fail-fast "$@")
   echo "test-affected: ${command[*]}"
   [ "$dry" = 1 ] || exec "${command[@]}"
   exit 0
@@ -106,6 +108,6 @@ echo "test-affected: testing $(printf '%s\n' "$packages" | wc -l | tr -d ' ') pa
 printf '%s\n' "$packages" | sed 's/^\([^ ]*\) /  \1: /'
 selection=()
 for name in $(printf '%s\n' "$packages" | cut -d' ' -f1); do selection+=(-p "$name"); done
-command=(cargo test --no-fail-fast "${selection[@]}" "$@")
+command=(cargo nextest run --no-fail-fast "${selection[@]}" "$@")
 echo "test-affected: ${command[*]}"
 [ "$dry" = 1 ] || exec "${command[@]}"

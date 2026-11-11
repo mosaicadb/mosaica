@@ -6,6 +6,8 @@ checks a change must pass, and how to propose the change.
 ## What you need
 
 - Rust stable (`rust-toolchain.toml` names the channel).
+- cargo-nextest, which runs the Rust tests (`cargo install cargo-nextest --locked`, or a prebuilt
+  binary from https://nexte.st).
 - Node 22.15 or later, for the TypeScript packages and the Python wheel's build hook.
 - Python 3.12 or later, with `uv` or `venv`.
 - Tens of gigabytes of free disc for a full test build. A build without debug info is much
@@ -26,7 +28,7 @@ npm --prefix clients/ts ci          # the TypeScript workspace
 While you work, and before you open a pull request, run the checks your change reaches:
 
 ```bash
-bash scripts/test-affected.sh                      # the Rust tests the change reaches
+bash scripts/test-affected.sh                      # the Rust tests the change reaches, without the slow tier
 cargo clippy --workspace --all-targets -- -D warnings
 bash scripts/check-layers.sh
 bash scripts/check-test-reachability.sh --quick    # a test's attributes, a feature or a dev-dependency changed
@@ -36,19 +38,27 @@ bash scripts/check-docs.sh                         # docs/ or mkdocs.yml changed
 ```
 
 `scripts/test-affected.sh` compares your branch and its uncommitted files with `origin/main` (set
-`BASE` to compare with another ref) and runs `cargo test --no-fail-fast` on each package you
+`BASE` to compare with another ref) and runs `cargo nextest run --no-fail-fast` on each package you
 changed and each package that depends on one of them, printing which it chose and why. It tests the
-whole workspace when `Cargo.toml`, `Cargo.lock`, `.cargo/` or `rust-toolchain.toml` changed, and
-nothing when no Rust did. With `-n` it prints the choice and runs nothing.
+whole workspace when `Cargo.toml`, `Cargo.lock`, `.cargo/`, `rust-toolchain.toml` or
+`.config/nextest.toml` changed, and nothing when no Rust did. With `-n` it prints the choice and
+runs nothing, and it passes any arguments after `--` to `cargo nextest run`.
+
+nextest's default profile, in `.config/nextest.toml`, leaves out the slow tier: about a hundred
+tests that each took more than five seconds in CI and together take half of the suite's test time.
+`cargo nextest run --profile ci` runs every test, as CI does, and `--ignore-default-filter` runs
+the slow tier under the default profile. A test name or `-E` filter on the command line is intersected
+with the default filter, so a filter that names a slow test needs one of those two.
+nextest does not run doc-tests, which `cargo test --doc` runs.
 
 A selection with `-p` resolves features over the selected packages only, so it can compile fewer
-tests than `cargo test --workspace`. The continuous integration workflow
-(`.github/workflows/ci.yml`) therefore runs the whole workspace's tests on every pull request,
-with clippy, every script above, the conformance suite and `cargo deny`, and skips only the jobs
-the change cannot reach. A change must pass it before it is merged. When you run the workspace's
-tests yourself, use `cargo test --workspace --no-fail-fast` and read the totals, because with
-`--no-fail-fast` every test binary runs and a failure in an early binary does not hide the count of
-the rest.
+tests than `--workspace`. The continuous integration workflow (`.github/workflows/ci.yml`)
+therefore runs every test of the whole workspace on every pull request, slow tier and doc-tests
+included, with clippy, every script above, the conformance suite and `cargo deny`, and skips only
+the jobs the change cannot reach. A change must pass it before it is merged. When you run the
+workspace's tests yourself, use `cargo nextest run --workspace --profile ci` and read the totals.
+The `ci` profile runs every test after a failure, so a failure early in the run does not hide the
+count of the rest.
 
 `check-clients.sh` needs Playwright's Chromium (`cd clients/ts && npx playwright install
 chromium`), and `check-docs.sh` needs the documentation's Python packages, which its header says
