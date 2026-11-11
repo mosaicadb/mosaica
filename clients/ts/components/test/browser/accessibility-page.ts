@@ -407,6 +407,11 @@ async function noFilters(): Promise<void> {
  * breadcrumb, the archive's children under their levels' titles, one of them under a second parent
  * too, the remainder row, and focus on a row's Highlight, which shows the row's buttons.
  */
+/**
+ * A `tiered` layer's cluster card stepped into Mathematics: the breadcrumb, a filter chip and a
+ * highlight chip, the children under their levels' headings with their step buttons, a `dag`-style
+ * row with two parents, and the remainder.
+ */
 async function clusterCard(): Promise<void> {
   stageEl.className = 'loose';
   stageEl.innerHTML = '<div style="width: 320px"><mosaica-field-card field="cluster:taxonomy"></mosaica-field-card></div>';
@@ -414,12 +419,21 @@ async function clusterCard(): Promise<void> {
   const store = fakeStore({meta: {...META, layers: [...META.layers, taxonomy]}, status: status({})});
   store.set('view', {...store.get('view'), id: 'places'});
   store.set('legend', {...store.get('legend'), colourBy: 'cluster:taxonomy'});
-  store.set('filters', {...store.get('filters'), members: [{layer: 'taxonomy', artifact: 1n, outside: false, verb: 'filter', label: 'Mathematics'}]});
-  const child = (id: bigint, name: string, rung: number, parentIds: bigint[], slot: number): BrowseRow => ({...browseRow(id, name), rung, parentIds, slot});
-  store.setBrowse('p:1', {artifacts: [child(11n, 'Algebraic geometry', 1, [1n], 0), child(12n, 'Mathematical physics', 1, [1n, 2n], 1), child(21n, 'Moduli spaces', 2, [1n], 2)], parents: [], next: null});
-  store.setBrowse('p:12', {artifacts: [], parents: [{...browseRow(1n, 'Mathematics'), childCount: 3}, browseRow(2n, 'Physics')], next: null});
+  store.set('filters', {
+    ...store.get('filters'),
+    members: [
+      {layer: 'taxonomy', artifact: 1n, outside: false, verb: 'filter', label: 'Mathematics'},
+      {layer: 'taxonomy', artifact: 2n, outside: false, verb: 'highlight', label: 'Physics'}
+    ]
+  });
+  const child = (id: bigint, name: string, rung: number, parentIds: bigint[], slot: number, childCount = 0): BrowseRow => ({...browseRow(id, name, childCount), rung, parentIds, slot});
+  store.setBrowse('roots', {artifacts: [child(1n, 'Mathematics', 0, [], 0, 3), child(2n, 'Physics', 0, [], 1, 2)], parents: [], next: null});
+  store.setBrowse('p:1', {artifacts: [child(11n, 'Algebraic geometry', 1, [1n], 0, 12), child(12n, 'Mathematical physics', 1, [1n, 2n], 1), child(21n, 'Moduli spaces', 2, [1n], 2)], parents: [], next: null});
   const card = stageEl.querySelector('mosaica-field-card') as HTMLElement & {store: unknown};
   card.store = store;
+  await settled();
+  await settled();
+  card.shadowRoot!.querySelector<HTMLElement>('[part="row"][data-key="1"] [part="step"]')!.click();
   await settled();
   await settled();
   const held = new Map(store.get('aggregates'));

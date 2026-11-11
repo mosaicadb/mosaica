@@ -16,7 +16,6 @@ import {
   type AggregateEntry,
   type AggregateSpec,
   type AggregateTable,
-  type BrowseRow,
   type ClauseVerb,
   type ColumnDraft,
   type FieldSummary,
@@ -36,15 +35,14 @@ import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {Lineage, otherParents, type Node as BrowseNode} from './lineage.js';
+import {Lineage, focusAdded, spokenCounts, type Node as BrowseNode} from './lineage.js';
 import {exportparts} from './parts.js';
-import {ClusterPaths} from './paths.js';
 import {chrome, tokens} from './tokens.js';
 import './filter.js';
 import './cluster-filter.js';
 
-/** The rows and crumbs whose place keeps focus across a render, by part. */
-const HOLDERS = '[part="row"], [part="crumb"]';
+/** The rows, crumbs and chips whose place keeps focus across a render, by part. */
+const HOLDERS = '[part="row"], [part="crumb"], [part="chip"]';
 /** The rows a category or cluster card lists, and the rows "N more" opens it to. */
 const ROWS = 5;
 const MORE_ROWS = 20;
@@ -79,11 +77,17 @@ function formatNumber(n: number, whole: boolean): string {
 type Kind = 'category' | 'cluster' | 'histogram' | 'bool' | 'search';
 
 /**
- * How a cluster card lists its layer: `ranked` by count with the layer's own clauses left out,
- * the `children` of its deepest crumb from browse pages, or the `overlap`, ranked at the next level
- * under every clause.
+ * How a cluster card lists its layer: `ranked` by count with the layer's own clauses left out, the
+ * `children` of its position from browse pages, or the `overlap`, ranked under every clause at the
+ * level after its position's, inside the position.
  */
 type Listing = 'ranked' | 'children' | 'overlap';
+
+/** One step of a card's position: the cluster stepped into, its level, and how many children its row said it has. */
+type Step = {id: bigint; name: string; rung: number; children: number | null};
+
+/** A row's button that steps into it: its accessible name, the figure it shows, and the step it takes. */
+type Stepper = {label: string; count: number | null; step: Step};
 
 /** One bin of a histogram, its edges in the column's units (microseconds on a timestamp). */
 type Bin = {lower: number; upper: number; count: number};
@@ -92,7 +96,7 @@ type Bin = {lower: number; upper: number; count: number};
  * One row of a category, bool or cluster card; `own` is a cluster's palette colour, `#rrggbb`, where it
  * is coloured, and `unmet` marks a category value the map has given no colour yet.
  */
-type Row = {key: string; name: string; path: string; sub: number | null; all: number | null; swatch: string | null; own: string | null; unmet: boolean};
+type Row = {key: string; name: string; sub: number | null; all: number | null; swatch: string | null; own: string | null; unmet: boolean};
 
 /** A range being dragged across the histogram, by bin, `from` where the drag began. */
 type Brush = {from: number; to: number};
@@ -160,6 +164,24 @@ function drills(layer: Layer): boolean {
   return isLinked(layer) && layer.depsOn.length === 0;
 }
 
+/** The level of `layer` after `rung`, the next finer one, where it has one. */
+function levelAfter(layer: Layer, rung: number): number | undefined {
+  return layer.levels
+    .map((l) => l.level)
+    .filter((l) => l > rung)
+    .sort((a, b) => a - b)[0];
+}
+
+/** A level's title, or its number where it has none. */
+function levelTitle(layer: Layer, level: number): string {
+  return layer.levels.find((l) => l.level === level)?.title || `Level ${level}`;
+}
+
+/** `n` and a noun, singular for one. */
+function counted(n: number, one: string, many: string): string {
+  return `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
+}
+
 /** "≈" where either table's counts were taken from a sample, else nothing. */
 function approxMark(...tables: (AggregateTable | undefined)[]): string {
   return tables.some((t) => t?.sample?.sampled) ? '≈' : '';
@@ -205,21 +227,26 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   no pointer that hovers. A button is filled, and its icon solid, while its value is highlighted
  *   or filtered to, and before the counts a tick marks a value the filter keeps and a pen one that
  *   is highlighted. A screen reader is given each count with what it counts.
- * - The card of a `tiered`, `nested` or `dag` layer walks the layer by its parent edges. Above its
- *   rows a breadcrumb holds the layer's own filter clauses in the order they were added, each with
- *   a × that removes it. The rows are the served children of the deepest crumb, or the top-level
- *   clusters while there is none, in the server's order, a page at a time: More loads the next
- *   page and says how many children are still to come where it knows. Each row counts the items
- *   that match every filter, this layer's clauses among them, beside every item of it the viewer
- *   may see, so a row whose count is 0 is still listed, and each count is what picking the row
- *   would leave. Picking a row adds a clause, and a layer's clauses combine with AND. The rows of
- *   a `tiered` layer stand under the titles of their levels, and a row of a `dag` layer names its
- *   other served parents. While every child of the deepest crumb is on one page, a last row counts
- *   the crumb's items in none of them.
- * - Below a crumb with no served children, and on a `stacked` layer, the card lists the clusters
- *   with most items in view as a category card does, under every filter, this layer's clauses
- *   among them. They are taken at the level below the deepest crumb, else at the chosen level or
- *   at what the map draws. The breadcrumb stands above the rows.
+ * - The card of a `tiered`, `nested` or `dag` layer walks the layer by its parent edges, and
+ *   walking it leaves the map's filter as it is. A breadcrumb above the rows holds the card's
+ *   position, from All, the layer's top level, down to the cluster whose children are listed. Each
+ *   crumb is a button that steps back to it, and a tick marks a crumb whose cluster the filter is
+ *   on. The rows are the served children of the position, in the server's order, a page at a time:
+ *   More loads the next page. Each row counts the items that match every filter, this layer's
+ *   clauses among them, beside every item of it the viewer may see, so a row whose count is 0 is
+ *   still listed, and each count is what filtering to the row would leave. A row with children
+ *   ends in a button with their number, which steps into the row. Filtering to a row adds a
+ *   clause, and a layer's clauses combine with AND. The rows of a `tiered` layer stand under the
+ *   titles of their levels, and a row of a `dag` layer names its other served parents. Once every
+ *   child of the position has loaded, a last row counts the items of the position that match every
+ *   filter and are in none of its children.
+ * - The card of a `stacked` layer lists the clusters with most items in view, under every filter,
+ *   this layer's clauses among them, at the chosen level or at the level the map draws. A row at a
+ *   level with a finer level after it ends in a button that steps into it, and the card then lists
+ *   the clusters of that finer level by their items inside the row, under a heading that says so.
+ * - On the card of a `tiered`, `nested`, `dag` or `stacked` layer, the layer's filter and highlight
+ *   clauses stand in a line of their own under the breadcrumb, each with a × that removes it, so a
+ *   clause set by another control is shown wherever the card's position is.
  * - A number or date card draws a histogram of up to 20 bins, and the viewer presses a bin or drags
  *   across several to pick a range to filter or highlight by. From the keyboard, they press Shift
  *   and the arrow keys on the focused plot, then Enter. Either opens a box under the range with its
@@ -246,7 +273,7 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-filterchange']>} mosaica-filterchange - A row's
  *   Highlight or Filter, or the range box, changed the field's clause.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clausechange']>} mosaica-clausechange - A cluster
- *   row, its Highlight or its Filter, or a crumb's ×, put a `member_of` clause on or took it off.
+ *   row, its Highlight or its Filter, or a clause's × put a `member_of` clause on or took it off.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - The paint
  *   button changed what the map is coloured by.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The Level
@@ -266,12 +293,19 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @csspart spark - The small chart of a folded card.
  * @csspart paint - The paint button, with `aria-pressed`.
  * @csspart fold - The fold button, with `aria-expanded`.
- * @csspart crumbs - The breadcrumb of a layer's card, a navigation list of the layer's filter
- *   clauses, while it has one.
- * @csspart crumb - One crumb, with `data-id`.
- * @csspart crumb-name - A crumb's name, with `aria-current` on the deepest.
- * @csspart crumb-remove - The × that removes a crumb's clause.
- * @csspart level - The title of a level over its rows, on a `tiered` layer's card.
+ * @csspart crumbs - The breadcrumb of a layer's card that steps: a navigation landmark named by
+ *   the layer, holding a list of the card's position from All down.
+ * @csspart crumb - One crumb, with `data-id`, which is empty for All, and `data-filtered` while the
+ *   layer's filter is on its cluster.
+ * @csspart crumb-name - A crumb's button, which steps back to it, with `aria-current` on the
+ *   deepest. A tick before the name marks a cluster the filter is on.
+ * @csspart chips - The layer's filter and highlight clauses on a card that steps, a list, while it
+ *   has any.
+ * @csspart chip - One clause, with `data-id` and `data-verb` (`filter` or `highlight`).
+ * @csspart chip-name - A clause's cluster, after a tick for a filter or a pen for a highlight.
+ * @csspart chip-remove - The × that removes a clause.
+ * @csspart level - A heading over a list of rows: a level's title on a `tiered` layer's card, or
+ *   what a `stacked` layer's card lists inside its position.
  * @csspart rows - A category or cluster card's rows, one list for each level on a `tiered` layer's
  *   card.
  * @csspart row - One row, with `data-key` and `data-state`: `in` if the field's filter keeps the
@@ -282,21 +316,23 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   yet and so has not given a colour.
  * @csspart name - A row's name, with `data-unnamed` for a cluster that has none, and the whole
  *   name as its `title`.
- * @csspart path - A cluster row's parents, with the whole path as its `title`. A step names each of
- *   the served parents of the step below it.
+ * @csspart step - A row's button that steps into it, with the number of its children on a layer
+ *   with parent edges.
  * @csspart also - The other served parents a `dag` row of a layer's card is under.
- * @csspart remainder - The row that counts the deepest crumb's items in none of its children.
+ * @csspart remainder - The last row of the last list, which counts the position's items in none of
+ *   its children.
  * @csspart refusal - The words "Clusters unavailable", with `data-code`, where the rows were
  *   refused.
  * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match.
  * @csspart bar-subject - A row's or a bin's solid bar, its share of the subject.
- * @csspart count - A row's counts as they are drawn, after its tick and its pen. A screen reader is
- *   given them beside it, each with what it counts.
+ * @csspart count - A row's counts as they are drawn, after its tick and its pen, with what they
+ *   count as its `title`. A screen reader is given them beside it, each with what it counts.
  * @csspart verbs - A row's Highlight and Filter buttons, in its counts' place.
  * @csspart highlight - A row's Highlight button, with `aria-pressed`.
  * @csspart filter - A row's Filter button, with `aria-pressed`.
- * @csspart more - The "N more" button, which on a layer's card walked by its parent edges loads the
- *   next page and moves focus to the first row it added.
+ * @csspart more - The "N more" button. On a layer's card walked by its parent edges it loads the
+ *   next page and moves focus to the first row it added; elsewhere it shows more rows, or fewer. Its
+ *   accessible name says what it shows.
  * @csspart plot - The histogram, a focusable group.
  * @csspart bin - One bin, with `data-index`.
  * @csspart band - An outlined range on the histogram, with `data-verb` (`filter`, `highlight`, or
@@ -584,18 +620,13 @@ export class MosaicaFieldCard extends MosaicaElement {
         gap: 3px;
         min-width: 0;
       }
-      /* The name and its parents on one line, cut at its end, or wrapped where long names wrap. */
+      /* The name on one line, cut at its end, or wrapped where long names wrap. */
       .names {
         min-width: 0;
         white-space: var(--_mosaica-long-text, nowrap);
         overflow: hidden;
         text-overflow: ellipsis;
         overflow-wrap: anywhere;
-      }
-      [part='path'] {
-        margin-left: 6px;
-        font-size: 12px;
-        color: var(--_mosaica-ink-3);
       }
       .bars {
         position: relative;
@@ -703,6 +734,12 @@ export class MosaicaFieldCard extends MosaicaElement {
           opacity: 1;
           pointer-events: auto;
         }
+        [part~='row'].steps {
+          grid-template-columns: 12px minmax(0, 1fr) auto auto minmax(30px, auto);
+        }
+        .step {
+          grid-column: 5;
+        }
         [part~='row']:hover [part='count'],
         [part~='row']:has(:focus-visible) [part='count'] {
           visibility: visible;
@@ -721,10 +758,11 @@ export class MosaicaFieldCard extends MosaicaElement {
         font-size: 12px;
         color: var(--_mosaica-ink-3);
       }
-      /* The breadcrumb: each crumb's name, cut where long, and the × that removes it. */
-      [part='crumbs'] ol {
+      /* The breadcrumb: each crumb a button with its name, cut where long. */
+      [part='crumbs'] ol,
+      [part='chips'] {
         list-style: none;
-        margin: 0 0 4px;
+        margin: 0;
         padding: 0;
         display: flex;
         flex-wrap: wrap;
@@ -743,16 +781,66 @@ export class MosaicaFieldCard extends MosaicaElement {
         margin-right: 2px;
         color: var(--_mosaica-ink-3);
       }
+      /* 24 px high, the name cut where long. */
       [part='crumb-name'] {
+        display: inline-flex;
+        align-items: center;
         min-width: 0;
+        max-width: 100%;
+        min-height: 24px;
+        padding: 0 4px;
+        margin: 0 -4px;
+        border-radius: 4px;
+        color: var(--_mosaica-ink-2);
+      }
+      [part='crumb-name']:hover {
+        background: var(--_mosaica-surface-2);
+      }
+      [part='crumb-name'][aria-current] {
         font-weight: 600;
+        color: var(--_mosaica-ink);
+      }
+      .crumb-text {
+        min-width: 0;
+        white-space: var(--_mosaica-long-text, nowrap);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        overflow-wrap: anywhere;
+      }
+      /* The layer's clauses, each a chip with its ×, on a line apart from the breadcrumb. */
+      [part='chips'] {
+        gap: 4px;
+      }
+      [part='chip'] {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: 100%;
+        height: 22px;
+        padding: 0 0 0 6px;
+        border: 1px solid var(--_mosaica-line);
+        border-radius: 5px;
+        background: var(--_mosaica-surface);
+      }
+      [part='chip'][data-verb='highlight'] {
+        border-color: color-mix(in srgb, var(--_mosaica-highlight) 18%, var(--_mosaica-highlight-soft));
+        background: var(--_mosaica-highlight-soft);
+        color: var(--_mosaica-highlight);
+      }
+      [part='chip'] .cue {
+        margin-right: 0;
+        color: inherit;
+      }
+      [part='chip-name'] {
+        min-width: 0;
         white-space: var(--_mosaica-long-text, nowrap);
         overflow: hidden;
         text-overflow: ellipsis;
         overflow-wrap: anywhere;
       }
       /* Drawn 20 px square, with a 24 px target around it. */
-      [part='crumb-remove'] {
+      [part='chip-remove'] {
         position: relative;
         flex: none;
         width: 20px;
@@ -760,20 +848,23 @@ export class MosaicaFieldCard extends MosaicaElement {
         display: grid;
         place-items: center;
         border-radius: 4px;
-        color: var(--_mosaica-ink-2);
+        color: inherit;
       }
-      [part='crumb-remove']::after {
+      [part='chip-remove']::after {
         content: '';
         position: absolute;
         inset: -2px;
       }
-      [part='crumb-remove']:hover {
+      [part='chip-remove']:hover {
         background: var(--_mosaica-surface-2);
       }
       [part='level'] {
-        margin-top: 4px;
+        margin: 4px 0 0;
         font-size: 12px;
         font-weight: 600;
+        line-height: 1.45;
+        letter-spacing: 0;
+        text-transform: none;
         color: var(--_mosaica-ink-2);
       }
       [part='also'] {
@@ -791,6 +882,40 @@ export class MosaicaFieldCard extends MosaicaElement {
         margin: 0 -6px;
         font-size: 12px;
         color: var(--_mosaica-ink-2);
+      }
+      /* A row that steps has a fourth column, kept on a row with nothing to step into so the
+         counts stand in line. */
+      [part~='row'].steps {
+        grid-template-columns: 12px minmax(0, 1fr) auto minmax(30px, auto);
+      }
+      .step {
+        grid-column: 4;
+        grid-row: 1;
+        justify-self: end;
+      }
+      /* 22 px high, with a 24 px target around it. */
+      [part='step'] {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 3px;
+        min-width: 24px;
+        height: 22px;
+        padding: 0 4px;
+        border-radius: 5px;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        color: var(--_mosaica-ink-2);
+      }
+      [part='step']::after {
+        content: '';
+        position: absolute;
+        inset: -1px 0;
+      }
+      [part='step']:hover {
+        background: var(--_mosaica-surface-3);
+        color: var(--_mosaica-ink);
       }
       /* The histogram. */
       .hist {
@@ -985,6 +1110,13 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /** Whether "N more" was pressed. @internal */
   @state() accessor expanded = false;
+  /**
+   * Where a cluster card that steps stands in its layer: the clusters stepped into, the deepest
+   * last, and none for the top level. @internal
+   */
+  @state() accessor position: readonly Step[] = [];
+  /** What the card says loaded after the last step. @internal */
+  @state() accessor said = '';
   /** A range being chosen on the histogram. @internal */
   @state() accessor brush: Brush | null = null;
   /** The range box's two fields, while it is open. @internal */
@@ -995,6 +1127,11 @@ export class MosaicaFieldCard extends MosaicaElement {
   private boxAt: [number, number] = [0, 1];
   /** The control in the card that held focus as a render began, and the row it was in. */
   private focusedBefore: {el: HTMLElement; holder: string; row: number} | null = null;
+  /**
+   * A step whose rows have not landed: the cluster stepped out of, whose row then takes focus, or
+   * `null` for a step in, after which the first row does. `fresh` until the render after the step.
+   */
+  private landing: {out: bigint | null; fresh: boolean} | null = null;
 
   private readonly subjectCounts = new HeldAggregate('field-subject');
   private readonly matchCounts = new HeldAggregate('field-match');
@@ -1002,9 +1139,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   /** The whole match's counts of the values in view its commonest do not list. */
   private readonly outsideCounts = new HeldAggregate('field-outside');
   private unwatchChoices: (() => void) | null = null;
-  /** The names of the clusters' parents. */
-  private readonly paths = new ClusterPaths(() => this.requestUpdate());
-  /** A linked layer's rows: the children of the deepest crumb, or the roots, a page at a time. */
+  /** A linked layer's rows: the children of the position, or the roots, a page at a time. */
   private readonly lineage = new Lineage({
     store: () => this.resolvedStore,
     layer: () => {
@@ -1015,29 +1150,26 @@ export class MosaicaFieldCard extends MosaicaElement {
     isOpen: () => false,
     changed: () => this.requestUpdate()
   });
-  /** The items of the deepest crumb in none of its children, while they fit on one page. */
+  /** The items of the position in none of its children, once every child has loaded. */
   private readonly remainder = new HeldAggregate('field-remainder');
   private remainderAsked: AggregateSpec | null = null;
-  /** The counts in view asked last, and the level an overlap list's ranked rows in them are at. */
-  private subjectAsked: {spec: AggregateSpec | null; level: number | undefined} = {spec: null, level: undefined};
-  /** The rows browse pages have served, and the level each cluster a ranked table listed is at. */
-  private readonly seen = new Map<bigint, BrowseRow>();
-  private readonly rungs = new Map<bigint, number>();
+  /** The counts in view asked last. */
+  private subjectAsked: AggregateSpec | null = null;
   private readonly picker = new ColourPicker(this, () => this.getBoundingClientRect());
 
   /** What the card last drew from, so a publish that changes none of it draws nothing. */
   private drawnFrom: readonly unknown[] = [];
 
   /**
-   * Draw again only when what the card reads changed: its counts, the clauses, the colouring, the
-   * view, the palette and chosen colours a layer's clusters take, or the level a levelled layer is
-   * drawn at. The store publishes as each frame arrives, which changes none of these.
+   * Draw again only when what the card reads changed: its counts, the clauses, the drawn region,
+   * the colouring, the view, the palette and chosen colours a layer's clusters take, or the level a
+   * levelled layer is drawn at. The store publishes as each frame arrives, which changes none of
+   * these.
    */
   protected override onStoreChange(): void {
-    this.browseIfStale();
     const s = this.resolvedStore;
     const layer = this.declaredLayer(s?.get('meta') ?? null);
-    const now = s ? [s.get('aggregates'), s.get('filters'), s.get('legend'), s.get('meta'), s.get('view').id, s.get('artifacts').palette, s.get('artifacts').overrides, layer ? this.levelOf(layer) : undefined] : [];
+    const now = s ? [s.get('aggregates'), s.get('filters'), s.get('region'), s.get('legend'), s.get('meta'), s.get('view').id, s.get('artifacts').palette, s.get('artifacts').overrides, layer ? this.levelOf(layer) : undefined] : [];
     if (now.length === this.drawnFrom.length && now.every((v, i) => v === this.drawnFrom[i])) return;
     this.drawnFrom = now;
     super.onStoreChange();
@@ -1050,10 +1182,10 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   protected override resetServerData(): void {
-    this.paths.reset();
     this.lineage.reset();
-    this.seen.clear();
-    this.rungs.clear();
+    this.position = [];
+    this.landing = null;
+    this.said = '';
     this.brush = null;
     this.entry = null;
     this.picker.close(false);
@@ -1105,79 +1237,63 @@ export class MosaicaFieldCard extends MosaicaElement {
     return levelOfLayer(layer, this.level, this.resolvedStore?.get('artifacts').followedLevels);
   }
 
-  /**
-   * How the card lists `layer`. A linked layer is listed by children until the deepest crumb is a
-   * leaf, whose served children are none, and then by overlap, as a stacked layer always is.
-   */
+  /** How the card lists `layer`. */
   private listing(layer: Layer): Listing {
     if (layer.hierarchy.kind === 'flat') return 'ranked';
-    if (!drills(layer)) return 'overlap';
-    const {roots, rootsNext, refusal, top} = this.lineage;
-    return top !== null && roots !== null && roots.length === 0 && rootsNext === null && refusal === null ? 'overlap' : 'children';
-  }
-
-  /** The layer's own filter clauses, the crumbs, in the order they were added. */
-  private crumbs(store: Store): MemberClause[] {
-    return store.get('filters').members.filter((m) => m.layer === this.layerName && m.verb === 'filter' && !m.outside);
+    return drills(layer) ? 'children' : 'overlap';
   }
 
   /** A cluster's name as a page or a clause gave it, or `null` where none has. */
   private knownName(store: Store, id: bigint): string | null {
-    const row = this.seen.get(id);
-    return (row ? artifactName(row) : null) ?? this.lineage.names.get(id) ?? this.clauseName(store, id) ?? this.paths.nameOf(id);
-  }
-
-  /** What to call a cluster. */
-  private nameOf(store: Store, id: bigint): string {
-    return this.knownName(store, id) ?? UNNAMED;
-  }
-
-  /** The level a cluster was listed at, where the card has listed it or a page has named it. */
-  private rungOf(id: bigint): number | undefined {
-    return this.seen.get(id)?.rung ?? this.rungs.get(id) ?? this.paths.rungOf(id);
+    return this.lineage.knownName(id) ?? this.clauseName(store, id);
   }
 
   /**
-   * The level a ranked list counts at. The overlap list counts at the level after the deepest
-   * crumb's, and at the chosen or drawn level where there is none.
+   * The level a ranked list counts at. The overlap list counts at the level after its position's,
+   * and at the chosen or drawn level at the top.
    */
-  private listLevel(store: Store, layer: Layer): number | undefined {
-    if (this.listing(layer) !== 'overlap') return this.levelOf(layer);
-    const crumb = this.crumbs(store).at(-1);
-    const rung = crumb ? this.rungOf(crumb.artifact) : undefined;
-    const next = rung === undefined ? undefined : layer.levels.map((l) => l.level).filter((l) => l > rung).sort((a, b) => a - b)[0];
-    return next ?? this.levelOf(layer);
+  private listLevel(layer: Layer): number | undefined {
+    const deepest = this.listing(layer) === 'overlap' ? this.position.at(-1) : undefined;
+    return deepest ? levelAfter(layer, deepest.rung) : this.levelOf(layer);
   }
 
   /**
-   * The rows a category or cluster card lists first, whatever their counts: those its clauses
-   * name. The overlap list takes its crumbs from the breadcrumb, so it names its highlight alone.
+   * The rows a category or flat layer's card lists first, whatever their counts: those its clauses
+   * name. A card that steps shows its layer's clauses apart from its rows.
    */
   private pinned(store: Store): string[] {
     const layer = this.declaredLayer(store.get('meta'));
-    const lit = [...this.clauseKeys(store, 'highlight')];
-    return layer && this.listing(layer) === 'overlap' ? lit : [...this.clauseKeys(store, 'filter'), ...lit];
+    return layer && this.listing(layer) !== 'ranked' ? [] : [...this.clauseKeys(store, 'filter'), ...this.clauseKeys(store, 'highlight')];
   }
 
-  /** Point the browse pages at the deepest crumb, with slots while the map is coloured by the layer, and fetch them where that moved. */
+  /** Point the browse pages at the position, with slots while the map is coloured by the layer, and fetch them where that moved. */
   private browseIfStale(): void {
     const s = this.resolvedStore;
-    if (!s || !this.isConnected || this.layerName === null) return;
-    this.lineage.top = this.crumbs(s).at(-1)?.artifact ?? null;
+    const layer = s && this.isConnected ? this.declaredLayer(s.get('meta')) : null;
+    if (!s || !layer || !drills(layer)) return;
+    this.lineage.top = this.position.at(-1)?.id ?? null;
     this.lineage.paletteSize = s.get('legend').colourBy === this.field ? paletteSize(s.get('artifacts').palette) : null;
     this.lineage.loadIfStale();
   }
 
   /**
-   * The count of the deepest crumb's items in none of its children: the crumb's clause, which the
-   * store's filters carry, and one `none_of` over the children. Asked only while every child is on
-   * the one page.
+   * The count of the position's items in none of its children, under every filter: a filter of its
+   * own holds the position's `member_of` and one `none_of` over the children. Asked only once every
+   * child has loaded.
    */
   private remainderSpec(layer: Layer): AggregateSpec | null {
-    const {roots, rootsNext, top} = this.lineage;
-    if (this.folded || this.listing(layer) !== 'children' || top === null || !roots || roots.length === 0 || rootsNext !== null) return null;
+    const deepest = this.position.at(-1);
+    const {roots} = this.lineage;
+    if (this.folded || this.listing(layer) !== 'children' || !deepest || !roots || roots.length === 0 || !this.lineage.complete) return null;
+    const leaf = (artifact: bigint) => memberLeaf({layer: layer.name, artifact, outside: false, verb: 'filter'});
     const ids = [...new Set(roots.map((n) => n.row.mosaicaId))].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    return {groupings: [{count: true}], filters: {none_of: ids.map((artifact) => memberLeaf({layer: layer.name, artifact, outside: false, verb: 'filter'}))}};
+    return {groupings: [{count: true}], filters: {all_of: [leaf(deepest.id), {none_of: ids.map(leaf)}]}};
+  }
+
+  /** The filter that keeps an overlap list inside its position, where it has one. */
+  private within(layer: Layer): Pick<AggregateSpec, 'filters'> {
+    const deepest = this.position.at(-1);
+    return deepest ? {filters: memberLeaf({layer: layer.name, artifact: deepest.id, outside: false, verb: 'filter'})} : {};
   }
 
   /** The keys of the field's clause in `verb`: a category's values, a bool's, or a layer's clusters by id. */
@@ -1198,18 +1314,18 @@ export class MosaicaFieldCard extends MosaicaElement {
     }
     const layer = this.declaredLayer(meta);
     if (!layer) return null;
-    return [this.ranked(store, layer, top), ...this.namedGroupings(store, layer, meta, named.map((id) => BigInt(id)))];
+    return [this.ranked(layer, top), ...this.namedGroupings(layer, meta, named.map((id) => BigInt(id)))];
   }
 
   /** The grouping ranking a layer's `top` clusters at the cut the map draws or at {@link listLevel}; each row's slot colours its swatch. */
-  private ranked(store: Store, layer: Layer, top: number): AggregateSpec['groupings'][number] {
-    return rankedGrouping(layer, top, this.listLevel(store, layer) ?? null);
+  private ranked(layer: Layer, top: number): AggregateSpec['groupings'][number] {
+    return rankedGrouping(layer, top, this.listLevel(layer) ?? null);
   }
 
-  /** The groupings counting `ids` of `layer` by name, leaving room for one more beside them. */
-  private namedGroupings(store: Store, layer: Layer, meta: Meta, ids: bigint[]): AggregateSpec['groupings'] {
-    const level = this.listLevel(store, layer) ?? 0;
-    const rows = [...new Set(ids)].map((id) => ({mosaicaId: id, rung: this.rungOf(id) ?? level}));
+  /** The groupings counting `ids` of `layer`, each at the level the list counts at, by name, leaving room for one more beside them. */
+  private namedGroupings(layer: Layer, meta: Meta, ids: bigint[]): AggregateSpec['groupings'] {
+    const level = this.listLevel(layer) ?? 0;
+    const rows = [...new Set(ids)].map((id) => ({mosaicaId: id, rung: level}));
     return rows.length === 0 ? [] : artifactGroupings(layer, rows, meta.selection, 'drawn').slice(0, meta.selection.maxAggregateGroupings - 1);
   }
 
@@ -1233,13 +1349,17 @@ export class MosaicaFieldCard extends MosaicaElement {
     return values.length === 0 ? null : {groupings: [{count: true, by: {field: this.field, values}}], without: this.field};
   }
 
-  /** The specs the card keeps registered: the subject's counts, the whole match's and a number's figures. */
+  /**
+   * The specs the card keeps registered: the subject's counts, the whole match's and a number's
+   * figures. They are read in a render as well, so the overlap list reads only the answers to what
+   * its position asks.
+   */
   private specs(store: Store, meta: Meta, kind: Kind): {subject: AggregateSpec | null; match: AggregateSpec | null; figures: AggregateSpec | null} {
     const layer = this.declaredLayer(meta);
     const listing = layer ? this.listing(layer) : null;
     // A children list counts from its browse pages, and the overlap list under every clause.
     if (kind === 'search' || listing === 'children') return {subject: null, match: null, figures: null};
-    const leaveOut = listing === 'overlap' ? {} : this.layerName !== null ? {withoutMembersOf: this.layerName} : {without: this.field};
+    const leaveOut = listing === 'overlap' ? this.within(layer!) : this.layerName !== null ? {withoutMembersOf: this.layerName} : {without: this.field};
     if (kind === 'histogram' || kind === 'bool') {
       const bins: AggregateSpec['groupings'] = [{count: true, by: {field: this.field, bins: kind === 'bool' ? BOOL_KEYS.length : BINS, sample: SAMPLE}}];
       return {
@@ -1248,18 +1368,20 @@ export class MosaicaFieldCard extends MosaicaElement {
         figures: kind === 'bool' ? null : {groupings: [{summary: [this.field]}], subject: 'visible'}
       };
     }
-    const subject = this.rowGroupings(store, meta, kind, this.expanded ? MORE_ROWS : ROWS);
+    const groupings = this.rowGroupings(store, meta, kind, this.expanded ? MORE_ROWS : ROWS);
+    const subject = groupings ? {groupings, subject: 'view' as const, highlighted: true, ...leaveOut} : null;
     // A layer's whole match counts the clusters the subject lists and its clauses name, and ranks
     // one more, whose table says how many there are; the search box names that number.
-    const listed = [...(countsByKey(this.subjectCounts.entryFor(store))?.keys() ?? []), ...this.pinned(store)];
+    const answered = listing === 'overlap' ? this.subjectCounts.entryOf(store, subject) : this.subjectCounts.entryFor(store);
+    const listed = [...(countsByKey(answered)?.keys() ?? []), ...this.pinned(store)];
     const match =
       kind === 'category'
         ? this.rowGroupings(store, meta, kind, Math.min(MATCH_TOP, meta.selection.maxAggregateTop))
         : layer
-          ? [...this.namedGroupings(store, layer, meta, listed.map((id) => BigInt(id))), this.ranked(store, layer, 1)]
+          ? [...this.namedGroupings(layer, meta, listed.map((id) => BigInt(id))), this.ranked(layer, 1)]
           : null;
     return {
-      subject: subject ? {groupings: subject, subject: 'view', highlighted: true, ...leaveOut} : null,
+      subject,
       match: match && !this.folded ? {groupings: match, ...leaveOut} : null,
       figures: null
     };
@@ -1267,6 +1389,14 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
+    if (changed.has('field')) {
+      this.position = [];
+      this.landing = null;
+      this.said = '';
+    }
+    // Before the render, so the rows of a position stepped out of are not drawn under the new one.
+    this.browseIfStale();
+    this.land();
     // The element of the card that holds focus, itself or in a search box's own shadow root.
     let el = this.isConnected ? document.activeElement : null;
     while (el && el.getRootNode() !== this.shadowRoot) el = el.shadowRoot?.activeElement ?? null;
@@ -1275,21 +1405,82 @@ export class MosaicaFieldCard extends MosaicaElement {
     this.focusedBefore = el ? {el: el as HTMLElement, holder, row: row ? Array.from(this.renderRoot.querySelectorAll(`[part="${holder}"]`)).indexOf(row) : -1} : null;
   }
 
+  /** The deepest crumb's button. */
+  private deepestCrumb(): HTMLElement | null {
+    return this.renderRoot.querySelector<HTMLElement>('[part="crumb-name"][aria-current]');
+  }
+
   /**
-   * Give focus back where the render took it away. A row or crumb that moved, as its value joined
-   * or left a clause, keeps it; for one that went, the same button of the row or crumb now in its
-   * place takes it, else the one before's, else the search box, else the fold button of a card with
-   * none.
+   * Give focus back where the render took it away. A row, crumb or chip that moved, as its value
+   * joined or left a clause, keeps it; for one that went, the same button of the row, crumb or chip
+   * now in its place takes it, else the one before's, else the search box, else the fold button of
+   * a card with none. Focus in the search box stays there. Just after a step, focus in the card
+   * goes to the deepest crumb until the rows land.
    */
   private keepFocus(): void {
     const before = this.focusedBefore;
     this.focusedBefore = null;
+    if (this.landing?.fresh) {
+      this.landing.fresh = false;
+      if (before) this.deepestCrumb()?.focus();
+      return;
+    }
     if (!before || !focusLost()) return;
     if (before.el.isConnected) return before.el.focus();
-    if (before.row < 0) return;
+    const search = this.renderRoot.querySelector<HTMLElement>('.search');
+    if (before.row < 0) {
+      if (before.el.classList.contains('search')) search?.focus();
+      return;
+    }
     const rows = Array.from(this.renderRoot.querySelectorAll(`[part="${before.holder}"]`));
     const same = (rows[before.row] ?? rows[before.row - 1])?.querySelector<HTMLElement>(`[part="${before.el.getAttribute('part')}"]`);
-    (same ?? this.renderRoot.querySelector<HTMLElement>('.search') ?? this.renderRoot.querySelector<HTMLElement>('[part="fold"]'))?.focus();
+    (same ?? search ?? this.renderRoot.querySelector<HTMLElement>('[part="fold"]'))?.focus();
+  }
+
+  /**
+   * The keys of the rows a card that steps lists for its position, once they have landed; `null`
+   * while they are on their way.
+   */
+  private landed(s: Store, layer: Layer): string[] | null {
+    if (this.listing(layer) === 'children') return this.lineage.settled ? this.lineage.roots!.map((n) => idString(n.row.mosaicaId)) : null;
+    const entry = this.subjectCounts.entryOf(s, this.subjectAsked);
+    if (!entry?.result && !entry?.refusal) return null;
+    return this.rows(s, 'cluster', entry, undefined, false).map((r) => r.key);
+  }
+
+  /**
+   * Once the rows of a step have landed, say what loaded, and once they are drawn move focus from
+   * the deepest crumb to the row stepped out of or, after a step in, to the first row. Focus that
+   * has gone elsewhere meanwhile stays there.
+   */
+  private land(): void {
+    const landing = this.landing;
+    const s = this.resolvedStore;
+    const layer = s ? this.declaredLayer(s.get('meta')) : null;
+    // The render of the step itself still holds the answers to the position before.
+    if (!landing || landing.fresh || !s || !layer) return;
+    const keys = this.landed(s, layer);
+    if (keys === null) return;
+    this.landing = null;
+    this.said = this.loadedText(layer, keys.length);
+    const crumb = this.deepestCrumb();
+    void this.updateComplete.then(() => {
+      const active = this.shadowRoot?.activeElement ?? null;
+      if (active !== crumb && !focusLost()) return;
+      const row = (key: string) => this.renderRoot.querySelector(`[part="row"][data-key="${key}"]`);
+      const to = landing.out !== null ? row(idString(landing.out))?.querySelector<HTMLElement>('[part="step"]') : keys[0] === undefined ? null : row(keys[0])?.querySelector<HTMLElement>('[part="highlight"]');
+      to?.focus();
+    });
+  }
+
+  /** What a card that steps says has loaded: how many rows, of what. */
+  private loadedText(layer: Layer, n: number): string {
+    const deepest = this.position.at(-1);
+    if (this.listing(layer) === 'overlap') return `${this.overlapTitle(layer) ?? layer.title ?? layer.name}: ${counted(n, 'cluster', 'clusters')}`;
+    if (this.lineage.refusal) return '';
+    if (!deepest) return counted(n, 'top-level cluster', 'top-level clusters');
+    const total = deepest.children !== null && deepest.children > n ? ` of ${deepest.children.toLocaleString('en-GB')}` : '';
+    return `${n.toLocaleString('en-GB')}${total} ${n === 1 && !total ? 'child' : 'children'} of ${deepest.name}`;
   }
 
   protected override updated(changed: PropertyValues<this>): void {
@@ -1298,12 +1489,12 @@ export class MosaicaFieldCard extends MosaicaElement {
     const s = this.resolvedStore;
     const meta = s?.get('meta') ?? null;
     const kind = this.kindOf(meta);
-    this.toggleAttribute('highlighting', s ? this.highlighting(s) : false);
     const live = this.isConnected && s !== null && meta !== null && kind !== null;
-    this.browseIfStale();
-    const specs = live ? this.specs(s, meta, kind) : {subject: null, match: null, figures: null};
     const layer = live ? this.declaredLayer(meta) : null;
-    this.subjectAsked = {spec: specs.subject, level: layer && this.listing(layer) === 'overlap' ? this.listLevel(s!, layer) : undefined};
+    // A children list's counts ignore the highlight, so they are not drawn as highlighted counts.
+    this.toggleAttribute('highlighting', s !== null && this.highlighting(s) && !(layer && this.listing(layer) === 'children'));
+    const specs = live ? this.specs(s, meta, kind) : {subject: null, match: null, figures: null};
+    this.subjectAsked = specs.subject;
     this.remainderAsked = layer ? this.remainderSpec(layer) : null;
     this.subjectCounts.set(s, specs.subject);
     this.remainder.set(s, this.remainderAsked);
@@ -1370,6 +1561,35 @@ export class MosaicaFieldCard extends MosaicaElement {
     const on = members.some((m) => m.layer === layer && m.artifact === artifact && m.verb === verb && !m.outside);
     s.setMembers(on ? withoutMember(members, layer, artifact, verb) : withMember(members, {layer, artifact, outside: false, verb, ...(name === null ? {} : {label: name})}));
     emit(this, 'mosaica-clausechange', {id, layer, outside: false, verb, on: !on});
+  }
+
+  /** Take one of this layer's clauses off. */
+  private removeClause(clause: MemberClause): void {
+    const s = this.resolvedStore;
+    const layer = this.layerName;
+    if (!s || layer === null) return;
+    s.setMembers(withoutMember(s.get('filters').members, layer, clause.artifact, clause.verb));
+    emit(this, 'mosaica-clausechange', {id: idString(clause.artifact), layer, outside: clause.outside, verb: clause.verb, on: false});
+  }
+
+  /** Step into a cluster, so the card lists what is inside it. The filter is left as it is. */
+  private stepIn(step: Step): void {
+    this.position = [...this.position, step];
+    this.stepped(null);
+  }
+
+  /** Step back to the crumb at `depth`, where 0 is All. */
+  private stepTo(depth: number): void {
+    if (depth >= this.position.length) return;
+    const out = this.position[depth]!.id;
+    this.position = this.position.slice(0, depth);
+    this.stepped(out);
+  }
+
+  private stepped(out: bigint | null): void {
+    this.landing = {out, fresh: true};
+    this.said = '';
+    this.expanded = false;
   }
 
   /** Colour the map by this field, or by nothing where it already is. */
@@ -1455,7 +1675,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const sub = this.counts(kind, subject);
     const all = this.counts(kind, match);
     if (kind === 'bool') {
-      return BOOL_KEYS.map((key) => ({key, name: BOOL_WORDS[key], path: '', sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
+      return BOOL_KEYS.map((key) => ({key, name: BOOL_WORDS[key], sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
     }
     if (all && kind === 'category') for (const [k, n] of countsByKey(this.outsideCounts.entryFor(s)) ?? []) if (!all.has(k)) all.set(k, n);
     const named = this.pinned(s);
@@ -1468,7 +1688,6 @@ export class MosaicaFieldCard extends MosaicaElement {
       return keys.map((key) => ({
         key,
         name: titles.get(key) ?? keyTitle(s, this.field, key),
-        path: '',
         sub: sub?.get(key) ?? null,
         all: all?.get(key) ?? null,
         swatch: colouring ? valueColour(s, this.field, key) : null,
@@ -1496,7 +1715,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       const held = slots.get(key);
       const own = artifactColour(held?.palette ?? palette, held?.slot ?? null);
       const swatch = colouring ? rgb(overrides.get(this.layerName!)?.get(id) ?? own) : null;
-      return {key, name: titles.get(key) ?? this.clauseName(s, id) ?? UNNAMED, path: this.paths.pathOf(id), sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch, own: colouring ? hexOf(own) : null, unmet: false};
+      return {key, name: titles.get(key) ?? this.clauseName(s, id) ?? UNNAMED, sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch, own: colouring ? hexOf(own) : null, unmet: false};
     });
   }
 
@@ -1525,22 +1744,70 @@ export class MosaicaFieldCard extends MosaicaElement {
               ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${!following && levelled === l.level}>${l.title || `Level ${l.level}`}</option>`)}
             </select>${icon('chev', 12, 1.4)}</span>`
         : html`<span part="sub"></span>`;
-    if (this.folded) return head(sub);
-    const listing = layer ? this.listing(layer) : null;
-    if (layer && listing === 'children') return html`${head(sub)}${this.childrenBody(s, layer, title, colouring)}${this.picker.render()}`;
-    const subject = this.subjectCounts.entry();
-    const match = this.matchCounts.entry();
-    const all = this.rows(s, kind, subject, match, colouring);
+    // One template under the heading, whatever the card lists, so the heading, the search box and
+    // the breadcrumb are the same elements as the list below them changes.
+    const body = this.folded ? nothing : layer && this.listing(layer) !== 'ranked' ? this.clusterBody(s, layer, title, colouring) : this.valueBody(s, kind, layer, title, colouring);
+    return html`${head(sub)}${body}${this.folded ? nothing : this.picker.render()}`;
+  }
+
+  /** The body of a category, bool or `flat` layer's card: the search box, the rows and More. */
+  private valueBody(s: Store, kind: Kind, layer: Layer | null, title: string, colouring: boolean): TemplateResult {
+    const {list, after, values} = this.rankedList(s, kind, layer, title, colouring);
+    const search =
+      kind === 'category'
+        ? html`<mosaica-filter class="search" exportparts=${exportparts('filter')} column=${this.field} placeholder=${values === null ? 'Search values' : `Search ${values.toLocaleString('en-GB')} values`} .store=${s}></mosaica-filter>`
+        : kind === 'bool'
+          ? nothing
+          : this.clusterSearch(s, layer!, values);
+    return html`<div class="body">${search}${list}${after}</div>`;
+  }
+
+  /**
+   * The body of a card that steps: the search box, the breadcrumb, the layer's clauses, the one
+   * status region, and the rows of the position with what follows them.
+   */
+  private clusterBody(s: Store, layer: Layer, title: string, colouring: boolean): TemplateResult {
+    const children = this.listing(layer) === 'children';
+    const {list, after} = children ? this.childList(s, layer, colouring) : this.rankedList(s, 'cluster', layer, title, colouring);
+    const {roots, refusal, loading} = this.lineage;
+    const note = !children
+      ? nothing
+      : refusal
+        ? html`<span class="none" part="refusal" data-code=${refusal.code}>Clusters unavailable</span>`
+        : roots === null
+          ? loading
+            ? html`<span class="sr-only">Loading</span>`
+            : nothing
+          : roots.length === 0
+            ? html`<span class="none">No clusters</span>`
+            : nothing;
+    return html`<div class="body">${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
+  }
+
+  /** What an overlap list inside a position lists, which heads it; `null` at the top. */
+  private overlapTitle(layer: Layer): string | null {
+    const deepest = this.position.at(-1);
+    const level = this.listLevel(layer);
+    return deepest && level !== undefined ? `${levelTitle(layer, level)} overlapping ${deepest.name}` : null;
+  }
+
+  /**
+   * A list ranked by count: a category's or a bool's values, a flat layer's clusters, or the
+   * overlap; then what an empty answer says and the More that shows more rows. `values` is how
+   * many values or clusters the whole match has, where its answer says.
+   */
+  private rankedList(s: Store, kind: Kind, layer: Layer | null, title: string, colouring: boolean): {list: TemplateResult; after: TemplateResult; values: number | null} {
     // A filter on the overlap list joins the others with AND, so it leaves no row out.
-    const anded = listing === 'overlap';
+    const anded = layer !== null && this.listing(layer) === 'overlap';
+    // Just after a step, the answers held are to what the position before asked.
+    const stale = anded && this.landing !== null;
+    const subject = stale ? undefined : this.subjectCounts.entry();
+    const match = stale ? undefined : this.matchCounts.entry();
+    const all = this.rows(s, kind, subject, match, colouring);
     const filtered = this.clauseKeys(s, 'filter');
     const lit = this.clauseKeys(s, 'highlight');
     const pinned = new Set(this.pinned(s));
     const shown = all.slice(0, Math.max(this.expanded ? MORE_ROWS : ROWS, all.filter((r) => pinned.has(r.key)).length));
-    if (layer) this.paths.ask(s, layer, shown.map((r) => BigInt(r.key)));
-    // The overlap list's rows are at the level they were counted at, the level a crumb picked from them is at.
-    const {spec: asked, level: at} = this.subjectAsked;
-    if (at !== undefined) for (const g of listedGroups(this.subjectCounts.entryOf(s, asked)?.result?.tables[0])) this.rungs.set(BigInt(g.key), at);
     // The shares are of each set's total, or of what the field's own filter keeps where it has one.
     const keptTotal = (counts: Map<string, number> | null, table: AggregateTable | undefined) =>
       !anded && filtered.size > 0 && counts ? [...filtered].reduce((t, k) => t + (counts.get(k) ?? 0), 0) : (table?.total ?? 0);
@@ -1549,12 +1816,18 @@ export class MosaicaFieldCard extends MosaicaElement {
     const same = subTotal === allTotal;
     // A bool's counts are a histogram's, so they may come from a sample.
     const approx = approxMark(subject?.result?.tables[0], match?.result?.tables[0]);
-    const counted = this.highlighting(s) ? 'highlighted' : 'in view';
+    const highlighting = this.highlighting(s);
+    const subjectWord = highlighting ? 'highlighted' : 'in view';
     const pct = (n: number | null, total: number) => (n === null || total <= 0 ? 0 : Math.min(100, (100 * n) / total));
     // A layer's clusters are often a few per cent each; a bar that is not empty stays visible.
     const width = (share: number) => (share > 0 && kind === 'cluster' ? `max(${MIN_BAR_PX}px, ${share.toFixed(1)}%)` : `${share.toFixed(1)}%`);
     const groups = kind === 'category' ? (subject?.result?.tables[0]?.groups ?? null) : all.length;
     const more = groups === null ? 0 : groups - shown.length;
+    // On the overlap list, a row at a level with a finer one after it steps into it.
+    const level = anded ? this.listLevel(layer) : undefined;
+    const next = level === undefined ? undefined : levelAfter(layer!, level);
+    const stepper = (r: Row): Stepper | undefined =>
+      next === undefined ? undefined : {label: `Open ${r.name}, ${levelTitle(layer!, next)} inside it`, count: null, step: {id: BigInt(r.key), name: r.name, rung: level!, children: null}};
 
     const row = (r: Row) => {
       const inFilter = filtered.has(r.key);
@@ -1569,29 +1842,32 @@ export class MosaicaFieldCard extends MosaicaElement {
         drawn: out ? (all ?? '') : null,
         sub,
         all,
-        said: [sub === null ? '' : `${sub} ${counted}`, all === null ? '' : `${all} matching`].filter(Boolean).join(', '),
+        said: [sub === null ? '' : `${sub} ${subjectWord}`, all === null ? '' : `${all} matching`].filter(Boolean).join(', '),
         barMatch: width(out ? 0 : pct(r.all, allTotal)),
-        barSubject: width(out ? 0 : pct(r.sub, subTotal))
+        barSubject: width(out ? 0 : pct(r.sub, subTotal)),
+        step: stepper(r)
       });
     };
     const values = (kind === 'category' ? match?.result?.tables[0] : match?.result?.tables.at(-1))?.groups ?? null;
-    const search =
-      kind === 'category'
-        ? html`<mosaica-filter class="search" exportparts=${exportparts('filter')} column=${this.field} placeholder=${values === null ? 'Search values' : `Search ${values.toLocaleString('en-GB')} values`} .store=${s}></mosaica-filter>`
-        : kind === 'bool'
-          ? nothing
-          : this.clusterSearch(s, layer!, values);
+    const noun = kind === 'bool' ? 'values' : layer ? `${title} clusters` : `${title} values`;
+    const moreText = this.expanded ? 'Show fewer' : `${more.toLocaleString('en-GB')} more${highlighting ? '' : ' in view'}`;
     const moreButton =
       more > 0 || this.expanded
-        ? html`<button part="more" class="more-link" type="button" @click=${() => (this.expanded = !this.expanded)}>${this.expanded ? 'Show fewer' : `${more.toLocaleString('en-GB')} more${this.highlighting(s) ? '' : ' in view'}`}</button>`
+        ? html`<button part="more" class="more-link" type="button" aria-label=${`${moreText}: ${noun}`} @click=${() => (this.expanded = !this.expanded)}>${moreText}</button>`
         : nothing;
     // An answer with nothing in it says so, where a list would otherwise stand empty.
     const empty = shown.length === 0 && subject?.result ? html`<span class="none">${subTotal === 0 ? 'None in view' : 'None counted'}</span>` : nothing;
-    return html`${head(sub)}<div class="body">${search}${anded ? this.crumbsTemplate(s, title) : nothing}<div part="rows" role="list" aria-label=${`${title}: ${kind === 'bool' ? 'values' : layer ? 'commonest clusters' : 'commonest values'}`}>${repeat(
-        shown,
-        (r) => r.key,
-        (r) => html`<div role="listitem">${row(r)}</div>`
-      )}</div>${empty}${moreButton}</div>${this.picker.render()}`;
+    const heading = anded ? this.overlapTitle(layer) : null;
+    const items = repeat(
+      shown,
+      (r) => r.key,
+      (r) => html`<div role="listitem">${row(r)}</div>`
+    );
+    const list =
+      heading === null
+        ? html`<div part="rows" role="list" aria-label=${`${title}: ${kind === 'bool' ? 'values' : layer ? 'commonest clusters' : 'commonest values'}`}>${items}</div>`
+        : html`<h4 part="level" id="overlap">${heading}</h4><div part="rows" role="list" aria-labelledby="overlap">${items}</div>`;
+    return {list, after: html`${empty}${moreButton}`, values};
   }
 
   /** The search box over a layer's clusters, which names how many there are where a count says. */
@@ -1602,15 +1878,16 @@ export class MosaicaFieldCard extends MosaicaElement {
   /**
    * One row of a category, bool or cluster card. `sub` and `all` are its two counts as drawn, or
    * `drawn` alone in their place, and `said` gives them to a screen reader with what each counts.
-   * A press on the row filters to its value or cluster, as its Filter button does; the keyboard
-   * reaches the buttons.
+   * `step` is the button that steps into the row, `null` on a row of a card that steps with nothing
+   * to step into. A press on the row filters to its value or cluster, as its Filter button does;
+   * the keyboard reaches the buttons.
    */
   private rowTemplate(
     r: Row,
     kind: Kind,
-    look: {state: string; inFilter: boolean; onLit: boolean; drawn: string | null; sub: string | null; all: string | null; said: string; barMatch: string; barSubject: string}
+    look: {state: string; inFilter: boolean; onLit: boolean; drawn: string | null; sub: string | null; all: string | null; said: string; barMatch: string; barSubject: string; step?: Stepper | null}
   ): TemplateResult {
-    const {inFilter, onLit} = look;
+    const {inFilter, onLit, step} = look;
     const mark = r.swatch
       ? html`<button part="swatch" type="button" style=${`--c:${r.swatch}`} ?data-unmet=${r.unmet} aria-haspopup="dialog" aria-label=${`Colour of ${r.name}`} @click=${(e: Event) => this.openPicker(e, r, kind)}></button>`
       : inFilter
@@ -1621,15 +1898,21 @@ export class MosaicaFieldCard extends MosaicaElement {
     // A tick where the filter keeps the value and the swatch stands where the tick would, and a pen where it is highlighted.
     const cues = html`${inFilter && r.swatch ? html`<span class="cue">${icon('check', 11, 2.4)}</span>` : nothing}${onLit ? html`<span class="cue lit">${icon('highlight', 11, 1.6)}</span>` : nothing}`;
     // The figures as they are drawn, and then for a reader, each with what it counts.
-    const counts = html`<span part="count" aria-hidden="true">${cues}${look.drawn ?? html`<span class="sub">${look.sub ?? ''}</span>${look.all === null ? '' : ` / ${look.all}`}`}</span
+    const counts = html`<span part="count" aria-hidden="true" title=${look.said}>${cues}${look.drawn ?? html`<span class="sub">${look.sub ?? ''}</span>${look.all === null ? '' : ` / ${look.all}`}`}</span
       ><span class="sr-only">${look.said}</span>`;
-    return html`<div part="row" data-key=${r.key} data-state=${look.state}
+    const stepButton =
+      step === undefined
+        ? nothing
+        : step === null
+          ? html`<span class="step"></span>`
+          : html`<span class="step"><button part="step" type="button" aria-label=${step.label} title="Open" @click=${() => this.stepIn(step.step)}>${step.count === null ? '' : countText(step.count)}<span aria-hidden="true">›</span></button></span>`;
+    return html`<div part="row" class=${step === undefined ? '' : 'steps'} data-key=${r.key} data-state=${look.state}
       @click=${(e: Event) => {
         if (!(e.target as HTMLElement).closest('button')) verb('filter')();
       }}>
       <span class="mark">${mark}</span>
       <span class="label">
-        <span class="names"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span>${r.path ? html`<span part="path" title=${r.path}>${r.path}</span>` : nothing}</span>
+        <span class="names"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span></span>
         <span class="bars" aria-hidden="true"><span part="bar-match" style=${`width:${look.barMatch}`}></span><span part="bar-subject" style=${`width:${look.barSubject}${r.swatch && !r.unmet ? `;background:${r.swatch}` : ''}`}></span></span>
       </span>
       ${counts}
@@ -1637,6 +1920,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         <button part="highlight" type="button" aria-pressed=${onLit ? 'true' : 'false'} aria-label=${onLit ? `Stop highlighting ${r.name}` : `Highlight ${r.name}`} title=${onLit ? 'Stop highlighting' : 'Highlight'} @click=${verb('highlight')}>${icon('highlight', 13, 1.5)}</button>
         <button part="filter" type="button" aria-pressed=${inFilter ? 'true' : 'false'} aria-label=${inFilter ? `Stop filtering to ${r.name}` : `Filter to ${r.name}`} title=${inFilter ? 'Stop filtering' : 'Filter'} @click=${verb('filter')}>${icon('filter', 13, 1.6)}</button>
       </span>
+      ${stepButton}
     </div>`;
   }
 
@@ -1649,7 +1933,6 @@ export class MosaicaFieldCard extends MosaicaElement {
       return {
         key: idString(row.mosaicaId),
         name: artifactName(row) ?? UNNAMED,
-        path: '',
         sub: row.matchedCount === null ? masked : Number(row.matchedCount),
         all: row.matchedCount === null ? null : masked,
         swatch: colouring ? rgb(overrides.get(layer.name)?.get(row.mosaicaId) ?? own) : null,
@@ -1660,14 +1943,12 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   /**
-   * A linked layer's card below its heading: the breadcrumb, the children of its deepest crumb or
-   * the roots, grouped by level on a `tiered` layer, the remainder row, and More.
+   * The rows of a linked layer's position: its children, or the roots, grouped under their levels'
+   * headings on a `tiered` layer, with the remainder as the last list's last row; then More.
    */
-  private childrenBody(s: Store, layer: Layer, title: string, colouring: boolean): TemplateResult {
-    const {roots, rootsNext, refusal, loading} = this.lineage;
-    const nodes = roots ?? [];
-    for (const n of nodes) this.seen.set(n.row.mosaicaId, n.row);
-    const crumb = this.crumbs(s).at(-1) ?? null;
+  private childList(s: Store, layer: Layer, colouring: boolean): {list: TemplateResult | typeof nothing; after: TemplateResult | typeof nothing} {
+    const nodes = this.lineage.roots ?? [];
+    const deepest = this.position.at(-1);
     const filtered = this.clauseKeys(s, 'filter');
     const lit = this.clauseKeys(s, 'highlight');
     const rows = this.childRows(s, layer, nodes, colouring);
@@ -1677,84 +1958,96 @@ export class MosaicaFieldCard extends MosaicaElement {
       const share = n === null ? 0 : Math.min(100, (100 * n) / largest);
       return share > 0 ? `max(${MIN_BAR_PX}px, ${share.toFixed(1)}%)` : '0%';
     };
-    // A `dag` row names its other served parents, asking for the names no page has given yet.
-    const others = nodes.map(otherParents);
-    this.paths.ask(s, layer, nodes.filter((_, i) => others[i]!.some((p) => this.knownName(s, p) === null)).map((n) => n.row.mosaicaId));
     const row = (r: Row, i: number) => {
+      const node = nodes[i]!;
       const inFilter = filtered.has(r.key);
       const onLit = lit.has(r.key);
-      const sub = countText(r.sub ?? 0);
-      const all = r.all === null ? null : countText(r.all);
-      const also = others[i]!;
+      const also = this.lineage.alsoUnder(node);
+      const n = node.row.childCount;
       return html`<div role="listitem">${this.rowTemplate(r, 'cluster', {
         state: inFilter ? 'in' : onLit ? 'lit' : '',
         inFilter,
         onLit,
         drawn: null,
-        sub,
-        all,
-        said: all === null ? `${sub} items` : `${sub} matching, ${all} in all`,
+        sub: countText(r.sub ?? 0),
+        all: r.all === null ? null : countText(r.all),
+        said: spokenCounts(node.row),
         barMatch: width(r.all ?? r.sub),
-        barSubject: width(r.sub)
-      })}${also.length > 0 ? html`<div part="also">also under ${also.map((p) => this.nameOf(s, p)).join(', ')}</div>` : nothing}</div>`;
+        barSubject: width(r.sub),
+        step: n > 0 ? {label: `Open ${r.name}, ${counted(n, 'child', 'children')}`, count: n, step: {id: node.row.mosaicaId, name: r.name, rung: node.row.rung, children: n}} : null
+      })}${also.length > 0 ? html`<div part="also">also under ${also.join(', ')}</div>` : nothing}</div>`;
     };
-    const scope = crumb ? `children of ${this.nameOf(s, crumb.artifact)}` : 'top level';
+    const left = this.remainderAsked ? this.remainder.entryOf(s, this.remainderAsked)?.result?.tables[0]?.total : undefined;
+    const rest = this.remainderAsked
+      ? html`<div role="listitem"><div part="remainder"><span class="mark"></span><span class="rest">Not in any of these</span>${
+          left === undefined ? nothing : html`<span part="count" aria-hidden="true"><span class="sub">${countText(left)}</span></span><span class="sr-only">${countText(left)} matching</span>`
+        }</div></div>`
+      : nothing;
+    const scope = deepest ? `children of ${deepest.name}` : 'top level';
     // On a `tiered` layer one parent can have children at several levels, each listed under its title.
     const levels = layer.hierarchy.kind === 'tiered' ? [...new Set(nodes.map((n) => n.row.rung))].sort((a, b) => a - b) : [null];
-    const lists = nodes.length === 0
-      ? nothing
-      : levels.map((rung) => {
-          const at = nodes.flatMap((n, i) => (rung === null || n.row.rung === rung ? [i] : []));
-          const heading = rung === null ? null : layer.levels.find((l) => l.level === rung)?.title || `Level ${rung}`;
-          return html`${heading === null ? nothing : html`<div part="level" aria-hidden="true">${heading}</div>`}<div part="rows" role="list" aria-label=${`${title}: ${heading === null ? scope : `${heading}, ${scope}`}`}>${repeat(
+    const list =
+      nodes.length === 0
+        ? nothing
+        : html`${levels.map((rung, li) => {
+            const at = nodes.flatMap((n, i) => (rung === null || n.row.rung === rung ? [i] : []));
+            const items = html`${repeat(
               at,
               (i) => rows[i]!.key,
               (i) => row(rows[i]!, i)
-            )}</div>`;
-        });
-    const left = this.remainderAsked ? this.remainder.entryOf(s, this.remainderAsked)?.result?.tables[0]?.total : undefined;
-    const rest = this.remainderAsked
-      ? html`<div part="remainder"><span class="mark"></span><span class="rest">Not in any of these</span>${left === undefined ? nothing : html`<span part="count" aria-hidden="true"><span class="sub">${countText(left)}</span></span><span class="sr-only">${countText(left)} matching</span>`}</div>`
+            )}${li === levels.length - 1 ? rest : nothing}`;
+            return rung === null
+              ? html`<div part="rows" role="list" aria-label=${`${layer.title || layer.name}: ${scope}`}>${items}</div>`
+              : html`<h4 part="level" id=${`level-${rung}`}>${levelTitle(layer, rung)}</h4><div part="rows" role="list" aria-labelledby=${`level-${rung}`}>${items}</div>`;
+          })}`;
+    // How many children are still to come, where the position's row was listed with its count.
+    const remaining = deepest?.children == null ? 0 : deepest.children - nodes.length;
+    const moreText = remaining > 0 ? `${remaining.toLocaleString('en-GB')} more` : 'More';
+    const after = this.lineage.hasMore
+      ? html`<button part="more" class="more-link" type="button" aria-label=${`${moreText} ${deepest ? `children of ${deepest.name}` : 'top-level clusters'}`} @click=${(e: Event) => void this.moreChildren(e.currentTarget as HTMLElement)}>${moreText}</button>`
       : nothing;
-    // How many children are still to come, where the crumb's row was listed with its count.
-    const known = crumb ? this.seen.get(crumb.artifact)?.childCount : undefined;
-    const remaining = known === undefined ? 0 : known - nodes.length;
-    const more = rootsNext !== null
-      ? html`<button part="more" class="more-link" type="button" @click=${(e: Event) => void this.moreChildren(e.currentTarget as HTMLElement)}>${remaining > 0 ? `${remaining.toLocaleString('en-GB')} more` : 'More'}</button>`
-      : nothing;
-    // In a status region that is there before it, so a reader hears it as it changes.
-    const note = refusal
-      ? html`<span class="none" part="refusal" data-code=${refusal.code}>Clusters unavailable</span>`
-      : roots === null
-        ? loading
-          ? html`<span class="sr-only">Loading</span>`
-          : nothing
-        : nodes.length === 0
-          ? html`<span class="none">No clusters</span>`
-          : nothing;
-    return html`<div class="body">${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${lists}<div role="status">${note}</div>${rest}${more}</div>`;
+    return {list, after};
   }
 
-  /** The breadcrumb: the layer's filter clauses, in the order they were added, each with a button that removes it. */
-  private crumbsTemplate(s: Store, title: string): TemplateResult | typeof nothing {
-    const crumbs = this.crumbs(s);
-    if (crumbs.length === 0) return nothing;
-    return html`<nav part="crumbs" aria-label=${`${title}: filtered to`}><ol>${crumbs.map((c, i) => {
-      const id = idString(c.artifact);
-      const name = this.nameOf(s, c.artifact);
-      return html`<li part="crumb" data-id=${id}>${i > 0 ? html`<span class="sep" aria-hidden="true">›</span>` : nothing}<span part="crumb-name" title=${name} aria-current=${i === crumbs.length - 1 ? 'location' : nothing}>${name}</span><button
-          part="crumb-remove" type="button" aria-label=${`Stop filtering to ${name}`} title="Stop filtering" @click=${() => this.toggleCluster(id, c.label ?? null, 'filter')}>${icon('close', 12)}</button></li>`;
-    })}</ol></nav>`;
+  /** The breadcrumb: All and then each step of the position, each a button that steps back to it. */
+  private crumbsTemplate(s: Store, title: string): TemplateResult {
+    const filtered = this.clauseKeys(s, 'filter');
+    const steps: {id: bigint | null; name: string}[] = [{id: null, name: 'All'}, ...this.position];
+    return html`<nav part="crumbs" aria-label=${`${title} breadcrumb`}><ol>${repeat(
+      steps,
+      (step, i) => `${i}:${step.id ?? ''}`,
+      (step, i) => {
+        const on = step.id !== null && filtered.has(idString(step.id));
+        return html`<li part="crumb" data-id=${step.id === null ? '' : idString(step.id)} ?data-filtered=${on}>${i > 0 ? html`<span class="sep" aria-hidden="true">›</span>` : nothing}<button
+            part="crumb-name" type="button" title=${step.name} aria-current=${i === steps.length - 1 ? 'location' : nothing} @click=${() => this.stepTo(i)}>${
+            on ? html`<span class="cue">${icon('check', 11, 2.4)}</span>` : nothing
+          }<span class="crumb-text">${step.name}</span>${on ? html`<span class="sr-only">, filtered to</span>` : nothing}</button></li>`;
+      }
+    )}</ol></nav>`;
+  }
+
+  /** The layer's clauses, in the order they were added, each with a × that removes it. */
+  private chipsTemplate(s: Store, title: string): TemplateResult | typeof nothing {
+    const clauses = s.get('filters').members.filter((m) => m.layer === this.layerName);
+    if (clauses.length === 0) return nothing;
+    return html`<ul part="chips" aria-label=${`${title}: filters and highlights`}>${repeat(
+      clauses,
+      (c) => `${c.verb}:${c.artifact}`,
+      (c) => {
+        const name = c.label ?? this.knownName(s, c.artifact) ?? UNNAMED;
+        const lit = c.verb === 'highlight';
+        const said = `${lit ? 'Highlighted' : 'Filtered to'}${c.outside ? ' outside' : ''}`;
+        return html`<li part="chip" data-id=${idString(c.artifact)} data-verb=${c.verb}><span class="cue">${lit ? icon('highlight', 11, 1.6) : icon('check', 11, 2.4)}</span><span part="chip-name" title=${name}
+            ><span class="sr-only">${said} </span>${c.outside ? 'not ' : ''}${name}</span
+          ><button part="chip-remove" type="button" aria-label=${`${lit ? 'Stop highlighting' : 'Stop filtering to'}${c.outside ? ' outside' : ''} ${name}`} title=${lit ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.removeClause(c)}>${icon('close', 12)}</button></li>`;
+      }
+    )}</ul>`;
   }
 
   /** Load the next page of children, and move focus from More to the first row it added, unless focus has gone elsewhere meanwhile. */
   private async moreChildren(button: HTMLElement): Promise<void> {
-    const added = await this.lineage.loadRoots(this.lineage.rootsNext ?? undefined);
-    await this.updateComplete;
-    const first = added[0];
-    const onButton = this.shadowRoot?.activeElement === button || (!button.isConnected && focusLost());
-    if (!first || !onButton) return;
-    this.renderRoot.querySelector<HTMLElement>(`[part="row"][data-key="${idString(first.row.mosaicaId)}"] [part="highlight"]`)?.focus();
+    const first = (await this.lineage.loadMore())[0];
+    if (first) await focusAdded(this, button, () => this.renderRoot.querySelector<HTMLElement>(`[part="row"][data-key="${idString(first.row.mosaicaId)}"] [part="highlight"]`));
   }
 
   // ---- histogram ---------------------------------------------------------------------------------

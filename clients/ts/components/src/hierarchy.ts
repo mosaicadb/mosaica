@@ -1,11 +1,11 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
 import {property, state} from 'lit/decorators.js';
-import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type ClauseVerb, type Layer, type Masked} from '@mosaicajs/client';
+import {artifactName, browsableLayers, isFilterLayer, withMember, withoutMember, type ClauseVerb, type Layer, type Masked, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
 import {MosaicaElement, UNNAMED, emit, focusLost, idString} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
-import {Lineage, otherParents, type Node} from './lineage.js';
+import {Lineage, focusAdded, spokenCounts, type Node} from './lineage.js';
 import {renderState, stateOf} from './states.js';
 import {chrome, tokens} from './tokens.js';
 import './count.js';
@@ -28,11 +28,13 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  * hierarchy, filter layers among them. When there are several, a select switches between them.
  *
  * Each row shows how many of the artifact's items the viewer may see. While filters are set, it
- * also shows how many of those items match. An artifact the viewer may not see is left out, and
- * its children appear under its nearest ancestors the viewer may see, or at the top level where it
- * has none. When the filters change, the rows are fetched again, a few requests at a time: as many
- * pages of the roots and of each open row as More had loaded, since a page's cursor is good only
- * for the filters it was served under. Focus stays on the control it was on.
+ * also shows how many of those items match, and a screen reader is given each count with what it
+ * counts. An artifact the viewer may not see is left out, and its children appear under its
+ * nearest ancestors the viewer may see, or at the top level where it has none. A row under several
+ * served parents names the others, and a parent no page has served yet is asked for by name. When
+ * the filters change, the rows are fetched again, a few requests at a time: as many pages of the
+ * roots and of each open row as More had loaded, since a page's cursor is good only for the
+ * filters it was served under. Focus stays on the control it was on.
  *
  * A row's name is one line, cut with an ellipsis where it is too long, unless
  * `--mosaica-long-text` is `normal`. A row's buttons highlight or filter the map by its artifact.
@@ -67,7 +69,9 @@ type Held = {path: string; at: number; part: string; verb: string | null};
  *   a row with no children it has `data-leaf` and is hidden, keeping the names aligned.
  * @csspart name - A row's name, with `data-unnamed` if it has none. Pressing it highlights the
  *   artifact, and it has `aria-pressed` while the artifact is highlighted.
- * @csspart counts - A row's counts. They are not drawn while the row's buttons are shown over them.
+ * @csspart counts - A row's counts as they are drawn, hidden from a screen reader, which is given
+ *   them beside it with what each counts. They are not drawn while the row's buttons are shown
+ *   over them.
  * @csspart count-matched - The `<mosaica-count>` of a row's items that match the filters, while a
  *   filter is set.
  * @csspart count-masked - The `<mosaica-count>` of a row's items the viewer may see.
@@ -277,6 +281,8 @@ export class MosaicaHierarchy extends MosaicaElement {
 
   @state() private accessor query = '';
   @state() private accessor searching: Node[] | null = null;
+  /** Why the last search was refused. */
+  @state() private accessor searchRefusal: Refusal | null = null;
   /** Which paths are open, so a re-render of the tree keeps the walk. */
   @state() private accessor open = new Set<string>();
   /** The paths of the rows whose buttons Escape has put away, each until the pointer and focus leave it. */
@@ -298,6 +304,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     this.epoch += 1;
     this.lineage.reset();
     this.searching = null;
+    this.searchRefusal = null;
     this.open = new Set();
     this.buttonsAway = new Set();
     if (this.searchTimer) clearTimeout(this.searchTimer);
@@ -418,15 +425,9 @@ export class MosaicaHierarchy extends MosaicaElement {
    * anywhere else meanwhile stays there.
    */
   private async more(button: HTMLElement, parent: Node | null): Promise<void> {
-    const added = await (parent ? this.lineage.expand(parent, true) : this.lineage.loadRoots(this.lineage.rootsNext ?? undefined));
-    await this.updateComplete;
+    const added = await (parent ? this.lineage.expand(parent, true) : this.lineage.loadMore());
     const first = added[0];
-    const onButton = this.shadowRoot?.activeElement === button || (!button.isConnected && focusLost());
-    if (!first || !onButton) return;
-    this.rowElements()
-      .find((r) => r.path === first.path)
-      ?.querySelector<HTMLElement>('[part="name"]')
-      ?.focus();
+    if (first) await focusAdded(this, button, () => this.rowElements().find((r) => r.path === first.path)?.querySelector<HTMLElement>('[part="name"]'));
   }
 
   private rowElements(): RowElement[] {
@@ -473,18 +474,21 @@ export class MosaicaHierarchy extends MosaicaElement {
       const q = text.trim();
       if (q.length === 0) {
         this.searching = null;
+        this.searchRefusal = null;
         return;
       }
-      const request = this.lineage.page({q});
+      const request = this.lineage.search(q);
       if (!request) return;
       const epoch = this.epoch;
       void request
-        .then((page) => {
-          if (epoch === this.epoch) this.searching = page.artifacts.map((row) => this.lineage.node(row, 'q'));
+        .then((nodes) => {
+          if (epoch !== this.epoch) return;
+          this.searching = nodes;
+          this.searchRefusal = null;
         })
         .catch((error: unknown) => {
           if (epoch !== this.epoch) return;
-          this.lineage.refusal = refusalOf(error);
+          this.searchRefusal = refusalOf(error);
           this.searching = [];
         });
     }, 250);
@@ -503,11 +507,11 @@ export class MosaicaHierarchy extends MosaicaElement {
     if (!s || !layer) return;
     const held = s.get('filters').members;
     const on = this.clausesOn(id).includes(verb);
-    const label = this.lineage.names.get(id);
+    const label = this.lineage.knownName(id);
     s.setMembers(
       on
         ? withoutMember(held, layer.name, id, verb)
-        : withMember(held, {layer: layer.name, artifact: id, outside: false, verb, ...(label === undefined ? {} : {label})})
+        : withMember(held, {layer: layer.name, artifact: id, outside: false, verb, ...(label === null ? {} : {label})})
     );
     emit(this, 'mosaica-clausechange', {id: idString(id), layer: layer.name, outside: false, verb, on: !on});
   }
@@ -529,8 +533,8 @@ export class MosaicaHierarchy extends MosaicaElement {
     if (offered.length === 0) return html`<div class="panel">${heading}<span part="state" data-state="empty">No hierarchical layers</span></div>`;
     const layer = this.current()!;
     const title = layer.title || layer.name;
-    const filtered = s.get('filters').expr !== null || s.get('filters').members.length > 0;
-    const {refusal, roots, rootsNext, loading} = this.lineage;
+    const {roots, loading} = this.lineage;
+    const refusal = this.searchRefusal ?? this.lineage.refusal;
     const rows = this.searching ?? roots;
     const state = refusal ? 'refused' : rows === null ? (loading ? 'loading' : 'shown') : rows.length === 0 ? 'empty' : 'shown';
     const said = refusal
@@ -563,14 +567,14 @@ export class MosaicaHierarchy extends MosaicaElement {
         @input=${(e: Event) => this.search((e.target as HTMLInputElement).value)}
       /></div>
       <div role="status"><span part="state" data-state=${state}>${said}</span>${notes.length > 0 ? html`<span class="sr-only">${notes.join('. ')}</span>` : nothing}</div>
-      ${rows === null || rows.length === 0 ? nothing : html`<ul part="tree" aria-label=${title}>${rows.map((n) => this.renderNode(n, 0, layer, filtered))}</ul>`}
-      ${this.searching === null && rootsNext
+      ${rows === null || rows.length === 0 ? nothing : html`<ul part="tree" aria-label=${title}>${rows.map((n) => this.renderNode(n, 0, layer))}</ul>`}
+      ${this.searching === null && this.lineage.hasMore
         ? html`<button part="more" class="more-link" type="button" @click=${(e: Event) => void this.more(e.currentTarget as HTMLElement, null)}>More</button>`
         : nothing}
     </div>`;
   }
 
-  private renderNode(node: Node, depth: number, layer: Layer, filtered: boolean): unknown {
+  private renderNode(node: Node, depth: number, layer: Layer): unknown {
     // A row is expanded while its children are drawn, not while they are on their way.
     const open = this.open.has(node.path) && node.children !== null;
     const id = node.row.mosaicaId;
@@ -578,7 +582,7 @@ export class MosaicaHierarchy extends MosaicaElement {
     const name = artifactName(node.row);
     const called = name ?? UNNAMED;
     // A `dag` node is drawn under each served parent; the row names the others.
-    const also = otherParents(node);
+    const also = this.lineage.alsoUnder(node);
     const drawn = !isFilterLayer(layer);
     const pressed = (verb: ClauseVerb) => (clauses.includes(verb) ? 'true' : 'false');
     return html`<li>
@@ -605,22 +609,22 @@ export class MosaicaHierarchy extends MosaicaElement {
                 : nothing
             }
           </span>
-          <span part="counts">
-            ${filtered && node.row.matchedCount !== null
+          <span part="counts" aria-hidden="true">
+            ${node.row.matchedCount !== null
               ? html`<mosaica-count part="count-matched" .masked=${masked(node.row.matchedCount)}></mosaica-count>/`
               : nothing}<mosaica-count part="count-masked" .masked=${masked(node.row.maskedCount)}></mosaica-count>
-          </span>
+          </span><span class="sr-only">${spokenCounts(node.row)}</span>
         </span>
         ${clauses.map(
             (verb) => html`<button part="dismiss" type="button" data-verb=${verb} aria-label=${verb === 'highlight' ? `Stop highlighting ${called}` : `Stop filtering to ${called}`}
               title=${verb === 'highlight' ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.apply(id, verb)}>${icon('close', 12)}</button>`
         )}
       </div>
-      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.map((p) => this.lineage.nameOf(p)).join(', ')}</div>` : nothing}
+      ${also.length > 0 ? html`<div part="also" style=${`--depth:${depth}`}>also under ${also.join(', ')}</div>` : nothing}
       ${node.refusal ? html`<div part="also" style=${`--depth:${depth}`} data-code=${node.refusal.code}>Children unavailable</div>` : nothing}
       ${open
         ? html`<ul part="children" aria-label=${`Children of ${called}`}>
-            ${node.children!.map((c) => this.renderNode(c, depth + 1, layer, filtered))}
+            ${node.children!.map((c) => this.renderNode(c, depth + 1, layer))}
             ${node.next
               ? html`<li><button part="more" class="more-link" style=${`--depth:${depth + 1}`} type="button" @click=${(e: Event) => void this.more(e.currentTarget as HTMLElement, node)}>More</button></li>`
               : nothing}

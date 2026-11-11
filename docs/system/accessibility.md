@@ -58,6 +58,8 @@ The table lists those keys and the others the components add.
 | The range box | Escape | Closes the box and returns focus to the plot or the Set range button, whichever opened it. Tab past either end of the box closes it too. |
 | A row of the hierarchy, with the focus or the pointer in it | Escape | Puts the row's buttons away and shows its counts again. Focus on one of the buttons moves to the row's name. |
 | More, in the hierarchy or on a cluster field card that walks a layer's parent edges | Enter | Loads the next page of rows and moves focus to the first row it added. |
+| A row's step button, on a cluster field card that steps | Enter | Steps into the row, so the card lists what is inside it. Focus moves to the deepest crumb, and to the first row once the rows have loaded. |
+| A crumb, on a cluster field card that steps | Enter | Steps back to that crumb. Focus stays on it, and moves to the step button of the row stepped out of once the rows have loaded. |
 | The colour editor | Escape | Closes the dialog. |
 | The colour picker | Escape | Closes the picker and returns focus to the swatch that opened it. Tab past its last control, or Shift and Tab before its first, does the same. |
 | The picker's colour square | Left, Right | Change the saturation by 1%, or by 10% with Shift. |
@@ -68,9 +70,9 @@ A histogram's range does not need the plot's keys or a drag. The range box float
 
 A row of a category or cluster field card shows its Highlight and Filter buttons in place of its counts while the pointer is over the row or the keyboard's focus is in it, and a row of the hierarchy does the same with its Highlight, Filter and Fit buttons. The buttons are Tab stops while they are not drawn, so Tab reaches and shows them, and a screen reader has the counts at all times. On a screen with no pointer that hovers, such as a touch screen, the buttons are always drawn beside the counts, which is how Highlight is reached there.
 
-The card of a `tiered`, `nested` or `dag` layer puts its breadcrumb in a navigation landmark named by the layer, as a list whose deepest crumb is marked as the current location. Each crumb's × is a button named for the filter it removes. Its rows are a list, one for each level on a `tiered` layer, named by the layer, the level and the crumb they are children of, so a screen reader says where in the layer the viewer is. A row of a `dag` layer names its other parents as text under it.
+A cluster field card on a `tiered`, `nested`, `dag` or `stacked` layer steps through the layer apart from the filter. Its breadcrumb moves the card, so it is a navigation landmark, named by the layer and the word breadcrumb. It holds a list of buttons from All down to the cluster whose rows are listed, and the deepest is marked as the current location. A crumb whose cluster the filter is on carries a tick, and a screen reader is told so in words. The layer's filter and highlight clauses are a list of their own under the breadcrumb, each with a × named for the clause it removes. The rows are a list, one for each level on a `tiered` layer, which is named by the heading over it with the level's title. On a `stacked` layer stepped into a cluster, a heading says what the list holds and names it, and elsewhere a list is named by the layer and what it holds. A row with children ends in a step button named for the row and the number of its children. A row of a `dag` layer names its other parents as text under it, and the row that counts the items in none of the children is the last item of the last list. Each More is named for what it loads.
 
-When an action removes the control that has focus, focus moves to a control beside it. Removing a filter's chip, for example, moves focus to the × of the chip after it, or of the one before it, and to Add field when no chip is left. Removing a crumb on a cluster field card moves focus to the × of the crumb in its place, or of the one before it, and to the card's search box when no crumb is left. A panel that shows chips alone has no Add field, so it shows the words No filters, which take the focus.
+When an action removes the control that has focus, focus moves to a control beside it. Removing a filter's chip, for example, moves focus to the × of the chip after it, or of the one before it, and to Add field when no chip is left. Removing a clause's chip on a cluster field card moves focus to the × of the chip in its place, or of the one before it, and to the card's search box when no chip is left. Focus in a field card's search box stays there while the rows below it change. After a step on a cluster field card, focus that has moved away from the deepest crumb while the rows load is left where it is. A panel that shows chips alone has no Add field, so it shows the words No filters, which take the focus.
 
 In the explorer's narrow form, an open sheet that reaches up over the map's tools makes the map behind it inert until the sheet closes, so that Tab and a press go to nothing the sheet covers.
 
@@ -105,12 +107,13 @@ Every element announces what only it knows, inside an explorer or outside one:
 - **A range being chosen.** While the arrow keys choose a range on a histogram, the card announces the range and its count. The range box says what to type when a field holds no number or date.
 - **A copy.** The item card's Copy id tells a screen reader whether the id was copied, in words that are not drawn.
 - **A card's own state.** The item card, the artifact card, the hierarchy, the colour editor and a cluster field card that walks a layer's parent edges each say when they have nothing to show, are loading or were refused.
+- **A step.** A cluster field card that steps says in its one status region what has loaded after each step, such as "3 children of Mathematics".
 
 A map on its own announces the states it shows over its canvas, and how many items match inside a selected region, once, when the query that counts it has finished loading. A selection card on its own announces Counting, then the counts once, or a refusal.
 
 Panning and zooming announce nothing. While the camera moves, the status strip goes between Up to date and Updating with each request, so those two states are text a screen reader can read on the strip and are not announced. The strip's count cells change with the camera too and sit outside the status region, and a pan that ends where nothing is in view shows Nothing in view without announcing it.
 
-Three things are given as text for a screen reader where a sighted viewer has a picture. A field card's histogram has a table of its bins with their counts. Each row of a field card gives its two counts with what each one counts. The density key is named with its range and scale.
+Three things are given as text for a screen reader where a sighted viewer has a picture. A field card's histogram has a table of its bins with their counts. Each row of a field card and of the hierarchy gives its counts with what each one counts. The density key is named with its range and scale.
 
 ## Colours and themes
 
@@ -194,7 +197,7 @@ A notebook runs its own shortcuts for a key pressed outside a text field, and th
 
 ## What has been checked
 
-The components' browser suite builds the explorer in each of its main states in headless Chromium, and the hierarchy, the selection card, the pickers, a filter panel that shows chips alone, the colour editor and a `tiered` layer's cluster card filtered to one of its clusters on their own. The states are the explorer at rest, with field cards open, with filters applied, with the Layers popover and its menus open, with an item card, an artifact card and a selected region, a range box holding an entry it refuses, each sheet of the narrow form, and each state the status strip and the map's overlay can show. In each state it checks:
+The components' browser suite builds the explorer in each of its main states in headless Chromium, and the hierarchy, the selection card, the pickers, a filter panel that shows chips alone, the colour editor and a `tiered` layer's cluster card stepped into one of its clusters, with a filter and a highlight on the layer, on their own. The states are the explorer at rest, with field cards open, with filters applied, with the Layers popover and its menus open, with an item card, an artifact card and a selected region, a range box holding an entry it refuses, each sheet of the narrow form, and each state the status strip and the map's overlay can show. In each state it checks:
 
 - every rule of axe-core 4.14 tagged WCAG 2.0, 2.1 or 2.2 at level A or AA;
 - the contrast of text in the light and the dark scheme, including text drawn over the map, which is measured against the map's background;

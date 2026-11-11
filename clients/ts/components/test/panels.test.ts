@@ -1361,7 +1361,7 @@ describe('<mosaica-filter-panel> cluster fields', () => {
   it('lists a layer holding a clause, and shows its clauses as chips, the filter’s first', async () => {
     const {host} = await mountLayered([topic(8n, 'highlight', 'Optics'), topic(7n, 'filter', 'Neural networks'), topic(9n, 'filter')]);
     expect(deep(host, 'mosaica-field-card[data-field="cluster:topics"]')).not.toBeNull();
-    const chips = deepAll(host, '[part="chip"]').map((c) => [c.getAttribute('data-verb'), named(c)]);
+    const chips = [...host.querySelector('mosaica-filter-panel')!.shadowRoot!.querySelectorAll('[part="chip"]')].map((c) => [c.getAttribute('data-verb'), named(c)]);
     expect(chips).toEqual([
       ['filter', 'Neural networks'],
       ['filter', UNNAMED],

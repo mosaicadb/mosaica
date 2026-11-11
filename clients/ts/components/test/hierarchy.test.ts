@@ -162,6 +162,33 @@ describe('<mosaica-hierarchy>', () => {
     expect(also).not.toContain('77');
   });
 
+  it('asks for the name of a parent in *also under* that no page has served, once', async () => {
+    const {host, store} = await panel();
+    store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n, {parentIds: [1n, 77n]}), row(12n, 'Tumours', 800n, {parentIds: [1n, 77n]})], parents: [], next: null});
+    // The children form of a row carries its parents, which name the one the walk has not met.
+    store.setBrowse('p:11', {artifacts: [], parents: [row(1n, 'Neoplasms', 1n), row(77n, 'Skin diseases', 1n)], next: null});
+    (deep(host, '[part="expander"]') as HTMLButtonElement).click();
+    await settle(host);
+    await settle(host);
+    await settle(host);
+    expect(deepAll(host, '[part="also"]').map((e) => deepText(e))).toEqual(['also under Skin diseases', 'also under Skin diseases']);
+    const asked = store.calls.filter((c) => c.name === 'browse').map((c) => (c.args[0] as {parent?: bigint}).parent);
+    expect(asked.filter((p) => p === 11n || p === 12n)).toEqual([11n]);
+  });
+
+  it('gives a screen reader each row’s counts with what each counts, the figures drawn hidden from it', async () => {
+    const {host, store} = await panel();
+    store.setBrowse('roots', {artifacts: [row(1n, 'Neoplasms', 27_000n, {matchedCount: 400n})], parents: [], next: null});
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['cs']}}});
+    await settle(host);
+    await settle(host);
+    const counts = deep(host, '[part="row"][data-id="1"] [part="counts"]')!;
+    expect(counts.getAttribute('aria-hidden')).toBe('true');
+    const said = counts.parentElement!.querySelector('.sr-only')!.textContent!;
+    expect(said).toContain('400');
+    expect(said).toContain('27,000');
+  });
+
   it('a click is a highlight, and the actions carry the filter beside it', async () => {
     const {host, store} = await panel();
     (deep(host, '[part="row"] [part="name"]') as HTMLButtonElement).click();

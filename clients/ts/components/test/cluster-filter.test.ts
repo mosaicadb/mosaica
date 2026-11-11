@@ -274,6 +274,22 @@ describe('<mosaica-cluster-filter> typing', () => {
     expect(deepAll(host, '[part="path"]').map((p) => p.textContent)).toEqual(['Mathematics', 'Mathematics']);
   });
 
+  it('asks for a parent once however many searches meet it, and names it from what it learnt', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('q:x-ray', {artifacts: [row(30n, 'x-ray state', [20n])], parents: [], next: null});
+    store.setBrowse('q:x-ray s', {artifacts: [row(30n, 'x-ray state', [20n]), row(31n, 'x-ray source', [20n])], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(20n, 'clusters x-ray')], next: null});
+    for (const text of ['x-ray', 'x-ray s']) {
+      box().value = text;
+      box().dispatchEvent(new Event('input'));
+      await wait(300);
+      await settle(host);
+      await settle(host);
+    }
+    expect(browses(store).filter((r) => (r as {parent?: bigint}).parent !== undefined)).toEqual([{parent: 30n, layer: 'topics', filters: null, limit: 1}]);
+    expect(deepAll(host, '[part="path"]').map((p) => p.textContent)).toEqual(['clusters x-ray', 'clusters x-ray']);
+  });
+
   it('names every served parent of a match with several, and walks on up from the first', async () => {
     const {host, store, box} = await mountField({layers: [layer('topics', {hierarchy: {kind: 'dag', pruneChildren: false}})]});
     store.setBrowse('q:glioma', {artifacts: [row(30n, 'glioma', [10n, 20n])], parents: [], next: null});
