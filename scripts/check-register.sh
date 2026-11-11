@@ -11,8 +11,9 @@ cd "$(dirname "$0")/.."
 # docs/writing.md is the source of the list and quotes it, so it is checked by neither set.
 STRICT=(CLAUDE.md docs/README.md docs/index.md docs/system docs/start docs/guides docs/reference)
 LOOSE=(README.md docs/openapi)
-# The pages a user of Mosaica reads, which USER_PATTERNS also apply to.
-USER_PAGES=(docs/index.md docs/start docs/guides docs/reference)
+# The pages a user of Mosaica reads, which USER_PATTERNS also apply to. The home page sells
+# Mosaica, as docs/writing.md says, so it is held to PATTERNS alone.
+USER_PAGES=(docs/start docs/guides docs/reference)
 
 PATTERNS=$(cat <<'EOF'
 —

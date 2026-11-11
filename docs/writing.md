@@ -59,6 +59,10 @@ The rules above were written for the system chapters, whose reader is assessing 
 
 There are three kinds of user page, and each is written differently because it serves a different moment. A tutorial teaches a newcomer by walking them through building something, a guide helps someone who knows the basics to do one task, and a reference page is somewhere a reader looks something up.
 
+### The home page
+
+The home page, `docs/index.md`, and the repository's `README.md` are where a reader decides whether Mosaica is worth their time, so they are written to sell it. Short headline phrases such as "Big data, small hardware" belong there, and so does the vocabulary the register check refuses on the other user pages. The evidence rules still apply, so every claim is one a measurement supports, and a figure says what it was measured on.
+
 ### Tutorials
 
 A tutorial should read as if a knowledgeable, patient person were sitting beside the reader while they do something for the first time.

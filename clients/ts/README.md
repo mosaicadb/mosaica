@@ -84,12 +84,12 @@ The reference on the documentation site is generated from the doc comments. `com
 
 ## Running the demo
 
-`run_demo.sh` at the repository root builds what is missing, starts `mosaica serve` over one or more bundles and starts the viewer:
+`run_demo.sh` at the repository root builds what is missing, starts `mosaica serve` over one or more bundles and starts the viewer. Its datasets are those of [Datasets to try](../../docs/start/datasets.md), and it fetches one that is not on disk:
 
 ```bash
-./run_demo.sh --scale notebook     # the arXiv notebook corpus, with its annotation layers
-./run_demo.sh --scale 2m4          # 2,422,486 arXiv papers; the examples expect this one
-./run_demo.sh --bundle PATH        # a bundle you already have
+./run_demo.sh                          # arxiv-sample and places; the examples expect arxiv-sample
+./run_demo.sh --dataset geonames       # 13.5 million GeoNames features, downloaded the first time
+./run_demo.sh --bundle PATH --terms A,B  # a bundle you already have, with its access terms
 ```
 
 It prints the viewer's address, which carries the dataset document in `?datasets=`. Everything it writes goes under `mosaica-demo/` at the repository root, which git ignores. The script's header lists its other options.
@@ -104,7 +104,7 @@ The viewer's Vite server listens on 5173, or on `VITE_PORT` where that is set, a
 
 [`getting-started`](examples/getting-started/README.md) is the finished project of the first tutorial, [Your first map in a web page](../../docs/start/typescript.md): a `mosaica.toml` for the GeoNames sample in `examples/data/geonames/`, and a Vite project that uses the built packages as an outside project would. Its README says how to run it. `npm run test:live` in its `web/` directory serves it over a temporary build of the sample and checks in headless Chromium that the page draws.
 
-Every example is a workspace that `npm run typecheck` checks. The other four expect the demo's `2m4` scale, started with `./run_demo.sh --scale 2m4`: its viewer listener on `127.0.0.1:37585` and its session listener on `127.0.0.1:49303`. The plain-HTML app server takes an API key holding `authorise-as` in `MOSAICA_API_KEY`; `run_demo.sh` writes one to `mosaica-demo/presets/2m4.key`. The users in `examples/plain-html/users.json` read as the principals `run_demo.sh` creates for that bundle's presets. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the examples at another deployment, whose principals `users.json` then has to name.
+Every example is a workspace that `npm run typecheck` checks. The other four expect the demo's `arxiv-sample` dataset, started with `./run_demo.sh`: its viewer listener on `127.0.0.1:37591` and its session listener on `127.0.0.1:49309`. The plain-HTML app server takes an API key holding `authorise-as` in `MOSAICA_API_KEY`; `run_demo.sh` writes one to `mosaica-demo/presets/arxiv-sample.key`. The users in `examples/plain-html/users.json` read as the principals `run_demo.sh` creates for that bundle's presets. `MOSAICA_VIEWER_URL` and `MOSAICA_SESSION_URL` point the examples at another deployment, whose principals `users.json` then has to name.
 
 The plain-HTML example's app server mints the tokens for all four, so start it after the demo and before the others. It listens on port 5180. The other three are Vite dev servers that proxy `/token` and `/users` to it and `/v1/*` to the viewer listener.
 

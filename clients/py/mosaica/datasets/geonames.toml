@@ -1,0 +1,261 @@
+# GeoNames: every feature of its `allCountries` dump on a world map.
+#
+# `mosaica.datasets.geonames.prepare` writes the files this names and copies this file beside them.
+
+[sources]
+points          = "points.parquet"
+feature_class   = "vocab-feature-class.parquet"
+feature_code    = "vocab-feature-code.parquet"
+country         = "vocab-country.parquet"
+admin1          = "vocab-admin1.parquet"
+admin2          = "vocab-admin2.parquet"
+admin3          = "vocab-admin3.parquet"
+admin4          = "vocab-admin4.parquet"
+timezone        = "vocab-timezone.parquet"
+members_feature = "members-feature.parquet"
+members_admin   = "members-admin.parquet"
+artifacts_admin = "artifacts-admin.parquet"
+
+[defaults]
+source     = "points"
+
+# Coordinates are in degrees, as GeoNames publishes them, and the build projects them. A feature
+# is visible to a reader holding its country code, and a feature with no country is public.
+[[view]]
+name             = "world"
+title            = "GeoNames"
+projection       = "web_mercator"
+extent           = { lon = [-180.0, 180.0], lat = [-85.0511287798066, 85.0511287798066] }
+point_visibility = { field = "country", default = "public" }
+
+# Feature classes and codes are GeoNames' published lists, so they are public. The other
+# vocabularies are shown to a reader only where they can see a feature that carries the value,
+# because those values say which countries and places the dataset holds.
+[[vocabulary]]
+name       = "feature_class"
+title      = "Feature class"
+width      = "u8"
+value_set  = "closed"
+visibility = "public"
+source     = "feature_class"
+
+[[vocabulary]]
+name       = "feature_code"
+title      = "Feature code"
+width      = "u16"
+value_set  = "closed"
+visibility = "public"
+source     = "feature_code"
+
+[[vocabulary]]
+name       = "country"
+title      = "Country"
+width      = "u16"
+value_set  = "closed"
+visibility = "derived"
+source     = "country"
+
+[[vocabulary]]
+name       = "admin1"
+title      = "First-level administrative division"
+width      = "u16"
+value_set  = "closed"
+visibility = "derived"
+source     = "admin1"
+
+[[vocabulary]]
+name       = "admin2"
+title      = "Second-level administrative division"
+width      = "u32"
+value_set  = "closed"
+visibility = "derived"
+source     = "admin2"
+
+[[vocabulary]]
+name       = "admin3"
+title      = "Third-level administrative division"
+width      = "u32"
+value_set  = "closed"
+visibility = "derived"
+source     = "admin3"
+
+[[vocabulary]]
+name       = "admin4"
+title      = "Fourth-level administrative division"
+width      = "u32"
+value_set  = "closed"
+visibility = "derived"
+source     = "admin4"
+
+[[vocabulary]]
+name       = "timezone"
+title      = "Time zone"
+width      = "u16"
+value_set  = "closed"
+visibility = "derived"
+source     = "timezone"
+
+# GeoNames' own id. Every file names a feature by it: the points file as `geonameid`, the member
+# files as `entity`.
+[[attribute]]
+name   = "geonameid"
+title  = "GeoNames id"
+type   = "i64"
+unique = true
+
+# The categories with few values are rendered, so they can colour the map, and every category is
+# indexed for filtering.
+[[attribute]]
+name       = "feature_class"
+type       = "category"
+vocabulary = "feature_class"
+render     = true
+index      = true
+
+[[attribute]]
+name       = "feature_code"
+type       = "category"
+vocabulary = "feature_code"
+render     = true
+index      = true
+
+[[attribute]]
+name       = "country"
+type       = "category"
+vocabulary = "country"
+render     = true
+index      = true
+
+[[attribute]]
+name       = "admin1"
+type       = "category"
+vocabulary = "admin1"
+index      = true
+
+[[attribute]]
+name       = "admin2"
+type       = "category"
+vocabulary = "admin2"
+index      = true
+
+[[attribute]]
+name       = "admin3"
+type       = "category"
+vocabulary = "admin3"
+index      = true
+
+[[attribute]]
+name       = "admin4"
+type       = "category"
+vocabulary = "admin4"
+index      = true
+
+[[attribute]]
+name       = "timezone"
+type       = "category"
+vocabulary = "timezone"
+index      = true
+
+[[attribute]]
+name   = "population"
+type   = "i64"
+render = true
+
+# `elevation` is GeoNames' recorded height, present on about a fifth of features. `dem` is a
+# height read from a terrain model for nearly every feature, with GeoNames' -9999 read as unknown.
+[[attribute]]
+name   = "elevation"
+type   = "i16"
+render = true
+
+[[attribute]]
+name   = "dem"
+type   = "i16"
+render = true
+
+[[attribute]]
+name   = "modification_date"
+type   = "timestamp_us"
+render = true
+
+# The name is indexed for text search.
+[[attribute]]
+name   = "name"
+type   = "text"
+index  = true
+
+# Two trees over the same features: feature class and code, and country down to the fourth level
+# of division. A reader is shown a branch only when they can see a feature in it.
+[[layer]]
+name                      = "features/taxonomy"
+title                     = "Feature taxonomy"
+views                     = ["world"]
+membership                = "enumerated"
+value_set                 = "open"
+hierarchy                 = { kind = "tiered", prune_children = true }
+visibility                = "public"
+artifact_visibility       = { default = "inherited" }
+require_member_visibility = { count = 1 }
+
+[[layer.levels]]
+level = 0
+title = "Class"
+zoom  = [0, 6]
+
+[[layer.levels]]
+level = 1
+title = "Code"
+zoom  = [5, 16]
+
+[layer.members]
+source = "members_feature"
+fields = { geonameid = "entity" }
+
+[[layer]]
+name                      = "admin/hierarchy"
+title                     = "Administrative hierarchy"
+source                    = "artifacts_admin"
+views                     = ["world"]
+membership                = "enumerated"
+value_set                 = "open"
+hierarchy                 = { kind = "tiered", prune_children = true }
+visibility                = "public"
+artifact_visibility       = { default = "inherited" }
+require_member_visibility = { count = 1 }
+
+[[layer.levels]]
+level = 0
+title = "Country"
+zoom  = [0, 4]
+
+[[layer.levels]]
+level = 1
+title = "Admin 1"
+zoom  = [3, 7]
+
+[[layer.levels]]
+level = 2
+title = "Admin 2"
+zoom  = [6, 10]
+
+[[layer.levels]]
+level = 3
+title = "Admin 3"
+zoom  = [9, 13]
+
+[[layer.levels]]
+level = 4
+title = "Admin 4"
+zoom  = [12, 16]
+
+[layer.content]
+computed = ["centroid", "box"]
+
+[[layer.content.supplied]]
+name                      = "name"
+type                      = "text"
+require_member_visibility = "inherited"
+
+[layer.members]
+source = "members_admin"
+fields = { geonameid = "entity" }

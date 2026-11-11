@@ -305,11 +305,15 @@ def state_port(directory: Path, port: int) -> None:
     deployment.write_text(dumps(document), encoding="utf-8")
 
 
-def write_deployment(directory: Path, port: int | None = None) -> Path:
+def write_deployment(
+    directory: Path, port: int | None = None, schema: str = "schema.toml"
+) -> Path:
     """Write `mosaica.toml`, which `mosaica build` and `mosaica serve` both read.
 
     Every path in it resolves against this file's own directory, so the database directory serves
-    from wherever it is copied to.
+    from wherever it is copied to. `schema` is the declaration the build reads; a dataset from
+    `mosaica.datasets` names its own by absolute path, so its sources stay where they were
+    prepared.
 
     The three planes share one port on loopback, which `listen` chooses. `serve.cors_loopback`
     lets a page served from this machine read from the server, which is what a notebook's map
@@ -323,7 +327,7 @@ def write_deployment(directory: Path, port: int | None = None) -> Path:
     }
     document = {
         "bundle": {"path": "bundle"},
-        "build": {"schema": "schema.toml"},
+        "build": {"schema": schema},
         "disclosure": {"token_max_lifetime": TOKEN_MAX_LIFETIME},
         "serve": serve,
         "catalogue": {"dir": ".mosaica/catalogue"},

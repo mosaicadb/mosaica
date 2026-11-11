@@ -32,7 +32,8 @@ mosaica = "mosaica_native:main"
 
 [project.urls]
 Homepage = "https://github.com/mosaicadb/mosaica"
-Documentation = "https://github.com/mosaicadb/mosaica/tree/main/docs"
+Documentation = "https://docs.mosaicadb.com/"
+Demo = "https://demo.mosaicadb.com/"
 Source = "https://github.com/mosaicadb/mosaica"
 Issues = "https://github.com/mosaicadb/mosaica/issues"
 Changelog = "https://github.com/mosaicadb/mosaica/blob/main/CHANGELOG.md"

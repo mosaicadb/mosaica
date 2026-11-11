@@ -3,6 +3,7 @@
 Install Mosaica, then build a first map.
 
 - [Install and configure](install.md): what to install for what you want to do, the platforms it runs on, and the two files a deployment is configured with, `schema.toml` and `mosaica.toml`.
+- [Datasets to try](datasets.md): datasets from 50,000 items to GBIF's 3.5 billion occurrences, each opened on a map in a browser with `mosaica demo NAME`, with the views, fields and layers of each and the disk it takes.
 - [Your first map from files](first-map.md): the GeoNames places for Ireland, from download to a filtered map, with `mosaica check`, `mosaica build` and `mosaica serve`.
 - [Your first map in Python](python.md#your-first-map-in-python): a notebook that takes 150,000 GeoNames places from a pandas data frame to a map, then filters, searches and counts them.
 - [Analysing a map with Mosaica](python.md#analysing-a-map-with-mosaica): a notebook that loads 50,000 arXiv papers in two layouts with their named topics, adds clusters of your own from HDBSCAN, and compares the two with counts, histograms and lift worked out by the server.

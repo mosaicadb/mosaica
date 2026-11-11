@@ -263,6 +263,13 @@ enum Command {
         #[arg(long)]
         identity: bool,
     },
+    /// Show a dataset to try on a map in a browser. The demo is in the Python package, which
+    /// carries the map page: `pip install 'mosaica[demo]'`, then `mosaica demo places`.
+    Demo {
+        /// The arguments `mosaica demo` takes in the Python package.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<String>,
+    },
     /// Generators for the conformance suite's corpus. Internal, and not shown in help.
     #[command(hide = true)]
     Corpus {
@@ -1653,6 +1660,14 @@ fn main() -> ExitCode {
                     }
                 }
             }
+        }
+        Command::Demo { arguments } => {
+            eprintln!(
+                "mosaica demo is in the Python package, which carries the map page: run `pip \
+                 install 'mosaica[demo]'`, then `mosaica demo {}`",
+                if arguments.is_empty() { "places".to_owned() } else { arguments.join(" ") }
+            );
+            ExitCode::FAILURE
         }
         Command::Corpus { command } => match command {
             CorpusCommand::Items { seed, ids, extent } => corpus_items(seed, &ids, extent),

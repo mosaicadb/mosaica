@@ -1,8 +1,8 @@
 # The places example dataset: 150,000 GeoNames features of every kind on a world map, every
 # populated place of 15,000 people or more and a seeded sample of the rest.
-# `test_corpora/geonames/example.py` writes the Parquet files beside this; NOTICE.md says where
+# `corpora/geonames/example.py` writes the Parquet files beside this; NOTICE.md says where
 # they came from. The declaration is a cut of the GeoNames ladder rung's
-# (`test_corpora/geonames/corpus.toml`), which says more about each choice.
+# (`clients/py/mosaica/datasets/geonames.toml`), which says more about each choice.
 
 [sources]
 points        = "points.parquet"

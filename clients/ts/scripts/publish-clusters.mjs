@@ -3,7 +3,7 @@
 // something to draw.
 //
 //   MOSAICA_OPERATOR_CRED=… node clients/ts/scripts/publish-clusters.mjs \
-//     --presets mosaica-demo/presets/2m4.json --clusters 24 [--min-visible 400]
+//     --presets mosaica-demo/presets/arxiv-sample.json --clusters 24 [--min-visible 400]
 //
 // The clustering is k-means over a sample of the corpus's points, to show masking: two principals
 // get different counts for the same cluster, and under `--min-visible` a cluster the broad one sees

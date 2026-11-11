@@ -120,7 +120,12 @@ def walk() -> tuple[dict, dict]:
     """What the reference documents. The exported names, the public methods and properties of
     each class among them, and every class those return or a returned dataclass holds, by path;
     and each public attribute of those classes, by path, with the class that defines it."""
-    queue = [getattr(mosaica, name) for name in mosaica.__all__ if name != "__version__"]
+    queue = []
+    for name in mosaica.__all__:
+        if name == "__version__":
+            continue
+        thing = getattr(mosaica, name)
+        queue += [getattr(thing, n) for n in thing.__all__] if inspect.ismodule(thing) else [thing]
     found: dict = {}
     fields: dict = {}
     while queue:

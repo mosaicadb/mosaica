@@ -1,6 +1,6 @@
 """Two corpus declarations, regenerated through the typed verbs and checked.
 
-`test_corpora/` holds the declarations the demo corpora were built from. Two of them reach a
+`corpora/` holds the declarations the demo corpora were built from. Two of them reach a
 declaration shape nothing else here does: `multiview` carries both roster forms, a group-scoped
 column, a spatial layer with an authored roster and an artifact-visibility column, and
 `treeoflife` a tiered taxonomy beside a predicate layer over a category column. Each is declared

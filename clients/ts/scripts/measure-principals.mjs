@@ -192,7 +192,7 @@ if (args.ranks) {
     const {n, visible} = await runReaching(start, corpus * fraction);
     const pct = (100 * visible) / corpus;
     chosen.push({
-      label: `${label} — ${pct < 10 || pct > 99 ? pct.toFixed(1) : Math.round(pct)}% (${n} terms)`,
+      label: `${label} — ${pct < 10 || pct > 99 ? pct.toFixed(1) : Math.round(pct)}% (${n} ${n === 1 ? 'term' : 'terms'})`,
       terms: ranked.slice(start, start + n),
       visible
     });

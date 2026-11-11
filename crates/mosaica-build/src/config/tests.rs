@@ -3410,12 +3410,12 @@ fn a_declaration_with_a_group_materialises_the_groups_views_too() {
 }
 
 /// **The fixture is the acceptance case**, read from the repository rather than copied: it is
-/// `test_corpora/multiview/`'s own `corpus.toml`, written against `views.md` r6 before any of this
+/// `corpora/multiview/`'s own `corpus.toml`, written against `views.md` r6 before any of this
 /// existed, and its README's feature table is the checklist this stage is measured against.
 #[test]
 fn the_multiview_fixture_parses() {
     let declared =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test_corpora/multiview/corpus.toml");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpora/multiview/corpus.toml");
     let text = std::fs::read_to_string(&declared).expect("the fixture is in the repository");
     // **Written beside a vocabulary file rather than parsed in place.** A closed `[[vocabulary]]`
     // naming a source is *read* at parse — the values are part of the declaration — and the

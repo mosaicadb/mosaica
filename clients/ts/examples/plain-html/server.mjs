@@ -146,8 +146,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const apiKey = process.env.MOSAICA_API_KEY;
   if (!apiKey) throw new Error('set MOSAICA_API_KEY to an API key whose principal holds authorise-as');
   const handler = createHandler({
-    sessionUrl: process.env.MOSAICA_SESSION_URL ?? 'http://127.0.0.1:49303',
-    viewerUrl: process.env.MOSAICA_VIEWER_URL ?? 'http://127.0.0.1:37585',
+    sessionUrl: process.env.MOSAICA_SESSION_URL ?? 'http://127.0.0.1:49309',
+    viewerUrl: process.env.MOSAICA_VIEWER_URL ?? 'http://127.0.0.1:37591',
     apiKey,
     users,
     bundleDir: dirname(fileURLToPath(import.meta.resolve('@mosaicajs/components/mosaica-components.js')))

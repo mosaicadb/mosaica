@@ -49,7 +49,7 @@ export const isSupersededAbort = (text) => /ERR_INCOMPLETE_CHUNKED_ENCODING/.tes
 
 /**
  * Add query parameters to a URL that may already carry some, such as `?prefetch=0` onto
- * `--url …/?dataset=notebook-2m4`.
+ * `--url …/?dataset=arxiv-sample`.
  *
  * @param {string} url
  * @param {Record<string, string | number | undefined>} params
