@@ -123,10 +123,10 @@ jobs:
           exit $status
 
   # Each shard runs a third of the tests with `--profile ci` (.config/nextest.toml), which runs the
-  # slow tier too and does not stop at the first failure. `count:` deals each test binary's tests
-  # round-robin, which spreads the few tests of a minute or more across the shards. The archive is
-  # unpacked at the workspace root, so the binaries sit where the build put them and the paths
-  # compiled into the tests resolve.
+  # slow tier too and does not stop at the first failure. `slice:` deals the tests round-robin in
+  # one sequence across every binary, where `count:` deals each binary's tests separately and so
+  # puts the first test of every small binary in shard 1. The archive is unpacked at the workspace
+  # root, so the binaries sit where the build put them and the paths compiled into the tests resolve.
   rust-tests:
     needs: rust
     if: ${{ !cancelled() && needs.rust.outputs.archived == 'true' }}
@@ -181,7 +181,7 @@ jobs:
           LLVM_PROFILE_FILE: ${{ github.workspace }}/target/mosaica-%p-%m.profraw
           MOSAICA_TEST_TRACE_DIR: ${{ runner.temp }}/hang/trace
         run: |
-          cargo nextest run --profile ci --partition count:${{ matrix.shard }}/3 \
+          cargo nextest run --profile ci --partition slice:${{ matrix.shard }}/3 \
             --archive-file "$RUNNER_TEMP/rust-tests.tar.zst" --extract-to . --extract-overwrite --workspace-remap .
       - name: this shard's coverage, as one profile
         if: ${{ !cancelled() }}
