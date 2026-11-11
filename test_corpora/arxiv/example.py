@@ -23,7 +23,9 @@ its access terms from. It needs `umap-learn` and about five minutes, most of it 
 
 Every member file is restricted to the sampled papers, and a cluster left with no member is dropped
 with any label attached to it. Positions are stored as `float32`. The archive and subject-class
-vocabularies are copied whole, each code titled with arXiv's name for it from `NAMES`.
+vocabularies are copied whole, each code titled with arXiv's name for it from `NAMES`, and each
+artifact of the taxonomy carries the same name as its one supplied content: an archive's from the
+archive vocabulary and a subject class's from the subject classes.
 
 ```bash
 python -m test_corpora.arxiv.example --source data/notebook-2m4-live --out examples/data/arxiv \
@@ -51,11 +53,13 @@ POINT_COLUMNS = [
     "entity_id", "x", "y", "categories", "arxiv_id", "archive", "primary_category",
     "submitted_at", "title",
 ]
-#: The clusterings kept, by file stem. Their artifact files carry no text, so they are filtered.
+#: The clusterings kept, by file stem. Their artifacts are filtered to those holding a sampled paper.
 CLUSTERINGS = ["clusters-toponymy", "taxonomy-arxiv"]
 #: The label kept as written, every one of whose generating papers is in the sample.
 KEPT_LABELS = {"topics-toponymy": "clusters-toponymy"}
 VOCABULARIES = ["archive.parquet", "primary_category.parquet"]
+#: The clustering named from the vocabularies, and the vocabulary each of its levels is named from.
+NAMED_BY_VOCABULARY = {"taxonomy-arxiv": {0: "archive.parquet", 1: "primary_category.parquet"}}
 #: arXiv's name for each archive and subject class, as https://arxiv.org/category_taxonomy gives it,
 #: and for the retired archives that page leaves out, as arXiv's arxiv-base code
 #: (`arxiv/taxonomy/definitions.py`) gives it. A key named in neither keeps its code as title.
@@ -292,6 +296,21 @@ def held_artifacts(source: Path, stem: str, members: pa.Table) -> pa.Table:
     return kept
 
 
+def named(stem: str, artifacts: pa.Table, names: dict[str, dict[str, str]]) -> pa.Table:
+    """`artifacts` with a `contents` column whose one rank holds each artifact's name: the title
+    arXiv gives its key in the vocabulary its level is named from. A key arXiv gives no title keeps
+    no name."""
+    vocabulary = NAMED_BY_VOCABULARY[stem]
+    contents = [
+        [[names[vocabulary[level]][key]]] if key in names[vocabulary[level]] else None
+        for level, key in zip(artifacts["level"].to_pylist(), artifacts["key"].to_pylist())
+    ]
+    print(f"  {stem}: {len(contents) - contents.count(None)} of {len(contents)} artifacts named")
+    if "contents" in artifacts.column_names:
+        artifacts = artifacts.drop_columns(["contents"])
+    return artifacts.append_column("contents", pa.array(contents, pa.list_(pa.list_(pa.string()))))
+
+
 def second_layout(points: pa.Table, data: Path, seed: int) -> pa.Table:
     """The sampled papers laid out again from their embeddings, with their categories."""
     from sklearn.decomposition import PCA
@@ -331,10 +350,24 @@ def main() -> None:
                                    pc.cast(points[axis], pa.float32()))
     write(points, args.out / "points.parquet")
 
+    names = {}
+    for name in VOCABULARIES:
+        vocabulary = pq.read_table(args.source / name)
+        keys = vocabulary["key"].to_pylist()
+        titles = pa.array([NAMES.get(key, key) for key in keys], pa.string())
+        write(vocabulary.set_column(vocabulary.schema.get_field_index("title"), "title", titles),
+              args.out / name)
+        names[name] = {key: NAMES[key] for key in keys if key in NAMES}
+        unnamed = [key for key in keys if key not in NAMES]
+        print(f"  {name}: {len(keys) - len(unnamed)} of {len(keys)} keys named"
+              + (f"; titled by their code: {', '.join(unnamed)}" if unnamed else ""))
+
     clusters = {}
     for stem in CLUSTERINGS:
         members = members_of(args.source, stem, keep)
         clusters[stem] = held_artifacts(args.source, stem, members)
+        if stem in NAMED_BY_VOCABULARY:
+            clusters[stem] = named(stem, clusters[stem], names)
         write(clusters[stem], args.out / f"{stem}.parquet")
         write(members, args.out / f"{stem}-members.parquet")
 
@@ -347,16 +380,6 @@ def main() -> None:
         write(labels, args.out / f"{stem}.parquet")
         write(members, args.out / f"{stem}-members.parquet")
         print(f"  {stem}: {labels.num_rows} names kept, every generating paper sampled")
-
-    for name in VOCABULARIES:
-        vocabulary = pq.read_table(args.source / name)
-        keys = vocabulary["key"].to_pylist()
-        titles = pa.array([NAMES.get(key, key) for key in keys], pa.string())
-        write(vocabulary.set_column(vocabulary.schema.get_field_index("title"), "title", titles),
-              args.out / name)
-        unnamed = [key for key in keys if key not in NAMES]
-        print(f"  {name}: {len(keys) - len(unnamed)} of {len(keys)} keys named"
-              + (f"; titled by their code: {', '.join(unnamed)}" if unnamed else ""))
 
     write(second_layout(points, args.data, args.seed), args.out / "points-umap200.parquet")
 

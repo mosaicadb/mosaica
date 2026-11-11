@@ -133,7 +133,6 @@ hierarchy  = { kind = "tiered", prune_children = false }
 visibility                = "public"
 artifact_visibility       = { default = "inherited" }
 require_member_visibility = { count = 1 }
-content                   = { computed = ["centroid", "box"] }
 
   [[layer.levels]]
   level = 0
@@ -146,6 +145,17 @@ content                   = { computed = ["centroid", "box"] }
   [layer.members]
   source = "taxonomy_members"
   fields = { id = "entity" }
+
+  [layer.content]
+  computed = ["centroid", "box"]
+
+  # Each artifact's name, in the `contents` column: arXiv's title for an archive or subject class,
+  # as the vocabularies give it. `inherited` because the name is arXiv's published taxonomy and is
+  # true whatever the members are, so a viewer who reaches the artifact reads it.
+  [[layer.content.supplied]]
+  name                      = "name"
+  type                      = "text"
+  require_member_visibility = "inherited"
 
 # Toponymy's rungs: a tiered layer over a density clustering. Levels are the rungs, coarsest
 # first; the edges are the library's own tree between them; and every cluster on every rung has a

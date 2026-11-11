@@ -667,7 +667,9 @@ paths:
                           "membership": "enumerated",
                           "name": "taxonomy/arxiv",
                           "shape": null,
-                          "supplied_content": [],
+                          "supplied_content": [
+                            "text"
+                          ],
                           "title": "arXiv classification",
                           "version": 1,
                           "views": [

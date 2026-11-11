@@ -243,6 +243,9 @@ container image.
   used to close the tree.
 - A search box whose list closed no longer reads "No value starts with that" while values
   match.
+- The arXiv example dataset names every archive and subject class of its `taxonomy/arxiv` layer,
+  such as Astrophysics for `astro-ph`, with arXiv's title for it, so its rows in the hierarchy and
+  the cluster card no longer read Unnamed and browse finds them by name.
 
 ## [0.3.0] - 2026-11-08
 

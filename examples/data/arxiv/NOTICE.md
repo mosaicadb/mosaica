@@ -10,7 +10,7 @@
 | `points-umap200.parquet` | 50,000 | `entity_id`, `x`, `y`, `categories`: a second layout of the same papers (the `topics-wide` view) |
 | `archive.parquet`, `primary_category.parquet` | 38, 171 | arXiv's archives and subject classes, copied whole from the source, each code titled with arXiv's name for it |
 | `clusters-toponymy.parquet` and members | 797 | Toponymy's four levels of clusters |
-| `taxonomy-arxiv.parquet` and members | 201 | arXiv's own classification: archives over subject classes |
+| `taxonomy-arxiv.parquet` and members | 201 | arXiv's own classification: archives over subject classes, each named in `contents` with its title from the archive or subject-class vocabulary |
 | `topics-toponymy.parquet` and members | 797 | a name for each Toponymy cluster |
 
 The papers carry no abstracts. The names' member file lists, for each name, the papers the language model was shown, which a reader must be able to see before the name is served to them.
@@ -30,7 +30,7 @@ The Toponymy names were written by a language model (Qwen3.6-35B-A3B) through th
 
 The sample keeps every Toponymy exemplar, 4,284 papers, so that each name ships with every paper it was written from. The other 45,716 papers are a uniform draw, with seed 0, from the rest of the corpus. Every clustering and member file is restricted to the sampled papers, and the taxonomy drops the 8 archives and subject classes with no sampled paper. The archive and subject-class vocabularies are copied whole.
 
-The names of the archives and subject classes, such as General Relativity and Quantum Cosmology for `gr-qc` and Machine Learning for `cs.LG`, are transcribed from arXiv's [category taxonomy](https://arxiv.org/category_taxonomy) into `test_corpora/arxiv/example.py`, as that page read on 25 October 2026. The page leaves out eighteen archives retired before it was written: `acc-phys`, `adap-org`, `alg-geom`, `ao-sci`, `atom-ph`, `bayes-an`, `chao-dyn`, `chem-ph`, `cmp-lg`, `comp-gas`, `dg-ga`, `funct-an`, `mtrl-th`, `patt-sol`, `plasm-ph`, `q-alg`, `solv-int` and `supr-con`. Their names, such as Accelerator Physics for `acc-phys`, are taken from `arxiv/taxonomy/definitions.py` in arXiv's own code, [arxiv-base](https://github.com/arXiv/arxiv-base).
+The names of the archives and subject classes, such as General Relativity and Quantum Cosmology for `gr-qc` and Machine Learning for `cs.LG`, are transcribed from arXiv's [category taxonomy](https://arxiv.org/category_taxonomy) into `test_corpora/arxiv/example.py`, as that page read on 25 October 2026, and the same names title the vocabularies and name the taxonomy's artifacts. The page leaves out eighteen archives retired before it was written: `acc-phys`, `adap-org`, `alg-geom`, `ao-sci`, `atom-ph`, `bayes-an`, `chao-dyn`, `chem-ph`, `cmp-lg`, `comp-gas`, `dg-ga`, `funct-an`, `mtrl-th`, `patt-sol`, `plasm-ph`, `q-alg`, `solv-int` and `supr-con`. Their names, such as Accelerator Physics for `acc-phys`, are taken from `arxiv/taxonomy/definitions.py` in arXiv's own code, [arxiv-base](https://github.com/arXiv/arxiv-base).
 
 ## Licences and attribution
 
