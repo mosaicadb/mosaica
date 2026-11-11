@@ -39,15 +39,15 @@
 //! those below them down to the nearest served ones. On a `nested` or `dag` layer those are found
 //! through the level's held lineage, so the cost follows that neighbourhood and not the layer: on a
 //! `nested` level of 3 × 10⁵ artifacts a children page or the roots take about a tenth of a
-//! millisecond, and a search about 170 ms. A `tiered` layer's edges to coarser levels are turned downward on each
-//! request that walks down, reading every artifact's parent edges and no membership. Each row
-//! returned also walks down to its own nearest served descendants for its `child_count`, and up
-//! to its served roots for its rung. Keys are read for the rows returned, and matched for every
-//! candidate of a search. Under `filters`, one more `and_cardinality` per artifact gated. **A
-//! filter whose leaves route row space is the one whole-view scan this design adds** (§9 (d), owner
-//! ruling): a leaf over a render-only column is answered by the viewport only inside its tiles,
-//! and browse has none, so the row route's own predicate is run over every row of the view rather
-//! than over a request's ranges. Served naively its `matched_count` would be silently zero, which
+//! millisecond, and a search about 170 ms. A `tiered` layer's edges to coarser levels are turned
+//! downward on each request that walks down, reading every artifact's parent edges and no
+//! membership. Each row returned also walks down to its own nearest served descendants for its
+//! `child_count`, and up to its served roots for its rung. Keys are read for the rows returned,
+//! and matched for every candidate of a search. Under `filters`, one more `and_cardinality` per
+//! artifact gated. **A filter whose leaves route row space is the one whole-view scan this design
+//! adds** (§9 (d), owner ruling): a leaf over a render-only column is answered by the viewport
+//! only inside its tiles, and browse has none, so the row route's own predicate is run over every
+//! row of the view rather than over a request's ranges. Served naively its `matched_count` would be silently zero, which
 //! is the failure decision 0104 exists to prevent.
 //!
 //! A row without text of its own takes its name from an attached label. The label layers are read
