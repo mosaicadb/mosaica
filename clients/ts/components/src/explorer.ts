@@ -5,9 +5,9 @@ import {repeat} from 'lit/directives/repeat.js';
 import type {ArtifactDetail, ItemDetail, PaletteName, Store} from '@mosaicajs/client';
 import type {CategoryPaletteName, Colouring, DensityColours, DensityMode, DensityScale, RampName, RampScale, SizeScale, Sizing} from '@mosaicajs/deck';
 import {CATEGORY_PALETTES, DEFAULT_DENSITY_CELL_PX, DEFAULT_DENSITY_SCALE, DENSITY_CELL_SIZES, RAMPS, cellDepth, nearestStop} from '@mosaicajs/deck';
-import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, colourLayers, emptyDraft} from '@mosaicajs/client';
-import {hasOneLayout, sizesPoints, topLevelServed} from '@mosaicajs/client/internal';
-import {DENSITY_COLOUR_TITLES, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
+import {CLUSTER_PREFIX, PALETTES, WORLD_SIZE, activeCount, artifactName, clustersInView, colourLayers, emptyDraft} from '@mosaicajs/client';
+import {follows, hasOneLayout, levelFollowsZoom, levelOfLayer, sizesPoints} from '@mosaicajs/client/internal';
+import {DENSITY_COLOUR_TITLES, clusterLayerOf, colourOfFraction, css as rgb, hexOf} from '@mosaicajs/deck/internal';
 import {MosaicaElement, columnCaption, emit, shortCount} from './base.js';
 import {placeCallout, type Rect, type Side} from './callout.js';
 import {colouringOf, setColouring, sizingOf, watchChoices} from './colouring.js';
@@ -32,6 +32,7 @@ import './key-picker.js';
 import './artifact-card.js';
 import './colour-editor.js';
 import type {MosaicaColourEditor} from './colour-editor.js';
+import type {MosaicaEventDetails} from './events.js';
 
 /** Every part of every element the explorer renders, forwarded. */
 const FORWARD = {
@@ -186,11 +187,11 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-selectchange']>} mosaica-selectchange - A selection was drawn, changed or cleared, or its counts arrived.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-layerchange']>} mosaica-layerchange - The layers chosen changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-colourchange']>} mosaica-colourchange - Colour by changed, in the Layers popover or by a card's paint button.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The level a layer is coloured and labelled at changed.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-levelchange']>} mosaica-levelchange - The level one layer is counted, coloured and labelled at changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-displaychange']>} mosaica-displaychange - A setting in the Points or Density section changed.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-sizechange']>} mosaica-sizechange - Size by, the size range or the scale changed in the Points section.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-budgetchange']>} mosaica-budgetchange - Most points was let go at a new number.
- * @fires {CustomEvent<MosaicaEventDetails['mosaica-clusterbudgetchange']>} mosaica-clusterbudgetchange - Most clusters was let go at a new number.
+ * @fires {CustomEvent<MosaicaEventDetails['mosaica-clusterspacingchange']>} mosaica-clusterspacingchange - Cluster density was let go at a new spacing.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-fold']>} mosaica-fold - A field card was folded to one line or opened.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-valuecolour']>} mosaica-valuecolour - Colours were chosen or reset for values of a category, on a field card or in Edit colours.
  * @fires {CustomEvent<MosaicaEventDetails['mosaica-clustercolour']>} mosaica-clustercolour - Colours were chosen or reset for clusters of a layer, on a field card or in Edit colours.
@@ -227,8 +228,9 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  * @csspart points-toggle - The Points switch, with `aria-checked`.
  * @csspart most-points - The Most points slider.
  * @csspart most-points-value - The number of points it stands at, such as "250K".
- * @csspart most-clusters - The Most clusters slider, while a `nested` or `dag` layer is drawn.
- * @csspart most-clusters-value - The number of clusters it stands at, such as "1K".
+ * @csspart cluster-density - The Cluster density slider, while a `nested` or `dag` layer is drawn, or a
+ *   levelled layer whose level follows the zoom is drawn or coloured by.
+ * @csspart cluster-density-value - How many clusters it gives the map at its size, such as "96".
  * @csspart size-by - The Size by button, naming the column the points are sized by or None, with
  *   `aria-expanded` while its menu is open.
  * @csspart size-menu - The Size by menu, while it is open.
@@ -245,7 +247,8 @@ const TABS: readonly {sheet: Sheet; icon: IconName; label: string; panel: Panel}
  *   `aria-expanded` while its menu is open.
  * @csspart colour-menu - The Colour by menu, while it is open.
  * @csspart colour-option - An entry in the Colour by menu, with `data-value` (empty for None,
- *   `cluster:<layer>@<level>` for one level of a levelled layer) and `aria-checked`.
+ *   `cluster:<layer>@<level>` for one level of a levelled layer, `cluster:<layer>@` for Follow zoom
+ *   on one whose levels declare no zoom range) and `aria-checked`.
  * @csspart palette - The Palette button, while the points are coloured by a layer or a category.
  * @csspart palette-menu - The Palette menu, while it is open.
  * @csspart palette-option - A palette in that menu, with `data-value` and `aria-checked`.
@@ -823,14 +826,16 @@ export class MosaicaExplorer extends MosaicaElement {
   /** The highest value of the Most points slider. */
   @property({type: Number, attribute: 'budget-max'}) accessor budgetMax = 2_000_000;
   /**
-   * The most clusters a `nested` or `dag` layer is cut to; `0` removes the limit. Most clusters in
-   * the Layers popover changes it.
+   * The side in CSS pixels of the square of the map each cluster is given, as for `<mosaica-map>`'s
+   * `cluster-spacing`: at 100, a map 1,200 by 800 pixels cuts a `nested` or `dag` layer to 96
+   * clusters, and a level that follows the zoom may have 96 in view. `0` removes the limit. Most
+   * clusters in the Layers popover changes it.
    */
-  @property({type: Number, attribute: 'cluster-budget'}) accessor clusterBudget = 1_000;
-  /** The lowest value of the Most clusters slider. */
-  @property({type: Number, attribute: 'cluster-budget-min'}) accessor clusterBudgetMin = 10;
-  /** The highest value of the Most clusters slider. */
-  @property({type: Number, attribute: 'cluster-budget-max'}) accessor clusterBudgetMax = 10_000;
+  @property({type: Number, attribute: 'cluster-spacing'}) accessor clusterSpacing = 100;
+  /** The smallest spacing Cluster density offers, at its More end. */
+  @property({type: Number, attribute: 'cluster-spacing-min'}) accessor clusterSpacingMin = 50;
+  /** The largest spacing Cluster density offers, at its Fewer end. */
+  @property({type: Number, attribute: 'cluster-spacing-max'}) accessor clusterSpacingMax = 400;
   /**
    * What is drawn under the points, as for `<mosaica-map>`'s `basemap`. The attribute takes `world`
    * and `none`. Unset, a view with a map projection gets the world outline and any other view gets
@@ -893,7 +898,7 @@ export class MosaicaExplorer extends MosaicaElement {
   @state() accessor menu: Menu | null = null;
   /** Where Most points is being dragged, before it is let go. @internal */
   @state() accessor pointsDragged: number | null = null;
-  /** Where Most clusters is being dragged, before it is let go. @internal */
+  /** The cluster spacing Cluster density is being dragged to, before it is let go. @internal */
   @state() accessor clustersDragged: number | null = null;
   /** Whether the list of density colours in the Layers popover is open. @internal */
   @state() accessor densityColoursOpen = false;
@@ -918,8 +923,11 @@ export class MosaicaExplorer extends MosaicaElement {
   private onStatusSlot = (): void => this.requestUpdate();
   /** What the status region says: the card that opened last. */
   private announced = '';
-  /** The level a layer is coloured and labelled at, chosen on its card or in Colour by. @internal */
-  @state() accessor level: number | null = null;
+  /**
+   * The level each layer is counted, coloured and labelled at, chosen on its card or in Colour by,
+   * keyed by layer name. A layer with no entry takes its default level. @internal
+   */
+  @state() accessor levels: ReadonlyMap<string, number> = new Map();
   /** The cards kept open by Pin, oldest first. @internal */
   @state() accessor pinned: Pinned[] = [];
   /** Each callout's size as last measured, by its key. */
@@ -1138,7 +1146,7 @@ export class MosaicaExplorer extends MosaicaElement {
     const narrow = this.narrow;
     // Short of room, the docked layout takes the overlay's form.
     const floating = this.layout === 'overlay' || compact;
-    const level = this.level;
+    const levels = this.levels;
     const hasDetail = this.hasDetail();
     // The detail shows whichever changed last.
     const showArtifact = this.showsArtifact();
@@ -1158,7 +1166,7 @@ export class MosaicaExplorer extends MosaicaElement {
       : html`<div class="names">${pickers}${pickersShown || !viewName ? nothing : html`<h2 part="view-name" class="title" title=${viewName}>${viewName}</h2>`}</div>`;
     const named = pickersShown || viewName !== '' || this.datasetTitle !== '';
     const layersPanel = html`<slot name="layers"><mosaica-layer-picker exportparts=${FORWARD['layer-picker']}></mosaica-layer-picker></slot>`;
-    const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevel=${level}></mosaica-filter-panel></slot>`;
+    const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevels=${levels}></mosaica-filter-panel></slot>`;
     // The status strip speaks for the map and the selection card, unless the host replaced it with something else.
     const quiet = !this.stripReplaced;
     const selectionPanel = this.has('selection') && region ? html`<slot name="selection"><mosaica-selection exportparts=${FORWARD.selection} ?quiet=${quiet}></mosaica-selection></slot>` : nothing;
@@ -1231,7 +1239,7 @@ export class MosaicaExplorer extends MosaicaElement {
     // The tooltip slot is forwarded only when the host supplied one: a slot assigned another slot
     // counts as filled even when that slot is empty, which would hide the map's own tooltip.
     return html`<div part="frame" class=${`${floating ? 'floating' : 'docked'}${compact ? ' compact' : ''}${narrow && this.has('toolbar') && named ? ' titled' : ''}`}
-      @mosaica-levelchange=${(e: CustomEvent<{level: number | null}>) => (this.level = e.detail.level)}
+      @mosaica-levelchange=${(e: CustomEvent<MosaicaEventDetails['mosaica-levelchange']>) => this.chooseLevel(e.detail.layer, e.detail.level)}
       @mosaica-artifactfit=${(e: CustomEvent<{id: string}>) => this.map?.fitTo(BigInt(e.detail.id))}
       @mosaica-viewfollow=${(e: CustomEvent<{view: string; x: number; y: number}>) => this.followItem(e.detail)}
       @mosaica-close=${(e: Event) => this.closeDetail(e)}>
@@ -1248,9 +1256,9 @@ export class MosaicaExplorer extends MosaicaElement {
           tooltip-fields=${this.tooltipFields}
           title-field=${this.titleField || nothing}
           budget=${this.budget || nothing}
-          .clusterBudget=${this.clusterBudget}
+          .clusterSpacing=${this.clusterSpacing}
           controls-corner=${compact ? 'bottom-left' : 'top-left'}
-          .clusterLevel=${level}
+          .clusterLevels=${levels}
           .basemap=${this.basemap}
           .noPoints=${this.noPoints}
           .radius=${this.radius}
@@ -1292,7 +1300,7 @@ export class MosaicaExplorer extends MosaicaElement {
         ? html`<div part="strip-row"><slot name="status" @slotchange=${this.onStatusSlot}><mosaica-status exportparts=${FORWARD.status}></mosaica-status></slot></div>
             <div part="tabs" role="toolbar" aria-label="Panels" @keydown=${this.onTabKey}>${tabs.map(tab)}</div>`
         : nothing}
-      <mosaica-colour-editor exportparts=${FORWARD['colour-editor']} field=${s?.get('legend').colourBy ?? ''} .level=${level}></mosaica-colour-editor>
+      <mosaica-colour-editor exportparts=${FORWARD['colour-editor']} field=${s?.get('legend').colourBy ?? ''} .clusterLevels=${levels}></mosaica-colour-editor>
     </div>`;
   }
 
@@ -1618,7 +1626,7 @@ export class MosaicaExplorer extends MosaicaElement {
           <button part="points-toggle" class="switch small" type="button" role="switch" aria-checked=${s.points ? 'true' : 'false'} aria-label="Show points"
             @click=${() => change({points: !s.points})}><span class="knob"></span></button>
         </div>
-        ${this.mostPoints(!s.points)}${this.mostClusters()}
+        ${this.mostPoints(!s.points)}${this.clusterDensity()}
         <div class="sliders">
           ${this.sizeControls(radius, !s.points)}
           <label for="point-opacity">Opacity</label>
@@ -1647,74 +1655,98 @@ export class MosaicaExplorer extends MosaicaElement {
    */
   private mostPoints(disabled: boolean): TemplateResult {
     const s = this.resolvedStore;
+    const min = Math.max(1, this.budgetMin);
+    const max = Math.max(min * 10, this.budgetMax);
+    const span = Math.log(max / min);
+    const at = (n: number) => Math.min(1, Math.max(0, Math.log(n / min) / span));
+    const shown = this.pointsDragged ?? s?.budget ?? 250_000;
+    // A tick at each power of ten between the ends, where it leaves room for the last end's label.
+    const ticks: {at: number; text: string}[] = [];
+    for (let p = 10 ** Math.ceil(Math.log10(min) + 1e-9); p < max; p *= 10) if (at(p) > 0.08 && at(p) < 0.85) ticks.push({at: at(p), text: pointsText(p)});
     return this.mostSlider({
       id: 'most-points',
       label: 'Most points',
-      unit: 'points',
-      range: [this.budgetMin, this.budgetMax],
-      shown: this.pointsDragged ?? s?.budget ?? 250_000,
+      at: at(shown),
+      readout: pointsText(shown),
+      valueText: `${pointsText(shown)} points`,
+      ends: [pointsText(min), pointsText(max)],
+      ticks,
       disabled: disabled || !s,
+      of: (t) => Math.min(max, Math.max(min, roundPoints(min * Math.exp(t * span)))),
       drag: (n) => (this.pointsDragged = n),
       set: (n) => this.setBudget(n)
     });
   }
 
   /**
-   * Most clusters, while a `nested` or `dag` layer is drawn: a slider from `cluster-budget-min` to
-   * `cluster-budget-max` as Most points is. Letting go sets the most clusters such a layer is cut to.
+   * Cluster density, while a `nested` or `dag` layer is drawn, or a levelled layer following the zoom
+   * is drawn or coloured by: a slider over the cluster spacing on a log scale, from
+   * `cluster-spacing-max` at its Fewer end to `cluster-spacing-min` at its More end, with how many
+   * clusters the spacing gives the map at its size. Letting go sets the store's spacing.
    */
-  private mostClusters(): TemplateResult | typeof nothing {
+  private clusterDensity(): TemplateResult | typeof nothing {
     const s = this.resolvedStore;
     const meta = s?.get('meta') ?? null;
     if (!s || !meta) return nothing;
-    const treed = s.get('artifacts').layers.some((name) => {
-      const kind = meta.layers.find((l) => l.name === name)?.hierarchy.kind;
-      return kind === 'nested' || kind === 'dag';
+    const coloured = clusterLayerOf(s.get('legend').colourBy);
+    const steered = [...s.get('artifacts').layers, ...(coloured === null ? [] : [coloured])].some((name) => {
+      const layer = meta.layers.find((l) => l.name === name);
+      if (!layer) return false;
+      return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag' || follows(layer, this.levels.get(name));
     });
-    if (!treed) return nothing;
+    if (!steered) return nothing;
+    const dense = Math.max(1, this.clusterSpacingMin);
+    const sparse = Math.max(dense * 2, this.clusterSpacingMax);
+    const span = Math.log(sparse / dense);
+    // With no spacing the map shows every cluster, as at the More end.
+    const shown = this.clustersDragged ?? s.clusterSpacing ?? dense;
+    const map = this.renderRoot.querySelector('mosaica-map');
+    const count = map && map.clientWidth > 0 && map.clientHeight > 0 ? clustersInView(shown, map.clientWidth, map.clientHeight) : null;
+    const square = `one per ${Math.round(shown)} px square`;
     return this.mostSlider({
-      id: 'most-clusters',
-      label: 'Most clusters',
-      unit: 'clusters',
-      range: [this.clusterBudgetMin, this.clusterBudgetMax],
-      shown: this.clustersDragged ?? s.clusterBudget ?? (this.clusterBudget || this.clusterBudgetMax),
+      id: 'cluster-density',
+      label: 'Cluster density',
+      at: Math.min(1, Math.max(0, Math.log(sparse / shown) / span)),
+      readout: count === null ? `1 per ${Math.round(shown)} px` : pointsText(count),
+      valueText: count === null ? square : `${count} clusters, ${square}`,
+      ends: ['Fewer', 'More'],
+      ticks: [],
       disabled: false,
+      of: (t) => Math.min(sparse, Math.max(dense, Math.round(sparse * Math.exp(-t * span)))),
       drag: (n) => (this.clustersDragged = n),
-      set: (n) => this.setClusterBudget(n)
+      set: (n) => this.setClusterSpacing(n)
     });
   }
 
-  /** A log-scale slider over `range` on round numbers, with the number it stands at. */
+  /**
+   * A slider standing `at` of the way along, with its readout, its ends' labels and its ticks. `of`
+   * gives the value at a share of the way along; dragging passes it to `drag`, and letting go to
+   * `set`.
+   */
   private mostSlider(o: {
-    id: 'most-points' | 'most-clusters';
+    id: 'most-points' | 'cluster-density';
     label: string;
-    unit: string;
-    range: [number, number];
-    shown: number;
+    at: number;
+    readout: string;
+    valueText: string;
+    ends: [string, string];
+    ticks: readonly {at: number; text: string}[];
     disabled: boolean;
+    of: (t: number) => number;
     drag: (n: number) => void;
     set: (n: number) => void;
   }): TemplateResult {
-    const min = Math.max(1, o.range[0]);
-    const max = Math.max(min * 10, o.range[1]);
-    const span = Math.log(max / min);
-    const at = (n: number) => Math.min(1, Math.max(0, Math.log(n / min) / span));
-    const of = (t: number) => Math.min(max, Math.max(min, roundPoints(min * Math.exp(t * span))));
-    const t = at(o.shown);
-    // A tick at each power of ten between the ends, where it leaves room for the last end's label.
-    const ticks: number[] = [];
-    for (let p = 10 ** Math.ceil(Math.log10(min) + 1e-9); p < max; p *= 10) if (at(p) > 0.08 && at(p) < 0.85) ticks.push(p);
-    const read = (e: Event) => of(Number((e.target as HTMLInputElement).value) / 1000);
+    const read = (e: Event) => o.of(Number((e.target as HTMLInputElement).value) / 1000);
     return html`<div class="most">
-      <div class="most-top"><label for=${o.id}>${o.label}</label><span part=${o.id === 'most-points' ? 'most-points-value' : 'most-clusters-value'} class="most-value">${pointsText(o.shown)}</span></div>
-      <input id=${o.id} part=${o.id === 'most-points' ? 'most-points' : 'most-clusters'} class="slider" type="range" min="0" max="1000" step="1" .value=${String(Math.round(t * 1000))} ?disabled=${o.disabled}
-        style=${`--fill:${(t * 100).toFixed(1)}%`} aria-valuetext=${`${pointsText(o.shown)} ${o.unit}`}
+      <div class="most-top"><label for=${o.id}>${o.label}</label><span part=${o.id === 'most-points' ? 'most-points-value' : 'cluster-density-value'} class="most-value">${o.readout}</span></div>
+      <input id=${o.id} part=${o.id === 'most-points' ? 'most-points' : 'cluster-density'} class="slider" type="range" min="0" max="1000" step="1" .value=${String(Math.round(o.at * 1000))} ?disabled=${o.disabled}
+        style=${`--fill:${(o.at * 100).toFixed(1)}%`} aria-valuetext=${o.valueText}
         @input=${(e: Event) => o.drag(read(e))}
         @change=${(e: Event) => o.set(read(e))} />
       <div class="ticks" aria-hidden="true">
-        <span style="left:0">${pointsText(min)}</span>
-        ${ticks.map((p) => html`<span class="mid" style=${`left:${(at(p) * 100).toFixed(1)}%`}>${pointsText(p)}</span>`)}
-        <span style="right:0">${pointsText(max)}</span>
+        <span style="left:0">${o.ends[0]}</span>
+        ${o.ticks.map((p) => html`<span class="mid" style=${`left:${(p.at * 100).toFixed(1)}%`}>${p.text}</span>`)}
+        <span style="right:0">${o.ends[1]}</span>
       </div>
     </div>`;
   }
@@ -1729,14 +1761,14 @@ export class MosaicaExplorer extends MosaicaElement {
     this.requestUpdate();
   }
 
-  /** Set the most clusters a treed layer is cut to from Most clusters, and report it. */
-  private setClusterBudget(budget: number): void {
+  /** Set the store's cluster spacing from Cluster density, and report it. */
+  private setClusterSpacing(spacing: number): void {
     this.clustersDragged = null;
     const s = this.resolvedStore;
-    if (!s || budget === s.clusterBudget) return;
-    s.setClusterBudget(budget);
-    this.clusterBudget = budget;
-    emit(this, 'mosaica-clusterbudgetchange', {budget});
+    if (!s || spacing === s.clusterSpacing) return;
+    s.setClusterSpacing(spacing);
+    this.clusterSpacing = spacing;
+    emit(this, 'mosaica-clusterspacingchange', {spacing});
   }
 
   /**
@@ -1791,7 +1823,8 @@ export class MosaicaExplorer extends MosaicaElement {
 
   /**
    * What Colour by offers: None, every layer that can colour (a levelled layer once per level, by
-   * its levels' titles), and the rendered category and number columns.
+   * its levels' titles, after Follow zoom where no level declares a zoom range), and the rendered
+   * category and number columns.
    */
   private colourOptions(): {value: string; title: string; kind: string; checked: boolean}[] {
     const s = this.resolvedStore;
@@ -1801,14 +1834,20 @@ export class MosaicaExplorer extends MosaicaElement {
     const layers = colourLayers(meta.layers).flatMap((decl) => {
       const value = `${CLUSTER_PREFIX}${decl.name}`;
       if (decl.levels.length <= 1) return [{value, title: decl.title || decl.name, kind: 'Clusters', checked: colourBy === value}];
-      const drawn = this.level ?? topLevelServed(decl, s?.get('artifacts').served ?? []);
-      return decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && drawn === lv.level}));
+      const chosen = this.levels.get(decl.name);
+      const following = follows(decl, chosen);
+      const drawn = levelOfLayer(decl, chosen, s?.get('artifacts').followedLevels);
+      const follow = levelFollowsZoom(decl) ? [{value: `${value}@`, title: `${decl.title || decl.name}, follow zoom`, kind: 'Clusters', checked: colourBy === value && following}] : [];
+      return [...follow, ...decl.levels.map((lv) => ({value: `${value}@${lv.level}`, title: lv.title || `${decl.title || decl.name}, level ${lv.level}`, kind: 'Clusters', checked: colourBy === value && !following && drawn === lv.level}))];
     });
     const columns = meta.declaredScalars.filter((c) => c.render).map((c) => ({value: c.name, title: columnCaption(c.name), kind: c.category ? 'Category' : c.arrowType === 'timestamp_us' ? 'Date' : 'Number', checked: colourBy === c.name}));
     return [{value: '', title: 'None', kind: '', checked: colourBy === null}, ...layers, ...columns];
   }
 
-  /** Colour by `value`: a column, `cluster:<layer>`, or `cluster:<layer>@<level>` for one level of a layer. */
+  /**
+   * Colour by `value`: a column, `cluster:<layer>`, `cluster:<layer>@<level>` for one level of a
+   * layer, or `cluster:<layer>@` for the level that follows the zoom.
+   */
   private chooseColour(value: string): void {
     const s = this.resolvedStore;
     if (!s) return;
@@ -1816,10 +1855,20 @@ export class MosaicaExplorer extends MosaicaElement {
     const colourBy = value === '' ? null : at > 0 ? value.slice(0, at) : value;
     s.setColourBy(colourBy);
     emit(this, 'mosaica-colourchange', {colourBy});
-    if (at > 0) {
-      this.level = Number(value.slice(at + 1));
-      emit(this, 'mosaica-levelchange', {level: this.level});
+    if (at > 0 && colourBy !== null) {
+      const layer = colourBy.slice(CLUSTER_PREFIX.length);
+      const level = at === value.length - 1 ? null : Number(value.slice(at + 1));
+      this.chooseLevel(layer, level);
+      emit(this, 'mosaica-levelchange', {layer, level});
     }
+  }
+
+  /** Count, colour and label `layer` at `level`, or at its default level where `level` is null; other layers keep theirs. */
+  private chooseLevel(layer: string, level: number | null): void {
+    const levels = new Map(this.levels);
+    if (level === null) levels.delete(layer);
+    else levels.set(layer, level);
+    this.levels = levels;
   }
 
   /** Colour a layer's clusters from `palette`, and report it. */

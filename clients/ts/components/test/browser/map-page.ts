@@ -45,6 +45,7 @@ const w = window as unknown as {
   selectRegion(bbox: [number, number, number, number]): void;
   regionEdge(): [number, number];
   setStatus(over: Partial<StatusProjection>): void;
+  canvases(): [number, number][];
   ready: boolean;
 };
 w.zooms = [];
@@ -76,4 +77,10 @@ w.regionEdge = () => {
   return [now.left + x, now.top + y];
 };
 w.setStatus = (over) => store.set('status', status(over));
+/** The canvas size each camera the map gave the store was for. */
+w.canvases = () =>
+  store.calls
+    .filter((c) => c.name === 'setView')
+    .map((c) => c.args[0] as {width: number; height: number})
+    .map((v) => [v.width, v.height]);
 w.ready = true;

@@ -73,7 +73,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     view: {id: '', composition: null, depth: 0, visible: NO_MASKED, matched: NO_MASKED, highlighted: NO_MASKED, highlighting: false, served: NO_COUNT, provisional: 0, inView: null},
     marks: {bands: [], standIn: [], count: NO_COUNT},
     tiles: {tiles: []},
-    artifacts: {layer: null, layers: [], served: [], colourServed: [], attached: new Map(), lineage: servedLineage([]), status: 'idle', refusal: null, version: 0, held: 0, table: new SessionArtifactTable(), servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}},
+    artifacts: {layer: null, layers: [], served: [], colourServed: [], levelsInView: new Map(), followedLevels: new Map(), attached: new Map(), lineage: servedLineage([]), status: 'idle', refusal: null, version: 0, held: 0, table: new SessionArtifactTable(), servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
     filters: {draft: {filter: {}, highlight: {}}, expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
@@ -104,7 +104,8 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     projections,
     calls,
     budget: 250_000,
-    clusterBudget: null,
+    clusterSpacing: null,
+    clusterCount: null,
     get: (name) => projections[name],
     set(name, value) {
       if (name === 'meta') titles.clear();
@@ -143,7 +144,7 @@ export function fakeStore(overrides: Partial<Projections> = {}): FakeStore {
     setPointColumns: spy('setPointColumns'),
     setPalette: spy('setPalette'),
     setBudget: spy('setBudget'),
-    setClusterBudget: spy('setClusterBudget'),
+    setClusterSpacing: spy('setClusterSpacing'),
     setCurrentView: spy('setCurrentView'),
     // The unit square, so a component's data↔world conversion is the identity here and a test
     // asserting on world coordinates is asserting on what it wrote.

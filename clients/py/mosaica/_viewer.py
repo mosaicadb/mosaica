@@ -934,9 +934,9 @@ class Selection:
         budget: int = 0,
         budget_min: int = 1_000,
         budget_max: int = 2_000_000,
-        cluster_budget: int = 1_000,
-        cluster_budget_min: int = 10,
-        cluster_budget_max: int = 10_000,
+        cluster_spacing: float = 100,
+        cluster_spacing_min: float = 50,
+        cluster_spacing_max: float = 400,
         palette: Optional[str] = None,
         value_colours: Optional[dict] = None,
         cluster_colours: Optional[dict] = None,
@@ -974,9 +974,9 @@ class Selection:
             budget=budget,
             budget_min=budget_min,
             budget_max=budget_max,
-            cluster_budget=cluster_budget,
-            cluster_budget_min=cluster_budget_min,
-            cluster_budget_max=cluster_budget_max,
+            cluster_spacing=cluster_spacing,
+            cluster_spacing_min=cluster_spacing_min,
+            cluster_spacing_max=cluster_spacing_max,
             palette=palette,
             value_colours=value_colours,
             cluster_colours=cluster_colours,
@@ -1819,19 +1819,26 @@ class Viewer:
         The page holds the rows in `artifacts` and the cursor for the next page in `next`, absent
         on the last page.
 
-        - `view`, `layer`, `level`: as for `artifacts`.
-        - `parent`: list the children of this annotation, given by its `mosaica_id`. Without it
-          or `q`, the page lists the top-level annotations.
+        - `view`, `layer`: as for `artifacts`.
+        - `level`: on a stacked or tiered layer, list the top-level annotations or the search
+          results of this level alone. Without it they cover every level. It cannot be combined
+          with `parent`, whose children are listed at every level.
+        - `parent`: list the children of this annotation, given by its `mosaica_id`, at any
+          level. Without it or `q`, the page lists the top-level annotations, those with no
+          ancestor this reader may see.
         - `q`: list the annotations whose key or name contains this text, ignoring case. It
           cannot be combined with `parent`.
         - `filters`: a filter expression. Each row then has `matched_count`, the number of its
-          items this reader may see that match, and the page is ordered by it.
+          items this reader may see that match, and the page is ordered by it, then by
+          `masked_count`.
         - `limit`: the most rows on the page, capped at the server's `max_browse_rows`.
         - `cursor`: the `next` of the previous page.
         - `palette_size`: how many colours your palette holds, as on `artifacts`.
 
-        Each row has `masked_count`, the number of its items this reader may see, and
-        `child_count`, how many rows `parent=` would list for it. A row has a `name` when the
+        Each row has `masked_count`, the number of its items this reader may see, `parent_ids`,
+        the annotations nearest above it that this reader may see, and `child_count`, how many
+        rows `parent=` would list for it. An annotation this reader may not see is skipped, so its
+        children are listed under the annotations above it. A row has a `name` when the
         annotation has text or a label attached to it, such as a cluster's topic.
 
             page = v.browse_artifacts("papers", "clusters")

@@ -702,10 +702,14 @@ gives the map no name of its own. `db.map`, `viewer.map` and `selection.map` all
 unless you give others, are the fewest and the most a control for it offers; neither changes
 `budget`. `db.map`, `viewer.map` and `selection.map` all take the three and pass them on.
 
-`cluster_budget` is the most clusters a `nested` or `dag` layer is drawn with, met by drawing
-parents in place of their children. Its default is 1,000, and `0` draws every cluster.
-`cluster_budget_min` and `cluster_budget_max`, 10 and 10,000 by default, are the ends of the
-control for it, and neither changes `cluster_budget`.
+`cluster_spacing` is the side in CSS pixels of the square of the map each cluster is given, so
+the map shows about one cluster per square whatever its size: at the default, 100, a map 1,200 by
+800 pixels shows 96. A `nested` or `dag` layer is drawn with that many, by drawing parents in place
+of their children, and a layer with levels that follows the zoom is drawn at the finest level with
+no more than that many in view, so the world view shows a broad level and finer ones appear as you
+zoom in. `0` removes the limit. `cluster_spacing_min` and `cluster_spacing_max`, 50 and 400 by
+default, are the spacings at the More and Fewer ends of the control for it, and neither changes
+`cluster_spacing`.
 
 `basemap` is what is drawn under the points: `"world"` (land, coastlines and borders, on a view
 with a map projection), `"none"`, `{"tiles": url_template, "attribution": text}`, or
@@ -784,11 +788,11 @@ skipped and `Map(url)` takes no `token`.
 | kernel → page | `{type: "basemap-image", path, read, mime}` and the bytes as a buffer | in answer to `basemap-images`, for each read it names that the kernel holds |
 
 Traitlets: `url`, `explorer_layout`, `height`, `label`, `title_field`, `artifacts_per_tile`,
-`budget_min`, `budget_max`, `cluster_budget_min`, `cluster_budget_max` and `_basemap` (the
+`budget_min`, `budget_max`, `cluster_spacing_min`, `cluster_spacing_max` and `_basemap` (the
 `basemap` value with each local image as `{"local": path}`, the path as written, and that path's
 read number, never its bytes) down; `view`, `bbox`,
 `layers`, `colour_by`, `palette`, `size_by`, `size_min`, `size_max`, `size_scale` and `filters`
-both ways, synced up at the settle; `budget` and `cluster_budget` both ways, up when the map's
+both ways, synced up at the settle; `budget` and `cluster_spacing` both ways, up when the map's
 slider is let go; `value_colours` and `cluster_colours` both ways, up as each colour is chosen
 in the map, as `palette` also is; `selected`, `selected_artifact`, `region` up.
 `last_error` and `basemap` are kernel-side only. The JavaScript half is `clients/ts/components/src/widget.ts`.

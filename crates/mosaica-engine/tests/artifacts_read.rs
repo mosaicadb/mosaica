@@ -655,9 +655,11 @@ fn taxon_rows(pages: &[RecordBatch]) -> Vec<TaxonRow> {
     out
 }
 
-/// **A read by identifier fills the figures of the levels its identifiers name and the levels
-/// their parents sit at, and no other**, and answers as the read of every level does. Each
-/// viewer below holds a grant of its own, so each level's figures are filled once per viewer.
+/// **A read by identifier fills the figures of the levels its identifiers name and, where it
+/// names `parents`, every level above them, and no other**, and answers as the read of every
+/// level does. The levels above are those the climb to an artifact's nearest served ancestors can
+/// pass through. Each viewer below holds a grant of its own, so each level's figures are filled
+/// once per viewer.
 #[test]
 fn a_read_by_identifier_reads_only_the_levels_it_names() {
     let fx = fixture();
@@ -696,18 +698,337 @@ fn a_read_by_identifier_reads_only_the_levels_it_names() {
     assert!(!want.is_empty(), "the subset viewer is served some family");
     assert_eq!(by_ids, want);
 
-    // Species name their genera: the genera's level and the species', and not the families'.
+    // Species name their genera: the species' level and both above it.
     let all = engine.authorise_all().unwrap();
     let before = fills();
     let by_ids = read_by_ids(&all, &species);
-    assert_eq!(fills(), before + 2, "a read of species with parents fills species and genera");
+    assert_eq!(fills(), before + 3, "a read of species with parents fills every level");
     let whole = every_level(&all);
-    assert_eq!(fills(), before + 3, "the read of every level fills the families");
+    assert_eq!(fills(), before + 3, "so the read of every level fills nothing more");
     let named: HashSet<u64> = species.iter().map(|id| id.raw()).collect();
     let want: Vec<TaxonRow> = whole.into_iter().filter(|row| named.contains(&row.0)).collect();
     assert_eq!(want.len(), species.len());
     assert!(want.iter().all(|row| row.3.len() == 1), "every species names its genus");
     assert_eq!(by_ids, want);
+}
+
+/// **A withheld parent is climbed through.** With a genus suppressed, its species name the family
+/// above it in `parents`, as browse and the artifacts frame name it, and a read under `parent`
+/// naming the family lists them after the family's served genera. The genus is named in no row.
+#[test]
+fn a_withheld_parents_children_name_the_artifact_above_it() {
+    let fx = fixture();
+    let engine = fx.engine();
+    plant_taxa(&fx);
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let fields = names(&["key", "level", "parents", "masked_count", "centroid"]);
+    let read = |req: &ArtifactsRequest<'_>| taxon_rows(&read_all(engine, &full, req));
+    let planted = read(&request(TAXA, &fields));
+    let id = |key: &str| planted.iter().find(|row| row.1 == key).unwrap().0;
+    let (family, genus) = (id("t0-0"), id("t1-0"));
+    engine
+        .accept_changes(vec![(
+            artifact_target(engine, MosaicaId::new(genus)),
+            ChangeOp::Suppress,
+        )])
+        .unwrap();
+
+    let after = read(&request(TAXA, &fields));
+    for species in ["t2-0", "t2-1"] {
+        let row = after.iter().find(|row| row.1 == species).unwrap();
+        assert_eq!(row.3, vec![family], "{species} names the family above its genus");
+    }
+    assert!(after.iter().all(|row| row.0 != genus && !row.3.contains(&genus)));
+
+    let mut under = request(TAXA, &fields);
+    under.parent = Some(MosaicaId::new(family));
+    let keys: Vec<String> = read(&under).into_iter().map(|row| row.1).collect();
+    assert_eq!(keys, vec!["t1-1", "t1-2", "t2-0", "t2-1"]);
+}
+
+/// **A read by identifier that names `parents` climbs through a withheld parent.** With a genus
+/// suppressed, a read naming two of its species, a served genus and the genus itself returns the
+/// three served rows, each species naming the family above its genus, and names the genus nowhere.
+#[test]
+fn a_read_by_identifier_names_the_artifact_above_a_withheld_parent() {
+    let fx = fixture();
+    let engine = fx.engine();
+    plant_taxa(&fx);
+    let full = engine.authorise(&full_coverage_credential()).unwrap();
+    let fields = names(&["key", "level", "parents", "masked_count", "centroid"]);
+    let planted = taxon_rows(&read_all(engine, &full, &request(TAXA, &fields)));
+    let id = |key: &str| planted.iter().find(|row| row.1 == key).unwrap().0;
+    let (family, genus) = (id("t0-0"), id("t1-0"));
+    engine
+        .accept_changes(vec![(
+            artifact_target(engine, MosaicaId::new(genus)),
+            ChangeOp::Suppress,
+        )])
+        .unwrap();
+
+    let named: Vec<MosaicaId> = ["t2-0", "t2-1", "t1-1", "t1-0"]
+        .into_iter()
+        .map(|key| MosaicaId::new(id(key)))
+        .collect();
+    let mut req = request(TAXA, &fields);
+    req.ids = Some(&named);
+    let rows = taxon_rows(&read_all(engine, &full, &req));
+    let mut keys: Vec<&str> = rows.iter().map(|row| row.1.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec!["t1-1", "t2-0", "t2-1"]);
+    for row in &rows {
+        assert_eq!(row.3, vec![family], "{} names the family", row.1);
+    }
+    assert!(rows
+        .iter()
+        .all(|row| row.0 != genus && !row.3.contains(&genus)));
+}
+
+/// Each served key with its parents' keys, sorted, and every identifier one route named.
+type Structure = (BTreeMap<String, Vec<String>>, HashSet<u64>);
+
+/// Keys each row's parents, given as identifiers, through the rows' own identifiers.
+fn structure(rows: Vec<(u64, String, Vec<u64>)>) -> Structure {
+    let key_of: HashMap<u64, String> = rows.iter().map(|(id, key, _)| (*id, key.clone())).collect();
+    let mut named = HashSet::new();
+    let mut tree = BTreeMap::new();
+    for (id, key, parents) in rows {
+        named.insert(id);
+        named.extend(parents.iter().copied());
+        let mut keys: Vec<String> = parents
+            .iter()
+            .map(|p| {
+                key_of
+                    .get(p)
+                    .cloned()
+                    .unwrap_or_else(|| format!("unserved {p}"))
+            })
+            .collect();
+        keys.sort();
+        tree.insert(key, keys);
+    }
+    (tree, named)
+}
+
+/// `layer`'s parent structure as a bulk read, browse and the artifacts frame give it to
+/// `credential`, with browse's child counts and the frame's rungs.
+fn structures(
+    engine: &Engine,
+    credential: &[u8],
+    layer: &str,
+) -> ([Structure; 3], BTreeMap<String, u64>, BTreeMap<String, u32>) {
+    let session = engine.authorise(credential).unwrap();
+    let fields = names(&["key", "parents"]);
+    let pages = read_all(engine, &session, &request(layer, &fields));
+    let mut bulk = Vec::new();
+    for batch in &pages {
+        let ids = column::<UInt64Array>(batch, "mosaica_id");
+        let keys = column::<StringArray>(batch, "key");
+        let parents = column::<ListArray>(batch, "parents");
+        for i in 0..batch.num_rows() {
+            let list = parents.value(i);
+            let list = list.as_any().downcast_ref::<UInt64Array>().unwrap();
+            bulk.push((
+                ids.value(i),
+                keys.value(i).to_string(),
+                list.values().to_vec(),
+            ));
+        }
+    }
+    let browsed = engine
+        .browse(
+            &session,
+            mosaica_engine::browse::BrowseRequest {
+                view: "s0",
+                layer,
+                level: None,
+                form: mosaica_engine::browse::BrowseForm::Search(String::new()),
+                filter: None,
+                limit: 1000,
+                cursor: None,
+                palette_size: None,
+                cancel: None,
+            },
+        )
+        .unwrap()
+        .artifacts;
+    let child_counts = browsed
+        .iter()
+        .map(|r| (r.key.clone().unwrap(), r.child_count))
+        .collect();
+    let browsed = browsed
+        .into_iter()
+        .map(|r| {
+            let parents = r.parent_ids.iter().map(|id| id.raw()).collect();
+            (r.mosaica_id.raw(), r.key.unwrap(), parents)
+        })
+        .collect();
+    let framed: Vec<_> = artifacts_of(engine, credential)
+        .into_iter()
+        .filter(|a| a.layer == layer)
+        .collect();
+    let rungs = framed
+        .iter()
+        .map(|a| (a.key.clone().unwrap(), a.rung))
+        .collect();
+    let framed = framed
+        .into_iter()
+        .map(|a| {
+            let parents = a.parent_ids.iter().map(|id| id.raw()).collect();
+            (a.mosaica_id.raw(), a.key.unwrap(), parents)
+        })
+        .collect();
+    (
+        [structure(bulk), structure(browsed), structure(framed)],
+        child_counts,
+        rungs,
+    )
+}
+
+/// A nested chain on `declared`'s layer: `top` over `mid` and `side`, and `leaf` under `mid`,
+/// with `mid` carrying `mid_label` where the layer reads labels. Returns `mid`'s identifier.
+fn plant_chain(
+    fx: &Fx,
+    declared: LayerDeclaration,
+    [top, mid, side, leaf]: [Vec<u64>; 4],
+    mid_label: &[u8],
+) -> u64 {
+    let engine = fx.engine();
+    let layer = declared.name.clone();
+    let labelled = declared.artifact_visibility.carries_own_labels();
+    engine.register_layer(declared).unwrap();
+    let planted = [
+        ("top", top, None),
+        ("mid", mid, Some("top")),
+        ("side", side, Some("top")),
+        ("leaf", leaf, Some("mid")),
+    ]
+    .into_iter()
+    .map(|(key, members, parent)| {
+        let mut a = IncomingArtifact::from_entities(Some(key.into()), fx.entities(members));
+        a.parent_keys = parent.into_iter().map(str::to_string).collect();
+        if labelled {
+            a.access = Some(match key {
+                "mid" => vec![mid_label.to_vec()],
+                _ => Vec::new(),
+            });
+        }
+        a
+    })
+    .collect();
+    engine.publish_artifacts(layer.clone(), 0, planted).unwrap();
+    tick(engine);
+    let session = engine.authorise_all().unwrap();
+    let fields = names(&["key"]);
+    let pages = read_all(engine, &session, &request(&layer, &fields));
+    let at = keys(&pages).iter().position(|k| k == "mid").unwrap();
+    ids(&pages)[at]
+}
+
+/// The chain's structure once `mid` is withheld: `leaf` hangs from `top` beside `side`.
+fn chain_without_mid() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        ("top".to_string(), Vec::new()),
+        ("side".to_string(), vec!["top".to_string()]),
+        ("leaf".to_string(), vec!["top".to_string()]),
+    ])
+}
+
+/// **A middle artifact withheld by its own label reads, on every route, exactly as one suppressed
+/// for everyone.** On one layer `mid` carries a label the broad viewer lacks; on another it is
+/// suppressed. The broad viewer's bulk read, browse and artifacts frame give both layers the same
+/// tree, in which `leaf` hangs from `top`, `top` counts two children and `leaf` sits one rung
+/// below it, and the labelled `mid`'s identifier, which the subset viewer is served, appears
+/// nowhere.
+#[test]
+fn a_middle_artifact_withheld_by_its_label_reads_as_one_suppressed_on_every_route() {
+    let fx = fixture();
+    let engine = fx.engine();
+    let chain = || {
+        [
+            (0..300).collect(),
+            (0..200).collect(),
+            (200..300).collect(),
+            (0..100).collect(),
+        ]
+    };
+    let mut labelled = base_declaration("chain/labelled", HierarchyKind::Nested);
+    labelled.artifact_visibility = ArtifactVisibility::carried("visibility");
+    let labelled_mid = plant_chain(&fx, labelled, chain(), b"1");
+    let suppressed_mid = plant_chain(
+        &fx,
+        base_declaration("chain/suppressed", HierarchyKind::Nested),
+        chain(),
+        b"",
+    );
+    engine
+        .accept_changes(vec![(fx.target_of(suppressed_mid), ChangeOp::Suppress)])
+        .unwrap();
+
+    let (subset_routes, ..) = structures(engine, &subset_credential(), "chain/labelled");
+    assert!(
+        subset_routes
+            .iter()
+            .all(|(_, named)| named.contains(&labelled_mid)),
+        "the subset viewer holds the label and is served mid on every route"
+    );
+
+    let full = full_coverage_credential();
+    let (by_label, label_children, label_rungs) = structures(engine, &full, "chain/labelled");
+    let (by_deny, deny_children, deny_rungs) = structures(engine, &full, "chain/suppressed");
+    for (route, (labelled, denied)) in ["bulk read", "browse", "frame"]
+        .iter()
+        .zip(by_label.iter().zip(&by_deny))
+    {
+        assert_eq!(labelled.0, chain_without_mid(), "{route}");
+        assert_eq!(
+            labelled.0, denied.0,
+            "{route}: a label and a suppression read alike"
+        );
+        assert!(
+            !labelled.1.contains(&labelled_mid),
+            "{route} names the labelled mid"
+        );
+        assert!(
+            !denied.1.contains(&suppressed_mid),
+            "{route} names the suppressed mid"
+        );
+    }
+    assert_eq!(label_children, deny_children);
+    assert_eq!(label_children["top"], 2);
+    assert_eq!(label_rungs, deny_rungs);
+    assert_eq!(label_rungs["leaf"], 1, "the withheld node occupies no rung");
+}
+
+/// **A middle artifact below its layer's fraction is climbed through on every route.** Under a bar
+/// of one half, the subset viewer sees 34 of `mid`'s 167 members and every member of `leaf` and
+/// `side`, and 267 of `top`'s 400, so it is served the chain without `mid`, and `mid`'s
+/// identifier, which the broad viewer is served, appears on none of its routes.
+#[test]
+fn a_middle_artifact_below_its_fraction_is_climbed_through_on_every_route() {
+    let fx = fixture();
+    let engine = fx.engine();
+    let seen = |r: std::ops::Range<u64>| r.filter(|&s| subset_sees(s)).collect::<Vec<u64>>();
+    let unseen = |r: std::ops::Range<u64>| r.filter(|&s| !subset_sees(s)).collect::<Vec<u64>>();
+    let leaf = seen(0..100);
+    let mid = [leaf.clone(), unseen(0..200)].concat();
+    let side = seen(200..300);
+    let top = [mid.clone(), side.clone(), seen(300..900)].concat();
+    let mut declared = base_declaration("chain/fraction", HierarchyKind::Nested);
+    declared.require_member_visibility = Some(ExistenceCriterion::Fraction(0.5));
+    let mid_id = plant_chain(&fx, declared, [top, mid, side, leaf], b"");
+
+    let (broad, ..) = structures(engine, &full_coverage_credential(), "chain/fraction");
+    assert!(broad
+        .iter()
+        .all(|(tree, named)| tree.len() == 4 && named.contains(&mid_id)));
+    let (narrow, children, rungs) = structures(engine, &subset_credential(), "chain/fraction");
+    for (route, (tree, named)) in ["bulk read", "browse", "frame"].iter().zip(&narrow) {
+        assert_eq!(tree, &chain_without_mid(), "{route}");
+        assert!(!named.contains(&mid_id), "{route} names the withheld mid");
+    }
+    assert_eq!(children["top"], 2);
+    assert_eq!(rungs["leaf"], 1);
 }
 
 /// **A read by identifier of an attached layer fills the levels of its target that the named

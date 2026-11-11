@@ -184,6 +184,16 @@ def _row(group, key, cell, count, reference_count, total, reference_total) -> Ro
     )
 
 
+def induced(parents: dict, passing: set, node) -> set:
+    """The nodes of `passing` nearest above `node` on every stored path: its parents that pass, and
+    in place of each that does not, that parent's own. This is the viewer's tree, whose edges every
+    reader names as a served artifact's parents."""
+    out: set = set()
+    for up in parents.get(node, []):
+        out |= {up} if up in passing else induced(parents, passing, up)
+    return out
+
+
 def drawn_cut(parents: dict, passing: set, budget: int | None, prune: bool) -> set:
     """What a treed layer draws, from its stored parent lists and the nodes that pass, read
     straight from the rule: the viewer's tree is the passing nodes, each linked to its nearest
@@ -192,13 +202,7 @@ def drawn_cut(parents: dict, passing: set, budget: int | None, prune: bool) -> s
     each of its root paths by the deepest node at or above `d`. The cut drawn is the deepest whose
     size fits `budget`, depth 0 where none does, and the finest with no budget."""
 
-    def induced(node) -> set:
-        out: set = set()
-        for up in parents.get(node, []):
-            out |= {up} if up in passing else induced(up)
-        return out
-
-    ups = {node: induced(node) for node in passing}
+    ups = {node: induced(parents, passing, node) for node in passing}
 
     def rung(node) -> int:
         return max((rung(up) + 1 for up in ups[node]), default=0)

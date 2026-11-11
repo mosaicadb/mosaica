@@ -33,6 +33,7 @@ pub mod filter;
 pub mod filter_cache;
 mod flush;
 mod layer_read;
+mod lineage;
 pub mod gate;
 mod generation;
 mod geometry;

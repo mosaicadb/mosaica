@@ -18,7 +18,7 @@ import {
   type ShapeKind,
   type Store
 } from '@mosaicajs/client';
-import {NEUTRAL, topLevelServed} from '@mosaicajs/client/internal';
+import {NEUTRAL, levelOfLayer} from '@mosaicajs/client/internal';
 import {materialiseStandIn, type StandInBuffers} from './assemble.js';
 import {BACKING_HEIGHT_EM, backingAspect, backingAtlas, backingIcon} from './backing.js';
 import {DEFAULT_COLOURING, buildColourAttribute, encodingSignature, rgbOfHex, type Colouring, type Encoding, type Rgb} from './colour.js';
@@ -68,11 +68,14 @@ export type MosaicaLayerProps = CompositeLayerProps & {
    */
   status?: PresentedStatus;
   /**
-   * The level of a `stacked` or `tiered` artifact layer to colour, name and outline artifacts at.
-   * Defaults to the coarsest level served. On a `nested` or `dag` layer it has no default, and each
-   * mark takes the nearest artifact served.
+   * The level to colour, name and outline each `stacked` or `tiered` artifact layer at, keyed by
+   * layer name. A layer with no entry is drawn at its entry in the artifacts projection's
+   * `followedLevels`: where its levels declare no zoom range, the finest level that is not crowded
+   * in view, which deepens as the map zooms in, and otherwise the coarsest level the camera's zoom
+   * serves. A `nested` or `dag` layer takes no level, whatever its entry, and each mark takes the
+   * nearest artifact served.
    */
-  clusterLevel?: number;
+  clusterLevels?: ReadonlyMap<string, number>;
   /** Whether to draw the artifacts' names, with the count of the one under the pointer. Defaults to `true`. */
   labels?: boolean;
   /**
@@ -223,17 +226,36 @@ export function clusterLayerOf(colourBy: string | null | undefined): string | nu
   return colourBy && colourBy.startsWith(CLUSTER_PREFIX) ? colourBy.slice(CLUSTER_PREFIX.length) : null;
 }
 
+/** The layer marks are coloured from: the layer coloured by, else the first layer drawn. */
+export function colourLayerOf(artifacts: Pick<ArtifactsProjection, 'layers'> | null, colourBy: string | null | undefined): string | undefined {
+  return clusterLayerOf(colourBy) ?? artifacts?.layers[0];
+}
+
 /**
- * The level clusters are coloured, named and outlined at: `chosen` where given, else the top
- * (coarsest) level served at the camera's zoom of the layer coloured by, or of the first layer
- * drawn, where that layer is `stacked` or `tiered`. On any other layer, `undefined`: each point
- * takes its nearest served cluster.
+ * The level the layer `name` is coloured, named and outlined at, where it is `stacked` or `tiered`:
+ * its entry in `chosen` where the layer declares that level, else its entry in the projection's
+ * `followedLevels`: the finest level not crowded in view where no level declares a zoom range,
+ * else the coarsest served at the camera's zoom. On a layer of any other kind, or one missing from
+ * the roster, `undefined`: each point takes its nearest served cluster.
  */
-export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers' | 'served'> | null, colourBy: string | null | undefined, chosen: number | undefined): number | undefined {
-  if (chosen !== undefined) return chosen;
-  const name = clusterLayerOf(colourBy) ?? artifacts?.layers[0];
+export function drawnLevel(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'followedLevels'> | null, name: string | undefined, chosen: ReadonlyMap<string, number> | undefined): number | undefined {
   const layer = name === undefined ? undefined : meta?.layers.find((l) => l.name === name);
-  return layer ? topLevelServed(layer, artifacts?.served ?? []) : undefined;
+  return layer ? levelOfLayer(layer, chosen?.get(layer.name), artifacts?.followedLevels) : undefined;
+}
+
+/** {@link drawnLevel} for each layer drawn, keyed by name. A layer drawn at no level has no entry. */
+export function drawnLevels(meta: Meta | null, artifacts: Pick<ArtifactsProjection, 'layers' | 'followedLevels'> | null, chosen: ReadonlyMap<string, number> | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const name of artifacts?.layers ?? []) {
+    const level = drawnLevel(meta, artifacts, name, chosen);
+    if (level !== undefined) out.set(name, level);
+  }
+  return out;
+}
+
+/** A cache key for a set of {@link drawnLevels}. */
+export function levelsKey(levels: ReadonlyMap<string, number>): string {
+  return [...levels].map(([name, level]) => `${name}@${level}`).join(',');
 }
 
 type Resolved = {
@@ -475,29 +497,43 @@ const BOX_LINE_WIDTH = 0.8;
 export type OutlineOptions = {
   opened: bigint | null;
   hovered: bigint | null;
-  level: number | undefined;
+  /** The level each layer is cut at ({@link drawnLevels}). */
+  levels: ReadonlyMap<string, number>;
   scheme: 'light' | 'dark';
-  /** The layer roster, to leave a dependent layer's artifacts out; null draws every served layer. */
+  /**
+   * The layer roster, to leave a dependent layer's artifacts out and to draw a `stacked` layer at
+   * its level alone; null draws every served layer.
+   */
   meta?: Meta | null;
 };
 
-/** The level cut, the layer roster and the opened artifact, which decide what may be hovered. */
+/** The level cuts, the layer roster and the opened artifact, which decide what may be hovered. */
 export type ContourOptions = {
-  level: number | undefined;
+  /** The level each layer is cut at ({@link drawnLevels}). */
+  levels: ReadonlyMap<string, number>;
   meta?: Meta | null;
   /** The opened artifact, which may be pointed at whether or not a filter matches it. */
   opened?: bigint | null;
 };
 
 /**
- * Whether a served artifact is drawn at `level` and has no drawn child: {@link frontier}'s rule for
- * one artifact. Under a filter, one with no matching member in view is not drawn, except `opened`,
- * which the viewer chose.
+ * Whether a served artifact is drawn at its layer's entry in `levels` and has no drawn child:
+ * {@link frontier}'s rule for one artifact. Under a filter, one with no matching member in view is
+ * not drawn, except `opened`, which the viewer chose.
  */
-function onFrontier(a: ArtifactsProjection, artifact: Artifact, level: number | undefined, opened: bigint | null = null): boolean {
-  const drawn = (x: Artifact) => (x.matched !== false || x.mosaicaId === opened) && (level === undefined || x.rung <= level);
+function onFrontier(a: ArtifactsProjection, artifact: Artifact, levels: ReadonlyMap<string, number>, opened: bigint | null, stacked: ReadonlySet<string>): boolean {
+  const drawn = (x: Artifact) => {
+    const level = levels.get(x.layer);
+    const atLevel = level === undefined || (stacked.has(x.layer) ? x.rung === level : x.rung <= level);
+    return (x.matched !== false || x.mosaicaId === opened) && atLevel;
+  };
   if (!drawn(artifact)) return false;
   return !(a.lineage.childrenOf.get(artifact.mosaicaId) ?? []).some((c) => drawn(c));
+}
+
+/** The `stacked` layers of the roster, whose levels are drawn one at a time. */
+function stackedLayers(meta: Meta | null | undefined): Set<string> {
+  return new Set(meta?.layers.filter((l) => l.hierarchy.kind === 'stacked').map((l) => l.name) ?? []);
 }
 
 /** The layers whose artifacts attach their text to another layer's, and draw no shape of their own. */
@@ -522,7 +558,7 @@ function shapeKindOf(meta: Meta | null | undefined, layer: string): ShapeKind | 
  */
 export function contourShapes(a: ArtifactsProjection, o: ContourOptions): ContourShape[] {
   const dependent = dependentLayers(o.meta);
-  const front = frontier(a, o.level, o.opened ?? null);
+  const front = frontier(a, o.levels, o.opened ?? null, o.meta);
   const shapes: ContourShape[] = [];
   for (const artifact of a.served) {
     if (!front.has(artifact.mosaicaId)) continue;
@@ -550,6 +586,7 @@ export function contourShapes(a: ArtifactsProjection, o: ContourOptions): Contou
  */
 export function focusOutlines(a: ArtifactsProjection, o: OutlineOptions): OutlineDatum[] {
   const dependent = dependentLayers(o.meta);
+  const stacked = stackedLayers(o.meta);
   const data: OutlineDatum[] = [];
   const seen = new Set<bigint>();
   // Opened first, so the artifact under the pointer draws as opened once it is opened.
@@ -559,7 +596,7 @@ export function focusOutlines(a: ArtifactsProjection, o: OutlineOptions): Outlin
     const artifact = a.served.find((x) => x.mosaicaId === id);
     if (!artifact) continue;
     if (dependent.has(artifact.layer)) continue;
-    if (!onFrontier(a, artifact, o.level, o.opened)) continue;
+    if (!onFrontier(a, artifact, o.levels, o.opened, stacked)) continue;
     const outline = outlineOf(artifact, a.shapes?.get(id));
     if (!outline) continue;
     const box = outline.source === 'box';
@@ -625,22 +662,25 @@ const COUNT_GAP_EM = 0.35;
 const TOPIC_SIZE = 12;
 
 /**
- * The artifacts named at `level`: every drawn artifact with no drawn child. An artifact with a
+ * The artifacts named at `levels`: every drawn artifact with no drawn child. An artifact with a
  * drawn child is an ancestor of something on the map and is not labelled.
  *
- * With no level this is the leaves of the served set. With one it is that level's artifacts and
- * every shallower artifact whose children are all deeper than the level, so a branch that ends
- * above the level is still named. The level compared is the served `rung`, which the server
- * computes per layer kind; a levelled layer's edges may skip a level, so a client-side depth count
- * would be wrong.
+ * On a layer with no entry in `levels` this is the leaves of its served set. On one with an entry
+ * it is that level's artifacts and every shallower artifact whose children are all deeper than the
+ * level, so a branch that ends above the level is still named. A `stacked` layer in `meta` has no
+ * edges between its levels, so on one with an entry it is that level's artifacts alone. Each layer
+ * is cut at its own entry only. The level compared is the served `rung`, which the server computes
+ * per layer kind; a levelled layer's edges may skip a level, so a client-side depth count would be
+ * wrong.
  *
  * Under a filter, an artifact with no member in view that matches it is left out: none of its
  * points are drawn, so its name and its outline would stand over empty ground. A parent whose
  * children all match nothing is on the frontier in their place.
  */
-export function frontier(a: ArtifactsProjection, level: number | undefined, opened: bigint | null = null): Set<bigint> {
+export function frontier(a: ArtifactsProjection, levels: ReadonlyMap<string, number>, opened: bigint | null = null, meta: Meta | null = null): Set<bigint> {
+  const stacked = stackedLayers(meta);
   const out = new Set<bigint>();
-  for (const artifact of a.served) if (onFrontier(a, artifact, level, opened)) out.add(artifact.mosaicaId);
+  for (const artifact of a.served) if (onFrontier(a, artifact, levels, opened, stacked)) out.add(artifact.mosaicaId);
   return out;
 }
 
@@ -650,14 +690,14 @@ export function frontier(a: ArtifactsProjection, level: number | undefined, open
  * no text and no attached topic gets no label; its key is an identifier, not a name. Name size
  * comes from {@link labelSize} over the candidates' counts.
  *
- * Only the anchor depends on the zoom, so the list is built once per served set, level and budget,
+ * Only the anchor depends on the zoom, so the list is built once per served set, levels and budget,
  * and each zoom bucket scales the anchors into a copy.
  */
-export function labelCandidates(a: ArtifactsProjection, meta: Meta | null, level: number | undefined, zoom: number, budget: number, opened: bigint | null = null): {candidates: LabelCandidate[]; byId: Map<bigint, LabelText>} {
-  const key = `${a.version}|${level ?? ''}|${budget}|${opened ?? ''}`;
+export function labelCandidates(a: ArtifactsProjection, meta: Meta | null, levels: ReadonlyMap<string, number>, zoom: number, budget: number, opened: bigint | null = null): {candidates: LabelCandidate[]; byId: Map<bigint, LabelText>} {
+  const key = `${a.version}|${levelsKey(levels)}|${budget}|${opened ?? ''}`;
   let held = heldCandidates.get(a.served);
   if (!held || held.key !== key) {
-    held = {key, ...namedCandidates(a, meta, level, budget, opened)};
+    held = {key, ...namedCandidates(a, meta, levels, budget, opened)};
     heldCandidates.set(a.served, held);
   }
   const scale = 2 ** zoom; // pixels per world unit
@@ -665,13 +705,13 @@ export function labelCandidates(a: ArtifactsProjection, meta: Meta | null, level
 }
 
 /** {@link labelCandidates} with anchors in world units, which the caller scales. */
-function namedCandidates(a: ArtifactsProjection, meta: Meta | null, level: number | undefined, budget: number, opened: bigint | null): {candidates: LabelCandidate[]; byId: Map<bigint, LabelText>} {
+function namedCandidates(a: ArtifactsProjection, meta: Meta | null, levels: ReadonlyMap<string, number>, budget: number, opened: bigint | null): {candidates: LabelCandidate[]; byId: Map<bigint, LabelText>} {
   const placed = a.served.filter((x) => x.centroid !== null);
   // A dependent layer's artifacts (a clustering's topic labels) are drawn beneath their target's
   // name and are not candidates of their own.
   const dependent = new Set(meta?.layers.filter((l) => l.depsOn.length > 0).map((l) => l.name) ?? []);
   // The same frontier the hover shapes use, so a name and the shape it labels agree.
-  const front = frontier(a, level, opened);
+  const front = frontier(a, levels, opened, meta);
   const named = placed
     .filter((x) => !dependent.has(x.layer) && front.has(x.mosaicaId))
     .filter((x) => artifactName(x, a.attached) !== null)
@@ -762,8 +802,8 @@ export type MosaicaLayerInternalProps = MosaicaLayerProps & {
  * to {@link resolvePick} to find the item or artifact under the pointer, then set the props that
  * show it, such as `selectedWorldXY` and `hoveredArtifact`. If the artifact's layer declares
  * shapes, call the store's `needShape` with its id: the outline appears once the shape arrives.
- * Otherwise the outline is the artifact's bounding box. Only an artifact drawn at `clusterLevel`
- * is outlined.
+ * Otherwise the outline is the artifact's bounding box. Only an artifact drawn at its layer's level
+ * (`clusterLevels`) is outlined.
  */
 export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
   /** @internal */
@@ -778,7 +818,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     legend: null,
     status: 'idle',
     slab: null,
-    clusterLevel: undefined,
+    clusterLevels: undefined,
     labels: true,
     scheme: 'dark',
     selectedWorldXY: null,
@@ -980,7 +1020,7 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const slab = this.slab();
     const layers: (Layer | null)[] = [];
 
-    // The key covers the palette, level and highlight; `update` compares the table and colour map
+    // The key covers the palette, colour level and highlight; `update` compares the table and colour map
     // itself. No texel depends on the served set's version, so it is not in the key.
     const lut = this.lut();
     const lutStarted = performance.now();
@@ -989,8 +1029,8 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const highlightOrdinal = highlight && r.artifacts ? r.artifacts.table.ordinalOf(highlight.layer, highlight.mosaicaId) : NO_ORDINAL;
     if (r.artifacts) {
       lut.update(
-        {artifacts: r.artifacts, level: this.levelOf(r), highlight: highlightOrdinal},
-        `${r.artifacts.palette}|${this.levelOf(r) ?? ''}|${highlightOrdinal}`
+        {artifacts: r.artifacts, level: this.colourLevel(r), highlight: highlightOrdinal},
+        `${r.artifacts.palette}|${this.colourLevel(r) ?? ''}|${highlightOrdinal}`
       );
     }
     timings.lutMs = performance.now() - lutStarted;
@@ -1258,9 +1298,14 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     );
   }
 
-  /** The level clusters are drawn at ({@link drawnLevel}). */
-  private levelOf(r: Resolved): number | undefined {
-    return drawnLevel(r.meta, r.artifacts, r.legend?.colourBy, this.props.clusterLevel);
+  /** The level marks are coloured at: that of the layer they are coloured from ({@link colourLayerOf}). */
+  private colourLevel(r: Resolved): number | undefined {
+    return drawnLevel(r.meta, r.artifacts, colourLayerOf(r.artifacts, r.legend?.colourBy), this.props.clusterLevels);
+  }
+
+  /** The level each drawn layer is cut at ({@link drawnLevels}). */
+  private levels(r: Resolved): Map<string, number> {
+    return drawnLevels(r.meta, r.artifacts, this.props.clusterLevels);
   }
 
   /**
@@ -1428,10 +1473,11 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const opened = this.props.openedArtifact ?? null;
     const hovered = this.props.hoveredArtifact ?? null;
     const scheme = this.props.scheme ?? 'dark';
-    const key = a ? `${a.version}|${a.palette}|${opened ?? ''}|${hovered ?? ''}|${scheme}|${this.levelOf(r) ?? ''}` : '';
+    const levels = this.levels(r);
+    const key = a ? `${a.version}|${a.palette}|${opened ?? ''}|${hovered ?? ''}|${scheme}|${levelsKey(levels)}` : '';
     let held = a ? heldOutlines.get(a.served) : undefined;
     if (a && (!held || held.key !== key || held.shapes !== a.shapes)) {
-      held = {key, shapes: a.shapes, data: focusOutlines(a, {opened, hovered, level: this.levelOf(r), scheme, meta: r.meta})};
+      held = {key, shapes: a.shapes, data: focusOutlines(a, {opened, hovered, levels, scheme, meta: r.meta})};
       heldOutlines.set(a.served, held);
     }
     const data = held?.data ?? NO_OUTLINES;
@@ -1476,11 +1522,12 @@ export class MosaicaLayer extends CompositeLayer<MosaicaLayerInternalProps> {
     const bucket = Math.round(zoom * LABEL_ZOOM_STEP);
     const budget = a ? labelBudget(a.served.length) : 0;
     const opened = this.props.openedArtifact ?? null;
-    const key = a ? `${a.version}|${a.palette}|${bucket}|${budget}|${this.levelOf(r) ?? ''}|${opened ?? ''}` : '';
+    const levels = this.levels(r);
+    const key = a ? `${a.version}|${a.palette}|${bucket}|${budget}|${levelsKey(levels)}|${opened ?? ''}` : '';
     let held = a ? heldLabels.get(a.served) : undefined;
     if (a && viewport && (!held || held.key !== key)) {
       const scale = 2 ** zoom; // pixels per world unit
-      const {candidates, byId} = labelCandidates(a, r.meta, this.levelOf(r), zoom, budget, opened);
+      const {candidates, byId} = labelCandidates(a, r.meta, levels, zoom, budget, opened);
       const data: LabelDatum[] = [];
       const leaders: LeaderDatum[] = [];
       let placed = 0;

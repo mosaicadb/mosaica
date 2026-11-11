@@ -625,6 +625,24 @@ impl Engine {
             .collect();
         let stored: Vec<Option<Stored<'_>>> =
             levels.iter().map(|level| stored(&level.forms)).collect();
+        // Each layer with a lineage, with where each of its levels sits among those read and
+        // `None` for a level this request does not read, which a climb to the nearest served
+        // ancestors stops at.
+        let linked: Vec<(&str, bool, Vec<Option<usize>>)> = layers
+            .iter()
+            .filter_map(|layer| {
+                let within =
+                    crate::lineage::within_level(layer.registered.declaration.hierarchy.kind)?;
+                let at = (0..layer.registered.runs.len() as u32)
+                    .map(|number| {
+                        levels
+                            .iter()
+                            .position(|l| l.layer.name == layer.name && l.level == number)
+                    })
+                    .collect();
+                Some((layer.name.as_str(), within, at))
+            })
+            .collect();
 
         for (at, tile) in tiling.tiles.iter().enumerate() {
             check_cancelled(&req.cancel)?;
@@ -653,6 +671,21 @@ impl Engine {
                     levels.iter().zip(&views).zip(&mut states).zip(&stored)
                 {
                     self.serve_tile_level(level, view, state, stored.as_ref(), &tile, &mut walked)?;
+                }
+                for (name, within, at) in &linked {
+                    let read = |level: u32| at.get(level as usize).copied().flatten();
+                    walked.name_parents(
+                        0,
+                        name,
+                        *within,
+                        |level| Some(&**levels[read(level)?].forms.first()),
+                        |level, ordinal| match read(level) {
+                            None => true,
+                            Some(i) => self
+                                .admitted(&levels[i], &views[i], &mut states[i], ordinal)
+                                .is_some(),
+                        },
+                    );
                 }
             }
             ctx.finish()?;

@@ -18,7 +18,7 @@ afterEach(() => {
 const layer = (name: string, over: Partial<Meta['layers'][number]> = {}) =>
   ({name, title: 'Topics', views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1, ...over}) as Meta['layers'][number];
 
-const row = (id: bigint, name: string | null, parentIds: bigint[] = [], rung = 0): BrowseRow => ({mosaicaId: id, key: null, name, maskedCount: 10n, matchedCount: null, rung, parentIds, childCount: 0, slot: null});
+const row = (id: bigint, name: string | null, parentIds: bigint[] = [], rung = 0, key: string | null = null): BrowseRow => ({mosaicaId: id, key, name, maskedCount: 10n, matchedCount: null, rung, parentIds, childCount: 0, slot: null});
 
 async function mountField(over: {layers?: Meta['layers']; verb?: 'filter' | 'highlight'; members?: unknown[]} = {}) {
   const host = await mount(`<mosaica-cluster-filter layer="topics" verb="${over.verb ?? 'filter'}"></mosaica-cluster-filter>`);
@@ -252,6 +252,74 @@ describe('<mosaica-cluster-filter> typing', () => {
     expect(deep(host, '[part="path"]')!.textContent).toBe('… › physics › galaxies › clusters x-ray');
     (deep(host, '[part~="option"]') as HTMLButtonElement).click();
     expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 30n, outside: false, verb: 'filter', label: 'x-ray state'}]);
+  });
+
+  it('calls a match with no name by its key, marked as one, in its row and in a path, and a pick labels its clause with the key', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('q:astro', {artifacts: [row(30n, null, [20n], 0, 'astro-ph.CO'), row(31n, null)], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(20n, null, [], 0, 'astro-ph')], next: null});
+    box().value = 'astro';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    const shown = deepAll(host, '[part~="option"] [part="name"]');
+    expect(shown.map((n) => [n.textContent, n.hasAttribute('data-key-name'), n.hasAttribute('data-unnamed')])).toEqual([
+      ['astro-ph.CO', true, false],
+      [UNNAMED, false, true]
+    ]);
+    expect(deep(host, '[part="path"]')!.textContent).toBe('astro-ph');
+    (deep(host, '[part~="option"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'topics', artifact: 30n, outside: false, verb: 'filter', label: 'astro-ph.CO'}]);
+  });
+
+  it('searches every level of a levelled layer in one request with no level, and walks a match’s parents there too', async () => {
+    const tiers = layer('topics', {hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: null, zoom: null}, {level: 1, title: null, zoom: null}]});
+    const {host, store, box} = await mountField({layers: [tiers]});
+    store.setBrowse('q:geometry', {artifacts: [row(11n, 'math.AG', [1n], 1), row(12n, 'math.DG', [1n], 1)], parents: [], next: null});
+    store.setBrowse('p:11', {artifacts: [], parents: [row(1n, 'Mathematics')], next: null});
+    store.setBrowse('p:12', {artifacts: [], parents: [row(1n, 'Mathematics')], next: null});
+    box().value = 'geometry';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(browses(store)).toEqual([
+      {q: 'geometry', layer: 'topics', filters: null, limit: 50},
+      {parent: 11n, layer: 'topics', filters: null, limit: 1},
+      {parent: 12n, layer: 'topics', filters: null, limit: 1}
+    ]);
+    expect(names(host)).toEqual(['math.AG', 'math.DG']);
+    expect(deepAll(host, '[part="path"]').map((p) => p.textContent)).toEqual(['Mathematics', 'Mathematics']);
+  });
+
+  it('asks for a parent once however many searches meet it, and names it from what it learnt', async () => {
+    const {host, store, box} = await mountField();
+    store.setBrowse('q:x-ray', {artifacts: [row(30n, 'x-ray state', [20n])], parents: [], next: null});
+    store.setBrowse('q:x-ray s', {artifacts: [row(30n, 'x-ray state', [20n]), row(31n, 'x-ray source', [20n])], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(20n, 'clusters x-ray')], next: null});
+    for (const text of ['x-ray', 'x-ray s']) {
+      box().value = text;
+      box().dispatchEvent(new Event('input'));
+      await wait(300);
+      await settle(host);
+      await settle(host);
+    }
+    expect(browses(store).filter((r) => (r as {parent?: bigint}).parent !== undefined)).toEqual([{parent: 30n, layer: 'topics', filters: null, limit: 1}]);
+    expect(deepAll(host, '[part="path"]').map((p) => p.textContent)).toEqual(['clusters x-ray', 'clusters x-ray']);
+  });
+
+  it('names every served parent of a match with several, and walks on up from the first', async () => {
+    const {host, store, box} = await mountField({layers: [layer('topics', {hierarchy: {kind: 'dag', pruneChildren: false}})]});
+    store.setBrowse('q:glioma', {artifacts: [row(30n, 'glioma', [10n, 20n])], parents: [], next: null});
+    store.setBrowse('p:30', {artifacts: [], parents: [row(10n, 'brain tumours', [1n]), row(20n, 'nerve tissue tumours', [2n])], next: null});
+    store.setBrowse('p:10', {artifacts: [], parents: [row(1n, 'neoplasms')], next: null});
+    box().value = 'glioma';
+    box().dispatchEvent(new Event('input'));
+    await wait(300);
+    await settle(host);
+    await settle(host);
+    expect(deep(host, '[part="path"]')!.textContent).toBe('neoplasms › brain tumours, nerve tissue tumours');
   });
 });
 

@@ -43,11 +43,48 @@ export type ArtifactChannelState = {
   artifacts: Artifact[];
   status: 'idle' | 'loading' | 'shown' | 'refused';
   refusal: Refusal | null;
+  /**
+   * What the view's tiles hold of each level of each levelled layer asked for. A layer's entry is
+   * replaced once every tile of the view is held for it, and kept from the last such view while
+   * the view loads.
+   */
+  levelsInView: LevelsInView;
   /** Incremented whenever `artifacts` is replaced. */
   version: number;
   /** How many distinct artifacts the held tiles carry. For instrumentation. */
   held: number;
 };
+
+/**
+ * What the tiles in view hold of one level of a levelled layer.
+ *
+ * @category Projections
+ */
+export type LevelInView = {
+  /**
+   * How many of the level's artifacts the tiles in view serve that are drawn, each counted once.
+   * Under a filter an artifact with no matching member in view (`matched` false) is not drawn and
+   * not counted.
+   */
+  served: number;
+  /**
+   * Whether some tile in view came back with its full `perTile` of the level, so the server may
+   * have left some of the level's artifacts out of it. The response does not say whether a tile was
+   * cut, so a tile holding exactly `perTile` of the level counts as full.
+   */
+  full: boolean;
+};
+
+/**
+ * For each levelled layer asked for, by name, the levels its tiles in view serve a drawn artifact
+ * of, by level. A level with nothing drawn in view has no entry. A layer's entry describes the
+ * last view whose every tile was held for it, so while a view loads it describes the view before.
+ *
+ * @category Projections
+ */
+export type LevelsInView = ReadonlyMap<string, ReadonlyMap<number, LevelInView>>;
+
+const NOTHING_IN_VIEW: LevelsInView = new Map();
 
 export type ArtifactChannelClock = {
   after(ms: number, fire: () => void): unknown;
@@ -156,8 +193,8 @@ function pairKey(layer: string, level: number): string {
   return `${layer}\u0000${level}`;
 }
 
-/** One held tile: the rows its frame carried and the (layer, level) pairs it answered. */
-type HeldTile = {rows: Artifact[]; answered: Set<string>; usedAt: number; paletteSize: number | undefined};
+/** One held tile: the rows its frame carried, the (layer, level) pairs it answered and those it carried its full `perTile` of. */
+type HeldTile = {rows: Artifact[]; answered: Set<string>; full: Set<string>; usedAt: number; paletteSize: number | undefined};
 
 /** What a view needs: its tiles, centre first, and the pairs and layers it is asked over. */
 type Want = {
@@ -287,7 +324,7 @@ export class ArtifactChannel {
   /** Set while reads by identifier wait out a failure, and how long the next wait is. */
   private lookPaused: unknown = null;
   private lookWait = LOOK_RETRY_MS;
-  private state: ArtifactChannelState = {layer: null, layers: [], artifacts: [], status: 'idle', refusal: null, version: 0, held: 0};
+  private state: ArtifactChannelState = {layer: null, layers: [], artifacts: [], levelsInView: NOTHING_IN_VIEW, status: 'idle', refusal: null, version: 0, held: 0};
 
   constructor(
     private readonly client: MosaicaClient,
@@ -314,10 +351,14 @@ export class ArtifactChannel {
     return {zoom: view.depth, bbox, ...(this.budget === undefined ? {} : {budget: this.budget})};
   }
 
-  /** Cut the treed layers to `budget`, `undefined` for the finest cut, and ask again where one is asked for. */
-  setBudget(budget: number | undefined): void {
+  /**
+   * Cut the treed layers to `budget`, `undefined` for the finest cut, and ask again where one is
+   * asked for, unless `ask` is false because the caller is about to schedule a request.
+   */
+  setBudget(budget: number | undefined, ask = true): void {
     if (budget === this.budget) return;
     this.budget = budget;
+    if (!ask) return;
     const walked = this.state.layers.some((name) => {
       const decl = this.declarations.get(name);
       return !decl || scopeKindOf(decl) === 'treed';
@@ -425,7 +466,7 @@ export class ArtifactChannel {
     this.cancel();
     this.dropHeld();
     this.view = null;
-    this.state = {...this.state, artifacts: [], status: 'idle', refusal: null, version: this.state.version + 1, held: 0};
+    this.state = {...this.state, artifacts: [], levelsInView: NOTHING_IN_VIEW, status: 'idle', refusal: null, version: this.state.version + 1, held: 0};
     this.emit();
   }
 
@@ -585,8 +626,11 @@ export class ArtifactChannel {
    * The artifacts of the noted view: each held tile's rows of the pairs asked, and the treed rows,
    * each artifact once. One served in several tiles has the same figures in each; its `matched`
    * and `highlighted` are true where any tile's are, and its parents are those any tile served.
+   * With them, what those tiles hold of each level of the levelled layers, for each layer every
+   * tile of the view is held for; another layer keeps the entry it had, so a level chosen from it
+   * does not move while the view's tiles land.
    */
-  private compose(want: Want): Artifact[] {
+  private compose(want: Want): {artifacts: Artifact[]; levelsInView: LevelsInView} {
     const at = new Map<string, number>();
     const out: Artifact[] = [];
     const add = (a: Artifact) => {
@@ -600,13 +644,34 @@ export class ArtifactChannel {
     };
     const walked = new Set(want.walked);
     for (const a of this.walkedRows) if (walked.has(a.layer)) add(a);
+    const full = new Set<string>();
+    // The layers some tile of the view is not yet held for.
+    const partial = new Set<string>();
     for (const tile of want.tiles) {
       const held = this.tiles.get(tileKey(want.filter, want.depth, tile));
+      for (const pair of want.pairs) if (!held?.answered.has(pair)) partial.add(pair.slice(0, pair.indexOf('\u0000')));
       if (!held) continue;
       held.usedAt = ++this.uses;
       for (const a of held.rows) if (want.pairs.has(pairKey(a.layer, a.rung)) && held.answered.has(pairKey(a.layer, a.rung))) add(a);
+      for (const pair of held.full) if (want.pairs.has(pair) && held.answered.has(pair)) full.add(pair);
     }
-    return out;
+    const levelled = want.held.filter((name) => scopeKindOf(this.declarations.get(name)!) === 'levelled');
+    if (levelled.length === 0) return {artifacts: out, levelsInView: NOTHING_IN_VIEW};
+    const whole = new Set(levelled.filter((name) => !partial.has(name)));
+    const levelsInView = new Map<string, ReadonlyMap<number, LevelInView>>();
+    for (const name of levelled) {
+      const before = this.state.levelsInView.get(name);
+      if (!whole.has(name) && before) levelsInView.set(name, before);
+    }
+    const counted = new Map<string, Map<number, LevelInView>>();
+    for (const a of out) {
+      if (!whole.has(a.layer) || a.matched === false) continue;
+      const levels = counted.get(a.layer) ?? counted.set(a.layer, new Map()).get(a.layer)!;
+      const level = levels.get(a.rung) ?? levels.set(a.rung, {served: 0, full: full.has(pairKey(a.layer, a.rung))}).get(a.rung)!;
+      level.served += 1;
+    }
+    for (const [name, levels] of counted) levelsInView.set(name, levels);
+    return {artifacts: out, levelsInView};
   }
 
   /** Whether any tile of `want` is held, or the treed rows answer it. */
@@ -616,7 +681,7 @@ export class ArtifactChannel {
   }
 
   private show(want: Want, status: ArtifactChannelState['status']): void {
-    this.state = {...this.state, artifacts: this.compose(want), status, refusal: null, version: this.state.version + 1, held: this.named.size};
+    this.state = {...this.state, ...this.compose(want), status, refusal: null, version: this.state.version + 1, held: this.named.size};
     this.emit();
   }
 
@@ -625,9 +690,13 @@ export class ArtifactChannel {
     const key = tileKey(want.filter, want.depth, tile);
     const before = this.tiles.get(key);
     const kept = rows.filter((a) => want.pairs.has(pairKey(a.layer, a.rung)));
+    const counts = new Map<string, number>();
+    for (const a of kept) counts.set(pairKey(a.layer, a.rung), (counts.get(pairKey(a.layer, a.rung)) ?? 0) + 1);
+    const perTile = this.opts.perTile;
+    const full = new Set([...counts].filter(([, n]) => perTile > 0 && n >= perTile).map(([pair]) => pair));
     this.name(kept, paletteSize);
     if (before) this.unname(before.rows);
-    this.tiles.set(key, {rows: kept, answered: new Set(want.pairs), usedAt: ++this.uses, paletteSize});
+    this.tiles.set(key, {rows: kept, answered: new Set(want.pairs), full, usedAt: ++this.uses, paletteSize});
   }
 
   /** Evicts the least recently used tiles past the cap, never one of `protect`'s. */
@@ -727,7 +796,7 @@ export class ArtifactChannel {
     if (this.state.layers.length === 0) {
       // No layer: the served set is cleared and the tiles kept, so turning a layer back on draws
       // without a refetch.
-      this.state = {...this.state, artifacts: [], status: 'idle', refusal: null, version: this.state.version + 1};
+      this.state = {...this.state, artifacts: [], levelsInView: NOTHING_IN_VIEW, status: 'idle', refusal: null, version: this.state.version + 1};
       this.emit();
       return;
     }
@@ -776,7 +845,7 @@ export class ArtifactChannel {
       }
       // A refusal drops the served set, which answered a superseded request. The tiles are kept: a
       // failed request says nothing about whether they are still true.
-      this.state = {...this.state, artifacts: [], status: 'refused', refusal: refusalOf(error), version: this.state.version + 1};
+      this.state = {...this.state, artifacts: [], levelsInView: NOTHING_IN_VIEW, status: 'refused', refusal: refusalOf(error), version: this.state.version + 1};
       this.emit();
     }
   }
@@ -918,9 +987,10 @@ function merged(a: Artifact, b: Artifact): Artifact {
 
 /**
  * The parent-child links among the artifacts in {@link ArtifactsProjection.served}, built from
- * their `parentIds`. Only links between served artifacts are included, so an artifact whose parent
- * was not served is a root here. On a `dag` layer a child is listed under each served parent. The
- * links change as the camera moves and as the cluster budget changes.
+ * their `parentIds`, which name each artifact's nearest ancestors the viewer is served, as browse
+ * names them. Only links between artifacts in the list are included, so an artifact none of whose
+ * served ancestors is in it is a root here. On a `dag` layer a child is listed under each served
+ * parent. The links change as the camera moves and as the cluster count changes.
  *
  * @category Projections
  */

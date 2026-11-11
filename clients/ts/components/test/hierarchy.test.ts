@@ -77,7 +77,19 @@ describe('<mosaica-hierarchy>', () => {
     expect(asked[0]).toEqual({layer: 'mesh/descriptors', limit: 50});
   });
 
-  it('marks a row with no name as unnamed and never draws its key in the name’s place', async () => {
+  it('asks for a tiered layer’s roots with no level, so a root at any level is listed', async () => {
+    const tiered = {...layer('taxonomy', 'tiered', []), levels: [{level: 0, title: 'Archive', zoom: null}, {level: 1, title: 'Subject class', zoom: null}]} as Layer;
+    const {host, store} = await panel({meta: {...META, layers: [tiered]}});
+    store.setBrowse('roots', {artifacts: [row(1n, 'Mathematics', 900n, {childCount: 30}), row(9n, 'q-bio.NC', 40n, {rung: 1})], parents: [], next: null});
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['math']}}});
+    await settle(host);
+    await settle(host);
+    const asked = store.calls.filter((c) => c.name === 'browse').map((c) => c.args[0] as Record<string, unknown>);
+    expect(asked.every((r) => !('level' in r))).toBe(true);
+    expect(deepAll(host, '[part="row"] [part="name"]').map((n) => n.textContent?.trim())).toEqual(['Mathematics', 'q-bio.NC']);
+  });
+
+  it('calls a row with no name by its key, marked as a key, and labels a clause on it with the key', async () => {
     const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
     const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;
     const store = fakeStore({meta: META, status: status({})});
@@ -86,21 +98,31 @@ describe('<mosaica-hierarchy>', () => {
     await settle(host);
     await settle(host);
     const name = deep(host, '[part="row"] [part="name"]')!;
-    expect(name.hasAttribute('data-unnamed')).toBe(true);
-    expect(name.textContent).not.toContain('d-3');
+    expect(name.textContent?.trim()).toBe('d-3');
+    expect(name.hasAttribute('data-key-name')).toBe(true);
+    expect(name.hasAttribute('data-unnamed')).toBe(false);
+    (deep(host, '[part="row"] [part="filter"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'mesh/descriptors', artifact: 3n, outside: false, verb: 'filter', label: 'd-3'}]);
   });
 
-  it('names a row by the name the server serves it, and marks a row with none, or an empty one, unnamed', async () => {
+  it('names a row by the name the server serves it, else by its key, and marks a row with neither unnamed', async () => {
     const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
     const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;
     const store = fakeStore({meta: META, status: status({})});
-    store.setBrowse('roots', {artifacts: [row(3n, 'spin magnetic effect', 10n), row(4n, null, 8n), row(5n, '', 6n)], parents: [], next: null});
+    store.setBrowse('roots', {artifacts: [row(3n, 'spin magnetic effect', 10n), row(4n, null, 8n), row(5n, '', 6n), row(6n, null, 4n, {key: null})], parents: [], next: null});
     el.store = store;
     await settle(host);
     await settle(host);
     const names = deepAll(host, '[part="row"] [part="name"]');
-    expect(names.map((n) => n.textContent?.trim())).toEqual(['spin magnetic effect', UNNAMED, UNNAMED]);
-    expect(names.map((n) => n.hasAttribute('data-unnamed'))).toEqual([false, true, true]);
+    expect(names.map((n) => n.textContent?.trim())).toEqual(['spin magnetic effect', 'd-4', 'd-5', UNNAMED]);
+    expect(names.map((n) => [n.hasAttribute('data-key-name'), n.hasAttribute('data-unnamed')])).toEqual([
+      [false, false],
+      [true, false],
+      [true, false],
+      [false, true]
+    ]);
+    (names[3]!.closest('[part="row"]')!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'mesh/descriptors', artifact: 6n, outside: false, verb: 'filter'}]);
   });
 
   it('offers to expand only a row the server counts children under, and keeps every name in line', async () => {
@@ -148,6 +170,33 @@ describe('<mosaica-hierarchy>', () => {
     const also = deepText(deep(host, '[part="also"]'));
     expect(also).toContain(UNNAMED);
     expect(also).not.toContain('77');
+  });
+
+  it('asks for the name of a parent in *also under* that no page has served, once', async () => {
+    const {host, store} = await panel();
+    store.setBrowse('p:1', {artifacts: [row(11n, 'Cysts', 900n, {parentIds: [1n, 77n]}), row(12n, 'Tumours', 800n, {parentIds: [1n, 77n]})], parents: [], next: null});
+    // The children form of a row carries its parents, which name the one the walk has not met.
+    store.setBrowse('p:11', {artifacts: [], parents: [row(1n, 'Neoplasms', 1n), row(77n, 'Skin diseases', 1n)], next: null});
+    (deep(host, '[part="expander"]') as HTMLButtonElement).click();
+    await settle(host);
+    await settle(host);
+    await settle(host);
+    expect(deepAll(host, '[part="also"]').map((e) => deepText(e))).toEqual(['also under Skin diseases', 'also under Skin diseases']);
+    const asked = store.calls.filter((c) => c.name === 'browse').map((c) => (c.args[0] as {parent?: bigint}).parent);
+    expect(asked.filter((p) => p === 11n || p === 12n)).toEqual([11n]);
+  });
+
+  it('gives a screen reader each row’s counts with what each counts, the figures drawn hidden from it', async () => {
+    const {host, store} = await panel();
+    store.setBrowse('roots', {artifacts: [row(1n, 'Neoplasms', 27_000n, {matchedCount: 400n})], parents: [], next: null});
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['cs']}}});
+    await settle(host);
+    await settle(host);
+    const counts = deep(host, '[part="row"][data-id="1"] [part="counts"]')!;
+    expect(counts.getAttribute('aria-hidden')).toBe('true');
+    const said = counts.parentElement!.querySelector('.sr-only')!.textContent!;
+    expect(said).toContain('400');
+    expect(said).toContain('27,000');
   });
 
   it('a click is a highlight, and the actions carry the filter beside it', async () => {

@@ -814,12 +814,26 @@ impl Engine {
         let here = &index[position(level)];
 
         // The viewer's tree: each cluster's nearest served ancestors on every path.
-        if treed || tiered {
+        if let Some(within) = crate::lineage::within_level(kind) {
             for (l, at) in index.iter().enumerate() {
                 for (ordinal, &c) in at.iter().enumerate() {
                     if c != u32::MAX {
-                        clusters[c as usize].parents =
-                            nearest_served(&reads, &index, l as u32, ordinal as u32, treed);
+                        clusters[c as usize].parents = crate::lineage::nearest_served(
+                            |level, ordinal| {
+                                reads
+                                    .get(level as usize)
+                                    .map_or(&[], |read| read.forms.first().parents(ordinal))
+                            },
+                            |level, ordinal| {
+                                index
+                                    .get(level as usize)?
+                                    .get(ordinal as usize)
+                                    .copied()
+                                    .filter(|&c| c != u32::MAX)
+                            },
+                            (l as u32, ordinal as u32),
+                            within,
+                        );
                     }
                 }
             }
@@ -1033,47 +1047,6 @@ fn add(sum: &mut ([f64; 2], u32), position: [f64; 2]) {
     sum.0[0] += position[0];
     sum.0[1] += position[1];
     sum.1 += 1;
-}
-
-/// The served clusters nearest above `(level, ordinal)` on every path, climbing through the ones
-/// this viewer is not served, as cluster indices ascending. `within` keeps a treed layer's
-/// in-level edges; otherwise a tiered layer's edges to coarser levels are followed.
-fn nearest_served(
-    reads: &[ReadLevel],
-    index: &[Vec<u32>],
-    level: u32,
-    ordinal: u32,
-    within: bool,
-) -> Vec<u32> {
-    let up = |level: u32, ordinal: u32| -> Vec<(u32, u32)> {
-        reads[level as usize]
-            .forms
-            .first()
-            .parents(ordinal)
-            .iter()
-            .filter(|p| match within {
-                true => p.level == level,
-                false => p.level < level,
-            })
-            .filter(|p| (p.level as usize) < reads.len())
-            .map(|p| (p.level, p.ordinal))
-            .collect()
-    };
-    let mut found: Vec<u32> = Vec::new();
-    let mut seen: FxHashSet<(u32, u32)> = FxHashSet::default();
-    let mut climb = up(level, ordinal);
-    while let Some(at) = climb.pop() {
-        if !seen.insert(at) {
-            continue;
-        }
-        match index[at.0 as usize].get(at.1 as usize) {
-            Some(&c) if c != u32::MAX => found.push(c),
-            _ => climb.extend(up(at.0, at.1)),
-        }
-    }
-    found.sort_unstable();
-    found.dedup();
-    found
 }
 
 /// The centre of the nearest ancestor of `c` with a centre of its own, searched breadth first

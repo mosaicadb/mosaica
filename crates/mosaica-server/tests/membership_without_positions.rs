@@ -356,9 +356,9 @@ struct BrowseRow {
 /// One page of `POST /v1/artifacts/browse`: the **roots** form where `parent` is absent, and the
 /// **children** form where it names an artifact.
 ///
-/// The roots form of a levelled layer serves the artifacts of that level with no *served* parent,
-/// so a tiered layer's finer levels are reached by walking down from the root rather than by
-/// naming the level — which is the verb's own shape and not something this ruling changes.
+/// The roots form serves the artifacts with no *served* ancestor, at every level of a levelled
+/// layer unless `level` names one, so a tiered layer's finer levels are reached by walking down
+/// from a root. The children form lists a parent's children at whichever level they sit.
 async fn browse_rows(
     server: &TestServer,
     terms: &[&str],
@@ -746,6 +746,12 @@ async fn a_tiered_list_column_mints_the_chain_it_declares() {
     let roots = browse_rows(&server, &["0", "1"], LAYER, Some(0), None).await;
     assert_eq!(roots.len(), 1, "one root was created");
     assert_eq!(roots[0].key, "root");
+    let every = browse_rows(&server, &["0", "1"], LAYER, None, None).await;
+    assert_eq!(
+        every.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+        vec!["root"],
+        "with no level the roots span every level, and every finer artifact hangs from the root"
+    );
     assert_eq!(
         roots[0].masked_count, N,
         "every point is in the root the chain named"
@@ -753,31 +759,34 @@ async fn a_tiered_list_column_mints_the_chain_it_declares() {
 
     // **The chain, walked down from the root.** A leaf reached this way is a leaf whose edges were
     // created by the batch that created the leaf.
-    let groups = browse_rows(
-        &server,
-        &["0", "1"],
-        LAYER,
-        Some(1),
-        Some(&roots[0].mosaica_id),
-    )
-    .await;
+    let groups = browse_rows(&server, &["0", "1"], LAYER, None, Some(&roots[0].mosaica_id)).await;
     assert_eq!(groups.len(), 3, "the root's three groups");
     assert_eq!(roots[0].child_count, 3, "the root counts the groups it is served under");
     assert!(
         groups.iter().all(|g| g.parents == 1),
         "each group is served under the root that the chain named"
     );
+    // A level beside a parent is refused, since the children form lists every level.
+    let auth = authorise(&server, &["0", "1"]).await;
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/artifacts/browse"))
+        .bearer_auth(auth["token"].as_str().unwrap())
+        .json(&json!({
+            "view": "s0",
+            "layer": LAYER,
+            "level": 1,
+            "parent": roots[0].mosaica_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 422, "{}", resp.text().await.unwrap());
 
     let mut leaves: BTreeMap<String, u64> = BTreeMap::new();
     for group in &groups {
-        let under = browse_rows(
-            &server,
-            &["0", "1"],
-            LAYER,
-            Some(2),
-            Some(&group.mosaica_id),
-        )
-        .await;
+        let under =
+            browse_rows(&server, &["0", "1"], LAYER, None, Some(&group.mosaica_id)).await;
         assert_eq!(group.child_count, under.len() as u64, "a group counts the leaves it holds");
         for leaf in under {
             assert_eq!(leaf.parents, 1, "a leaf is served under its own group");

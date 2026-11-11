@@ -1,5 +1,5 @@
 import {ContextConsumer} from '@lit/context';
-import {LitElement, type PropertyValues} from 'lit';
+import {LitElement, html, type PropertyValues, type TemplateResult} from 'lit';
 import {property} from 'lit/decorators.js';
 import {createStore, isPopulated, type ColumnDraft, type Meta, type SelectionShape, type Store, type TokenSupplier} from '@mosaicajs/client';
 import type {SelectionShapeDetail, MosaicaEventDetails} from './events.js';
@@ -232,11 +232,40 @@ export abstract class MosaicaElement extends LitElement {
 }
 
 /**
- * What stands where an artifact has no name, on an element carrying `data-unnamed`, which draws it
- * faint. A key such as `hdb-2422486` is an identifier and would read as a name, so it shows only in
- * the card's key field.
+ * What stands where an artifact has neither a name nor a key, on an element carrying
+ * `data-unnamed`, which draws it faint.
  */
 export const UNNAMED = 'Unnamed';
+
+/**
+ * What a list calls an artifact. `from` is `name` for its name, `key` for its publisher's key where
+ * it has no name, and `none` for {@link UNNAMED} where it has neither. A key is drawn on an element
+ * carrying `data-key-name`, in the secondary ink and the identifiers' font, so that it does not read
+ * as a name.
+ */
+export type Called = {text: string; from: 'name' | 'key' | 'none'};
+
+/** What a list calls an artifact with this name and key, either of which may be missing or empty. */
+export function called(name: string | null | undefined, key: string | null | undefined): Called {
+  if (name) return {text: name, from: 'name'};
+  if (key) return {text: key, from: 'key'};
+  return {text: UNNAMED, from: 'none'};
+}
+
+/** What a list calls an artifact, as text marked `data-key-name` for a key and `data-unnamed` for {@link UNNAMED}. */
+export function calledText(c: Called): TemplateResult {
+  return html`<span ?data-key-name=${c.from === 'key'} ?data-unnamed=${c.from === 'none'}>${c.text}</span>`;
+}
+
+/** What a list calls several artifacts, as {@link calledText} marks each, separated by commas. */
+export function calledList(cs: readonly Called[]): TemplateResult {
+  return html`${cs.map((c, i) => html`${i > 0 ? ', ' : ''}${calledText(c)}`)}`;
+}
+
+/** The `label` a `member_of` clause on an artifact carries: what it is called, unless that is {@link UNNAMED}. */
+export function labelOf(c: Called): {label?: string} {
+  return c.from === 'none' ? {} : {label: c.text};
+}
 
 /** Emit one of the elements' events, bubbling and composed so it crosses shadow roots. */
 export function emit<K extends keyof MosaicaEventDetails>(from: HTMLElement, name: K, detail: MosaicaEventDetails[K]): void {

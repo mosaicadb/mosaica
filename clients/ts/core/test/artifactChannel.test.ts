@@ -11,6 +11,7 @@ import {SessionArtifactTable} from '../src/artifactTable.js';
 import {MosaicaClient, MosaicaError, type TileSink} from '../src/client.js';
 import {GRID32, WORLD_SIZE, mortonOfTile} from '../src/coords.js';
 import type {Artifact, Layer, Quantisation, ViewportArtifactsRequest} from '../src/types.js';
+import {levelInView} from '../src/layers.js';
 import {artifact, layer, manualClock, settle, tileAnswers} from './support.js';
 
 const Q: Quantisation = {xMin: 0, xMax: 100, yMin: 0, yMax: 100};
@@ -690,5 +691,126 @@ describe('the drawn cut', () => {
     await settle();
     expect('budget' in asked(viewportArtifacts, 2)).toBe(false);
     expect('budget' in ch.drawnCut()!).toBe(false);
+  });
+});
+
+describe('the level a levelled layer is drawn at where no level is chosen', () => {
+  const strata = (zoom: [number, number] | null = null) =>
+    layer('strata', {
+      hierarchy: {kind: 'stacked', pruneChildren: false},
+      levels: [
+        {level: 0, title: 'coarse', zoom},
+        {level: 1, title: 'fine', zoom}
+      ]
+    });
+  /** Each tile holds one coarse artifact, and a fine one for every 4 by 4 world units it spans, at most the request's `perTile` of each. */
+  const rows = (tile: bigint, req: ViewportArtifactsRequest) => {
+    const fine = Math.min(req.perTile, (WORLD_SIZE / 2 ** req.zoom / 4) ** 2);
+    return [cluster(tile * 1000n, {layer: 'strata', rung: 0}), ...Array.from({length: fine}, (_, i) => cluster(tile * 1000n + 1n + BigInt(i), {layer: 'strata', rung: 1}))];
+  };
+  async function shown(over: Partial<ArtifactChannelOptions>, camera = view, decl = strata(), rowsFor = rows) {
+    const {client, viewportArtifacts} = fakeClient(rowsFor);
+    const {ch, states} = channel(client, {declarations: [decl], ...over});
+    ch.setLayer('strata');
+    ch.refresh(camera, 200, 150);
+    await settle();
+    return {ch, states, viewportArtifacts, decl};
+  }
+
+  it('asks for every level at every zoom', async () => {
+    const {ch, viewportArtifacts} = await shown({});
+    expect(asked(viewportArtifacts).levels).toEqual([0, 1]);
+    ch.refresh({...view, zoom: 6}, 200, 150);
+    await settle();
+    expect(asked(viewportArtifacts, 1).levels).toEqual([0, 1]);
+  });
+
+  it('steps up from a level some tile in view came back full of', async () => {
+    // Each of the view's four tiles spans 16 by 16 world units, so it holds 16 fine artifacts.
+    const full = await shown({perTile: 8});
+    expect(full.ch.current.levelsInView.get('strata')).toEqual(
+      new Map([
+        [0, {served: 4, full: false}],
+        [1, {served: 32, full: true}]
+      ])
+    );
+    expect(levelInView(full.decl, full.ch.current.levelsInView, null)).toBe(0);
+    const room = await shown({perTile: 20});
+    expect(room.ch.current.levelsInView.get('strata')!.get(1)).toEqual({served: 64, full: false});
+    expect(levelInView(room.decl, room.ch.current.levelsInView, null)).toBe(1);
+  });
+
+  it('steps up from a level with more artifacts in view than the cluster count', async () => {
+    const {ch, decl} = await shown({perTile: 20});
+    expect(levelInView(decl, ch.current.levelsInView, 64)).toBe(1);
+    expect(levelInView(decl, ch.current.levelsInView, 63)).toBe(0);
+    // Every level crowded: the coarsest.
+    expect(levelInView(decl, ch.current.levelsInView, 3)).toBe(0);
+  });
+
+  it('deepens as the camera zooms in and each level thins', async () => {
+    const {ch, decl} = await shown({perTile: 8});
+    expect(levelInView(decl, ch.current.levelsInView, 1000)).toBe(0);
+    ch.refresh({...view, zoom: 5}, 200, 150);
+    await settle();
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.full).toBe(false);
+    expect(levelInView(decl, ch.current.levelsInView, 1000)).toBe(1);
+    ch.refresh(view, 200, 150);
+    await settle();
+    expect(levelInView(decl, ch.current.levelsInView, 1000)).toBe(0);
+  });
+
+  it('stays at the coarsest level served where the levels declare zoom ranges', async () => {
+    const {ch, decl} = await shown({perTile: 8}, {...view, zoom: 5}, strata([0, 16]));
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.full).toBe(false);
+    expect(levelInView(decl, ch.current.levelsInView, null)).toBe(0);
+  });
+
+  it('is the coarsest level while nothing of the layer is in view', () => {
+    expect(levelInView(strata(), new Map(), null)).toBe(0);
+  });
+
+  it('is counted only once every tile of the first view is held, so the level does not move while they land', async () => {
+    // Each of the four tiles holds 16 fine artifacts: one or two tiles are within a budget of 40,
+    // and the whole view is not.
+    const {ch, states, decl} = await shown({perTile: 20});
+    // Drawn as the first tiles land, with nothing counted until the last of them has.
+    const partial = states.filter((s) => s.status === 'loading' && s.artifacts.length > 0 && s.artifacts.length < 68);
+    expect(partial.length).toBeGreaterThan(0);
+    for (const s of partial) expect(s.levelsInView.has('strata')).toBe(false);
+    for (const s of states) if (s.levelsInView.has('strata')) expect(s.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+    expect(new Set(states.map((s) => levelInView(decl, s.levelsInView, 40)))).toEqual(new Set([0]));
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+  });
+
+  it('keeps what the last whole view held while the next view’s tiles land', async () => {
+    const {ch, states, decl} = await shown({perTile: 20}, {...view, zoom: 5});
+    const before = ch.current.levelsInView.get('strata');
+    expect(levelInView(decl, ch.current.levelsInView, 40)).toBe(1);
+    states.length = 0;
+    ch.refresh(view, 200, 150);
+    await settle();
+    // The new view's first tiles are drawn under the last view's counts, and its own replace them
+    // once its last tile has landed: the level moves once.
+    const partial = states.filter((s) => s.status === 'loading' && s.artifacts.length > 0 && s.artifacts.length < 68);
+    expect(partial.length).toBeGreaterThan(0);
+    for (const s of partial) expect(s.levelsInView.get('strata')).toBe(before);
+    const levels = states.map((s) => levelInView(decl, s.levelsInView, 40));
+    expect(levels.slice(levels.indexOf(0)).every((l) => l === 0)).toBe(true);
+    expect(levels[0]).toBe(1);
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+  });
+
+  it('counts only the artifacts drawn under the filter, so the level can deepen under a narrow one', async () => {
+    // Every fine artifact but the first in each tile has no member in view that matches the filter.
+    const narrowed = (tile: bigint, req: ViewportArtifactsRequest) => rows(tile, req).map((a, i) => (a.rung === 1 && i > 1 ? {...a, matched: false} : {...a, matched: true}));
+    const {ch, decl} = await shown({perTile: 20, filters: () => ({archive: {in: ['cs']}})}, view, strata(), narrowed);
+    expect(ch.current.levelsInView.get('strata')).toEqual(
+      new Map([
+        [0, {served: 4, full: false}],
+        [1, {served: 4, full: false}]
+      ])
+    );
+    expect(levelInView(decl, ch.current.levelsInView, 40)).toBe(1);
   });
 });

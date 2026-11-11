@@ -77,10 +77,18 @@ export type MosaicaEventDetails = {
   'mosaica-fold': {field: string; folded: boolean};
   /** The Most points slider was released. The store now aims to draw `budget` marks on screen. */
   'mosaica-budgetchange': {budget: number};
-  /** The Most clusters slider was released. A `nested` or `dag` layer is now cut to at most `budget` clusters. */
-  'mosaica-clusterbudgetchange': {budget: number};
-  /** The level that clusters are coloured and labelled at is now `level`. Null is the default level. */
-  'mosaica-levelchange': {level: number | null};
+  /**
+   * The Cluster density slider was released. Each cluster is now given a square `spacing` CSS pixels
+   * on a side of the map, so a `nested` or `dag` layer is cut to as many clusters as such squares
+   * fit the map, and a level that follows the zoom is one with no more than that many in view.
+   */
+  'mosaica-clusterspacingchange': {spacing: number};
+  /**
+   * The level that the clusters of the layer `layer` are counted, coloured and labelled at is now
+   * `level`. Null is that layer's default level, which follows the zoom on a layer whose levels
+   * declare no zoom range. Other layers keep theirs.
+   */
+  'mosaica-levelchange': {layer: string; level: number | null};
   /**
    * The viewer chose or reset colours for values of the category column `column`, in a colour
    * picker or in Edit colours. Each change names a category key and its new colour as `#rrggbb`, or

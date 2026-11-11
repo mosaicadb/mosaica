@@ -8,8 +8,8 @@ import type {AggregateBy, AggregateCut, AggregateRequest, AggregateResult, Aggre
 /**
  * One grouping in an {@link AggregateSpec}. The same as a {@link Grouping}, except that a layer
  * grouping's `cut` and `paletteSize` can be `'drawn'` to use the map's current values.
- * `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut the map currently draws,
- * under the cluster budget ({@link Store.setClusterBudget}). `paletteSize: 'drawn'` returns each
+ * `cut: 'drawn'` ranks a `nested` or `dag` layer's artifacts at the cut the map draws,
+ * under the cluster count ({@link Store.clusterCount}). `paletteSize: 'drawn'` returns each
  * artifact's slot in the palette the map colours clusters from ({@link Store.setPalette}). Both
  * are read when each request is sent.
  *
@@ -66,8 +66,8 @@ export type AggregateSpec = {
    * selected region. `view` counts the same items within the area in view: the selected region if
    * there is one, otherwise the camera's box; it is fetched again once the camera has rested for
    * 250 ms, and `reference` is limited to the same area. `visible` counts every item the viewer may
-   * see in the view, wherever the camera is, and sends no filters, so `without`, `withoutMembersOf`
-   * and `highlighted` have no effect.
+   * see in the view, wherever the camera is, and sends none of the store's filters, so `without`,
+   * `withoutMembersOf` and `highlighted` have no effect; `filters` still applies.
    */
   subject?: 'match' | 'view' | 'visible';
   /**
@@ -88,6 +88,11 @@ export type AggregateSpec = {
    * selected region still apply.
    */
   withoutMembersOf?: string;
+  /**
+   * A filter expression the counts must also match, joined to the rest with `all_of`. It applies
+   * under every `subject`. Unset adds nothing.
+   */
+  filters?: FilterExpr;
   /**
    * Whether to count only the items that also match the store's highlight, so each count matches
    * the viewport's `highlighted` count. Defaults to `false`. Has no effect when nothing is
