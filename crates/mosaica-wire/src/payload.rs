@@ -280,9 +280,9 @@ pub struct ArtifactRow<'a> {
     pub bbox: Option<[u32; 4]>,
     /// One value per content kind the layer declares, in declaration order.
     pub content: &'a [String],
-    /// The parents that are rows of this same frame, ascending. Empty for a root and equally for
-    /// an artifact whose parents were not served, so the list never reveals a parent the viewer
-    /// was not sent.
+    /// The artifact's nearest served ancestors that are rows of this same frame, ascending. A
+    /// withheld parent is climbed through to its own served ancestors, so the list never reveals
+    /// an artifact the viewer was not sent.
     pub parent_ids: Vec<u64>,
     /// The resolution to draw at: the declared level on a levelled layer, the depth within this
     /// response's parent links on a treed layer, 0 on a flat one.

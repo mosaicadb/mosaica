@@ -1,8 +1,9 @@
 import {afterEach, describe, expect, it} from 'vitest';
-import type {FilterDraft, FiltersProjection, Meta, Rgba} from '@mosaicajs/client';
+import type {BrowsePage, BrowseRow, FilterDraft, FiltersProjection, Meta, Rgba} from '@mosaicajs/client';
 import '../src/field-card.js';
 import type {MosaicaFieldCard} from '../src/field-card.js';
 import {aggregateEntry, answerAggregate, deep, deepAll, fakeStore, meta, mount, registered, scalar, settle, status, type FakeStore} from './fake-store.js';
+import {UNNAMED} from '../src/base.js';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -864,23 +865,27 @@ describe('<mosaica-field-card> on a bool', () => {
   });
 });
 
-describe('<mosaica-field-card> on a layer', () => {
-  const row = (id: bigint, name: string, parentIds: bigint[] = []) => ({mosaicaId: id, key: null, name, maskedCount: 10n, matchedCount: null, rung: 1, parentIds, childCount: 0, slot: null});
+describe('<mosaica-field-card> on a flat layer', () => {
+  const flat = {...topicsLayer, hierarchy: {kind: 'flat', pruneChildren: false}} as Meta['layers'][number];
+  const FLAT = {...META, layers: [flat]};
 
-  it('ranks the clusters the map draws by their counts in view, leaving out its own clauses, and names each as its table does, with its path from browse pages', async () => {
+  async function mountFlat(over: {colourBy?: string} = {}) {
     const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
-    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    const store = fakeStore({meta: FLAT, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
-    store.setBrowse('p:7', {artifacts: [], parents: [row(1n, 'physics', [0n])], next: null});
-    store.setBrowse('p:1', {artifacts: [], parents: [row(0n, 'science')], next: null});
-    store.setBrowse('p:8', {artifacts: [], parents: [], next: null});
+    if (over.colourBy) store.set('legend', {...store.get('legend'), colourBy: over.colourBy});
+    return {host, card, store};
+  }
+
+  it('ranks the clusters by their counts in view, leaving out its own clauses, and names each as its table does', async () => {
+    const {host, card, store} = await mountFlat();
     card.store = store;
     await settle(host);
     // Each asks for the clusters' slots in the palette the map colours from, which the swatches read.
-    const ranked = (top: number) => ({count: true, by: {layer: 'topics', top, cut: 'drawn', paletteSize: 'drawn'}});
+    const ranked = (top: number) => ({count: true, by: {layer: 'topics', top, paletteSize: 'drawn'}});
     expect(spec(store, 'field-subject')).toEqual({groupings: [ranked(5)], subject: 'view', highlighted: true, withoutMembersOf: 'topics'});
-    // The whole match counts how many clusters are drawn, which the search box names.
+    // The whole match counts how many clusters there are, which the search box names.
     expect(spec(store, 'field-match')).toEqual({groupings: [ranked(1)], withoutMembersOf: 'topics'});
     answerAggregate(store, 'field-subject', aggregateEntry([{rows: [{key: 7n, count: 9, title: 'optics'}, {key: 8n, count: 5, title: 'lasers'}], total: 14}]));
     await settle(host);
@@ -898,16 +903,9 @@ describe('<mosaica-field-card> on a layer', () => {
     // A share of a few per cent still reads as a bar; plain percentages otherwise.
     const optics = rows(host)[0]!;
     expect((optics.querySelector('[part="bar-match"]') as HTMLElement).getAttribute('style')).toContain('max(3px, 64.3%)');
-    for (let i = 0; i < 3; i++) {
-      await new Promise((r) => setTimeout(r, 0));
-      await settle(host);
-    }
-    expect(rows(host).map((r) => [r.querySelector('[part="name"]')!.textContent, r.querySelector('[part="path"]')?.textContent ?? ''])).toEqual([
-      ['optics', 'science › physics'],
-      ['lasers', '']
-    ]);
-    // Each cluster's parents, and its first parent's, and nothing else.
-    expect(store.calls.filter((c) => c.name === 'browse').map((c) => (c.args[0] as {parent?: bigint}).parent ?? 'roots')).toEqual([7n, 8n, 1n]);
+    expect(rows(host).map((r) => r.querySelector('[part="name"]')!.textContent)).toEqual(['optics', 'lasers']);
+    // A flat layer has no parents to name, so no page is asked for.
+    expect(store.calls.filter((c) => c.name === 'browse')).toEqual([]);
     const clauses: unknown[] = [];
     host.addEventListener('mosaica-clausechange', (e) => clauses.push((e as CustomEvent).detail));
     (rows(host)[1]!.querySelector('[part="highlight"]') as HTMLButtonElement).click();
@@ -916,10 +914,7 @@ describe('<mosaica-field-card> on a layer', () => {
   });
 
   it('filters to a cluster from a click on its row, the row taking no focus', async () => {
-    const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
-    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
-    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
-    store.set('view', {...store.get('view'), id: 's0'});
+    const {host, card, store} = await mountFlat();
     card.store = store;
     await settle(host);
     answerAggregate(store, 'field-subject', aggregateEntry([{rows: [{key: 7n, count: 9, title: 'optics'}], total: 9}]));
@@ -934,11 +929,7 @@ describe('<mosaica-field-card> on a layer', () => {
   });
 
   it('colours each cluster’s swatch from the slot its row carries, a chosen colour over it, in the store’s palette', async () => {
-    const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
-    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
-    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
-    store.set('view', {...store.get('view'), id: 's0'});
-    store.set('legend', {...store.get('legend'), colourBy: 'cluster:topics'});
+    const {host, card, store} = await mountFlat({colourBy: 'cluster:topics'});
     card.store = store;
     await settle(host);
     const answerBoth = async (palette: 'tableau10' | 'okabe-ito') => {
@@ -971,11 +962,7 @@ describe('<mosaica-field-card> on a layer', () => {
   });
 
   it('opens the colour picker from a cluster’s swatch, sets the colour chosen on the store over its slot’s, and reports it', async () => {
-    const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
-    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
-    const store = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
-    store.set('view', {...store.get('view'), id: 's0'});
-    store.set('legend', {...store.get('legend'), colourBy: 'cluster:topics'});
+    const {host, card, store} = await mountFlat({colourBy: 'cluster:topics'});
     // 9 has a colour on this layer; 7 has one on another layer, which is not this cluster's.
     store.set('artifacts', {...store.get('artifacts'), overrides: new Map([['topics', new Map([[9n, [1, 2, 3, 220] satisfies Rgba]])], ['other', new Map([[7n, [4, 5, 6, 220] satisfies Rgba]])]])});
     card.store = store;
@@ -1011,10 +998,10 @@ describe('<mosaica-field-card> on a layer', () => {
   });
 
   it('ranks a flat layer’s clusters with no cut', async () => {
-    const flat = {...topicsLayer, name: 'groups', hierarchy: {kind: 'flat', pruneChildren: false}} as Meta['layers'][number];
+    const flatGroups = {...topicsLayer, name: 'groups', hierarchy: {kind: 'flat', pruneChildren: false}} as Meta['layers'][number];
     const host = await mount('<mosaica-field-card field="cluster:groups"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
-    const store = fakeStore({meta: {...META, layers: [flat]}, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    const store = fakeStore({meta: {...META, layers: [flatGroups]}, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
     card.store = store;
     await settle(host);
@@ -1022,42 +1009,485 @@ describe('<mosaica-field-card> on a layer', () => {
   });
 });
 
+/** A browse row as the server serves it; `matched` is its count under the filters, where they are set. */
+const browseRow = (id: bigint, name: string | null, over: {key?: string; rung?: number; parentIds?: bigint[]; childCount?: number; masked?: bigint; matched?: bigint | null; slot?: number | null} = {}): BrowseRow => ({
+  mosaicaId: id,
+  key: over.key ?? null,
+  name,
+  maskedCount: over.masked ?? 10n,
+  matchedCount: over.matched ?? null,
+  rung: over.rung ?? 0,
+  parentIds: over.parentIds ?? [],
+  childCount: over.childCount ?? 0,
+  slot: over.slot ?? null
+});
+
+/** A page of `rows`, the last unless `next` is given. */
+const page = (rows: BrowseRow[], next: string | null = null, parents: BrowseRow[] = []): BrowsePage => ({artifacts: rows, parents, next});
+
+/** The browse requests a store has been asked, in order. */
+const browses = (store: FakeStore) => store.calls.filter((c) => c.name === 'browse').map((c) => c.args[0] as Record<string, unknown>);
+
+/** Let the browse pages and the renders after them land. */
+async function landed(host: HTMLElement) {
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+    await settle(host);
+  }
+}
+
+/** Put the filter clauses on `ids` of `layer`, as the store does once a row asks for them. */
+function filterTo(store: FakeStore, layer: string, ids: [bigint, string][]) {
+  store.set('filters', {...store.get('filters'), members: ids.map(([artifact, label]) => ({layer, artifact, outside: false, verb: 'filter' as const, label}))});
+}
+
+const rowNames = (host: HTMLElement) => rows(host).map((r) => r.querySelector('[part="name"]')!.textContent);
+
+describe('<mosaica-field-card> on a linked layer', () => {
+  const taxonomy = {
+    ...topicsLayer,
+    name: 'taxonomy',
+    title: 'arXiv classification',
+    hierarchy: {kind: 'tiered', pruneChildren: false},
+    levels: [
+      {level: 0, title: 'Archive', zoom: null},
+      {level: 1, title: 'Subject class', zoom: null},
+      {level: 2, title: 'Topic', zoom: null}
+    ]
+  } as unknown as Meta['layers'][number];
+
+  async function mountLinked(layer: Meta['layers'][number], script: (store: FakeStore) => void = () => {}) {
+    const host = await mount(`<mosaica-field-card field="cluster:${layer.name}"></mosaica-field-card>`);
+    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
+    const store = fakeStore({meta: meta({layers: [layer]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    script(store);
+    card.store = store;
+    await landed(host);
+    return {host, card, store};
+  }
+
+  const archives = (store: FakeStore) => {
+    store.setBrowse('roots', page([browseRow(1n, 'Mathematics', {childCount: 3, masked: 900n}), browseRow(2n, 'Physics', {childCount: 2, masked: 700n}), browseRow(9n, 'q-bio.NC', {rung: 1, masked: 40n})]));
+    store.setBrowse(
+      'p:1',
+      page([
+        browseRow(11n, 'math.AG', {rung: 1, parentIds: [1n], masked: 300n, matched: 300n, childCount: 2}),
+        browseRow(12n, 'math.NT', {rung: 1, parentIds: [1n], masked: 250n, matched: 250n}),
+        browseRow(13n, 'math.LO', {rung: 1, parentIds: [1n], masked: 50n, matched: 0n})
+      ])
+    );
+    store.setBrowse('p:11', page([browseRow(111n, 'Moduli', {rung: 2, parentIds: [11n]}), browseRow(112n, 'Schemes', {rung: 2, parentIds: [11n]})]));
+  };
+
+  const crumbNames = (host: HTMLElement) => deepAll(host, '[part="crumb-name"]').map((e) => e.querySelector('.crumb-text')!.textContent);
+  const stepButton = (host: HTMLElement, key: string) => deep(host, `[part="row"][data-key="${key}"] [part="step"]`) as HTMLButtonElement | null;
+  const setMembersCalls = (store: FakeStore) => store.calls.filter((c) => c.name === 'setMembers');
+  /** The text of the element an `aria-labelledby` names, in the card's shadow root. */
+  const labelOf = (card: MosaicaFieldCard, el: Element) => card.shadowRoot!.getElementById(el.getAttribute('aria-labelledby')!)!.textContent;
+
+  it('opens on the roots of every level under the store’s filters, grouped under their levels’ headings, and counts nothing else', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    // No level, so a level-1 class whose archive is withheld is a root too; no `filters`, so the
+    // store sends its own.
+    expect(browses(store)).toEqual([{layer: 'taxonomy', limit: 20}]);
+    const headings = deepAll(host, '[part="level"]');
+    expect(headings.map((e) => [e.tagName, e.textContent])).toEqual([
+      ['H4', 'Archive'],
+      ['H4', 'Subject class']
+    ]);
+    // Each list is named by the heading over it.
+    expect(deepAll(host, '[part="rows"]').map((e) => labelOf(card, e))).toEqual(['Archive', 'Subject class']);
+    expect(rowNames(host)).toEqual(['Mathematics', 'Physics', 'q-bio.NC']);
+    // With no filter, a row's one count is every item of it the viewer may see.
+    expect(rows(host)[0]!.querySelector('[part="count"]')!.textContent).toBe('900');
+    expect(registered(store).size).toBe(0);
+    // The breadcrumb stands at the top level.
+    expect(crumbNames(host)).toEqual(['All']);
+    expect(deep(host, '[part="crumb-name"]')!.getAttribute('aria-current')).toBe('location');
+    expect(deep(host, '[part="crumbs"]')!.tagName).toBe('NAV');
+    expect(deep(host, '[part="chips"]')).toBeNull();
+  });
+
+  it('ends a row with children in a button with their number, and a leaf in none', async () => {
+    const {host} = await mountLinked(taxonomy, archives);
+    expect(stepButton(host, '1')!.textContent).toContain('3');
+    expect(stepButton(host, '2')!.textContent).toContain('2');
+    expect(stepButton(host, '9')).toBeNull();
+    // Each says what it opens, beyond its figure.
+    expect(stepButton(host, '1')!.getAttribute('aria-label')).toContain('Mathematics');
+  });
+
+  it('steps into a row, listing its children under the filter, and leaves the filter as it is', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    const clauses: unknown[] = [];
+    host.addEventListener('mosaica-clausechange', (e) => clauses.push((e as CustomEvent).detail));
+    stepButton(host, '1')!.focus();
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(setMembersCalls(store)).toEqual([]);
+    expect(clauses).toEqual([]);
+    expect(browses(store).at(-1)).toEqual({layer: 'taxonomy', parent: 1n, limit: 20});
+    expect(crumbNames(host)).toEqual(['All', 'Mathematics']);
+    expect(deepAll(host, '[part="crumb-name"]').map((e) => e.getAttribute('aria-current'))).toEqual([null, 'location']);
+    // In the server's order, a class none of whose items match still listed, each matched over masked.
+    expect(rowNames(host)).toEqual(['math.AG', 'math.NT', 'math.LO']);
+    expect(rows(host).map((r) => r.querySelector('[part="count"]')!.textContent)).toEqual(['300 / 300', '250 / 250', '0 / 50']);
+    expect(deepAll(host, '[part="rows"]').map((e) => labelOf(card, e))).toEqual(['Subject class']);
+    // Focus moves to the first row that loaded, and the one status region has words for what did.
+    expect(focused(card)!.closest('[part="row"]')!.getAttribute('data-key')).toBe('11');
+    const regions = deepAll(card.shadowRoot!, '[role="status"]').filter((e) => card.shadowRoot!.contains(e));
+    expect(regions).toHaveLength(1);
+    expect(regions[0]!.textContent!.trim()).not.toBe('');
+    // Filtering to a class adds a clause, which the others combine with by AND.
+    (rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([{layer: 'taxonomy', artifact: 11n, outside: false, verb: 'filter', label: 'math.AG'}]);
+  });
+
+  it('steps back from a crumb, focus on the row stepped out of, and to the top from All', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    stepButton(host, '1')!.click();
+    await landed(host);
+    stepButton(host, '11')!.focus();
+    stepButton(host, '11')!.click();
+    await landed(host);
+    expect(crumbNames(host)).toEqual(['All', 'Mathematics', 'math.AG']);
+    expect(rowNames(host)).toEqual(['Moduli', 'Schemes']);
+    const crumb = (i: number) => deepAll(host, '[part="crumb-name"]')[i] as HTMLButtonElement;
+    crumb(1).focus();
+    crumb(1).click();
+    await landed(host);
+    expect(crumbNames(host)).toEqual(['All', 'Mathematics']);
+    expect(rowNames(host)).toEqual(['math.AG', 'math.NT', 'math.LO']);
+    expect(focused(card)).toBe(stepButton(host, '11'));
+    crumb(0).focus();
+    crumb(0).click();
+    await landed(host);
+    expect(crumbNames(host)).toEqual(['All']);
+    expect(rowNames(host)).toEqual(['Mathematics', 'Physics', 'q-bio.NC']);
+    expect(focused(card)).toBe(stepButton(host, '1'));
+    expect(setMembersCalls(store)).toEqual([]);
+  });
+
+  it('holds focus on the deepest crumb until a step’s rows land', async () => {
+    let release: () => void = () => {};
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    const answer = store.browse;
+    store.browse = (async (req: {parent?: bigint}) => {
+      if (req.parent === 1n) await new Promise<void>((r) => (release = r));
+      return answer(req as never);
+    }) as typeof store.browse;
+    stepButton(host, '1')!.focus();
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(rows(host)).toEqual([]);
+    expect(focused(card)).toBe(deepAll(host, '[part="crumb-name"]')[1]);
+    release();
+    await landed(host);
+    expect(focused(card)!.closest('[part="row"]')!.getAttribute('data-key')).toBe('11');
+  });
+
+  it('marks a crumb its layer’s filter is on, and shows each of the layer’s clauses as a chip with a ×, wherever it was set', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, (s) => {
+      archives(s);
+      s.set('filters', {
+        ...s.get('filters'),
+        members: [
+          {layer: 'taxonomy', artifact: 1n, outside: false, verb: 'filter', label: 'Mathematics'},
+          {layer: 'taxonomy', artifact: 20n, outside: false, verb: 'filter', label: 'Condensed matter'},
+          {layer: 'taxonomy', artifact: 2n, outside: false, verb: 'highlight', label: 'Physics'}
+        ]
+      });
+    });
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(deepAll(host, '[part="crumb"]').map((c) => c.hasAttribute('data-filtered'))).toEqual([false, true]);
+    // A clause not on the path is a chip as much as one that is.
+    const chips = () => deepAll(host, '[part="chip"]');
+    expect(chips().map((c) => [c.getAttribute('data-verb'), c.getAttribute('data-id')])).toEqual([
+      ['filter', '1'],
+      ['filter', '20'],
+      ['highlight', '2']
+    ]);
+    expect(deep(host, '[part="chips"]')!.closest('[part="crumbs"]')).toBeNull();
+    const clauses: unknown[] = [];
+    host.addEventListener('mosaica-clausechange', (e) => clauses.push((e as CustomEvent).detail));
+    const remove = chips()[1]!.querySelector('[part="chip-remove"]') as HTMLButtonElement;
+    remove.focus();
+    remove.click();
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([
+      {layer: 'taxonomy', artifact: 1n, outside: false, verb: 'filter', label: 'Mathematics'},
+      {layer: 'taxonomy', artifact: 2n, outside: false, verb: 'highlight', label: 'Physics'}
+    ]);
+    expect(clauses).toEqual([{id: '20', layer: 'taxonomy', outside: false, verb: 'filter', on: false}]);
+    store.set('filters', {...store.get('filters'), members: setMembersCalls(store).at(-1)!.args[0] as never});
+    await landed(host);
+    // Focus goes to the × of the chip now in its place.
+    expect(focused(card)).toBe(chips()[1]!.querySelector('[part="chip-remove"]'));
+    // A row the filter or the highlight is on keeps its pressed buttons.
+    store.set('filters', {...store.get('filters'), members: [...store.get('filters').members, {layer: 'taxonomy', artifact: 12n, outside: false, verb: 'filter', label: 'math.NT'}]});
+    await landed(host);
+    expect(rows(host)[1]!.querySelector('[part="filter"]')!.getAttribute('aria-pressed')).toBe('true');
+    // Placed where the clauses are shown already, the card leaves its chips out and keeps its ticks.
+    card.hideChips = true;
+    await landed(host);
+    expect(deep(host, '[part="chips"]')).toBeNull();
+    expect(deepAll(host, '[part="crumb"]').map((c) => c.hasAttribute('data-filtered'))).toEqual([false, true]);
+    expect(rows(host)[1]!.getAttribute('data-state')).toBe('in');
+  });
+
+  it('calls a cluster with no name by its key, marked as one, in its row, its crumb, its clause and its chip, and one with neither Unnamed', async () => {
+    const mesh = {...topicsLayer, name: 'mesh', title: 'MeSH', hierarchy: {kind: 'dag', pruneChildren: false}} as Meta['layers'][number];
+    const {host, store} = await mountLinked(mesh, (s) => {
+      s.setBrowse('roots', page([browseRow(1n, null, {key: 'C04', childCount: 1}), browseRow(2n, null)]));
+      s.setBrowse('p:1', page([browseRow(5n, null, {key: 'C04.588', parentIds: [1n, 3n]})]));
+      s.setBrowse('p:5', page([], null, [browseRow(1n, null, {key: 'C04'}), browseRow(3n, null, {key: 'C10'})]));
+    });
+    const marks = (e: Element) => [e.hasAttribute('data-key-name'), e.hasAttribute('data-unnamed')];
+    expect(rowNames(host)).toEqual(['C04', UNNAMED]);
+    expect(rows(host).map((r) => marks(r.querySelector('[part="name"]')!))).toEqual([
+      [true, false],
+      [false, true]
+    ]);
+    (rows(host)[1]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([{layer: 'mesh', artifact: 2n, outside: false, verb: 'filter'}]);
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(crumbNames(host)).toEqual(['All', 'C04']);
+    expect(deepAll(host, '[part="crumb-name"] .crumb-text').map(marks)).toEqual([
+      [false, false],
+      [true, false]
+    ]);
+    expect(rowNames(host)).toEqual(['C04.588']);
+    const also = deep(host, '[part="also"]')!;
+    expect(also.textContent).toBe('also under C10');
+    expect(also.querySelector('[data-key-name]')!.textContent).toBe('C10');
+    (rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    const clause = {layer: 'mesh', artifact: 5n, outside: false, verb: 'filter', label: 'C04.588'};
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([clause]);
+    store.set('filters', {...store.get('filters'), members: [clause as never]});
+    await landed(host);
+    const chip = deep(host, '[part="chip-name"]')!;
+    expect(chip.querySelector('[data-key-name]')!.textContent).toBe('C04.588');
+  });
+
+  it('counts the position’s items in none of its children once every child has loaded, as the last row of the last list', async () => {
+    const {host, store} = await mountLinked(taxonomy, archives);
+    expect(spec(store, 'field-remainder')).toBeUndefined();
+    stepButton(host, '1')!.click();
+    await landed(host);
+    const member = (id: string) => ({member_of: {layer: 'taxonomy', artifact: id}});
+    expect(spec(store, 'field-remainder')).toEqual({groupings: [{count: true}], filters: {all_of: [member('1'), {none_of: [member('11'), member('12'), member('13')]}]}});
+    answerAggregate(store, 'field-remainder', aggregateEntry([{rows: [{count: 42}], total: 42}]));
+    await settle(host);
+    const rest = deep(host, '[part="remainder"]')!;
+    expect(rest.querySelector('[part="count"]')!.textContent).toBe('42');
+    expect(rest.parentElement!.getAttribute('role')).toBe('listitem');
+    expect(rest.closest('[role="list"]')).toBe(deepAll(host, '[part="rows"]').at(-1));
+  });
+
+  it('asks for no remainder while the children run past a page, and says how many are still to come', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, (s) => {
+      archives(s);
+      s.setBrowse('p:1', page([browseRow(11n, 'math.AG', {rung: 1, parentIds: [1n]})], 'c2'));
+      s.setBrowse('p:1:c2', page([browseRow(12n, 'math.NT', {rung: 1, parentIds: [1n]})], 'c3'));
+    });
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(spec(store, 'field-remainder')).toBeUndefined();
+    expect(deep(host, '[part="remainder"]')).toBeNull();
+    // Mathematics was listed with three children, one of them on the page.
+    const more = deep(host, '[part="more"]') as HTMLButtonElement;
+    expect(more.textContent).toBe('2 more');
+    expect(more.getAttribute('aria-label')).toContain('Mathematics');
+    more.focus();
+    more.click();
+    await landed(host);
+    expect(browses(store).at(-1)).toEqual({layer: 'taxonomy', parent: 1n, cursor: 'c2', limit: 20});
+    expect(rowNames(host)).toEqual(['math.AG', 'math.NT']);
+    expect(deep(host, '[part="more"]')!.textContent).toBe('1 more');
+    // Focus moves from More to the first row its page added.
+    expect(focused(card)!.closest('[part="row"]')!.getAttribute('data-key')).toBe('12');
+  });
+
+  it('offers no More while the rows are fetched again under new filters, and never sends a cursor served under the old ones', async () => {
+    let release: () => void = () => {};
+    const {host, store} = await mountLinked(taxonomy, (s) => s.setBrowse('roots', page([browseRow(1n, 'Mathematics')], 'c2')));
+    expect(deep(host, '[part="more"]')).not.toBeNull();
+    const answer = store.browse;
+    store.browse = (async (req: {cursor?: string}) => {
+      if (req.cursor === undefined) {
+        await new Promise<void>((r) => (release = r));
+        return page([browseRow(2n, 'Physics')], 'c9');
+      }
+      return answer(req as never);
+    }) as typeof store.browse;
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['physics']}}});
+    await landed(host);
+    // The rows under the old filters stay until the new ones land, without their next page.
+    expect(rowNames(host)).toEqual(['Mathematics']);
+    expect(deep(host, '[part="more"]')).toBeNull();
+    release();
+    await landed(host);
+    expect(rowNames(host)).toEqual(['Physics']);
+    (deep(host, '[part="more"]') as HTMLButtonElement).click();
+    await landed(host);
+    expect(browses(store).filter((r) => r.cursor !== undefined).map((r) => r.cursor)).toEqual(['c9']);
+  });
+
+  it('keeps focus on a leaf’s Filter as the filter it adds fetches the rows again', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    const filter = () => rows(host)[2]!.querySelector('[part="filter"]') as HTMLButtonElement;
+    filter().focus();
+    filter().click();
+    filterTo(store, 'taxonomy', [[9n, 'q-bio.NC']]);
+    await landed(host);
+    expect(browses(store)).toHaveLength(2);
+    expect(rowNames(host)).toEqual(['Mathematics', 'Physics', 'q-bio.NC']);
+    expect(focused(card)).toBe(filter());
+    expect(filter().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('keeps the search box, with focus in it, as the rows below it are replaced, and its words are the same at every position', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    const search = deep(host, 'mosaica-cluster-filter')!;
+    const placeholder = search.getAttribute('placeholder');
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(deep(host, 'mosaica-cluster-filter')).toBe(search);
+    expect(search.getAttribute('placeholder')).toBe(placeholder);
+    (search as HTMLElement).focus();
+    store.setBrowse('p:1', page([browseRow(14n, 'math.CT', {rung: 1, parentIds: [1n]})]));
+    store.set('filters', {...store.get('filters'), expr: {archive: {in: ['math']}}});
+    await landed(host);
+    expect(rowNames(host)).toEqual(['math.CT']);
+    expect(focused(card)).toBe(search);
+  });
+
+  it('names a dag row’s other served parents under it', async () => {
+    const mesh = {...topicsLayer, name: 'mesh', title: 'MeSH', hierarchy: {kind: 'dag', pruneChildren: false}} as Meta['layers'][number];
+    const {host} = await mountLinked(mesh, (s) => {
+      s.setBrowse('roots', page([browseRow(1n, 'Neoplasms', {childCount: 2})]));
+      s.setBrowse('p:1', page([browseRow(5n, 'Brain tumours', {parentIds: [1n, 3n]}), browseRow(6n, 'Carcinoma', {parentIds: [1n]})]));
+      // The children form of the row carries its parents, which name the one the list has not met.
+      s.setBrowse('p:5', page([], null, [browseRow(1n, 'Neoplasms'), browseRow(3n, 'Nervous system diseases')]));
+    });
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(rowNames(host)).toEqual(['Brain tumours', 'Carcinoma']);
+    expect(deepAll(host, '[part="also"]').map((e) => e.textContent)).toEqual(['also under Nervous system diseases']);
+  });
+
+  it('colours each row from the slot browse serves it in the store’s palette while the map is coloured by the layer', async () => {
+    const {host, store} = await mountLinked(taxonomy, (s) => {
+      s.set('legend', {...s.get('legend'), colourBy: 'cluster:taxonomy'});
+      s.setBrowse('roots', page([browseRow(1n, 'Mathematics', {slot: 2}), browseRow(2n, 'Physics')]));
+    });
+    expect(browses(store)).toEqual([{layer: 'taxonomy', limit: 20, paletteSize: 10}]);
+    const swatches = () => rows(host).map((r) => /--c:([^;]+)/.exec(r.querySelector('[part="swatch"]')!.getAttribute('style')!)![1]);
+    expect(swatches()).toEqual(['rgb(225, 87, 89)', 'rgb(118, 126, 140)']);
+    store.set('artifacts', {...store.get('artifacts'), overrides: new Map([['taxonomy', new Map([[2n, [1, 2, 3, 255] as const]])]])});
+    await settle(host);
+    expect(swatches()).toEqual(['rgb(225, 87, 89)', 'rgb(1, 2, 3)']);
+  });
+
+  it('draws its counts in the plain colour while there is a highlight, since they leave the highlight out', async () => {
+    const {host, card, store} = await mountLinked(taxonomy, archives);
+    store.set('filters', {...store.get('filters'), members: [{layer: 'taxonomy', artifact: 2n, outside: false, verb: 'highlight', label: 'Physics'}]});
+    await landed(host);
+    expect(card.hasAttribute('highlighting')).toBe(false);
+    expect(deepAll(host, '[part="chip"]').map((c) => c.getAttribute('data-verb'))).toEqual(['highlight']);
+  });
+
+  it('keeps the level choice on a tiered card, which sets the drawn level alone', async () => {
+    const {host, store} = await mountLinked(taxonomy, archives);
+    const chosen: unknown[] = [];
+    host.addEventListener('mosaica-levelchange', (e) => chosen.push(e.detail));
+    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
+    select.value = '1';
+    select.dispatchEvent(new Event('change'));
+    await landed(host);
+    expect(chosen).toEqual([{layer: 'taxonomy', level: 1}]);
+    expect(rowNames(host)).toEqual(['Mathematics', 'Physics', 'q-bio.NC']);
+    expect(browses(store)).toHaveLength(1);
+  });
+});
+
+describe('<mosaica-field-card> on a stacked layer', () => {
+  const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad'}, {level: 1, title: 'Fine'}]} as unknown as Meta['layers'][number];
+
+  async function mountStacked() {
+    const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
+    const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
+    const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    card.store = store;
+    await settle(host);
+    return {host, card, store};
+  }
+
+  const ranked = (level: number) => ({count: true, by: {layer: 'bands', level, top: 5, paletteSize: 'drawn'}});
+
+  it('ranks the clusters at the drawn level under every clause, and steps into one to rank the next level inside it, under a heading', async () => {
+    const {host, card, store} = await mountStacked();
+    expect(spec(store, 'field-subject')).toEqual({groupings: [ranked(0)], subject: 'view', highlighted: true});
+    const placeholder = deep(host, 'mosaica-cluster-filter')!.getAttribute('placeholder');
+    answerAggregate(store, 'field-subject', aggregateEntry([{rows: [{key: 4n, count: 9, title: 'north'}], total: 9}]));
+    await landed(host);
+    const step = rows(host)[0]!.querySelector('[part="step"]') as HTMLButtonElement;
+    expect(step.getAttribute('aria-label')).toContain('north');
+    step.focus();
+    step.click();
+    await landed(host);
+    // Inside north by a filter of the spec's own; the store's filters are left as they are.
+    expect(spec(store, 'field-subject')).toEqual({groupings: [ranked(1)], subject: 'view', highlighted: true, filters: {member_of: {layer: 'bands', artifact: '4'}}});
+    expect(store.calls.filter((c) => c.name === 'setMembers')).toEqual([]);
+    expect(deepAll(host, '[part="crumb-name"]').map((e) => e.querySelector('.crumb-text')!.textContent)).toEqual(['All', 'north']);
+    const heading = deep(host, '[part="level"]')!;
+    expect(heading.tagName).toBe('H4');
+    expect(heading.textContent).toContain('Fine');
+    expect(heading.textContent).toContain('north');
+    expect(deep(host, '[part="rows"]')!.getAttribute('aria-labelledby')).toBe(heading.id);
+    // The answer held for the level before is not drawn as the rows inside north.
+    expect(rows(host)).toEqual([]);
+    expect(focused(card)).toBe(deepAll(host, '[part="crumb-name"]')[1]);
+    answerAggregate(store, 'field-subject', aggregateEntry([{rows: [{key: 41n, count: 5, title: 'north-east'}], total: 5}]));
+    await landed(host);
+    expect(rowNames(host)).toEqual(['north-east']);
+    // The finest level has none after it to step into.
+    expect(rows(host)[0]!.querySelector('[part="step"]')).toBeNull();
+    expect(focused(card)!.closest('[part="row"]')!.getAttribute('data-key')).toBe('41');
+    expect(deep(host, 'mosaica-cluster-filter')!.getAttribute('placeholder')).toBe(placeholder);
+    // The match counts the rows listed inside north too.
+    expect(spec(store, 'field-match')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, artifacts: [41n], paletteSize: 'drawn'}}, {...ranked(1), by: {...ranked(1).by, top: 1}}], filters: {member_of: {layer: 'bands', artifact: '4'}}});
+  });
+});
+
 describe('<mosaica-field-card> across a change of viewer', () => {
   it('drops a browse page still loading for the viewer before, so nothing it met names a cluster to the next', async () => {
-    const row = (id: bigint, name: string, parentIds: bigint[] = []) => ({mosaicaId: id, key: null, name, maskedCount: 10n, matchedCount: null, rung: 0, parentIds, childCount: 0, slot: null});
     const host = await mount('<mosaica-field-card field="cluster:topics"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const before = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     before.set('view', {...before.get('view'), id: 's0'});
-    // The page of the cluster's parents waits until the viewer has changed.
+    // The page of the roots waits until the viewer has changed.
     let release: () => void = () => {};
     const held = new Promise<void>((r) => (release = r));
-    const browse = before.browse.bind(before);
-    before.browse = async (req) => {
-      if (req.parent === 3n) {
-        await held;
-        return {artifacts: [], parents: [row(1n, 'seen only by the first viewer')], next: null};
-      }
-      return browse(req);
+    before.browse = async () => {
+      await held;
+      return page([browseRow(1n, 'seen only by the first viewer')]);
     };
     card.store = before;
-    await settle(host);
-    answerAggregate(before, 'field-subject', aggregateEntry([{rows: [{key: 3n, count: 4}], total: 4}]));
     await settle(host);
 
     const after = fakeStore({meta: META, status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     after.set('view', {...after.get('view'), id: 's0'});
-    after.setBrowse('p:3', {artifacts: [], parents: [], next: null});
+    after.setBrowse('roots', page([browseRow(3n, 'theirs')]));
     card.store = after;
     await settle(host);
     release();
-    answerAggregate(after, 'field-subject', aggregateEntry([{rows: [{key: 3n, count: 4, title: 'theirs'}], total: 4}]));
-    for (let i = 0; i < 3; i++) {
-      await new Promise((r) => setTimeout(r, 0));
-      await settle(host);
-    }
-    expect(rows(host).map((r) => [r.querySelector('[part="name"]')!.textContent, r.querySelector('[part="path"]')?.textContent ?? ''])).toEqual([['theirs', '']]);
-    expect(deepAll(host, '[part="name"], [part="path"]').map((e) => e.textContent).join(' ')).not.toContain('first viewer');
+    await landed(host);
+    expect(rowNames(host)).toEqual(['theirs']);
+    expect(deepAll(host, '[part="name"], [part="also"]').map((e) => e.textContent).join(' ')).not.toContain('first viewer');
   });
 });
 
@@ -1071,34 +1501,60 @@ describe('<mosaica-field-card> on text', () => {
 });
 
 describe('<mosaica-field-card> on a levelled layer', () => {
-  it('counts at the top level and shows it chosen until another is chosen', async () => {
-    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad'}, {level: 1, title: 'Fine'}]} as unknown as Meta['layers'][number];
+  /** The store's level for the layer where none is chosen, as it works it out from what is in view. */
+  const followed = (level: number) => new Map([['bands', level]]);
+
+  it('follows the zoom until a level is chosen, and Follow zoom goes back to it', async () => {
+    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: null}, {level: 1, title: 'Fine', zoom: null}]} as unknown as Meta['layers'][number];
     const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
     card.store = store;
+    await settle(host);
+    // Nothing in view: the coarsest level.
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
+    const select = () => deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect(select().getAttribute('aria-label')).toContain('Bands');
+    expect([...select().options].map((o) => [o.textContent, o.value, o.selected])).toEqual([
+      ['Follow zoom', '', true],
+      ['Broad', '0', false],
+      ['Fine', '1', false]
+    ]);
+    // Zoomed in, the fine level fits in view, and the card counts at it.
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: followed(1)});
+    await settle(host);
+    expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+    expect(select().value).toBe('');
+    const chosen: unknown[] = [];
+    host.addEventListener('mosaica-levelchange', (e) => chosen.push(e.detail));
+    select().value = '0';
+    select().dispatchEvent(new Event('change'));
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":0');
-    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
-    expect(select.getAttribute('aria-label')).toContain('Bands');
-    expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['Broad', true], ['Fine', false]]);
-    select.value = '1';
-    select.dispatchEvent(new Event('change'));
+    select().value = '';
+    select().dispatchEvent(new Event('change'));
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
+    // The choice names the card's layer, so a listener sets that layer's level alone.
+    expect(chosen).toEqual([
+      {layer: 'bands', level: 0},
+      {layer: 'bands', level: null}
+    ]);
   });
 
-  it('counts at the top level the camera’s zoom serves, where the top declared level is not served', async () => {
-    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: [0, 5]}, {level: 1, title: 'Fine', zoom: [4, 16]}]} as unknown as Meta['layers'][number];
+  it('counts at the coarsest level in view where the levels declare zoom ranges, and offers no Follow zoom', async () => {
+    const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: [0, 5]}, {level: 1, title: 'Fine', zoom: [4, 16]}]} as unknown as Meta['layers'][number];
     const host = await mount('<mosaica-field-card field="cluster:bands"></mosaica-field-card>');
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
-    store.set('artifacts', {...store.get('artifacts'), served: [{layer: 'bands', rung: 1, mosaicaId: 5n}] as never});
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: followed(1)});
     card.store = store;
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
-    expect((deep(host, '[part="level-select"]') as HTMLSelectElement).value).toBe('1');
+    const select = deep(host, '[part="level-select"]') as HTMLSelectElement;
+    expect(select.value).toBe('1');
+    expect([...select.options].map((o) => o.textContent)).toEqual(['Broad', 'Fine']);
   });
 });

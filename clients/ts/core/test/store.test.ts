@@ -972,6 +972,179 @@ describe('subscription', () => {
   });
 });
 
+describe('the level a stacked layer follows', () => {
+  it('moves to the finer level only well within the cluster count, and back only once it is over it', async () => {
+    const strata = layer('strata', {
+      hierarchy: {kind: 'stacked', pruneChildren: false},
+      computedContent: ['centroid'],
+      levels: [
+        {level: 0, title: 'Coarse', zoom: null},
+        {level: 1, title: 'Fine', zoom: null}
+      ]
+    });
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const rows = (t: bigint) => [artifact(t * 10n, {layer: 'strata', rung: 0}), ...[1n, 2n, 3n].map((i) => artifact(t * 10n + i, {layer: 'strata', rung: 1}))];
+    const {client} = fakeClient(() => response('ck'), {...META, layers: [strata]}, rows);
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10}});
+    await clock.advance(1);
+    store.setLayers(['strata']);
+    store.setView(camera(META.views[0]!.quantisation, [0, 0, 100, 200], 800, 800));
+    await clock.advance(600);
+    scheduler.flush();
+    await clock.advance(600);
+    const fine = store.get('artifacts').levelsInView.get('strata')!.get(1)!.served;
+    expect(fine).toBeGreaterThan(4);
+    const level = () => store.get('artifacts').followedLevels.get('strata');
+    // The spacing at which the 800 by 800 canvas holds `count` clusters.
+    const spacing = (count: number) => {
+      const s = Math.sqrt((800 * 800) / (count + 0.5));
+      store.setClusterSpacing(s);
+      expect(store.clusterCount).toBe(count);
+    };
+    // With no spacing no tile is full, so the finest.
+    expect(level()).toBe(1);
+    spacing(fine);
+    expect(level()).toBe(1);
+    spacing(fine - 1);
+    expect(level()).toBe(0);
+    spacing(fine);
+    expect(level()).toBe(0);
+    spacing(Math.ceil(fine / 0.8));
+    expect(level()).toBe(1);
+    store.dispose();
+  });
+
+  it('coarsens on a smaller canvas showing the same area, and deepens as the camera zooms in', async () => {
+    const strata = layer('strata', {
+      hierarchy: {kind: 'stacked', pruneChildren: false},
+      computedContent: ['centroid'],
+      levels: [
+        {level: 0, title: 'Coarse', zoom: null},
+        {level: 1, title: 'Fine', zoom: null}
+      ]
+    });
+    // A corpus laid out over the world: four coarse clusters on a 2 by 2 grid and 64 fine ones on an
+    // 8 by 8 grid, each served by every tile it overlaps.
+    const rows = (tile: bigint, req: ViewportArtifactsRequest) => {
+      const depth = req.zoom;
+      const {x, y} = tileXY(tile, depth);
+      const side = 512 / 2 ** depth;
+      const out: Artifact[] = [];
+      for (const [rung, grid] of [[0, 2], [1, 8]] as const) {
+        const cell = 512 / grid;
+        for (let i = 0; i < grid; i++) {
+          for (let j = 0; j < grid; j++) {
+            const overlaps = i * cell < (x + 1) * side && (i + 1) * cell > x * side && j * cell < (y + 1) * side && (j + 1) * cell > y * side;
+            if (overlaps) out.push(artifact(BigInt(rung * 1000 + i * grid + j + 1), {layer: 'strata', rung}));
+          }
+        }
+      }
+      return out;
+    };
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {client} = fakeClient(() => response('ck'), {...META, layers: [strata]}, rows);
+    const store = createStore({
+      viewerUrl: 'http://viewer',
+      token: 'tok',
+      client,
+      clock,
+      scheduler,
+      prefetch: false,
+      replica: {revalidateAfterMs: Infinity},
+      artifacts: {perTile: 50, clusterSpacing: 80}
+    });
+    await clock.advance(1);
+    store.setLayers(['strata']);
+    const q = META.views[0]!.quantisation;
+    // `bbox` as shares of the view's extent.
+    const look = async (bbox: [number, number, number, number], side: number) => {
+      store.setView(camera(q, [bbox[0] * q.xMax, bbox[1] * q.yMax, bbox[2] * q.xMax, bbox[3] * q.yMax], side, side));
+      await clock.advance(600);
+      scheduler.flush();
+      await clock.advance(600);
+      return {count: store.clusterCount, fine: store.get('artifacts').levelsInView.get('strata')?.get(1)?.served, level: store.get('artifacts').followedLevels.get('strata')};
+    };
+    // The whole world on 800 by 800 pixels holds 100 squares of 80, and the layer starts at its
+    // coarsest level, so it deepens because the 64 fine clusters are within four fifths of 100.
+    expect(await look([0, 0, 1, 1], 800)).toEqual({count: 100, fine: 64, level: 1});
+    // The same world on 400 by 400 holds 25, so the fine level is crowded.
+    expect(await look([0, 0, 1, 1], 400)).toEqual({count: 25, fine: 64, level: 0});
+    // A quarter of the world across on the same canvas thins the fine level to within four fifths of 25.
+    const zoomed = await look([0.38, 0.38, 0.62, 0.62], 400);
+    expect(zoomed.count).toBe(25);
+    expect(zoomed.fine).toBeLessThanOrEqual(20);
+    expect(zoomed.level).toBe(1);
+    store.dispose();
+  });
+});
+
+describe('the cluster spacing', () => {
+  const tree = layer('tree', {hierarchy: {kind: 'nested', pruneChildren: false}, computedContent: ['centroid']});
+
+  async function treeStore(over: StoreOptions['artifacts'] = {}) {
+    const clock = fakeClock();
+    const scheduler = fakeScheduler();
+    const {client, viewport, viewportArtifacts} = fakeClient(() => response('ck'), {...META, layers: [tree]});
+    const store = createStore({viewerUrl: 'http://viewer', token: 'tok', client, clock, scheduler, prefetch: false, replica: {revalidateAfterMs: Infinity}, artifacts: {perTile: 10, ...over}});
+    await clock.advance(1);
+    const look = async (side: [number, number], bbox: [number, number, number, number] = [20, 40, 80, 160]) => {
+      store.setView(camera(META.views[0]!.quantisation, bbox, side[0], side[1]));
+      await clock.advance(600);
+      scheduler.flush();
+      await clock.advance(600);
+    };
+    const budgets = () => viewportArtifacts.mock.calls.map((call) => call[1].budget);
+    return {store, clock, viewport, budgets, look};
+  }
+
+  it('gives the count of squares of that side the canvas holds, at least one, from the first camera', async () => {
+    const {store, look} = await treeStore({clusterSpacing: 100});
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([100, null]);
+    await look([800, 800]);
+    expect(store.clusterCount).toBe(64);
+    await look([1200, 800]);
+    expect(store.clusterCount).toBe(96);
+    await look([400, 200]);
+    expect(store.clusterCount).toBe(8);
+    store.setClusterSpacing(50);
+    expect(store.clusterCount).toBe(32);
+    await look([30, 30]);
+    expect(store.clusterCount).toBe(1);
+    store.setClusterSpacing(null);
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([null, null]);
+    store.dispose();
+  });
+
+  it('sends the count as a treed layer’s budget, and asks again only when the count changes', async () => {
+    const {store, clock, viewport, budgets, look} = await treeStore({clusterSpacing: 100});
+    store.setLayers(['tree']);
+    await look([800, 800]);
+    expect(budgets()).toEqual([64]);
+    // The point path names the same cut, so a point's membership names an artifact the map draws.
+    const named = viewport.mock.calls.map((call) => call[1] as FakeRequest & {artifactBudget?: number}).filter((req) => (req.layers ?? []).length > 0);
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.every((req) => req.artifactBudget === 64)).toBe(true);
+    // A spacing that gives the same count asks nothing.
+    store.setClusterSpacing(99.9);
+    await clock.advance(600);
+    expect(budgets()).toEqual([64]);
+    // A new spacing asks at once.
+    store.setClusterSpacing(80);
+    await clock.advance(1);
+    expect(budgets()).toEqual([64, 100]);
+    // A resize asks once, at the camera's settle, under the new count.
+    await look([400, 400]);
+    expect(budgets()).toEqual([64, 100, 25]);
+    // No spacing: the finest cut.
+    store.setClusterSpacing(null);
+    await clock.advance(1);
+    expect(budgets()).toEqual([64, 100, 25, undefined]);
+    store.dispose();
+  });
+});
+
 describe('setLayers before meta', () => {
   it('is honoured once the channel exists, and the projection shows the intent meanwhile', async () => {
     const clock = fakeClock();

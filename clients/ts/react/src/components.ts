@@ -112,7 +112,8 @@ export const MosaicaStore = withStableAuthorise(wrap('mosaica-store', StoreEleme
  * it has a handler prop for each of them: `onPick` for `mosaica-pick`, and so on for every event
  * in {@link MosaicaEvents} except `mosaica-chipopen`, which it does not fire. The `open` prop
  * is the function the item card's Open button calls, and `openUrl` the address it goes to.
- * `onOpen` is called on every press.
+ * `onOpen` is called on every press. `onLevelChange` reports `{layer, level}`: the explorer keeps a
+ * level for each layer, and a choice changes that layer's alone.
  */
 export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', ExplorerElement, {
   ...mapEvents,
@@ -126,7 +127,7 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
   onDisplayChange: ev('mosaica-displaychange'),
   onSizeChange: ev('mosaica-sizechange'),
   onBudgetChange: ev('mosaica-budgetchange'),
-  onClusterBudgetChange: ev('mosaica-clusterbudgetchange'),
+  onClusterSpacingChange: ev('mosaica-clusterspacingchange'),
   onFold: ev('mosaica-fold'),
   onFilterChange: ev('mosaica-filterchange'),
   onStateChange: ev('mosaica-statechange'),
@@ -163,7 +164,9 @@ export const MosaicaItemCard = wrap('mosaica-item-card', ItemCardElement, {onOpe
  * (`mosaica-filterchange`), `onChipOpen` (`mosaica-chipopen`), and from its cards
  * `onClauseChange` (`mosaica-clausechange`), `onColourChange` (`mosaica-colourchange`),
  * `onLevelChange` (`mosaica-levelchange`), `onValueColour` (`mosaica-valuecolour`),
- * `onClusterColour` (`mosaica-clustercolour`) and `onFold` (`mosaica-fold`).
+ * `onClusterColour` (`mosaica-clustercolour`) and `onFold` (`mosaica-fold`). `onLevelChange`
+ * reports `{layer, level}`; to keep the choice, set it in the `Map` passed as `clusterLevels`, here
+ * and on the map.
  */
 export const MosaicaFilterPanel = wrap('mosaica-filter-panel', FilterPanelElement, {
   onFilterChange: ev('mosaica-filterchange'),
@@ -202,6 +205,7 @@ export const MosaicaArtifactCard = wrap('mosaica-artifact-card', ArtifactCardEle
  * (`mosaica-filterchange`), `onClauseChange` (`mosaica-clausechange`), `onColourChange`
  * (`mosaica-colourchange`), `onLevelChange` (`mosaica-levelchange`), `onValueColour`
  * (`mosaica-valuecolour`), `onClusterColour` (`mosaica-clustercolour`) and `onFold` (`mosaica-fold`).
+ * `onLevelChange` reports `{layer, level}` for the card's layer.
  */
 export const MosaicaFieldCard = wrap('mosaica-field-card', FieldCardElement, {
   onFold: ev('mosaica-fold'),

@@ -2,7 +2,7 @@ import {describe, expect, it} from 'vitest';
 import {type Artifact, type ArtifactsProjection, type Meta} from '@mosaicajs/client';
 import {SessionArtifactTable, attachedTextOf, servedLineage} from '@mosaicajs/client/internal';
 import {LayerManager, OrthographicView, type Layer} from '@deck.gl/core';
-import {LABEL_CANDIDATE_CEILING, MosaicaLayer, frontier, labelBudget, labelCandidates, type MosaicaLayerInternalProps} from '../src/layer.js';
+import {LABEL_CANDIDATE_CEILING, MosaicaLayer, drawnLevels, frontier, labelBudget, labelCandidates, type MosaicaLayerInternalProps} from '../src/layer.js';
 import {fakeDevice} from './fake-device.js';
 import {LABEL_SIZE_MAX, LABEL_SIZE_MIN, placeLabels} from '../src/labels.js';
 import medcpt from './fixtures/medcpt-kmeans-labels.json' with {type: 'json'};
@@ -55,12 +55,18 @@ function projection(input: Artifact[]): ArtifactsProjection {
   const served = withRungs(input);
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds, rung: a.rung})));
-  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
+  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), followedLevels: new Map(), lineage: servedLineage(served), attached: attachedTextOf(served, ['clusters', 'topics'].map((name) => ({name, hierarchy: {kind: 'flat' as const, pruneChildren: false}}))), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes: new Map(), colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
 }
 
 const META = {layers: [{name: 'clusters', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: []}, {name: 'topics', hierarchy: {kind: 'flat', pruneChildren: false}, depsOn: ['clusters']}]} as unknown as Meta;
 
 const ids = (s: Iterable<bigint>) => [...s].map(String).sort();
+
+/** No layer cut at a level. */
+const NO_LEVELS: ReadonlyMap<string, number> = new Map();
+
+/** The fixture's layer cut at `level`. */
+const levelsAt = (level: number): ReadonlyMap<string, number> => new Map([['clusters', level]]);
 
 /**
  * A served k-means clustering, one artifact per row of the fixture: a real compact layout, which
@@ -79,33 +85,86 @@ describe('frontier', () => {
   it('is every served artifact with no served child — an ancestor of something drawn is not on it', () => {
     // A chain 1 → 2 → 3 and a sibling 4 under 2: the frontier is 3 and 4, not the chain above.
     const p = projection([artifact(1n, 900n), artifact(2n, 500n, [], 'clusters', 1n), artifact(3n, 300n, [], 'clusters', 2n), artifact(4n, 200n, [], 'clusters', 2n)]);
-    expect(ids(frontier(p, undefined))).toEqual(['3', '4']);
+    expect(ids(frontier(p, NO_LEVELS))).toEqual(['3', '4']);
   });
 
   it('a flat layer is all frontier — nothing has a served child', () => {
     const p = projection([artifact(1n, 9n), artifact(2n, 8n), artifact(3n, 7n)]);
-    expect(ids(frontier(p, undefined))).toEqual(['1', '2', '3']);
+    expect(ids(frontier(p, NO_LEVELS))).toEqual(['1', '2', '3']);
   });
 
   it('an artifact whose parent was withheld is a root, and a leaf if it has no served child', () => {
     const p = projection([artifact(1n, 9n), artifact(7n, 8n, [], 'clusters', 99n)]);
-    expect(ids(frontier(p, undefined))).toEqual(['1', '7']);
+    expect(ids(frontier(p, NO_LEVELS))).toEqual(['1', '7']);
   });
 
   it('at a chosen level it is that level and every branch that stopped above it', () => {
     // 1 → 2 → 3 is three deep; 4 is a child of 1 and stops there. At level 1 the frontier is 2
     // (the level) and 4 (a branch the level did not reach), not 1, whose child 2 is drawn.
     const p = projection([artifact(1n, 900n), artifact(2n, 500n, [], 'clusters', 1n), artifact(3n, 300n, [], 'clusters', 2n), artifact(4n, 200n, [], 'clusters', 1n)]);
-    expect(ids(frontier(p, 1))).toEqual(['2', '4']);
-    expect(ids(frontier(p, 0))).toEqual(['1']);
-    expect(ids(frontier(p, 9))).toEqual(['3', '4']);
+    expect(ids(frontier(p, levelsAt(1)))).toEqual(['2', '4']);
+    expect(ids(frontier(p, levelsAt(0)))).toEqual(['1']);
+    expect(ids(frontier(p, levelsAt(9)))).toEqual(['3', '4']);
+  });
+});
+
+describe('a level chosen for one layer', () => {
+  const LEVELLED = {
+    layers: [
+      {name: 'taxonomy', hierarchy: {kind: 'tiered', pruneChildren: false}, levels: [{level: 0, title: 'Archive'}, {level: 1, title: 'Subject class'}], depsOn: []},
+      {name: 'toponymy', hierarchy: {kind: 'nested', pruneChildren: false}, levels: [], depsOn: []}
+    ]
+  } as unknown as Meta;
+  // An archive and its subject class, and a three-deep tree drawn beside them.
+  const drawn = (): ArtifactsProjection => ({
+    ...projection([
+      artifact(1n, 50n, ['Mathematics'], 'taxonomy'),
+      artifact(2n, 20n, ['math.AG'], 'taxonomy', 1n),
+      artifact(10n, 90n, ['Science'], 'toponymy'),
+      artifact(11n, 60n, ['Geometry'], 'toponymy', 10n),
+      artifact(12n, 30n, ['Moduli spaces'], 'toponymy', 11n)
+    ]),
+    layers: ['taxonomy', 'toponymy']
+  });
+
+  it('cuts that layer only: a nested layer drawn beside it keeps its leaves at every level', () => {
+    const p = drawn();
+    const coarse = drawnLevels(LEVELLED, p, new Map([['taxonomy', 0]]));
+    expect(coarse).toEqual(new Map([['taxonomy', 0]]));
+    expect(ids(frontier(p, coarse))).toEqual(['1', '12']);
+    expect(ids(labelCandidates(p, LEVELLED, coarse, 0, 10).candidates.map((c) => c.id))).toEqual(['1', '12']);
+    const fine = drawnLevels(LEVELLED, p, new Map([['taxonomy', 1]]));
+    expect(ids(frontier(p, fine))).toEqual(['12', '2']);
+  });
+
+  it('is never applied to a nested layer, whose rung is a depth', () => {
+    const p = drawn();
+    // Unchosen with nothing of it in view, the tiered layer is drawn at its coarsest level, and the tree at its leaves.
+    expect(drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))).toEqual(new Map([['taxonomy', 0]]));
+    expect(ids(frontier(p, drawnLevels(LEVELLED, p, new Map([['toponymy', 0]]))))).toEqual(['1', '12']);
+  });
+
+  it('draws a stacked layer at that level alone, since nothing links its levels', () => {
+    const STACKED = {layers: [{name: 'strata', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Coarse'}, {level: 1, title: 'Fine'}], depsOn: []}]} as unknown as Meta;
+    const served = [
+      {...artifact(1n, 50n, ['North'], 'strata'), rung: 0},
+      {...artifact(2n, 40n, ['South'], 'strata'), rung: 0},
+      {...artifact(3n, 30n, ['Harbour'], 'strata'), rung: 1},
+      {...artifact(4n, 20n, ['Ridge'], 'strata'), rung: 1},
+      {...artifact(5n, 10n, ['Marsh'], 'strata'), rung: 1}
+    ];
+    const p: ArtifactsProjection = {...projection([]), layers: ['strata'], served, lineage: servedLineage(served), attached: attachedTextOf(served, STACKED.layers)};
+    const fine = drawnLevels(STACKED, p, new Map([['strata', 1]]));
+    expect(ids(frontier(p, fine, null, STACKED))).toEqual(['3', '4', '5']);
+    expect(ids(labelCandidates(p, STACKED, fine, 0, 10).candidates.map((c) => c.id))).toEqual(['3', '4', '5']);
+    expect(ids(frontier(p, drawnLevels(STACKED, p, new Map([['strata', 0]])), null, STACKED))).toEqual(['1', '2']);
   });
 });
 
 describe('labelCandidates', () => {
   it('an artifact with no text draws no label — never its key', () => {
     const p = projection([artifact(1n, 100n, ['quantum error correction']), artifact(2n, 900n), artifact(3n, 50n, [''])]);
-    const {candidates, byId} = labelCandidates(p, META, undefined, 0, 10);
+    const {candidates, byId} = labelCandidates(p, META, NO_LEVELS, 0, 10);
     expect(candidates.map((c) => String(c.id))).toEqual(['1']);
     // One line, and the whole name is there.
     expect(byId.get(1n)!.line).toBe('quantum error correction');
@@ -119,7 +178,7 @@ describe('labelCandidates', () => {
       artifact(3n, 300n, ['a small split'], 'clusters', 2n),
       artifact(4n, 200n, ['another small split'], 'clusters', 2n)
     ]);
-    const {candidates} = labelCandidates(p, META, undefined, 0, 10);
+    const {candidates} = labelCandidates(p, META, NO_LEVELS, 0, 10);
     expect(candidates.map((c) => String(c.id))).toEqual(['3', '4']);
   });
 
@@ -128,24 +187,24 @@ describe('labelCandidates', () => {
       {...artifact(1n, 900n, ['nothing matches here']), matched: false},
       {...artifact(2n, 100n, ['something matches here']), matched: true}
     ]);
-    expect(labelCandidates(p, META, undefined, 0, 10).candidates.map((c) => String(c.id))).toEqual(['2']);
+    expect(labelCandidates(p, META, NO_LEVELS, 0, 10).candidates.map((c) => String(c.id))).toEqual(['2']);
     // A parent that matches, whose children all match nothing, is named in their place.
     const parent = projection([
       {...artifact(1n, 900n, ['the parent']), matched: true},
       {...artifact(2n, 500n, ['a child'], 'clusters', 1n), matched: false},
       {...artifact(3n, 400n, ['another child'], 'clusters', 1n), matched: false}
     ]);
-    expect(labelCandidates(parent, META, undefined, 0, 10).candidates.map((c) => String(c.id))).toEqual(['1']);
+    expect(labelCandidates(parent, META, NO_LEVELS, 0, 10).candidates.map((c) => String(c.id))).toEqual(['1']);
     // An opened child that matches nothing is named in place of its parent, as the hover shapes have it.
-    expect(labelCandidates(parent, META, undefined, 0, 10, 2n).candidates.map((c) => String(c.id))).toEqual(['2']);
+    expect(labelCandidates(parent, META, NO_LEVELS, 0, 10, 2n).candidates.map((c) => String(c.id))).toEqual(['2']);
     // A filter matching nothing in view names nothing.
     const none = projection([{...artifact(1n, 900n, ['a']), matched: false}, {...artifact(2n, 100n, ['b']), matched: false}]);
-    expect(labelCandidates(none, META, undefined, 0, 10).candidates).toEqual([]);
+    expect(labelCandidates(none, META, NO_LEVELS, 0, 10).candidates).toEqual([]);
   });
 
   it('a nameless cluster with a topic attached takes the topic as its name', () => {
     const p = projection([artifact(1n, 100n), artifact(2n, 40n), topic(9n, 1n, 'decoders, thresholds')]);
-    const {candidates, byId} = labelCandidates(p, META, undefined, 0, 10);
+    const {candidates, byId} = labelCandidates(p, META, NO_LEVELS, 0, 10);
     expect(candidates.map((c) => String(c.id))).toEqual(['1']);
     expect(byId.get(1n)!.line).toBe('decoders, thresholds');
     expect(byId.get(1n)!.topic).toBeNull();
@@ -155,13 +214,13 @@ describe('labelCandidates', () => {
     // Both clusters have 100 visible members; the join is by `target`, so equal counts do not
     // matter.
     const p = projection([artifact(1n, 100n), artifact(2n, 100n), topic(8n, 1n, 'left topic'), topic(9n, 2n, 'right topic')]);
-    const {byId} = labelCandidates(p, META, undefined, 0, 10);
+    const {byId} = labelCandidates(p, META, NO_LEVELS, 0, 10);
     expect(byId.get(1n)!.line).toBe('left topic');
     expect(byId.get(2n)!.line).toBe('right topic');
     // And a topic naming nothing this response holds attaches to nothing rather than to whichever
     // row happens to share its count.
     const orphan = projection([artifact(1n, 100n), {...topic(7n, 1n, 'unattached'), target: null}]);
-    expect(labelCandidates(orphan, META, undefined, 0, 10).byId.get(1n)).toBeUndefined();
+    expect(labelCandidates(orphan, META, NO_LEVELS, 0, 10).byId.get(1n)).toBeUndefined();
   });
 
   it('size is the masked count, and level says nothing: the deeper, larger name draws larger', () => {
@@ -174,7 +233,7 @@ describe('labelCandidates', () => {
       artifact(5n, 4000n, ['deeper and bigger'], 'clusters', 3n),
       artifact(6n, 100n, ['deeper and smaller'], 'clusters', 3n)
     ]);
-    const {byId} = labelCandidates(p, META, undefined, 0, 10);
+    const {byId} = labelCandidates(p, META, NO_LEVELS, 0, 10);
     expect([...byId.keys()].map(String).sort()).toEqual(['2', '5', '6']);
     // The largest count on screen is the largest name on screen, whatever level it sits at.
     expect(byId.get(5n)!.size).toBeCloseTo(LABEL_SIZE_MAX, 6);
@@ -185,7 +244,7 @@ describe('labelCandidates', () => {
 
   it('spans the band over the counts drawn — the smallest at the floor, the largest at the top', () => {
     const served = Array.from({length: 5}, (_, i) => artifact(BigInt(i + 1), BigInt(10 ** (5 - i)), [`cluster ${i}`]));
-    const {byId} = labelCandidates(projection(served), META, undefined, 0, 10);
+    const {byId} = labelCandidates(projection(served), META, NO_LEVELS, 0, 10);
     const sizes = [...byId.values()].map((t) => t.size);
     expect(Math.max(...sizes)).toBeCloseTo(LABEL_SIZE_MAX, 6);
     expect(Math.min(...sizes)).toBeCloseTo(LABEL_SIZE_MIN, 6);
@@ -198,27 +257,27 @@ describe('labelCandidates', () => {
 
   it('a frontier with no range lands on the band rather than dividing by zero', () => {
     // One name on screen, and every count equal: both take the top of the band, and neither is NaN.
-    const one = labelCandidates(projection([artifact(1n, 4812n, ['the only cluster'])]), META, undefined, 0, 10);
+    const one = labelCandidates(projection([artifact(1n, 4812n, ['the only cluster'])]), META, NO_LEVELS, 0, 10);
     expect(one.byId.get(1n)!.size).toBe(LABEL_SIZE_MAX);
     const flat = Array.from({length: 4}, (_, i) => artifact(BigInt(i + 1), 500n, [`cluster ${i}`]));
-    const {byId} = labelCandidates(projection(flat), META, undefined, 0, 10);
+    const {byId} = labelCandidates(projection(flat), META, NO_LEVELS, 0, 10);
     const sizes = [...byId.values()].map((t) => t.size);
     expect(sizes).toEqual([LABEL_SIZE_MAX, LABEL_SIZE_MAX, LABEL_SIZE_MAX, LABEL_SIZE_MAX]);
     // And an empty frontier asks nothing of the band at all.
-    expect(labelCandidates(projection([]), META, undefined, 0, 10).candidates).toEqual([]);
+    expect(labelCandidates(projection([]), META, NO_LEVELS, 0, 10).candidates).toEqual([]);
   });
 
   it('takes the top N by masked count, and the placement then drops what overlaps', () => {
     const served = Array.from({length: 30}, (_, i) => artifact(BigInt(i + 1), BigInt(1000 - i), [`cluster ${i}`]));
     const p = projection(served);
-    const {candidates} = labelCandidates(p, META, undefined, 0, 12);
+    const {candidates} = labelCandidates(p, META, NO_LEVELS, 0, 12);
     expect(candidates.length).toBe(12);
     expect(candidates.map((c) => Number(c.id))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(candidates[0]!.priority).toBe(1000);
     // Every candidate has a box the spatial hash can refuse.
     expect(candidates.every((c) => c.width > 0 && c.height > 0)).toBe(true);
     // Thirty of them on one spot: the placement keeps some and drops the rest, no two overlapping.
-    const stacked = labelCandidates(p, META, undefined, 0, 30).candidates.map((c) => ({...c, x: 100, y: 100}));
+    const stacked = labelCandidates(p, META, NO_LEVELS, 0, 30).candidates.map((c) => ({...c, x: 100, y: 100}));
     const placed = placeLabels(stacked);
     expect(placed.length).toBeLessThan(stacked.length);
     expect(placed.length).toBeGreaterThan(0);
@@ -226,7 +285,7 @@ describe('labelCandidates', () => {
 
   it('a zero budget places nothing', () => {
     const p = projection([artifact(1n, 100n, ['a'])]);
-    expect(labelCandidates(p, META, undefined, 0, 0).candidates).toEqual([]);
+    expect(labelCandidates(p, META, NO_LEVELS, 0, 0).candidates).toEqual([]);
   });
 });
 
@@ -240,8 +299,8 @@ describe('the candidate list is held per served set, not per zoom bucket', () =>
 
   it('is the same list at every zoom, with the anchors scaled', () => {
     const p = projection(set);
-    const at9 = labelCandidates(p, META, undefined, 9, 10);
-    const at925 = labelCandidates(p, META, undefined, 9.25, 10);
+    const at9 = labelCandidates(p, META, NO_LEVELS, 9, 10);
+    const at925 = labelCandidates(p, META, NO_LEVELS, 9.25, 10);
     // The text, sizes and boxes are one object shared by every bucket: nothing about them is a
     // function of zoom.
     expect(at925.byId).toBe(at9.byId);
@@ -256,13 +315,13 @@ describe('the candidate list is held per served set, not per zoom bucket', () =>
     expect(at925.candidates[0]).not.toBe(at9.candidates[0]);
   });
 
-  it('is rebuilt when the served set, the level or the budget moves', () => {
+  it('is rebuilt when the served set, the levels or the budget move', () => {
     const p = projection(set);
-    const first = labelCandidates(p, META, undefined, 9, 10).byId;
-    expect(labelCandidates(p, META, undefined, 9, 2).byId).not.toBe(first);
-    expect(labelCandidates(p, META, 0, 9, 10).byId).not.toBe(first);
+    const first = labelCandidates(p, META, NO_LEVELS, 9, 10).byId;
+    expect(labelCandidates(p, META, NO_LEVELS, 9, 2).byId).not.toBe(first);
+    expect(labelCandidates(p, META, levelsAt(0), 9, 10).byId).not.toBe(first);
     // A response replacing the served set under the same object identity makes a new list.
-    expect(labelCandidates({...p, version: p.version + 1}, META, undefined, 9, 10).byId).not.toBe(first);
+    expect(labelCandidates({...p, version: p.version + 1}, META, NO_LEVELS, 9, 10).byId).not.toBe(first);
   });
 });
 
@@ -281,7 +340,7 @@ describe('labelBudget', () => {
    */
   it('names many more of a compact layout than a screen-derived budget did', () => {
     const p = projection(medcptClusters());
-    const placed = (budget: number) => placeLabels(labelCandidates(p, MEDCPT_META, undefined, 0, budget).candidates).length;
+    const placed = (budget: number) => placeLabels(labelCandidates(p, MEDCPT_META, NO_LEVELS, 0, budget).candidates).length;
     const screenDerived = placed(28);
     const drawnSet = placed(labelBudget(p.served.length));
     expect(screenDerived).toBeLessThanOrEqual(8);
@@ -290,7 +349,7 @@ describe('labelBudget', () => {
 
   it('offers every drawn artifact, so a small cluster in a gap is a candidate at all', () => {
     const p = projection(medcptClusters());
-    const {candidates} = labelCandidates(p, MEDCPT_META, undefined, 0, labelBudget(p.served.length));
+    const {candidates} = labelCandidates(p, MEDCPT_META, NO_LEVELS, 0, labelBudget(p.served.length));
     expect(candidates).toHaveLength(253);
   });
 });

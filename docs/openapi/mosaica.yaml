@@ -1748,8 +1748,8 @@ paths:
         **Narrowing.** `ids` reads the artifacts those `mosaica_id`s name, such as the tags of
         points a client holds no artifact for; one this principal is not served has no row, as
         one naming nothing does. `level` reads one level of a levelled layer. `parent` reads the artifacts
-        naming that artifact among their parents; a parent this principal is not served answers
-        as a parent with no children does. `q` keeps the artifacts whose key, or whose first
+        naming that artifact in their `parents`, at any level; a parent this principal is not
+        served answers as a parent with no children does. `q` keeps the artifacts whose key, or whose first
         served text content, contains it, ignoring case; an authored shape is not text and is not
         searched. `filters` keeps the artifacts with at least one visible member matching it, and
         adds a `matched_count` column; under `keep_unmatched` every served artifact is returned,
@@ -1769,7 +1769,9 @@ paths:
 
         - `key`: `utf8`, null where the publisher supplied none.
         - `level`: `uint32`, the declared level, 0 on a layer without levels.
-        - `parents`: `list<uint64>`, the parents this principal is also served.
+        - `parents`: `list<uint64>`, the artifacts this principal is served nearest above this
+          one on every path, as `POST /v1/artifacts/browse` names them in `parent_ids`: a withheld
+          parent is passed through to its own nearest served ancestors.
         - `target`: `uint64`, the artifact this one is attached to, null where none.
         - `masked_count`: `uint64`, how many members this principal can see.
         - `content`: `list<utf8>`, the supplied content this principal is served, in the order of
@@ -1925,7 +1927,9 @@ paths:
         (`uint32`, the tile's Morton prefix at `zoom`) and `slot` (`uint8`, null where the request
         names no `palette_size`; see **Slots**). A null in a geometry column means
         the layer declares no such property or the request asked for none. `parent_ids` names the
-        parents that are rows of the same frame. `target` is the `mosaica_id` of the artifact a row
+        artifact's nearest served ancestors, as `POST /v1/artifacts/browse` names them, that are
+        rows of the same frame. The climb passes a withheld artifact and stops at a served one and
+        at a level the request does not read. `target` is the `mosaica_id` of the artifact a row
         is attached to, such as the cluster a label names, in the same frame or the treed frame;
         null where the row is attached to nothing. A dependent is served in a tile only where its
         target is in that tile's frame or the treed frame, when the request names its target's
@@ -2059,10 +2063,13 @@ paths:
         `POST /v1/artifacts/viewport` carries.
 
         **Three forms.** With neither `parent` nor `q` it returns the layer's roots, the artifacts
-        with no served parent. `parent` returns the artifacts naming that one among their parents,
-        with the named artifact's own served parents in `parents`, which is `[]` in the other two
-        forms. `q` returns the artifacts whose key or `name` contains it, ignoring case. Both
-        together is `422`.
+        with no served ancestor. `parent` returns the artifacts naming that one in their
+        `parent_ids`, at whichever level they sit, with the named artifact's own `parent_ids` rows
+        in `parents`, which is `[]` in the other two forms. `q` returns the artifacts whose key or
+        `name` contains it, ignoring case. Both together is `422`. On a levelled layer the roots
+        and search forms cover every level unless `level` names one, so a `tiered` artifact whose
+        ancestors are all withheld is a root at its own level. `level` beside `parent` is `422`,
+        since the children form covers every level.
 
         **Names.** A row's `name` is the artifact's own first supplied text. An artifact with none,
         such as a cluster whose topic is published in a separate label layer, is named by the first
@@ -2076,10 +2083,14 @@ paths:
         **Visibility first.** Every artifact served has passed its own existence criterion,
         evaluated over the form's whole candidate set before `limit` and `cursor` apply, so a
         page's fill and its `next` count only artifacts this principal may see, and a withheld
-        artifact leaves no gap. The order is total: count descending, then `mosaica_id` ascending,
-        so a cursor over tied counts neither repeats nor skips a row. A relation is named only
-        where both ends are served: a child whose parent is withheld is a root here, and a parent
-        below this principal's criterion is absent from `parents`.
+        artifact leaves no gap. The order is total: `matched_count` descending under `filters`, then
+        `masked_count` descending, then `mosaica_id` ascending, so a cursor over tied counts neither
+        repeats nor skips a row. A relation is named only
+        where both ends are served. A served artifact's `parent_ids` are the served artifacts
+        nearest above it on every path: a withheld parent is passed through to its own nearest
+        served ancestors, which then list the child among their children, and an artifact with no
+        served ancestor is a root. The map's cut and `POST /v1/artifacts` attach a withheld
+        artifact's children the same way, and a withheld artifact is named nowhere.
 
         **Refusals.** They name deployment schema and never an artifact. An unknown layer, an
         attached layer, a `level` on a kind with one level, a level the layer does not hold,
@@ -2114,7 +2125,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "422":
-          description: "`422 contract`: an unknown or attached layer, a `level` the kind or the layer does not have, `limit = 0`, both `parent` and `q`, or a malformed `filters`."
+          description: "`422 contract`: an unknown or attached layer, a `level` the kind or the layer does not have, `level` beside `parent`, `limit = 0`, both `parent` and `q`, or a malformed `filters`."
           content:
             application/json:
               schema:
@@ -6220,9 +6231,9 @@ components:
         level:
           type: integer
           minimum: 0
-          description: The level to browse on a levelled layer (`stacked`, `tiered`). `422` on `flat`, `nested` and `dag`, which have one level, and on a level the layer does not hold, since a parameter accepted and ignored would give a wrong answer that looks right.
+          description: The one level the roots and search forms list on a levelled layer (`stacked`, `tiered`). Without it they list every level. Not with `parent`, since the children form lists children at whichever level they sit. `422` on `flat`, `nested` and `dag`, which have one level, on a level the layer does not hold, and beside `parent`, since a parameter accepted and ignored would give a wrong answer that looks right.
         parent:
-          description: The children form. The artifacts naming this one among their parents, with its own served parents in `parents`. A `mosaica_id`, as a number or its decimal string. One that names nothing, one of another layer, one suppressed and one below this principal's criterion all answer an empty page.
+          description: The children form. The artifacts naming this one in their `parent_ids`, at any level, with its own `parent_ids` rows in `parents`. A `mosaica_id`, as a number or its decimal string. One that names nothing, one of another layer, one suppressed and one below this principal's criterion all answer an empty page.
           oneOf:
             - type: integer
               minimum: 0
@@ -6232,7 +6243,7 @@ components:
           type: string
           description: The search form. The layer's artifacts whose `key` or `name`, as the row carries it for this principal, contains this, ignoring case. Not with `parent`.
         filters:
-          description: The viewport's filter. Each row then carries `matched_count`, the members this principal can see that match, and the page is ordered by it. Which artifacts are served, and their `masked_count`, do not change, and a row whose `matched_count` is zero is still served.
+          description: The viewport's filter. Each row then carries `matched_count`, the members this principal can see that match, and the page is ordered by it, with rows of equal `matched_count` ordered by `masked_count`. Which artifacts are served, and their `masked_count`, do not change, and a row whose `matched_count` is zero is still served.
           allOf:
             - $ref: "#/components/schemas/FilterExpr"
         limit:
@@ -6254,7 +6265,7 @@ components:
           items: { $ref: "#/components/schemas/BrowseRow" }
         parents:
           type: array
-          description: The requested artifact's own served parents in the children form, and `[]` in the other forms, so a client reads one shape.
+          description: The rows the requested artifact's `parent_ids` name, in the children form, and `[]` in the other forms, so a client reads one shape.
           items: { $ref: "#/components/schemas/BrowseRow" }
         next:
           type: string
@@ -6281,15 +6292,15 @@ components:
           description: How many of the members this principal can see match `filters`. Present exactly when the request carries `filters`.
         rung:
           type: integer
-          description: The declared level on a levelled layer, the depth in the served lineage on a treed one, and `0` on a flat one.
+          description: The declared level on a levelled layer, the depth in the served lineage that `parent_ids` forms on a treed one, and `0` on a flat one. A withheld ancestor occupies no rung.
         parent_ids:
           type: array
-          description: This artifact's parents that this principal is also served, ascending. Empty for a root and for an artifact whose parents are all withheld; a client reads both as no parent here.
+          description: The artifacts this principal is served nearest above this one on every path, ascending. A served parent is named; a withheld parent is passed through and its own nearest served ancestors are named in its place, as the map's cut attaches them. Empty for an artifact with no served ancestor, which is a root.
           items: { type: string }
         child_count:
           type: integer
           minimum: 0
-          description: How many artifacts this principal is served name this one among their parents, which is how many rows the children form with this artifact as `parent` serves across its pages. A child this principal is not served is not counted. `0` for a leaf, and on a `flat` or `stacked` layer, which have no links. Not changed by `filters`.
+          description: How many artifacts this principal is served name this one in their `parent_ids`, which is how many rows the children form with this artifact as `parent` serves across its pages. A child this principal is not served is not counted, and a withheld child's served children are. `0` for a leaf, and on a `flat` or `stacked` layer, which have no links. Not changed by `filters`.
         slot:
           type: [integer, "null"]
           minimum: 0
@@ -6608,7 +6619,7 @@ components:
               minimum: 0
             - type: string
               pattern: "^[0-9]+$"
-          description: A `mosaica_id`. Only the artifacts naming it among their parents. Not with `q`.
+          description: A `mosaica_id`. Only the artifacts naming it in their `parents`, which are their nearest served ancestors. Not with `q`.
         q:
           type: string
           description: Only artifacts whose key, or first served text content, contains this, ignoring case. Not with `parent`.

@@ -1358,15 +1358,29 @@ describe('<mosaica-filter-panel> cluster fields', () => {
     expect(deep(host, 'mosaica-field-card[data-field="cluster:topics"]')).not.toBeNull();
   });
 
-  it('lists a layer holding a clause, and shows its clauses as chips, the filter’s first', async () => {
+  it('lists a layer holding a clause, and shows its clauses as chips, the filter’s first, once', async () => {
     const {host} = await mountLayered([topic(8n, 'highlight', 'Optics'), topic(7n, 'filter', 'Neural networks'), topic(9n, 'filter')]);
-    expect(deep(host, 'mosaica-field-card[data-field="cluster:topics"]')).not.toBeNull();
+    const card = deep(host, 'mosaica-field-card[data-field="cluster:topics"]')!;
+    expect(card).not.toBeNull();
+    // The panel's chips, and none on the card inside it.
     const chips = deepAll(host, '[part="chip"]').map((c) => [c.getAttribute('data-verb'), named(c)]);
     expect(chips).toEqual([
       ['filter', 'Neural networks'],
       ['filter', UNNAMED],
       ['highlight', 'Optics']
     ]);
+    expect(deep(card.shadowRoot!, '[part="chips"]')).toBeNull();
+  });
+
+  it('leaves the card its chips under controls-only, where the panel shows none', async () => {
+    const host = await mount('<mosaica-filter-panel controls-only></mosaica-filter-panel>');
+    const panel = host.querySelector('mosaica-filter-panel') as MosaicaFilterPanel;
+    const store = fakeStore({meta: LAYERED, status: status({}), filters: filtersOf({filter: {}, highlight: {}}, {members: [topic(7n, 'filter', 'Neural networks')]})});
+    store.set('view', {...store.get('view'), id: 's0'});
+    panel.store = store;
+    await settle(host);
+    const card = deep(host, 'mosaica-field-card[data-field="cluster:topics"]')!;
+    expect(deepAll(card.shadowRoot!, '[part="chip"]').map(named)).toEqual(['Neural networks']);
   });
 
   it('shows a clause on a layer with no card, in either position, as a chip that takes it off', async () => {

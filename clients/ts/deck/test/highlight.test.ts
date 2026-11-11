@@ -23,7 +23,7 @@ function artifacts(): ArtifactsProjection {
     layer: null,
     layers: [],
     served: [],
-    colourServed: [],
+    colourServed: [], levelsInView: new Map(), followedLevels: new Map(),
     attached: new Map(),
     lineage: servedLineage([]),
     status: 'idle',

@@ -1322,8 +1322,8 @@ export type ArtifactDetail = {
  * - Search, with `q`: the artifacts whose key or {@link BrowseRow.name} contains `q`, ignoring
  *   case.
  *
- * Giving both `parent` and `q` is a `422`. Rows are ordered by `matchedCount` if `filters` is set,
- * otherwise by `maskedCount`, then by `mosaicaId`.
+ * Giving both `parent` and `q` is a `422`, and so is giving `level` with `parent`. Rows are ordered
+ * by `matchedCount` if `filters` is set, then by `maskedCount`, then by `mosaicaId`.
  *
  * @category Requests and responses
  */
@@ -1336,8 +1336,9 @@ export type BrowseRequest = {
    */
   layer: string;
   /**
-   * The level to browse on a `stacked` or `tiered` layer. On any other layer, or for a level the
-   * layer does not have, it is a `422`.
+   * The level to browse on a `stacked` or `tiered` layer, for roots or a search. On any other
+   * layer, for a level the layer does not have, or with `parent`, whose children are listed at
+   * every level, it is a `422`.
    */
   level?: number;
   /**
@@ -1348,8 +1349,8 @@ export type BrowseRequest = {
   /** Text to search for in each artifact's key or {@link BrowseRow.name}, ignoring case. */
   q?: string;
   /**
-   * A filter. Each row then carries `matchedCount` and the page is ordered by it. The same rows are
-   * served, including those with a `matchedCount` of zero.
+   * A filter. Each row then carries `matchedCount` and the page is ordered by it, then by
+   * `maskedCount`. The same rows are served, including those with a `matchedCount` of zero.
    */
   filters?: FilterExpr | null;
   /** The page size. Defaults to `selection.maxBrowseRows` and is capped at it; `0` is a `422`. */

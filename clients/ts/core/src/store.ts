@@ -1,5 +1,5 @@
 import {Aggregates, isDrawn, isPaletteDrawn, joinedAggregate, type AggregateBody, type AggregateSpec, type AggregatesProjection} from './aggregates.js';
-import {ArtifactChannel, requestLevels, servedLineage, type ArtifactChannelState, type ServedLineage} from './artifactChannel.js';
+import {ArtifactChannel, requestLevels, servedLineage, type ArtifactChannelState, type LevelsInView, type ServedLineage} from './artifactChannel.js';
 import {SessionArtifactTable, type ArtifactTable} from './artifactTable.js';
 import {BandBudget, bandKey, type Band, type BandKey} from './bands.js';
 import {tileRectOfBbox, type DepthChoice} from './budget.js';
@@ -9,10 +9,10 @@ import type {Composition} from './compose.js';
 import {dataToWorldXY, gridToWorld, MAX_DEPTH, rectToRequestBbox, WORLD_SIZE} from './coords.js';
 import {NO_COUNT, NO_MASKED, type Count, type Masked} from './counts.js';
 import {RETRY_DEFAULTS, type Clock, type DriverOptions, type ViewState as DriverViewState} from './driver.js';
-import {composeFilters, emptyDraft, withoutClause, type ClauseVerb, type FilterDraft} from './filters.js';
+import {allOf, composeFilters, emptyDraft, withoutClause, type ClauseVerb, type FilterDraft} from './filters.js';
 import {HeldRecords, HeldShapes} from './held.js';
 import {HeldViews, type ViewMachinery} from './heldViews.js';
-import {colourLayers, isFilterLayer, layerClosure} from './layers.js';
+import {clustersInView, colourLayers, isFilterLayer, layerClosure, levelsDrawnInView} from './layers.js';
 import {CLUSTER_PREFIX, EMPTY_LEGEND, Legend, type LegendProjection} from './legend.js';
 import {withMembers, type MemberClause} from './members.js';
 import {attachedTextOf} from './names.js';
@@ -146,8 +146,11 @@ export type StoreOptions = {
      * `meta.selection.maxArtifactsPerTile` if that is lower, and the server refuses a larger value.
      */
     perTile?: number;
-    /** The starting cluster budget ({@link Store.setClusterBudget}). By default there is no limit. */
-    budget?: number;
+    /**
+     * The starting cluster spacing in CSS pixels ({@link Store.setClusterSpacing}). By default there
+     * is none, so the clusters drawn are not limited by the map's size.
+     */
+    clusterSpacing?: number;
     /** How many tiles of artifacts to keep per view. Defaults to `4096`. */
     heldTiles?: number;
   };
@@ -391,6 +394,22 @@ export type ArtifactsProjection = {
   colourServed: Artifact[];
   /** The parent-child links between the artifacts in `served`. */
   lineage: ServedLineage;
+  /**
+   * What the tiles in view hold of each level of each `stacked` or `tiered` layer drawn or coloured
+   * by: how many of the level's artifacts they serve and are drawn, and whether one of them came
+   * back with its full `perTile` of the level. A layer's entry is replaced once every tile of the
+   * view is held for it, so while a view loads it describes the view before.
+   */
+  levelsInView: LevelsInView;
+  /**
+   * The level each `stacked` or `tiered` layer is drawn at where no level is chosen for it, keyed
+   * by name, worked out from `levelsInView` and the cluster count ({@link Store.clusterCount}).
+   * Where the layer's levels declare no zoom range, it is the finest level that is not crowded in
+   * view. A layer moves to a finer level only once that level's artifacts in view are within four
+   * fifths of the count, and moves back only once they are over it. Where the levels declare zoom
+   * ranges, it is the coarsest level in view. A layer with nothing in view is at its coarsest level.
+   */
+  followedLevels: ReadonlyMap<string, number>;
   /**
    * Text attached to artifacts, such as a clustering's topic labels, keyed by the artifact it
    * belongs to. {@link artifactName} uses it to name the artifacts in `served` and `colourServed`.
@@ -658,8 +677,9 @@ export interface Store {
    * The aggregate counts what the map counts ({@link Store.requestFilters}). `spec.without` leaves
    * one column's filter out, so a filter control can still show the values its own clause
    * excludes; `spec.withoutMembersOf` does the same for a layer's `member_of` clauses.
-   * `spec.subject: 'view'` limits the counts to the area in view, and `'visible'` ignores the
-   * filters and counts everything the viewer may see.
+   * `spec.filters` narrows the counts further. `spec.subject: 'view'` limits the counts to the area
+   * in view, and `'visible'` ignores the store's filters and counts everything the viewer may see
+   * that matches `spec.filters`.
    *
    * The store asks again whenever the filters, highlight, selected region or view change, and for
    * a `view` aggregate once the camera comes to rest. Each call sends a new request, so call it
@@ -742,17 +762,37 @@ export interface Store {
   /** How many marks the store aims to draw. Set by `budget` in the options or by `setBudget`. */
   readonly budget: number;
   /**
-   * Limit every `nested` and `dag` layer to at most `budget` artifacts by drawing ancestors in place
-   * of their descendants. `null` removes the limit. The store fetches the affected layers again,
-   * and any aggregate that ranks a layer at `cut: 'drawn'`. Anything but a positive whole number or
-   * `null` is ignored.
+   * Give each cluster a square `spacing` CSS pixels on a side of the map on screen, so the map shows
+   * about one cluster per square: at 100, a map 1,200 by 800 pixels shows 96. `null` removes the
+   * limit. The count this gives for the canvas the last `setView` described is
+   * {@link Store.clusterCount}, and it changes as the canvas is resized.
+   *
+   * Every `nested` and `dag` layer is cut to at most that many artifacts by drawing ancestors in
+   * place of their descendants. On a `stacked` or `tiered` layer whose levels declare no zoom range,
+   * a level with more than that many artifacts drawn in view is crowded, and the components draw
+   * such a layer, where no level is chosen for it, at the finest level that is not
+   * ({@link ArtifactsProjection.followedLevels}), so the world view shows a coarse level and finer
+   * ones appear as the camera zooms in. With no spacing only a tile that came back with its full
+   * `perTile` of a level crowds it, so such a layer is drawn at its finest level until its tiles
+   * fill, at any zoom, and a `nested` or `dag` layer is drawn at its finest cut.
+   *
+   * When the count changes, the store fetches the treed layers again, with any aggregate that ranks
+   * a layer at `cut: 'drawn'`, and works out the followed levels again. Anything but a positive
+   * finite number or `null` is ignored.
    */
-  setClusterBudget(budget: number | null): void;
+  setClusterSpacing(spacing: number | null): void;
   /**
-   * The most artifacts a `nested` or `dag` layer is drawn with, or `null` for no limit. Set by
-   * `artifacts.budget` in the options or by `setClusterBudget`.
+   * The side in CSS pixels of the square of the map each cluster is given, or `null` for no limit.
+   * Set by `artifacts.clusterSpacing` in the options or by `setClusterSpacing`.
    */
-  readonly clusterBudget: number | null;
+  readonly clusterSpacing: number | null;
+  /**
+   * The most clusters the map shows at the cluster spacing, for the canvas the last `setView`
+   * described ({@link clustersInView}): the most artifacts a `nested` or `dag` layer is drawn with,
+   * and the most a level that follows the zoom may have drawn in view. `null` with no spacing, or
+   * before the first `setView`.
+   */
+  readonly clusterCount: number | null;
   /**
    * Switch to view `id`. An id `meta.views` does not list is ignored. Called before `/v1/meta` has
    * loaded, it sets the view to open with.
@@ -890,6 +930,11 @@ function serverOf(url: string): object {
 }
 
 /** The `view` projection before a frame has been drawn in view `id`. */
+/** `spacing` where it is a positive finite number of pixels, else `undefined`. */
+function spacingOf(spacing: number | undefined): number | undefined {
+  return spacing !== undefined && Number.isFinite(spacing) && spacing > 0 ? spacing : undefined;
+}
+
 function noFrame(id: string): ViewProjection {
   return {id, composition: null, depth: 0, visible: NO_MASKED, matched: NO_MASKED, highlighted: NO_MASKED, highlighting: false, served: NO_COUNT, provisional: 0, inView: null};
 }
@@ -996,7 +1041,11 @@ export function createStore(options: StoreOptions): Store {
 
   let meta: Meta | null = null;
   let budget = options.budget ?? DEFAULT_BUDGET;
-  let clusterBudget: number | null = options.artifacts?.budget ?? null;
+  let clusterSpacing: number | null = spacingOf(options.artifacts?.clusterSpacing) ?? null;
+  /** The canvas the last `setView` described, kept across a view switch that drops the camera. */
+  let canvas: {width: number; height: number} | null = null;
+  /** {@link clustersInView} for {@link clusterSpacing} and {@link canvas}, or `null` for no limit. */
+  let clusterCount: number | null = null;
   let contentKeyAtFrame = '';
   /** The content key the registered aggregates were last asked under, by {@link observeCorpus}. */
   let corpusKey = '';
@@ -1344,7 +1393,7 @@ export function createStore(options: StoreOptions): Store {
     view: noFrame(''),
     marks: {bands: [], standIn: [], count: NO_COUNT},
     tiles: {tiles: []},
-    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
+    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), levelsInView: new Map(), followedLevels: new Map(), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
     filters: {draft: emptyDraft([]), expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
@@ -1456,7 +1505,7 @@ export function createStore(options: StoreOptions): Store {
         const zoom = ownPresenter?.view?.view.zoom ?? 0;
         const layers = req.k === 0 ? [] : pointLayers();
         const columns = req.k === 0 ? undefined : pointColumns(id);
-        const cut = clusterBudget;
+        const cut = clusterCount;
         const response = await client.viewport(
           tok,
           {
@@ -1540,7 +1589,7 @@ export function createStore(options: StoreOptions): Store {
       quantisation: q,
       projection: m.views.find((v) => v.id === id)?.projection ?? 'none',
       perTile: options.artifacts?.perTile ?? Math.min(DEFAULT_ARTIFACTS_PER_TILE, m.selection.maxArtifactsPerTile),
-      ...(clusterBudget === null ? {} : {budget: clusterBudget}),
+      ...(clusterCount === null ? {} : {budget: clusterCount}),
       paletteSize: paletteSize(colours.palette),
       heldTiles: options.artifacts?.heldTiles ?? DEFAULT_HELD_TILES,
       prefetch: options.prefetch ?? true,
@@ -1973,6 +2022,8 @@ export function createStore(options: StoreOptions): Store {
       served,
       colourServed: coloured === null ? [] : state.artifacts.filter((a) => a.layer === coloured),
       lineage: servedLineage(served),
+      levelsInView: state.levelsInView,
+      followedLevels: followedLevels(state.levelsInView),
       attached: attachedTextOf(state.artifacts, meta?.layers ?? []),
       status: state.status,
       refusal: state.refusal,
@@ -2198,6 +2249,10 @@ export function createStore(options: StoreOptions): Store {
   function setView(input: ViewInput): void {
     if (!Number.isFinite(input.zoom)) throw new TypeError(`setView was given zoom ${String(input.zoom)}: ViewInput.zoom is required, the camera's zoom as a finite number`);
     lastView = {input};
+    canvas = {width: input.width, height: input.height};
+    // The channel asks once the camera settles below, so a new count waits for that request, and
+    // the followed levels are worked out again when its tiles arrive.
+    recount(false);
     areaChanged();
     // From here the request's own status transitions answer for the status.
     awaitingSwitchFrame = false;
@@ -2300,8 +2355,8 @@ export function createStore(options: StoreOptions): Store {
 
   /**
    * {@link requestFilters} less the filter-position control `spec.without` names and the
-   * filter-position `member_of` clauses on the layer `spec.withoutMembersOf` names, and with
-   * `spec.highlighted` the highlight joined to it.
+   * filter-position `member_of` clauses on the layer `spec.withoutMembersOf` names, with
+   * `spec.filters` joined to it, and with `spec.highlighted` the highlight joined too.
    */
   function aggregateFilters(spec: AggregateSpec): FilterExpr | null {
     const {draft, members} = projections.filters;
@@ -2310,8 +2365,7 @@ export function createStore(options: StoreOptions): Store {
     const clauses = layer === undefined ? members : members.filter((m) => m.verb !== 'filter' || m.layer !== layer);
     const filters = withSelected(withMembers(composeFilters(kept, 'filter'), clauses, 'filter'));
     const highlight = spec.highlighted === true ? requestHighlight() : null;
-    if (highlight === null) return filters;
-    return filters === null ? highlight : {all_of: [filters, highlight]};
+    return allOf([filters, spec.filters ?? null, highlight].filter((f): f is FilterExpr => f !== null));
   }
 
   /**
@@ -2325,6 +2379,7 @@ export function createStore(options: StoreOptions): Store {
     let filters: FilterExpr | null = null;
     let reference: FilterExpr | undefined = spec.reference === 'visible' ? {} : spec.reference;
     if (subject === 'match') filters = aggregateFilters(spec);
+    if (subject === 'visible') filters = spec.filters ?? null;
     if (subject === 'view') {
       const area = countedArea();
       if (area === null) return null;
@@ -2665,12 +2720,33 @@ export function createStore(options: StoreOptions): Store {
     checkPointColumns();
   }
 
-  function setClusterBudget(next: number | null): void {
-    if (next !== null && !(Number.isInteger(next) && next > 0)) return;
-    if (next === clusterBudget) return;
-    clusterBudget = next;
-    for (const held of views.all()) held.channel.setBudget(next ?? undefined);
+  function setClusterSpacing(next: number | null): void {
+    if (next !== null && spacingOf(next) === undefined) return;
+    if (next === clusterSpacing) return;
+    clusterSpacing = next;
+    if (!recount(true)) return;
     aggregates.refresh(false, {which: drawsCut, changed: true});
+    // A level that follows the zoom is chosen under the count.
+    replaceProjection('artifacts', {...projections.artifacts, followedLevels: followedLevels(projections.artifacts.levelsInView)});
+  }
+
+  /**
+   * Work out {@link clusterCount} again and give a new one to every view's channel. The current
+   * view's channel asks again at once where `ask` is set; the others ask at their next camera.
+   *
+   * @returns Whether the count changed.
+   */
+  function recount(ask: boolean): boolean {
+    const next = clusterSpacing === null || canvas === null ? null : clustersInView(clusterSpacing, canvas.width, canvas.height);
+    if (next === clusterCount) return false;
+    clusterCount = next;
+    for (const held of views.all()) held.channel.setBudget(next ?? undefined, ask && held === views.current);
+    return true;
+  }
+
+  /** {@link ArtifactsProjection.followedLevels} for `inView`, each layer from the level it is drawn at now. */
+  function followedLevels(inView: LevelsInView): ReadonlyMap<string, number> {
+    return levelsDrawnInView(meta?.layers ?? [], inView, clusterCount, projections.artifacts.followedLevels);
   }
 
   function setPalette(next: PaletteName): void {
@@ -2917,9 +2993,12 @@ export function createStore(options: StoreOptions): Store {
     get budget() {
       return budget;
     },
-    setClusterBudget,
-    get clusterBudget() {
-      return clusterBudget;
+    setClusterSpacing,
+    get clusterSpacing() {
+      return clusterSpacing;
+    },
+    get clusterCount() {
+      return clusterCount;
     },
     setCurrentView,
     frame: frameOrNull,

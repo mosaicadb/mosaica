@@ -17,9 +17,10 @@ const META = meta({
   layers: [layer('topics', 'nested'), layer('bands', 'stacked', [{level: 0, title: 'Broad'}, {level: 1, title: 'Fine'}])]
 });
 
-async function open(field: string, attrs = '') {
-  const host = await mount(`<button id="opener">Edit colours</button><mosaica-colour-editor field="${field}" ${attrs}></mosaica-colour-editor>`);
+async function open(field: string, levels: ReadonlyMap<string, number> = new Map()) {
+  const host = await mount(`<button id="opener">Edit colours</button><mosaica-colour-editor field="${field}"></mosaica-colour-editor>`);
   const editor = host.querySelector('mosaica-colour-editor') as MosaicaColourEditor;
+  editor.clusterLevels = levels;
   const store = fakeStore({meta: META, status: status({})});
   store.set('view', {...store.get('view'), id: 's0'});
   editor.store = store;
@@ -229,13 +230,28 @@ describe('<mosaica-colour-editor> on a tree layer', () => {
 });
 
 describe('<mosaica-colour-editor> on a levelled layer', () => {
-  it('lists the clusters of the level coloured, the top level unless one is set', async () => {
-    const top = await open('cluster:bands');
+  it('lists the clusters of the level coloured, the top level unless one is set for its layer', async () => {
+    const top = await open('cluster:bands', new Map([['topics', 1]]));
     expect(specOf(top.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 0, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     document.body.innerHTML = '';
-    const fine = await open('cluster:bands', 'cluster-level="1"');
+    const fine = await open('cluster:bands', new Map([['bands', 1]]));
     expect(specOf(fine.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     expect(deep(fine.host, '[part="sub"]')!.textContent).toBe('Fine · Tableau 10');
+  });
+
+  it('drops what was ticked when the level the map follows moves as it zooms', async () => {
+    const {host, store} = await open('cluster:bands');
+    answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
+    await settle(host);
+    const box = rowsOf(host)[0]!.querySelector('[part="check"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle(host);
+    expect(deep(host, '[part="selected"]')).not.toBeNull();
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: new Map([['bands', 1]])});
+    await settle(host);
+    expect(deep(host, '[part="selected"]')).toBeNull();
+    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
   });
 });
 

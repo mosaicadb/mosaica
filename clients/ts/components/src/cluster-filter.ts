@@ -4,10 +4,11 @@ import {repeat} from 'lit/directives/repeat.js';
 import {artifactName, withMember, withoutMember, type BrowseRow, type Layer, type MemberClause, type Refusal} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
 import {HeldAggregate, artifactGroupings, countsByKey} from './aggregate.js';
-import {MosaicaElement, UNNAMED, emit, idString} from './base.js';
+import {MosaicaElement, called, emit, idString, labelOf} from './base.js';
 import {FloatingList} from './float.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
+import {ClusterPaths, type Path} from './paths.js';
 import {NamedQuery} from './states.js';
 import {chrome, tokens} from './tokens.js';
 
@@ -19,15 +20,15 @@ const TOP_LEVEL_ROWS = 50;
  * A path of `n` of its nearest parents, nearest last, led by an ellipsis where parents further up
  * are left out.
  */
-function pathText(path: readonly string[], beyond: boolean, n: number): string {
-  return `${beyond || n < path.length ? '… › ' : ''}${path.slice(path.length - n).join(' › ')}`;
+function pathText(path: Path, n: number): string {
+  return `${path.beyond || n < path.steps.length ? '… › ' : ''}${path.steps.slice(path.steps.length - n).join(' › ')}`;
 }
 
 /** How many parents a match's path is walked up, nearest first. */
 const PATH_DEPTH = 3;
 
-/** One cluster the list offers: its row and, once walked, its path of parents' names, nearest last. */
-type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
+/** One cluster the list offers. */
+type Offer = {row: BrowseRow};
 
 /**
  * Use `<mosaica-cluster-filter>` when you want to search a layer's clusters without the field card
@@ -52,8 +53,10 @@ type Offer = {row: BrowseRow; path: string[] | null; beyond: boolean};
  * @csspart values - The list, while it is open.
  * @csspart option - One cluster in the list, with `data-id`, `aria-selected` while its clause is
  *   on, and `data-active` on the one the arrow keys reached.
- * @csspart name - A row's name, with `data-unnamed` if the cluster has none.
- * @csspart path - A row's path of parents' names.
+ * @csspart name - A row's name. Where the cluster has none it is the cluster's key, with
+ *   `data-key-name`, and where it has no key either it is the word Unnamed, with `data-unnamed`.
+ * @csspart path - A row's path of its parents' names, each step naming every served parent of the
+ *   step below it, by its key where it has no name.
  * @csspart value-count - A row's exact count.
  * @csspart more - The note under the box when there is nothing to list, or when more match than
  *   are listed.
@@ -190,10 +193,8 @@ export class MosaicaClusterFilter extends MosaicaElement {
     const anchor = this.renderRoot.querySelector<HTMLElement>('.combo');
     return list && anchor ? {list, anchor} : null;
   });
-  /** Every artifact's row as the field has met it, for names and parents. */
-  private readonly rows = new Map<bigint, BrowseRow>();
-  /** Each artifact's served parents as a children-form page gave them. */
-  private readonly parentsOf = new Map<bigint, Promise<BrowseRow[]>>();
+  /** The names of the offered clusters' parents, walked {@link PATH_DEPTH} steps up. */
+  private readonly paths = new ClusterPaths(() => this.requestUpdate());
   /** The layer and view the top-level clusters were fetched for. */
   private fetchedFor = '';
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -205,8 +206,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
     this.tops = null;
     this.found = null;
     this.refusal = null;
-    this.rows.clear();
-    this.parentsOf.clear();
+    this.paths.reset();
     this.fetchedFor = '';
   }
 
@@ -223,14 +223,14 @@ export class MosaicaClusterFilter extends MosaicaElement {
     return this.resolvedStore?.get('meta')?.layers.find((l) => l.name === this.layer) ?? null;
   }
 
-  /** The levels a request addresses on the layer: each declared level on a levelled one, else one request with none. */
-  private levels(layer: Layer): (number | undefined)[] {
+  /** The first declared level of a levelled layer, whose clusters are the top level; `undefined` on any other. */
+  private firstLevel(layer: Layer): number | undefined {
     const levelled = layer.hierarchy.kind === 'stacked' || layer.hierarchy.kind === 'tiered';
-    return levelled && layer.levels.length > 0 ? layer.levels.map((l) => l.level) : [undefined];
+    return levelled ? layer.levels[0]?.level : undefined;
   }
 
   /** One browse page of the layer. Counts come from the aggregate, so the page is asked unfiltered. */
-  private browse(req: {q?: string; parent?: bigint; level?: number; limit: number}) {
+  private browse(req: {q?: string; level?: number; limit: number}) {
     const s = this.resolvedStore;
     if (!s) return Promise.reject(new Error('no store'));
     const ceiling = s.get('meta')?.selection.maxBrowseRows ?? req.limit;
@@ -238,9 +238,17 @@ export class MosaicaClusterFilter extends MosaicaElement {
     return s.browse({...rest, layer: this.layer, filters: null, limit: Math.max(1, Math.min(req.limit, ceiling)), ...(level === undefined ? {} : {level})});
   }
 
-  private offer(row: BrowseRow): Offer {
-    this.rows.set(row.mosaicaId, row);
-    return {row, path: row.parentIds.length === 0 ? [] : null, beyond: false};
+  /** Offer the rows of a page, and walk the parents of each. */
+  private offer(rows: BrowseRow[], layer: Layer): Offer[] {
+    const s = this.resolvedStore;
+    this.paths.meet(rows);
+    if (s) this.paths.ask(s, layer, rows.map((r) => r.mosaicaId), PATH_DEPTH);
+    return rows.map((row) => ({row}));
+  }
+
+  /** An offer's path of parents, once walked; empty for a cluster with none. */
+  private pathOf(o: Offer): Path | null {
+    return this.paths.path(o.row.mosaicaId, PATH_DEPTH);
   }
 
   /** Fetch the top-level clusters, once per layer and view. */
@@ -252,11 +260,11 @@ export class MosaicaClusterFilter extends MosaicaElement {
     if (key === this.fetchedFor) return;
     this.fetchedFor = key;
     const epoch = this.epoch;
-    const level = this.levels(layer)[0];
+    const level = this.firstLevel(layer);
     this.browse({limit: TOP_LEVEL_ROWS, ...(level === undefined ? {} : {level})})
       .then((page) => {
         if (epoch !== this.epoch) return;
-        this.tops = page.artifacts.map((r) => this.offer(r));
+        this.tops = this.offer(page.artifacts, layer);
         this.refusal = null;
       })
       .catch((error: unknown) => {
@@ -268,56 +276,26 @@ export class MosaicaClusterFilter extends MosaicaElement {
       });
   }
 
-  /** Search the layer's names for `q`, at every level of a levelled layer, and walk each match's path. */
+  /**
+   * Search the layer's names for `q`, and walk each match's path. One request with no level
+   * searches every level of a levelled layer.
+   */
   private searchFor(q: string): void {
     const layer = this.declared();
     if (!layer) return;
     const epoch = this.epoch;
     const limit = this.resolvedStore?.get('meta')?.selection.maxBrowseRows ?? 50;
-    Promise.all(this.levels(layer).map((level) => this.browse({q, limit: Math.min(limit, 50), ...(level === undefined ? {} : {level})})))
-      .then((pages) => {
+    this.browse({q, limit: Math.min(limit, 50)})
+      .then((page) => {
         if (epoch !== this.epoch || this.search.trim() !== q) return;
-        const offers = pages.flatMap((p) => p.artifacts.map((r) => this.offer(r)));
-        this.found = {q, offers, more: pages.some((p) => p.next !== null)};
+        this.found = {q, offers: this.offer(page.artifacts, layer), more: page.next !== null};
         this.refusal = null;
-        const walkable = layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag';
-        for (const o of offers) void this.walk(o, walkable, epoch);
       })
       .catch((error: unknown) => {
         if (epoch !== this.epoch) return;
         this.refusal = refusalOf(error);
         this.found = {q, offers: [], more: false};
       });
-  }
-
-  /**
-   * Fill in an offer's path, its first parent's name and so on up to {@link PATH_DEPTH} parents. On
-   * a layer whose children form needs no level, a missing parent is asked for; on a levelled layer
-   * only parents already met are named.
-   */
-  private async walk(o: Offer, ask: boolean, epoch: number): Promise<void> {
-    const names: string[] = [];
-    let at: BrowseRow = o.row;
-    for (let i = 0; i < PATH_DEPTH && at.parentIds.length > 0; i++) {
-      const up = at.parentIds[0]!;
-      let parent = this.rows.get(up);
-      if (!parent && ask) {
-        let held = this.parentsOf.get(at.mosaicaId);
-        if (!held) {
-          held = this.browse({parent: at.mosaicaId, limit: 1}).then((p) => p.parents, () => []);
-          this.parentsOf.set(at.mosaicaId, held);
-        }
-        for (const r of await held) this.rows.set(r.mosaicaId, r);
-        parent = this.rows.get(up);
-      }
-      if (!parent) break;
-      names.unshift(artifactName(parent) ?? UNNAMED);
-      at = parent;
-    }
-    if (epoch !== this.epoch) return;
-    o.path = names;
-    o.beyond = at.parentIds.length > 0;
-    this.requestUpdate();
   }
 
   /** The clauses this field holds: the layer's, in its position. */
@@ -333,16 +311,16 @@ export class MosaicaClusterFilter extends MosaicaElement {
       this.search = '';
       this.found = null;
       this.listOpen = false;
-      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: offer.path && offer.path.length > 0 ? pathText(offer.path, offer.beyond, offer.path.length) : '', rung: row.rung});
+      const path = this.pathOf(offer);
+      this.choose({id: idString(row.mosaicaId), name: artifactName(row), path: path && path.steps.length > 0 ? pathText(path, path.steps.length) : '', rung: row.rung});
       return;
     }
     const members = s.get('filters').members;
     const on = this.held().some((m) => m.artifact === row.mosaicaId && !m.outside);
-    const name = artifactName(row);
     s.setMembers(
       on
         ? withoutMember(members, this.layer, row.mosaicaId, 'filter')
-        : withMember(members, {layer: this.layer, artifact: row.mosaicaId, outside: false, verb: 'filter', ...(name === null ? {} : {label: name})})
+        : withMember(members, {layer: this.layer, artifact: row.mosaicaId, outside: false, verb: 'filter', ...labelOf(called(row.name, row.key))})
     );
     emit(this, 'mosaica-clausechange', {id: idString(row.mosaicaId), layer: this.layer, outside: false, verb: 'filter', on: !on});
     this.search = '';
@@ -402,13 +380,14 @@ export class MosaicaClusterFilter extends MosaicaElement {
     for (const el of shown) {
       const id = BigInt(el.dataset.id!);
       const o = this.listed()?.find((x) => x.row.mosaicaId === id);
-      if (!o?.path) continue;
-      let n = o.path.length;
+      const path = o ? this.pathOf(o) : null;
+      if (!path) continue;
+      let n = path.steps.length;
       if (context && el.clientWidth > 0) {
         context.font = getComputedStyle(el).font;
-        while (n > 1 && context.measureText(pathText(o.path, o.beyond, n)).width > el.clientWidth) n -= 1;
+        while (n > 1 && context.measureText(pathText(path, n)).width > el.clientWidth) n -= 1;
       }
-      if ((this.pathFits.get(id) ?? o.path.length) !== n) {
+      if ((this.pathFits.get(id) ?? path.steps.length) !== n) {
         this.pathFits.set(id, n);
         changed = true;
       }
@@ -454,14 +433,15 @@ export class MosaicaClusterFilter extends MosaicaElement {
     };
     const open = this.listOpen && offers.length > 0;
     const option = (o: Offer) => {
-      const name = artifactName(o.row);
+      const name = called(o.row.name, o.row.key);
       const count = countOf(o);
-      const full = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, o.path.length) : '';
-      const path = o.path && o.path.length > 0 ? pathText(o.path, o.beyond, this.pathFits.get(o.row.mosaicaId) ?? o.path.length) : '';
+      const walked = this.pathOf(o);
+      const full = walked && walked.steps.length > 0 ? pathText(walked, walked.steps.length) : '';
+      const path = walked && walked.steps.length > 0 ? pathText(walked, this.pathFits.get(o.row.mosaicaId) ?? walked.steps.length) : '';
       return html`<button type="button" part="option" role="option" id=${`c-${o.row.mosaicaId}`} tabindex="-1" data-id=${idString(o.row.mosaicaId)} ?data-active=${o === active}
         aria-selected=${on.has(o.row.mosaicaId) ? 'true' : 'false'}
         @mousedown=${(e: Event) => e.preventDefault()} @click=${() => this.toggle(o)}>
-        <span class="opt"><span part="name" ?data-unnamed=${name === null}>${name ?? UNNAMED}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
+        <span class="opt"><span part="name" ?data-key-name=${name.from === 'key'} ?data-unnamed=${name.from === 'none'}>${name.text}</span>${path ? html`<span part="path" data-id=${idString(o.row.mosaicaId)} title=${full}><bdi>${path}</bdi></span>` : nothing}</span>
         ${count === undefined ? nothing : html`<span part="value-count">${count.toLocaleString('en-GB')}</span>`}
       </button>`;
     };

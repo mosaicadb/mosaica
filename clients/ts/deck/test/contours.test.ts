@@ -31,7 +31,7 @@ const artifact = (id: bigint, parent: bigint | null, count = 10n): Shaped => ({
  * it draws, and what it depends on.
  */
 const meta = (layers: {name: string; computedContent?: string[]; shape?: 'derived' | 'predicate' | 'authored' | null; depsOn?: string[]}[]): Meta =>
-  ({layers: layers.map((l) => ({name: l.name, computedContent: l.computedContent ?? [], shape: l.shape ?? null, depsOn: l.depsOn ?? []}))}) as unknown as Meta;
+  ({layers: layers.map((l) => ({name: l.name, hierarchy: {kind: 'flat', pruneChildren: false}, computedContent: l.computedContent ?? [], shape: l.shape ?? null, depsOn: l.depsOn ?? []}))}) as unknown as Meta;
 
 /**
  * The served set as the server delivers it: on this treed fixture `rung` is the response-local
@@ -58,8 +58,14 @@ function projection(input: Shaped[]): ArtifactsProjection {
   const shapes = new Map(input.filter((a) => a.shape !== null).map((a) => [a.mosaicaId, a.shape!]));
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds, rung: a.rung})));
-  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], attached: new Map(), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes, colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
+  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), followedLevels: new Map(), attached: new Map(), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes, colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
 }
+
+/** No layer cut at a level. */
+const NO_LEVELS: ReadonlyMap<string, number> = new Map();
+
+/** The fixture's layer cut at `level`, or at none. */
+const levelsAt = (level: number | undefined): ReadonlyMap<string, number> => (level === undefined ? NO_LEVELS : new Map([['clusters', level]]));
 
 /** The unsigned area of a closed ring, by the shoelace formula. */
 const area = (ring: readonly [number, number][]) => {
@@ -156,7 +162,7 @@ describe('outlineOf', () => {
 
 describe('contourShapes — what may be hovered', () => {
   const ids = (a: ArtifactsProjection, o: {level?: number; meta?: Meta} = {}) =>
-    contourShapes(a, {level: o.level, meta: o.meta ?? null}).map((s) => String(s.id));
+    contourShapes(a, {levels: levelsAt(o.level), meta: o.meta ?? null}).map((s) => String(s.id));
 
   it('holds the frontier and nothing above it — an ancestor answers nothing', () => {
     // Three levels of one chain. Only the leaf is drawn, so only the leaf may be pointed at.
@@ -179,7 +185,7 @@ describe('contourShapes — what may be hovered', () => {
     expect(ids(p)).toEqual(['2']);
     expect(ids(projection([{...artifact(1n, null), matched: false}]))).toEqual([]);
     // The opened artifact may still be pointed at.
-    expect(contourShapes(p, {level: undefined, opened: 1n}).map((s) => String(s.id))).toEqual(['1', '2']);
+    expect(contourShapes(p, {levels: NO_LEVELS, opened: 1n}).map((s) => String(s.id))).toEqual(['1', '2']);
   });
 
   it('leaves a dependent layer’s artifacts out — they have no shape, and their box is not one', () => {
@@ -198,7 +204,7 @@ describe('contourShapes — what may be hovered', () => {
     const left: [number, number][] = [[0, 0], [g / 4, 0], [g / 4, g / 4], [0, g / 4]];
     const right: [number, number][] = [[(3 * g) / 4, (3 * g) / 4], [g, (3 * g) / 4], [g, g], [(3 * g) / 4, g]];
     const flat = projection([{...artifact(1n, null), shape: [[left], [right]]}, artifact(2n, null)]);
-    const shapes = contourShapes(flat, {level: undefined});
+    const shapes = contourShapes(flat, {levels: NO_LEVELS});
     expect(shapes.map((s) => [String(s.id), s.parts.length, s.rung])).toEqual([['1', 2, 0], ['2', 1, 0]]);
     // The box is the parts', so a pointer between two separated groups is in neither.
     const one = shapes[0]!;
@@ -214,7 +220,7 @@ describe('contourShapes — what may be hovered', () => {
     const hole: [number, number][] = [[g / 4, g / 4], [(3 * g) / 4, g / 4], [(3 * g) / 4, (3 * g) / 4], [g / 4, (3 * g) / 4]];
     const island: [number, number][] = [[(3 * g) / 8, (3 * g) / 8], [(5 * g) / 8, (3 * g) / 8], [(5 * g) / 8, (5 * g) / 8], [(3 * g) / 8, (5 * g) / 8]];
     const p = projection([{...artifact(1n, null), shape: [[outer, hole], [island]]}]);
-    const one = contourShapes(p, {level: undefined})[0]!;
+    const one = contourShapes(p, {levels: NO_LEVELS})[0]!;
     expect(shapeContains(one, gridToWorldXY([g / 8, g / 8]))).toBe(true);
     expect(shapeContains(one, gridToWorldXY([(5 * g) / 16, (5 * g) / 16]))).toBe(false);
     expect(shapeContains(one, gridToWorldXY([g / 2, g / 2]))).toBe(true);
@@ -226,8 +232,8 @@ describe('contourShapes — what may be hovered', () => {
     const g = 2 ** 32 - 1;
     const ring: [number, number][] = [[0, 0], [g / 2, 0], [g / 2, g / 2], [g / 4, g / 3], [0, g / 2]];
     const p = projection([{...artifact(1n, null), shape: null}, {...artifact(2n, null), shape: null}]);
-    expect(contourShapes(p, {level: undefined}).map((s) => s.parts[0]![0]!.length)).toEqual([4, 4]);
-    const after = contourShapes({...p, shapes: new Map([[1n, [[ring]]]])}, {level: undefined});
+    expect(contourShapes(p, {levels: NO_LEVELS}).map((s) => s.parts[0]![0]!.length)).toEqual([4, 4]);
+    const after = contourShapes({...p, shapes: new Map([[1n, [[ring]]]])}, {levels: NO_LEVELS});
     expect(after.find((s) => s.id === 1n)!.parts[0]![0]).toEqual(ring.map(gridToWorldXY));
     expect(after.find((s) => s.id === 2n)!.parts[0]![0]!.length).toBe(4);
   });
@@ -236,13 +242,13 @@ describe('contourShapes — what may be hovered', () => {
     const g = 2 ** 32 - 1;
     const notched: [number, number][] = [[0, 0], [g, 0], [g, g], [g / 2, g], [g / 2, g / 2], [0, g / 2]];
     const p = projection([{...artifact(1n, null), shape: [[notched]]}]);
-    expect(contourShapes(p, {level: undefined})[0]!.parts[0]![0]).toEqual(notched.map(gridToWorldXY));
+    expect(contourShapes(p, {levels: NO_LEVELS})[0]!.parts[0]![0]).toEqual(notched.map(gridToWorldXY));
   });
 });
 
 describe('focusOutlines — what draws', () => {
   const rows = (data: ReturnType<typeof focusOutlines>) => Object.fromEntries(data.map((d) => [String(d.id), [d.fill, d.line, d.width]]));
-  const options = (o: Partial<Parameters<typeof focusOutlines>[1]>) => ({opened: null, hovered: null, level: undefined, scheme: 'light' as const, ...o});
+  const options = (o: Partial<Parameters<typeof focusOutlines>[1]>) => ({opened: null, hovered: null, levels: NO_LEVELS, scheme: 'light' as const, ...o});
 
   it('holds the hovered and the opened artifact, and nothing else', () => {
     // Hover and click resolve against `contourShapes`, so this holds only what draws.
@@ -274,8 +280,8 @@ describe('focusOutlines — what draws', () => {
     expect(focusOutlines(p, options({opened: 2n})).map((d) => String(d.id))).toEqual(['2']);
     expect(focusOutlines(p, options({hovered: 404n}))).toEqual([]);
     // A level moves the frontier up, and with it what may draw.
-    expect(focusOutlines(p, options({opened: 2n, level: 0}))).toEqual([]);
-    expect(focusOutlines(p, options({opened: 1n, level: 0})).map((d) => String(d.id))).toEqual(['1']);
+    expect(focusOutlines(p, options({opened: 2n, levels: levelsAt(0)}))).toEqual([]);
+    expect(focusOutlines(p, options({opened: 1n, levels: levelsAt(0)})).map((d) => String(d.id))).toEqual(['1']);
   });
 
   it('leaves a dependent layer’s artifacts out — their box is not a shape', () => {
@@ -356,7 +362,7 @@ describe('focusOutlines — what draws', () => {
     for (const kind of ['derived', 'predicate', 'authored'] as const) {
       const declares = meta([{name: 'clusters', computedContent: ['centroid', 'box'], shape: kind}]);
       expect(focusOutlines(p, options({hovered: 1n, meta: declares}))).toEqual([]);
-      expect(contourShapes(p, {level: undefined, meta: declares}).map((s) => String(s.id))).toEqual(['1']);
+      expect(contourShapes(p, {levels: NO_LEVELS, meta: declares}).map((s) => String(s.id))).toEqual(['1']);
       const arrived = focusOutlines({...p, shapes: new Map([[1n, [[ring]]]])}, options({hovered: 1n, meta: declares}));
       expect(arrived.length).toBe(1);
       expect(arrived[0]!.source).toBe('shape');

@@ -21,7 +21,7 @@ afterAll(async () => {
   await served?.close();
 });
 
-type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; regionEdge(): [number, number]; setStatus(over: object): void; ready?: boolean};
+type Seen = {zooms: number[]; hovered: string[]; points: [number, number][]; selectRegion(bbox: [number, number, number, number]): void; regionEdge(): [number, number]; setStatus(over: object): void; canvases(): [number, number][]; ready?: boolean};
 type Box = {left: number; top: number; right: number; bottom: number; width: number; height: number};
 
 const frames = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -92,6 +92,17 @@ describe('the map’s keys in a browser', () => {
       return {focused: root.activeElement === canvas, visible: canvas.matches(':focus-visible'), width: style.outlineWidth, style: style.outlineStyle, offset: style.outlineOffset};
     });
     expect(ring).toEqual({focused: true, visible: true, width: '2px', style: 'solid', offset: '-2px'});
+  }, 120_000);
+});
+
+describe('the map’s size in a browser', () => {
+  it('gives the store its new canvas when the map is resized, so the cluster count follows it', async () => {
+    const page = await open();
+    const canvases = () => page.evaluate(() => (window as unknown as Seen).canvases());
+    expect((await canvases()).at(-1)).toEqual([800, 500]);
+    await page.evaluate(() => ((document.querySelector('mosaica-map') as HTMLElement).style.width = '400px'));
+    await page.waitForFunction(() => (window as unknown as Seen).canvases().at(-1)?.[0] === 400, undefined, {timeout: 20_000});
+    expect((await canvases()).at(-1)).toEqual([400, 500]);
   }, 120_000);
 });
 

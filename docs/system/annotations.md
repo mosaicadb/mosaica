@@ -28,7 +28,7 @@ An `enumerated` membership is fixed at what its table says: an item inserted lat
 | `tiered` | levels, each artifact naming a parent at a coarser level | field, subfield and topic; country, region and district |
 | `stacked` | levels with no relations between them | the same data clustered at three resolutions |
 
-A tiered or stacked layer declares its levels, each with an optional title and an optional zoom range, which picks the level a request that names none is answered at. A nested or dag layer has no levels: the map cuts through the tree as it zooms, as described [below](#on-the-map).
+A tiered or stacked layer declares its levels, each with an optional title and an optional zoom range, which picks the level a request that names none is answered at. A layer whose levels declare no zoom range is answered at every level, and the browser components then draw it at the finest level that is not crowded in view, so it deepens as the viewer zooms in; [the level](browser-maps.md#what-the-deck-layer-and-the-components-add) gives the rule. A nested or dag layer has no levels: the map cuts through the tree as it zooms, as described [below](#on-the-map).
 
 ### What each artifact carries
 
@@ -82,11 +82,11 @@ A client asks for the artifacts in each map tile, as described under [annotation
 
 - **The largest first.** On a flat, stacked or tiered layer, each tile returns at most `per_tile` artifacts of each level, the largest first by how many members the viewer may see. A small cluster in a crowded tile is left out there, and appears where it is among the largest, or when the viewer zooms in.
 - **The same figures everywhere.** An artifact's count, centre and box cover all the members the viewer may see, wherever they are, so an artifact that spans several tiles has the same figures in each.
-- **Trees are cut to a budget.** A nested or dag layer is cut across the whole area on screen: where too many fine topics would show, their parent stands in for them. Zooming in moves the cut deeper. With `prune_children = true`, only the finest topic that qualifies on each branch is drawn. The default, `false`, draws its ancestors too.
+- **Trees are cut to a budget.** A nested or dag layer is cut across the whole area on screen: where too many fine topics would show, their parent stands in for them. Zooming in moves the cut deeper. The browser client sets the budget from the map's size, at one topic per square of the map's cluster spacing, which [browser-maps.md](browser-maps.md) describes under the level. With `prune_children = true`, only the finest topic that qualifies on each branch is drawn. The default, `false`, draws its ancestors too.
 - **Filters mark matches.** Filtering the map does not change which artifacts are served or their counts. Each artifact carries a flag saying whether any of its members in the tile match the filter, and another for the highlight, so a client can dull the topics with no matches.
 - **Colours.** A request can ask for a colour slot for each artifact, from a palette of 2 to 32 colours. Mosaica tries to give neighbouring artifacts different slots, keeps a viewer's slot for an artifact the same at every zoom, and gives the largest child of a topic its parent's colour where it can, so a cluster usually keeps its colour as the viewer zooms into it. Two viewers with different access may see one cluster in different colours.
 
-An artifact deep in a large tree, or a small one in tiles crowded with larger ones, may not be drawn at any zoom a viewer reaches. `POST /v1/artifacts/browse` lists a layer's artifacts without a map: a page of its top-level artifacts, one artifact's children, or a search by name, each with the count the map would show.
+An artifact deep in a large tree, or a small one in tiles crowded with larger ones, may not be drawn at any zoom a viewer reaches. `POST /v1/artifacts/browse` lists a layer's artifacts without a map: a page of its top-level artifacts, one artifact's children, or a search by name, each with the count the map would show. On a stacked or tiered layer the top-level artifacts and the search cover every level unless the request names one.
 
 ## Who sees an annotation
 
@@ -106,7 +106,9 @@ A viewer is served an artifact only if it passes three tests.
 
 Use `"none"` for a region that exists whether or not a viewer can see anything in it, such as a country. Such a region is served by its `mosaica_id`, in browse and in bulk reads, but the map's tiles draw only artifacts with a member the viewer can see in that tile. Use a stricter requirement where the artifact itself says something about its members, such as a cluster of confidential documents.
 
-An artifact a viewer is not served does not exist for them: no row, no count, no gap in a list, no parent naming it, and a 404 when named directly. On the map, its children attach to its nearest ancestor the viewer is served. In browse and bulk reads they show no parent, as roots.
+An artifact a viewer is not served has no row, no count, no place in a list and no parent naming it, and is a 404 when named directly. Its served children attach to its nearest ancestors the viewer is served, or are roots where it has none. The map, browse and bulk reads all name parents by this one rule, so a client walking any of them sees the same tree, and a map frame names only the parents it carries. A tiered artifact whose ancestors are all withheld is a root at its own level.
+
+On a `nested` or `dag` layer a served artifact's depth is counted over the served tree, so a withheld artifact leaves no gap in it. A `tiered` layer's levels are declared, so a child attached to an ancestor two or more levels up shows that a level was passed through. Where every chain on the layer steps one level at a time, as the chains a list column mints do, that tells the viewer that an artifact they are not served sits on that branch, though not which one. The [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md#residual-disclosure) records this beside the other residual channels.
 
 ```mermaid
 flowchart TB
@@ -123,7 +125,7 @@ flowchart TB
   end
 ```
 
-*Topic X is withheld. On the map its children attach to the root, so the viewer sees a whole tree with no gap.*
+*Topic X is withheld. On the map, in browse and in bulk reads its children attach to the root, so the viewer sees a whole tree with no gap.*
 
 ### Names generated from the members
 

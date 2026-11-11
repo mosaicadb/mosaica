@@ -164,6 +164,10 @@ export const chrome = css`
   [data-unnamed] {
     color: var(--_mosaica-ink-3);
   }
+  [data-key-name] {
+    color: var(--_mosaica-ink-2);
+    font-family: var(--_mosaica-font-mono);
+  }
   .sm {
     font-size: 12px;
   }

@@ -355,10 +355,10 @@ pub struct ArtifactOut {
     /// rows the count was taken over — see [`crate::derived`]. Empty where the layer declares
     /// none; describes only the members this viewer can see.
     pub derived: crate::derived::DerivedContent,
-    /// This artifact's parents, only those also in this response, ascending by identifier. A
-    /// tree's list is at most one long; a `dag` layer's may name several. An absent entry covers
-    /// a root and a withheld parent alike, so distinguishing them cannot disclose a coarser
-    /// grouping.
+    /// The artifacts this principal is served nearest above this one on every path
+    /// ([`crate::lineage`]), only those also in this response, ascending by identifier. A withheld
+    /// parent is climbed through to its own served ancestors, as browse climbs it, so it leaves
+    /// no entry and no gap. A tree's list is at most one long; a `dag` layer's may name several.
     pub parent_ids: Vec<MosaicaId>,
     /// The artifact this one is attached to, named by the identifier this response served it
     /// under. `None` where attached to nothing, or on the identifier route. Always names a row in

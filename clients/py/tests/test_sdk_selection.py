@@ -306,7 +306,7 @@ def test_a_map_opens_on_the_selections_view_filters_and_box(db, points, stub_bun
     assert m.colour_by == "primary_category" and m.layers == [] and m.height == 320
     assert m.size_by == "submitted_at"
     assert (m.budget, m.budget_min, m.budget_max) == (0, 1_000, 2_000_000)
-    assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (1_000, 10, 10_000)
+    assert (m.cluster_spacing, m.cluster_spacing_min, m.cluster_spacing_max) == (100, 50, 400)
 
 
 def test_a_timestamp_filter_takes_a_moment_however_it_is_written(db, points, stub_bundle):
@@ -377,13 +377,13 @@ def test_every_route_to_a_map_takes_the_point_budget(db, stub_bundle):
         "budget": 40_000,
         "budget_min": 500,
         "budget_max": 90_000,
-        "cluster_budget": 300,
-        "cluster_budget_min": 5,
-        "cluster_budget_max": 5_000,
+        "cluster_spacing": 150,
+        "cluster_spacing_min": 30,
+        "cluster_spacing_max": 600,
     }
     for m in (db.map(**settings), db.viewer(["cs.LG"]).map(**settings), db.view("s0").map(**settings)):
         assert (m.budget, m.budget_min, m.budget_max) == (40_000, 500, 90_000)
-        assert (m.cluster_budget, m.cluster_budget_min, m.cluster_budget_max) == (300, 5, 5_000)
+        assert (m.cluster_spacing, m.cluster_spacing_min, m.cluster_spacing_max) == (150, 30, 600)
 
 
 def test_every_route_to_a_map_takes_the_maps_other_settings(db, stub_bundle):

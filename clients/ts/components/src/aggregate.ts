@@ -1,5 +1,5 @@
 import type {AggregateEntry, AggregateSpec, AggregateSpecGrouping, AggregateTable, Layer, Meta, Store} from '@mosaicajs/client';
-import {jsonBody, topLevelServed} from '@mosaicajs/client/internal';
+import {jsonBody} from '@mosaicajs/client/internal';
 
 /**
  * One listed group of an aggregate table: its key (a vocabulary key for a field, an artifact's
@@ -56,24 +56,19 @@ export function isTree(layer: Pick<Layer, 'hierarchy'>): boolean {
   return layer.hierarchy.kind === 'nested' || layer.hierarchy.kind === 'dag';
 }
 
-/**
- * The level of a `stacked` or `tiered` layer that is counted and coloured: `chosen` where the layer
- * declares it, else its top (coarsest) level among those `served` at the camera's zoom, as the
- * map draws it. `undefined` on a layer with no levels to choose.
- */
-export function levelOf(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, chosen: number | null, served: readonly {layer: string; rung: number}[] = []): number | undefined {
-  if ((layer.hierarchy.kind !== 'stacked' && layer.hierarchy.kind !== 'tiered') || layer.levels.length === 0) return undefined;
-  return chosen !== null && layer.levels.some((l) => l.level === chosen) ? chosen : topLevelServed(layer, served);
+/** Whether `layer` declares parent edges, `tiered`, `nested` or `dag`, so its artifacts can be walked by their parents and children. */
+export function isLinked(layer: Pick<Layer, 'hierarchy'>): boolean {
+  return layer.hierarchy.kind === 'tiered' || isTree(layer);
 }
 
 /**
  * The grouping ranking a layer's `top` clusters: at the cut the map draws on a tree, else at
- * {@link levelOf} `level`. Each row carries its slot in the palette the map colours clusters from.
+ * `level`, the level already worked out for the layer (`levelOfLayer`), or at no level where it is
+ * `null`. Each row carries its slot in the palette the map colours clusters from.
  */
 export function rankedGrouping(layer: Pick<Layer, 'name' | 'hierarchy' | 'levels'>, top: number, level: number | null): AggregateSpecGrouping {
   if (isTree(layer)) return {count: true, by: {layer: layer.name, top, cut: 'drawn', paletteSize: 'drawn'}};
-  const at = levelOf(layer, level);
-  return {count: true, by: {layer: layer.name, ...(at === undefined || !countedByLevel(layer) ? {} : {level: at}), top, paletteSize: 'drawn'}};
+  return {count: true, by: {layer: layer.name, ...(level === null || !countedByLevel(layer) ? {} : {level}), top, paletteSize: 'drawn'}};
 }
 
 /**

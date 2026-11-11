@@ -199,6 +199,19 @@ function operatorOf(draft: Exclude<ColumnDraft, {family: 'text'}>): FilterOperat
 }
 
 /**
+ * `operands` joined by `all_of`: `null` where there are none, the operand itself where there is
+ * one. An operand that is itself an `all_of` has its operands taken in its place, since the server
+ * refuses an expression nested deeper than four.
+ *
+ * @internal
+ */
+export function allOf(operands: readonly FilterExpr[]): FilterExpr | null {
+  if (operands.length === 0) return null;
+  const flat = operands.flatMap((o) => ('all_of' in o ? (o.all_of as FilterExpr[]) : [o]));
+  return flat.length === 1 ? flat[0]! : {all_of: flat};
+}
+
+/**
  * Build the filter expression for one side of a draft: `null` if no control is populated, the
  * single clause if one is, and `all_of` over the clauses if several are.
  *

@@ -332,6 +332,60 @@ describe('an aggregate that leaves out one layer’s clauses', () => {
   });
 });
 
+describe('an aggregate that carries its own filter', () => {
+  const remainder = {all_of: [{member_of: {layer: 'topics', artifact: '7'}}, {none_of: [{member_of: {layer: 'topics', artifact: '70'}}, {member_of: {layer: 'topics', artifact: '71'}}]}]};
+
+  it('counts the items that match it as well as the store’s filters and highlight', async () => {
+    const {store, pending} = await storeWith();
+    store.setFilters(DRAFT);
+    const venue = {layer: 'venues', artifact: 9n, outside: false, verb: 'filter' as const};
+    const lit = {layer: 'topics', artifact: 8n, outside: false, verb: 'highlight' as const};
+    store.setMembers([venue, lit]);
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder, highlighted: true});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual({
+      all_of: [{archive: {in: ['cs']}}, {member_of: {layer: 'venues', artifact: '9'}}, ...remainder.all_of, {member_of: {layer: 'topics', artifact: '8'}}]
+    });
+  });
+
+  it('stays within the four levels of nesting the server takes under several controls, clauses and a region', async () => {
+    const depth = (expr: unknown): number => {
+      const node = expr as Record<string, unknown>;
+      const kids = ['all_of', 'any_of', 'none_of'].flatMap((key) => (Array.isArray(node[key]) ? (node[key] as unknown[]) : []));
+      return kids.length === 0 && !['all_of', 'any_of', 'none_of'].some((key) => key in node) ? 1 : 1 + Math.max(0, ...kids.map(depth));
+    };
+    const {store, pending} = await storeWith();
+    store.setFilters({filter: {archive: {family: 'category', keys: ['cs']}, year: {family: 'numeric', gte: 2020, lte: null}}, highlight: {archive: {family: 'category', keys: ['math']}}});
+    store.setMembers([
+      {layer: 'topics', artifact: 7n, outside: false, verb: 'filter'},
+      {layer: 'venues', artifact: 9n, outside: true, verb: 'filter'},
+      {layer: 'topics', artifact: 8n, outside: false, verb: 'highlight'}
+    ]);
+    store.select({kind: 'box', bbox: [0, 0, 0.5, 0.5]});
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder, highlighted: true});
+    await flush();
+    const sent = pending.at(-1)!.req.filters;
+    expect(JSON.stringify(sent)).toContain('"region"');
+    expect(JSON.stringify(sent)).toContain('"year"');
+    expect(depth(sent)).toBeLessThanOrEqual(4);
+  });
+
+  it('is sent alone where the store has no filters', async () => {
+    const {store, pending} = await storeWith();
+    store.setAggregate('rest', {groupings: [{count: true}], filters: remainder});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual(remainder);
+  });
+
+  it('still applies to an aggregate over everything the viewer may see', async () => {
+    const {store, pending} = await storeWith();
+    store.setFilters(DRAFT);
+    store.setAggregate('rest', {groupings: [{count: true}], subject: 'visible', filters: remainder});
+    await flush();
+    expect(pending[0]!.req.filters).toEqual(remainder);
+  });
+});
+
 describe('an aggregate the server sheds', () => {
   it('is sent again after the backoff, or the Retry-After where longer, and shows retrying meanwhile', async () => {
     const {store, pending, clock} = await storeWith();
@@ -734,7 +788,7 @@ describe('an aggregate ranking a layer at the drawn cut', () => {
   const ranked = (p: {req: AggregateRequest}) => p.req.groupings.some((g) => g.by !== undefined && 'cut' in g.by);
   const cutOf = (p: {req: AggregateRequest}) => (p.req.groupings[0]!.by as {cut: Cut}).cut;
 
-  it('waits for the camera, sends the cut the map draws, and asks again when the cluster budget changes', async () => {
+  it('waits for the camera, sends the cut the map draws, and asks again when the cluster count changes', async () => {
     const {store, pending, clock} = await storeWith();
     store.setAggregate('card', {groupings: [TREE]});
     await flush();
@@ -749,16 +803,24 @@ describe('an aggregate ranking a layer at the drawn cut', () => {
     expect(cut.bbox[0]).toBeLessThanOrEqual(BOX[0]);
     expect(cut.bbox[2]).toBeGreaterThanOrEqual(BOX[2]);
     expect('budget' in cut).toBe(false);
-    expect(store.clusterBudget).toBeNull();
-    store.setClusterBudget(40);
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([null, null]);
+    // A level that follows the zoom is chosen under the count, so what draws the artifacts is told.
+    const told: unknown[] = [];
+    const unsubscribe = store.subscribe('artifacts', (a) => told.push(a));
+    // 400 by 400 pixels in squares 50 on a side.
+    store.setClusterSpacing(50);
     await flush();
-    expect(pending.filter(ranked).map(cutOf)).toEqual([cut, {...cut, budget: 40}]);
-    expect(store.clusterBudget).toBe(40);
-    // Not a whole number above zero, or the same budget: nothing changes and nothing is asked.
-    store.setClusterBudget(0);
-    store.setClusterBudget(2.5);
-    store.setClusterBudget(40);
+    unsubscribe();
+    expect(told.length).toBeGreaterThan(0);
+    expect(pending.filter(ranked).map(cutOf)).toEqual([cut, {...cut, budget: 64}]);
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([50, 64]);
+    // Not a number above zero, or a spacing that gives the same count: nothing is asked.
+    store.setClusterSpacing(0);
+    store.setClusterSpacing(-5);
+    store.setClusterSpacing(Number.NaN);
+    store.setClusterSpacing(49.9);
     await flush();
+    expect(store.clusterCount).toBe(64);
     expect(pending.filter(ranked)).toHaveLength(2);
   });
 });

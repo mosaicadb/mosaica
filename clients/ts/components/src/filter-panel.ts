@@ -4,7 +4,7 @@ import {repeat} from 'lit/directives/repeat.js';
 import {CLUSTER_PREFIX, activeCount, artifactName, emptyDraft, isPopulated, withoutClause, withoutMember, type ClauseVerb, type ColumnDraft, type FilterDraft, type HeldRegion, type Layer, type MemberClause, type Meta, type Store} from '@mosaicajs/client';
 import {OPERATOR_WORDS} from './filter.js';
 import {HeldAggregate} from './aggregate.js';
-import {BOOL_WORDS, MosaicaElement, UNNAMED, boolKeys, columnCaption, dateRangeText, countText, emit, focusLost, keyTitle, shortCount} from './base.js';
+import {BOOL_WORDS, MosaicaElement, boolKeys, called, columnCaption, dateRangeText, countText, emit, focusLost, keyTitle, shortCount} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import type {MosaicaFieldCard} from './field-card.js';
 import {icon} from './icons.js';
@@ -60,6 +60,10 @@ const figure = (n: number, compact: boolean) => (compact ? shortCount(n) : count
  * The panel shows a card for each field in `pinned`, for each field that holds a filter or
  * highlight, and for the field the map is coloured by. Viewers add other fields with Add field.
  * Taking a card off clears that field's filters and highlights.
+ *
+ * The panel sets `hide-chips` on the cards it shows, so that a layer's card does not repeat the
+ * chips the panel shows for its clauses. Under `controls-only` the panel shows no chips, and the
+ * cards keep theirs.
  *
  * Set `chips-only` on one panel and `controls-only` on another when you want the chips apart from
  * the cards.
@@ -119,8 +123,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
   @property() accessor pinned = '';
   /** Keeps one card open at a time, and shortens the subject row's figures. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
-  /** The level that cards for layers with levels count at. `null` is the coarsest level. */
-  @property({type: Number, attribute: 'cluster-level'}) accessor clusterLevel: number | null = null;
+  /**
+   * The level each card for a `stacked` or `tiered` layer counts at, keyed by layer name. A layer
+   * with no entry counts at the level the map draws it at, which follows the zoom where its levels
+   * declare no zoom range. Set it as a property; it has no attribute.
+   */
+  @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
 
   /** The fields the user added, which stay listed. @internal */
   @state() accessor opened: ReadonlySet<string> = new Set();
@@ -532,12 +540,12 @@ export class MosaicaFilterPanel extends MosaicaElement {
 
   /**
    * A `member_of` chip's text: the clause's own label (the only name a filter layer's artifact has,
-   * since it is not served), else the served name, else unnamed.
+   * since it is not served), else the served name or key, else unnamed.
    */
   private memberText(clause: MemberClause): string {
     const artifacts = this.resolvedStore?.get('artifacts');
     const served = artifacts?.served.find((a) => a.mosaicaId === clause.artifact && a.layer === clause.layer);
-    const name = clause.label ?? (served ? artifactName(served, artifacts!.attached) : null) ?? UNNAMED;
+    const name = clause.label ?? called(served ? artifactName(served, artifacts!.attached) : null, served?.key).text;
     return clause.outside ? `Outside ${name}` : name;
   }
 
@@ -668,7 +676,7 @@ export class MosaicaFilterPanel extends MosaicaElement {
     const listed = this.listOrder.map((k) => shown.find((f) => f.key === k)!);
     const open = this.compact ? (listed.some((f) => f.key === this.openCard) ? this.openCard : null) : null;
     const card = (f: (typeof fields)[number]) =>
-      html`<mosaica-field-card part="card" exportparts=${CARD_PARTS} data-field=${f.key} field=${f.key} .store=${s} .level=${this.clusterLevel}
+      html`<mosaica-field-card part="card" exportparts=${CARD_PARTS} data-field=${f.key} field=${f.key} ?hide-chips=${!this.controlsOnly} .store=${s} .level=${f.layer ? (this.clusterLevels.get(f.layer.name) ?? null) : null}
         ?compact=${this.compact} .folded=${this.compact ? f.key !== open : this.folded.has(f.key)}
         @mosaica-fold=${(e: Event) => this.onToggle(f.key, e.currentTarget as MosaicaFieldCard)}
         @mosaica-filterchange=${() => this.keepListed(f.key)} @mosaica-clausechange=${() => this.keepListed(f.key)}></mosaica-field-card>`;

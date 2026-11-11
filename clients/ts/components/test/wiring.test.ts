@@ -388,12 +388,12 @@ describe('event details', () => {
     const el = document.createElement('div');
     const seen: string[] = [];
     el.addEventListener('mosaica-clausechange', (e) => seen.push(`${e.detail.layer}:${e.detail.id}:${e.detail.verb}`));
-    el.addEventListener('mosaica-levelchange', (e) => seen.push(String(e.detail.level)));
+    el.addEventListener('mosaica-levelchange', (e) => seen.push(`${e.detail.layer}@${e.detail.level}`));
     // @ts-expect-error: a close names what closed, and carries no id.
     el.addEventListener('mosaica-close', (e) => seen.push(e.detail.id));
     emit(el, 'mosaica-clausechange', {id: '7', layer: 'mesh', outside: false, verb: 'highlight', on: true});
-    emit(el, 'mosaica-levelchange', {level: 2});
-    expect(seen).toEqual(['mesh:7:highlight', '2']);
+    emit(el, 'mosaica-levelchange', {layer: 'taxonomy', level: 2});
+    expect(seen).toEqual(['mesh:7:highlight', 'taxonomy@2']);
   });
 
   it('carry an opened artifact’s count as a decimal string, so the detail is JSON', async () => {
@@ -464,6 +464,32 @@ describe('<mosaica-map> defaults', () => {
     const el = asked.firstElementChild as unknown as Display;
     expect([el.density, el.noPoints]).toEqual(['hex', true]);
     asked.remove();
+  });
+});
+
+describe('<mosaica-map> cluster spacing', () => {
+  const spacings = (store: ReturnType<typeof fakeStore>) => store.calls.filter((c) => c.name === 'setClusterSpacing').map((c) => c.args[0]);
+
+  it('sets the store’s cluster spacing from the attribute, removes it when set to 0, and leaves the store’s own without one', async () => {
+    await import('../src/map.js');
+    const host = await mount('<mosaica-map cluster-spacing="120"></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; clusterSpacing: number};
+    const store = fakeStore({meta: meta(), status: status({})});
+    map.store = store;
+    await settle(host);
+    expect(spacings(store)).toEqual([120]);
+    map.setAttribute('cluster-spacing', '60');
+    await settle(host);
+    map.clusterSpacing = 0;
+    await settle(host);
+    expect(spacings(store)).toEqual([120, 60, null]);
+
+    const bare = await mount('<mosaica-map></mosaica-map>');
+    const plain = bare.querySelector('mosaica-map') as HTMLElement & {store: unknown};
+    const own = fakeStore({meta: meta(), status: status({})});
+    plain.store = own;
+    await settle(bare);
+    expect(spacings(own)).toEqual([]);
   });
 });
 

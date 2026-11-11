@@ -43,6 +43,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from .aggregate import induced
 from .harness import (
     JOIN_COLUMN,
     JOIN_FIELD,
@@ -144,9 +145,9 @@ Served = dict[tuple[str, str], tuple[int, str | None, str | None]]
 def served(terms: list[str]) -> Served:
     """`(layer, key) -> (masked count, served parent key, served target key)` for one principal.
 
-    Every layer requires one visible member (`count = 1`). A parent is named only where it is
-    itself served. An attached artifact counts its target's members and is served only where its
-    target is.
+    Every layer requires one visible member (`count = 1`). A team names its nearest served
+    ancestor, climbing past one it is not served. An attached artifact counts its target's members
+    and is served only where its target is.
     """
     visible = visible_to(terms)
     passing: dict[tuple[str, str], tuple[int, str | None]] = {}
@@ -159,9 +160,10 @@ def served(terms: list[str]) -> Served:
         if _admits(labels, default, terms) and count >= 1:
             passing[(layer, key)] = (count, parent)
     out: Served = {}
-    for (layer, key), (count, parent) in passing.items():
-        named = parent if parent is not None and (layer, parent) in passing else None
-        out[(layer, key)] = (count, named, None)
+    parents = {(TEAMS, key): [(TEAMS, up)] for key, _, _, up in TEAM_ROWS if up is not None}
+    for (layer, key), (count, _) in passing.items():
+        named = induced(parents, set(passing), (layer, key))
+        out[(layer, key)] = (count, next(iter(named))[1] if named else None, None)
     for key, team, _ in NAME_ROWS:
         if (TEAMS, team) in passing:
             out[(NAMES, key)] = (passing[(TEAMS, team)][0], None, team)

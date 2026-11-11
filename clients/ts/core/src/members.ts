@@ -1,4 +1,4 @@
-import type {ClauseVerb} from './filters.js';
+import {allOf, type ClauseVerb} from './filters.js';
 import type {FilterExpr, MemberOfOperand} from './types.js';
 
 /**
@@ -70,17 +70,16 @@ export function memberLeaf(clause: MemberClause): FilterExpr {
 }
 
 /**
- * Combine `expr` with the clauses set to `verb`, using `all_of`. Two artifacts combine to the items
- * in both; to show the members of either, use their parent. Returns `expr` unchanged if no clause
- * is set to `verb`.
+ * Combine `expr` with the clauses set to `verb`, using `all_of`, into which the operands of an
+ * `expr` that is an `all_of` are taken. Two artifacts combine to the items in both; to show the
+ * members of either, use their parent. Returns `expr` unchanged if no clause is set to `verb`.
  *
  * @category Filters
  */
 export function withMembers(expr: FilterExpr | null, clauses: readonly MemberClause[], verb: ClauseVerb): FilterExpr | null {
   const leaves = clauses.filter((c) => c.verb === verb).map(memberLeaf);
   if (leaves.length === 0) return expr;
-  const all = expr === null ? leaves : [expr, ...leaves];
-  return all.length === 1 ? all[0]! : {all_of: all};
+  return allOf(expr === null ? leaves : [expr, ...leaves]);
 }
 
 /**
