@@ -1,7 +1,7 @@
 import type {LitElement} from 'lit';
 import {type BrowsePage, type BrowseRow, type Layer, type Refusal, type Store} from '@mosaicajs/client';
 import {refusalOf} from '@mosaicajs/client/internal';
-import {UNNAMED, countText, focusLost} from './base.js';
+import {called, countText, focusLost, type Called} from './base.js';
 import {ClusterPaths} from './paths.js';
 
 /** One node of the walk: a row, its children once fetched, and where its paging got to. */
@@ -272,18 +272,18 @@ export class Lineage {
     if (s && layer && through.size > 0) this.paths.ask(s, layer, [...new Set(through.values())], 1);
   }
 
-  /** The name a page gave an artifact, or `null` where none has met it. */
-  knownName(id: bigint): string | null {
+  /** What an artifact is called from the row a page served, or `null` where none has met it. */
+  knownName(id: bigint): Called | null {
     return this.paths.nameOf(id);
   }
 
-  /** What to call an artifact: its name where the walk has met one. */
-  nameOf(id: bigint): string {
-    return this.paths.nameOf(id) ?? UNNAMED;
+  /** What to call an artifact: as a page served it, else Unnamed. */
+  nameOf(id: bigint): Called {
+    return this.paths.nameOf(id) ?? called(null, null);
   }
 
-  /** The names of the served parents of a node's row other than the one it was reached under, which a `dag` row names. */
-  alsoUnder(node: Node): string[] {
+  /** What the served parents of a node's row other than the one it was reached under are called, which a `dag` row names. */
+  alsoUnder(node: Node): Called[] {
     return otherParents(node).map((p) => this.nameOf(p));
   }
 

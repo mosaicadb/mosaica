@@ -3,6 +3,7 @@ import type {BrowsePage, BrowseRow, FilterDraft, FiltersProjection, Meta, Rgba} 
 import '../src/field-card.js';
 import type {MosaicaFieldCard} from '../src/field-card.js';
 import {aggregateEntry, answerAggregate, deep, deepAll, fakeStore, meta, mount, registered, scalar, settle, status, type FakeStore} from './fake-store.js';
+import {UNNAMED} from '../src/base.js';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -1009,9 +1010,9 @@ describe('<mosaica-field-card> on a flat layer', () => {
 });
 
 /** A browse row as the server serves it; `matched` is its count under the filters, where they are set. */
-const browseRow = (id: bigint, name: string, over: {rung?: number; parentIds?: bigint[]; childCount?: number; masked?: bigint; matched?: bigint | null; slot?: number | null} = {}): BrowseRow => ({
+const browseRow = (id: bigint, name: string | null, over: {key?: string; rung?: number; parentIds?: bigint[]; childCount?: number; masked?: bigint; matched?: bigint | null; slot?: number | null} = {}): BrowseRow => ({
   mosaicaId: id,
-  key: null,
+  key: over.key ?? null,
   name,
   maskedCount: over.masked ?? 10n,
   matchedCount: over.matched ?? null,
@@ -1227,6 +1228,47 @@ describe('<mosaica-field-card> on a linked layer', () => {
     store.set('filters', {...store.get('filters'), members: [...store.get('filters').members, {layer: 'taxonomy', artifact: 12n, outside: false, verb: 'filter', label: 'math.NT'}]});
     await landed(host);
     expect(rows(host)[1]!.querySelector('[part="filter"]')!.getAttribute('aria-pressed')).toBe('true');
+    // Placed where the clauses are shown already, the card leaves its chips out and keeps its ticks.
+    card.hideChips = true;
+    await landed(host);
+    expect(deep(host, '[part="chips"]')).toBeNull();
+    expect(deepAll(host, '[part="crumb"]').map((c) => c.hasAttribute('data-filtered'))).toEqual([false, true]);
+    expect(rows(host)[1]!.getAttribute('data-state')).toBe('in');
+  });
+
+  it('calls a cluster with no name by its key, marked as one, in its row, its crumb, its clause and its chip, and one with neither Unnamed', async () => {
+    const mesh = {...topicsLayer, name: 'mesh', title: 'MeSH', hierarchy: {kind: 'dag', pruneChildren: false}} as Meta['layers'][number];
+    const {host, store} = await mountLinked(mesh, (s) => {
+      s.setBrowse('roots', page([browseRow(1n, null, {key: 'C04', childCount: 1}), browseRow(2n, null)]));
+      s.setBrowse('p:1', page([browseRow(5n, null, {key: 'C04.588', parentIds: [1n, 3n]})]));
+      s.setBrowse('p:5', page([], null, [browseRow(1n, null, {key: 'C04'}), browseRow(3n, null, {key: 'C10'})]));
+    });
+    const marks = (e: Element) => [e.hasAttribute('data-key-name'), e.hasAttribute('data-unnamed')];
+    expect(rowNames(host)).toEqual(['C04', UNNAMED]);
+    expect(rows(host).map((r) => marks(r.querySelector('[part="name"]')!))).toEqual([
+      [true, false],
+      [false, true]
+    ]);
+    (rows(host)[1]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([{layer: 'mesh', artifact: 2n, outside: false, verb: 'filter'}]);
+    stepButton(host, '1')!.click();
+    await landed(host);
+    expect(crumbNames(host)).toEqual(['All', 'C04']);
+    expect(deepAll(host, '[part="crumb-name"] .crumb-text').map(marks)).toEqual([
+      [false, false],
+      [true, false]
+    ]);
+    expect(rowNames(host)).toEqual(['C04.588']);
+    const also = deep(host, '[part="also"]')!;
+    expect(also.textContent).toBe('also under C10');
+    expect(also.querySelector('[data-key-name]')!.textContent).toBe('C10');
+    (rows(host)[0]!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    const clause = {layer: 'mesh', artifact: 5n, outside: false, verb: 'filter', label: 'C04.588'};
+    expect(setMembersCalls(store).at(-1)!.args[0]).toEqual([clause]);
+    store.set('filters', {...store.get('filters'), members: [clause as never]});
+    await landed(host);
+    const chip = deep(host, '[part="chip-name"]')!;
+    expect(chip.querySelector('[data-key-name]')!.textContent).toBe('C04.588');
   });
 
   it('counts the position’s items in none of its children once every child has loaded, as the last row of the last list', async () => {

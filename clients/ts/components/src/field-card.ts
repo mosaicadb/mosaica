@@ -5,7 +5,6 @@ import {
   CLUSTER_PREFIX,
   PALETTES,
   artifactColour,
-  artifactName,
   colourLayers,
   composeFilters,
   isPopulated,
@@ -30,7 +29,7 @@ import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
 import {follows, levelFollowsZoom, levelOfLayer} from '@mosaicajs/client/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, isLinked, listedGroups, rankedGrouping} from './aggregate.js';
-import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey} from './base.js';
+import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, boolClause, called, calledList, calledText, labelOf, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey, type Called} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -83,8 +82,11 @@ type Kind = 'category' | 'cluster' | 'histogram' | 'bool' | 'search';
  */
 type Listing = 'ranked' | 'children' | 'overlap';
 
-/** One step of a card's position: the cluster stepped into, its level, and how many children its row said it has. */
-type Step = {id: bigint; name: string; rung: number; children: number | null};
+/**
+ * One step of a card's position: the cluster stepped into, what it is called and where that came
+ * from, its level, and how many children its row said it has.
+ */
+type Step = {id: bigint; name: string; from: Called['from']; rung: number; children: number | null};
 
 /** A row's button that steps into it: its accessible name, the figure it shows, and the step it takes. */
 type Stepper = {label: string; count: number | null; step: Step};
@@ -93,10 +95,14 @@ type Stepper = {label: string; count: number | null; step: Step};
 type Bin = {lower: number; upper: number; count: number};
 
 /**
- * One row of a category, bool or cluster card; `own` is a cluster's palette colour, `#rrggbb`, where it
- * is coloured, and `unmet` marks a category value the map has given no colour yet.
+ * One row of a category, bool or cluster card; `from` says where its name came from, `own` is a
+ * cluster's palette colour, `#rrggbb`, where it is coloured, and `unmet` marks a category value the
+ * map has given no colour yet.
  */
-type Row = {key: string; name: string; sub: number | null; all: number | null; swatch: string | null; own: string | null; unmet: boolean};
+type Row = {key: string; name: string; from: Called['from']; sub: number | null; all: number | null; swatch: string | null; own: string | null; unmet: boolean};
+
+/** A row's or a step's name and where it came from. */
+const nameFrom = (c: Called): {name: string; from: Called['from']} => ({name: c.text, from: c.from});
 
 /** A range being dragged across the histogram, by bin, `from` where the drag began. */
 type Brush = {from: number; to: number};
@@ -246,7 +252,10 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   the clusters of that finer level by their items inside the row, under a heading that says so.
  * - On the card of a `tiered`, `nested`, `dag` or `stacked` layer, the layer's filter and highlight
  *   clauses stand in a line of their own under the breadcrumb, each with a × that removes it, so a
- *   clause set by another control is shown wherever the card's position is.
+ *   clause set by another control is shown wherever the card's position is. Set `hide-chips` to
+ *   leave that line out where the clauses are shown already, as `<mosaica-filter-panel>` does on
+ *   the cards it shows while it shows the clauses as chips of its own. The ticks on the crumbs and
+ *   the rows stay.
  * - A number or date card draws a histogram of up to 20 bins, and the viewer presses a bin or drags
  *   across several to pick a range to filter or highlight by. From the keyboard, they press Shift
  *   and the arrow keys on the focused plot, then Enter. Either opens a box under the range with its
@@ -263,6 +272,9 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *
  * While the paint button colours the map by the field, clicking a value's colour opens a picker
  * that changes the colour on the map.
+ *
+ * A cluster with no name is called by its key, drawn in the secondary ink and the identifiers'
+ * font, and a clause on it carries the key as its label. A cluster with neither is called Unnamed.
  *
  * A long name is one line, cut with an ellipsis. Where `--mosaica-long-text` is `normal`, as in the
  * explorer's narrow form, the card's name, what it notes and its rows' names wrap.
@@ -298,11 +310,13 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  * @csspart crumb - One crumb, with `data-id`, which is empty for All, and `data-filtered` while the
  *   layer's filter is on its cluster.
  * @csspart crumb-name - A crumb's button, which steps back to it, with `aria-current` on the
- *   deepest. A tick before the name marks a cluster the filter is on.
+ *   deepest. A tick before the name marks a cluster the filter is on, and the name carries
+ *   `data-key-name` where it is the cluster's key.
  * @csspart chips - The layer's filter and highlight clauses on a card that steps, a list, while it
- *   has any.
+ *   has any and `hide-chips` is not set.
  * @csspart chip - One clause, with `data-id` and `data-verb` (`filter` or `highlight`).
- * @csspart chip-name - A clause's cluster, after a tick for a filter or a pen for a highlight.
+ * @csspart chip-name - A clause's cluster, after a tick for a filter or a pen for a highlight. The
+ *   name carries `data-key-name` where it is the cluster's key.
  * @csspart chip-remove - The × that removes a clause.
  * @csspart level - A heading over a list of rows: a level's title on a `tiered` layer's card, or
  *   what a `stacked` layer's card lists inside its position.
@@ -314,11 +328,13 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   with the colour, set as `--c`, in a 10 px square at its middle. It opens the colour picker. It
  *   carries `data-unmet`, and the square is drawn as an outline, for a value the map has not drawn
  *   yet and so has not given a colour.
- * @csspart name - A row's name, with `data-unnamed` for a cluster that has none, and the whole
- *   name as its `title`.
+ * @csspart name - A row's name, with the whole name as its `title`. Where a cluster has none it is
+ *   the cluster's key, with `data-key-name`, and where it has no key either it is the word Unnamed,
+ *   with `data-unnamed`.
  * @csspart step - A row's button that steps into it, with the number of its children on a layer
  *   with parent edges.
- * @csspart also - The other served parents a `dag` row of a layer's card is under.
+ * @csspart also - The other served parents a `dag` row of a layer's card is under, each with
+ *   `data-key-name` where it is called by its key.
  * @csspart remainder - The last row of the last list, which counts the position's items in none of
  *   its children.
  * @csspart refusal - The words "Clusters unavailable", with `data-code`, where the rows were
@@ -879,6 +895,9 @@ export class MosaicaFieldCard extends MosaicaElement {
         color: var(--_mosaica-ink-3);
         overflow-wrap: anywhere;
       }
+      [part='also'] [data-key-name] {
+        color: inherit;
+      }
       [part='remainder'] {
         display: grid;
         grid-template-columns: 12px minmax(0, 1fr) auto var(--_mosaica-step-w, 30px);
@@ -1112,6 +1131,8 @@ export class MosaicaFieldCard extends MosaicaElement {
   @property({type: Boolean, reflect: true}) accessor folded = false;
   /** Draws a folded card in the compact style the explorer uses in narrow containers. */
   @property({type: Boolean, reflect: true}) accessor compact = false;
+  /** Leaves out the layer's clauses as chips, for a card placed where they are shown already. */
+  @property({type: Boolean, attribute: 'hide-chips'}) accessor hideChips = false;
   /**
    * The level a card for a layer with levels counts at. `null` is the level the map draws: where no
    * level declares a zoom range, the finest that is not crowded in view, else the coarsest served.
@@ -1253,9 +1274,19 @@ export class MosaicaFieldCard extends MosaicaElement {
     return drills(layer) ? 'children' : 'overlap';
   }
 
-  /** A cluster's name as a page or a clause gave it, or `null` where none has. */
-  private knownName(store: Store, id: bigint): string | null {
-    return this.lineage.knownName(id) ?? this.clauseName(store, id);
+  /** What the card calls a cluster no table names, from the label of its clause on this layer if it has one. */
+  private knownName(s: Store, id: bigint): Called {
+    return this.clauseCalled(s.get('filters').members.find((m) => m.artifact === id && m.layer === this.layerName)?.label, id);
+  }
+
+  /**
+   * What the card calls a cluster with a clause labelled `label`: the label, which is the cluster's
+   * key where a page served its row with a key and no name, else as a page served it, else Unnamed.
+   */
+  private clauseCalled(label: string | undefined, id: bigint): Called {
+    const met = this.lineage.knownName(id);
+    if (label === undefined) return met ?? called(null, null);
+    return met?.from === 'key' && met.text === label ? met : {text: label, from: 'name'};
   }
 
   /**
@@ -1562,14 +1593,14 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   /** Put a cluster's `member_of` clause in `verb` on or off. */
-  private toggleCluster(id: string, name: string | null, verb: ClauseVerb): void {
+  private toggleCluster(id: string, name: Called, verb: ClauseVerb): void {
     const s = this.resolvedStore;
     const layer = this.layerName;
     if (!s || layer === null) return;
     const artifact = BigInt(id);
     const members = s.get('filters').members;
     const on = members.some((m) => m.layer === layer && m.artifact === artifact && m.verb === verb && !m.outside);
-    s.setMembers(on ? withoutMember(members, layer, artifact, verb) : withMember(members, {layer, artifact, outside: false, verb, ...(name === null ? {} : {label: name})}));
+    s.setMembers(on ? withoutMember(members, layer, artifact, verb) : withMember(members, {layer, artifact, outside: false, verb, ...labelOf(name)}));
     emit(this, 'mosaica-clausechange', {id, layer, outside: false, verb, on: !on});
   }
 
@@ -1685,7 +1716,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const sub = this.counts(kind, subject);
     const all = this.counts(kind, match);
     if (kind === 'bool') {
-      return BOOL_KEYS.map((key) => ({key, name: BOOL_WORDS[key], sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
+      return BOOL_KEYS.map((key) => ({key, name: BOOL_WORDS[key], from: 'name' as const, sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch: null, own: null, unmet: false}));
     }
     if (all && kind === 'category') for (const [k, n] of countsByKey(this.outsideCounts.entryFor(s)) ?? []) if (!all.has(k)) all.set(k, n);
     const named = this.pinned(s);
@@ -1698,6 +1729,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       return keys.map((key) => ({
         key,
         name: titles.get(key) ?? keyTitle(s, this.field, key),
+        from: 'name' as const,
         sub: sub?.get(key) ?? null,
         all: all?.get(key) ?? null,
         swatch: colouring ? valueColour(s, this.field, key) : null,
@@ -1725,7 +1757,8 @@ export class MosaicaFieldCard extends MosaicaElement {
       const held = slots.get(key);
       const own = artifactColour(held?.palette ?? palette, held?.slot ?? null);
       const swatch = colouring ? rgb(overrides.get(this.layerName!)?.get(id) ?? own) : null;
-      return {key, name: titles.get(key) ?? this.clauseName(s, id) ?? UNNAMED, sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch, own: colouring ? hexOf(own) : null, unmet: false};
+      const title = titles.get(key);
+      return {key, ...nameFrom(title ? called(title, null) : this.knownName(s, id)), sub: sub?.get(key) ?? null, all: all?.get(key) ?? null, swatch, own: colouring ? hexOf(own) : null, unmet: false};
     });
   }
 
@@ -1735,11 +1768,6 @@ export class MosaicaFieldCard extends MosaicaElement {
     const table = entry?.result?.tables[0];
     if (!table) return null;
     return new Map(BOOL_KEYS.map((k) => [k, binsOf(table, false).find((b) => b.lower === BOOL_NUMBERS[k])?.count ?? 0]));
-  }
-
-  /** The name a cluster's clause carries, for a cluster no table lists. */
-  private clauseName(s: Store, id: bigint): string | null {
-    return s.get('filters').members.find((m) => m.artifact === id && m.layer === this.layerName)?.label ?? null;
   }
 
   private valueCard(s: Store, kind: Kind, layer: Layer | null, title: string, head: (sub: TemplateResult | typeof nothing) => TemplateResult, colouring: boolean): TemplateResult {
@@ -1793,7 +1821,7 @@ export class MosaicaFieldCard extends MosaicaElement {
             : nothing;
     // One width for every row's step button, so the counts beside it line up down the card.
     const widest = Math.max(0, ...(roots ?? []).map((n) => (n.row.childCount > 0 ? countText(n.row.childCount).length : 0)));
-    return html`<div class="body" style=${`--_mosaica-step-w: calc(${widest}ch + 27px)`}>${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
+    return html`<div class="body" style=${`--_mosaica-step-w: calc(${widest}ch + 27px)`}>${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.hideChips ? nothing : this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
   }
 
   /** What an overlap list inside a position lists, which heads it; `null` at the top. */
@@ -1839,7 +1867,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     const level = anded ? this.listLevel(layer) : undefined;
     const next = level === undefined ? undefined : levelAfter(layer!, level);
     const stepper = (r: Row): Stepper | undefined =>
-      next === undefined ? undefined : {label: `Open ${r.name}, ${levelTitle(layer!, next)} inside it`, count: null, step: {id: BigInt(r.key), name: r.name, rung: level!, children: null}};
+      next === undefined ? undefined : {label: `Open ${r.name}, ${levelTitle(layer!, next)} inside it`, count: null, step: {id: BigInt(r.key), name: r.name, from: r.from, rung: level!, children: null}};
 
     const row = (r: Row) => {
       const inFilter = filtered.has(r.key);
@@ -1906,7 +1934,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         ? icon('check', 12, 2.6)
         : nothing;
     const verb = (v: ClauseVerb) => () =>
-      kind === 'category' ? this.toggleValue(r.key, v) : kind === 'bool' ? this.toggleBool(r.key as BoolKey, v) : this.toggleCluster(r.key, r.name === UNNAMED ? null : r.name, v);
+      kind === 'category' ? this.toggleValue(r.key, v) : kind === 'bool' ? this.toggleBool(r.key as BoolKey, v) : this.toggleCluster(r.key, {text: r.name, from: r.from}, v);
     // A tick where the filter keeps the value and the swatch stands where the tick would, and a pen where it is highlighted.
     const cues = html`${inFilter && r.swatch ? html`<span class="cue">${icon('check', 11, 2.4)}</span>` : nothing}${onLit ? html`<span class="cue lit">${icon('highlight', 11, 1.6)}</span>` : nothing}`;
     // The figures as they are drawn, and then for a reader, each with what it counts.
@@ -1924,7 +1952,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       }}>
       <span class="mark">${mark}</span>
       <span class="label">
-        <span class="names"><span part="name" title=${r.name} ?data-unnamed=${r.name === UNNAMED}>${r.name}</span></span>
+        <span class="names"><span part="name" title=${r.name} ?data-key-name=${r.from === 'key'} ?data-unnamed=${r.from === 'none'}>${r.name}</span></span>
         <span class="bars" aria-hidden="true"><span part="bar-match" style=${`width:${look.barMatch}`}></span><span part="bar-subject" style=${`width:${look.barSubject}${r.swatch && !r.unmet ? `;background:${r.swatch}` : ''}`}></span></span>
       </span>
       ${counts}
@@ -1944,7 +1972,7 @@ export class MosaicaFieldCard extends MosaicaElement {
       const masked = Number(row.maskedCount);
       return {
         key: idString(row.mosaicaId),
-        name: artifactName(row) ?? UNNAMED,
+        ...nameFrom(called(row.name, row.key)),
         sub: row.matchedCount === null ? masked : Number(row.matchedCount),
         all: row.matchedCount === null ? null : masked,
         swatch: colouring ? rgb(overrides.get(layer.name)?.get(row.mosaicaId) ?? own) : null,
@@ -1986,8 +2014,8 @@ export class MosaicaFieldCard extends MosaicaElement {
         said: spokenCounts(node.row),
         barMatch: width(r.all ?? r.sub),
         barSubject: width(r.sub),
-        step: n > 0 ? {label: `Open ${r.name}, ${counted(n, 'child', 'children')}`, count: n, step: {id: node.row.mosaicaId, name: r.name, rung: node.row.rung, children: n}} : null
-      })}${also.length > 0 ? html`<div part="also">also under ${also.join(', ')}</div>` : nothing}</div>`;
+        step: n > 0 ? {label: `Open ${r.name}, ${counted(n, 'child', 'children')}`, count: n, step: {id: node.row.mosaicaId, name: r.name, from: r.from, rung: node.row.rung, children: n}} : null
+      })}${also.length > 0 ? html`<div part="also">also under ${calledList(also)}</div>` : nothing}</div>`;
     };
     const left = this.remainderAsked ? this.remainder.entryOf(s, this.remainderAsked)?.result?.tables[0]?.total : undefined;
     const rest = this.remainderAsked
@@ -2024,7 +2052,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   /** The breadcrumb: All and then each step of the position, each a button that steps back to it. */
   private crumbsTemplate(s: Store, title: string): TemplateResult {
     const filtered = this.clauseKeys(s, 'filter');
-    const steps: {id: bigint | null; name: string}[] = [{id: null, name: 'All'}, ...this.position];
+    const steps: {id: bigint | null; name: string; from: Called['from']}[] = [{id: null, name: 'All', from: 'name'}, ...this.position];
     return html`<nav part="crumbs" aria-label=${`${title} breadcrumb`}><ol>${repeat(
       steps,
       (step, i) => `${i}:${step.id ?? ''}`,
@@ -2033,7 +2061,7 @@ export class MosaicaFieldCard extends MosaicaElement {
         return html`<li part="crumb" data-id=${step.id === null ? '' : idString(step.id)} ?data-filtered=${on}>${i > 0 ? html`<span class="sep" aria-hidden="true">›</span>` : nothing}<button
             part="crumb-name" type="button" title=${step.name} aria-current=${i === steps.length - 1 ? 'location' : nothing} @click=${() => this.stepTo(i)}>${
             on ? html`<span class="cue">${icon('check', 11, 2.4)}</span>` : nothing
-          }<span class="crumb-text">${step.name}</span>${on ? html`<span class="sr-only">, filtered to</span>` : nothing}</button></li>`;
+          }<span class="crumb-text" ?data-key-name=${step.from === 'key'} ?data-unnamed=${step.from === 'none'}>${step.name}</span>${on ? html`<span class="sr-only">, filtered to</span>` : nothing}</button></li>`;
       }
     )}</ol></nav>`;
   }
@@ -2046,12 +2074,12 @@ export class MosaicaFieldCard extends MosaicaElement {
       clauses,
       (c) => `${c.verb}:${c.artifact}`,
       (c) => {
-        const name = c.label ?? this.knownName(s, c.artifact) ?? UNNAMED;
+        const name = this.clauseCalled(c.label, c.artifact);
         const lit = c.verb === 'highlight';
         const said = `${lit ? 'Highlighted' : 'Filtered to'}${c.outside ? ' outside' : ''}`;
-        return html`<li part="chip" data-id=${idString(c.artifact)} data-verb=${c.verb}><span class="cue">${lit ? icon('highlight', 11, 1.6) : icon('check', 11, 2.4)}</span><span part="chip-name" title=${name}
-            ><span class="sr-only">${said} </span>${c.outside ? 'not ' : ''}${name}</span
-          ><button part="chip-remove" type="button" aria-label=${`${lit ? 'Stop highlighting' : 'Stop filtering to'}${c.outside ? ' outside' : ''} ${name}`} title=${lit ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.removeClause(c)}>${icon('close', 12)}</button></li>`;
+        return html`<li part="chip" data-id=${idString(c.artifact)} data-verb=${c.verb}><span class="cue">${lit ? icon('highlight', 11, 1.6) : icon('check', 11, 2.4)}</span><span part="chip-name" title=${name.text}
+            ><span class="sr-only">${said} </span>${c.outside ? 'not ' : ''}${calledText(name)}</span
+          ><button part="chip-remove" type="button" aria-label=${`${lit ? 'Stop highlighting' : 'Stop filtering to'}${c.outside ? ' outside' : ''} ${name.text}`} title=${lit ? 'Stop highlighting' : 'Stop filtering'} @click=${() => this.removeClause(c)}>${icon('close', 12)}</button></li>`;
       }
     )}</ul>`;
   }

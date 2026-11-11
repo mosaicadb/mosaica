@@ -89,7 +89,7 @@ describe('<mosaica-hierarchy>', () => {
     expect(deepAll(host, '[part="row"] [part="name"]').map((n) => n.textContent?.trim())).toEqual(['Mathematics', 'q-bio.NC']);
   });
 
-  it('marks a row with no name as unnamed and never draws its key in the name’s place', async () => {
+  it('calls a row with no name by its key, marked as a key, and labels a clause on it with the key', async () => {
     const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
     const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;
     const store = fakeStore({meta: META, status: status({})});
@@ -98,21 +98,31 @@ describe('<mosaica-hierarchy>', () => {
     await settle(host);
     await settle(host);
     const name = deep(host, '[part="row"] [part="name"]')!;
-    expect(name.hasAttribute('data-unnamed')).toBe(true);
-    expect(name.textContent).not.toContain('d-3');
+    expect(name.textContent?.trim()).toBe('d-3');
+    expect(name.hasAttribute('data-key-name')).toBe(true);
+    expect(name.hasAttribute('data-unnamed')).toBe(false);
+    (deep(host, '[part="row"] [part="filter"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'mesh/descriptors', artifact: 3n, outside: false, verb: 'filter', label: 'd-3'}]);
   });
 
-  it('names a row by the name the server serves it, and marks a row with none, or an empty one, unnamed', async () => {
+  it('names a row by the name the server serves it, else by its key, and marks a row with neither unnamed', async () => {
     const host = await mount('<mosaica-hierarchy></mosaica-hierarchy>');
     const el = host.querySelector('mosaica-hierarchy') as MosaicaHierarchy;
     const store = fakeStore({meta: META, status: status({})});
-    store.setBrowse('roots', {artifacts: [row(3n, 'spin magnetic effect', 10n), row(4n, null, 8n), row(5n, '', 6n)], parents: [], next: null});
+    store.setBrowse('roots', {artifacts: [row(3n, 'spin magnetic effect', 10n), row(4n, null, 8n), row(5n, '', 6n), row(6n, null, 4n, {key: null})], parents: [], next: null});
     el.store = store;
     await settle(host);
     await settle(host);
     const names = deepAll(host, '[part="row"] [part="name"]');
-    expect(names.map((n) => n.textContent?.trim())).toEqual(['spin magnetic effect', UNNAMED, UNNAMED]);
-    expect(names.map((n) => n.hasAttribute('data-unnamed'))).toEqual([false, true, true]);
+    expect(names.map((n) => n.textContent?.trim())).toEqual(['spin magnetic effect', 'd-4', 'd-5', UNNAMED]);
+    expect(names.map((n) => [n.hasAttribute('data-key-name'), n.hasAttribute('data-unnamed')])).toEqual([
+      [false, false],
+      [true, false],
+      [true, false],
+      [false, true]
+    ]);
+    (names[3]!.closest('[part="row"]')!.querySelector('[part="filter"]') as HTMLButtonElement).click();
+    expect(store.calls.filter((c) => c.name === 'setMembers').at(-1)!.args[0]).toEqual([{layer: 'mesh/descriptors', artifact: 6n, outside: false, verb: 'filter'}]);
   });
 
   it('offers to expand only a row the server counts children under, and keeps every name in line', async () => {
