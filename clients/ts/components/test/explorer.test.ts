@@ -1342,7 +1342,7 @@ describe('<mosaica-explorer> the level chosen for each layer', () => {
       return [...shadow.querySelectorAll<HTMLButtonElement>('[part~="colour-option"]')].filter((o) => o.dataset.value!.startsWith('cluster:'));
     };
     // Following the zoom, the fine level fits in view: the map draws it, and Follow zoom is checked.
-    store.set('artifacts', {...store.get('artifacts'), levelsInView: new Map([['taxonomy', new Map([[0, {served: 2, full: false}], [1, {served: 9, full: false}]])]])});
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: new Map([['taxonomy', 1]])});
     await settle(host);
     expect((await options()).map((o) => [o.dataset.value, o.textContent!.trim(), o.getAttribute('aria-checked')])).toEqual([
       ['cluster:taxonomy@', 'taxonomy, follow zoomClusters', 'true'],
@@ -1558,6 +1558,10 @@ describe('<mosaica-explorer> the cluster budget', () => {
     emit(shadow.querySelector('mosaica-map')!, 'mosaica-levelchange', {layer: 'bands', level: 1});
     await settle(host);
     expect(slider()).toBeNull();
+    // A level the layer does not declare is no choice: the layer still follows the zoom.
+    emit(shadow.querySelector('mosaica-map')!, 'mosaica-levelchange', {layer: 'bands', level: 7});
+    await settle(host);
+    expect(slider()).not.toBeNull();
   });
 
   it('offers Most clusters only while a tree layer is drawn, from cluster-budget-min to cluster-budget-max, and sets the cut only when it is let go', async () => {

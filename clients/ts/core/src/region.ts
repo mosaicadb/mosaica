@@ -1,4 +1,5 @@
 import {WORLD_SIZE} from './coords.js';
+import {allOf} from './filters.js';
 import type {FilterExpr, RegionOperand, RegionVerdict} from './types.js';
 
 /**
@@ -99,8 +100,9 @@ export function regionOperand(
 }
 
 /**
- * Joins a `region` leaf for `operand` to `expr` with `all_of`, or returns the leaf alone where
- * `expr` is `null`. Returns `expr` unchanged where `operand` is `null`.
+ * Joins a `region` leaf for `operand` to `expr` with `all_of`, into which the operands of an `expr`
+ * that is an `all_of` are taken, or returns the leaf alone where `expr` is `null`. Returns `expr`
+ * unchanged where `operand` is `null`.
  *
  * @param outside - Whether to select everything outside the region, by wrapping the leaf in
  *   `none_of`. Defaults to `false`.
@@ -110,7 +112,7 @@ export function regionOperand(
 export function withRegion(expr: FilterExpr | null, operand: RegionOperand | null, outside = false): FilterExpr | null {
   if (!operand) return expr;
   const leaf: FilterExpr = outside ? {none_of: [{region: operand}]} : {region: operand};
-  return expr ? {all_of: [expr, leaf]} : leaf;
+  return allOf(expr ? [expr, leaf] : [leaf]);
 }
 
 /**

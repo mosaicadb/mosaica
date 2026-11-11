@@ -43,7 +43,11 @@ export type ArtifactChannelState = {
   artifacts: Artifact[];
   status: 'idle' | 'loading' | 'shown' | 'refused';
   refusal: Refusal | null;
-  /** What the view's tiles hold of each level of each levelled layer asked for. */
+  /**
+   * What the view's tiles hold of each level of each levelled layer asked for. A layer's entry is
+   * replaced once every tile of the view is held for it, and kept from the last such view while
+   * the view loads.
+   */
   levelsInView: LevelsInView;
   /** Incremented whenever `artifacts` is replaced. */
   version: number;
@@ -57,15 +61,24 @@ export type ArtifactChannelState = {
  * @category Projections
  */
 export type LevelInView = {
-  /** How many of the level's artifacts the tiles in view serve, each counted once. */
+  /**
+   * How many of the level's artifacts the tiles in view serve that are drawn, each counted once.
+   * Under a filter an artifact with no matching member in view (`matched` false) is not drawn and
+   * not counted.
+   */
   served: number;
-  /** Whether some tile in view came back with its full `perTile` of the level, so the server left some of the level's artifacts out of it. */
+  /**
+   * Whether some tile in view came back with its full `perTile` of the level, so the server may
+   * have left some of the level's artifacts out of it. The response does not say whether a tile was
+   * cut, so a tile holding exactly `perTile` of the level counts as full.
+   */
   full: boolean;
 };
 
 /**
- * For each levelled layer asked for, by name, the levels its tiles in view serve any artifact of,
- * by level. A level with nothing in view has no entry.
+ * For each levelled layer asked for, by name, the levels its tiles in view serve a drawn artifact
+ * of, by level. A level with nothing drawn in view has no entry. A layer's entry describes the
+ * last view whose every tile was held for it, so while a view loads it describes the view before.
  *
  * @category Projections
  */
@@ -609,7 +622,9 @@ export class ArtifactChannel {
    * The artifacts of the noted view: each held tile's rows of the pairs asked, and the treed rows,
    * each artifact once. One served in several tiles has the same figures in each; its `matched`
    * and `highlighted` are true where any tile's are, and its parents are those any tile served.
-   * With them, what those tiles hold of each level of the levelled layers.
+   * With them, what those tiles hold of each level of the levelled layers, for each layer every
+   * tile of the view is held for; another layer keeps the entry it had, so a level chosen from it
+   * does not move while the view's tiles land.
    */
   private compose(want: Want): {artifacts: Artifact[]; levelsInView: LevelsInView} {
     const at = new Map<string, number>();
@@ -626,22 +641,32 @@ export class ArtifactChannel {
     const walked = new Set(want.walked);
     for (const a of this.walkedRows) if (walked.has(a.layer)) add(a);
     const full = new Set<string>();
+    // The layers some tile of the view is not yet held for.
+    const partial = new Set<string>();
     for (const tile of want.tiles) {
       const held = this.tiles.get(tileKey(want.filter, want.depth, tile));
+      for (const pair of want.pairs) if (!held?.answered.has(pair)) partial.add(pair.slice(0, pair.indexOf('\u0000')));
       if (!held) continue;
       held.usedAt = ++this.uses;
       for (const a of held.rows) if (want.pairs.has(pairKey(a.layer, a.rung)) && held.answered.has(pairKey(a.layer, a.rung))) add(a);
       for (const pair of held.full) if (want.pairs.has(pair) && held.answered.has(pair)) full.add(pair);
     }
-    const levelled = new Set(want.held.filter((name) => scopeKindOf(this.declarations.get(name)!) === 'levelled'));
-    if (levelled.size === 0) return {artifacts: out, levelsInView: NOTHING_IN_VIEW};
-    const levelsInView = new Map<string, Map<number, LevelInView>>();
+    const levelled = want.held.filter((name) => scopeKindOf(this.declarations.get(name)!) === 'levelled');
+    if (levelled.length === 0) return {artifacts: out, levelsInView: NOTHING_IN_VIEW};
+    const whole = new Set(levelled.filter((name) => !partial.has(name)));
+    const levelsInView = new Map<string, ReadonlyMap<number, LevelInView>>();
+    for (const name of levelled) {
+      const before = this.state.levelsInView.get(name);
+      if (!whole.has(name) && before) levelsInView.set(name, before);
+    }
+    const counted = new Map<string, Map<number, LevelInView>>();
     for (const a of out) {
-      if (!levelled.has(a.layer)) continue;
-      const levels = levelsInView.get(a.layer) ?? levelsInView.set(a.layer, new Map()).get(a.layer)!;
+      if (!whole.has(a.layer) || a.matched === false) continue;
+      const levels = counted.get(a.layer) ?? counted.set(a.layer, new Map()).get(a.layer)!;
       const level = levels.get(a.rung) ?? levels.set(a.rung, {served: 0, full: full.has(pairKey(a.layer, a.rung))}).get(a.rung)!;
       level.served += 1;
     }
+    for (const [name, levels] of counted) levelsInView.set(name, levels);
     return {artifacts: out, levelsInView};
   }
 

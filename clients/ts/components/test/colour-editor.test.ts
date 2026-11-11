@@ -238,6 +238,21 @@ describe('<mosaica-colour-editor> on a levelled layer', () => {
     expect(specOf(fine.store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
     expect(deep(fine.host, '[part="sub"]')!.textContent).toBe('Fine · Tableau 10');
   });
+
+  it('drops what was ticked when the level the map follows moves as it zooms', async () => {
+    const {host, store} = await open('cluster:bands');
+    answerAggregate(store, 'colours-ranked', aggregateEntry([{rows: CUT, groups: 3}], 's0', undefined, 'tableau10'));
+    await settle(host);
+    const box = rowsOf(host)[0]!.querySelector('[part="check"]') as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await settle(host);
+    expect(deep(host, '[part="selected"]')).not.toBeNull();
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: new Map([['bands', 1]])});
+    await settle(host);
+    expect(deep(host, '[part="selected"]')).toBeNull();
+    expect(specOf(store, 'colours-ranked')).toEqual({groupings: [{count: true, by: {layer: 'bands', level: 1, top: 1000, paletteSize: 'drawn'}}], subject: 'visible'});
+  });
 });
 
 describe('<mosaica-colour-editor> on a category', () => {

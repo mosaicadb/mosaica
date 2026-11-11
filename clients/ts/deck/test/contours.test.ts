@@ -31,7 +31,7 @@ const artifact = (id: bigint, parent: bigint | null, count = 10n): Shaped => ({
  * it draws, and what it depends on.
  */
 const meta = (layers: {name: string; computedContent?: string[]; shape?: 'derived' | 'predicate' | 'authored' | null; depsOn?: string[]}[]): Meta =>
-  ({layers: layers.map((l) => ({name: l.name, computedContent: l.computedContent ?? [], shape: l.shape ?? null, depsOn: l.depsOn ?? []}))}) as unknown as Meta;
+  ({layers: layers.map((l) => ({name: l.name, hierarchy: {kind: 'flat', pruneChildren: false}, computedContent: l.computedContent ?? [], shape: l.shape ?? null, depsOn: l.depsOn ?? []}))}) as unknown as Meta;
 
 /**
  * The served set as the server delivers it: on this treed fixture `rung` is the response-local
@@ -58,7 +58,7 @@ function projection(input: Shaped[]): ArtifactsProjection {
   const shapes = new Map(input.filter((a) => a.shape !== null).map((a) => [a.mosaicaId, a.shape!]));
   const table = new SessionArtifactTable();
   const ordinals = table.take(served.map((a) => ({mosaicaId: a.mosaicaId, layer: a.layer, parentIds: a.parentIds, rung: a.rung})));
-  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), attached: new Map(), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes, colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
+  return {layer: 'clusters', layers: ['clusters'], served, colourServed: [], levelsInView: new Map(), followedLevels: new Map(), attached: new Map(), lineage: servedLineage(served), status: 'shown', refusal: null, version: 1, held: 0, table, servedOrdinals: new Set(ordinals), shapes, colours: new Map(), palette: 'tableau10', overrides: new Map(), coverage: {current: 0, stale: 0}};
 }
 
 /** No layer cut at a level. */

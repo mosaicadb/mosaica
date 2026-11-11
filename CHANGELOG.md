@@ -90,12 +90,15 @@ container image.
   declare no zoom range and no level is chosen for it, the map draws, colours and counts it at the
   finest level that is not crowded in view, which is the coarsest while every level is. A level is
   crowded when a tile in view came back with its full `per_tile` of it, or when more of its
-  artifacts are in view than the cluster budget, so Most clusters in the explorer moves the zoom
-  at which each level is drawn, and shows while such a layer is drawn. The card's level choice and
-  Colour by offer Follow zoom, which clears the layer's level. A layer whose levels declare zoom
-  ranges is drawn at the coarsest level its range serves, as before. The store's `artifacts`
-  projection carries `levelsInView`, each level's count in view and whether a tile came back full
-  of it.
+  artifacts are drawn in view than the cluster budget, so Most clusters in the explorer moves the
+  zoom at which each level is drawn, and shows while such a layer is drawn. A layer moves to a
+  finer level once that level is within four fifths of the budget and back once it is over it, and
+  the level is decided once every tile of a view has arrived. With no cluster budget, as on a bare
+  `<mosaica-map>`, only full tiles crowd a level. The card's level choice and Colour by offer
+  Follow zoom, which clears the layer's level. A layer whose levels declare zoom ranges is drawn
+  at the coarsest level its range serves, as before. The store's `artifacts` projection carries
+  `levelsInView`, each level's count drawn in view and whether a tile came back full of it, and
+  `followedLevels`, the level each layer is drawn at where none is chosen.
 - **The cluster card drills down a layer's parent edges.** On a `tiered`, `nested` or `dag` layer,
   `<mosaica-field-card>` shows the layer's filter clauses as a breadcrumb, each with a × that
   removes it, and lists the children of the deepest crumb, or the top-level clusters, from the
@@ -184,6 +187,13 @@ container image.
 
 ### Fixed
 
+- A `stacked` layer drawn at one level names and outlines that level's artifacts alone. The map
+  used to draw every coarser level's names and outlines over it, since nothing links a stacked
+  layer's levels.
+- `withMembers`, `withRegion` and the store's filters take the operands of an `all_of` they join
+  into their own `all_of`, so the TypeScript client's requests under several filter controls,
+  clauses and selected regions stay within the four levels of nesting the server accepts. Such a
+  request used to be refused.
 - When a client goes away, Mosaica stops working on its request inside a column, range, `in` or
   keyword filter and inside an aggregate's passes over a column, as it already did inside a text
   filter. Those requests used to run to their end, so a viewer changing filters quickly left the

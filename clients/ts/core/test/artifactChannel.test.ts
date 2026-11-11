@@ -708,13 +708,13 @@ describe('the level a levelled layer is drawn at where no level is chosen', () =
     const fine = Math.min(req.perTile, (WORLD_SIZE / 2 ** req.zoom / 4) ** 2);
     return [cluster(tile * 1000n, {layer: 'strata', rung: 0}), ...Array.from({length: fine}, (_, i) => cluster(tile * 1000n + 1n + BigInt(i), {layer: 'strata', rung: 1}))];
   };
-  async function shown(over: Partial<ArtifactChannelOptions>, camera = view, decl = strata()) {
-    const {client, viewportArtifacts} = fakeClient(rows);
-    const {ch} = channel(client, {declarations: [decl], ...over});
+  async function shown(over: Partial<ArtifactChannelOptions>, camera = view, decl = strata(), rowsFor = rows) {
+    const {client, viewportArtifacts} = fakeClient(rowsFor);
+    const {ch, states} = channel(client, {declarations: [decl], ...over});
     ch.setLayer('strata');
     ch.refresh(camera, 200, 150);
     await settle();
-    return {ch, viewportArtifacts, decl};
+    return {ch, states, viewportArtifacts, decl};
   }
 
   it('asks for every level at every zoom', async () => {
@@ -768,5 +768,49 @@ describe('the level a levelled layer is drawn at where no level is chosen', () =
 
   it('is the coarsest level while nothing of the layer is in view', () => {
     expect(levelInView(strata(), new Map(), null)).toBe(0);
+  });
+
+  it('is counted only once every tile of the first view is held, so the level does not move while they land', async () => {
+    // Each of the four tiles holds 16 fine artifacts: one or two tiles are within a budget of 40,
+    // and the whole view is not.
+    const {ch, states, decl} = await shown({perTile: 20});
+    // Drawn as the first tiles land, with nothing counted until the last of them has.
+    const partial = states.filter((s) => s.status === 'loading' && s.artifacts.length > 0 && s.artifacts.length < 68);
+    expect(partial.length).toBeGreaterThan(0);
+    for (const s of partial) expect(s.levelsInView.has('strata')).toBe(false);
+    for (const s of states) if (s.levelsInView.has('strata')) expect(s.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+    expect(new Set(states.map((s) => levelInView(decl, s.levelsInView, 40)))).toEqual(new Set([0]));
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+  });
+
+  it('keeps what the last whole view held while the next view’s tiles land', async () => {
+    const {ch, states, decl} = await shown({perTile: 20}, {...view, zoom: 5});
+    const before = ch.current.levelsInView.get('strata');
+    expect(levelInView(decl, ch.current.levelsInView, 40)).toBe(1);
+    states.length = 0;
+    ch.refresh(view, 200, 150);
+    await settle();
+    // The new view's first tiles are drawn under the last view's counts, and its own replace them
+    // once its last tile has landed: the level moves once.
+    const partial = states.filter((s) => s.status === 'loading' && s.artifacts.length > 0 && s.artifacts.length < 68);
+    expect(partial.length).toBeGreaterThan(0);
+    for (const s of partial) expect(s.levelsInView.get('strata')).toBe(before);
+    const levels = states.map((s) => levelInView(decl, s.levelsInView, 40));
+    expect(levels.slice(levels.indexOf(0)).every((l) => l === 0)).toBe(true);
+    expect(levels[0]).toBe(1);
+    expect(ch.current.levelsInView.get('strata')!.get(1)!.served).toBe(64);
+  });
+
+  it('counts only the artifacts drawn under the filter, so the level can deepen under a narrow one', async () => {
+    // Every fine artifact but the first in each tile has no member in view that matches the filter.
+    const narrowed = (tile: bigint, req: ViewportArtifactsRequest) => rows(tile, req).map((a, i) => (a.rung === 1 && i > 1 ? {...a, matched: false} : {...a, matched: true}));
+    const {ch, decl} = await shown({perTile: 20, filters: () => ({archive: {in: ['cs']}})}, view, strata(), narrowed);
+    expect(ch.current.levelsInView.get('strata')).toEqual(
+      new Map([
+        [0, {served: 4, full: false}],
+        [1, {served: 4, full: false}]
+      ])
+    );
+    expect(levelInView(decl, ch.current.levelsInView, 40)).toBe(1);
   });
 });

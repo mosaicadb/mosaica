@@ -34,7 +34,7 @@ const artifacts: ArtifactsProjection = {
   layer: 'clusters',
   layers: ['clusters'],
   served: [cluster],
-  colourServed: [], levelsInView: new Map(),
+  colourServed: [], levelsInView: new Map(), followedLevels: new Map(),
   attached: attachedTextOf([cluster], META.layers),
   lineage: servedLineage([cluster]),
   status: 'shown',

@@ -9,10 +9,10 @@ import type {Composition} from './compose.js';
 import {dataToWorldXY, gridToWorld, MAX_DEPTH, rectToRequestBbox, WORLD_SIZE} from './coords.js';
 import {NO_COUNT, NO_MASKED, type Count, type Masked} from './counts.js';
 import {RETRY_DEFAULTS, type Clock, type DriverOptions, type ViewState as DriverViewState} from './driver.js';
-import {composeFilters, emptyDraft, withoutClause, type ClauseVerb, type FilterDraft} from './filters.js';
+import {allOf, composeFilters, emptyDraft, withoutClause, type ClauseVerb, type FilterDraft} from './filters.js';
 import {HeldRecords, HeldShapes} from './held.js';
 import {HeldViews, type ViewMachinery} from './heldViews.js';
-import {colourLayers, isFilterLayer, layerClosure} from './layers.js';
+import {colourLayers, isFilterLayer, layerClosure, levelsDrawnInView} from './layers.js';
 import {CLUSTER_PREFIX, EMPTY_LEGEND, Legend, type LegendProjection} from './legend.js';
 import {withMembers, type MemberClause} from './members.js';
 import {attachedTextOf} from './names.js';
@@ -393,11 +393,20 @@ export type ArtifactsProjection = {
   lineage: ServedLineage;
   /**
    * What the tiles in view hold of each level of each `stacked` or `tiered` layer drawn or coloured
-   * by: how many of the level's artifacts they serve, and whether one of them came back with its
-   * full `perTile` of the level. Replaced with `served`. A level that follows the zoom is chosen
-   * from it.
+   * by: how many of the level's artifacts they serve and are drawn, and whether one of them came
+   * back with its full `perTile` of the level. A layer's entry is replaced once every tile of the
+   * view is held for it, so while a view loads it describes the view before.
    */
   levelsInView: LevelsInView;
+  /**
+   * The level each `stacked` or `tiered` layer is drawn at where no level is chosen for it, keyed
+   * by name, worked out from `levelsInView` and the cluster budget ({@link Store.setClusterBudget}).
+   * Where the layer's levels declare no zoom range, it is the finest level that is not crowded in
+   * view. A layer moves to a finer level only once that level's artifacts in view are within four
+   * fifths of the budget, and moves back only once they are over it. Where the levels declare zoom
+   * ranges, it is the coarsest level in view. A layer with nothing in view is at its coarsest level.
+   */
+  followedLevels: ReadonlyMap<string, number>;
   /**
    * Text attached to artifacts, such as a clustering's topic labels, keyed by the artifact it
    * belongs to. {@link artifactName} uses it to name the artifacts in `served` and `colourServed`.
@@ -756,8 +765,10 @@ export interface Store {
    * `null` is ignored.
    *
    * On a `stacked` or `tiered` layer whose levels declare no zoom range, a level with more than
-   * `budget` artifacts in view is crowded, and the components draw such a layer, where no level is
-   * chosen for it, at the finest level that is not ({@link ArtifactsProjection.levelsInView}).
+   * `budget` artifacts drawn in view is crowded, and the components draw such a layer, where no
+   * level is chosen for it, at the finest level that is not ({@link ArtifactsProjection.followedLevels}).
+   * With no budget only a tile that came back with its full `perTile` of a level crowds it, so such
+   * a layer is drawn at its finest level until its tiles fill, at any zoom.
    */
   setClusterBudget(budget: number | null): void;
   /**
@@ -1357,7 +1368,7 @@ export function createStore(options: StoreOptions): Store {
     view: noFrame(''),
     marks: {bands: [], standIn: [], count: NO_COUNT},
     tiles: {tiles: []},
-    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), levelsInView: new Map(), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
+    artifacts: {layer: null, layers: [], served: [], colourServed: [], lineage: servedLineage([]), levelsInView: new Map(), followedLevels: new Map(), attached: new Map(), status: 'idle', refusal: null, version: 0, held: 0, table, servedOrdinals: new Set(), shapes: new Map(), colours: new Map(), palette: colours.palette, overrides: colours.overrides, coverage: {current: 0, stale: 0}},
     selection: {item: null, itemRefusal: null, artifact: null, artifactRefusal: null},
     region: null,
     filters: {draft: emptyDraft([]), expr: null, highlight: null, members: [], regions: [], suggestions: {}, suggestErrors: {}, suggestEpoch: 0},
@@ -1987,6 +1998,7 @@ export function createStore(options: StoreOptions): Store {
       colourServed: coloured === null ? [] : state.artifacts.filter((a) => a.layer === coloured),
       lineage: servedLineage(served),
       levelsInView: state.levelsInView,
+      followedLevels: followedLevels(state.levelsInView),
       attached: attachedTextOf(state.artifacts, meta?.layers ?? []),
       status: state.status,
       refusal: state.refusal,
@@ -2324,9 +2336,7 @@ export function createStore(options: StoreOptions): Store {
     const clauses = layer === undefined ? members : members.filter((m) => m.verb !== 'filter' || m.layer !== layer);
     const filters = withSelected(withMembers(composeFilters(kept, 'filter'), clauses, 'filter'));
     const highlight = spec.highlighted === true ? requestHighlight() : null;
-    const joined = [filters, spec.filters ?? null, highlight].filter((f): f is FilterExpr => f !== null);
-    if (joined.length === 0) return null;
-    return joined.length === 1 ? joined[0]! : {all_of: joined};
+    return allOf([filters, spec.filters ?? null, highlight].filter((f): f is FilterExpr => f !== null));
   }
 
   /**
@@ -2687,8 +2697,13 @@ export function createStore(options: StoreOptions): Store {
     clusterBudget = next;
     for (const held of views.all()) held.channel.setBudget(next ?? undefined);
     aggregates.refresh(false, {which: drawsCut, changed: true});
-    // A level that follows the zoom is chosen under the budget, so what draws the artifacts reads them again.
-    replaceProjection('artifacts', {...projections.artifacts});
+    // A level that follows the zoom is chosen under the budget.
+    replaceProjection('artifacts', {...projections.artifacts, followedLevels: followedLevels(projections.artifacts.levelsInView)});
+  }
+
+  /** {@link ArtifactsProjection.followedLevels} for `inView`, each layer from the level it is drawn at now. */
+  function followedLevels(inView: LevelsInView): ReadonlyMap<string, number> {
+    return levelsDrawnInView(meta?.layers ?? [], inView, clusterBudget, projections.artifacts.followedLevels);
   }
 
   function setPalette(next: PaletteName): void {

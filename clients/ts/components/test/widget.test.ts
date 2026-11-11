@@ -442,7 +442,8 @@ describe('the up-sync', () => {
     shown(store, {});
     expect(model.state.filters).toEqual({
       all_of: [
-        {all_of: [{year: {range: {gte: 2000}}}, {title: {match: 'graphene'}}]},
+        {year: {range: {gte: 2000}}},
+        {title: {match: 'graphene'}},
         {member_of: {layer: 'topics', artifact: '18446744073709551615'}},
         {none_of: [{member_of: {layer: 'topics', artifact: '7'}}]}
       ]

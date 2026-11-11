@@ -1311,7 +1311,8 @@ describe('<mosaica-field-card> on text', () => {
 });
 
 describe('<mosaica-field-card> on a levelled layer', () => {
-  const levelsIn = (levels: [number, number, boolean][]) => new Map([['bands', new Map(levels.map(([level, served, full]) => [level, {served, full}]))]]);
+  /** The store's level for the layer where none is chosen, as it works it out from what is in view. */
+  const followed = (level: number) => new Map([['bands', level]]);
 
   it('follows the zoom until a level is chosen, and Follow zoom goes back to it', async () => {
     const bands = {...topicsLayer, name: 'bands', title: 'Bands', hierarchy: {kind: 'stacked', pruneChildren: false}, levels: [{level: 0, title: 'Broad', zoom: null}, {level: 1, title: 'Fine', zoom: null}]} as unknown as Meta['layers'][number];
@@ -1331,7 +1332,7 @@ describe('<mosaica-field-card> on a levelled layer', () => {
       ['Fine', '1', false]
     ]);
     // Zoomed in, the fine level fits in view, and the card counts at it.
-    store.set('artifacts', {...store.get('artifacts'), levelsInView: levelsIn([[0, 2, false], [1, 9, false]])});
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: followed(1)});
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');
     expect(select().value).toBe('');
@@ -1358,7 +1359,7 @@ describe('<mosaica-field-card> on a levelled layer', () => {
     const card = host.querySelector('mosaica-field-card') as MosaicaFieldCard;
     const store = fakeStore({meta: meta({layers: [bands]}), status: status({}), filters: filtersOf({filter: {}, highlight: {}})});
     store.set('view', {...store.get('view'), id: 's0'});
-    store.set('artifacts', {...store.get('artifacts'), levelsInView: levelsIn([[1, 1, false]])});
+    store.set('artifacts', {...store.get('artifacts'), followedLevels: followed(1)});
     card.store = store;
     await settle(host);
     expect(JSON.stringify(spec(store, 'field-subject'))).toContain('"level":1');

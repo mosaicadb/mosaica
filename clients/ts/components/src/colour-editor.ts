@@ -3,8 +3,9 @@ import {property, state} from 'lit/decorators.js';
 import {repeat} from 'lit/directives/repeat.js';
 import {CLUSTER_PREFIX, PALETTES, artifactColour, colourLayers, type AggregateSpec, type Layer, type Meta, type PaletteName, type Store} from '@mosaicajs/client';
 import {CATEGORY_PALETTES} from '@mosaicajs/deck';
+import {levelOfLayer} from '@mosaicajs/client/internal';
 import {hexOf} from '@mosaicajs/deck/internal';
-import {HeldAggregate, artifactGroupings, isTree, levelOf, listedGroups, rankedGrouping, type GroupCount} from './aggregate.js';
+import {HeldAggregate, artifactGroupings, isTree, listedGroups, rankedGrouping, type GroupCount} from './aggregate.js';
 import {MosaicaElement, UNNAMED, columnCaption, countText, emit, idString, keyTitle} from './base.js';
 import {ColourPicker, pickerStyles, type PickerTarget} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
@@ -332,7 +333,8 @@ export class MosaicaColourEditor extends MosaicaElement {
   @property() accessor field = '';
   /**
    * The level each `stacked` or `tiered` layer's clusters are listed at, keyed by layer name. A
-   * layer with no entry is listed at its coarsest level. Set it as a property; it has no attribute.
+   * layer with no entry is listed at the level the map draws it at, which follows the zoom where its
+   * levels declare no zoom range. Set it as a property; it has no attribute.
    */
   @property({attribute: false}) accessor clusterLevels: ReadonlyMap<string, number> = new Map();
 
@@ -352,6 +354,8 @@ export class MosaicaColourEditor extends MosaicaElement {
   private opener: HTMLElement | null = null;
   /** The frame the paths of the rows in sight are next asked for in, while one is waiting. */
   private pathFrame: number | null = null;
+  /** The level the layer was listed at in the last update, chosen or followed. */
+  private listedAt: number | undefined = undefined;
 
   /** Open the dialog. */
   async show(): Promise<void> {
@@ -409,19 +413,22 @@ export class MosaicaColourEditor extends MosaicaElement {
   }
 
   /**
-   * A change of field or of its layer's level drops what was found and ticked and closes the
-   * picker, since each names the last field's values; the dialog closes where the field is now
-   * nothing it can edit.
+   * A change of field or of the level its layer is listed at, chosen or followed as the map zooms,
+   * drops what was found and ticked and closes the picker, since each names the last field's
+   * values; the dialog closes where the field is now nothing it can edit.
    */
   protected override willUpdate(changed: PropertyValues<this>): void {
     super.willUpdate(changed);
-    const levelMoved = changed.has('clusterLevels') && this.chosenIn(changed.get('clusterLevels')) !== this.chosenIn(this.clusterLevels);
+    const meta = this.resolvedStore?.get('meta') ?? null;
+    const layer = meta ? this.layerOf(meta) : null;
+    const level = layer ? this.levelOf(layer) : undefined;
+    const levelMoved = level !== this.listedAt;
+    this.listedAt = level;
     if (changed.has('field') || levelMoved) {
       this.found = [];
       this.ticked = new Set();
       this.picker.close(false);
     }
-    const meta = this.resolvedStore?.get('meta') ?? null;
     if (this.isOpen && (meta === null || !this.editable(meta))) this.close();
   }
 
@@ -429,16 +436,9 @@ export class MosaicaColourEditor extends MosaicaElement {
     return this.field.startsWith(CLUSTER_PREFIX) ? this.field.slice(CLUSTER_PREFIX.length) : null;
   }
 
-  /** The level chosen in `levels` for the layer listed, or `null` where none is. */
-  private chosenIn(levels: ReadonlyMap<string, number> | undefined): number | null {
-    const name = this.layerName;
-    return name === null ? null : (levels?.get(name) ?? null);
-  }
-
-  /** The level `layer` is listed at ({@link levelOf}). */
+  /** The level `layer` is listed at: its entry in `clusterLevels`, else the level the map draws it at. */
   private levelOf(layer: Layer): number | undefined {
-    const s = this.resolvedStore;
-    return levelOf(layer, this.chosenIn(this.clusterLevels), s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
+    return levelOfLayer(layer, this.clusterLevels.get(layer.name), this.resolvedStore?.get('artifacts').followedLevels);
   }
 
   /** The layer listed, where `field` names one the points can be coloured by. */

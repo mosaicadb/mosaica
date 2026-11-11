@@ -29,8 +29,8 @@ import {
 } from '@mosaicajs/client';
 import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
-import {levelFollowsZoom} from '@mosaicajs/client/internal';
-import {HeldAggregate, artifactGroupings, countsByKey, isLinked, levelOf, listedGroups, rankedGrouping} from './aggregate.js';
+import {follows, levelFollowsZoom, levelOfLayer} from '@mosaicajs/client/internal';
+import {HeldAggregate, artifactGroupings, countsByKey, isLinked, listedGroups, rankedGrouping} from './aggregate.js';
 import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, UNNAMED, boolClause, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
@@ -1102,8 +1102,7 @@ export class MosaicaFieldCard extends MosaicaElement {
 
   /** The level a levelled layer's card counts and browses at: the one chosen, else the one the map draws. */
   private levelOf(layer: Layer): number | undefined {
-    const s = this.resolvedStore;
-    return levelOf(layer, this.level, s?.get('artifacts').levelsInView, s?.clusterBudget ?? null);
+    return levelOfLayer(layer, this.level, this.resolvedStore?.get('artifacts').followedLevels);
   }
 
   /**
@@ -1517,12 +1516,12 @@ export class MosaicaFieldCard extends MosaicaElement {
   private valueCard(s: Store, kind: Kind, layer: Layer | null, title: string, head: (sub: TemplateResult | typeof nothing) => TemplateResult, colouring: boolean): TemplateResult {
     const levelled = layer ? this.levelOf(layer) : undefined;
     // Follow zoom is offered where no level declares a zoom range, and is chosen while no level is.
-    const follows = layer !== null && levelFollowsZoom(layer);
-    const following = follows && !layer.levels.some((l) => l.level === this.level);
+    const offered = layer !== null && levelFollowsZoom(layer);
+    const following = layer !== null && follows(layer, this.level);
     const sub =
       layer && levelled !== undefined && layer.levels.length > 1
         ? html`<span part="sub" class="choice"><select part="level-select" aria-label=${`${title} level`} @change=${(e: Event) => this.chooseLevel((e.target as HTMLSelectElement).value)}>
-              ${follows ? html`<option value="" ?selected=${following}>Follow zoom</option>` : nothing}
+              ${offered ? html`<option value="" ?selected=${following}>Follow zoom</option>` : nothing}
               ${layer.levels.map((l) => html`<option value=${l.level} ?selected=${!following && levelled === l.level}>${l.title || `Level ${l.level}`}</option>`)}
             </select>${icon('chev', 12, 1.4)}</span>`
         : html`<span part="sub"></span>`;
