@@ -281,32 +281,84 @@ jobs:
   docs:
     uses: ./.github/workflows/docs.yml
 
-  # The suite in each mode on its own runner: `one` builds every corpus as one shard, `many` over
-  # several and leaves out the tests that set their own shard sizes (conformance/README.md).
-  conformance:
+  # The two binaries the suite spawns, built once for all four suite jobs, each in its own job so
+  # the builds run side by side: the default build, and the faults build that
+  # `conformance/suite/driver.py` boots for a stage carrying a kill, with the features and target
+  # directory its `ensure_faults_cli_built` gives it. Each keeps its own cache.
+  conformance-build:
     needs: changes
     if: needs.changes.outputs.conformance == 'true'
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
+        include:
+          - binary: default
+            path: target/release/mosaica
+          - binary: faults
+            args: --features fault-injection --target-dir target/faults
+            path: target/faults/release/mosaica
+    name: conformance (build ${{ matrix.binary }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ${{ matrix.binary }}
+      - run: cargo build --release -p mosaica ${{ matrix.args }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: conformance-${{ matrix.binary }}
+          path: ${{ matrix.path }}
+          retention-days: 1
+
+  # The suite in each mode, in two parts, each on its own runner: `one` builds every corpus as one
+  # shard, `many` over several and leaves out the tests that set their own shard sizes
+  # (conformance/README.md). Part 1 runs the files `PART_1` names and part 2 everything else in
+  # both directories, so a new file runs in part 2 the day it lands, and a file named here that no
+  # longer exists fails part 1 rather than running nowhere.
+  conformance:
+    needs: [changes, conformance-build]
+    if: needs.changes.outputs.conformance == 'true'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
         mode: [one, many]
-    name: conformance (${{ matrix.mode }})
+        part: [1, 2]
+    name: conformance (${{ matrix.mode }}, ${{ matrix.part }}/2)
+    env:
+      MOSAICA_CONFORMANCE_PREBUILT: 1
+      PART_1: >-
+        conformance/tests/test_two_modes.py
+        conformance/tests/test_declared_equivalence.py
+        conformance/tests/test_text_differential.py
     steps:
       - uses: actions/checkout@v7
       # A walk that fails while its server still runs prints every thread's stack with gdb, which
       # the runner image lacks; without it the report gives each thread's state and wait channel.
-      # It installs in the background while the binary builds, and a failed install fails no step.
+      # It installs in the background, and a failed install fails no step.
       - name: gdb, for the stacks of a server a failed walk leaves running
         run: nohup bash -c 'sudo apt-get update -q && sudo apt-get install -yq gdb' > "$RUNNER_TEMP/gdb.log" 2>&1 &
+      # The suite builds no `mosaica` binary (`MOSAICA_CONFORMANCE_PREBUILT`), but
+      # `conformance/suite/verification.py` compiles and runs a shim over the corpus crate.
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable branch
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: part-${{ matrix.part }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # The suite spawns the release `mosaica` binary and speaks the real API. Its own step keeps a
-      # compile failure legible as one rather than as a suite error.
-      - run: cargo build --release -p mosaica
+      - uses: actions/download-artifact@v8
+        with:
+          name: conformance-default
+          path: target/release
+      - uses: actions/download-artifact@v8
+        with:
+          name: conformance-faults
+          path: target/faults/release
+      # An artifact does not keep the executable bit.
+      - run: chmod +x target/release/mosaica target/faults/release/mosaica
       # The dependencies are read from `reference/pyproject.toml`, so the list has one copy. The
       # package is not installed: both suites reach `oracle` through the `sys.path` insert their
       # conftests make, as they do locally.
@@ -319,13 +371,22 @@ jobs:
           d = tomllib.load(open('reference/pyproject.toml', 'rb'))
           print(' '.join(d['project']['dependencies'] + d['project']['optional-dependencies']['dev']))
           ")
-      - run: reference/.venv/bin/ruff check --config reference/pyproject.toml reference conformance
-      # Fixtures are built once and cached in /tmp by a stamped recipe; on a fresh runner every one
-      # of them is built from scratch, which is most of this job's wall-clock.
-      - name: the conformance suite, ${{ matrix.mode }} shard mode
+      - if: matrix.mode == 'one' && matrix.part == 1
+        run: reference/.venv/bin/ruff check --config reference/pyproject.toml reference conformance
+      # Fixtures are built once per runner and cached in /tmp by a stamped recipe, so each part
+      # builds the ones its own tests use.
+      - name: the conformance suite, ${{ matrix.mode }} shard mode, part ${{ matrix.part }} of 2
         env:
           MOSAICA_CONFORMANCE_SHARDS: ${{ matrix.mode }}
-        run: reference/.venv/bin/pytest conformance/tests conformance/suite -v
+        run: |
+          read -ra part_1 <<< "$PART_1"
+          if [ "${{ matrix.part }}" = 1 ]; then
+            set -- "${part_1[@]}"
+          else
+            set -- conformance/tests conformance/suite
+            for file in "${part_1[@]}"; do set -- "$@" --ignore "$file"; done
+          fi
+          reference/.venv/bin/pytest "$@" -v
       # The oracle's own tests, apart from those that build from the Phase 0 corpus: one file
       # ignored and three cases deselected by node id. Naming the exclusions rather than the
       # inclusions runs a new test file the day it lands, and a renamed case stops matching its
@@ -333,7 +394,7 @@ jobs:
       # `reference/`, where `testpaths` and the node ids are rooted: a `--deselect` given a
       # repo-relative path matches nothing and is not an error.
       - name: the oracle's own tests, minus what needs the Phase 0 corpus
-        if: matrix.mode == 'one'
+        if: matrix.mode == 'one' && matrix.part == 2
         working-directory: reference
         run: |
           .venv/bin/pytest -v tests \
@@ -417,7 +478,7 @@ jobs:
   # The one check for branch protection to require: it fails where any job above failed or was
   # cancelled, and passes where each passed or was skipped.
   required:
-    needs: [changes, rust, rust-tests, rust-coverage, clippy, checks, docs, conformance, clients]
+    needs: [changes, rust, rust-tests, rust-coverage, clippy, checks, docs, conformance-build, conformance, clients]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     steps:
