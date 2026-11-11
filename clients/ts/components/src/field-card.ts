@@ -29,7 +29,7 @@ import {CATEGORY_PALETTES, RAMPS} from '@mosaicajs/deck';
 import {colourOfFraction, css as rgb, fractionOf, hexOf} from '@mosaicajs/deck/internal';
 import {follows, levelFollowsZoom, levelOfLayer} from '@mosaicajs/client/internal';
 import {HeldAggregate, artifactGroupings, countsByKey, isLinked, listedGroups, rankedGrouping} from './aggregate.js';
-import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, boolClause, called, calledList, calledText, labelOf, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, parseDateText, shortDateText, type BoolKey, type Called} from './base.js';
+import {BOOL_KEYS, BOOL_NUMBERS, BOOL_WORDS, MosaicaElement, boolClause, called, calledList, calledText, labelOf, boolKeys, columnCaption, countText, dateRangeText, emit, focusLost, idString, isBoolColumn, keyTitle, numberText, parseDateText, shortDateText, type BoolKey, type Called} from './base.js';
 import {ColourPicker, pickerStyles} from './colour-picker.js';
 import {clusterColour, colouringOf, holdColours, paletteValueColour, setClusterColours, setValueColours, valueColour, valueMet, watchChoices} from './colouring.js';
 import {attachContextRoot, defineOnce} from './define.js';
@@ -69,7 +69,7 @@ function formatNumber(n: number, whole: boolean): string {
   const v = whole ? Math.round(n) : n;
   const size = Math.abs(v);
   if (size >= 1e6 || (v !== 0 && size < 1e-3)) return v.toExponential(2);
-  return v.toLocaleString('en-GB', size >= 1 ? {maximumFractionDigits: 2} : {maximumSignificantDigits: 3});
+  return numberText(v, size >= 1 ? {maximumFractionDigits: 2} : {maximumSignificantDigits: 3});
 }
 
 /** What a card draws: a category's or a layer's top values, a histogram, a bool's two values, or a search box. */
@@ -339,8 +339,10 @@ function binsOf(table: AggregateTable | undefined, timestamp: boolean): Bin[] {
  *   its children.
  * @csspart refusal - The words "Clusters unavailable", with `data-code`, where the rows were
  *   refused.
- * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match.
- * @csspart bar-subject - A row's or a bin's solid bar, its share of the subject.
+ * @csspart bar-match - A row's or a bin's pale bar, its share of the whole match. A bin's is on a
+ *   scale the whole match's tallest share sets, which the camera does not move.
+ * @csspart bar-subject - A row's or a bin's solid bar, its share of the subject; a bin's on the same
+ *   scale as the pale bars, cut at the plot's top.
  * @csspart count - A row's counts as they are drawn, after its tick and its pen, with what they
  *   count as its `title`. A screen reader is given them beside it, each with what it counts.
  * @csspart verbs - A row's Highlight and Filter buttons, in its counts' place.
@@ -1163,6 +1165,11 @@ export class MosaicaFieldCard extends MosaicaElement {
    * `null` for a step in, after which the first row does. `fresh` until the render after the step.
    */
   private landing: {out: bigint | null; fresh: boolean} | null = null;
+  /**
+   * The body's height as a step began, which it keeps until the step's rows land, so a scrolling
+   * column it stands in does not lose its place while the rows are away.
+   */
+  private heldHeight = 0;
 
   private readonly subjectCounts = new HeldAggregate('field-subject');
   private readonly matchCounts = new HeldAggregate('field-match');
@@ -1463,7 +1470,7 @@ export class MosaicaFieldCard extends MosaicaElement {
     this.focusedBefore = null;
     if (this.landing?.fresh) {
       this.landing.fresh = false;
-      if (before) this.deepestCrumb()?.focus();
+      if (before) this.deepestCrumb()?.focus({preventScroll: true});
       return;
     }
     if (!before || !focusLost()) return;
@@ -1628,6 +1635,7 @@ export class MosaicaFieldCard extends MosaicaElement {
   }
 
   private stepped(out: bigint | null): void {
+    this.heldHeight = this.renderRoot.querySelector<HTMLElement>('.body')?.offsetHeight ?? 0;
     this.landing = {out, fresh: true};
     this.said = '';
     this.expanded = false;
@@ -1821,7 +1829,8 @@ export class MosaicaFieldCard extends MosaicaElement {
             : nothing;
     // One width for every row's step button, so the counts beside it line up down the card.
     const widest = Math.max(0, ...(roots ?? []).map((n) => (n.row.childCount > 0 ? countText(n.row.childCount).length : 0)));
-    return html`<div class="body" style=${`--_mosaica-step-w: calc(${widest}ch + 27px)`}>${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.hideChips ? nothing : this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
+    const held = this.landing && this.heldHeight > 0 ? `;min-height:${this.heldHeight}px` : '';
+    return html`<div class="body" style=${`--_mosaica-step-w: calc(${widest}ch + 27px)${held}`}>${this.clusterSearch(s, layer, null)}${this.crumbsTemplate(s, title)}${this.hideChips ? nothing : this.chipsTemplate(s, title)}<div class="note" role="status">${note}<span class="sr-only">${this.said}</span></div>${list}${after}</div>`;
   }
 
   /** What an overlap list inside a position lists, which heads it; `null` at the top. */
@@ -2098,7 +2107,10 @@ export class MosaicaFieldCard extends MosaicaElement {
     const whole = column ? column.arrowType !== 'f32' && column.arrowType !== 'f64' : false;
     const value = (v: number) => (timestamp ? shortDateText(v) : formatNumber(v, whole));
     const summary = this.figures.entry()?.summaries[0]?.get(this.field) ?? null;
-    const sub = html`<span part="sub" title=${this.summaryText(summary, timestamp, whole, false)}>${this.summaryText(summary, timestamp, whole, this.folded)}</span>`;
+    // Folded, the head shows the field's span; open, the plot does, and a reader is told the figures.
+    const sub = this.folded
+      ? html`<span part="sub">${this.summaryText(summary, timestamp, whole, true)}</span>`
+      : html`<span part="sub"><span class="sr-only">${this.summaryText(summary, timestamp, whole, false)}</span></span>`;
     if (this.folded) return head(sub);
     const subjectTable = this.subjectCounts.entry()?.result?.tables[0];
     const matchTable = this.matchCounts.entry()?.result?.tables[0];
@@ -2110,8 +2122,11 @@ export class MosaicaFieldCard extends MosaicaElement {
     const subOf = (b: Bin) => subjectBins.find((x) => x.lower === b.lower)?.count ?? 0;
     const allOf = (b: Bin) => matchBins.find((x) => x.lower === b.lower)?.count ?? 0;
     const share = (n: number, total: number) => (total > 0 ? n / total : 0);
-    const tallest = Math.max(1e-9, ...bins.map((b) => Math.max(share(allOf(b), allTotal), share(subOf(b), subTotal))));
-    const height = (n: number, total: number) => `${((share(n, total) / tallest) * PLOT_HEIGHT).toFixed(1)}px`;
+    // Each bar is its share of its own set, on one scale the whole match's tallest share sets, so
+    // the match's columns stay put as the camera moves. A subject bar taller than the plot is cut
+    // at its top, and one with anything in it stays visible.
+    const tallest = Math.max(1e-9, ...bins.map((b) => (matchTable ? share(allOf(b), allTotal) : share(subOf(b), subTotal))));
+    const height = (n: number, total: number) => `${n > 0 ? Math.max(1, Math.min(1, share(n, total) / tallest) * PLOT_HEIGHT).toFixed(1) : 0}px`;
     const approx = approxMark(subjectTable, matchTable);
     const lo = bins[0]?.lower;
     const hi = bins.at(-1)?.upper;
@@ -2247,15 +2262,16 @@ export class MosaicaFieldCard extends MosaicaElement {
     return from + to < 1 ? `left:clamp(0px, ${(from * 100).toFixed(2)}%, ${room})` : `right:clamp(0px, ${((1 - to) * 100).toFixed(2)}%, ${room})`;
   }
 
-  /** The figures in the heading: how many hold a value and their mean, or while folded their range. */
+  /** The figures in the heading: how many hold a value and their mean, said to a reader, or while folded their range. */
   private summaryText(summary: FieldSummary | null, timestamp: boolean, whole: boolean, folded: boolean): string {
     if (!summary || summary.min === null || summary.max === null) return '';
     const unit = timestamp ? 1000 : 1;
     const min = Number(summary.min) * unit;
     const max = Number(summary.max) * unit;
     if (folded) return `${this.edgeText(min, min, max, timestamp, whole)} – ${this.edgeText(max, min, max, timestamp, whole)}`;
-    const mean = summary.mean === null ? '' : ` · mean ${timestamp ? shortDateText(summary.mean * unit) : formatNumber(summary.mean, false)}`;
-    return `n ${countText(Number(summary.values))}${mean}`;
+    const mean = summary.mean === null ? '' : `, mean ${timestamp ? shortDateText(summary.mean * unit) : formatNumber(summary.mean, false)}`;
+    const n = Number(summary.values);
+    return `${countText(n)} ${n === 1 ? 'value' : 'values'}${mean}`;
   }
 
   /** An edge on the axis: a date as its year where the range spans years, else its day. */

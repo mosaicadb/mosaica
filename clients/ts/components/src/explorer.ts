@@ -804,7 +804,7 @@ export class MosaicaExplorer extends MosaicaElement {
   @property() accessor layers = '';
   /** The columns the hover tooltip shows, as for `<mosaica-map>`'s `tooltip-fields`. */
   @property({attribute: 'tooltip-fields'}) accessor tooltipFields = '';
-  /** The field that titles a point in the hover tooltip and the item card. Unset, the title is the `mosaica_id`. */
+  /** The field that titles a point in the hover tooltip, the item card and the selection's list. Unset, the title is the `mosaica_id`. */
   @property({attribute: 'title-field'}) accessor titleField = '';
   /** The field the item card shows under its title. Unset, there is no subtitle. */
   @property({attribute: 'subtitle-field'}) accessor subtitleField = '';
@@ -1169,7 +1169,7 @@ export class MosaicaExplorer extends MosaicaElement {
     const filters = html`<slot name="filters"><mosaica-filter-panel exportparts=${FORWARD['filter-panel']} pinned=${this.pinnedFilters || nothing} ?compact=${compact || narrow} .clusterLevels=${levels}></mosaica-filter-panel></slot>`;
     // The status strip speaks for the map and the selection card, unless the host replaced it with something else.
     const quiet = !this.stripReplaced;
-    const selectionPanel = this.has('selection') && region ? html`<slot name="selection"><mosaica-selection exportparts=${FORWARD.selection} ?quiet=${quiet}></mosaica-selection></slot>` : nothing;
+    const selectionPanel = this.has('selection') && region ? html`<slot name="selection"><mosaica-selection exportparts=${FORWARD.selection} ?quiet=${quiet} title-field=${this.titleField || nothing}></mosaica-selection></slot>` : nothing;
     const selectionCard = selectionPanel === nothing ? nothing : html`<div part="selection-card" class="card">${selectionPanel}</div>`;
     const head = html`<div class="head" ?hidden=${!named}>${names}</div>`;
 
@@ -1481,9 +1481,9 @@ export class MosaicaExplorer extends MosaicaElement {
     if (!m) return;
     this.mapSize = {width: m.clientWidth, height: m.clientHeight};
     const origin = m.getBoundingClientRect();
-    // The height the card's content wants, whatever height it is shown at.
+    // The height the card's content wants, with the card's border, whatever height it is shown at.
     for (const el of Array.from(this.renderRoot.querySelectorAll<HTMLElement>('[part~="callout"]'))) {
-      if (el.offsetWidth > 0) this.calloutSizes.set(el.dataset.callout!, {width: el.offsetWidth, height: Math.max(el.offsetHeight, el.scrollHeight)});
+      if (el.offsetWidth > 0) this.calloutSizes.set(el.dataset.callout!, {width: el.offsetWidth, height: el.scrollHeight + el.offsetHeight - el.clientHeight});
     }
     this.keepClear = this.keptClear().flatMap((el) => {
       const r = el.getBoundingClientRect();
@@ -1515,7 +1515,9 @@ export class MosaicaExplorer extends MosaicaElement {
       return;
     }
     const sheet = this.renderRoot.querySelector('[part="sheet"]');
-    const now = new Set<Element>([...(m ? [m] : []), ...this.keptClear(), ...callouts, ...(sheet ? [sheet] : [])]);
+    // A callout is held to the height it was placed at, so what it holds is followed too, and grows under Show all.
+    const held = callouts.flatMap((el) => Array.from(el.children).flatMap((c) => (c instanceof HTMLSlotElement ? c.assignedElements({flatten: true}) : [c])));
+    const now = new Set<Element>([...(m ? [m] : []), ...this.keptClear(), ...callouts, ...held, ...(sheet ? [sheet] : [])]);
     for (const el of this.observed) if (!now.has(el)) this.sizes.unobserve(el);
     for (const el of now) if (!this.observed.has(el)) this.sizes.observe(el);
     this.observed = now;

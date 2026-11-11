@@ -532,8 +532,8 @@ for (const [look, css] of Object.entries(LOOKS)) {
 
       it('draws no text at rest but in the parts that held text on main', async () => {
         const p = await panel();
-        // A card's name, figures, rows, counts, "N more" and axis; the subject row, the chips, Clear all and Add field.
-        expect(await drawnText(p)).toEqual(['add', 'add-note', 'all', 'all-count', 'clear', 'edit', 'field-card axis', 'field-card count', 'field-card more', 'field-card name', 'field-card sub', 'field-card title', 'subject-name']);
+        // A card's name, rows, counts, "N more" and axis; the subject row, the chips, Clear all and Add field.
+        expect(await drawnText(p)).toEqual(['add', 'add-note', 'all', 'all-count', 'clear', 'edit', 'field-card axis', 'field-card count', 'field-card more', 'field-card name', 'field-card title', 'subject-name']);
         // What the earlier rounds gave a screen reader is all still there, off screen.
         const unseen = await p.evaluate(() => {
           const root = document.querySelector('mosaica-filter-panel')!.shadowRoot!;
@@ -544,10 +544,11 @@ for (const [look, css] of Object.entries(LOOKS)) {
             verb: [...root.querySelectorAll('[part="chip"][data-verb="highlight"] > .sr-only')].every(off) && root.querySelectorAll('[part="chip"][data-verb="highlight"] > .sr-only').length === 2,
             range: off(cards[1]!.querySelector('[part="range"]')),
             applied: off(cards[1]!.querySelector('.applied[data-verb="highlight"]')),
-            table: off(cards[1]!.querySelector('table')!.parentElement)
+            table: off(cards[1]!.querySelector('table')!.parentElement),
+            figures: off(root.querySelector('mosaica-field-card[data-field="population"]')!.shadowRoot!.querySelector('[part="sub"] > .sr-only'))
           };
         });
-        expect(unseen).toEqual({counts: true, verb: true, range: true, applied: true, table: true});
+        expect(unseen).toEqual({counts: true, verb: true, range: true, applied: true, table: true, figures: true});
       });
 
       it('takes a press 12 px either side of the middle of every small control, drawn no larger for it', async () => {
