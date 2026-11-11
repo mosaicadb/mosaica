@@ -685,7 +685,7 @@ describe('<mosaica-field-card> on a date', () => {
     expect(sub.textContent).toContain('25');
     expect(sub.textContent).toContain('1 Jan 2011');
     expect(Array.from(sub.children).every((el) => el.classList.contains('sr-only'))).toBe(true);
-    expect(sub.title).toBe('');
+    expect(sub.hasAttribute('title')).toBe(false);
   });
 });
 

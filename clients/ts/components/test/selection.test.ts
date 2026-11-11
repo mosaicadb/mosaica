@@ -1,4 +1,5 @@
 import {afterEach, describe, expect, it} from 'vitest';
+import type {RegionProjection} from '@mosaicajs/client';
 import '../src/selection.js';
 import {deepAll, fakeStore, mount, settle, status} from './fake-store.js';
 
@@ -9,14 +10,14 @@ afterEach(() => {
 const shape = {kind: 'box' as const, bbox: [0, 0, 1, 1] as [number, number, number, number]};
 
 /** A region holding `ids`, counted. */
-const region = (ids: bigint[]) => ({
+const region = (ids: bigint[]): RegionProjection => ({
   shape,
   status: 'shown' as const,
   refusal: null,
   visible: {value: ids.length, exact: true},
   matched: {value: ids.length, exact: true},
   served: {shown: ids.length, total: ids.length, exact: true},
-  verdict: {exact: true},
+  verdict: {exact: true, depth: null},
   held: {ids: BigUint64Array.from(ids), positions: new Float32Array(2 * ids.length), count: ids.length}
 });
 
