@@ -49,7 +49,7 @@ config is boot-time, not runtime), cover the rest:
     the SAME key while a separate warm pool's traffic on OTHER keys is driven at the same time.
 
 Criterion 7 (byte-identity) is not run from this script at all -- it is `cargo test -p
-mosaica-server --test http` plus the `reference/` oracle suite, both already exercised by every
+mosaica-server --test it http::` plus the `reference/` oracle suite, both already exercised by every
 earlier task in this workstream and re-run directly by the report, not through the HTTP load path.
 """
 

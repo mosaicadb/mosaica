@@ -265,7 +265,7 @@ fn segment_of(rows_per_cell: u32) -> Segment {
 }
 
 /// An [`EffectiveMask`] over exactly `visible_rows`, with no overlay or buffer effects — the same
-/// construction `tests/selection.rs` and `decode_tiers.rs` use.
+/// construction `tests/it/selection.rs` and `decode_tiers.rs` use.
 fn mask_over(visible_rows: &[u32], row_count: u32) -> (TempDir, EffectiveMask) {
     let temp = TempDir::new().unwrap();
     let bound = u64::from(row_count);

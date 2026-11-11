@@ -3265,7 +3265,7 @@ mod tests {
 
     /// **A torn handle recovers by neither route.** Pinned here, against a real [`WalState::Torn`],
     /// because the wrapper's injected-fault arm refuses first and so hides whatever this function
-    /// does — `tests/wal.rs`'s injected case asserts the wrapper, and asserting the same property
+    /// does — `tests/it/wal.rs`'s injected case asserts the wrapper, and asserting the same property
     /// twice at the same layer is not defence in depth, it is one test written twice.
     ///
     /// Truncating to `durable_len` would in fact restore this handle: that offset is a record

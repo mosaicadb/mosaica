@@ -378,7 +378,7 @@ pub fn run(ctx: &Context, ops: &[String], checkpoints: &[u64], seed: u64) -> Res
 ///    saturated — proven by counting `QueueFull` on the ingest lane rather than assumed — no deny
 ///    may be refused. **Scope limit: this exercises the engine's lane split only.** The HTTP-level
 ///    asymmetry is a different claim and is not made here; `changes_never_429s` in
-///    `mosaica-server/tests/http_write.rs` is what asserts it.
+///    `mosaica-server/tests/it/http_write.rs` is what asserts it.
 // Eight parameters, one over clippy's default. A bench arm's signature IS its knob surface --
 // ops, buffered depths, submitters, repeats and seed are each independently swept from the CLI,
 // and folding them into a params struct would put a second name on every one of them for no

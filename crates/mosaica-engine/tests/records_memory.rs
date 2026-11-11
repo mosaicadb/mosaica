@@ -4,6 +4,9 @@
 //! One test, so no other test's allocations land in the count. The engine's background work is
 //! quiet: the flush tick is an hour and the refresh is off.
 
+// The `it` binary's shared fixtures, of which this binary uses a few.
+#[path = "it/common/mod.rs"]
+#[allow(dead_code, unused_imports)]
 mod common;
 
 use std::alloc::{GlobalAlloc, Layout, System};

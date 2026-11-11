@@ -106,7 +106,7 @@ ZOOM_RANGE = range(0, 7)
 # with no test failing. The three overrides keep the surface at full strength.
 #
 # Deliberately still NOT exercised here: cap truncation and theta's threshold clause themselves.
-# Those are tested in `crates/mosaica-engine/tests/selection.rs`, against fixtures built for them.
+# Those are tested in `crates/mosaica-engine/tests/it/selection.rs`, against fixtures built for them.
 K = 500
 # §3.3 underlay depth offset. 4^2 = 16 sub-cells per tile is enough to produce a populated third
 # stream at every zoom without tripping the server's max_underlay_cells budget — the same value the

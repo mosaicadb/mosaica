@@ -40,7 +40,7 @@ use mosaica_types::{IdentityKey, TermId};
 
 const ITEM_LIMIT: u64 = 2_422_486;
 
-/// The same fixed, non-degenerate test key `tests/viewport.rs` and `mosaica-build`'s own fixture
+/// The same fixed, non-degenerate test key `tests/it/viewport.rs` and `mosaica-build`'s own fixture
 /// tests use — arbitrary here (this bench never inverts a `mosaica_id`), but a real key all the
 /// same, since `IdentityKey::from_hex` refuses degenerate ones.
 const TEST_KEY_HEX: &str = "000102030405060708090a0b0c0d0e0f";
@@ -56,7 +56,7 @@ fn extent() -> Bounds {
 
 fn workspace_root() -> PathBuf {
     // `cargo bench`'s working directory is not guaranteed to be the workspace root (unlike
-    // `cargo test`, which the sibling `tests/viewport.rs` relies on) — resolve relative to this
+    // `cargo test`, which the sibling `tests/it/viewport.rs` relies on) — resolve relative to this
     // crate's manifest directory instead.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()

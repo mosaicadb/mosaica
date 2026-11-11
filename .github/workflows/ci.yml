@@ -49,7 +49,7 @@
 #
 # Both are **measurements with a date, not a current budget**, and the distinction is load-bearing
 # because four other sites cite the 94 s — `conformance.md` §6, `correctness-suite.md` §16 twice,
-# and `tests/scale.rs`'s module doc — and two of those cite it as the budget an ignored test is
+# and `tests/it/scale.rs`'s module doc — and two of those cite it as the budget an ignored test is
 # excluded against. The workspace has grown since (2,283 distinct tests at 2026-08-30) and neither
 # figure has been re-measured, so neither may be quoted as headroom. What the exclusion of the
 # ignored set actually rests on is what those tests do — real corpora, minutes to hours — which is
