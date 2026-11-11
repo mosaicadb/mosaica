@@ -39,7 +39,7 @@
 //! those below them down to the nearest served ones. On a `nested` or `dag` layer those are found
 //! through the level's held lineage, so the cost follows that neighbourhood and not the layer: on a
 //! `nested` level of 3 × 10⁵ artifacts a children page or the roots take about a tenth of a
-//! millisecond, and a search about 170 ms. A `tiered` layer's edges to coarser levels are turned
+//! millisecond, and a search about 100 ms. A `tiered` layer's edges to coarser levels are turned
 //! downward on each request that walks down, reading every artifact's parent edges and no
 //! membership. Each row returned also walks down to its own nearest served descendants for its
 //! `child_count`, and up to its served roots for its rung. Keys are read for the rows returned,
@@ -415,9 +415,10 @@ impl crate::Engine {
             &dependency_served,
             &attached,
         );
-        let resolved: RefCell<HashMap<usize, Option<String>>> = RefCell::default();
+        // Each name worked out, by index in the gate, so a row is named as its search matched it.
+        let resolved: RefCell<Vec<Option<Option<String>>>> = RefCell::default();
         let name_of = |at: usize| -> Option<String> {
-            if let Some(name) = resolved.borrow().get(&at) {
+            if let Some(Some(name)) = resolved.borrow().get(at) {
                 return name.clone();
             }
             let g = gate.get(at);
@@ -426,7 +427,11 @@ impl crate::Engine {
                 g.level,
                 g.ordinal,
             );
-            resolved.borrow_mut().insert(at, name.clone());
+            let mut held = resolved.borrow_mut();
+            if held.len() <= at {
+                held.resize(at + 1, None);
+            }
+            held[at] = Some(name.clone());
             name
         };
 
@@ -476,7 +481,7 @@ impl crate::Engine {
             BrowseCursor {
                 count: g.matched_count.unwrap_or(g.masked_count),
                 masked_count: g.masked_count,
-                mosaica_id: g.mosaica_id.raw(),
+                mosaica_id: gate.id(*at).raw(),
             }
         };
         let mut candidates: Vec<(usize, BrowseCursor)> =
@@ -503,18 +508,15 @@ impl crate::Engine {
                 .map(|(&at, key)| {
                     let g = gate.get(at);
                     BrowseRow {
-                        mosaica_id: g.mosaica_id,
+                        mosaica_id: gate.id(at),
                         key,
                         name: name_of(at),
                         masked_count: g.masked_count,
                         matched_count: g.matched_count,
                         rung: if levelled { g.level } else { gate.rung(at) },
                         parent_ids: {
-                            let mut ids: Vec<MosaicaId> = gate
-                                .nearest(at)
-                                .iter()
-                                .map(|&up| gate.get(up).mosaica_id)
-                                .collect();
+                            let mut ids: Vec<MosaicaId> =
+                                gate.nearest(at).iter().map(|&up| gate.id(up)).collect();
                             ids.sort_unstable_by_key(|id| id.raw());
                             ids
                         },
@@ -550,7 +552,7 @@ struct Gated {
     masked_count: u64,
     /// `|membership ∩ M_auth ∩ filter|` under `filters`, `None` without.
     matched_count: Option<u64>,
-    mosaica_id: MosaicaId,
+    entity: EntityId,
 }
 
 /// Where a layer's edges lead downward, by the edges [`crate::lineage::nearest_served`] climbs.
@@ -608,6 +610,11 @@ impl Coarser {
     }
 }
 
+/// Zero, so a level's slots are allocated zeroed.
+const UNASKED: u32 = 0;
+const WITHHELD: u32 = 1;
+const FIRST_SERVED: u32 = 2;
+
 /// The viewport's gate over one layer for one request, asked one artifact at a time and holding
 /// each answer, so a form reads the artifacts its answer depends on and no others: the children
 /// form the artifacts below the one requested down to the nearest served ones, and its parents the
@@ -620,8 +627,9 @@ struct Gate<'a> {
     levels: &'a [ReadLevel],
     views: Vec<ArtifactView<'a, EffectiveMask>>,
     below: Below,
-    /// Each artifact asked about, by `(level, ordinal)`, and its index in `gated` where served.
-    at: RefCell<FxHashMap<(u32, u32), Option<usize>>>,
+    /// Each level's artifacts by ordinal, allocated on the level's first: [`UNASKED`],
+    /// [`WITHHELD`], or the artifact's index in `gated` plus [`FIRST_SERVED`].
+    at: RefCell<Vec<Vec<u32>>>,
     gated: RefCell<Vec<Gated>>,
     /// Each served artifact's own first supplied text, from the content this viewer is served,
     /// indexed like `gated`.
@@ -634,8 +642,26 @@ struct Gate<'a> {
 impl Gate<'_> {
     /// The artifact at `ordinal` of `level` where this viewer is served it, by its index.
     fn served(&self, level: u32, ordinal: u32) -> Option<usize> {
-        if let Some(&at) = self.at.borrow().get(&(level, ordinal)) {
-            return at;
+        let len = self.levels.get(level as usize)?.forms.first().len();
+        if ordinal as usize >= len {
+            return None;
+        }
+        let known = {
+            let mut at = self.at.borrow_mut();
+            if at.is_empty() {
+                at.resize(self.levels.len(), Vec::new());
+            }
+            let slots = &mut at[level as usize];
+            if slots.is_empty() {
+                // Zeroed by the allocator, so a page no artifact is asked about is never written.
+                *slots = vec![UNASKED; len];
+            }
+            slots[ordinal as usize]
+        };
+        match known {
+            UNASKED => {}
+            WITHHELD => return None,
+            at => return Some((at - FIRST_SERVED) as usize),
         }
         let at = self.verdict(level, ordinal).map(|(gated, name)| {
             self.names.borrow_mut().push(name);
@@ -643,15 +669,13 @@ impl Gate<'_> {
             held.push(gated);
             held.len() - 1
         });
-        self.at.borrow_mut().insert((level, ordinal), at);
+        self.at.borrow_mut()[level as usize][ordinal as usize] =
+            at.map_or(WITHHELD, |at| at as u32 + FIRST_SERVED);
         at
     }
 
     fn verdict(&self, level: u32, ordinal: u32) -> Option<(Gated, Option<String>)> {
-        let read = self.levels.get(level as usize)?;
-        if ordinal as usize >= read.forms.first().len() {
-            return None;
-        }
+        let read = &self.levels[level as usize];
         let entity = self.layer.runs[level as usize]
             .entity_of(u64::from(ordinal))
             .map(EntityId::new)?;
@@ -662,7 +686,8 @@ impl Gate<'_> {
         else {
             return None;
         };
-        let mosaica_id = self.engine.artifact_id(self.layer.space, entity)?;
+        // The identity space, which [`Self::id`] permutes only for the artifacts a form orders.
+        u32::try_from(entity.raw()).ok()?;
         // Content decides servability as well as text: a viewer containing no content's
         // generating set receives no artifact at all rather than one with its description
         // missing (decision 0076), which is why this runs inside the gate and not beside the row
@@ -675,13 +700,19 @@ impl Gate<'_> {
             matched_count: self
                 .filter_rows
                 .map(|rows| read.matched_count(ordinal, self.mask, rows)),
-            mosaica_id,
+            entity,
         };
         Some((gated, content.name()))
     }
 
     fn get(&self, at: usize) -> Gated {
         self.gated.borrow()[at]
+    }
+
+    fn id(&self, at: usize) -> MosaicaId {
+        self.engine
+            .artifact_id(self.layer.space, self.get(at).entity)
+            .expect("the gate serves only entities inside the identity space")
     }
 
     fn with_own_name<T>(&self, at: usize, f: impl FnOnce(Option<&str>) -> T) -> T {
@@ -837,11 +868,15 @@ impl Gate<'_> {
         let name = self.layer.declaration.name.as_str();
         let gated = self.gated.borrow();
         self.engine.write.live().with_artifacts(|store| {
+            let slots: Vec<_> = (0..self.levels.len() as u32)
+                .map(|level| store.slots(name, level))
+                .collect();
             ats.iter()
                 .map(|&at| {
                     let g = &gated[at];
-                    f(store
-                        .get(name, g.level, g.ordinal)
+                    f(slots[g.level as usize]
+                        .get(g.ordinal as usize)
+                        .and_then(Option::as_deref)
                         .and_then(|record| record.key.as_deref()))
                 })
                 .collect()
