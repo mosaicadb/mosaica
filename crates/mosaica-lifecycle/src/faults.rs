@@ -44,7 +44,7 @@
 //! The consequence to respect rather than re-derive: a `#[cfg(feature = "fault-injection")]` block
 //! compiles differently under `cargo test -p mosaica-lifecycle` than under `cargo test
 //! --workspace`. So nothing may let a *default* build's behaviour depend on this feature —
-//! `crates/mosaica-server/tests/http.rs` already demonstrates the footgun with a
+//! `crates/mosaica-server/tests/it/http.rs` already demonstrates the footgun with a
 //! `bench-timing` block that silently covers less when the feature is absent. The crates that
 //! *declare* the feature (`mosaica-server`, `mosaica`) depend on it only to add the arming
 //! surface and the switchboard's construction; every default-build code path is identical with
@@ -58,10 +58,10 @@
 //! does the same: `Io(StorageFull)` first, `Poisoned` after. Returning `Poisoned` on the *first*
 //! call would diverge on precisely the error the 500 mapping, the operator alarm and the deny
 //! apply-anyway branch all switch on — the one call whose variant matters most. The real sequence
-//! is pinned independently by `tests/wal.rs`'s `a_real_fsync_failure_poisons_the_handle`, which
+//! is pinned independently by `tests/it/wal.rs`'s `a_real_fsync_failure_poisons_the_handle`, which
 //! provokes a genuine `io::Error` rather than an injected one; if these two ever disagree, the
 //! tests that depend on injection are measuring the harness. Both injection arms are exercised:
-//! `an_injected_append_failure_follows_the_real_sequence` and its fsync twin, in `tests/wal.rs`.
+//! `an_injected_append_failure_follows_the_real_sequence` and its fsync twin, in `tests/it/wal.rs`.
 //!
 //! **Repairability is part of the sequence, not a detail beside it.** A real append failure is
 //! terminal and a real sync failure is not (`crate::wal`'s two kinds of write failure), so the two
@@ -227,7 +227,7 @@ pub enum PauseSite {
     /// Between a merge's execution on the pool and its publication on the executor: the merged
     /// segment exists, its inputs are untouched, and the executor has not begun to publish.
     ///
-    /// The hook `mosaica-engine/tests/merge.rs`'s module doc recorded as missing — both for a
+    /// The hook `mosaica-engine/tests/it/merge.rs`'s module doc recorded as missing — both for a
     /// crash-mid-merge test (kill while parked: the output segment is an orphan, the inputs still
     /// stand) and for ordering a suppression against the publication that re-derives the deny mask
     /// over the new row space. Sited at the top of the executor's `publish_merge`, before it reads

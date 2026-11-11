@@ -5,7 +5,7 @@
 //! # One implementation, called from both build routes
 //!
 //! The streaming pipeline and the in-memory build both call [`run`], and
-//! `tests/build_equivalence.rs` holds the two to one bundle, so a term-image file is the same
+//! `tests/it/build_equivalence.rs` holds the two to one bundle, so a term-image file is the same
 //! bytes whichever route produced it. The derivation itself is the store's
 //! [`mosaica_store::term_images::derive_term_images`], which the fold calls as well (decisions
 //! 0091 and 0139): nothing here projects a posting.

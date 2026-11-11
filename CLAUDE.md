@@ -50,13 +50,16 @@ Refuse or withhold only where something would leak to a viewer or cannot be undo
 
 ## Checks before finishing
 
+While working and before finishing, run what the change reaches:
+
 ```bash
-cargo test --workspace --no-fail-fast
+bash scripts/test-affected.sh                      # Rust tests of the changed packages and their dependents, without the slow tier
 cargo clippy --workspace --all-targets -- -D warnings
 bash scripts/check-layers.sh
-bash scripts/check-test-reachability.sh --quick
-bash scripts/check-clients.sh
-bash clients/py/check.sh
+bash scripts/check-test-reachability.sh --quick    # a test's attributes, a feature or a dev-dependency changed
+bash scripts/check-clients.sh                      # clients/ts or the HTTP API changed
+bash clients/py/check.sh                           # clients/py, clients/py-native or the HTTP API changed
+bash scripts/check-docs.sh                         # docs/ or mkdocs.yml changed
 ```
 
-Keep `--no-fail-fast` and read the totals: without it cargo stops at the first failing binary and a smaller passing count looks green. Build with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` in a worktree; debug targets are tens of gigabytes each.
+`test-affected.sh` runs `cargo nextest run` on the changed packages and their dependents, prints what it chose and why, tests the whole workspace when the workspace's configuration changed, and runs nothing when no Rust did. nextest's default profile leaves out the slow tier named in [.config/nextest.toml](.config/nextest.toml), the hundred or so tests that take over five seconds each; `cargo nextest run --profile ci` runs every test, and naming a slow test in a filter also needs `--ignore-default-filter`. CI runs every test of the whole workspace, slow tier included, because a `-p` selection can resolve fewer features than `--workspace`; read its result before calling the change done. Pass `--no-fail-fast` to any test run you start yourself and read the totals: without it the run stops at the first failure and a smaller passing count looks green. Build with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0` in a worktree; debug targets are tens of gigabytes each.

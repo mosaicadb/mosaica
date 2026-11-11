@@ -1003,7 +1003,7 @@ mod session_registry_tests {
     use super::*;
 
     /// The sweep's bounds are properties of this expression. A `SessionRegistry` cannot be built in
-    /// a unit test, so the sweep itself is tested over HTTP in `tests/http_engine_state.rs`.
+    /// a unit test, so the sweep itself is tested over HTTP in `tests/it/http_engine_state.rs`.
     #[test]
     fn the_sweep_threshold_doubles_above_the_floor_and_never_falls_below_it() {
         assert_eq!(next_sweep_threshold(0), SWEEP_FLOOR_ENTRIES);

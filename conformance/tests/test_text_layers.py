@@ -4,7 +4,7 @@ Three artefacts are per-layer for this family where the keyword family has two. 
 position in **its own layer's token dictionary** and means nothing anywhere else; the postings it
 indexes are that layer's; and the prose `phrase` re-reads to check adjacency is that layer's record
 blob. So `match` crosses two per-layer artefacts and `phrase` crosses three, and the third is the
-one no engine-level fold test opens — `tests/fold_text.rs` reads dictionaries and postings out of
+one no engine-level fold test opens — `tests/it/fold_text.rs` reads dictionaries and postings out of
 the artefacts directly, and never asks a server for a phrase.
 
 The corpus is driven to three states over the control plane, on a private copy of the catalogue
@@ -46,7 +46,7 @@ analyses to *no terms*, which must match no predicate while still being served.
 coalesced (`filter-index.md` §5.2, unlike a keyword one), so a window of extents collapses into one
 renumbered layer between folds — but the pass fires on a policy width of eight flushes, and driving
 eight over the control plane to reach a state whose correctness is a merge property would be a slow
-way to test what `crates/mosaica-engine/tests/coalesce_text.rs` tests directly against the
+way to test what `crates/mosaica-engine/tests/it/coalesce_text.rs` tests directly against the
 artefacts. What this module owns is the layered and folded answers, which is where a cross-layer
 defect reaches a client.
 
@@ -470,7 +470,7 @@ def test_the_three_states_are_reached_and_are_distinct(layers, catalogue_bundle)
     The fold's evidence is the segment count collapsing: a fold rewrites the corpus into one
     segment per partition-view and shard, where two flushes had left two more than the
     build's one a shard. The text column's own single-layer-again claim is not visible from
-    here — it is an artefact fact, and `tests/fold_text.rs` opens the artefacts to assert it — and
+    here — it is an artefact fact, and `tests/it/fold_text.rs` opens the artefacts to assert it — and
     what this suite can check is that every answer is still right afterwards, which the tests
     below do.
     """
@@ -573,7 +573,7 @@ def test_the_folded_index_answers_exactly_what_the_layered_one_did(layers):
     guards against — a renumbering that shifted a block of terms — moves several answers at once
     and is easiest to read as a diff of the whole set.
 
-    This is the property `tests/fold_text.rs` cannot state. That module proves the merged artefact
+    This is the property `tests/it/fold_text.rs` cannot state. That module proves the merged artefact
     is the one a fresh build would write; this one proves a *search* returns the same items before
     and after a compaction, over a server, including the phrase route that reads prose back out of
     a blob the fold rewrote.

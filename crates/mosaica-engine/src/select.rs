@@ -1393,7 +1393,7 @@ mod tests {
         // The serve-all branch claims to be exact, not conservative. That means: wherever
         // `serves_all_visible` holds, the definition's own `served_count` must equal the visible
         // count for every reachable C_theta — otherwise that branch serves a different set from the
-        // definition it claims to evaluate. This is the algebraic half; `tests/selection.rs` checks
+        // definition it claims to evaluate. This is the algebraic half; `tests/it/selection.rs` checks
         // the same property against real data.
         for &threshold in &[Threshold::Saturated, Threshold::Cut(1 << 40)] {
             for cap in [1usize, 2, 30, 128] {

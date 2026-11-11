@@ -1,6 +1,6 @@
 # Mosaica's HTTP API: the viewer, session and control planes, as an OpenAPI 3.1 description.
 #
-# Hand-authored, and kept true by `crates/mosaica-server/tests/openapi.rs`, which starts the
+# Hand-authored, and kept true by `crates/mosaica-server/tests/it/openapi.rs`, which starts the
 # server, exercises every route below (a success and at least one refusal each) and validates
 # every JSON request and response body against the schemas in `components`. A field added to a
 # response and not to this file fails that test, because every closed DTO is declared

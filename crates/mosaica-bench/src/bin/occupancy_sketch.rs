@@ -286,7 +286,7 @@ fn build_layout(codes: &[u32], parts: usize, split: Split) -> SegmentLayout {
 
 /// An [`EffectiveMask`] over exactly `visible_rows` of a `row_count`-row space.
 ///
-/// Built the way `tests/selection.rs` builds one: postings over an identity permutation, no
+/// Built the way `tests/it/selection.rs` builds one: postings over an identity permutation, no
 /// overlay and no buffer, so the composed mask's diffs are empty and the walk takes
 /// `for_each_visible_run`'s in-place route — which is the route a deployment takes between denies.
 fn mask_over(visible_rows: &[u32], row_count: u32) -> (TempDir, EffectiveMask) {

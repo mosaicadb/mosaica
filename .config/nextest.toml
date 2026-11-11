@@ -1,0 +1,153 @@
+# cargo-nextest's configuration: https://nexte.st/docs/configuration/
+#
+# `cargo nextest run` leaves out the slow tier, the tests that each took more than five seconds in
+# CI and together take about half of the suite's test time. `--profile ci` runs every test, as CI
+# does, and `--ignore-default-filter` runs the slow tier under the default profile. A filter given
+# on the command line is intersected with the default filter, so naming a slow test also needs one
+# of those two. `#[ignore]`d tests run under neither profile without
+# `--run-ignored`.
+
+[profile.default]
+# The slow tier, by exact name within each test binary.
+default-filter = '''
+not (
+    binary_id(mosaica-build) & (
+          test(=config::tests::a_declaration_past_the_most_unique_fields_is_refused)
+        | test(=ids::tests::an_attribute_file_naming_items_out_of_order_numbers_as_the_rule_does)
+        | test(=ids::tests::the_identity_scratch_stays_within_its_forecast)
+        | test(=ids::tests::the_sort_merge_numbers_as_the_rule_does_when_its_sorts_spill)
+        | test(=ids::tests::the_sort_merge_numbers_as_the_rule_does_within_a_limit)
+        | test(=pipeline::tests::chunking_the_keyword_column_does_not_change_its_bytes)
+        | test(=pipeline::tests::chunking_the_text_index_does_not_change_its_bytes)
+        | test(=pipeline::tests::the_keyword_column_names_every_entity_s_own_key)
+    )
+  | binary_id(mosaica-build::it) & (
+          test(=attribute_pass::the_linear_build_reports_the_same_coverage_and_places_the_same_values)
+        | test(=identity_rule::the_sort_merge_decides_what_the_rule_decides_when_it_spills)
+        | test(=multi_view_build::a_sparse_views_permutation_costs_its_pages_and_not_its_bound)
+    )
+  | binary_id(mosaica-catalogue) & (
+          test(=password::tests::a_throttled_name_answers_as_an_unknown_one_does)
+        | test(=password::tests::failures_count_against_a_name_that_cannot_authenticate)
+        | test(=password::tests::failures_up_to_the_limit_refuse_even_the_right_password_until_the_window_passes)
+        | test(=password::tests::only_the_set_password_of_an_enabled_principal_authenticates)
+        | test(=password::tests::past_the_remembered_names_the_oldest_is_forgotten)
+        | test(=password::tests::the_default_limit_is_ten_failures_in_fifteen_minutes)
+    )
+  | binary_id(mosaica-engine) & (
+          test(=cut::tests::the_downward_walk_answers_where_every_artifact_passes)
+        | test(=cut::tests::the_plan_agrees_with_the_obvious_rule_over_random_dags)
+        | test(=cut::tests::the_plan_agrees_with_the_obvious_rule_over_random_trees)
+        | test(=derived::dig::tests::the_budget_is_shared_across_the_rings)
+        | test(=occupancy::tests::a_ladder_is_the_same_whatever_the_viewer_cannot_see)
+    )
+  | binary_id(mosaica-engine::it) & (
+          test(=aggregate::a_tree_lists_the_cut_the_map_draws)
+        | test(=aggregate_bins::invisible_items_never_enter_a_sample)
+        | test(=artifact_layout_flip::the_fold_flips_a_scattered_level_and_the_answers_do_not_move)
+        | test(=artifact_row_major::the_two_layouts_answer_identically)
+        | test(=artifact_spatial::a_compaction_of_each_shard_leaves_a_boundarys_answers_unchanged)
+        | test(=artifact_spatial::a_maintained_boundary_form_equals_one_resolved_from_scratch)
+        | test(=artifact_spatial::a_restart_claims_the_row_forms_of_a_shard_whose_slice_alone_moved)
+        | test(=artifact_spatial::a_second_shards_compaction_keeps_the_held_shapes)
+        | test(=artifact_spatial::an_absolute_criterion_fires_on_a_boundary)
+        | test(=artifact_tile_index::a_transposed_row_form_is_the_projected_one)
+        | test(=band_route::the_band_route_serves_what_the_scan_serves_through_writes_a_fold_and_a_restart)
+        | test(=cluster_slots::a_viewer_denied_items_has_the_slots_of_a_corpus_without_them)
+        | test(=fold::a_flush_in_flight_does_not_make_the_dead_bytes_route_dispatch)
+        | test(=identity_model::edit_heavy_sequences_reuse_ids_and_agree_with_the_model)
+        | test(=identity_model::writes_agree_with_the_model)
+        | test(=membership_tag::labels_tag_points_as_the_walk_does_through_growth_ingest_fold_and_suppression)
+        | test(=membership_tag::own_labels_content_fractions_filters_and_highlights_tag_as_the_walk_does)
+        | test(=records::a_driven_read_sends_what_the_walk_sends_through_changes_mid_read)
+        | test(=records::a_flush_and_a_merge_landing_mid_read_lose_and_repeat_nothing)
+        | test(=records::a_page_cut_by_time_is_sent_short_and_the_read_resumes_after_it)
+        | test(=records::a_read_driven_by_its_matches_sends_what_the_walk_sends)
+        | test(=records::every_row_is_read_once_across_stretch_boundaries)
+        | test(=region_leaf::a_region_of_another_view_is_the_items_inside_it_there)
+        | test(=selection::per_cell_selection_returns_what_the_scan_returns)
+        | test(=several_shards::a_growth_in_one_shard_survives_another_shards_compaction_and_a_restart)
+        | test(=term_images_ingest::a_built_corpus_and_the_same_corpus_ingested_and_folded_agree)
+        | test(=term_images_route::a_principal_holding_almost_everything_is_sent_to_the_complement_by_the_chooser)
+        | test(=term_images_route::a_principal_holding_no_kept_term_walks_and_a_forced_split_falls_back_to_the_walk)
+        | test(=term_images_route::a_view_created_while_running_gains_images_at_its_first_fold)
+        | test(=term_images_route::a_view_created_while_running_has_no_images_and_is_served_by_the_walk)
+        | test(=term_images_route::a_view_with_no_image_table_is_still_priced_against_the_complement)
+        | test(=term_images_route::every_route_agrees_across_a_delete_and_a_suppression)
+        | test(=term_images_route::every_route_agrees_after_a_flush_under_a_kept_and_an_unkept_term)
+        | test(=term_images_route::every_route_agrees_after_a_fold_executes_a_delete)
+        | test(=term_images_route::every_route_agrees_after_a_merge)
+        | test(=term_images_route::every_route_builds_the_same_projection_over_a_built_bundle)
+        | test(=term_images_route::the_background_refresh_builds_by_a_chosen_route_and_equals_the_walk)
+        | test(=term_images_route::the_fixtures_terms_are_classified_as_every_other_case_assumes)
+        | test(=viewport::counts_spanning_several_containers_sum_to_the_visible_total)
+        | test(=viewport::viewport_output_is_byte_identical_at_compute_threads_1_and_8)
+        | test(=viewport::viewport_output_is_byte_identical_at_compute_threads_1_and_8_with_sparse_empty_tiles)
+        | test(=write::a_deny_drain_that_never_closes_publishes_at_the_liveness_floor)
+    )
+  | binary_id(mosaica-engine::records_memory) & (
+          test(=a_reads_peak_is_held_to_its_page_ceiling)
+    )
+  | binary_id(mosaica-filter) & (
+          test(=values::tests::a_range_answers_alike_on_a_pool_and_off_one)
+    )
+  | binary_id(mosaica-filter-write) & (
+          test(=chunk_dict::tests::a_batch_that_switches_to_sorting_writes_the_same_dictionary)
+    )
+  | binary_id(mosaica-lifecycle) & (
+          test(=membership::tests::a_scattered_membership_of_the_campaigns_shape_survives_its_own_encoding)
+    )
+  | binary_id(mosaica-roaring) & (
+          test(=view::tests::joined_parts_are_the_canonical_serialisation_of_their_union)
+    )
+  | binary_id(mosaica-server::it) & (
+          test(=artifact_labels::an_artifact_withheld_by_its_own_label_is_indistinguishable_from_one_never_published)
+        | test(=build_equals_ingest::a_build_answers_as_its_files_ingested_into_an_empty_database)
+        | test(=build_equals_ingest::a_build_in_shards_of_a_third_answers_as_its_files_ingested)
+        | test(=http::a_stalled_or_disconnected_stream_is_shed_and_the_gauge_returns_to_zero)
+        | test(=http_write::an_answer_older_than_the_ones_kept_is_gone)
+        | test(=http_write::concurrent_ingests_do_not_delay_a_control_changes_suppress)
+        | test(=identity::a_catalogue_change_ends_exactly_the_sessions_it_affects)
+        | test(=keyword_coalesce::a_keyword_filter_serves_the_same_set_before_and_after_the_coalesce)
+        | test(=layers::omitting_levels_follows_the_declared_zoom_map)
+        | test(=meta_projection::a_box_in_degrees_is_answered_as_its_projected_box)
+        | test(=openapi::every_example_is_what_the_server_answers)
+        | test(=openapi::login_and_logout_match_the_description)
+        | test(=scoped_families::a_recreated_views_scoped_values_survive_a_restart_and_a_fold)
+        | test(=scoped_families::every_scoped_family_survives_ingest_flush_layering_fold_and_restart)
+        | test(=scoped_render::a_scoped_column_serves_the_same_values_through_flush_coalesce_fold_and_restart)
+    )
+  | binary_id(mosaica-spatial::it) & (
+          test(=shape::a_box_decomposes_to_its_direct_test)
+        | test(=shape::a_conic_decomposes_to_its_direct_test_away_from_rounding)
+        | test(=shape::a_polygon_decomposes_to_exactly_its_direct_test)
+        | test(=shape::every_boundary_cells_corner_parity_is_the_full_ray_cast)
+    )
+  | binary_id(mosaica-store) & (
+          test(=key_index::tests::a_key_filter_passes_every_key_its_run_holds_and_about_one_absent_key_in_a_hundred)
+        | test(=key_index::tests::a_page_damaged_at_random_never_panics_and_answers_as_it_scans_when_it_verifies)
+        | test(=key_index::tests::u128_runs_of_spread_keys_answer_as_a_set_of_pairs)
+        | test(=permutation::tests::a_reused_scratch_and_an_exact_window_project_what_a_single_pass_projects)
+        | test(=permutation::tests::a_walk_spread_over_threads_projects_what_one_thread_projects_in_one_round)
+        | test(=permutation::tests::a_windowed_pass_projects_what_a_single_pass_projects)
+        | test(=permutation::tests::rows_arriving_bucket_by_bucket_stay_within_one_window)
+        | test(=permutation::tests::validation_on_any_pool_refuses_a_row_claimed_twice_or_out_of_range)
+    )
+  | binary_id(mosaica-store::it) & (
+          test(=bundle_read::nested_tiles_among_empty_ones_are_each_found)
+        | test(=cell_histogram::reports_the_designed_histogram_globally_and_within_a_region)
+        | test(=permutation_project_parallel::a_projection_spanning_several_buckets_matches_the_serial_reference)
+        | test(=segment_roundtrip::a_column_file_filled_in_place_is_byte_identical_to_one_written_whole)
+    )
+  | binary_id(mosaica::it) & (
+          test(=artifact_fixture_smoke::a_generator_corpus_with_every_artifact_arm_builds)
+    )
+)
+'''
+
+[profile.ci]
+default-filter = "all()"
+fail-fast = false
+# A test still running after fifteen minutes is ended and fails. The hang watchdog in
+# .github/workflows/ci.yml writes its stacks at ten.
+slow-timeout = { period = "60s", terminate-after = 15 }

@@ -140,7 +140,7 @@ def resolve(target: str, src: Path):
 def resolve_loose(target: str, src: Path, tracked):
     """resolve(), then the shorthands this repo actually writes.
 
-    Reports cite paths relative to a crate (`tests/http.rs`, `arms/viewport.rs`) or to the crates
+    Reports cite paths relative to a crate (`tests/it/http.rs`, `arms/viewport.rs`) or to the crates
     directory (`mosaica-authz/src/postings.rs`). Both are unambiguous to a human and neither is
     root-relative. Returns (Path, None) when found, (None, reason) when not.
     """

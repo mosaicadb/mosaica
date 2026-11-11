@@ -620,7 +620,7 @@ impl WritePath {
                 // earlier in the unwind than this guard, and that caller's `rx.recv()` can return
                 // before the posture moves. Its error is then `SubmitError::ReceiptLost`, mapped to
                 // 500 rather than 503, which is correct regardless of the posture because the
-                // command may be fully applied. `tests/write.rs`'s
+                // command may be fully applied. `tests/it/write.rs`'s
                 // `an_executor_panic_is_reported_dead` asserts both halves.
                 //
                 // The lifecycle axis is published with `fetch_max` and answered before the WAL

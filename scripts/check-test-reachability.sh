@@ -16,18 +16,21 @@
 #      unification as measured rather than assumed; this script is where the consequence for tests
 #      is counted.
 #   3. A test binary that no longer builds under the narrower selection at all.
+#   4. A file in a crate's `tests/it/` that `tests/it/main.rs` does not declare. Cargo compiles
+#      `main.rs` as the crate's one integration-test binary and nothing else in that directory.
 #
 # The answer is derived from `cargo test -- --list`, which asks the compiled harness what it would
 # run, rather than from a grep over `#[test]`, which cannot see any of the three.
 #
 # `--quick` is in the gate (CLAUDE.md's gate block, and the `rust` job in
 # `.github/workflows/ci.yml`, where it reuses that job's build). It skips the per-crate sweep
-# (step 3) and keeps steps 1 and 2. The full run stays out: the sweep re-resolves features once per
+# (step 4) and keeps steps 1 to 3. The full run stays out: the sweep re-resolves features once per
 # workspace member, so it recompiles the world several times over. Run it when a feature gate or a
 # dev-dependency changes.
 #
-# Exit non-zero on: a bare `#[ignore]`. Everything else is reported and does not fail — a test that
-# exists only under `--workspace` is a fact the operator dispositions, not a build to block.
+# Exit non-zero on: a bare `#[ignore]`, or an undeclared file in `tests/it/`. Everything else is
+# reported and does not fail — a test that exists only under `--workspace` is a fact the operator
+# dispositions, not a build to block.
 #
 # **Why a refusal here does not contradict CLAUDE.md's "report loudly and do not block a build".**
 # That rule governs operator-facing behaviour over real data — joins, coverage, extents — where a
@@ -81,15 +84,35 @@ else
 fi
 echo "  bare ignores: $bare_count"
 
+echo
+echo "== 3. files in tests/it/ that main.rs does not declare"
+undeclared=0
+for main in crates/*/tests/it/main.rs; do
+  dir="${main%/main.rs}"
+  for entry in "$dir"/*; do
+    name="$(basename "$entry")"
+    case "$name" in
+      main.rs) continue ;;
+      *.rs) module="${name%.rs}" ;;
+      *) [ -d "$entry" ] || continue; module="$name" ;;
+    esac
+    if ! grep -qE "^\s*(pub )?mod ${module};" "$main"; then
+      echo "  UNDECLARED: $entry (add \`mod ${module};\` to $main)"
+      undeclared=$((undeclared + 1))
+    fi
+  done
+done
+echo "  undeclared files: $undeclared"
+
 if [ "$quick" = 1 ]; then
   echo
-  echo "== 3. skipped (--quick)"
-  [ "$bare_count" -eq 0 ] || exit 1
+  echo "== 4. skipped (--quick)"
+  [ "$bare_count" -eq 0 ] && [ "$undeclared" -eq 0 ] || exit 1
   exit 0
 fi
 
 echo
-echo "== 3. tests reachable only under --workspace"
+echo "== 4. tests reachable only under --workspace"
 # One `cargo test -p <crate>` per member, which is what a developer working on that crate runs.
 # A test present in the workspace listing and absent from its own crate's listing exists only
 # because some OTHER member's default features unified onto this crate.
@@ -118,7 +141,7 @@ for m in $members; do
   # anything — the missing spelling belongs to the other member. Without this the source grep alone
   # reports a false positive for every duplicated test name, which it did:
   # `an_undersized_bound_does_not_livelock` exists in both `mosaica-cache/src` and
-  # `mosaica-engine/tests/cache.rs`, and the bare spelling from the second was attributed to the
+  # `mosaica-engine/tests/it/cache.rs`, and the bare spelling from the second was attributed to the
   # first, whose own listing carries it under `tests::`.
   #
   # The trade is deliberate: a crate that genuinely lost a test *and* still lists another test of
@@ -135,4 +158,4 @@ for m in $members; do
 done
 echo "  tests reachable only under --workspace: $only_ws"
 
-[ "$bare_count" -eq 0 ] || exit 1
+[ "$bare_count" -eq 0 ] && [ "$undeclared" -eq 0 ] || exit 1

@@ -20,7 +20,7 @@
 //! the values earlier files gave items (`stream`), because a lookup per row is random access at
 //! 10⁹ rows. The linear build asks [`mosaica_lifecycle::resolve::resolve`] file by file over maps
 //! (`linear`). This module's tests hold the two numberings equal file by file, and
-//! `tests/identity_rule.rs` the two builds byte-identical, which is what checks the sort-merge
+//! `tests/it/identity_rule.rs` the two builds byte-identical, which is what checks the sort-merge
 //! against the rule as written.
 
 mod linear;

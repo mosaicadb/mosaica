@@ -299,7 +299,7 @@ fn contains_narrow(
 mod tests {
     //! The keyword read route, over dictionaries and ordinal columns built in this process: cases
     //! like two layers numbering one key differently are cheaper to contrive here than as fixtures.
-    //! The end-to-end pass over a built bundle is `tests/filtering.rs`'s.
+    //! The end-to-end pass over a built bundle is `tests/it/filtering.rs`'s.
 
     use super::*;
     use crate::filter::test_support::*;

@@ -549,7 +549,7 @@ pub struct BuildReport {
     /// streaming pipeline counts a column's presence inside a scatter it splits across threads,
     /// and a tally that lost or double-counted a lane would change this report without changing
     /// one byte of the bundle — the one defect a bundle comparison cannot see. The linear build
-    /// counts the same thing serially, so the two are comparable (`tests/attribute_pass.rs`).
+    /// counts the same thing serially, so the two are comparable (`tests/it/attribute_pass.rs`).
     pub attribute_coverage: Vec<AttributeCoverage>,
     /// Each indexed keyword column's distinct-key count against the rows carrying one, with the
     /// bytes its index cost (`unique_key`). Printed at every build; a key unique per row earns a
@@ -1432,7 +1432,7 @@ pub(crate) fn fit_frames(
 /// also what lets a probe time the two routes against each other with the rest of the plan held
 /// still, where varying the free space would vary the machine as well.
 ///
-/// It changes no byte of the bundle. `tests/extent_route.rs` is what holds that.
+/// It changes no byte of the bundle. `tests/it/extent_route.rs` is what holds that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExtentRoute {
     /// The modelled scratch against the free space, which is what [`build`] takes.
@@ -1468,7 +1468,7 @@ pub fn build_observed(
 /// Superseded by [`build`] for anything but small inputs — it materialises one [`StagedItem`]
 /// per point and the whole `per_term` posting relation before writing a byte, which at 10⁹
 /// items is tens of gigabytes. It is retained, and exercised by
-/// `tests/build_equivalence.rs`, as the **oracle** for the streaming pipeline: the two must
+/// `tests/it/build_equivalence.rs`, as the **oracle** for the streaming pipeline: the two must
 /// produce byte-identical bundles for any input, because the entity-ID assignment they encode
 /// is permanent (I9) and every digest in the bundle depends on it.
 pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
@@ -1859,7 +1859,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
     // The model's sizes for the stages that take what their phase leaves are the streaming
     // build's too, so both builds cut the same batches. This build holds its numbers in memory, so
     // it charges them nothing; the route a string column's characters take is not recorded in the
-    // bundle (`tests/extent_route.rs`), so a different route is not a byte difference.
+    // bundle (`tests/it/extent_route.rs`), so a different route is not a byte difference.
     let (routes, model) = residency::routes_for(
         args,
         n,
@@ -2142,7 +2142,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
 
     // ---- 8b. the post-bundle artifact pass ---------------------------------------------
     //
-    // **Both builds run it, and that is not optional**: `tests/build_equivalence.rs` asserts the
+    // **Both builds run it, and that is not optional**: `tests/it/build_equivalence.rs` asserts the
     // two produce byte-identical bundles, and the pass writes files and edits the layer records the
     // manifest carries. The linear build writes its permutation at step 7, so row space already
     // exists here — the batched build has to wait for its tiler sort, which is the only reason the
@@ -2164,7 +2164,7 @@ pub fn build_in_memory(args: &BuildArgs) -> Result<BuildReport> {
         &mut derived_index,
     );
     // The containment partitions are not per view, so they are filed once for the prefix. The
-    // batched build does the same, and `tests/build_equivalence.rs` holds the two to one bundle.
+    // batched build does the same, and `tests/it/build_equivalence.rs` holds the two to one bundle.
     let containment_extents = crate::artifact_pass::containment(
         &artifact_store,
         &prefix_dir,
