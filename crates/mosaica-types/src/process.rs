@@ -124,15 +124,18 @@ pub fn resident_bytes() -> Resident {
 }
 
 /// Memory this process could take without reclaiming anything it needs, in bytes: the smaller of
-/// `MemAvailable` and what is left under this process's cgroup v2 limit, `memory.max` less
-/// `memory.current`. `None` where `/proc/meminfo` cannot be read.
+/// `MemAvailable` and what is left under this process's cgroup limit, the limit less what the
+/// group holds other than its inactive file pages. `None` where `/proc/meminfo` cannot be read.
 ///
 /// **Both sources, because either can be the real bound.** `MemAvailable` is the kernel's estimate
-/// of what an allocation could get on the host; `memory.max` is the ceiling this process is killed
-/// at, and `memory.current` is what the cgroup already holds against it, page cache included. A
-/// process inside a 4 GiB container on a 48 GiB machine that read only the first would size itself
-/// for the machine. A cgroup with no limit, or none to be read, leaves `MemAvailable` as the
-/// answer.
+/// of what an allocation could get on the host; the cgroup limit is the ceiling this process is
+/// killed at. A process inside a 4 GiB container on a 48 GiB machine that read only the first would
+/// size itself for the machine. A cgroup with no limit, or none to be read, leaves `MemAvailable`
+/// as the answer.
+///
+/// The group's usage counts the page cache, which fills a group up to its limit once enough has
+/// been read through it; the kernel reclaims the inactive file pages before it refuses an
+/// allocation, so they are not held.
 pub fn available_memory() -> Option<u64> {
     let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
     let available = meminfo
@@ -149,16 +152,32 @@ pub fn available_memory() -> Option<u64> {
 /// What is left under the memory limit of the cgroup of the process whose `/proc/self/cgroup` is
 /// `cgroup`, reading its files through `read`. Under v2, `memory.max` less `memory.current` of its
 /// group. Under v1, the least of `memory.limit_in_bytes` less `memory.usage_in_bytes` over its
-/// memory group and that group's ancestors, since a limit set on an ancestor binds too. `None`
-/// where neither hierarchy sets a limit or the files cannot be read.
+/// memory group and that group's ancestors, since a limit set on an ancestor binds too. Each usage
+/// is taken less the inactive file pages its `memory.stat` reports. `None` where neither hierarchy
+/// sets a limit or the files cannot be read.
 fn cgroup_left(cgroup: &str, read: impl Fn(&str) -> Option<String>) -> Option<u64> {
     let figure = |file: String| read(&file)?.trim().parse::<u64>().ok();
+    let held = |dir: &str, usage: &str, inactive_file: &str| {
+        let usage = figure(format!("{dir}/{usage}"))?;
+        let inactive = read(&format!("{dir}/memory.stat"))
+            .and_then(|stat| {
+                stat.lines().find_map(|line| {
+                    line.strip_prefix(inactive_file)?
+                        .strip_prefix(' ')?
+                        .trim()
+                        .parse::<u64>()
+                        .ok()
+                })
+            })
+            .unwrap_or(0);
+        Some(usage.saturating_sub(inactive))
+    };
     let v2 = || {
         let path = cgroup.lines().find_map(|line| line.strip_prefix("0::"))?;
         let dir = group_dir("/sys/fs/cgroup", path);
         Some(
             figure(format!("{dir}/memory.max"))?
-                .saturating_sub(figure(format!("{dir}/memory.current"))?),
+                .saturating_sub(held(&dir, "memory.current", "inactive_file")?),
         )
     };
     let v1 = || {
@@ -178,7 +197,8 @@ fn cgroup_left(cgroup: &str, read: impl Fn(&str) -> Option<String>) -> Option<u6
                 // The kernel writes an unset v1 limit as the largest page count it holds, just
                 // under 2^63 bytes.
                 if limit < 1 << 62 {
-                    let usage = figure(format!("{dir}/memory.usage_in_bytes")).unwrap_or(0);
+                    let usage = held(&dir, "memory.usage_in_bytes", "total_inactive_file")
+                        .unwrap_or(0);
                     let left = limit.saturating_sub(usage);
                     least = Some(least.map_or(left, |least| least.min(left)));
                 }
@@ -332,6 +352,35 @@ mod tests {
             _ => None,
         };
         assert_eq!(cgroup_left("0::/\n", root), Some(1 << 30));
+    }
+
+    /// **The inactive file pages a group's usage counts are not held**: the kernel reclaims them
+    /// before it refuses an allocation, so a group whose page cache has filled it to its limit
+    /// still has room. Active file pages and anonymous memory stay held.
+    #[test]
+    fn inactive_file_pages_are_not_held() {
+        let v2 = |file: &str| match file {
+            "/sys/fs/cgroup/app/memory.max" => Some("8589934592\n".to_string()),
+            "/sys/fs/cgroup/app/memory.current" => Some("8589934592\n".to_string()),
+            "/sys/fs/cgroup/app/memory.stat" => Some(
+                "anon 1073741824\nfile 7516192768\nactive_file 1073741824\n\
+                 inactive_file 6442450944\n"
+                    .to_string(),
+            ),
+            _ => None,
+        };
+        assert_eq!(cgroup_left("0::/app\n", v2), Some(6 << 30));
+        let v1 = |file: &str| match file {
+            "/sys/fs/cgroup/memory/app/memory.limit_in_bytes" => Some("4294967296\n".to_string()),
+            "/sys/fs/cgroup/memory/app/memory.usage_in_bytes" => Some("4294967296\n".to_string()),
+            "/sys/fs/cgroup/memory/app/memory.stat" => Some(
+                "inactive_file 0\ntotal_active_file 1073741824\n\
+                 total_inactive_file 2147483648\n"
+                    .to_string(),
+            ),
+            _ => None,
+        };
+        assert_eq!(cgroup_left("4:memory:/app\n0::/\n", v1), Some(2 << 30));
     }
 
     /// **Without a v2 limit, the v1 memory group's limit binds, and so does any ancestor's.** The
