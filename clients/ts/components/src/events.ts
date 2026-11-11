@@ -78,10 +78,11 @@ export type MosaicaEventDetails = {
   /** The Most points slider was released. The store now aims to draw `budget` marks on screen. */
   'mosaica-budgetchange': {budget: number};
   /**
-   * The Most clusters slider was released. A `nested` or `dag` layer is now cut to at most `budget`
-   * clusters, and a level that follows the zoom is one with at most `budget` clusters in view.
+   * The Most clusters slider was released. Each cluster is now given a square `spacing` CSS pixels
+   * on a side of the map, so a `nested` or `dag` layer is cut to as many clusters as such squares
+   * fit the map, and a level that follows the zoom is one with no more than that many in view.
    */
-  'mosaica-clusterbudgetchange': {budget: number};
+  'mosaica-clusterspacingchange': {spacing: number};
   /**
    * The level that the clusters of the layer `layer` are counted, coloured and labelled at is now
    * `level`. Null is that layer's default level, which follows the zoom on a layer whose levels

@@ -788,7 +788,7 @@ describe('an aggregate ranking a layer at the drawn cut', () => {
   const ranked = (p: {req: AggregateRequest}) => p.req.groupings.some((g) => g.by !== undefined && 'cut' in g.by);
   const cutOf = (p: {req: AggregateRequest}) => (p.req.groupings[0]!.by as {cut: Cut}).cut;
 
-  it('waits for the camera, sends the cut the map draws, and asks again when the cluster budget changes', async () => {
+  it('waits for the camera, sends the cut the map draws, and asks again when the cluster count changes', async () => {
     const {store, pending, clock} = await storeWith();
     store.setAggregate('card', {groupings: [TREE]});
     await flush();
@@ -803,21 +803,24 @@ describe('an aggregate ranking a layer at the drawn cut', () => {
     expect(cut.bbox[0]).toBeLessThanOrEqual(BOX[0]);
     expect(cut.bbox[2]).toBeGreaterThanOrEqual(BOX[2]);
     expect('budget' in cut).toBe(false);
-    expect(store.clusterBudget).toBeNull();
-    // A level that follows the zoom is chosen under the budget, so what draws the artifacts is told.
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([null, null]);
+    // A level that follows the zoom is chosen under the count, so what draws the artifacts is told.
     const told: unknown[] = [];
     const unsubscribe = store.subscribe('artifacts', (a) => told.push(a));
-    store.setClusterBudget(40);
+    // 400 by 400 pixels in squares 50 on a side.
+    store.setClusterSpacing(50);
     await flush();
     unsubscribe();
     expect(told.length).toBeGreaterThan(0);
-    expect(pending.filter(ranked).map(cutOf)).toEqual([cut, {...cut, budget: 40}]);
-    expect(store.clusterBudget).toBe(40);
-    // Not a whole number above zero, or the same budget: nothing changes and nothing is asked.
-    store.setClusterBudget(0);
-    store.setClusterBudget(2.5);
-    store.setClusterBudget(40);
+    expect(pending.filter(ranked).map(cutOf)).toEqual([cut, {...cut, budget: 64}]);
+    expect([store.clusterSpacing, store.clusterCount]).toEqual([50, 64]);
+    // Not a number above zero, or a spacing that gives the same count: nothing is asked.
+    store.setClusterSpacing(0);
+    store.setClusterSpacing(-5);
+    store.setClusterSpacing(Number.NaN);
+    store.setClusterSpacing(49.9);
     await flush();
+    expect(store.clusterCount).toBe(64);
     expect(pending.filter(ranked)).toHaveLength(2);
   });
 });

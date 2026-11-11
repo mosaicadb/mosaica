@@ -467,6 +467,32 @@ describe('<mosaica-map> defaults', () => {
   });
 });
 
+describe('<mosaica-map> cluster spacing', () => {
+  const spacings = (store: ReturnType<typeof fakeStore>) => store.calls.filter((c) => c.name === 'setClusterSpacing').map((c) => c.args[0]);
+
+  it('sets the store’s cluster spacing from the attribute, removes it when set to 0, and leaves the store’s own without one', async () => {
+    await import('../src/map.js');
+    const host = await mount('<mosaica-map cluster-spacing="120"></mosaica-map>');
+    const map = host.querySelector('mosaica-map') as HTMLElement & {store: unknown; clusterSpacing: number};
+    const store = fakeStore({meta: meta(), status: status({})});
+    map.store = store;
+    await settle(host);
+    expect(spacings(store)).toEqual([120]);
+    map.setAttribute('cluster-spacing', '60');
+    await settle(host);
+    map.clusterSpacing = 0;
+    await settle(host);
+    expect(spacings(store)).toEqual([120, 60, null]);
+
+    const bare = await mount('<mosaica-map></mosaica-map>');
+    const plain = bare.querySelector('mosaica-map') as HTMLElement & {store: unknown};
+    const own = fakeStore({meta: meta(), status: status({})});
+    plain.store = own;
+    await settle(bare);
+    expect(spacings(own)).toEqual([]);
+  });
+});
+
 describe('<mosaica-map> display', () => {
   it('keys density’s colours while they encode counts, and not for the warm-grey wash under the points', async () => {
     await import('../src/map.js');

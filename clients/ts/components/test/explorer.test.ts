@@ -1504,14 +1504,14 @@ describe('<mosaica-explorer> the Palette menu while the points are coloured by a
   });
 });
 
-describe('<mosaica-explorer> the cluster budget', () => {
+describe('<mosaica-explorer> the cluster spacing', () => {
   const tree = {name: 'tree', title: 'tree', views: ['s0'], membership: 'enumerated', hierarchy: {kind: 'nested', pruneChildren: true}, levels: [], computedContent: ['centroid'], shape: null, suppliedContent: ['name'], depsOn: [], version: 1} as unknown as Meta['layers'][number];
   const flat = {...tree, name: 'flat', hierarchy: {kind: 'flat', pruneChildren: false}} as unknown as Meta['layers'][number];
-  const budgets = (store: FakeStore) => store.calls.filter((c) => c.name === 'setClusterBudget').map((c) => c.args[0]);
+  const spacings = (store: FakeStore) => store.calls.filter((c) => c.name === 'setClusterSpacing').map((c) => c.args[0]);
 
   async function withLayers(markup = '<mosaica-explorer></mosaica-explorer>') {
     const host = await mount(markup);
-    const el = host.querySelector('mosaica-explorer') as HTMLElement & {store: unknown; clusterBudget: number};
+    const el = host.querySelector('mosaica-explorer') as HTMLElement & {store: unknown; clusterSpacing: number};
     const store = fakeStore({meta: {...META, layers: [tree, flat]}, status: status({})});
     el.store = store;
     await settle(host);
@@ -1520,23 +1520,23 @@ describe('<mosaica-explorer> the cluster budget', () => {
     return {host, el, store, shadow: el.shadowRoot!};
   }
 
-  it('cuts a tree layer to 1,000 clusters unless the host says otherwise, and passes a change on', async () => {
+  it('gives each cluster a square 100 pixels on a side unless the host says otherwise, and passes a change on', async () => {
     const {host, el, store} = await withLayers();
-    expect(budgets(store)).toEqual([1_000]);
-    el.clusterBudget = 250;
+    expect(spacings(store)).toEqual([100]);
+    el.clusterSpacing = 250;
     await settle(host);
-    expect(budgets(store)).toEqual([1_000, 250]);
-    const other = await withLayers('<mosaica-explorer cluster-budget="40"></mosaica-explorer>');
-    expect(budgets(other.store)).toEqual([40]);
+    expect(spacings(store)).toEqual([100, 250]);
+    const other = await withLayers('<mosaica-explorer cluster-spacing="40"></mosaica-explorer>');
+    expect(spacings(other.store)).toEqual([40]);
   });
 
-  it('goes back to the finest cut when the cluster budget is set to 0', async () => {
+  it('removes the limit when the cluster spacing is set to 0', async () => {
     const {host, el, store} = await withLayers();
-    el.clusterBudget = 0;
+    el.clusterSpacing = 0;
     await settle(host);
-    expect(budgets(store)).toEqual([1_000, null]);
-    const none = await withLayers('<mosaica-explorer cluster-budget="0"></mosaica-explorer>');
-    expect(budgets(none.store)).toEqual([]);
+    expect(spacings(store)).toEqual([100, null]);
+    const none = await withLayers('<mosaica-explorer cluster-spacing="0"></mosaica-explorer>');
+    expect(spacings(none.store)).toEqual([]);
   });
 
   it('offers Most clusters while a levelled layer that follows the zoom is drawn or coloured by, and not once a level is chosen for it', async () => {
@@ -1564,31 +1564,52 @@ describe('<mosaica-explorer> the cluster budget', () => {
     expect(slider()).not.toBeNull();
   });
 
-  it('offers Most clusters only while a tree layer is drawn, from cluster-budget-min to cluster-budget-max, and sets the cut only when it is let go', async () => {
-    const {host, shadow, store} = await withLayers('<mosaica-explorer cluster-budget-min="10" cluster-budget-max="10000"></mosaica-explorer>');
+  it('offers Most clusters only while a tree layer is drawn, from cluster-spacing-max to cluster-spacing-min, and sets the spacing only when it is let go', async () => {
+    const {host, shadow, store} = await withLayers('<mosaica-explorer cluster-spacing-min="25" cluster-spacing-max="400"></mosaica-explorer>');
+    store.setClusterSpacing = (spacing: number | null) => {
+      store.calls.push({name: 'setClusterSpacing', args: [spacing]});
+      (store as {clusterSpacing: number | null}).clusterSpacing = spacing;
+    };
+    (store as {clusterSpacing: number | null}).clusterSpacing = 100;
     const slider = () => shadow.querySelector<HTMLInputElement>('[part="most-clusters"]');
     expect(slider()).toBeNull();
     store.set('artifacts', {...store.get('artifacts'), layers: ['flat']});
     await settle(host);
     expect(slider()).toBeNull();
+    // The map is 1,200 by 800 pixels.
+    const map = shadow.querySelector('mosaica-map')!;
+    Object.defineProperty(map, 'clientWidth', {configurable: true, get: () => 1200});
+    Object.defineProperty(map, 'clientHeight', {configurable: true, get: () => 800});
     store.set('artifacts', {...store.get('artifacts'), layers: ['flat', 'tree']});
     await settle(host);
     expect(slider()).not.toBeNull();
     const value = () => shadow.querySelector('[part="most-clusters-value"]')!.textContent;
-    expect(value()).toBe('1K');
+    const ends = () => [...shadow.querySelectorAll('.most:has(#most-clusters) .ticks span')].map((e) => e.textContent);
+    // 100 is halfway along a log scale from 400 down to 25, and 96 squares of it fit the map.
+    expect(value()).toBe('96');
+    expect(slider()!.value).toBe('500');
+    expect(slider()!.getAttribute('aria-valuetext')).toBe('96 clusters, one per 100 px square');
+    expect(ends()).toEqual(['Fewer', 'More']);
     const seen: unknown[] = [];
-    host.addEventListener('mosaica-clusterbudgetchange', (e) => seen.push((e as CustomEvent).detail));
+    host.addEventListener('mosaica-clusterspacingchange', (e) => seen.push((e as CustomEvent).detail));
+    // The More end: squares of 25.
     slider()!.value = '1000';
     slider()!.dispatchEvent(new Event('input'));
     await settle(host);
-    expect(value()).toBe('10K');
-    slider()!.value = '500';
+    expect(value()).toBe('1.5K');
+    // The Fewer end: squares of 400.
+    slider()!.value = '0';
     slider()!.dispatchEvent(new Event('input'));
     await settle(host);
-    expect(budgets(store)).toEqual([1_000]);
+    expect(value()).toBe('6');
+    slider()!.value = '750';
+    slider()!.dispatchEvent(new Event('input'));
+    await settle(host);
+    expect(spacings(store)).toEqual([100]);
     slider()!.dispatchEvent(new Event('change'));
     await settle(host);
-    expect(budgets(store).at(-1)).toBe(320);
-    expect(seen).toEqual([{budget: 320}]);
+    expect(spacings(store).at(-1)).toBe(50);
+    expect(seen).toEqual([{spacing: 50}]);
+    expect(value()).toBe('384');
   });
 });

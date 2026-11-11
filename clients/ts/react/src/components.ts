@@ -127,7 +127,7 @@ export const MosaicaExplorer = withStableAuthorise(wrap('mosaica-explorer', Expl
   onDisplayChange: ev('mosaica-displaychange'),
   onSizeChange: ev('mosaica-sizechange'),
   onBudgetChange: ev('mosaica-budgetchange'),
-  onClusterBudgetChange: ev('mosaica-clusterbudgetchange'),
+  onClusterSpacingChange: ev('mosaica-clusterspacingchange'),
   onFold: ev('mosaica-fold'),
   onFilterChange: ev('mosaica-filterchange'),
   onStateChange: ev('mosaica-statechange'),
