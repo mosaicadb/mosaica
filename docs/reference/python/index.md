@@ -17,6 +17,7 @@ These are the names `mosaica` exports:
 | `Viewer`, `Selection`, `Sample` | A reader of a database, a part of one of its views, and the points a map draws | [Reading](reading.md) |
 | `Batches`, `PartialRead` | The pages of a large read of records, and the exception raised when a read stops part of the way | [Reading](reading.md) |
 | `Map` | An interactive map shown in a notebook cell | [The notebook map](widget.md) |
+| `datasets` | A module that fetches, builds and opens datasets to try: `load`, `prepared`, `names`, `describe`, `root`, `Dataset` and `Persona` | [Datasets to try](datasets.md) |
 | `__version__` | The package's version, as a string | |
 
 The package's calls return these types too. They are not imported by name.

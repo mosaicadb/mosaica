@@ -6,7 +6,7 @@
 //
 // Requires a running `mosaica serve` over the GeoNames bundle and a running `vite dev`, with a
 // dataset document (`?datasets=` or `VITE_MOSAICA_DATASETS`). `country` is `derived` with 254
-// values (`test_corpora/geonames/corpus.toml`).
+// values (`clients/py/mosaica/datasets/geonames.toml`).
 //
 // It checks against a real server what the component tests with a fake store cannot: that
 // keystrokes in the country card's search box reach `/v1/categories/country/suggest` a bounded

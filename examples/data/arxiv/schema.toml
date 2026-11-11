@@ -1,6 +1,6 @@
 # The arXiv example dataset: 50,000 papers, two 2D layouts, Toponymy's named clusters and arXiv's
 # own classification.
-# `test_corpora/arxiv/example.py` writes the Parquet files beside this; NOTICE.md says where they
+# `corpora/arxiv/example.py` writes the Parquet files beside this; NOTICE.md says where they
 # came from. The declaration is the notebook corpus's, without the abstracts, the k-means and
 # HDBSCAN layers, and with the floors scaled to a corpus a fiftieth of the size.
 
@@ -133,7 +133,6 @@ hierarchy  = { kind = "tiered", prune_children = false }
 visibility                = "public"
 artifact_visibility       = { default = "inherited" }
 require_member_visibility = { count = 1 }
-content                   = { computed = ["centroid", "box"] }
 
   [[layer.levels]]
   level = 0
@@ -146,6 +145,16 @@ content                   = { computed = ["centroid", "box"] }
   [layer.members]
   source = "taxonomy_members"
   fields = { id = "entity" }
+
+  # Each archive and subject class carries arXiv's name for it. The name is arXiv's, true whatever
+  # the members, so it is served to anyone the artifact is served to.
+  [layer.content]
+  computed = ["centroid", "box"]
+
+    [[layer.content.supplied]]
+    name                      = "name"
+    type                      = "text"
+    require_member_visibility = "inherited"
 
 # Toponymy's rungs: a tiered layer over a density clustering. Levels are the rungs, coarsest
 # first; the edges are the library's own tree between them; and every cluster on every rung has a

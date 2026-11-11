@@ -52,10 +52,10 @@ GeoNames' disclaimer, kept as the licence requires: "The Data is provided "as is
 
 ## Making it again
 
-From the repository root, with GeoNames' `allCountries.txt` and the vocabularies `test_corpora/geonames/prepare.py` writes in `data/ladder/geonames/`, and `duckdb` installed:
+From the repository root, with GeoNames' `allCountries.txt` and the vocabularies `corpora/geonames/prepare.py` writes in `data/ladder/geonames/`, and `duckdb` installed:
 
 ```bash
-python -m test_corpora.geonames.example --out examples/data/geonames --min-population 15000 --features 150000 --seed 0
+python -m corpora.geonames.example --out examples/data/geonames --min-population 15000 --features 150000 --seed 0
 ```
 
 It takes about fifteen seconds.

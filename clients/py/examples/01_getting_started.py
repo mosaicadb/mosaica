@@ -68,27 +68,19 @@ def _(mo):
     over 13 million features; this extract keeps every town and city of 15,000 people or more,
     and a sample of everything else, from lakes and farms to undersea ridges. The next cell
     uses the repository's copy when this notebook runs from a clone of it, and otherwise
-    downloads the file from GitHub into a folder called `geonames` where you started the
-    notebook, the first time only.
+    downloads it from GitHub once, into Mosaica's folder in your user cache, with
+    `mosaica.datasets`.
     """)
     return
 
 
 @app.cell
 def _():
-    # Jupyter runs a notebook in its own directory, and marimo gives the notebook's path as
-    # __file__.
-    from pathlib import Path
-    from urllib.request import urlretrieve
+    # The repository's copy of the places, or one this package's release fetched once into the
+    # user cache.
+    from mosaica import datasets as _datasets
 
-    here = Path(__file__).parent if "__file__" in globals() else Path.cwd()
-    geonames = (here / "../../../examples/data/geonames").resolve()
-    if not geonames.is_dir():
-        geonames = Path("geonames")
-        geonames.mkdir(exist_ok=True)
-        if not (geonames / "points.parquet").exists():
-            urlretrieve("https://raw.githubusercontent.com/mosaicadb/mosaica/main/"
-                        "examples/data/geonames/points.parquet", geonames / "points.parquet")
+    geonames = _datasets.prepared("places").parent
     return (geonames,)
 
 

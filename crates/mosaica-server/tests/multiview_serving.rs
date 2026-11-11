@@ -18,7 +18,7 @@
 //! - **Unknown is one 404.** A name nobody declared and a well-formed key no view holds must be
 //!   the same answer, or the difference between them is an existence oracle over the roster.
 //!
-//! The bundle is built here rather than from `test_corpora/multiview` because that fixture's
+//! The bundle is built here rather than from `corpora/multiview` because that fixture's
 //! positions are sampled from another rung's built points; the shapes asserted below are the
 //! declaration's, and a synthetic corpus states them without the data dependency.
 

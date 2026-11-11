@@ -37,7 +37,17 @@ def binary_path() -> str:
 
 
 def main() -> None:
-    """The `mosaica` command on PATH: this process becomes the executable, with the same arguments."""
+    """The `mosaica` command on PATH: this process becomes the executable, with the same arguments.
+
+    `mosaica demo` is the Python package's, since it serves the map page the package carries, and
+    runs here instead.
+    """
+    if sys.argv[1:2] == ["demo"]:
+        try:
+            from mosaica.demo import main as demo
+        except ImportError:
+            sys.exit("mosaica demo is in the Python package: pip install 'mosaica[demo]'")
+        sys.exit(demo(sys.argv[2:]))
     path = binary_path()
     os.execv(path, [path, *sys.argv[1:]])
 

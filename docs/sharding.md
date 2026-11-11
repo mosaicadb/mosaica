@@ -936,8 +936,8 @@ counts:
 | Tree of Life | 233 million | 1, 4, 16 |
 | GBIF | 3.5 billion | 1, 4, 14 (a size of 2²⁸) |
 
-Each bundle runs the interactive bench (`test_corpora/common/interactive_bench.py`) and the serve
-battery (`test_corpora/common/serve_battery.py`) under the 24 GiB memory cap, cold and over a kept
+Each bundle runs the interactive bench (`corpora/common/interactive_bench.py`) and the serve
+battery (`corpora/common/serve_battery.py`) under the 24 GiB memory cap, cold and over a kept
 cache. They give, for principals seeing about 1%, 7%, 85% and 100%:
 
 - authorise, and the first counts, first points and settled times of a new session;
@@ -979,7 +979,7 @@ cell. Both predate label columns, figures and term images.
 
 ### 8.4 Churn
 
-The ingest cycle's write cycle (`test_corpora/common/ingest_cycle`) deletes and re-ingests 1,000
+The ingest cycle's write cycle (`corpora/common/ingest_cycle`) deletes and re-ingests 1,000
 items. It gains a churn mode: ten rounds that each delete half the corpus, insert it again as new
 items and compact, on GeoNames and Tree of Life, at one shard and at several. Per round:
 the high water, which must stop rising once ids are reused; posting bytes and union cost against a

@@ -1,0 +1,19 @@
+# The checkout's Python environment for `uv run`: the `mosaica` package with the binary and the
+# map bundle built from this tree, so `uv run mosaica demo places` works with nothing installed
+# first. The first run builds `mosaica-native` with cargo and the components' bundle with npm;
+# `uv sync --reinstall-package mosaica-native` rebuilds the binary after a change to the Rust.
+[project]
+name = "mosaica-checkout"
+version = "0"
+requires-python = ">=3.12"
+dependencies = ["mosaica[demo]"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["clients/py", "clients/py-native"]
+
+[tool.uv.sources]
+mosaica = { workspace = true }
+mosaica-native = { workspace = true }

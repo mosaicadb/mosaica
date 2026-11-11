@@ -66,7 +66,9 @@ wheel = sys.argv[1]
 with zipfile.ZipFile(wheel) as z:
     names = z.namelist()
     want = "mosaica/static/mosaica-components.js"
-    for name in (want, want + ".LICENSE.txt"):
+    # The page `mosaica demo` serves and the declarations its datasets are prepared with.
+    data = ["mosaica/demo.html", "mosaica/datasets/geonames.toml", "mosaica/datasets/gbif.toml"]
+    for name in (want, want + ".LICENSE.txt", *data):
         if name not in names:
             print(f"check-python: {wheel} does not contain {name}", file=sys.stderr)
             sys.exit(1)

@@ -18,7 +18,7 @@
 //!   until the fold reclaims them, and the internal incarnation is what keeps them out of the view
 //!   created under the reused name.
 //!
-//! The fixture is built here rather than taken from `test_corpora/` because these tests assert the
+//! The fixture is built here rather than taken from `corpora/` because these tests assert the
 //! shapes the declaration states, and a synthetic corpus states them with no data dependency —
 //! `multiview_serving.rs`' reason, and its shape.
 

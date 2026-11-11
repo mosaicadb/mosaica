@@ -147,7 +147,7 @@ Bundle size per item varies widely with the schema: a rendered field travels wit
 
 The figures in [Memory](#memory) came from `scripts/bench_capacity.py` in the source repository, which builds synthetic corpora of a chosen size and shape, serves each under a range of memory caps and drives it with simulated users. To compare a machine against a corpus like yours, pick the synthetic profile closest to your schema; its `bench/README.md` explains the profiles.
 
-To estimate your own bundle size, build a sample of your data with your real schema, read the size from the line that starts `built`, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
+[Datasets to try](../start/datasets.md) lists larger bundles, up to billions of items, with the disk each one takes. To estimate your own bundle size, build a sample of your data with your real schema, read the size from the line that starts `built`, and scale it by the number of items you expect. A sample keeps per-item costs right, but fixed costs and the size of annotation layers don't scale the same way, so treat the result as a starting point and check it against a larger build before you buy hardware.
 
 ```bash
 mosaica build 2>&1 | grep '^built'

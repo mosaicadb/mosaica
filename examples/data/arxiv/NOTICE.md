@@ -30,7 +30,7 @@ The Toponymy names were written by a language model (Qwen3.6-35B-A3B) through th
 
 The sample keeps every Toponymy exemplar, 4,284 papers, so that each name ships with every paper it was written from. The other 45,716 papers are a uniform draw, with seed 0, from the rest of the corpus. Every clustering and member file is restricted to the sampled papers, and the taxonomy drops the 8 archives and subject classes with no sampled paper. The archive and subject-class vocabularies are copied whole.
 
-The names of the archives and subject classes, such as General Relativity and Quantum Cosmology for `gr-qc` and Machine Learning for `cs.LG`, are transcribed from arXiv's [category taxonomy](https://arxiv.org/category_taxonomy) into `test_corpora/arxiv/example.py`, as that page read on 25 October 2026. The page leaves out eighteen archives retired before it was written: `acc-phys`, `adap-org`, `alg-geom`, `ao-sci`, `atom-ph`, `bayes-an`, `chao-dyn`, `chem-ph`, `cmp-lg`, `comp-gas`, `dg-ga`, `funct-an`, `mtrl-th`, `patt-sol`, `plasm-ph`, `q-alg`, `solv-int` and `supr-con`. Their names, such as Accelerator Physics for `acc-phys`, are taken from `arxiv/taxonomy/definitions.py` in arXiv's own code, [arxiv-base](https://github.com/arXiv/arxiv-base).
+The names of the archives and subject classes, such as General Relativity and Quantum Cosmology for `gr-qc` and Machine Learning for `cs.LG`, are transcribed from arXiv's [category taxonomy](https://arxiv.org/category_taxonomy) into `corpora/arxiv/example.py`, as that page read on 25 October 2026. The page leaves out eighteen archives retired before it was written: `acc-phys`, `adap-org`, `alg-geom`, `ao-sci`, `atom-ph`, `bayes-an`, `chao-dyn`, `chem-ph`, `cmp-lg`, `comp-gas`, `dg-ga`, `funct-an`, `mtrl-th`, `patt-sol`, `plasm-ph`, `q-alg`, `solv-int` and `supr-con`. Their names, such as Accelerator Physics for `acc-phys`, are taken from `arxiv/taxonomy/definitions.py` in arXiv's own code, [arxiv-base](https://github.com/arXiv/arxiv-base).
 
 ## Licences and attribution
 
@@ -47,7 +47,7 @@ Abstracts are left out because an abstract may be its authors' copyright, where 
 From the repository root, with `data/notebook-2m4-live/`, `data/corpus.parquet` and `data/arxiv_papers_embeds.parquet` present and `scikit-learn` and `umap-learn` installed:
 
 ```bash
-python -m test_corpora.arxiv.example --source data/notebook-2m4-live --out examples/data/arxiv --papers 50000 --seed 0
+python -m corpora.arxiv.example --source data/notebook-2m4-live --out examples/data/arxiv --papers 50000 --seed 0
 ```
 
 With pyarrow 26.0.0 it writes the same bytes as are committed here. It takes about five minutes, most of it reading the 4.7 GB embedding file and laying out the second view. The first layout and the Toponymy clusters and names are copied from the source, which was made once and cannot be reproduced exactly, so the command makes this dataset again only from that same source directory.

@@ -1,9 +1,12 @@
-# Publishes the documentation site at https://mosaicadb.github.io/mosaica/ from each release tag, so
-# the site describes the release a reader installs. Run it by hand on a tag to redeploy that
-# release's docs. The site is built and checked by `docs.yml`, as in the gate.
+# Publishes the documentation site at https://docs.mosaicadb.com/ from each release tag, so the
+# site describes the release a reader installs. Run it by hand on a tag to redeploy that release's
+# docs. The site is built and checked by `docs.yml`, as in the gate.
 #
 # It needs the repository's Pages source set to GitHub Actions, and the `github-pages` environment
-# to allow the release tags; without that a tag's deployment is refused.
+# to allow the release tags; without that a tag's deployment is refused. The custom domain,
+# docs.mosaicadb.com, is set in the repository's Pages settings, not by a CNAME file, and its DNS
+# record on Cloudflare is a CNAME to mosaicadb.github.io. mkdocs.yml's `site_url` names the same
+# address.
 
 name: pages
 

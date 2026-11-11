@@ -91,6 +91,18 @@ When a `match` filter returns nothing, this shows how the index split the text. 
 | `--analyser` | `NAME` | `unicode` | The analyser to use, by name. An unknown name is refused with the list of names this binary carries. |
 | `--identity` |  |  | Print the analyser's identity, the value a text column records, and exit. |
 
+## `mosaica demo`
+
+```text
+mosaica demo [ARGUMENTS]...
+```
+
+Show a dataset to try on a map in a browser. The demo is in the Python package, which carries the map page: `pip install 'mosaica[demo]'`, then `mosaica demo places`.
+
+| Argument | Value | Default | Description |
+| --- | --- | --- | --- |
+| `ARGUMENTS` |  |  | The arguments `mosaica demo` takes in the Python package. |
+
 ## `mosaica health`
 
 ```text
