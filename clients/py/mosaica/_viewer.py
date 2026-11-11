@@ -1821,14 +1821,16 @@ class Viewer:
 
         - `view`, `layer`: as for `artifacts`.
         - `level`: on a stacked or tiered layer, list the top-level annotations or the search
-          results of this level alone. Without it they cover every level.
+          results of this level alone. Without it they cover every level. It cannot be combined
+          with `parent`, whose children are listed at every level.
         - `parent`: list the children of this annotation, given by its `mosaica_id`, at any
           level. Without it or `q`, the page lists the top-level annotations, those with no
           ancestor this reader may see.
         - `q`: list the annotations whose key or name contains this text, ignoring case. It
           cannot be combined with `parent`.
         - `filters`: a filter expression. Each row then has `matched_count`, the number of its
-          items this reader may see that match, and the page is ordered by it.
+          items this reader may see that match, and the page is ordered by it, then by
+          `masked_count`.
         - `limit`: the most rows on the page, capped at the server's `max_browse_rows`.
         - `cursor`: the `next` of the previous page.
         - `palette_size`: how many colours your palette holds, as on `artifacts`.

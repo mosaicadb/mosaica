@@ -867,9 +867,9 @@ impl Engine {
                 walked.treed.insert(layer.name.clone());
             }
             let mut served_levels: Vec<ServedLevel> = Vec::new();
-            // Each level this walk reads, with the ordinals whose verdict passed, held until the
-            // layer's parents are named.
-            let mut read: Vec<Option<(LevelPass<'_>, Vec<u32>)>> =
+            // Each level this walk reads, with the artifacts whose verdict passed by ordinal, held
+            // until the layer's parents are named.
+            let mut read: Vec<Option<(LevelPass<'_>, Vec<Passing>)>> =
                 layer.registered.runs.iter().map(|_| None).collect();
             let from = walked.placed.len();
             for (number, runs) in layer.registered.runs.iter().enumerate() {
@@ -890,7 +890,7 @@ impl Engine {
                     passing,
                     served: cut,
                 } = self.level_cut(&level, sets);
-                let passed: Vec<u32> = passing.iter().map(|&(ordinal, ..)| ordinal).collect();
+                let passed: Vec<Passing> = passing.clone();
                 served_levels.push(ServedLevel {
                     level: number,
                     rows: level.forms.rows.clone(),
@@ -920,6 +920,10 @@ impl Engine {
                     .map(|at| at.as_ref().map(|(level, _)| self.level_view(level)))
                     .collect();
                 let mut verdicts: rustc_hash::FxHashMap<(u32, u32), bool> = Default::default();
+                let mut contents: rustc_hash::FxHashMap<
+                    u32,
+                    Option<Arc<crate::artifact_content::LevelContent>>,
+                > = Default::default();
                 walked.name_parents(
                     from,
                     &layer.name,
@@ -935,14 +939,27 @@ impl Engine {
                         ) else {
                             return true;
                         };
-                        if passed.binary_search(&ordinal).is_ok() {
-                            return true;
-                        }
                         *verdicts.entry((level, ordinal)).or_insert_with(|| {
-                            pass.runs
-                                .entity_of(u64::from(ordinal))
-                                .map(EntityId::new)
-                                .is_some_and(|entity| view.verdict(entity, ordinal).is_served())
+                            let served = match passed.binary_search_by_key(&ordinal, |at| at.0) {
+                                Ok(at) => Some((passed[at].1, passed[at].3)),
+                                Err(_) => pass
+                                    .runs
+                                    .entity_of(u64::from(ordinal))
+                                    .map(EntityId::new)
+                                    .and_then(|entity| match view.verdict(entity, ordinal) {
+                                        crate::artifacts::ArtifactVerdict::Serve {
+                                            position,
+                                            ..
+                                        } => Some((entity, position)),
+                                        _ => None,
+                                    }),
+                            };
+                            served.is_some_and(|(entity, position)| {
+                                let table = contents
+                                    .entry(level)
+                                    .or_insert_with(|| self.level_contents_of(pass, true));
+                                self.served_whole(pass, table.as_deref(), ordinal, entity, position)
+                            })
                         })
                     },
                 );
@@ -1248,6 +1265,37 @@ impl Engine {
             self.assemble_one(level, content, key, at, bits(at.0), walked)?;
         }
         Ok(())
+    }
+
+    /// Whether an artifact the viewer's verdict serves at `position` is served as a row: its
+    /// supplied content reads back whole and its identifier can be formed. A frame names an
+    /// ancestor as a parent only where this holds, as browse and bulk reads do.
+    fn served_whole(
+        &self,
+        level: &LevelPass<'_>,
+        contents: Option<&crate::artifact_content::LevelContent>,
+        ordinal: u32,
+        entity: EntityId,
+        position: Option<u32>,
+    ) -> bool {
+        let layer = level.layer;
+        self.supplied_content(
+            layer
+                .pass
+                .served
+                .generation
+                .space_content(layer.registered.space)
+                .map(Arc::as_ref),
+            &layer.registered.declaration,
+            level.level,
+            ordinal,
+            entity,
+            position,
+            false,
+            contents,
+        )
+        .is_some()
+            && self.artifact_id(layer.registered.space, entity).is_some()
     }
 
     /// [`Engine::level_content`] for a level pass, `None` where nothing is `wanted`.

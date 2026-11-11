@@ -27,8 +27,9 @@ pub(crate) fn within_level(kind: HierarchyKind) -> Option<bool> {
 ///
 /// `parents` gives an artifact's parent edges, empty where it has none or its level was not read;
 /// `served` gives what an artifact is named by where this viewer is served it. The climb passes
-/// through every artifact `served` does not answer for and stops at each one it does, and an
-/// artifact reached twice is climbed once, so a cycle in malformed edges ends.
+/// through every artifact `served` does not answer for and stops at each one it does. An artifact
+/// reached twice is climbed once and the start is never reached, so a cycle in malformed edges
+/// ends and does not name the start as its own ancestor.
 pub(crate) fn nearest_served<'a, T: Ord>(
     parents: impl Fn(u32, u32) -> &'a [ParentRef],
     mut served: impl FnMut(u32, u32) -> Option<T>,
@@ -46,6 +47,7 @@ pub(crate) fn nearest_served<'a, T: Ord>(
     };
     let mut found: Vec<T> = Vec::new();
     let mut seen: FxHashSet<(u32, u32)> = FxHashSet::default();
+    seen.insert((level, ordinal));
     let mut climb: Vec<(u32, u32)> = up(level, ordinal).collect();
     while let Some(at) = climb.pop() {
         if !seen.insert(at) {
@@ -92,6 +94,15 @@ mod tests {
         let parents = |_: u32, o: u32| cycle[o as usize].as_slice();
         let none = |_: u32, _: u32| None::<u32>;
         assert!(nearest_served(parents, none, (0, 0), true).is_empty());
+    }
+
+    #[test]
+    fn a_cycle_through_a_withheld_artifact_does_not_name_the_start() {
+        // 0 names 1 and 1 names 0; 1 is withheld, 0 is served.
+        let cycle = edges(&[&[(0, 1)], &[(0, 0)]]);
+        let parents = |_: u32, o: u32| cycle[o as usize].as_slice();
+        let served = |_: u32, o: u32| (o != 1).then_some(o);
+        assert!(nearest_served(parents, served, (0, 0), true).is_empty());
     }
 
     #[test]

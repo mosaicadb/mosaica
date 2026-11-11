@@ -106,7 +106,9 @@ A viewer is served an artifact only if it passes three tests.
 
 Use `"none"` for a region that exists whether or not a viewer can see anything in it, such as a country. Such a region is served by its `mosaica_id`, in browse and in bulk reads, but the map's tiles draw only artifacts with a member the viewer can see in that tile. Use a stricter requirement where the artifact itself says something about its members, such as a cluster of confidential documents.
 
-An artifact a viewer is not served does not exist for them: no row, no count, no gap in a list, no parent naming it, and a 404 when named directly. Its served children attach to its nearest ancestors the viewer is served, or are roots where it has none. The map, browse and bulk reads all name parents by this one rule, so a client walking any of them sees the same tree, and a map frame names only the parents it carries. A tiered artifact whose ancestors are all withheld is a root at its own level.
+An artifact a viewer is not served has no row, no count, no place in a list and no parent naming it, and is a 404 when named directly. Its served children attach to its nearest ancestors the viewer is served, or are roots where it has none. The map, browse and bulk reads all name parents by this one rule, so a client walking any of them sees the same tree, and a map frame names only the parents it carries. A tiered artifact whose ancestors are all withheld is a root at its own level.
+
+On a `nested` or `dag` layer a served artifact's depth is counted over the served tree, so a withheld artifact leaves no gap in it. A `tiered` layer's levels are declared, so a child attached to an ancestor two or more levels up shows that a level was passed through. Where every chain on the layer steps one level at a time, as the chains a list column mints do, that tells the viewer that an artifact they are not served sits on that branch, though not which one. The [threat model](https://github.com/mosaicadb/mosaica/blob/main/docs/dev/threat-model.md#residual-disclosure) records this beside the other residual channels.
 
 ```mermaid
 flowchart TB

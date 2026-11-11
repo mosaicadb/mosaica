@@ -1175,14 +1175,16 @@ export class MosaicaClient {
    * regardless of what the map shows. It reads the layer's roots, one artifact's children together
    * with that artifact's parents, or the results of a name search. Each row carries its count of
    * visible members and, if `filters` is set, its count of matching ones. Rows are ordered by
-   * count, highest first, then by `mosaica_id`, using the matching count if `filters` is set. To
+   * count, highest first, using the matching count and then the visible count if `filters` is
+   * set, then by `mosaica_id`. To
    * read the next page, pass `next` back as `cursor`. It is `null` on the last page.
    *
    * A parent is listed only if the viewer is served both ends of the link. A `parent` the viewer is
    * not served returns an empty page.
    *
    * @throws {@link MosaicaError} if the server refuses: `404` for an unknown view, `422` for an
-   *   unknown layer, both `parent` and `q`, `limit: 0` or a malformed filter.
+   *   unknown layer, both `parent` and `q`, `level` with `parent`, `limit: 0` or a malformed
+   *   filter.
    */
   async browse(token: string, req: BrowseRequest, signal?: AbortSignal): Promise<BrowsePage> {
     const body: Record<string, unknown> = {view: req.view, layer: req.layer};

@@ -83,10 +83,10 @@ pub struct BrowseRequest<'a> {
     pub view: &'a str,
     pub layer: &'a str,
     /// The one level the roots and search forms list on a **levelled** layer (`stacked`,
-    /// `tiered`), which list every level without it; the children form lists children at any
-    /// level whichever is named. A `422` on the three one-level kinds, a kind's levels being
-    /// deployment schema and a parameter accepted and ignored being a wrong answer that looks
-    /// right (§4).
+    /// `tiered`), which list every level without it. A `422` on the three one-level kinds, a
+    /// kind's levels being deployment schema and a parameter accepted and ignored being a wrong
+    /// answer that looks right (§4), and a `422` beside `parent`, since the children form lists
+    /// children at every level.
     pub level: Option<u32>,
     pub form: BrowseForm,
     /// The viewport's own `filters` object. Its answer here is a **count per row** rather than the
@@ -105,32 +105,47 @@ pub struct BrowseRequest<'a> {
     pub cancel: Option<crate::CancelToken>,
 }
 
-/// A position in the total order — `(masked or matched count descending, mosaica_id ascending)`.
+/// A position in the total order: the ordering count descending (`matched_count` under
+/// `filters`, `masked_count` otherwise), then `masked_count` descending, then `mosaica_id`
+/// ascending.
 ///
 /// **The order is total**, which is what lets a cursor page over tied counts without duplicating
-/// or dropping a row: two artifacts with the same count are separated by their identifiers, and no
+/// or dropping a row: two artifacts with the same counts are separated by their identifiers, and no
 /// two artifacts share one.
 ///
-/// It carries a count this principal was already served and an identifier they were already
+/// It carries counts this principal was already served and an identifier they were already
 /// handed, so it discloses nothing a page did not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrowseCursor {
+    /// The ordering count: `matched_count` under `filters`, `masked_count` otherwise.
     pub count: u64,
+    pub masked_count: u64,
     pub mosaica_id: u64,
 }
 
 impl BrowseCursor {
-    /// The wire spelling: `<count>:<mosaica_id>`, both decimal.
+    /// The wire spelling: `<count>:<masked_count>:<mosaica_id>`, each decimal.
     pub fn parse(text: &str) -> Option<BrowseCursor> {
-        let (count, id) = text.split_once(':')?;
-        Some(BrowseCursor {
-            count: count.parse().ok()?,
-            mosaica_id: id.parse().ok()?,
-        })
+        let mut parts = text.split(':');
+        let cursor = BrowseCursor {
+            count: parts.next()?.parse().ok()?,
+            masked_count: parts.next()?.parse().ok()?,
+            mosaica_id: parts.next()?.parse().ok()?,
+        };
+        parts.next().is_none().then_some(cursor)
     }
 
     pub fn encode(&self) -> String {
-        format!("{}:{}", self.count, self.mosaica_id)
+        format!("{}:{}:{}", self.count, self.masked_count, self.mosaica_id)
+    }
+
+    /// Where this cursor sits in the total order, as the key rows are sorted by.
+    fn key(&self) -> (std::cmp::Reverse<u64>, std::cmp::Reverse<u64>, u64) {
+        (
+            std::cmp::Reverse(self.count),
+            std::cmp::Reverse(self.masked_count),
+            self.mosaica_id,
+        )
     }
 }
 
@@ -201,6 +216,9 @@ pub enum BrowseRefused {
     /// hold. A kind's levels are deployment schema, and a parameter accepted and ignored is a
     /// wrong answer that looks right.
     Level { layer: String, detail: String },
+    /// `level` beside `parent`: the children form lists a parent's children at every level, so
+    /// a level would be ignored.
+    LevelWithParent,
     /// `limit = 0`: a zero-length page is a question with no answer.
     ZeroLimit,
 }
@@ -221,6 +239,12 @@ impl std::fmt::Display for BrowseRefused {
             BrowseRefused::Level { layer, detail } => {
                 write!(f, "layer '{layer}': {detail}")
             }
+            BrowseRefused::LevelWithParent => write!(
+                f,
+                "`level` and `parent` were both given, but a parent's children are listed at \
+                 every level. Omit `level` to list them, or omit `parent` to list the roots at \
+                 that level"
+            ),
             BrowseRefused::ZeroLimit => write!(
                 f,
                 "`limit` is 0, which asks for a page with no rows. Omit it for the deployment's \
@@ -251,6 +275,9 @@ impl crate::Engine {
     pub fn browse(&self, session: &crate::Session, req: BrowseRequest<'_>) -> Result<BrowseOut> {
         if req.limit == 0 {
             return Err(EngineError::BrowseRefused(BrowseRefused::ZeroLimit));
+        }
+        if req.level.is_some() && matches!(req.form, BrowseForm::Children(_)) {
+            return Err(EngineError::BrowseRefused(BrowseRefused::LevelWithParent));
         }
         let generation = self.generation.load_full();
         let view = req.view;
@@ -555,24 +582,25 @@ impl crate::Engine {
             }
         };
 
-        // **The total order**: count descending, then `mosaica_id` ascending, so a cursor over tied
-        // counts neither duplicates nor drops a row. The count is the filtered one under `filters`
-        // and the masked one otherwise (§4).
-        let sort_key = |at: &usize| {
+        // **The total order**, [`BrowseCursor`]'s: a row tied on its matched count is placed by
+        // its masked count, so the larger artifact comes first, and then by `mosaica_id`, so a
+        // cursor over tied counts neither duplicates nor drops a row.
+        let cursor_of = |at: &usize| {
             let g = &gated[*at];
-            let count = filtered
-                .get(&(g.level, g.ordinal))
-                .copied()
-                .unwrap_or(g.masked_count);
-            (std::cmp::Reverse(count), g.mosaica_id.raw())
+            BrowseCursor {
+                count: filtered
+                    .get(&(g.level, g.ordinal))
+                    .copied()
+                    .unwrap_or(g.masked_count),
+                masked_count: g.masked_count,
+                mosaica_id: g.mosaica_id.raw(),
+            }
         };
         let mut candidates = candidates;
-        candidates.sort_by_key(sort_key);
+        candidates.sort_by_key(|at| cursor_of(at).key());
         let after = match req.cursor {
             None => 0,
-            Some(cursor) => candidates.partition_point(|at| {
-                sort_key(at) <= (std::cmp::Reverse(cursor.count), cursor.mosaica_id)
-            }),
+            Some(cursor) => candidates.partition_point(|at| cursor_of(at).key() <= cursor.key()),
         };
         let page: Vec<usize> = candidates
             .iter()
@@ -581,18 +609,7 @@ impl crate::Engine {
             .copied()
             .collect();
         let next = (after + page.len() < candidates.len())
-            .then(|| {
-                page.last().map(|at| {
-                    let g = &gated[*at];
-                    BrowseCursor {
-                        count: filtered
-                            .get(&(g.level, g.ordinal))
-                            .copied()
-                            .unwrap_or(g.masked_count),
-                        mosaica_id: g.mosaica_id.raw(),
-                    }
-                })
-            })
+            .then(|| page.last().map(cursor_of))
             .flatten();
 
         // The children of each row returned, counted over the gated artifacts by the same nearest

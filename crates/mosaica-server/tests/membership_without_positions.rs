@@ -766,6 +766,22 @@ async fn a_tiered_list_column_mints_the_chain_it_declares() {
         groups.iter().all(|g| g.parents == 1),
         "each group is served under the root that the chain named"
     );
+    // A level beside a parent is refused, since the children form lists every level.
+    let auth = authorise(&server, &["0", "1"]).await;
+    let resp = server
+        .client
+        .post(server.viewer_url("/v1/artifacts/browse"))
+        .bearer_auth(auth["token"].as_str().unwrap())
+        .json(&json!({
+            "view": "s0",
+            "layer": LAYER,
+            "level": 1,
+            "parent": roots[0].mosaica_id,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 422, "{}", resp.text().await.unwrap());
 
     let mut leaves: BTreeMap<String, u64> = BTreeMap::new();
     for group in &groups {

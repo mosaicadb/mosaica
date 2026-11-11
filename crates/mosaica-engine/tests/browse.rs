@@ -279,14 +279,20 @@ fn key_set(out: &BrowseOut) -> Vec<String> {
     keys
 }
 
-/// **The total order, checked as a property rather than as a transcript.** Count descending, then
-/// `mosaica_id` ascending. The identifiers are a blinding permutation (I10), so an alphabetical
-/// expectation would be asserting the permutation rather than the rule.
+/// **The total order, checked as a property rather than as a transcript.** The matched count
+/// descending where there is one, then the masked count descending, then `mosaica_id` ascending.
+/// The identifiers are a blinding permutation (I10), so an alphabetical expectation would be
+/// asserting the permutation rather than the rule.
 fn is_in_total_order(out: &BrowseOut) -> bool {
     out.artifacts.windows(2).all(|w| {
-        let count = |r: &BrowseRow| r.matched_count.unwrap_or(r.masked_count);
-        (std::cmp::Reverse(count(&w[0])), w[0].mosaica_id.raw())
-            < (std::cmp::Reverse(count(&w[1])), w[1].mosaica_id.raw())
+        let key = |r: &BrowseRow| {
+            (
+                std::cmp::Reverse(r.matched_count.unwrap_or(r.masked_count)),
+                std::cmp::Reverse(r.masked_count),
+                r.mosaica_id.raw(),
+            )
+        };
+        key(&w[0]) < key(&w[1])
     })
 }
 
@@ -739,7 +745,30 @@ fn plant(
     kind: HierarchyKind,
     levels: &[&[Planted<'_>]],
 ) -> HashMap<String, MosaicaId> {
-    let mut declaration = declaration(None);
+    let levels: Vec<Vec<PlantedSet<'_>>> = levels
+        .iter()
+        .map(|level| {
+            level
+                .iter()
+                .map(|(key, members, parents)| (*key, members.clone().collect(), *parents))
+                .collect()
+        })
+        .collect();
+    plant_sets(fx, layer, kind, None, &levels)
+}
+
+/// One planted artifact whose members are any source ids, not only a run.
+type PlantedSet<'a> = (&'a str, Vec<u64>, &'a [&'a str]);
+
+/// [`plant`], under `criterion`, with members given as lists.
+fn plant_sets(
+    fx: &Fixture,
+    layer: &str,
+    kind: HierarchyKind,
+    criterion: Option<ExistenceCriterion>,
+    levels: &[Vec<PlantedSet<'_>>],
+) -> HashMap<String, MosaicaId> {
+    let mut declaration = declaration(criterion);
     declaration.name = layer.into();
     declaration.hierarchy.kind = kind;
     declaration.content = ContentDeclaration::default();
@@ -760,7 +789,7 @@ fn plant(
             .map(|(key, members, parents)| {
                 let mut a = IncomingArtifact::from_entities(
                     Some(key.to_string()),
-                    members.clone().map(|s| EntityId::new(map[&s])),
+                    members.iter().map(|s| EntityId::new(map[s])),
                 );
                 a.parent_keys = parents.iter().map(|p| p.to_string()).collect();
                 a
@@ -882,6 +911,203 @@ fn a_tiered_artifact_whose_ancestor_is_withheld_is_a_root_of_every_level() {
     };
     assert_eq!(search(None), vec!["math.AG", "physics.optics"]);
     assert!(search(Some(0)).is_empty());
+}
+
+/// One page of `layer` for `credential`, with no filter.
+fn ask_layer(
+    engine: &Engine,
+    credential: &[u8],
+    layer: &str,
+    level: Option<u32>,
+    form: BrowseForm,
+) -> Result<BrowseOut, EngineError> {
+    let session = engine.authorise(credential).unwrap();
+    engine.browse(
+        &session,
+        BrowseRequest {
+            view: "s0",
+            layer,
+            level,
+            form,
+            filter: None,
+            limit: 100,
+            cursor: None,
+            palette_size: None,
+            cancel: None,
+        },
+    )
+}
+
+/// **On a tiered layer of three levels, a narrow principal's tree skips each level whose
+/// artifact it is not served.** A proportional criterion withholds `a2` at level 1 and `b` at
+/// level 0 from the subset principal alone. `a2x` at level 2 then names `a` at level 0 and is one
+/// of `a`'s children, `b1` is a root at level 1, and each `child_count` counts the rows its
+/// children form lists. The broad principal, served everything, sees the consecutive chain.
+#[test]
+fn a_tiered_childs_withheld_parent_is_skipped_for_a_narrow_principal_at_every_level() {
+    const THREE: &str = "taxonomy/three";
+    let fx = fixture(None);
+    let seen = |r: std::ops::Range<u64>| r.filter(|&s| subset_sees(s)).collect::<Vec<u64>>();
+    let unseen = |r: std::ops::Range<u64>| r.filter(|&s| !subset_sees(s)).collect::<Vec<u64>>();
+    // Under a bar of one half the subset principal is served `a` (175 of 275 members seen),
+    // `a1`, `a1x`, `a2x`, `b1` and `b1x` (every member seen), and not `a2` (25 of 125) or `b`
+    // (100 of 300).
+    let a2 = [seen(150..225), unseen(150..300)].concat();
+    let a = [seen(0..150), a2.clone(), seen(300..600)].concat();
+    let b = [seen(600..900), unseen(600..900)].concat();
+    let ids = plant_sets(
+        &fx,
+        THREE,
+        HierarchyKind::Tiered,
+        Some(ExistenceCriterion::Fraction(0.5)),
+        &[
+            vec![("a", a, &[]), ("b", b, &[])],
+            vec![
+                ("a1", seen(0..150), &["a"]),
+                ("a2", a2, &["a"]),
+                ("b1", seen(600..900), &["b"]),
+            ],
+            vec![
+                ("a1x", seen(0..75), &["a1"]),
+                ("a2x", seen(150..225), &["a2"]),
+                ("b1x", seen(600..700), &["b1"]),
+            ],
+        ],
+    );
+    let narrow = subset_credential();
+    let page = |level, form| ask_layer(&fx.engine, &narrow, THREE, level, form).unwrap();
+
+    let roots = page(None, BrowseForm::Roots);
+    assert_eq!(key_set(&roots), vec!["a", "b1"]);
+    assert_eq!(
+        row(&roots, "a").child_count,
+        2,
+        "a1, and a2x from two levels down"
+    );
+    assert_eq!(row(&roots, "b1").child_count, 1);
+    assert_eq!(key_set(&page(Some(0), BrowseForm::Roots)), vec!["a"]);
+    assert_eq!(key_set(&page(Some(1), BrowseForm::Roots)), vec!["b1"]);
+    assert!(page(Some(2), BrowseForm::Roots).artifacts.is_empty());
+
+    let under_a = page(None, BrowseForm::Children(ids["a"]));
+    assert_eq!(key_set(&under_a), vec!["a1", "a2x"]);
+    let a2x = row(&under_a, "a2x");
+    assert_eq!(a2x.parent_ids, vec![ids["a"]]);
+    assert_eq!(a2x.rung, 2, "a levelled layer's rung is its declared level");
+    assert_eq!(a2x.child_count, 0);
+    assert_eq!(row(&under_a, "a1").child_count, 1);
+    let under_b1 = page(None, BrowseForm::Children(ids["b1"]));
+    assert_eq!(key_set(&under_b1), vec!["b1x"]);
+    assert_eq!(row(&under_b1, "b1x").parent_ids, vec![ids["b1"]]);
+
+    let all = page(None, BrowseForm::Search(String::new()));
+    assert_eq!(key_set(&all), vec!["a", "a1", "a1x", "a2x", "b1", "b1x"]);
+    for out in [&roots, &under_a, &under_b1, &all] {
+        assert!(names_nowhere(out, ids["a2"]) && names_nowhere(out, ids["b"]));
+    }
+    for withheld in ["a2", "b"] {
+        let out = page(None, BrowseForm::Children(ids[withheld]));
+        assert!(out.artifacts.is_empty() && out.parents.is_empty());
+    }
+
+    let broad = |form| browse_layer(&fx.engine, THREE, None, form);
+    let under_a = broad(BrowseForm::Children(ids["a"]));
+    assert_eq!(key_set(&under_a), vec!["a1", "a2"]);
+    let under_a2 = broad(BrowseForm::Children(ids["a2"]));
+    assert_eq!(row(&under_a2, "a2x").parent_ids, vec![ids["a2"]]);
+    assert_eq!(key_set(&broad(BrowseForm::Roots)), vec!["a", "b"]);
+}
+
+/// **`level` beside `parent` is refused**, since the children form lists a parent's children at
+/// every level and a level would be ignored. `level` alone, and `parent` alone, answer.
+#[test]
+fn a_level_beside_a_parent_is_refused() {
+    const TIERS: &str = "taxonomy/refused";
+    let fx = fixture(None);
+    let ids = plant(
+        &fx,
+        TIERS,
+        HierarchyKind::Tiered,
+        &[&[("math", 0..300, &[])], &[("math.AG", 0..100, &["math"])]],
+    );
+    let full = full_coverage_credential();
+    let ask = |level, form| ask_layer(&fx.engine, &full, TIERS, level, form);
+    for level in [0, 1] {
+        match ask(Some(level), BrowseForm::Children(ids["math"])) {
+            Err(EngineError::BrowseRefused(_)) => {}
+            other => panic!("level {level} beside a parent is the caller's fault, not {other:?}"),
+        }
+    }
+    assert_eq!(
+        key_set(&ask(None, BrowseForm::Children(ids["math"])).unwrap()),
+        vec!["math.AG"]
+    );
+    assert_eq!(
+        key_set(&ask(Some(1), BrowseForm::Roots).unwrap()),
+        Vec::<String>::new()
+    );
+}
+
+/// **Under a filter, rows tied on their matched count are ordered by their masked count, then by
+/// `mosaica_id`**, so a large artifact that matches nothing lists above a small one that matches
+/// nothing, and a walk one row at a time across the tie reproduces the unpaged answer.
+#[test]
+fn a_tie_on_the_matched_count_is_broken_by_the_masked_count_and_paged_exactly() {
+    const SIZES: &str = "clusters/sizes";
+    let fx = fixture(None);
+    plant(
+        &fx,
+        SIZES,
+        HierarchyKind::Nested,
+        &[&[
+            ("fifty", 0..50, &[]),
+            ("one-fifty", 50..200, &[]),
+            ("hundred", 200..300, &[]),
+            ("one-fifty-too", 300..450, &[]),
+            ("three-hundred", 450..750, &[]),
+        ]],
+    );
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let nothing = FilterExpr::Leaf {
+        column: "archive".into(),
+        operand: FilterOperand::Equals(mosaica_engine::filter::UNRESOLVABLE_VALUE),
+    };
+    let ask = |limit, cursor| {
+        fx.engine
+            .browse(
+                &session,
+                BrowseRequest {
+                    view: "s0",
+                    layer: SIZES,
+                    level: None,
+                    form: BrowseForm::Roots,
+                    filter: Some(nothing.clone()),
+                    limit,
+                    cursor,
+                    palette_size: None,
+                    cancel: None,
+                },
+            )
+            .unwrap()
+    };
+    let all = ask(100, None);
+    assert!(all.artifacts.iter().all(|r| r.matched_count == Some(0)));
+    let counts: Vec<u64> = all.artifacts.iter().map(|r| r.masked_count).collect();
+    assert_eq!(counts, vec![300, 150, 150, 100, 50], "{:?}", keys(&all));
+    assert!(is_in_total_order(&all));
+
+    let mut walked: Vec<BrowseRow> = Vec::new();
+    let mut cursor = None;
+    for _ in 0..all.artifacts.len() + 1 {
+        let page = ask(1, cursor);
+        walked.extend(page.artifacts);
+        cursor = page.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(cursor.is_none(), "the walk ends");
+    assert_eq!(walked, all.artifacts, "the walk is the unpaged answer");
 }
 
 /// **On a `dag` layer a withheld parent lifts its child to every served parent it had.** `ab`
