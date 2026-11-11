@@ -121,3 +121,7 @@ base64 = "0.22"
 # --time 2` in the user crontab removes what accumulates regardless.
 [profile.dev]
 debug = "line-tables-only"
+
+# Dependencies are optimised in dev and test builds; the workspace's own crates stay unoptimised.
+[profile.dev.package."*"]
+opt-level = 1
