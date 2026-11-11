@@ -229,7 +229,7 @@ export class MosaicaClusterFilter extends MosaicaElement {
   }
 
   /** One browse page of the layer. Counts come from the aggregate, so the page is asked unfiltered. */
-  private browse(req: {q?: string; parent?: bigint; level?: number; limit: number}) {
+  private browse(req: {q?: string; level?: number; limit: number}) {
     const s = this.resolvedStore;
     if (!s) return Promise.reject(new Error('no store'));
     const ceiling = s.get('meta')?.selection.maxBrowseRows ?? req.limit;

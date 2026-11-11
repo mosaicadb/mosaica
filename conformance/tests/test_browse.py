@@ -258,8 +258,10 @@ def test_a_filter_adds_a_count_per_row_and_moves_nothing_else(browse_server):
             assert row["matched_count"] == want, f"{terms}/{key}: {row['matched_count']} != {want}"
             any_positive |= want > 0
         assert any_positive, "a filter matching nothing everywhere proves nothing here"
-        # Ordered by the filtered count under `filters`.
-        keyed = [(-r["matched_count"], int(r["mosaica_id"])) for r in filtered]
+        # Ordered by the filtered count under `filters`, then by the masked count.
+        keyed = [
+            (-r["matched_count"], -r["masked_count"], int(r["mosaica_id"])) for r in filtered
+        ]
         assert keyed == sorted(keyed), f"principal {terms}: the filtered order is not total"
 
 

@@ -1589,7 +1589,7 @@ struct BrowseReq {
     layer: String,
     /// The one level the roots and search forms list on a levelled layer (`stacked`, `tiered`),
     /// which list every level without it. A 422 on `flat`, `nested` and `dag`, which have one
-    /// level.
+    /// level, and beside `parent`.
     #[serde(default)]
     level: Option<u32>,
     /// The children form: the artifacts naming this one in their `parent_ids`, at any level, with
@@ -1600,8 +1600,8 @@ struct BrowseReq {
     /// case-insensitively.
     #[serde(default)]
     q: Option<String>,
-    /// The viewport's filter object. Rows then carry `matched_count` and are ordered by it;
-    /// existence and `masked_count` never change with it.
+    /// The viewport's filter object. Rows then carry `matched_count` and are ordered by it, then
+    /// by `masked_count`; existence and `masked_count` never change with it.
     #[serde(default)]
     filters: Option<serde_json::Value>,
     /// Page size, clamped to `selection.max_browse_rows`. `0` is a `422`.

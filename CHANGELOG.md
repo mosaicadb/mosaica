@@ -89,6 +89,12 @@ container image.
   read. Browse with no `level` on a stacked or tiered layer now lists the top-level annotations,
   and searches, at every level; name a `level` for one level, as before. A bulk read that names
   `parents` or `parent` reads every level above the ones it walks.
+- **Browse refuses `level` beside `parent`, and breaks a tie on the filtered count by size.**
+  `POST /v1/artifacts/browse` lists a parent's children at every level, so a request naming both
+  `level` and `parent` is now a `422`; send `parent` alone. Under `filters`, rows with the same
+  `matched_count` are ordered by `masked_count`, largest first, before `mosaica_id`, so an
+  annotation matching nothing no longer lists above a larger one that also matches nothing. A
+  page's `next` cursor now carries both counts, so a cursor from an earlier build is refused.
 - **A level is chosen for each layer.** The explorer keeps a level for each `stacked` or `tiered`
   layer, and choosing one, on a card or in Colour by, leaves the other layers drawn at theirs. A
   `nested` or `dag` layer is never cut at a level. `mosaica-levelchange` now reports

@@ -758,10 +758,12 @@ fn a_served_artifact_names_its_parent_when_the_parent_is_also_served() {
     assert_eq!(by_key("state-b").parent_ids, vec![country.mosaica_id]);
 }
 
-/// **A parent that exists and was withheld is null, identically to a root.** That is the whole
-/// disclosure rule for the field: naming it would tell this viewer that a coarser artifact exists
-/// which they are not cleared to see, and the register's standing rule is that a withheld artifact
-/// is indistinguishable from one that was never published.
+/// **A child whose only ancestor is withheld names no parent, as a root does.** The climb passes
+/// through the withheld country and finds nothing served above it, so the state's `parent_ids` is
+/// empty and the country is named nowhere. Where a served artifact sits above a withheld one, the
+/// child names that artifact instead (`a_withheld_parent_is_passed_through_to_the_grandparent`),
+/// and on a tiered layer whose chains are consecutive the level it skips shows that a withheld
+/// artifact sits between them, a disclosure the threat model records.
 #[test]
 fn a_withheld_parent_is_named_no_differently_from_a_root() {
     let fx = fixture();
@@ -808,9 +810,10 @@ fn a_withheld_parent_is_named_no_differently_from_a_root() {
         vec!["state"],
         "the country is below the bar for this principal and the state is not"
     );
-    assert!(narrow[0].parent_ids.is_empty(),
-        "the state's parent exists and was withheld, so it reads exactly as a root does — the \
-         alternative discloses that a coarser artifact is there"
+    assert!(
+        narrow[0].parent_ids.is_empty(),
+        "the state's only ancestor is withheld, so the climb finds nothing served above it and \
+         the state reads as a root"
     );
 
     // And the broad principal, who is served both, gets the link.
@@ -935,6 +938,136 @@ fn a_withheld_parent_is_passed_through_to_the_grandparent() {
         .artifacts();
     assert_eq!(keys(&skipped), vec!["country", "county"]);
     assert!(skipped.iter().all(|a| a.parent_ids.is_empty()));
+}
+
+/// Every artifact `out` serves in `layer`, by frame: its key, identifier and parents.
+fn framed(out: &mosaica_engine::ViewportArtifactsOut, layer: &str) -> Vec<Vec<ArtifactOut>> {
+    out.frames
+        .iter()
+        .map(|frame| {
+            frame
+                .artifacts
+                .iter()
+                .filter(|a| a.layer == layer)
+                .cloned()
+                .collect()
+        })
+        .collect()
+}
+
+/// **A frame names as a parent only an artifact it carries.** On a tiered layer served tile by
+/// tile, a child whose served parent the quota left out of the tile, or whose served parent lies
+/// in another tile, names no parent in that frame.
+#[test]
+fn a_frame_names_no_parent_it_does_not_carry() {
+    let fx = fixture();
+    let engine = fx.open();
+    let credential = full_coverage_credential();
+    let ask = |layer: &str, zoom: u8, per_tile: usize| {
+        let session = engine.authorise(&credential).unwrap();
+        let names = [layer];
+        let out = engine
+            .viewport_artifacts(
+                &session,
+                mosaica_engine::ViewportArtifactsRequest::new("s0", zoom, WHOLE_MAP, per_tile)
+                    .layers(LayerSelection::Named(&names)),
+            )
+            .expect("a viewport over the whole map");
+        let frames = framed(&out, layer);
+        for frame in &frames {
+            for a in frame {
+                for parent in &a.parent_ids {
+                    assert!(
+                        frame.iter().any(|b| b.mosaica_id == *parent),
+                        "{:?} names a parent its frame does not carry",
+                        a.key
+                    );
+                }
+            }
+        }
+        frames
+    };
+    let find = |frame: &[ArtifactOut], key: &str| {
+        frame
+            .iter()
+            .find(|a| a.key.as_deref() == Some(key))
+            .cloned()
+    };
+
+    // The quota: one artifact a level keeps `big` over `small`, the parent of `kid`.
+    engine.register_layer(tiered("admin/quota", 2)).unwrap();
+    engine
+        .publish_artifacts(
+            "admin/quota".into(),
+            0,
+            vec![
+                node(&fx, "big", None, 0..400),
+                node(&fx, "small", None, 400..600),
+            ],
+        )
+        .unwrap();
+    engine
+        .publish_artifacts(
+            "admin/quota".into(),
+            1,
+            vec![node(&fx, "kid", Some("small"), 400..500)],
+        )
+        .unwrap();
+    let one = ask("admin/quota", 0, 1);
+    assert_eq!(one.len(), 1, "one tile at depth 0");
+    assert_eq!(keys(&one[0]), vec!["big", "kid"]);
+    assert!(find(&one[0], "kid").unwrap().parent_ids.is_empty());
+    let two = ask("admin/quota", 0, 2);
+    let small = find(&two[0], "small").expect("served under a quota of two");
+    assert_eq!(
+        find(&two[0], "kid").unwrap().parent_ids,
+        vec![small.mosaica_id]
+    );
+
+    // Another tile: `west` lies at the left edge of the map and its child `east` at the right.
+    let x = |s: u64| (s * 37) % 1000;
+    engine.register_layer(tiered("admin/apart", 2)).unwrap();
+    engine
+        .publish_artifacts(
+            "admin/apart".into(),
+            0,
+            vec![node(
+                &fx,
+                "west",
+                None,
+                (0..N_ITEMS).filter(|&s| x(s) < 250),
+            )],
+        )
+        .unwrap();
+    engine
+        .publish_artifacts(
+            "admin/apart".into(),
+            1,
+            vec![node(
+                &fx,
+                "east",
+                Some("west"),
+                (0..N_ITEMS).filter(|&s| x(s) >= 750),
+            )],
+        )
+        .unwrap();
+    let frames = ask("admin/apart", 1, usize::MAX);
+    assert!(
+        frames.iter().any(|f| find(f, "west").is_some()),
+        "west is served to this viewer"
+    );
+    let apart: Vec<&Vec<ArtifactOut>> = frames
+        .iter()
+        .filter(|f| find(f, "east").is_some())
+        .collect();
+    assert!(!apart.is_empty());
+    for frame in apart {
+        assert!(
+            find(frame, "west").is_none(),
+            "east's tiles hold none of west's members"
+        );
+        assert!(find(frame, "east").unwrap().parent_ids.is_empty());
+    }
 }
 
 /// The frontier drops ancestors, so a pruned layer carries no links — correct, and worth pinning:
