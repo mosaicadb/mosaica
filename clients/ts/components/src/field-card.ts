@@ -770,6 +770,10 @@ export class MosaicaFieldCard extends MosaicaElement {
         gap: 2px 4px;
         font-size: 12px;
       }
+      /* The first crumb's text lines up with the rows; its button's padding reaches past it. */
+      [part='crumbs'] ol {
+        margin: 0 -4px;
+      }
       [part='crumb'] {
         display: inline-flex;
         align-items: center;
@@ -789,7 +793,6 @@ export class MosaicaFieldCard extends MosaicaElement {
         max-width: 100%;
         min-height: 24px;
         padding: 0 4px;
-        margin: 0 -4px;
         border-radius: 4px;
         color: var(--_mosaica-ink-2);
       }
