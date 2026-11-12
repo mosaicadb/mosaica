@@ -66,6 +66,7 @@ system `python3`, which has all three.
 | `medcpt` | 35,920,666 |
 | `overture` | 73,631,092 |
 | `paperseek` | 102,117,343 |
+| `cellxgene` | 202,636,280 |
 | `treeoflife` | 233,055,986 |
 | `gbif` | 3,495,729,729 |
 
