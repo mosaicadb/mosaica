@@ -1,0 +1,31 @@
+[     1s] model distortion: uniform [0.3634  0.1188  0.03744 0.01154] tree [0.36338 0.11748 0.03484 0.0098 ] bitplane [0.36338 0.24021 0.07487 0.01984] escape [0.3634  0.03653 0.00948 0.00237 0.00059] bits of escape depth-2 step 1.728
+[    36s] N 200000 n 768 levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576] full 1536
+[    59s] group 0 items 12513 violations {}
+[    65s] group 1 items 3544 violations {}
+[   128s] group 2 items 34396 violations {}
+[   129s] group 3 items 504 violations {}
+[   148s] group 4 items 11350 violations {}
+[   170s] group 5 items 12729 violations {}
+[   202s] group 6 items 18017 violations {}
+[   203s] group 7 items 1044 violations {}
+[   205s] group 8 items 1493 violations {}
+[   207s] group 9 items 983 violations {}
+[   208s] group 10 items 449 violations {}
+[   242s] group 11 items 19894 violations {}
+[   332s] group 12 items 49674 violations {}
+[   356s] group 13 items 12661 violations {}
+[   364s] group 14 items 5183 violations {}
+[   393s] group 15 items 15566 violations {}
+levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576] | max |u| 18.316192626953125 | share of coordinates beyond 3.94 sigma 0.002289830729166667
+uni                viol 0 | % read d=0: 0.622 0.827 1.946 5.724 | d=.01: 0.420 0.621 1.619 4.630 | d=.05: 0.345 0.502 1.291 3.601 | full reads/match: 0.035 0.022 0.033 0.058
+tree               viol 0 | % read d=0: 0.571 0.776 1.816 5.231 | d=.01: 0.413 0.607 1.538 4.371 | d=.05: 0.344 0.498 1.255 3.436 | full reads/match: 0.021 0.015 0.024 0.042
+esc                viol 0 | % read d=0: 0.527 0.697 1.502 4.245 | d=.01: 0.411 0.595 1.368 3.788 | d=.05: 0.345 0.498 1.189 3.049 | full reads/match: 0.005 0.003 0.003 0.008
+esc ideal          viol 0 | % read d=0: 0.524 0.699 1.542 4.363 | d=.01: 0.411 0.599 1.405 3.901 | d=.05: 0.346 0.502 1.223 3.151 | full reads/match: 0.005 0.003 0.004 0.012
+tree H3            viol 0 | % read d=0: 0.599 0.874 2.159 5.936 | d=.01: 0.427 0.694 1.869 5.041 | d=.05: 0.345 0.573 1.568 4.071 | full reads/match: 0.023 0.016 0.025 0.044
+esc H2             viol 0 | % read d=0: 0.511 0.720 1.628 4.478 | d=.01: 0.392 0.613 1.489 4.003 | d=.05: 0.322 0.513 1.306 3.269 | full reads/match: 0.007 0.003 0.003 0.008
+esc H3             viol 0 | % read d=0: 0.554 0.788 1.788 4.814 | d=.01: 0.426 0.678 1.646 4.341 | d=.05: 0.347 0.569 1.452 3.571 | full reads/match: 0.007 0.003 0.003 0.008
+esc H3 S2          viol 0 | % read d=0: 0.697 1.010 2.283 6.421 | d=.01: 0.510 0.857 2.084 5.655 | d=.05: 0.414 0.699 1.780 4.550 | full reads/match: 0.019 0.011 0.011 0.033
+esc H3 S3          viol 0 | % read d=0: 0.637 0.928 2.209 6.315 | d=.01: 0.484 0.793 2.032 5.774 | d=.05: 0.369 0.642 1.800 4.862 | full reads/match: 0.007 0.003 0.003 0.008
+esc H2 S2          viol 0 | % read d=0: 0.659 0.956 2.174 6.177 | d=.01: 0.480 0.803 1.976 5.402 | d=.05: 0.394 0.657 1.682 4.318 | full reads/match: 0.019 0.011 0.011 0.033
+esc H2 S3          viol 0 | % read d=0: 0.595 0.866 2.075 6.032 | d=.01: 0.451 0.735 1.901 5.488 | d=.05: 0.346 0.592 1.677 4.617 | full reads/match: 0.007 0.003 0.003 0.008
+true matches, % of pairs: 2.223 4.804 9.468 17.341

@@ -1,0 +1,93 @@
+[     1s] loaded (1000000, 768)
+[     2s] global mean norm 0.7625526785850525
+[     2s] === K 1
+[    47s] bucket sizes: median 1000000 max 1000000 empty 0
+[    47s] bucket angular radius deg: median θ95 47.7 median θmax 55.8 item median θ 40.6
+[    48s] residual norm: median 0.651 p95 0.746
+[    48s] residual PCA dims for 50/80/90/95/99% energy: [21, 86, 154, 228, 392]
+[    48s] pca alloc 384 bits -> dims with bits: 238 max 4
+[    48s] pca alloc 768 bits -> dims with bits: 393 max 5
+[    48s] pca alloc 1536 bits -> dims with bits: 539 max 7
+[    48s] pca alloc 3072 bits -> dims with bits: 754 max 8
+[    65s] chunk 0 violations so far 0
+[    82s] chunk 1 violations so far 0
+[    99s] chunk 2 violations so far 0
+[   116s] chunk 3 violations so far 0
+[   133s] chunk 4 violations so far 0
+[   150s] chunk 5 violations so far 0
+[   166s] chunk 6 violations so far 0
+[   183s] chunk 7 violations so far 0
+[   200s] chunk 8 violations so far 0
+[   217s] chunk 9 violations so far 0
+[   234s] chunk 10 violations so far 0
+[   251s] chunk 11 violations so far 0
+[   269s] chunk 12 violations so far 0
+[   285s] chunk 13 violations so far 0
+[   303s] chunk 14 violations so far 0
+[   320s] chunk 15 violations so far 0
+[   338s] chunk 16 violations so far 0
+[   356s] chunk 17 violations so far 0
+[   374s] chunk 18 violations so far 0
+[   391s] chunk 19 violations so far 0
+{"rand768": 0.39144900142061345, "rand1536": 0.22342603807514919, "rand3072": 0.06889123421040638, "rand6144": 0.005825714509090392, "pca384": 0.23571008443832397, "pca768": 0.14743931591510773, "pca1536": 0.06692236661911011, "pca3072": 0.018541833385825157}
+[   392s] === K 1000
+[   464s] bucket sizes: median 863 max 5137 empty 0
+[   464s] bucket angular radius deg: median θ95 31.5 median θmax 38.5 item median θ 21.1
+[   465s] residual norm: median 0.36 p95 0.553
+[   466s] residual PCA dims for 50/80/90/95/99% energy: [62, 162, 242, 317, 462]
+[   466s] pca alloc 384 bits -> dims with bits: 268 max 3
+[   466s] pca alloc 768 bits -> dims with bits: 418 max 4
+[   466s] pca alloc 1536 bits -> dims with bits: 548 max 5
+[   466s] pca alloc 3072 bits -> dims with bits: 759 max 7
+[   483s] chunk 0 violations so far 0
+[   500s] chunk 1 violations so far 0
+[   518s] chunk 2 violations so far 0
+[   535s] chunk 3 violations so far 0
+[   553s] chunk 4 violations so far 0
+[   570s] chunk 5 violations so far 0
+[   588s] chunk 6 violations so far 0
+[   607s] chunk 7 violations so far 0
+[   626s] chunk 8 violations so far 0
+[   646s] chunk 9 violations so far 0
+[   666s] chunk 10 violations so far 0
+[   686s] chunk 11 violations so far 0
+[   706s] chunk 12 violations so far 0
+[   727s] chunk 13 violations so far 0
+[   747s] chunk 14 violations so far 0
+[   767s] chunk 15 violations so far 0
+[   787s] chunk 16 violations so far 0
+[   804s] chunk 17 violations so far 0
+[   821s] chunk 18 violations so far 0
+[   840s] chunk 19 violations so far 0
+{"rand768": 0.21674806058666093, "rand1536": 0.12372554830171939, "rand3072": 0.03828334280692304, "rand6144": 0.00323504448099932, "pca384": 0.17600005865097046, "pca768": 0.11376295983791351, "pca1536": 0.05323273316025734, "pca3072": 0.015359045937657356}
+[   840s] === K 4000
+[   946s] bucket sizes: median 216 max 1346 empty 0
+[   946s] bucket angular radius deg: median θ95 29.2 median θmax 34.2 item median θ 19.4
+[   947s] residual norm: median 0.328 p95 0.513
+[   947s] residual PCA dims for 50/80/90/95/99% energy: [65, 168, 248, 324, 466]
+[   947s] pca alloc 384 bits -> dims with bits: 270 max 3
+[   947s] pca alloc 768 bits -> dims with bits: 421 max 4
+[   947s] pca alloc 1536 bits -> dims with bits: 550 max 5
+[   947s] pca alloc 3072 bits -> dims with bits: 759 max 7
+[   965s] chunk 0 violations so far 0
+[   984s] chunk 1 violations so far 0
+[  1002s] chunk 2 violations so far 0
+[  1019s] chunk 3 violations so far 0
+[  1037s] chunk 4 violations so far 0
+[  1055s] chunk 5 violations so far 0
+[  1073s] chunk 6 violations so far 0
+[  1091s] chunk 7 violations so far 0
+[  1109s] chunk 8 violations so far 0
+[  1128s] chunk 9 violations so far 0
+[  1146s] chunk 10 violations so far 0
+[  1163s] chunk 11 violations so far 0
+[  1181s] chunk 12 violations so far 0
+[  1198s] chunk 13 violations so far 0
+[  1216s] chunk 14 violations so far 0
+[  1234s] chunk 15 violations so far 0
+[  1254s] chunk 16 violations so far 0
+[  1274s] chunk 17 violations so far 0
+[  1293s] chunk 18 violations so far 0
+[  1313s] chunk 19 violations so far 0
+{"rand768": 0.1990017472840812, "rand1536": 0.11362311539496553, "rand3072": 0.03515627448222715, "rand6144": 0.0029687303074907093, "pca384": 0.1638312041759491, "pca768": 0.10636326670646667, "pca1536": 0.050027087330818176, "pca3072": 0.014471897855401039}
+[  1313s] done

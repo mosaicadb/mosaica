@@ -1,0 +1,36 @@
+[   13.9s] bioclip1024 N 200000 n 1024 K 200 G 16 KD 1024 control False
+[   37.6s] kmeans done; cluster sizes min/med/max 67 759 5061 group sizes [1353, 440, 5895, 3076, 16530, 18394, 15018, 32446, 10076, 4956, 16914, 1798, 11611, 15773, 23703, 22017]
+[   49.5s] bases done; mean residual energy per item 0.18189942045211793
+[  142.9s]   base g done
+[  156.7s]   base s done
+[  248.9s]   base c done
+[  343.6s]   base g done
+[  355.8s]   base s done
+[  443.5s]   base c done
+[  443.5s] differential cross-entropy saving against the group Gaussian, bits per item, top-k coordinates (gamma order); k = [16, 32, 64, 128, 256, 512, 768, 1024]
+[  443.5s]   c:ellip              3.1       6.0      12.7      27.9      63.3     135.4     203.4     271.4
+[  443.5s]   c:gauss              2.8       5.2      10.4      22.0      48.5     100.6     147.6     192.6
+[  443.5s]   c:hist               2.9       5.3      10.7      22.9      51.0     107.3     158.8     209.0
+[  443.5s]   c:sm_t1e+09          3.1       6.0      12.7      27.9      63.3     135.2     203.0     270.7
+[  443.5s]   c:sm_t8              2.9       5.6      11.9      26.4      60.3     129.6     194.8     260.1
+[  443.5s]   c:t                  2.9       5.3      10.7      22.9      51.0     107.2     158.7     208.9
+[  443.5s]   g:ellip              1.7       4.2      10.3      24.7      59.0     130.2     197.9     266.3
+[  443.5s]   g:escape            -0.8      -1.5      -2.7      -4.3      -5.8      -7.7     -10.8     -13.8
+[  443.5s]   g:gauss              0.0       0.0       0.0       0.0       0.0       0.0       0.0       0.0
+[  443.5s]   g:hist               0.7       1.4       3.1       7.6      19.2      44.0      67.2      90.5
+[  443.5s]   g:laplace            0.4       0.9       2.2       5.9      16.1      37.8      57.6      77.5
+[  443.5s]   g:sm_t1e+09          1.7       4.2      10.3      24.7      59.0     130.0     197.4     265.3
+[  443.5s]   g:sm_t8              1.6       4.0       9.8      23.7      56.9     125.5     190.6     256.1
+[  443.5s]   g:t                  0.7       1.3       3.1       7.5      19.1      43.9      67.1      90.4
+[  443.5s]   s:ellip              2.2       4.9      11.1      25.8      60.6     132.3     200.2     268.7
+[  443.5s]   s:gauss              1.8       3.7       8.3      19.2      44.4      95.3     143.1     190.9
+[  443.5s]   s:hist               2.0       4.0       8.9      20.5      47.7     103.1     155.1     207.2
+[  443.5s]   s:t                  2.0       4.0       9.0      20.6      47.7     103.0     155.0     206.9
+[  443.5s]   nu by band (g): [[6, 5, 4, 4], [6, 5, 4, 4]]  radial cv (g): [0.882, 0.846, 0.867, 0.952, 1.078, 1.215, 1.263, 1.283]  (c): [0.564, 0.51, 0.497, 0.521, 0.563, 0.629, 0.656, 0.679]
+[  443.5s]   stats {'kurt': [5.127885526107123, 5.499533401513717, 7.251603961724336, 9.176789582076344], 'beyond394': 0.0047115234375, 'maxabs': 30.386150360107422}
+[  472.1s] quant target     341 bits (=43 B) k_theta  206.5 nonzero   99.1 | gauss    446.8 | saving: t   12.4 cluster   36.2 gauss+scale   42.6 cluster+scale   46.3
+[  487.0s] quant target    1024 bits (=128 B) k_theta  397.8 nonzero  247.5 | gauss   1203.1 | saving: t   30.4 cluster   76.3 gauss+scale   95.5 cluster+scale  100.4
+[  503.1s] quant target    2048 bits (=256 B) k_theta  580.2 nonzero  421.8 | gauss   2303.9 | saving: t   47.9 cluster  113.3 gauss+scale  146.3 cluster+scale  151.6
+[  521.1s] quant target    4096 bits (=512 B) k_theta  822.5 nonzero  671.7 | gauss   4474.1 | saving: t   70.0 cluster  160.3 gauss+scale  213.3 cluster+scale  218.8
+[  537.5s] quant target    6144 bits (=768 B) k_theta  973.3 nonzero  853.1 | gauss   6581.5 | saving: t   84.3 cluster  188.1 gauss+scale  253.6 cluster+scale  259.0
+[  537.5s] done

@@ -1,0 +1,34 @@
+[     0s] gfull worker 1 NT 18 LV [0, 4, 8, 16, 32, 48] random levels [48]
+[     2s] group 3 clusters 7 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 148
+[     6s] group 6 clusters 18 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 529
+[     6s] group 7 clusters 6 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 596
+[    18s] group 8 clusters 44 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 4035
+[    19s] group 9 clusters 6 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 4191
+[    22s] group 10 clusters 10 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 5292
+[    30s] group 11 clusters 35 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 7634
+[    43s] group 12 clusters 37 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 11564
+[    52s] group 17 clusters 33 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 14855
+[    56s] group 19 clusters 22 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 15360
+[    57s] group 22 clusters 4 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 15809
+[    60s] group 24 clusters 11 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 16797
+[    64s] group 25 clusters 14 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 18231
+[    66s] group 26 clusters 10 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 18518
+[    68s] group 30 clusters 9 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 19032
+[    71s] group 31 clusters 10 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 19480
+[    73s] group 33 clusters 8 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 20454
+[    78s] group 34 clusters 31 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 22381
+[    80s] group 39 clusters 9 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.29 ladder pairs 22959
+[    81s] group 40 clusters 6 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 23022
+[    87s] group 43 clusters 28 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 25056
+[    90s] group 44 clusters 11 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 25725
+[    90s] group 46 clusters 1 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 25746
+[    95s] group 47 clusters 22 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 26683
+[    96s] group 48 clusters 8 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 26930
+[   102s] group 49 clusters 23 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 29005
+[   105s] group 51 clusters 12 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 29679
+[   107s] group 56 clusters 10 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 30138
+[   110s] group 57 clusters 17 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 31122
+[   114s] group 60 clusters 18 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 31998
+[   115s] group 62 clusters 2 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 32054
+[   116s] group 63 clusters 5 decision violations {'R': 0, 'D': 0} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd 5.53 ladder pairs 32333
+[   116s] done

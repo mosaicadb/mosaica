@@ -1,0 +1,38 @@
+[   184s] K 1000 residual norm vs k-means mean: median 0.357 | vs mean of 1024 consecutive rows: 0.43
+[   184s] G 256 bnd 32 bits -> dims coded 16 max bits 5
+[   184s] G 256 bnd 128 bits -> dims coded 52 max bits 7
+[   184s] G 256 bnd 256 bits -> dims coded 91 max bits 8
+[   184s] G 256 bnd 768 bits -> dims coded 197 max bits 8
+[   184s] G 256 group 0 violations 0
+[   186s] G 256 group 8 violations 0
+[   190s] G 256 group 16 violations 0
+[   192s] G 256 group 24 violations 0
+[   196s] G 256 group 32 violations 0
+[   198s] G 256 group 40 violations 0
+[   201s] G 256 group 48 violations 0
+[   203s] G 256 group 56 violations 0
+[   205s] G 256 group 64 violations 0
+[   207s] G 256 group 72 violations 0
+[   210s] G 256 group 80 violations 0
+[   214s] G 256 group 88 violations 0
+[   218s] G 256 group 96 violations 0
+[   220s] G 256 group 104 violations 0
+[   223s] G 256 group 112 violations 0
+[   227s] G 256 group 120 violations 0
+[   230s] G 256 group 128 violations 0
+[   232s] G 256 group 136 violations 0
+[   235s] G 256 group 144 violations 0
+[   238s] G 256 group 152 violations 0
+[   240s] G 256 group 160 violations 0
+[   242s] G 256 group 168 violations 0
+[   244s] G 256 group 176 violations 0
+[   246s] G 256 group 184 violations 0
+[   248s] G 256 group 192 violations 0
+[   250s] G 256 group 200 violations 0
+[   253s] G 256 group 208 violations 0
+[   255s] G 256 group 216 violations 0
+[   257s] G 256 group 224 violations 0
+[   260s] G 256 group 232 violations 0
+[   262s] G 256 group 240 violations 0
+[   265s] G 256 group 248 violations 0
+[   266s] G 256 done, violations 0

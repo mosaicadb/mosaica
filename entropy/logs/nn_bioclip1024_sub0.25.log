@@ -1,0 +1,31 @@
+[    7.9s] bioclip1024_sub0.25 N 50000 n 1024 base 40000 test 10000 K 50 G 8
+[   15.3s] neighbours found
+[   15.4s] global N=2500 {'mean_ratio': 0.9603, 'median_item_ratio': 1.0109, 'share_worse': 0.5196, 'cos999': 0.0001, 'cos99': 0.0083, 'cos95': 0.3664, 'exact': 0.0, 'mean_cos': 0.8876}
+[   15.4s] global N=10000 {'mean_ratio': 0.8172, 'median_item_ratio': 0.8875, 'share_worse': 0.303, 'cos999': 0.0005, 'cos99': 0.0146, 'cos95': 0.4105, 'exact': 0.0, 'mean_cos': 0.9044}
+[   15.4s] global N=40000 {'mean_ratio': 0.6985, 'median_item_ratio': 0.7799, 'share_worse': 0.1428, 'cos999': 0.0012, 'cos99': 0.0292, 'cos95': 0.456, 'exact': 0.0, 'mean_cos': 0.9183}
+[   15.4s] in-cluster {'mean_ratio': 0.7213, 'median_item_ratio': 0.7924, 'share_worse': 0.1666, 'cos999': 0.0012, 'cos99': 0.0285, 'cos95': 0.4528, 'exact': 0.0, 'mean_cos': 0.9156}
+[   15.4s] residual energy to cluster mean 0.23406870663166046
+[   18.3s] items in groups large enough to evaluate: 0.99
+[   33.2s] --- global N=40000: pointer 15.3 bits, 8 bins (3.0 bits to name the bin); budgets (bits) [341, 1024, 2048, 4096]
+[   33.3s]   bin 0 share 0.0010 skipped
+[   33.3s]   bin 1 d2<0.020 share 0.0269 cos 0.9920 energy delta/regress 0.500/0.423 beta 0.71 | saving exact-ref [125.2, 331.2, 574.3, 860.0] lossy-ref [112.9, 317.6, 561.1, 851.0]
+[   33.3s]   bin 2 d2<0.039 share 0.1681 cos 0.9853 energy delta/regress 0.715/0.584 beta 0.60 | saving exact-ref [125.4, 328.0, 539.1, 781.0] lossy-ref [117.8, 322.2, 535.1, 779.1]
+[   33.3s]   bin 3 d2<0.071 share 0.1491 cos 0.9734 energy delta/regress 0.657/0.558 beta 0.68 | saving exact-ref [109.5, 259.0, 386.6, 510.8] lossy-ref [98.8, 250.5, 381.2, 508.7]
+[   33.3s]   bin 4 d2<0.116 share 0.1616 cos 0.9539 energy delta/regress 0.589/0.505 beta 0.71 | saving exact-ref [97.9, 194.5, 270.2, 333.2] lossy-ref [85.6, 184.8, 263.6, 331.0]
+[   33.3s]   bin 5 d2<0.183 share 0.1679 cos 0.9267 energy delta/regress 0.597/0.514 beta 0.73 | saving exact-ref [45.3, 75.7, 99.4, 116.3] lossy-ref [31.8, 66.4, 93.0, 114.7]
+[   33.3s]   bin 6 d2<0.296 share 0.1586 cos 0.8833 energy delta/regress 0.714/0.604 beta 0.68 | saving exact-ref [-37.0, -84.7, -130.6, -153.8] lossy-ref [-47.1, -90.9, -134.9, -154.5]
+[   33.3s]   bin 7 d2<4.010 share 0.1667 cos 0.7785 energy delta/regress 0.918/0.726 beta 0.58 | saving exact-ref [-213.2, -374.1, -516.7, -571.7] lossy-ref [-218.5, -377.4, -519.2, -572.0]
+[   33.3s]   saving from knowing the bin alone (no neighbour, bin index charged): [-6.3, 31.1, 71.6, 135.1]
+[   33.3s]   net saving per item, exact reference: [19.8, 68.0, 114.2, 181.3]  reference at the same distortion: [9.8, 60.7, 109.2, 179.6]
+[   33.8s] --- in-cluster: pointer 9.6 bits, 8 bins (3.0 bits to name the bin); budgets (bits) [341, 1024, 2048, 4096]
+[   33.8s]   bin 0 share 0.0010 skipped
+[   33.8s]   bin 1 d2<0.020 share 0.0261 cos 0.9920 energy delta/regress 0.498/0.422 beta 0.72 | saving exact-ref [132.0, 338.8, 580.4, 863.3] lossy-ref [119.6, 325.2, 567.4, 854.4]
+[   33.8s]   bin 2 d2<0.039 share 0.1673 cos 0.9853 energy delta/regress 0.721/0.590 beta 0.60 | saving exact-ref [132.1, 337.0, 549.9, 793.6] lossy-ref [124.6, 331.3, 545.9, 791.8]
+[   33.8s]   bin 3 d2<0.071 share 0.1493 cos 0.9733 energy delta/regress 0.672/0.569 beta 0.67 | saving exact-ref [113.6, 262.7, 390.9, 516.3] lossy-ref [103.3, 254.6, 385.7, 514.2]
+[   33.8s]   bin 4 d2<0.117 share 0.1647 cos 0.9535 energy delta/regress 0.602/0.514 beta 0.71 | saving exact-ref [102.0, 198.9, 275.6, 339.7] lossy-ref [90.7, 190.6, 270.2, 338.0]
+[   33.8s]   bin 5 d2<0.186 share 0.1683 cos 0.9256 energy delta/regress 0.602/0.516 beta 0.71 | saving exact-ref [49.5, 78.6, 100.7, 116.5] lossy-ref [37.2, 70.4, 95.2, 115.2]
+[   33.8s]   bin 6 d2<0.303 share 0.1582 cos 0.8806 energy delta/regress 0.733/0.616 beta 0.67 | saving exact-ref [-35.0, -84.8, -131.4, -155.1] lossy-ref [-44.7, -90.7, -135.3, -155.8]
+[   33.8s]   bin 7 d2<4.010 share 0.1651 cos 0.7643 energy delta/regress 0.974/0.754 beta 0.55 | saving exact-ref [-218.3, -382.8, -528.0, -583.8] lossy-ref [-221.8, -384.7, -529.2, -583.9]
+[   33.8s]   saving from knowing the bin alone (no neighbour, bin index charged): [-5.8, 32.3, 73.2, 137.2]
+[   33.8s]   net saving per item, exact reference: [23.1, 70.8, 116.9, 184.0]  reference at the same distortion: [13.9, 64.3, 112.5, 182.5]
+[   33.8s] done

@@ -1,0 +1,11 @@
+pooled mean thresholds: item [0.928 0.903 0.863 0.797] text [0.703 0.681 0.647 0.605]
+energy % by band [0, 8, 32, 64, 128, 256, 512, 768] 
+ item offsets [26.4 31.1 15.7 13.5  9.2  4.   0.2] 
+ text offsets [12.  14.3 12.  15.3 19.8 22.9  3.8] 
+ residual     [22.8 30.2 17.  14.9 10.4  4.5  0.2]
+dims coded at 96 B by MSE allocation, per group: item profile [228, 231, 241, 237, 232, 249, 222, 230, 232, 269, 232, 226] mix profile [285, 267, 279, 260, 268, 277, 263, 276, 269, 287, 268, 263]
+text, answer size 20: share of items undecided after det levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576]: [0.8512, 0.6935, 0.5898, 0.4484, 0.2894, 0.2056, 0.0845, 0.016, 0.0012, 0.0005] | after split levels 32/48/96/192/384: [0.2034, 0.1055, 0.0127, 0.0008, 0.0001]
+   bytes per item by step (scalars, 4, 8, 16, split 32, 48, 96, 192, 384, full): [4.0, 3.4, 2.77, 4.72, 14.35, 3.25, 5.07, 1.22, 0.15, 0.14] total 39.1
+text, answer size 200: share of items undecided after det levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576]: [0.8837, 0.7602, 0.6705, 0.5334, 0.3642, 0.2715, 0.132, 0.0351, 0.0042, 0.0018] | after split levels 32/48/96/192/384: [0.2743, 0.16, 0.0322, 0.004, 0.0006]
+   bytes per item by step (scalars, 4, 8, 16, split 32, 48, 96, 192, 384, full): [4.0, 3.53, 3.04, 5.36, 17.07, 4.39, 7.68, 3.09, 0.77, 0.89] total 49.8
+text, 0 bytes: mean |Delta_b||r_b| for local dims 0-8, 8-128, 128-768: [0.0457, 0.1586, 0.0828]

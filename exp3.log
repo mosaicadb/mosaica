@@ -1,0 +1,13 @@
+[   119s] K 1000 residual norm vs k-means mean: median 0.358 | vs mean of 1024 consecutive rows: 0.429
+[   119s] G 64 bnd 1536 bits -> dims coded 323 max bits 8
+[   119s] G 64 bnd 3072 bits -> dims coded 474 max bits 8
+[   119s] G 64 bnd 4608 bits -> dims coded 721 max bits 8
+[   120s] G 64 group 0 violations 0
+[   130s] G 64 group 8 violations 0
+[   147s] G 64 group 16 violations 0
+[   159s] G 64 group 24 violations 0
+[   171s] G 64 group 32 violations 0
+[   182s] G 64 group 40 violations 0
+[   194s] G 64 group 48 violations 0
+[   206s] G 64 group 56 violations 0
+[   220s] G 64 done, violations 0

@@ -1,0 +1,22 @@
+['datasets/imageomics/TreeOfLife-200M-Embeddings/bioclip-2.5-vith14_float16', 'datasets/imageomics/TreeOfLife-200M-Embeddings/bioclip-2_float16', 'datasets/imageomics/TreeOfLife-200M-Embeddings/demo_subset', 'datasets/imageomics/TreeOfLife-200M-Embeddings/.gitattributes', 'datasets/imageomics/TreeOfLife-200M-Embeddings/README.md']
+666
+2 train-00059-of-00666.parquet 6 (50000, 768) 171
+1 train-00049-of-00666.parquet 1 (50000, 768) 1
+0 train-00038-of-00666.parquet 6 (50000, 768) 692
+5 train-00088-of-00666.parquet 4 (50000, 768) 293
+4 train-00074-of-00666.parquet 1 (50000, 768) 616
+6 train-00092-of-00666.parquet 6 (50000, 768) 560
+7 train-00096-of-00666.parquet 2 (50000, 768) 589
+8 train-00154-of-00666.parquet 1 (50000, 768) 12
+3 train-00071-of-00666.parquet 1 (50000, 768) 607
+10 train-00246-of-00666.parquet 4 (50000, 768) 1
+9 train-00219-of-00666.parquet 3 (50000, 768) 4
+11 train-00331-of-00666.parquet 3 (50000, 768) 2235
+13 train-00404-of-00666.parquet 2 (50000, 768) 99
+14 train-00428-of-00666.parquet 0 (50000, 768) 74
+12 train-00374-of-00666.parquet 3 (50000, 768) 266
+15 train-00444-of-00666.parquet 1 (50000, 768) 52
+16 train-00519-of-00666.parquet 2 (50000, 768) 35
+17 train-00548-of-00666.parquet 4 (50000, 768) 309
+19 train-00596-of-00666.parquet 5 (50000, 768) 1
+18 train-00564-of-00666.parquet 1 (50000, 768) 96

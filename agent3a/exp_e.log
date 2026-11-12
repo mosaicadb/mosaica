@@ -1,0 +1,6 @@
+code | bits | mean tan(phi) | rms error/(|y||D|) | max |error| in predicted sd | Shannon-limit tan(phi) at these bits
+sign bits              |   96 | 3.412 | 0.1208 | 5.21 | 2.299
+pulse position M=16    |   95 | 2.883 | 0.1023 | 5.41 | 2.312
+sign bits              |  240 | 2.009 | 0.0711 | 4.64 | 1.358
+pulse position M=16    |  240 | 1.644 | 0.0586 | 5.24 | 1.358
+sign bits              |  480 | 1.239 | 0.0443 | 4.82 | 0.852

@@ -1,0 +1,8 @@
+[     1s] g100 worker 3 LV [0, 4, 8, 16, 32, 48] LD 16 random levels [32, 48] blocks [0, 100] c(sub-Gaussian) 9.256
+[     1s] int rates per level [[1], [2]] scalar bytes per level [3, 1] block dims [100]
+[     1s] sub rates per level [[1], [2]] scalar bytes per level [3, 1] block dims [100]
+[     8s] group 1 clusters 5 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 4.93, 'sub': 4.93}
+[    32s] group 3 clusters 20 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.46}
+[    57s] group 11 clusters 19 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.46}
+[    65s] group 12 clusters 7 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.46}
+[    65s] done

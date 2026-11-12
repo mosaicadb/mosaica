@@ -1,0 +1,70 @@
+{'index': 'flat', 'k': 1, 'filter': 'all', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 1.0, 'ms': 54.456, 'ndis': 1000000}
+{'index': 'flat', 'k': 10, 'filter': 'all', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 54.338, 'ndis': 1000000}
+{'index': 'flat', 'k': 100, 'filter': 'all', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 100.0, 'ms': 53.114, 'ndis': 1000000}
+{'index': 'flat', 'k': 10, 'filter': 'rand50', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 136.783, 'ndis': 499446}
+{'index': 'flat', 'k': 10, 'filter': 'rand10', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 36.026, 'ndis': 99842}
+{'index': 'flat', 'k': 10, 'filter': 'rand1', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 4.377, 'ndis': 9905}
+{'index': 'flat', 'k': 10, 'filter': 'rand0.1', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 2.581, 'ndis': 963}
+{'index': 'flat', 'k': 10, 'filter': 'clusters10', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 22.877, 'ndis': 94133}
+{'index': 'flat', 'k': 10, 'filter': 'idrange10', 'recall': {'item': 1.0, 'text': 1.0}, 'got': 10.0, 'ms': 25.609, 'ndis': 100000}
+{'index': 'ivfpq', 'pm': 96, 'nlist': 1024, 'build_s': 110.4, 'code_bytes_per_item': 104}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'item': 0.46, 'text': 0.16}, 'got': 1.0, 'ms': 0.149, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 1, 'rerank': 110, 'recall': {'item': 0.73, 'text': 0.4067}, 'got': 1.0, 'ms': 0.213, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'item': 0.58, 'text': 0.1867}, 'got': 1.0, 'ms': 0.311, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 4, 'rerank': 110, 'recall': {'item': 0.97, 'text': 0.66}, 'got': 1.0, 'ms': 0.379, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'item': 0.59, 'text': 0.2}, 'got': 1.0, 'ms': 0.965, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 16, 'rerank': 110, 'recall': {'item': 1.0, 'text': 0.88}, 'got': 1.0, 'ms': 1.01, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'item': 0.59, 'text': 0.2}, 'got': 1.0, 'ms': 3.159, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 64, 'rerank': 110, 'recall': {'item': 1.0, 'text': 0.8933}, 'got': 1.0, 'ms': 3.158, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'item': 0.59, 'text': 0.2}, 'got': 1.0, 'ms': 12.991, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 1, 'filter': 'all', 'nprobe': 256, 'rerank': 110, 'recall': {'item': 1.0, 'text': 0.9067}, 'got': 1.0, 'ms': 13.334, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'item': 0.574, 'text': 0.1967}, 'got': 10.0, 'ms': 0.129, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.696, 'text': 0.3587}, 'got': 10.0, 'ms': 0.261, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'item': 0.705, 'text': 0.284}, 'got': 10.0, 'ms': 0.351, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.952, 'text': 0.6447}, 'got': 10.0, 'ms': 0.432, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'item': 0.719, 'text': 0.318}, 'got': 10.0, 'ms': 0.895, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.995, 'text': 0.8267}, 'got': 10.0, 'ms': 1.052, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'item': 0.719, 'text': 0.3193}, 'got': 10.0, 'ms': 3.386, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.8507}, 'got': 10.0, 'ms': 3.816, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'item': 0.719, 'text': 0.3193}, 'got': 10.0, 'ms': 14.078, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'all', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.8547}, 'got': 10.0, 'ms': 13.479, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'item': 0.5653, 'text': 0.2463}, 'got': 100.0, 'ms': 0.153, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 1, 'rerank': 1100, 'recall': {'item': 0.6224, 'text': 0.3234}, 'got': 100.0, 'ms': 0.841, 'ndis': 961.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'item': 0.7385, 'text': 0.3733}, 'got': 100.0, 'ms': 0.325, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 4, 'rerank': 1100, 'recall': {'item': 0.9033, 'text': 0.6143}, 'got': 100.0, 'ms': 1.214, 'ndis': 3721.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'item': 0.7694, 'text': 0.4171}, 'got': 100.0, 'ms': 0.908, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 16, 'rerank': 1100, 'recall': {'item': 0.9908, 'text': 0.8217}, 'got': 100.0, 'ms': 1.84, 'ndis': 13959.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'item': 0.7703, 'text': 0.4208}, 'got': 100.0, 'ms': 3.039, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 64, 'rerank': 1100, 'recall': {'item': 1.0, 'text': 0.8723}, 'got': 100.0, 'ms': 3.96, 'ndis': 51755.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'item': 0.7703, 'text': 0.4211}, 'got': 100.0, 'ms': 12.948, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 100, 'filter': 'all', 'nprobe': 256, 'rerank': 1100, 'recall': {'item': 1.0, 'text': 0.8771}, 'got': 100.0, 'ms': 15.092, 'ndis': 204008.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand50', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.679, 'text': 0.3633}, 'got': 10.0, 'ms': 0.242, 'ndis': 482.1, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand50', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.937, 'text': 0.6553}, 'got': 10.0, 'ms': 0.388, 'ndis': 1863.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand50', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.995, 'text': 0.8367}, 'got': 10.0, 'ms': 0.846, 'ndis': 6976.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand50', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.864}, 'got': 10.0, 'ms': 2.602, 'ndis': 25859.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand50', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.8653}, 'got': 10.0, 'ms': 9.092, 'ndis': 101951.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand10', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.625, 'text': 0.3113}, 'got': 10.0, 'ms': 0.155, 'ndis': 93.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand10', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.896, 'text': 0.608}, 'got': 10.0, 'ms': 0.276, 'ndis': 365.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand10', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.99, 'text': 0.8427}, 'got': 10.0, 'ms': 0.671, 'ndis': 1380.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand10', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.904}, 'got': 10.0, 'ms': 1.36, 'ndis': 5148.7, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand10', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.918}, 'got': 10.0, 'ms': 4.542, 'ndis': 20410.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand1', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.404, 'text': 0.2007}, 'got': 7.31, 'ms': 0.106, 'ndis': 9.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand1', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.775, 'text': 0.4933}, 'got': 10.0, 'ms': 0.163, 'ndis': 36.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand1', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.973, 'text': 0.748}, 'got': 10.0, 'ms': 0.38, 'ndis': 137.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand1', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 0.997, 'text': 0.9073}, 'got': 10.0, 'ms': 0.946, 'ndis': 508.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand1', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 1.0, 'text': 0.9727}, 'got': 10.0, 'ms': 2.853, 'ndis': 2022.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand0.1', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.106, 'text': 0.03}, 'got': 0.76, 'ms': 0.093, 'ndis': 0.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand0.1', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.334, 'text': 0.1267}, 'got': 3.0, 'ms': 0.147, 'ndis': 3.0, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand0.1', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.773, 'text': 0.3547}, 'got': 9.36, 'ms': 0.259, 'ndis': 12.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand0.1', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 0.967, 'text': 0.7267}, 'got': 10.0, 'ms': 0.722, 'ndis': 51.1, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'rand0.1', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 0.997, 'text': 0.9613}, 'got': 10.0, 'ms': 2.617, 'ndis': 203.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'clusters10', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.176, 'text': 0.094}, 'got': 4.9, 'ms': 0.119, 'ndis': 69.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'clusters10', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.453, 'text': 0.2667}, 'got': 8.11, 'ms': 0.198, 'ndis': 298.7, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'clusters10', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.778, 'text': 0.502}, 'got': 9.78, 'ms': 0.415, 'ndis': 1000.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'clusters10', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 0.945, 'text': 0.806}, 'got': 10.0, 'ms': 1.04, 'ndis': 4168.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'clusters10', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 0.986, 'text': 0.88}, 'got': 10.0, 'ms': 3.477, 'ndis': 18956.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'idrange10', 'nprobe': 1, 'rerank': 200, 'recall': {'item': 0.091, 'text': 0.2253}, 'got': 4.4, 'ms': 0.138, 'ndis': 314.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'idrange10', 'nprobe': 4, 'rerank': 200, 'recall': {'item': 0.121, 'text': 0.408}, 'got': 5.46, 'ms': 0.208, 'ndis': 1065.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'idrange10', 'nprobe': 16, 'rerank': 200, 'recall': {'item': 0.186, 'text': 0.6093}, 'got': 7.2, 'ms': 0.453, 'ndis': 3388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'idrange10', 'nprobe': 64, 'rerank': 200, 'recall': {'item': 0.426, 'text': 0.732}, 'got': 10.0, 'ms': 1.242, 'ndis': 8626.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 96, 'k': 10, 'filter': 'idrange10', 'nprobe': 256, 'rerank': 200, 'recall': {'item': 0.843, 'text': 0.822}, 'got': 10.0, 'ms': 3.656, 'ndis': 23809.1, 'nlist': 1024}

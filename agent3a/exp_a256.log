@@ -1,0 +1,42 @@
+[    15s] geoA64c8 bits used 48 blocks (dims, rate, randomised) [(24, 2, 0), (24, 0, 0), (48, 0, 0), (96, 0, 0), (64, 0, 0)]
+[    15s] geoA64c10 bits used 48 blocks (dims, rate, randomised) [(24, 2, 0), (24, 0, 0), (48, 0, 0), (96, 0, 0), (64, 0, 0)]
+[    15s] split 64 blocks (depth, dims) [(0.0, 222), (1.0, 14), (2.0, 11), (3.0, 8), (4.0, 1)]
+[    15s] geoA128c8 bits used 120 blocks (dims, rate, randomised) [(24, 3, 0), (24, 2, 0), (48, 0, 0), (96, 0, 0), (64, 0, 0)]
+[    15s] geoA128c10 bits used 120 blocks (dims, rate, randomised) [(24, 3, 0), (24, 2, 0), (48, 0, 0), (96, 0, 0), (64, 0, 0)]
+[    15s] split 128 blocks (depth, dims) [(0.0, 197), (1.0, 21), (2.0, 18), (3.0, 10), (4.0, 9), (5.0, 1)]
+[    15s] geoA256c8 bits used 256 blocks (dims, rate, randomised) [(24, 4, 1), (24, 2, 1), (48, 1, 1), (96, 0.5, 1), (64, 0.25, 1)]
+[    15s] geoA256c10 bits used 240 blocks (dims, rate, randomised) [(24, 5, 0), (24, 3, 0), (48, 1, 0), (96, 0, 0), (64, 0, 0)]
+[    15s] split 256 blocks (depth, dims) [(0.0, 160), (1.0, 26), (2.0, 23), (3.0, 21), (4.0, 12), (5.0, 11), (6.0, 3)]
+[    15s] geoA512c8 bits used 512 blocks (dims, rate, randomised) [(24, 6, 1), (24, 4, 1), (48, 3, 1), (96, 1, 1), (64, 0.5, 1)]
+[    15s] geoA512c10 bits used 512 blocks (dims, rate, randomised) [(24, 6, 1), (24, 4, 1), (48, 3, 1), (96, 1, 1), (64, 0.5, 1)]
+[    15s] split 512 blocks (depth, dims) [(0.0, 91), (1.0, 38), (2.0, 36), (3.0, 30), (4.0, 23), (5.0, 18), (6.0, 11), (7.0, 8), (8.0, 1)]
+[    21s] group 0 violations {} max sigma {'split64': 0.0, 'split128': 0.0, 'split256': 4.04, 'split512': 4.61, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.47, 'geoA256c10': 0.0, 'geoA512c8': 5.13, 'geoA512c10': 4.79}
+[    22s] group 1 violations {} max sigma {'split64': 0.0, 'split128': 3.98, 'split256': 4.25, 'split512': 4.61, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.47, 'geoA256c10': 4.29, 'geoA512c8': 5.13, 'geoA512c10': 4.79}
+[    33s] group 2 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.47, 'geoA256c10': 4.29, 'geoA512c8': 5.13, 'geoA512c10': 4.97}
+[    45s] group 3 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.29, 'geoA512c8': 5.13, 'geoA512c10': 5.13}
+[    47s] group 4 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.67, 'geoA512c8': 5.13, 'geoA512c10': 5.13}
+[    48s] group 5 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.67, 'geoA512c8': 5.13, 'geoA512c10': 5.13}
+[    57s] group 6 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.67, 'geoA512c8': 5.16, 'geoA512c10': 5.13}
+[    58s] group 7 violations {} max sigma {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.96, 'geoA512c8': 5.16, 'geoA512c10': 5.13}
+pairs 20000000 total violations 0 max error in predicted sd {'split64': 0.0, 'split128': 4.27, 'split256': 4.85, 'split512': 4.89, 'geoA64c8': 0.0, 'geoA64c10': 0.0, 'geoA128c8': 0.0, 'geoA128c10': 0.0, 'geoA256c8': 5.5, 'geoA256c10': 4.96, 'geoA512c8': 5.16, 'geoA512c10': 5.13}
+stored scalars per item (last group) {'split64': 10, 'geoA64c8': 7, 'geoA64c10': 7, 'split128': 12, 'geoA128c8': 8, 'geoA128c10': 8, 'split256': 14, 'geoA256c8': 11, 'geoA256c10': 10, 'split512': 18, 'geoA512c8': 11, 'geoA512c10': 11}
+det64          undecided/A    1.70    1.64    3.73    4.10  | half-width 0.0176 0.0264 0.0474 0.0820
+det128         undecided/A    1.09    0.87    2.02    3.34  | half-width 0.0134 0.0196 0.0354 0.0629
+det256         undecided/A    0.65    0.47    0.84    2.10  | half-width 0.0089 0.0128 0.0232 0.0430
+det512         undecided/A    0.34    0.24    0.34    0.94  | half-width 0.0052 0.0071 0.0128 0.0247
+split64c8      undecided/A    1.58    1.55    3.49    3.95  | half-width 0.0157 0.0241 0.0442 0.0779
+split64c10     undecided/A    1.58    1.55    3.49    3.95  | half-width 0.0157 0.0241 0.0442 0.0779
+split128c8     undecided/A    0.99    0.84    1.98    3.24  | half-width 0.0111 0.0174 0.0327 0.0601
+split128c10    undecided/A    1.04    0.92    2.13    3.31  | half-width 0.0111 0.0176 0.0332 0.0613
+split256c8     undecided/A    0.56    0.42    0.73    1.94  | half-width 0.0071 0.0111 0.0210 0.0397
+split256c10    undecided/A    0.61    0.46    0.87    2.18  | half-width 0.0077 0.0120 0.0227 0.0428
+split512c8     undecided/A    0.21    0.16    0.20    0.59  | half-width 0.0029 0.0045 0.0086 0.0171
+split512c10    undecided/A    0.24    0.18    0.23    0.68  | half-width 0.0032 0.0050 0.0096 0.0192
+geoA64c8       undecided/A    2.06    2.04    4.16    4.18  | half-width 0.0191 0.0293 0.0523 0.0883
+geoA64c10      undecided/A    2.05    2.03    4.16    4.18  | half-width 0.0191 0.0293 0.0523 0.0883
+geoA128c8      undecided/A    1.06    0.84    1.88    3.22  | half-width 0.0123 0.0191 0.0349 0.0616
+geoA128c10     undecided/A    1.06    0.84    1.88    3.22  | half-width 0.0123 0.0191 0.0349 0.0616
+geoA256c8      undecided/A    0.52    0.38    0.55    1.45  | half-width 0.0066 0.0104 0.0191 0.0345
+geoA256c10     undecided/A    0.62    0.47    0.86    2.15  | half-width 0.0078 0.0122 0.0229 0.0428
+geoA512c8      undecided/A    0.18    0.13    0.16    0.44  | half-width 0.0024 0.0038 0.0071 0.0138
+geoA512c10     undecided/A    0.22    0.16    0.21    0.58  | half-width 0.0030 0.0047 0.0089 0.0173

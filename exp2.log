@@ -1,0 +1,33 @@
+[   116s] K 1000 residual norm vs k-means mean: median 0.358 | vs mean of 1024 consecutive rows: 0.429
+[   120s] G 1 mse 0 bits -> dims coded 0 max bits 0
+[   120s] G 1 mse 32 bits -> dims coded 31 max bits 2
+[   120s] G 1 mse 64 bits -> dims coded 62 max bits 2
+[   120s] G 1 mse 128 bits -> dims coded 103 max bits 2
+[   120s] G 1 mse 256 bits -> dims coded 173 max bits 3
+[   120s] G 1 mse 384 bits -> dims coded 233 max bits 3
+[   120s] G 1 mse 768 bits -> dims coded 365 max bits 4
+[   120s] G 1 bnd 0 bits -> dims coded 0 max bits 0
+[   120s] G 1 bnd 32 bits -> dims coded 25 max bits 3
+[   120s] G 1 bnd 64 bits -> dims coded 47 max bits 3
+[   120s] G 1 bnd 128 bits -> dims coded 77 max bits 4
+[   120s] G 1 bnd 256 bits -> dims coded 123 max bits 5
+[   120s] G 1 bnd 384 bits -> dims coded 163 max bits 5
+[   120s] G 1 bnd 768 bits -> dims coded 261 max bits 7
+[   416s] G 1 group 0 violations 0
+[   417s] G 1 done, violations 0
+[   417s] G 64 bnd 0 bits -> dims coded 0 max bits 0
+[   417s] G 64 bnd 32 bits -> dims coded 17 max bits 3
+[   417s] G 64 bnd 64 bits -> dims coded 28 max bits 5
+[   417s] G 64 bnd 128 bits -> dims coded 49 max bits 6
+[   417s] G 64 bnd 256 bits -> dims coded 83 max bits 7
+[   417s] G 64 bnd 384 bits -> dims coded 114 max bits 8
+[   417s] G 64 bnd 768 bits -> dims coded 197 max bits 8
+[   417s] G 64 group 0 violations 0
+[   429s] G 64 group 8 violations 0
+[   450s] G 64 group 16 violations 0
+[   465s] G 64 group 24 violations 0
+[   482s] G 64 group 32 violations 0
+[   498s] G 64 group 40 violations 0
+[   513s] G 64 group 48 violations 0
+[   528s] G 64 group 56 violations 0
+[   546s] G 64 done, violations 0

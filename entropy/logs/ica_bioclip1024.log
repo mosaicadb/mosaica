@@ -1,0 +1,20 @@
+[   45.5s] group 7: 25925 training items, k = 128; mean excess kurtosis: pca 0.941, ica 11.644 (max 124.22), ica on directions 7.776
+[   50.0s]    pca      {'marg_t': np.float64(1.9), 'sm_t8': np.float64(10.0), 'sm_t16': np.float64(11.1), 'sm_t32': np.float64(11.5), 'sm_t1e+09': np.float64(11.6)}
+[   54.4s]    ica      {'marg_t': np.float64(18.5), 'sm_t8': np.float64(22.5), 'sm_t16': np.float64(20.1), 'sm_t32': np.float64(17.4), 'sm_t1e+09': np.float64(11.6)}
+[   59.0s]    ica_dir  {'marg_t': np.float64(11.9), 'sm_t8': np.float64(16.4), 'sm_t16': np.float64(15.8), 'sm_t32': np.float64(14.6), 'sm_t1e+09': np.float64(11.6)}
+[   74.4s] group 14: 18931 training items, k = 128; mean excess kurtosis: pca 0.522, ica 4.153 (max 59.98), ica on directions 3.136
+[   77.7s]    pca      {'marg_t': np.float64(0.4), 'sm_t8': np.float64(2.6), 'sm_t16': np.float64(3.7), 'sm_t32': np.float64(4.0), 'sm_t1e+09': np.float64(4.1)}
+[   81.1s]    ica      {'marg_t': np.float64(7.7), 'sm_t8': np.float64(8.9), 'sm_t16': np.float64(7.9), 'sm_t32': np.float64(6.6), 'sm_t1e+09': np.float64(4.1)}
+[   84.4s]    ica_dir  {'marg_t': np.float64(5.6), 'sm_t8': np.float64(6.3), 'sm_t16': np.float64(6.2), 'sm_t32': np.float64(5.6), 'sm_t1e+09': np.float64(4.1)}
+[   98.8s] group 15: 17507 training items, k = 128; mean excess kurtosis: pca 1.046, ica 8.122 (max 455.09), ica on directions 6.774
+[  102.0s]    pca      {'marg_t': np.float64(1.5), 'sm_t8': np.float64(7.1), 'sm_t16': np.float64(8.1), 'sm_t32': np.float64(8.5), 'sm_t1e+09': np.float64(8.6)}
+[  105.0s]    ica      {'marg_t': np.float64(10.1), 'sm_t8': np.float64(13.0), 'sm_t16': np.float64(12.1), 'sm_t32': np.float64(10.9), 'sm_t1e+09': np.float64(8.6)}
+[  108.2s]    ica_dir  {'marg_t': np.float64(7.2), 'sm_t8': np.float64(10.2), 'sm_t16': np.float64(10.3), 'sm_t32': np.float64(9.8), 'sm_t1e+09': np.float64(8.6)}
+[  120.1s] group 5: 14726 training items, k = 128; mean excess kurtosis: pca 0.447, ica 6.444 (max 67.98), ica on directions 4.578
+[  122.7s]    pca      {'marg_t': np.float64(0.6), 'sm_t8': np.float64(3.5), 'sm_t16': np.float64(4.6), 'sm_t32': np.float64(4.9), 'sm_t1e+09': np.float64(5.1)}
+[  125.3s]    ica      {'marg_t': np.float64(15.2), 'sm_t8': np.float64(14.6), 'sm_t16': np.float64(11.9), 'sm_t32': np.float64(9.4), 'sm_t1e+09': np.float64(5.1)}
+[  128.0s]    ica_dir  {'marg_t': np.float64(10.1), 'sm_t8': np.float64(9.9), 'sm_t16': np.float64(8.9), 'sm_t32': np.float64(7.7), 'sm_t1e+09': np.float64(5.1)}
+[  128.0s] weighted mean over the 4 groups, bits per item saved against the Gaussian (same whitening, top-128):
+[  128.0s]    pca      {'marg_t': np.float64(1.2), 'sm_t8': np.float64(6.3), 'sm_t16': np.float64(7.4), 'sm_t32': np.float64(7.7), 'sm_t1e+09': np.float64(7.8)}
+[  128.0s]    ica      {'marg_t': np.float64(13.3), 'sm_t8': np.float64(15.5), 'sm_t16': np.float64(13.7), 'sm_t32': np.float64(11.7), 'sm_t1e+09': np.float64(7.8)}
+[  128.0s]    ica_dir  {'marg_t': np.float64(8.9), 'sm_t8': np.float64(11.3), 'sm_t16': np.float64(10.9), 'sm_t32': np.float64(10.0), 'sm_t1e+09': np.float64(7.8)}

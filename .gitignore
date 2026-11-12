@@ -1,0 +1,14 @@
+__pycache__/
+*.npy
+*.npz
+*.hdf5
+*.parquet
+*.safetensors
+data/
+data1024/
+dl/
+pylib/
+model/
+idx_*/
+work_*/
+site/proofs.html

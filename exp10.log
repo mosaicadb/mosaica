@@ -1,0 +1,50 @@
+[   122s] K 1000 residual norm vs k-means mean: median 0.358 | vs mean of 1024 consecutive rows: 0.429
+[   122s] G 64 bnd 256 bits -> dims coded 83 max bits 7
+[   122s] G 64 bnd 768 bits -> dims coded 197 max bits 8
+[   122s] G 64 bnd 1536 bits -> dims coded 323 max bits 8
+[   122s] G 64 group 0 violations 0
+[   133s] G 64 group 8 violations 0
+[   152s] G 64 group 16 violations 0
+[   165s] G 64 group 24 violations 0
+[   178s] G 64 group 32 violations 0
+[   191s] G 64 group 40 violations 0
+[   205s] G 64 group 48 violations 0
+[   218s] G 64 group 56 violations 0
+[   234s] G 64 done, violations 0
+t=0.95: exact answer within +-0.001 / 0.002 / 0.005 / 0.01 of the threshold, as share of the answer: 0.096 0.194 0.480 0.925
+t=0.9: exact answer within +-0.001 / 0.002 / 0.005 / 0.01 of the threshold, as share of the answer: 0.025 0.050 0.124 0.248
+t=0.8: exact answer within +-0.001 / 0.002 / 0.005 / 0.01 of the threshold, as share of the answer: 0.040 0.080 0.201 0.398
+t=0.7: exact answer within +-0.001 / 0.002 / 0.005 / 0.01 of the threshold, as share of the answer: 0.028 0.056 0.140 0.279
+  32 B ls  similarity error: median 0.0043  99% 0.0238  99.99% 0.0550
+        t=0.95: disagreements/answer 0.0350 (wrongly in 0.0158, wrongly out 0.0192); their distance from the threshold: median 0.0005  90% 0.0018  99% 0.0057
+        t=0.9: disagreements/answer 0.0189 (wrongly in 0.0085, wrongly out 0.0104); their distance from the threshold: median 0.0013  90% 0.0037  99% 0.0118
+        t=0.8: disagreements/answer 0.0452 (wrongly in 0.0216, wrongly out 0.0236); their distance from the threshold: median 0.0015  90% 0.0047  99% 0.0112
+        t=0.7: disagreements/answer 0.0512 (wrongly in 0.0252, wrongly out 0.0260); their distance from the threshold: median 0.0025  90% 0.0077  99% 0.0173
+  32 B unb similarity error: median 0.0065  99% 0.0470  99.99% 0.0963
+        t=0.95: disagreements/answer 0.0686 (wrongly in 0.0482, wrongly out 0.0203); their distance from the threshold: median 0.0010  90% 0.0037  99% 0.0115
+        t=0.9: disagreements/answer 0.0420 (wrongly in 0.0276, wrongly out 0.0143); their distance from the threshold: median 0.0025  90% 0.0092  99% 0.0255
+        t=0.8: disagreements/answer 0.0872 (wrongly in 0.0627, wrongly out 0.0245); their distance from the threshold: median 0.0033  90% 0.0155  99% 0.0542
+        t=0.7: disagreements/answer 0.1044 (wrongly in 0.0737, wrongly out 0.0306); their distance from the threshold: median 0.0055  90% 0.0298  99% 0.0780
+  96 B ls  similarity error: median 0.0018  99% 0.0100  99.99% 0.0267
+        t=0.95: disagreements/answer 0.0110 (wrongly in 0.0052, wrongly out 0.0059); their distance from the threshold: median 0.0003  90% 0.0005  99% 0.0018
+        t=0.9: disagreements/answer 0.0062 (wrongly in 0.0029, wrongly out 0.0033); their distance from the threshold: median 0.0005  90% 0.0015  99% 0.0045
+        t=0.8: disagreements/answer 0.0168 (wrongly in 0.0084, wrongly out 0.0085); their distance from the threshold: median 0.0008  90% 0.0018  99% 0.0045
+        t=0.7: disagreements/answer 0.0194 (wrongly in 0.0100, wrongly out 0.0093); their distance from the threshold: median 0.0010  90% 0.0033  99% 0.0080
+  96 B unb similarity error: median 0.0023  99% 0.0168  99.99% 0.0628
+        t=0.95: disagreements/answer 0.0184 (wrongly in 0.0126, wrongly out 0.0058); their distance from the threshold: median 0.0003  90% 0.0010  99% 0.0030
+        t=0.9: disagreements/answer 0.0122 (wrongly in 0.0080, wrongly out 0.0043); their distance from the threshold: median 0.0008  90% 0.0027  99% 0.0080
+        t=0.8: disagreements/answer 0.0257 (wrongly in 0.0175, wrongly out 0.0082); their distance from the threshold: median 0.0010  90% 0.0043  99% 0.0138
+        t=0.7: disagreements/answer 0.0308 (wrongly in 0.0207, wrongly out 0.0101); their distance from the threshold: median 0.0018  90% 0.0083  99% 0.0305
+ 192 B ls  similarity error: median 0.0008  99% 0.0050  99.99% 0.0180
+        t=0.95: disagreements/answer 0.0048 (wrongly in 0.0023, wrongly out 0.0025); their distance from the threshold: median 0.0003  90% 0.0003  99% 0.0008
+        t=0.9: disagreements/answer 0.0025 (wrongly in 0.0012, wrongly out 0.0013); their distance from the threshold: median 0.0003  90% 0.0008  99% 0.0020
+        t=0.8: disagreements/answer 0.0068 (wrongly in 0.0035, wrongly out 0.0033); their distance from the threshold: median 0.0003  90% 0.0008  99% 0.0033
+        t=0.7: disagreements/answer 0.0079 (wrongly in 0.0043, wrongly out 0.0036); their distance from the threshold: median 0.0005  90% 0.0018  99% 0.0057
+ 192 B unb similarity error: median 0.0008  99% 0.0073  99.99% 0.0362
+        t=0.95: disagreements/answer 0.0059 (wrongly in 0.0039, wrongly out 0.0021); their distance from the threshold: median 0.0003  90% 0.0005  99% 0.0008
+        t=0.9: disagreements/answer 0.0041 (wrongly in 0.0027, wrongly out 0.0015); their distance from the threshold: median 0.0003  90% 0.0013  99% 0.0035
+        t=0.8: disagreements/answer 0.0090 (wrongly in 0.0059, wrongly out 0.0030); their distance from the threshold: median 0.0005  90% 0.0018  99% 0.0070
+        t=0.7: disagreements/answer 0.0108 (wrongly in 0.0072, wrongly out 0.0037); their distance from the threshold: median 0.0008  90% 0.0035  99% 0.0150
+  32 B  largest similarity error 0.1588 | disagreements with exact answer per true match: 0.0350 0.0189 0.0452 0.0512 | furthest disagreement from threshold: 0.0500 0.1000 0.0907 0.0965
+  96 B  largest similarity error 0.0862 | disagreements with exact answer per true match: 0.0110 0.0062 0.0168 0.0194 | furthest disagreement from threshold: 0.0500 0.0158 0.0333 0.0585
+ 192 B  largest similarity error 0.0552 | disagreements with exact answer per true match: 0.0048 0.0025 0.0068 0.0079 | furthest disagreement from threshold: 0.0025 0.0136 0.0143 0.0347

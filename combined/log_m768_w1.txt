@@ -1,0 +1,20 @@
+[     1s] m768 worker 1 LV [0, 4, 8, 16, 32, 48, 96, 192, 384, 576] LD 32 random levels [48, 96, 192, 384, 576] blocks [0, 96, 224, 480, 768] c(sub-Gaussian) 9.354
+[     2s] int rates per level [[1, 0, 0, 0], [4, 1, 0, 0], [5, 4, 1, 0], [8, 8, 4, 0], [8, 8, 8, 1]] scalar bytes per level [9, 2, 3, 3, 2] block dims [96, 128, 256, 288]
+[     2s] sub rates per level [[1, 0, 0.125, 0], [3, 1, 0.25, 0], [5, 4, 1, 0], [8, 7, 4, 0.25], [8, 8, 8, 1]] scalar bytes per level [10, 3, 3, 4, 3] block dims [96, 128, 256, 288]
+[     3s] group 2 clusters 1 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 4.76, 'sub': 5.34}
+[    88s] group 3 clusters 15 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.35, 'sub': 5.44}
+[   157s] group 13 clusters 11 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.35, 'sub': 5.82}
+[   217s] group 16 clusters 10 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.35, 'sub': 5.82}
+[   280s] group 19 clusters 12 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.35, 'sub': 5.82}
+[   329s] group 20 clusters 13 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.35, 'sub': 5.82}
+[   418s] group 21 clusters 7 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[   477s] group 24 clusters 11 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[   850s] group 26 clusters 28 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1050s] group 28 clusters 22 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1333s] group 41 clusters 30 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1371s] group 42 clusters 6 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1470s] group 47 clusters 14 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1496s] group 59 clusters 5 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1660s] group 60 clusters 24 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1772s] group 63 clusters 19 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.82, 'sub': 5.82}
+[  1772s] done

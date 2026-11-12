@@ -1,0 +1,6 @@
+dl/te3/00010.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00011.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00012.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+norms 0.99977154 1.0 1.0002359 zero rows 0
+data/te3_3072.npy (47619, 3072)
+done

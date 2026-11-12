@@ -1,0 +1,20 @@
+[   126s] K 1000 residual norm vs k-means mean: median 0.358 | vs mean of 1024 consecutive rows: 0.429
+[   127s] G 64 bnd 128 bits -> dims coded 49 max bits 6
+[   127s] G 64 bnd 256 bits -> dims coded 83 max bits 7
+[   127s] G 64 bnd 768 bits -> dims coded 197 max bits 8
+[   127s] G 64 bnd 1536 bits -> dims coded 323 max bits 8
+[   127s] G 64 bnd 3072 bits -> dims coded 474 max bits 8
+[   127s] G 64 group 0 violations 0
+[   140s] G 64 group 8 violations 0
+[   162s] G 64 group 16 violations 0
+[   177s] G 64 group 24 violations 0
+[   192s] G 64 group 32 violations 0
+[   208s] G 64 group 40 violations 0
+[   224s] G 64 group 48 violations 0
+[   240s] G 64 group 56 violations 0
+[   258s] G 64 done, violations 0
+  16 B  largest similarity error 0.2063 | disagreements with exact answer per true match: 0.0601 0.0313 0.0688 0.0779 | furthest disagreement from threshold: 0.0500 0.1000 0.1276 0.1223
+  32 B  largest similarity error 0.1588 | disagreements with exact answer per true match: 0.0350 0.0189 0.0452 0.0512 | furthest disagreement from threshold: 0.0500 0.1000 0.0907 0.0965
+  96 B  largest similarity error 0.0862 | disagreements with exact answer per true match: 0.0110 0.0062 0.0168 0.0194 | furthest disagreement from threshold: 0.0500 0.0158 0.0333 0.0585
+ 192 B  largest similarity error 0.0552 | disagreements with exact answer per true match: 0.0048 0.0025 0.0068 0.0079 | furthest disagreement from threshold: 0.0025 0.0136 0.0143 0.0347
+ 384 B  largest similarity error 0.0549 | disagreements with exact answer per true match: 0.0031 0.0014 0.0028 0.0034 | furthest disagreement from threshold: 0.0005 0.0051 0.0133 0.0347

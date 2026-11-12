@@ -1,0 +1,3 @@
+[    3.4s] bioclip768 N 200000 n 768 K 800 G 16 KD 768 control False
+[   44.7s] kmeans done; cluster sizes min/med/max 29 217 1351 group sizes [11956, 5951, 12001, 43985, 3395, 11387, 4082, 6533, 7844, 6561, 8662, 7636, 10624, 13279, 6050, 40054]
+[   55.8s] bases done; mean residual energy per item 0.11761347789764404

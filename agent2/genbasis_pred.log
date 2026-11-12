@@ -1,0 +1,16 @@
+
+item queries, 2000 (query, true match) pairs: predicted matched l1 half-width at [0, 32, 96, 192, 384] bytes
+  pca/item-bits  0.1131 0.0385 0.0154 0.0060 0.0017
+  pca/text-bits  0.1131 0.0395 0.0162 0.0065 0.0017
+  gen-item       0.1177 0.0430 0.0189 0.0086 0.0025
+  gen-text       0.1386 0.0598 0.0276 0.0118 0.0031
+  gen-mix        0.1188 0.0436 0.0187 0.0076 0.0021
+
+text queries, 7334 (query, true match) pairs: predicted matched l1 half-width at [0, 32, 96, 192, 384] bytes
+  pca/item-bits  0.2186 0.1025 0.0503 0.0223 0.0056
+  pca/text-bits  0.2186 0.1018 0.0492 0.0215 0.0054
+  gen-item       0.2236 0.1092 0.0575 0.0299 0.0081
+  gen-text       0.1916 0.0817 0.0379 0.0161 0.0038
+  gen-mix        0.1932 0.0832 0.0384 0.0163 0.0039
+
+largest group 9 : sum sqrt(gamma) text 0.23820843016452214 vs PCA-diagonal sum sqrt(Q_ii lam_i) 0.3018236645512866 | item 0.15508667729862077 vs 0.16467958855781073

@@ -1,0 +1,20 @@
+dl/glove/glove.hdf5 (1183514, 100) float32
+norms 0.37048042 5.7313676 16.752354 zero rows 0
+data/glove100.npy (200000, 100)
+dl/nyt/nyt.hdf5 (290000, 256) float32
+norms 0.0 0.99870986 1.2036675 zero rows 150
+data/nyt256.npy (200000, 256)
+dl/ada/train-00000-of-00026-3c7b99d1c7eda36e.parquet ['_id', 'title', 'text', 'openai'] 38462
+dl/ada/train-00001-of-00026-2b24035a6390fdcb.parquet ['_id', 'title', 'text', 'openai'] 38462
+dl/ada/train-00002-of-00026-b05ce48965853dad.parquet ['_id', 'title', 'text', 'openai'] 38462
+norms 0.99960417 1.0000006 1.0003824 zero rows 0
+data/ada1536.npy (115386, 1536)
+dl/te3/00000.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15874
+dl/te3/00001.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00002.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00003.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00004.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+dl/te3/00005.parquet ['_id', 'title', 'text', 'text-embedding-ada-002-1536-embedding', 'text-embedding-3-large-3072-embedding'] 15873
+norms 0.99965 1.0000004 1.0001919 zero rows 0
+data/te3_3072.npy (95239, 1536)
+done

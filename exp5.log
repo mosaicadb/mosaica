@@ -1,0 +1,27 @@
+[    86s] G 1 0 bits -> dims coded 0 max bits 0
+[    86s] G 1 32 bits -> dims coded 25 max bits 3
+[    86s] G 1 64 bits -> dims coded 46 max bits 3
+[    86s] G 1 128 bits -> dims coded 75 max bits 4
+[    86s] G 1 256 bits -> dims coded 120 max bits 5
+[    86s] G 1 384 bits -> dims coded 161 max bits 6
+[    86s] G 1 768 bits -> dims coded 258 max bits 7
+[   235s] G 1 group 0 violations 0
+[   235s] G 1 done, violations 0 | floor (pca-diagonal vs simultaneous) by budget: [[np.float64(0.1811), np.float64(0.1792)], [np.float64(0.1491), np.float64(0.1469)], [np.float64(0.1303), np.float64(0.1281)], [np.float64(0.1049), np.float64(0.1029)], [np.float64(0.0748), np.float64(0.0731)], [np.float64(0.0567), np.float64(0.0552)], [np.float64(0.0289), np.float64(0.028)]]
+[   235s]    max |actual error| / guaranteed bound by budget: {0: 0.999, 32: 0.977, 64: 0.953, 128: 0.939, 256: 0.9, 384: 0.829, 768: 0.834}
+[   236s] G 64 0 bits -> dims coded 0 max bits 0
+[   236s] G 64 32 bits -> dims coded 16 max bits 4
+[   236s] G 64 64 bits -> dims coded 30 max bits 5
+[   236s] G 64 128 bits -> dims coded 60 max bits 6
+[   236s] G 64 256 bits -> dims coded 109 max bits 7
+[   236s] G 64 384 bits -> dims coded 152 max bits 7
+[   236s] G 64 768 bits -> dims coded 254 max bits 8
+[   237s] G 64 group 0 violations 0
+[   252s] G 64 group 8 violations 0
+[   269s] G 64 group 16 violations 0
+[   299s] G 64 group 24 violations 0
+[   320s] G 64 group 32 violations 0
+[   336s] G 64 group 40 violations 0
+[   361s] G 64 group 48 violations 0
+[   372s] G 64 group 56 violations 0
+[   389s] G 64 done, violations 0 | floor (pca-diagonal vs simultaneous) by budget: [[np.float64(0.1976), np.float64(0.1822)], [np.float64(0.1363), np.float64(0.1212)], [np.float64(0.1112), np.float64(0.0976)], [np.float64(0.0834), np.float64(0.0718)], [np.float64(0.0555), np.float64(0.0466)], [np.float64(0.0405), np.float64(0.0334)], [np.float64(0.0197), np.float64(0.0155)]]
+[   389s]    max |actual error| / guaranteed bound by budget: {0: 0.999, 32: 0.95, 64: 0.91, 128: 0.851, 256: 0.836, 384: 0.726, 768: 0.794}

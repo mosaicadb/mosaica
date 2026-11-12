@@ -1,0 +1,25 @@
+[   35.9s] group 14: transform-coding penalty in the r' metric, bits per item: pca 2.4, ica 121.0, ica on directions 126.3
+[   36.0s] group 14: 25173 training items, k = 128; mean excess kurtosis: pca 0.708, ica 4.348 (max 66.03), ica on directions 3.140
+[   40.6s]    pca      {'marg_t': np.float64(1.0), 'sm_t8': np.float64(4.8), 'sm_t16': np.float64(5.9), 'sm_t32': np.float64(6.2), 'sm_t1e+09': np.float64(6.3)}
+[   45.0s]    ica      {'marg_t': np.float64(8.5), 'sm_t8': np.float64(10.4), 'sm_t16': np.float64(9.6), 'sm_t32': np.float64(8.4), 'sm_t1e+09': np.float64(6.3)}
+[   49.3s]    ica_dir  {'marg_t': np.float64(6.1), 'sm_t8': np.float64(7.8), 'sm_t16': np.float64(7.9), 'sm_t32': np.float64(7.5), 'sm_t1e+09': np.float64(6.3)}
+[   65.4s] group 6: transform-coding penalty in the r' metric, bits per item: pca 5.6, ica 137.1, ica on directions 143.4
+[   65.5s] group 6: 20979 training items, k = 128; mean excess kurtosis: pca 0.561, ica 4.227 (max 46.55), ica on directions 3.263
+[   69.1s]    pca      {'marg_t': np.float64(0.5), 'sm_t8': np.float64(2.8), 'sm_t16': np.float64(3.9), 'sm_t32': np.float64(4.2), 'sm_t1e+09': np.float64(4.3)}
+[   72.8s]    ica      {'marg_t': np.float64(9.3), 'sm_t8': np.float64(9.3), 'sm_t16': np.float64(8.1), 'sm_t32': np.float64(6.7), 'sm_t1e+09': np.float64(4.3)}
+[   76.7s]    ica_dir  {'marg_t': np.float64(7.2), 'sm_t8': np.float64(6.8), 'sm_t16': np.float64(6.5), 'sm_t32': np.float64(5.8), 'sm_t1e+09': np.float64(4.3)}
+[   87.2s] group 11: transform-coding penalty in the r' metric, bits per item: pca 6.5, ica 106.0, ica on directions 112.1
+[   87.3s] group 11: 14723 training items, k = 128; mean excess kurtosis: pca 0.394, ica 7.493 (max 100.31), ica on directions 5.670
+[   89.8s]    pca      {'marg_t': np.float64(0.2), 'sm_t8': np.float64(1.4), 'sm_t16': np.float64(2.5), 'sm_t32': np.float64(2.8), 'sm_t1e+09': np.float64(3.0)}
+[   92.2s]    ica      {'marg_t': np.float64(14.0), 'sm_t8': np.float64(13.1), 'sm_t16': np.float64(10.6), 'sm_t32': np.float64(8.0), 'sm_t1e+09': np.float64(3.0)}
+[   94.8s]    ica_dir  {'marg_t': np.float64(10.2), 'sm_t8': np.float64(8.9), 'sm_t16': np.float64(7.8), 'sm_t32': np.float64(6.3), 'sm_t1e+09': np.float64(3.0)}
+[  104.3s] group 9: transform-coding penalty in the r' metric, bits per item: pca 5.0, ica 108.6, ica on directions 118.6
+[  104.3s] group 9: 14028 training items, k = 128; mean excess kurtosis: pca 0.378, ica 7.687 (max 56.07), ica on directions 5.687
+[  106.9s]    pca      {'marg_t': np.float64(0.3), 'sm_t8': np.float64(2.4), 'sm_t16': np.float64(3.5), 'sm_t32': np.float64(3.8), 'sm_t1e+09': np.float64(3.9)}
+[  109.4s]    ica      {'marg_t': np.float64(13.8), 'sm_t8': np.float64(14.3), 'sm_t16': np.float64(12.0), 'sm_t32': np.float64(9.4), 'sm_t1e+09': np.float64(3.9)}
+[  111.9s]    ica_dir  {'marg_t': np.float64(10.1), 'sm_t8': np.float64(10.1), 'sm_t16': np.float64(9.2), 'sm_t32': np.float64(7.6), 'sm_t1e+09': np.float64(3.9)}
+[  111.9s] weighted mean over the 4 groups, bits per item saved against the Gaussian (same whitening, top-128):
+[  111.9s]    pca      {'marg_t': 0.6, 'sm_t8': 3.2, 'sm_t16': 4.2, 'sm_t32': 4.5, 'sm_t1e+09': 4.7}
+[  111.9s]    ica      {'marg_t': 10.8, 'sm_t8': 11.4, 'sm_t16': 9.8, 'sm_t32': 8.1, 'sm_t1e+09': 4.7}
+[  111.9s]    ica_dir  {'marg_t': 8.0, 'sm_t8': 8.2, 'sm_t16': 7.7, 'sm_t32': 6.8, 'sm_t1e+09': 4.7}
+[  111.9s]    pen      {'ica': 120.3, 'pca': 4.6}

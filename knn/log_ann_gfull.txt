@@ -1,0 +1,135 @@
+{'index': 'flat', 'k': 1, 'filter': 'all', 'recall': {'test': 1.0}, 'got': 1.0, 'ms': 50.687, 'ndis': 1183514}
+{'index': 'flat', 'k': 10, 'filter': 'all', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 48.765, 'ndis': 1183514}
+{'index': 'flat', 'k': 100, 'filter': 'all', 'recall': {'test': 1.0}, 'got': 100.0, 'ms': 48.0, 'ndis': 1183514}
+{'index': 'flat', 'k': 10, 'filter': 'rand50', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 41.783, 'ndis': 591393}
+{'index': 'flat', 'k': 10, 'filter': 'rand10', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 14.581, 'ndis': 118186}
+{'index': 'flat', 'k': 10, 'filter': 'rand1', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 3.629, 'ndis': 11737}
+{'index': 'flat', 'k': 10, 'filter': 'rand0.1', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 2.643, 'ndis': 1218}
+{'index': 'flat', 'k': 10, 'filter': 'clusters10', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 4.537, 'ndis': 116016}
+{'index': 'flat', 'k': 10, 'filter': 'idrange10', 'recall': {'test': 1.0}, 'got': 10.0, 'ms': 18.106, 'ndis': 118351}
+{'index': 'ivfpq', 'pm': 50, 'nlist': 1024, 'build_s': 21.4, 'code_bytes_per_item': 58}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'test': 0.395}, 'got': 1.0, 'ms': 0.046, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 1, 'rerank': 110, 'recall': {'test': 0.475}, 'got': 1.0, 'ms': 0.103, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'test': 0.61}, 'got': 1.0, 'ms': 0.131, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 4, 'rerank': 110, 'recall': {'test': 0.715}, 'got': 1.0, 'ms': 0.211, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'test': 0.715}, 'got': 1.0, 'ms': 0.432, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 16, 'rerank': 110, 'recall': {'test': 0.835}, 'got': 1.0, 'ms': 0.499, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'test': 0.795}, 'got': 1.0, 'ms': 1.531, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 64, 'rerank': 110, 'recall': {'test': 0.95}, 'got': 1.0, 'ms': 1.732, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'test': 0.795}, 'got': 1.0, 'ms': 6.98, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 1, 'filter': 'all', 'nprobe': 256, 'rerank': 110, 'recall': {'test': 0.985}, 'got': 1.0, 'ms': 6.184, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'test': 0.4055}, 'got': 10.0, 'ms': 0.047, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.423}, 'got': 10.0, 'ms': 0.136, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'test': 0.615}, 'got': 10.0, 'ms': 0.13, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.6535}, 'got': 10.0, 'ms': 0.241, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'test': 0.732}, 'got': 10.0, 'ms': 0.439, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.801}, 'got': 10.0, 'ms': 0.602, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'test': 0.807}, 'got': 10.0, 'ms': 1.793, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.9075}, 'got': 10.0, 'ms': 1.808, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'test': 0.8435}, 'got': 10.0, 'ms': 5.982, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'all', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.976}, 'got': 10.0, 'ms': 5.894, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 1, 'rerank': 0, 'recall': {'test': 0.3433}, 'got': 100.0, 'ms': 0.076, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 1, 'rerank': 1100, 'recall': {'test': 0.3475}, 'got': 100.0, 'ms': 0.349, 'ndis': 1388.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 4, 'rerank': 0, 'recall': {'test': 0.5322}, 'got': 100.0, 'ms': 0.172, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 4, 'rerank': 1100, 'recall': {'test': 0.5439}, 'got': 100.0, 'ms': 0.572, 'ndis': 5163.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 16, 'rerank': 0, 'recall': {'test': 0.6846}, 'got': 100.0, 'ms': 0.477, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 16, 'rerank': 1100, 'recall': {'test': 0.7149}, 'got': 100.0, 'ms': 0.968, 'ndis': 18931.8, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 64, 'rerank': 0, 'recall': {'test': 0.7983}, 'got': 100.0, 'ms': 1.754, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 64, 'rerank': 1100, 'recall': {'test': 0.8542}, 'got': 100.0, 'ms': 2.393, 'ndis': 69998.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 256, 'rerank': 0, 'recall': {'test': 0.8662}, 'got': 100.0, 'ms': 5.963, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 100, 'filter': 'all', 'nprobe': 256, 'rerank': 1100, 'recall': {'test': 0.9606}, 'got': 100.0, 'ms': 7.173, 'ndis': 272024.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand50', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.4065}, 'got': 10.0, 'ms': 0.122, 'ndis': 693.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand50', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.629}, 'got': 10.0, 'ms': 0.236, 'ndis': 2577.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand50', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.7875}, 'got': 10.0, 'ms': 0.622, 'ndis': 9460.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand50', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.89}, 'got': 10.0, 'ms': 1.859, 'ndis': 35002.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand50', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.977}, 'got': 10.0, 'ms': 6.63, 'ndis': 135997.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand10', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.3555}, 'got': 10.0, 'ms': 0.078, 'ndis': 139.0, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand10', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.553}, 'got': 10.0, 'ms': 0.158, 'ndis': 515.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand10', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.727}, 'got': 10.0, 'ms': 0.369, 'ndis': 1891.7, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand10', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.848}, 'got': 10.0, 'ms': 1.024, 'ndis': 6988.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand10', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.959}, 'got': 10.0, 'ms': 3.554, 'ndis': 27146.0, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand1', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.192}, 'got': 9.1, 'ms': 0.051, 'ndis': 13.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand1', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.3725}, 'got': 10.0, 'ms': 0.084, 'ndis': 51.1, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand1', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.56}, 'got': 10.0, 'ms': 0.208, 'ndis': 189.1, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand1', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.733}, 'got': 10.0, 'ms': 0.642, 'ndis': 705.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand1', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.9045}, 'got': 10.0, 'ms': 2.286, 'ndis': 2735.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand0.1', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.0615}, 'got': 1.39, 'ms': 0.035, 'ndis': 1.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand0.1', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.166}, 'got': 5.3, 'ms': 0.067, 'ndis': 5.5, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand0.1', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.3315}, 'got': 9.95, 'ms': 0.162, 'ndis': 20.1, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand0.1', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.5455}, 'got': 10.0, 'ms': 0.529, 'ndis': 73.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'rand0.1', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.812}, 'got': 10.0, 'ms': 1.928, 'ndis': 284.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'clusters10', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.1385}, 'got': 8.82, 'ms': 0.057, 'ndis': 124.6, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'clusters10', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.3195}, 'got': 9.9, 'ms': 0.123, 'ndis': 528.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'clusters10', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.534}, 'got': 10.0, 'ms': 0.296, 'ndis': 1862.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'clusters10', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.7605}, 'got': 10.0, 'ms': 0.92, 'ndis': 7228.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'clusters10', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.9335}, 'got': 10.0, 'ms': 2.705, 'ndis': 28049.2, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'idrange10', 'nprobe': 1, 'rerank': 200, 'recall': {'test': 0.3475}, 'got': 10.0, 'ms': 0.075, 'ndis': 140.3, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'idrange10', 'nprobe': 4, 'rerank': 200, 'recall': {'test': 0.535}, 'got': 10.0, 'ms': 0.154, 'ndis': 516.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'idrange10', 'nprobe': 16, 'rerank': 200, 'recall': {'test': 0.702}, 'got': 10.0, 'ms': 0.368, 'ndis': 1894.9, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'idrange10', 'nprobe': 64, 'rerank': 200, 'recall': {'test': 0.847}, 'got': 10.0, 'ms': 0.959, 'ndis': 7000.4, 'nlist': 1024}
+{'index': 'ivfpq', 'pm': 50, 'k': 10, 'filter': 'idrange10', 'nprobe': 256, 'rerank': 200, 'recall': {'test': 0.9655}, 'got': 10.0, 'ms': 3.388, 'ndis': 27191.1, 'nlist': 1024}
+{'index': 'fhnsw', 'M': 16, 'build_s': 297.6, 'file_bytes': 644153874, 'bytes_per_item': 544.3}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 16, 'recall': {'test': 0.57}, 'got': 1.0, 'ms': 0.069, 'ndis': 660.1, 'hops': 32.1}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 32, 'recall': {'test': 0.69}, 'got': 1.0, 'ms': 0.102, 'ndis': 1043.5, 'hops': 49.9}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 64, 'recall': {'test': 0.79}, 'got': 1.0, 'ms': 0.17, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.845}, 'got': 1.0, 'ms': 0.307, 'ndis': 2840.3, 'hops': 145.3}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.925}, 'got': 1.0, 'ms': 0.59, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.945}, 'got': 1.0, 'ms': 1.133, 'ndis': 8930.6, 'hops': 524.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 16, 'recall': {'test': 0.551}, 'got': 10.0, 'ms': 0.06, 'ndis': 660.1, 'hops': 32.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 32, 'recall': {'test': 0.6685}, 'got': 10.0, 'ms': 0.097, 'ndis': 1043.5, 'hops': 49.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 64, 'recall': {'test': 0.7665}, 'got': 10.0, 'ms': 0.17, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.832}, 'got': 10.0, 'ms': 0.354, 'ndis': 2840.3, 'hops': 145.3}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.883}, 'got': 10.0, 'ms': 0.749, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.919}, 'got': 10.0, 'ms': 1.239, 'ndis': 8930.6, 'hops': 524.8}
+{'index': 'fhnsw', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.7307}, 'got': 100.0, 'ms': 0.338, 'ndis': 2840.3, 'hops': 145.3}
+{'index': 'fhnsw', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.804}, 'got': 100.0, 'ms': 0.633, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.8611}, 'got': 100.0, 'ms': 1.173, 'ndis': 8930.6, 'hops': 524.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 64, 'recall': {'test': 0.7455}, 'got': 10.0, 'ms': 0.193, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 256, 'recall': {'test': 0.867}, 'got': 10.0, 'ms': 0.626, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 1024, 'recall': {'test': 0.9455}, 'got': 10.0, 'ms': 2.572, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 4096, 'recall': {'test': 0.985}, 'got': 10.0, 'ms': 13.485, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 64, 'recall': {'test': 0.6375}, 'got': 10.0, 'ms': 0.18, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 256, 'recall': {'test': 0.811}, 'got': 10.0, 'ms': 0.607, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 1024, 'recall': {'test': 0.916}, 'got': 10.0, 'ms': 2.487, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 4096, 'recall': {'test': 0.977}, 'got': 10.0, 'ms': 14.173, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 64, 'recall': {'test': 0.329}, 'got': 9.66, 'ms': 0.186, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 256, 'recall': {'test': 0.5725}, 'got': 10.0, 'ms': 0.6, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 1024, 'recall': {'test': 0.7885}, 'got': 10.0, 'ms': 2.424, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 4096, 'recall': {'test': 0.928}, 'got': 10.0, 'ms': 13.389, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand0.1', 'ef': 64, 'recall': {'test': 0.0865}, 'got': 1.69, 'ms': 0.177, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand0.1', 'ef': 256, 'recall': {'test': 0.218}, 'got': 5.15, 'ms': 0.593, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand0.1', 'ef': 1024, 'recall': {'test': 0.4675}, 'got': 9.71, 'ms': 2.487, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'rand0.1', 'ef': 4096, 'recall': {'test': 0.759}, 'got': 10.0, 'ms': 13.764, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'clusters10', 'ef': 64, 'recall': {'test': 0.398}, 'got': 9.77, 'ms': 0.28, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'clusters10', 'ef': 256, 'recall': {'test': 0.6}, 'got': 9.99, 'ms': 0.782, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'clusters10', 'ef': 1024, 'recall': {'test': 0.7985}, 'got': 10.0, 'ms': 2.772, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'clusters10', 'ef': 4096, 'recall': {'test': 0.933}, 'got': 10.0, 'ms': 13.121, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'idrange10', 'ef': 64, 'recall': {'test': 0.6265}, 'got': 10.0, 'ms': 0.187, 'ndis': 1682.6, 'hops': 82.1}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'idrange10', 'ef': 256, 'recall': {'test': 0.807}, 'got': 10.0, 'ms': 0.617, 'ndis': 4982.3, 'hops': 271.8}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'idrange10', 'ef': 1024, 'recall': {'test': 0.914}, 'got': 10.0, 'ms': 2.516, 'ndis': 16329.7, 'hops': 1035.5}
+{'index': 'fhnsw', 'M': 16, 'k': 10, 'filter': 'idrange10', 'ef': 4096, 'recall': {'test': 0.97}, 'got': 10.0, 'ms': 13.201, 'ndis': 55358.6, 'hops': 4105.9}
+{'index': 'hnswlib', 'M': 16, 'build_s': 226.1, 'file_bytes': 649240364, 'bytes_per_item': 548.6}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 16, 'recall': {'test': 0.615}, 'got': 1.0, 'ms': 0.074}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 32, 'recall': {'test': 0.69}, 'got': 1.0, 'ms': 0.105}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 64, 'recall': {'test': 0.795}, 'got': 1.0, 'ms': 0.177}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.855}, 'got': 1.0, 'ms': 0.317}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.9}, 'got': 1.0, 'ms': 0.605}
+{'index': 'hnswlib', 'M': 16, 'k': 1, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.96}, 'got': 1.0, 'ms': 1.206}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 16, 'recall': {'test': 0.555}, 'got': 10.0, 'ms': 0.11}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 32, 'recall': {'test': 0.653}, 'got': 10.0, 'ms': 0.17}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 64, 'recall': {'test': 0.753}, 'got': 10.0, 'ms': 0.288}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.8305}, 'got': 10.0, 'ms': 0.477}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.8885}, 'got': 10.0, 'ms': 0.692}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.927}, 'got': 10.0, 'ms': 1.308}
+{'index': 'hnswlib', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 128, 'recall': {'test': 0.7197}, 'got': 100.0, 'ms': 0.318}
+{'index': 'hnswlib', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 256, 'recall': {'test': 0.7998}, 'got': 100.0, 'ms': 0.614}
+{'index': 'hnswlib', 'M': 16, 'k': 100, 'filter': 'all', 'ef': 512, 'recall': {'test': 0.8626}, 'got': 100.0, 'ms': 1.481}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 64, 'recall': {'test': 0.8115}, 'got': 10.0, 'ms': 0.802}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand50', 'ef': 256, 'recall': {'test': 0.9135}, 'got': 10.0, 'ms': 1.655}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 64, 'recall': {'test': 0.8875}, 'got': 10.0, 'ms': 1.826}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand10', 'ef': 256, 'recall': {'test': 0.968}, 'got': 10.0, 'ms': 7.167}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 64, 'recall': {'test': 0.962}, 'got': 10.0, 'ms': 18.141}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand1', 'ef': 256, 'recall': {'test': 0.9955}, 'got': 10.0, 'ms': 67.189}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'rand0.1', 'ef': 64, 'recall': {'test': 0.997}, 'got': 10.0, 'ms': 133.805}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'clusters10', 'ef': 64, 'recall': {'test': 0.8395}, 'got': 10.0, 'ms': 3.874}
+{'index': 'hnswlib', 'M': 16, 'k': 10, 'filter': 'idrange10', 'ef': 64, 'recall': {'test': 0.8745}, 'got': 10.0, 'ms': 2.136}

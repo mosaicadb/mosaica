@@ -1,0 +1,31 @@
+[   12.0s] te3_3072 N 47619 n 3072 base 38096 test 9523 K 48 G 8
+[   30.8s] neighbours found
+[   31.3s] global N=2381 {'mean_ratio': 1.4971, 'median_item_ratio': 1.5258, 'share_worse': 0.9851, 'cos999': 0.0, 'cos99': 0.0, 'cos95': 0.0, 'exact': 0.0, 'mean_cos': 0.3895}
+[   31.3s] global N=9524 {'mean_ratio': 1.3568, 'median_item_ratio': 1.3935, 'share_worse': 0.9552, 'cos999': 0.0, 'cos99': 0.0, 'cos95': 0.0001, 'exact': 0.0, 'mean_cos': 0.4467}
+[   31.3s] global N=38096 {'mean_ratio': 1.2137, 'median_item_ratio': 1.2574, 'share_worse': 0.8672, 'cos999': 0.0, 'cos99': 0.0, 'cos95': 0.0002, 'exact': 0.0, 'mean_cos': 0.505}
+[   31.3s] in-cluster {'mean_ratio': 1.2615, 'median_item_ratio': 1.3091, 'share_worse': 0.8945, 'cos999': 0.0, 'cos99': 0.0, 'cos95': 0.0002, 'exact': 0.0, 'mean_cos': 0.4855}
+[   31.3s] residual energy to cluster mean 0.8156339526176453
+[   79.7s] items in groups large enough to evaluate: 1.0
+[  137.4s] --- global N=38096: pointer 15.2 bits, 8 bins (3.0 bits to name the bin); budgets (bits) [1024, 3072, 6144, 12288]
+[  137.4s]   bin 0 share 0.0000 skipped
+[  137.4s]   bin 1 share 0.0000 skipped
+[  137.4s]   bin 2 d2<0.848 share 0.1714 cos 0.6504 energy delta/regress 0.875/0.663 beta 0.66 | saving exact-ref [195.4, 362.3, 421.1, 421.6] lossy-ref [142.7, 296.6, 391.4, 419.7]
+[  137.4s]   bin 3 d2<0.957 share 0.1766 cos 0.5454 energy delta/regress 1.141/0.791 beta 0.54 | saving exact-ref [99.0, 162.6, 180.9, 181.1] lossy-ref [76.4, 136.5, 169.8, 180.4]
+[  137.4s]   bin 4 d2<1.026 share 0.1762 cos 0.5035 energy delta/regress 1.242/0.834 beta 0.49 | saving exact-ref [65.1, 102.1, 111.0, 111.2] lossy-ref [49.5, 84.0, 103.2, 110.7]
+[  137.4s]   bin 5 d2<1.081 share 0.1640 cos 0.4733 energy delta/regress 1.305/0.857 beta 0.46 | saving exact-ref [36.7, 48.6, 50.1, 50.2] lossy-ref [24.5, 35.4, 44.6, 49.8]
+[  137.4s]   bin 6 d2<1.143 share 0.1581 cos 0.4443 energy delta/regress 1.345/0.873 beta 0.43 | saving exact-ref [-4.2, -53.3, -70.3, -70.4] lossy-ref [-15.1, -65.3, -75.0, -70.7]
+[  137.4s]   bin 7 d2<4.010 share 0.1537 cos 0.4016 energy delta/regress 1.422/0.901 beta 0.39 | saving exact-ref [-42.4, -132.4, -158.3, -158.6] lossy-ref [-51.1, -141.3, -161.7, -158.8]
+[  137.4s]   saving from knowing the bin alone (no neighbour, bin index charged): [-3.1, -0.6, 2.8, 2.9]
+[  137.4s]   net saving per item, exact reference: [58.3, 85.0, 93.4, 93.5]  reference at the same distortion: [37.4, 60.5, 82.8, 92.9]
+[  139.6s] --- in-cluster: pointer 9.6 bits, 8 bins (3.0 bits to name the bin); budgets (bits) [1024, 3072, 6144, 12288]
+[  139.6s]   bin 0 share 0.0000 skipped
+[  139.6s]   bin 1 share 0.0000 skipped
+[  139.6s]   bin 2 d2<0.877 share 0.1699 cos 0.6398 energy delta/regress 0.909/0.684 beta 0.64 | saving exact-ref [186.1, 341.5, 398.1, 398.6] lossy-ref [142.6, 291.4, 376.0, 397.2]
+[  139.6s]   bin 3 d2<0.990 share 0.1812 cos 0.5300 energy delta/regress 1.187/0.815 beta 0.51 | saving exact-ref [91.0, 151.6, 169.1, 169.3] lossy-ref [74.0, 134.0, 161.9, 168.9]
+[  139.6s]   bin 4 d2<1.059 share 0.1617 cos 0.4871 energy delta/regress 1.290/0.858 beta 0.46 | saving exact-ref [54.8, 79.0, 84.7, 84.9] lossy-ref [44.6, 68.9, 80.5, 84.6]
+[  139.6s]   bin 5 d2<1.122 share 0.1690 cos 0.4547 energy delta/regress 1.345/0.879 beta 0.43 | saving exact-ref [26.2, 24.6, 21.2, 21.2] lossy-ref [17.8, 16.2, 17.8, 21.0]
+[  139.6s]   bin 6 d2<1.194 share 0.1585 cos 0.4218 energy delta/regress 1.405/0.902 beta 0.39 | saving exact-ref [-12.2, -62.7, -78.7, -78.9] lossy-ref [-18.6, -69.0, -81.5, -79.1]
+[  139.6s]   bin 7 d2<4.010 share 0.1596 cos 0.3707 energy delta/regress 1.468/0.925 beta 0.36 | saving exact-ref [-65.5, -172.1, -204.2, -204.6] lossy-ref [-69.9, -176.5, -206.0, -204.7]
+[  139.6s]   saving from knowing the bin alone (no neighbour, bin index charged): [-3.2, -0.0, 3.7, 3.8]
+[  139.6s]   net saving per item, exact reference: [46.0, 62.0, 67.5, 67.6]  reference at the same distortion: [30.8, 45.6, 60.5, 67.1]
+[  139.6s] done

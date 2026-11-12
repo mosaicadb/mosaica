@@ -1,0 +1,8 @@
+[     3s] n1024 worker 1 LV [0, 4, 8, 16, 32, 48, 96, 192, 384, 576] LD 32 random levels [48, 96, 192, 384, 576] blocks [0, 96, 224, 480, 1024] c(sub-Gaussian) 9.354
+[     3s] int rates per level [[1, 0, 0, 0], [2, 2, 0, 0], [5, 4, 1, 0], [7, 6, 3, 1], [8, 8, 5, 2]] scalar bytes per level [9, 2, 3, 4, 4] block dims [96, 128, 256, 544]
+[     3s] sub rates per level [[1, 0, 0.125, 0], [2, 1, 0.5, 0], [5, 3, 1, 0.25], [7, 6, 4, 0.5], [8, 8, 5, 2]] scalar bytes per level [10, 3, 4, 4, 4] block dims [96, 128, 256, 544]
+[    83s] group 0 clusters 15 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.27}
+[   115s] group 3 clusters 5 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.27}
+[   188s] group 9 clusters 11 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.34}
+[   204s] group 15 clusters 6 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'int': 5.46, 'sub': 5.34}
+[   204s] done

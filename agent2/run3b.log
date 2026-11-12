@@ -1,0 +1,35 @@
+[    9s] split-mix-opt 32 B: blocks (bits, dims) [(1, 78), (2, 33), (3, 15), (4, 8), (5, 7)] uncoded 627
+[    9s] split-mix-opt 48 B: blocks (bits, dims) [(1, 179), (2, 36), (3, 12), (4, 14), (5, 7), (6, 1)] uncoded 519
+[   10s] split-mix-opt 96 B: blocks (bits, dims) [(1, 329), (2, 39), (3, 33), (4, 28), (5, 16), (6, 7), (7, 4)] uncoded 312
+[   10s] split-mix-opt 192 B: blocks (bits, dims) [(1, 194), (2, 101), (3, 94), (4, 70), (5, 30), (6, 34), (7, 16), (8, 14)] uncoded 215
+[   11s] split-mix-opt 384 B: blocks (bits, dims) [(1, 229), (2, 20), (3, 64), (4, 116), (5, 109), (6, 95), (7, 48), (8, 87)] uncoded 0
+[   28s] group 0 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.22, 5.7]}
+[   39s] group 1 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.22, 5.7]}
+[   42s] group 2 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.22, 5.7]}
+[   53s] group 3 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.22, 5.7]}
+[   64s] group 4 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.28, 5.7]}
+[   67s] group 5 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.28, 5.7]}
+[   79s] group 6 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.28, 5.7]}
+[   84s] group 7 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.28, 5.7]}
+[   91s] group 8 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.28, 5.7]}
+[  113s] group 9 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.39, 5.7]}
+[  124s] group 10 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.39, 5.7]}
+[  129s] group 11 violations {'split-mix-opt': 0} max sigma (item, text) {'split-mix-opt': [5.39, 5.7]}
+pairs per level 93800000 violations {'split-mix-opt': 0} max |error|/predicted sd (item, text) {'split-mix-opt': [5.386643409729004, 5.701469421386719]}
+pairs above 4/5/6 sd, rows item,text: {'split-mix-opt': [[4154.0, 24.0, 0.0], [15926.0, 68.0, 0.0]]}
+
+== split-mix-opt c = 8.0  blocks per level [6.0, 7.0, 8.0, 8.0, 8.0]
+  item  32 B undecided/match:    62.24    23.83     7.02     4.38   half-width: 0.0411 0.0396 0.0410 0.0485   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0078 0.0196 0.0135
+  item  48 B undecided/match:    22.36    10.74     3.96     2.69   half-width: 0.0286 0.0276 0.0285 0.0338   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0067 0.0153 0.0064
+  item  96 B undecided/match:     3.90     2.35     1.28     0.90   half-width: 0.0116 0.0111 0.0115 0.0136   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0021 0.0082 0.0011
+  item 192 B undecided/match:     0.98     0.63     0.37     0.25   half-width: 0.0035 0.0034 0.0035 0.0041   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0007 0.0025 0.0002
+  item 384 B undecided/match:     0.31     0.18     0.11     0.07   half-width: 0.0009 0.0009 0.0009 0.0011   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0000 0.0009 0.0000
+  item read % (levels as listed then full; 0 B of scalars per block):   2.36   2.44   2.77   3.78
+  item read % (levels as listed then full; 2 B of scalars per block):   3.15   3.26   3.68   4.96
+  text  32 B undecided/match:  2033.83   274.26    39.82    11.81   half-width: 0.1335 0.1285 0.1237 0.1237   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0132 0.0513 0.0591
+  text  48 B undecided/match:  1055.40   159.99    25.76     8.50   half-width: 0.0973 0.0935 0.0898 0.0899   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0120 0.0438 0.0339
+  text  96 B undecided/match:   126.57    32.19     8.41     3.69   half-width: 0.0423 0.0407 0.0391 0.0388   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0036 0.0272 0.0082
+  text 192 B undecided/match:     7.67     4.03     2.07     1.24   half-width: 0.0141 0.0136 0.0130 0.0130   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0012 0.0103 0.0016
+  text 384 B undecided/match:     0.88     0.58     0.38     0.26   half-width: 0.0028 0.0028 0.0027 0.0027   parts at size 2000 (small-block det, c*sd, uncoded det): 0.0002 0.0024 0.0000
+  text read % (levels as listed then full; 0 B of scalars per block):   2.98   3.44   4.73   7.52
+  text read % (levels as listed then full; 2 B of scalars per block):   4.07   4.67   6.25   9.54

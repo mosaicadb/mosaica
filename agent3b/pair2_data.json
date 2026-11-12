@@ -1,0 +1,310 @@
+{
+ "baseline_bytes": {
+  "0.95": 8.6692301,
+  "0.9": 13.3622955,
+  "0.8": 28.6850575,
+  "0.7": 81.9554567
+ },
+ "n": 768,
+ "N": 200000,
+ "K50_J1": {
+  "K": 50,
+  "J": 1,
+  "overhead_bytes_per_item": 0.0125,
+  "centroid_bytes_per_item": 0.384,
+  "0.95": {
+   "touched": 0.175022325,
+   "bytes": 5.0096071,
+   "pct": 0.3261462955729167,
+   "annulus_touched": 0.282953075,
+   "annulus_bytes": 5.739863799999999,
+   "annulus_pct": 0.3736890494791666,
+   "certified_in": 0.000495775,
+   "annulus_certified_in": 0.000495775,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.26655945,
+   "bytes": 9.3636558,
+   "pct": 0.6096130078125,
+   "annulus_touched": 0.50342155,
+   "annulus_bytes": 11.2619583,
+   "annulus_pct": 0.73320041015625,
+   "certified_in": 0.0106511,
+   "annulus_certified_in": 0.0106511,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.578034025,
+   "bytes": 25.2776986,
+   "pct": 1.6456835026041667,
+   "annulus_touched": 0.794164925,
+   "annulus_bytes": 27.7976743,
+   "annulus_pct": 1.8097444205729167,
+   "certified_in": 0.038460925,
+   "annulus_certified_in": 0.0384609,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.8576733,
+   "bytes": 80.8776706,
+   "pct": 5.265473346354167,
+   "annulus_touched": 0.902583775,
+   "annulus_bytes": 81.5415812,
+   "annulus_pct": 5.308696692708334,
+   "certified_in": 0.05949155,
+   "annulus_certified_in": 0.0594882,
+   "violations": 0
+  }
+ },
+ "K50_J8": {
+  "K": 50,
+  "J": 8,
+  "overhead_bytes_per_item": 0.0135425,
+  "centroid_bytes_per_item": 0.384,
+  "0.95": {
+   "touched": 0.17101265,
+   "bytes": 4.9830923,
+   "pct": 0.3244200716145833,
+   "annulus_touched": 0.282953075,
+   "annulus_bytes": 5.739863799999999,
+   "annulus_pct": 0.3736890494791666,
+   "certified_in": 0.000495775,
+   "annulus_certified_in": 0.000495775,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.25788125,
+   "bytes": 9.2910941,
+   "pct": 0.6048889388020834,
+   "annulus_touched": 0.50342155,
+   "annulus_bytes": 11.2619583,
+   "annulus_pct": 0.73320041015625,
+   "certified_in": 0.0106511,
+   "annulus_certified_in": 0.0106511,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.56782015,
+   "bytes": 25.1502661,
+   "pct": 1.6373871158854167,
+   "annulus_touched": 0.794164925,
+   "annulus_bytes": 27.7976743,
+   "annulus_pct": 1.8097444205729167,
+   "certified_in": 0.03846095,
+   "annulus_certified_in": 0.0384609,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.855752375,
+   "bytes": 80.848473,
+   "pct": 5.2635724609375,
+   "annulus_touched": 0.902583775,
+   "annulus_bytes": 81.5415812,
+   "annulus_pct": 5.308696692708334,
+   "certified_in": 0.0594915,
+   "annulus_certified_in": 0.0594882,
+   "violations": 0
+  }
+ },
+ "K200_J1": {
+  "K": 200,
+  "J": 1,
+  "overhead_bytes_per_item": 0.042,
+  "centroid_bytes_per_item": 1.536,
+  "0.95": {
+   "touched": 0.125823775,
+   "bytes": 4.697000399999999,
+   "pct": 0.305794296875,
+   "annulus_touched": 0.20111875,
+   "annulus_bytes": 5.323968,
+   "annulus_pct": 0.3466125,
+   "certified_in": 0.00056695,
+   "annulus_certified_in": 0.00056695,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.17808035,
+   "bytes": 8.5941608,
+   "pct": 0.5595156770833333,
+   "annulus_touched": 0.3811294,
+   "annulus_bytes": 10.5529449,
+   "annulus_pct": 0.6870406835937499,
+   "certified_in": 0.01159505,
+   "annulus_certified_in": 0.0115935,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.394340375,
+   "bytes": 22.5113726,
+   "pct": 1.4655841536458334,
+   "annulus_touched": 0.725993625,
+   "annulus_bytes": 27.364294299999997,
+   "annulus_pct": 1.7815295768229167,
+   "certified_in": 0.039425725,
+   "annulus_certified_in": 0.0393927,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.763770275,
+   "bytes": 78.6101937,
+   "pct": 5.11785115234375,
+   "annulus_touched": 0.889573725,
+   "annulus_bytes": 81.47940980000001,
+   "annulus_pct": 5.304649075520834,
+   "certified_in": 0.06069655,
+   "annulus_certified_in": 0.06063225,
+   "violations": 0
+  }
+ },
+ "K200_J8": {
+  "K": 200,
+  "J": 8,
+  "overhead_bytes_per_item": 0.04638,
+  "centroid_bytes_per_item": 1.536,
+  "0.95": {
+   "touched": 0.1222725,
+   "bytes": 4.6716779,
+   "pct": 0.3041456966145833,
+   "annulus_touched": 0.20111875,
+   "annulus_bytes": 5.323968,
+   "annulus_pct": 0.3466125,
+   "certified_in": 0.00056695,
+   "annulus_certified_in": 0.00056695,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.172276525,
+   "bytes": 8.5378791,
+   "pct": 0.5558515039062499,
+   "annulus_touched": 0.3811294,
+   "annulus_bytes": 10.5529449,
+   "annulus_pct": 0.6870406835937499,
+   "certified_in": 0.01159535,
+   "annulus_certified_in": 0.0115935,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.381580775,
+   "bytes": 22.2852239,
+   "pct": 1.4508609309895832,
+   "annulus_touched": 0.725993625,
+   "annulus_bytes": 27.364294299999997,
+   "annulus_pct": 1.7815295768229167,
+   "certified_in": 0.0394207,
+   "annulus_certified_in": 0.0393927,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.7565128,
+   "bytes": 78.4147964,
+   "pct": 5.105129973958333,
+   "annulus_touched": 0.889573725,
+   "annulus_bytes": 81.47940980000001,
+   "annulus_pct": 5.304649075520834,
+   "certified_in": 0.06069905,
+   "annulus_certified_in": 0.06063225,
+   "violations": 0
+  }
+ },
+ "K800_J1": {
+  "K": 800,
+  "J": 1,
+  "overhead_bytes_per_item": 0.136,
+  "centroid_bytes_per_item": 6.144,
+  "0.95": {
+   "touched": 0.094315425,
+   "bytes": 4.5226351000000005,
+   "pct": 0.2944423893229167,
+   "annulus_touched": 0.156399525,
+   "annulus_bytes": 5.0600195,
+   "annulus_pct": 0.32942835286458333,
+   "certified_in": 0.000661875,
+   "annulus_certified_in": 0.000661875,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.133479225,
+   "bytes": 8.1950109,
+   "pct": 0.5335293554687499,
+   "annulus_touched": 0.2977853,
+   "annulus_bytes": 9.9480478,
+   "annulus_pct": 0.6476593619791666,
+   "certified_in": 0.01236825,
+   "annulus_certified_in": 0.01233155,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.2707985,
+   "bytes": 20.1008228,
+   "pct": 1.3086473177083333,
+   "annulus_touched": 0.65948635,
+   "annulus_bytes": 26.8575989,
+   "annulus_pct": 1.7485415950520833,
+   "certified_in": 0.04048135,
+   "annulus_certified_in": 0.040128825,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.6450806,
+   "bytes": 74.9380321,
+   "pct": 4.878778131510416,
+   "annulus_touched": 0.8744128,
+   "annulus_bytes": 81.4197366,
+   "annulus_pct": 5.3007641015625,
+   "certified_in": 0.062834575,
+   "annulus_certified_in": 0.062040025,
+   "violations": 0
+  }
+ },
+ "K800_J8": {
+  "K": 800,
+  "J": 8,
+  "overhead_bytes_per_item": 0.15516,
+  "centroid_bytes_per_item": 6.144,
+  "0.95": {
+   "touched": 0.091227025,
+   "bytes": 4.514432,
+   "pct": 0.2939083333333333,
+   "annulus_touched": 0.156399525,
+   "annulus_bytes": 5.0600195,
+   "annulus_pct": 0.32942835286458333,
+   "certified_in": 0.000661875,
+   "annulus_certified_in": 0.000661875,
+   "violations": 0
+  },
+  "0.9": {
+   "touched": 0.129057825,
+   "bytes": 8.162202800000001,
+   "pct": 0.5313934114583334,
+   "annulus_touched": 0.2977853,
+   "annulus_bytes": 9.9480478,
+   "annulus_pct": 0.6476593619791666,
+   "certified_in": 0.012379225,
+   "annulus_certified_in": 0.01233155,
+   "violations": 0
+  },
+  "0.8": {
+   "touched": 0.2597053,
+   "bytes": 19.8522778,
+   "pct": 1.2924660026041666,
+   "annulus_touched": 0.65948635,
+   "annulus_bytes": 26.8575989,
+   "annulus_pct": 1.7485415950520833,
+   "certified_in": 0.040485125,
+   "annulus_certified_in": 0.040128825,
+   "violations": 0
+  },
+  "0.7": {
+   "touched": 0.633140325,
+   "bytes": 74.49599029999999,
+   "pct": 4.849999368489582,
+   "annulus_touched": 0.8744128,
+   "annulus_bytes": 81.4197366,
+   "annulus_pct": 5.3007641015625,
+   "certified_in": 0.062886575,
+   "annulus_certified_in": 0.062040025,
+   "violations": 0
+  }
+ }
+}

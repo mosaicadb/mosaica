@@ -1,0 +1,53 @@
+
+=== block dims 96:224 (n_b=128), rate 1.0 bit/dim, 40000 items ===
+per-query: 5000 items x 2000 real offsets, max |error| = 5.57 predicted sd (rms 0.995)
+(b) real offsets in block: participation ratio 103 of 128; energy in top k PCs: k=1:0.02 k=4:0.07 k=16:0.25 k=64:0.70 k=128:1.00
+(a) k | random W: max_i ||P_W u_i||*sqrt(m)  [mean] (excess over sqrt(k), in sd) | W = top-k PCs of real offsets: same | uniform/per-query(c=8) = (sqrt k + c)/c | uniform/deterministic = (sqrt k + c)/sqrt m
+      1 |   4.07 [ 0.80] ( 3.07) |   4.13 [ 0.79] ( 3.13) |  1.12 |  0.80
+      4 |   4.91 [ 1.87] ( 2.91) |   4.91 [ 1.87] ( 2.91) |  1.25 |  0.89
+     16 |   6.65 [ 3.93] ( 2.65) |   6.61 [ 3.93] ( 2.61) |  1.50 |  1.06
+     64 |   9.68 [ 7.95] ( 1.68) |   9.81 [ 7.95] ( 1.81) |  2.00 |  1.42
+    deterministic two-scalar class certificate / plain Cauchy-Schwarz, real offsets: k=4: 0.991  k=16: 0.984  k=64: 0.979  (violations 0);  per-query randomised c=8 / plain: 0.710
+(c) L leaked bits -> error of the adversary's query in predicted sd (mean over 200 items) | ceiling proved: sqrt(2 ln2 L) | sqrt(m) = 11.3
+   L=   16:   3.00 (min  1.44)  |   4.71
+   L=   64:   5.56 (min  4.26)  |   9.42
+   L=  256:   8.43 (min  7.72)  |  18.84
+   L= 1024:  10.31 (min 10.01)  |  37.68
+   L= 4096:  11.01 (min 10.89)  |  75.35
+(d) 128 estimates of item 7 solved for its error vector; attack query error = 11.27 predicted sd (deterministic bound = 11.27 sd, c = 8 or 10)
+
+=== block dims 224:480 (n_b=256), rate 1.0 bit/dim, 40000 items ===
+per-query: 5000 items x 2000 real offsets, max |error| = 5.61 predicted sd (rms 0.998)
+(b) real offsets in block: participation ratio 160 of 256; energy in top k PCs: k=1:0.01 k=4:0.05 k=16:0.18 k=64:0.54 k=128:0.79
+(a) k | random W: max_i ||P_W u_i||*sqrt(m)  [mean] (excess over sqrt(k), in sd) | W = top-k PCs of real offsets: same | uniform/per-query(c=8) = (sqrt k + c)/c | uniform/deterministic = (sqrt k + c)/sqrt m
+      1 |   5.66 [ 0.80] ( 4.66) |   4.18 [ 0.80] ( 3.18) |  1.12 |  0.56
+      4 |   5.22 [ 1.88] ( 3.22) |   5.40 [ 1.87] ( 3.40) |  1.25 |  0.63
+     16 |   6.85 [ 3.94] ( 2.85) |   6.66 [ 3.92] ( 2.66) |  1.50 |  0.75
+     64 |  10.35 [ 7.96] ( 2.35) |  10.55 [ 7.95] ( 2.55) |  2.00 |  1.00
+    128 |  13.14 [11.28] ( 1.83) |  13.31 [11.27] ( 1.99) |  2.41 |  1.21
+    deterministic two-scalar class certificate / plain Cauchy-Schwarz, real offsets: k=4: 0.994  k=16: 0.985  k=64: 0.965  (violations 0);  per-query randomised c=8 / plain: 0.501
+(c) L leaked bits -> error of the adversary's query in predicted sd (mean over 200 items) | ceiling proved: sqrt(2 ln2 L) | sqrt(m) = 16.0
+   L=   16:   3.08 (min  1.97)  |   4.71
+   L=   64:   5.98 (min  4.84)  |   9.42
+   L=  256:   9.98 (min  8.99)  |  18.84
+   L= 1024:  13.55 (min 13.05)  |  37.68
+   L= 4096:  15.24 (min 15.05)  |  75.35
+(d) 256 estimates of item 7 solved for its error vector; attack query error = 15.97 predicted sd (deterministic bound = 15.97 sd, c = 8 or 10)
+
+=== block dims 480:768 (n_b=288), rate 0.25 bit/dim, 40000 items ===
+per-query: 5000 items x 2000 real offsets, max |error| = 5.08 predicted sd (rms 1.001)
+(b) real offsets in block: participation ratio 104 of 288; energy in top k PCs: k=1:0.02 k=4:0.08 k=16:0.27 k=64:0.70 k=128:0.89
+(a) k | random W: max_i ||P_W u_i||*sqrt(m)  [mean] (excess over sqrt(k), in sd) | W = top-k PCs of real offsets: same | uniform/per-query(c=8) = (sqrt k + c)/c | uniform/deterministic = (sqrt k + c)/sqrt m
+      1 |   4.36 [ 0.81] ( 3.36) |   4.08 [ 0.77] ( 3.08) |  1.12 |  0.53
+      4 |   4.69 [ 1.85] ( 2.69) |   5.00 [ 1.88] ( 3.00) |  1.25 |  0.59
+     16 |   6.95 [ 3.97] ( 2.95) |   6.87 [ 3.95] ( 2.87) |  1.50 |  0.71
+     64 |  10.77 [ 7.92] ( 2.77) |  10.99 [ 7.92] ( 2.99) |  2.00 |  0.94
+    128 |  13.12 [11.30] ( 1.80) |  13.23 [11.24] ( 1.92) |  2.41 |  1.14
+    deterministic two-scalar class certificate / plain Cauchy-Schwarz, real offsets: k=4: 0.985  k=16: 0.955  k=64: 0.879  (violations 0);  per-query randomised c=8 / plain: 0.472
+(c) L leaked bits -> error of the adversary's query in predicted sd (mean over 200 items) | ceiling proved: sqrt(2 ln2 L) | sqrt(m) = 16.9
+   L=   16:   3.11 (min  1.86)  |   4.71
+   L=   64:   6.01 (min  4.52)  |   9.42
+   L=  256:  10.20 (min  9.04)  |  18.84
+   L= 1024:  14.13 (min 13.46)  |  37.68
+   L= 4096:  16.09 (min 15.92)  |  75.35
+(d) 288 estimates of item 7 solved for its error vector; attack query error = 16.94 predicted sd (deterministic bound = 16.94 sd, c = 8 or 10)

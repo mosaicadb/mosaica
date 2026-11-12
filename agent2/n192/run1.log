@@ -1,0 +1,123 @@
+item mean thresholds [0.942 0.919 0.881 0.815]
+bare mean thresholds [0.695 0.671 0.634 0.59 ]
+com mean thresholds [0.812 0.792 0.758 0.715]
+free mean thresholds [0.664 0.639 0.607 0.577]
+higher mean thresholds [0.799 0.779 0.745 0.705]
+oos mean thresholds [0.763 0.737 0.703 0.674]
+sci mean thresholds [0.812 0.789 0.748 0.692]
+tax mean thresholds [0.811 0.788 0.748 0.693]
+[    6s] base group 0 violations 0
+[   13s] base group 1 violations 0
+[   15s] base group 2 violations 0
+[   22s] base group 3 violations 0
+[   29s] base group 4 violations 0
+[   31s] base group 5 violations 0
+[   46s] base group 6 violations 0
+[   63s] base group 7 violations 0
+[   78s] base group 8 violations 0
+[   79s] base group 9 violations 0
+[   87s] base group 10 violations 0
+[   93s] base group 11 violations 0
+violations per level [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] total 0 pairs 93800000
+which bound is tightest (plain, weighted) share per level: [[0.71, 0.29], [0.4, 0.6], [0.37, 0.63], [0.35, 0.65], [0.3, 0.7], [0.27, 0.73], [0.21, 0.79], [0.17, 0.83], [0.14, 0.86], [0.22, 0.78]]
+
+== existing scheme (item-fitted)
+-- item (n=100); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    1.44    1.94    3.39    7.64
+   read % d=0.005:    1.44    1.89    3.12    6.90
+   read % d=0.01 :    1.43    1.87    3.01    6.51
+   read % d=0.02 :    1.42    1.84    2.87    6.13
+     1 B undecided/match:  1645.02   249.89    39.52    12.15   half-width: 0.0911 0.0883 0.0941 0.1172
+     4 B undecided/match:   711.05   134.91    26.25     9.82   half-width: 0.0738 0.0716 0.0758 0.0939
+     8 B undecided/match:   333.59    77.04    17.73     7.95   half-width: 0.0608 0.0588 0.0620 0.0766
+    24 B undecided/match:    55.88    19.72     6.47     4.28   half-width: 0.0359 0.0346 0.0361 0.0446
+    48 B undecided/match:    13.02     6.16     2.67     2.08   half-width: 0.0203 0.0194 0.0200 0.0249
+    96 B undecided/match:     2.35     1.44     0.75     0.60   half-width: 0.0070 0.0066 0.0067 0.0085
+-- text(all) (n=369); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    4.78    6.39   10.18   17.37
+   read % d=0.005:    4.77    6.36    9.95   16.44
+   read % d=0.01 :    4.77    6.31    9.66   15.47
+   read % d=0.02 :    4.76    6.26    9.39   14.54
+     1 B undecided/match:  6292.12   702.64    80.32    17.89   half-width: 0.2441 0.2360 0.2324 0.2380
+     4 B undecided/match:  4773.71   565.86    70.19    16.71   half-width: 0.2102 0.2030 0.1990 0.2027
+     8 B undecided/match:  3513.71   441.58    59.19    15.28   half-width: 0.1828 0.1762 0.1719 0.1744
+    24 B undecided/match:  1300.29   194.63    32.09    10.43   half-width: 0.1231 0.1177 0.1135 0.1143
+    48 B undecided/match:   377.98    70.92    15.00     6.02   half-width: 0.0774 0.0732 0.0697 0.0699
+    96 B undecided/match:    33.99    10.34     3.63     2.01   half-width: 0.0309 0.0281 0.0258 0.0255
+-- bare (n=30); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    6.42    8.32   12.77   20.65
+   read % d=0.005:    6.41    8.30   12.58   19.90
+   read % d=0.01 :    6.41    8.26   12.34   19.03
+   read % d=0.02 :    6.40    8.19   11.95   17.66
+     1 B undecided/match:  7098.81   773.46    85.40    18.60   half-width: 0.2846 0.2745 0.2765 0.2867
+     4 B undecided/match:  5857.48   668.09    77.91    17.64   half-width: 0.2462 0.2372 0.2381 0.2466
+     8 B undecided/match:  4709.75   560.73    69.39    16.47   half-width: 0.2171 0.2086 0.2082 0.2152
+    24 B undecided/match:  2191.61   294.87    44.02    12.36   half-width: 0.1517 0.1436 0.1420 0.1461
+    48 B undecided/match:   659.25   114.01    22.29     8.01   half-width: 0.0972 0.0907 0.0888 0.0909
+    96 B undecided/match:    51.41    13.89     4.82     2.66   half-width: 0.0392 0.0345 0.0332 0.0337
+-- com (n=29); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    3.98    5.28    8.51   14.79
+   read % d=0.005:    3.97    5.24    8.21   13.63
+   read % d=0.01 :    3.96    5.18    7.85   12.71
+   read % d=0.02 :    3.96    5.13    7.60   12.01
+     1 B undecided/match:  5971.03   670.15    76.55    17.13   half-width: 0.2161 0.2060 0.2040 0.2106
+     4 B undecided/match:  4226.16   513.12    64.86    15.63   half-width: 0.1865 0.1756 0.1721 0.1759
+     8 B undecided/match:  2851.24   372.54    52.49    13.98   half-width: 0.1614 0.1509 0.1465 0.1487
+    24 B undecided/match:   852.43   129.83    23.92     8.78   half-width: 0.1068 0.0978 0.0933 0.0940
+    48 B undecided/match:   261.84    48.34    10.16     4.56   half-width: 0.0678 0.0599 0.0561 0.0560
+    96 B undecided/match:    28.13     9.25     3.08     1.60   half-width: 0.0294 0.0236 0.0208 0.0203
+-- free (n=50); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    8.37   11.28   17.00   25.40
+   read % d=0.005:    8.36   11.26   16.78   24.35
+   read % d=0.01 :    8.36   11.23   16.47   23.14
+   read % d=0.02 :    8.35   11.15   15.93   21.39
+     1 B undecided/match:  8289.90   886.47    93.63    19.36   half-width: 0.3346 0.3208 0.3012 0.2803
+     4 B undecided/match:  7320.90   812.09    89.07    18.82   half-width: 0.2963 0.2820 0.2621 0.2426
+     8 B undecided/match:  6238.08   726.12    83.35    18.12   half-width: 0.2639 0.2498 0.2301 0.2119
+    24 B undecided/match:  3095.91   437.90    60.92    15.16   half-width: 0.1878 0.1758 0.1592 0.1451
+    48 B undecided/match:   973.99   175.96    32.86    10.27   half-width: 0.1248 0.1152 0.1024 0.0924
+    96 B undecided/match:    82.48    22.48     7.21     3.45   half-width: 0.0535 0.0475 0.0401 0.0352
+-- higher (n=60); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    4.65    6.06    9.56   15.65
+   read % d=0.005:    4.64    6.02    9.29   14.62
+   read % d=0.01 :    4.64    5.97    8.97   13.53
+   read % d=0.02 :    4.63    5.92    8.71   12.74
+     1 B undecided/match:  6315.16   694.23    79.10    17.61   half-width: 0.2277 0.2174 0.2144 0.2165
+     4 B undecided/match:  4777.06   553.10    68.10    16.18   half-width: 0.1968 0.1874 0.1843 0.1857
+     8 B undecided/match:  3498.46   425.93    56.34    14.45   half-width: 0.1709 0.1626 0.1596 0.1604
+    24 B undecided/match:  1211.24   179.09    28.98     8.97   half-width: 0.1154 0.1086 0.1054 0.1053
+    48 B undecided/match:   334.88    61.73    13.44     4.98   half-width: 0.0719 0.0669 0.0641 0.0639
+    96 B undecided/match:    30.82     9.46     3.40     1.82   half-width: 0.0286 0.0253 0.0233 0.0228
+-- oos (n=20); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    6.35    9.10   15.21   24.13
+   read % d=0.005:    6.35    9.08   14.99   23.03
+   read % d=0.01 :    6.34    9.05   14.70   21.76
+   read % d=0.02 :    6.34    9.00   14.31   20.44
+     1 B undecided/match:  8162.53   899.70    96.86    19.85   half-width: 0.2786 0.2720 0.2646 0.2500
+     4 B undecided/match:  6798.76   801.20    92.28    19.51   half-width: 0.2461 0.2388 0.2300 0.2153
+     8 B undecided/match:  5262.82   677.25    85.17    18.86   half-width: 0.2185 0.2104 0.2008 0.1866
+    24 B undecided/match:  1856.43   313.19    54.98    15.31   half-width: 0.1552 0.1474 0.1379 0.1255
+    48 B undecided/match:   487.85   102.20    24.19     9.22   half-width: 0.1038 0.0971 0.0890 0.0793
+    96 B undecided/match:    53.48    15.54     5.53     2.87   half-width: 0.0464 0.0420 0.0364 0.0309
+-- sci (n=120); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    3.51    4.70    7.83   14.92
+   read % d=0.005:    3.50    4.66    7.60   14.12
+   read % d=0.01 :    3.50    4.62    7.35   13.29
+   read % d=0.02 :    3.49    4.59    7.17   12.64
+     1 B undecided/match:  5487.29   631.75    75.64    17.48   half-width: 0.2187 0.2131 0.2135 0.2298
+     4 B undecided/match:  3778.34   472.27    63.69    16.19   half-width: 0.1846 0.1806 0.1808 0.1936
+     8 B undecided/match:  2486.56   335.87    50.85    14.62   half-width: 0.1583 0.1550 0.1546 0.1651
+    24 B undecided/match:   690.15   112.75    22.23     9.22   half-width: 0.1023 0.1001 0.0992 0.1057
+    48 B undecided/match:   181.96    37.22     9.10     4.79   half-width: 0.0615 0.0600 0.0591 0.0632
+    96 B undecided/match:    16.74     6.11     2.36     1.51   half-width: 0.0226 0.0217 0.0209 0.0225
+-- tax (n=60); answer sizes [20, 200, 2000, 10000]; true share % 0.010 0.100 1.000 5.000
+   read % d=0.0  :    3.50    4.68    7.67   14.67
+   read % d=0.005:    3.50    4.65    7.44   13.76
+   read % d=0.01 :    3.49    4.60    7.17   12.84
+   read % d=0.02 :    3.49    4.56    6.97   12.12
+     1 B undecided/match:  5342.32   614.25    73.60    17.12   half-width: 0.2178 0.2130 0.2121 0.2256
+     4 B undecided/match:  3686.18   456.57    60.90    15.62   half-width: 0.1846 0.1815 0.1807 0.1914
+     8 B undecided/match:  2452.10   326.79    48.07    13.88   half-width: 0.1572 0.1553 0.1544 0.1636
+    24 B undecided/match:   698.72   112.91    21.25     8.59   half-width: 0.1015 0.1005 0.0992 0.1054
+    48 B undecided/match:   195.33    38.96     9.11     4.59   half-width: 0.0611 0.0605 0.0596 0.0636
+    96 B undecided/match:    18.90     6.61     2.47     1.61   half-width: 0.0222 0.0219 0.0213 0.0228

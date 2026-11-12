@@ -1,0 +1,90 @@
+<title>Certified Threshold Search Proofs</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=IBM+Plex+Sans:wght@500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a single reading column like a refereed note, with a slim contents rail on wide screens. */
+:root {
+  --paper: #f7f8fa;
+  --ink: #1b2230;
+  --muted: #5b6577;
+  --rule: #d9dee7;
+  --accent: #2f5d8a;
+  --stmt-bg: #eaf0f7;
+  --code-bg: #eceff4;
+  --serif: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #12161d; --ink: #e3e7ee; --muted: #9aa4b5; --rule: #2a313d;
+    --accent: #8db6e0; --stmt-bg: #1a2230; --code-bg: #1d232d; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #12161d; --ink: #e3e7ee; --muted: #9aa4b5; --rule: #2a313d;
+  --accent: #8db6e0; --stmt-bg: #1a2230; --code-bg: #1d232d; color-scheme: dark;
+}
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--serif); font-size: 17px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap {
+  max-width: 1080px; margin: 0 auto; padding-block: 48px 96px;
+  display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 56px;
+}
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 28px 64px; } }
+header { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--rule); padding-bottom: 28px; }
+.eyebrow { font-family: var(--sans); font-weight: 600; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--sans); font-weight: 600; font-size: clamp(28px, 4vw, 38px); line-height: 1.15; margin: 0; text-wrap: balance; }
+.lede { max-width: 66ch; color: var(--muted); margin: 0; }
+.lede p { margin: 0 0 .4em; }
+nav { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font-family: var(--sans); font-size: 14px; }
+@media (max-width: 860px) { nav { position: static; } }
+nav .label { font-weight: 600; font-size: 12px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+nav ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+nav a { color: var(--ink); text-decoration: none; display: flex; gap: 10px; }
+nav a:hover, nav a:focus-visible { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--mono); color: var(--accent); min-width: 1.4em; font-variant-numeric: tabular-nums; }
+main { min-width: 0; max-width: 70ch; }
+h2 { font-family: var(--sans); font-weight: 600; font-size: 22px; margin: 2.4em 0 .7em; display: flex; gap: 12px; align-items: baseline; text-wrap: balance; scroll-margin-top: 24px; }
+main > h2:first-child { margin-top: 0; }
+p { margin: 0 0 1em; }
+ul, ol { padding-left: 1.3em; margin: 0 0 1em; }
+li { margin-bottom: .35em; }
+p.stmt { background: var(--stmt-bg); padding: 14px 18px; margin: 1.6em 0 1em; }
+p.stmt strong { font-family: var(--sans); font-weight: 600; font-size: 15px; letter-spacing: .01em; }
+p.proof em:first-child { font-style: italic; color: var(--muted); }
+.qed { float: right; color: var(--muted); margin-left: 12px; }
+code { font-family: var(--mono); font-size: .86em; background: var(--code-bg); padding: 1px 5px; }
+code.file { color: var(--accent); }
+strong { font-weight: 600; }
+table { border-collapse: collapse; font-size: 15px; display: block; overflow-x: auto; }
+th, td { border-bottom: 1px solid var(--rule); padding: 6px 10px; text-align: left; }
+footer { grid-column: 1 / -1; border-top: 1px solid var(--rule); padding-top: 20px; font-family: var(--sans); font-size: 13px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Refereed note · exact threshold vector search</div>
+    <h1>Certified Threshold Search Proofs</h1>
+    <div class="lede">
+
+      <p>Floors on how tightly any stored code can certify a similarity, optimality of reading a progressive code level by level, and the guarantees of the randomised scheme. Every result here passed an independent referee check; open questions are listed as conjectures in the last section.</p>
+    </div>
+  </header>
+  <nav aria-label="Contents">
+    <div class="label">Contents</div>
+    <ol>{{NAV}}</ol>
+  </nav>
+  <main>
+    {{BODY}}
+  </main>
+  <footer>Numerical checks referenced in the text are scripts in the research scratch directory (<code>proofcheck/</code>). Statements assume the setting of section 0 throughout.</footer>
+</div>

@@ -1,0 +1,5 @@
+t=0.98: queries 7  median answers 8  oracle Hamming radius median 95/768 (background mean 378)  frac within radius 0.0002  pigeonhole per-chunk radius 1  candidate frac median 0.0653 mean 0.0978  posting lists unioned 816
+t=0.95: queries 30  median answers 112  oracle Hamming radius median 136/768 (background mean 383)  frac within radius 0.0006  pigeonhole per-chunk radius 2  candidate frac median 0.1439 mean 0.2378  posting lists unioned 6576
+t=0.9: queries 37  median answers 1148  oracle Hamming radius median 194/768 (background mean 385)  frac within radius 0.0030  pigeonhole per-chunk radius 4  candidate frac median 0.7085 mean 0.5899  posting lists unioned 120816
+t=0.8: queries 40  median answers 11404  oracle Hamming radius median 284/768 (background mean 387)  frac within radius 0.0217  pigeonhole per-chunk radius 5  candidate frac median 0.9899 mean 0.9779  posting lists unioned 330480
+t=0.7: queries 40  median answers 40222  oracle Hamming radius median 374/768 (background mean 390)  frac within radius 0.2888  pigeonhole per-chunk radius 7  candidate frac median 1.0000 mean 0.9999  posting lists unioned 1263984

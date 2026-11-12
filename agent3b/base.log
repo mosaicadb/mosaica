@@ -1,0 +1,18 @@
+[    44s] clusters done
+[    56s] group 0 items 33242 violations 0
+[    59s] group 1 items 8203 violations 0
+[    60s] group 2 items 3759 violations 0
+[    66s] group 3 items 18750 violations 0
+[    69s] group 4 items 10982 violations 0
+[    70s] group 5 items 4677 violations 0
+[    77s] group 6 items 22967 violations 0
+[    78s] group 7 items 4104 violations 0
+[    83s] group 8 items 13033 violations 0
+[    87s] group 9 items 14644 violations 0
+[   100s] group 10 items 40386 violations 0
+[   105s] group 11 items 17821 violations 0
+[   107s] group 12 items 7432 violations 0
+[   112s] 0.95 {'matches': 0.010724875, 'baseline_bytes': 8.6692301, 'baseline_pct': 0.5644030013020833, 'first_pass_bytes': 4, 'annulus_touched': 0.2026154, 'annulus_violations': 0, 'sorted_annulus_bytes': 5.3153466, 'sorted_annulus_pct': 0.34605121093749996, 'ideal_matches_only_pct': 1.0724875}
+[   113s] 0.9 {'matches': 0.03730345, 'baseline_bytes': 13.3622955, 'baseline_pct': 0.8699411132812499, 'first_pass_bytes': 4, 'annulus_touched': 0.379141625, 'annulus_violations': 0, 'sorted_annulus_bytes': 10.5223835, 'sorted_annulus_pct': 0.6850510091145834, 'ideal_matches_only_pct': 3.7303450000000002}
+[   114s] 0.8 {'matches': 0.0790489, 'baseline_bytes': 28.6850575, 'baseline_pct': 1.8675167643229167, 'first_pass_bytes': 4, 'annulus_touched': 0.723377475, 'annulus_violations': 0, 'sorted_annulus_bytes': 27.3172678, 'sorted_annulus_pct': 1.7784679557291665, 'ideal_matches_only_pct': 7.904890000000001}
+[   115s] 0.7 {'matches': 0.15968255, 'baseline_bytes': 81.9554567, 'baseline_pct': 5.335641712239584, 'first_pass_bytes': 4, 'annulus_touched': 0.887987225, 'annulus_violations': 0, 'sorted_annulus_bytes': 81.4356479, 'sorted_annulus_pct': 5.301799993489584, 'ideal_matches_only_pct': 15.968255000000001}

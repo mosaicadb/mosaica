@@ -1,0 +1,3 @@
+[    0.4s] glove100 N 200000 n 100 K 3200 G 16 KD 100 control False
+[   59.8s] kmeans done; cluster sizes min/med/max 1 57 258 group sizes [10696, 24482, 10349, 12010, 10960, 12017, 6127, 12823, 2399, 6013, 16105, 20527, 14680, 9, 23111, 17692]
+[   60.9s] bases done; mean residual energy per item 0.5988662017822266
