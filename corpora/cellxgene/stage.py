@@ -23,7 +23,6 @@ import time
 import urllib.request
 
 import numpy as np
-import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..common.timing import Steps

@@ -135,16 +135,19 @@ def census_summary() -> tuple[dict, dict[str, str], dict[str, np.ndarray]]:
     for species in sources.SPECIES:
         t = pq.read_table(sources.obs_path(species),
                           columns=["dataset_id", "cell_type_ontology_term_id", "cell_type",
-                                   "is_primary_data"])
+                                   "is_primary_data"]).unify_dictionaries()
         vc = pc.value_counts(t.column("dataset_id").combine_chunks())
         per_dataset[species] = dict(zip(vc.field("values").to_pylist(),
                                         vc.field("counts").to_pylist()))
-        pairs = pa.table({"id": t.column("cell_type_ontology_term_id").cast(pa.string()),
-                          "label": t.column("cell_type").cast(pa.string())})
-        for row in pairs.group_by(["id", "label"]).aggregate([]).to_pylist():
-            types.setdefault(row["id"], row["label"])
+        # The distinct (id, label) pairs, found over dictionary codes rather than 10^8 strings.
+        ids, labels = (encoded(t.column(c)) for c in ("cell_type_ontology_term_id", "cell_type"))
+        pairs = np.unique(ids.indices.to_numpy().astype(np.int64) << 32
+                          | labels.indices.to_numpy().astype(np.int64))
+        for pair in pairs:
+            types.setdefault(ids.dictionary[int(pair >> 32)].as_py(),
+                             labels.dictionary[int(pair & 0xFFFFFFFF)].as_py())
         primary[species] = t.column("is_primary_data").to_numpy()
-        del t, pairs
+        del t, ids, labels
     return per_dataset, types, primary
 
 
@@ -251,11 +254,15 @@ def route(species: str, take: np.ndarray | None, primary: np.ndarray, managed: b
 # ------------------------------------------------------------------------------------ writing
 
 
+def encoded(column) -> pa.DictionaryArray:
+    """A column as one dictionary array, encoding it where it is not one already."""
+    col = column.combine_chunks() if isinstance(column, pa.ChunkedArray) else column
+    return col if pa.types.is_dictionary(col.type) else pc.dictionary_encode(col)
+
+
 def through(dictionary_column: pa.Array, mapping: dict) -> pa.Array:
     """`mapping` applied to a dictionary-encoded column, once per distinct value."""
-    col = dictionary_column
-    if not pa.types.is_dictionary(col.type):
-        col = pc.dictionary_encode(col)
+    col = encoded(dictionary_column)
     values = col.dictionary.cast(pa.string()).to_pylist()
     mapped = pa.array([mapping.get(v) for v in values], pa.string())
     return mapped.take(col.indices)
@@ -437,8 +444,7 @@ def main() -> None:
                     values[name].update(v for v in pc.unique(columns[column]).to_pylist()
                                         if v is not None)
 
-                codes = (type_id if pa.types.is_dictionary(type_id.type)
-                         else pc.dictionary_encode(type_id))
+                codes = encoded(type_id)
                 ids = codes.dictionary.cast(pa.string()).to_pylist()
                 lists = pa.array([tier_lists[i] for i in ids], pa.list_(pa.string()))
                 members.write_table(pa.table(

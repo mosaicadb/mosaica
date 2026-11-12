@@ -47,8 +47,6 @@ from pathlib import Path
 import numpy as np
 
 from ..common.fit_place import (
-    SEED,
-    UMAP_PARAMS,
     DeviceWatermark,
     Placer,
     fit_layout,

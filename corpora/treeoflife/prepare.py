@@ -61,6 +61,7 @@ import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from ..arxiv.writer import ArtifactSet
+from ..common import fit_place
 from ..common.paths import ladder
 from ..common.rung_files import write_deployment, write_vocabulary
 from ..common.timing import Steps
@@ -903,7 +904,7 @@ def main() -> None:
         "geo_share": round(in_geo / n, 6),
         "gbif_matched": matched,
         "named": named,
-        "umap": dict(routes.UMAP_PARAMS, seed=routes.SEED, implementation="cuml",
+        "umap": dict(fit_place.UMAP_PARAMS, seed=fit_place.SEED, implementation="cuml",
                      route=("fit on the staged 2.5M sample, place every row against its CAGRA "
                             "index off the share" if whole else "fit over the sample itself"),
                      graph="cagra fp16", fit_rows=fit_meta["rows"],

@@ -6,10 +6,13 @@ embedding the Census team publishes for it, and carries its cell type, tissue, d
 development stage, donor, dataset and collection. The Cell Ontology is drawn over both maps as a
 four-tier layer, from a broad class such as "leukocyte" down to the cell type itself.
 
-| View | Cells | Of which primary |
-|---|---|---|
-| `human` | 158,982,719 | 96.6M |
-| `mouse` | 43,653,561 | |
+| View | Cells | Primary cells | Datasets |
+|---|---|---|---|
+| `human` | 158,982,719 | 96,591,226 | 1,086 |
+| `mouse` | 43,653,561 | 18,384,205 | 172 |
+
+A cell that appears in more than one dataset is in the corpus once per dataset, and only one of
+those rows is primary.
 
 The corpus is a demonstration and a speed benchmark. The layout only has to look good, and its
 fidelity to the embedding is not measured.
@@ -46,7 +49,10 @@ a vector. The vector step keeps a ledger of the million-row ranges it has writte
 interrupted run resumes where it stopped.
 
 `prepare.py --sample N` takes N cells of each species uniformly; `--sample 0` takes all of them.
-`--layout-only` stops after the layouts and `--reuse-layout` starts from them.
+It keeps each species' layout as `layout-<species>.npy` beside the data, so `--reuse-layout` can
+start from it, and `--layout-only` stops once they are written. It also draws
+`overview-<species>.png`, three million of the species' cells coloured by their Cell Ontology
+class.
 
 ## The layout
 
@@ -58,7 +64,55 @@ its 15 nearest fit cells' positions. The metric is Euclidean, which is the metri
 space is trained in. The fit and the placement are [`common/fit_place.py`](../common/fit_place.py),
 which the TreeOfLife rung uses too.
 
-<!-- measured -->
+Every cell of a species is placed against one CAGRA index, so the placement is a search per cell
+and costs about 5 minutes for all human cells. CAGRA searches a 50-wide vector about 500 times
+more slowly than a 64-wide one on cuVS 26.10, so `fit_place.py` pads every vector with zero
+columns to a multiple of 32, which changes no distance.
+
+Three things in the pictures look worse than a direct UMAP would:
+
+- A haze of cells lies between the clusters. A cell whose 15 nearest fit cells sit in two clusters
+  is placed between them, because its position is their weighted mean.
+- Cells stack. A cell duplicated across datasets has one vector and so one position, and placed
+  cells crowd onto their fit neighbours: the 158,982,719 human cells fall in 99,323,623 distinct
+  cells of the build's 65,536 by 65,536 grid, and the 43,653,561 mouse cells in 18,551,038.
+- The layout is not reproducible under a seed, because CAGRA's index build takes none.
+
+The mouse map is dominated by embryo atlases: 34.3 million of its 43.7 million cells are from
+embryos, so "mesodermal cell" is its second largest class.
+
+## Measured
+
+On one box: WSL2, 12 cores, 47 GB of memory, one RTX 3080 with 10 GB, local NVMe. Staging read
+from the Census's S3 bucket in us-west-2 over a home connection.
+
+| Step | Wall | Peak memory | Output |
+|---|---|---|---|
+| `stage.py --obs --vectors --ontology` | 33 min 6 s | 23.1 GB | 21 GB staged |
+| of which the cell tables | 222 s | | 1.35 GB of parquet |
+| of which the human vectors | 1,388 s, 114,500 rows/s | | 15.9 GB |
+| of which the mouse vectors | 374 s, 116,700 rows/s | | 4.4 GB |
+| `prepare.py --sample 0` | 10 min 42 s | 24.0 GB | 3.9 GB of parquet |
+| of which the human layout | 322 s | 4.2 GB on the card | |
+| of which the mouse layout | 113 s | 2.5 GB on the card | |
+| of which the cells, points and members | 172 s | | |
+| `mosaica build --stage-timings` | 17 min 43 s | 15.2 GB | 23.6 GB bundle |
+| `prepare.py --sample 1000000` | 49 s | 19.0 GB | |
+| `mosaica build` of the sample | 11 s | 0.67 GB | 260 MB bundle |
+
+The peak memory of `stage.py` and `prepare.py` is the resident set, which counts the pages of the
+memory-mapped vector files they write or read.
+
+| Layout step | Human, 4,000,000 fit cells | Mouse, 2,000,000 fit cells |
+|---|---|---|
+| CAGRA index over the fit set | 8.0 s | 3.5 s |
+| its kNN graph | 6.1 s | 3.1 s |
+| UMAP over the graph | 27.3 s | 27.3 s |
+| placing every cell | 276 s, 575,900 cells/s | 78 s, 559,800 cells/s |
+
+A server over the full bundle answered `/readyz` 4.0 s after starting. An anonymous viewer's
+whole-map viewport at zoom 2 took 0.03 s on the human view, and a count of the visible cells by
+`tissue_general` took 0.06 s.
 
 ## Visibility by collection
 
@@ -73,7 +127,10 @@ carry the total past 15% of all cells, until the total reaches 12%.
 `restricted-collections.json`, beside the data, lists each restricted collection with its term,
 name and cell count.
 
-<!-- restricted -->
+The rule picks 35 of the 304 collections that hold human or mouse cells, which hold 25,983,078
+cells, 12.82% of the corpus: 15.40% of human cells and 3.43% of mouse cells. An anonymous viewer
+sees 134,498,431 human cells, and a viewer granted the three largest restricted collections sees
+147,577,505.
 
 The `collection` and `dataset` vocabularies are `derived`, so a viewer is told the name of a
 collection or a dataset only where they can see one of its cells.
@@ -103,7 +160,10 @@ An artifact's key is its tier and label, such as `t1:lymphocyte`, because a shor
 label at several tiers and a tiered layer resolves a parent by key; each artifact carries the
 label alone as its name.
 
-<!-- ontology -->
+The rule gives 16 classes, 148 lineages, 453 parent types and 1,014 cell types. 54 cell types,
+1.6% of cells, are under none of the classes and are in "other cell", among them "kidney cell",
+"secretory cell" and "mesenchymal cell", and 1.5% of cells are `unknown`. "neural cell" is both a
+class and a cell type the Census uses, for 2.5% of cells, so it repeats at every tier.
 
 ## Fields
 
