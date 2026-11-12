@@ -148,3 +148,73 @@ Graph indexes for exactness; multi-index hashing; wide random sparse features; L
 costly); trees over items and small set summaries (proved to need many bits); two independent codes
 of one item; per-cluster shape descriptions; class-uniform guarantees; query-time randomness;
 modelling non-Gaussian structure (small gains); learned codebooks for correctness (fine for cost).
+
+## 8. Related work
+
+Numbers in brackets refer to the bibliography in `lit/REPORT.md`, which also records how each
+source was verified.
+
+**Exact search over compressed approximations.** Filtering with a compact per-item approximation
+that yields guaranteed bounds, then refining, goes back to the VA-file [1], which scans
+scalar-quantised approximations, bounds each distance from below and above, and reads full vectors
+only where the bounds do not decide. The VA+-file [2] added a decorrelating transform and
+non-uniform bit allocation, and the IQ-tree [3] chose the resolution of each page by a cost model.
+BOND [4] accumulates a score one dimension at a time over a vertical layout and discards items whose
+bound falls below the current k-th best. For inner products, LEMP [6] retrieves exactly the entries
+of a matrix product above a threshold, which is our threshold query: it sorts by length, prunes
+buckets, and bounds the unread coordinates by the product of the remaining norms. FEXIPRO [7]
+combines an SVD basis, integer upper bounds and incremental pruning. More recently ANSMET [8] reads
+most-significant bits first with conservative lower bounds, PDX [9] revives dimension-wise exact
+pruning, and Panorama [10] learns an energy-compacting orthogonal transform, stores each vector's
+tail energy at a few levels, and refines level by level with Cauchy–Schwarz bounds. Panorama is the
+closest deterministic precedent to our early levels. We differ in refining a quantised nested code
+in local bases and in certifying set-valued threshold results.
+
+**Randomised bounds.** ADSampling [11] samples rotated coordinates incrementally and stops by a
+hypothesis test. RaBitQ [12] gives an unbiased estimator with a probabilistic error bound from a
+random rotation. Its extension [13] produces a code whose most significant bits are the one-bit
+code, so that a search reads those bits first and the rest only when needed. Our randomised levels
+follow this line, with a finer schedule, an exact tail for the sphere and a union bound over
+undecided items. Concurrent work [18] derives per-query guarantees from exact error quantiles of
+rotated one-bit codes. We know of no earlier scheme in which a single per-item stream carries
+deterministic certificates in its first levels and randomised ones after.
+
+**Stored norms.** Bounding an unread or mis-coded remainder by Cauchy–Schwarz with a stored norm is
+used by LEMP [6], L2AP [19] and Panorama [10]; RaBitQ stores two scalars per vector and counts them
+[13]. Our certificate weights the norm by a profile of query offsets and applies it to the
+quantisation error of every prefix.
+
+**Limits.** Alon and Klartag [20] determine, up to constants, the bits needed to keep all pairwise
+inner products of a point set to a given additive error. Ordentlich and Polyanskiy [22] give the
+rate–distortion function for the mean squared error of Gaussian inner products. Our floor concerns a
+different quantity, the mean half-width of a sound interval, which is the support function of the
+encoder's cell. It follows the Shannon lower bound with Urysohn's inequality in place of the
+second-moment step. We have not found it stated elsewhere.
+
+**Optimality of reading order.** Seidl and Kriegel [25] showed that a multi-step k-NN algorithm can
+refine the minimum number of candidates for a given lower-bounding filter; Kriegel et al. [26]
+extended this to filters with upper bounds; Fagin, Lotem and Naor [27] introduced instance
+optimality for threshold-style aggregation, which Li et al. [28] adapted to cosine thresholds.
+Theorem 4 is the same indistinguishability argument applied per item to nested prefixes.
+
+**Exact k-NN from bounds.** Selecting by the k-th best lower bound and certifying membership when no
+other upper bound can exceed it is the stopping rule of the VA-file [1] and of NRA [27]. Seeding a
+threshold and then running a threshold query is LEMP's Row-Top-k [6].
+
+**Queries that differ from the data.** ScaNN's anisotropic loss [30] weights error along the data
+vector. QUIP [31] uses example queries in codebook learning, LeanVec [32] fits a projection to the
+query distribution for text-to-image search, and RoarGraph [33] builds a graph from it. We fit bit
+allocation and certificate weights to a mixture of item and text queries; this changes cost and
+never correctness.
+
+**Cluster-level pruning.** Ordering a cluster's members by distance to its reference point, so that
+a query touches a contiguous key range, is iDistance [34]. Covering-radius pruning is the M-tree [35]
+and the list of clusters [36], after Fukunaga and Narendra [37]; Schubert [38] gives the cosine form.
+Per-cluster minimum and maximum distances to split points are GNAT's range tables [39]; pivot tables
+originate with LAESA [40]. Tribase [41] applies such bounds to inverted-file indexes.
+
+**Filtering and access control.** Filtered approximate search [44–49] trades recall against
+selectivity; all treat filtering first and scanning exactly as the correct baseline. Espiritu and
+Cash [52] show that post-filtering over a shared index leaks hidden rows through timing and relevance
+scores. Our results depend, item by item, only on that item's data, so a masked result equals a
+result computed over the visible set. Timing is outside this guarantee.
