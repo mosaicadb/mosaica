@@ -18,7 +18,8 @@
 # is named for the projection experiment this rung's two views came out of.
 
 pyarrow
-numpy
+# cuML 26.10 fails to import with numpy 2.3 or later.
+numpy<2.3
 scikit-learn
 scipy
 
