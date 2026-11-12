@@ -568,3 +568,17 @@ fn a_suppression_moves_the_filtered_anchor_on_the_next_request() {
 fn session_of(engine: &Engine) -> Session {
     engine.authorise(&full_coverage_credential()).unwrap()
 }
+
+/// **A capped filtered sample is the `mosaica_id` prefix of the uncapped one**, so a client that
+/// asks for fewer points gets the first of the same ones.
+#[test]
+fn a_capped_filtered_sample_is_the_prefix_of_the_uncapped_one() {
+    let fx = fixture();
+    let live = fx.live("live");
+    let session = session_of(&live);
+    let common = fx.kind("common");
+    let uncapped = ask(&live, &session, 0, WHOLE_MAP, CAP, Some(&common)).points.mosaica_ids;
+    assert!(uncapped.len() > 5, "the cap must bind below the sample: {}", uncapped.len());
+    let capped = ask(&live, &session, 0, WHOLE_MAP, 5, Some(&common)).points.mosaica_ids;
+    assert_eq!(capped, uncapped[..5]);
+}

@@ -210,10 +210,15 @@ def test_masks_counts_and_selection_over_seven_shards_are_one_shards(built, gran
             assert selection["many"].n_occ == occupancy.sketch_ladder(tiles, depth)[depth]
             # Saturated and uncapped, every visible point is served: the same positions, in an
             # order each build's identifiers decide.
-            params = {"k_min": 1, "cap": mv.N_ITEMS, "v_total": totals["one"], "m_target": 1}
+            params = {
+                "k_min": 1,
+                "cap": mv.N_ITEMS,
+                "v_total": totals["one"],
+                "m_target": mv.N_ITEMS,
+            }
             for tile in tiles:
                 served = {
-                    w: sorted(selection[w].served_points(tile, filtered=True, **params))
+                    w: sorted(selection[w].served_points(tile, **params))
                     for w in built
                 }
                 assert served["one"] == served["many"]

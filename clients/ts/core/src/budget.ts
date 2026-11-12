@@ -9,11 +9,11 @@ import {rectContains, type TileRect} from './rects.js';
  * serves over the cells a request would address, and the depth asked for is the deepest whose
  * figure fits the budget ({@link countedMarks}, {@link chooseDepth}).
  *
- * What a tile of `n` matching items serves depends on the request. Under a filter it serves every
- * match up to the cap, `min(k, n)`. Without one the server thins it: a tile at depth `d` serves
- * about `θ_d · n`, at least `min(k_min, k)` and at most `k`, where
- * `θ_d = θ_target · N_occ(d) / V_total` over the viewer's whole visible set, so the average occupied
- * tile serves `θ_target` marks at every depth ({@link Thinning}). `θ_d` grows with depth, and a
+ * The server thins a tile of `n` matching items: a tile at depth `d` serves about `θ_d · n`, at
+ * least `min(k_min, k)` and at most `k`, where `θ_d = θ_target · N_occ(d) / V` over the viewer's
+ * whole visible set, so the average occupied tile serves `θ_target` marks at every depth
+ * ({@link Thinning}). `V` is the visible total, or under a filter the matched total, and `N_occ(d)`
+ * counts the occupied tiles of the unfiltered map either way. `θ_d` grows with depth, and a
  * tile is served whole only once it reaches 1, so on a corpus far below the cap a deeper request
  * still draws more.
  *
@@ -34,10 +34,11 @@ export const MIN_DEPTH = 3;
 export type CountCell = {x: number; y: number; count: number};
 
 /**
- * How an unfiltered request thins a tile. The server's `θ_d` needs the occupied tiles and the
- * visible total over the viewer's whole set, which the client does not hold. A count field gives
- * both over the ground it covers, so `θ_d` is estimated as `target · occupied(d) / total` over the
- * field, which is exact where the field covers the whole map. Where a response has shown `θ` at
+ * How the server thins a tile. The server's `θ_d` needs the occupied tiles and the visible total
+ * over the viewer's whole set, which the client does not hold. A count field gives both over the
+ * ground it covers, so `θ_d` is estimated as `target · occupied(d) / total` over the field, which
+ * is exact where an unfiltered field covers the whole map; under a filter the field's occupied
+ * cells are the matches', fewer than the server counts, so the estimate is low. Where a response has shown `θ` at
  * some depth, that figure is used and carried to other depths in proportion to the field's
  * occupied cells.
  *
@@ -79,7 +80,7 @@ export type BudgetInputs = {
   counts?: CountField;
   /** The cap in force, `min(k, k_max_marks)`. Required to use counts. */
   k?: number;
-  /** How the server thins an unfiltered tile. Absent, every match up to `k` is served, as under a filter. */
+  /** How the server thins a tile. Absent, every match up to `k` is served. */
   thinning?: Thinning;
   /**
    * The principal's visible count over the view, from the previous response. It bounds the average
@@ -100,7 +101,7 @@ export type DepthChoice = {
    * Where {@link predictedMarks} came from.
    *
    * - `counts`: what the cells serve at the depth the counts are held at (see
-   *   {@link countedMarks}). Exact under a filter; under thinning as exact as the estimate of `θ`.
+   *   {@link countedMarks}). Exact without thinning; under thinning as exact as the estimate of `θ`.
    * - `bound`: the counts are held at another depth. An upper bound going deeper, a lower bound
    *   going shallower (an ancestor tile reaches beyond the view, and the counts describe only the
    *   part inside).

@@ -32,8 +32,7 @@ export type Clock = {
 export type ViewState = {target: [number, number, number]; zoom: number};
 
 /**
- * What the driver needs to know from `/v1/meta`, injected once at session start, and whether the
- * requests carry a filter, which decides how the server thins a tile (see `budget.ts`). @internal
+ * What the driver needs to know from `/v1/meta`, injected once at session start. @internal
  */
 export type DriverMeta = {
   kMaxMarks: number;
@@ -41,8 +40,6 @@ export type DriverMeta = {
   thetaTargetMarks: number;
   /** `selection.kMin`. Unset, 0. */
   kMin?: number;
-  /** Whether requests carry a filter. Unset, they do not. */
-  filtered?: () => boolean;
 };
 
 /** @internal */
@@ -159,8 +156,8 @@ export class Driver {
    */
   private counts = new Map<number, CountField>();
   /**
-   * Per depth, the `θ` an unfiltered response showed: served over matched, summed over the tiles in
-   * view that served more than the floor and fewer than the cap and their matches.
+   * Per depth, the `θ` a response to the current question showed: served over matched, summed over
+   * the tiles in view that served more than the floor and fewer than the cap and their matches.
    */
   private theta = new Map<number, number>();
   /** The presented-frame handle: all the driver knows of what is on screen. */
@@ -271,7 +268,7 @@ export class Driver {
       mTarget: this.mTarget,
       counts: this.countsFor(worldBbox(viewport, 1)),
       k: this.meta.kMaxMarks,
-      thinning: this.meta.filtered?.() ? undefined : {target: this.meta.thetaTargetMarks, kMin: this.meta.kMin ?? 0, seen: this.theta},
+      thinning: {target: this.meta.thetaTargetMarks, kMin: this.meta.kMin ?? 0, seen: this.theta},
       maxTiles: this.meta.maxTilesPerRequest,
       visibleInView: this.lastVisibleInView,
       velocity,
@@ -747,7 +744,7 @@ export class Driver {
           thinnedMatched += matched;
         }
       }
-      if (thinnedMatched > 0 && !this.meta.filtered?.()) this.theta.set(choice.depth, thinnedServed / thinnedMatched);
+      if (thinnedMatched > 0) this.theta.set(choice.depth, thinnedServed / thinnedMatched);
 
       this.trace('arrived', {
         ms: arrivedAt - startedAt,

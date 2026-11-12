@@ -233,7 +233,7 @@ impl Engine {
         let cap = k.min(self.config.k_max_marks);
         let theta = self.theta(&served, &generation, &mask, &req, cap, &mut probe);
         let filtered = self.filtered_anchor(&served, &mask, &req, &theta, tiles.tiles.len())?;
-        probe.lap(|t| &mut t.theta_anchor_ns);
+        probe.skip();
         let params = SelectParams {
             k_min: self.config.k_min,
             cap,
