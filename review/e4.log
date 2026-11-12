@@ -1,0 +1,25 @@
+group 0 items so far 8821 11 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 8 items so far 10135 12 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 16 items so far 19498 23 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 24 items so far 29511 35 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 32 items so far 36012 42 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 40 items so far 45879 53 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 48 items so far 48270 56 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 56 items so far 52222 61 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+items 52222 of 1000000
+
+== item (100 queries), answer sizes 0.01 / 0.1 / 1 / 5 %: total B per item (det-only stream) | B per item through 32 B | % of items undecided after 32 B
+  A order=item norm=item (as built)       8.46   13.41   28.45   67.50 |   8.15  11.54  18.26  29.76 |   0.8   3.9  15.7  43.1
+  B order=mix norm=mix                    7.77   12.59   27.80   67.69 |   7.47  10.78  17.60  29.51 |   0.7   3.6  15.0  42.4
+  C order=text norm=text                  8.45   13.56   29.79   72.23 |   8.07  11.45  18.34  30.42 |   0.9   4.1  16.2  44.8
+  D order=mix norms=item+text             9.36   14.60   30.60   71.95 |   9.07  12.82  20.45  33.73 |   0.7   3.5  15.0  42.3
+  E order=item norms=item+text            9.38   14.64   30.59   71.64 |   9.08  12.84  20.46  33.69 |   0.7   3.6  15.1  42.2
+  F order=item norm=mix                   7.78   12.62   27.76   67.45 |   7.48  10.80  17.60  29.48 |   0.8   3.7  15.2  42.4
+
+== text (150 queries), answer sizes 0.01 / 0.1 / 1 / 5 %: total B per item (det-only stream) | B per item through 32 B | % of items undecided after 32 B
+  A order=item norm=item (as built)      38.84   51.07   89.59  169.48 |  27.76  31.57  36.59  38.73 |  24.2  37.7  69.0  92.1
+  B order=mix norm=mix                   33.63   45.30   82.61  160.32 |  25.43  29.79  35.79  38.60 |  18.9  31.7  64.3  90.2
+  C order=text norm=text                 33.69   45.64   84.08  163.80 |  25.43  29.88  35.88  38.64 |  19.2  32.3  65.3  90.9
+  D order=mix norms=item+text            37.62   50.05   88.91  168.37 |  29.14  33.98  40.51  43.57 |  19.0  31.9  64.4  90.3
+  E order=item norms=item+text           38.33   51.07   90.53  171.01 |  29.22  34.04  40.53  43.56 |  19.8  32.8  64.9  90.3
+  F order=item norm=mix                  34.29   46.27   84.25  163.10 |  25.49  29.85  35.80  38.59 |  19.8  32.7  64.7  90.2

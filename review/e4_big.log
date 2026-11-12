@@ -1,0 +1,49 @@
+group 1 items so far 32004 40 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 3 items so far 50831 63 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 5 items so far 60476 73 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 7 items so far 81995 99 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 9 items so far 98515 120 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 11 items so far 134582 162 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 13 items so far 145733 175 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 15 items so far 154470 185 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 17 items so far 158100 190 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 19 items so far 166822 200 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 21 items so far 180954 219 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 23 items so far 196065 237 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 25 items so far 224719 272 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 27 items so far 232537 281 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 29 items so far 245293 296 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 31 items so far 245835 296 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 33 items so far 281746 338 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 35 items so far 306054 365 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 37 items so far 325197 388 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 39 items so far 347717 417 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 41 items so far 378836 454 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 43 items so far 393608 473 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 45 items so far 397774 478 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 47 items so far 413725 498 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 49 items so far 438945 530 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 51 items so far 468833 569 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 53 items so far 477022 580 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 55 items so far 482930 587 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 57 items so far 489934 596 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 59 items so far 494494 602 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 61 items so far 503339 613 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+group 63 items so far 524246 645 s viol {'A order=item norm=item (as built)': 0, 'B order=mix norm=mix': 0, 'C order=text norm=text': 0, 'D order=mix norms=item+text': 0, 'E order=item norms=item+text': 0, 'F order=item norm=mix': 0}
+items 524246 of 1000000
+
+== item (100 queries), answer sizes 0.01 / 0.1 / 1 / 5 %: total B per item (det-only stream) | B per item through 32 B | % of items undecided after 32 B
+  A order=item norm=item (as built)       6.47   10.48   23.71   67.80 |   6.17   8.86  15.38  29.14 |   0.7   2.8  12.0  41.6
+  B order=mix norm=mix                    6.08    9.97   23.34   68.45 |   5.77   8.30  14.75  28.79 |   0.6   2.7  11.7  41.1
+  C order=text norm=text                  6.42   10.53   24.72   72.25 |   6.03   8.62  15.18  29.35 |   0.8   3.0  12.5  43.0
+  D order=mix norms=item+text             7.40   11.59   25.67   72.50 |   7.11   9.98  17.27  32.93 |   0.6   2.6  11.5  41.1
+  E order=item norms=item+text            7.39   11.56   25.56   71.79 |   7.11   9.98  17.26  32.86 |   0.6   2.6  11.5  40.8
+  F order=item norm=mix                   6.06    9.92   23.17   67.80 |   5.76   8.30  14.74  28.72 |   0.6   2.7  11.7  40.9
+
+== text (150 queries), answer sizes 0.01 / 0.1 / 1 / 5 %: total B per item (det-only stream) | B per item through 32 B | % of items undecided after 32 B
+  A order=item norm=item (as built)      31.46   44.05   83.81  146.53 |  20.45  24.34  31.79  37.14 |  17.1  25.3  49.0  78.3
+  B order=mix norm=mix                   27.20   39.06   76.98  138.17 |  18.17  22.19  30.25  36.57 |  14.2  21.9  45.0  75.3
+  C order=text norm=text                 27.15   39.20   77.94  140.65 |  18.10  22.20  30.34  36.65 |  14.3  22.1  45.8  76.2
+  D order=mix norms=item+text            30.20   42.74   82.19  145.10 |  21.00  25.52  34.44  41.38 |  14.1  21.8  45.2  75.4
+  E order=item norms=item+text           30.63   43.42   83.60  147.14 |  21.11  25.63  34.49  41.37 |  14.5  22.3  45.5  75.4
+  F order=item norm=mix                  27.60   39.71   78.35  140.18 |  18.26  22.29  30.29  36.55 |  14.5  22.3  45.3  75.2
