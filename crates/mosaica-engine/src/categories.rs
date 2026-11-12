@@ -788,7 +788,7 @@ impl Engine {
                                 .find(|(own, _)| own.id() == side.shard.id())
                                 .expect("every shard has a candidate");
                             let within = match filter {
-                                None => crate::aggregate::set::in_view(&open, place, candidate)?,
+                                None => crate::aggregate::set::in_view(&open.served, place, candidate)?,
                                 Some(expr) => {
                                     let (entities, verdict) =
                                         crate::aggregate::set::entities_passing(

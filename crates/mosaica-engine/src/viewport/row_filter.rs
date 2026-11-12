@@ -1167,9 +1167,8 @@ pub(crate) fn predicate_source<'a>(
 
 impl Engine {
     /// The request's filter and highlight, evaluated and crossed into the mask — after the tile
-    /// ranges, before the sweep. Everything before this call stays blind to the filter: θ's anchor
-    /// and the masked counts already computed ignore it, or an artifact would appear and vanish,
-    /// or density would shift, as a viewer typed. `filters` and `highlight` are evaluated
+    /// ranges, before the sweep. The masked counts already computed ignore the filter, or an
+    /// artifact would appear and vanish as a viewer typed. `filters` and `highlight` are evaluated
     /// together against the same candidate and the same pre-filter mask — a highlight is a
     /// conjunction with the filter's candidate by construction, and evaluating its leaves against
     /// an already-filtered mask would make the two positions of one clause mean different things.

@@ -1522,88 +1522,6 @@ fn a_filtered_viewport_serves_only_matching_marks() {
     }
 }
 
-/// §8.5's match-layer count rule: a filtered request serves every match up to the cap, and θ's
-/// threshold clause never thins it. Every other filtered test in this file saturates θ by fixture
-/// (`common::config`'s doc says why), so this is the one place the interaction is genuinely live:
-/// without the rule, a filtered tile is pushed through the *unfiltered* θ odds, and a filter that
-/// narrows a tile a hundredfold draws the `k_min` floor instead of its matches — the map thins in
-/// proportion to the filter's selectivity, silently.
-#[test]
-fn a_filter_serves_every_match_up_to_the_cap_even_with_theta_live() {
-    let fx = fixture();
-    let cache = fx._dir.path().join("cache-vp-theta");
-    let wal = fx._dir.path().join("wal-vp-theta");
-    // θ live and small, unlike every other engine these tests open.
-    let live_theta = mosaica_engine::EngineConfig {
-        theta_target_marks: 4,
-        ..config()
-    };
-    let engine = mosaica_engine::Engine::open(
-        &fx.bundle,
-        &cache,
-        &wal,
-        live_theta,
-    )
-    .expect("engine should open against a freshly built bundle");
-    let session = engine.authorise(&full_coverage_credential()).unwrap();
-
-    // The control: the threshold clause genuinely thins the unfiltered map under this config. If
-    // this stops holding, θ is no longer live here and the assertions below prove nothing.
-    let unfiltered = engine
-        .viewport(
-            &session,
-            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000),
-        )
-        .expect("an unfiltered viewport answers");
-    assert!(
-        (unfiltered.points.len() as u64) < N,
-        "θ must be live for this test: {} of {N} served unfiltered",
-        unfiltered.points.len()
-    );
-
-    let matches = (0..N).filter(|&e| department_of(e) == Some("eng")).count() as u64;
-    let eng = FilterOperand::Equals(AttrLocalId::new(fx.codes["eng"]));
-    let filtered = engine
-        .viewport(
-            &session,
-            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 10_000)
-                .filter(leaf("department", eng.clone())),
-        )
-        .expect("a filtered viewport answers");
-    assert_eq!(
-        filtered.points.len() as u64,
-        matches,
-        "a filtered request serves its matches in full below the cap, θ notwithstanding"
-    );
-    for tile in &filtered.tiles {
-        assert_eq!(
-            tile.served, tile.matched,
-            "below the cap, every matched row in a tile is served"
-        );
-    }
-
-    // The cap still caps: a request `k` below the match count serves exactly `k`, and the
-    // truncated set is the `mosaica_id` prefix of the full one — the nesting argument's
-    // client-truncation clause holds for the match layer too. One tile at zoom 0, so the
-    // response's point order is the tile's ascending-id order and a slice comparison is exact.
-    let capped = engine
-        .viewport(
-            &session,
-            ViewportRequest::new("s0", 0, FULL_VIEWPORT, 5).filter(leaf("department", eng)),
-        )
-        .expect("a capped filtered viewport answers");
-    assert_eq!(
-        capped.points.len(),
-        5,
-        "the cap governs when matches exceed it"
-    );
-    assert_eq!(
-        capped.points.mosaica_ids,
-        filtered.points.mosaica_ids[..5],
-        "the capped served set is the id-prefix of the uncapped one"
-    );
-}
-
 /// A viewport far smaller than the filter's result crosses into row space by **testing its own
 /// rows** rather than projecting the whole result, and the two routes agree.
 ///
@@ -1723,11 +1641,10 @@ fn a_narrow_viewport_over_a_broad_filter_tests_its_own_rows() {
     );
 }
 
-/// **The selection threshold stays anchored on the unfiltered total** (§8.4, I12). A filter may
-/// move the frontier up, never down — so the anchor a filtered request uses is the same one the
-/// unfiltered request uses, and a viewer typing does not coarsen their own map.
+/// **A filter moves `matched` and never `visible`**: each tile's composed count is the same
+/// filtered or not.
 #[test]
-fn a_filter_does_not_move_the_threshold_anchor() {
+fn a_filter_does_not_move_the_visible_count() {
     let fx = fixture();
     let cache = fx._dir.path().join("cache-theta");
     let wal = fx._dir.path().join("wal-theta");
@@ -1753,8 +1670,6 @@ fn a_filter_does_not_move_the_threshold_anchor() {
     let sum = |v: &[mosaica_engine::TileCount], f: fn(&mosaica_engine::TileCount) -> u64| -> u64 {
         v.iter().map(f).sum()
     };
-    // `visible` is the composed count and must not move with the filter — that is what keeps θ's
-    // anchor unfiltered, and with it I12's "a filter moves the frontier up, never down".
     assert_eq!(
         sum(&filtered.tiles, |t| t.visible),
         sum(&unfiltered.tiles, |t| t.visible),
@@ -5128,20 +5043,10 @@ fn the_row_route_and_the_entity_route_agree_over_a_numeric_range() {
     );
 }
 
-/// **A filter narrows the selection and never moves θ** (I3/I12): the label frontier anchors on the
-/// unfiltered composed mask, so the same viewport answers the same θ filtered or not.
-///
-/// This is the invariant a row-space route is most likely to break by accident, because the route
-/// is evaluated inside the same sweep that computes the anchor — and an anchor taken after the
-/// filter would let a caller move the frontier by narrowing, which is a disclosure rather than a
-/// view. The unfiltered total is asserted alongside it: it is `visible_total()`, computed above the
-/// filter and deliberately blind to it.
-///
-/// Both row-space families run it: the anchor is computed above the filter whatever the leaf reads,
-/// and a rule that held for a category's codes and not for a number's bounds would be a coincidence
-/// of where the code sits rather than a property of the sweep.
+/// **A row-space filter narrows the selection and never moves a tile's `visible`** (I3/I12), for
+/// a category's codes and a number's bounds alike.
 #[test]
-fn a_render_column_filter_narrows_the_selection_without_moving_the_anchor() {
+fn a_render_column_filter_narrows_the_selection_without_moving_the_visible_count() {
     let fx = fixture();
     let cache = fx._dir.path().join("cache-anchor");
     let wal = fx._dir.path().join("wal-anchor");
@@ -5183,23 +5088,19 @@ fn a_render_column_filter_narrows_the_selection_without_moving_the_anchor() {
             "{family}: this test is only meaningful if the row route ran"
         );
 
-        // `TileCount::visible` is the anchor's own input — the composed mask's count for the tile,
-        // computed above the filter — while `matched` is what the filter narrowed to. The first
-        // must be identical across the pair; the second must not be.
-        let anchor = |out: &mosaica_engine::ViewportOut| -> Vec<(u64, u64)> {
+        let visible = |out: &mosaica_engine::ViewportOut| -> Vec<(u64, u64)> {
             out.tiles.iter().map(|t| (t.tile, t.visible)).collect()
         };
-        let (visible, visible_unfiltered) = (anchor(&filtered), anchor(&unfiltered));
         assert_eq!(
-            visible, visible_unfiltered,
-            "{family}: the filter moved the anchor: θ anchors on the unfiltered composed mask \
-             (I3/I12)"
+            visible(&filtered),
+            visible(&unfiltered),
+            "{family}: the filter moved a tile's visible count (I3/I12)"
         );
         let matched: u64 = filtered.tiles.iter().map(|t| t.matched).sum();
         let visible_total: u64 = filtered.tiles.iter().map(|t| t.visible).sum();
         assert!(
             matched < visible_total,
-            "{family}: the filter must actually have narrowed the matched set beneath the anchor"
+            "{family}: the filter must actually have narrowed the matched set"
         );
         let drawn: std::collections::BTreeSet<u64> =
             filtered.points.mosaica_ids.iter().copied().collect();

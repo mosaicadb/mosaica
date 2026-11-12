@@ -36,9 +36,11 @@ counted over the same composed mask and over the whole view. [`Selection`] alrea
 visible row by its depth-*d* tile, so `N_occ(d)` here is the number of buckets — the definition
 read straight off the structure the counts come from.
 
-One clause arrives from outside §7.2: a request carrying a filter evaluates the definition with
-the threshold **saturated** (§8.5's match-layer rule — every match served, up to the cap), which
-[`Selection.served_rows`] exposes as `filtered=True`. The anchor above is untouched by it.
+A request carrying a filter evaluates the same definition over the filter's matches, with
+`V_total` replaced by `V_matched`, how many of the viewer's visible items the filter admits over
+the whole view, and `N_occ(d)` still the unfiltered mask's:
+`P_f = ⌊m_target · N_occ(d) · 2⁶⁴ / V_matched⌋`. A caller builds the [`Selection`] over the
+matches and passes the unfiltered `N_occ` as `n_occ` to [`Selection.served_rows`].
 
 ## What is literal here, and what is not — the line is drawn deliberately
 
@@ -271,7 +273,7 @@ class Selection:
         cap: int,
         v_total: int,
         m_target: int,
-        filtered: bool = False,
+        n_occ: int | None = None,
     ) -> list[int]:
         """§7.2's `served(T)`, as row ids in served order (ascending `mosaica_id`).
 
@@ -287,17 +289,15 @@ class Selection:
         client-truncation clause depends on the served set being a prefix, so the order is
         contract, not presentation.
 
-        `filtered=True` is §8.5's match-layer count rule: a request carrying a filter evaluates
-        this same definition over `M_sel` with the threshold **saturated**, so `C_θ = |vis(T)|`
-        and every match is served up to the cap. θ's *anchor* never re-anchors on `M_sel`
-        (filter-surface §5.2 forbids a threshold that moves as the viewer types); the filtered
-        selection simply does not consult it. The caller passes `vis(T)` already filtered — this
-        module holds one visible set per `Selection` and no filter machinery of its own.
+        `n_occ` is the `N_occ(d)` the cut is taken with, this selection's own where it is `None`. A
+        filtered request is evaluated by a selection over the filter's matches, with `v_total` the
+        matched total `V_matched` and `n_occ` the unfiltered selection's: the module holds one
+        visible set per `Selection` and no filter machinery of its own.
         """
         identities = self.segment.mosaica_id
         rows = sorted(self.rows_by_tile.get(tile, ()), key=lambda row: int(identities[row]))
 
-        cut = SATURATED if filtered else theta_cut(v_total, m_target, self.n_occ)
+        cut = theta_cut(v_total, m_target, self.n_occ if n_occ is None else n_occ)
         if cut is None:
             c_theta = len(rows)
         else:

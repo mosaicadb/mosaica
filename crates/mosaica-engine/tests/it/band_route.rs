@@ -305,7 +305,7 @@ fn check_all(engine: &Engine) {
     }
     assert!(
         broad.filtered_from_bands > 0,
-        "the bands answered no filtered tile, whose threshold is saturated: {broad:?}"
+        "the bands answered no filtered tile: {broad:?}"
     );
     let all = [&broad, &medium, &narrow, &lone];
     assert!(

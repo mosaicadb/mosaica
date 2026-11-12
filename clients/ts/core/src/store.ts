@@ -1562,8 +1562,7 @@ export function createStore(options: StoreOptions): Store {
         kMaxMarks: m.selection.kMaxMarks,
         maxTilesPerRequest: m.maxTilesPerRequest,
         thetaTargetMarks: m.selection.thetaTargetMarks,
-        kMin: m.selection.kMin,
-        filtered: () => requestFilters() !== null
+        kMin: m.selection.kMin
       },
       clock,
       scheduler,

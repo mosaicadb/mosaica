@@ -52,6 +52,7 @@ mod discovered_vocabulary_mint;
 mod edit_carries_every_home;
 mod engine_open;
 mod figures;
+mod filtered_sampling;
 mod filtering;
 mod flush_attribution;
 mod flush_tick;

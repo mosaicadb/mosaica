@@ -4,14 +4,16 @@ import {tileRectOfBbox} from '../src/budget.js';
 import {WORLD_SIZE, dataToWorldXY, mortonOfTile, tileXY} from '../src/coords.js';
 import {createStore, type Store} from '../src/store.js';
 import type {ViewportResponse} from '../src/types.js';
-import {camera, fakeClock, fakeScheduler, meta, response, scalar, servedResult, tile, view} from './support.js';
+import {SELECTION, camera, fakeClock, fakeScheduler, meta, response, scalar, servedResult, tile, view} from './support.js';
 
 /**
  * What the map draws when the answer holds nothing: no marks, no stand-ins and no counted tiles
  * from the question before, while an answer still on its way leaves the last one drawn.
  */
 
+/** A floor at the cap, so a tile serves every match up to `k` and the plan does not depend on θ. */
 const META = meta({
+  selection: {...SELECTION, kMin: SELECTION.kMaxMarks},
   views: [view('s0', {displayName: 'default', quantisation: {xMin: 0, xMax: 100, yMin: 0, yMax: 200}})],
   declaredScalars: [scalar('archive', 'u16', {category: {vocabulary: 'a', kind: 'declared', visibility: 'public'}, render: true, homes: ['rendered']})],
   filterOperands: [{column: 'archive', family: 'category', operands: ['in']}]

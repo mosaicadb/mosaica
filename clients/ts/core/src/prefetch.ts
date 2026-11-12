@@ -39,7 +39,7 @@ export type PlannerInputs = {
   counts?: CountField;
   /** The cap in force, `min(k, k_max_marks)`. */
   k?: number;
-  /** How the server thins an unfiltered tile; absent under a filter. See `budget.ts`. */
+  /** How the server thins a tile. See `budget.ts`. */
   thinning?: Thinning;
   maxTiles: number;
   /** The previous response's visible count, the saturation term for depth choice. */

@@ -23,10 +23,10 @@
 //! outside `M_auth`, which Appendix C admits nowhere. `N_occ` carries the signal as directly as
 //! `V_total` does: a suppression that empties a tile lowers it.
 //!
-//! It is also **filter-blind**, and for **I12**'s reason: [`crate::compose::EffectiveMask`] with a
-//! filter attached is a narrower set, so counting occupied tiles under one would make θ a function
-//! of what the viewer typed and move the frontier down. The call site takes the anchor before the
-//! filter is evaluated.
+//! It is also **filter-blind**. A filtered request divides by how many items its filter admits
+//! instead of `V_total`, and keeps this `N_occ`: the filtered map then spends about the marks the
+//! unfiltered one does, and its cut is never below the unfiltered one, so adding a filter drops no
+//! point that passes it. The call site takes the anchor before the filter is evaluated.
 //!
 //! # Why an estimate is enough, and what it is not enough for
 //!

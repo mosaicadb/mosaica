@@ -297,7 +297,9 @@ name is withheld by the change.
 
 Where more items are in view than a response carries, the sample MUST be drawn from the viewer's
 own visible set. A viewer with a narrow grant sees a sample of what they can see, never a sample
-taken over the whole corpus with the hidden points removed.
+taken over the whole corpus with the hidden points removed. Under a filter, the share each tile
+draws is set by how many of the viewer's visible items the filter admits, a count taken over the
+same visible set.
 
 The artifacts of a tile are limited the same way. A request names a quota of artifacts per level
 and tile, at most `selection.max_artifacts_per_tile`, and the tile holds the first of them by the

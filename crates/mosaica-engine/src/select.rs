@@ -158,8 +158,12 @@ impl Threshold {
     /// Summed over the occupied tiles that is `V_total · θ_d = m_target · N_occ(d)`, so the mean
     /// occupied tile draws `m_target` marks at every depth.
     ///
-    /// **Both factors must come from the COMPOSED mask** — after the overlay diff, not from the
-    /// cached `RowProjection`. This is an I2 requirement, not a preference: the pre-overlay
+    /// A filtered request passes, as `v_total`, how many of those visible rows its filter admits,
+    /// with the unfiltered `N_occ(d)`. That is no more than `V_total`, so its cut is no lower and
+    /// the filtered served set holds every unfiltered served row the filter admits.
+    ///
+    /// **Both factors must come from the COMPOSED mask**, the filtered count included — after the
+    /// overlay diff, not from the cached `RowProjection`. This is an I2 requirement, not a preference: the pre-overlay
     /// projection strictly contains `M_auth` after any accepted delete or suppression, so anchoring
     /// on it would let a viewer aggregate mark counts across tiles, solve for θ, difference it
     /// against its own summed per-tile `visible` (which §7.1 discloses exactly), and recover **a

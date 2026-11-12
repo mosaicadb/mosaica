@@ -392,18 +392,29 @@ def test_a_zero_total_serves_the_saturated_selection(selection):
     assert selection.served_rows(0, **{**LIVE, "v_total": 0}) == [1, 4, 2, 5]
 
 
-def test_a_filtered_request_evaluates_with_the_threshold_saturated(selection):
-    """§8.5's match-layer rule: a filtered request serves every match up to the cap.
+def test_a_filtered_request_anchors_on_its_matches_with_the_unfiltered_occupancy(selection):
+    """A filtered request takes `P_f = ⌊m_target · N_occ(d) · 2⁶⁴ / V_matched⌋` over its matches,
+    with the unfiltered `N_occ(d)`.
 
-    Working: the same tile and the same live anchor. Unfiltered, C_θ = 3 and three rows are
-    served; `filtered=True` ignores the cut altogether, so C_θ = |vis| = 6 and m = min(4, 6) = 4.
-    The anchor is untouched — it is simply not consulted.
+    Working: the filter keeps entities 100, 101, 103 and 105, rows 0, 1, 3 and 5, all in tile 0, so
+    `V_matched` = 4. The unfiltered mask occupies tiles 0 and 1, so `N_occ(1)` = 2, where the
+    matches alone occupy one tile. At `m_target` = 1 the cut is 2·2⁶⁴/4 = 2⁶³: only row 1's
+    0x1000… is below it (row 5's 0x8000… is exactly 2⁶³), so C_θ = 1 and the floor serves rows 1
+    and 5. At `m_target` = 2 the cut is 2⁶⁴, which saturates, so all four matches are served, where
+    the matches' own `N_occ` of 1 would give 2⁶³ again and serve two. Unfiltered, rows 1, 4 and 2
+    are served, and the one of them that matches, row 1, is served filtered too.
 
-    Kills: re-anchoring θ on the filtered set (filter-surface §5.2 forbids a threshold that moves
-    as the viewer types); ignoring `filtered` and returning the live selection.
+    Kills: saturating a filtered request (four rows at `m_target` = 1); anchoring on the matches'
+    own `N_occ` (two rows at `m_target` = 2); anchoring on `V_total`.
     """
-    assert selection.served_rows(0, **LIVE) == [1, 4, 2]
-    assert selection.served_rows(0, **LIVE, filtered=True) == [1, 4, 2, 5]
+    matches = viewport.Selection(_StubBundle(ROWS), {100, 101, 103, 105}, VIEW, 1)
+    unfiltered_n_occ = selection.n_occ
+    assert (unfiltered_n_occ, matches.n_occ) == (2, 1)
+    filtered = {**LIVE, "v_total": 4, "n_occ": unfiltered_n_occ}
+    assert matches.served_rows(0, **filtered) == [1, 5]
+    assert matches.served_rows(0, **{**filtered, "m_target": 2}) == [1, 5, 0, 3]
+    assert matches.served_rows(0, **{**LIVE, "v_total": 4, "m_target": 2}) == [1, 5]
+    assert set(selection.served_rows(0, **LIVE)) & {0, 1, 3, 5} <= {1, 5}
 
 
 def test_served_points_and_identities_report_the_selected_rows(selection):
