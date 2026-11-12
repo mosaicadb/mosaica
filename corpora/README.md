@@ -5,7 +5,9 @@ publisher's files staged on a local share. A dataset that anyone can make from t
 download is in `mosaica.datasets` instead (`clients/py/mosaica/datasets/`), and
 [Datasets to try](../docs/start/datasets.md) lists those. A rung that is also a dataset, such as
 `geonames`, calls that package for its row work, so the two build the same files, and adds its
-survey of the source and its deployment file here.
+survey of the source and its deployment file here. `cellxgene` is the exception: its layout takes a
+GPU, so its dataset is built from this rung's prepared files, published on Hugging Face, rather
+than from the Census, and the rung reads its declaration from the package.
 
 ## Layout
 

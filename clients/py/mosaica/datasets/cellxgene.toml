@@ -1,9 +1,10 @@
 # CZ CELLxGENE Census 2025-11-08: every human and mouse cell, laid out by UMAP over its scVI
 # embedding.
 #
-# `prepare.py` writes a copy of this file beside the data, with `# <vocabularies>` replaced by the
-# value sets it minted. `[sources]` paths are relative to the declaring file, so the copy is what
-# `mosaica build` reads.
+# `mosaica.datasets.cellxgene.prepare` and the ladder's `corpora/cellxgene/prepare.py` each write a
+# copy of this file beside the files it names, with `# <vocabularies>` replaced by the blocks
+# `vocabulary_toml` writes. `[sources]` paths are relative to the declaring file, so the copy is
+# what `mosaica build` reads.
 
 [sources]
 cells           = "cells.parquet"
@@ -50,9 +51,9 @@ source           = "points_mouse"
 visibility       = "public"
 point_visibility = { field = "access", default = "public" }
 
-# All vocabularies are closed, minted from the staged cell tables, and `derived`: a viewer is
-# served a value only where they can see one of its cells, so a disease or a collection that only
-# restricted collections carry reaches only those who hold one of them.
+# All vocabularies are closed and `derived`: a viewer is served a value only where they can see one
+# of its cells, so a disease or a collection that only restricted collections carry reaches only
+# those who hold one of them.
 # <vocabularies>
 
 # The row number `prepare.py` gives each cell: the Census `soma_joinid` for a human cell, and the

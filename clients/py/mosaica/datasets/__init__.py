@@ -1,4 +1,6 @@
 """Datasets to try, each fetched from its publisher, prepared, built and served with one call.
+`cellxgene` is fetched from the files this repository's `corpora/cellxgene` prepared from the
+Census and published, since laying the Census out takes a GPU.
 
     db = mosaica.datasets.load("places")
     db.map()
@@ -24,7 +26,7 @@ from .. import _instance, _progress
 from .._database import Database, _reason_first
 from .._database import open as _open
 from .._refusal import Refusal
-from . import _steps, gbif, geonames
+from . import _steps, cellxgene, gbif, geonames
 
 __all__ = ["Dataset", "Persona", "describe", "load", "names", "prepared", "root"]
 
@@ -36,7 +38,8 @@ class Persona:
 
     - `id`: the persona's name in the page's address, as in `?as=gb`.
     - `label`, `description`: what the picker shows.
-    - `terms`: the access terms the persona holds, or `None` for one who reads everything.
+    - `terms`: the access terms the persona holds, `()` for one who holds none and so sees only
+      what is public, or `None` for one who reads everything.
     """
 
     id: str
@@ -53,6 +56,8 @@ class Dataset:
     - `download`: the bytes fetched where the files are not on disk; a checkout of the
       repository holds those of the two samples. GBIF's whole-snapshot figures are modelled from
       a 64-part sample and from the ladder's build of an earlier snapshot; the rest were measured.
+      CELLxGENE's `items` and sizes are those of what it reads without a sample, and its `sample`
+      gives the whole's.
     - `personas`: who `mosaica demo` offers to view the dataset as, the first by default.
     - `disk`: the bytes on disk once built, the fetched files and the bundle included.
     - `bundle`: the bytes of the built bundle.
@@ -181,6 +186,35 @@ _BY_ARCHIVE = (
     Persona("stats", "Statistics", "Holds the stat.* categories.", _STATS),
 )
 
+#: Readers of CELLxGENE, which restricts 35 of its collections each to its own term, as the hosted
+#: demo offers them.
+_BY_COLLECTION = (
+    Persona(
+        "public",
+        "Public collections",
+        "Holds no terms, so sees the 269 collections that are not restricted.",
+        (),
+    ),
+    Persona(
+        "every-collection",
+        "Every collection",
+        "Holds all 35 restricted collections, so sees every cell.",
+        cellxgene.RESTRICTED,
+    ),
+    Persona(
+        "lung-atlas",
+        "Human Lung Cell Atlas",
+        "Holds one restricted collection: the integrated Human Lung Cell Atlas.",
+        ("collection:6f6d381a-7701-4781-935c-db10d30de293",),
+    ),
+    Persona(
+        "gut-study",
+        "Gut inflammation study",
+        "Holds one restricted collection: single-cell integration of inflammatory gut diseases.",
+        ("collection:f11cb29c-b546-4738-9bd8-66ea621a7bd5",),
+    ),
+)
+
 
 _CATALOGUE = (
     Dataset(
@@ -212,6 +246,26 @@ _CATALOGUE = (
         per_sample=None,
         personas=_BY_ARCHIVE,
         fetch=_example("arxiv"),
+    ),
+    Dataset(
+        name="cellxgene",
+        title="CELLxGENE Census cells on UMAP maps of human and mouse",
+        items=3_166_194,
+        licence="CC BY 4.0: the CZ CELLxGENE Census, the Cell Ontology, and the layout and tiers",
+        publisher="CZ CELLxGENE Census 2025-11-08, prepared by this repository, on Hugging Face",
+        download=58_148_934,
+        disk=540_455_162,
+        bundle=409_627_959,
+        needs=("duckdb",),
+        sample=(
+            "N of its 128 parts, each a uniform sample of about 1.58 million cells, and 2 without "
+            "N; all 128 are the whole 202,636,280 cells, a 3.7 GB download that takes 31.8 GB on "
+            "disk with a 23.6 GB bundle"
+        ),
+        per_sample=(28_944_000, 270_000_000),
+        personas=_BY_COLLECTION,
+        fetch=cellxgene.fetch,
+        prepare=cellxgene.prepare,
     ),
     Dataset(
         name="geonames",

@@ -33,12 +33,16 @@ Each dataset's own citation is in `datasets.parquet` in the staged directory. Th
 ## Reproducing it
 
 ```bash
-export MOSAICA_STAGED=/path/to/staged MOSAICA_LADDER=/path/to/ladder
+export MOSAICA_STAGED=/path/to/staged MOSAICA_LADDER=/path/to/ladder PYTHONPATH=clients/py
 ~/venvs/projection/bin/python -m corpora.cellxgene.stage --obs --vectors --ontology
 ~/venvs/projection/bin/python -m corpora.cellxgene.prepare --sample 1000000   # a small corpus, in cellxgene-sample/
 ~/venvs/projection/bin/python -m corpora.cellxgene.prepare --sample 0         # every cell, in cellxgene/
 cd "$MOSAICA_LADDER/cellxgene" && mosaica check && mosaica build
 ```
+
+The declaration is `clients/py/mosaica/datasets/cellxgene.toml`, which the `cellxgene` dataset of
+`mosaica.datasets` builds from too, so `prepare.py` imports that package; `PYTHONPATH` finds it in
+the checkout.
 
 `stage.py` reads anonymously from the Census's public S3 bucket into
 `$MOSAICA_STAGED/cellxgene-census/2025-11-08/`. It writes each species' cell table as
@@ -53,6 +57,24 @@ It keeps each species' layout as `layout-<species>.npy` beside the data, so `--r
 start from it, and `--layout-only` stops once they are written. It also draws
 `overview-<species>.png`, three million of the species' cells coloured by their Cell Ontology
 class.
+
+## Published for `mosaica demo`
+
+The `cellxgene` dataset of `mosaica.datasets` is built from files cut from the full prepared corpus
+and published on Hugging Face as
+[`mosaicadb/cellxgene-census-map`](https://huggingface.co/datasets/mosaicadb/cellxgene-census-map),
+so that it needs no GPU and none of this rung's dependencies.
+[`publish.py`](publish.py) writes them: every cell's attributes, position and access label in 128
+parts, each a uniform sample of each species, with each cell type's tier keys, the tier names, the
+vocabularies and [`dataset-card.md`](dataset-card.md) as the card.
+
+```bash
+~/venvs/projection/bin/python -m corpora.cellxgene.publish --out /path/to/upload
+hf upload mosaicadb/cellxgene-census-map /path/to/upload --repo-type dataset
+```
+
+The dataset fetches the files at one commit of that repository, `REVISION` in
+`clients/py/mosaica/datasets/cellxgene.py`, which a new upload must update.
 
 ## The layout
 

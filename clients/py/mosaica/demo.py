@@ -44,6 +44,12 @@ EXPLORER = {
     },
     "geonames": {"title-field": "name", "colour-by": "feature_class"},
     "gbif": {"title-field": "scientificname", "colour-by": "kingdom"},
+    "cellxgene": {
+        "title-field": "cell_type",
+        "colour-by": "tissue_general",
+        "pinned-filters": "cell_type tissue_general disease is_primary_data",
+        "layers": "cell-ontology",
+    },
 }
 
 

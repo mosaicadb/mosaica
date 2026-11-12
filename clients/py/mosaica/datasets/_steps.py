@@ -105,6 +105,7 @@ def fetch(raw: Path, files: dict[str, str], progress: bool = True) -> list[Path]
     raw.mkdir(parents=True, exist_ok=True)
     for name, url in files.items():
         if not held(raw, locked(raw), name, url):
+            (raw / name).parent.mkdir(parents=True, exist_ok=True)
             record(raw, {name: kept(raw / name, lambda part: _download(url, part, progress), url)})
     return [raw / name for name in files]
 

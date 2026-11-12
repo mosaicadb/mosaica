@@ -136,6 +136,10 @@ def test_a_fetch_is_recorded_and_not_repeated(tmp_path, publisher):
     (served / "a.txt").write_text("second")
     _steps.fetch(raw, {"a.txt": base + "a.txt"}, progress=False)
     assert (raw / "a.txt").read_text() == "first"
+    (served / "sub").mkdir()
+    (served / "sub" / "b.txt").write_text("nested")
+    _steps.fetch(raw, {"sub/b.txt": base + "sub/b.txt"}, progress=False)
+    assert (raw / "sub" / "b.txt").read_text() == "nested"
 
 
 def test_a_download_that_stops_short_is_refused_and_not_recorded(tmp_path):
@@ -412,3 +416,83 @@ def test_a_step_stopped_while_clearing_its_directory_runs_again(tmp_path, monkey
             _steps.made(out, {"recipe": 2}, make, "making")
     _steps.made(out, {"recipe": 2}, make, "making")
     assert (out / "made" / "file").read_text() == "made"
+
+
+def cellxgene_files(raw: Path, parts: list[list[dict]]) -> None:
+    """The CELLxGENE files already fetched into `raw`: `parts` as its first parts, the small files
+    `prepare` reads, and the lock that records them, so `load` reads nothing from the network."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from mosaica.datasets import cellxgene
+
+    (raw / "parts").mkdir(parents=True)
+    types = {"entity_id": pa.uint64(), "soma_joinid": pa.uint64(), "x": pa.float32(),
+             "y": pa.float32(), "is_primary_data": pa.bool_(), "nnz": pa.uint32(),
+             "raw_sum": pa.float32()}
+    for i, rows in enumerate(parts):
+        names = list(rows[0])
+        table = pa.table({c: pa.array([r[c] for r in rows], types.get(c, pa.string()))
+                          for c in names})
+        pq.write_table(table, raw / f"parts/part-{i:03d}.parquet")
+    cells = [row for rows in parts for row in rows]
+    chains = {"T cell": ["t0:leukocyte", "t1:lymphocyte", "t2:lymphocyte", "t3:T cell"],
+              "neuron": ["t0:neural cell", "t1:neuron", "t2:neuron", "t3:neuron"]}
+    pq.write_table(pa.table({"cell_type": list(chains), "key": list(chains.values())}),
+                   raw / cellxgene.TIERS)
+    keys = sorted({(int(k[1]), k) for chain in chains.values() for k in chain})
+    pq.write_table(pa.table({
+        "level": pa.array([level for level, _ in keys], pa.uint32()),
+        "key": [key for _, key in keys],
+        "contents": [[[key.split(":", 1)[1]]] for _, key in keys],
+    }), raw / cellxgene.ARTIFACTS)
+    for _, _, stem, *_, column in cellxgene.VOCABULARIES:
+        values = sorted({row[column] for row in cells})
+        pq.write_table(pa.table({"key": values, "code": pa.array(range(1, len(values) + 1),
+                                 pa.uint32()), "title": values}), raw / f"vocab-{stem}.parquet")
+    (raw / "restricted-collections.json").write_text("{}")
+    lock = {}
+    for name in cellxgene.SMALL + [f"parts/part-{i:03d}.parquet" for i in range(len(parts))]:
+        lock[name] = {"url": cellxgene.BASE + name, "bytes": (raw / name).stat().st_size}
+    (raw / "LOCK.json").write_text(json.dumps(lock))
+
+
+def cell(entity_id: int, organism: str, cell_type: str, access=None) -> dict:
+    row = {"entity_id": entity_id, "x": float(entity_id), "y": 1.0, "access": access,
+           "soma_joinid": entity_id, "organism": organism, "cell_type": cell_type}
+    for column in ("tissue", "tissue_general", "disease", "assay", "sex", "development_stage",
+                   "self_reported_ethnicity", "suspension_type"):
+        row[column] = "unknown"
+    return row | {"collection": access or "open", "dataset": "a dataset",
+                  "is_primary_data": True, "dataset_id": "d1", "donor_id": "donor",
+                  "nnz": 100, "raw_sum": 1000.0}
+
+
+def test_cellxgene_reads_its_parts_and_puts_each_cell_on_its_species_map(tmp_path):
+    binary()
+    lung = "collection:6f6d381a-7701-4781-935c-db10d30de293"
+    human, mouse = "Homo sapiens", "Mus musculus"
+    cellxgene_files(tmp_path / "cellxgene" / "raw", [
+        [cell(1, human, "T cell"), cell(2, human, "neuron", lung), cell(10, mouse, "neuron")],
+        [cell(3, human, "T cell", "collection:f11cb29c-b546-4738-9bd8-66ea621a7bd5"),
+         cell(11, mouse, "T cell")],
+        [cell(4, human, "neuron")],
+    ])
+    db = datasets.load("cellxgene", dir=tmp_path, port=0, progress=False)
+    try:
+        assert db.view("human").count() == 3
+        assert db.view("mouse").count() == 2
+        personas = {p.id: p for p in datasets.describe("cellxgene").personas}
+        seen = {id: db.token(None if p.terms is None else list(p.terms)) for id, p in
+                personas.items()}
+        counts = {id: mosaica.connect(db.viewer_url, token).view("human").count()
+                  for id, token in seen.items()}
+        assert counts == {"public": 1, "every-collection": 3, "lung-atlas": 2, "gut-study": 2}
+        assert [layer["name"] for layer in db.layers()] == ["cell-ontology"]
+    finally:
+        db.close()
+    whole = datasets.load("cellxgene", dir=tmp_path, sample=3, port=0, progress=False)
+    try:
+        assert whole.view("human").count() == 4
+    finally:
+        whole.close()

@@ -12,7 +12,9 @@ Reads what `stage.py` downloaded and writes, into `$MOSAICA_LADDER/cellxgene/` (
   `restricted-collections.json`, and `overview-<species>.png`.
 
 The layout of each species is fitted on a uniform sample of its primary cells and every cell is
-placed against it (`corpora/common/fit_place.py`), in scVI's own Euclidean metric.
+placed against it (`corpora/common/fit_place.py`), in scVI's own Euclidean metric. The
+declaration and its vocabularies are `mosaica.datasets.cellxgene`'s, which builds the
+`cellxgene` dataset from the files `publish.py` cuts from this output.
 
     ~/venvs/projection/bin/python -m corpora.cellxgene.prepare --sample 1000000
     ~/venvs/projection/bin/python -m corpora.cellxgene.prepare --sample 0
@@ -32,6 +34,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from mosaica.datasets.cellxgene import ORGANISM, VOCABULARIES, write_declaration
+
 from ..common import fit_place
 from ..common.rung_files import write_deployment, write_vocabulary
 from ..common.timing import Steps
@@ -45,8 +49,6 @@ FIT_ROWS = {"human": 4_000_000, "mouse": 2_000_000}
 #: Rows placed per read of the staged vectors.
 PLACE_CHUNK = 2_000_000
 
-ORGANISM = {"human": "Homo sapiens", "mouse": "Mus musculus"}
-
 #: The share of all cells, both species together, that the restricted collections reach for, and
 #: the most they may hold. Collections are taken in the order of `sha256(RESTRICTION_SALT + id)`;
 #: one that would take the total past the ceiling is passed over, and the walk stops once the
@@ -54,28 +56,6 @@ ORGANISM = {"human": "Homo sapiens", "mouse": "Mus musculus"}
 RESTRICTION_SALT = "mosaica-cellxgene-restricted:"
 RESTRICTED_TARGET = 0.12
 RESTRICTED_CEILING = 0.15
-
-#: `(vocabulary, [sources] key, file stem, title, visibility, column of cells.parquet)`. Every one
-#: is `derived`, because a value carried only by restricted collections, such as a disease, would
-#: otherwise be listed to a viewer who can see none of its cells.
-VOCABULARIES = [
-    ("cell_type", "cell_type", "cell-type", "Cell type", "derived", "cell_type"),
-    ("tissue", "tissue", "tissue", "Tissue", "derived", "tissue"),
-    ("tissue_general", "tissue_general", "tissue-general", "Tissue (general)", "derived",
-     "tissue_general"),
-    ("disease", "disease", "disease", "Disease", "derived", "disease"),
-    ("assay", "assay", "assay", "Assay", "derived", "assay"),
-    ("sex", "sex", "sex", "Sex", "derived", "sex"),
-    ("development_stage", "development", "development-stage", "Development stage", "derived",
-     "development_stage"),
-    ("self_reported_ethnicity", "ethnicity", "self-reported-ethnicity", "Self-reported ethnicity",
-     "derived", "self_reported_ethnicity"),
-    ("suspension_type", "suspension", "suspension-type", "Suspension type", "derived",
-     "suspension_type"),
-    ("organism", "organism", "organism", "Organism", "derived", "organism"),
-    ("collection", "collection", "collection", "Collection", "derived", "collection"),
-    ("dataset", "dataset", "dataset", "Dataset", "derived", "dataset"),
-]
 
 #: Obs columns copied into `cells.parquet` under their own names, as strings.
 CATEGORY_COLUMNS = ["cell_type", "tissue", "tissue_general", "disease", "assay", "sex",
@@ -270,33 +250,6 @@ def through(dictionary_column: pa.Array, mapping: dict) -> pa.Array:
     return mapped.take(col.indices)
 
 
-def vocabulary_toml(sizes: dict[str, int]) -> str:
-    def width(n: int) -> str:
-        return "u8" if n < 255 else ("u16" if n < 65_535 else "u32")
-
-    blocks = []
-    for name, key, _, title, visibility, _ in VOCABULARIES:
-        n = sizes[name]
-        blocks.append(
-            "[[vocabulary]]\n"
-            f'name       = "{name}"\n'
-            f'title      = "{title}"  # {n:,} keys\n'
-            f'width      = "{width(n)}"\n'
-            'value_set  = "closed"\n'
-            f'visibility = "{visibility}"\n'
-            f'source     = "{key}"'
-        )
-    return "\n\n".join(blocks)
-
-
-def write_declaration(out: Path, sizes: dict[str, int]) -> None:
-    lines = (Path(__file__).parent / "corpus.toml").read_text().splitlines()
-    hit = [i for i, line in enumerate(lines) if line.strip() == "# <vocabularies>"]
-    assert len(hit) == 1, "corpus.toml must hold one `# <vocabularies>` line"
-    lines[hit[0]] = vocabulary_toml(sizes)
-    (out / "corpus.toml").write_text("\n".join(lines) + "\n")
-
-
 def overview(out: Path, species: str, xy: np.ndarray, cls: np.ndarray, classes: list[str]) -> Path:
     """A picture of one species' layout, coloured by the top tier, from at most 3M cells."""
     import matplotlib
@@ -475,7 +428,7 @@ def main() -> None:
     with steps.step("vocabularies"):
         sizes = {name: write_vocabulary(out, stem, sorted(values[name]))
                  for name, _, stem, *_ in VOCABULARIES}
-    write_declaration(out, sizes)
+    write_declaration(out / "corpus.toml", sizes)
     tier_artifacts = write_tier_names(out, tiers)
     write_deployment(out, generator="corpora/cellxgene/prepare.py",
                      credential_env="MOSAICA_CELLXGENE_OPERATOR_CRED")
