@@ -55,22 +55,24 @@ RESTRICTION_SALT = "mosaica-cellxgene-restricted:"
 RESTRICTED_TARGET = 0.12
 RESTRICTED_CEILING = 0.15
 
-#: `(vocabulary, [sources] key, file stem, title, visibility, column of cells.parquet)`.
+#: `(vocabulary, [sources] key, file stem, title, visibility, column of cells.parquet)`. Every one
+#: is `derived`, because a value carried only by restricted collections, such as a disease, would
+#: otherwise be listed to a viewer who can see none of its cells.
 VOCABULARIES = [
-    ("cell_type", "cell_type", "cell-type", "Cell type", "public", "cell_type"),
-    ("tissue", "tissue", "tissue", "Tissue", "public", "tissue"),
-    ("tissue_general", "tissue_general", "tissue-general", "Tissue (general)", "public",
+    ("cell_type", "cell_type", "cell-type", "Cell type", "derived", "cell_type"),
+    ("tissue", "tissue", "tissue", "Tissue", "derived", "tissue"),
+    ("tissue_general", "tissue_general", "tissue-general", "Tissue (general)", "derived",
      "tissue_general"),
-    ("disease", "disease", "disease", "Disease", "public", "disease"),
-    ("assay", "assay", "assay", "Assay", "public", "assay"),
-    ("sex", "sex", "sex", "Sex", "public", "sex"),
-    ("development_stage", "development", "development-stage", "Development stage", "public",
+    ("disease", "disease", "disease", "Disease", "derived", "disease"),
+    ("assay", "assay", "assay", "Assay", "derived", "assay"),
+    ("sex", "sex", "sex", "Sex", "derived", "sex"),
+    ("development_stage", "development", "development-stage", "Development stage", "derived",
      "development_stage"),
     ("self_reported_ethnicity", "ethnicity", "self-reported-ethnicity", "Self-reported ethnicity",
-     "public", "self_reported_ethnicity"),
-    ("suspension_type", "suspension", "suspension-type", "Suspension type", "public",
+     "derived", "self_reported_ethnicity"),
+    ("suspension_type", "suspension", "suspension-type", "Suspension type", "derived",
      "suspension_type"),
-    ("organism", "organism", "organism", "Organism", "public", "organism"),
+    ("organism", "organism", "organism", "Organism", "derived", "organism"),
     ("collection", "collection", "collection", "Collection", "derived", "collection"),
     ("dataset", "dataset", "dataset", "Dataset", "derived", "dataset"),
 ]
@@ -372,6 +374,7 @@ def main() -> None:
         path = out / f"layout-{species}.npy"
         if args.reuse_layout:
             layouts[species] = np.load(path)
+            routes[species] = json.loads((out / f"layout-{species}.json").read_text())
             continue
         with steps.step(f"layout {species}"):
             t: dict = {}

@@ -86,19 +86,20 @@ embryos, so "mesodermal cell" is its second largest class.
 On one box: WSL2, 12 cores, 47 GB of memory, one RTX 3080 with 10 GB, local NVMe. Staging read
 from the Census's S3 bucket in us-west-2 over a home connection.
 
-| Step | Wall | Peak memory | Output |
+| Step | Wall | Peak memory (GiB) | Output |
 |---|---|---|---|
-| `stage.py --obs --vectors --ontology` | 33 min 6 s | 23.1 GB | 21 GB staged |
+| `stage.py --obs --vectors --ontology` | 33 min 6 s | 23.1 | 21 GiB staged |
 | of which the cell tables | 222 s | | 1.35 GB of parquet |
 | of which the human vectors | 1,388 s, 114,500 rows/s | | 15.9 GB |
 | of which the mouse vectors | 374 s, 116,700 rows/s | | 4.4 GB |
-| `prepare.py --sample 0` | 10 min 42 s | 24.0 GB | 3.9 GB of parquet |
-| of which the human layout | 322 s | 4.2 GB on the card | |
-| of which the mouse layout | 113 s | 2.5 GB on the card | |
+| `prepare.py --sample 0` | 10 min 42 s | 22.9 | 3.9 GB of parquet |
+| of which the human layout | 322 s | 4.2 on the card | |
+| of which the mouse layout | 113 s | 2.5 on the card | |
 | of which the cells, points and members | 172 s | | |
-| `mosaica build --stage-timings` | 17 min 43 s | 15.2 GB | 23.6 GB bundle |
-| `prepare.py --sample 1000000` | 49 s | 19.0 GB | |
-| `mosaica build` of the sample | 11 s | 0.67 GB | 260 MB bundle |
+| `mosaica build --stage-timings` | 17 min 33 s | 20.5 | 22.0 GiB bundle |
+| `prepare.py --sample 0 --reuse-layout` | 3 min 20 s | 5.0 | |
+| `prepare.py --sample 1000000` | 49 s | 18.1 | |
+| `mosaica build` of the sample | 11 s | 0.64 | 260 MB bundle |
 
 The peak memory of `stage.py` and `prepare.py` is the resident set, which counts the pages of the
 memory-mapped vector files they write or read.
@@ -121,9 +122,11 @@ granted none, this rung treats a seeded minority of collections as restricted: a
 restricted collection carries the access term `collection:<collection id>`, and every other cell
 has no label and takes the view's default, `public`.
 
-The restricted collections are chosen from the collection ids alone. They are taken in the order
-of `sha256("mosaica-cellxgene-restricted:" + collection_id)`, and each is added unless it would
-carry the total past 15% of all cells, until the total reaches 12%.
+The restricted collections are chosen from the collection ids and their cell counts in this
+Census version. The ids set the order, which is that of
+`sha256("mosaica-cellxgene-restricted:" + collection_id)`, and the counts decide which are taken:
+each collection is added unless it would carry the total past 15% of all cells, until the total
+reaches 12%. Another Census version, with other counts, can restrict other collections.
 `restricted-collections.json`, beside the data, lists each restricted collection with its term,
 name and cell count.
 
@@ -132,8 +135,9 @@ cells, 12.82% of the corpus: 15.40% of human cells and 3.43% of mouse cells. An 
 sees 134,498,431 human cells, and a viewer granted the three largest restricted collections sees
 147,577,505.
 
-The `collection` and `dataset` vocabularies are `derived`, so a viewer is told the name of a
-collection or a dataset only where they can see one of its cells.
+Every vocabulary is `derived`, so a viewer is told a value, such as a disease, a cell type or a
+collection's name, only where they can see one of its cells. A value carried only by restricted
+collections is not listed to a viewer who holds none of them.
 
 ## The Cell Ontology layer
 

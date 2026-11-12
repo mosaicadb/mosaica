@@ -50,9 +50,9 @@ source           = "points_mouse"
 visibility       = "public"
 point_visibility = { field = "access", default = "public" }
 
-# All vocabularies are closed and minted from the staged cell tables. `collection` and `dataset`
-# are `derived`: a viewer is served the name of a collection or dataset only where they can see one
-# of its cells, so a restricted collection's name reaches only those who hold it.
+# All vocabularies are closed, minted from the staged cell tables, and `derived`: a viewer is
+# served a value only where they can see one of its cells, so a disease or a collection that only
+# restricted collections carry reaches only those who hold one of them.
 # <vocabularies>
 
 # The row number `prepare.py` gives each cell: the Census `soma_joinid` for a human cell, and the

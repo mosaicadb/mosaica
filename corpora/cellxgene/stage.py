@@ -21,6 +21,7 @@ import json
 import resource
 import time
 import urllib.request
+from pathlib import Path
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -32,6 +33,12 @@ CHUNK_ROWS = 1_000_000
 READ_WORKERS = 3
 
 
+def partial(path: Path) -> Path:
+    """Where a file is written before it is renamed into place, so an interrupted run leaves no
+    file that a rerun would take as finished."""
+    return path.with_name(path.name + ".partial")
+
+
 def stage_obs() -> None:
     import cellxgene_census
 
@@ -39,7 +46,8 @@ def stage_obs() -> None:
         datasets = sources.staging() / "datasets.parquet"
         if not datasets.exists():
             table = census["census_info"]["datasets"].read().concat()
-            pq.write_table(table, datasets, compression="zstd")
+            pq.write_table(table, partial(datasets), compression="zstd")
+            partial(datasets).rename(datasets)
             print(f"  datasets: {table.num_rows:,} rows", flush=True)
         for species, spec in sources.SPECIES.items():
             path = sources.obs_path(species)
@@ -53,7 +61,8 @@ def stage_obs() -> None:
             assert len(joinid) == spec["rows"] and joinid[0] == 0 and joinid[-1] == len(joinid) - 1, (
                 f"{species} obs is not soma_joinid 0..{spec['rows'] - 1}"
             )
-            pq.write_table(table, path, compression="zstd", row_group_size=CHUNK_ROWS)
+            pq.write_table(table, partial(path), compression="zstd", row_group_size=CHUNK_ROWS)
+            partial(path).rename(path)
             print(f"  {species} obs: {table.num_rows:,} rows, {path.stat().st_size / 1e9:.2f} GB",
                   flush=True)
 
@@ -123,7 +132,8 @@ def stage_ontology() -> None:
     path = sources.staging() / f"cl-basic-{sources.CL_RELEASE}.json"
     if not path.exists():
         with urllib.request.urlopen(sources.CL_URL) as got:
-            path.write_bytes(got.read())
+            partial(path).write_bytes(got.read())
+        partial(path).rename(path)
     print(f"  Cell Ontology {sources.CL_RELEASE}: {path.stat().st_size / 1e6:.1f} MB", flush=True)
 
 
