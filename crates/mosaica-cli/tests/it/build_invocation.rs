@@ -888,12 +888,25 @@ fn no_progress_prints_no_progress() {
     assert!(progress_records(&json)
         .iter()
         .all(|r| json_stages.contains(&r.step.to_string())));
+    // A stage's elapsed seconds differ from one build to the next.
+    let untimed = |line: &str| -> String {
+        match line.rsplit_once(", ") {
+            Some((rest, last))
+                if last
+                    .strip_suffix(" s")
+                    .is_some_and(|secs| secs.parse::<f64>().is_ok()) =>
+            {
+                rest.to_string()
+            }
+            _ => line.to_string(),
+        }
+    };
     let without_records: Vec<String> = stderr(&json)
         .lines()
         .filter(|line| !line.starts_with('{'))
-        .map(|line| line.replace("bundles/a", "bundles/b"))
+        .map(|line| untimed(&line.replace("bundles/a", "bundles/b")))
         .collect();
-    let none_lines: Vec<String> = stderr(&none).lines().map(str::to_string).collect();
+    let none_lines: Vec<String> = stderr(&none).lines().map(untimed).collect();
     assert_eq!(none_lines, without_records);
 
     assert!(!auto.stderr.contains(&0x1b), "{}", stderr(&auto));

@@ -2,8 +2,8 @@
 
 `mosaica check` prints one page: the schemas it read, with their paths, then what the declaration
 discloses. It is run here over both declarations: the committed one and the one the verbs wrote.
-The two name the same files by different paths, one reading `data/notebook/` directly and one
-reading it through a relative path from a temporary directory. **The lines that name a path are
+The two name the same files by different paths, one reading the corpus's directory directly and
+one reading it through a relative path from a temporary directory. **The lines that name a path are
 compared by file name, and the rest of the page whole, but for the `[sources]` key a line names**:
 the SDK names each file after the target it was inserted into, and the committed declaration
 chose its own names.
@@ -28,8 +28,9 @@ pytest.importorskip("pyarrow")
 
 
 def declare_notebook(db, corpus: Path) -> None:
-    """python-sdk.md §10.2: `data/notebook/schema.toml` as calls, the files read in place."""
-    db.declare_view("s0", title="arXiv, 50,000 papers")
+    """python-sdk.md §10.2: the notebook corpus's `schema.toml` as calls, the files read in
+    place."""
+    db.declare_view("s0", title="arXiv papers")
     db.declare_vocabulary("archive", closed=True, width="u8", title="arXiv archive")
     db.declare_vocabulary(
         "primary_category", closed=True, width="u16", title="arXiv subject class"
@@ -171,9 +172,9 @@ def page_without_sources(page: str) -> list[str]:
 def read_schema_lines(stderr: str) -> list[str]:
     """`mosaica check`'s "read schema" lines, with the path column cut to its file name.
 
-    The two declarations name one set of files by two paths, one relative to `data/notebook/` and
-    one relative to a temporary directory, so the file name is what can be compared. What is being
-    compared is which object reads which file, which the name carries.
+    The two declarations name one set of files by two paths, one relative to the corpus's directory
+    and one relative to a temporary directory, so the file name is what can be compared. What is
+    being compared is which object reads which file, which the name carries.
 
     A `[sources]` key is the caller's own name for a file and the SDK names each after the target
     its insert bound it to, so the key is cut from the `source` lines and the file name compared.

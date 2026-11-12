@@ -22,6 +22,15 @@ pub(crate) fn within_level(kind: HierarchyKind) -> Option<bool> {
     }
 }
 
+/// Whether the climb from an artifact at `level` follows its edge to `parent`: `within` is
+/// [`within_level`]'s answer for the layer's kind.
+pub(crate) fn climbs(within: bool, level: u32, parent: &ParentRef) -> bool {
+    match within {
+        true => parent.level == level,
+        false => parent.level < level,
+    }
+}
+
 /// The served artifacts nearest above `(level, ordinal)` on every path, ascending and without
 /// repeats.
 ///
@@ -39,10 +48,7 @@ pub(crate) fn nearest_served<'a, T: Ord>(
     let up = |level: u32, ordinal: u32| {
         parents(level, ordinal)
             .iter()
-            .filter(move |p| match within {
-                true => p.level == level,
-                false => p.level < level,
-            })
+            .filter(move |p| climbs(within, level, p))
             .map(|p| (p.level, p.ordinal))
     };
     let mut found: Vec<T> = Vec::new();

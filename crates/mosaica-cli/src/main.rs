@@ -654,6 +654,7 @@ enum CorpusCommand {
     ///
     /// Every file lands beside the declaration, because a `source` is a path relative to the
     /// document that names it (`configuration.md` §3) — there is nothing to move independently.
+    /// With `--ingest`, it also writes `ingest.arrows`.
     Materialise {
         /// The run's seed.
         #[arg(long)]
@@ -674,6 +675,10 @@ enum CorpusCommand {
         /// Quantisation extent as `x_min,x_max,y_min,y_max` (contracts §2.5).
         #[arg(long, value_parser = parse_extent, default_value = GRID_EXTENT)]
         extent: Bounds,
+        /// Also write `ingest.arrows`: one `/control/ingest` body, as an Arrow IPC stream, of the
+        /// items `lo..hi` of the same generator. The range may start at `n`, past the built items.
+        #[arg(long, value_name = "LO..HI", value_parser = parse_item_range)]
+        ingest: Option<std::ops::Range<u64>>,
     },
     /// The artifact census: expected masked count per artifact of one closed-form layer, for one
     /// principal — an Arrow IPC stream on stdout, `(artifact, count)` ascending, non-empty
@@ -843,6 +848,25 @@ fn parse_extent(raw: &str) -> Result<Bounds, String> {
     };
     extent.validate()?;
     Ok(extent)
+}
+
+/// `lo..hi`, a half-open range of item numbers.
+fn parse_item_range(raw: &str) -> Result<std::ops::Range<u64>, String> {
+    let (lo, hi) = raw
+        .split_once("..")
+        .ok_or_else(|| format!("expected a range 'lo..hi', got '{raw}'"))?;
+    let bound = |text: &str| {
+        text.trim()
+            .parse::<u64>()
+            .map_err(|e| format!("'{text}' is not an item number: {e}"))
+    };
+    let (lo, hi) = (bound(lo)?, bound(hi)?);
+    if lo > hi {
+        return Err(format!(
+            "the range '{raw}' ends before it starts; write 'lo..hi' with lo <= hi"
+        ));
+    }
+    Ok(lo..hi)
 }
 
 /// `24g` / `512m` / `1073741824` — the human forms a budget is actually typed in.
@@ -1232,13 +1256,15 @@ fn corpus_with_terms_per_level(
 }
 
 /// `mosaica corpus materialise` (`artifact-delivery.md` §5.1, §5.4): the generator's build inputs
-/// plus the artifact scale campaign's fixture, written to `out`.
+/// plus the artifact scale campaign's fixture, written to `out`, and the ingest body of the items
+/// `ingest` when it is given.
 fn corpus_materialise(
     seed: u64,
     n: u64,
     out: &Path,
     terms_per_level: Option<u32>,
     extent: Bounds,
+    ingest: Option<std::ops::Range<u64>>,
 ) -> ExitCode {
     let corpus = match corpus_with_terms_per_level(seed, n, extent, terms_per_level) {
         Ok(corpus) => corpus,
@@ -1270,6 +1296,20 @@ fn corpus_materialise(
             return ExitCode::FAILURE;
         }
     };
+    if let Some(range) = ingest {
+        let batch = corpus.ingest_batch(range);
+        let write = || -> Result<(), Box<dyn std::error::Error>> {
+            let file = std::fs::File::create(out.join("ingest.arrows"))?;
+            let mut writer = arrow::ipc::writer::StreamWriter::try_new(file, &batch.schema())?;
+            writer.write(&batch)?;
+            writer.finish()?;
+            Ok(())
+        };
+        if let Err(e) = write() {
+            eprintln!("corpus materialise: writing ingest.arrows: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
     println!(
         "materialised {} (seed {seed}, n {n}, term space {}): {} flat artifacts / {} member \
          rows, {} partition artifacts / {} member rows, {} boundary artifacts, {} treed \
@@ -1684,7 +1724,8 @@ fn main() -> ExitCode {
                 out,
                 terms_per_level,
                 extent,
-            } => corpus_materialise(seed, n, &out, terms_per_level, extent),
+                ingest,
+            } => corpus_materialise(seed, n, &out, terms_per_level, extent, ingest),
             CorpusCommand::ArtifactCensus {
                 seed,
                 n,

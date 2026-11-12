@@ -321,13 +321,21 @@ fn published_layers(dir: &std::path::Path) -> Vec<String> {
 ///
 /// The executor publishes a write's side-manifest after acknowledging it, so the drop's own
 /// publication is awaited before the pause is armed. Armed earlier, the pause parks the executor
-/// on the drop's publication, and the registration of c is never accepted.
+/// on the drop's publication, and the registration of c is never accepted. A side-manifest naming
+/// a alone is also what the registration of a publishes, so the one naming a and b is awaited
+/// first: only a later one names a alone because of the drop.
 async fn crash_before_the_manifest_naming_a_new_layer(fold: bool) -> (Vec<(String, u64)>, Vec<(String, u64)>) {
     use mosaica_lifecycle::faults::{PauseAction, PauseSite};
     let tmp = TempDir::new().unwrap();
     let (server, faults) = serve_with_faults(&tmp).await;
     register(&server, declaration("clusters/a", None)).await;
     register(&server, declaration("clusters/b", None)).await;
+    wait_until(
+        "a side-manifest naming both registrations",
+        std::time::Duration::from_secs(60),
+        async || published_layers(tmp.path()) == ["clusters/a", "clusters/b"],
+    )
+    .await;
     assert_eq!(drop_layer(&server, "clusters/b").await.0, 200);
     if fold {
         flush_and_fold(&server, None).await;

@@ -60,6 +60,17 @@ describe('<mosaica-item-card> structure', () => {
     }
   });
 
+  it('writes a whole number of four figures, such as a year, without a thousands mark, and a longer one with them', async () => {
+    const host = await mount('<mosaica-item-card></mosaica-item-card>');
+    const el = host.querySelector('mosaica-item-card') as MosaicaItemCard;
+    el.meta = meta({declaredScalars: [scalar('year', 'i32'), scalar('population', 'i64')]});
+    el.item = {id: 7n, detail: {fields: {year: 2012, population: 48_213}, labels: [], views: [], scoped: {}}};
+    await settle(host);
+    const value = (name: string) => deep(host, `[part="field"][data-name="${name}"] [part="value"]`)!.textContent!.trim();
+    expect(value('year')).toBe('2012');
+    expect(value('population')).toBe('48,213');
+  });
+
   it('heads the group-scoped values of each key under the headline, as terms and values', async () => {
     const {host} = await card('title-field="title"', {...paper, detail: {...paper.detail, scoped: {mood: {'2026-Q2': 'calm'}}}} as typeof paper);
     const key = deep(host, '[part="key"]')!;

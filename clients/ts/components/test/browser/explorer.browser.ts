@@ -138,6 +138,13 @@ describe('a choice menu', () => {
 });
 
 describe('Tab from the map', () => {
+  it('grows the card beside a point to hold every field under Show all, where the map has room, with nothing to scroll', async () => {
+    const {result: r} = await opened<{before: {height: number; scrolls: boolean}; after: {height: number; scrolls: boolean}}>('grow', 1200, 900);
+    expect(r.before.scrolls).toBe(false);
+    expect(r.after.height).toBeGreaterThan(r.before.height);
+    expect(r.after.scrolls).toBe(false);
+  });
+
   it('reaches the region’s Clear, the selection, the status strip and the card beside the point, each control once', async () => {
     const {page, result: r} = await opened<{callout: boolean; regionTag: boolean}>('order', 1200, 800);
     expect(r).toEqual({callout: true, regionTag: true});

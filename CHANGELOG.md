@@ -8,6 +8,52 @@ container image.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-11
+
+Faster browsing of nested annotation layers, a build report that says what it measures, histogram
+and selection fixes in the components, and memory sizing that no longer mistakes page cache for
+memory in use. Bundles and clients from 0.4.0 work unchanged.
+
+### Added
+
+- `<mosaica-selection>` takes `title-field` and names each listed mark by that field, read for
+  the listed marks in one items request. The explorer passes its own `title-field`.
+
+### Changed
+
+- **Faster browse.** Expanding a row of a nested layer is answered from the neighbourhood of that
+  row, not the whole layer. On a layer of about 300,000 artifacts, a children page takes under
+  0.05 ms rather than about 470 ms at any depth, a filtered one 0.4 ms rather than about 500 ms,
+  and the roots about 190 ms rather than 470 ms.
+- **The build's occupancy report counts cells, not positions.** Each view's line now gives points
+  per occupied cell, and the warning past ten per cell is `CELLS SHARED` in place of
+  `RESOLUTION LOST`. Every position is still stored and served exactly; only the cell, the finest
+  unit the map tiles and counts by, is shared. The count and the threshold are unchanged.
+- The histogram card draws each bar as its share of its own set, on a scale the whole match sets.
+  The scale stays put as the camera moves, and the bars in view keep their shape at any zoom
+  rather than shrinking to a pixel when the view holds a small part of the match.
+- Numbers in the components are grouped in thousands only from 10,000 up, so a year reads `2012`
+  in the item card, the histogram's axis and the filter chips.
+- The histogram's count and mean are given to a screen reader only.
+
+### Fixed
+
+- Mosaica counts a cgroup's inactive file pages as available memory. Once the page cache filled
+  a container's memory limit, writes could be refused as `insufficient_memory` with a few
+  kilobytes available, and the build's default budget and the server's writer sizing shrank to
+  match.
+- A write submitted while the write executor is stopping is refused with `503` as not ready,
+  rather than with the `500` that says it may have taken effect.
+- Stepping into a cluster on a layer's card keeps the card's height until the children arrive, so
+  a scrolled filter panel keeps its place.
+- A callout follows the size of the card it holds, so Show all grows it to fit with no scroll bar
+  left.
+
+### Documentation
+
+- The [own-UI tutorial](https://docs.mosaicadb.com/start/typescript-own-ui/) sets a cluster
+  spacing, so its world view names the broad topics.
+
 ## [0.4.0] - 2026-11-11
 
 Annotation layers you can step through, components usable from the keyboard and by a screen
@@ -242,6 +288,7 @@ any later release, and a bundle built by one version may be refused by the next.
   container image on GHCR; and the Rust crates on crates.io, which are internal to the binary and
   carry no stable API.
 
+[0.4.1]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.1
 [0.4.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mosaicadb/mosaica/releases/tag/v0.2.0

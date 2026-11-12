@@ -1863,50 +1863,63 @@ pub(super) fn lineage_kind(kind: mosaica_types::layer::HierarchyKind) -> Option<
 /// `parents_of` holds every served row of the treed layers, keyed by `mosaica_id`, valued with
 /// `parent_ids`, which only ever name identifiers in the same response and layer. An empty
 /// list, or an identifier `parents_of` does not hold, are both roots — rung 0.
-///
-/// Iterative depth-first, ancestors memoised. The in-progress mark guards a cycle: a malformed
-/// store contributes nothing rather than looping.
-pub(crate) fn response_rungs(
+fn response_rungs(
     parents_of: &std::collections::HashMap<u64, Vec<u64>>,
 ) -> std::collections::HashMap<u64, u32> {
-    const PENDING: u32 = u32::MAX;
-    let mut known: std::collections::HashMap<u64, u32> =
-        std::collections::HashMap::with_capacity(parents_of.len());
-    let mut stack: Vec<u64> = Vec::new();
+    let mut known = std::collections::HashMap::with_capacity(parents_of.len());
     for &id in parents_of.keys() {
-        if known.contains_key(&id) {
-            continue;
-        }
-        stack.push(id);
-        while let Some(&at) = stack.last() {
-            let ups = parents_of.get(&at).map_or(&[][..], Vec::as_slice);
-            match known.get(&at).copied() {
-                None => {
-                    known.insert(at, PENDING);
-                    for &up in ups {
-                        if !known.contains_key(&up) {
-                            stack.push(up);
-                        }
-                    }
-                }
-                Some(PENDING) => {
-                    let rung = ups
-                        .iter()
-                        .filter_map(|up| known.get(up).copied())
-                        .filter(|&k| k != PENDING)
-                        .map(|k| k + 1)
-                        .max()
-                        .unwrap_or(0);
-                    known.insert(at, rung);
-                    stack.pop();
-                }
-                Some(_) => {
-                    stack.pop();
-                }
+        rung_of(
+            id,
+            |at| parents_of.get(&at).into_iter().flatten().copied(),
+            &mut known,
+        );
+    }
+    known
+}
+
+/// The longest parent chain above `at` by `parents`, with every rung met on the way held in
+/// `known`, so a walk from another artifact reuses them. An artifact with no parents is rung 0.
+///
+/// Iterative depth-first. The in-progress mark guards a cycle: a malformed store contributes
+/// nothing rather than looping.
+pub(crate) fn rung_of<K, P>(
+    at: K,
+    mut parents: impl FnMut(K) -> P,
+    known: &mut std::collections::HashMap<K, u32>,
+) -> u32
+where
+    K: Copy + Eq + std::hash::Hash,
+    P: IntoIterator<Item = K>,
+{
+    const PENDING: u32 = u32::MAX;
+    let mut stack = vec![at];
+    while let Some(&top) = stack.last() {
+        match known.get(&top).copied() {
+            None => {
+                known.insert(top, PENDING);
+                stack.extend(
+                    parents(top)
+                        .into_iter()
+                        .filter(|up| !known.contains_key(up)),
+                );
+            }
+            Some(PENDING) => {
+                let rung = parents(top)
+                    .into_iter()
+                    .filter_map(|up| known.get(&up).copied())
+                    .filter(|&k| k != PENDING)
+                    .map(|k| k + 1)
+                    .max()
+                    .unwrap_or(0);
+                known.insert(top, rung);
+                stack.pop();
+            }
+            Some(_) => {
+                stack.pop();
             }
         }
     }
-    known
+    known[&at]
 }
 
 /// Where one served artifact sits, and what it points at. Both edges are recorded during the

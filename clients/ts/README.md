@@ -71,10 +71,10 @@ The check runs these steps, each of which can be run alone from this directory:
 | Typecheck every package and the operator scripts | `npm run typecheck` | |
 | Build, then load each package entry from `dist/` in Node | `npm run build && node scripts/smoke-dist.mjs` | |
 | Unit tests of every package | `npm test` | |
-| Live tests of core against a real server | `npm --prefix core run test:live` | a `mosaica` binary and the notebook corpus |
+| Live tests of core against a real server | `npm --prefix core run test:live` | a `mosaica` binary, and `numpy` and `pyarrow` in `python3` |
 | Browser tests of the elements | `npm --prefix components run test:browser` | Chromium for Playwright, and a build |
 
-The live tests build the notebook corpus into a temporary deployment, serve it, and call it through `MosaicaClient`, `Control` and the bulk reads. They look for the binary in `MOSAICA_BIN`, then this checkout's `target/release` or `target/debug`, then `PATH`, then a `target/release` or `target/debug` in any directory above this one, and for the corpus in `MOSAICA_NOTEBOOK_DATA`, then `data/notebook/` at the root of the main checkout, which worktrees share. That directory is not in git. Where either is missing, each test is skipped and prints why. Build the binary with `cargo build --release -p mosaica`.
+The live tests build the notebook corpus into a temporary deployment, serve it, and call it through `MosaicaClient`, `Control` and the bulk reads. They look for the binary in `MOSAICA_BIN`, then this checkout's `target/release` or `target/debug`, then `PATH`, then a `target/release` or `target/debug` in any directory above this one. The corpus is the one `python3 -m corpora.notebook`, run at the repository root, writes once into the temporary directory: 12,000 papers drawn from `examples/data/arxiv/` by a seed, with three clusterings and their titles. Where the binary is missing, or the corpus cannot be written, each test is skipped and prints why. Build the binary with `cargo build --release -p mosaica`; the corpus needs `numpy` and `pyarrow` in `python3`.
 
 The browser tests run the elements in headless Chromium, and also load the built packages from `dist/`: the decode worker from its file with no bundler, and the elements built by Vite from their `dist/` modules. Install the browser once with `npx playwright install chromium`.
 

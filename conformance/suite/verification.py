@@ -31,21 +31,14 @@ granularity is the design's: the O(*n*) census pass and the per-id evaluation st
 the Python side compares vectors. A call per row would multiply process spawns by the corpus and
 make the mechanism unaffordable at exactly the sizes it exists for.
 
-## Materialisation — the shim, and why it exists
+## Materialisation
 
 The corpus reaches the build as files — points, pairs, the artifact rosters and their
-memberships, `config.toml` — written by the crate's own materialisers. `mosaica corpus
-materialise` writes that set, but it writes only that set: §12.1's "the corpus emits a batch and
-the driver posts it" needs one `/control/ingest` body drawn from the same generator over an
-arbitrary item range, and no verb takes a range. So [`materialise_corpus`] compiles a two-file
-cargo shim against `crates/mosaica-corpus` itself and runs it, calling the same materialisers the
-verb calls and then `Corpus::ingest_batch` beside them. This is the same trust chain as invoking
-the CLI — the one Rust generator, reached through a build — and deliberately not a Python
-restatement of the materialisers, for §12.1's reason. Two writers of one input set is the cost:
-the shim's calls and `Corpus::config_toml`'s declaration are one obligation held apart in two
-crates, which `test_materialisation.py` exists to keep matched. The shim lives in the checkout's
-own target directory and compiles into it, so after the first run its cost is a cargo fingerprint
-check.
+memberships, `corpus-config.toml` — and the driver posts one `/control/ingest` body over an item
+range (§12.1's "the corpus emits a batch and the driver posts it"). `mosaica corpus materialise`
+writes all of them from the one Rust generator, the ingest body with `--ingest`, so this module
+writes none of them itself: a Python restatement of the materialisers would put the fixture under
+test, for §12.1's reason.
 
 ## What the harness owns, and the two rules a naive harness breaks
 
@@ -69,8 +62,8 @@ from it.
 
 - **An absent value is null on the points tail and an omitted field at drill-down**, except a
   category's on the tail, which is its reserved code 0. The declaration's own key→code table
-  decides a category's code ([`Declaration`], parsed from the materialised `config.toml` rather
-  than restated here).
+  decides a category's code ([`Declaration`], parsed from the materialised `corpus-config.toml`
+  rather than restated here).
 - **The render columns are read by position.** The points tail is `mosaica_id` and `code`, then
   the render columns in manifest order, each named by its column. [`check_points`] reads the join
   column and `code` by name and the render columns by position, and
@@ -87,8 +80,6 @@ surface.
 from __future__ import annotations
 
 import io
-import os
-import re
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -117,11 +108,6 @@ from .canonical import Json, Streamed
 #: expected geometry.
 GRID_EXTENT = (0.0, 65536.0, 0.0, 65536.0)
 
-#: Where the materialiser shim lives: in this checkout's target directory, where it is compiled,
-#: since its manifest names this checkout's crates. The corpus *files* are per run.
-SHIM_DIR = REPO_ROOT / "target" / "corpus-materialise-shim"
-
-
 class TotalVerificationFailure(AssertionError):
     """A served value, count or membership disagrees with the computed corpus — or the comparison
     was vacuous, which this mechanism refuses to report as a pass."""
@@ -130,62 +116,6 @@ class TotalVerificationFailure(AssertionError):
 # ---------------------------------------------------------------------------------------------
 # Materialisation: the corpus's files, written by the crate's own materialisers
 # ---------------------------------------------------------------------------------------------
-
-_SHIM_MAIN = """\
-//! Materialise the correctness-suite corpus (written by conformance/suite/verification.py; the
-//! generator and every value are `mosaica-corpus`'s — this file only names output paths).
-use std::process::ExitCode;
-
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 6 {
-        eprintln!("usage: corpus-materialise <seed> <n> <ingest_lo> <ingest_hi> <out_dir>");
-        return ExitCode::FAILURE;
-    }
-    let seed: u64 = args[1].parse().expect("seed");
-    let n: u64 = args[2].parse().expect("n");
-    let lo: u64 = args[3].parse().expect("ingest_lo");
-    let hi: u64 = args[4].parse().expect("ingest_hi");
-    let out = std::path::PathBuf::from(&args[5]);
-    std::fs::create_dir_all(&out).expect("out dir");
-    let extent = mosaica_spatial::Bounds { x_min: 0.0, x_max: 65536.0, y_min: 0.0, y_max: 65536.0 };
-    let corpus = mosaica_corpus::Corpus::new(seed, n, extent).expect("corpus");
-    corpus.write_points_parquet(&out.join("points.parquet")).expect("points");
-    corpus.write_pairs_parquet(&out.join("pairs.parquet")).expect("pairs");
-    // Every remaining source `config_toml` declares — the four artifact rosters and their three
-    // membership relations — in one call. The declaration is a constant, so the file set it names
-    // and the file set written here are one obligation, checked by
-    // `test_materialisation.py::test_every_declared_source_is_a_file_the_shim_wrote`.
-    corpus.write_artifact_fixtures(&out).expect("artifact fixtures");
-    std::fs::write(out.join("config.toml"), corpus.config_toml()).expect("config");
-    if hi > lo {
-        let batch = corpus.ingest_batch(lo..hi);
-        let file = std::fs::File::create(out.join("ingest.arrows")).expect("ingest file");
-        let mut writer =
-            arrow::ipc::writer::StreamWriter::try_new(file, &batch.schema()).expect("writer");
-        writer.write(&batch).expect("write");
-        writer.finish().expect("finish");
-    }
-    ExitCode::SUCCESS
-}
-"""
-
-_SHIM_MANIFEST = """\
-[package]
-name = "corpus-materialise"
-version = "0.0.0"
-edition = "2021"
-
-[dependencies]
-mosaica-corpus = {{ path = "{corpus_crate}" }}
-mosaica-spatial = {{ path = "{spatial_crate}" }}
-# Pinned to the workspace lock's exact version: the shim's `arrow` must be type-identical to the
-# one `mosaica-corpus` compiled against, or `RecordBatch` is two types and nothing links.
-arrow = {{ version = "={arrow_version}", default-features = false, features = ["ipc"] }}
-
-[workspace]
-"""
-
 
 @dataclass(frozen=True)
 class CorpusFiles:
@@ -209,46 +139,22 @@ class CorpusFiles:
         return max(self.n, self.ingest_hi)
 
 
-def _workspace_arrow_version() -> str:
-    lock = (REPO_ROOT / "Cargo.lock").read_text()
-    m = re.search(r'name = "arrow"\nversion = "([^"]+)"', lock)
-    if m is None:
-        raise RuntimeError("no `arrow` entry in the workspace Cargo.lock — cannot pin the shim")
-    return m.group(1)
-
-
 def materialise_corpus(
     seed: int, n: int, out_dir: Path, *, ingest: tuple[int, int] | None = None
 ) -> CorpusFiles:
-    """Write the corpus's files into `out_dir` via the crate's own materialisers (module doc).
+    """Write the corpus's files into `out_dir` with `mosaica corpus materialise` (module doc).
 
     `ingest`, when given, is the half-open item range for one `/control/ingest` body — usually
     `(n, n + k)`, the corpus extended past the built prefix from the same functions.
     """
     lo, hi = ingest if ingest is not None else (n, n)
-    SHIM_DIR.joinpath("src").mkdir(parents=True, exist_ok=True)
-    (SHIM_DIR / "Cargo.toml").write_text(
-        _SHIM_MANIFEST.format(
-            corpus_crate=REPO_ROOT / "crates" / "mosaica-corpus",
-            spatial_crate=REPO_ROOT / "crates" / "mosaica-spatial",
-            arrow_version=_workspace_arrow_version(),
-        )
-    )
-    (SHIM_DIR / "src" / "main.rs").write_text(_SHIM_MAIN)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    run = subprocess.run(
-        [
-            "cargo", "run", "--release", "--quiet",
-            "--manifest-path", str(SHIM_DIR / "Cargo.toml"),
-            "--", str(seed), str(n), str(lo), str(hi), str(out_dir),
-        ],
-        env={**os.environ, "CARGO_TARGET_DIR": str(REPO_ROOT / "target")},
-        capture_output=True,
-        text=True,
-    )
-    if run.returncode != 0:
-        raise RuntimeError(f"corpus materialisation failed:\n{run.stdout}\n{run.stderr}")
-    with (out_dir / "config.toml").open("a") as declaration:
+    ensure_cli_built()
+    args = ["corpus", "materialise", "--seed", str(seed), "--n", str(n), "--out", str(out_dir)]
+    if hi > lo:
+        args += ["--ingest", f"{lo}..{hi}"]
+    _run_cli(args)
+    schema = out_dir / "corpus-config.toml"
+    with schema.open("a") as declaration:
         declaration.write(shards_toml(n))
     return CorpusFiles(
         seed=seed,
@@ -257,7 +163,7 @@ def materialise_corpus(
         ingest_hi=hi,
         points=out_dir / "points.parquet",
         pairs=out_dir / "pairs.parquet",
-        schema=out_dir / "config.toml",
+        schema=schema,
         ingest=(out_dir / "ingest.arrows") if hi > lo else None,
     )
 
@@ -314,8 +220,8 @@ class ColumnDecl:
 
 @dataclass(frozen=True)
 class Declaration:
-    """The corpus's declared columns, read from the `config.toml` the build compiled — so the
-    expected shapes below and the bundle's manifest share one source."""
+    """The corpus's declared columns, read from the `corpus-config.toml` the build compiled — so
+    the expected shapes below and the bundle's manifest share one source."""
 
     columns: tuple[ColumnDecl, ...]
 

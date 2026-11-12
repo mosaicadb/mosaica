@@ -268,7 +268,7 @@ impl Lineage {
 
     /// How many ordinals the parent table spans — every ordinal that names or is named as a
     /// parent. An ordinal at or past this has no parents and no children.
-    fn span(&self) -> usize {
+    pub(crate) fn span(&self) -> usize {
         match &self.parents {
             Parents::Tree(parent) => parent.len(),
             Parents::Dag { at, .. } => at.len() - 1,
@@ -317,8 +317,14 @@ impl Lineage {
         (child_at, children)
     }
 
+    /// The ordinals below [`Self::span`] with no parent, ascending, those a child names that the
+    /// level does not hold included.
+    pub(crate) fn roots(&self) -> &[u32] {
+        &self.roots
+    }
+
     /// The children of `ordinal`, ascending — building the index on the first call.
-    fn children_of_node(&self, ordinal: u32) -> &[u32] {
+    pub(crate) fn children_of_node(&self, ordinal: u32) -> &[u32] {
         let (child_at, children) = self.child_index.get_or_init(|| self.children_of());
         let at = ordinal as usize;
         if at + 1 >= child_at.len() {

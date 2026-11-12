@@ -8,6 +8,9 @@
 //! - **A `filters` whose leaves route row space** is the one whole-view pass the design adds
 //!   (§9 (d), owner ruling): a leaf over a render-only column is answered by the viewport only
 //!   inside its tiles, so browse runs the row route's own predicate over every row of the view.
+//! - **The children form down a deep tree**, on a synthetic `nested` layer published over the
+//!   same synthetic bundle (`--tree ROWS:BRANCHING:DEPTH`): its cost follows the requested
+//!   artifact's neighbourhood, so a page deep in the tree should cost what one near the roots does.
 //!
 //! # Why the scan needs a fixture of its own, and what that costs the figure
 //!
@@ -30,6 +33,7 @@
 //! cargo run --release -p mosaica-bench --bin browse_cost -- \
 //!     --bundle data/ladder/arxiv/bundle --view knn --layer clusters/kmeans
 //! cargo run --release -p mosaica-bench --bin browse_cost -- --scan-rows 2422486
+//! cargo run --release -p mosaica-bench --bin browse_cost -- --tree 4_000_000:8:6
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -51,6 +55,7 @@ fn main() {
     let mut layer: Option<String> = None;
     let mut scan_rows: Option<u64> = None;
     let mut repeat = 5usize;
+    let mut tree: Option<(u64, u32, u32)> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -58,12 +63,23 @@ fn main() {
             "--view" => view = args.next().expect("--view takes a value"),
             "--layer" => layer = args.next(),
             "--scan-rows" => scan_rows = args.next().and_then(|n| n.replace('_', "").parse().ok()),
+            "--tree" => {
+                let spec = args.next().expect("--tree takes ROWS:BRANCHING:DEPTH");
+                let parts: Vec<u64> = spec
+                    .split(':')
+                    .map(|n| n.replace('_', "").parse().expect("a number"))
+                    .collect();
+                tree = Some((parts[0], parts[1] as u32, parts[2] as u32));
+            }
             "--repeat" => repeat = args.next().and_then(|n| n.parse().ok()).unwrap_or(5),
             other => panic!("unknown argument {other}"),
         }
     }
     if let Some(rows) = scan_rows {
         measure_scan(rows, repeat);
+    }
+    if let Some((rows, branching, depth)) = tree {
+        measure_tree(rows, branching, depth, repeat);
     }
     if let Some(root) = bundle {
         measure_pages(&root, &view, layer.as_deref(), repeat);
@@ -302,6 +318,117 @@ fn measure_scan(rows: u64, repeat: usize) {
     ask("render-only leaf (scan)", Some(scan));
 }
 
+/// The roots, a search and the children form down a deep `nested` layer: `branching` children
+/// under every artifact to `depth` generations below the one root, each artifact holding a
+/// contiguous run of the `rows` rows, so the layer holds the sum of `branching^k` for `k` from 0
+/// to `depth` artifacts.
+fn measure_tree(rows: u64, branching: u32, depth: u32, repeat: usize) {
+    let tmp = tempfile::TempDir::new().expect("a scratch dir");
+    let started = Instant::now();
+    let bundle = build_scan_fixture(tmp.path(), rows);
+    println!(
+        "synthetic bundle of {rows} rows built in {:?}",
+        started.elapsed()
+    );
+    let engine = engine_at(
+        &bundle,
+        &tmp.path().join("cache"),
+        &tmp.path().join("wal.log"),
+        true,
+    );
+    let mut declaration = scan_layer();
+    declaration.name = "bench/tree".into();
+    declaration.hierarchy.kind = mosaica_types::layer::HierarchyKind::Nested;
+    engine
+        .register_layer(declaration)
+        .expect("the layer registers");
+    let started = Instant::now();
+    let mut artifacts = 0u64;
+    let mut ids: Vec<Vec<mosaica_types::MosaicaId>> = Vec::new();
+    for at in 0..=depth {
+        let width = u64::from(branching).pow(at);
+        let span = (rows / width).max(1);
+        let level: Vec<mosaica_lifecycle::IncomingArtifact> = (0..width)
+            .map(|j| {
+                let members =
+                    (j * span..((j + 1) * span).min(rows)).map(mosaica_types::EntityId::new);
+                let mut artifact = mosaica_lifecycle::IncomingArtifact::from_entities(
+                    Some(format!("{at}/{j}")),
+                    members,
+                );
+                if at > 0 {
+                    artifact.parent_keys = vec![format!("{}/{}", at - 1, j / u64::from(branching))];
+                }
+                artifact
+            })
+            .collect();
+        artifacts += width;
+        let mut published = Vec::new();
+        for chunk in level.chunks(10_000) {
+            published.extend(
+                engine
+                    .publish_artifacts("bench/tree".into(), 0, chunk.to_vec())
+                    .expect("the artifacts publish"),
+            );
+        }
+        ids.push(published);
+    }
+    println!("{artifacts} artifacts published in {:?}", started.elapsed());
+    let session = engine
+        .authorise(&credential(&all_terms(&bundle)))
+        .expect("the credential authorises");
+    let ask = |what: &str, form: BrowseForm, filter: Option<FilterExpr>| {
+        let mut samples = Vec::new();
+        let mut rows = 0;
+        for _ in 0..repeat {
+            let started = Instant::now();
+            let out = engine
+                .browse(
+                    &session,
+                    BrowseRequest {
+                        view: "s0",
+                        layer: "bench/tree",
+                        level: None,
+                        form: form.clone(),
+                        filter: filter.clone(),
+                        limit: 50,
+                        cursor: None,
+                        palette_size: None,
+                        cancel: None,
+                    },
+                )
+                .expect("a browse answers");
+            samples.push(started.elapsed().as_secs_f64() * 1e3);
+            rows = out.artifacts.len();
+        }
+        println!("  {what:<28} {:>9.1} ms   {rows} row(s)", median(samples));
+    };
+    let filter = FilterExpr::Leaf {
+        column: "score".into(),
+        operand: FilterOperand::Range {
+            lo: None,
+            hi: Some(Endpoint {
+                value: Scalar::Int(0),
+                inclusive: false,
+            }),
+        },
+    };
+    ask("roots", BrowseForm::Roots, None);
+    ask("search '/12345'", BrowseForm::Search("/12345".into()), None);
+    for at in [0, depth / 2, depth.saturating_sub(1)] {
+        ask(
+            &format!("children at depth {at}"),
+            BrowseForm::Children(ids[at as usize][0]),
+            None,
+        );
+    }
+    ask(
+        &format!("children at depth {}, filtered", depth.saturating_sub(1)),
+        BrowseForm::Children(ids[depth.saturating_sub(1) as usize][0]),
+        Some(filter),
+    );
+}
+
 fn scan_layer() -> mosaica_types::layer::LayerDeclaration {
     use mosaica_types::layer::*;
     LayerDeclaration {
@@ -335,6 +462,12 @@ name   = "score"
 type   = "i32"
 render = true
 index  = false
+
+[[attribute]]
+name   = "id"
+field  = "entity_id"
+type   = "u64"
+unique = true
 "#;
 
 fn build_scan_fixture(dir: &Path, rows: u64) -> PathBuf {

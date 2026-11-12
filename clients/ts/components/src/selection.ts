@@ -1,8 +1,8 @@
 import {css, html, nothing, type PropertyValues, type TemplateResult} from 'lit';
-import {property} from 'lit/decorators.js';
-import {formatMasked, type RegionProjection, type StatusProjection} from '@mosaicajs/client';
+import {property, state} from 'lit/decorators.js';
+import {formatMasked, namedItems, type RegionProjection, type StatusProjection, type Store} from '@mosaicajs/client';
 import {isBusy, isUnanswered} from '@mosaicajs/client/internal';
-import {MosaicaElement, emit, idString, shapeDetail} from './base.js';
+import {MosaicaElement, emit, idString, keyTitle, numberText, shapeDetail} from './base.js';
 import {attachContextRoot, defineOnce} from './define.js';
 import {icon} from './icons.js';
 import {ActionFocus, UNSAID, liveLine, reasonOf, refusedLine, stateLine, stateOf, type PanelState, type StateLine} from './states.js';
@@ -13,7 +13,9 @@ import './count.js';
  * Use the selection card beside a map so that viewers can see what is inside the region they have
  * drawn. It reads the store's selected region, or the `region` you set. It counts the items inside
  * that the filters match, the items the viewer may see there and the marks drawn there. The drawn
- * marks are listed below the counts, each a button that picks it.
+ * marks are listed below the counts, each a button that picks it. With `title-field` set, a mark
+ * is named by that field, read for the marks listed in one request, and by its `mosaica_id` until
+ * the name arrives or where the item has no value for it.
  *
  * The region acts as a filter, which means the map and every other count narrow to it once it
  * settles. Outside flips it to everything outside the shape, and Clear removes it. The counts are
@@ -45,7 +47,8 @@ import './count.js';
  * @csspart count-visible - The `<mosaica-count>` of items the viewer may see inside (or outside).
  * @csspart label - The heading above the list.
  * @csspart items - The list of drawn marks inside.
- * @csspart item - One drawn mark's row, holding a button named by its `mosaica_id`.
+ * @csspart item - One drawn mark's row, holding a button named by its `title-field` value, else by
+ *   its `mosaica_id`, with `data-id` on a button named by its `mosaica_id`.
  * @csspart actions - The action buttons.
  * @csspart action - One action button.
  */
@@ -92,12 +95,14 @@ export class MosaicaSelection extends MosaicaElement {
         align-self: stretch;
         padding: 0 6px;
         border-radius: var(--_mosaica-radius-control);
-        font-family: var(--_mosaica-font-mono);
         font-size: 12px;
         text-align: left;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      [part='item'] button[data-id] {
+        font-family: var(--_mosaica-font-mono);
       }
       [part='item'] button:focus-visible {
         outline-offset: -2px;
@@ -118,6 +123,57 @@ export class MosaicaSelection extends MosaicaElement {
    * region. Set it when another element on the page says the same things.
    */
   @property({type: Boolean, reflect: true}) accessor quiet = false;
+  /** The field that names each listed mark. Unset, a mark is named by its `mosaica_id`. */
+  @property({attribute: 'title-field'}) accessor titleField = '';
+
+  /** The listed marks' names, by `mosaica_id`, for {@link namedBy}. @internal */
+  @state() accessor names: ReadonlyMap<string, string> = new Map();
+  /** The field and store the names were read for, and the marks already asked about. */
+  private namedBy: {field: string; store: Store | null} = {field: '', store: null};
+  private asked = new Set<string>();
+  /** Moved as the names are dropped, so an answer asked for before is too. */
+  private namesEpoch = 0;
+
+  protected override resetServerData(): void {
+    this.dropNames();
+  }
+
+  private dropNames(): void {
+    this.namesEpoch += 1;
+    if (this.names.size > 0) this.names = new Map();
+    this.asked = new Set();
+  }
+
+  /** Read the title field of the listed marks no request has asked about yet, in one request. */
+  private askNames(): void {
+    const s = this.resolvedStore;
+    const field = this.titleField;
+    if (field !== this.namedBy.field || s !== this.namedBy.store) {
+      this.namedBy = {field, store: s};
+      this.dropNames();
+    }
+    const r = this.shown;
+    const ids = s && field && r ? Array.from(r.held.ids).filter((id) => !this.asked.has(idString(id))) : [];
+    if (!s || ids.length === 0) return;
+    for (const id of ids) this.asked.add(idString(id));
+    const epoch = this.namesEpoch;
+    const column = s.get('meta')?.declaredScalars.find((c) => c.name === field);
+    const text = (v: unknown) => (column?.category && typeof v === 'string' ? (s.heldTitle(field, v) ?? keyTitle(s, field, v)) : typeof v === 'number' ? numberText(v) : String(v));
+    void (async () => {
+      const got = new Map<string, string>();
+      for await (const page of await s.items({fields: [field], filters: namedItems(ids)})) {
+        const idColumn = page.getChild('mosaica_id');
+        const values = page.getChild(field);
+        for (let i = 0; i < page.numRows; i++) {
+          const v: unknown = values?.get(i);
+          if (v !== null && v !== undefined && v !== '') got.set(String(idColumn?.get(i)), text(v));
+        }
+      }
+      if (epoch === this.namesEpoch && got.size > 0) this.names = new Map([...this.names, ...got]);
+    })().catch(() => {
+      // A refused read leaves those marks named by their ids.
+    });
+  }
 
   private get shown(): RegionProjection | null {
     return this.region ?? this.resolvedStore?.get('region') ?? null;
@@ -132,6 +188,7 @@ export class MosaicaSelection extends MosaicaElement {
 
   protected override updated(): void {
     this.actionFocus.keep(this.renderRoot.querySelector<HTMLElement>('[part="state"]'));
+    this.askNames();
   }
 
   /**
@@ -193,7 +250,10 @@ export class MosaicaSelection extends MosaicaElement {
       ${r && ids.length > 0
         ? html`<div part="label" id="items-label" class="xs muted items-label">Shown items</div>
           <ul part="items" class="list" aria-labelledby="items-label">
-            ${ids.map((id) => html`<li part="item" class="item"><button type="button" @click=${() => void this.resolvedStore?.pick(BigInt(id))}>${id}</button></li>`)}
+            ${ids.map((id) => {
+              const name = this.names.get(id);
+              return html`<li part="item" class="item"><button type="button" ?data-id=${name === undefined} title=${name === undefined ? nothing : id} @click=${() => void this.resolvedStore?.pick(BigInt(id))}>${name ?? id}</button></li>`;
+            })}
             ${r.held.count > ids.length ? html`<li class="muted sm">${(r.held.count - ids.length).toLocaleString('en-GB')} more not listed</li>` : nothing}
           </ul>`
         : nothing}

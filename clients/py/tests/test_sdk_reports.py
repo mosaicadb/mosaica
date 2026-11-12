@@ -1,4 +1,5 @@
-"""What each call returns: a report that shows as a short summary, and no call prints.
+"""What each call returns: a report that shows as a short summary, and only starting the server
+prints, one line naming the address it serves at.
 
 Each report kind is checked for the numbers that matter in its summary, and for every finding
 and refusal it holds. The wording is not asserted.
@@ -158,7 +159,9 @@ def test_a_strict_first_commit_refuses_the_build_at_a_row_it_would_leave_out(tmp
         db.close()
 
 
-def test_the_first_commit_reports_what_it_built_and_prints_nothing(tmp_path, corpus, capsys):
+def test_the_first_commit_reports_what_it_built_and_prints_the_address_it_serves_at(
+    tmp_path, corpus, capsys
+):
     db = create(tmp_path / "db")
     try:
         small(db)
@@ -173,7 +176,8 @@ def test_the_first_commit_reports_what_it_built_and_prints_nothing(tmp_path, cor
         assert report.viewer in summary
         # The build's log stays on the report.
         assert "built" in report.log
-        assert capsys.readouterr().out == ""
+        [line] = capsys.readouterr().out.splitlines()
+        assert db.viewer_url in line
     finally:
         db.close()
 
