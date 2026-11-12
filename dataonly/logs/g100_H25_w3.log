@@ -1,0 +1,7 @@
+[     0s] g100 H25 worker 3 {'DCODE': 'fr', 'PROF': 'h0.25', 'RPROF': 'h0.25', 'ANCH': 'items', 'NA': 200, 'SPH': 1, 'NORM': 4, 'L0': 0, 'SCHED': [4, 8, 12, 16, 24, 32], 'RSC': 'cheap', 'ISC': 1} levels [4, 8, 12, 16, 24, 32, 40, 48, 56, 64, 72, 80]
+[     0s] rates [[0], [1], [1], [2], [3], [3]] scalar bytes per randomised level [1.0, 0.5, 0.0, 0.5, 0.5, 0.0] blocks [100]
+[     5s] group 1 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 30150], 'ry': [12, 5025], 'rt': [574, 15075]} rmax 4.94
+[    16s] group 3 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 140112], 'ry': [67, 23352], 'rt': [2697, 70056]} rmax 4.94
+[    30s] group 11 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 259062], 'ry': [146, 43177], 'rt': [4909, 129531]} rmax 4.98
+[    36s] group 12 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 298200], 'ry': [186, 49700], 'rt': [5214, 149100]} rmax 5.23
+[    36s] done
