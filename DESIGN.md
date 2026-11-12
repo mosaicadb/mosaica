@@ -21,6 +21,9 @@ Reports (all under this directory): `combined/REPORT.md` (the build and ablation
   Pr over ω [ S(t) ⊆ R ⊆ S(t − d) ] ≥ 1 − ε, with d = 0 (exact) as the default and ε = 10⁻⁹ per
   query at N = 10⁹. Decisions made by deterministic bounds are always correct; only decisions at
   randomised levels carry ε. A query or item crafted against the seed affects only itself.
+- **No query sample at build time.** The index is fitted to the data alone (corpus items as
+  pseudo-queries); the query path never knows a query's type. Sections 2 and 5 still describe the
+  earlier build tuned to an item/text mixture; its cost under the data-only fit is being measured.
 - **Scale and generality.** Billions of items on one machine (more by sharding, which needs no
   merging for thresholds). Live inserts, deletes and suppressions. Any embedding model, roughly
   100 to 5,000 dimensions, with no dataset-specific modelling.

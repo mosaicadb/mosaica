@@ -267,5 +267,10 @@ Write `REPORT.md` in your subdirectory, and return a summary of at most ~400 wor
 - **A filter keeps its meaning.** Results are plain sets; no three-valued or "maybe" results.
 - **The method must generalise across datasets and dimensions** (roughly 100 to 5,000), with no
   dataset-specific modelling.
+- **The build is fitted to the data alone.** Users cannot be required to supply example queries, and
+  a query's domain (item-like or text) is unknown at query time. Profiles, bit allocations and
+  certificate weights are fitted using corpus items as pseudo-queries; no text anchors. (Learning a
+  profile from the live query log at compaction remains possible later, since tuning affects cost
+  and never correctness.)
 - **Text queries are the expected common case.** Keep the randomised deep levels in the stream:
   they cost item queries ~1–3% and save text queries 8–18% (combined build, 1M).
