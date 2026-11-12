@@ -1,0 +1,198 @@
+{
+ "FlatIP f32 (25k rows)": {
+  "ns_per_item": 167.02
+ },
+ "RaBitQ 1-bit qb=4": {
+  "ms_per_query": 4.641,
+  "ns_per_item": 23.21,
+  "recall@10": 0.3825,
+  "code_bytes": 104
+ },
+ "RaBitQ 1-bit qb=0": {
+  "ms_per_query": 10.092,
+  "ns_per_item": 50.46,
+  "recall@10": 0.385,
+  "code_bytes": 104
+ },
+ "RaBitQ 1-bit qb=8": {
+  "ms_per_query": 6.789,
+  "ns_per_item": 33.95,
+  "recall@10": 0.3825,
+  "code_bytes": 104
+ },
+ "RaBitQ 1-bit qb=4 sel=0.1": {
+  "ms_per_query": 1.5,
+  "ns_per_item": 7.5,
+  "ns_per_visible_item": 75.23,
+  "recall@10": 0.5625,
+  "code_bytes": 104
+ },
+ "RaBitQ 1-bit qb=4 sel=0.01": {
+  "ms_per_query": 0.568,
+  "ns_per_item": 2.84,
+  "ns_per_visible_item": 282.59,
+  "recall@10": 0.635,
+  "code_bytes": 104
+ },
+ "err RaBitQ 1-bit (104 B)": {
+  "err_rms": 0.012203262187540531,
+  "err_max_abs": 0.06456708908081055,
+  "z_std_vs_1bit_formula": 0.9688189029693604,
+  "z_max_abs": 4.806665420532227
+ },
+ "RaBitQFastScan 1-bit": {
+  "ms_per_query": 1.768,
+  "ns_per_item": 8.84,
+  "recall@10": 0.385,
+  "code_bytes": 104
+ },
+ "RaBitQFastScan 1-bit batch40": {
+  "ms_per_query": 1.764,
+  "ns_per_item": 8.82,
+  "recall@10": 0.385,
+  "code_bytes": 104
+ },
+ "RaBitQFastScan 1-bit sel=0.1": {
+  "ms_per_query": 1.934,
+  "ns_per_item": 9.67,
+  "ns_per_visible_item": 96.98,
+  "recall@10": 0.5625,
+  "code_bytes": 104
+ },
+ "RaBitQFastScan 1-bit sel=0.01": {
+  "ms_per_query": 0.968,
+  "ns_per_item": 4.84,
+  "ns_per_visible_item": 481.49,
+  "recall@10": 0.635,
+  "code_bytes": 104
+ },
+ "RaBitQ 4-bit two-stage": {
+  "ms_per_query": 6.498,
+  "ns_per_item": 32.49,
+  "recall@10": 0.8675,
+  "code_bytes": 404
+ },
+ "err RaBitQ 4-bit (404 B)": {
+  "err_rms": 0.0017846296541392803,
+  "err_max_abs": 0.009667158126831055,
+  "z_std_vs_1bit_formula": 0.14248855412006378,
+  "z_max_abs": 0.7338860630989075
+ },
+ "RaBitQ 9-bit two-stage": {
+  "ms_per_query": 16.398,
+  "ns_per_item": 81.99,
+  "recall@10": 0.9925,
+  "code_bytes": 884
+ },
+ "err RaBitQ 9-bit (884 B)": {
+  "err_rms": 6.707821739837527e-05,
+  "err_max_abs": 0.0004646778106689453,
+  "z_std_vs_1bit_formula": 0.005352939944714308,
+  "z_max_abs": 0.03164283558726311
+ },
+ "RaBitQFastScan 4-bit two-stage": {
+  "ms_per_query": 3.897,
+  "ns_per_item": 19.49,
+  "recall@10": 0.865,
+  "code_bytes": 404
+ },
+ "PQFastScan M=64 (32 B)": {
+  "ms_per_query": 0.423,
+  "ns_per_item": 2.12,
+  "recall@10": 0.057499999999999996,
+  "code_bytes": 32
+ },
+ "PQFastScan M=64 batch40": {
+  "ms_per_query": 0.257,
+  "ns_per_item": 1.29,
+  "recall@10": 0.057499999999999996,
+  "code_bytes": 32
+ },
+ "PQFastScan M=64 sel=0.1": {
+  "ms_per_query": 0.552,
+  "ns_per_item": 2.76,
+  "ns_per_visible_item": 27.7,
+  "recall@10": 0.14750000000000002,
+  "code_bytes": 32
+ },
+ "PQFastScan M=64 sel=0.01": {
+  "ms_per_query": 0.657,
+  "ns_per_item": 3.29,
+  "ns_per_visible_item": 326.92,
+  "recall@10": 0.32999999999999996,
+  "code_bytes": 32
+ },
+ "PQFastScan M=192 (96 B)": {
+  "ms_per_query": 0.878,
+  "ns_per_item": 4.39,
+  "recall@10": 0.255,
+  "code_bytes": 96
+ },
+ "PQFastScan M=192 batch40": {
+  "ms_per_query": 0.688,
+  "ns_per_item": 3.44,
+  "recall@10": 0.255,
+  "code_bytes": 96
+ },
+ "PQFastScan M=192 sel=0.1": {
+  "ms_per_query": 1.021,
+  "ns_per_item": 5.1,
+  "ns_per_visible_item": 51.18,
+  "recall@10": 0.39249999999999996,
+  "code_bytes": 96
+ },
+ "PQFastScan M=192 sel=0.01": {
+  "ms_per_query": 0.798,
+  "ns_per_item": 3.99,
+  "ns_per_visible_item": 396.83,
+  "recall@10": 0.505,
+  "code_bytes": 96
+ },
+ "IVFRaBitQFastScan nprobe=256": {
+  "ms_per_query": 2.978,
+  "ns_per_item": 14.89,
+  "recall@10": 0.5425000000000001,
+  "code_bytes": 104
+ },
+ "IVFRaBitQFastScan nprobe=16": {
+  "ms_per_query": 0.225,
+  "ns_per_item": 1.12,
+  "recall@10": 0.51,
+  "code_bytes": 104
+ },
+ "IVFRaBitQFastScan nprobe=256 sel=0.1": {
+  "ms_per_query": 3.019,
+  "ns_per_item": 15.1,
+  "ns_per_visible_item": 151.4,
+  "recall@10": 0.675,
+  "code_bytes": 104
+ },
+ "IVFRaBitQFastScan nprobe=256 sel=0.01": {
+  "ms_per_query": 1.863,
+  "ns_per_item": 9.32,
+  "ns_per_visible_item": 927.06,
+  "recall@10": 0.755,
+  "code_bytes": 104
+ },
+ "IVFRaBitQ 1-bit nprobe=256": {
+  "ms_per_query": 4.102,
+  "ns_per_item": 20.51,
+  "recall@10": 0.5450000000000002,
+  "code_bytes": 104
+ },
+ "IVFRaBitQ 1-bit nprobe=256 sel=0.1": {
+  "ms_per_query": 1.833,
+  "ns_per_item": 9.17,
+  "ns_per_visible_item": 91.91,
+  "recall@10": 0.67,
+  "code_bytes": 104
+ },
+ "IVFRaBitQ 1-bit nprobe=256 sel=0.01": {
+  "ms_per_query": 1.079,
+  "ns_per_item": 5.39,
+  "ns_per_visible_item": 536.59,
+  "recall@10": 0.7525,
+  "code_bytes": 104
+ },
+ "peak_rss_mb": 1494.31640625
+}

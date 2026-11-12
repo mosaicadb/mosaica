@@ -1,0 +1,381 @@
+{
+ "rot": 1,
+ "N": 200000,
+ "visible": 19944,
+ "RaBitQ1_code_size": 104,
+ "RaBitQ4_code_size": 404,
+ "RaBitQ9_code_size": 884,
+ "IVFRaBitQ_code_size": 104,
+ "text@0.001": {
+  "RaBitQ1 qb=4(default)": {
+   "true": 1140,
+   "returned": 3960,
+   "missed": 281,
+   "extra": 3101,
+   "invisible_returned": 0,
+   "ms_per_query": 2.39
+  },
+  "RaBitQ1 qb=0(float query)": {
+   "true": 1140,
+   "returned": 3750,
+   "missed": 279,
+   "extra": 2889,
+   "invisible_returned": 0,
+   "ms_per_query": 2.74
+  },
+  "RaBitQ4 qb=4(default)": {
+   "true": 1140,
+   "returned": 1155,
+   "missed": 94,
+   "extra": 109,
+   "invisible_returned": 0,
+   "ms_per_query": 7.18
+  },
+  "RaBitQ4 qb=0(float query)": {
+   "true": 1140,
+   "returned": 1155,
+   "missed": 94,
+   "extra": 109,
+   "invisible_returned": 0,
+   "ms_per_query": 6.3
+  },
+  "RaBitQ9 qb=4(default)": {
+   "true": 1140,
+   "returned": 1110,
+   "missed": 34,
+   "extra": 4,
+   "invisible_returned": 0,
+   "ms_per_query": 4.39
+  },
+  "RaBitQ9 qb=0(float query)": {
+   "true": 1140,
+   "returned": 1110,
+   "missed": 34,
+   "extra": 4,
+   "invisible_returned": 0,
+   "ms_per_query": 4.01
+  },
+  "IVFRaBitQ1 nprobe=all qb=0": {
+   "true": 1140,
+   "returned": 2073,
+   "missed": 263,
+   "extra": 1196,
+   "invisible_returned": 0,
+   "ms_per_query": 4.09
+  },
+  "IVFRaBitQ1 nprobe=16 qb=0": {
+   "true": 1140,
+   "returned": 1378,
+   "missed": 367,
+   "extra": 605,
+   "invisible_returned": 0,
+   "ms_per_query": 1.12
+  },
+  "RaBitQFastScan": {
+   "error": "Error in virtual void faiss::Index::range_search(faiss::idx_t, const float*, float, faiss::RangeSearchResult*, const faiss::SearchParameters*) const at /project"
+  },
+  "IVFRaBitQFastScan nprobe=all": {
+   "true": 1140,
+   "returned": 19,
+   "missed": 1138,
+   "extra": 17,
+   "invisible_returned": 0,
+   "ms_per_query": 3.99
+  }
+ },
+ "text@0.01": {
+  "RaBitQ1 qb=4(default)": {
+   "true": 11940,
+   "returned": 20878,
+   "missed": 2352,
+   "extra": 11290,
+   "invisible_returned": 0,
+   "ms_per_query": 2.47
+  },
+  "RaBitQ1 qb=0(float query)": {
+   "true": 11940,
+   "returned": 20043,
+   "missed": 2384,
+   "extra": 10487,
+   "invisible_returned": 0,
+   "ms_per_query": 3.13
+  },
+  "RaBitQ4 qb=4(default)": {
+   "true": 11940,
+   "returned": 12203,
+   "missed": 664,
+   "extra": 927,
+   "invisible_returned": 0,
+   "ms_per_query": 5.88
+  },
+  "RaBitQ4 qb=0(float query)": {
+   "true": 11940,
+   "returned": 12203,
+   "missed": 664,
+   "extra": 927,
+   "invisible_returned": 0,
+   "ms_per_query": 7.12
+  },
+  "RaBitQ9 qb=4(default)": {
+   "true": 11940,
+   "returned": 11904,
+   "missed": 59,
+   "extra": 23,
+   "invisible_returned": 0,
+   "ms_per_query": 4.89
+  },
+  "RaBitQ9 qb=0(float query)": {
+   "true": 11940,
+   "returned": 11904,
+   "missed": 59,
+   "extra": 23,
+   "invisible_returned": 0,
+   "ms_per_query": 3.9
+  },
+  "IVFRaBitQ1 nprobe=all qb=0": {
+   "true": 11940,
+   "returned": 15684,
+   "missed": 2066,
+   "extra": 5810,
+   "invisible_returned": 0,
+   "ms_per_query": 3.4
+  },
+  "IVFRaBitQ1 nprobe=16 qb=0": {
+   "true": 11940,
+   "returned": 10360,
+   "missed": 3775,
+   "extra": 2195,
+   "invisible_returned": 0,
+   "ms_per_query": 0.94
+  },
+  "RaBitQFastScan": {
+   "error": "Error in virtual void faiss::Index::range_search(faiss::idx_t, const float*, float, faiss::RangeSearchResult*, const faiss::SearchParameters*) const at /project"
+  },
+  "IVFRaBitQFastScan nprobe=all": {
+   "true": 11940,
+   "returned": 45,
+   "missed": 11930,
+   "extra": 35,
+   "invisible_returned": 0,
+   "ms_per_query": 3.19
+  }
+ },
+ "item@0.001": {
+  "RaBitQ1 qb=4(default)": {
+   "true": 760,
+   "returned": 1069,
+   "missed": 178,
+   "extra": 487,
+   "invisible_returned": 0,
+   "ms_per_query": 2.97
+  },
+  "RaBitQ1 qb=0(float query)": {
+   "true": 760,
+   "returned": 932,
+   "missed": 175,
+   "extra": 347,
+   "invisible_returned": 0,
+   "ms_per_query": 2.86
+  },
+  "RaBitQ4 qb=4(default)": {
+   "true": 760,
+   "returned": 745,
+   "missed": 53,
+   "extra": 38,
+   "invisible_returned": 0,
+   "ms_per_query": 6.13
+  },
+  "RaBitQ4 qb=0(float query)": {
+   "true": 760,
+   "returned": 745,
+   "missed": 53,
+   "extra": 38,
+   "invisible_returned": 0,
+   "ms_per_query": 6.79
+  },
+  "RaBitQ9 qb=4(default)": {
+   "true": 760,
+   "returned": 737,
+   "missed": 24,
+   "extra": 1,
+   "invisible_returned": 0,
+   "ms_per_query": 5.41
+  },
+  "RaBitQ9 qb=0(float query)": {
+   "true": 760,
+   "returned": 737,
+   "missed": 24,
+   "extra": 1,
+   "invisible_returned": 0,
+   "ms_per_query": 4.37
+  },
+  "IVFRaBitQ1 nprobe=all qb=0": {
+   "true": 760,
+   "returned": 790,
+   "missed": 86,
+   "extra": 116,
+   "invisible_returned": 0,
+   "ms_per_query": 4.13
+  },
+  "IVFRaBitQ1 nprobe=16 qb=0": {
+   "true": 760,
+   "returned": 783,
+   "missed": 92,
+   "extra": 115,
+   "invisible_returned": 0,
+   "ms_per_query": 1.24
+  },
+  "RaBitQFastScan": {
+   "error": "Error in virtual void faiss::Index::range_search(faiss::idx_t, const float*, float, faiss::RangeSearchResult*, const faiss::SearchParameters*) const at /project"
+  },
+  "IVFRaBitQFastScan nprobe=all": {
+   "true": 760,
+   "returned": 0,
+   "missed": 760,
+   "extra": 0,
+   "invisible_returned": 0,
+   "ms_per_query": 3.87
+  }
+ },
+ "item@0.01": {
+  "RaBitQ1 qb=4(default)": {
+   "true": 7960,
+   "returned": 8819,
+   "missed": 1149,
+   "extra": 2008,
+   "invisible_returned": 0,
+   "ms_per_query": 2.27
+  },
+  "RaBitQ1 qb=0(float query)": {
+   "true": 7960,
+   "returned": 8456,
+   "missed": 1151,
+   "extra": 1647,
+   "invisible_returned": 0,
+   "ms_per_query": 2.76
+  },
+  "RaBitQ4 qb=4(default)": {
+   "true": 7960,
+   "returned": 7962,
+   "missed": 222,
+   "extra": 224,
+   "invisible_returned": 0,
+   "ms_per_query": 5.92
+  },
+  "RaBitQ4 qb=0(float query)": {
+   "true": 7960,
+   "returned": 7962,
+   "missed": 222,
+   "extra": 224,
+   "invisible_returned": 0,
+   "ms_per_query": 5.82
+  },
+  "RaBitQ9 qb=4(default)": {
+   "true": 7960,
+   "returned": 7935,
+   "missed": 29,
+   "extra": 4,
+   "invisible_returned": 0,
+   "ms_per_query": 4.05
+  },
+  "RaBitQ9 qb=0(float query)": {
+   "true": 7960,
+   "returned": 7935,
+   "missed": 29,
+   "extra": 4,
+   "invisible_returned": 0,
+   "ms_per_query": 3.74
+  },
+  "IVFRaBitQ1 nprobe=all qb=0": {
+   "true": 7960,
+   "returned": 8140,
+   "missed": 555,
+   "extra": 735,
+   "invisible_returned": 0,
+   "ms_per_query": 3.41
+  },
+  "IVFRaBitQ1 nprobe=16 qb=0": {
+   "true": 7960,
+   "returned": 7491,
+   "missed": 1010,
+   "extra": 541,
+   "invisible_returned": 0,
+   "ms_per_query": 0.98
+  },
+  "RaBitQFastScan": {
+   "error": "Error in virtual void faiss::Index::range_search(faiss::idx_t, const float*, float, faiss::RangeSearchResult*, const faiss::SearchParameters*) const at /project"
+  },
+  "IVFRaBitQFastScan nprobe=all": {
+   "true": 7960,
+   "returned": 0,
+   "missed": 7960,
+   "extra": 0,
+   "invisible_returned": 0,
+   "ms_per_query": 3.31
+  }
+ },
+ "certify_1bit": {
+  "text": {
+   "pairs": 6000000,
+   "z_std": 0.9729419946670532,
+   "z_mean": 0.06489247828722,
+   "max_abs_z": 5.053366661071777,
+   "frac_abs_z_gt_1.9": 0.051354,
+   "frac_abs_z_gt_3": 0.0021353333333333333,
+   "answer_frac": 0.0009526674689129566,
+   "undecided_frac_by_multiplier": {
+    "1.9": 0.020209921112448185,
+    "3": 0.03131768953068593,
+    "4": 0.042253309265944644,
+    "5": 0.05515944645006018,
+    "6": 0.06930572269019922,
+    "7": 0.08409212461559032,
+    "9.35": 0.12005448589383608
+   },
+   "wrong_decisions_by_multiplier": {
+    "1.9": 11,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "9.35": 0
+   },
+   "mean_halfwidth_at_1sd": 0.012418358586728573
+  },
+  "item": {
+   "pairs": 4000000,
+   "z_std": 0.953735888004303,
+   "z_mean": -0.018428022041916847,
+   "max_abs_z": 4.940953731536865,
+   "frac_abs_z_gt_1.9": 0.04728125,
+   "frac_abs_z_gt_3": 0.00188425,
+   "answer_frac": 0.0009526674689129565,
+   "undecided_frac_by_multiplier": {
+    "1.9": 0.00703971119133574,
+    "3": 0.014713698355395108,
+    "4": 0.02418521861211392,
+    "5": 0.03517097874047333,
+    "6": 0.04646008824709186,
+    "7": 0.05750100280786202,
+    "9.35": 0.08733202968311271
+   },
+   "wrong_decisions_by_multiplier": {
+    "1.9": 0,
+    "3": 0,
+    "4": 0,
+    "5": 0,
+    "6": 0,
+    "7": 0,
+    "9.35": 0
+   },
+   "mean_halfwidth_at_1sd": 0.012198425829410553
+  }
+ },
+ "f_error_stored_vs_formula_maxrel": 6.816575478296727e-06,
+ "peak_rss_mb": 2235.8125
+}
+
+real	4m50.476s
+user	4m27.463s
+sys	0m2.305s

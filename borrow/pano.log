@@ -1,0 +1,38 @@
+orthonormality err 7.152557373046875e-07
+stats var indexPanorama_stats
+L8 text@0.001 sel=True {'true': 360, 'missed': 21, 'extra': 0, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 1.11, 'ns_per_item': 11.1, 'ratio_dims_scanned': 0.262362003326416}
+L8 text@0.001 sel=False {'true': 3680, 'missed': 21, 'extra': 0, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 8.81, 'ns_per_item': 88.1, 'ratio_dims_scanned': 0.26270782947540283}
+L8 text@0.01 sel=True {'true': 3920, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 1.29, 'ns_per_item': 12.9, 'ratio_dims_scanned': 0.3165619671344757}
+L8 text@0.01 sel=False {'true': 40625, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 14.12, 'ns_per_item': 141.2, 'ratio_dims_scanned': 0.31697702407836914}
+L8 text knn10 {'recall@10': 1.0, 'ns_per_item': 137.2, 'ratio_dims_scanned': 0.276681125164032}
+L8 item@0.001 sel=True {'true': 360, 'missed': 25, 'extra': 0, 'mismatch_within_1e-5_of_t': 25, 'invisible_returned': 0, 'ms_per_query': 0.77, 'ns_per_item': 7.7, 'ratio_dims_scanned': 0.14439254999160767}
+L8 item@0.001 sel=False {'true': 3924, 'missed': 25, 'extra': 0, 'mismatch_within_1e-5_of_t': 25, 'invisible_returned': 0, 'ms_per_query': 2.81, 'ns_per_item': 28.1, 'ratio_dims_scanned': 0.14440244436264038}
+L8 item@0.01 sel=True {'true': 3920, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 0.83, 'ns_per_item': 8.3, 'ratio_dims_scanned': 0.16888193786144257}
+L8 item@0.01 sel=False {'true': 40287, 'missed': 19, 'extra': 2, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 4.78, 'ns_per_item': 47.8, 'ratio_dims_scanned': 0.16905944049358368}
+L8 item knn10 {'recall@10': 1.0, 'ns_per_item': 35.9, 'ratio_dims_scanned': 0.1615438461303711}
+L16 text@0.001 sel=True {'true': 360, 'missed': 23, 'extra': 0, 'mismatch_within_1e-5_of_t': 23, 'invisible_returned': 0, 'ms_per_query': 1.2, 'ns_per_item': 12.0, 'ratio_dims_scanned': 0.22596795856952667}
+L16 text@0.001 sel=False {'true': 3680, 'missed': 22, 'extra': 0, 'mismatch_within_1e-5_of_t': 22, 'invisible_returned': 0, 'ms_per_query': 6.83, 'ns_per_item': 68.3, 'ratio_dims_scanned': 0.22628994286060333}
+L16 text@0.01 sel=True {'true': 3920, 'missed': 20, 'extra': 0, 'mismatch_within_1e-5_of_t': 20, 'invisible_returned': 0, 'ms_per_query': 1.4, 'ns_per_item': 14.0, 'ratio_dims_scanned': 0.2853591740131378}
+L16 text@0.01 sel=False {'true': 40625, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 10.67, 'ns_per_item': 106.7, 'ratio_dims_scanned': 0.28578153252601624}
+L16 text knn10 {'recall@10': 1.0, 'ns_per_item': 93.4, 'ratio_dims_scanned': 0.2404664307832718}
+L16 item@0.001 sel=True {'true': 360, 'missed': 23, 'extra': 0, 'mismatch_within_1e-5_of_t': 23, 'invisible_returned': 0, 'ms_per_query': 0.64, 'ns_per_item': 6.4, 'ratio_dims_scanned': 0.09151729196310043}
+L16 item@0.001 sel=False {'true': 3924, 'missed': 23, 'extra': 0, 'mismatch_within_1e-5_of_t': 23, 'invisible_returned': 0, 'ms_per_query': 2.08, 'ns_per_item': 20.8, 'ratio_dims_scanned': 0.09159090369939804}
+L16 item@0.01 sel=True {'true': 3920, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 0.78, 'ns_per_item': 7.8, 'ratio_dims_scanned': 0.11743675917387009}
+L16 item@0.01 sel=False {'true': 40287, 'missed': 20, 'extra': 1, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 3.47, 'ns_per_item': 34.7, 'ratio_dims_scanned': 0.11759943515062332}
+L16 item knn10 {'recall@10': 1.0, 'ns_per_item': 27.3, 'ratio_dims_scanned': 0.11575687676668167}
+L64 text@0.001 sel=True {'true': 360, 'missed': 24, 'extra': 0, 'mismatch_within_1e-5_of_t': 24, 'invisible_returned': 0, 'ms_per_query': 1.83, 'ns_per_item': 18.3, 'ratio_dims_scanned': 0.20129717886447906}
+L64 text@0.001 sel=False {'true': 3680, 'missed': 24, 'extra': 0, 'mismatch_within_1e-5_of_t': 24, 'invisible_returned': 0, 'ms_per_query': 10.4, 'ns_per_item': 104.0, 'ratio_dims_scanned': 0.20164895057678223}
+L64 text@0.01 sel=True {'true': 3920, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 2.41, 'ns_per_item': 24.1, 'ratio_dims_scanned': 0.26173269748687744}
+L64 text@0.01 sel=False {'true': 40625, 'missed': 19, 'extra': 0, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 15.39, 'ns_per_item': 153.9, 'ratio_dims_scanned': 0.262153685092926}
+L64 text knn10 {'recall@10': 1.0, 'ns_per_item': 123.6, 'ratio_dims_scanned': 0.21737749874591827}
+L64 item@0.001 sel=True {'true': 360, 'missed': 21, 'extra': 0, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 0.87, 'ns_per_item': 8.7, 'ratio_dims_scanned': 0.05406251549720764}
+L64 item@0.001 sel=False {'true': 3924, 'missed': 21, 'extra': 0, 'mismatch_within_1e-5_of_t': 21, 'invisible_returned': 0, 'ms_per_query': 2.87, 'ns_per_item': 28.7, 'ratio_dims_scanned': 0.0541251040995121}
+L64 item@0.01 sel=True {'true': 3920, 'missed': 18, 'extra': 0, 'mismatch_within_1e-5_of_t': 18, 'invisible_returned': 0, 'ms_per_query': 1.2, 'ns_per_item': 12.0, 'ratio_dims_scanned': 0.08130146563053131}
+L64 item@0.01 sel=False {'true': 40287, 'missed': 18, 'extra': 1, 'mismatch_within_1e-5_of_t': 19, 'invisible_returned': 0, 'ms_per_query': 5.47, 'ns_per_item': 54.7, 'ratio_dims_scanned': 0.08144336938858032}
+L64 item knn10 {'recall@10': 1.0, 'ns_per_item': 35.6, 'ratio_dims_scanned': 0.08483196794986725}
+121.1
+811.1875
+
+real	0m12.036s
+user	0m10.593s
+sys	0m0.834s
