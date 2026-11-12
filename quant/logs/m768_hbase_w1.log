@@ -1,0 +1,36 @@
+[     1s] m768 hbase worker 1 {'PROF': 'Qmix', 'SPH': 0, 'NORM': 8, 'L0': 1, 'SCHED': [4, 8, 16, 32], 'RSC': 'orig', 'ISC': 0} levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576]
+[     1s] rates [[1, 0, 0.125, 0], [2, 2, 0.25, 0], [5, 4, 1, 0], [8, 7, 4, 0.25], [8, 8, 8, 1]] scalar bytes per randomised level [10, 3, 3, 4, 3] blocks [96, 128, 256, 288]
+[     2s] group 2 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1880], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    25s] group 6 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 49960], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    64s] group 7 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 157555], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    67s] group 8 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 164125], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   125s] group 11 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 344460], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   182s] group 12 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 511880], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   212s] group 13 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 567635], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   234s] group 15 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 611320], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   277s] group 18 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 690335], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   300s] group 20 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 729095], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   328s] group 22 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 810590], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   407s] group 26 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1017315], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   426s] group 27 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1056405], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   470s] group 28 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1172710], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   494s] group 29 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1236490], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   530s] group 30 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1304950], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   531s] group 31 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1307660], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   548s] group 32 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1340165], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   589s] group 34 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1444270], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   626s] group 37 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1539985], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   651s] group 40 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1589320], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   711s] group 41 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1744915], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   721s] group 42 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1767895], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   761s] group 43 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1841755], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   812s] group 49 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 1967855], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   846s] group 50 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2055240], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   901s] group 51 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2204680], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   915s] group 55 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2234220], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   925s] group 56 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2253980], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   936s] group 59 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2276780], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[   985s] group 60 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2413275], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[  1005s] group 61 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2457500], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[  1029s] group 62 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 2500080], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[  1029s] done

@@ -1,0 +1,24 @@
+
+p768, offsets with profile Qi: level B | stored bits | mean CS half-width | /conjectured floor | /proved floor
+  before  4 B | h 0.1354 | conj 0.1011 ratio 1.339 | proved 0.0738 ratio 1.834
+  before  8 B | h 0.1111 | conj 0.0830 ratio 1.339 | proved 0.0632 ratio 1.759
+  before 16 B | h 0.0842 | conj 0.0631 ratio 1.335 | proved 0.0503 ratio 1.673
+  before 32 B | h 0.0572 | conj 0.0427 ratio 1.337 | proved 0.0359 ratio 1.592
+  after   4 B | h 0.1395 | conj 0.1086 ratio 1.284 | proved 0.0779 ratio 1.791
+  after   8 B | h 0.1144 | conj 0.0893 ratio 1.281 | proved 0.0670 ratio 1.707
+  after  12 B | h 0.0981 | conj 0.0763 ratio 1.287 | proved 0.0590 ratio 1.665
+  after  16 B | h 0.0865 | conj 0.0666 ratio 1.298 | proved 0.0527 ratio 1.641
+  after  24 B | h 0.0700 | conj 0.0536 ratio 1.305 | proved 0.0438 ratio 1.598
+  after  32 B | h 0.0588 | conj 0.0445 ratio 1.321 | proved 0.0372 ratio 1.579
+
+p768, offsets with profile Qmix: level B | stored bits | mean CS half-width | /conjectured floor | /proved floor
+  before  4 B | h 0.2004 | conj 0.1497 ratio 1.339 | proved 0.1079 ratio 1.857
+  before  8 B | h 0.1719 | conj 0.1281 ratio 1.342 | proved 0.0970 ratio 1.773
+  before 16 B | h 0.1389 | conj 0.1030 ratio 1.349 | proved 0.0825 ratio 1.684
+  before 32 B | h 0.1028 | conj 0.0751 ratio 1.369 | proved 0.0641 ratio 1.604
+  after   4 B | h 0.1860 | conj 0.1583 ratio 1.175 | proved 0.1120 ratio 1.661
+  after   8 B | h 0.1592 | conj 0.1358 ratio 1.173 | proved 0.1010 ratio 1.576
+  after  12 B | h 0.1413 | conj 0.1198 ratio 1.179 | proved 0.0924 ratio 1.529
+  after  16 B | h 0.1278 | conj 0.1076 ratio 1.188 | proved 0.0853 ratio 1.498
+  after  24 B | h 0.1079 | conj 0.0903 ratio 1.194 | proved 0.0744 ratio 1.449
+  after  32 B | h 0.0936 | conj 0.0776 ratio 1.206 | proved 0.0659 ratio 1.420

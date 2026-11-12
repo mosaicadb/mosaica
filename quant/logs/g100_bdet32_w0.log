@@ -1,0 +1,10 @@
+[     0s] g100 bdet32 worker 0 {'PROF': 'Qi', 'SPH': 0, 'NORM': 8, 'L0': 1, 'SCHED': [4, 8, 16, 32], 'RSC': 'orig', 'ISC': 0} levels [0, 4, 8, 16, 32]
+[     1s] group 0 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 28855], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[     2s] group 5 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 64700], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[     3s] group 6 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 90930], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[     7s] group 8 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 270310], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    10s] group 10 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 356105], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    12s] group 11 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 455230], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    13s] group 12 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 487845], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    14s] group 15 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 504835], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    14s] done

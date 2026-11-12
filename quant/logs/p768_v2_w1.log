@@ -1,0 +1,11 @@
+[     1s] p768 v2 worker 1 {'PROF': 'Qmix', 'SPH': 1, 'NORM': 8, 'L0': 1, 'SCHED': [4, 8, 16, 32], 'RSC': 'orig', 'ISC': 0} levels [0, 4, 8, 16, 32, 48, 96, 192, 384, 576]
+[     1s] rates [[1, 0, 0, 0], [2, 1, 0.5, 0.125], [4, 4, 1, 0.25], [7, 6, 4, 1], [8, 8, 6, 3]] scalar bytes per randomised level [9, 4, 4, 4, 4] blocks [96, 128, 256, 288]
+[    12s] group 0 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 79005], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    34s] group 2 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 238910], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    39s] group 6 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 279885], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    47s] group 7 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 340690], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    52s] group 8 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 374915], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    65s] group 10 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 465055], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    66s] group 12 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 471570], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    69s] group 15 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 501415], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    69s] done

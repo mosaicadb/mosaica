@@ -1,0 +1,7 @@
+[     1s] ada1536 v3 worker 0 {'PROF': 'Qmix', 'SPH': 1, 'NORM': 8, 'L0': 0, 'SCHED': [4, 8, 16, 32], 'RSC': 'orig', 'ISC': 0} levels [4, 8, 16, 32, 48, 96, 192, 384, 576]
+[     1s] rates [[1, 0, 0, 0, 0], [1, 1, 0.5, 0.25, 0], [3, 3, 1, 0.5, 0.125], [6, 5, 3, 1, 0.5], [7, 6, 4, 3, 0.5]] scalar bytes per randomised level [11, 3, 5, 5, 4] blocks [96, 128, 256, 512, 544]
+[    34s] group 2 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 77940], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    35s] group 3 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 79960], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    57s] group 4 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 119848], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    99s] group 5 viol 0 IV {'det': 0, 'pre': 0, 'rand': 0} esc {'det': [0, 226424], 'ry': [0, 0], 'rt': [0, 0]} rmax 0.0
+[    99s] done
