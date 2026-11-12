@@ -23,7 +23,7 @@ import shutil
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from .._refusal import Refusal
 
@@ -68,22 +68,26 @@ def record(raw: Path, entries: dict) -> None:
     (raw / LOCK).write_text(json.dumps(lock, indent=1) + "\n", encoding="utf-8")
 
 
-def held(raw: Path, lock: dict, name: str, url: str) -> bool:
-    """Whether `LOCK.json` records `name` as fetched from `url` and the file is there at its
-    size."""
+def held(raw: Path, lock: dict, name: str, url: str, sha256: Optional[str] = None) -> bool:
+    """Whether `LOCK.json` records `name` as fetched from `url`, with the SHA-256 `sha256` where
+    one is given, and the file is there at its size."""
     entry = lock.get(name)
     target = raw / name
     return (
         entry is not None
         and entry.get("url") == url
+        and (sha256 is None or entry.get("sha256") == sha256)
         and target.exists()
         and target.stat().st_size == entry.get("bytes")
     )
 
 
-def kept(target: Path, write: Callable[[Path], None], url: str) -> dict:
-    """Write `target` with `write`, through a `.part` file so that a write that stops leaves
-    nothing at `target`, and return its lock entry."""
+def kept(
+    target: Path, write: Callable[[Path], None], url: str, sha256: Optional[str] = None
+) -> dict:
+    """Write `target` with `write`, through a `.part` file so that a write that stops, or whose
+    bytes do not have the SHA-256 `sha256` where one is given, leaves nothing at `target`, and
+    return its lock entry."""
     part = target.with_name(target.name + ".part")
     try:
         write(part)
@@ -94,20 +98,55 @@ def kept(target: Path, write: Callable[[Path], None], url: str) -> dict:
     with part.open("rb") as written:
         while chunk := written.read(1 << 20):
             digest.update(chunk)
+    if sha256 is not None and digest.hexdigest() != sha256:
+        part.unlink()
+        raise Refusal(
+            f"fetch: {url} does not have the SHA-256 this package expects ({sha256}); run again "
+            "to fetch it again, and if it differs again the published file has changed"
+        )
     size = part.stat().st_size
     os.replace(part, target)
     return {"url": url, "bytes": size, "sha256": digest.hexdigest()}
 
 
-def fetch(raw: Path, files: dict[str, str], progress: bool = True) -> list[Path]:
+def fetch(
+    raw: Path,
+    files: dict[str, str],
+    progress: bool = True,
+    sha256: Optional[dict[str, str]] = None,
+) -> list[Path]:
     """Download each of `files`, `{name: url}`, into `raw` unless `LOCK.json` already holds it,
-    record each one fetched, and return their paths."""
+    record each one fetched, and return their paths. `sha256`, `{name: digest}`, pins a file's
+    bytes: one the lock records with another digest is fetched again, and a download with
+    another digest is refused."""
     raw.mkdir(parents=True, exist_ok=True)
+    pinned = sha256 or {}
     for name, url in files.items():
-        if not held(raw, locked(raw), name, url):
+        if not held(raw, locked(raw), name, url, pinned.get(name)):
             (raw / name).parent.mkdir(parents=True, exist_ok=True)
-            record(raw, {name: kept(raw / name, lambda part: _download(url, part, progress), url)})
+            entry = kept(
+                raw / name,
+                lambda part: _download(url, part, progress),
+                url,
+                pinned.get(name),
+            )
+            record(raw, {name: entry})
     return [raw / name for name in files]
+
+
+def width(keys: int) -> str:
+    """The narrowest vocabulary width with room for `keys` codes after the absent code 0."""
+    return "u8" if keys < 255 else ("u16" if keys < 65_535 else "u32")
+
+
+def declared(declaration: Path, placeholder: str, text: str, path: Path) -> None:
+    """`declaration` written to `path` with its one line reading `placeholder` replaced by
+    `text`."""
+    lines = declaration.read_text(encoding="utf-8").splitlines()
+    hit = [i for i, line in enumerate(lines) if line.strip() == placeholder]
+    assert len(hit) == 1, f"{placeholder} appears {len(hit)} times as a line of its own"
+    lines[hit[0]] = text
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _download(url: str, part: Path, progress: bool) -> None:

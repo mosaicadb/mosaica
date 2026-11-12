@@ -66,6 +66,9 @@ class Dataset:
     - `sample`: what `sample=N` keeps, or `None` where the dataset takes no sample.
     - `per_sample`: the bytes downloaded and on disk for each unit of `sample=N`, as
       `(download, disk)`, where a sample downloads less than the whole, or `None`.
+    - `default_sample`: the sample taken when none is given, or `None` for the whole.
+    - `samples`: the largest sample that differs from the whole, where a larger one reads the
+      same files; a larger sample is taken as this one.
     - `fetch`, `prepare`: how `load` makes it. `fetch` puts the files a sample needs in a
       directory, or finds them in a checkout, and returns their paths, the declaration first
       where there is nothing to prepare. `prepare` writes `schema.toml` and the files it names
@@ -89,6 +92,8 @@ class Dataset:
     prepare: Optional[Callable[[Path, Path, Optional[int]], None]] = dataclasses.field(
         default=None, repr=False
     )
+    default_sample: Optional[int] = None
+    samples: Optional[int] = None
 
 
 def root() -> Path:
@@ -192,7 +197,7 @@ _BY_COLLECTION = (
     Persona(
         "public",
         "Public collections",
-        "Holds no terms, so sees the 269 collections that are not restricted.",
+        "Holds no terms, so sees the cells of the 269 collections that are not restricted.",
         (),
     ),
     Persona(
@@ -266,6 +271,8 @@ _CATALOGUE = (
         personas=_BY_COLLECTION,
         fetch=cellxgene.fetch,
         prepare=cellxgene.prepare,
+        default_sample=cellxgene.DEFAULT_PARTS,
+        samples=cellxgene.PARTS,
     ),
     Dataset(
         name="geonames",
@@ -328,6 +335,7 @@ def prepared(
     `progress` are `load`'s.
     """
     dataset = _checked(name, sample)
+    sample = _taken(dataset, sample)
     raw = _home(name, dir) / "raw"
     fetched = dataset.fetch(raw, progress, sample)
     if dataset.prepare is None:
@@ -369,6 +377,7 @@ def load(
         db.view("world").count()
     """
     schema = prepared(name, dir, sample, progress)
+    sample = _taken(describe(name), sample)
     database = _home(name, dir) / ("db" if sample is None else f"db-{sample}")
     binary, _ = _instance.find_binary()
     found = os.stat(binary)
@@ -397,6 +406,14 @@ def _checked(name: str, sample: int | None) -> Dataset:
             "the demo extra, `pip install 'mosaica[demo]'`"
         )
     return dataset
+
+
+def _taken(dataset: Dataset, sample: int | None) -> int | None:
+    """The sample `dataset` takes for `sample`: its default for none, and its largest for one
+    above that, so samples that read the same files share their directories."""
+    if sample is None:
+        return dataset.default_sample
+    return sample if dataset.samples is None else min(sample, dataset.samples)
 
 
 def _home(name: str, dir: str | os.PathLike | None) -> Path:  # noqa: A002

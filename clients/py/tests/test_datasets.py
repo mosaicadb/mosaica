@@ -142,6 +142,27 @@ def test_a_fetch_is_recorded_and_not_repeated(tmp_path, publisher):
     assert (raw / "sub" / "b.txt").read_text() == "nested"
 
 
+def test_a_pinned_fetch_refuses_other_bytes_and_fetches_a_file_recorded_with_others(
+    tmp_path, publisher
+):
+    import hashlib
+
+    served, base = publisher
+    (served / "a.txt").write_text("right")
+    right = hashlib.sha256(b"right").hexdigest()
+    raw = tmp_path / "raw"
+    with pytest.raises(Refusal):
+        _steps.fetch(raw, {"a.txt": base + "a.txt"}, False, {"a.txt": "0" * 64})
+    assert not (raw / "a.txt").exists()
+    assert "a.txt" not in _steps.locked(raw)
+    (raw / "a.txt").write_text("wrong")
+    (raw / "LOCK.json").write_text(json.dumps(
+        {"a.txt": {"url": base + "a.txt", "bytes": 5, "sha256": "f" * 64}}))
+    _steps.fetch(raw, {"a.txt": base + "a.txt"}, False, {"a.txt": right})
+    assert (raw / "a.txt").read_text() == "right"
+    assert _steps.locked(raw)["a.txt"]["sha256"] == right
+
+
 def test_a_download_that_stops_short_is_refused_and_not_recorded(tmp_path):
     import socket
 
@@ -418,9 +439,12 @@ def test_a_step_stopped_while_clearing_its_directory_runs_again(tmp_path, monkey
     assert (out / "made" / "file").read_text() == "made"
 
 
-def cellxgene_files(raw: Path, parts: list[list[dict]]) -> None:
+def cellxgene_files(raw: Path, parts: list[list[dict]], monkeypatch) -> None:
     """The CELLxGENE files already fetched into `raw`: `parts` as its first parts, the small files
-    `prepare` reads, and the lock that records them, so `load` reads nothing from the network."""
+    `prepare` reads, and the lock that records them, with `SHA256` pinning these files, so `load`
+    reads nothing from the network."""
+    import hashlib
+
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -450,14 +474,22 @@ def cellxgene_files(raw: Path, parts: list[list[dict]]) -> None:
         values = sorted({row[column] for row in cells})
         pq.write_table(pa.table({"key": values, "code": pa.array(range(1, len(values) + 1),
                                  pa.uint32()), "title": values}), raw / f"vocab-{stem}.parquet")
-    (raw / "restricted-collections.json").write_text("{}")
-    lock = {}
+    (raw / cellxgene.RESTRICTIONS).write_text(json.dumps(
+        {"terms": [{"term": term} for term in cellxgene.RESTRICTED]}))
+    lock, pinned = {}, {}
     for name in cellxgene.SMALL + [f"parts/part-{i:03d}.parquet" for i in range(len(parts))]:
-        lock[name] = {"url": cellxgene.BASE + name, "bytes": (raw / name).stat().st_size}
+        data = (raw / name).read_bytes()
+        pinned[name] = hashlib.sha256(data).hexdigest()
+        lock[name] = {"url": cellxgene.BASE + name, "bytes": len(data), "sha256": pinned[name]}
     (raw / "LOCK.json").write_text(json.dumps(lock))
+    monkeypatch.setattr(cellxgene, "SHA256", pinned)
 
 
-def cell(entity_id: int, organism: str, cell_type: str, access=None) -> dict:
+LUNG = "collection:6f6d381a-7701-4781-935c-db10d30de293"
+GUT = "collection:f11cb29c-b546-4738-9bd8-66ea621a7bd5"
+
+
+def cell(entity_id: int, organism: str, cell_type: str, access=None, **values) -> dict:
     row = {"entity_id": entity_id, "x": float(entity_id), "y": 1.0, "access": access,
            "soma_joinid": entity_id, "organism": organism, "cell_type": cell_type}
     for column in ("tissue", "tissue_general", "disease", "assay", "sex", "development_stage",
@@ -465,34 +497,55 @@ def cell(entity_id: int, organism: str, cell_type: str, access=None) -> dict:
         row[column] = "unknown"
     return row | {"collection": access or "open", "dataset": "a dataset",
                   "is_primary_data": True, "dataset_id": "d1", "donor_id": "donor",
-                  "nnz": 100, "raw_sum": 1000.0}
+                  "nnz": 100, "raw_sum": 1000.0} | values
 
 
-def test_cellxgene_reads_its_parts_and_puts_each_cell_on_its_species_map(tmp_path):
+HUMAN, MOUSE = "Homo sapiens", "Mus musculus"
+CELLS = [
+    [cell(1, HUMAN, "T cell", disease="normal"), cell(2, HUMAN, "neuron", LUNG),
+     cell(10, MOUSE, "neuron")],
+    [cell(3, HUMAN, "T cell", GUT, disease="Crohn disease"), cell(11, MOUSE, "T cell")],
+    [cell(4, HUMAN, "neuron")],
+]
+
+
+def test_cellxgene_reads_its_parts_and_puts_each_cell_on_its_species_map(tmp_path, monkeypatch):
     binary()
-    lung = "collection:6f6d381a-7701-4781-935c-db10d30de293"
-    human, mouse = "Homo sapiens", "Mus musculus"
-    cellxgene_files(tmp_path / "cellxgene" / "raw", [
-        [cell(1, human, "T cell"), cell(2, human, "neuron", lung), cell(10, mouse, "neuron")],
-        [cell(3, human, "T cell", "collection:f11cb29c-b546-4738-9bd8-66ea621a7bd5"),
-         cell(11, mouse, "T cell")],
-        [cell(4, human, "neuron")],
-    ])
+    cellxgene_files(tmp_path / "cellxgene" / "raw", CELLS, monkeypatch)
     db = datasets.load("cellxgene", dir=tmp_path, port=0, progress=False)
     try:
         assert db.view("human").count() == 3
         assert db.view("mouse").count() == 2
-        personas = {p.id: p for p in datasets.describe("cellxgene").personas}
-        seen = {id: db.token(None if p.terms is None else list(p.terms)) for id, p in
-                personas.items()}
-        counts = {id: mosaica.connect(db.viewer_url, token).view("human").count()
-                  for id, token in seen.items()}
+        readers = {p.id: mosaica.connect(db.viewer_url, db.token(list(p.terms)))
+                   for p in datasets.describe("cellxgene").personas}
+        counts = {id: reader.view("human").count() for id, reader in readers.items()}
         assert counts == {"public": 1, "every-collection": 3, "lung-atlas": 2, "gut-study": 2}
+        assert "Crohn disease" not in readers["public"].categories("disease")["key"].to_pylist()
+        assert "Crohn disease" in readers["every-collection"].categories("disease")[
+            "key"].to_pylist()
         assert [layer["name"] for layer in db.layers()] == ["cell-ontology"]
+        current = (db.path / "bundle" / "CURRENT").stat().st_mtime_ns
     finally:
         db.close()
+    named = datasets.load("cellxgene", dir=tmp_path, sample=2, port=0, progress=False)
+    try:
+        assert (named.path / "bundle" / "CURRENT").stat().st_mtime_ns == current
+    finally:
+        named.close()
     whole = datasets.load("cellxgene", dir=tmp_path, sample=3, port=0, progress=False)
     try:
         assert whole.view("human").count() == 4
     finally:
         whole.close()
+
+
+def test_cellxgene_refuses_restricted_collections_its_personas_do_not_hold(
+    tmp_path, monkeypatch
+):
+    from mosaica.datasets import cellxgene
+
+    raw = tmp_path / "cellxgene" / "raw"
+    cellxgene_files(raw, CELLS, monkeypatch)
+    monkeypatch.setattr(cellxgene, "RESTRICTED", cellxgene.RESTRICTED[1:])
+    with pytest.raises(Refusal):
+        cellxgene.fetch(raw, progress=False)
