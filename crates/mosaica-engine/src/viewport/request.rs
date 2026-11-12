@@ -108,9 +108,9 @@ pub struct ViewportRequest<'a> {
     /// geometry builders: a build already in flight runs to completion regardless.
     pub cancel: Option<CancelToken>,
     /// The request's filter expression, or `None` for an unfiltered request. Applied above the
-    /// mask, never folded into it: it narrows which marks are drawn but never moves the
-    /// selection threshold, which stays anchored on the unfiltered composed total. Otherwise
-    /// artifacts would appear and vanish, and density would shift, as a viewer types.
+    /// mask, never folded into it: it narrows which marks are drawn and never moves a count or an
+    /// artifact's presence. The selection threshold is anchored on how many visible items it
+    /// admits, so a filtered tile thins by density as an unfiltered one does.
     pub filter: Option<crate::filter::FilterExpr>,
     /// The annotation layers whose artifacts tag the served points, one membership column each.
     /// `None` answers for every layer this principal reaches; an empty slice answers for none.

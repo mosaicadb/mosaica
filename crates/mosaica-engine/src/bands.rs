@@ -13,10 +13,9 @@
 //! - Otherwise a wider band is tried, and below the widest the tile is not answered here; the
 //!   caller reads it from the identity column as the shipped scan does.
 //!
-//! A saturated threshold, a filtered request's or one whose anchor reaches every visible row,
-//! admits every identity: `C_θ` is the tile's visible count without a read, `m` is
-//! `min(cap, matched)`, and the narrowest band expected to hold `m` visible entries is read where
-//! its entries cost less than the scan's rows.
+//! A saturated threshold, one whose anchor reaches every visible row, admits every identity: `C_θ`
+//! is the tile's visible count without a read, `m` is `min(cap, matched)`, and the narrowest band
+//! expected to hold `m` visible entries is read where its entries cost less than the scan's rows.
 //!
 //! The mask is applied to every entry before it is counted or kept, so the bands decide only how
 //! far the read goes, never which rows are visible: a tile with one visible row is answered by the
@@ -29,7 +28,7 @@ use mosaica_store::bands::{band_below, FIRST_BAND};
 use mosaica_types::{RowId, ShardRow};
 
 use crate::error::{EngineError, Result};
-use crate::select::{served_count, SelectParams, Threshold, TileShard};
+use crate::select::{decode_tier, served_count, DecodeTier, SelectParams, Threshold, TileShard};
 
 /// The band route answers requests at zooms below this; the scan answers the rest. Where the
 /// threshold is wider than the widest band the route declines each tile, at any zoom.
@@ -52,7 +51,8 @@ pub enum BandAnswer {
     /// rather than expected from the tile's visible count.
     Sparse { read: bool },
     /// No band holds every row below a wide threshold, the scan reads less than the bands would
-    /// under a saturated one, or the request serves no point: the shipped scan answers.
+    /// under a saturated threshold or over a sparse tile, or the request serves no point: the
+    /// shipped scan answers.
     Declined,
 }
 
@@ -82,6 +82,17 @@ pub fn select(shards: &[TileShard<'_>], params: &SelectParams, matched: u64) -> 
             let start = holding.min(63 - ratio.leading_zeros());
             if start < FIRST_BAND {
                 return Ok(BandAnswer::Sparse { read: false });
+            }
+            // Where the tile's visible rows are sparse the scan reads only them, and a band, which
+            // holds every row below the cut, can hold many times more.
+            let rows: u64 = shards
+                .iter()
+                .flat_map(|held| held.parts)
+                .map(|part| u64::from(part.range.end - part.range.start))
+                .sum();
+            if decode_tier(matched, rows) == DecodeTier::Values && !bands_pay(shards, start, matched)
+            {
+                return Ok(BandAnswer::Declined);
             }
             (cut, start)
         }
