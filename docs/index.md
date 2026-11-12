@@ -52,7 +52,7 @@ We served the same map of GBIF's species records from Mosaica and from three oth
 
 ## Try it in your browser
 
-[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves two maps from one machine: 73.6 million places from Overture Maps on a world map, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the European Union's places or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves four maps from one machine: 88.4 million places from Overture Maps on a world map, 50,000 arXiv papers laid out by their topics, 20.7 million papers from PubMed Landscape placed by their abstracts, and the 202.6 million human and mouse cells of the CELLxGENE Census placed by their gene expression. Pick whom to view the map as, such as a viewer who may see only the places Meta contributed or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
 
 ## Where to start
 
