@@ -1,0 +1,64 @@
+==== run at 1794507640: ["/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rust-target/release/vexact", "bandwidth", "levels", "verify", "e2e", "batch", "filter"]
+[build] plans 0.6s; max basis defect 1.00e-6
+[build] calibrated 50.0s
+[build] encoded 83.7s
+[build] assembled 85.5s; x2 bound 4.882e-4
+[build] support table (1000 anchors) 98.5s
+built 1000000 rows, 1000 clusters, 1000 anchors in 98.8s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 53.6, 66.5, 71.0, 79.5, 88.1, 105.5, 122.0, 138.5, 156.0, 172.5, 203.4, 234.5, 272.3]
+escapes: det norms 304 (0.005% of item-levels), yh fallbacks 87656 (2.191%), tan fallbacks 4091057
+bandwidth threads=1 read 13.40 GB/s (1536 MB in 114.6 ms)
+bandwidth threads=2 read 26.68 GB/s (1536 MB in 57.6 ms)
+bandwidth threads=3 read 37.02 GB/s (1536 MB in 41.5 ms)
+bandwidth threads=4 read 42.54 GB/s (1536 MB in 36.1 ms)
+levels item: mean over clusters of dwa(one alpha)/dwa(per-level alpha), det levels: [1.0081, 1.0041, 1.0022, 1.0011, 1.0002, 1.0]
+levels item,0,4,6.50,8.33,8.33,1.852
+levels item,1,8,11.00,13.85,5.52,1.226
+levels item,2,12,15.50,20.05,6.20,1.377
+levels item,3,16,20.00,24.23,4.18,0.929
+levels item,4,24,28.50,32.52,8.29,0.975
+levels item,5,32,37.00,39.09,6.57,0.773
+levels item,6,40,41.00,46.36,7.26,1.816
+levels item,7,48,53.62,58.05,11.69,0.926
+levels item,8,56,66.49,72.13,14.09,1.095
+levels item,9,64,71.05,80.24,8.11,1.776
+levels item,10,72,79.49,88.04,7.80,0.925
+levels item,11,80,88.10,96.96,8.92,1.036
+levels item,12,96,105.49,123.65,26.69,1.534
+levels item,13,112,121.99,147.68,24.03,1.456
+levels item,14,128,138.49,167.59,19.91,1.207
+levels item,15,144,155.99,198.72,31.13,1.779
+levels item,16,160,172.48,221.27,22.55,1.367
+levels item,17,192,203.36,266.75,45.48,1.473
+levels item,18,224,234.52,303.41,36.66,1.176
+levels item,19,256,272.33,381.96,78.55,2.078
+levels text: mean over clusters of dwa(one alpha)/dwa(per-level alpha), det levels: [1.0135, 1.0065, 1.0034, 1.0018, 1.0004, 1.0]
+levels text,0,4,6.50,8.86,8.86,1.968
+levels text,1,8,11.00,14.23,5.38,1.194
+levels text,2,12,15.50,18.74,4.51,1.003
+levels text,3,16,20.00,23.00,4.25,0.945
+levels text,4,24,28.50,30.96,7.96,0.936
+levels text,5,32,37.00,39.22,8.27,0.972
+levels text,6,40,41.00,46.71,7.49,1.873
+levels text,7,48,53.62,58.04,11.33,0.898
+levels text,8,56,66.49,71.63,13.59,1.056
+levels text,9,64,71.05,78.73,7.11,1.557
+levels text,10,72,79.49,88.24,9.51,1.127
+levels text,11,80,88.10,98.93,10.68,1.241
+levels text,12,96,105.49,129.46,30.53,1.755
+levels text,13,112,121.99,147.85,18.39,1.115
+levels text,14,128,138.49,192.53,44.68,2.707
+levels text,15,144,155.99,219.26,26.73,1.528
+levels text,16,160,172.48,222.33,3.07,0.186
+levels text,17,192,203.36,278.39,56.05,1.816
+levels text,18,224,234.52,311.60,33.22,1.066
+levels text,19,256,272.33,381.67,70.07,1.853
+VERIFY 569 queries x 4 answer sizes: result-set violations wrong-in 0 wrong-out 0; interval checks 691575520 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.46); k-NN k=10 mismatches 0 of 569
+e2e item,1,index_thr,0.0001,19.002,28.675,62.000,100,129459,44.1,100,2.26
+e2e enter-fraction by level (item, 0.0001): [0.1295, 0.0883, 0.0565, 0.037, 0.025, 0.0124, 0.0068, 0.0056, 0.0037, 0.002, 0.0015, 0.0008, 0.0006, 0.0004, 0.0003, 0.0002, 0.0002, 0.0001, 0.0001, 0.0001, 0.0]
+e2e item,1,index_thr,0.001,37.902,42.037,85.882,100,206977,271.0,1000,5.46
+e2e enter-fraction by level (item, 0.001): [0.207, 0.1644, 0.1226, 0.0918, 0.0699, 0.0428, 0.0279, 0.0246, 0.0179, 0.0109, 0.0081, 0.0046, 0.0037, 0.0023, 0.0018, 0.0013, 0.001, 0.0007, 0.0006, 0.0004, 0.0003]
+e2e item,1,index_thr,0.01,70.086,73.801,154.231,100,389986,1684.8,10000,17.68
+e2e enter-fraction by level (item, 0.01): [0.39, 0.3517, 0.3032, 0.2584, 0.2197, 0.1601, 0.1189, 0.1099, 0.0861, 0.0566, 0.0445, 0.0275, 0.0222, 0.0143, 0.0107, 0.0079, 0.006, 0.0046, 0.0036, 0.0024, 0.0017]
+e2e item,1,index_thr,0.05,168.964,172.238,265.355,100,761216,9154.2,50000,60.52
+e2e enter-fraction by level (item, 0.05): [0.7612, 0.7363, 0.6928, 0.643, 0.5938, 0.5025, 0.4227, 0.4041, 0.3459, 0.2554, 0.2141, 0.1455, 0.12, 0.0778, 0.0579, 0.0418, 0.0313, 0.0247, 0.019, 0.0125, 0.0092]
+e2e item,1,index_knn10,0,15.911,25.080,56.839,100,16,0,10,0   (seed 2.04 / sweep 23.17 / selection 0.27 ms mean)

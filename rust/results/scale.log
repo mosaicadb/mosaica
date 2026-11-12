@@ -1,0 +1,33 @@
+==== scale run x10 at 1794509696
+[real] plans 0.5s; max basis defect 1.00e-6
+[real] calibrated 2.3s
+[real] encoded 26.1s
+[real] assembled 27.9s; x2 bound 4.882e-4
+[real] support table (1 anchors) 28.4s
+[synth] plans 0.4s; max basis defect 1.00e-6
+[synth] calibrated 15.3s
+[synth] encoded 223.9s
+[synth] assembled 242.5s; x2 bound 7.703e-7
+synthetic index: 10000000 rows, 1000 clusters, 1000 anchors, built in 407s; stored B/item [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 53.6, 66.5, 71.0, 79.5, 88.1, 105.5, 122.0, 138.5, 156.0, 172.5, 203.4, 234.5, 272.3]
+truth pass over 10000000 rows x 40 queries: 68s
+scale item,1,index_thr,0.0001,40.86,76.32,20,921396,467.4,3.71,1000,0
+scale item,1,index_thr,0.001,85.37,125.95,20,1252519,2368.8,18.68,10000,0
+scale item,1,index_thr,0.01,355.50,478.42,20,4307382,11327.4,98.61,100000,0
+scale item,1,index_thr,0.05,2146.89,2113.08,20,8366437,111824.2,882.25,500000,0
+scale item,1,index_knn10,0,29.71,59.86,20,0,0,0,10,0
+scale text,1,index_thr,0.0001,409.88,417.14,20,7285878,1756.0,14.46,1000,0
+scale text,1,index_thr,0.001,652.10,632.69,20,8165079,10789.6,89.52,10000,0
+scale text,1,index_thr,0.01,1566.63,1675.23,20,9326118,79495.9,571.16,100000,0
+scale text,1,index_thr,0.05,3812.83,3749.28,20,9874521,253820.6,1990.45,500000,0
+scale text,1,index_knn10,0,332.02,355.14,20,0,0,0,10,0
+scale item,4,index_thr,0.0001,19.78,28.54,20,921396,467.4,3.71,1000,0
+scale item,4,index_thr,0.001,40.99,51.37,20,1252519,2368.8,17.58,10000,0
+scale item,4,index_thr,0.01,129.49,149.27,20,4307382,11327.4,90.57,100000,0
+scale item,4,index_thr,0.05,635.82,626.28,20,8366437,111824.2,811.90,500000,0
+scale item,4,index_knn10,0,16.70,24.76,20,0,0,0,10,0
+scale text,4,index_thr,0.0001,109.06,107.45,20,7285878,1756.0,12.13,1000,0
+scale text,4,index_thr,0.001,165.88,167.38,20,8165079,10789.6,78.26,10000,0
+scale text,4,index_thr,0.01,442.00,505.71,20,9326118,79495.9,564.52,100000,0
+scale text,4,index_thr,0.05,997.43,968.64,20,9874521,253820.6,1832.72,500000,0
+scale text,4,index_knn10,0,84.93,91.72,20,0,0,0,10,0
+scale run done in 1015s

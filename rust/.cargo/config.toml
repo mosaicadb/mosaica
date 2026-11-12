@@ -1,0 +1,3 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+target-dir = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rust-target"

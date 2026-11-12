@@ -1,0 +1,21 @@
+==== run at 1794510727: ["/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rust-target/release/vexact", "verify", "--vcheck", "25"]
+[build] plans 0.5s; max basis defect 1.00e-6
+[build] calibrated 14.5s
+[build] encoded 39.0s
+[build] assembled 41.0s; x2 bound 4.882e-4
+[build] support table (1000 anchors) 50.4s
+built 1000000 rows, 1000 clusters, 1000 anchors in 50.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 53.6, 66.5, 71.0, 79.5, 88.1, 105.5, 122.0, 138.5, 156.0, 172.5, 203.4, 234.5, 272.3]
+escapes: det norms 304 (0.005% of item-levels), yh fallbacks 87656 (2.191%), tan fallbacks 4091057
+verify 0/569 1s viol in/out 0/0 det 0 rand 0 checked 2999190 maxsd 4.33
+verify 50/569 28s viol in/out 0/0 det 0 rand 0 checked 125640143 maxsd 4.93
+verify 100/569 51s viol in/out 0/0 det 0 rand 0 checked 125640143 maxsd 4.93
+verify 150/569 75s viol in/out 0/0 det 0 rand 0 checked 125640143 maxsd 4.93
+verify 200/569 102s viol in/out 0/0 det 0 rand 0 checked 152145463 maxsd 4.98
+verify 250/569 146s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 300/569 174s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 350/569 203s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 400/569 232s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 450/569 261s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 500/569 290s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+verify 550/569 323s viol in/out 0/0 det 0 rand 0 checked 691575520 maxsd 5.34
+VERIFY 569 queries x 4 answer sizes: result-set violations wrong-in 0 wrong-out 0; interval checks 691575520 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.46); k-NN k=10 mismatches 0 of 569
