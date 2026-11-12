@@ -9,7 +9,10 @@
 
 Mosaica is a database for serving interactive maps over billions of spatial data points with granular access control on every point. It takes records with a position, such as locations in geo datasets, specimens in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map that users can pan, zoom, filter and search, in a browser or a notebook.
 
-![160 million single cells in the Mosaica explorer, coloured by tissue](docs/assets/screenshots/mosaica_cellxgene_light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshots/mosaica_cellxgene.webp">
+  <img src="docs/assets/screenshots/mosaica_cellxgene_light.webp" alt="160 million single cells in the Mosaica explorer, coloured by tissue">
+</picture>
 
 ## Why Mosaica
 
@@ -30,7 +33,7 @@ We served one map of GBIF's species records, from Mosaica and compared it to del
 
 ## Try it in your browser
 
-[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves two maps from one machine: 73.6 million places from Overture Maps on a world map, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the European Union's places or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves three maps from one machine: 88.4 million places from Overture Maps on a world map, 20.7 million PubMed papers laid out by their abstracts, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the places Foursquare contributed or only the cancer papers, and every point, count and cluster changes to what that viewer may see.
 
 ## See a map in one command
 
@@ -94,7 +97,7 @@ Mosaica is an alpha. Expect formats and APIs to change before 1.0.
 
 - [Documentation](docs/index.md): tutorials, [how it works](docs/system/overview.md), [guides](docs/guides/index.md) and the [reference](docs/reference/index.md).
 - The same documentation as a website, with search, at [docs.mosaicadb.com](https://docs.mosaicadb.com/).
-- A [hosted demo](https://demo.mosaicadb.com/) of 73.6 million places and 50,000 arXiv papers.
+- A [hosted demo](https://demo.mosaicadb.com/) of 88.4 million places, 20.7 million PubMed papers and 50,000 arXiv papers.
 - Examples for the [browser](clients/ts/examples) and [Python](clients/py/examples).
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 

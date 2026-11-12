@@ -4,7 +4,8 @@
 
 Mosaica is a database for serving interactive maps over billions of points, with access control on every point. It takes records with a position, such as locations in geo datasets, specimens in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map that people can pan, zoom, filter and search, in a browser or a notebook.
 
-![150,000 GeoNames places in the Mosaica explorer, coloured by feature class](assets/brand/mosaica_example.png)
+![160 million single cells in the Mosaica explorer, coloured by tissue](assets/screenshots/mosaica_cellxgene_light.webp#only-light)
+![160 million single cells in the Mosaica explorer, coloured by tissue](assets/screenshots/mosaica_cellxgene.webp#only-dark)
 
 ## Why Mosaica
 
@@ -52,7 +53,7 @@ We served the same map of GBIF's species records from Mosaica and from three oth
 
 ## Try it in your browser
 
-[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves two maps from one machine: 73.6 million places from Overture Maps on a world map, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the European Union's places or only the computer science papers, and every point, count and cluster changes to what that viewer may see.
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves three maps from one machine: 88.4 million places from Overture Maps on a world map, 20.7 million PubMed papers laid out by their abstracts, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the places Foursquare contributed or only the cancer papers, and every point, count and cluster changes to what that viewer may see.
 
 ## Where to start
 

@@ -114,6 +114,8 @@ Search results aren't ranked. A relevance score is usually worked out from how c
 
 Where a filter changes what's drawn, a highlight keeps everything drawn and marks the items that also match a second expression, so a client can light them up and dull the rest. You can send both at once, filtering to computer science papers, say, and highlighting those from 2024. Each point then carries a `highlighted` flag, and each tile counts its highlighted items.
 
+![20.7 million PubMed papers with the 639,621 in chemistry highlighted and the rest dulled](../assets/screenshots/mosaica_pubmed.webp)
+
 ## Annotations on the map
 
 The points carry each one's artifact, but not the artifacts themselves, so a client reads those from the annotations request. It returns the artifacts in each tile, with their names and other content, their counts, centres and boxes.

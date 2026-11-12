@@ -2,7 +2,9 @@
 
 These datasets let you see Mosaica working on real data with one command. `mosaica demo` downloads a dataset, builds a database from it and opens its map in your browser. Above the map you can switch between datasets and choose whom to view the map as, and every point, count and cluster changes to what that viewer may see.
 
-To look before installing anything, open the hosted demo at [demo.mosaicadb.com](https://demo.mosaicadb.com/). It shows the same page over 73.6 million places from Overture Maps and 50,000 arXiv papers.
+To look before installing anything, open the hosted demo at [demo.mosaicadb.com](https://demo.mosaicadb.com/). It shows the same page over 88.4 million places from Overture Maps, 20.7 million PubMed papers and 50,000 arXiv papers.
+
+![Overture Maps places across Europe on the hosted demo, with each country named](../assets/screenshots/mosaica_europe.webp)
 
 To run it on your own machine, install the Python package with its `demo` extra and name a dataset:
 
@@ -74,6 +76,8 @@ Not built yet: the larger datasets Mosaica is benchmarked on, which are the full
 ## `arxiv-sample`
 
 50,000 arXiv papers laid out by topic in two maps, with arXiv's own classification and the topic clusters that [Toponymy](https://github.com/TutteInstitute/toponymy) found and named. The papers have titles but no abstracts. The data comes with the repository, and arXiv publishes the paper metadata under CC0.
+
+![The 50,000 papers of arxiv-sample coloured by archive, with Toponymy's topic names over the map](../assets/screenshots/mosaica_arxiv.webp)
 
 **Views**
 
