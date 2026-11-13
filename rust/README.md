@@ -6,8 +6,11 @@ result against brute force, and times everything against flat f16 and int8 scans
 
 ## Build
 
-Stable Rust (1.97), release only, `-C target-cpu=native` (set in `.cargo/config.toml`; AVX-512 F/BW/DQ/VL required at
-run time). The target directory is outside the tree (`../../rust-target`).
+Stable Rust (1.99), release only, `-C target-cpu=native` (set in `.cargo/config.toml`). The fast-scan index (`--v2`)
+runs on AVX2 (with FMA and F16C) or AVX-512: `src/simd.rs` gives its 16-lane operations as two 256-bit registers when the
+target lacks AVX-512, and `src/v2/kern.rs`, `src/v2/q.rs` and `src/kernel.rs` have AVX2 versions of the kernels that
+need byte permutes, VNNI or horizontal sums. Version 1 still needs AVX-512 at run time. Set `CARGO_TARGET_DIR` to a
+directory outside the tree.
 
 ```bash
 export CARGO_PROFILE_RELEASE_DEBUG=0

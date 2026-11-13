@@ -6,7 +6,7 @@ use super::*;
 use crate::kernel::Stats;
 use crate::query::Cut;
 use roaring::RoaringBitmap;
-use std::arch::x86_64::*;
+use crate::simd::*;
 use std::sync::OnceLock;
 
 pub const U: f64 = 1.0 / 16777216.0;
@@ -84,6 +84,7 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
 /// Four basis vectors at a time share the query loads.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vnni")]
 pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
     assert!(n % 32 == 0 && n % 4 == 0);
@@ -112,6 +113,7 @@ pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i1
 }
 
 /// f64 dot product, two 8-lane accumulators.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot64v(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
@@ -131,6 +133,7 @@ pub unsafe fn dot64v(a: &[f64], b: &[f64]) -> f64 {
 }
 
 /// y = R x for a row-major square f64 matrix (n a multiple of 8).
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
     let n = x.len();
@@ -154,6 +157,114 @@ pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
         }
         y[a] = v;
     }
+}
+
+/// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (vpmaddwd), then one rounding to f64.
+/// Four basis vectors at a time share the query loads.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
+    assert!(n % 32 == 0 && n % 4 == 0);
+    let mut c = 0;
+    while c < n {
+        let mut ah = [_mm256_setzero_si256(); 4];
+        let mut al = [_mm256_setzero_si256(); 4];
+        let mut i = 0;
+        while i < n {
+            let h = _mm256_loadu_si256(qhi.as_ptr().add(i) as *const _);
+            let l = _mm256_loadu_si256(qlo.as_ptr().add(i) as *const _);
+            for r in 0..4 {
+                let x = _mm256_cvtepi8_epi16(_mm_loadu_si128(v8t.as_ptr().add((c + r) * n + i) as *const _));
+                ah[r] = _mm256_add_epi32(ah[r], _mm256_madd_epi16(x, h));
+                al[r] = _mm256_add_epi32(al[r], _mm256_madd_epi16(x, l));
+            }
+            i += 16;
+        }
+        for r in 0..4 {
+            let h = hsum_epi32(ah[r]) as i64;
+            let l = hsum_epi32(al[r]) as i64;
+            out[c + r] = vsc[c + r] * ((h * 8192 + l) as f64) * (1.0 / 16777216.0);
+        }
+        c += 4;
+    }
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn hsum_epi32(v: __m256i) -> i32 {
+    let x = _mm_add_epi32(_mm256_castsi256_si128(v), _mm256_extracti128_si256::<1>(v));
+    let x = _mm_add_epi32(x, _mm_shuffle_epi32::<0x4e>(x));
+    let x = _mm_add_epi32(x, _mm_shuffle_epi32::<0xb1>(x));
+    _mm_cvtsi128_si32(x)
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn hsum_pd(v: __m256d) -> f64 {
+    let x = _mm_add_pd(_mm256_castpd256_pd128(v), _mm256_extractf128_pd::<1>(v));
+    _mm_cvtsd_f64(_mm_add_sd(x, _mm_unpackhi_pd(x, x)))
+}
+
+/// f64 dot product, four 4-lane accumulators.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot64v(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    let mut s = [_mm256_setzero_pd(); 4];
+    let mut i = 0;
+    while i + 16 <= n {
+        for k in 0..4 {
+            s[k] = _mm256_fmadd_pd(_mm256_loadu_pd(a.as_ptr().add(i + 4 * k)), _mm256_loadu_pd(b.as_ptr().add(i + 4 * k)), s[k]);
+        }
+        i += 16;
+    }
+    let mut r = hsum_pd(_mm256_add_pd(_mm256_add_pd(s[0], s[1]), _mm256_add_pd(s[2], s[3])));
+    while i < n {
+        r += a[i] * b[i];
+        i += 1;
+    }
+    r
+}
+
+/// y = R x for a row-major square f64 matrix.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
+    let n = x.len();
+    for a in 0..n {
+        y[a] = dot64v(&r[a * n..(a + 1) * n], x);
+    }
+}
+
+/// f32 dot product (eight 8-lane accumulators); |result - exact| <= 64 u sum |a_i b_i| for n <= 4096.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot32(a: &[f32], b: &[f32]) -> f64 {
+    let n = a.len();
+    let mut acc = [_mm256_setzero_ps(); 8];
+    let mut i = 0;
+    while i + 64 <= n {
+        for k in 0..8 {
+            acc[k] = _mm256_fmadd_ps(_mm256_loadu_ps(a.as_ptr().add(i + 8 * k)), _mm256_loadu_ps(b.as_ptr().add(i + 8 * k)), acc[k]);
+        }
+        i += 64;
+    }
+    while i + 16 <= n {
+        acc[0] = _mm256_fmadd_ps(_mm256_loadu_ps(a.as_ptr().add(i)), _mm256_loadu_ps(b.as_ptr().add(i)), acc[0]);
+        acc[1] = _mm256_fmadd_ps(_mm256_loadu_ps(a.as_ptr().add(i + 8)), _mm256_loadu_ps(b.as_ptr().add(i + 8)), acc[1]);
+        i += 16;
+    }
+    let mut t = [_mm256_setzero_ps(); 4];
+    for k in 0..4 {
+        t[k] = _mm256_add_ps(acc[k], acc[k + 4]);
+    }
+    let a8 = _mm256_add_ps(_mm256_add_ps(t[0], t[1]), _mm256_add_ps(t[2], t[3]));
+    let mut r = hsum_pd(_mm256_add_pd(_mm256_cvtps_pd(_mm256_castps256_ps128(a8)), _mm256_cvtps_pd(_mm256_extractf128_ps::<1>(a8))));
+    while i < n {
+        r += a[i] as f64 * b[i] as f64;
+        i += 1;
+    }
+    r
 }
 
 pub fn group_q2(ix: &Index2, g: usize, pr: &Prep2) -> GQ2 {
@@ -289,6 +400,7 @@ pub struct CQ2 {
 }
 
 /// f32 dot product (four 16-lane accumulators); |result - exact| <= 64 u sum |a_i b_i| for n <= 4096.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot32(a: &[f32], b: &[f32]) -> f64 {
     let n = a.len();
@@ -324,8 +436,8 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     let c = &ix.cl[ci];
     let n = ix.n();
     let gp = &ix.groups[c.g];
-    // f32 products of f32-rounded factors: each sum is within 70 u sqrt(sum a^2 sum b^2) of the exact one
-    let e = 70.0 * U;
+    // f32 products of f32-rounded factors: each sum is within (n/64 + 6) u sqrt(sum a^2 sum b^2) of the exact one
+    let e = ((n / 64 + 6) as f64).max(70.0) * U;
     let mut ab = [0f64; J];
     for j in 0..J {
         ab[j] = unsafe { dot32(&c.mv32, &gq.qdt2[j * n..(j + 1) * n]) };
@@ -625,7 +737,7 @@ unsafe fn arr(v: __m512) -> [f32; 16] {
 
 /// Run the index path for candidates `cands` (local item indices, ascending) of one cluster. Decisions in Thr mode;
 /// in Interval(L) mode every candidate's interval at level L goes to out.iv.
-#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
+#[target_feature(enable = "avx2,fma")]
 pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut) {
     let ti = tick();
     let c = &ix.cl[ci];
@@ -703,7 +815,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     let mut dmxj = [0f32; J]; // relative rounding bound of each block's latest kappa
     let mut edet = 0f32; // cumulative table error of the deterministic part
     let mut ej = [0f32; J];
-    let mut g = Gather { ident: None, nsrc: 0, src: [0; 32], mlo: [0; 32], mhi: [0; 32], idxlo: _mm512_setzero_si512(), idxhi: _mm512_setzero_si512(), shlo: 0, shhi: 0 };
+    let mut g = Gather::new();
     for l in 0..nl {
         if nsurv == 0 {
             break;

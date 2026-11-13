@@ -531,6 +531,7 @@ pub unsafe fn run_block<const NQ: usize>(
 // ---------------- flat scans ----------------
 
 /// f16 x f32 dot, 16 lanes, f32 accumulation. |error| <= (n/16 + 4) * 2^-24 * sum |q_i x_i|.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
     let n = q.len();
@@ -558,6 +559,7 @@ pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
 }
 
 /// Four rows at a time (more loads in flight).
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
     let n = q.len();
@@ -575,6 +577,7 @@ pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
 }
 
 /// int8 x int16 dot via vpmaddwd (exactly as the review's baseline).
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
     let n = q.len();
@@ -587,6 +590,84 @@ pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
         i += 32;
     }
     _mm512_reduce_add_epi32(s)
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn hsum_ps(v: __m256) -> f32 {
+    let x = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps::<1>(v));
+    let x = _mm_add_ps(x, _mm_movehl_ps(x, x));
+    _mm_cvtss_f32(_mm_add_ss(x, _mm_movehdup_ps(x)))
+}
+
+/// f16 x f32 dot, four 8-lane accumulators (32 lanes, as the AVX-512 kernel), f32 accumulation.
+/// |error| <= (n/16 + 4) * 2^-24 * sum |q_i x_i|.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma,f16c")]
+pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
+    let n = q.len();
+    let mut s = [_mm256_setzero_ps(); 4];
+    let mut i = 0;
+    while i + 32 <= n {
+        for k in 0..4 {
+            let xv = _mm256_cvtph_ps(_mm_loadu_si128(x.as_ptr().add(i + 8 * k) as *const _));
+            s[k] = _mm256_fmadd_ps(xv, _mm256_loadu_ps(q.as_ptr().add(i + 8 * k)), s[k]);
+        }
+        i += 32;
+    }
+    while i + 16 <= n {
+        for k in 0..2 {
+            let xv = _mm256_cvtph_ps(_mm_loadu_si128(x.as_ptr().add(i + 8 * k) as *const _));
+            s[k] = _mm256_fmadd_ps(xv, _mm256_loadu_ps(q.as_ptr().add(i + 8 * k)), s[k]);
+        }
+        i += 16;
+    }
+    let mut r = hsum_ps(_mm256_add_ps(_mm256_add_ps(s[0], s[2]), _mm256_add_ps(s[1], s[3])));
+    while i < n {
+        r += crate::util::f16_to_f32(x[i]) * q[i];
+        i += 1;
+    }
+    r
+}
+
+/// Four rows at a time (more loads in flight); n a multiple of 16, two 8-lane accumulators per row.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma,f16c")]
+pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
+    let n = q.len();
+    let mut s = [[_mm256_setzero_ps(); 2]; 4];
+    let mut i = 0;
+    while i + 16 <= n {
+        let q0 = _mm256_loadu_ps(q.as_ptr().add(i));
+        let q1 = _mm256_loadu_ps(q.as_ptr().add(i + 8));
+        for r in 0..4 {
+            let x0 = _mm256_cvtph_ps(_mm_loadu_si128(x[r].as_ptr().add(i) as *const _));
+            let x1 = _mm256_cvtph_ps(_mm_loadu_si128(x[r].as_ptr().add(i + 8) as *const _));
+            s[r][0] = _mm256_fmadd_ps(x0, q0, s[r][0]);
+            s[r][1] = _mm256_fmadd_ps(x1, q1, s[r][1]);
+        }
+        i += 16;
+    }
+    core::array::from_fn(|r| hsum_ps(_mm256_add_ps(s[r][0], s[r][1])))
+}
+
+/// int8 x int16 dot via vpmaddwd.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
+    let n = q.len();
+    let mut s = _mm256_setzero_si256();
+    let mut i = 0;
+    while i + 16 <= n {
+        let xv = _mm256_cvtepi8_epi16(_mm_loadu_si128(x.as_ptr().add(i) as *const _));
+        let qv = _mm256_loadu_si256(q.as_ptr().add(i) as *const _);
+        s = _mm256_add_epi32(s, _mm256_madd_epi16(xv, qv));
+        i += 16;
+    }
+    let v = _mm_add_epi32(_mm256_castsi256_si128(s), _mm256_extracti128_si256::<1>(s));
+    let v = _mm_add_epi32(v, _mm_shuffle_epi32::<0x4e>(v));
+    let v = _mm_add_epi32(v, _mm_shuffle_epi32::<0xb1>(v));
+    _mm_cvtsi128_si32(v)
 }
 
 /// QV = V^T q for several queries in one pass over a transposed basis (row c of vt is column c of V); f32 products,

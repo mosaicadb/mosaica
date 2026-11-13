@@ -5,7 +5,7 @@
 //! Block layout: 32 items; a row is 16 bytes, byte p holds item p in the low nibble and item 16 + p in the high nibble.
 //! A level of a cluster stores, per block, its code rows (one per 4-bit unit) contiguously.
 use super::*;
-use std::arch::x86_64::*;
+use crate::simd::*;
 
 pub const U32: f64 = 1.0 / 16777216.0;
 
@@ -27,7 +27,7 @@ pub struct LevelLut {
 }
 
 /// Build the level's tables from the cluster's combined weights w (det by coordinate, rand by n + position).
-#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
+#[target_feature(enable = "avx2,fma")]
 pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, out: &mut LevelLut) {
     let qmax: f32 = if split { 65535.0 } else { 255.0 };
     out.parts.clear();
@@ -91,6 +91,7 @@ pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, out
 
 /// Where a dest block's rows come from: the distinct source blocks (at most 32) with, for each, the dest bytes whose
 /// low-nibble and high-nibble items it supplies; and for each dest byte the source byte of those items.
+#[cfg(target_feature = "avx512f")]
 pub struct Gather {
     pub ident: Option<usize>, // the whole block is source block s in order
     pub nsrc: usize,
@@ -103,6 +104,7 @@ pub struct Gather {
     pub shhi: u64,
 }
 
+#[cfg(target_feature = "avx512f")]
 #[inline(always)]
 fn rep16(m: u16) -> u64 {
     let m = m as u64;
@@ -110,6 +112,7 @@ fn rep16(m: u16) -> u64 {
 }
 
 /// Plan the gather of 32 survivors (local item indices, ascending; u32::MAX for empty lanes).
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
 pub unsafe fn plan_gather(lanes: &[u32; 32], g: &mut Gather) {
     let l0 = _mm512_loadu_si512(lanes.as_ptr() as *const _);
@@ -159,6 +162,7 @@ pub unsafe fn plan_gather(lanes: &[u32; 32], g: &mut Gather) {
 }
 
 /// Assemble `rows` rows of a dest block from the source blocks at `base` (row stride `rows` x 16 per block) into dst.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
 pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8) {
     let stride = rows * 16;
@@ -183,6 +187,7 @@ pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8
     }
 }
 
+#[cfg(target_feature = "avx512f")]
 #[inline(always)]
 unsafe fn lane_sum(e: __m512i, o: __m512i) -> (__m512, __m512) {
     // e: words = sums of even bytes per 128-bit lane, o: odd; sum the four lanes and interleave to item order
@@ -199,6 +204,7 @@ unsafe fn lane_sum(e: __m512i, o: __m512i) -> (__m512, __m512) {
 }
 
 /// Integer table sums of one part over one block: S for items 0..15 and 16..31.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
 pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m512, __m512) {
     let m0f = _mm512_set1_epi8(0x0f);
@@ -220,9 +226,203 @@ pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m
     (s0, s1)
 }
 
+#[cfg(target_feature = "avx512f")]
+impl Gather {
+    pub fn new() -> Gather {
+        let z = unsafe { _mm512_setzero_si512() };
+        Gather { ident: None, nsrc: 0, src: [0; 32], mlo: [0; 32], mhi: [0; 32], idxlo: z, idxhi: z, shlo: 0, shhi: 0 }
+    }
+}
+
+/// Where a dest block's rows come from: the distinct source blocks (at most 32) with, for each, byte masks of the dest
+/// bytes whose low-nibble and high-nibble items it supplies; and for each dest byte the source byte of those items and
+/// whether each sits in the other nibble of its source byte.
+#[cfg(not(target_feature = "avx512f"))]
+pub struct Gather {
+    pub ident: Option<usize>, // the whole block is source block s in order
+    pub nsrc: usize,
+    pub src: [u32; 32],
+    pub mlo: [[u8; 16]; 32],
+    pub mhi: [[u8; 16]; 32],
+    pub idxlo: [u8; 16],
+    pub idxhi: [u8; 16],
+    pub shlo: [u8; 16], // the low-nibble item is in the high nibble of its source byte
+    pub shhi: [u8; 16], // the high-nibble item is in the low nibble of its source byte
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+impl Gather {
+    pub fn new() -> Gather {
+        Gather { ident: None, nsrc: 0, src: [0; 32], mlo: [[0; 16]; 32], mhi: [[0; 16]; 32], idxlo: [0; 16], idxhi: [0; 16], shlo: [0; 16], shhi: [0; 16] }
+    }
+}
+
+/// Plan the gather of 32 survivors (local item indices, ascending; u32::MAX for empty lanes).
+#[cfg(not(target_feature = "avx512f"))]
+pub unsafe fn plan_gather(lanes: &[u32; 32], g: &mut Gather) {
+    let first = lanes[0];
+    if first != u32::MAX && first % 32 == 0 && (1..32).all(|d| lanes[d] == first + d as u32) {
+        g.ident = Some(first as usize / 32);
+        return;
+    }
+    g.ident = None;
+    g.idxlo = [0; 16];
+    g.idxhi = [0; 16];
+    g.shlo = [0; 16];
+    g.shhi = [0; 16];
+    // survivors ascend, so the source blocks are runs
+    let mut ns = 0;
+    for d in 0..32 {
+        let v = lanes[d];
+        if v == u32::MAX {
+            continue;
+        }
+        let b = v >> 5;
+        if ns == 0 || g.src[ns - 1] != b {
+            g.src[ns] = b;
+            g.mlo[ns] = [0; 16];
+            g.mhi[ns] = [0; 16];
+            ns += 1;
+        }
+        let (src_byte, src_hi) = ((v & 15) as u8, v & 16 != 0);
+        if d < 16 {
+            g.mlo[ns - 1][d] = 0xff;
+            g.idxlo[d] = src_byte;
+            g.shlo[d] = if src_hi { 0xff } else { 0 };
+        } else {
+            g.mhi[ns - 1][d - 16] = 0xff;
+            g.idxhi[d - 16] = src_byte;
+            g.shhi[d - 16] = if src_hi { 0 } else { 0xff };
+        }
+    }
+    g.nsrc = ns;
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn bcast16(p: &[u8; 16]) -> __m256i {
+    _mm256_broadcastsi128_si256(_mm_loadu_si128(p.as_ptr() as *const _))
+}
+
+/// Assemble `rows` rows of a dest block from the source blocks at `base` (row stride `rows` x 16 per block) into dst,
+/// two rows per pass (dst gets whole pairs of rows).
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8) {
+    let stride = rows * 16;
+    let m0f = _mm256_set1_epi8(0x0f);
+    let mf0 = _mm256_set1_epi8(0xf0u8 as i8);
+    let (ilo, ihi, slo, shi) = (bcast16(&g.idxlo), bcast16(&g.idxhi), bcast16(&g.shlo), bcast16(&g.shhi));
+    let np = (rows + 1) / 2;
+    for gi in 0..np {
+        let mut t1 = _mm256_setzero_si256();
+        let mut t2 = _mm256_setzero_si256();
+        for s in 0..g.nsrc {
+            let v = _mm256_loadu_si256(base.add(*g.src.get_unchecked(s) as usize * stride + gi * 32) as *const _);
+            t1 = _mm256_blendv_epi8(t1, _mm256_shuffle_epi8(v, ilo), bcast16(g.mlo.get_unchecked(s)));
+            t2 = _mm256_blendv_epi8(t2, _mm256_shuffle_epi8(v, ihi), bcast16(g.mhi.get_unchecked(s)));
+        }
+        let lo = _mm256_and_si256(_mm256_blendv_epi8(t1, _mm256_srli_epi16::<4>(t1), slo), m0f);
+        let hi = _mm256_and_si256(_mm256_blendv_epi8(t2, _mm256_slli_epi16::<4>(t2), shi), mf0);
+        _mm256_storeu_si256(dst.add(gi * 32) as *mut _, _mm256_or_si256(lo, hi));
+    }
+}
+
+/// Integer table sums of one part over one block: S for items 0..15 and 16..31.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m512, __m512) {
+    let m0f = _mm256_set1_epi8(0x0f);
+    let (mut a0, mut b0, mut a1, mut b1) = (_mm256_setzero_si256(), _mm256_setzero_si256(), _mm256_setzero_si256(), _mm256_setzero_si256());
+    for h in 0..2 * groups {
+        let c = _mm256_loadu_si256(codes.add(h * 32) as *const _);
+        let t = _mm256_loadu_si256(tab.add(h * 32) as *const _);
+        let r0 = _mm256_shuffle_epi8(t, _mm256_and_si256(c, m0f));
+        let r1 = _mm256_shuffle_epi8(t, _mm256_and_si256(_mm256_srli_epi16::<4>(c), m0f));
+        a0 = _mm256_add_epi16(a0, r0);
+        b0 = _mm256_add_epi16(b0, _mm256_srli_epi16::<8>(r0));
+        a1 = _mm256_add_epi16(a1, r1);
+        b1 = _mm256_add_epi16(b1, _mm256_srli_epi16::<8>(r1));
+    }
+    (lane_sum(_mm256_sub_epi16(a0, _mm256_slli_epi16::<8>(b0)), b0), lane_sum(_mm256_sub_epi16(a1, _mm256_slli_epi16::<8>(b1)), b1))
+}
+
+/// e: words = sums of even bytes per 128-bit lane, o: odd; sum the two lanes and interleave to item order.
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn lane_sum(e: __m256i, o: __m256i) -> __m512 {
+    let f = |x: __m256i| _mm_add_epi16(_mm256_castsi256_si128(x), _mm256_extracti128_si256::<1>(x));
+    let (e, o) = (f(e), f(o));
+    let a = _mm256_cvtepu16_epi32(_mm_unpacklo_epi16(e, o));
+    let b = _mm256_cvtepu16_epi32(_mm_unpackhi_epi16(e, o));
+    __m512(_mm256_cvtepi32_ps(a), _mm256_cvtepi32_ps(b))
+}
+
 /// Nibble of every lane of a scalar row (lanes 0..15 low nibbles, 16..31 high nibbles) as i32.
 #[inline(always)]
 pub unsafe fn row_nibbles(p: *const u8) -> (__m512i, __m512i) {
     let v = _mm512_cvtepu8_epi32(_mm_loadu_si128(p as *const _));
     (_mm512_and_si512(v, _mm512_set1_epi32(15)), _mm512_srli_epi32(v, 4))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nib(buf: &[u8], row: usize, item: usize) -> u8 {
+        let b = buf[row * 16 + item % 16];
+        if item < 16 { b & 15 } else { b >> 4 }
+    }
+
+    #[test]
+    fn part_sums_match_scalar() {
+        let groups = 5;
+        let codes: Vec<u8> = (0..groups * 64).map(|i| (i * 37 % 251) as u8).collect();
+        let tab: Vec<u8> = (0..groups * 64).map(|i| (i * 91 % 256) as u8).collect();
+        let (s0, s1) = unsafe { part_sums(codes.as_ptr(), tab.as_ptr(), groups) };
+        let mut got = [0f32; 32];
+        unsafe {
+            _mm512_storeu_ps(got.as_mut_ptr(), s0);
+            _mm512_storeu_ps(got.as_mut_ptr().add(16), s1);
+        }
+        for item in 0..32 {
+            let want: u32 = (0..groups * 4).map(|row| tab[row * 16 + nib(&codes, row, item) as usize] as u32).sum();
+            assert_eq!(got[item], want as f32, "item {item}");
+        }
+    }
+
+    #[test]
+    fn gather_rows_match_scalar() {
+        let rows = 5;
+        let nblk = 6;
+        let src: Vec<u8> = (0..nblk * rows * 16 + 128).map(|i| (i * 53 % 256) as u8).collect();
+        let mut lanes = [u32::MAX; 32];
+        let picks = [1u32, 2, 17, 31, 32, 40, 63, 64, 65, 66, 80, 95, 100, 120, 130, 150, 160, 161, 170, 175, 180, 190];
+        lanes[..picks.len()].copy_from_slice(&picks);
+        let mut g = Gather::new();
+        unsafe { plan_gather(&lanes, &mut g) };
+        let mut dst = vec![0u8; rows * 16 + 64];
+        unsafe { gather_rows(&g, src.as_ptr(), rows, dst.as_mut_ptr()) };
+        for (d, &v) in lanes.iter().enumerate() {
+            for row in 0..rows {
+                let want = if v == u32::MAX { 0 } else { nib(&src[(v as usize / 32) * rows * 16..], row, v as usize % 32) };
+                assert_eq!(nib(&dst, row, d), want, "lane {d} row {row}");
+            }
+        }
+    }
+
+    #[test]
+    fn compress_keeps_order() {
+        let v: Vec<i32> = (0..16).map(|i| 100 + i).collect();
+        for m in [0u16, 1, 0x8000, 0xffff, 0x5a5a, 0x00f0, 0x0f0f] {
+            let mut out = [0i32; 16];
+            unsafe {
+                let x = _mm512_loadu_si512(v.as_ptr() as *const _);
+                _mm512_storeu_si512(out.as_mut_ptr() as *mut _, _mm512_maskz_compress_epi32(m, x));
+            }
+            let want: Vec<i32> = (0..16).filter(|&i| m >> i & 1 == 1).map(|i| 100 + i).collect();
+            assert_eq!(&out[..want.len()], &want[..]);
+            assert!(out[want.len()..].iter().all(|&x| x == 0));
+        }
+    }
 }

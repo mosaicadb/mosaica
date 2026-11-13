@@ -4,6 +4,7 @@ mod kernel;
 mod query;
 mod run2;
 mod scale;
+mod simd;
 mod v2;
 mod synth;
 mod util;
@@ -781,6 +782,10 @@ fn main() {
             run2::filter2(&c, get("--fnq", 30));
         }
         return;
+    }
+    if !std::arch::is_x86_feature_detected!("avx512f") {
+        eprintln!("the version 1 index needs AVX-512, which this CPU lacks; use --v2");
+        std::process::exit(2);
     }
     let tag = if has("--scale") { "scale" } else { "run1m" };
     if has("--scale") {
