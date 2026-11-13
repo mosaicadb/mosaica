@@ -25,6 +25,9 @@ pub const P_FULL: usize = 9;
 pub const P_INIT: usize = 10;
 pub const P_PLAN: usize = 11;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
+/// at least the threshold) in Stats::errs.
+pub static ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[inline(always)]
 pub fn tick() -> u64 {
     if PROF.load(std::sync::atomic::Ordering::Relaxed) { unsafe { core::arch::x86_64::_rdtsc() } } else { 0 }
@@ -55,6 +58,7 @@ pub struct Prep2 {
     pub beta: f64,
     pub rho: f64,
     pub gq: Vec<OnceLock<GQ2>>,
+    pub dial: Vec<f32>, // per level, factor on the item intervals' upper half-width (1: certified; below: approximate)
 }
 
 /// The query rounded to f16, as f16 and as f32, and its norm.
@@ -85,7 +89,7 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     }
     let _ = n;
     let rho = (qn * qn - best * best).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
-    Prep2 { q16, q32, q64, qn, qhi, qlo, anchor: ba, beta: best, rho, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect() }
+    Prep2 { q16, q32, q64, qn, qhi, qlo, anchor: ba, beta: best, rho, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
@@ -610,6 +614,47 @@ impl Vis2 {
         rows.sort_unstable();
         Vis2 { bits, cl_cnt, rows }
     }
+    /// The visible rows of `clusters` only (every row of them when vis is None), and the visible rows listed in
+    /// `extra` for those clusters (a second assignment), once each.
+    pub fn restrict(ix: &Index2, vis: Option<&Vis2>, clusters: &[usize], extra: Option<&[Vec<u32>]>) -> Vis2 {
+        let mut bits = vec![0u64; (ix.nrows + 64) / 64 + 1];
+        let mut rows: Vec<u32> = Vec::new();
+        for &ci in clusters {
+            let c = &ix.cl[ci];
+            match vis {
+                Some(v) => {
+                    let a = v.rows.partition_point(|&r| (r as usize) < c.r0);
+                    let b = v.rows.partition_point(|&r| (r as usize) < c.r1);
+                    rows.extend_from_slice(&v.rows[a..b]);
+                }
+                None => rows.extend(c.r0 as u32..c.r1 as u32),
+            }
+        }
+        for &r in &rows {
+            bits[r as usize / 64] |= 1 << (r % 64);
+        }
+        if let Some(ex) = extra {
+            for &ci in clusters {
+                for &r in &ex[ci] {
+                    let w = &mut bits[r as usize / 64];
+                    if vis.map_or(true, |v| v.has(r as usize)) && *w >> (r % 64) & 1 == 0 {
+                        *w |= 1 << (r % 64);
+                        rows.push(r);
+                    }
+                }
+            }
+        }
+        rows.sort_unstable();
+        let mut cl_cnt = vec![0u32; ix.k()];
+        let mut ci = 0;
+        for &r in &rows {
+            while ix.cl[ci].r1 <= r as usize {
+                ci += 1;
+            }
+            cl_cnt[ci] += 1;
+        }
+        Vis2 { bits, cl_cnt, rows }
+    }
     #[inline]
     pub fn has(&self, r: usize) -> bool {
         self.bits[r / 64] >> (r % 64) & 1 == 1
@@ -964,7 +1009,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let fl = _mm512_mul_ps(u16x, _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa)));
                     let hh = _mm512_add_ps(_mm512_mul_ps(_mm512_mul_ps(_mm512_set1_ps(cq.dwa[l]), rho), one6), _mm512_add_ps(_mm512_set1_ps(cq.fixed), _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), fl)));
                     lb = _mm512_sub_ps(est, hh);
-                    ub = _mm512_add_ps(est, hh);
+                    ub = _mm512_add_ps(est, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
@@ -1059,7 +1104,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let hh = _mm512_mul_ps(_mm512_fmadd_ps(csg, sdv, hnv), one6);
                     est = e;
                     lb = _mm512_sub_ps(e, hh);
-                    ub = _mm512_add_ps(e, hh);
+                    ub = _mm512_add_ps(e, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
                     hn = hnv;
                     sd = sdv;
                 }
@@ -1067,11 +1112,16 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 ubh[h] = ub;
                 if verify {
                     let (lbs, ubs, es, hs, sds) = (arr(lb), arr(ub), arr(est), arr(hn), arr(sd));
+                    let collect = ERRS.load(std::sync::atomic::Ordering::Relaxed);
                     for i in 0..16 {
                         if hm >> i & 1 == 0 {
                             continue;
                         }
                         let sc = sv.truth[o + i];
+                        if collect && sc >= t {
+                            // the share of the half-width above the estimate an item in the answer needed
+                            st.errs.push((l as u8, ((sc - es[i] as f64) / ((es[i] - lbs[i]) as f64).max(1e-30)) as f32));
+                        }
                         st.checked += 1;
                         if sc < lbs[i] as f64 - 1e-12 || sc > ubs[i] as f64 + 1e-12 {
                             if l < NDL { st.viol_det += 1 } else { st.viol_rand += 1 }
@@ -1792,14 +1842,203 @@ pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, 
     iv
 }
 
-/// Approximate k-NN (IVF with a re-rank): the visible items of the `nprobe` clusters whose centres are nearest the
-/// query, scored by their interval at `level`; the `rerank` best by midpoint are scored exactly from full vectors.
-pub fn knn2_approx(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, rerank: usize, level: usize) -> KnnOut2 {
+/// The approximate mode's cluster order: q.m + f r, the centre score plus f times the cluster's RMS radius about its
+/// centre (an optimistic estimate of its best item's score), with f fitted on corpus pseudo-queries.
+pub struct Approx {
+    pub f: f64,
+    pub rad: Vec<f64>,
+    pub second: Vec<Vec<u32>>, // per cluster, the rows assigned to it second (SOAR); empty unless computed
+}
+
+/// Corpus rows used as pseudo-queries (spread over the index, near-zero rows left out), as unit queries, with their
+/// exact k nearest other rows.
+pub fn pseudo_queries(ix: &Index2, nq: usize, kk: usize) -> Vec<(usize, Vec<f32>, Vec<u32>)> {
+    let rows: Vec<usize> = (0..ix.nrows).filter(|&r| (r as u64 ^ 0x5bd1e995).wrapping_mul(0x9E3779B97F4A7C15) % ix.nrows as u64 * 2 < 3 * nq as u64).collect();
+    let mut out: Vec<(usize, Vec<f32>, Vec<u32>)> = rows.par_iter().filter_map(|&row| {
+        let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
+        let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+        if qn < 0.5 {
+            return None;
+        }
+        let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
+        let (q16, q32, qn) = query_f16(&q);
+        let me = ix.row_ent[row];
+        let gt: Vec<u32> = scan_knn(ix, &q16, &q32, qn, kk + 1, None).into_iter().map(|x| x.1).filter(|&e| e != me).take(kk).collect();
+        Some((row, q, gt))
+    }).collect();
+    out.truncate(nq);
+    out
+}
+
+impl Approx {
+    /// A second cluster for every row in the style of SOAR (lambda = 1): the centre c other than its own (m) that
+    /// minimises |x - c|^2 + (r . (x - c))^2 / |r|^2 with r = x - m, so that the second cluster covers the queries
+    /// along r, where the first is weakest. Rows are listed under their second cluster.
+    pub fn second_assignment(ix: &Index2) -> Vec<Vec<u32>> {
+        let (n, k) = (ix.n(), ix.k());
+        let cen: Vec<f32> = ix.centres64.iter().map(|&x| x as f32).collect();
+        let cn2: Vec<f32> = (0..k).map(|ci| cen[ci * n..(ci + 1) * n].iter().map(|x| x * x).sum()).collect();
+        let dot = |a: &[f32], b: &[f32]| -> f32 {
+            let mut acc = [0f32; 8];
+            for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+                for i in 0..8 {
+                    acc[i] += x[i] * y[i];
+                }
+            }
+            acc.iter().sum()
+        };
+        let sec: Vec<u32> = ix.cl.par_iter().enumerate().flat_map_iter(|(c1, c)| {
+            let (cen, cn2) = (&cen, &cn2);
+            (c.r0..c.r1).map(move |row| {
+                let x: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
+                let m = &cen[c1 * n..(c1 + 1) * n];
+                let r: Vec<f32> = x.iter().zip(m).map(|(a, b)| a - b).collect();
+                let (x2, r2, rx) = (dot(&x, &x), dot(&r, &r).max(1e-30), dot(&r, &x));
+                let mut best = (f32::INFINITY, c1);
+                for ci in 0..k {
+                    if ci == c1 {
+                        continue;
+                    }
+                    let cv = &cen[ci * n..(ci + 1) * n];
+                    let (xc, rc) = (dot(&x, cv), dot(&r, cv));
+                    let par = rx - rc;
+                    let loss = x2 - 2.0 * xc + cn2[ci] + par * par / r2;
+                    if loss < best.0 {
+                        best = (loss, ci);
+                    }
+                }
+                best.1 as u32
+            })
+        }).collect();
+        let mut out = vec![Vec::new(); k];
+        for (row, &ci) in sec.iter().enumerate() {
+            out[ci as usize].push(row as u32);
+        }
+        out
+    }
+    /// Clusters holding a visible item, by descending q.m + f r.
+    pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+        let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0))
+            .map(|ci| (dot64(q64, ix.centres_f64(ci)) + self.f * self.rad[ci], ci)).collect();
+        keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+        keys.into_iter().map(|x| x.1).collect()
+    }
+
+    /// Radii from the stored vectors; f from the grid {0, 0.1, 0.2, 0.35, 0.5, 0.75}, the one that reaches mean
+    /// recall@10 0.95 on the pseudo-queries (exact scan of the probed clusters, same number of clusters for every
+    /// query) with the fewest items scanned.
+    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)]) -> (Approx, Vec<(f64, f64)>) {
+        let n = ix.n();
+        let rad: Vec<f64> = (0..ix.k()).into_par_iter().map(|ci| {
+            let c = &ix.cl[ci];
+            let m = ix.centres_f64(ci);
+            let mut x = vec![0f64; n];
+            let mut s = 0.0;
+            for r in c.r0..c.r1 {
+                ix.full_row_f64(r, &mut x);
+                s += x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+            }
+            (s / (c.r1 - c.r0).max(1) as f64).sqrt()
+        }).collect();
+        let k = ix.k();
+        let row_cl: Vec<u32> = ix.cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
+        let mut res = Vec::new();
+        for f in [0.0, 0.1, 0.2, 0.35, 0.5, 0.75] {
+            let ap = Approx { f, rad: rad.clone(), second: Vec::new() };
+            // per query: items scanned and items found by the first p clusters, p = 1..k
+            let per: Vec<(Vec<f64>, Vec<f64>)> = pseudo.par_iter().map(|(_, q, gt)| {
+                let pr = prep2(ix, q);
+                let ord = ap.order(ix, &pr.q64, None);
+                let mut rank = vec![0usize; k];
+                for (i, &ci) in ord.iter().enumerate() {
+                    rank[ci] = i;
+                }
+                let mut found = vec![0f64; k + 1];
+                for &e in gt {
+                    found[rank[row_cl[ix.ent_row[e as usize] as usize] as usize] + 1] += 1.0 / gt.len() as f64;
+                }
+                let mut items = vec![0f64; k + 1];
+                for p in 1..=k {
+                    found[p] += found[p - 1];
+                    items[p] = items[p - 1] + (ix.cl[ord[p - 1]].r1 - ix.cl[ord[p - 1]].r0) as f64;
+                }
+                (found, items)
+            }).collect();
+            let nq = per.len() as f64;
+            let p95 = (1..=k).find(|&p| per.iter().map(|x| x.0[p]).sum::<f64>() / nq >= 0.95).unwrap_or(k);
+            res.push((f, per.iter().map(|x| x.1[p95]).sum::<f64>() / nq));
+        }
+        let best = res.iter().cloned().fold((0.0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
+        (Approx { f: best.0, rad, second: Vec::new() }, res)
+    }
+}
+
+/// The confidence dial, fitted on corpus pseudo-queries. It cuts only the upper side of each item interval, the side
+/// that prunes; lower bounds stay certified, so the selection's k-th largest lower bound never overshoots. Each
+/// level's factor for a miss rate eps is the (1 - eps) quantile of (true - estimate) / half-width over the intervals
+/// that level computed for the items in the answer of the pseudo-queries' threshold queries at their 1,000th best
+/// score (index path), clipped to [0, 1]; eps = 0 gives 1 everywhere, the exact mode. Then the mean
+/// recall@k of the approximate mode over all clusters (index path) for each eps of a grid, and for each target recall
+/// the largest eps that reaches it.
+pub struct Dial {
+    pub eps: Vec<f64>,
+    pub factors: Vec<Vec<f32>>, // per eps, per level
+    pub recall: Vec<f64>,       // per eps, on the pseudo-queries
+    pub fits: Vec<(f64, usize)>, // (target recall, index into eps)
+}
+impl Dial {
+    pub fn for_target(&self, t: f64) -> &[f32] {
+        let i = self.fits.iter().find(|x| (x.0 - t).abs() < 1e-9).expect("no dial fitted for that target").1;
+        &self.factors[i]
+    }
+    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)], plan: Plan, targets: &[f64]) -> Dial {
+        let nl = ix.meta.nl();
+        let pidx = Plan { mode: PlanMode::Index, ..plan };
+        ERRS.store(true, std::sync::atomic::Ordering::Relaxed);
+        let errs: Vec<Vec<(u8, f32)>> = pseudo.par_iter().map(|(_, q, _)| {
+            let pr = prep2(ix, q);
+            let t = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, 1000, None).last().unwrap().0;
+            let o = Opts2 { vis: None, verify: true, want_iv: false, plan: pidx };
+            threshold2(ix, &pr, t, &o).st.errs
+        }).collect();
+        ERRS.store(false, std::sync::atomic::Ordering::Relaxed);
+        let mut by_level: Vec<Vec<f32>> = vec![Vec::new(); nl];
+        for e in errs.into_iter().flatten() {
+            by_level[e.0 as usize].push(e.1);
+        }
+        for v in &mut by_level {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        }
+        let eps = vec![0.0, 1e-5, 1e-4, 1e-3, 3e-3, 1e-2, 3e-2, 0.1, 0.2];
+        let factors: Vec<Vec<f32>> = eps.iter().map(|&e| by_level.iter().map(|v| {
+            if e == 0.0 || v.is_empty() { 1.0 } else { v[(((1.0 - e) * v.len() as f64) as usize).min(v.len() - 1)].clamp(0.0, 1.0) }
+        }).collect()).collect();
+        let kk = pseudo.first().map_or(10, |p| p.2.len());
+        let mut recall = Vec::new();
+        for f in &factors {
+            let rec: f64 = pseudo.par_iter().map(|(row, q, gt)| {
+                let me = ix.row_ent[*row];
+                let got: Vec<u32> = knn2d(ix, q, kk + 1, None, pidx, Some(f)).ents.iter().map(|x| x.1).filter(|&e| e != me).take(kk).collect();
+                got.iter().filter(|e| gt.contains(e)).count() as f64 / gt.len() as f64
+            }).sum::<f64>() / pseudo.len() as f64;
+            recall.push(rec);
+        }
+        let fits = targets.iter().map(|&t| (t, (0..eps.len()).filter(|&i| recall[i] >= t).max().unwrap_or(0))).collect();
+        Dial { eps, factors, recall, fits }
+    }
+}
+
+/// Approximate k-NN (IVF with a re-rank): the visible items of the first `nprobe` clusters in the order `ap` gives
+/// (by centre direction when `ap` is None), scored by their interval at `level`; the `rerank` best by midpoint are
+/// scored exactly from full vectors.
+pub fn knn2_approx(ix: &Index2, ap: Option<&Approx>, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, rerank: usize, level: usize) -> KnnOut2 {
     let tm = Timer::new();
     let pr = prep2(ix, q);
     let mut st = Stats::new(ix.meta.nl());
-    let clusters: Vec<usize> = (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).collect();
-    let mut order = by_centre(ix, &pr, clusters);
+    let mut order = match ap {
+        Some(ap) => ap.order(ix, &pr.q64, vis),
+        None => by_centre(ix, &pr, (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).collect()),
+    };
     order.truncate(nprobe);
     let iv = probe(ix, &pr, order, vis, level, usize::MAX, &mut st);
     let take = rerank.max(kk).min(iv.len());
@@ -1836,6 +2075,24 @@ pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut St
 /// set) or after the seed and the cut (nothing prunes); otherwise the threshold query at the seed's k-th score runs
 /// as planned and the selection refines the survivors' intervals until the k best are certain.
 pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
+    knn2d(ix, q, kk, vis, plan, None)
+}
+
+/// Approximate k-NN: exact k-NN over the visible items of the first `nprobe` clusters in the order of `ap` (with
+/// `soar`, also the visible items assigned to them second), with each level's item upper half-widths scaled by `dial`
+/// (per level). Only visible items are read; nprobe = all clusters and no
+/// dial is the exact mode.
+pub fn knn2_dial(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, dial: Option<&[f32]>, soar: bool, plan: Plan) -> KnnOut2 {
+    let (_, q32, _) = query_f16(q);
+    let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
+    let mut order = ap.order(ix, &q64, vis);
+    order.truncate(nprobe);
+    let sub = Vis2::restrict(ix, vis, &order, if soar { Some(&ap.second) } else { None });
+    knn2d(ix, q, kk, Some(&sub), plan, dial)
+}
+
+/// knn2 with each level's item upper half-widths scaled by `dial`.
+pub fn knn2d(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, dial: Option<&[f32]>) -> KnnOut2 {
     let tm = Timer::new();
     let nl = ix.meta.nl();
     let stored = matches!(ix.full, Full2::Real { .. });
@@ -1851,7 +2108,10 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
             return scan(Stats::new(nl), 0.0);
         }
     }
-    let pr = prep2(ix, q);
+    let mut pr = prep2(ix, q);
+    if let Some(d) = dial {
+        pr.dial = d.to_vec();
+    }
     let mut st = Stats::new(nl);
     let tau1 = seed2(ix, &pr, kk, vis, &mut st);
     let t_seed = tm.ms();

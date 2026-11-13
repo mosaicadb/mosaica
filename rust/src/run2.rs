@@ -29,6 +29,8 @@ pub struct Ctx2 {
     pub items: Vec<Vec<f32>>,
     pub texts: Vec<Vec<f32>>,
     pub plan: Plan,
+    pub approx: Approx,
+    pub dial: Option<Dial>,
 }
 
 pub fn args() -> Vec<String> {
@@ -127,7 +129,27 @@ pub fn setup2(tag: &str) -> Ctx2 {
         out!("[plan] calibrated in {:.1}s: {:?}", t.s(), pc);
         pc
     };
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan };
+    let t = Timer::new();
+    let pseudo = pseudo_queries(&ix, arg_usize("--pseudo", 1000), 10);
+    let (mut approx, fres) = Approx::fit(&ix, &pseudo);
+    if args().iter().any(|a| a == "--soar") {
+        let t = Timer::new();
+        approx.second = Approx::second_assignment(&ix);
+        out!("[approx] second assignment in {:.1}s", t.s());
+    }
+    out!("[approx] f = {} from {} pseudo-queries in {:.1}s; mean items scanned at recall 0.95 by f: {:?}", approx.f, pseudo.len(), t.s(), fres.iter().map(|x| (x.0, x.1.round())).collect::<Vec<_>>());
+    let dial = if args().iter().any(|a| a == "--fit-dial") || arg_str("--dial", "").contains("fit") {
+        let t = Timer::new();
+        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999]);
+        out!("[approx] dial fitted in {:.1}s: eps {:?}, pseudo-query recall {:?}, fits {:?}", t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>(), d.fits);
+        for (e, f) in d.eps.iter().zip(&d.factors) {
+            out!("[approx] eps {e}: factors by level {:?}", f.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
+        }
+        Some(d)
+    } else {
+        None
+    };
+    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
     out!("built v2 ({} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c

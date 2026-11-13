@@ -31,12 +31,14 @@ pub struct Stats {
     pub checked: u64,
     pub max_sd: f64,
     pub cyc: [u64; 12], // time-stamp-counter cycles by phase (v2 breakdown)
+    pub errs: Vec<(u8, f32)>, // (level, |true - estimate| / half-width), when v2::q::ERRS is set
 }
 impl Stats {
     pub fn new(nl: usize) -> Stats {
         Stats { enter: vec![0; nl + 1], dec_in: vec![0; nl + 1], dec_out: vec![0; nl + 1], blocks: vec![0; nl + 1], ..Default::default() }
     }
     pub fn add(&mut self, o: &Stats) {
+        self.errs.extend_from_slice(&o.errs);
         for (a, b) in self.enter.iter_mut().zip(&o.enter) {
             *a += b;
         }

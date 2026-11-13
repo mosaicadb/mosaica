@@ -3,7 +3,8 @@
 # usage: python3 -I baselines.py build DATASET_DIR OUT_DIR LIB [--threads T]
 #        python3 -I baselines.py query DATASET_DIR OUT_DIR LIB [--reps R] [--filtered BUILD] [--nq N] [--efs E,E]
 #   LIB: hnswlib | faiss-hnsw | faiss-ivfpqfs. --filtered BUILD runs the visible sets of filters.py on that one build
-#   (e.g. M-16, nlist-2048) instead of the unfiltered grid. Rows go to OUT_DIR/baselines.csv.
+#   (e.g. M-16, nlist-2048) instead of the unfiltered grid. Rows go to OUT_DIR/baselines.csv. --builds B,B runs only
+#   those builds of the unfiltered grid, --fracs F,F only those visible fractions of a filtered run.
 import argparse, csv, os, sys, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -157,7 +158,7 @@ def timed(s, Q, reps):
     return best
 
 
-def query(ds, out, lib, reps, filtered, nq, name, efs):
+def query(ds, out, lib, reps, filtered, nq, name, efs, only_builds=None, only_fracs=None):
     Q = ds["test"][:nq] if nq else ds["test"]
     ds = dict(ds, test=Q, distances=ds["distances"][:len(Q)])
     fcsv = os.path.join(out, "baselines.csv")
@@ -166,7 +167,8 @@ def query(ds, out, lib, reps, filtered, nq, name, efs):
     w = csv.writer(f)
     if fresh:
         w.writerow(["dataset", "method", "build", "params", "filter", "nq", "reps", "qps", "mean_ms", "p50_ms", "p99_ms", "recall"])
-    runs = [(b, None) for b in builds(lib)] if filtered is None else [(filtered, fr) for fr in FRACS]
+    runs = [(b, None) for b in builds(lib) if not only_builds or b in only_builds] if filtered is None else \
+        [(filtered, fr) for fr in FRACS if not only_fracs or fr in only_fracs]
     for b, fr in runs:
         s = Searcher(ds, out, lib, b)
         ftag = "all" if fr is None else tag(fr)
@@ -195,6 +197,8 @@ def main():
     ap.add_argument("--filtered")
     ap.add_argument("--nq", type=int, default=0, help="first N test queries only")
     ap.add_argument("--efs", help="comma-separated ef values instead of the grid")
+    ap.add_argument("--builds", help="comma-separated builds of the unfiltered grid to run (default all)")
+    ap.add_argument("--fracs", help="comma-separated visible fractions of a filtered run (default all)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     ds = load(a.data)
@@ -202,7 +206,8 @@ def main():
     if a.cmd == "build":
         build(ds, a.out, a.lib, a.threads)
     else:
-        query(ds, a.out, a.lib, a.reps, a.filtered, a.nq, name, [int(e) for e in a.efs.split(",")] if a.efs else None)
+        query(ds, a.out, a.lib, a.reps, a.filtered, a.nq, name, [int(e) for e in a.efs.split(",")] if a.efs else None,
+              a.builds.split(",") if a.builds else None, [float(f) for f in a.fracs.split(",")] if a.fracs else None)
 
 
 if __name__ == "__main__":
