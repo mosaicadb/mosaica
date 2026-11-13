@@ -9,9 +9,12 @@ TARGETS = (0.9, 0.95, 0.99)
 def cell(o):
     return 'n/a' if o is None else f"{o['share'] * 100:.2f}% ({o['scanned']:,.0f}; p={o['nprobe']})"
 
-for fn in sorted(glob.glob(f'{od}/expA_*.json')):
-    name = os.path.basename(fn)[5:-5]
-    A = json.load(open(fn))
+merged = {}
+for fn in sorted(glob.glob(f'{od}/expA_*_K*.json')):
+    nm = os.path.basename(fn)[5:].rsplit('_K', 1)[0]
+    merged.setdefault(nm, {}).update(json.load(open(fn)))
+for name, A in merged.items():
+    A = dict(sorted(A.items(), key=lambda kv: int(kv[0])))
     print(f'\n### A: {name}\n')
     print('Share of items scanned to reach mean recall@10 (ANN-Benchmarks tolerance), with the unique item count '
           'and the number of clusters probed (p); strict recall at 0.95 in its own column.\n')
@@ -41,16 +44,6 @@ for fn in sorted(glob.glob(f'{od}/expA_*.json')):
         print(f"- K={K}: plain max/mean {s['plain']['max_over_mean']:.1f}, CV {s['plain']['cv']:.2f}, largest 10% of clusters hold "
               f"{s['plain']['share_in_top10pct'] * 100:.1f}% of items, empty {s['plain']['empty']}; balanced max/mean "
               f"{s['balanced']['max_over_mean']:.1f}, CV {s['balanced']['cv']:.2f}, top 10% hold {s['balanced']['share_in_top10pct'] * 100:.1f}%")
-    print('\nCentre ranking, multiply-adds per query (plain k-means, centre ordering):\n')
-    print('| K | flat K*n | tree groups | t | centres scored | tree madds | max recall | clusters probed for 0.9 / 0.95 / 0.99 |')
-    print('|---|---|---|---|---|---|---|---|')
-    for K, r in A.items():
-        tr = r['tree']
-        flat = r['runs']['plain/centre']['test']
-        print(f"| {K} | {tr['flat_madds']:,} | — | — | {K} | — | 1.0 | " + ' / '.join(str(flat[f'rt{R}']['nprobe']) if flat[f'rt{R}'] else 'n/a' for R in TARGETS) + ' |')
-        for row in tr['rows']:
-            print(f"| {K} | | {tr['groups']} | {row['t']} | {row['mean_centres_scored']:,.0f} | {row['madds']:,.0f} | {row['max_recall']:.4f} | "
-                  + ' / '.join(str(row['test'][f'rt{R}']['nprobe']) if row['test'][f'rt{R}'] else 'n/a' for R in TARGETS) + ' |')
     # plot
     Ks = list(A)
     fig, axs = plt.subplots(1, len(Ks), figsize=(5 * len(Ks), 4.2), sharey=True, squeeze=False); axs = axs[0]
@@ -69,6 +62,27 @@ for fn in sorted(glob.glob(f'{od}/expA_*.json')):
         ax.set_ylim(0.5, 1.0); ax.set_xlim(1e-3, 1)
     axs[0].set_ylabel('recall@10 (ANN-Benchmarks)'); axs[-1].legend(fontsize=7, loc='lower right')
     fig.tight_layout(); fig.savefig(f'{od}/expA_{name}.png', dpi=110)
+
+for fn in sorted(glob.glob(f'{od}/expA_tree_*.json')):
+    TR = json.load(open(fn)); name = os.path.basename(fn)[10:-5]
+    print(f'\n### Centre hierarchy: {name}\n')
+    print('Balanced k-means, single assignment, bound ordering of centres. For each target: the cheapest configuration '
+          '(fewest centres scored per query) whose share scanned is within 1.1x of the flat pass, and the cheapest that reaches it at all.\n')
+    print('| K | structure | h | 0.9: centres / share | 0.95: centres / share | 0.99: centres / share |')
+    print('|---|---|---|---|---|---|')
+    for K, r in TR.items():
+        fl = r['flat']['test']
+        print(f"| {K} | flat (f={r['f_leaf']}) | | " + ' | '.join(f"{K} / {fl[f'rt{R}']['share'] * 100:.2f}%" for R in TARGETS) + ' |')
+        for depth, t in r['trees'].items():
+            cells = []
+            for R in TARGETS:
+                ok = [w for w in t['rows'] if w['test'][f'rt{R}']]
+                near = [w for w in ok if w['test'][f'rt{R}']['share'] <= 1.1 * fl[f'rt{R}']['share']]
+                c1 = min(near, key=lambda w: w['centres_scored']) if near else None
+                c2 = min(ok, key=lambda w: w['centres_scored']) if ok else None
+                f = lambda w: 'n/a' if w is None else f"{w['centres_scored']:,.0f} / {w['test'][f'rt{R}']['share'] * 100:.2f}% (beam {w['beam']})"
+                cells.append(f(c1) + ('' if c1 is c2 else f'; cheapest {f(c2)}'))
+            print(f"| {K} | {depth} levels {t['sizes']} | {t['h']} | " + ' | '.join(cells) + ' |')
 
 for fn in sorted(glob.glob(f'{od}/expB_*.json')):
     B = json.load(open(fn))

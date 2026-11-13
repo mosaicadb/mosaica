@@ -1,0 +1,5 @@
+[      1s] nytimes-256-angular: N=290000 n=256 NQ=10000; tolerance set size mean 10.68, queries whose tolerance set fills all 100 listed neighbours: 0
+[     11s] pseudo-query ground truth done
+[     11s] K=256: k-means
+[     15s] balanced k-means
+[     25s] SOAR

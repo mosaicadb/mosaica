@@ -1,19 +1,23 @@
 # Experiment A: coarse structure for probing. Recall@10 against the share of items scanned when the
 # scan of each probed cluster is exact, so only the choice of clusters is tested.
 #
-# usage: expA.py <hdf5> <outdir> K [K ...]
+# usage: expA.py <hdf5> <outdir> K [K ...]        build and measure the structures (saved for the tree mode)
+#        expA.py <hdf5> <outdir> tree K [K ...]   hierarchies over the saved balanced k-means centres
 # For each K: plain k-means (faiss) and balanced k-means (cap 2x mean), each with and without a
 # SOAR second assignment, under several cluster orderings; queries are all test queries plus
 # 2,000 corpus items as pseudo-queries (own GT, self excluded) used only to choose the bound factor.
-import sys, time, json, numpy as np, h5py, faiss
+import os, sys, time, json, numpy as np, h5py, faiss
 
-path, outdir, Ks = sys.argv[1], sys.argv[2], [int(x) for x in sys.argv[3:]]
+path, outdir = sys.argv[1], sys.argv[2]
+TREE = sys.argv[3] == 'tree'
+Ks = [int(x) for x in sys.argv[4 if TREE else 3:]]
 name = path.split('/')[-1].replace('.hdf5', '')
 faiss.omp_set_num_threads(1)
 k = 10; EPS = 1e-3; L = 16; SOAR_LAMBDA = 1.0; NPSEUDO = 2000
 F_GRID = (0.1, 0.2, 0.35, 0.5, 0.75)
 TARGETS = (0.9, 0.95, 0.99)
 t00 = time.time()
+STRUCT = f'/home/joe/code/vexact-data/{name}/probe'; os.makedirs(STRUCT, exist_ok=True)
 def log(*a): print(f'[{time.time() - t00:7.0f}s]', *a, flush=True)
 
 f = h5py.File(path, 'r')
@@ -150,6 +154,84 @@ def thin(c, K):
     ps = np.unique(np.round(np.geomspace(1, K, 120)).astype(int)) - 1
     return {key: [round(float(v), 6) for v in c[key][ps]] for key in c} | dict(nprobe=(ps + 1).tolist())
 
+
+def tree_mode():
+    """Hierarchies over the balanced k-means centres. Leaf key = q . c + f * rms radius (f chosen on
+    pseudo-queries as in the build mode). Each internal node holds the mean of its children and a
+    bound radius br = max over children of (|child - node| + br(child)), so its key q . v + h * br
+    with h = 1 bounds every leaf key beneath it; h < 1 is the fitted dial. A query keeps the best
+    w nodes per level among the children of the nodes kept above; only centres under the kept
+    bottom-level nodes can be probed. Centres scored = every node and leaf whose score is computed."""
+    out = {}
+    for K in Ks:
+        z = np.load(f'{STRUCT}/K{K}.npz'); C = z['Cb']; a = z['ab']
+        cnt = np.bincount(a, minlength=K)
+        rad = np.sqrt(np.bincount(a, weights=((X - C[a]) ** 2).sum(1), minlength=K) / np.maximum(cnt, 1))
+        best = None
+        for fct in F_GRID:
+            o = ops(curves(lambda q: q @ C.T + fct * rad, P, T_ps, G_ps, a, None, K))['rt0.95']
+            if o and (best is None or o['share'] < best[0]): best = (o['share'], fct)
+        f_leaf = best[1]
+        leafkey = lambda q: q @ C.T + f_leaf * rad
+        flat = curves(leafkey, Q, T_test, G_test, a, None, K)
+        res = out[K] = dict(K=K, n=n, f_leaf=f_leaf, flat=dict(centres_scored=K, test=ops(flat), curve=thin(flat, K)), trees={})
+        log(f'K={K} flat (balanced, bound{f_leaf}): ' + ' '.join(f"R{R}: {res['flat']['test'][f'rt{R}']['share']:.4f}" for R in TARGETS))
+        flat_ps = ops(curves(leafkey, P, T_ps, G_ps, a, None, K))
+        for depth in (2, 3):
+            sizes = [K] + ([int(round(K ** 0.5))] if depth == 2 else [int(round(K ** (2 / 3))), int(round(K ** (1 / 3)))])
+            vecs = [C]; brs = [f_leaf * rad]; parents = []
+            for lvl, G in enumerate(sizes[1:]):
+                V = vecs[-1]
+                km = faiss.Kmeans(n, G, niter=25, seed=3 + lvl, max_points_per_centroid=100_000); km.train(V)
+                _, pa = km.index.search(V, 1); pa = pa[:, 0]
+                M = np.stack([V[pa == g].mean(0) if (pa == g).any() else km.centroids[g] for g in range(G)]).astype(np.float32)
+                br = np.zeros(G); np.maximum.at(br, pa, np.linalg.norm(V - M[pa], axis=1) + brs[-1])
+                vecs.append(M); brs.append(br); parents.append(pa)
+            # beams: number of nodes kept at each internal level, top level first
+            if depth == 2:
+                beams = [(t,) for t in (1, 2, 4, 8, 16, 32, 64) if t <= sizes[1]]
+            else:
+                beams = [(t1, t2) for t1 in (1, 2, 4, 8) for t2 in (2, 4, 8, 16, 32, 64, 128, 256)
+                         if t1 <= sizes[2] and t1 <= t2 <= min(sizes[1], t1 * 4 * sizes[1] // sizes[2])]
+            def make(h, beam):
+                def fn(q):
+                    b = len(q); lv = len(sizes) - 1
+                    keep = np.ones((b, sizes[lv]), bool); scored = np.full(b, sizes[lv])
+                    for li, w in zip(range(lv, 0, -1), beam):
+                        key = np.where(keep, q @ vecs[li].T + h * brs[li], -np.inf)
+                        top = np.argpartition(-key, w - 1, axis=1)[:, :w]
+                        sel = np.zeros_like(keep); np.put_along_axis(sel, top, True, 1); sel &= keep
+                        keep = sel[:, parents[li - 1]]
+                        scored += keep.sum(1)
+                    fn.scored += scored.sum()
+                    return np.where(keep, leafkey(q), -np.inf), keep
+                fn.scored = 0
+                return fn
+            # h fitted on pseudo-queries: cheapest centres scored reaching recall 0.95 within 1.1x the flat share
+            hres = {}
+            for h in (0.0, 0.25, 0.5, 1.0):
+                cost = None
+                for beam in beams:
+                    fn = make(h, beam); o = ops(curves(fn, P, T_ps, G_ps, a, None, K))['rt0.95']
+                    if o and o['share'] <= 1.1 * flat_ps['rt0.95']['share']:
+                        c = fn.scored / len(P); cost = c if cost is None else min(cost, c)
+                hres[h] = cost
+            fitted = [h for h in hres if hres[h] is not None]
+            h = min(fitted, key=lambda h: hres[h]) if fitted else 1.0
+            rows = []
+            for beam in beams:
+                fn = make(h, beam); ct = curves(fn, Q, T_test, G_test, a, None, K)
+                sc = fn.scored / len(Q)
+                rows.append(dict(beam=list(beam), centres_scored=float(sc), max_recall=float(ct['rt'][-1]), test=ops(ct), curve=thin(ct, K)))
+                o = rows[-1]['test']
+                log(f'K={K} depth {depth} {sizes} h={h} beam={beam}: centres scored {sc:.0f}, max recall {ct["rt"][-1]:.4f}; ' +
+                    ' '.join(f"R{R}: " + (f"{o[f'rt{R}']['share']:.4f}" if o[f'rt{R}'] else 'n/a') for R in TARGETS))
+            res['trees'][depth] = dict(sizes=sizes, h=h, pseudo_cost_by_h={str(k_): v for k_, v in hres.items()}, rows=rows)
+        json.dump(out, open(f'{outdir}/expA_tree_{name}.json', 'w'))
+
+if TREE:
+    tree_mode(); log('done'); sys.exit()
+
 results = {}
 for K in Ks:
     log(f'K={K}: k-means'); C0 = kmeans(K)
@@ -157,6 +239,7 @@ for K in Ks:
     log('balanced k-means'); Cb, ab, Db, Ib = balanced(C0)
     log('SOAR'); s0 = soar(C0, a0, I0); sb = soar(Cb, ab, Ib)
     log('structures built')
+    np.savez(f'{STRUCT}/K{K}.npz', C0=C0, a0=a0, Cb=Cb, ab=ab, s0=s0, sb=sb)
     res = results[K] = dict(sizes=dict(plain=sizes_stats(a0, K), balanced=sizes_stats(ab, K),
                                        soar_second_same_as_second_nearest_plain=float((s0 == I0[:, 1]).mean())), runs={})
     for base, C, a, a2, I in (('plain', C0, a0, s0, I0), ('balanced', Cb, ab, sb, Ib)):
@@ -193,33 +276,5 @@ for K in Ks:
                 o = r['test']
                 log(f'K={K} {tag:14s} {oname:10s} ' + '  '.join(
                     f'R{R}: ' + (f"p={o[f'rt{R}']['nprobe']} share={o[f'rt{R}']['share']:.4f}" if o[f'rt{R}'] else 'n/a') for R in TARGETS))
-    # Centre-ranking cost: flat pass over K centres against a two-level tree over the plain k-means
-    # centres: sqrt(K) groups by k-means on the centres, group size capped at 2x the mean, groups
-    # ranked by q . group mean, centres of the top t groups ranked by q . centre, others never probed.
-    Gn = int(round(np.sqrt(K)))
-    kmc = faiss.Kmeans(n, Gn, niter=20, seed=2, max_points_per_centroid=10_000); kmc.train(C0)
-    GC = kmc.centroids.copy()
-    for r in range(4):
-        Dg, Ig = kmc.index.search(C0, min(Gn, 16)) if r == 0 else gidx.search(C0, min(Gn, 16))
-        gc = capped_assign(Dg, Ig, GC, int(np.ceil(2 * K / Gn)), Y=C0)
-        GC = np.stack([C0[gc == g].mean(0) if (gc == g).any() else GC[g] for g in range(Gn)]).astype(np.float32)
-        gidx = faiss.IndexFlatL2(n); gidx.add(GC)
-    gsz = np.bincount(gc, minlength=Gn)
-    tree = res['tree'] = dict(groups=Gn, flat_madds=K * n, group_size_max=int(gsz.max()), rows=[])
-    for t in (1, 2, 4, 8, 16, 32, 64):
-        if t > Gn: break
-        def fn(q, t=t):
-            gs = q @ GC.T; topg = np.argpartition(-gs, t - 1, axis=1)[:, :t]
-            ing = np.zeros((len(q), Gn), bool); np.put_along_axis(ing, topg, True, 1)
-            cand = ing[:, gc]
-            fn.cand += cand.sum()
-            return np.where(cand, q @ C0.T, -np.inf), cand
-        fn.cand = 0
-        ct = curves(fn, Q, T_test, G_test, a0, None, K)
-        mean_cand = fn.cand / NQ
-        o = ops(ct)
-        tree['rows'].append(dict(t=t, max_recall=float(ct['rt'][-1]), max_recall_strict=float(ct['rs'][-1]), scanned_at_max=float(ct['su'][-1]), mean_centres_scored=float(mean_cand), madds=float((Gn + mean_cand) * n), test=o))
-        log(f'tree t={t}: centres scored {mean_cand:.0f} of {K}; max recall {ct["rt"][-1]:.4f}; ' + '  '.join(
-            f'R{R}: ' + (f"p={o[f'rt{R}']['nprobe']}" if o[f'rt{R}'] else 'n/a') for R in TARGETS))
-    json.dump(results, open(f'{outdir}/expA_{name}.json', 'w'))
+    json.dump(results, open(f'{outdir}/expA_{name}_K{"_".join(map(str, Ks))}.json', 'w'))
 log('done')
