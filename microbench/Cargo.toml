@@ -1,0 +1,10 @@
+[package]
+name = "microbench"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[profile.release]
+debug = 0
+codegen-units = 1

@@ -1,0 +1,3 @@
+[build]
+rustflags = ["-C", "target-cpu=native"]
+target-dir = "/home/joe/code/vexact-microbench-target"
