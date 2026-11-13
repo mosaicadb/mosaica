@@ -57,12 +57,18 @@ pub struct Prep2 {
     pub gq: Vec<OnceLock<GQ2>>,
 }
 
-pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
-    let n = ix.n();
+/// The query rounded to f16, as f16 and as f32, and its norm.
+pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
     let q16: Vec<u16> = q.iter().map(|&x| f32_to_f16(x)).collect();
     let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
+    let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+    (q16, q32, qn)
+}
+
+pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
+    let n = ix.n();
+    let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
-    let qn = q64.iter().map(|x| x * x).sum::<f64>().sqrt();
     let fx: Vec<i64> = q16.iter().map(|&h| f16_fixed(h)).collect();
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
@@ -590,6 +596,7 @@ pub fn key_interval2(ix: &Index2, cu: &Cut, row: usize) -> (f64, f64) {
 pub struct Vis2 {
     pub bits: Vec<u64>,
     pub cl_cnt: Vec<u32>,
+    pub rows: Vec<u32>, // the visible rows, ascending
 }
 impl Vis2 {
     pub fn new(ix: &Index2, bm: &RoaringBitmap) -> Vis2 {
@@ -599,7 +606,9 @@ impl Vis2 {
             bits[r / 64] |= 1 << (r % 64);
         }
         let cl_cnt = ix.cl.iter().map(|c| count_bits(&bits, c.r0, c.r1) as u32).collect();
-        Vis2 { bits, cl_cnt }
+        let mut rows: Vec<u32> = bm.iter().map(|e| ix.ent_row[e as usize]).collect();
+        rows.sort_unstable();
+        Vis2 { bits, cl_cnt, rows }
     }
     #[inline]
     pub fn has(&self, r: usize) -> bool {
@@ -626,7 +635,11 @@ fn count_bits(bits: &[u64], a: usize, b: usize) -> usize {
 // ---------------- exact full-vector decisions ----------------
 
 pub fn full_err2(ix: &Index2, pr: &Prep2) -> f64 {
-    ((ix.n() / 16 + 6) as f64) * U * pr.qn * ix.x2.sqrt() * 1.01 + 1e-12
+    full_err_qn(ix, pr.qn)
+}
+/// Bound on |f32 product - exact product| of a stored vector and a query of norm qn.
+pub fn full_err_qn(ix: &Index2, qn: f64) -> f64 {
+    ((ix.n() / 16 + 6) as f64) * U * qn * ix.x2.sqrt() * 1.01 + 1e-12
 }
 pub fn exact_value2(ix: &Index2, pr: &Prep2, row: usize) -> f64 {
     match &ix.full {
@@ -1229,9 +1242,10 @@ pub enum PlanMode {
     Flat,
 }
 
-/// Cost model of the planner, in microseconds, measured at 1M on one thread. d is the fraction of the visible items
-/// of opened clusters that the cut and the sorted range leave undecided: a proxy for how deep candidates will go
-/// (text-like queries leave most items undecided), known before any code is read.
+/// Cost model of the planner, in microseconds on one thread. d is the fraction of the visible items of opened
+/// clusters that the cut and the sorted range leave undecided: a proxy for how deep candidates will go (text-like
+/// queries leave most items undecided), known before any code is read. `Plan::default` holds the values measured at
+/// 1M BioCLIP (n = 768, AVX-512); `Plan::calibrate` re-times them on the index at hand.
 #[derive(Clone, Copy, Debug)]
 pub struct Plan {
     pub mode: PlanMode,
@@ -1241,15 +1255,119 @@ pub struct Plan {
     pub cl_us0: f64,       // index path per cluster (setup and tables): cl_us0 + cl_us1 * d
     pub cl_us1: f64,
     pub grp_us: f64,       // index path per group (exact basis product, rotated weights)
-    pub scan_us: f64,      // certified scan of the visible set, per visible item
+    pub scan_us: f64,      // scan of the visible set, per visible item
     pub cut_us: f64,       // cluster cut and sorted range, per cluster holding a visible item
+    pub seed_us: f64,      // the k-NN seed (query setup, probing, first full vectors), per query
     pub alpha0: bool,      // tables shared per group (no centre multiple taken out of the query)
     pub jump_level: usize, // when most items stay undecided (d > jump_d): no decisions before this level
     pub jump_d: f64,
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, alpha0: false, jump_level: 0, jump_d: 0.8 }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8 }
+    }
+}
+impl Plan {
+    /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
+    pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
+        ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
+    }
+
+    /// The constants re-timed on this index and machine, on one thread, from corpus pseudo-queries (`nq` stored rows
+    /// spread over the index) at their 10th best score, unfiltered and over a fixed random tenth of the rows: the
+    /// visible scan, the cut, full vectors after the cut, the k-NN seed, and one factor scaling every index-path
+    /// constant (least squares of measured against modelled time). Data only: no example queries.
+    pub fn calibrate(ix: &Index2, base: Plan, nq: usize) -> Plan {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        pool.install(|| {
+            let ents: Vec<u32> = (0..ix.nrows).filter(|&r| (r as u64).wrapping_mul(0x9E3779B97F4A7C15) >> 60 < 2).map(|r| ix.row_ent[r]).collect();
+            let mut ents = ents;
+            ents.sort_unstable();
+            let tenth = Vis2::new(ix, &RoaringBitmap::from_sorted_iter(ents).unwrap());
+            let (mut scan_t, mut scan_n, mut cut_t, mut cut_n, mut full_t, mut full_n, mut seed_t) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+            let (mut tm_idx, mut mm_idx) = (0.0, 0.0);
+            for i in 0..nq {
+                let row = (2 * i + 1) * ix.nrows / (2 * nq);
+                let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
+                let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+                let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
+                let pr = prep2(ix, &q);
+                let tm = Timer::new();
+                let mut st = Stats::new(ix.meta.nl());
+                std::hint::black_box(seed2(ix, &prep2(ix, &q), 10, None, &mut st));
+                seed_t += tm.ms() * 1e3;
+                for vis in [None, Some(&tenth)] {
+                    let nvis = vis.map_or(ix.nrows, |v: &Vis2| v.cl_cnt.iter().map(|&x| x as usize).sum());
+                    let tm = Timer::new();
+                    let top = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, 10, vis);
+                    scan_t += tm.ms() * 1e3;
+                    scan_n += nvis as f64;
+                    let t = top.last().map_or(f64::NEG_INFINITY, |x| x.0);
+                    for mode in [PlanMode::Flat, PlanMode::Index] {
+                        let o = Opts2 { vis, verify: false, want_iv: true, plan: Plan { mode, ..base } };
+                        let tm = Timer::new();
+                        let Planned::Run { pre, use_idx, first_decide, cut_cyc } = plan2(ix, &pr, t, &o, 0.0) else { unreachable!() };
+                        let tc = tm.ms() * 1e3;
+                        let tm = Timer::new();
+                        std::hint::black_box(run_planned(ix, &pr, t, &o, &pre, &use_idx, first_decide, cut_cyc).rows.len());
+                        let tr = tm.ms() * 1e3;
+                        let (mut ncand, mut nv) = (0usize, 0usize);
+                        let mut groups = vec![false; ix.groups.len()];
+                        for (ci, p) in pre.iter().enumerate() {
+                            if let Pre::Open { ncand: c, .. } = p {
+                                ncand += c;
+                                nv += vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+                                if *c > 0 {
+                                    groups[ix.cl[ci].g] = true;
+                                }
+                            }
+                        }
+                        let d = ncand as f64 / nv.max(1) as f64;
+                        match mode {
+                            PlanMode::Flat => {
+                                cut_t += tc;
+                                cut_n += vis.map_or(ix.k(), |v| v.cl_cnt.iter().filter(|&&x| x > 0).count()) as f64;
+                                full_t += tr;
+                                full_n += ncand as f64;
+                            }
+                            _ => {
+                                let mut m = groups.iter().filter(|&&g| g).count() as f64 * base.grp_us;
+                                for p in &pre {
+                                    if let Pre::Open { ncand: c, .. } = p {
+                                        if *c > 0 {
+                                            m += base.index_us(*c, d);
+                                        }
+                                    }
+                                }
+                                tm_idx += tr * m;
+                                mm_idx += m * m;
+                            }
+                        }
+                    }
+                }
+            }
+            let s = tm_idx / mm_idx.max(1e-30);
+            Plan {
+                scan_us: scan_t / scan_n,
+                cut_us: cut_t / cut_n,
+                full_us: full_t / full_n.max(1.0),
+                seed_us: seed_t / nq as f64,
+                item_us0: base.item_us0 * s,
+                item_us1: base.item_us1 * s,
+                cl_us0: base.cl_us0 * s,
+                cl_us1: base.cl_us1 * s,
+                grp_us: base.grp_us * s,
+                ..base
+            }
+        })
+    }
+
+    /// Before anything is read: a scan of the visible set costs no more than cutting every cluster that holds a
+    /// visible item, plus `fixed_us` of other index-path work that the scan avoids.
+    pub fn scan_first(&self, vis: &Vis2, fixed_us: f64) -> bool {
+        let nvis = vis.rows.len();
+        let nvc = vis.cl_cnt.iter().filter(|&&x| x > 0).count();
+        matches!(self.mode, PlanMode::Auto) && nvis as f64 * self.scan_us <= nvc as f64 * self.cut_us + fixed_us
     }
 }
 
@@ -1272,24 +1390,30 @@ pub struct ThrOut2 {
     pub scanned: bool, // the visible set was scanned directly
 }
 
-/// Certified scan of the visible set: every visible row's full vector, exact near the threshold.
-pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: &Vis2, want_exact: bool) -> ThrOut2 {
+const SCAN_ROWS: usize = 1024;
+
+/// Number of scan chunks over the visible rows (all rows when vis is None), SCAN_ROWS each.
+fn scan_chunks(ix: &Index2, vis: Option<&Vis2>) -> usize {
+    (vis.map_or(ix.nrows, |v| v.rows.len()) + SCAN_ROWS - 1) / SCAN_ROWS
+}
+/// Appends the visible rows of scan chunk `ch`, ascending.
+fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
+    let nr = vis.map_or(ix.nrows, |v| v.rows.len());
+    let (a, b) = (ch * SCAN_ROWS, ((ch + 1) * SCAN_ROWS).min(nr));
+    match vis {
+        None => out.extend(a as u32..b as u32),
+        Some(v) => out.extend_from_slice(&v.rows[a..b]),
+    }
+}
+
+/// Certified scan of the visible set (every row when vis is None): every visible row's full vector, exact near the
+/// threshold.
+pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
-    let nw = vis.bits.len();
-    let chunk = 256;
-    let parts: Vec<ThrOut2> = (0..(nw + chunk - 1) / chunk).into_par_iter().map(|ch| {
+    let parts: Vec<ThrOut2> = (0..scan_chunks(ix, vis)).into_par_iter().map(|ch| {
         let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
         let mut rows = Vec::with_capacity(4096);
-        for w in ch * chunk..((ch + 1) * chunk).min(nw) {
-            let mut b = vis.bits[w];
-            while b != 0 {
-                let r = w * 64 + b.trailing_zeros() as usize;
-                if r < ix.nrows {
-                    rows.push(r as u32);
-                }
-                b &= b - 1;
-            }
-        }
+        scan_rows(ix, vis, ch, &mut rows);
         decide_full(ix, pr, t, &rows, want_exact, &mut acc);
         acc
     }).collect();
@@ -1301,6 +1425,12 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: &Vis2, want_exact: boo
     }
     out.flat_items = out.st.full_reads;
     out
+}
+
+/// Exact k-NN by a scan of the visible set's stored vectors (every row when vis is None): (score, entity), best first.
+pub fn scan_knn(ix: &Index2, q16: &[u16], q32: &[f32], qn: f64, kk: usize, vis: Option<&Vis2>) -> Vec<(f64, u32)> {
+    crate::query::topk_f16(q16, q32, kk, full_err_qn(ix, qn), scan_chunks(ix, vis), |ch, out| scan_rows(ix, vis, ch, out),
+                           |r| ix.full_row_f16(r as usize), |r| ix.row_ent[r as usize])
 }
 
 /// Exact decisions from full vectors (four rows per pass of the query; exact integer products only near t).
@@ -1342,10 +1472,18 @@ pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bo
     }
 }
 
-enum Pre {
+#[derive(Clone, Copy)]
+pub enum Pre {
     Skip,
     In,
     Open { qm: f64, u0: usize, u1: usize, d0: usize, d1: usize, ncand: usize },
+}
+
+/// What the planner chose for a threshold query: a scan of the visible set, or per cluster the index path or full
+/// vectors after the cut.
+pub enum Planned {
+    Scan,
+    Run { pre: Vec<Pre>, use_idx: Vec<bool>, first_decide: usize, cut_cyc: u64 },
 }
 
 fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) -> Vec<u32> {
@@ -1353,21 +1491,20 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
     (d0..d1).filter(|&r| vis.map_or(true, |v| v.has(r))).map(|r| (r - c.r0) as u32).collect()
 }
 
-pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
-    let nl = ix.meta.nl();
+/// The cluster cut and sorted range at t, then the planner's choice. `fixed_us` is index-path work already committed
+/// to by the caller that a scan would have avoided (nothing for a threshold query).
+pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Planned {
     let k = ix.k();
     let rr = ix.x2.sqrt();
     let pl = o.plan;
-    if let (Some(v), PlanMode::Auto) = (o.vis, pl.mode) {
-        let nvis: usize = v.cl_cnt.iter().map(|&x| x as usize).sum();
-        let nvc = v.cl_cnt.iter().filter(|&&x| x > 0).count();
-        if nvis as f64 * pl.scan_us <= nvc as f64 * pl.cut_us {
-            return scan_visible(ix, pr, t, v, o.want_iv);
+    if let Some(v) = o.vis {
+        if pl.scan_first(v, fixed_us) {
+            return Planned::Scan;
         }
     }
     // pass 1: cut and range per cluster
     let tc0 = tick();
-    let pre: Vec<Pre> = (0..k).into_par_iter().map(|ci| {
+    let pre_of = |ci: usize| -> Pre {
         if let Some(v) = o.vis {
             if v.cl_cnt[ci] == 0 {
                 return Pre::Skip;
@@ -1391,8 +1528,37 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
             Some(v) => count_bits(&v.bits, d0, d1),
         };
         Pre::Open { qm, u0, u1, d0, d1, ncand }
-    }).collect();
-    let tc1 = tick();
+    };
+    let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+    let mut pre: Vec<Option<Pre>> = vec![None; k];
+    // a sample of one cluster in SAMPLE first: when the scan already beats the extrapolated cost of the rest of the
+    // cut and of every candidate's cheaper path, the cut stops there
+    const SAMPLE: usize = 8;
+    let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
+    if matches!(pl.mode, PlanMode::Auto) && live.len() >= 8 * SAMPLE {
+        let (mut nv_s, mut nc_s, mut nvo_s) = (0usize, 0usize, 0usize);
+        for &ci in live.iter().step_by(SAMPLE) {
+            let p = pre_of(ci);
+            nv_s += nvis_cl(ci);
+            if let Pre::Open { ncand, .. } = p {
+                nc_s += ncand;
+                nvo_s += nvis_cl(ci);
+            }
+            pre[ci] = Some(p);
+        }
+        let d = nc_s as f64 / nvo_s.max(1) as f64;
+        let cost_s: f64 = live.iter().step_by(SAMPLE).map(|&ci| match pre[ci] {
+            Some(Pre::Open { ncand, .. }) if ncand > 0 => (ncand as f64 * pl.full_us).min(pl.index_us(ncand, d)),
+            _ => 0.0,
+        }).sum();
+        let nvis = o.vis.map_or(ix.nrows, |v| v.rows.len());
+        let rest = live.len() - (live.len() + SAMPLE - 1) / SAMPLE;
+        if nvis as f64 * pl.scan_us < rest as f64 * pl.cut_us + cost_s * nvis as f64 / nv_s.max(1) as f64 {
+            return Planned::Scan;
+        }
+    }
+    let pre: Vec<Pre> = pre.into_par_iter().enumerate().map(|(ci, p)| p.unwrap_or_else(|| pre_of(ci))).collect();
+    let cut_cyc = tick() - tc0;
     // the planner: per cluster the index path or full vectors, a group's setup only if its clusters' gains pay for it
     let mut use_idx = vec![false; k];
     let (mut ncand_all, mut nvis_all) = (0usize, 0usize);
@@ -1410,7 +1576,7 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
             if *ncand == 0 {
                 continue;
             }
-            let gain = *ncand as f64 * (pl.full_us - pl.item_us0 - pl.item_us1 * d) - (pl.cl_us0 + pl.cl_us1 * d);
+            let gain = *ncand as f64 * pl.full_us - pl.index_us(*ncand, d);
             use_idx[ci] = match pl.mode {
                 PlanMode::Index => true,
                 PlanMode::Flat => false,
@@ -1428,18 +1594,28 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
             }
         }
         // what remains costs every candidate's full vector less the kept gains; a plain scan may be cheaper
-        if let Some(v) = o.vis {
-            let nvis: usize = v.cl_cnt.iter().map(|&x| x as usize).sum();
-            let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
-            // (full vectors cluster by cluster cost about a quarter more per item than one scan)
-            if ncand_all as f64 * pl.full_us - gains > 0.8 * nvis as f64 * pl.scan_us {
-                let mut out = scan_visible(ix, pr, t, v, o.want_iv);
-                // the cut pass already ran; its decisions are not needed
-                out.st.clusters_open = 0;
-                return out;
-            }
+        let nvis = o.vis.map_or(ix.nrows, |v| v.cl_cnt.iter().map(|&x| x as usize).sum());
+        let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
+        if ncand_all as f64 * pl.full_us - gains > nvis as f64 * pl.scan_us {
+            return Planned::Scan;
         }
     }
+    Planned::Run { pre, use_idx, first_decide, cut_cyc }
+}
+
+pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
+    match plan2(ix, pr, t, o, 0.0) {
+        Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv),
+        Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, first_decide, cut_cyc),
+    }
+}
+
+/// The threshold query over the clusters as planned.
+pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], first_decide: usize, cut_cyc: u64) -> ThrOut2 {
+    let nl = ix.meta.nl();
+    let k = ix.k();
+    let rr = ix.x2.sqrt();
+    let pl = o.plan;
     let mut gst = Stats::new(nl);
     {
         let mut need: Vec<usize> = (0..k).filter(|&ci| use_idx[ci]).map(|ci| ix.cl[ci].g).collect();
@@ -1529,7 +1705,7 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
         },
     ).map(|x| x.0).collect();
     let mut out = ThrOut2 { st: Stats::new(nl), ..Default::default() };
-    out.st.cyc[P_CUT] += tc1 - tc0;
+    out.st.cyc[P_CUT] += cut_cyc;
     out.st.add(&gst);
     for p in parts {
         out.rows.extend(p.rows);
@@ -1634,12 +1810,10 @@ pub fn knn2_approx(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe
     KnnOut2 { ents: fin, st, cands: iv.len(), t_seed: tm.ms(), t_sweep: 0.0, t_sel: 0.0 }
 }
 
-pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
-    let tm = Timer::new();
-    let nl = ix.meta.nl();
+/// A first k-th best score: the visible items of the 64 clusters with the largest bound, taken by centre score until
+/// 2,000 are read at level 3, and the best 2k + 8 of those by interval midpoint scored exactly.
+pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut Stats) -> f64 {
     let k = ix.k();
-    let pr = prep2(ix, q);
-    let mut st = Stats::new(nl);
     let rr = ix.x2.sqrt();
     let a = pr.anchor;
     let mut cand: Vec<(f64, usize)> = (0..k).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).map(|ci| {
@@ -1650,15 +1824,43 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
     cand.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     cand.truncate(64);
     let clusters: Vec<usize> = cand.iter().map(|&(_, ci)| ci).collect();
-    let seed_iv = probe(ix, &pr, by_centre(ix, &pr, clusters), vis, 3, 2000, &mut st);
+    let seed_iv = probe(ix, pr, by_centre(ix, pr, clusters), vis, 3, 2000, st);
     let take = (2 * kk + 8).min(seed_iv.len());
-    let mut ex: Vec<f64> = seed_iv[..take].iter().map(|x| exact_value2(ix, &pr, x.0 as usize)).collect();
+    let mut ex: Vec<f64> = seed_iv[..take].iter().map(|x| exact_value2(ix, pr, x.0 as usize)).collect();
     st.full_reads += take as u64;
     ex.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    let tau1 = if ex.len() >= kk { ex[kk - 1] } else { f64::NEG_INFINITY };
+    if ex.len() >= kk { ex[kk - 1] } else { f64::NEG_INFINITY }
+}
+
+/// Exact k-NN. The planner may send the query to a scan of the visible set before anything else (a small visible
+/// set) or after the seed and the cut (nothing prunes); otherwise the threshold query at the seed's k-th score runs
+/// as planned and the selection refines the survivors' intervals until the k best are certain.
+pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
+    let tm = Timer::new();
+    let nl = ix.meta.nl();
+    let stored = matches!(ix.full, Full2::Real { .. });
+    let scan = |st: Stats, t_seed: f64| {
+        let (q16, q32, qn) = query_f16(q);
+        let ents = scan_knn(ix, &q16, &q32, qn, kk, vis);
+        let mut st = st;
+        st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
+        KnnOut2 { ents, st, cands: 0, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0 }
+    };
+    if let Some(v) = vis {
+        if stored && plan.scan_first(v, plan.seed_us) {
+            return scan(Stats::new(nl), 0.0);
+        }
+    }
+    let pr = prep2(ix, q);
+    let mut st = Stats::new(nl);
+    let tau1 = seed2(ix, &pr, kk, vis, &mut st);
     let t_seed = tm.ms();
     let o = Opts2 { vis, verify: false, want_iv: true, plan };
-    let sw = threshold2(ix, &pr, tau1, &o);
+    let sw = match plan2(ix, &pr, tau1, &o, 0.0) {
+        Planned::Scan if stored => return scan(st, t_seed),
+        Planned::Scan => scan_visible(ix, &pr, tau1, vis, true),
+        Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, &pr, tau1, &o, &pre, &use_idx, first_decide, cut_cyc),
+    };
     st.add(&sw.st);
     let t_sweep = tm.ms() - t_seed;
     let mut cands: Vec<(u32, f64, f64, usize, bool)> = Vec::new();

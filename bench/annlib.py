@@ -37,11 +37,11 @@ def kth_distance(ds, ftag):
 
 
 def recall(ds, ids, ftag):
-    """Mean over queries of the fraction of the k returned items within the k-th true distance + 1e-3."""
+    """Mean over the queries of `ids` (the first len(ids) test queries) of the fraction of the k returned items within the k-th true distance + 1e-3."""
     X, Q = ds["train"], ds["test"]
     thr = kth_distance(ds, ftag) + 1e-3
-    out = np.zeros(len(Q))
-    for i in range(len(Q)):
+    out = np.zeros(len(ids))
+    for i in range(len(ids)):
         r = ids[i][ids[i] >= 0][:K]
         if len(r) == 0:
             continue

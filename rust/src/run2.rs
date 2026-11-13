@@ -103,7 +103,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
     let xs = RealSource::open(&p.xs_path);
     let src = Real2 { src: RealSource::open(&p.xs_path) };
     let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: f2.map, off: f2.off, xs_row: Vec::new() };
+    let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
     let mut lg = |s: String| out!("[build2] {s}");
     let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, &mut lg);
     build_table2(&mut ix, p.meta.k);
@@ -119,6 +119,13 @@ pub fn setup2(tag: &str) -> Ctx2 {
         alpha0: args().iter().any(|a| a == "--alpha0"),
         jump_level: arg_usize("--jump", 0),
         ..Plan::default()
+    };
+    // the cost model re-timed on this index (`--plan-default` keeps the BioCLIP constants)
+    let plan = if args().iter().any(|a| a == "--plan-default") { plan } else {
+        let t = Timer::new();
+        let pc = Plan::calibrate(&ix, plan, arg_usize("--calib", 16));
+        out!("[plan] calibrated in {:.1}s: {:?}", t.s(), pc);
+        pc
     };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan };
     out!("built v2 ({} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
@@ -170,7 +177,9 @@ pub fn bytesq2(c: &Ctx2, nq: usize) {
     }
 }
 
-/// Every threshold query and k-NN against brute force; intervals checked at every level on the first `ncheck`.
+/// Every threshold query and k-NN against brute force, as planned and on the index path; k-NN also on full vectors
+/// (k-NN compared by the exact scores of the k returned, so ties may differ). Intervals checked at every level on the
+/// first `ncheck`.
 pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     let ix = &c.ix;
     let fl = c.flat();
@@ -189,33 +198,38 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         let sc = fl.scores(&pr.q32);
         let ths = thresholds_for(&fl, &pr.q16, &sc, err, &sizes);
         let chk = (qi < ncheck) || (qi >= ni && qi < ni + ncheck);
+        // as planned, and with the index path forced so that its intervals are checked whatever the planner picks
+        let modes = [c.plan, Plan { mode: PlanMode::Index, ..c.plan }];
         for (si, &th) in ths.iter().enumerate() {
             let truth = fl.threshold(&pr.q16, &pr.q32, th, err, None, &c.ent_xs);
-            let pr2 = prep2(ix, q);
-            let o = Opts2 { vis: None, verify: chk, want_iv: false, plan: c.plan };
-            let r = threshold2(ix, &pr2, th, &o);
-            let bm = to_bitmap2(ix, &r.rows);
-            let (a, b) = sym_diff(&bm, &truth);
-            wi += a;
-            wo += b;
-            tot.add(&r.st);
-            rows.push(format!("{},{},{},{},{},{},{},{},{},{:.3}", qi, cls, SIZES[si], th, truth.len(), a, b, r.st.touched, r.st.full_reads, bytes_read2(ix, &r.st)));
+            for plan in modes {
+                let pr2 = prep2(ix, q);
+                let o = Opts2 { vis: None, verify: chk, want_iv: false, plan };
+                let r = threshold2(ix, &pr2, th, &o);
+                let bm = to_bitmap2(ix, &r.rows);
+                let (a, b) = sym_diff(&bm, &truth);
+                wi += a;
+                wo += b;
+                tot.add(&r.st);
+                rows.push(format!("{},{},{},{},{},{},{},{},{},{:.3}", qi, cls, SIZES[si], th, truth.len(), a, b, r.st.touched, r.st.full_reads, bytes_read2(ix, &r.st)));
+            }
         }
-        let kn = knn2(ix, q, 10, None, c.plan);
         let fk = fl.knn(&pr.q16, &pr.q32, 10, err, None, &c.ent_xs);
-        let mut a: Vec<u32> = kn.ents.iter().map(|x| x.1).collect();
-        let mut b: Vec<u32> = fk.iter().map(|x| x.1).collect();
-        a.sort();
-        b.sort();
-        if a != b {
-            kb += 1;
-            out!("knn mismatch q{} {}", qi, cls);
+        for plan in [modes[0], modes[1], Plan { mode: PlanMode::Flat, ..c.plan }] {
+            let kn = knn2(ix, q, 10, None, plan);
+            let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+            sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
+            let sb: Vec<f64> = fk.iter().map(|x| x.0).collect();
+            if sa != sb {
+                kb += 1;
+                out!("knn mismatch q{} {} {:?}", qi, cls, plan.mode);
+            }
         }
         if qi % 50 == 0 {
             println!("verify2 {qi}/{} {:.0}s wrong in/out {wi}/{wo} det {} rand {} checked {} maxsd {:.2}", qs.len(), t.s(), tot.viol_det, tot.viol_rand, tot.checked, tot.max_sd);
         }
     }
-    out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {}",
+    out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each)",
         qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len());
     std::fs::write(format!("{}/verify2.csv", crate::run2::res_dir()), rows.join("\n") + "\n").unwrap();
 }

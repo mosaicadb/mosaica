@@ -674,8 +674,10 @@ pub struct Cl2 {
     pub smax: f32,
 }
 
+/// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
+/// rows in order reads memory in order.
 pub enum Full2 {
-    Real { map: memmap2::Mmap, off: usize, xs_row: Vec<u32> },
+    Real { map: memmap2::Mmap, off: usize, rows: Vec<u16> },
     Synth(q::Synth2),
 }
 
@@ -734,11 +736,9 @@ impl Index2 {
     }
     pub fn full_row_f16(&self, row: usize) -> &[u16] {
         match &self.full {
-            Full2::Real { map, off, xs_row } => {
+            Full2::Real { rows, .. } => {
                 let n = self.n();
-                let r = xs_row[row] as usize;
-                let b = &map[off + r * n * 2..off + (r + 1) * n * 2];
-                unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u16, n) }
+                &rows[row * n..(row + 1) * n]
             }
             Full2::Synth(_) => panic!("synthetic rows have no stored f16 vector"),
         }
@@ -1250,7 +1250,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     }
     let mut full = full;
     match &mut full {
-        Full2::Real { xs_row: xr, .. } => *xr = xs_row,
+        Full2::Real { map, off, rows } => {
+            let src = unsafe { std::slice::from_raw_parts(map[*off..].as_ptr() as *const u16, (map.len() - *off) / 2) };
+            *rows = vec![0u16; nrows * n];
+            rows.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+        }
         Full2::Synth(sy) => {
             sy.ext = xs_row;
             sy.row_cl = cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();

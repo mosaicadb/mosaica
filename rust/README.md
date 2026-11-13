@@ -80,7 +80,7 @@ $B --scale 10 --nq 20                             # 10M synthetic items in the i
 $B --clusters 40 verify                           # quick development check
 ```
 
-`--plan auto|index|flat` sets the planner (constants of its cost model in `Plan::default`, `src/v2/q.rs`). Layout: `src/v2/mod.rs` (code fitting, plans, int8
+`--plan auto|index|flat` sets the planner, for threshold queries and exact k-NN alike. Its cost model (`Plan`, `src/v2/q.rs`) is re-timed when the index opens, on one thread, from 16 stored rows used as queries (`Plan::calibrate`, about 1 s; `--calib N` rows, `--plan-default` keeps the BioCLIP constants of `Plan::default`). k-NN goes straight to a scan of the visible set when that costs less than cutting the clusters that hold it plus the seed; otherwise after the seed it cuts a sample of the clusters and scans if the sample says nothing will prune, and only then cuts the rest. Full vectors are held in index row order, so a scan reads memory in order. Layout: `src/v2/mod.rs` (code fitting, plans, int8
 bases, encoder, layout), `src/v2/kern.rs` (tables, survivor re-packing, shuffle kernel), `src/v2/q.rs` (setup,
 breadth-first level loop, planner, k-NN, synthetic items), `src/run2.rs` (experiments). Results go to
 `results/*2*.csv` and `results/run2.log`.

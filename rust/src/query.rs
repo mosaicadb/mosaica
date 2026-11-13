@@ -956,58 +956,69 @@ impl<'a> Flat<'a> {
     }
     /// exact k-NN (score desc, entity asc)
     pub fn knn(&self, q16: &[u16], q32: &[f32], k: usize, err: f64, vis: Option<&RoaringBitmap>, ent_xs: &[u32]) -> Vec<(f64, u32)> {
-        let rows: Vec<u32> = match vis {
-            None => Vec::new(),
-            Some(bm) => bm.iter().map(|e| ent_xs[e as usize]).collect(),
-        };
-        let nr = if vis.is_some() { rows.len() } else { self.nrows };
-        let keep = k + 32;
-        let rowof = |i: usize| if vis.is_some() { rows[i] as usize } else { i };
-        let tops: Vec<Vec<(f32, u32)>> = (0..(nr + 1023) / 1024)
-            .into_par_iter()
-            .fold(Vec::new, |mut v: Vec<(f32, u32)>, ch| {
-                let (a, b) = (ch * 1024, ((ch + 1) * 1024).min(nr));
-                let mut push = |s: f32, r: usize, v: &mut Vec<(f32, u32)>| {
-                    if v.len() < keep || s > v[v.len() - 1].0 {
-                        let pos = v.partition_point(|x| x.0 >= s);
-                        v.insert(pos, (s, r as u32));
-                        if v.len() > keep {
-                            v.pop();
-                        }
-                    }
-                };
-                let mut i = a;
-                while i + 4 <= b {
-                    let rr = [rowof(i), rowof(i + 1), rowof(i + 2), rowof(i + 3)];
-                    let s = unsafe { dot_f16_x4(q32, [self.row(rr[0]), self.row(rr[1]), self.row(rr[2]), self.row(rr[3])]) };
-                    for k in 0..4 {
-                        push(s[k], rr[k], &mut v);
-                    }
-                    i += 4;
-                }
-                while i < b {
-                    let r = rowof(i);
-                    push(unsafe { dot_f16(q32, self.row(r)) }, r, &mut v);
-                    i += 1;
-                }
-                v
-            })
-            .collect();
-        let mut all: Vec<(f32, u32)> = tops.into_iter().flatten().collect();
-        all.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        if all.is_empty() {
-            return Vec::new();
-        }
-        let kth = all[(k - 1).min(all.len() - 1)].0 as f64;
-        let mut ex: Vec<(f64, u32)> = all
-            .iter()
-            .filter(|x| x.0 as f64 >= kth - 2.0 * err)
-            .map(|x| (exact_to_f64(exact_dot(q16, self.row(x.1 as usize))), self.ent[x.1 as usize] as u32))
-            .collect();
-        ex.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
-        ex.truncate(k);
-        ex
+        const CH: usize = 1024;
+        let rows: Option<Vec<u32>> = vis.map(|bm| bm.iter().map(|e| ent_xs[e as usize]).collect());
+        let nr = rows.as_ref().map_or(self.nrows, |r| r.len());
+        topk_f16(q16, q32, k, err, (nr + CH - 1) / CH, |ch, out| {
+            let (a, b) = (ch * CH, ((ch + 1) * CH).min(nr));
+            match &rows {
+                Some(r) => out.extend_from_slice(&r[a..b]),
+                None => out.extend(a as u32..b as u32),
+            }
+        }, |r| self.row(r as usize), |r| self.ent[r as usize] as u32)
     }
+}
+
+/// Exact k-NN by brute force over rows produced chunk by chunk (`chunk(c, out)` appends the rows of chunk c):
+/// f32 scores keep the k + 32 best per chunk, then exact products decide among those within two error bounds of the
+/// k-th. Returns (exact score, id) by descending score, then ascending id.
+pub fn topk_f16<'a>(q16: &[u16], q32: &[f32], k: usize, err: f64, nchunks: usize, chunk: impl Fn(usize, &mut Vec<u32>) + Sync,
+                    row: impl Fn(u32) -> &'a [u16] + Sync, id: impl Fn(u32) -> u32 + Sync) -> Vec<(f64, u32)> {
+    let keep = k + 32;
+    let tops: Vec<Vec<(f32, u32)>> = (0..nchunks)
+        .into_par_iter()
+        .fold(|| (Vec::new(), Vec::new()), |(mut v, mut rr): (Vec<(f32, u32)>, Vec<u32>), ch| {
+            rr.clear();
+            chunk(ch, &mut rr);
+            let push = |s: f32, r: u32, v: &mut Vec<(f32, u32)>| {
+                if v.len() < keep || s > v[v.len() - 1].0 {
+                    let pos = v.partition_point(|x| x.0 >= s);
+                    v.insert(pos, (s, r));
+                    if v.len() > keep {
+                        v.pop();
+                    }
+                }
+            };
+            let mut i = 0;
+            while i + 4 <= rr.len() {
+                let r4 = [rr[i], rr[i + 1], rr[i + 2], rr[i + 3]];
+                let s = unsafe { dot_f16_x4(q32, r4.map(|r| row(r))) };
+                for j in 0..4 {
+                    push(s[j], r4[j], &mut v);
+                }
+                i += 4;
+            }
+            for &r in &rr[i..] {
+                push(unsafe { dot_f16(q32, row(r)) }, r, &mut v);
+            }
+            (v, rr)
+        })
+        .map(|x| x.0)
+        .collect();
+    let mut all: Vec<(f32, u32)> = tops.into_iter().flatten().collect();
+    all.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    if all.is_empty() {
+        return Vec::new();
+    }
+    let kth = all[(k - 1).min(all.len() - 1)].0 as f64;
+    let mut ex: Vec<(f64, u32)> = all
+        .iter()
+        .filter(|x| x.0 as f64 >= kth - 2.0 * err)
+        .map(|x| (exact_to_f64(exact_dot(q16, row(x.1))), id(x.1)))
+        .collect();
+    ex.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
+    ex.truncate(k);
+    ex
 }
 
 /// thresholds for answer sizes (fractions of N), exact: midpoint between the k-th and (k+1)-th exact scores
