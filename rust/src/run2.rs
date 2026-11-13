@@ -10,8 +10,6 @@ use rayon::prelude::*;
 use roaring::RoaringBitmap;
 use std::io::Write;
 
-pub const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
-pub const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
 const SIZES: [f64; 4] = [1e-4, 1e-3, 1e-2, 5e-2];
 
 static LOG: std::sync::OnceLock<std::sync::Mutex<std::fs::File>> = std::sync::OnceLock::new();
@@ -45,15 +43,55 @@ pub fn arg_str(k: &str, d: &str) -> String {
     a.iter().position(|x| x == k).map(|i| a[i + 1].clone()).unwrap_or(d.to_string())
 }
 
+/// The index directory written by tools/fit.py (`--index DIR`).
+pub fn data_dir() -> String {
+    let a = args();
+    match a.iter().position(|x| x == "--index") {
+        Some(i) => a[i + 1].clone(),
+        None => {
+            eprintln!("no index: write --index DIR, a directory made by tools/fit.py");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// Where results go (`--results DIR`, default DIR/results of the index).
+pub fn res_dir() -> String {
+    let d = arg_str("--results", &format!("{}/results", data_dir()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// Queries from `--queries FILE` (npy, rows of the original dimension; zero-padded and normalised), else none.
+pub fn load_queries(n: usize) -> Vec<Vec<f32>> {
+    let path = arg_str("--queries", "");
+    if path.is_empty() {
+        return Vec::new();
+    }
+    let a = read_npy(&path);
+    let n0 = a.shape[1];
+    let v: Vec<f32> = if a.descr.contains("f8") { a.f64s().iter().map(|&x| x as f32).collect() } else { a.f32s() };
+    v.chunks(n0).map(|r| {
+        let nn = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
+        let mut q = vec![0f32; n];
+        if nn > 0.0 {
+            for (o, &x) in q.iter_mut().zip(r) {
+                *o = (x as f64 / nn) as f32;
+            }
+        }
+        q
+    }).collect()
+}
+
 pub fn setup2(tag: &str) -> Ctx2 {
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/{tag}.log")).unwrap();
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), args());
     let kk = arg_usize("--clusters", 100000);
-    let prof_path = arg_str("--profile", &format!("{DATA}/prof_h0.25.npy"));
+    let prof_path = arg_str("--profile", &format!("{}/profile.npy", crate::run2::data_dir()));
     let split = !args().iter().any(|a| a == "--u8");
     let t = Timer::new();
-    let mut p = load_params(DATA);
+    let mut p = load_params(&crate::run2::data_dir());
     if kk < p.meta.k {
         let n = p.meta.n;
         p.meta.k = kk;
@@ -75,10 +113,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
         ent_xs[e as usize] = r as u32;
     }
     let items: Vec<Vec<f32>> = p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect();
-    let texts: Vec<Vec<f32>> = p.text_q.chunks(n).map(|v| {
-        let nn = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        v.iter().map(|x| x / nn).collect()
-    }).collect();
+    let texts = load_queries(n);
     let plan = Plan {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
         alpha0: args().iter().any(|a| a == "--alpha0"),
@@ -182,7 +217,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     }
     out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {}",
         qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len());
-    std::fs::write(format!("{RES}/verify2.csv"), rows.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/verify2.csv", crate::run2::res_dir()), rows.join("\n") + "\n").unwrap();
 }
 
 /// ns per item per level: all items of every cluster, no decisions (interval at each level), tables built beforehand.
@@ -229,7 +264,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
             prev = ns;
         }
     }
-    std::fs::write(format!("{RES}/levels2{}.csv", if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/levels2{}.csv", crate::run2::res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
 }
 
 /// Fixed setup per query: group setup (exact int8 basis product, rotated weights) and cluster setup with tables.
@@ -415,7 +450,7 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/e2e2_1m{}.csv", if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/e2e2_1m{}.csv", crate::run2::res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
 }
 
 /// Where the time of a threshold query goes (text queries at 1% and 5%; 1 and 4 threads), for plan variants.
@@ -490,7 +525,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/breakdown2_text.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/breakdown2_text.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 pub fn make_filter(ix: &Index2, kind: &str, frac: f64, rng: &mut rand::rngs::StdRng) -> RoaringBitmap {
@@ -610,5 +645,5 @@ pub fn filter2(c: &Ctx2, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/filter2_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/filter2_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }

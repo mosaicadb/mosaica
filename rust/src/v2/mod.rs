@@ -761,7 +761,7 @@ pub struct Items2 {
     pub z: Vec<f64>,
     pub ent: Vec<u32>,
     pub ext: Vec<u32>,
-    pub x2max: f64,
+    pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
 }
 
 pub trait Source2: Sync {
@@ -793,7 +793,7 @@ impl Source2 for Real2 {
                 nx += xv * xv;
                 rmat[i * n + k] = xv - m[k] as f64;
             }
-            x2max = x2max.max((nx - 1.0).abs());
+            x2max = x2max.max(nx - 1.0);
         }
         // z^T = r^T M^T: z_i = M r_i
         let mut z = vec![0f64; nc * n];

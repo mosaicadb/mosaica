@@ -47,7 +47,8 @@ impl Meta {
     }
 }
 
-/// Exported numpy build parameters.
+/// Build parameters fitted by tools/fit.py. The version 1 allocation (frb, dl, dt, ridx, rates) is derived from a
+/// profile (`--profile`), or read when present.
 pub struct Params {
     pub meta: Meta,
     pub cstart: Vec<usize>,
@@ -65,7 +66,6 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
-    pub text_q: Vec<f32>,
     pub xs_path: String,
 }
 
@@ -74,11 +74,13 @@ pub fn load_params(dir: &str) -> Params {
     let us = |k: &str| meta[k].as_u64().unwrap() as usize;
     let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
     let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
+    let opt = |k: &str| std::path::Path::new(&format!("{dir}/{k}.npy")).exists().then(|| r(k));
     let mq8 = r("mq8").i8s();
     let msc = r("msc").f64s();
     let n = us("n");
     let k = us("K");
     let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
+    let xs = meta["xs"].as_str().unwrap();
     Params {
         meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap() },
         cstart: r("cstart").i64s().iter().map(|&x| x as usize).collect(),
@@ -86,18 +88,17 @@ pub fn load_params(dir: &str) -> Params {
         centres,
         lam: r("lam").f64s(),
         v: r("V").f32s(),
-        frb: r("frb").u8s(),
-        dl: r("dl").f64s(),
-        dt: r("dt").f64s(),
-        ridx: r("ridx").i32s(),
-        rates: r("rates").f64s(),
+        frb: opt("frb").map_or(Vec::new(), |a| a.u8s()),
+        dl: opt("dl").map_or(Vec::new(), |a| a.f64s()),
+        dt: opt("dt").map_or(Vec::new(), |a| a.f64s()),
+        ridx: opt("ridx").map_or(Vec::new(), |a| a.i32s()),
+        rates: opt("rates").map_or(Vec::new(), |a| a.f64s()),
         tree_edges: r("tree_edges").f64s(),
         tree_cent: r("tree_cent").f64s(),
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
-        text_q: r("text_q").f32s(),
-        xs_path: meta["xs"].as_str().unwrap().to_string(),
+        xs_path: if xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
     }
 }
 

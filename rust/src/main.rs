@@ -17,8 +17,6 @@ use roaring::RoaringBitmap;
 use std::io::Write;
 use util::*;
 
-const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
-const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
 
 struct Ctx {
     p: Params,
@@ -57,7 +55,7 @@ fn arg_str(k: &str) -> Option<String> {
 
 /// Parameters with the profile-dependent ones derived from `--profile <file.npy>` when given.
 pub fn params_with_profile(kk: usize) -> Params {
-    let mut p = load_params(DATA);
+    let mut p = load_params(&crate::run2::data_dir());
     if let Some(pf) = arg_str("--profile") {
         let (a, b) = apply_profile(&mut p, &pf);
         println!("profile {pf}: derived parameters differ from the exported ones in {a} frb and {b} rate entries");
@@ -66,7 +64,7 @@ pub fn params_with_profile(kk: usize) -> Params {
 }
 
 fn setup(kk: usize, nanch: usize, tag: &str) -> Ctx {
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/{tag}.log")).unwrap();
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), std::env::args().collect::<Vec<_>>());
     let t = Timer::new();
@@ -83,10 +81,7 @@ fn setup(kk: usize, nanch: usize, tag: &str) -> Ctx {
         ent_xs[e as usize] = r as u32;
     }
     let items: Vec<Vec<f32>> = p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect();
-    let texts: Vec<Vec<f32>> = p.text_q.chunks(n).map(|v| {
-        let nn = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        v.iter().map(|x| x / nn).collect()
-    }).collect();
+    let texts = crate::run2::load_queries(n);
     let c = Ctx { p, ix, xs, ent_xs, items, texts };
     out!("built {} rows, {} clusters, {} anchors in {:.1}s; stored bytes/item cumulative by level: {:?}", c.ix.nrows, c.ix.k(), c.ix.nanch, t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -157,7 +152,7 @@ fn verify(c: &mut Ctx, nitem: usize, ntext: usize, ncheck: usize) {
     let _ = n;
     out!("VERIFY {} queries x 4 answer sizes: result-set violations wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN k=10 mismatches {} of {}",
         qs.len(), wrong_in, wrong_out, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, knn_bad, qs.len());
-    let mut f = std::fs::File::create(format!("{RES}/verify_1m.csv")).unwrap();
+    let mut f = std::fs::File::create(format!("{}/verify_1m.csv", crate::run2::res_dir())).unwrap();
     writeln!(f, "q,class,answer_frac,t,truth_size,wrong_in,wrong_out,touched,full_reads").unwrap();
     for r in rows {
         writeln!(f, "{r}").unwrap();
@@ -207,7 +202,7 @@ fn levels(c: &mut Ctx) {
             prev = ns;
         }
     }
-    std::fs::write(format!("{RES}/levels.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/levels.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 /// memory read bandwidth (sum of u64 over a large buffer)
@@ -430,7 +425,7 @@ fn e2e(c: &mut Ctx, nq: usize, nflat: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/e2e_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/e2e_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn batch(c: &mut Ctx, total: usize) {
@@ -483,7 +478,7 @@ fn batch(c: &mut Ctx, total: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/batch_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/batch_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn filtered(c: &mut Ctx, nq: usize) {
@@ -600,7 +595,7 @@ fn filtered(c: &mut Ctx, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/filter_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/filter_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 /// Disk: levels past a residency cut and the full vectors in files, laid out as in memory (level-major, per cluster,
@@ -612,7 +607,8 @@ fn disk(c: &mut Ctx, nq: usize) {
     let n = ix.n();
     let nl = ix.meta.nl();
     let fl = c.flat();
-    let dir = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/diskfiles";
+    let dir = format!("{}/diskfiles", crate::run2::res_dir());
+    let dir = dir.as_str();
     std::fs::create_dir_all(dir).unwrap();
     // files: one per level (planes; th words follow), and the full vectors in row order
     let mut lvl_base = vec![0u64; nl];
@@ -738,7 +734,7 @@ fn disk(c: &mut Ctx, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/disk_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/disk_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn main() {
@@ -748,8 +744,8 @@ fn main() {
     let kk = get("--clusters", 100000);
     let nanch = get("--anchors", 100000);
     if has("checkderive") {
-        let mut p = load_params(DATA);
-        let pf = format!("{DATA}/prof_qmix.npy");
+        let mut p = load_params(&crate::run2::data_dir());
+        let pf = format!("{}/prof_qmix.npy", crate::run2::data_dir());
         let (a, b) = apply_profile(&mut p, &pf);
         println!("qmix profile re-derived: {a} frb entries and {b} rate entries differ from the numpy export");
         return;
