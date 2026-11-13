@@ -970,22 +970,26 @@ impl<'a> Flat<'a> {
 }
 
 /// Exact k-NN by brute force over rows produced chunk by chunk (`chunk(c, out)` appends the rows of chunk c):
-/// f32 scores keep the k + 32 best per chunk, then exact products decide among those within two error bounds of the
-/// k-th. Returns (exact score, id) by descending score, then ascending id.
+/// f32 scores keep, per chunk, every row within two error bounds of the running k-th best, then exact products decide
+/// among those within two error bounds of the k-th. Returns (exact score, id) by descending score, then ascending id.
 pub fn topk_f16<'a>(q16: &[u16], q32: &[f32], k: usize, err: f64, nchunks: usize, chunk: impl Fn(usize, &mut Vec<u32>) + Sync,
                     row: impl Fn(u32) -> &'a [u16] + Sync, id: impl Fn(u32) -> u32 + Sync) -> Vec<(f64, u32)> {
-    let keep = k + 32;
     let tops: Vec<Vec<(f32, u32)>> = (0..nchunks)
         .into_par_iter()
         .fold(|| (Vec::new(), Vec::new()), |(mut v, mut rr): (Vec<(f32, u32)>, Vec<u32>), ch| {
             rr.clear();
             chunk(ch, &mut rr);
+            // every row whose f32 score is within 2 err of the running k-th best stays: one of them may be a true
+            // top-k item however many rows tie with it
             let push = |s: f32, r: u32, v: &mut Vec<(f32, u32)>| {
-                if v.len() < keep || s > v[v.len() - 1].0 {
+                if v.len() < k || s as f64 >= v[k - 1].0 as f64 - 2.0 * err {
                     let pos = v.partition_point(|x| x.0 >= s);
                     v.insert(pos, (s, r));
-                    if v.len() > keep {
-                        v.pop();
+                    if v.len() > k {
+                        let floor = v[k - 1].0 as f64 - 2.0 * err;
+                        while v.len() > k && (v[v.len() - 1].0 as f64) < floor {
+                            v.pop();
+                        }
                     }
                 }
             };
