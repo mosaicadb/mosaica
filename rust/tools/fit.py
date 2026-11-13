@@ -54,6 +54,9 @@ def main():
     rng = np.random.default_rng(a.seed)
     X = np.load(a.vectors, mmap_mode="r")
     N, n0 = X.shape
+    if n0 < 50:
+        sys.exit(f"{a.vectors} has {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, "
+                 f"which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more.")
     n = (n0 + 31) // 32 * 32
     Xu = np.zeros((N, n), np.float32)
     for i in range(0, N, 100_000):

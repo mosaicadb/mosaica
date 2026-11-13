@@ -1042,6 +1042,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 /// Query-independent per-cluster data.
 fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+    assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
     // mv = V_q^T m
     let mut mv = vec![0f64; n];
