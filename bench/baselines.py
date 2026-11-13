@@ -1,10 +1,13 @@
 # Baselines with ANN-Benchmarks' wrappers and parameter grids: hnswlib, faiss HNSW, faiss IVF-PQ fast scan with a
-# re-rank (faiss-ivfpqfs). Build with many threads, query with one, one query at a time.
+# re-rank (faiss-ivfpqfs), and brute force (faiss-flat: IndexFlatIP over the visible rows, built when the visible set
+# is set, as an index's visible set is computed once per session). Build with many threads, query with one, one
+# query at a time.
 # usage: python3 -I baselines.py build DATASET_DIR OUT_DIR LIB [--threads T]
 #        python3 -I baselines.py query DATASET_DIR OUT_DIR LIB [--reps R] [--filtered BUILD] [--nq N] [--efs E,E]
-#   LIB: hnswlib | faiss-hnsw | faiss-ivfpqfs. --filtered BUILD runs the visible sets of filters.py on that one build
+#   LIB: hnswlib | faiss-hnsw | faiss-ivfpqfs | faiss-flat. --filtered BUILD runs the visible sets of filters.py on that one build
 #   (e.g. M-16, nlist-2048) instead of the unfiltered grid. Rows go to OUT_DIR/baselines.csv. --builds B,B runs only
-#   those builds of the unfiltered grid, --fracs F,F only those visible fractions of a filtered run.
+#   those builds of the unfiltered grid, --fracs F,F only those visible fractions of a filtered run, --efs and
+#   --nprobes replace the ef and nprobe grids.
 import argparse, csv, os, sys, time
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,15 +25,19 @@ def nonzero(X):
 
 
 def builds(lib):
+    if lib == "faiss-flat":
+        return ["flat"]
     if lib in ("hnswlib", "faiss-hnsw"):
         return [f"M-{m}" for m in HNSW_M]
     return [f"nlist-{n}" for n in IVF_NLIST]
 
 
-def qargs(lib, efs=None):
+def qargs(lib, efs=None, nprobes=None):
+    if lib == "faiss-flat":
+        return [dict()]
     if lib in ("hnswlib", "faiss-hnsw"):
         return [dict(ef=e) for e in (efs or HNSW_EF)]
-    return [dict(nprobe=p, k_reorder=r) for p in IVF_NPROBE for r in IVF_KREORDER]
+    return [dict(nprobe=p, k_reorder=r) for p in (nprobes or IVF_NPROBE) for r in IVF_KREORDER]
 
 
 def path(out, lib, b):
@@ -39,6 +46,8 @@ def path(out, lib, b):
 
 def build(ds, out, lib, threads):
     import faiss, hnswlib
+    if lib == "faiss-flat":
+        return
     X = ds["train"]
     N, d = X.shape
     log = os.path.join(out, "builds.csv")
@@ -85,7 +94,11 @@ class Searcher:
         X = ds["train"]
         self.N = len(X)
         self.sel = None
-        if lib == "hnswlib":
+        self.X = X
+        if lib == "faiss-flat":
+            faiss.omp_set_num_threads(1)
+            self.visible(None)
+        elif lib == "hnswlib":
             self.ix = hnswlib.Index(space="cosine", dim=X.shape[1])
             self.ix.load_index(p, max_elements=len(X))
             self.ix.set_num_threads(1)
@@ -98,7 +111,9 @@ class Searcher:
 
     def set(self, **a):
         self.a = a
-        if self.lib == "hnswlib":
+        if self.lib == "faiss-flat":
+            pass
+        elif self.lib == "hnswlib":
             self.ix.set_ef(a["ef"])
         elif self.lib == "faiss-hnsw":
             self.base.hnsw.efSearch = a["ef"]
@@ -106,7 +121,7 @@ class Searcher:
             self.base.nprobe = a["nprobe"]
             self.refine.k_factor = a["k_reorder"]
         self.params = None
-        if self.sel is not None and self.lib != "hnswlib":
+        if self.sel is not None and self.lib not in ("hnswlib", "faiss-flat"):
             f = self.faiss
             if self.lib == "faiss-hnsw":
                 self.params = f.SearchParametersHNSW(efSearch=a["ef"], sel=self.sel)
@@ -117,6 +132,12 @@ class Searcher:
 
     def visible(self, ids):
         """Restrict searches to entity ids (None: all)."""
+        if self.lib == "faiss-flat":
+            self.ids = np.arange(self.N) if ids is None else np.sort(np.asarray(ids, np.int64))
+            self.base = self.faiss.IndexFlatIP(self.X.shape[1])
+            self.base.add(np.ascontiguousarray(self.X[self.ids]))
+            self.sel = None
+            return
         if ids is None:
             self.sel, self.mask = None, None
             return
@@ -126,7 +147,7 @@ class Searcher:
             self.sel = True
         else:
             self.bits = np.packbits(self.mask[self.ids], bitorder="little")
-            self.sel = self.faiss.IDSelectorBitmap(len(self.ids), self.faiss.swig_ptr(self.bits))
+            self.sel = self.faiss.IDSelectorBitmap(len(self.bits), self.faiss.swig_ptr(self.bits))
 
     def search(self, q, k):
         if self.lib == "hnswlib":
@@ -158,7 +179,7 @@ def timed(s, Q, reps):
     return best
 
 
-def query(ds, out, lib, reps, filtered, nq, name, efs, only_builds=None, only_fracs=None):
+def query(ds, out, lib, reps, filtered, nq, name, efs, only_builds=None, only_fracs=None, nprobes=None):
     Q = ds["test"][:nq] if nq else ds["test"]
     ds = dict(ds, test=Q, distances=ds["distances"][:len(Q)])
     fcsv = os.path.join(out, "baselines.csv")
@@ -174,7 +195,7 @@ def query(ds, out, lib, reps, filtered, nq, name, efs, only_builds=None, only_fr
         ftag = "all" if fr is None else tag(fr)
         if fr is not None:
             s.visible(np.load(os.path.join(ds["dir"], "filters", ftag + ".npy")))
-        for a in qargs(lib, efs):
+        for a in qargs(lib, efs, nprobes):
             s.set(**a)
             ids, ts = timed(s, Q, reps)
             rec = recall(ds, ids, ftag)
@@ -191,12 +212,13 @@ def main():
     ap.add_argument("cmd", choices=["build", "query"])
     ap.add_argument("data")
     ap.add_argument("out")
-    ap.add_argument("lib", choices=["hnswlib", "faiss-hnsw", "faiss-ivfpqfs"])
+    ap.add_argument("lib", choices=["hnswlib", "faiss-hnsw", "faiss-ivfpqfs", "faiss-flat"])
     ap.add_argument("--threads", type=int, default=8)
     ap.add_argument("--reps", type=int, default=2)
     ap.add_argument("--filtered")
     ap.add_argument("--nq", type=int, default=0, help="first N test queries only")
     ap.add_argument("--efs", help="comma-separated ef values instead of the grid")
+    ap.add_argument("--nprobes", help="comma-separated nprobe values instead of the grid")
     ap.add_argument("--builds", help="comma-separated builds of the unfiltered grid to run (default all)")
     ap.add_argument("--fracs", help="comma-separated visible fractions of a filtered run (default all)")
     a = ap.parse_args()
@@ -207,7 +229,8 @@ def main():
         build(ds, a.out, a.lib, a.threads)
     else:
         query(ds, a.out, a.lib, a.reps, a.filtered, a.nq, name, [int(e) for e in a.efs.split(",")] if a.efs else None,
-              a.builds.split(",") if a.builds else None, [float(f) for f in a.fracs.split(",")] if a.fracs else None)
+              a.builds.split(",") if a.builds else None, [float(f) for f in a.fracs.split(",")] if a.fracs else None,
+              [int(p) for p in a.nprobes.split(",")] if a.nprobes else None)
 
 
 if __name__ == "__main__":
