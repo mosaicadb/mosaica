@@ -1,0 +1,6 @@
+666 files
+0 train-00463-of-00666.parquet row group 1 (50000, 768)
+1 train-00573-of-00666.parquet row group 5 (50000, 768)
+2 train-00476-of-00666.parquet row group 3 (50000, 768)
+3 train-00462-of-00666.parquet row group 4 (50000, 768)
+total 200000

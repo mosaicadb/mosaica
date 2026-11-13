@@ -1,0 +1,1 @@
+[      1s] nytimes-256-angular: base N=288000 n=256 K=1024; pseudo-queries 2000; test queries 10000 (ANN-Benchmarks test queries)

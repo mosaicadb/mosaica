@@ -1,0 +1,35 @@
+[      1s] glove-100-angular: N=1183514 n=100 NQ=10000; tolerance set size mean 10.45, queries whose tolerance set fills all 100 listed neighbours: 0
+[     30s] pseudo-query ground truth done
+[     30s] K=1024: k-means
+[     55s] balanced k-means
+[    112s] SOAR
+[    131s] structures built
+[    134s] K=1024 plain          centre     R0.9: p=39 share=0.0476  R0.95: p=89 share=0.1056  R0.99: p=266 share=0.2971
+[    135s] K=1024 plain          l2         R0.9: p=47 share=0.0448  R0.95: p=104 share=0.0962  R0.99: p=296 share=0.2732
+[    136s] K=1024 plain          bound0.1   R0.9: p=34 share=0.0408  R0.95: p=78 share=0.0909  R0.99: p=244 share=0.2684
+[    137s] K=1024 plain          bound0.2   R0.9: p=31 share=0.0364  R0.95: p=70 share=0.0798  R0.99: p=228 share=0.2458
+[    137s] K=1024 plain          bound0.35  R0.9: p=29 share=0.0327  R0.95: p=66 share=0.0720  R0.99: p=219 share=0.2271
+[    138s] K=1024 plain          bound0.5   R0.9: p=31 share=0.0333  R0.95: p=69 share=0.0714  R0.99: p=226 share=0.2241
+[    139s] K=1024 plain          bound0.75  R0.9: p=45 share=0.0434  R0.95: p=100 share=0.0933  R0.99: p=293 share=0.2718
+[    244s] K=1024 plain+soar     centre     R0.9: p=19 share=0.0405  R0.95: p=41 share=0.0831  R0.99: p=125 share=0.2316
+[    344s] K=1024 plain+soar     l2         R0.9: p=21 share=0.0370  R0.95: p=48 share=0.0792  R0.99: p=149 share=0.2264
+[    432s] K=1024 plain+soar     bound0.35  R0.9: p=14 share=0.0284  R0.95: p=29 share=0.0561  R0.99: p=97 share=0.1724
+[    435s] K=1024 balanced       centre     R0.9: p=39 share=0.0463  R0.95: p=86 share=0.0998  R0.99: p=263 share=0.2908
+[    436s] K=1024 balanced       l2         R0.9: p=45 share=0.0435  R0.95: p=102 share=0.0959  R0.99: p=288 share=0.2711
+[    437s] K=1024 balanced       bound0.1   R0.9: p=33 share=0.0387  R0.95: p=74 share=0.0848  R0.99: p=238 share=0.2602
+[    438s] K=1024 balanced       bound0.2   R0.9: p=29 share=0.0335  R0.95: p=66 share=0.0744  R0.99: p=219 share=0.2359
+[    438s] K=1024 balanced       bound0.35  R0.9: p=27 share=0.0302  R0.95: p=61 share=0.0666  R0.99: p=207 share=0.2162
+[    439s] K=1024 balanced       bound0.5   R0.9: p=28 share=0.0302  R0.95: p=64 share=0.0670  R0.99: p=210 share=0.2116
+[    440s] K=1024 balanced       bound0.75  R0.9: p=40 share=0.0397  R0.95: p=92 share=0.0886  R0.99: p=277 share=0.2639
+[    542s] K=1024 balanced+soar  centre     R0.9: p=19 share=0.0396  R0.95: p=40 share=0.0795  R0.99: p=124 share=0.2269
+[    637s] K=1024 balanced+soar  l2         R0.9: p=20 share=0.0353  R0.95: p=46 share=0.0761  R0.99: p=150 share=0.2282
+[    734s] K=1024 balanced+soar  bound0.35  R0.9: p=13 share=0.0261  R0.95: p=28 share=0.0538  R0.99: p=94 share=0.1668
+WARNING clustering 1024 points to 32 centroids: please provide at least 1248 training points
+[    734s] tree t=1: centres scored 29 of 1024; max recall 0.4725; R0.9: n/a  R0.95: n/a  R0.99: n/a
+[    734s] tree t=2: centres scored 57 of 1024; max recall 0.6241; R0.9: n/a  R0.95: n/a  R0.99: n/a
+[    735s] tree t=4: centres scored 118 of 1024; max recall 0.7693; R0.9: n/a  R0.95: n/a  R0.99: n/a
+[    736s] tree t=8: centres scored 251 of 1024; max recall 0.8926; R0.9: n/a  R0.95: n/a  R0.99: n/a
+[    736s] tree t=16: centres scored 550 of 1024; max recall 0.9758; R0.9: p=47  R0.95: p=123  R0.99: n/a
+[    737s] tree t=32: centres scored 1024 of 1024; max recall 1.0000; R0.9: p=39  R0.95: p=89  R0.99: p=266
+[    737s] K=4096: k-means
+[    933s] balanced k-means
