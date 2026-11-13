@@ -705,3 +705,41 @@ pub unsafe fn basis_matvec(vt: &[f32], n: usize, qs: &[&[f64]], out: &mut [Vec<f
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::*;
+
+    /// dot_f16 and dot_f16_x4 against the exact product, within the bound the scans use: (n/16 + 6) u |q| |x|.
+    #[test]
+    fn f16_dots_within_their_bound() {
+        let mut z = 12345u64;
+        let mut rnd = || {
+            z = z.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((z >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0) as f32
+        };
+        for n in [32usize, 96, 128, 256, 768, 2048] {
+            let q16: Vec<u16> = (0..n).map(|_| f32_to_f16(rnd())).collect();
+            let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
+            let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+            let xs: Vec<Vec<u16>> = (0..8).map(|i| (0..n).map(|_| f32_to_f16(rnd() * if i % 2 == 0 { 1.0 } else { 1e-3 })).collect()).collect();
+            let bound = |x: &[u16]| {
+                let xn = x.iter().map(|&h| f16_to_f32(h) as f64 * f16_to_f32(h) as f64).sum::<f64>().sqrt();
+                (n / 16 + 6) as f64 * (1.0 / 16777216.0) * qn * xn
+            };
+            for x in &xs {
+                let e = exact_to_f64(exact_dot(&q16, x));
+                let d = unsafe { dot_f16(&q32, x) } as f64;
+                assert!((d - e).abs() <= bound(x), "n {n}: dot_f16 off by {} > {}", (d - e).abs(), bound(x));
+            }
+            for c in xs.chunks(4) {
+                let d4 = unsafe { dot_f16_x4(&q32, [&c[0], &c[1], &c[2], &c[3]]) };
+                for k in 0..4 {
+                    let e = exact_to_f64(exact_dot(&q16, &c[k]));
+                    assert!((d4[k] as f64 - e).abs() <= bound(&c[k]), "n {n}: dot_f16_x4 lane {k} off by {}", (d4[k] as f64 - e).abs());
+                }
+            }
+        }
+    }
+}

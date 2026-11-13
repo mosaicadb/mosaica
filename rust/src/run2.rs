@@ -201,7 +201,7 @@ pub fn bytesq2(c: &Ctx2, nq: usize) {
 
 /// Every threshold query and k-NN against brute force, as planned and on the index path; k-NN also on full vectors
 /// (k-NN compared by the exact scores of the k returned, so ties may differ). Intervals checked at every level on the
-/// first `ncheck`.
+/// first `ncheck`. Then random visible sets (`--vfilt` queries each), against an exact brute force over the visible rows.
 pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     let ix = &c.ix;
     let fl = c.flat();
@@ -251,8 +251,41 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
             println!("verify2 {qi}/{} {:.0}s wrong in/out {wi}/{wo} det {} rand {} checked {} maxsd {:.2}", qs.len(), t.s(), tot.viol_det, tot.viol_rand, tot.checked, tot.max_sd);
         }
     }
-    out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each)",
-        qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len());
+    // filtered: random visible sets (one row in 1,000 / 100 / 10 / 2), the first `nf` queries; threshold queries at
+    // the 100th best visible score and k-NN, as planned and on each forced path, against a brute force over the
+    // visible rows that uses only exact integer products
+    let nf = arg_usize("--vfilt", 40).min(qs.len());
+    for (fi, &den) in [1000u64, 100, 10, 2].iter().enumerate() {
+        let mut ents: Vec<u32> = (0..ix.nrows).filter(|&r| ((r as u64) ^ (fi as u64 * 0x51ed27)).wrapping_mul(0x9E3779B97F4A7C15) >> 32 < (1u64 << 32) / den).map(|r| ix.row_ent[r]).collect();
+        ents.sort_unstable();
+        let bm = RoaringBitmap::from_sorted_iter(ents).unwrap();
+        let vis = Vis2::new(ix, &bm);
+        for (qi, (_, q)) in qs.iter().step_by((qs.len() / nf.max(1)).max(1)).take(nf).enumerate() {
+            let pr = prep2(ix, q);
+            let mut ex: Vec<(f64, u32)> = vis.rows.par_iter().map(|&r| (exact_to_f64(exact_dot(&pr.q16, ix.full_row_f16(r as usize))), r)).collect();
+            ex.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            let want: Vec<f64> = ex.iter().take(10).map(|x| x.0).collect();
+            let t = ex[(100).min(ex.len()) - 1].0;
+            let mut truth: Vec<u32> = ex.iter().filter(|x| x.0 >= t).map(|x| ix.row_ent[x.1 as usize]).collect();
+            truth.sort_unstable();
+            for plan in [c.plan, Plan { mode: PlanMode::Index, ..c.plan }, Plan { mode: PlanMode::Flat, ..c.plan }] {
+                let r = threshold2(ix, &pr, t, &Opts2 { vis: Some(&vis), verify: false, want_iv: false, plan });
+                let (a, b) = sym_diff(&to_bitmap2(ix, &r.rows), &truth);
+                wi += a;
+                wo += b;
+                let kn = knn2(ix, q, 10, Some(&vis), plan);
+                let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+                sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
+                if sa != want {
+                    kb += 1;
+                    out!("knn mismatch q{qi} visible 1/{den} {:?}", plan.mode);
+                }
+            }
+        }
+        println!("verify2 filtered 1/{den}: {} visible, wrong in/out {wi}/{wo}, k-NN mismatches {kb}", vis.rows.len());
+    }
+    out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each){}",
+        qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
     std::fs::write(format!("{}/verify2.csv", crate::run2::res_dir()), rows.join("\n") + "\n").unwrap();
 }
 
