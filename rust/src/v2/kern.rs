@@ -392,6 +392,21 @@ mod tests {
     }
 
     #[test]
+    fn part_sums_at_the_largest_part() {
+        // 64 groups (256 units, the most Part::pack allows) of all-255 tables: 65,280, the largest 16-bit sum
+        let groups = 64;
+        let codes: Vec<u8> = (0..groups * 64).map(|i| (i * 37 % 251) as u8).collect();
+        let tab = vec![255u8; groups * 64];
+        let (s0, s1) = unsafe { part_sums(codes.as_ptr(), tab.as_ptr(), groups) };
+        let mut got = [0f32; 32];
+        unsafe {
+            _mm512_storeu_ps(got.as_mut_ptr(), s0);
+            _mm512_storeu_ps(got.as_mut_ptr().add(16), s1);
+        }
+        assert!(got.iter().all(|&x| x == (255 * 4 * groups) as f32), "{got:?}");
+    }
+
+    #[test]
     fn gather_rows_match_scalar() {
         let rows = 5;
         let nblk = 6;

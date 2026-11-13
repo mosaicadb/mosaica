@@ -98,6 +98,8 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vnni")]
 pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
     assert!(n % 32 == 0 && n % 4 == 0);
+    // each i32 lane sums n/16 products of an int8 and a 13-bit half, up to 128 * 8191 * 2 each
+    assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
     let mut c = 0;
     while c < n {
         let mut ah = [_mm512_setzero_si512(); 4];
@@ -175,6 +177,8 @@ pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
     assert!(n % 32 == 0 && n % 4 == 0);
+    // each i32 lane sums n/16 products of an int8 and a 13-bit half, up to 128 * 8191 * 2 each
+    assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
     let mut c = 0;
     while c < n {
         let mut ah = [_mm256_setzero_si256(); 4];
@@ -446,8 +450,8 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     let c = &ix.cl[ci];
     let n = ix.n();
     let gp = &ix.groups[c.g];
-    // f32 products of f32-rounded factors: each sum is within (n/64 + 6) u sqrt(sum a^2 sum b^2) of the exact one
-    let e = ((n / 64 + 6) as f64).max(70.0) * U;
+    // f32 products of f32-rounded factors: each sum is within (n/64 + 8) u sqrt(sum a^2 sum b^2) of the exact one
+    let e = ((n / 64 + 8) as f64).max(70.0) * U;
     let mut ab = [0f64; J];
     for j in 0..J {
         ab[j] = unsafe { dot32(&c.mv32, &gq.qdt2[j * n..(j + 1) * n]) };

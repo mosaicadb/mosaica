@@ -341,7 +341,9 @@ impl Part {
             let mask = (1usize << f.nb) - 1;
             f.eid = et.id(core::array::from_fn(|k| v[(k >> f.off) & mask]), f.nb);
         }
-        let ufields = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
+        let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
+        // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        assert!(ufields.len() <= 257, "a part of {} units can overflow its 16-bit table sums; split it into parts of at most 257 units", ufields.len());
         Part { j, fields, ufields }
     }
 }
