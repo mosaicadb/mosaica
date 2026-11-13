@@ -1,0 +1,29 @@
+dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids,recall
+nytimes-256-angular,exact,all,-,10000,10,2,44.6,22.4165,21.1851,45.5092,9,0,286371,8982.3,34414728,exact_all_x.npy,0.9991
+nytimes-256-angular,flat,all,-,10000,10,2,109.7,9.1193,9.0781,10.0038,1,0,0,290000.0,148480000,flat_all_x.npy,0.9991
+nytimes-256-angular,approx,all,nprobe=1 rerank=100 level=5,10000,10,2,5521.9,0.1811,0.1741,0.2833,-1,-1,1240,100.0,97083,approx_all_nprobe_1_rerank_100_level_5.npy,0.5323
+nytimes-256-angular,approx,all,nprobe=2 rerank=100 level=5,10000,10,2,3898.4,0.2565,0.2511,0.3863,-1,-1,2433,100.0,141220,approx_all_nprobe_2_rerank_100_level_5.npy,0.6170
+nytimes-256-angular,approx,all,nprobe=4 rerank=100 level=5,10000,10,2,2473.3,0.4043,0.3980,0.5845,-1,-1,4688,100.0,224652,approx_all_nprobe_4_rerank_100_level_5.npy,0.6737
+nytimes-256-angular,approx,all,nprobe=8 rerank=100 level=5,10000,10,2,1508.6,0.6629,0.6555,0.9061,-1,-1,9001,100.0,384237,approx_all_nprobe_8_rerank_100_level_5.npy,0.7223
+nytimes-256-angular,approx,all,nprobe=16 rerank=100 level=5,10000,10,2,819.2,1.2207,1.2126,1.5762,-1,-1,17395,100.0,694800,approx_all_nprobe_16_rerank_100_level_5.npy,0.7696
+nytimes-256-angular,approx,all,nprobe=32 rerank=100 level=5,10000,10,2,433.3,2.3078,2.2997,2.8141,-1,-1,33929,100.0,1306573,approx_all_nprobe_32_rerank_100_level_5.npy,0.8136
+nytimes-256-angular,approx,all,nprobe=64 rerank=100 level=5,10000,10,2,225.4,4.4358,4.4266,5.1330,-1,-1,66595,100.0,2515206,approx_all_nprobe_64_rerank_100_level_5.npy,0.8550
+nytimes-256-angular,approx,all,nprobe=128 rerank=100 level=5,10000,10,2,112.0,8.9276,8.8482,11.9781,-1,-1,131148,100.0,4903678,approx_all_nprobe_128_rerank_100_level_5.npy,0.8881
+nytimes-256-angular,approx,all,nprobe=256 rerank=100 level=5,10000,10,2,57.7,17.3411,17.1726,23.5873,-1,-1,257712,100.0,9586531,approx_all_nprobe_256_rerank_100_level_5.npy,0.9075
+nytimes-256-angular,approx,all,nprobe=1 rerank=1000 level=5,10000,10,2,1744.1,0.5734,0.6051,0.7892,-1,-1,1240,890.7,501914,approx_all_nprobe_1_rerank_1000_level_5.npy,0.5346
+nytimes-256-angular,approx,all,nprobe=2 rerank=1000 level=5,10000,10,2,1347.8,0.7419,0.7399,0.9131,-1,-1,2433,999.2,601590,approx_all_nprobe_2_rerank_1000_level_5.npy,0.6229
+nytimes-256-angular,approx,all,nprobe=4 rerank=1000 level=5,10000,10,2,1086.6,0.9203,0.9141,1.1341,-1,-1,4688,1000.0,685452,approx_all_nprobe_4_rerank_1000_level_5.npy,0.6848
+nytimes-256-angular,approx,all,nprobe=8 rerank=1000 level=5,10000,10,2,821.9,1.2167,1.2096,1.4806,-1,-1,9001,1000.0,845037,approx_all_nprobe_8_rerank_1000_level_5.npy,0.7409
+nytimes-256-angular,approx,all,nprobe=16 rerank=1000 level=5,10000,10,2,565.2,1.7692,1.7615,2.1415,-1,-1,17395,1000.0,1155600,approx_all_nprobe_16_rerank_1000_level_5.npy,0.7980
+nytimes-256-angular,approx,all,nprobe=32 rerank=1000 level=5,10000,10,2,349.7,2.8593,2.8499,3.3920,-1,-1,33929,1000.0,1767373,approx_all_nprobe_32_rerank_1000_level_5.npy,0.8549
+nytimes-256-angular,approx,all,nprobe=64 rerank=1000 level=5,10000,10,2,198.6,5.0345,5.0288,5.7603,-1,-1,66595,1000.0,2976006,approx_all_nprobe_64_rerank_1000_level_5.npy,0.9111
+nytimes-256-angular,approx,all,nprobe=128 rerank=1000 level=5,10000,10,2,108.7,9.1991,9.1523,10.5407,-1,-1,131148,1000.0,5364478,approx_all_nprobe_128_rerank_1000_level_5.npy,0.9568
+nytimes-256-angular,approx,all,nprobe=256 rerank=1000 level=5,10000,10,2,56.4,17.7326,17.6693,19.2573,-1,-1,257712,1000.0,10047331,approx_all_nprobe_256_rerank_1000_level_5.npy,0.9846
+nytimes-256-angular,exact,vis_0.001,-,10000,10,2,2096.7,0.4769,0.4740,0.5546,0,0,106,318.0,164943,exact_vis_0.001_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.001,-,10000,10,2,73726.1,0.0136,0.0132,0.0253,0,0,0,290.0,148480,flat_vis_0.001_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.01,-,10000,10,2,1490.4,0.6710,0.6663,0.7984,0,0,774,2928.0,1514609,exact_vis_0.01_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.01,-,10000,10,2,12560.2,0.0796,0.0776,0.1094,0,0,0,2900.0,1484800,flat_vis_0.01_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.1,-,10000,10,2,499.2,2.0033,1.9652,2.4452,0,0,2077,28971.6,14874847,exact_vis_0.1_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.1,-,10000,10,2,866.4,1.1542,1.1327,1.4647,0,0,0,29000.0,14848000,flat_vis_0.1_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.5,-,10000,10,2,133.6,7.4839,7.2766,12.7390,0,0,3397,142798.3,73183629,exact_vis_0.5_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.5,-,10000,10,2,146.3,6.8373,6.7366,8.6411,0,0,0,145000.0,74240000,flat_vis_0.5_x.npy,0.9991

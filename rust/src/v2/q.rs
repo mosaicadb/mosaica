@@ -1581,6 +1581,59 @@ pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut
     (iv[0].1 as f64, iv[0].2 as f64)
 }
 
+/// Clusters in descending order of q.m^ (their centre direction).
+pub fn by_centre(ix: &Index2, pr: &Prep2, clusters: Vec<usize>) -> Vec<usize> {
+    let mut byc: Vec<(f64, usize)> = clusters.into_iter().map(|ci| (dot64(&pr.q64, ix.centres_f64(ci)) / ix.cl[ci].mn, ci)).collect();
+    byc.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+    byc.into_iter().map(|x| x.1).collect()
+}
+
+/// Intervals at `level` of the visible items of `clusters`, taken in order until `budget` items are read; sorted by
+/// descending midpoint.
+pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, level: usize, budget: usize, st: &mut Stats) -> Vec<(u32, f32, f32, u8)> {
+    let mut iv: Vec<(u32, f32, f32, u8)> = Vec::new();
+    let mut nvis = 0;
+    let mut sv = State::default();
+    for ci in clusters {
+        let c = &ix.cl[ci];
+        let cands = cands_of(ix, ci, c.r0, c.r1, vis);
+        if cands.is_empty() {
+            continue;
+        }
+        nvis += cands.len();
+        st.touched += cands.len() as u64;
+        let gq = get_gq2(ix, pr, c.g, st);
+        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+        let mut cq = cluster_q2(ix, ci, gq, pr, qm);
+        let (mut rin, mut pend) = (Vec::new(), Vec::new());
+        let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+        unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(level), 0, false, &mut sv, st, &mut out) };
+        if nvis >= budget {
+            break;
+        }
+    }
+    iv.sort_by(|x, y| ((y.1 + y.2) as f64).partial_cmp(&((x.1 + x.2) as f64)).unwrap());
+    iv
+}
+
+/// Approximate k-NN (IVF with a re-rank): the visible items of the `nprobe` clusters whose centres are nearest the
+/// query, scored by their interval at `level`; the `rerank` best by midpoint are scored exactly from full vectors.
+pub fn knn2_approx(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, rerank: usize, level: usize) -> KnnOut2 {
+    let tm = Timer::new();
+    let pr = prep2(ix, q);
+    let mut st = Stats::new(ix.meta.nl());
+    let clusters: Vec<usize> = (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).collect();
+    let mut order = by_centre(ix, &pr, clusters);
+    order.truncate(nprobe);
+    let iv = probe(ix, &pr, order, vis, level, usize::MAX, &mut st);
+    let take = rerank.max(kk).min(iv.len());
+    st.full_reads += take as u64;
+    let mut fin: Vec<(f64, u32)> = iv[..take].iter().map(|x| (exact_value2(ix, &pr, x.0 as usize), ix.row_ent[x.0 as usize])).collect();
+    fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
+    fin.truncate(kk);
+    KnnOut2 { ents: fin, st, cands: iv.len(), t_seed: tm.ms(), t_sweep: 0.0, t_sel: 0.0 }
+}
+
 pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
     let tm = Timer::new();
     let nl = ix.meta.nl();
@@ -1596,29 +1649,8 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
     }).collect();
     cand.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     cand.truncate(64);
-    let mut byc: Vec<(f64, usize)> = cand.iter().map(|&(_, ci)| (dot64(&pr.q64, ix.centres_f64(ci)) / ix.cl[ci].mn, ci)).collect();
-    byc.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
-    let mut seed_iv: Vec<(u32, f32, f32, u8)> = Vec::new();
-    let mut nvis = 0;
-    let mut sv = State::default();
-    for &(_, ci) in &byc {
-        let c = &ix.cl[ci];
-        let cands = cands_of(ix, ci, c.r0, c.r1, vis);
-        if cands.is_empty() {
-            continue;
-        }
-        nvis += cands.len();
-        let gq = get_gq2(ix, &pr, c.g, &mut st);
-        let qm = dot64(&pr.q64, ix.centres_f64(ci));
-        let mut cq = cluster_q2(ix, ci, gq, &pr, qm);
-        let (mut rin, mut pend) = (Vec::new(), Vec::new());
-        let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut seed_iv) };
-        unsafe { run_cluster(ix, ci, &pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(3), 0, false, &mut sv, &mut st, &mut out) };
-        if nvis >= 2000 {
-            break;
-        }
-    }
-    seed_iv.sort_by(|x, y| ((y.1 + y.2) as f64).partial_cmp(&((x.1 + x.2) as f64)).unwrap());
+    let clusters: Vec<usize> = cand.iter().map(|&(_, ci)| ci).collect();
+    let seed_iv = probe(ix, &pr, by_centre(ix, &pr, clusters), vis, 3, 2000, &mut st);
     let take = (2 * kk + 8).min(seed_iv.len());
     let mut ex: Vec<f64> = seed_iv[..take].iter().map(|x| exact_value2(ix, &pr, x.0 as usize)).collect();
     st.full_reads += take as u64;

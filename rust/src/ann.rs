@@ -1,0 +1,189 @@
+//! ANN-Benchmarks runs on the fast-scan index: k-NN of every query, exact and approximate, unfiltered and restricted
+//! to visible sets, one query at a time on one thread. Writes the returned entity ids (for recall, bench/score.py) and
+//! one CSV row per configuration with timings and exactness against brute force over the stored values.
+//!
+//! `ann-truth`: brute force over the stored values for every query and filter (all threads), saved beside the results.
+//! `ann`: the timed runs (one thread, pinned to `--core N` when given). Filters are `--filters a.npy,b.npy` (sorted
+//! entity ids); the unfiltered run is tagged `all`. The approximate grid is `--approx c:r:l,...` (clusters probed,
+//! re-ranked items, level of the interval scores); `--flat` adds brute force over the stored values on the same thread.
+use crate::query::Flat;
+use crate::run2::*;
+use crate::util::*;
+use crate::v2::q::*;
+use rayon::prelude::*;
+use roaring::RoaringBitmap;
+use std::io::Write;
+
+fn filters() -> Vec<(String, Option<RoaringBitmap>)> {
+    let mut out = vec![("all".to_string(), None)];
+    for f in arg_str("--filters", "").split(',').filter(|s| !s.is_empty()) {
+        let ids: Vec<u32> = read_npy(f).i32s().iter().map(|&x| x as u32).collect();
+        let tag = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().to_string();
+        out.push((tag, Some(RoaringBitmap::from_sorted_iter(ids).expect("filter ids must be sorted and distinct"))));
+    }
+    out
+}
+
+fn ids_bytes(v: &[i32]) -> Vec<u8> {
+    v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// Brute force over the stored values: the k best entity ids and exact scores of every query, per filter.
+pub fn truth(c: &Ctx2, k: usize) {
+    let fl: Flat = c.flat();
+    let dir = res_dir();
+    for (tag, bm) in filters() {
+        let t = Timer::new();
+        let res: Vec<Vec<(f64, u32)>> = c.texts.par_iter().map(|q| {
+            let pr = prep2(&c.ix, q);
+            fl.knn(&pr.q16, &pr.q32, k, full_err2(&c.ix, &pr), bm.as_ref(), &c.ent_xs)
+        }).collect();
+        let mut ids = vec![-1i32; res.len() * k];
+        let mut sc = vec![f64::NEG_INFINITY; res.len() * k];
+        for (i, r) in res.iter().enumerate() {
+            for (j, &(s, e)) in r.iter().enumerate() {
+                ids[i * k + j] = e as i32;
+                sc[i * k + j] = s;
+            }
+        }
+        write_npy(&format!("{dir}/truth_{tag}.npy"), "<i4", &[res.len(), k], &ids_bytes(&ids));
+        write_npy(&format!("{dir}/truth_{tag}_s.npy"), "<f8", &[res.len(), k], &sc.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+        println!("truth {tag}: {} queries in {:.1}s", res.len(), t.s());
+    }
+}
+
+struct Run {
+    ids: Vec<i32>,
+    times: Vec<f64>,
+    touched: f64,
+    full_reads: f64,
+    bytes: f64,
+}
+
+extern "C" {
+    fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
+}
+
+/// Pin the calling thread to one logical CPU.
+fn pin(cpu: usize) {
+    let mut mask = [0u64; 16];
+    mask[cpu / 64] = 1 << (cpu % 64);
+    assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
+}
+
+/// Every query once per repetition, timed one at a time on one thread (pinned to `--core` when given); the
+/// repetition with the least total time is kept.
+fn timed(c: &Ctx2, k: usize, reps: usize, f: &(dyn Fn(&[f32]) -> KnnOut2 + Sync)) -> Run {
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+    let mut best: Option<Run> = None;
+    for _ in 0..reps {
+        let mut r = Run { ids: vec![-1; c.texts.len() * k], times: Vec::with_capacity(c.texts.len()), touched: 0.0, full_reads: 0.0, bytes: 0.0 };
+        pool.install(|| {
+            if let Some(cpu) = arg_str("--core", "").parse().ok() {
+                pin(cpu);
+            }
+            for (i, q) in c.texts.iter().enumerate() {
+                let t = Timer::new();
+                let o = f(q);
+                r.times.push(t.ms());
+                for (j, &(_, e)) in o.ents.iter().enumerate() {
+                    r.ids[i * k + j] = e as i32;
+                }
+                r.touched += o.st.touched as f64;
+                r.full_reads += o.st.full_reads as f64;
+                r.bytes += bytes_read2(&c.ix, &o.st) * c.ix.nrows as f64;
+            }
+        });
+        let tot: f64 = r.times.iter().sum();
+        if best.as_ref().map_or(true, |b| tot < b.times.iter().sum::<f64>()) {
+            best = Some(r);
+        }
+    }
+    best.unwrap()
+}
+
+/// Queries whose returned set differs from brute force, and those whose exact scores differ (a set can differ on ties
+/// alone).
+fn exactness(c: &Ctx2, k: usize, ids: &[i32], tag: &str) -> (i64, i64) {
+    let dir = res_dir();
+    let p = format!("{dir}/truth_{tag}.npy");
+    if !std::path::Path::new(&p).exists() {
+        return (-1, -1);
+    }
+    let tid = read_npy(&p).i32s();
+    let tsc = read_npy(&format!("{dir}/truth_{tag}_s.npy")).f64s();
+    let (mut wset, mut wsc) = (0, 0);
+    for (i, q) in c.texts.iter().enumerate() {
+        let mut a: Vec<i32> = ids[i * k..(i + 1) * k].to_vec();
+        let mut b: Vec<i32> = tid[i * k..(i + 1) * k].to_vec();
+        a.sort_unstable();
+        b.sort_unstable();
+        if a == b {
+            continue;
+        }
+        wset += 1;
+        let pr = prep2(&c.ix, q);
+        let mut s: Vec<f64> = ids[i * k..(i + 1) * k].iter().filter(|&&e| e >= 0).map(|&e| exact_value2(&c.ix, &pr, c.ix.ent_row[e as usize] as usize)).collect();
+        let mut t: Vec<f64> = tsc[i * k..(i + 1) * k].iter().copied().filter(|x| x.is_finite()).collect();
+        s.sort_by(|x, y| y.partial_cmp(x).unwrap());
+        t.sort_by(|x, y| y.partial_cmp(x).unwrap());
+        if s != t {
+            wsc += 1;
+        }
+    }
+    (wset, wsc)
+}
+
+pub fn run(c: &Ctx2, k: usize) {
+    let dir = res_dir();
+    let name = arg_str("--name", "data");
+    let reps = arg_usize("--reps", 2);
+    let approx: Vec<(usize, usize, usize)> = arg_str("--approx", "").split(',').filter(|s| !s.is_empty()).map(|s| {
+        let v: Vec<usize> = s.split(':').map(|x| x.parse().unwrap()).collect();
+        (v[0], v[1], v[2])
+    }).collect();
+    let csv = format!("{dir}/ours.csv");
+    let fresh = !std::path::Path::new(&csv).exists();
+    let mut out = std::fs::OpenOptions::new().create(true).append(true).open(&csv).unwrap();
+    if fresh {
+        writeln!(out, "dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids").unwrap();
+    }
+    let nq = c.texts.len();
+    for (tag, bm) in filters() {
+        let vis = bm.as_ref().map(|b| Vis2::new(&c.ix, b));
+        let mut cfgs: Vec<(String, String, Box<dyn Fn(&[f32]) -> KnnOut2 + Sync + '_>)> = Vec::new();
+        cfgs.push(("exact".into(), "-".into(), Box::new(|q: &[f32]| knn2(&c.ix, q, k, vis.as_ref(), c.plan))));
+        if args().iter().any(|a| a == "--flat") {
+            let (fl, bm) = (c.flat(), bm.as_ref());
+            cfgs.push(("flat".into(), "-".into(), Box::new(move |q: &[f32]| {
+                let q16: Vec<u16> = q.iter().map(|&x| f32_to_f16(x)).collect();
+                let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
+                let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+                let err = ((q.len() / 16 + 6) as f64) * U * qn * c.ix.x2.sqrt() * 1.01 + 1e-12;
+                let ents = fl.knn(&q16, &q32, k, err, bm, &c.ent_xs);
+                let mut st = crate::kernel::Stats::new(c.ix.meta.nl());
+                st.full_reads = bm.map_or(c.ix.nrows as u64, |b| b.len());
+                KnnOut2 { ents, st, cands: 0, t_seed: 0.0, t_sweep: 0.0, t_sel: 0.0 }
+            })));
+        }
+        if bm.is_none() || args().iter().any(|a| a == "--approx-filtered") {
+            for &(np, rr, lv) in &approx {
+                let v = vis.as_ref();
+                cfgs.push(("approx".into(), format!("nprobe={np} rerank={rr} level={lv}"), Box::new(move |q: &[f32]| knn2_approx(&c.ix, q, k, v, np, rr, lv))));
+            }
+        }
+        for (method, params, f) in &cfgs {
+            let r = timed(c, k, reps, f.as_ref());
+            let (wset, wsc) = if method != "approx" { exactness(c, k, &r.ids, &tag) } else { (-1, -1) };
+            let fname = format!("{method}_{tag}_{}.npy", params.replace([' ', '='], "_").replace("-", "x"));
+            write_npy(&format!("{dir}/{fname}"), "<i4", &[nq, k], &ids_bytes(&r.ids));
+            let tot: f64 = r.times.iter().sum();
+            let mut ts = r.times.clone();
+            let line = format!("{name},{method},{tag},{params},{nq},{k},{reps},{:.1},{:.4},{:.4},{:.4},{wset},{wsc},{:.0},{:.1},{:.0},{fname}",
+                nq as f64 / (tot / 1e3), tot / nq as f64, quantile(&mut ts, 0.5), quantile(&mut ts, 0.99), r.touched / nq as f64, r.full_reads / nq as f64, r.bytes / nq as f64);
+            println!("ann {line}");
+            writeln!(out, "{line}").unwrap();
+            out.flush().unwrap();
+        }
+    }
+}

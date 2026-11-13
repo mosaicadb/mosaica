@@ -1,3 +1,4 @@
+mod ann;
 mod derive;
 mod index;
 mod kernel;
@@ -776,6 +777,12 @@ fn main() {
         }
         if has("filter") {
             run2::filter2(&c, get("--fnq", 30));
+        }
+        if has("ann-truth") {
+            ann::truth(&c, get("--k", 10));
+        }
+        if has("ann") {
+            ann::run(&c, get("--k", 10));
         }
         return;
     }
