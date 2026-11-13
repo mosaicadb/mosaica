@@ -1,0 +1,27 @@
+[      1s] glove-100-angular: N=1183514 n=100 NQ=10000; tolerance set size mean 10.45, queries whose tolerance set fills all 100 listed neighbours: 0
+[     33s] pseudo-query ground truth done
+[     33s] K=16384: k-means
+[   1234s] balanced k-means
+[   1768s] SOAR
+[   1795s] structures built
+[   1837s] K=16384 plain          centre     R0.9: p=189 share=0.0175  R0.95: p=490 share=0.0427  R0.99: p=1964 share=0.1535
+[   1854s] K=16384 plain          l2         R0.9: p=275 share=0.0173  R0.95: p=693 share=0.0412  R0.99: p=2524 share=0.1430
+[   1871s] K=16384 plain          bound0.1   R0.9: p=158 share=0.0141  R0.95: p=417 share=0.0351  R0.99: p=1757 share=0.1334
+[   1887s] K=16384 plain          bound0.2   R0.9: p=142 share=0.0121  R0.95: p=379 share=0.0306  R0.99: p=1612 share=0.1180
+[   1904s] K=16384 plain          bound0.35  R0.9: p=138 share=0.0109  R0.95: p=368 share=0.0276  R0.99: p=1536 share=0.1052
+[   1921s] K=16384 plain          bound0.5   R0.9: p=162 share=0.0118  R0.95: p=418 share=0.0289  R0.99: p=1692 share=0.1077
+[   1938s] K=16384 plain          bound0.75  R0.9: p=281 share=0.0177  R0.95: p=719 share=0.0429  R0.99: p=2630 share=0.1495
+[   2053s] K=16384 plain+soar     centre     R0.9: p=88 share=0.0139  R0.95: p=227 share=0.0332  R0.99: p=904 share=0.1159
+[   2166s] K=16384 plain+soar     l2         R0.9: p=116 share=0.0134  R0.95: p=301 share=0.0322  R0.99: p=1134 share=0.1097
+[   2272s] K=16384 plain+soar     bound0.35  R0.9: p=67 share=0.0091  R0.95: p=170 share=0.0215  R0.99: p=697 share=0.0788
+[   2308s] K=16384 balanced       centre     R0.9: p=200 share=0.0177  R0.95: p=515 share=0.0434  R0.99: p=2021 share=0.1551
+[   2324s] K=16384 balanced       l2         R0.9: p=277 share=0.0174  R0.95: p=709 share=0.0423  R0.99: p=2538 share=0.1446
+[   2339s] K=16384 balanced       bound0.1   R0.9: p=163 share=0.0140  R0.95: p=433 share=0.0355  R0.99: p=1781 share=0.1333
+[   2354s] K=16384 balanced       bound0.2   R0.9: p=144 share=0.0119  R0.95: p=384 share=0.0304  R0.99: p=1632 share=0.1181
+[   2369s] K=16384 balanced       bound0.35  R0.9: p=139 share=0.0108  R0.95: p=369 share=0.0274  R0.99: p=1554 share=0.1059
+[   2384s] K=16384 balanced       bound0.5   R0.9: p=163 share=0.0118  R0.95: p=420 share=0.0289  R0.99: p=1687 share=0.1074
+[   2399s] K=16384 balanced       bound0.75  R0.9: p=289 share=0.0182  R0.95: p=742 share=0.0444  R0.99: p=2702 share=0.1544
+[   2502s] K=16384 balanced+soar  centre     R0.9: p=94 share=0.0144  R0.95: p=240 share=0.0343  R0.99: p=931 share=0.1179
+[   2607s] K=16384 balanced+soar  l2         R0.9: p=119 share=0.0136  R0.95: p=306 share=0.0326  R0.99: p=1171 share=0.1130
+[   2709s] K=16384 balanced+soar  bound0.35  R0.9: p=67 share=0.0091  R0.95: p=171 share=0.0216  R0.99: p=692 share=0.0784
+[   2709s] done

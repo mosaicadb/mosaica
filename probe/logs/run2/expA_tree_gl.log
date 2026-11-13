@@ -1,0 +1,105 @@
+[      1s] glove-100-angular: N=1183514 n=100 NQ=10000; tolerance set size mean 10.45, queries whose tolerance set fills all 100 listed neighbours: 0
+[     26s] pseudo-query ground truth done
+[     28s] K=1024 flat (balanced, bound0.35): R0.9: 0.0302 R0.95: 0.0666 R0.99: 0.2162
+WARNING clustering 1024 points to 32 centroids: please provide at least 1248 training points
+[     32s] K=1024 depth 2 [1024, 32] h=0.0 beam=(1,): centres scored 62, max recall 0.4879; R0.9: n/a R0.95: n/a R0.99: n/a
+[     33s] K=1024 depth 2 [1024, 32] h=0.0 beam=(2,): centres scored 91, max recall 0.6477; R0.9: n/a R0.95: n/a R0.99: n/a
+[     33s] K=1024 depth 2 [1024, 32] h=0.0 beam=(4,): centres scored 152, max recall 0.7803; R0.9: n/a R0.95: n/a R0.99: n/a
+[     34s] K=1024 depth 2 [1024, 32] h=0.0 beam=(8,): centres scored 286, max recall 0.8939; R0.9: n/a R0.95: n/a R0.99: n/a
+[     35s] K=1024 depth 2 [1024, 32] h=0.0 beam=(16,): centres scored 603, max recall 0.9779; R0.9: 0.0358 R0.95: 0.0945 R0.99: n/a
+[     36s] K=1024 depth 2 [1024, 32] h=0.0 beam=(32,): centres scored 1056, max recall 1.0000; R0.9: 0.0302 R0.95: 0.0666 R0.99: 0.2162
+WARNING clustering 1024 points to 102 centroids: please provide at least 3978 training points
+WARNING clustering 102 points to 10 centroids: please provide at least 390 training points
+[     46s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(1, 2): centres scored 49, max recall 0.4515; R0.9: n/a R0.95: n/a R0.99: n/a
+[     47s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(1, 4): centres scored 70, max recall 0.5175; R0.9: n/a R0.95: n/a R0.99: n/a
+[     47s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(1, 8): centres scored 107, max recall 0.5457; R0.9: n/a R0.95: n/a R0.99: n/a
+[     48s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(1, 16): centres scored 148, max recall 0.5546; R0.9: n/a R0.95: n/a R0.99: n/a
+[     48s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(1, 32): centres scored 170, max recall 0.5557; R0.9: n/a R0.95: n/a R0.99: n/a
+[     49s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 2): centres scored 69, max recall 0.5706; R0.9: n/a R0.95: n/a R0.99: n/a
+[     50s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 4): centres scored 94, max recall 0.6723; R0.9: n/a R0.95: n/a R0.99: n/a
+[     50s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 8): centres scored 143, max recall 0.7330; R0.9: n/a R0.95: n/a R0.99: n/a
+[     51s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 16): centres scored 227, max recall 0.7693; R0.9: n/a R0.95: n/a R0.99: n/a
+[     51s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 32): centres scored 331, max recall 0.7812; R0.9: n/a R0.95: n/a R0.99: n/a
+[     52s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(2, 64): centres scored 369, max recall 0.7818; R0.9: n/a R0.95: n/a R0.99: n/a
+[     52s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(4, 4): centres scored 126, max recall 0.7513; R0.9: n/a R0.95: n/a R0.99: n/a
+[     53s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(4, 8): centres scored 178, max recall 0.8392; R0.9: n/a R0.95: n/a R0.99: n/a
+[     54s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(4, 16): centres scored 282, max recall 0.9007; R0.9: 0.1712 R0.95: n/a R0.99: n/a
+[     55s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(4, 32): centres scored 487, max recall 0.9418; R0.9: 0.0549 R0.95: n/a R0.99: n/a
+[     55s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(4, 64): centres scored 733, max recall 0.9523; R0.9: 0.0505 R0.95: 0.3143 R0.99: n/a
+[     56s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(8, 8): centres scored 210, max recall 0.8544; R0.9: n/a R0.95: n/a R0.99: n/a
+[     56s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(8, 16): centres scored 312, max recall 0.9252; R0.9: 0.0528 R0.95: n/a R0.99: n/a
+[     57s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(8, 32): centres scored 525, max recall 0.9769; R0.9: 0.0325 R0.95: 0.0842 R0.99: n/a
+[     58s] K=1024 depth 3 [1024, 102, 10] h=0.25 beam=(8, 64): centres scored 909, max recall 0.9981; R0.9: 0.0302 R0.95: 0.0676 R0.99: 0.2249
+[     65s] K=4096 flat (balanced, bound0.35): R0.9: 0.0172 R0.95: 0.0416 R0.99: 0.1476
+[     81s] K=4096 depth 2 [4096, 64] h=0.0 beam=(1,): centres scored 121, max recall 0.4633; R0.9: n/a R0.95: n/a R0.99: n/a
+[     83s] K=4096 depth 2 [4096, 64] h=0.0 beam=(2,): centres scored 180, max recall 0.6271; R0.9: n/a R0.95: n/a R0.99: n/a
+[     85s] K=4096 depth 2 [4096, 64] h=0.0 beam=(4,): centres scored 297, max recall 0.7638; R0.9: n/a R0.95: n/a R0.99: n/a
+[     86s] K=4096 depth 2 [4096, 64] h=0.0 beam=(8,): centres scored 537, max recall 0.8612; R0.9: n/a R0.95: n/a R0.99: n/a
+[     89s] K=4096 depth 2 [4096, 64] h=0.0 beam=(16,): centres scored 1056, max recall 0.9363; R0.9: 0.0328 R0.95: n/a R0.99: n/a
+[     92s] K=4096 depth 2 [4096, 64] h=0.0 beam=(32,): centres scored 2243, max recall 0.9876; R0.9: 0.0189 R0.95: 0.0498 R0.99: n/a
+[     96s] K=4096 depth 2 [4096, 64] h=0.0 beam=(64,): centres scored 4160, max recall 1.0000; R0.9: 0.0172 R0.95: 0.0416 R0.99: 0.1476
+WARNING clustering 4096 points to 256 centroids: please provide at least 9984 training points
+WARNING clustering 256 points to 16 centroids: please provide at least 624 training points
+[    144s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 2): centres scored 102, max recall 0.0943; R0.9: n/a R0.95: n/a R0.99: n/a
+[    145s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 4): centres scored 143, max recall 0.1358; R0.9: n/a R0.95: n/a R0.99: n/a
+[    147s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 8): centres scored 222, max recall 0.1892; R0.9: n/a R0.95: n/a R0.99: n/a
+[    149s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 16): centres scored 354, max recall 0.2100; R0.9: n/a R0.95: n/a R0.99: n/a
+[    151s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 32): centres scored 551, max recall 0.2199; R0.9: n/a R0.95: n/a R0.99: n/a
+[    153s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(1, 64): centres scored 612, max recall 0.2210; R0.9: n/a R0.95: n/a R0.99: n/a
+[    154s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 2): centres scored 134, max recall 0.1424; R0.9: n/a R0.95: n/a R0.99: n/a
+[    156s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 4): centres scored 176, max recall 0.2153; R0.9: n/a R0.95: n/a R0.99: n/a
+[    158s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 8): centres scored 263, max recall 0.3023; R0.9: n/a R0.95: n/a R0.99: n/a
+[    159s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 16): centres scored 424, max recall 0.3591; R0.9: n/a R0.95: n/a R0.99: n/a
+[    162s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 32): centres scored 718, max recall 0.3975; R0.9: n/a R0.95: n/a R0.99: n/a
+[    164s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 64): centres scored 1095, max recall 0.4226; R0.9: n/a R0.95: n/a R0.99: n/a
+[    167s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(2, 128): centres scored 1194, max recall 0.4258; R0.9: n/a R0.95: n/a R0.99: n/a
+[    169s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 4): centres scored 246, max recall 0.2461; R0.9: n/a R0.95: n/a R0.99: n/a
+[    171s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 8): centres scored 333, max recall 0.3650; R0.9: n/a R0.95: n/a R0.99: n/a
+[    173s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 16): centres scored 512, max recall 0.4816; R0.9: n/a R0.95: n/a R0.99: n/a
+[    175s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 32): centres scored 836, max recall 0.5666; R0.9: n/a R0.95: n/a R0.99: n/a
+[    178s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 64): centres scored 1433, max recall 0.6236; R0.9: n/a R0.95: n/a R0.99: n/a
+[    181s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 128): centres scored 2388, max recall 0.6537; R0.9: n/a R0.95: n/a R0.99: n/a
+[    184s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(4, 256): centres scored 2417, max recall 0.6542; R0.9: n/a R0.95: n/a R0.99: n/a
+[    186s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 8): centres scored 398, max recall 0.4371; R0.9: n/a R0.95: n/a R0.99: n/a
+[    188s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 16): centres scored 573, max recall 0.6011; R0.9: n/a R0.95: n/a R0.99: n/a
+[    190s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 32): centres scored 915, max recall 0.7440; R0.9: n/a R0.95: n/a R0.99: n/a
+[    193s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 64): centres scored 1542, max recall 0.8455; R0.9: n/a R0.95: n/a R0.99: n/a
+[    196s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 128): centres scored 2664, max recall 0.9100; R0.9: 0.1094 R0.95: n/a R0.99: n/a
+[    199s] K=4096 depth 3 [4096, 256, 16] h=1.0 beam=(8, 256): centres scored 3511, max recall 0.9230; R0.9: 0.0756 R0.95: n/a R0.99: n/a
+[    230s] K=16384 flat (balanced, bound0.35): R0.9: 0.0108 R0.95: 0.0274 R0.99: 0.1059
+[    286s] K=16384 depth 2 [16384, 128] h=0.25 beam=(1,): centres scored 263, max recall 0.4802; R0.9: n/a R0.95: n/a R0.99: n/a
+[    292s] K=16384 depth 2 [16384, 128] h=0.25 beam=(2,): centres scored 398, max recall 0.6343; R0.9: n/a R0.95: n/a R0.99: n/a
+[    299s] K=16384 depth 2 [16384, 128] h=0.25 beam=(4,): centres scored 666, max recall 0.7527; R0.9: n/a R0.95: n/a R0.99: n/a
+[    306s] K=16384 depth 2 [16384, 128] h=0.25 beam=(8,): centres scored 1202, max recall 0.8434; R0.9: n/a R0.95: n/a R0.99: n/a
+[    314s] K=16384 depth 2 [16384, 128] h=0.25 beam=(16,): centres scored 2323, max recall 0.9157; R0.9: 0.0299 R0.95: n/a R0.99: n/a
+[    325s] K=16384 depth 2 [16384, 128] h=0.25 beam=(32,): centres scored 4712, max recall 0.9665; R0.9: 0.0134 R0.95: 0.0483 R0.99: n/a
+[    339s] K=16384 depth 2 [16384, 128] h=0.25 beam=(64,): centres scored 9531, max recall 0.9938; R0.9: 0.0112 R0.95: 0.0293 R0.99: 0.1543
+WARNING clustering 16384 points to 645 centroids: please provide at least 25155 training points
+WARNING clustering 645 points to 25 centroids: please provide at least 975 training points
+[    498s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 2): centres scored 177, max recall 0.0811; R0.9: n/a R0.95: n/a R0.99: n/a
+[    504s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 4): centres scored 263, max recall 0.1069; R0.9: n/a R0.95: n/a R0.99: n/a
+[    510s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 8): centres scored 416, max recall 0.1284; R0.9: n/a R0.95: n/a R0.99: n/a
+[    517s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 16): centres scored 693, max recall 0.1414; R0.9: n/a R0.95: n/a R0.99: n/a
+[    524s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 32): centres scored 1124, max recall 0.1470; R0.9: n/a R0.95: n/a R0.99: n/a
+[    532s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(1, 64): centres scored 1604, max recall 0.1488; R0.9: n/a R0.95: n/a R0.99: n/a
+[    538s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 2): centres scored 210, max recall 0.1849; R0.9: n/a R0.95: n/a R0.99: n/a
+[    544s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 4): centres scored 281, max recall 0.2558; R0.9: n/a R0.95: n/a R0.99: n/a
+[    549s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 8): centres scored 425, max recall 0.3338; R0.9: n/a R0.95: n/a R0.99: n/a
+[    556s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 16): centres scored 706, max recall 0.4020; R0.9: n/a R0.95: n/a R0.99: n/a
+[    564s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 32): centres scored 1240, max recall 0.4565; R0.9: n/a R0.95: n/a R0.99: n/a
+[    573s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 64): centres scored 2127, max recall 0.4903; R0.9: n/a R0.95: n/a R0.99: n/a
+[    581s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(2, 128): centres scored 2972, max recall 0.5051; R0.9: n/a R0.95: n/a R0.99: n/a
+[    588s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 4): centres scored 406, max recall 0.2700; R0.9: n/a R0.95: n/a R0.99: n/a
+[    594s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 8): centres scored 538, max recall 0.3483; R0.9: n/a R0.95: n/a R0.99: n/a
+[    601s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 16): centres scored 806, max recall 0.4371; R0.9: n/a R0.95: n/a R0.99: n/a
+[    609s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 32): centres scored 1359, max recall 0.5372; R0.9: n/a R0.95: n/a R0.99: n/a
+[    617s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 64): centres scored 2439, max recall 0.6144; R0.9: n/a R0.95: n/a R0.99: n/a
+[    627s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 128): centres scored 4377, max recall 0.6797; R0.9: n/a R0.95: n/a R0.99: n/a
+[    639s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(4, 256): centres scored 6754, max recall 0.7018; R0.9: n/a R0.95: n/a R0.99: n/a
+[    646s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 8): centres scored 692, max recall 0.3829; R0.9: n/a R0.95: n/a R0.99: n/a
+[    653s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 16): centres scored 953, max recall 0.4780; R0.9: n/a R0.95: n/a R0.99: n/a
+[    659s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 32): centres scored 1482, max recall 0.6017; R0.9: n/a R0.95: n/a R0.99: n/a
+[    668s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 64): centres scored 2554, max recall 0.7133; R0.9: n/a R0.95: n/a R0.99: n/a
+[    678s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 128): centres scored 4654, max recall 0.8153; R0.9: n/a R0.95: n/a R0.99: n/a
+[    691s] K=16384 depth 3 [16384, 645, 25] h=1.0 beam=(8, 256): centres scored 8523, max recall 0.8875; R0.9: n/a R0.95: n/a R0.99: n/a
+[    691s] done
