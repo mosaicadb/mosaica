@@ -1,0 +1,210 @@
+[   0.1s] base header [10000000      192] query header [100000    192] (100000, 192)
+[   0.2s] base meta 10000000 200386 108210476 used nnz 8776663 | query meta 100000 200386 138374
+[   0.9s] postings built
+[   1.8s] variance {"total": 86189.61116866206, "max": 741.2226573321204, "median": 437.30061263337575, "min": 308.8567679999978, "share_top": {"8": 0.06351391511762697, "16": 0.12013947701063911, "32": 0.22092764867696457, "48": 0.3135081648278005, "64": 0.40199299423501866, "96": 0.5698154839456452, "128": 0.7261889118023587}, "uniform_share": {"32": 0.16666666666666666, "48": 0.25, "64": 0.3333333333333333}}
+[  10.5s] kmeans trained
+[  13.7s] assigned; cluster size min/median/max 178 975 2610 empty 0
+[  18.1s] precompute done {"mean_nu": 44632.331489, "mean_xn_centred": 86189.61116866206, "residual_share_of_variance": 0.5178388773753745, "residual_share_in_head": {"32": 0.1764579115016888, "48": 0.26204275893322915, "64": 0.3480982132611441}}
+[  18.1s] query tag counts {np.int64(1): np.int64(61626), np.int64(2): np.int64(38374)}
+[  18.2s] bucket 10-99: one-tag candidates 5179 of 61626, two-tag 1490 of 3000 sampled
+[  18.2s] bucket 100-999: one-tag candidates 5350 of 61626, two-tag 1228 of 3000 sampled
+[  18.2s] bucket 1k-10k: one-tag candidates 27414 of 61626, two-tag 98 of 3000 sampled
+[  18.2s] bucket 10k-50k: one-tag candidates 8252 of 61626, two-tag 0 of 3000 sampled
+[  18.2s] bucket 50k+: one-tag candidates 12312 of 61626, two-tag 0 of 3000 sampled
+[  18.2s] selected 650
+[  25.0s] queries done 650 exact-distance check: queries 20 mismatches 0
+
+== ALL: queries 650, pairs 12157760, median V 1216, median occupied clusters 521, seed clusters >2 in 350 queries, median tau_seed/tau 1.115
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9679 | 0.9945;  f_c (I1 cut+item) 0.9180 | 0.9813
+   p=32: I2 over all pairs 0.6900 | 0.8854;  s = I2 among I1 survivors 0.7516 | 0.8921;  head only (no tail) among I1 survivors 0.9245
+   p=48: I2 over all pairs 0.5152 | 0.7942;  s = I2 among I1 survivors 0.5612 | 0.7983;  head only (no tail) among I1 survivors 0.7598
+   p=64: I2 over all pairs 0.3303 | 0.6834;  s = I2 among I1 survivors 0.3599 | 0.6858;  head only (no tail) among I1 survivors 0.5209
+   1-bit dial 2.0 sd: survivors/query mean 43 median 30 share of pairs 0.00228; true top-k rows lost 22 of 6536
+   1-bit dial 2.5 sd: survivors/query mean 59 median 38 share of pairs 0.00316; true top-k rows lost 4 of 6536
+   1-bit dial 3.0 sd: survivors/query mean 83 median 49 share of pairs 0.00443; true top-k rows lost 2 of 6536
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9682 | 0.9945;  f_c (I1 cut+item) 0.9240 | 0.9835
+   p=32: I2 over all pairs 0.7297 | 0.9127;  s = I2 among I1 survivors 0.7897 | 0.9184;  head only (no tail) among I1 survivors 0.9391
+   p=48: I2 over all pairs 0.5762 | 0.8466;  s = I2 among I1 survivors 0.6236 | 0.8503;  head only (no tail) among I1 survivors 0.8005
+   p=64: I2 over all pairs 0.4064 | 0.7653;  s = I2 among I1 survivors 0.4399 | 0.7676;  head only (no tail) among I1 survivors 0.5911
+   1-bit dial 2.0 sd: survivors/query mean 166 median 73 share of pairs 0.00889; true top-k rows lost 5 of 6536
+   1-bit dial 2.5 sd: survivors/query mean 213 median 91 share of pairs 0.01141; true top-k rows lost 1 of 6536
+   1-bit dial 3.0 sd: survivors/query mean 274 median 114 share of pairs 0.01467; true top-k rows lost 1 of 6536
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== one-tag V>=10k (large one-tag): queries 200, pairs 11633664, median V 50290, median occupied clusters 969, seed clusters >2 in 1 queries, median tau_seed/tau 1.071
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9664 | 0.9823;  f_c (I1 cut+item) 0.9148 | 0.9487
+   p=32: I2 over all pairs 0.6819 | 0.7403;  s = I2 among I1 survivors 0.7455 | 0.7572;  head only (no tail) among I1 survivors 0.9222
+   p=48: I2 over all pairs 0.5048 | 0.5628;  s = I2 among I1 survivors 0.5519 | 0.5734;  head only (no tail) among I1 survivors 0.7539
+   p=64: I2 over all pairs 0.3183 | 0.3683;  s = I2 among I1 survivors 0.3480 | 0.3744;  head only (no tail) among I1 survivors 0.5106
+   1-bit dial 2.0 sd: survivors/query mean 75 median 62 share of pairs 0.00130; true top-k rows lost 11 of 2012
+   1-bit dial 2.5 sd: survivors/query mean 112 median 88 share of pairs 0.00193; true top-k rows lost 3 of 2012
+   1-bit dial 3.0 sd: survivors/query mean 168 median 126 share of pairs 0.00289; true top-k rows lost 1 of 2012
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9667 | 0.9825;  f_c (I1 cut+item) 0.9208 | 0.9538
+   p=32: I2 over all pairs 0.7207 | 0.7825;  s = I2 among I1 survivors 0.7827 | 0.7977;  head only (no tail) among I1 survivors 0.9367
+   p=48: I2 over all pairs 0.5635 | 0.6325;  s = I2 among I1 survivors 0.6120 | 0.6424;  head only (no tail) among I1 survivors 0.7937
+   p=64: I2 over all pairs 0.3904 | 0.4620;  s = I2 among I1 survivors 0.4239 | 0.4680;  head only (no tail) among I1 survivors 0.5784
+   1-bit dial 2.0 sd: survivors/query mean 246 median 122 share of pairs 0.00422; true top-k rows lost 4 of 2012
+   1-bit dial 2.5 sd: survivors/query mean 347 median 176 share of pairs 0.00596; true top-k rows lost 0 of 2012
+   1-bit dial 3.0 sd: survivors/query mean 485 median 242 share of pairs 0.00834; true top-k rows lost 0 of 2012
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 1-tag V 10-99: queries 100, pairs 2150, median V 15, median occupied clusters 12, seed clusters >2 in 96 queries, median tau_seed/tau 1.032
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 1.0000 | 1.0000
+   p=32: I2 over all pairs 0.9972 | 0.9987;  s = I2 among I1 survivors 0.9972 | 0.9987;  head only (no tail) among I1 survivors 1.0000
+   p=48: I2 over all pairs 0.9958 | 0.9981;  s = I2 among I1 survivors 0.9958 | 0.9981;  head only (no tail) among I1 survivors 0.9981
+   p=64: I2 over all pairs 0.9912 | 0.9958;  s = I2 among I1 survivors 0.9912 | 0.9958;  head only (no tail) among I1 survivors 0.9958
+   1-bit dial 2.0 sd: survivors/query mean 14 median 12 share of pairs 0.63163; true top-k rows lost 3 of 1005
+   1-bit dial 2.5 sd: survivors/query mean 14 median 13 share of pairs 0.66744; true top-k rows lost 0 of 1005
+   1-bit dial 3.0 sd: survivors/query mean 15 median 14 share of pairs 0.71116; true top-k rows lost 0 of 1005
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 1.0000 | 1.0000
+   p=32: I2 over all pairs 0.9981 | 0.9989;  s = I2 among I1 survivors 0.9981 | 0.9989;  head only (no tail) among I1 survivors 1.0000
+   p=48: I2 over all pairs 0.9967 | 0.9985;  s = I2 among I1 survivors 0.9967 | 0.9985;  head only (no tail) among I1 survivors 0.9991
+   p=64: I2 over all pairs 0.9944 | 0.9975;  s = I2 among I1 survivors 0.9944 | 0.9975;  head only (no tail) among I1 survivors 0.9977
+   1-bit dial 2.0 sd: survivors/query mean 17 median 14 share of pairs 0.78000; true top-k rows lost 0 of 1005
+   1-bit dial 2.5 sd: survivors/query mean 17 median 14 share of pairs 0.81023; true top-k rows lost 0 of 1005
+   1-bit dial 3.0 sd: survivors/query mean 18 median 14 share of pairs 0.83953; true top-k rows lost 0 of 1005
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 1-tag V 100-999: queries 100, pairs 51313, median V 449, median occupied clusters 254, seed clusters >2 in 80 queries, median tau_seed/tau 1.183
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9990 | 0.9993;  f_c (I1 cut+item) 0.9859 | 0.9910
+   p=32: I2 over all pairs 0.9240 | 0.9491;  s = I2 among I1 survivors 0.9372 | 0.9528;  head only (no tail) among I1 survivors 0.9787
+   p=48: I2 over all pairs 0.8645 | 0.9017;  s = I2 among I1 survivors 0.8769 | 0.9042;  head only (no tail) among I1 survivors 0.9397
+   p=64: I2 over all pairs 0.7607 | 0.8149;  s = I2 among I1 survivors 0.7716 | 0.8164;  head only (no tail) among I1 survivors 0.8566
+   1-bit dial 2.0 sd: survivors/query mean 29 median 26 share of pairs 0.05733; true top-k rows lost 1 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 37 median 32 share of pairs 0.07176; true top-k rows lost 0 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 46 median 41 share of pairs 0.09044; true top-k rows lost 0 of 1006
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9990 | 0.9993;  f_c (I1 cut+item) 0.9861 | 0.9912
+   p=32: I2 over all pairs 0.9390 | 0.9606;  s = I2 among I1 survivors 0.9523 | 0.9642;  head only (no tail) among I1 survivors 0.9800
+   p=48: I2 over all pairs 0.9059 | 0.9337;  s = I2 among I1 survivors 0.9187 | 0.9362;  head only (no tail) among I1 survivors 0.9540
+   p=64: I2 over all pairs 0.8535 | 0.8893;  s = I2 among I1 survivors 0.8656 | 0.8906;  head only (no tail) among I1 survivors 0.9069
+   1-bit dial 2.0 sd: survivors/query mean 109 median 72 share of pairs 0.21232; true top-k rows lost 0 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 125 median 82 share of pairs 0.24310; true top-k rows lost 0 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 142 median 96 share of pairs 0.27714; true top-k rows lost 0 of 1006
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 1-tag V 1k-10k: queries 100, pairs 376520, median V 3422, median occupied clusters 811, seed clusters >2 in 47 queries, median tau_seed/tau 1.240
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9881 | 0.9922
+   p=32: I2 over all pairs 0.8475 | 0.8796;  s = I2 among I1 survivors 0.8577 | 0.8839;  head only (no tail) among I1 survivors 0.9680
+   p=48: I2 over all pairs 0.7066 | 0.7561;  s = I2 among I1 survivors 0.7151 | 0.7584;  head only (no tail) among I1 survivors 0.8632
+   p=64: I2 over all pairs 0.5460 | 0.6069;  s = I2 among I1 survivors 0.5526 | 0.6083;  head only (no tail) among I1 survivors 0.6967
+   1-bit dial 2.0 sd: survivors/query mean 42 median 38 share of pairs 0.01112; true top-k rows lost 2 of 1007
+   1-bit dial 2.5 sd: survivors/query mean 56 median 50 share of pairs 0.01481; true top-k rows lost 0 of 1007
+   1-bit dial 3.0 sd: survivors/query mean 75 median 70 share of pairs 0.02004; true top-k rows lost 0 of 1007
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9943 | 0.9961
+   p=32: I2 over all pairs 0.9221 | 0.9409;  s = I2 among I1 survivors 0.9274 | 0.9431;  head only (no tail) among I1 survivors 0.9873
+   p=48: I2 over all pairs 0.8412 | 0.8750;  s = I2 among I1 survivors 0.8460 | 0.8760;  head only (no tail) among I1 survivors 0.9341
+   p=64: I2 over all pairs 0.7367 | 0.7846;  s = I2 among I1 survivors 0.7409 | 0.7852;  head only (no tail) among I1 survivors 0.8384
+   1-bit dial 2.0 sd: survivors/query mean 307 median 182 share of pairs 0.08166; true top-k rows lost 0 of 1007
+   1-bit dial 2.5 sd: survivors/query mean 370 median 222 share of pairs 0.09823; true top-k rows lost 0 of 1007
+   1-bit dial 3.0 sd: survivors/query mean 441 median 274 share of pairs 0.11723; true top-k rows lost 0 of 1007
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 1-tag V 10k-50k: queries 100, pairs 2442993, median V 26547, median occupied clusters 945, seed clusters >2 in 1 queries, median tau_seed/tau 1.082
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9877 | 0.9880
+   p=32: I2 over all pairs 0.8090 | 0.8172;  s = I2 among I1 survivors 0.8190 | 0.8237;  head only (no tail) among I1 survivors 0.9576
+   p=48: I2 over all pairs 0.6203 | 0.6338;  s = I2 among I1 survivors 0.6280 | 0.6375;  head only (no tail) among I1 survivors 0.8240
+   p=64: I2 over all pairs 0.4146 | 0.4243;  s = I2 among I1 survivors 0.4198 | 0.4261;  head only (no tail) among I1 survivors 0.6009
+   1-bit dial 2.0 sd: survivors/query mean 65 median 56 share of pairs 0.00265; true top-k rows lost 6 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 94 median 76 share of pairs 0.00384; true top-k rows lost 2 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 137 median 113 share of pairs 0.00559; true top-k rows lost 1 of 1006
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9909 | 0.9912
+   p=32: I2 over all pairs 0.8537 | 0.8623;  s = I2 among I1 survivors 0.8615 | 0.8670;  head only (no tail) among I1 survivors 0.9681
+   p=48: I2 over all pairs 0.6982 | 0.7151;  s = I2 among I1 survivors 0.7046 | 0.7177;  head only (no tail) among I1 survivors 0.8623
+   p=64: I2 over all pairs 0.5220 | 0.5415;  s = I2 among I1 survivors 0.5268 | 0.5427;  head only (no tail) among I1 survivors 0.6850
+   1-bit dial 2.0 sd: survivors/query mean 244 median 121 share of pairs 0.01000; true top-k rows lost 4 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 330 median 170 share of pairs 0.01350; true top-k rows lost 0 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 443 median 232 share of pairs 0.01815; true top-k rows lost 0 of 1006
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 1-tag V 50k+: queries 100, pairs 9190671, median V 86586, median occupied clusters 992, seed clusters >2 in 0 queries, median tau_seed/tau 1.057
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9575 | 0.9647;  f_c (I1 cut+item) 0.8954 | 0.9095
+   p=32: I2 over all pairs 0.6482 | 0.6635;  s = I2 among I1 survivors 0.7239 | 0.6907;  head only (no tail) among I1 survivors 0.9118
+   p=48: I2 over all pairs 0.4741 | 0.4919;  s = I2 among I1 survivors 0.5295 | 0.5093;  head only (no tail) among I1 survivors 0.7333
+   p=64: I2 over all pairs 0.2927 | 0.3124;  s = I2 among I1 survivors 0.3269 | 0.3226;  head only (no tail) among I1 survivors 0.4841
+   1-bit dial 2.0 sd: survivors/query mean 86 median 71 share of pairs 0.00094; true top-k rows lost 5 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 131 median 102 share of pairs 0.00142; true top-k rows lost 1 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 200 median 150 share of pairs 0.00217; true top-k rows lost 0 of 1006
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 0.9579 | 0.9651;  f_c (I1 cut+item) 0.9022 | 0.9163
+   p=32: I2 over all pairs 0.6853 | 0.7028;  s = I2 among I1 survivors 0.7597 | 0.7284;  head only (no tail) among I1 survivors 0.9276
+   p=48: I2 over all pairs 0.5277 | 0.5498;  s = I2 among I1 survivors 0.5850 | 0.5670;  head only (no tail) among I1 survivors 0.7737
+   p=64: I2 over all pairs 0.3554 | 0.3825;  s = I2 among I1 survivors 0.3939 | 0.3934;  head only (no tail) among I1 survivors 0.5472
+   1-bit dial 2.0 sd: survivors/query mean 247 median 123 share of pairs 0.00269; true top-k rows lost 0 of 1006
+   1-bit dial 2.5 sd: survivors/query mean 364 median 178 share of pairs 0.00396; true top-k rows lost 0 of 1006
+   1-bit dial 3.0 sd: survivors/query mean 527 median 264 share of pairs 0.00573; true top-k rows lost 0 of 1006
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 2-tag V 10-99: queries 50, pairs 1996, median V 36, median occupied clusters 27, seed clusters >2 in 48 queries, median tau_seed/tau 1.108
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 1.0000 | 1.0000
+   p=32: I2 over all pairs 0.9985 | 0.9992;  s = I2 among I1 survivors 0.9985 | 0.9992;  head only (no tail) among I1 survivors 1.0000
+   p=48: I2 over all pairs 0.9920 | 0.9954;  s = I2 among I1 survivors 0.9920 | 0.9954;  head only (no tail) among I1 survivors 0.9990
+   p=64: I2 over all pairs 0.9800 | 0.9890;  s = I2 among I1 survivors 0.9800 | 0.9890;  head only (no tail) among I1 survivors 0.9925
+   1-bit dial 2.0 sd: survivors/query mean 17 median 15 share of pairs 0.41784; true top-k rows lost 1 of 502
+   1-bit dial 2.5 sd: survivors/query mean 19 median 17 share of pairs 0.47194; true top-k rows lost 0 of 502
+   1-bit dial 3.0 sd: survivors/query mean 21 median 19 share of pairs 0.52806; true top-k rows lost 0 of 502
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 1.0000 | 1.0000
+   p=32: I2 over all pairs 1.0000 | 1.0000;  s = I2 among I1 survivors 1.0000 | 1.0000;  head only (no tail) among I1 survivors 1.0000
+   p=48: I2 over all pairs 0.9985 | 0.9991;  s = I2 among I1 survivors 0.9985 | 0.9991;  head only (no tail) among I1 survivors 1.0000
+   p=64: I2 over all pairs 0.9970 | 0.9984;  s = I2 among I1 survivors 0.9970 | 0.9984;  head only (no tail) among I1 survivors 0.9985
+   1-bit dial 2.0 sd: survivors/query mean 26 median 23 share of pairs 0.66333; true top-k rows lost 0 of 502
+   1-bit dial 2.5 sd: survivors/query mean 28 median 24 share of pairs 0.70140; true top-k rows lost 0 of 502
+   1-bit dial 3.0 sd: survivors/query mean 30 median 26 share of pairs 0.73898; true top-k rows lost 0 of 502
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 2-tag V 100-999: queries 50, pairs 15093, median V 229, median occupied clusters 155, seed clusters >2 in 42 queries, median tau_seed/tau 1.152
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9994 | 0.9996
+   p=32: I2 over all pairs 0.9768 | 0.9841;  s = I2 among I1 survivors 0.9774 | 0.9845;  head only (no tail) among I1 survivors 0.9960
+   p=48: I2 over all pairs 0.9351 | 0.9535;  s = I2 among I1 survivors 0.9356 | 0.9537;  head only (no tail) among I1 survivors 0.9767
+   p=64: I2 over all pairs 0.8683 | 0.9011;  s = I2 among I1 survivors 0.8688 | 0.9013;  head only (no tail) among I1 survivors 0.9304
+   1-bit dial 2.0 sd: survivors/query mean 29 median 28 share of pairs 0.09667; true top-k rows lost 3 of 502
+   1-bit dial 2.5 sd: survivors/query mean 36 median 33 share of pairs 0.12019; true top-k rows lost 0 of 502
+   1-bit dial 3.0 sd: survivors/query mean 44 median 41 share of pairs 0.14649; true top-k rows lost 0 of 502
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9994 | 0.9996
+   p=32: I2 over all pairs 0.9900 | 0.9924;  s = I2 among I1 survivors 0.9906 | 0.9928;  head only (no tail) among I1 survivors 0.9965
+   p=48: I2 over all pairs 0.9773 | 0.9817;  s = I2 among I1 survivors 0.9779 | 0.9820;  head only (no tail) among I1 survivors 0.9911
+   p=64: I2 over all pairs 0.9432 | 0.9544;  s = I2 among I1 survivors 0.9438 | 0.9546;  head only (no tail) among I1 survivors 0.9779
+   1-bit dial 2.0 sd: survivors/query mean 85 median 62 share of pairs 0.28099; true top-k rows lost 0 of 502
+   1-bit dial 2.5 sd: survivors/query mean 96 median 72 share of pairs 0.31949; true top-k rows lost 0 of 502
+   1-bit dial 3.0 sd: survivors/query mean 110 median 84 share of pairs 0.36487; true top-k rows lost 0 of 502
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 2-tag V 1k-10k: queries 50, pairs 77024, median V 1319, median occupied clusters 570, seed clusters >2 in 36 queries, median tau_seed/tau 1.212
+ threshold=true: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9959 | 0.9957
+   p=32: I2 over all pairs 0.9066 | 0.9110;  s = I2 among I1 survivors 0.9103 | 0.9136;  head only (no tail) among I1 survivors 0.9849
+   p=48: I2 over all pairs 0.8004 | 0.8126;  s = I2 among I1 survivors 0.8037 | 0.8142;  head only (no tail) among I1 survivors 0.9100
+   p=64: I2 over all pairs 0.6661 | 0.6855;  s = I2 among I1 survivors 0.6688 | 0.6865;  head only (no tail) among I1 survivors 0.7755
+   1-bit dial 2.0 sd: survivors/query mean 37 median 32 share of pairs 0.02429; true top-k rows lost 1 of 502
+   1-bit dial 2.5 sd: survivors/query mean 49 median 44 share of pairs 0.03185; true top-k rows lost 1 of 502
+   1-bit dial 3.0 sd: survivors/query mean 65 median 57 share of pairs 0.04201; true top-k rows lost 1 of 502
+ threshold=seed: (pair-weighted | mean per query)
+   cluster cut alone leaves 1.0000 | 1.0000;  f_c (I1 cut+item) 0.9969 | 0.9964
+   p=32: I2 over all pairs 0.9413 | 0.9409;  s = I2 among I1 survivors 0.9442 | 0.9430;  head only (no tail) among I1 survivors 0.9903
+   p=48: I2 over all pairs 0.8740 | 0.8803;  s = I2 among I1 survivors 0.8768 | 0.8816;  head only (no tail) among I1 survivors 0.9426
+   p=64: I2 over all pairs 0.7864 | 0.8055;  s = I2 among I1 survivors 0.7889 | 0.8063;  head only (no tail) among I1 survivors 0.8578
+   1-bit dial 2.0 sd: survivors/query mean 201 median 130 share of pairs 0.13044; true top-k rows lost 1 of 502
+   1-bit dial 2.5 sd: survivors/query mean 239 median 164 share of pairs 0.15508; true top-k rows lost 1 of 502
+   1-bit dial 3.0 sd: survivors/query mean 285 median 211 share of pairs 0.18503; true top-k rows lost 1 of 502
+   violations: {'lbviol_cl': 0, 'viol_cl': 0, 'violseed_cl': 0, 'lbviol_i1': 0, 'viol_i1': 0, 'violseed_i1': 0, 'lbviol_i2_32': 0, 'viol_i2_32': 0, 'violseed_i2_32': 0, 'lbviol_i2_48': 0, 'viol_i2_48': 0, 'violseed_i2_48': 0, 'lbviol_i2_64': 0, 'viol_i2_64': 0, 'violseed_i2_64': 0}
+
+== 2-tag V 10k-50k: 0 queries
+
+== 2-tag V 50k+: 0 queries
+[  25.1s] end

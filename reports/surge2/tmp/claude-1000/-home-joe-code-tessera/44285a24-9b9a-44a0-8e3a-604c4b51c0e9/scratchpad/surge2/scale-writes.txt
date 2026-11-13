@@ -1,0 +1,202 @@
+SCALE AND THE WRITE PATH FOR THE GLOBAL 1/2/4-BIT CASCADE
+2026-11-13. Arithmetic only; nothing was run. Tags: [D] derived from measured numbers, [M] modelled (measured
+count x assumed rate, or an assumed distribution), [A] argued.
+
+Inputs taken from the reports: level 1 = n/8 B sign plane + 3 B scalars (|r| 2 B, cos phi 1 B); level 2 = n/8 B
++ 2 B; level 3 = n/4 B + 3 B; full vector 2n B (f16). Survivors, k = 10: glove 12.6% after 1 bit, 0.64% after
+2 bits, 81 full reads; nytimes 20%, 1.45%, 42. Kernel 0.6 + 0.066 x (n/8) ns per item (ideas report) to
+0.6 + 0.108 x (n/8) (the faiss-calibrated rate in the clusters report). Memory bandwidth 13.4 GB/s on one
+thread, 42.5 GB/s on four (measured on the 4-core Xeon; assumed as this machine's ceiling [M]). NVMe assumed
+at 500k random 4 KiB reads per second and 3 GB/s sequential [M].
+
+SHORT VERSION
+- Exact unfiltered k-NN is one pass over N x (n/8 + 3) bytes and little else. At 1e9 that pass is 15.5 / 35 /
+  99 / 195 GB for n = 100 / 256 / 768 / 1,536: 6.4-7.8% of the f16 data [D]. It must be resident, and on all
+  cores it is bandwidth-bound at 0.4 / 0.8 / 2.3 / 4.6 s per query [M]. That is not interactive.
+- What is interactive is any query whose visible set is under about 1e8 items at n = 768 (5e8 at n = 100,
+  4e7 at n = 1,536), exact, on the whole machine [M]; and approximate mode at any size.
+- Nothing cuts clusters in exact mode, so centres cost K x n per query and K only has to keep that under 1%
+  of the pass: K = N/1,000. Centres matter less than expected in exact mode: an index with no centres at all
+  is at most about 1.5x wider [D], which bounds what stale centres can cost.
+- Stale centres are cost only, provided a centre is never edited in place, clustering never looks at rotated
+  codes, and per-cluster visible counts are never trusted after an insert or a lifted suppression.
+
+1. MEMORY, DISK AND ONE EXACT QUERY
+
+Bytes per item: plane 1 with scalars / plane 2 / plane 3 / full
+  n = 100:   15.5 / 14.5 / 28 / 200        n = 768:   99 / 98 / 195 / 1,536
+  n = 256:   35 / 34 / 67 / 512            n = 1,536: 195 / 194 / 387 / 3,072                              [D]
+
+Resident, minimum = plane 1 + scalars + row-to-entity map (4 B) + 8-bit centres at K = N/1,000 (n B each)
+  N = 1e9:  23.6 / 43 / 108 / 205 GB       N = 1e8:  2.4 / 4.3 / 10.8 / 20.5 GB                            [D]
+Resident with plane 2 as well
+  N = 1e9:  38 / 77 / 206 / 399 GB         N = 1e8:  3.8 / 7.7 / 20.6 / 39.9 GB                            [D]
+Extras: entity-to-row map 4 GB per 1e9 (needed once per session; can sit on disk). Graph over centres 130 B
+x K = 130 MB at K = 1e6. One viewer's row-space bitset 125 MB dense at 1e9, less as Roaring (section 3).
+Tag postings in row space: 28 B per item if as tag-heavy as YFCC (0.28 GB per 10M measured), so 28 GB at 1e9,
+on disk and read per filter [D by scaling].
+On NVMe (everything, plane 1 included for restart): 262 / 652 / 1,932 / 3,852 GB at 1e9; a tenth at 1e8.
+A SOAR second copy of level 1 adds 15.5 / 35 / 99 / 195 GB [D].
+On the 47 GB machine: 1e9 fits only at n = 100; 1e8 fits at every n with plane 1 resident.
+
+One exact unfiltered k-NN at 1e9
+  First pass (all rows):     15.5 / 35 / 99 / 195 GB                                                       [D]
+  Per core, first pass:      1.4-2.0 / 2.7-4.1 / 6.9-11 / 13-21 s (kernel) ; bandwidth floor 1.2 / 2.6 /
+                             7.4 / 14.6 s                                                                  [M]
+  12 cores, first pass:      0.36 / 0.82 / 2.3 / 4.6 s, bandwidth-bound; the whole machine for one query   [M]
+  At 1e8: a tenth: 36 / 82 / 230 / 460 ms on all cores; 0.14-2.1 s on one core                             [M]
+Later levels depend on how survivors scale with N, which is unmeasured. Two brackets:
+  (a) fractions stay as at 1M: level 2 reads 1.3-2e8 items, level 3 6.4e6-1.5e7, 68k-145k full vectors.
+      Total 17.5 / 43 / 113 / 222 GB = 8.8 / 8.4 / 7.3 / 7.2% of f16. Adds 25-70% to the per-core time     [M]
+  (b) scores Gaussian in the tail, k fixed, so the k-th score rises with N (z = 4.3 at 1.18M, 5.6 at 1e9):
+      glove's 12.6% / 0.64% / 81 become 0.7% (7e6 items) / 0.007% (7e4) / about 150 full reads. Later
+      levels are then under 2% of the bytes and the query is the first pass                                [M]
+Page reads if only plane 1 is resident, n = 768 (42 items per 4 KiB page of plane 2):
+  (a) 13% of rows hit 99.7% of plane-2 pages: the whole 98 GB, 24M pages, 30 s or more. Not usable        [D]
+  (b) 7e6 rows hit about 6M pages (25 GB): 12 s. Still not usable unless survivors bunch in clusters       [M]
+  Full vectors: 150 to 68k pages, 1 ms to 0.14 s. Fine either way                                          [M]
+So exact unfiltered at 1e9 needs planes 1 and 2 resident unless experiment 1 shows bunching: 206 GB at n = 768.
+
+Where it cannot answer interactively, and the honest statement
+- Exact, unfiltered, 1e9: seconds, the whole machine, 0.2-2.5 queries per second in total. Batching B queries
+  through one pass helps until compute binds: about 3x at n = 100 and 768 (kernel 1.4 and 6.9-11 ns per item
+  per query over 12 cores = 0.12 and 0.6-0.9 s) [M].
+- Exact within 0.2 s on all cores needs visible rows x (n/8 + 3) <= 8.5 GB: 5.5e8 / 2.4e8 / 8.6e7 / 4.4e7
+  rows. On one core (2.7 GB or the kernel): about 1e8 / 5e7 / 2-3e7 / 1-1.5e7 [M].
+- Statement: "Exact for every viewer at any size. Interactive when the viewer's filtered set is under roughly
+  a hundred million items; above that an exact query takes seconds and scales with cores and memory channels.
+  Approximate mode is interactive at any size, with a stated expected recall, and its filter is still exact."
+- Sharding by cores is a split of the row range with a shared threshold; thresholds need no merge. It buys
+  bandwidth only up to the memory channels (about 3-4 cores' worth on this class of machine) [M].
+
+2. CLUSTERS AT 1e9
+
+- Exact mode needs q.c_j exactly for every cluster holding a visible row (the estimate is q.c_j + f S +
+  alpha e_c; a coded centre's error would swamp the width). Cost K x n: at K = 1e6, 10 / 26 / 77 / 154 ms per
+  core at 10 ns per 100 dimensions, 0.5-1.1% of the first pass [M]. At K = N/70 = 1.4e7 it is 14x that (1.1 s
+  at n = 768) and 11 GB of 8-bit centres: too much above n = 100 [D].
+- Pick K = N/1,000 (1e6 at 1e9, 1e5 at 1e8). The N/70 knee was an approximate-mode result at 1.18M and
+  n = 100; affordable there (1.4 GB of centres), not at 768 and above.
+- K barely matters in exact mode on flat data. Width is c w |r| tan(phi)/sqrt(n-1); with no centre w = |r| = 1.
+  Measured w is 0.80 (glove) and 0.93 (nytimes); taking |r| about 0.85-0.9 the centre buys 1.2-1.5x in width
+  [D from w; |r| assumed]. From the c table that is at most about 4x in 1-bit survivors and 30-50% in bytes.
+- Structure that keeps both modes honest: one flat array of 8-bit centres, scored exactly in exact mode; every
+  cluster's 1-bit plane scanned with one table per query (the table depends on P q only, not the cluster).
+  Group bounds are replaced by nothing: the only cluster skips are "no visible row" and the free per-cluster
+  test q.c_j + w_j Rmax_j < tau, which fires on clustered data and almost never on flat data.
+- Approximate mode only: a graph over centres (M = 16). Glove needed 1.2-2k centre scores at K = 16k; allow
+  2-5k at K = 1e6 [A]: 0.02-0.05 ms at n = 100, 0.15-0.4 ms at n = 768, against 2.7-21 ms for a scan of centre
+  codes [M]. The graph only chooses clusters; each item is still decided from its own code and its own visible
+  bit, so approximate mode can miss a visible item but never returns a hidden one.
+- SOAR copies are read by approximate mode only. Resident they double memory; on NVMe a probe of 300 clusters
+  is about 30 MB in 300 extents, 10-20 ms [M].
+
+3. FILTERED QUERIES (1e9 rows, n = 768 figures; 9 ns kernel, 10 ns gather)
+
+- Session: permute the viewer's Roaring bitmap into row space once. Dense bitset 125 MB; as Roaring 0.2 MB at
+  0.01%, 20 MB at 1% random, 125 MB from about 6% up [D]. Scatter cost about 5-10 ns per visible row: 1 ms at
+  1e5, 0.1 s at 1e7, 2.5-5 s at 5e8 [M]; a hundred dense sessions are 12.5 GB.
+- 32-row blocks holding a visible row: 100% at 50%, 96.6% at 10%, 27.5% at 1%, 3.2% at 0.1%, 0.3% at 0.01% [D].
+  Block skipping alone therefore saves nothing above about 5% random visibility.
+- Three paths, chosen per cluster from the per-cluster visible count:
+    dense    block kernel over all rows, mask applied to survivors: N x t_kernel
+    middle   gather visible rows' 1-bit codes, then the cascade: V x (t_gather + t_kernel)
+    tiny     V under a few thousand: read the full vectors
+  Gather beats the block pass below visibility t_kernel / (t_gather + t_kernel): 47% at n = 768, 12% at
+  n = 100 [M].
+- The 1M finding "scan the visible set below 10%" does not carry over: at 1e9 full vectors are on NVMe, so a
+  direct scan is V page reads (1e5 rows = 0.2 s) against 2 ms for the gathered cascade [M].
+- Cost per query: V = 1e5: 2 ms on a core. 1e6: 19 ms. 1e7: 0.19 s on a core, 16 ms on twelve. 1e8: 1.9 s on a
+  core, about 0.25 s on twelve (bandwidth). 5e8: the full pass, 2.3 s [M].
+- A small visible set has a lower k-th score, so more rows pass level 1 (29% at V = 1e5 against 0.7% at 1e9 in
+  bracket (b)) [M]. With plane 2 on NVMe that is one page per survivor: 60 ms at V = 1e5, 0.4 s at 1e6, seconds
+  at 1e7. Either plane 2 is resident or small visible sets skip to full vectors after level 1.
+- Per-cluster visible counts: 4 MB per session at K = 1e6, built in the same pass as the permutation. They skip
+  empty clusters (V = 1e5 scores at most 1e5 centres, 8 ms instead of 77), pick the path, and feed the
+  approximate stopping rule.
+
+4. THE WRITE PATH
+
+Insert, per item [M]: nearest centre through the graph (2k scores: 20 us at n = 100, 0.15 ms at 768; the exact
+search is 77 ms and unnecessary, since any centre gives a valid code); rotation n^2 (1 us at n = 100, 30-120 us
+at 768, 0.1-0.5 ms at 1,536, where block rotations cut it about 6x); quantise three planes and scalars (1-2 us);
+e_c needs P c_j, cached per centre (3 GB at K = 1e6, n = 768) or one more rotation; SOAR copy = a second
+residual, rotation and level-1 code; postings and maps: append. About 0.3 ms per item at n = 768, so 1e9 items
+is about 7 hours on 12 cores; n = 100 under an hour; n = 1,536 12-20 hours with full rotations.
+Rows cannot be inserted into cluster order in place. New rows go to a delta: arrival order, a cluster id per
+row, per-row lookup of the cluster's three scalars. Exact mode scans the delta like any rows; approximate mode
+needs a cluster-to-delta-rows list.
+
+Delete and suppress: bitmap only, applied before the scan and before tau is taken. Codes of deleted rows go at
+the compaction that removes the rows; codes of suppressed rows stay, because a suppression can be lifted. The
+deny set must be applied per request, not folded into the cached session bitset, or a suppression accepted
+mid-session is missed.
+
+"Stale centres cost, never correctness", scalar by scalar:
+  sign and magnitude planes, |r|, cos(phi), e_c   functions of (x, the stored centre, P). Sound while the centre
+                                                 bytes used at query time are those used at encode time.
+                                                 So a centre is immutable; re-clustering makes new centres and
+                                                 re-encodes. Editing a centre in place breaks all four.
+  rho = c.r                                      derived from |c| and |r| only for unit x; stored f16 vectors
+                                                 are within 4.9e-4 of unit, so add that slack or store rho.
+  Rmax per cluster                               inserts must widen it; deletes leave it loose. Sound.
+  rms radius in the probe key, fitted dials      approximate mode only. Drift lowers recall at a fitted
+  (m, delta, probe counts)                       setting. Not exactness, but not "cost only" either: refit at
+                                                 compaction; the proved dial (all clusters scanned) is immune.
+  per-cluster visible counts                     stale-high after a suppression is cost only. Stale-low after an
+                                                 insert or a lifted suppression would skip a cluster holding a
+                                                 visible row: wrong. Bump them, or keep delta rows outside them.
+  the constant c                                 depends on k, levels and n, not on data.
+  independence from the seed                     the lemma needs r independent of P. Centres, assignment, SOAR
+                                                 choice and the re-cluster trigger may use x, |r| and counts,
+                                                 never tan(phi) or any code. k-means takes its randomness from a
+                                                 different stream.
+Cost of drift in exact mode is bounded by the no-centre case: at most about 1.5x in width (section 2) [D].
+That bound is for flat-spectrum data. On clustered data (BioCLIP-like, small |r|) centres buy far more, so
+drift can cost several times; unmeasured.
+
+Compaction within a budget. A flat k-means for 1e6 centres needs 3e7 or more sample vectors (92 GB at n = 768).
+Use about 1,000 coarse partitions of about 1e6 rows, each with its own 1,000 centres and a fixed row range
+with slack. Compacting one partition: read 1.5 GB of full vectors, k-means (about 8e12 flops, half a minute on
+12 cores), re-encode (100 core-seconds), write 1.9 GB, swap in the manifest. About a minute and under 4 GB of
+memory each; a full re-cluster of 1e9 x 768 is about 17 hours in the background, and normally only drifted
+partitions are done [M]. The swap changes row ids inside that range only; sessions re-permute that range.
+
+Seed and rotation. They survive compaction, and should: redrawing means re-encoding everything, and nothing in
+the guarantee asks for it as long as nothing was chosen as a function of the seed. Store the rotation matrix
+(2.4 MB at n = 768) with a checksum beside the seed, define the estimator on the stored matrix, and add its
+orthogonality defect to the width; do not rely on regenerating it bit for bit. A seed per partition would also
+be sound (the union is over k x levels events) but costs one n^2 table per partition per query [A].
+
+Crash safety. Planes are derived from (full vector, centre, rotation). Order: log, full vector, planes, then
+advance the committed row count in the manifest; a row is served only when every plane holds it. On restart,
+rows past the committed count are re-derived. Every plane page and scalar block carries a checksum: a torn
+cos(phi) that reads too small narrows an interval and silently drops a neighbour, so this is a correctness
+requirement. Plane 1 is persisted because re-deriving it at 1e9 x 768 is 28 core-hours against 33 s to load.
+
+For a build to be exactly an ingest into an empty index:
+  1. An empty index has the seed (drawn at declare) and one null centre, c = 0. Level 1 is valid from the
+     first row.
+  2. Encoding is one function of (item, centre, rotation), called by both paths.
+  3. Centres are made by one operation only, compaction. A build is: ingest into the delta, then compact.
+  4. Everything fitted (centres, graph, dials) is fitted from stored data, with no query sample.
+  5. The same deny, count and commit rules apply to delta and compacted rows.
+
+5. THREE UNKNOWNS, CHEAPEST EXPERIMENTS (12 cores, 47 GB)
+
+  1. How level-1 and level-2 survivors scale with N at fixed k, and whether they bunch in pages. Brackets (a)
+     and (b) differ by 18x and 90x and decide whether plane 2 must be resident (108 against 206 GB at n = 768).
+     Experiment: numpy on what is on disk. Subsample glove, nytimes, BioCLIP and YFCC-10M at N/64, N/16, N/4, N
+     with K = N/1,000; count survivors per level and distinct 4 KiB pages touched in cluster order; fit against
+     the Gaussian-tail prediction. Half a day.
+  2. The first pass out of cache: ns per row and GB/s at 1, 4, 8, 12 threads and batch 1, 4, 16. Every time in
+     section 1 rests on an assumed kernel rate and another machine's bandwidth.
+     Experiment: Rust microbenchmark over synthetic planes, n = 768, N = 2e8 (19.8 GB resident), thresholds set
+     to pass 13% and 0.7%; then n = 100 at 1e9 (15.5 GB) for a true billion-row pass. Half a day to a day.
+  3. What drift and the delta really cost: exact-mode bytes and approximate recall when centres were trained
+     on a different part of the data, against the 1.5x bound and a fresh build.
+     Experiment: numpy at 1M. Train centres on the half of the corpus below the median of the first principal
+     coordinate, ingest the other half, compare survivors and probe recall with a fresh build, and with no
+     centres at all. Half a day.
+  Runner-up: session set-up at 1e9 (permutation, counts, the deny path): an hour of Rust on a random
+  permutation.

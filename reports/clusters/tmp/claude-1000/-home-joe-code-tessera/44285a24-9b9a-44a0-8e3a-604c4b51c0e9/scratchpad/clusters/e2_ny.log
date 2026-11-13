@@ -1,0 +1,27 @@
+[     1s] nytimes-256-angular K=4096 N=290000 n=256 queries=1000; centre norm mean 0.657; key sd per query 0.136
+[     2s] flat (all centres exact): 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   cost 4096 centres x 256 dims = 1.05M mults
+[     2s] centre energy in the first d principal coordinates: d=4: 0.071, d=8: 0.105, d=16: 0.162, d=32: 0.261, d=48: 0.347, d=64: 0.426
+[     2s] query energy in the same coordinates: d=4: 0.048, d=8: 0.075, d=16: 0.119, d=32: 0.195, d=48: 0.263, d=64: 0.328
+[     2s] lossless prefix, top p=64: d=8: 4095 left (1.00 of flat); d=16: 4095 left (1.00 of flat); d=32: 4095 left (1.00 of flat); d=48: 4095 left (1.00 of flat); d=64: 4093 left (1.00 of flat); d=80: 4084 left (1.00 of flat)
+[     2s] lossless prefix, top p=256: d=8: 4095 left (1.00 of flat); d=16: 4095 left (1.00 of flat); d=32: 4095 left (1.00 of flat); d=48: 4095 left (1.00 of flat); d=64: 4094 left (1.00 of flat); d=80: 4090 left (1.00 of flat)
+[     2s] lossless prefix, top p=1024: d=8: 4095 left (1.00 of flat); d=16: 4095 left (1.00 of flat); d=32: 4095 left (1.00 of flat); d=48: 4095 left (1.00 of flat); d=64: 4095 left (1.00 of flat); d=80: 4093 left (1.00 of flat)
+[     3s] pq 4-bit M=16 (8.0 B/centre, key error sd 0.039) R=512: 26.83% (p=320) | n/a | n/a   cost 4096 codes x 8.0 B + 512 exact
+[     4s] pq 4-bit M=16 (8.0 B/centre, key error sd 0.039) R=1024: 7.23% (p=81) | 20.58% (p=241) | n/a   cost 4096 codes x 8.0 B + 1024 exact
+[     5s] pq 4-bit M=16 (8.0 B/centre, key error sd 0.039) R=2048: 4.49% (p=53) | 12.21% (p=146) | 38.85% (p=512)   cost 4096 codes x 8.0 B + 2048 exact
+[     6s] pq 4-bit M=32 (16.0 B/centre, key error sd 0.035) R=512: 8.02% (p=91) | n/a | n/a   cost 4096 codes x 16.0 B + 512 exact
+[     7s] pq 4-bit M=32 (16.0 B/centre, key error sd 0.035) R=1024: 4.95% (p=57) | 13.33% (p=156) | n/a   cost 4096 codes x 16.0 B + 1024 exact
+[     8s] pq 4-bit M=32 (16.0 B/centre, key error sd 0.035) R=2048: 4.45% (p=53) | 12.04% (p=145) | 37.99% (p=502)   cost 4096 codes x 16.0 B + 2048 exact
+[     8s] pq 4-bit M=64 (32.0 B/centre, key error sd 0.027) R=512: 5.03% (p=59) | 14.64% (p=174) | n/a   cost 4096 codes x 32.0 B + 512 exact
+[     9s] pq 4-bit M=64 (32.0 B/centre, key error sd 0.027) R=1024: 4.55% (p=54) | 12.27% (p=147) | 38.51% (p=504)   cost 4096 codes x 32.0 B + 1024 exact
+[    10s] pq 4-bit M=64 (32.0 B/centre, key error sd 0.027) R=2048: 4.43% (p=53) | 11.92% (p=144) | 37.13% (p=491)   cost 4096 codes x 32.0 B + 2048 exact
+[    12s] hnsw M=16 ef=128 (finds 91.9 of the true top 100 centres): 5.29% (p=63) | n/a | n/a   cost 1753 centre distances (0.428 of flat)
+[    13s] hnsw M=16 ef=256 (finds 98.2 of the true top 100 centres): 4.85% (p=58) | 12.88% (p=156) | n/a   cost 2419 centre distances (0.591 of flat)
+[    14s] hnsw M=16 ef=512 (finds 99.8 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 37.29% (p=494)   cost 2957 centre distances (0.722 of flat)
+[    15s] hnsw M=16 ef=1024 (finds 100.0 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   cost 3357 centre distances (0.820 of flat)
+[    18s] hnsw M=16 ef=2048 (finds 100.0 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   cost 3876 centre distances (0.946 of flat)
+[    19s] hnsw M=32 ef=128 (finds 96.6 of the true top 100 centres): 4.61% (p=55) | n/a | n/a   cost 2127 centre distances (0.519 of flat)
+[    20s] hnsw M=32 ef=256 (finds 99.5 of the true top 100 centres): 4.43% (p=53) | 12.00% (p=145) | n/a   cost 2731 centre distances (0.667 of flat)
+[    21s] hnsw M=32 ef=512 (finds 100.0 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 36.91% (p=488)   cost 3175 centre distances (0.775 of flat)
+[    23s] hnsw M=32 ef=1024 (finds 100.0 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   cost 3539 centre distances (0.864 of flat)
+[    25s] hnsw M=32 ef=2048 (finds 100.0 of the true top 100 centres): 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   cost 4024 centre distances (0.982 of flat)
+[    25s] done

@@ -1,0 +1,29 @@
+[     0s] glove-100-angular N=1183514 n=100 queries=1000
+[     4s]   round 0: mean squared residual 0.6879
+[    10s]   round 1: mean squared residual 0.6814
+[    16s]   round 2: mean squared residual 0.6789
+[    22s]   round 3: mean squared residual 0.6773
+[    28s]   round 4: mean squared residual 0.6760
+[    28s] additive 64x64: 4096 cells, 4096 nonempty, mean size 288.9, max 2995, centre dots 128
+[    29s] additive 64x64 f=0.0: 8.28% (p=280) | 15.20% (p=533) | 36.50% (p=1353)   nonempty cells 4096, mean rad 0.820
+[    29s] additive 64x64 f=0.2: 6.01% (p=214) | 11.43% (p=417) | 30.28% (p=1145)   nonempty cells 4096, mean rad 0.820
+[    29s] additive 64x64 f=0.35: 5.25% (p=195) | 9.98% (p=377) | 26.38% (p=1018)   nonempty cells 4096, mean rad 0.820
+[    33s]   round 0: mean squared residual 0.6560
+[    41s]   round 1: mean squared residual 0.6499
+[    48s]   round 2: mean squared residual 0.6473
+[    56s]   round 3: mean squared residual 0.6456
+[    63s]   round 4: mean squared residual 0.6444
+[    63s] additive 128x128: 16384 cells, 16251 nonempty, mean size 72.8, max 1658, centre dots 256
+[    64s] additive 128x128 f=0.0: 5.31% (p=685) | 10.09% (p=1360) | 29.16% (p=4195)   nonempty cells 16251, mean rad 0.801
+[    65s] additive 128x128 f=0.2: 3.74% (p=519) | 7.40% (p=1060) | 23.46% (p=3494)   nonempty cells 16251, mean rad 0.801
+[    66s] additive 128x128 f=0.35: 3.11% (p=455) | 6.38% (p=957) | 20.76% (p=3194)   nonempty cells 16251, mean rad 0.801
+[    74s]   round 0: mean squared residual 0.6289
+[    84s]   round 1: mean squared residual 0.6236
+[    94s]   round 2: mean squared residual 0.6210
+[   105s]   round 3: mean squared residual 0.6192
+[   115s]   round 4: mean squared residual 0.6178
+[   115s] additive 256x256: 65536 cells, 60926 nonempty, mean size 19.4, max 890, centre dots 512
+[   119s] additive 256x256 f=0.0: 4.00% (p=1895) | 8.21% (p=4105) | 23.22% (p=12383)   nonempty cells 60926, mean rad 0.784
+[   124s] additive 256x256 f=0.2: 2.92% (p=1510) | 5.88% (p=3175) | 19.64% (p=11086)   nonempty cells 60926, mean rad 0.784
+[   129s] additive 256x256 f=0.35: 2.53% (p=1402) | 5.07% (p=2910) | 17.54% (p=10383)   nonempty cells 60926, mean rad 0.784
+[   129s] done

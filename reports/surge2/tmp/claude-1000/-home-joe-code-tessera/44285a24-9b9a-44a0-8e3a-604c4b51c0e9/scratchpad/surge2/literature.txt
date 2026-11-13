@@ -1,0 +1,175 @@
+LITERATURE CHECK FOR THE CERTIFIED LEVEL (written 2026-11-13, about 8 minutes of web reading)
+
+How each fact was read: [raw] = I read the source text or data myself (downloaded file, parsed page data,
+extracted PDF text); [sum] = read through the fetch tool's summariser, so wording and numbers are one step
+removed; [mem] = from memory, not rechecked.
+
+HEADLINE
+Claims (a) and (b) are published. The closest prior work is a concurrent preprint, Loh and Lee,
+"Per-Query Recall Guarantees for Approximate Nearest Neighbor Search in Dynamic Vector Databases"
+(PQR-Search), arXiv:2611.07579, 5 November 2026 (v2 read) https://arxiv.org/abs/2611.07579. It contains the
+union over the k true neighbours x stages (its Theorem 2), the exact Beta law of the error with quantiles in
+place of a constant (its Eq. 5, Lemma 1, Theorem 1), a slack factor below 1 that is the decision form of the
+self-normalised width, a multi-stage code cascade ending in exact re-rank, a threshold that shrinks during
+the search (Theorem 5), a bitmap-filter corollary (Corollary 2), and the remark that range queries need
+delta/n. It credits the k-neighbour union to ADSampling (2023). What I did not find anywhere: the centre
+correction with a stored per-item scalar, and the closed-form two-sided interval.
+
+JOB 1: IS IT KNOWN?
+
+(a) Union bound over k true neighbours x levels; constant independent of N        KNOWN
+    - ADSampling (Gao and Long, SIGMOD 2023), Section 4, Corollary 4.2: for methods that generate candidates
+      in one batch (IVF), "producing correct DCO results for KNN objects (K objects) rather than for all
+      objects (at most N objects) is sufficient"; cost bound uses log(DK/delta') in place of log(DN/delta').
+      Objects that pass get exact distances. Constant c0 unspecified; epsilon_0 = 2.1 set empirically. [sum]
+      https://arxiv.org/abs/2303.09855
+    - PQR-Search, Theorem 2 (Exact Search): Pr[result is not exact] <= |V| * sum over stages l of
+      G_D(-eps_{0,l}) <= k*beta, with beta = delta/k; V = unvisited true neighbours. The text says summing
+      over all n vectors "would shrink the budget to beta = delta/n". Theorem 5 keeps the guarantee when the
+      radius shrinks during the search and depends on the rotation (the same argument as tau <= s_k).
+      Range queries: delta/n (the same as the report's threshold-query remark). [raw]
+    - Bandit k-NN goes the other way: Bagaria, Baharav, Kamath, Tse, "Bandit-Based Monte Carlo Optimization
+      for Nearest Neighbors" (arXiv:1805.08321) holds all n arms' intervals with probability 1 - 1/n^2, so
+      its constant grows with N. LeJeune, Baraniuk, Heckel (AISTATS 2019) likewise. [sum]
+      https://arxiv.org/abs/1805.08321
+
+(b) Exact tail of a sphere coordinate instead of a sub-Gaussian bound              KNOWN (concurrent)
+    - RaBitQ technical report, Appendix B.3, states the exact density of the error coordinate,
+      p_D(x) proportional to (1 - x^2)^((D-3)/2), and its independence of <o-bar, o>; but Theorem 3.2 is
+      stated as 2 exp(-c0 eps0^2) with c0 unspecified. [sum] https://arxiv.org/abs/2405.12497
+    - PQR-Search Eq. 5: G_D(-s) = 1/2 Pr[Beta(1/2, (D-2)/2) > s^2/(D-1)]; Lemma 1 (error identity
+      rho-hat - rho = sqrt(1 - rho^2) * scale * zeta, zeta independent of the code, valid for prefix and
+      2-bit codes); the parameter is set by G_D(-eps0) = delta_l, "with no empirically determined constant".
+      This is the report's law with m = D - 1. [raw]
+
+(c) Centre-corrected, self-normalised interval                                     PARTLY KNOWN
+    - Self-normalised width: RaBitQ's own identity (its Eq. 10/12) carries the factor sqrt(1 - <o,q>^2);
+      Theorem 3.2 drops it. [sum] PQR-Search uses it: slack factor f >= sqrt(1 - max(theta(r), 0)^2), "one
+      can choose f smaller than 1 and make the test tighter". [raw] For a prune decision against a threshold
+      this is the same test as the report's t_hi < tau. The closed-form two-sided interval end, and its
+      use with kappa = tan(phi) as a deterministic backstop, I did not find stated.
+    - Centre correction (D = q - alpha c with alpha = q.c/|c|^2, plus a stored scalar e_c per item): NOT
+      FOUND. RaBitQ, Extended RaBitQ and PQR-Search all work in the residual frame q - c (alpha = 1).
+      PQR-Search has an optional "global centering" that reduces a deterministic slack term; that is a
+      different device (centred lookup tables, to shrink a deterministic slack). MRQ (arXiv:2411.06158) and
+      SAQ (arXiv:2509.12086) also only subtract the centroid; their stored scalars are the residual norm
+      and <o-bar, o>. [sum] Searched: the RaBitQ line, ADSampling, DDC, MRQ, SAQ, PQR-Search.
+
+(d) 1 -> 2 -> 4-bit cascade to exact re-rank as an exact method                    PARTLY KNOWN
+    - Extended RaBitQ (arXiv:2409.09913): 1-bit most-significant code with a bound, then the remaining bits
+      for the B-bit estimate. Approximate; per-estimate bound 1 - exp(-c0 eps0^2); no raw-vector re-rank in
+      its IVF form; no exact claim. [sum]
+    - PQR-Search: prefix-truncated 1-bit stages (first 128 or 256 bits, then all D), an optional 2-bit final
+      stage, then exact distances on the original vectors; exact mode (tau = 1) with Pr[not exact] <= delta;
+      reports 6.8-20.6x over FAISS IndexFlatL2 in batch. No 4-bit stage. [raw]
+    - MRQ: quantised projected code -> exact projected distance -> full distance, pruning at each stage;
+      SAQ: segments read in variance order with a b-bit prefix usable alone. Both use Chebyshev bounds
+      (confidence 1 - 1/m^2, m = 4 by default in SAQ) and tuned constants; neither claims exactness. [sum]
+    - Deterministic cascades to exact results are older (VA-file, ANSMET, Panorama; see the existing survey).
+    - What differs: the particular 1/2/4-bit ladder and the bytes-read accounting. An instance, not a new
+      class of method.
+
+How RaBitQ sets its constant. [sum] Theorem 3.2: the estimate of <o,q> is within
+sqrt((1 - <o-bar,o>^2)/<o-bar,o>^2) * eps0/sqrt(D-1) with probability >= 1 - 2 exp(-c0 eps0^2), c0 an
+unspecified constant. Re-ranking drops a vector whose distance lower bound exceeds the best exact distance so
+far, else computes its exact distance. "eps0 is fixed to be 1.9 in pursuit of nearly perfect confidence";
+the justification is Section 5.2.4, which sweeps eps0 from 0 to 4 on two datasets and sees recall saturate
+near 1.9. No union bound over N or k, no numeric failure rate; the claim is that the true NN within the
+probed clusters reaches re-ranking "with high probability". eps0 is in the same units as the report's c
+(multiples of the sd), so RaBitQ's default is c = 1.9, a two-sided Gaussian tail of about 5.7% per
+comparison at worst [my arithmetic, not from a source].
+
+Who states a per-query exactness guarantee with a constant independent of N: ADSampling Corollary 4.2
+(asymptotic, unspecified constant, "the KNNs of the generated candidates") and PQR-Search Theorem 2
+(explicit quantiles; covers unvisited partitions, filters and updates). PQR-Search also names PUFFINN,
+Confirmation Sampling and TPU-KNN as per-query probabilistic guarantees; I did not open those.
+
+Others asked about. DDC (arXiv:2404.16322): a Gaussian quantile on the residual error or a trained
+classifier tuned to a target recall; empirical. [sum] DADE (arXiv:2411.17229): data-aware estimator with a
+hypothesis test; empirical significance level (search snippet only). Panorama: deterministic
+Cauchy-Schwarz bounds, exact (already in the survey). Finger, LVQ, ScaNN/SOAR: no certificate. [mem]
+Filtered-search theory: nothing found with an exactness guarantee apart from PQR-Search Corollary 2.
+
+JOB 2: FACTS
+
+(1) ANN-Benchmarks
+    Recall rule [raw, metrics.py]: a returned item counts if its distance <= (true k-th distance) + 1e-3.
+    The epsilon is additive and absolute, default 1e-3; recall = count over the first k returned / k.
+    (The separate "epsilon recall" metrics are multiplicative, (1 + 0.01) and (1 + 0.1).)
+    https://github.com/erikbern/ann-benchmarks/blob/main/ann_benchmarks/plotting/metrics.py
+    Hardware [sum, README]: AWS r6i.16xlarge, --parallelism 31, hyperthreading disabled, one CPU per run,
+    single queries (no batch); "as of April 2025". https://github.com/erikbern/ann-benchmarks
+    Best QPS, k = 10 [raw: chart data embedded in the result pages; best measured point at or above the
+    recall, no interpolation; the pages carry no date, so that they come from the April 2025 run is the
+    README's statement, not checked]:
+      glove-100-angular     >=0.90: QSG-NGT 7,562 (recall 0.909); NGT-qg 5,460; ScaNN 5,175
+                            >=0.95: QSG-NGT 3,984 (0.951); ScaNN 2,663; NGT-qg 2,536
+                            >=0.99: ScaNN 991 (0.991); Vearch 713; Glass 588
+                            brute force (BLAS): 16.5 QPS at recall 1.0
+      nytimes-256-angular   >=0.90: QSG-NGT 9,462 (0.924); NGT-qg 6,527; Glass 4,833
+                            >=0.95: QSG-NGT 5,253 (0.958); NGT-qg 2,349; Glass 2,092
+                            >=0.99: QSG-NGT 2,087 (0.991); NGT-qg 858; Glass 416
+                            brute force (BLAS): 26.7 QPS at recall 0.9991
+    https://ann-benchmarks.com/glove-100-angular_10_angular.html
+    https://ann-benchmarks.com/nytimes-256-angular_10_angular.html
+
+(2) NeurIPS'23 Big-ANN filtered track (YFCC-10M: 10M x 192-d uint8, L2, 100,000 queries, 1-2 tags each)
+    Batch: yes. The harness calls filtered_query(X, filter, k), "Carry out a batch query for k-NN of query
+    set X with associated filter" [sum, neurips23/filter/base.py]; the results paper: "All queries are
+    provided at once, and the entry could use all the threads available". [sum]
+    https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/neurips23/filter/base.py
+    Hardware: Azure Standard D8lds_v5, 8 vCPUs, 16 GiB; README names Intel Xeon Platinum 8370C 2.80 GHz
+    (Ice Lake). [sum] AVX-512: not stated in any source read; Ice Lake server parts have it [mem].
+    https://github.com/harsha-simhadri/big-ann-benchmarks/blob/main/neurips23/README.md
+    QPS at recall@10 >= 0.9, public queries [raw: leaderboard CSV, update of 1 March 2024]:
+      pinecone 85,492 and zilliz 84,596 (post-competition, binary only); parlayivf 37,902 (winner);
+      puck 19,193; hwtl_sdu_anns_filter 15,059; wm_filter 14,468; dhq 13,671; fdufilterdiskann 5,680;
+      pyanns 5,185; faissplus 3,777; faiss baseline 3,033; cufe 2,917.
+      Results paper Table 2 gives the same public figures and private ones (parlay 37,671, puck 19,153,
+      faiss 3,253); README quotes the baseline as 3,200. Zilliz's blog quotes different figures (own
+      ~82,000, Pinecone ~68,000, winner ~32,000). [sum]
+    https://github.com/harsha-simhadri/big-ann-benchmarks/tree/main/neurips23/ongoing_leaderboard/filter
+    https://arxiv.org/abs/2409.17424
+    Methods [sum]: ParlayANN IVF^2: an index per tag, a graph plus a spatial inverted index for common
+    tags, rare tags scanned, different plans for one- and two-tag queries. Puck: four-level quantised index
+    with tags attached to cluster labels so centroids are filtered. Pinecone: IVF plus a tag inverted
+    index, clusters scanned according to estimated selectivity, some list intersections precomputed, all
+    matching vectors scanned for the most selective queries. Zilliz: graphs for large tag combinations,
+    inverted lists for small ones, queries grouped by tag, quantisation and SIMD. Faiss baseline:
+    IVF16384,SQ8; brute force over the matching vectors when few match, else IVF search with post-filter.
+    hwtl, wm, dhq: not described in the sources read.
+
+(3) Filtered YFCC-10M at recall >= 0.99 or exact
+    - Leaderboard: none. The highest recall of any entry is the faiss baseline at 0.986 (1,064 QPS, batch,
+      8 vCPUs); every other entry stops at or below 0.949. [raw, same CSV]
+    - Pinecone, "Accurate and Efficient Metadata Filtering in Pinecone's Serverless Vector Database"
+      (Ingber and Liberty, ICML 2025): mean recall@10 0.989 on YFCC through the hosted product; no QPS. [raw]
+      https://www.pinecone.io/research/ICML_2025.pdf
+    - PQR-Search: exact mode (delta = 0.01) on 1,000 of the track's queries; at most 1 failure in 20,000
+      (rotation, query) trials on YFCC-10M. Mean 1-thread latency on 10M: 3.65 ms choosing per query between
+      its method and a scan of the qualifying vectors (8.98 ms method alone, 22.7 ms scan alone); on 1M
+      0.26 / 0.67 / 1.57 ms. Machine: AMD Threadripper PRO 9975WX, 32 cores, 256 GB. [raw]
+    - Others found stop near 0.9 (SIEVE arXiv:2507.11907; GateANN arXiv:2603.21466 to 0.91). [snippets]
+
+(4) SOAR (arXiv:2404.00774, NeurIPS 2023), Table 2: points searched for a given recall@100, SOAR against no
+    spilling [sum]: Glove-1M 1.09x / 1.13x / 1.14x fewer at 80 / 90 / 95%; MS SPACEV 1.50x / 2.06x / 3.36x at
+    85 / 90 / 95%; MS Turing 1.67x / 2.39x / 4.32x. Plain spilling without the orthogonality loss is worse than
+    none on Glove (21,126 against 19,983 points at 80%). Memory: +7.7% on Glove-1M, +17% at billion scale.
+    https://arxiv.org/abs/2404.00774
+
+POSITIONING
+The project cannot present the k x levels union bound or the exact sphere tail as new: the first is
+ADSampling's Corollary 4.2 and both are in PQR-Search with explicit quantiles, a filter corollary and an
+exact mode. The honest framing is to build on them by name, treat PQR-Search as the concurrent baseline, and
+claim what it lacks: the centre-corrected estimator with one stored scalar; the closed-form two-sided
+interval that doubles as the deterministic backstop; codes above 2 bits as certified stages (a 4-bit level
+leaving 56-81 full reads); inner-product search on flat-spectrum data, where PQR-Search itself reports its
+smallest gains (1.01-1.31x at one thread on GloVe and YFCC, slower in batch on YFCC at k = 100); set-valued
+threshold queries with a self-bounding union where PQR-Search uses delta/n; and per-viewer visibility as a
+security property rather than a deletion bitmap. The comparison a reader will ask for is against PQR-Search
+on glove, nytimes and filtered YFCC-10M (its 3.65 ms single-thread exact figure), and against RaBitQ at its
+eps0 = 1.9 to show what the certified constant costs.
+
+NOT DONE
+PQR-Search was read from a crude text extraction of the v2 PDF: theorem statements were legible, symbols
+partly garbled, tables not read. DADE, PUFFINN, TPU-KNN not opened. No venue check for any paper.

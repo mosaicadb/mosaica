@@ -1,0 +1,152 @@
+RED TEAM: THE EXACT, FILTER-AWARE VECTOR INDEX
+2026-11-13. Reading only; nothing run. V = size of the visible-and-filtered set a query runs over.
+All "measured" figures are from bench/REPORT.md (glove, nytimes) and rust/REPORT2.md (BioCLIP 1M, n = 768).
+
+VERDICT IN FIVE LINES
+- The measured index never beats a plain scan of the visible set on glove or nytimes, at any selectivity
+  (0.4x unfiltered, 0.9-1.0x at 50%, 0.6-0.8x at 10%, 0.1-0.3x at 1%, 0.03-0.08x at 0.1%). Every claim that it does is modelled.
+- On BioCLIP it wins clearly only for item queries (18-36x over a flat scan). For text, the stated common case,
+  it is 2.5x a flat int8 scan for k-NN and about 1.0-1.2x for thresholds.
+- Its filtered advantage is over badly configured graph baselines. The real competitor is "pre-filter, then scan",
+  which is exact, leaks nothing, and was left out of the comparison as first written.
+- What is new and probably real: sound per-item intervals whose k-NN constant does not grow with N (Theorem A),
+  and a threshold predicate with set semantics. That is a certified RaBitQ scan, not a new index family.
+- It is linear in V. The honest regime is V between about 10^4 and a few 10^7 at 768 dimensions.
+
+1. THE CASE AGAINST, CLAIM BY CLAIM
+
+Exactness. Simplest competitor: a flat SIMD scan (exact, eps = 0, no proof needed), or an int8 or 1-bit scan
+with a sound bound and a re-rank (the VA-file, 1998; LEMP). Measured: glove exact 29.9 QPS against flat 75.5;
+nytimes 44.6 against 110. BioCLIP: item k-NN 4.8 ms against flat 88 (int8) or 175 (f16): 18-36x. Text k-NN 35.3
+ms: 2.5-5x, and only 1.5x against the 54 ms BLAS float scan in knn/REPORT (perhaps another machine). Text thresholds: 75.6 ms (1% answer)
+and 110 ms (5%) against 88 ms for flat int8, i.e. 1.2x and 0.8x; on 4 threads 21.0 against 23. So for text
+thresholds the whole structure is worth nothing over a flat int8 pass plus a re-rank of the borderline items.
+
+Exact filtering. Competitor: pre-filter plus scan of the visible set. Measured crossover on BioCLIP (random
+filter): items win 5.7x at V = 100k (3.5 against 20 ms), tie at V = 10k (1.3 against 1.2), lose 2.8x at V = 1k.
+Text: 1.4x at V = 500k (71 against 99), tie at 100k (23 against 21), lose at 10k and below. Glove and nytimes:
+lose 3-35x at 1% and 0.1%, tie at 50%. The HNSW rows prove little: hnswlib ran a Python callback per node, faiss
+HNSW was one M-16 build that returns short lists. No ACORN, no filtered DiskANN, no native filter functor. A fair
+graph baseline at 1-10% selectivity will reach recall 0.95-0.99 at speeds well above ours; whether it reaches
+0.999 is unmeasured, and for text even unfiltered HNSW only reached 0.947 at ef 512.
+
+Bytes read. Nobody pays for bytes in RAM; they pay for time. v2 costs 1.4 ns per byte end to end; a flat f16 scan
+costs 0.11 ns per byte (175 ms / 1.536 GB) and faiss fast scan about 0.07-0.11. A 50x saving in bytes for text
+(2%) is a 2.5-5x saving in time. On disk the unit is pages, not bytes, and DESIGN admits a possible 10-30x page
+multiplier, unmeasured. At N = 1e9 the percentages are 2.6 GB per item query and 30 GB per text query; DiskANN
+reads about half a megabyte at any N (from memory).
+
+Memory. 39-119 B per item resident. HNSW at 3.2 KB per item is a strawman at this scale. DiskANN keeps 30-60 B per
+item (from memory); a 1-bit RaBitQ code at 768 dimensions is about 100 B. Parity, not an advantage. The one real point: once
+N x 2n bytes exceeds RAM (about 40M items per 64 GB at 768 dimensions), "scan the visible set" becomes V random
+page reads, so some resident certified code is needed for V above about 10k. Any sound code does that job.
+
+Regime map (768 dimensions, one machine, linear extrapolation from 1M on 4 threads; unverified above 1M):
+
+  V                 exact option that wins                         margin
+  < 10k             scan of visible (text: < 100k)                 scan wins 1-35x
+  10k - 4M          index, items 5-36x; text 1-2.5x                a flat scan is still under 100 ms here
+  4M - 34M (items)  index is the only exact answer under 100 ms    2.9 ms per 1M items
+  4M - 8M (text)    same, a band of 2x (12.5 ms per 1M)            up to ~40M only if the modelled 1-bit pass holds
+  above that        nobody is exact and interactive; ANN, or exact as a batch answer in seconds
+  N = 1e9 unfiltered: items 3-5 s, text 12-35 s, all levels in RAM (120 GB). Not a map interaction.
+
+  Dimension: wins grow with n and with spectrum decay. At n = 100 the deterministic cap is 9.95 sd, randomness
+  buys 1.66x, and a flat scan is cheap; the measured index loses everywhere. k: cost nearly flat (k = 1 to 100:
+  2.7x for items, 1.5x for text), which favours large k and thresholds with large answers, where graphs are weak.
+  Selectivity at N = 1e9: the niche is V = 10k to 34M for items (0.001% to 3%) and 100k to 8M for text (0.01% to
+  0.8%). Below V = 4M the gain is cores and avoided disk reads, not feasibility.
+
+2. WHAT IS SOLID, WHAT IS MODELLED
+
+Solid: correctness (0 violations in 731M interval checks; 20,000 benchmark queries equal to brute force); every
+QPS in bench/REPORT.md and REPORT2.md; the YFCC visible-set distribution (median 14k, sum 18.9e9); the sphere-law
+tail check; the negative result that no stored cluster bound helps (98% of clusters opened against an oracle's
+0.5% on glove, 61% against 1.1% on BioCLIP), which kills cluster pruning for good.
+Sound but unrefereed: Theorem A (union over k, c = 6.0-6.5 at any N) and Theorem B. I see no hole in A, but it
+abandons "simultaneous over all items" and forbids certifying by bound alone.
+Counts from small samples: survivors against c (40-200 queries, oracle or seed threshold, a global rotated code
+that is not v2's code, independent scales per level where the layout needs nested ones).
+Modelled and likely optimistic: every QPS for the cascade (380 and 700), built on 0.066 ns per byte, which the
+clusters report itself found 40% optimistic here, with a second pass assumed at 5 ns per survivor; v2 is 11-14x
+from that kernel. The two kernel forecasts disagree: the ideas report says text 83 ms to 30-45 and item k-NN 4.8
+to 1-1.5; the careful integer-kernel design says 83.5 to about 50 and 4.8 to 4.3. Believe the second. Also
+modelled: 10,000 QPS approximate on glove, YFCC 11-31k QPS (rests on batching queries by tag, which a database
+serving one viewer at a time cannot do), the 25-40% text savings (stand-ins only; the text embeddings are gone
+from disk), and everything said about 10M or more.
+
+Three numbers to measure before anyone believes the story:
+ a. Native wall time of the certified cascade on all 10,000 glove and nytimes queries, out of cache, against a
+    tuned flat scan and against HNSW at recall 0.999 (not 0.99), with the price of certainty stated as the ratio
+    to the same scan at m = 3.
+ b. Real text queries on BioCLIP at 1M and 10M with the data-only profile: ms against a tuned flat int8 or 1-bit
+    scan with re-rank, and the V at which the index overtakes the visible scan.
+ c. 100M under a memory cap, deep levels and vectors on NVMe: p50 and p99 latency, pages read per query, resident
+    bytes per item.
+
+3. IS "EXACT WITH PROBABILITY 1 - EPS" WORTH ANYTHING AGAINST RECALL 0.999?
+
+For relevance, no. The answer is exact with respect to stored f16 values of an embedding whose own error is
+orders larger; 1e-9 is below the chance of a bug or a bit flip. Nobody ranks better at 1.0 than at 0.999.
+What has value is three properties that happen to come with it, and two of them do not need exactness:
+- Each item's decision depends only on its own data. This is what access control needs (no leak through other
+  items, a masked result equals the result over the visible set). A fixed-dial approximate scan has it too.
+  The security argument is for item-local decisions, not for eps = 1e-9.
+- A per-query guarantee instead of an average. Recall 0.999 is a mean over a benchmark; under filters and for
+  out-of-distribution queries the same graph gives 0.3-0.95 with silently short lists and no warning.
+- Set semantics. sim(q, x) >= t becomes a predicate: results nest as t moves, counts add across shards, the
+  answer survives compaction, inserts of other items and a rebuild. No ANN index returns a threshold set of
+  10^5 to 10^7 items at all.
+Who pays for that: counts and densities over a similarity filter, joins and near-duplicate sets, diffs over time,
+audit and legal holds (defensible because the set is defined by a predicate, not because similarity is truth),
+science that must reproduce, and ground truth for other indexes. A map viewer looking at a highlight does not.
+Honest pitch: "a similarity predicate with database semantics: threshold and top-k computed exactly inside any
+filter, at a cost proportional to the filtered set and several times below scanning it, in about 100 B per item
+of RAM." Not "a faster vector index", and not "billions, interactive, unfiltered".
+
+4. DO TEXT QUERIES UNDERMINE IT?
+
+They undermine the elaborate design, not the core. For text the local bases, escape code, support table and
+sorted range buy 0-6% (DESIGN section 5) and cost fixed work (tables 13 ms, basis 7 ms of 83). 59% of items are
+touched against 10.6%; the session's own report says touching is not closable from data and the profile route is
+exhausted. Measured, text is 2.5x flat int8 for k-NN and level with it for thresholds. So for text the project
+reduces to a flat certified scan of about one bit per dimension over the visible set: 96 B per item at 768
+dimensions, bandwidth-bound at roughly 2-7 ns per item, 2 s or more at 1e9. That is RaBitQ with a rigorous tail
+and a constant that does not grow with N. It is worth having, it is small, and it is not six agents of structure.
+If text really is the common case, the item-query results (the 18-36x) are the side show, and they are the only
+large measured win. Also: no real text query was measured this session.
+
+5. CHEAPEST SEQUENCE TO KILL OR PROVE IT
+
+ 0. (no code) Get the distribution of V for the product: visible set times usual filters, and the latency a
+    similarity filter may take. Kill the index for the product if most queries have V < 100k (scan wins) or
+    V > 50M with an interactive budget (nothing exact wins); keep brute force and an approximate dial.
+ 1. (1 day) Fair baselines, once: pre-filter plus tuned scan (int8 with exact re-rank, and float BLAS); hnswlib
+    with a native filter; ACORN or filtered DiskANN; HNSW pushed to 0.999, including text. Kill the k-NN story
+    if a native filtered graph holds 0.999 at 1-10% selectivity at 10x our speed.
+ 2. (1 day) Re-encode the text queries; run v2 with the data-only profile. Kill the level stream for text if
+    k-NN is under 2x a tuned flat int8 scan with re-rank at 1M on one thread.
+ 3. (1 day, in parallel) Referee Theorems A and B and the self-bounding threshold scheme. If A falls, c returns
+    to 7.3-8.6, survivors roughly double, and step 4's bar gets harder.
+ 4. (3 days) Native 1-bit level and the cascade, end to end, 10,000 queries each on glove, nytimes and BioCLIP
+    text. Kill exact k-NN as a product if it is under 3x the flat scan on any of the three, or if the first pass
+    is over 2 ns per item on glove or 8 ns at 768 dimensions out of cache.
+ 5. (1 week) 100M BioCLIP under a 16 GB cap. Kill "billions on one machine" if item p99 exceeds 1 s or pages
+    read exceed 10x the byte model; the claim becomes "tens of millions per machine".
+ Only after 4 and 5 pass: the write path, then thresholds with the self-bounding union.
+
+6. WHAT TO STOP
+
+- Modelled QPS. No further figure that multiplies a count by an assumed kernel rate.
+- "Percentage of the dataset read" as the headline. Report wall time against a tuned scan of the visible set,
+  and pages when on disk.
+- The approximate mode and ANN-Benchmarks chasing (balanced k-means, SOAR, graphs over centres, stopping rules).
+  That is rebuilding ScaNN against strong incumbents and says nothing about the project's point.
+- The YFCC track. Its own design says the level stream is not the tool; the winners are filter-first brute
+  force, which is the competitor's argument. The L2 and uint8 ports go with it.
+- Cluster-level bounds, more anchors, finer clusters. Measured dead.
+- Closing the text gap from data alone, profile tuning, stand-in queries.
+- Tightening the local-basis code toward its floor (1.36-1.42x) before the kernel is 10x faster.
+- Comparing against hnswlib through a Python callback.
+- Growing two code families, two metrics and two modes at once. Pick the 1-bit certified level first; add local
+  bases back only where item queries on structured data are shown to be the workload.

@@ -1,0 +1,47 @@
+N=290000 n=256 K=1024 prep 10s  mean |r|=0.922  mean kth score=0.427
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial_ny.py:48: RuntimeWarning: invalid value encountered in divide
+  fac = rn / (cn * cos)
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial_ny.py:49: RuntimeWarning: invalid value encountered in divide
+  sd = rn * np.sqrt(np.maximum(1 - cos * cos, 0)) / cos / np.sqrt(n - 1)
+b=1: 32.0 B/item, mean cos 0.7990, mean sd 0.0435, err/sd: sd 1.006 share |z|>3 2.69e-03 >5 1.04e-04 >9.35 3.34e-05; items with sd<1e-4: 776
+  nprobe=   16 m= 0.00 scanned=      484 rerank=      72 recall=0.2950 recall_eps=0.2985 model=     36 us ->  27721 QPS
+  nprobe=   16 m= 1.00 scanned=      484 rerank=      56 recall=0.2905 recall_eps=0.2950 model=     35 us ->  28480 QPS
+  nprobe=   16 m= 2.00 scanned=      484 rerank=      77 recall=0.2965 recall_eps=0.2990 model=     36 us ->  27481 QPS
+  nprobe=   16 m= 3.00 scanned=      484 rerank=     109 recall=0.2970 recall_eps=0.2990 model=     38 us ->  26091 QPS
+  nprobe=   16 m= 9.35 scanned=      484 rerank=     390 recall=0.2970 recall_eps=0.2990 model=     55 us ->  18124 QPS
+  nprobe=   64 m= 0.00 scanned=     1960 rerank=     100 recall=0.4125 recall_eps=0.4195 model=     41 us ->  24197 QPS
+  nprobe=   64 m= 1.00 scanned=     1960 rerank=      90 recall=0.4085 recall_eps=0.4160 model=     41 us ->  24538 QPS
+  nprobe=   64 m= 2.00 scanned=     1960 rerank=     173 recall=0.4165 recall_eps=0.4230 model=     46 us ->  21884 QPS
+  nprobe=   64 m= 3.00 scanned=     1960 rerank=     311 recall=0.4175 recall_eps=0.4235 model=     54 us ->  18526 QPS
+  nprobe=   64 m= 9.35 scanned=     1960 rerank=    1417 recall=0.4170 recall_eps=0.4240 model=    120 us ->   8310 QPS
+  nprobe=  256 m= 0.00 scanned=    25351 rerank=     100 recall=0.6675 recall_eps=0.6840 model=     98 us ->  10230 QPS
+  nprobe=  256 m= 1.00 scanned=    25351 rerank=     161 recall=0.6780 recall_eps=0.6970 model=    101 us ->   9863 QPS
+  nprobe=  256 m= 2.00 scanned=    25351 rerank=     495 recall=0.6900 recall_eps=0.7060 model=    121 us ->   8236 QPS
+  nprobe=  256 m= 3.00 scanned=    25351 rerank=    1357 recall=0.6890 recall_eps=0.7070 model=    173 us ->   5775 QPS
+  nprobe=  256 m= 9.35 scanned=    25351 rerank=   16718 recall=0.6905 recall_eps=0.7075 model=   1095 us ->    913 QPS
+  nprobe= 1024 m= 0.00 scanned=   290000 rerank=     100 recall=0.9130 recall_eps=0.9265 model=    736 us ->   1359 QPS
+  nprobe= 1024 m= 1.00 scanned=   290000 rerank=     234 recall=0.9690 recall_eps=0.9835 model=    744 us ->   1344 QPS
+  nprobe= 1024 m= 2.00 scanned=   290000 rerank=    1012 recall=0.9895 recall_eps=0.9990 model=    791 us ->   1265 QPS
+  nprobe= 1024 m= 3.00 scanned=   290000 rerank=    3823 recall=0.9890 recall_eps=0.9995 model=    959 us ->   1042 QPS
+  nprobe= 1024 m= 9.35 scanned=   290000 rerank=  156285 recall=0.9900 recall_eps=1.0000 model=  10107 us ->     99 QPS
+b=2: 64.0 B/item, mean cos 0.9277, mean sd 0.0232, err/sd: sd 1.027 share |z|>3 2.83e-03 >5 2.04e-04 >9.35 9.87e-05; items with sd<1e-4: 785
+  nprobe=   16 m= 0.00 scanned=      484 rerank=      72 recall=0.2970 recall_eps=0.2990 model=     37 us ->  26958 QPS
+  nprobe=   16 m= 1.00 scanned=      484 rerank=      46 recall=0.2950 recall_eps=0.2980 model=     36 us ->  28119 QPS
+  nprobe=   16 m= 2.00 scanned=      484 rerank=      53 recall=0.2965 recall_eps=0.2990 model=     36 us ->  27781 QPS
+  nprobe=   16 m= 3.00 scanned=      484 rerank=      63 recall=0.2965 recall_eps=0.2990 model=     37 us ->  27335 QPS
+  nprobe=   16 m= 9.35 scanned=      484 rerank=     195 recall=0.2965 recall_eps=0.2990 model=     44 us ->  22472 QPS
+  nprobe=   64 m= 0.00 scanned=     1960 rerank=     100 recall=0.4175 recall_eps=0.4240 model=     45 us ->  21994 QPS
+  nprobe=   64 m= 1.00 scanned=     1960 rerank=      55 recall=0.4155 recall_eps=0.4215 model=     43 us ->  23382 QPS
+  nprobe=   64 m= 2.00 scanned=     1960 rerank=      76 recall=0.4180 recall_eps=0.4235 model=     44 us ->  22713 QPS
+  nprobe=   64 m= 3.00 scanned=     1960 rerank=     111 recall=0.4180 recall_eps=0.4240 model=     46 us ->  21677 QPS
+  nprobe=   64 m= 9.35 scanned=     1960 rerank=     697 recall=0.4175 recall_eps=0.4240 model=     81 us ->  12300 QPS
+  nprobe=  256 m= 0.00 scanned=    25351 rerank=     100 recall=0.6880 recall_eps=0.7060 model=    151 us ->   6610 QPS
+  nprobe=  256 m= 1.00 scanned=    25351 rerank=      60 recall=0.6840 recall_eps=0.7010 model=    149 us ->   6716 QPS
+  nprobe=  256 m= 2.00 scanned=    25351 rerank=      98 recall=0.6895 recall_eps=0.7060 model=    151 us ->   6616 QPS
+  nprobe=  256 m= 3.00 scanned=    25351 rerank=     187 recall=0.6900 recall_eps=0.7070 model=    156 us ->   6391 QPS
+  nprobe=  256 m= 9.35 scanned=    25351 rerank=    5363 recall=0.6895 recall_eps=0.7075 model=    467 us ->   2141 QPS
+  nprobe= 1024 m= 0.00 scanned=   290000 rerank=     100 recall=0.9815 recall_eps=0.9940 model=   1349 us ->    742 QPS
+  nprobe= 1024 m= 1.00 scanned=   290000 rerank=      60 recall=0.9765 recall_eps=0.9900 model=   1346 us ->    743 QPS
+  nprobe= 1024 m= 2.00 scanned=   290000 rerank=     105 recall=0.9885 recall_eps=0.9975 model=   1349 us ->    741 QPS
+  nprobe= 1024 m= 3.00 scanned=   290000 rerank=     232 recall=0.9890 recall_eps=0.9995 model=   1357 us ->    737 QPS
+  nprobe= 1024 m= 9.35 scanned=   290000 rerank=   23154 recall=0.9900 recall_eps=1.0000 model=   2732 us ->    366 QPS

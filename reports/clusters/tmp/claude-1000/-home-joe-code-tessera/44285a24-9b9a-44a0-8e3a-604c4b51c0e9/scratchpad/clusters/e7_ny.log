@@ -1,0 +1,12 @@
+[     1s] nytimes-256-angular N=290000 n=256 K=1024 queries=200; mean |r| 0.908; mean k-th score 0.427; score sd 0.065
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/clusters/e7_onesided.py:42: RuntimeWarning: invalid value encountered in divide
+  fac = rn / (cn * cos); sd = rn * np.sqrt(np.maximum(1 - cos * cos, 0)) / cos / np.sqrt(n - 1)
+[     3s] b=1: 32.0 B/item, mean sd 0.0428; error/sd over all pairs: sd 138.838, most negative -178813.93; over the true top-10 only: most negative -2.94
+[     4s] b=2: 64.0 B/item, mean sd 0.0229; error/sd over all pairs: sd 138.838, most negative -178813.93; over the true top-10 only: most negative -2.89
+[     6s] b=4: 128.0 B/item, mean sd 0.0060; error/sd over all pairs: sd 138.839, most negative -178813.93; over the true top-10 only: most negative -3.30
+[     7s] c= 3.00: survive 1 bit      3508 (  1.2%), 2 bits      185 ( 0.06%), 4 bits      17 (0.006%); true top-10 items lost 0; bytes read 9.4 MB (6.3% of f16 data); modelled 0.71 ms
+[     7s] c= 5.00: survive 1 bit     25071 (  8.6%), 2 bits     1208 ( 0.42%), 4 bits      25 (0.009%); true top-10 items lost 0; bytes read 10.2 MB (6.9% of f16 data); modelled 0.79 ms
+[     7s] c= 7.02: survive 1 bit     78623 ( 27.1%), 2 bits     5691 ( 1.96%), 4 bits      40 (0.014%); true top-10 items lost 0; bytes read 12.2 MB (8.2% of f16 data); modelled 0.98 ms
+[     8s] c= 8.60: survive 1 bit    129344 ( 44.6%), 2 bits    14727 ( 5.08%), 4 bits      60 (0.021%); true top-10 items lost 0; bytes read 14.4 MB (9.7% of f16 data); modelled 1.18 ms
+[     8s] c= 9.35: survive 1 bit    151959 ( 52.4%), 2 bits    21464 ( 7.40%), 4 bits      73 (0.025%); true top-10 items lost 0; bytes read 15.6 MB (10.5% of f16 data); modelled 1.29 ms
+[     8s] done

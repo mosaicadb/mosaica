@@ -1,0 +1,232 @@
+INTEGER DECISION KERNEL ON THE REAL INDEX: DESIGN AND PROOFS
+Tags: [proved] = argument given here in full; [argued] = reasoning from the code and counts, not measured;
+[guessed] = an estimate that needs a measurement. Nothing was run except one numpy check (noted).
+Sources read: DESIGN.md, CONSOLIDATED_PROOFS.md, REPORT2.md, rust/src/v2/{kern,q,mod}.rs, results/levels2.csv,
+results/breakdown2_text.csv, microbench kern.rs/main.rs at 39eff3264.
+
+SUMMARY OF THE DESIGN
+ a. Decide in fine integer units with two u16 accumulators (sum of high bytes, sum of low bytes) and a two-word
+    compare. This removes the microbench's coarse-step loss (its 3-5%) instead of accepting it.
+ b. No key bin. The per-item threshold is computed once per candidate from its key (v2 already does this work in
+    its init) and held as integers. No stored half byte, no bin loss, and each item's decision still depends only
+    on its own data.
+ c. Tables: one float build per (group, level); per cluster an integer combine T_c = T_q - alpha*T_m, where T_m is
+    the centre's table, query-independent, built and stored at index build. alpha* is kept, so nothing widens.
+ d. Randomised levels: 16-bit fixed-point multiplier (one vpmulhrsw per touched block), products updated
+    incrementally for the blocks a level touches, outward-rounded classes only on the half-width side.
+ e. k-NN: out-test only; floats only for survivors. Re-pack threshold depends on the next level's size.
+ Predicted: text 1% answer 83.5 -> about 50 ms wall (range 44-56); item k-NN 4.8 -> about 4.3 ms.
+
+0. THE REAL-VALUED BOUND BEING IMPLEMENTED (from run_cluster, q.rs)
+ Item i, cluster c, level l. From the key alone: s_i > 0 (item scale) and mr_i. Per (query, cluster): qm, alpha,
+ dwa_l, nd_j, fixed, ewdet. tau_u(e) = ideal table of 4-bit unit u (real arithmetic on the f32 weights
+ w = wq - alpha*mu_c). A_i = sum over units up to level l of tau_u(code_iu). D = the query's dial.
+ Deterministic certificate (A0):  | q.x_i - (qm + alpha*mr_i + s_i*A_i) | <= s_i*(rho_l(n_i) + ewdet) + fixed,
+ with rho_l(n) = dwa_l * pconst_l * ntab_l[n] * (1+1e-6), n_i the item's 4-bit norm code (15 = escape), the right
+ side times D. v2 evaluates this in f32 and adds edet (table quantisation) and fl (f32 evaluation).
+ Randomised certificate (A1), the same divided through by s_i (every per-item multiplier is s_i times a function
+ of stored codes): estimate/s = A_i + sum_j k_ij*A_ij, half-width/s = hdet_i + hpar_i + csg*sqrt(V_i), where
+ k_ij = y_ij*ktab[ck_ij] (y_ij from an 8-bit code, ck per rise), hdet_i = sum over rate-0 blocks of y_ij*nd_j,
+ hpar_i = edet+ewdet + sum_j (dmx_j*|k_ij*A_ij| + k_ij*(ej_j+ewj_j)), V_i = sum_j (y_ij*th_ij*nd_j)^2/(nb_j-1).
+
+1. DETERMINISTIC LEVELS
+ 1.1 Tables. One fine step sigma > 0 per cluster for all deterministic levels. For unit u:
+     theta_u(e) = round((T_u(e) - b_u)/sigma), an integer in [0, 2^(h+8) - 1], split hi = theta >> 8 (h bits),
+     lo = theta & 255, with b_u <= min_e T_u(e). |sigma*theta_u(e) + b_u - tau_u(e)| <= delta_u = sigma/2 + f_u,
+     f_u the float build error v2 already bounds ((48+2nu)*2^-24*sabs). B_l = sum of b_u and e_l = sum of delta_u
+     over units up to level l. The integer part of B_l/sigma is added to the accumulators as a per-level constant,
+     so the sums below are signed and centred; write B_l for the remainder (|B_l| < sigma).
+ 1.2 Accumulators. Hs_i = sum of hi lookups, Ls_i = sum of lo lookups, both kept across levels. Then
+     Theta_i = 256*Hs_i + Ls_i = sum of theta exactly, and |sigma*Theta_i + B_l - A_i| <= e_l.            (1)
+     [proved] No overflow: |Hs| <= U*(2^h - 1), 0 <= Ls <= 255*U, U = 64 units through the 32-byte level.
+ 1.3 Thresholds. Divide (A0) by s_i > 0:
+       q.x_i >= t  if  A_i - D*(rho_l(n_i)+ewdet) >= Kin_i  := (t + D*fixed - qm - alpha*mr_i)/s_i
+       q.x_i <  t  if  A_i + D*(rho_l(n_i)+ewdet) <  Kout_i := (t - D*fixed - qm - alpha*mr_i)/s_i
+     Per item, once, from its key: Tin_i = ceil(Kin_i/sigma), Tout_i = floor(Kout_i/sigma), computed in f64 (or
+     f32 with a relative 2^-20 and one-step outward slack), each stored as two words (TH, TL), TL in [0,255].
+     Per level, a 16-entry table over the norm code: R_l(n) = ceil((D*(rho_l(n)+ewdet) + e_l + |B_l|)/sigma),
+     stored as (RH, RL).
+     RULE:  IN  iff  Theta_i - R_l(n_i) >= Tin_i.      OUT  iff  Theta_i + R_l(n_i) < Tout_i.
+     Escapes (n = 15), and any code or item whose R or T does not fit the ranges of 1.4, set a per-lane mask that
+     forces "undecided" (v2 already forms the escape mask); they go to the next level or the cold path.
+ THEOREM D [proved]. IN implies lower bound >= t and OUT implies upper bound < t for the bound (A0); so every
+ integer decision is implied by the real-valued certificate.
+   Proof. IN: sigma*Theta >= sigma*Tin + sigma*R >= Kin + D*(rho+ewdet) + e_l + |B_l|. By (1),
+   A_i >= sigma*Theta + B_l - e_l >= Kin + D*(rho+ewdet). Multiply by s_i > 0 and rearrange: that is
+   qm + alpha*mr_i + s_i*A_i - D*(s_i*(rho+ewdet) + fixed) >= t. OUT: sigma*Theta + sigma*R < sigma*Tout <= Kout,
+   and by (1) A_i <= sigma*Theta + B_l + e_l, so A_i + D*(rho+ewdet) < Kout; rearrange likewise. QED.
+   Rounding directions: R up, Tin up, Tout down, e_l and |B_l| added on both sides; every one widens.
+ 1.4 Evaluation and saturation.  d = Hs - TH -/+ RH,  g = Ls - TL -/+ RL,  IN iff d + (g >> 8) >= 0 (arithmetic
+     shift), OUT iff the same expression with +R is < 0.
+     LEMMA [proved]. For integers d, g: 256*d + g >= 0 iff d + floor(g/256) >= 0. (Write g = 256*f + r, 0 <= r <
+     256; if d + f <= -1 then 256*(d+f) + r <= -1; if d + f >= 0 the sum is >= 0.)
+     Saturation [proved by ranges]: choose h so that 2*U*(2^h - 1) + Rcap + 64 <= 32767 (U = 64: h = 7, Rcap =
+     16000 coarse steps). An undecided item's threshold lies within the accumulator's range plus R, so a TH outside
+     +-(U*(2^h-1) + Rcap) is replaced by the mask, as is RH > Rcap. On unmasked lanes no intermediate leaves
+     the int16 range, so the saturating adds never saturate and the compare is exact. g lies in [-510, 16320].
+     Numpy check of the two-word compare against the 24-bit compare, 2M cases with half near the threshold:
+     0 mismatches for IN and OUT.
+ 1.5 Losses, per side, in fine steps sigma: table quantisation e_l <= U/2 = 32 (same term as v2's edet); R, Tin,
+     Tout rounding <= 1 each; float slack on T <= 1; |B_l| < 1. Total under 40 fine steps = 0.3 of one of the
+     microbench's 8-bit coarse steps (a fine step here is 2^-15 of the widest unit range). The per-item half-width is not re-quantised: ntab is already a 15-value grid and R_l is its exact
+     ceiling. [argued] If the microbench's 3-5% came from about 1.5-2 coarse steps of rounding plus 16 key bins,
+     the half-width is 30-60 coarse steps and this design loses 0.5-1% from e_l (as v2 does today) and nothing
+     more. [guessed] the extra cost over the microbench kernel is about 10 vector ops per 32 items and 8 bytes of
+     state per item, +0.05-0.1 ns per item-level.
+ 1.6 The key bin is not needed in any variant. Items are sorted by key within a cluster, so a quantile bin is a
+     position range (the microbench built its bins exactly so): the half byte could be synthesised from the item
+     index. Per-item thresholds are better still: zero loss, the cost is v2's existing init (key gather, sqrt,
+     divide; 2.5 of 83.5 ms), and a decision depends only on the item's own data. A per-block or per-bin threshold
+     makes the level at which an item is decided depend on its block-mates; results stay exact, but under a dial
+     other than 1 "masked result = result over the visible set" would no longer hold. [argued]
+
+2. RANDOMISED LEVELS
+ 2.1 Candidates.
+  (a) kappa in 16 classes folded into a shuffle. Sound with the error term eta*|k*A_ij| added (eta = half the
+      class ratio; 16 classes over 3 octaves gives 6.7%). The loss is eta times the block's signal, not its
+      half-width: small at sub-bit rates (signal << half-width), 3-7% of the half-width at high rates [argued].
+      It does not remove the multiply: a shuffle yields the multiplier, it cannot apply it per lane. Rejected.
+  (b) Sort or bucket by kappa class. Rejected [proved impossible in general]: an item has 4 blocks and a new
+      kappa at every rise, and the order within a cluster is already fixed by the key, which the sorted-range cut
+      needs. At most one multiplier could be made block-constant.
+  (c) Per-class threshold pair, A >= T/kappa. Rejected [proved]: with 4 blocks the test is sum_j k_j*A_j >= T_i
+      with a per-item T_i (the frozen blocks and the deterministic part), so the threshold per class is not a
+      class constant; it needs a per-item division, which is no cheaper than the multiply.
+  (d) CHOSEN: fixed-point multiply. The multiply is one instruction; what costs in v2 is the int-to-float
+      conversion, 256-entry float gathers, a sqrt and a loop over all 4 blocks at every level, and 20 float state
+      arrays compacted per survivor.
+ 2.2 Formulation. Output step sigma_r per cluster; block table step sigma_j = sigma_r / kmax_j (kmax_j = top of
+     the block's kappa grid), so the real multiplier m_ij = k_ij*sigma_j/sigma_r is in (0, 1]. State per survivor:
+     Din_i, Dout_i (int16: the deterministic margins (Theta - Tin - R') and (Theta + R' - Tout) of 1.3 without
+     the norm term, shifted down to sigma_r with floor and ceiling respectively), and per block Theta'_ij (int16,
+     centred), K_ij = round(2^15*m_ij), P_ij = mulhrs(Theta'_ij, K_ij), Q_ij, Y_ij.
+     Per level, only for the blocks the level touches (the others' P and Q are unchanged):
+       Theta'_ij += the level's table sums;
+       on a rise: K_ij = mulhi(Y_ij, KT[ck_ij]), Q_ij = ceiling of (y_ij*th_ij*nd_j)^2/(nb_j-1) in units;
+       P' = mulhrs(Theta', K);  M_i += P' - P_ij;  V_i += Q' - Q_ij;
+       W_i = ceil(csg*sqrt(V_i)) + sum_j mulhi(|P_ij|, dmx_j + 2^-12) + sum_j ceil(K_ij*(ej_j+ewj_j+sigma_j/2))
+             + hdet_i + 2*(coded blocks) + const_l         (all rounded up; W >= Wcap sets the mask)
+       IN iff Din_i + M_i - W_i >= 0.     OUT iff Dout_i + M_i + W_i < 0.
+     8-bit codes on geometric grids decode as two 16-entry lookups and one mulhi (2^((16a+b)/L) =
+     2^(16a/L)*2^(b/L)), replacing the 256-entry gathers [argued; relative error 2^-14, inside the 2^-12 above].
+     The sqrt stays as one float sqrt per 16 lanes, rounded up; it is not the cost.
+ LEMMA R [proved; product bound also checked in numpy on 2M cases]. |P - m*Theta'| <= 1/2 + |Theta'|*2^-15 <=
+   1.5. Hence |sigma_r*P_ij - k_ij*A_ij| <= sigma_r*(2 + e_j/sigma_j): the deterministic slack per coded block
+   that W carries.
+ THEOREM R [proved given Lemma R and Lemma 8 of the proofs]. Let I*_i be the ideal randomised interval and I_i
+   the integer one. For every seed, I_i contains I*_i, so {integer decision wrong} is inside {q.x_i outside
+   I*_i}. The guarantee is unchanged: probability over the seed at most 2*exp(-c^2/2) per (item, level), with the
+   same union over (item, level) pairs.
+   Why the union and independence survive: (1) all rounding is a function of the item's stored codes and of
+   (query, cluster) constants; by Lemma 8 the error direction u is uniform conditional on the code, so widening
+   conditional on the code cannot raise the conditional failure probability. (2) The set U of Proposition 12 is
+   fixed by the deterministic decisions, which do not read the seed; the integer deterministic kernel decides
+   slightly fewer items, so U grows, but csg is set from a union over all N x levels pairs, which contains any U.
+   (3) No new events: one interval per (item, level), as before.
+ Loss [argued]: estimate side <= about 2.5 output steps per touched block, under 0.5% when the half-width is over
+   2,000 steps (sigma_r is chosen for that; margins of survivors fit int16 because a survivor's margin is within
+   its half-width). Half-width side: the multiplier error adds 2^-12 to dmx (0.135% for 8-bit kappa codes, so
+   +18% of that small term), Q rounding under 0.1%.
+ Overflow: a block with more than 127 units uses hi tables one bit narrower (general rule 2*U_j*(2^h-1) <=
+   32767). [proved by ranges]
+
+3. TABLES PER (GROUP, LEVEL)
+ Algebra [proved]. v2's weights are w_c = wq - alpha_c*mu_c (q.rs cluster_q2a: wq is per group, mu_c the centre
+ in the same coordinates, for deterministic coordinates and randomised positions alike). Tables are linear in
+ the weights, so tau^c_u(e) = tau^q_u(e) - alpha_c*tau^m_u(e), with tau^q per (query, group, level) and tau^m
+ per cluster and independent of the query.
+ Why REPORT2's shared tables widened: that variant set alpha = 0 (cluster_q2a with alpha0), so the Cauchy-Schwarz
+ factor became the weighted norm of q instead of q - alpha*m (dwa_l and nd_j computed with a = 0), which is why it
+ read 40-46% more bytes. It dropped the optimisation, not just the tables.
+ This design keeps alpha* and its dwa, nd unchanged and builds the same table by integer combination:
+   theta^c_u(e) = mulhi(theta^q_u(e), fq) -/+ mulhi(theta^m_u(e), fm) + bias_u,
+   fq = 2^16*sigma_g/sigma_c, fm = 2^16*|alpha_c|*sigma_m/sigma_c, sigma_c = max_u(range^q_u + |alpha_c|*range^m_u)
+   / (2^(h+8) - 8), bias_u from the stored per-unit extremes (no horizontal minimum).
+ theta^m is built once at index build, stored per cluster as 16-bit entries (32 bytes per unit: 2 KB per cluster
+ for the deterministic levels, 16 KB through 256 B, about 5% of a 1,000-item cluster's codes).
+ Bound [proved]: the real table is identical, so estimate and half-width are identical; only the rounding term
+ changes, from 0.5 to at most 0.5 + 0.5 + 2 fine steps per unit (two source roundings scaled by factors <= 1, two
+ floors), so e_l <= 3*U*sigma_c = 192 fine steps = 1.5 of the microbench's coarse steps at U = 64. [argued] that is 2.5-5%
+ of a 30-60 step half-width if taken at face value; halve it with a rounding mulhrs and by rounding the stored
+ theta^m to nearest (to about 1.5 fine steps per unit, 1-2.5%), or carry 32-bit intermediates in the combine
+ (0.5 per unit, as today). This is the one place the design can leak tightness; test 2 below measures it.
+ A per-item stored scalar (the centre's component of the coding error) also keeps the bound, but costs 0.5-1 byte
+ per item per level and a per-item multiply; rejected for that.
+ Work per query (text, 1M, about 1,000 clusters opened, 64 groups):
+   before: one float build per (cluster, level reached): 13.0 ms, 13 us per cluster.
+   after: one float build per (group, level): 2.3 ms (REPORT2's shared variant measured 2.27); plus per cluster
+   one pass over units x 16 entries: 1,024 entries for the deterministic levels = 32 zmm of about 8 ops, roughly
+   100 cycles; 300 cycles through 96 B; so 0.1 us per cluster, 0.1 ms per query [argued]; plus reading theta^m,
+   2-6 KB per cluster, 0.2-0.6 ms if cold [guessed]. Tables: 13.0 -> about 2.5-3 ms.
+
+4. k-NN ONE-SIDED TEST AND RE-PACKING
+ One-sided test. The sweep needs only OUT against tau (tau_1 from the seed, then the k-th largest lower bound).
+ OUT iff Theta_i + R_l(n_i) < Tout_i(tau): half the decision work and half the threshold state. Sound [proved]:
+ by Theorem D an excluded item has q.x < tau, and tau never exceeds the true k-th best score because it is the
+ k-th largest of valid lower bounds (or exact scores); strictness handles ties. tau is fixed during a cluster
+ run and raised between clusters (and may be raised between levels by recomputing Tout for survivors only).
+ Survivors, which are few, get float intervals from the integer state on a cold path (outward), feeding the
+ existing selection unchanged. [guessed] the microbench's 7-13% k-NN loss was the coarse step against a threshold
+ in the tail of the score distribution, where the survivor count is steep in the bound; the fine compare should
+ remove most of it.
+ Re-pack against live mask, in vector ops per 32 survivors, for a level of U rows at occupancy f (from kern.rs:
+ kernel about 14 ops per 4 rows per block for hi and lo; gather 3 ops per 4 rows per source block, then 6 to
+ finish; planning about 60):
+   live mask: (1/f)*(U/4)*14            re-pack: (1/f)*(U/4)*3 + (U/4)*20 + 60
+   re-pack wins iff f < 11/(20 + 240/U): f* = 0.22 for a 4-byte level (U = 8), 0.31 for 8 bytes, 0.40 for 16,
+   0.55 in the limit. [argued from op counts; constants guessed, to be calibrated like the planner's]
+ v2 switches at a fixed 0.6 and then re-packs every block of every later level; with the cheaper kernel a re-pack
+ is relatively dearer, so that is too eager for the 4- and 8-byte levels that carry most item-levels.
+ Policy: keep slot order with holes (no state movement) while occupancy >= f*(U of the next level); compact once
+ when it falls below; afterwards re-pack, but treat any source block whose live fraction is >= 0.55 in place.
+ State is 8-12 bytes per item at deterministic levels and about 30 at randomised ones (v2: 12 and 80 or more), so
+ the compaction that sits inside "bounds" shrinks in proportion.
+
+5. PREDICTED EFFECT
+ Text, 1% answer, 1 thread, 83.5 ms. Inputs: levels2.csv gives 2.2 ns per item-level at 4-byte deterministic
+ levels and 2.9 at 8-byte ones, so about 0.05 ns per unit and 1.7 ns fixed per item-level; randomised levels
+ 3.9-8.1. Item-levels are not in the result files; I assume 5.5M deterministic and 3M randomised (64.8 bytes per
+ item on the index path, 37 through the deterministic levels) [guessed].
+   Tables           13.0 -> 2.8   (section 3)
+   Bounds           24.2 -> 5.5   (deterministic 5.5M x 1.5 ns = 8 -> 5.5M x 0.3 = 1.7; randomised 16 -> 3.8,
+                                   3M x 1.25 ns: about 70 ops per 32 items plus compaction of 14 short vectors)
+   Decode           19.3 -> 15.5  (same shuffles; the lane reduction and float conversion go, which is over half
+                                   the ops at 8-unit levels; the rest is bound by reading 65 MB of codes)
+   Re-pack          17.9 -> 12    (level-aware threshold, in-place dense blocks; +1% bytes from loss)
+   Basis             6.8 -> 6.8
+   Other            12.5 -> 12.9  (anchor and cut 3.7, rotations 1.0, cluster setup 1.9, full vectors 3.2,
+                                   init 2.5 -> 2.9 for the integer thresholds, bitmap 0.2)
+   Sum of parts     93.7 -> 55.5 (-41%). The listed parts sum to the 93.75 ms of CPU the file reports, not to the
+   83.5 ms wall; scaling by 83.5/93.7 gives wall 83.5 -> about 50 ms, range 44-56. All [guessed] from the
+   arithmetic above.
+   With the microbench's coarse rule instead (3-5% wider bounds): add 2-3 ms.
+ At 4 threads (23 ms) expect less than that: decode and re-pack are memory-bound there. [guessed]
+ Item k-NN, 4.8 ms median: no breakdown exists in results/. Text shows anchor plus cut at 3.7 ms and those do not
+ shrink for items (77% of centres opened), so the kernel-side share is at most about 1.5 ms. Saving 40% of that
+ gives 4.8 -> about 4.2-4.5 ms [guessed]. The integer kernel is not the lever for item k-NN; the cut and the seed
+ are. The item breakdown should be measured before any claim.
+
+6. ORDER, TESTS, RISKS
+ 0. Checker. In verify mode compute (A0)/(A1) in f64 and assert, for every integer decision, the implication of
+    Theorems D and R, besides the existing truth check. Pass: 0 failures; this is deterministic, not statistical.
+ 1. Deterministic levels, per-cluster tables as now, per-item thresholds, two-word compare, in the levels2
+    harness and in run_cluster. Pass: 0 implication failures on 569 x 4 queries; survivors per level within 1% of
+    v2's; 4-byte level at most 1.0 ns per item-level (v2 2.2). Fail on either number: stop.
+ 2. Tables per (group, level) with stored centre tables (format version bump). Pass: bytes read within 0.5% of
+    step 1; tables at most 3 ms at text 1%.
+ 3. Re-pack policy. Pass: re-pack plus decode below step 2 at both 1% and 5%; no regression at 0.01%.
+ 4. Randomised levels. Pass: 0 implication failures and 0 randomised violations over the 731M checks; bytes
+    within 2% of v2; at most 2 ns per item-level (v2 4-8).
+ 5. k-NN one-sided. Pass: exact on 569/569 and filtered runs; time no worse at every visibility.
+ 6. End to end at 1M against section 5, then 10M.
+ What could still sink it:
+  - Memory. Decode and re-pack mostly stream codes from RAM; in-cache gains (the microbench) do not transfer.
+    If step 1 shows under 20% end to end, the remaining steps buy little beyond tables.
+  - Randomised levels are the least certain: the per-rise scalars are in the format and must be decoded per
+    item; my 1.25 ns is a count of ops, not a measurement. If the three-table decode of kappa is slow or the
+    grids are not commensurate, the gather stays.
+  - Section 2 assumes a touched block always rises and few blocks are touched per level; if most levels touch
+    all 4, the incremental update saves nothing (still sound).
+  - Integer ranges at the 192-256 B levels (narrower tables, more rounding per unit) and escapes on the cold path.
+  - The stored centre tables add 5% to the index and a cold read per cluster.
+  - Compress of 16-bit lanes needs AVX-512 VBMI2; without it use byte-permute compaction or holes only.

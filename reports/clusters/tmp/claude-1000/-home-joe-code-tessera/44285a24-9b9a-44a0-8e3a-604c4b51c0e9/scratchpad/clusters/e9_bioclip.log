@@ -1,0 +1,12 @@
+WARNING clustering 200 points to 16 centroids: please provide at least 624 training points
+[     3s] bioclip N=200000 n=768 K=200 groups=16; mean |r| 0.371; pooled residual energy in top D: D=32: 0.361, D=64: 0.556, D=128: 0.771, D=256: 0.935
+[    13s] share of a group's residual energy in its top j coded directions, j = 4, 8, 16, 32, 64
+[    13s]                               own basis (n x n per group): 0.133, 0.230, 0.372, 0.544, 0.719
+[    13s]                           pooled basis, no local rotation: 0.068, 0.118, 0.211, 0.351, 0.546
+[    13s]       rotation inside the pooled top 64 (D x D per group): 0.117, 0.199, 0.314, 0.443, 0.546
+[    13s]      rotation inside the pooled top 128 (D x D per group): 0.126, 0.218, 0.349, 0.506, 0.658
+[    13s]      rotation inside the pooled top 256 (D x D per group): 0.131, 0.228, 0.367, 0.536, 0.707
+[    13s]   projection cost for 64 groups at n=768: nested D=64: 0.31M multiply-adds; own bases: 37.7M
+[    13s]   projection cost for 64 groups at n=768: nested D=128: 1.15M multiply-adds; own bases: 37.7M
+[    13s]   projection cost for 64 groups at n=768: nested D=256: 4.39M multiply-adds; own bases: 37.7M
+[    13s] done

@@ -1,0 +1,20 @@
+[     1s] glove-100-angular K=16384 N=1183514 n=100 queries=1000; centre norm mean 0.647; key sd per query 0.074
+[     5s] flat (all centres exact): 0.85% (p=61) | 1.99% (p=153) | 6.71% (p=574)   cost 16384 centres x 100 dims = 1.64M mults
+[     6s] centre energy in the first d principal coordinates: d=4: 0.388, d=8: 0.465, d=16: 0.562, d=32: 0.694, d=48: 0.791, d=64: 0.871
+[     6s] query energy in the same coordinates: d=4: 0.204, d=8: 0.264, d=16: 0.353, d=32: 0.500, d=48: 0.631, d=64: 0.756
+[     6s] lossless prefix, top p=64: d=8: 15910 left (0.97 of flat); d=16: 15193 left (0.94 of flat); d=32: 12463 left (0.84 of flat); d=48: 7683 left (0.72 of flat); d=64: 2839 left (0.70 of flat); d=80: 532 left (0.81 of flat)
+[     6s] lossless prefix, top p=256: d=8: 16267 left (0.99 of flat); d=16: 15972 left (0.98 of flat); d=32: 14505 left (0.92 of flat); d=48: 10966 left (0.83 of flat); d=64: 5585 left (0.76 of flat); d=80: 1549 left (0.82 of flat)
+[     7s] lossless prefix, top p=1024: d=8: 16370 left (1.00 of flat); d=16: 16318 left (1.00 of flat); d=32: 15841 left (0.98 of flat); d=48: 14018 left (0.92 of flat); d=64: 9724 left (0.85 of flat); d=80: 4194 left (0.85 of flat)
+[    11s] prefix d=8 m=0.0 R=512: n/a | n/a | n/a   cost 16384x8 + 512x92 = 0.18M mults (0.109 of flat)
+[    14s] prefix d=8 m=0.0 R=2048: n/a | n/a | n/a   cost 16384x8 + 2048x92 = 0.32M mults (0.195 of flat)
+[    19s] prefix d=8 m=2.0 R=512: n/a | n/a | n/a   cost 16384x8 + 512x92 = 0.18M mults (0.109 of flat)
+[    22s] prefix d=8 m=2.0 R=2048: 3.03% (p=234) | n/a | n/a   cost 16384x8 + 2048x92 = 0.32M mults (0.195 of flat)
+[    26s] prefix d=16 m=0.0 R=512: n/a | n/a | n/a   cost 16384x16 + 512x84 = 0.31M mults (0.186 of flat)
+[    30s] prefix d=16 m=0.0 R=2048: 1.61% (p=120) | n/a | n/a   cost 16384x16 + 2048x84 = 0.43M mults (0.265 of flat)
+[    34s] prefix d=16 m=2.0 R=512: n/a | n/a | n/a   cost 16384x16 + 512x84 = 0.31M mults (0.186 of flat)
+[    38s] prefix d=16 m=2.0 R=2048: 0.98% (p=71) | 2.68% (p=209) | n/a   cost 16384x16 + 2048x84 = 0.43M mults (0.265 of flat)
+[    41s] prefix d=32 m=0.0 R=512: 1.23% (p=89) | n/a | n/a   cost 16384x32 + 512x68 = 0.56M mults (0.341 of flat)
+[    45s] prefix d=32 m=0.0 R=2048: 0.88% (p=63) | 2.19% (p=169) | n/a   cost 16384x32 + 2048x68 = 0.66M mults (0.405 of flat)
+[    49s] prefix d=32 m=2.0 R=512: 1.01% (p=73) | 5.10% (p=423) | n/a   cost 16384x32 + 512x68 = 0.56M mults (0.341 of flat)
+[    53s] prefix d=32 m=2.0 R=2048: 0.86% (p=62) | 2.10% (p=162) | 11.06% (p=989)   cost 16384x32 + 2048x68 = 0.66M mults (0.405 of flat)
+[    53s] done

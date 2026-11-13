@@ -1,0 +1,10 @@
+[     6s] glove-100-angular N=1183514 n=100 K=4096 queries=200; mean |r| 0.769; mean k-th score 0.603; score sd 0.119
+[    10s] b=1: 12.5 B/item, mean sd 0.0580; error/sd over all pairs: sd 0.995, most negative -5.25; over the true top-10 only: most negative -2.82
+[    16s] b=2: 25.0 B/item, mean sd 0.0309; error/sd over all pairs: sd 0.995, most negative -5.66; over the true top-10 only: most negative -3.12
+[    21s] b=4: 50.0 B/item, mean sd 0.0080; error/sd over all pairs: sd 0.995, most negative -5.43; over the true top-10 only: most negative -2.91
+[    23s] c= 3.00: survive 1 bit     16185 (  1.4%), 2 bits      732 ( 0.06%), 4 bits      29 (0.002%); true top-10 items lost 0; bytes read 15.0 MB (6.3% of f16 data); modelled 1.36 ms
+[    24s] c= 5.00: survive 1 bit    123739 ( 10.5%), 2 bits     5291 ( 0.45%), 4 bits      57 (0.005%); true top-10 items lost 0; bytes read 16.5 MB (7.0% of f16 data); modelled 1.57 ms
+[    25s] c= 7.02: survive 1 bit    413360 ( 34.9%), 2 bits    25902 ( 2.19%), 4 bits     112 (0.009%); true top-10 items lost 0; bytes read 20.6 MB (8.7% of f16 data); modelled 2.16 ms
+[    27s] c= 8.60: survive 1 bit    692535 ( 58.5%), 2 bits    69038 ( 5.83%), 4 bits     192 (0.016%); true top-10 items lost 0; bytes read 25.2 MB (10.7% of f16 data); modelled 2.79 ms
+[    29s] c= 9.35: survive 1 bit    807470 ( 68.2%), 2 bits   102195 ( 8.63%), 4 bits     248 (0.021%); true top-10 items lost 0; bytes read 27.5 MB (11.6% of f16 data); modelled 3.09 ms
+[    29s] done

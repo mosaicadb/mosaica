@@ -1,0 +1,8 @@
+[     4s] glove-100-angular: 65430 centres from 256 x 256
+[    51s] one Lloyd pass done
+[   120s] assigned; nonempty 65430, mean size 18.1, max 177, mean rad 0.703
+[   126s] K=65430 single assignment f=0.2: 0.76% (p=329) | 1.86% (p=848) | 6.79% (p=3328)
+[   139s] K=65430 + SOAR f=0.2: 0.62% (p=153) | 1.50% (p=400) | 5.13% (p=1504)
+[   144s] K=65430 single assignment f=0.35: 0.68% (p=288) | 1.59% (p=707) | 6.26% (p=3011)
+[   156s] K=65430 + SOAR f=0.35: 0.56% (p=135) | 1.33% (p=343) | 4.81% (p=1369)
+[   156s] done

@@ -1,0 +1,286 @@
+FEWER CLUSTERS OPENED, FEWER ITEMS READ, LOWER FIXED COSTS
+Research notes for the exact, filter-aware vector index. 2026-11-13.
+
+Everything here is a count from a numpy experiment unless marked "modelled" (measured counts
+multiplied by a per-item time) or "argued". Scripts and logs are in this directory:
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/clusters/
+(common.py, e1_additive.py, e2_centres.py, e4_adaptive.py, e6_setbounds.py, e7_onesided.py,
+e8_dirradius.py, e9_nestedbasis.py, e10_bigk.py, and one .log per run). Nothing ran in the
+background; nothing is left running.
+
+Conventions: unit vectors, k = 10, ANN-Benchmarks tolerant recall, the saved balanced k-means
+structures with a SOAR second assignment (probe/K{K}.npz), cluster key = q.c + 0.35 x rms radius.
+Unless stated, the first 1,000 non-zero test queries. My harness reproduces the probe report on that
+subset: glove K = 16,384 balanced + SOAR scans 0.85 / 1.99 / 6.71% of items for recall
+0.9 / 0.95 / 0.99 (the probe report, on all 10,000 queries: 0.91 / 2.16 / 7.84%).
+
+Time calibration used for every modelled figure. The faiss IVF-PQ fast-scan rows in
+glove-100-angular/baselines/baselines.csv (nlist 4,096, 25-byte codes, no re-order) go from 44 us
+at nprobe 1 to 200 us at nprobe 200. That is 2.7 ns per scanned 25-byte code including per-list
+overhead, and about 10 ns per exact 100-dimension centre score, on this machine with other jobs
+running. I use those two measured rates, not the 0.066 ns per byte assumed in the earlier ideas
+report, which was about 40% optimistic here.
+
+
+1. THE SHORT ANSWER
+
+Exact mode. On glove and nytimes no whole-cluster bound excludes anything, and none can be made to:
+an oracle that knew each cluster's true best score would open 0.5% of clusters, the best bound we
+can store opens 98%. So the number of clusters opened cannot be cut on such data. What can be cut is
+(a) how much of each item is read, by a smaller confidence constant that I show is valid for k-NN,
+and (b) the cost of opening, by making it free. The floor is one pass over about one bit per
+dimension of every visible item.
+
+Approximate mode. The items scanned are already near what this family of structures can reach.
+The remaining cost is scoring centres and per-cluster setup. Scoring centres through a compact code
+cuts that stage 3-4x with no loss, a per-query stopping rule cuts items a further 18-30% on glove and
+keeps recall under filters, and K beyond about N/70 stops paying. An additive coarse quantiser (the
+multi-index idea) is dead.
+
+
+2. RANKED PROPOSALS
+
+P1. One-sided certification for k-NN: a union over k items, not N.            [exact; measured]
+
+Mechanism. In k-NN the sweep excludes an item when its upper bound is below a threshold tau. If tau
+is only ever taken from exactly scored items (as the seed already does), tau never exceeds the true
+k-th best score. Then excluding an item that is truly outside the top k is correct whatever its
+estimate did. The answer is wrong only if the upper bound of one of the k true answers fails at one
+of its levels. That set of (item, level) pairs depends on the query and the data but not on the
+seed, so Proposition 12 of the consolidated proofs applies with |U| = k x levels and one side:
+Pr[wrong] <= k L exp(-c^2/2). For k = 10, L = 5, eps = 1e-9 this gives c = 7.02, at any N. The
+design now uses c = 9.35 (two-sided union over 1e9 items x 5 levels). The selection stage must stop
+using randomised lower bounds to raise tau or to certify an item in; it reads the finalists
+exactly instead, which costs at most a few times k full reads.
+
+Effect, with a global rotated nested code of the residual (1, 2, 4 bits per dimension), 200 test
+queries, zero true neighbours lost at every c (e7_*.log):
+
+  glove (N = 1.18M)      survive 1 bit   survive 2 bits   survive 4 bits   bytes per query
+  c = 9.35                   68.2%           8.63%            248          27.5 MB (11.6% of f16)
+  c = 7.02                   34.9%           2.19%            112          20.6 MB ( 8.7%)
+  nytimes (N = 290k)
+  c = 9.35                   52.4%           7.40%             73          15.6 MB (10.5%)
+  c = 7.02                   27.1%           1.96%             40          12.2 MB ( 8.2%)
+
+Version 2 reads 28-34 MB per query across the two datasets (bench/REPORT.md). Largest error over
+the true top 10, the only pairs that matter, was 2.8-3.3 sd over 2,000 pairs per level.
+Modelled time (first pass at the calibrated rate, later levels at twice that rate per byte because
+survivors are sparse, 50-100 ns per full vector): glove 4.3 ms -> 2.9 ms; nytimes 2.35 -> 1.6 ms.
+The counts use the final k-th score as tau from the start; a real pass begins lower, but the first
+1% of items in key order already holds 90% of the true neighbours, so the difference is small
+(argued from the probing counts).
+Cost. No memory. Exactness kept: it is the same theorem with a smaller, seed-independent set.
+Filtering unaffected (the k true answers are the visible ones). Threshold queries do not benefit:
+there both sides and every item matter. On BioCLIP the gain is confined to the randomised levels
+after 32 bytes, where FINDINGS measured c 10 -> 6 as worth about 15% of the bound.
+Cheapest test. In version 2, run knn2 with the one-sided constant in the sweep and exact reads in
+place of randomised lower bounds in the selection; count bytes and compare answers. One day.
+
+P2. Score centres through a compact code, exactly only for the best ~1,000.   [approximate; measured]
+
+Mechanism. Keep a 4-bit product code of each centre and score all centres with the same block
+kernel that scans items; re-score the best R exactly; probe in exact order. No tree, so no good
+cluster is missed for structural reasons; the only loss is code error, and R absorbs it.
+
+  glove K = 16,384 (flat: 0.85 / 1.99 / 6.71% scanned, 16,384 exact centre scores)
+  25-byte codes, R = 1,024:   0.85 / 1.97 / 7.16%     16,384 codes + 1,024 exact
+  25-byte codes, R = 2,048:   0.85 / 1.99 / 6.78%
+  12.5-byte codes, R = 2,048: 0.86 / 2.15 / 10.83%
+  nytimes K = 4,096 (flat: 4.43 / 11.99 / 37.10%)
+  32-byte codes, R = 1,024:   4.55 / 12.27 / 38.51%
+
+Modelled: glove centre stage 16,384 x 10 ns = 165 us flat -> 44 + 10 = 54 us. That is the largest
+single term in the approximate query at recall 0.9 (items cost about 30 us).
+A graph over the centres (inner product on [c, 0.35 rad]) is the alternative for larger K:
+
+  glove K = 16,384, graph M = 16:  ef 128: 1,159 centre scores (7% of flat), 1.01% scanned at 0.9
+                                   ef 256: 1,955 (12%), 0.90 / 2.30%
+                                   ef 1,024: 5,444 (33%), 0.87 / 2.07 / 8.87%
+  nytimes K = 4,096:               ef 256: 2,419 (59% of flat), 4.85 / 12.88%
+
+So the graph wins when K is large and the target is 0.9-0.95, and stops paying at 0.99 or at small K.
+At a billion items with around a million centres a flat code scan is 2-3 ms, so the graph is the
+structure there (argued). A graph over centres does not touch the filter: it only chooses clusters.
+Cost. 25 bytes per centre; a graph adds links (about 130 bytes per centre at M = 16).
+Cheapest test. Point the existing item kernel at a table of centre codes; count as above. Half a day
+in numpy is already done here; native is the kernel plus one table.
+
+P3. Stop per query on the running k-th best, with the offset fitted per visibility level.
+                                                                         [approximate; measured]
+Mechanism. Probe clusters in key order and stop at the first whose key is below (k-th best exact
+score so far) - delta. delta is fitted on corpus items used as queries, once for the unfiltered case
+and once per visibility level with random masks; the query's visible share picks the value. Each
+item's decision still depends only on its own data, and clusters with no visible item cost nothing.
+
+  glove K = 16,384, items scanned (clusters opened), 1,000 test queries, delta from 500 corpus items
+  visible  target   fixed probe count, hindsight   rule, fitted delta          recall reached
+  all      0.90     10,013 (61)                    8,237 (51)                  0.910
+  all      0.95     23,510 (153)                   16,671 (110)                0.957
+  all      0.99     79,387 (574)                   46,326 (335)                0.988 (63,078 at 0.993)
+  10%      0.90     2,441 (159)                    1,745 (115)                 0.906
+  10%      0.95     4,903 (339)                    3,346 (232)                 0.958
+  10%      0.99     15,867 (1,219)                 10,923 (850)                0.994
+  1%       0.90     675 (346)                      481 (247)                   0.901
+  1%       0.95     1,155 (606)                    834 (438)                   0.955
+  1%       0.99     2,750 (1,511)                  1,790 (978)                 0.989
+
+That is 18-42% fewer items at equal or higher recall, and the fitted offsets transfer (one near miss:
+0.988 for 0.99). A probe count chosen for the unfiltered case falls to recall 0.82 at 10% visible and
+0.65 at 1%; the rule with the unfiltered delta does the opposite (0.97 and 0.99, at 2.6-4.6x the items),
+so it fails safe, and the per-visibility fit removes the overshoot.
+On nytimes K = 4,096 the rule gains nothing at 0.95 and 0.99 (34.6k vs 34.8k items; 113k vs 108k)
+and my delta grid bottomed out under filters, so those rows are not usable. Query difficulty there is
+bimodal (median 5 probes, 90th percentile 684) and a single offset does not capture it.
+Cost. A table of a few offsets. Exactness: approximate mode only. Filter exact.
+Cheapest test. Already done for glove. For correlated filters (whole clusters visible or not) rerun
+e4_adaptive.py with a clustered mask; I expect the key to need the cluster's visible count (argued).
+
+P4. Nested local bases: one global projection, then a D x D rotation per group.
+                                                               [exact, fixed cost; measured at 200k]
+Mechanism. Project the query once onto the top D directions of the pooled residuals (n x D). Each
+group's basis is a rotation inside that subspace (D x D); the tail beyond D keeps the global
+coordinates for every group. Opening a group then costs D^2 multiply-adds, not n^2.
+
+  BioCLIP 200k, K = 200, 16 groups: share of a group's residual energy in its top j directions
+  j =                                   4      8      16     32     64
+  own n x n basis                     0.133  0.230  0.372  0.544  0.719
+  rotation inside the pooled top 256  0.131  0.228  0.367  0.536  0.707
+  rotation inside the pooled top 128  0.126  0.218  0.349  0.506  0.658
+  pooled basis, no local rotation     0.068  0.118  0.211  0.351  0.546
+
+At D = 256 the loss is 1-2% of captured energy and the projection for 64 groups at n = 768 falls
+from 37.7M multiply-adds to 4.4M (8.6x); at D = 128 it is 1.15M (33x) for a 5-8% loss. Stored bases
+fall from 37.7 MB to 4.2 MB per 64 groups. In REPORT2 the projection is 6.8 ms of an 83.5 ms text
+query. For item k-NN, which takes 4.8 ms in all, it would be up to 3.5 ms at the same rate if 33
+groups are opened as knn/REPORT.md counted, which would make it the largest part of that query
+(modelled; the item breakdown was never printed, and printing it is the first thing to do).
+A second effect: the tail coordinates are the same for every group, so tables for tail levels can be
+global.
+Cost. A format change and a refit. Exactness unaffected: bounds are computed against the basis
+actually stored, as now. Caveat: 200k items in four dense slices; at 1M with 64 groups the pooled
+subspace covers more taxa and D may need to be larger.
+Cheapest test. Refit one profile with nested bases at 1M and count bytes per item at the 1% answer.
+The earlier "lazy projection of only the rows a level reads" reaches a similar saving without a
+format change, provided the certificate's weights are constant over the unread rows; the two are
+alternatives, not complements.
+
+P5. Per-cluster setup has to be zero in the approximate mode, not merely smaller.
+                                                                     [fixed cost; modelled from counts]
+The microbenchmark's table setup is 3.6-8 us per cluster. At K = 16,384 a query opens 51-574
+clusters (P3 table), so setup alone is 0.2-4.6 ms against a modelled 0.1-0.25 ms for the whole
+query. For inner products the table of a residual code does not depend on the cluster (q.x = q.c +
+q.r), so one table per query, or per group with the alpha term stored per item, is the only shape
+that works. This is proposals 1 and 5 of the earlier ideas report; the count above is why they are
+the gate and not an optimisation. I did not re-test them.
+
+P6. Under a filter, skip blocks above a few percent visible and scan visible vectors below.
+                                                                                [exact; modelled]
+With a setup-free first level the unit of skipping is the 32-item block, tested with one word of
+the row-space visibility bitmap. Blocks holding a visible item: 97% at 10% visible, 27% at 1%, 3% at
+0.1%. A block costs 32 code reads whatever it holds, so the block pass beats a scan of the visible
+full vectors only above a visible share of about (code read / full read): 3% on glove, about 7% at
+768 dimensions. Modelled on glove at 10% visible: 1.7 ms, against 4.7 ms measured for the scan of
+visible vectors and 5.8 ms for version 2. At 1% the block pass is 0.45 ms against 0.22 ms measured
+for the scan, so the k-NN path needs the planner's rule that sends a small visible set straight to
+the scan (bench/REPORT.md notes it lacks one). The per-cluster visible counts in Vis2 belong to the
+session, not the query (argued).
+
+Smaller findings that set parameters:
+- K. glove K = 65,430 + SOAR scans 0.56 / 1.33 / 4.81% against 0.85 / 1.99 / 6.71% at K = 16,384:
+  34% fewer items for 4x the centres, and 135 clusters opened instead of 61 at recall 0.9. With
+  centres at P2's price the total does not fall. About N/70 items per cluster is the knee.
+- SOAR stores a second copy of the first-level code (12.5-25 B per item on glove) for the approximate
+  mode. Exact mode scans first copies only; both copies carry the same entity id, so the filter and
+  the result set are unaffected.
+- A second group per centre (SOAR applied to a two-level tree) repairs most of the beam's loss
+  (beam 16 of 128: 1.01% at 0.9 for 3,376 centres, against 1.49% for 2,108 with one group) but the
+  graph gives 0.90% for 1,955. Use the graph.
+
+
+3. WHAT IS DEAD
+
+- Additive coarse quantiser (cell centre = C1[i] + C2[j], shared second codebook, all k1 x k2 cell
+  scores from k1 + k2 dot products; the inverted multi-index for inner products). Measured. Cells are
+  far worse than free k-means at the same count: glove 128 x 128 scans 3.11 / 6.38 / 20.76% against
+  1.07 / 2.57 / 9.44% for flat K = 16,384 (single assignment), and 256 x 256 (65,536 cells, 512 dot
+  products) scans 2.53% and opens 1,402 cells to do it; flat k-means reaches that with about 1,500
+  centres. nytimes 128 x 128:
+  16.7% against 5.8% for flat K = 4,096, worse than flat K = 1,024. Residuals of different first-level
+  cells share no structure a common codebook can use; the mean squared residual barely moves
+  (0.656 -> 0.644 over training). Same root as the K^-0.06 radius law.
+- Scoring centres on a prefix of their principal coordinates. Measured. The centres' spectrum is too
+  flat: glove holds 69% of centre energy in 32 of 100 coordinates, nytimes 26% in 32 of 256. A
+  lossless version (Cauchy-Schwarz tail) costs 0.70 of the flat pass on glove at best and 1.00 on
+  nytimes. With a 2 sd allowance, 32 coordinates and R = 2,048 it costs 0.40 of flat and loses at 0.99
+  (11.1% scanned against 6.7%). The product code in P2 dominates it.
+- A direction-aware radius in the cluster key (z x the standard deviation of q.r over the cluster
+  from its covariance). Measured on glove K = 4,096: the full covariance gains 6-8% of items; its top
+  4 or 8 directions, or one covariance per group, gain nothing. Clusters there are round (the spread
+  term varies 10% across clusters for a query). Not tested on BioCLIP, the one place it might pay.
+- Better whole-cluster bounds for exact search. Measured, 300 queries (e6_*.log). Share of clusters
+  a k-NN query must open:
+                                 BioCLIP 200k, K = 200     glove, K = 1,024
+    oracle (true cluster maximum)        1.1%                   0.5%
+    ball                                99.9%                  99.8%
+    cone about the cluster's centre     93.1%                  99.7%
+    support table, nearest anchor       63.3%                  98.3%
+    support table, best of all anchors  60.6%                  98.2%
+    two anchors (least squares)         81.7%                  98.6%
+  Trying every anchor instead of the nearest buys 3 points on BioCLIP and nothing on glove, and two
+  anchors are worse than one (sums of maxima). The gap to the oracle is 50-200x and no summary of
+  this kind closes it. More anchors, cones, low-rank boxes and matching pursuit over anchors are all
+  the same l1-versus-l2 loss. The lever is not opening fewer clusters; it is making opening free.
+- A better seed or probing order for exact search. The sweep is already within 5-22% of an oracle
+  that knows the k-th score (knn/REPORT.md), so that is the whole prize.
+- A lossless tree over centres: confirmed dead by the probe report; nothing here revives it.
+- K far beyond N/70, and a sub-bit first level on glove (argued: at half a bit per dimension the
+  7 sd half-width is 0.79 against a k-th score of 0.60, so about 12% of items are excluded).
+- Randomised partitions (LSH) for exact search, even with the union over k: about 1e5 tables at
+  glove's contrast (argued from the standard exponent).
+
+
+4. THE FLOOR
+
+Exact, unfiltered, glove and nytimes. Every item's first level must be read; nothing at cluster
+level helps and nothing can (section 3). With P1 the reads are, per query:
+  glove:   12.5 B of every item, 12.5 B more of 35%, 25 B more of 2.2%, about 110 full vectors
+           = 20.6 MB, 8.7% of the f16 data. Modelled 2.9 ms, about 350 QPS on one thread.
+           Measured today: flat scan 75 QPS, version 2 exact 30, hnswlib at recall 0.99 611.
+  nytimes: 32 B of every item, 32 B more of 27%, 64 B more of 2%, about 40 full vectors
+           = 12.2 MB, 8.2%. Modelled 1.6 ms, about 600 QPS.
+           Measured today: flat 110, version 2 exact 45, hnswlib at 0.99 374.
+So exact search can plausibly sit within 2x of HNSW at recall 0.99 on glove and above it on nytimes,
+at about 1.4 ns (glove) to 3.5 ns (nytimes) per item for the first pass, and stays linear in the
+visible set (above a few percent visible; below that, the scan of visible vectors). The first pass streams
+15 MB, so it is partly bound by memory bandwidth; batching queries through the same pass is the
+remaining lever. These figures need the kernel at faiss's measured speed and no per-cluster setup;
+version 2 is 11-14x from that on these two datasets.
+
+Approximate, glove, K = 16,384 + SOAR, with P2, P3 and P5 (modelled from measured counts):
+  recall 0.90: 8.2k items (about 9.5k codes with second copies) 26 us + centres 54 us + about 40
+               re-ranks and fixed work 10-15 us = about 95 us, about 10,000 QPS.
+               hnswlib measured 3,004 QPS here (about 4,000 without the neighbouring jobs).
+  recall 0.95: about 120 us, about 8,000 QPS; hnswlib 1,536.
+  recall 0.99: 46-63k items, about 220-270 us, about 4,000 QPS; hnswlib 611.
+This is the cost profile of ScaNN, which leads HNSW on glove in the published benchmark (from
+memory), so the claim is ordinary, not optimistic. The faiss IVF-PQ rows in our own table
+(4,642 QPS at 0.9) are held back by the wrapper's re-order step, which costs 1-1.5 us per re-ranked
+item in baselines.csv, not by the structure.
+Approximate, nytimes: probing needs 37% of items for 0.99 whatever the structure, and neither the
+stopping rule nor a larger K changes that. The earlier report's flat one-bit pass with the dial
+(about 1,000 QPS modelled) remains the right plan there and beats hnswlib's 374.
+
+
+5. LIMITS OF THIS WORK
+
+- All times are modelled; I timed nothing. The two rates come from faiss on this machine.
+- 1,000 test queries for the probing experiments, 200 for the exact-mode counts, 300 for the bounds.
+- P1 was counted on a global rotated code, not on version 2's code; on version 2 as built most glove
+  items are decided at deterministic levels, where c does not enter.
+- P4 was measured as energy captured on 200k items, not as bytes read on the 1M build.
+- No BioCLIP text queries were available, so nothing here speaks to the text case.
+- Not tested: learned partitions, a clustered (correlated) filter, the direction-aware radius on
+  BioCLIP, and the graph over centres above K = 16,384.
+- The structures are glove at 1.18M and nytimes at 290k. Nothing was tested at 10M or beyond; the
+  statements about a billion items are arguments.
