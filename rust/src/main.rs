@@ -1,7 +1,10 @@
+mod derive;
 mod index;
 mod kernel;
 mod query;
+mod run2;
 mod scale;
+mod v2;
 mod synth;
 mod util;
 
@@ -46,12 +49,27 @@ fn subset(mut p: Params, kk: usize) -> Params {
     p
 }
 
+fn arg_str(k: &str) -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.iter().position(|a| a == k).map(|i| args[i + 1].clone())
+}
+
+/// Parameters with the profile-dependent ones derived from `--profile <file.npy>` when given.
+pub fn params_with_profile(kk: usize) -> Params {
+    let mut p = load_params(DATA);
+    if let Some(pf) = arg_str("--profile") {
+        let (a, b) = apply_profile(&mut p, &pf);
+        println!("profile {pf}: derived parameters differ from the exported ones in {a} frb and {b} rate entries");
+    }
+    subset(p, kk)
+}
+
 fn setup(kk: usize, nanch: usize, tag: &str) -> Ctx {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/{tag}.log")).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), std::env::args().collect::<Vec<_>>());
     let t = Timer::new();
-    let p = subset(load_params(DATA), kk);
+    let p = params_with_profile(kk);
     let xs = RealSource::open(&p.xs_path);
     let src = Box::new(RealSource::open(&p.xs_path));
     let mut lg = |s: String| {
@@ -222,6 +240,29 @@ fn bytes_read(ix: &Index, st: &Stats) -> f64 {
     }
     b += st.full_reads as f64 * 2.0 * ix.n() as f64;
     b / ix.nrows as f64
+}
+
+/// Bytes read per item (of N) and items touched, by class and answer size; no timing.
+fn bytesq(c: &mut Ctx, nq: usize) {
+    let ix = &c.ix;
+    let fl = c.flat();
+    let sizes: Vec<usize> = SIZES.iter().map(|f| ((fl.nrows as f64 * f).round() as usize).max(1)).collect();
+    for (cls, qs) in [("item", c.items.clone()), ("text", c.texts.clone())] {
+        let mut br = vec![0.0; 4];
+        let mut tch = vec![0.0; 4];
+        let k = qs.len().min(nq);
+        for q in qs.iter().take(nq) {
+            let pr = prep(ix, q);
+            let sc = fl.scores(&pr.q32);
+            let ths = thresholds_for(&fl, &pr.q16, &sc, full_err(ix, &pr), &sizes);
+            for si in 0..4 {
+                let r = threshold_prepped(ix, &prep(ix, q), ths[si], &Opts { vis: None, verify: false, want_iv: false, rec: false });
+                br[si] += bytes_read(ix, &r.st) / k as f64;
+                tch[si] += r.st.touched as f64 / ix.nrows as f64 / k as f64;
+            }
+        }
+        out!("bytesq old {cls} ({k} queries): bytes read per item {:?}; touched {:?}", br.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tch.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+    }
 }
 
 fn e2e(c: &mut Ctx, nq: usize, nflat: usize) {
@@ -705,6 +746,42 @@ fn main() {
     let has = |k: &str| args.iter().any(|a| a == k);
     let kk = get("--clusters", 100000);
     let nanch = get("--anchors", 100000);
+    if has("checkderive") {
+        let mut p = load_params(DATA);
+        let pf = format!("{DATA}/prof_qmix.npy");
+        let (a, b) = apply_profile(&mut p, &pf);
+        println!("qmix profile re-derived: {a} frb entries and {b} rate entries differ from the numpy export");
+        return;
+    }
+    if has("--v2") {
+        if has("--scale") {
+            crate::scale::run2(get("--scale", 10), get("--nq", 20));
+            return;
+        }
+        let c = run2::setup2("run2");
+        if has("verify") {
+            run2::verify2(&c, get("--vitem", 200), get("--vtext", 369), get("--vcheck", 25));
+        }
+        if has("levels") {
+            run2::levels2(&c, get("--reps", 5));
+        }
+        if has("setup") {
+            run2::setup_cost(&c, 10);
+        }
+        if has("bytesq") {
+            run2::bytesq2(&c, get("--nq", 100));
+        }
+        if has("e2e") {
+            run2::e2e2(&c, get("--nq", 100), get("--nflat", 20));
+        }
+        if has("breakdown") {
+            run2::breakdown2(&c, get("--nq", 20));
+        }
+        if has("filter") {
+            run2::filter2(&c, get("--fnq", 30));
+        }
+        return;
+    }
     let tag = if has("--scale") { "scale" } else { "run1m" };
     if has("--scale") {
         scale::run(get("--scale", 10), get("--nq", 20), nanch.min(1000));
@@ -720,6 +797,9 @@ fn main() {
     if has("verify") {
         let (a, b) = (get("--vitem", 200), get("--vtext", 369));
         verify(&mut c, a, b, get("--vcheck", 25));
+    }
+    if has("bytesq") {
+        bytesq(&mut c, get("--nq", 100));
     }
     if has("e2e") {
         let nq = get("--nq", 100);

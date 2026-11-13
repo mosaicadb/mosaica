@@ -53,3 +53,25 @@ here.
   batched threshold, exact k-NN, visibility, flat scans, brute-force truth.
 - `src/synth.rs`, `src/scale.rs` — synthetic items for the scale test.
 - `tools/export.py` — exports the numpy build parameters.
+
+## Version 2: the fast-scan code (`--v2`)
+
+Every query-profile-dependent parameter is derived in Rust (`src/derive.rs`) from a profile file (G x n query-offset
+variances in each group's local basis). Export one with `tools/profile.py` (`qmix` text-tuned, `qi` items, `h0.25` the
+data-only H25 profile, or a key of a `.npz`):
+
+```bash
+python3 tools/profile.py m768 h0.25 /tmp/.../scratchpad/rustdata/m768/prof_h0.25.npy
+B=../../rust-target/release/vexact
+$B --profile .../prof_h0.25.npy levels e2e        # the old tree kernel built with any profile
+$B --v2 verify levels setup e2e filter            # the fast-scan index (profile defaults to prof_h0.25.npy)
+$B --v2 --u8 ...                                  # 8-bit tables (one shuffle) instead of 16-bit
+$B --v2 bytesq; $B --profile ... bytesq           # bytes read per item only, both codes
+$B --v2 --scale 10 --nq 20                        # 10M synthetic items in the int8 bases
+$B --v2 --clusters 40 verify                      # quick development check
+```
+
+`--plan auto|index|flat` sets the planner (constants of its cost model in `Plan::default`, `src/v2/q.rs`). Layout: `src/v2/mod.rs` (code fitting, plans, int8
+bases, encoder, layout), `src/v2/kern.rs` (tables, survivor re-packing, shuffle kernel), `src/v2/q.rs` (setup,
+breadth-first level loop, planner, k-NN, synthetic items), `src/run2.rs` (experiments). Results go to
+`results/*2*.csv` and `results/run2.log`.

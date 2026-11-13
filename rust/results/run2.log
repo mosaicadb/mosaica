@@ -1,0 +1,1485 @@
+==== run at 1794520614: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.4s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 6.6s
+[build2] encoded 8.2s
+[build2] assembled 8.2s; x2 bound 4.872e-4; 149144 escapes
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 8.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 69.5, 75.0, 84.5, 95.5, 115.0, 132.5, 150.6, 169.0, 186.5, 220.0, 253.6, 291.8]
+==== run at 1794520626: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.5s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 6.6s
+[build2] encoded 8.1s
+[build2] assembled 8.2s; x2 bound 4.872e-4; 149144 escapes
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 8.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 69.5, 75.0, 84.5, 95.5, 115.0, 132.5, 150.6, 169.0, 186.5, 220.0, 253.6, 291.8]
+==== run at 1794520687: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.4s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 6.6s
+[build2] encoded 8.3s
+[build2] assembled 8.3s; x2 bound 4.872e-4; escapes: det norms 68, |y| 4936, kappa 1441, tan 142699
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 8.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 69.5, 75.0, 84.5, 95.5, 115.0, 132.5, 150.6, 169.0, 186.5, 220.0, 253.6, 291.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44944531 (det violations 0, rand violations 0); largest randomised error 4.35 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794520751: ["../../rust-target/release/vexact", "--v2", "--clusters", "64"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.5s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 7.2s
+[build2] encoded 9.7s
+[build2] assembled 9.7s; x2 bound 4.872e-4; escapes: det norms 71, |y| 5933, kappa 2295, tan 240914
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 76008 rows, 64 clusters in 10.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.9, 69.5, 75.0, 84.5, 95.5, 115.0, 132.5, 150.6, 169.0, 186.5, 219.2, 252.7, 291.7]
+==== run at 1794520847: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.9s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 7.2s
+[build2] encoded 8.8s
+[build2] assembled 8.8s; x2 bound 4.872e-4; escapes: det norms 68, |y| 154, kappa 1011, tan 1923
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 9.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 69.5, 75.0, 84.5, 95.5, 115.0, 132.5, 150.6, 169.0, 186.5, 220.0, 253.6, 291.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44976219 (det violations 0, rand violations 0); largest randomised error 4.40 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794521048: ["../../rust-target/release/vexact", "--v2", "verify", "--vitem", "50", "--vtext", "50", "--vcheck", "10"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.156, 0.0396, 0.0111, 0.0039, 0.002, 0.0015, 0.0013]
+[build2] plans 5.7s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 24.0s
+[build2] encoded 58.6s
+[build2] assembled 59.0s; x2 bound 4.882e-4; escapes: det norms 680, |y| 5219, kappa 20219, tan 38913
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 78.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 56.5, 69.4, 75.1, 84.4, 95.8, 114.9, 132.4, 150.9, 168.9, 186.4, 217.8, 251.3, 291.3]
+==== run at 1794521159: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1892, 0.0463, 0.0115, 0.0029, 0.0007, 0.0002, 0.0001]
+[build2] plans 8.9s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [1.0, 1.0, 0.5, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 15.1s
+[build2] encoded 24.1s
+[build2] assembled 24.1s; x2 bound 4.872e-4; escapes: det norms 68, |y| 154, kappa 1274, tan 1984
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 24.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 69.5, 75.0, 84.5, 94.8, 115.0, 132.8, 151.5, 169.0, 186.5, 217.5, 251.0, 291.5]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 45048298 (det violations 0, rand violations 0); largest randomised error 4.42 sd (c = 9.46); k-NN mismatches 0 of 38
+VERIFY2 100 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 290525597 (det violations 0, rand violations 0); largest randomised error 4.60 sd (c = 9.46); k-NN mismatches 0 of 100
+==== run at 1794521361: ["../../rust-target/release/vexact", "--v2", "bytesq", "--nq", "100"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 6.7s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 60.1s
+[build2] encoded 152.1s
+[build2] assembled 152.5s; x2 bound 4.882e-4; escapes: det norms 680, |y| 5219, kappa 25329, tan 38886
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 163.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 56.5, 69.4, 75.1, 84.4, 95.7, 114.9, 132.4, 151.0, 168.9, 186.4, 217.7, 251.2, 291.3]
+bytesq v2 item (100 queries): bytes read per item [2.53, 6.42, 21.96, 76.93]; touched [0.129, 0.207, 0.39, 0.761]
+bytesq v2 text (100 queries): bytes read per item [18.63, 29.46, 69.41, 154.86]; touched [0.663, 0.767, 0.927, 0.995]
+==== run at 1794521561: ["../../rust-target/release/vexact", "--v2", "--split", "bytesq", "--nq", "100"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 6.8s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+==== run at 1794521617: ["../../rust-target/release/vexact", "--v2", "--clusters", "2"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 9.9s; 76 distinct deterministic codes; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 10.2s
+[build2] encoded 10.6s
+[build2] assembled 10.6s; x2 bound 1.894e-4; escapes: det norms 0, |y| 4, kappa 23, tan 38
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 823 rows, 2 clusters in 10.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 54.5, 69.5, 75.0, 84.5, 98.0, 115.0, 132.5, 151.5, 169.0, 186.5, 217.5, 251.0, 291.5]
+[build2] calibrated 78.3s
+[build2] encoded 173.9s
+[build2] assembled 174.3s; x2 bound 4.882e-4; escapes: det norms 680, |y| 5219, kappa 25329, tan 38886
+==== run at 1794521953: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 7.7s
+[build2] encoded 11.9s
+[build2] assembled 11.9s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 1182, tan 1982
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.3s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 60.0, 69.5, 75.0, 84.5, 98.0, 115.0, 134.0, 151.5, 169.0, 183.2, 222.7, 256.3, 287.3]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 46181629 (det violations 0, rand violations 0); largest randomised error 4.28 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794521972: ["../../rust-target/release/vexact", "--v2", "bytesq", "--nq", "100"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 56.2s
+[build2] encoded 153.0s
+[build2] assembled 153.4s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 22263, tan 38194
+built v2 (8-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 164.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.7, 69.4, 75.1, 84.5, 97.8, 115.0, 133.7, 151.4, 169.0, 184.7, 220.2, 253.7, 287.2]
+bytesq v2 item (100 queries): bytes read per item [2.54, 6.64, 22.87, 79.77]; touched [0.129, 0.207, 0.39, 0.761]
+bytesq v2 text (100 queries): bytes read per item [19.41, 31.0, 72.41, 158.89]; touched [0.663, 0.767, 0.927, 0.995]
+==== run at 1794522174: ["../../rust-target/release/vexact", "--v2", "--split", "bytesq", "--nq", "100"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 54.0s
+[build2] encoded 139.7s
+[build2] assembled 140.2s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 22263, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 149.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.7, 69.4, 75.1, 84.5, 97.8, 115.0, 133.7, 151.4, 169.0, 184.7, 220.2, 253.7, 287.2]
+bytesq v2 item (100 queries): bytes read per item [2.43, 6.11, 20.09, 68.56]; touched [0.129, 0.207, 0.39, 0.761]
+bytesq v2 text (100 queries): bytes read per item [18.79, 29.39, 65.83, 135.99]; touched [0.663, 0.767, 0.927, 0.995]
+==== run at 1794522475: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 8.0s
+[build2] encoded 12.5s
+[build2] assembled 12.6s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 45256939 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794522495: ["../../rust-target/release/vexact", "--v2", "bytesq", "--nq", "100"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 55.0s
+[build2] encoded 134.9s
+[build2] assembled 135.3s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 145.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+bytesq v2 item (100 queries): bytes read per item [2.42, 6.05, 19.82, 67.5]; touched [0.129, 0.207, 0.39, 0.761]
+bytesq v2 text (100 queries): bytes read per item [18.6, 29.03, 64.81, 133.96]; touched [0.663, 0.767, 0.927, 0.995]
+==== run at 1794522681: ["../../rust-target/release/vexact", "--v2", "levels", "setup", "--reps", "3"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 55.1s
+[build2] encoded 135.2s
+[build2] assembled 135.7s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 145.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+levels2 item,0,4,6.50,5.74,5.74,1.2750
+levels2 item,1,8,11.00,8.34,2.61,0.5791
+levels2 item,2,12,15.50,11.20,2.85,0.6344
+levels2 item,3,16,20.00,13.98,2.78,0.6173
+levels2 item,4,24,28.50,17.20,3.22,0.3788
+levels2 item,5,32,37.00,20.33,3.14,0.3692
+levels2 item,6,40,41.00,25.32,4.99,1.2463
+levels2 item,7,48,58.75,34.99,9.67,0.5449
+levels2 item,8,56,67.90,41.96,6.97,0.7617
+levels2 item,9,64,73.07,49.40,7.43,1.4401
+levels2 item,10,72,82.02,54.83,5.43,0.6065
+levels2 item,11,80,95.28,62.95,8.12,0.6124
+levels2 item,12,96,111.49,72.35,9.40,0.5800
+levels2 item,13,112,129.79,80.20,7.85,0.4288
+levels2 item,14,128,147.43,88.15,7.95,0.4509
+levels2 item,15,144,164.48,95.47,7.32,0.4293
+levels2 item,16,160,180.19,102.59,7.12,0.4532
+levels2 item,17,192,215.46,115.65,13.06,0.3705
+levels2 item,18,224,248.46,126.76,11.11,0.3365
+levels2 item,19,256,281.74,138.25,11.49,0.3453
+levels2 text,0,4,6.50,5.64,5.64,1.2538
+levels2 text,1,8,11.00,8.41,2.77,0.6160
+levels2 text,2,12,15.50,11.03,2.62,0.5824
+levels2 text,3,16,20.00,14.57,3.53,0.7855
+levels2 text,4,24,28.50,17.42,2.85,0.3357
+levels2 text,5,32,37.00,21.08,3.66,0.4304
+levels2 text,6,40,41.00,26.51,5.43,1.3577
+levels2 text,7,48,58.75,35.72,9.21,0.5188
+levels2 text,8,56,67.90,43.07,7.35,0.8035
+levels2 text,9,64,73.07,49.35,6.28,1.2160
+levels2 text,10,72,82.02,56.80,7.45,0.8318
+levels2 text,11,80,95.28,65.22,8.43,0.6354
+levels2 text,12,96,111.49,73.93,8.70,0.5370
+levels2 text,13,112,129.79,81.09,7.16,0.3910
+levels2 text,14,128,147.43,94.93,13.85,0.7850
+levels2 text,15,144,164.48,97.91,2.98,0.1747
+levels2 text,16,160,180.19,108.34,10.43,0.6640
+levels2 text,17,192,215.46,113.73,5.38,0.1526
+levels2 text,18,224,248.46,126.34,12.61,0.3821
+levels2 text,19,256,281.74,135.17,8.84,0.2656
+setup2 item (1 thread, 64 groups, 1000 clusters): group setup 13.83 ms, cluster setup 11.15 ms (11.15 us each), all tables of every cluster and level 20.35 ms (20.35 us per cluster)
+setup2 text (1 thread, 64 groups, 1000 clusters): group setup 13.88 ms, cluster setup 11.00 ms (11.00 us each), all tables of every cluster and level 20.39 ms (20.39 us per cluster)
+==== run at 1794523000: ["../../rust-target/release/vexact", "--v2", "--clusters", "1000", "setup", "levels", "--reps", "3"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 54.3s
+[build2] encoded 134.0s
+[build2] assembled 134.5s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 144.4s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+levels2 item,0,4,6.50,5.88,5.88,1.3056
+levels2 item,1,8,11.00,8.18,2.31,0.5128
+levels2 item,2,12,15.50,10.78,2.60,0.5780
+levels2 item,3,16,20.00,13.65,2.87,0.6367
+levels2 item,4,24,28.50,16.59,2.94,0.3464
+levels2 item,5,32,37.00,20.08,3.49,0.4102
+levels2 item,6,40,41.00,24.82,4.74,1.1859
+levels2 item,7,48,58.75,33.13,8.30,0.4678
+levels2 item,8,56,67.90,38.51,5.38,0.5881
+levels2 item,9,64,73.07,44.09,5.58,1.0815
+levels2 item,10,72,82.02,54.10,10.01,1.1185
+levels2 item,11,80,95.28,55.27,1.17,0.0879
+levels2 item,12,96,111.49,62.49,7.22,0.4454
+levels2 item,13,112,129.79,70.27,7.78,0.4252
+levels2 item,14,128,147.43,77.71,7.44,0.4217
+levels2 item,15,144,164.48,85.15,7.44,0.4364
+levels2 item,16,160,180.19,92.27,7.12,0.4532
+levels2 item,17,192,215.46,107.39,15.12,0.4289
+levels2 item,18,224,248.46,113.13,5.73,0.1737
+levels2 item,19,256,281.74,121.36,8.23,0.2475
+levels2 text,0,4,6.50,6.47,6.47,1.4370
+levels2 text,1,8,11.00,8.63,2.17,0.4811
+levels2 text,2,12,15.50,11.21,2.58,0.5725
+levels2 text,3,16,20.00,14.04,2.83,0.6290
+levels2 text,4,24,28.50,16.54,2.50,0.2945
+levels2 text,5,32,37.00,19.39,2.85,0.3348
+levels2 text,6,40,41.00,24.71,5.32,1.3307
+levels2 text,7,48,58.75,33.44,8.73,0.4916
+levels2 text,8,56,67.90,38.08,4.64,0.5070
+levels2 text,9,64,73.07,43.10,5.03,0.9737
+levels2 text,10,72,82.02,48.02,4.91,0.5489
+levels2 text,11,80,95.28,54.19,6.17,0.4653
+levels2 text,12,96,111.49,63.41,9.23,0.5693
+levels2 text,13,112,129.79,71.73,8.31,0.4540
+levels2 text,14,128,147.43,79.66,7.94,0.4500
+levels2 text,15,144,164.48,85.05,5.39,0.3160
+levels2 text,16,160,180.19,90.03,4.98,0.3169
+levels2 text,17,192,215.46,101.75,11.72,0.3324
+levels2 text,18,224,248.46,110.93,9.18,0.2781
+levels2 text,19,256,281.74,119.91,8.98,0.2700
+setup2 item (1 thread, 64 groups, 1000 clusters): group setup 14.83 ms (int8 basis products alone, warm 5.58 ms), cluster setup 5.90 ms (5.90 us each), all tables of every cluster and level 22.08 ms (22.08 us per cluster)
+setup2 text (1 thread, 64 groups, 1000 clusters): group setup 14.48 ms (int8 basis products alone, warm 5.59 ms), cluster setup 5.87 ms (5.87 us each), all tables of every cluster and level 21.11 ms (21.11 us per cluster)
+==== run at 1794523261: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 8.0s
+[build2] encoded 12.7s
+[build2] assembled 12.8s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 13.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 45257732 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794523277: ["../../rust-target/release/vexact", "--v2", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 57.6s
+[build2] encoded 149.6s
+[build2] assembled 150.2s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 160.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+setup2 item (1 thread, 64 groups, 1000 clusters): group setup 14.49 ms (int8 basis products alone, warm 5.41 ms), cluster setup 5.71 ms (5.71 us each), all tables of every cluster and level 19.29 ms (19.29 us per cluster)
+setup2 text (1 thread, 64 groups, 1000 clusters): group setup 14.27 ms (int8 basis products alone, warm 5.27 ms), cluster setup 5.65 ms (5.65 us each), all tables of every cluster and level 19.69 ms (19.69 us per cluster)
+==== run at 1794523475: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 15.0s
+[build2] encoded 31.7s
+[build2] assembled 31.8s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 32.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 13.89 ms (int8 basis products alone, warm 5.78 ms), cluster setup 1.19 ms (5.93 us each), all tables of every cluster and level 3.93 ms (19.63 us per cluster; warm 22.3 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 13.25 ms (int8 basis products alone, warm 5.08 ms), cluster setup 1.10 ms (5.51 us each), all tables of every cluster and level 3.55 ms (17.75 us per cluster; warm 22.4 ns per unit)
+==== run at 1794523546: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 15.0s
+[build2] encoded 31.9s
+[build2] assembled 32.0s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 32.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 16.59 ms (int8 basis products alone, warm 5.83 ms), cluster setup 1.28 ms (6.42 us each), all tables of every cluster and level 5.18 ms (25.90 us per cluster; warm 22.8 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 13.47 ms (int8 basis products alone, warm 5.30 ms), cluster setup 1.10 ms (5.52 us each), all tables of every cluster and level 3.59 ms (17.95 us per cluster; warm 22.5 ns per unit)
+==== run at 1794523603: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 14.7s
+[build2] encoded 31.4s
+[build2] assembled 31.5s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 32.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 13.98 ms (int8 basis products alone, warm 5.41 ms; rotations alone 7.35 ms), cluster setup 1.29 ms (6.43 us each), all tables of every cluster and level 3.76 ms (18.78 us per cluster; warm 22.2 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 13.67 ms (int8 basis products alone, warm 5.35 ms; rotations alone 7.46 ms), cluster setup 1.12 ms (5.61 us each), all tables of every cluster and level 3.75 ms (18.76 us per cluster; warm 22.8 ns per unit)
+==== run at 1794523675: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 5.1s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 16.1s
+[build2] encoded 34.0s
+[build2] assembled 34.1s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 34.8s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 9.50 ms (int8 basis products alone, warm 5.36 ms; rotations alone 7.44 ms), cluster setup 1.11 ms (5.57 us each), all tables of every cluster and level 3.68 ms (18.42 us per cluster; warm 23.8 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 9.08 ms (int8 basis products alone, warm 5.15 ms; rotations alone 7.28 ms), cluster setup 1.10 ms (5.49 us each), all tables of every cluster and level 3.65 ms (18.26 us per cluster; warm 23.3 ns per unit)
+==== run at 1794523773: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 15.6s
+[build2] encoded 33.4s
+[build2] assembled 33.5s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 34.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 11.73 ms (int8 basis products alone, warm 5.97 ms; rotations alone 9.45 ms), cluster setup 1.34 ms (6.68 us each), all tables of every cluster and level 4.14 ms (20.68 us per cluster; warm 27.9 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 9.25 ms (int8 basis products alone, warm 5.20 ms; rotations alone 7.44 ms), cluster setup 1.04 ms (5.20 us each), all tables of every cluster and level 3.76 ms (18.79 us per cluster; warm 24.2 ns per unit)
+==== run at 1794523808: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 8.1s
+[build2] encoded 12.8s
+[build2] assembled 12.8s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 13.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 45257735 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794523856: ["../../rust-target/release/vexact", "--v2", "--clusters", "200", "setup"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.7s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 15.4s
+[build2] encoded 32.9s
+[build2] assembled 33.0s; x2 bound 4.872e-4; escapes: det norms 501, |y| 1158, kappa 3155, tan 8046
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 207214 rows, 200 clusters in 33.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 129.6, 147.5, 164.5, 179.6, 216.1, 249.1, 282.1]
+setup2 item (1 thread, 64 groups, 200 clusters): group setup 9.03 ms (int8 basis products alone, warm 5.04 ms; rotations alone 7.47 ms), cluster setup 0.70 ms (3.49 us each), all tables of every cluster and level 3.55 ms (17.74 us per cluster; warm 23.0 ns per unit)
+setup2 text (1 thread, 64 groups, 200 clusters): group setup 8.68 ms (int8 basis products alone, warm 4.91 ms; rotations alone 7.38 ms), cluster setup 0.72 ms (3.61 us each), all tables of every cluster and level 3.62 ms (18.11 us per cluster; warm 22.9 ns per unit)
+==== run at 1794523898: ["../../rust-target/release/vexact", "--v2", "e2e", "--nq", "20", "--nflat", "0"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 55.4s
+[build2] encoded 142.6s
+[build2] assembled 143.1s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 153.4s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+e2e2 item,1,index2_thr,0.0001,2.987,4.239,5.440,20,49005,520.5,100,1.76,0.931
+e2e2 enter-fraction by level (item, 0.0001): [0.0485, 0.0291, 0.0194, 0.0141, 0.0109, 0.0071, 0.0052, 0.0044, 0.0029, 0.0018, 0.0016, 0.0012, 0.0006, 0.0005, 0.0004, 0.0003, 0.0002, 0.0002, 0.0001, 0.0001, 0.0001]
+e2e2 item,1,index2_thr,0.001,4.151,5.849,8.192,20,59662,800.5,1000,3.02,0.940
+e2e2 enter-fraction by level (item, 0.001): [0.0592, 0.042, 0.0312, 0.0245, 0.0201, 0.0147, 0.0118, 0.0106, 0.0077, 0.0056, 0.0052, 0.0043, 0.0027, 0.0024, 0.0019, 0.0013, 0.0011, 0.0009, 0.0006, 0.0005, 0.0003]
+e2e2 item,1,index2_thr,0.01,6.865,10.573,20.154,20,86904,1600.4,10000,6.63,0.955
+e2e2 enter-fraction by level (item, 0.01): [0.0866, 0.0722, 0.0589, 0.0494, 0.0427, 0.0339, 0.0291, 0.0271, 0.022, 0.0175, 0.0165, 0.0143, 0.0102, 0.0092, 0.0075, 0.0054, 0.0047, 0.0039, 0.0024, 0.002, 0.0013]
+e2e2 item,1,index2_thr,0.05,44.788,43.936,68.513,20,390937,4754.1,50000,27.43,0.956
+e2e2 enter-fraction by level (item, 0.05): [0.3898, 0.3679, 0.3303, 0.2933, 0.2605, 0.2079, 0.1691, 0.1578, 0.1244, 0.0854, 0.0735, 0.051, 0.0368, 0.029, 0.0231, 0.0163, 0.0126, 0.0101, 0.0068, 0.005, 0.0036]
+e2e2 item,1,index2_knn10,0,3.837,4.654,6.191,20,0,0,10,0,0   (seed 1.04 / sweep 2.94 / selection 0.56 ms mean)
+e2e2 item,4,index2_thr,0.0001,3.678,4.054,5.840,20,49005,520.5,100,1.76,0.931
+e2e2 item,4,index2_thr,0.001,4.699,4.933,6.649,20,59662,800.5,1000,3.02,0.940
+e2e2 item,4,index2_thr,0.01,5.207,6.419,10.513,20,86904,1600.4,10000,6.63,0.955
+e2e2 item,4,index2_thr,0.05,13.179,13.949,21.922,20,390937,4754.1,50000,27.43,0.956
+e2e2 item,4,index2_knn10,0,3.178,3.479,4.975,20,0,0,10,0,0   (seed 1.03 / sweep 1.83 / selection 0.60 ms mean)
+e2e2 text,1,index2_thr,0.0001,39.786,41.447,53.811,20,611869,736.8,100,16.28,0.933
+e2e2 enter-fraction by level (text, 0.0001): [0.6113, 0.4893, 0.3754, 0.2919, 0.2288, 0.1438, 0.0923, 0.0785, 0.0527, 0.0256, 0.0153, 0.0065, 0.0043, 0.0023, 0.0017, 0.001, 0.0006, 0.0005, 0.0003, 0.0002, 0.0001]
+e2e2 text,1,index2_thr,0.001,51.497,54.033,68.925,20,736422,1052.3,1000,25.71,0.946
+e2e2 enter-fraction by level (text, 0.001): [0.7361, 0.6293, 0.5246, 0.4408, 0.3714, 0.267, 0.194, 0.1737, 0.1234, 0.0665, 0.0439, 0.0198, 0.0128, 0.0076, 0.0057, 0.0038, 0.0026, 0.0021, 0.0016, 0.001, 0.0008]
+e2e2 text,1,index2_thr,0.01,102.346,102.050,111.187,20,957857,7932.3,10000,73.10,0.964
+e2e2 enter-fraction by level (text, 0.01): [0.9578, 0.8913, 0.8387, 0.7923, 0.7477, 0.6634, 0.5854, 0.5628, 0.4738, 0.3416, 0.2834, 0.1859, 0.1312, 0.0897, 0.069, 0.0438, 0.0298, 0.0228, 0.0165, 0.0108, 0.0079]
+e2e2 text,1,index2_thr,0.05,139.996,140.799,155.812,20,997336,36549.0,50000,152.23,0.971
+e2e2 enter-fraction by level (text, 0.05): [0.9973, 0.9696, 0.9434, 0.9182, 0.8929, 0.8421, 0.791, 0.7762, 0.7066, 0.5851, 0.5275, 0.4117, 0.3274, 0.2554, 0.2132, 0.1557, 0.1158, 0.0945, 0.0704, 0.049, 0.0365]
+e2e2 text,1,index2_knn10,0,36.840,39.960,44.136,20,0,0,10,0,0   (seed 1.76 / sweep 38.43 / selection 0.30 ms mean)
+e2e2 text,4,index2_thr,0.0001,12.898,13.486,15.859,20,611869,736.8,100,16.28,0.933
+e2e2 text,4,index2_thr,0.001,15.697,16.335,21.860,20,736422,1052.3,1000,25.71,0.946
+e2e2 text,4,index2_thr,0.01,28.738,28.638,32.540,20,957857,7932.3,10000,73.10,0.964
+e2e2 text,4,index2_thr,0.05,40.291,39.894,43.644,20,997336,36549.0,50000,152.23,0.971
+e2e2 text,4,index2_knn10,0,10.442,11.840,14.860,20,0,0,10,0,0   (seed 1.50 / sweep 10.18 / selection 0.26 ms mean)
+==== run at 1794524144: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 7.7s
+[build2] encoded 12.4s
+[build2] assembled 12.4s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 45257733 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794524175: ["../../rust-target/release/vexact", "--v2", "verify", "levels", "setup", "--vitem", "200", "--vtext", "369", "--vcheck", "25", "--reps", "5"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 55.7s
+[build2] encoded 137.8s
+[build2] assembled 138.3s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 148.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+VERIFY2 569 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 738267204 (det violations 0, rand violations 0); largest randomised error 5.08 sd (c = 9.46); k-NN mismatches 0 of 569
+levels2 item,0,4,6.50,5.18,5.18,1.1503
+levels2 item,1,8,11.00,7.40,2.23,0.4953
+levels2 item,2,12,15.50,9.25,1.85,0.4102
+levels2 item,3,16,20.00,11.56,2.31,0.5135
+levels2 item,4,24,28.50,13.97,2.41,0.2835
+levels2 item,5,32,37.00,17.09,3.12,0.3674
+levels2 item,6,40,41.00,24.13,7.04,1.7594
+levels2 item,7,48,58.75,31.13,6.99,0.3939
+levels2 item,8,56,67.90,34.41,3.29,0.3592
+levels2 item,9,64,73.07,39.34,4.93,0.9543
+levels2 item,10,72,82.02,44.64,5.31,0.5927
+levels2 item,11,80,95.28,50.55,5.90,0.4451
+levels2 item,12,96,111.49,57.39,6.85,0.4223
+levels2 item,13,112,129.79,64.19,6.80,0.3714
+levels2 item,14,128,147.43,73.16,8.97,0.5086
+levels2 item,15,144,164.48,79.19,6.02,0.3534
+levels2 item,16,160,180.19,83.34,4.15,0.2644
+levels2 item,17,192,215.46,96.55,13.21,0.3746
+levels2 item,18,224,248.46,106.12,9.57,0.2898
+levels2 item,19,256,281.74,114.18,8.06,0.2422
+levels2 text,0,4,6.50,5.10,5.10,1.1342
+levels2 text,1,8,11.00,7.34,2.24,0.4978
+levels2 text,2,12,15.50,9.41,2.07,0.4593
+levels2 text,3,16,20.00,11.36,1.95,0.4338
+levels2 text,4,24,28.50,13.89,2.53,0.2977
+levels2 text,5,32,37.00,16.77,2.88,0.3391
+levels2 text,6,40,41.00,21.46,4.69,1.1714
+levels2 text,7,48,58.75,29.14,7.68,0.4325
+levels2 text,8,56,67.90,34.07,4.93,0.5391
+levels2 text,9,64,73.07,39.11,5.04,0.9756
+levels2 text,10,72,82.02,45.54,6.43,0.7183
+levels2 text,11,80,95.28,51.01,5.47,0.4124
+levels2 text,12,96,111.49,57.96,6.95,0.4290
+levels2 text,13,112,129.79,64.15,6.19,0.3380
+levels2 text,14,128,147.43,72.57,8.42,0.4776
+levels2 text,15,144,164.48,79.63,7.05,0.4139
+levels2 text,16,160,180.19,89.56,9.93,0.6320
+levels2 text,17,192,215.46,94.91,5.35,0.1518
+levels2 text,18,224,248.46,103.91,9.00,0.2726
+levels2 text,19,256,281.74,111.86,7.95,0.2388
+setup2 item (1 thread, 64 groups, 1000 clusters): group setup 11.49 ms (int8 basis products alone, warm 6.28 ms; rotations alone 9.56 ms), cluster setup 4.37 ms (4.37 us each), all tables of every cluster and level 22.09 ms (22.09 us per cluster; warm 28.6 ns per unit)
+setup2 text (1 thread, 64 groups, 1000 clusters): group setup 9.95 ms (int8 basis products alone, warm 5.43 ms; rotations alone 7.47 ms), cluster setup 3.76 ms (3.76 us each), all tables of every cluster and level 20.80 ms (20.80 us per cluster; warm 23.5 ns per unit)
+==== run at 1794525071: ["../../rust-target/release/vexact", "--v2", "e2e", "--nq", "100", "--nflat", "20"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 5.0s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 57.1s
+[build2] encoded 147.1s
+[build2] assembled 147.6s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 157.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+e2e2 item,1,index2_thr,0.0001,5.788,11.258,27.308,100,129459,1204.8,100,4.18,0.907
+e2e2 enter-fraction by level (item, 0.0001): [0.1283, 0.0887, 0.0581, 0.0393, 0.0277, 0.0151, 0.0092, 0.0075, 0.0047, 0.0024, 0.0018, 0.0011, 0.0006, 0.0005, 0.0003, 0.0002, 0.0002, 0.0001, 0.0001, 0.0001, 0.0]
+e2e2 item,1,index2_thr,0.001,9.803,17.442,43.599,100,206977,1381.7,1000,7.72,0.929
+e2e2 enter-fraction by level (item, 0.001): [0.2059, 0.167, 0.1278, 0.0988, 0.0779, 0.0513, 0.0362, 0.0314, 0.0223, 0.0131, 0.0097, 0.0059, 0.0037, 0.0027, 0.002, 0.0014, 0.0011, 0.0009, 0.0006, 0.0004, 0.0003]
+e2e2 item,1,index2_thr,0.01,32.340,33.136,75.490,100,389986,2555.8,10000,20.96,0.951
+e2e2 enter-fraction by level (item, 0.01): [0.3892, 0.356, 0.3128, 0.273, 0.2383, 0.184, 0.1451, 0.133, 0.1019, 0.0657, 0.0519, 0.0331, 0.0225, 0.0167, 0.0128, 0.009, 0.0069, 0.0055, 0.0036, 0.0027, 0.0018]
+e2e2 item,1,index2_thr,0.05,81.415,80.222,117.931,100,761216,10532.4,50000,68.23,0.966
+e2e2 enter-fraction by level (item, 0.05): [0.7607, 0.7395, 0.7023, 0.661, 0.6198, 0.5439, 0.4772, 0.4565, 0.3839, 0.2825, 0.2406, 0.1661, 0.1212, 0.0903, 0.0715, 0.0493, 0.0361, 0.0286, 0.0198, 0.014, 0.0101]
+e2e2 item,1,index2_knn10,0,5.010,9.094,21.399,100,0,0,10,0,0   (seed 1.20 / sweep 7.53 / selection 0.31 ms mean)
+e2e2 item,1,flat_f16_thr,0.001,174.993,175.316,178.648,20,1000000,0,0,0,0
+e2e2 item,1,flat_f16_knn10,0.001,171.481,173.333,182.347,20,1000000,0,0,0,0
+e2e2 item,1,flat_int8_thr,0.001,87.766,88.789,92.080,20,1000000,0,0,0,0
+e2e2 item,4,index2_thr,0.0001,2.714,4.230,9.060,100,129459,1204.8,100,4.18,0.907
+e2e2 item,4,index2_thr,0.001,3.573,5.852,11.717,100,206977,1381.7,1000,7.72,0.929
+e2e2 item,4,index2_thr,0.01,10.296,11.230,20.885,100,389986,2555.8,10000,20.96,0.951
+e2e2 item,4,index2_thr,0.05,24.381,24.251,35.823,100,761216,10532.4,50000,68.23,0.966
+e2e2 item,4,index2_knn10,0,3.181,4.280,8.050,100,0,0,10,0,0   (seed 1.08 / sweep 2.87 / selection 0.33 ms mean)
+e2e2 item,4,flat_f16_thr,0.001,45.196,45.689,47.431,20,1000000,0,0,0,0
+e2e2 item,4,flat_f16_knn10,0.001,44.496,44.934,46.425,20,1000000,0,0,0,0
+e2e2 item,4,flat_int8_thr,0.001,23.265,23.569,24.444,20,1000000,0,0,0,0
+e2e2 text,1,index2_thr,0.0001,41.175,41.605,52.489,100,663398,661.7,100,19.28,0.939
+e2e2 enter-fraction by level (text, 0.0001): [0.663, 0.5284, 0.4183, 0.3363, 0.2734, 0.1855, 0.1296, 0.1102, 0.0834, 0.0452, 0.0271, 0.013, 0.0087, 0.0046, 0.0033, 0.002, 0.0011, 0.0008, 0.0006, 0.0003, 0.0002]
+e2e2 text,1,index2_thr,0.001,50.353,51.518,66.588,100,767312,1587.6,1000,29.43,0.949
+e2e2 enter-fraction by level (text, 0.001): [0.767, 0.6482, 0.5487, 0.4686, 0.4019, 0.2998, 0.2271, 0.2011, 0.1564, 0.0909, 0.0596, 0.0309, 0.022, 0.0128, 0.0098, 0.0066, 0.0045, 0.0036, 0.0029, 0.0017, 0.0013]
+e2e2 text,1,index2_thr,0.01,79.578,78.920,95.178,100,926549,7963.1,10000,64.94,0.962
+e2e2 enter-fraction by level (text, 0.01): [0.9265, 0.841, 0.7776, 0.7227, 0.6717, 0.5807, 0.5019, 0.4729, 0.4009, 0.2786, 0.2163, 0.1368, 0.0997, 0.0649, 0.0516, 0.0353, 0.0245, 0.0197, 0.0155, 0.0102, 0.0079]
+e2e2 text,1,index2_thr,0.05,123.039,120.234,135.987,100,994710,27903.7,50000,134.02,0.971
+e2e2 enter-fraction by level (text, 0.05): [0.9947, 0.9668, 0.9394, 0.9127, 0.886, 0.8333, 0.7818, 0.7633, 0.7013, 0.5778, 0.5043, 0.3856, 0.3097, 0.2223, 0.1852, 0.1333, 0.0906, 0.0736, 0.0554, 0.0365, 0.0279]
+e2e2 text,1,index2_knn10,0,37.221,40.596,54.204,100,0,0,10,0,0   (seed 1.81 / sweep 39.06 / selection 0.43 ms mean)
+e2e2 text,1,flat_f16_thr,0.001,176.567,177.684,184.242,20,1000000,0,0,0,0
+e2e2 text,1,flat_f16_knn10,0.001,171.876,174.604,181.091,20,1000000,0,0,0,0
+e2e2 text,1,flat_int8_thr,0.001,89.543,90.483,94.536,20,1000000,0,0,0,0
+e2e2 text,4,index2_thr,0.0001,12.708,13.047,16.457,100,663398,661.7,100,19.28,0.939
+e2e2 text,4,index2_thr,0.001,14.791,14.864,17.701,100,767312,1587.6,1000,29.43,0.949
+e2e2 text,4,index2_thr,0.01,22.156,22.778,27.845,100,926549,7963.1,10000,64.94,0.962
+e2e2 text,4,index2_thr,0.05,35.720,34.898,39.843,100,994710,27903.7,50000,134.02,0.971
+e2e2 text,4,index2_knn10,0,13.045,13.785,17.991,100,0,0,10,0,0   (seed 1.62 / sweep 12.00 / selection 0.41 ms mean)
+e2e2 text,4,flat_f16_thr,0.001,45.827,46.649,50.176,20,1000000,0,0,0,0
+e2e2 text,4,flat_f16_knn10,0.001,45.748,45.853,46.832,20,1000000,0,0,0,0
+e2e2 text,4,flat_int8_thr,0.001,23.554,23.508,24.579,20,1000000,0,0,0,0
+==== run at 1794525440: ["../../rust-target/release/vexact", "--v2", "filter", "--fnq", "30"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 57.3s
+[build2] encoded 141.0s
+[build2] assembled 141.5s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 151.3s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+filter2 random 0.5: 500000 visible; permuting into row order 3.85 ms
+filter2 item,random,0.5,1,planner,5.880,18.603,30,121012,4997,0,365,63
+filter2 item,random,0.5,1,index_only,6.562,19.128,30,121012,4997,0,422,6
+filter2 item,random,0.5,1,range_then_full,6.625,30.474,30,121012,4997,0,0,427
+filter2 item,random,0.5,1,planner_knn10,5.926,9.099,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_thr,98.220,99.060,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_knn10,96.942,97.582,30,0,0,0,0,0
+filter2 item,random,0.5,4,planner,5.485,7.596,30,121012,4997,0,365,63
+filter2 item,random,0.5,4,index_only,4.759,7.849,30,121012,4997,0,422,6
+filter2 item,random,0.5,4,range_then_full,5.521,10.368,30,121012,4997,0,0,427
+filter2 item,random,0.5,4,planner_knn10,4.351,4.952,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_thr,28.762,29.454,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_knn10,29.175,29.616,30,0,0,0,0,0
+filter2 text,random,0.5,1,planner,75.705,75.654,30,476752,4963,0,997,3
+filter2 text,random,0.5,1,index_only,76.589,77.757,30,476752,4963,0,1000,0
+filter2 text,random,0.5,1,range_then_full,118.431,118.386,30,476752,4963,0,0,1000
+filter2 text,random,0.5,1,planner_knn10,38.023,41.805,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_thr,99.027,99.442,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_knn10,96.837,98.341,30,0,0,0,0,0
+filter2 text,random,0.5,4,planner,22.598,22.147,30,476752,4963,0,997,3
+filter2 text,random,0.5,4,index_only,22.746,23.154,30,476752,4963,0,1000,0
+filter2 text,random,0.5,4,range_then_full,32.953,33.231,30,476752,4963,0,0,1000
+filter2 text,random,0.5,4,planner_knn10,13.940,15.213,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_thr,29.322,29.961,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_knn10,28.885,30.767,30,0,0,0,0,0
+filter2 clustered 0.5: 500000 visible; permuting into row order 3.93 ms
+filter2 item,clustered,0.5,1,planner,4.846,13.505,30,120731,5177,0,185,24
+filter2 item,clustered,0.5,1,index_only,4.772,13.350,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,1,range_then_full,5.818,22.608,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,1,planner_knn10,4.855,7.425,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_thr,88.114,89.381,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_knn10,87.192,88.472,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,planner,3.485,4.946,30,120731,5177,0,185,24
+filter2 item,clustered,0.5,4,index_only,3.406,5.380,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,4,range_then_full,3.733,8.072,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,4,planner_knn10,3.546,4.354,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_thr,26.839,27.088,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_knn10,26.712,27.009,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,planner,50.249,49.754,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,1,index_only,49.566,50.276,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,1,range_then_full,91.326,91.491,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,1,planner_knn10,26.875,29.110,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_thr,90.499,92.122,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_knn10,88.438,89.855,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,planner,15.125,15.477,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,4,index_only,14.321,14.509,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,4,range_then_full,25.993,25.700,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,4,planner_knn10,10.643,11.049,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_thr,27.048,27.606,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_knn10,27.017,27.454,30,0,0,0,0,0
+filter2 random 0.1: 100000 visible; permuting into row order 1.93 ms
+filter2 item,random,0.1,1,planner,3.912,12.470,30,24206,998,0,276,151
+filter2 item,random,0.1,1,index_only,4.602,14.195,30,24206,998,0,402,25
+filter2 item,random,0.1,1,range_then_full,2.943,9.048,30,24206,998,0,0,427
+filter2 item,random,0.1,1,planner_knn10,5.453,7.263,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_thr,21.224,22.387,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_knn10,20.714,22.149,30,0,0,0,0,0
+filter2 item,random,0.1,4,planner,2.995,4.825,30,24206,998,0,276,151
+filter2 item,random,0.1,4,index_only,2.802,5.191,30,24206,998,0,402,25
+filter2 item,random,0.1,4,range_then_full,1.887,3.266,30,24206,998,0,0,427
+filter2 item,random,0.1,4,planner_knn10,3.610,4.136,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_thr,6.004,6.111,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_knn10,6.112,6.290,30,0,0,0,0,0
+filter2 text,random,0.1,1,planner,49.214,49.516,30,95306,997,0,961,38
+filter2 text,random,0.1,1,index_only,50.486,51.797,30,95306,997,0,999,0
+filter2 text,random,0.1,1,range_then_full,31.484,32.569,30,95306,997,0,0,999
+filter2 text,random,0.1,1,planner_knn10,27.996,30.334,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_thr,20.798,20.841,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_knn10,20.454,20.430,30,0,0,0,0,0
+filter2 text,random,0.1,4,planner,14.061,14.329,30,95306,997,0,961,38
+filter2 text,random,0.1,4,index_only,14.181,14.208,30,95306,997,0,999,0
+filter2 text,random,0.1,4,range_then_full,8.929,8.969,30,95306,997,0,0,999
+filter2 text,random,0.1,4,planner_knn10,11.046,11.733,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_thr,6.133,6.080,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_knn10,6.151,6.114,30,0,0,0,0,0
+filter2 clustered 0.1: 100000 visible; permuting into row order 1.74 ms
+filter2 item,clustered,0.1,1,planner,1.508,3.980,30,23550,719,0,33,9
+filter2 item,clustered,0.1,1,index_only,1.496,4.364,30,23550,719,0,42,0
+filter2 item,clustered,0.1,1,range_then_full,1.193,3.667,30,23550,719,0,0,42
+filter2 item,clustered,0.1,1,planner_knn10,3.176,4.550,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_thr,16.068,16.747,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_knn10,15.451,15.923,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,planner,1.510,2.052,30,23550,719,0,33,9
+filter2 item,clustered,0.1,4,index_only,1.559,2.343,30,23550,719,0,42,0
+filter2 item,clustered,0.1,4,range_then_full,1.271,1.904,30,23550,719,0,0,42
+filter2 item,clustered,0.1,4,planner_knn10,2.238,2.760,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_thr,3.991,3.992,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_knn10,4.030,3.959,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,planner,15.149,15.318,30,97355,492,0,97,2
+filter2 text,clustered,0.1,1,index_only,15.973,16.080,30,97355,492,0,99,0
+filter2 text,clustered,0.1,1,range_then_full,19.016,18.954,30,97355,492,0,0,99
+filter2 text,clustered,0.1,1,planner_knn10,15.624,15.891,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_thr,16.349,16.918,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_knn10,15.365,15.603,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,planner,4.048,4.232,30,97355,492,0,97,2
+filter2 text,clustered,0.1,4,index_only,4.041,3.981,30,97355,492,0,99,0
+filter2 text,clustered,0.1,4,range_then_full,4.245,4.432,30,97355,492,0,0,99
+filter2 text,clustered,0.1,4,planner_knn10,6.332,6.652,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_thr,4.284,4.345,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_knn10,4.303,4.331,30,0,0,0,0,0
+filter2 random 0.01: 10000 visible; permuting into row order 1.25 ms
+filter2 item,random,0.01,1,planner,2.125,2.813,30,2430,101,0,0,423
+filter2 item,random,0.01,1,index_only,3.305,10.244,30,2430,101,0,349,74
+filter2 item,random,0.01,1,range_then_full,2.172,2.823,30,2430,101,0,0,423
+filter2 item,random,0.01,1,planner_knn10,4.476,5.089,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_thr,1.075,1.168,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_knn10,1.067,1.137,30,0,0,0,0,0
+filter2 item,random,0.01,4,planner,1.564,1.780,30,2430,101,0,0,423
+filter2 item,random,0.01,4,index_only,1.818,3.595,30,2430,101,0,349,74
+filter2 item,random,0.01,4,range_then_full,1.136,1.400,30,2430,101,0,0,423
+filter2 item,random,0.01,4,planner_knn10,3.179,3.397,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_thr,0.479,0.524,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_knn10,0.564,0.580,30,0,0,0,0,0
+filter2 text,random,0.01,1,planner,5.973,6.032,30,9528,95,0,0,989
+filter2 text,random,0.01,1,index_only,32.500,32.616,30,9528,95,0,988,1
+filter2 text,random,0.01,1,range_then_full,7.716,7.698,30,9528,95,0,0,989
+filter2 text,random,0.01,1,planner_knn10,9.800,10.285,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_thr,1.140,1.188,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_knn10,1.029,1.051,30,0,0,0,0,0
+filter2 text,random,0.01,4,planner,2.256,2.344,30,9528,95,0,0,989
+filter2 text,random,0.01,4,index_only,8.690,8.701,30,9528,95,0,988,1
+filter2 text,random,0.01,4,range_then_full,2.170,2.237,30,9528,95,0,0,989
+filter2 text,random,0.01,4,planner_knn10,5.390,5.573,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_thr,0.497,0.529,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_knn10,0.554,0.589,30,0,0,0,0,0
+filter2 clustered 0.01: 10000 visible; permuting into row order 1.03 ms
+filter2 item,clustered,0.01,1,planner,0.697,0.964,30,2051,150,0,2,1
+filter2 item,clustered,0.01,1,index_only,0.695,1.019,30,2051,150,0,3,0
+filter2 item,clustered,0.01,1,range_then_full,0.711,0.940,30,2051,150,0,0,3
+filter2 item,clustered,0.01,1,planner_knn10,2.380,2.496,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_thr,0.814,0.817,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_knn10,0.849,0.885,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,planner,1.002,1.038,30,2051,150,0,2,1
+filter2 item,clustered,0.01,4,index_only,1.023,1.058,30,2051,150,0,3,0
+filter2 item,clustered,0.01,4,range_then_full,0.996,0.979,30,2051,150,0,0,3
+filter2 item,clustered,0.01,4,planner_knn10,1.872,1.979,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_thr,0.397,0.414,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_knn10,0.483,0.489,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,planner,1.869,1.892,30,9979,12,0,7,0
+filter2 text,clustered,0.01,1,index_only,1.857,1.874,30,9979,12,0,7,0
+filter2 text,clustered,0.01,1,range_then_full,1.385,1.429,30,9979,12,0,0,7
+filter2 text,clustered,0.01,1,planner_knn10,3.073,3.405,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_thr,0.848,0.882,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_knn10,0.877,0.920,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,planner,1.306,1.335,30,9979,12,0,7,0
+filter2 text,clustered,0.01,4,index_only,1.221,1.227,30,9979,12,0,7,0
+filter2 text,clustered,0.01,4,range_then_full,1.064,1.110,30,9979,12,0,0,7
+filter2 text,clustered,0.01,4,planner_knn10,2.381,2.554,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_thr,0.419,0.468,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_knn10,0.496,0.493,30,0,0,0,0,0
+filter2 random 0.001: 1000 visible; permuting into row order 1.08 ms
+filter2 item,random,0.001,1,planner,1.535,1.684,30,243,10,0,0,250
+filter2 item,random,0.001,1,index_only,1.858,5.603,30,243,10,0,161,88
+filter2 item,random,0.001,1,range_then_full,1.852,2.360,30,243,10,0,0,250
+filter2 item,random,0.001,1,planner_knn10,3.906,4.135,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_thr,0.196,0.197,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_knn10,0.158,0.175,30,0,0,0,0,0
+filter2 item,random,0.001,4,planner,0.876,1.011,30,243,10,0,0,250
+filter2 item,random,0.001,4,index_only,1.355,2.308,30,243,10,0,161,88
+filter2 item,random,0.001,4,range_then_full,0.894,1.061,30,243,10,0,0,250
+filter2 item,random,0.001,4,planner_knn10,2.847,3.231,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_thr,0.159,0.173,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_knn10,0.155,0.171,30,0,0,0,0,0
+filter2 text,random,0.001,1,planner,3.234,3.286,30,955,11,0,0,585
+filter2 text,random,0.001,1,index_only,19.212,19.453,30,955,11,0,576,9
+filter2 text,random,0.001,1,range_then_full,3.248,3.312,30,955,11,0,0,585
+filter2 text,random,0.001,1,planner_knn10,6.600,6.743,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_thr,0.186,0.194,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_knn10,0.162,0.173,30,0,0,0,0,0
+filter2 text,random,0.001,4,planner,1.753,1.800,30,955,11,0,0,585
+filter2 text,random,0.001,4,index_only,4.472,4.977,30,955,11,0,576,9
+filter2 text,random,0.001,4,range_then_full,1.372,1.381,30,955,11,0,0,585
+filter2 text,random,0.001,4,planner_knn10,4.596,4.760,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_thr,0.169,0.170,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_knn10,0.165,0.169,30,0,0,0,0,0
+filter2 clustered 0.001: 1000 visible; permuting into row order 1.00 ms
+filter2 item,clustered,0.001,1,planner,0.722,0.806,30,407,0,0,1,0
+filter2 item,clustered,0.001,1,index_only,0.699,0.800,30,407,0,0,1,0
+filter2 item,clustered,0.001,1,range_then_full,0.699,0.712,30,407,0,0,0,1
+filter2 item,clustered,0.001,1,planner_knn10,1.362,1.396,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_thr,0.138,0.143,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_knn10,0.098,0.114,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,planner,0.732,0.785,30,407,0,0,1,0
+filter2 item,clustered,0.001,4,index_only,0.725,0.789,30,407,0,0,1,0
+filter2 item,clustered,0.001,4,range_then_full,0.719,0.730,30,407,0,0,0,1
+filter2 item,clustered,0.001,4,planner_knn10,1.600,1.665,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_thr,0.127,0.133,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_knn10,0.124,0.136,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,planner,1.054,1.082,30,1000,58,0,2,0
+filter2 text,clustered,0.001,1,index_only,1.106,1.257,30,1000,58,0,2,0
+filter2 text,clustered,0.001,1,range_then_full,1.008,1.012,30,1000,58,0,0,2
+filter2 text,clustered,0.001,1,planner_knn10,1.652,1.739,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_thr,0.149,0.150,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_knn10,0.116,0.133,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,planner,0.992,1.004,30,1000,58,0,2,0
+filter2 text,clustered,0.001,4,index_only,1.006,1.029,30,1000,58,0,2,0
+filter2 text,clustered,0.001,4,range_then_full,0.756,0.779,30,1000,58,0,0,2
+filter2 text,clustered,0.001,4,planner_knn10,1.545,1.596,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_thr,0.127,0.134,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_knn10,0.122,0.122,30,0,0,0,0,0
+==== run at 1794525805: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 8.0s
+[build2] encoded 12.6s
+[build2] assembled 12.6s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44576159 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794525820: ["../../rust-target/release/vexact", "--v2", "filter", "--fnq", "30"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.9s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 56.2s
+[build2] encoded 141.0s
+[build2] assembled 141.5s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 152.3s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+filter2 random 0.5: 500000 visible; permuting into row order 3.49 ms
+filter2 item,random,0.5,1,planner,5.872,18.559,30,121012,4997,0,272,155
+filter2 item,random,0.5,1,index_only,6.636,19.947,30,121012,4997,0,422,6
+filter2 item,random,0.5,1,range_then_full,5.815,25.870,30,121012,4997,0,0,427
+filter2 item,random,0.5,1,planner_knn10,5.557,8.719,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_thr,102.897,103.391,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_knn10,99.268,101.041,30,0,0,0,0,0
+filter2 item,random,0.5,4,planner,6.692,9.307,30,121012,4997,0,272,155
+filter2 item,random,0.5,4,index_only,5.173,8.127,30,121012,4997,0,422,6
+filter2 item,random,0.5,4,range_then_full,5.432,11.368,30,121012,4997,0,0,427
+filter2 item,random,0.5,4,planner_knn10,4.658,5.131,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_thr,31.658,32.387,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_knn10,32.147,32.468,30,0,0,0,0,0
+filter2 text,random,0.5,1,planner,74.991,77.082,30,476752,4963,0,792,208
+filter2 text,random,0.5,1,index_only,74.199,75.379,30,476752,4963,0,1000,0
+filter2 text,random,0.5,1,range_then_full,105.290,107.208,30,476752,4963,0,0,1000
+filter2 text,random,0.5,1,planner_knn10,39.279,43.782,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_thr,101.726,103.468,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_knn10,99.997,101.548,30,0,0,0,0,0
+filter2 text,random,0.5,4,planner,23.052,23.355,30,476752,4963,0,792,208
+filter2 text,random,0.5,4,index_only,22.245,23.021,30,476752,4963,0,1000,0
+filter2 text,random,0.5,4,range_then_full,29.202,29.483,30,476752,4963,0,0,1000
+filter2 text,random,0.5,4,planner_knn10,14.479,15.087,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_thr,29.904,30.326,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_knn10,29.955,30.656,30,0,0,0,0,0
+filter2 clustered 0.5: 500000 visible; permuting into row order 3.03 ms
+filter2 item,clustered,0.5,1,planner,4.353,12.911,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,1,index_only,4.890,13.966,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,1,range_then_full,5.673,22.846,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,1,planner_knn10,4.813,7.457,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_thr,93.090,96.169,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_knn10,93.822,95.835,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,planner,3.419,5.263,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,4,index_only,3.941,5.819,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,4,range_then_full,4.739,8.225,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,4,planner_knn10,4.151,4.777,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_thr,28.848,29.143,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_knn10,28.325,28.779,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,planner,49.125,48.961,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,1,index_only,50.460,50.791,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,1,range_then_full,88.828,88.476,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,1,planner_knn10,26.064,28.217,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_thr,89.369,90.721,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_knn10,88.416,89.264,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,planner,13.885,14.004,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,4,index_only,14.691,15.030,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,4,range_then_full,25.070,25.486,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,4,planner_knn10,10.024,10.693,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_thr,27.091,27.310,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_knn10,27.150,27.601,30,0,0,0,0,0
+filter2 random 0.1: 100000 visible; permuting into row order 1.01 ms
+filter2 item,random,0.1,1,planner,4.048,8.271,30,24206,998,0,14,413
+filter2 item,random,0.1,1,index_only,4.416,13.649,30,24206,998,0,402,25
+filter2 item,random,0.1,1,range_then_full,2.749,7.769,30,24206,998,0,0,427
+filter2 item,random,0.1,1,planner_knn10,5.523,6.818,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_thr,21.159,21.691,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_knn10,20.988,21.333,30,0,0,0,0,0
+filter2 item,random,0.1,4,planner,3.974,4.749,30,24206,998,0,14,413
+filter2 item,random,0.1,4,index_only,3.135,5.287,30,24206,998,0,402,25
+filter2 item,random,0.1,4,range_then_full,1.805,2.878,30,24206,998,0,0,427
+filter2 item,random,0.1,4,planner_knn10,4.118,4.523,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_thr,6.765,6.708,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_knn10,6.933,6.858,30,0,0,0,0,0
+filter2 text,random,0.1,1,planner,26.612,26.960,30,95306,997,0,0,999
+filter2 text,random,0.1,1,index_only,48.577,48.816,30,95306,997,0,999,0
+filter2 text,random,0.1,1,range_then_full,26.335,26.755,30,95306,997,0,0,999
+filter2 text,random,0.1,1,planner_knn10,22.192,23.237,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_thr,21.282,21.647,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_knn10,20.806,20.863,30,0,0,0,0,0
+filter2 text,random,0.1,4,planner,7.528,7.595,30,95306,997,0,0,999
+filter2 text,random,0.1,4,index_only,13.510,13.610,30,95306,997,0,999,0
+filter2 text,random,0.1,4,range_then_full,5.804,6.049,30,95306,997,0,0,999
+filter2 text,random,0.1,4,planner_knn10,7.815,8.129,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_thr,5.200,5.262,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_knn10,5.234,5.360,30,0,0,0,0,0
+filter2 clustered 0.1: 100000 visible; permuting into row order 1.02 ms
+filter2 item,clustered,0.1,1,planner,1.524,3.668,30,23550,719,0,17,25
+filter2 item,clustered,0.1,1,index_only,1.660,4.921,30,23550,719,0,42,0
+filter2 item,clustered,0.1,1,range_then_full,1.218,4.003,30,23550,719,0,0,42
+filter2 item,clustered,0.1,1,planner_knn10,2.779,3.696,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_thr,14.855,14.868,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_knn10,14.330,14.294,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,planner,1.580,1.892,30,23550,719,0,17,25
+filter2 item,clustered,0.1,4,index_only,1.429,1.992,30,23550,719,0,42,0
+filter2 item,clustered,0.1,4,range_then_full,1.140,1.682,30,23550,719,0,0,42
+filter2 item,clustered,0.1,4,planner_knn10,2.352,2.731,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_thr,3.957,4.041,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_knn10,4.027,4.142,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,planner,13.428,13.575,30,97355,492,0,59,40
+filter2 text,clustered,0.1,1,index_only,15.382,15.900,30,97355,492,0,99,0
+filter2 text,clustered,0.1,1,range_then_full,17.609,17.676,30,97355,492,0,0,99
+filter2 text,clustered,0.1,1,planner_knn10,12.623,12.205,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_thr,14.894,14.827,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_knn10,13.967,13.882,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,planner,3.144,3.316,30,97355,492,0,59,40
+filter2 text,clustered,0.1,4,index_only,3.945,4.049,30,97355,492,0,99,0
+filter2 text,clustered,0.1,4,range_then_full,3.288,3.501,30,97355,492,0,0,99
+filter2 text,clustered,0.1,4,planner_knn10,4.977,5.066,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_thr,3.772,3.817,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_knn10,3.700,3.827,30,0,0,0,0,0
+filter2 random 0.01: 10000 visible; permuting into row order 0.31 ms
+filter2 item,random,0.01,1,planner,1.958,2.372,30,2430,101,0,0,423
+filter2 item,random,0.01,1,index_only,2.756,9.789,30,2430,101,0,349,74
+filter2 item,random,0.01,1,range_then_full,2.024,2.397,30,2430,101,0,0,423
+filter2 item,random,0.01,1,planner_knn10,3.746,4.740,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_thr,1.096,1.153,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_knn10,1.093,1.133,30,0,0,0,0,0
+filter2 item,random,0.01,4,planner,1.323,1.444,30,2430,101,0,0,423
+filter2 item,random,0.01,4,index_only,1.943,3.599,30,2430,101,0,349,74
+filter2 item,random,0.01,4,range_then_full,1.558,1.523,30,2430,101,0,0,423
+filter2 item,random,0.01,4,planner_knn10,2.967,3.380,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_thr,0.508,0.526,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_knn10,0.541,0.565,30,0,0,0,0,0
+filter2 text,random,0.01,1,planner,4.593,4.695,30,9528,95,0,0,989
+filter2 text,random,0.01,1,index_only,33.145,33.362,30,9528,95,0,988,1
+filter2 text,random,0.01,1,range_then_full,4.933,5.166,30,9528,95,0,0,989
+filter2 text,random,0.01,1,planner_knn10,9.978,10.350,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_thr,1.310,1.309,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_knn10,1.218,1.244,30,0,0,0,0,0
+filter2 text,random,0.01,4,planner,2.036,2.218,30,9528,95,0,0,989
+filter2 text,random,0.01,4,index_only,10.522,10.750,30,9528,95,0,988,1
+filter2 text,random,0.01,4,range_then_full,2.066,2.169,30,9528,95,0,0,989
+filter2 text,random,0.01,4,planner_knn10,5.301,5.537,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_thr,0.559,0.581,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_knn10,0.595,0.607,30,0,0,0,0,0
+filter2 clustered 0.01: 10000 visible; permuting into row order 0.11 ms
+filter2 item,clustered,0.01,1,planner,0.706,0.925,30,2051,150,0,1,2
+filter2 item,clustered,0.01,1,index_only,0.698,1.006,30,2051,150,0,3,0
+filter2 item,clustered,0.01,1,range_then_full,0.707,0.893,30,2051,150,0,0,3
+filter2 item,clustered,0.01,1,planner_knn10,1.942,2.062,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_thr,0.795,0.805,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_knn10,0.831,0.834,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,planner,0.724,0.822,30,2051,150,0,1,2
+filter2 item,clustered,0.01,4,index_only,0.791,0.927,30,2051,150,0,3,0
+filter2 item,clustered,0.01,4,range_then_full,0.723,0.854,30,2051,150,0,0,3
+filter2 item,clustered,0.01,4,planner_knn10,2.184,2.338,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_thr,0.458,0.453,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_knn10,0.522,0.514,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,planner,1.490,1.593,30,9979,12,0,3,4
+filter2 text,clustered,0.01,1,index_only,1.846,1.881,30,9979,12,0,7,0
+filter2 text,clustered,0.01,1,range_then_full,1.293,1.334,30,9979,12,0,0,7
+filter2 text,clustered,0.01,1,planner_knn10,2.373,2.607,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_thr,0.777,0.809,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_knn10,0.806,0.823,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,planner,1.625,1.560,30,9979,12,0,3,4
+filter2 text,clustered,0.01,4,index_only,1.444,1.538,30,9979,12,0,7,0
+filter2 text,clustered,0.01,4,range_then_full,1.104,1.164,30,9979,12,0,0,7
+filter2 text,clustered,0.01,4,planner_knn10,2.555,2.905,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_thr,0.485,0.526,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_knn10,0.549,0.551,30,0,0,0,0,0
+filter2 random 0.001: 1000 visible; permuting into row order 0.18 ms
+filter2 item,random,0.001,1,planner,1.554,1.587,30,243,10,0,0,250
+filter2 item,random,0.001,1,index_only,1.978,6.490,30,243,10,0,161,88
+filter2 item,random,0.001,1,range_then_full,1.546,1.554,30,243,10,0,0,250
+filter2 item,random,0.001,1,planner_knn10,3.616,4.704,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_thr,0.191,0.201,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_knn10,0.172,0.183,30,0,0,0,0,0
+filter2 item,random,0.001,4,planner,1.063,1.070,30,243,10,0,0,250
+filter2 item,random,0.001,4,index_only,1.311,2.264,30,243,10,0,161,88
+filter2 item,random,0.001,4,range_then_full,0.966,0.989,30,243,10,0,0,250
+filter2 item,random,0.001,4,planner_knn10,2.797,3.134,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_thr,0.167,0.169,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_knn10,0.168,0.176,30,0,0,0,0,0
+filter2 text,random,0.001,1,planner,2.599,2.674,30,955,11,0,0,585
+filter2 text,random,0.001,1,index_only,19.672,19.948,30,955,11,0,576,9
+filter2 text,random,0.001,1,range_then_full,2.607,2.671,30,955,11,0,0,585
+filter2 text,random,0.001,1,planner_knn10,7.041,7.328,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_thr,0.220,0.223,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_knn10,0.190,0.194,30,0,0,0,0,0
+filter2 text,random,0.001,4,planner,1.878,1.899,30,955,11,0,0,585
+filter2 text,random,0.001,4,index_only,4.465,4.812,30,955,11,0,576,9
+filter2 text,random,0.001,4,range_then_full,1.269,1.270,30,955,11,0,0,585
+filter2 text,random,0.001,4,planner_knn10,4.782,4.778,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_thr,0.165,0.167,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_knn10,0.143,0.151,30,0,0,0,0,0
+filter2 clustered 0.001: 1000 visible; permuting into row order 0.07 ms
+filter2 item,clustered,0.001,1,planner,0.697,0.700,30,407,0,0,0,1
+filter2 item,clustered,0.001,1,index_only,1.030,1.035,30,407,0,0,1,0
+filter2 item,clustered,0.001,1,range_then_full,0.710,0.753,30,407,0,0,0,1
+filter2 item,clustered,0.001,1,planner_knn10,1.178,1.201,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_thr,0.114,0.122,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_knn10,0.105,0.108,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,planner,0.801,0.801,30,407,0,0,0,1
+filter2 item,clustered,0.001,4,index_only,0.817,0.876,30,407,0,0,1,0
+filter2 item,clustered,0.001,4,range_then_full,0.781,0.798,30,407,0,0,0,1
+filter2 item,clustered,0.001,4,planner_knn10,1.381,1.440,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_thr,0.114,0.127,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_knn10,0.151,0.152,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,planner,0.729,0.737,30,1000,58,0,0,2
+filter2 text,clustered,0.001,1,index_only,1.026,1.037,30,1000,58,0,2,0
+filter2 text,clustered,0.001,1,range_then_full,0.732,0.745,30,1000,58,0,0,2
+filter2 text,clustered,0.001,1,planner_knn10,1.332,1.559,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_thr,0.126,0.133,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_knn10,0.127,0.156,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,planner,1.098,1.108,30,1000,58,0,0,2
+filter2 text,clustered,0.001,4,index_only,1.427,1.368,30,1000,58,0,2,0
+filter2 text,clustered,0.001,4,range_then_full,0.733,0.737,30,1000,58,0,0,2
+filter2 text,clustered,0.001,4,planner_knn10,1.250,1.270,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_thr,0.108,0.110,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_knn10,0.109,0.113,30,0,0,0,0,0
+==== run at 1794526205: ["../../rust-target/release/vexact", "--v2", "filter", "--fnq", "30"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 53.7s
+[build2] encoded 136.1s
+[build2] assembled 136.6s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 146.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+filter2 random 0.5: 500000 visible; permuting into row order 2.91 ms
+filter2 item,random,0.5,1,planner,6.160,17.815,30,121012,4997,0,272,155
+filter2 item,random,0.5,1,index_only,6.048,19.009,30,121012,4997,0,422,6
+filter2 item,random,0.5,1,range_then_full,5.394,25.218,30,121012,4997,0,0,427
+filter2 item,random,0.5,1,planner_knn10,5.019,8.153,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_thr,100.264,102.391,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_knn10,99.214,101.644,30,0,0,0,0,0
+filter2 item,random,0.5,4,planner,5.145,7.790,30,121012,4997,0,272,155
+filter2 item,random,0.5,4,index_only,4.902,7.437,30,121012,4997,0,422,6
+filter2 item,random,0.5,4,range_then_full,4.085,8.906,30,121012,4997,0,0,427
+filter2 item,random,0.5,4,planner_knn10,4.300,4.738,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_thr,32.408,32.386,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_knn10,32.491,32.844,30,0,0,0,0,0
+filter2 text,random,0.5,1,planner,94.022,87.806,30,168178,4963,0,296,6404
+filter2 text,random,0.5,1,index_only,73.204,74.434,30,476752,4963,0,1000,0
+filter2 text,random,0.5,1,range_then_full,99.169,98.902,30,476752,4963,0,0,1000
+filter2 text,random,0.5,1,planner_knn10,37.169,42.282,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_thr,100.019,100.668,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_knn10,97.513,99.637,30,0,0,0,0,0
+filter2 text,random,0.5,4,planner,25.590,24.167,30,168178,4963,0,296,6404
+filter2 text,random,0.5,4,index_only,19.595,20.118,30,476752,4963,0,1000,0
+filter2 text,random,0.5,4,range_then_full,27.064,27.650,30,476752,4963,0,0,1000
+filter2 text,random,0.5,4,planner_knn10,12.713,13.785,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_thr,28.124,28.601,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_knn10,28.076,28.686,30,0,0,0,0,0
+filter2 clustered 0.5: 500000 visible; permuting into row order 3.07 ms
+filter2 item,clustered,0.5,1,planner,3.411,12.035,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,1,index_only,4.413,13.301,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,1,range_then_full,5.223,22.252,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,1,planner_knn10,4.084,6.255,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_thr,91.048,91.940,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_knn10,91.045,93.070,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,planner,3.300,4.883,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,4,index_only,2.837,4.806,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,4,range_then_full,4.078,7.059,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,4,planner_knn10,3.061,3.583,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_thr,27.182,27.563,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_knn10,26.965,27.714,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,planner,48.937,48.731,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,1,index_only,48.245,48.375,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,1,range_then_full,84.731,85.052,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,1,planner_knn10,25.366,27.749,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_thr,87.258,88.974,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_knn10,86.359,87.003,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,planner,12.770,12.694,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,4,index_only,12.320,12.558,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,4,range_then_full,23.284,23.568,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,4,planner_knn10,8.923,9.867,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_thr,26.436,26.360,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_knn10,26.201,26.338,30,0,0,0,0,0
+filter2 random 0.1: 100000 visible; permuting into row order 1.05 ms
+filter2 item,random,0.1,1,planner,3.130,7.539,30,21377,998,0,14,713
+filter2 item,random,0.1,1,index_only,3.770,13.817,30,24206,998,0,402,25
+filter2 item,random,0.1,1,range_then_full,2.365,7.715,30,24206,998,0,0,427
+filter2 item,random,0.1,1,planner_knn10,4.356,5.931,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_thr,20.771,21.029,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_knn10,20.257,20.807,30,0,0,0,0,0
+filter2 item,random,0.1,4,planner,2.395,2.995,30,21377,998,0,14,713
+filter2 item,random,0.1,4,index_only,2.343,4.357,30,24206,998,0,402,25
+filter2 item,random,0.1,4,range_then_full,1.320,2.315,30,24206,998,0,0,427
+filter2 item,random,0.1,4,planner_knn10,3.007,3.298,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_thr,5.316,5.321,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_knn10,5.517,5.542,30,0,0,0,0,0
+filter2 text,random,0.1,1,planner,22.630,22.974,30,0,997,0,0,10000
+filter2 text,random,0.1,1,index_only,48.255,48.059,30,95306,997,0,999,0
+filter2 text,random,0.1,1,range_then_full,25.337,25.705,30,95306,997,0,0,999
+filter2 text,random,0.1,1,planner_knn10,20.454,21.673,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_thr,20.152,20.669,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_knn10,19.712,20.358,30,0,0,0,0,0
+filter2 text,random,0.1,4,planner,6.170,6.219,30,0,997,0,0,10000
+filter2 text,random,0.1,4,index_only,13.188,13.535,30,95306,997,0,999,0
+filter2 text,random,0.1,4,range_then_full,5.863,5.833,30,95306,997,0,0,999
+filter2 text,random,0.1,4,planner_knn10,6.997,7.493,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_thr,4.946,5.137,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_knn10,5.073,5.147,30,0,0,0,0,0
+filter2 clustered 0.1: 100000 visible; permuting into row order 0.85 ms
+filter2 item,clustered,0.1,1,planner,1.155,3.122,30,23550,719,0,17,25
+filter2 item,clustered,0.1,1,index_only,1.325,4.349,30,23550,719,0,42,0
+filter2 item,clustered,0.1,1,range_then_full,0.839,3.325,30,23550,719,0,0,42
+filter2 item,clustered,0.1,1,planner_knn10,2.058,2.936,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_thr,13.389,13.424,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_knn10,13.064,13.126,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,planner,1.141,1.420,30,23550,719,0,17,25
+filter2 item,clustered,0.1,4,index_only,1.134,1.681,30,23550,719,0,42,0
+filter2 item,clustered,0.1,4,range_then_full,0.911,1.487,30,23550,719,0,0,42
+filter2 item,clustered,0.1,4,planner_knn10,2.022,2.205,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_thr,3.558,3.665,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_knn10,3.796,3.854,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,planner,16.324,16.137,30,0,492,0,0,10000
+filter2 text,clustered,0.1,1,index_only,16.568,16.671,30,97355,492,0,99,0
+filter2 text,clustered,0.1,1,range_then_full,17.722,17.664,30,97355,492,0,0,99
+filter2 text,clustered,0.1,1,planner_knn10,13.071,13.785,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_thr,16.444,16.626,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_knn10,15.622,15.681,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,planner,2.690,2.910,30,0,492,0,0,10000
+filter2 text,clustered,0.1,4,index_only,3.946,4.002,30,97355,492,0,99,0
+filter2 text,clustered,0.1,4,range_then_full,2.895,3.118,30,97355,492,0,0,99
+filter2 text,clustered,0.1,4,planner_knn10,4.476,4.650,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_thr,3.967,4.023,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_knn10,4.120,4.178,30,0,0,0,0,0
+filter2 random 0.01: 10000 visible; permuting into row order 0.30 ms
+filter2 item,random,0.01,1,planner,1.715,2.151,30,2148,101,0,0,723
+filter2 item,random,0.01,1,index_only,2.658,9.864,30,2430,101,0,349,74
+filter2 item,random,0.01,1,range_then_full,1.746,2.122,30,2430,101,0,0,423
+filter2 item,random,0.01,1,planner_knn10,3.358,4.292,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_thr,1.057,1.104,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_knn10,1.052,1.083,30,0,0,0,0,0
+filter2 item,random,0.01,4,planner,0.769,0.983,30,2148,101,0,0,723
+filter2 item,random,0.01,4,index_only,1.865,3.435,30,2430,101,0,349,74
+filter2 item,random,0.01,4,range_then_full,0.849,1.030,30,2430,101,0,0,423
+filter2 item,random,0.01,4,planner_knn10,2.568,2.782,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_thr,0.492,0.521,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_knn10,0.539,0.582,30,0,0,0,0,0
+filter2 text,random,0.01,1,planner,2.918,2.991,30,0,95,0,0,10000
+filter2 text,random,0.01,1,index_only,31.130,31.019,30,9528,95,0,988,1
+filter2 text,random,0.01,1,range_then_full,4.285,4.565,30,9528,95,0,0,989
+filter2 text,random,0.01,1,planner_knn10,7.428,7.223,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_thr,1.040,1.065,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_knn10,1.022,1.036,30,0,0,0,0,0
+filter2 text,random,0.01,4,planner,1.404,1.415,30,0,95,0,0,10000
+filter2 text,random,0.01,4,index_only,7.223,7.556,30,9528,95,0,988,1
+filter2 text,random,0.01,4,range_then_full,1.779,1.807,30,9528,95,0,0,989
+filter2 text,random,0.01,4,planner_knn10,5.474,5.288,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_thr,0.544,0.568,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_knn10,0.609,0.621,30,0,0,0,0,0
+filter2 clustered 0.01: 10000 visible; permuting into row order 0.16 ms
+filter2 item,clustered,0.01,1,planner,0.407,0.593,30,1729,150,0,1,335
+filter2 item,clustered,0.01,1,index_only,0.408,0.717,30,2051,150,0,3,0
+filter2 item,clustered,0.01,1,range_then_full,0.397,0.564,30,2051,150,0,0,3
+filter2 item,clustered,0.01,1,planner_knn10,1.499,1.523,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_thr,0.753,0.770,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_knn10,0.792,0.802,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,planner,0.448,0.567,30,1729,150,0,1,335
+filter2 item,clustered,0.01,4,index_only,0.461,0.591,30,2051,150,0,3,0
+filter2 item,clustered,0.01,4,range_then_full,0.423,0.502,30,2051,150,0,0,3
+filter2 item,clustered,0.01,4,planner_knn10,1.333,1.365,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_thr,0.388,0.394,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_knn10,0.434,0.452,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,planner,1.086,1.103,30,0,12,0,0,10000
+filter2 text,clustered,0.01,1,index_only,1.777,1.810,30,9979,12,0,7,0
+filter2 text,clustered,0.01,1,range_then_full,1.110,1.151,30,9979,12,0,0,7
+filter2 text,clustered,0.01,1,planner_knn10,1.618,1.645,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_thr,0.765,0.772,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_knn10,0.813,0.823,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,planner,0.714,0.713,30,0,12,0,0,10000
+filter2 text,clustered,0.01,4,index_only,1.112,1.123,30,9979,12,0,7,0
+filter2 text,clustered,0.01,4,range_then_full,0.797,0.807,30,9979,12,0,0,7
+filter2 text,clustered,0.01,4,planner_knn10,1.295,1.341,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_thr,0.422,0.439,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_knn10,0.539,0.526,30,0,0,0,0,0
+filter2 random 0.001: 1000 visible; permuting into row order 0.12 ms
+filter2 item,random,0.001,1,planner,0.484,0.492,30,0,10,0,0,10000
+filter2 item,random,0.001,1,index_only,1.775,5.148,30,243,10,0,161,88
+filter2 item,random,0.001,1,range_then_full,0.932,1.182,30,243,10,0,0,250
+filter2 item,random,0.001,1,planner_knn10,2.004,2.459,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_thr,0.170,0.177,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_knn10,0.149,0.155,30,0,0,0,0,0
+filter2 item,random,0.001,4,planner,0.343,0.343,30,0,10,0,0,10000
+filter2 item,random,0.001,4,index_only,0.994,1.796,30,243,10,0,161,88
+filter2 item,random,0.001,4,range_then_full,0.588,0.665,30,243,10,0,0,250
+filter2 item,random,0.001,4,planner_knn10,1.864,2.422,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_thr,0.145,0.156,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_knn10,0.176,0.179,30,0,0,0,0,0
+filter2 text,random,0.001,1,planner,0.449,0.455,30,0,11,0,0,10000
+filter2 text,random,0.001,1,index_only,18.255,18.429,30,955,11,0,576,9
+filter2 text,random,0.001,1,range_then_full,2.299,2.336,30,955,11,0,0,585
+filter2 text,random,0.001,1,planner_knn10,3.599,3.720,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_thr,0.159,0.171,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_knn10,0.157,0.165,30,0,0,0,0,0
+filter2 text,random,0.001,4,planner,0.357,0.356,30,0,11,0,0,10000
+filter2 text,random,0.001,4,index_only,3.864,4.050,30,955,11,0,576,9
+filter2 text,random,0.001,4,range_then_full,0.965,0.982,30,955,11,0,0,585
+filter2 text,random,0.001,4,planner_knn10,3.583,3.645,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_thr,0.148,0.157,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_knn10,0.182,0.185,30,0,0,0,0,0
+filter2 clustered 0.001: 1000 visible; permuting into row order 0.08 ms
+filter2 item,clustered,0.001,1,planner,0.398,0.402,30,7,0,0,0,4000
+filter2 item,clustered,0.001,1,index_only,0.407,0.506,30,407,0,0,1,0
+filter2 item,clustered,0.001,1,range_then_full,0.439,0.429,30,407,0,0,0,1
+filter2 item,clustered,0.001,1,planner_knn10,0.840,0.934,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_thr,0.126,0.135,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_knn10,0.104,0.179,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,planner,0.426,0.423,30,7,0,0,0,4000
+filter2 item,clustered,0.001,4,index_only,0.473,0.509,30,407,0,0,1,0
+filter2 item,clustered,0.001,4,range_then_full,0.406,0.417,30,407,0,0,0,1
+filter2 item,clustered,0.001,4,planner_knn10,0.812,0.827,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_thr,0.098,0.102,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_knn10,0.112,0.116,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,planner,0.383,0.399,30,0,58,0,0,10000
+filter2 text,clustered,0.001,1,index_only,0.727,0.742,30,1000,58,0,2,0
+filter2 text,clustered,0.001,1,range_then_full,0.438,0.459,30,1000,58,0,0,2
+filter2 text,clustered,0.001,1,planner_knn10,0.837,0.895,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_thr,0.109,0.117,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_knn10,0.110,0.124,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,planner,0.399,0.406,30,0,58,0,0,10000
+filter2 text,clustered,0.001,4,index_only,0.766,0.753,30,1000,58,0,2,0
+filter2 text,clustered,0.001,4,range_then_full,0.490,0.494,30,1000,58,0,0,2
+filter2 text,clustered,0.001,4,planner_knn10,1.031,1.038,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_thr,0.130,0.135,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_knn10,0.161,0.171,30,0,0,0,0,0
+==== run at 1794526575: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 7.5s
+[build2] encoded 11.8s
+[build2] assembled 11.8s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44576159 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794526589: ["../../rust-target/release/vexact", "--v2", "breakdown", "--nq", "20"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 51.8s
+[build2] encoded 135.8s
+[build2] assembled 136.3s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 146.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+breakdown2 levels,text,0.01,1,89.98,96.71,0.51,3.24,6.26,3.77,1.93,12.88,21.63,19.00,22.16,3.21,1.86,0.25,82.60,14496,0
+breakdown2 levels,text,0.01,4,25.70,102.07,0.52,1.08,6.52,3.75,2.05,14.50,22.99,20.28,22.84,3.39,3.88,0.28,82.60,14496,0
+breakdown2 shared_tables,text,0.01,1,92.61,99.86,0.49,3.12,5.99,3.60,1.82,2.60,24.14,22.64,28.61,4.81,1.79,0.25,117.99,23393,0
+breakdown2 shared_tables,text,0.01,4,26.48,104.46,0.50,0.92,6.35,3.78,1.90,2.65,25.64,23.97,29.38,5.22,3.90,0.24,117.99,23393,0
+breakdown2 single_pass_64B,text,0.01,1,118.47,130.22,0.48,3.29,6.32,3.88,2.07,5.40,6.95,20.56,21.88,57.16,2.00,0.24,510.65,287208,0
+breakdown2 single_pass_64B,text,0.01,4,32.05,135.62,0.49,0.99,6.63,3.88,2.20,6.12,7.21,21.22,22.11,60.14,4.39,0.25,510.65,287208,0
+breakdown2 single_pass_96B,text,0.01,1,93.64,108.70,0.50,3.28,6.32,3.73,1.90,7.39,8.89,25.93,29.61,19.06,1.85,0.24,252.16,95132,0
+breakdown2 single_pass_96B,text,0.01,4,27.63,114.71,0.52,0.98,6.42,3.88,2.03,8.58,9.29,27.92,30.46,20.28,4.11,0.25,252.16,95132,0
+breakdown2 single_pass_128B,text,0.01,1,95.43,113.69,0.51,3.14,6.05,3.67,1.92,9.24,10.25,31.36,35.32,10.18,1.79,0.25,216.91,49922,0
+breakdown2 single_pass_128B,text,0.01,4,28.14,120.53,0.50,0.94,6.48,3.83,2.02,11.07,10.79,34.07,35.91,10.76,3.90,0.26,216.91,49922,0
+breakdown2 shared+single_96B,text,0.01,1,110.29,122.44,0.51,3.18,6.30,3.90,2.01,1.49,8.91,26.72,30.62,36.60,1.95,0.24,387.25,183079,0
+breakdown2 shared+single_96B,text,0.01,4,29.62,123.71,0.51,0.93,6.41,3.81,2.06,1.53,9.04,27.58,29.70,37.63,4.28,0.23,387.25,183079,0
+breakdown2 levels,text,0.05,1,124.12,131.69,0.48,3.06,5.94,3.71,1.87,15.63,30.05,25.57,33.37,8.94,1.85,1.22,161.49,43159,0
+breakdown2 levels,text,0.05,4,37.62,141.95,0.54,0.97,6.37,3.76,2.06,18.55,32.68,27.03,35.12,9.61,4.01,1.27,161.49,43159,0
+breakdown2 shared_tables,text,0.05,1,128.92,140.18,0.51,3.19,6.08,3.74,1.91,2.78,32.60,29.91,41.02,15.24,1.96,1.24,236.27,75004,0
+breakdown2 shared_tables,text,0.05,4,37.40,146.56,0.51,0.99,6.49,3.95,2.09,2.90,33.95,31.89,41.60,16.21,4.75,1.24,236.27,75004,0
+breakdown2 single_pass_64B,text,0.05,1,165.69,188.44,0.50,3.34,6.71,4.12,2.51,5.94,7.79,23.22,24.42,106.27,2.36,1.26,886.27,529896,0
+breakdown2 single_pass_64B,text,0.05,4,45.14,185.05,0.49,0.93,6.46,3.86,2.36,6.37,7.36,23.19,23.13,105.00,4.67,1.23,886.27,529896,0
+breakdown2 single_pass_96B,text,0.05,1,125.97,144.10,0.48,3.10,6.00,3.73,2.06,7.77,9.14,27.29,31.38,50.02,1.93,1.20,508.76,259350,0
+breakdown2 single_pass_96B,text,0.05,4,37.40,155.75,0.51,0.98,6.49,3.86,2.35,9.44,9.72,29.77,32.44,54.45,4.48,1.26,508.76,259350,0
+breakdown2 single_pass_128B,text,0.05,1,115.83,133.29,0.46,2.99,5.69,3.59,1.88,9.06,10.36,31.18,35.42,29.71,1.81,1.15,392.94,160772,0
+breakdown2 single_pass_128B,text,0.05,4,35.32,145.24,0.49,0.94,6.24,3.73,2.10,10.91,10.97,34.29,37.15,33.14,4.08,1.19,392.94,160772,0
+breakdown2 shared+single_96B,text,0.05,1,140.24,161.03,0.49,3.12,5.97,3.77,2.11,1.58,9.20,27.79,31.33,72.45,2.05,1.18,704.68,386904,0
+breakdown2 shared+single_96B,text,0.05,4,41.37,168.67,0.51,0.96,6.41,3.84,2.32,1.59,9.49,29.61,31.86,76.04,4.71,1.32,704.68,386904,0
+==== run at 1794527048: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 8.4s
+[build2] encoded 12.9s
+[build2] assembled 12.9s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 13.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44576159 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794527063: ["../../rust-target/release/vexact", "--v2", "breakdown", "--nq", "20"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 54.6s
+[build2] encoded 137.4s
+[build2] assembled 137.9s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 147.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+breakdown2 levels,text,0.01,1,87.63,94.07,0.48,3.25,6.40,0.92,1.86,12.32,21.27,18.87,23.01,3.04,2.39,0.25,82.60,14496,0
+breakdown2 levels,text,0.01,4,24.92,92.38,0.47,0.84,6.36,0.68,1.83,13.41,20.93,18.86,22.04,3.02,3.69,0.24,82.60,14496,0
+breakdown2 shared_tables,text,0.01,1,87.86,94.49,0.46,2.91,6.11,0.88,1.78,2.26,22.51,22.30,28.24,4.52,2.28,0.24,117.99,23393,0
+breakdown2 shared_tables,text,0.01,4,24.32,95.12,0.45,0.76,6.26,0.62,1.71,2.23,23.37,22.83,28.27,4.59,3.79,0.24,117.99,23393,0
+breakdown2 single_pass_64B,text,0.01,1,116.54,123.68,0.46,2.96,6.20,1.05,2.03,5.10,11.55,18.20,20.67,52.68,2.52,0.25,510.65,287208,0
+breakdown2 single_pass_64B,text,0.01,4,34.09,131.46,0.48,0.93,6.93,0.70,2.19,5.79,12.32,19.45,21.51,56.42,4.46,0.28,510.65,287208,0
+breakdown2 single_pass_96B,text,0.01,1,94.60,112.36,0.48,3.24,6.57,0.96,1.94,7.23,15.53,25.70,29.37,18.57,2.48,0.27,252.16,95132,0
+breakdown2 single_pass_96B,text,0.01,4,25.27,106.26,0.46,0.78,6.28,0.64,1.85,7.49,14.68,24.88,27.29,18.04,3.64,0.23,252.16,95132,0
+breakdown2 single_pass_128B,text,0.01,1,95.81,119.28,0.47,3.15,6.56,0.94,1.93,9.17,17.78,31.47,35.09,10.03,2.44,0.25,216.91,49922,0
+breakdown2 single_pass_128B,text,0.01,4,28.00,118.75,0.49,0.92,6.94,0.72,1.94,9.79,17.52,31.54,34.46,10.23,3.94,0.25,216.91,49922,0
+breakdown2 shared+single_96B,text,0.01,1,101.25,120.58,0.48,3.13,6.53,0.93,1.96,1.32,14.68,25.02,28.94,34.84,2.50,0.24,387.25,183079,0
+breakdown2 shared+single_96B,text,0.01,4,29.37,119.99,0.47,0.85,6.61,0.64,1.99,1.35,15.29,25.43,28.46,34.66,3.99,0.25,387.25,183079,0
+breakdown2 levels,text,0.05,1,119.30,131.72,0.47,2.94,6.26,0.90,1.96,15.70,29.72,25.57,35.59,8.91,2.49,1.24,161.49,43159,0
+breakdown2 levels,text,0.05,4,35.23,132.94,0.47,0.87,6.57,0.66,2.01,17.21,29.73,26.12,34.90,9.13,4.12,1.17,161.49,43159,0
+breakdown2 shared_tables,text,0.05,1,123.28,136.36,0.48,3.05,6.47,0.99,1.98,2.49,29.87,30.43,42.18,14.64,2.58,1.19,236.27,75004,0
+breakdown2 shared_tables,text,0.05,4,34.78,138.17,0.52,0.98,6.97,0.72,2.00,2.56,31.32,30.72,41.62,15.06,4.39,1.28,236.27,75004,0
+breakdown2 single_pass_64B,text,0.05,1,164.70,176.70,0.49,3.20,6.75,0.97,2.37,5.56,12.19,20.10,22.59,98.35,2.90,1.23,886.27,529896,0
+breakdown2 single_pass_64B,text,0.05,4,47.59,183.65,0.48,0.96,7.07,0.76,2.57,6.25,12.56,21.18,22.62,103.22,4.81,1.18,886.27,529896,0
+breakdown2 single_pass_96B,text,0.05,1,123.82,140.85,0.47,2.99,6.18,0.90,2.01,7.02,15.04,25.34,29.72,47.48,2.55,1.15,508.76,259350,0
+breakdown2 single_pass_96B,text,0.05,4,36.98,151.28,0.48,0.91,6.79,0.69,2.20,8.65,16.53,27.54,30.95,50.90,4.38,1.25,508.76,259350,0
+breakdown2 single_pass_128B,text,0.05,1,123.07,148.36,0.47,3.10,6.52,0.97,2.07,9.96,18.69,32.96,38.28,31.46,2.68,1.20,392.94,160772,0
+breakdown2 single_pass_128B,text,0.05,4,35.73,144.15,0.45,0.85,6.59,0.65,2.10,10.70,18.09,32.68,35.74,30.95,4.20,1.16,392.94,160772,0
+breakdown2 shared+single_96B,text,0.05,1,142.26,156.78,0.47,2.95,6.18,0.90,2.11,1.34,14.84,25.51,29.70,68.98,2.67,1.14,704.68,386904,0
+breakdown2 shared+single_96B,text,0.05,4,40.72,165.33,0.47,0.89,6.62,0.67,2.34,1.44,16.14,27.48,30.61,72.93,4.43,1.30,704.68,386904,0
+==== run at 1794527392: ["../../rust-target/release/vexact", "--v2", "--clusters", "40", "verify", "--vitem", "20", "--vtext", "30", "--vcheck", "50"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 7.5s
+[build2] encoded 11.8s
+[build2] assembled 11.8s; x2 bound 4.872e-4; escapes: det norms 468, |y| 146, kappa 740, tan 1982
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 50966 rows, 40 clusters in 12.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 59.0, 68.0, 73.0, 82.0, 95.5, 111.5, 130.0, 147.5, 164.5, 178.7, 217.7, 250.8, 281.8]
+VERIFY2 38 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 44576159 (det violations 0, rand violations 0); largest randomised error 4.59 sd (c = 9.46); k-NN mismatches 0 of 38
+==== run at 1794527406: ["../../rust-target/release/vexact", "--v2", "breakdown", "--nq", "20"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 52.8s
+[build2] encoded 133.7s
+[build2] assembled 134.2s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 143.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+breakdown2 levels,text,0.01,1,83.52,93.75,0.49,3.19,6.76,1.01,1.92,13.04,17.93,19.32,24.23,3.15,2.46,0.24,82.60,14496,0
+breakdown2 levels,text,0.01,4,23.15,90.69,0.47,0.93,6.84,0.65,1.86,13.42,17.46,19.19,22.82,3.10,3.72,0.24,82.60,14496,0
+breakdown2 shared_tables,text,0.01,1,84.38,92.73,0.48,3.11,6.46,0.90,1.93,2.27,18.36,22.73,29.08,4.82,2.35,0.24,117.99,23393,0
+breakdown2 shared_tables,text,0.01,4,23.36,91.70,0.46,0.79,6.48,0.72,1.74,2.25,18.82,22.87,28.82,4.73,3.79,0.23,117.99,23393,0
+breakdown2 single_pass_64B,text,0.01,1,107.66,118.53,0.47,3.00,6.20,0.87,2.01,4.88,6.44,18.81,20.41,52.72,2.47,0.24,510.65,287208,0
+breakdown2 single_pass_64B,text,0.01,4,29.96,120.64,0.46,0.82,6.36,0.65,2.01,5.58,6.51,19.40,20.73,53.86,4.01,0.25,510.65,287208,0
+breakdown2 single_pass_96B,text,0.01,1,88.08,102.50,0.48,3.09,6.33,0.91,1.84,7.07,8.39,25.10,28.61,18.07,2.37,0.24,252.16,95132,0
+breakdown2 single_pass_96B,text,0.01,4,23.37,100.82,0.48,0.83,6.35,0.65,1.84,7.66,8.35,25.05,27.50,18.17,3.70,0.24,252.16,95132,0
+breakdown2 single_pass_128B,text,0.01,1,87.13,109.50,0.47,3.03,6.31,0.97,1.82,8.88,9.83,30.73,34.94,9.88,2.39,0.24,216.91,49922,0
+breakdown2 single_pass_128B,text,0.01,4,24.14,106.58,0.44,0.78,6.32,0.64,1.79,9.61,9.68,30.69,33.14,9.68,3.58,0.23,216.91,49922,0
+breakdown2 shared+single_96B,text,0.01,1,91.19,111.88,0.47,2.95,6.20,0.91,1.87,1.28,8.31,25.45,28.22,33.57,2.42,0.24,387.25,183079,0
+breakdown2 shared+single_96B,text,0.01,4,27.22,115.80,0.50,0.85,6.66,0.70,1.97,1.35,8.62,26.74,28.76,35.40,4.02,0.24,387.25,183079,0
+breakdown2 levels,text,0.05,1,116.47,125.21,0.46,3.02,6.19,0.89,1.94,15.28,23.93,25.51,35.47,8.79,2.48,1.24,161.49,43159,0
+breakdown2 levels,text,0.05,4,34.46,129.78,0.49,0.93,6.74,0.71,2.03,17.38,24.67,26.28,35.68,9.26,4.37,1.25,161.49,43159,0
+breakdown2 shared_tables,text,0.05,1,117.58,131.12,0.47,3.01,6.28,0.92,1.97,2.50,24.15,30.22,43.06,14.78,2.56,1.20,236.27,75004,0
+breakdown2 shared_tables,text,0.05,4,33.81,130.85,0.48,0.89,6.69,0.70,1.99,2.54,24.20,30.80,42.07,14.89,4.36,1.23,236.27,75004,0
+breakdown2 single_pass_64B,text,0.05,1,151.63,171.40,0.48,3.03,6.27,0.90,2.38,5.30,6.83,21.34,22.87,97.95,2.90,1.16,886.27,529896,0
+breakdown2 single_pass_64B,text,0.05,4,44.74,176.65,0.48,0.99,6.69,0.67,2.35,6.02,6.88,22.30,22.93,101.35,4.74,1.24,886.27,529896,0
+breakdown2 single_pass_96B,text,0.05,1,116.88,133.74,0.47,2.99,6.10,0.88,1.93,7.06,8.59,25.97,29.33,46.73,2.51,1.18,508.76,259350,0
+breakdown2 single_pass_96B,text,0.05,4,35.04,144.47,0.49,0.95,6.95,0.71,2.23,8.64,9.04,28.14,31.01,50.59,4.55,1.17,508.76,259350,0
+breakdown2 single_pass_128B,text,0.05,1,114.05,136.98,0.48,3.06,6.41,0.94,1.99,9.36,10.23,32.25,37.42,31.07,2.61,1.16,392.94,160772,0
+breakdown2 single_pass_128B,text,0.05,4,33.63,139.37,0.51,0.89,6.96,0.73,2.10,10.76,10.28,33.17,36.63,31.37,4.70,1.28,392.94,160772,0
+breakdown2 shared+single_96B,text,0.05,1,136.23,157.29,0.50,3.05,6.46,0.93,2.11,1.36,8.78,27.82,31.08,71.16,2.76,1.27,704.68,386904,0
+breakdown2 shared+single_96B,text,0.05,4,39.02,160.76,0.47,0.86,6.78,0.67,2.23,1.44,8.81,29.34,30.91,73.47,4.59,1.19,704.68,386904,0
+==== run at 1794527683: ["../../rust-target/release/vexact", "--v2", "verify", "setup", "levels", "--vitem", "200", "--vtext", "369", "--vcheck", "25", "--reps", "5"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 51.6s
+[build2] encoded 128.1s
+[build2] assembled 128.5s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 137.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+VERIFY2 569 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 731378512 (det violations 0, rand violations 0); largest randomised error 5.08 sd (c = 9.46); k-NN mismatches 0 of 569
+levels2 item,0,4,6.50,6.25,6.25,1.3882
+levels2 item,1,8,11.00,8.53,2.28,0.5076
+levels2 item,2,12,15.50,10.94,2.41,0.5345
+levels2 item,3,16,20.00,13.06,2.12,0.4717
+levels2 item,4,24,28.50,15.40,2.34,0.2749
+levels2 item,5,32,37.00,18.40,3.00,0.3533
+levels2 item,6,40,41.00,23.14,4.74,1.1849
+levels2 item,7,48,58.75,30.44,7.30,0.4113
+levels2 item,8,56,67.90,35.09,4.65,0.5078
+levels2 item,9,64,73.07,39.77,4.68,0.9063
+levels2 item,10,72,82.02,44.57,4.81,0.5369
+levels2 item,11,80,95.28,50.09,5.52,0.4165
+levels2 item,12,96,111.49,57.34,7.25,0.4472
+levels2 item,13,112,129.79,64.15,6.81,0.3719
+levels2 item,14,128,147.43,70.68,6.53,0.3702
+levels2 item,15,144,164.48,75.02,4.34,0.2544
+levels2 item,16,160,180.19,82.14,7.12,0.4534
+levels2 item,17,192,215.46,93.20,11.06,0.3136
+levels2 item,18,224,248.46,100.14,6.93,0.2101
+levels2 item,19,256,281.74,109.45,9.31,0.2800
+levels2 text,0,4,6.50,6.40,6.40,1.4220
+levels2 text,1,8,11.00,8.61,2.21,0.4915
+levels2 text,2,12,15.50,10.41,1.80,0.3995
+levels2 text,3,16,20.00,12.62,2.21,0.4903
+levels2 text,4,24,28.50,14.81,2.20,0.2584
+levels2 text,5,32,37.00,17.69,2.88,0.3387
+levels2 text,6,40,41.00,22.82,5.13,1.2821
+levels2 text,7,48,58.75,30.89,8.07,0.4547
+levels2 text,8,56,67.90,34.79,3.89,0.4255
+levels2 text,9,64,73.07,39.86,5.07,0.9825
+levels2 text,10,72,82.02,44.72,4.87,0.5436
+levels2 text,11,80,95.28,50.08,5.36,0.4041
+levels2 text,12,96,111.49,56.93,6.85,0.4225
+levels2 text,13,112,129.79,64.33,7.40,0.4043
+levels2 text,14,128,147.43,70.43,6.10,0.3458
+levels2 text,15,144,164.48,76.39,5.96,0.3498
+levels2 text,16,160,180.19,80.68,4.29,0.2728
+levels2 text,17,192,215.46,90.77,10.09,0.2863
+levels2 text,18,224,248.46,101.17,10.40,0.3151
+levels2 text,19,256,281.74,112.62,11.44,0.3440
+setup2 item (1 thread, 64 groups, 1000 clusters): group setup 9.34 ms (int8 basis products alone, warm 5.08 ms; rotations alone 7.35 ms), cluster setup 3.73 ms (3.73 us each), all tables of every cluster and level 18.81 ms (18.81 us per cluster; warm 22.1 ns per unit)
+setup2 text (1 thread, 64 groups, 1000 clusters): group setup 9.04 ms (int8 basis products alone, warm 5.05 ms; rotations alone 7.37 ms), cluster setup 3.62 ms (3.62 us each), all tables of every cluster and level 18.67 ms (18.67 us per cluster; warm 22.4 ns per unit)
+==== run at 1794528087: ["../../rust-target/release/vexact", "--v2", "e2e", "--nq", "100", "--nflat", "20"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 52.6s
+[build2] encoded 134.6s
+[build2] assembled 135.2s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 145.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+e2e2 item,1,index2_thr,0.0001,5.273,9.814,23.764,100,129459,5533.4,100,10.77,0.864
+e2e2 enter-fraction by level (item, 0.0001): [0.124, 0.0859, 0.0566, 0.0385, 0.0272, 0.0149, 0.0092, 0.0075, 0.0047, 0.0024, 0.0018, 0.0011, 0.0006, 0.0005, 0.0003, 0.0002, 0.0002, 0.0001, 0.0001, 0.0001, 0.0]
+e2e2 item,1,index2_thr,0.001,8.096,15.638,39.214,100,206977,7010.3,1000,16.27,0.878
+e2e2 enter-fraction by level (item, 0.001): [0.2003, 0.1628, 0.125, 0.097, 0.0768, 0.0508, 0.036, 0.0312, 0.0222, 0.013, 0.0096, 0.0059, 0.0037, 0.0027, 0.002, 0.0014, 0.0011, 0.0009, 0.0006, 0.0004, 0.0003]
+e2e2 item,1,index2_thr,0.01,27.945,32.112,71.937,100,389986,8936.8,10000,30.57,0.897
+e2e2 enter-fraction by level (item, 0.01): [0.3828, 0.3506, 0.3086, 0.2697, 0.2357, 0.1822, 0.1439, 0.1319, 0.1011, 0.0652, 0.0515, 0.0329, 0.0223, 0.0166, 0.0127, 0.0089, 0.0069, 0.0054, 0.0036, 0.0027, 0.0018]
+e2e2 item,1,index2_thr,0.05,75.631,72.247,109.864,100,761216,19130.2,50000,80.99,0.916
+e2e2 enter-fraction by level (item, 0.05): [0.7521, 0.7315, 0.6952, 0.6548, 0.6144, 0.5396, 0.4736, 0.453, 0.3809, 0.2802, 0.2387, 0.1648, 0.1201, 0.0895, 0.0709, 0.0489, 0.0358, 0.0284, 0.0197, 0.0139, 0.01]
+e2e2 item,1,index2_knn10,0,4.783,8.466,19.593,100,0,0,10,0,0   (seed 0.85 / sweep 7.24 / selection 0.35 ms mean)
+e2e2 item,1,flat_f16_thr,0.001,174.566,175.395,177.792,20,1000000,0,0,0,0
+e2e2 item,1,flat_f16_knn10,0.001,170.320,171.927,177.734,20,1000000,0,0,0,0
+e2e2 item,1,flat_int8_thr,0.001,87.606,88.105,91.071,20,1000000,0,0,0,0
+e2e2 item,4,index2_thr,0.0001,2.555,4.114,9.673,100,129459,5533.4,100,10.77,0.864
+e2e2 item,4,index2_thr,0.001,3.489,5.707,11.809,100,206977,7010.3,1000,16.27,0.878
+e2e2 item,4,index2_thr,0.01,9.106,10.198,19.634,100,389986,8936.8,10000,30.57,0.897
+e2e2 item,4,index2_thr,0.05,22.957,22.217,32.336,100,761216,19130.2,50000,80.99,0.916
+e2e2 item,4,index2_knn10,0,2.854,4.022,7.582,100,0,0,10,0,0   (seed 0.77 / sweep 2.92 / selection 0.31 ms mean)
+e2e2 item,4,flat_f16_thr,0.001,45.156,45.269,46.133,20,1000000,0,0,0,0
+e2e2 item,4,flat_f16_knn10,0.001,44.836,45.633,46.107,20,1000000,0,0,0,0
+e2e2 item,4,flat_int8_thr,0.001,22.958,23.564,25.276,20,1000000,0,0,0,0
+e2e2 text,1,index2_thr,0.0001,38.647,39.440,50.178,100,663398,8689.8,100,31.47,0.886
+e2e2 enter-fraction by level (text, 0.0001): [0.6549, 0.5235, 0.4152, 0.3342, 0.2719, 0.1846, 0.129, 0.1097, 0.0829, 0.045, 0.027, 0.0129, 0.0087, 0.0046, 0.0033, 0.002, 0.0011, 0.0008, 0.0006, 0.0003, 0.0002]
+e2e2 text,1,index2_thr,0.001,47.592,48.046,59.681,100,767312,8952.4,1000,40.55,0.895
+e2e2 enter-fraction by level (text, 0.001): [0.7597, 0.6431, 0.5449, 0.4656, 0.3995, 0.2979, 0.2256, 0.1998, 0.1553, 0.0902, 0.0591, 0.0306, 0.0218, 0.0127, 0.0098, 0.0065, 0.0045, 0.0036, 0.0029, 0.0017, 0.0013]
+e2e2 text,1,index2_thr,0.01,75.568,75.313,89.262,100,926549,14619.9,10000,74.71,0.911
+e2e2 enter-fraction by level (text, 0.01): [0.9197, 0.8349, 0.772, 0.7173, 0.6666, 0.576, 0.4975, 0.4688, 0.3971, 0.2757, 0.2139, 0.1352, 0.0985, 0.0641, 0.0511, 0.0349, 0.0242, 0.0195, 0.0154, 0.0102, 0.0078]
+e2e2 text,1,index2_thr,0.05,110.059,108.400,118.644,100,994710,34623.3,50000,143.53,0.927
+e2e2 enter-fraction by level (text, 0.05): [0.9876, 0.9599, 0.9327, 0.906, 0.8794, 0.8269, 0.7755, 0.7571, 0.6954, 0.5726, 0.4996, 0.3816, 0.3062, 0.2197, 0.1831, 0.1317, 0.0895, 0.0727, 0.0548, 0.0361, 0.0276]
+e2e2 text,1,index2_knn10,0,35.296,39.651,54.222,100,0,0,10,0,0   (seed 1.23 / sweep 39.01 / selection 0.43 ms mean)
+e2e2 text,1,flat_f16_thr,0.001,174.810,175.526,178.343,20,1000000,0,0,0,0
+e2e2 text,1,flat_f16_knn10,0.001,171.325,171.862,173.912,20,1000000,0,0,0,0
+e2e2 text,1,flat_int8_thr,0.001,87.837,87.615,89.030,20,1000000,0,0,0,0
+e2e2 text,4,index2_thr,0.0001,13.071,13.254,16.500,100,663398,8689.8,100,31.47,0.886
+e2e2 text,4,index2_thr,0.001,15.494,15.491,18.395,100,767312,8952.4,1000,40.55,0.895
+e2e2 text,4,index2_thr,0.01,21.004,21.027,24.526,100,926549,14619.9,10000,74.71,0.911
+e2e2 text,4,index2_thr,0.05,32.500,32.320,36.632,100,994710,34623.3,50000,143.53,0.927
+e2e2 text,4,index2_knn10,0,12.511,13.034,18.313,100,0,0,10,0,0   (seed 1.06 / sweep 11.76 / selection 0.38 ms mean)
+e2e2 text,4,flat_f16_thr,0.001,45.641,46.304,48.553,20,1000000,0,0,0,0
+e2e2 text,4,flat_f16_knn10,0.001,45.089,45.765,47.641,20,1000000,0,0,0,0
+e2e2 text,4,flat_int8_thr,0.001,22.950,23.402,24.050,20,1000000,0,0,0,0
+==== run at 1794528419: ["../../rust-target/release/vexact", "--v2", "filter", "--fnq", "30"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 4.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [5.0, 3.0, 2.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 51.7s
+[build2] encoded 128.9s
+[build2] assembled 129.4s; x2 bound 4.882e-4; escapes: det norms 742, |y| 5641, kappa 14562, tan 38194
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768/prof_h0.25.npy) 1000000 rows, 1000 clusters in 139.2s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 67.9, 73.1, 82.0, 95.3, 111.5, 129.8, 147.4, 164.5, 180.2, 215.5, 248.5, 281.7]
+filter2 random 0.5: 500000 visible; permuting into row order 6.24 ms
+filter2 item,random,0.5,1,planner,6.279,17.986,30,121012,4997,0,272,155
+filter2 item,random,0.5,1,index_only,6.321,18.231,30,121012,4997,0,422,6
+filter2 item,random,0.5,1,range_then_full,5.228,25.409,30,121012,4997,0,0,427
+filter2 item,random,0.5,1,planner_knn10,5.231,7.823,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_thr,98.430,99.625,30,0,0,0,0,0
+filter2 item,random,0.5,1,flat_visible_knn10,97.389,98.191,30,0,0,0,0,0
+filter2 item,random,0.5,4,planner,4.657,7.344,30,121012,4997,0,272,155
+filter2 item,random,0.5,4,index_only,4.935,7.506,30,121012,4997,0,422,6
+filter2 item,random,0.5,4,range_then_full,4.142,8.412,30,121012,4997,0,0,427
+filter2 item,random,0.5,4,planner_knn10,4.040,4.548,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_thr,29.268,30.612,30,0,0,0,0,0
+filter2 item,random,0.5,4,flat_visible_knn10,29.813,30.816,30,0,0,0,0,0
+filter2 text,random,0.5,1,planner,71.434,73.446,30,443508,4963,0,741,859
+filter2 text,random,0.5,1,index_only,71.134,71.442,30,476752,4963,0,1000,0
+filter2 text,random,0.5,1,range_then_full,99.983,99.402,30,476752,4963,0,0,1000
+filter2 text,random,0.5,1,planner_knn10,36.205,38.488,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_thr,98.631,99.518,30,0,0,0,0,0
+filter2 text,random,0.5,1,flat_visible_knn10,98.030,98.233,30,0,0,0,0,0
+filter2 text,random,0.5,4,planner,20.384,20.879,30,443508,4963,0,741,859
+filter2 text,random,0.5,4,index_only,20.893,21.010,30,476752,4963,0,1000,0
+filter2 text,random,0.5,4,range_then_full,27.721,27.704,30,476752,4963,0,0,1000
+filter2 text,random,0.5,4,planner_knn10,13.780,14.595,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_thr,28.628,28.836,30,0,0,0,0,0
+filter2 text,random,0.5,4,flat_visible_knn10,28.598,29.284,30,0,0,0,0,0
+filter2 clustered 0.5: 500000 visible; permuting into row order 2.74 ms
+filter2 item,clustered,0.5,1,planner,3.595,11.246,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,1,index_only,4.110,11.672,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,1,range_then_full,5.110,21.757,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,1,planner_knn10,4.047,6.124,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_thr,89.215,90.621,30,0,0,0,0,0
+filter2 item,clustered,0.5,1,flat_visible_knn10,88.961,90.203,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,planner,4.573,5.540,30,120731,5177,0,154,55
+filter2 item,clustered,0.5,4,index_only,3.106,5.120,30,120731,5177,0,209,0
+filter2 item,clustered,0.5,4,range_then_full,3.249,7.166,30,120731,5177,0,0,209
+filter2 item,clustered,0.5,4,planner_knn10,3.176,3.961,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_thr,26.937,27.028,30,0,0,0,0,0
+filter2 item,clustered,0.5,4,flat_visible_knn10,27.261,27.424,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,planner,44.160,44.138,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,1,index_only,44.761,44.535,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,1,range_then_full,86.415,85.812,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,1,planner_knn10,24.148,26.461,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_thr,89.953,90.995,30,0,0,0,0,0
+filter2 text,clustered,0.5,1,flat_visible_knn10,88.532,90.975,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,planner,14.003,14.212,30,479183,4547,0,458,24
+filter2 text,clustered,0.5,4,index_only,12.992,13.203,30,479183,4547,0,482,0
+filter2 text,clustered,0.5,4,range_then_full,23.391,23.540,30,479183,4547,0,0,482
+filter2 text,clustered,0.5,4,planner_knn10,10.723,10.490,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_thr,26.742,27.169,30,0,0,0,0,0
+filter2 text,clustered,0.5,4,flat_visible_knn10,26.588,26.955,30,0,0,0,0,0
+filter2 random 0.1: 100000 visible; permuting into row order 0.95 ms
+filter2 item,random,0.1,1,planner,3.530,8.091,30,21377,998,0,14,713
+filter2 item,random,0.1,1,index_only,4.060,12.203,30,24206,998,0,402,25
+filter2 item,random,0.1,1,range_then_full,2.407,6.880,30,24206,998,0,0,427
+filter2 item,random,0.1,1,planner_knn10,4.132,5.884,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_thr,19.987,20.393,30,0,0,0,0,0
+filter2 item,random,0.1,1,flat_visible_knn10,19.698,19.974,30,0,0,0,0,0
+filter2 item,random,0.1,4,planner,2.702,3.330,30,21377,998,0,14,713
+filter2 item,random,0.1,4,index_only,2.640,5.028,30,24206,998,0,402,25
+filter2 item,random,0.1,4,range_then_full,1.374,2.402,30,24206,998,0,0,427
+filter2 item,random,0.1,4,planner_knn10,2.987,3.296,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_thr,5.387,5.519,30,0,0,0,0,0
+filter2 item,random,0.1,4,flat_visible_knn10,5.730,5.860,30,0,0,0,0,0
+filter2 text,random,0.1,1,planner,23.239,23.430,30,0,997,0,0,10000
+filter2 text,random,0.1,1,index_only,46.225,45.887,30,95306,997,0,999,0
+filter2 text,random,0.1,1,range_then_full,24.827,24.801,30,95306,997,0,0,999
+filter2 text,random,0.1,1,planner_knn10,20.904,21.733,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_thr,20.685,20.876,30,0,0,0,0,0
+filter2 text,random,0.1,1,flat_visible_knn10,20.114,20.243,30,0,0,0,0,0
+filter2 text,random,0.1,4,planner,6.068,6.236,30,0,997,0,0,10000
+filter2 text,random,0.1,4,index_only,13.099,12.982,30,95306,997,0,999,0
+filter2 text,random,0.1,4,range_then_full,6.297,6.428,30,95306,997,0,0,999
+filter2 text,random,0.1,4,planner_knn10,8.113,8.272,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_thr,6.052,6.171,30,0,0,0,0,0
+filter2 text,random,0.1,4,flat_visible_knn10,6.324,7.029,30,0,0,0,0,0
+filter2 clustered 0.1: 100000 visible; permuting into row order 0.82 ms
+filter2 item,clustered,0.1,1,planner,1.298,3.224,30,23550,719,0,17,25
+filter2 item,clustered,0.1,1,index_only,1.335,3.608,30,23550,719,0,42,0
+filter2 item,clustered,0.1,1,range_then_full,0.882,3.506,30,23550,719,0,0,42
+filter2 item,clustered,0.1,1,planner_knn10,2.264,3.181,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_thr,14.938,14.944,30,0,0,0,0,0
+filter2 item,clustered,0.1,1,flat_visible_knn10,14.585,14.402,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,planner,1.691,1.931,30,23550,719,0,17,25
+filter2 item,clustered,0.1,4,index_only,1.357,1.951,30,23550,719,0,42,0
+filter2 item,clustered,0.1,4,range_then_full,0.969,1.480,30,23550,719,0,0,42
+filter2 item,clustered,0.1,4,planner_knn10,1.910,2.260,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_thr,3.539,3.628,30,0,0,0,0,0
+filter2 item,clustered,0.1,4,flat_visible_knn10,3.707,3.938,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,planner,18.291,18.244,30,9254,492,0,6,9004
+filter2 text,clustered,0.1,1,index_only,14.814,15.546,30,97355,492,0,99,0
+filter2 text,clustered,0.1,1,range_then_full,18.044,18.043,30,97355,492,0,0,99
+filter2 text,clustered,0.1,1,planner_knn10,14.807,14.228,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_thr,17.202,17.716,30,0,0,0,0,0
+filter2 text,clustered,0.1,1,flat_visible_knn10,16.074,17.023,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,planner,3.878,3.806,30,9254,492,0,6,9004
+filter2 text,clustered,0.1,4,index_only,3.942,3.980,30,97355,492,0,99,0
+filter2 text,clustered,0.1,4,range_then_full,3.080,3.638,30,97355,492,0,0,99
+filter2 text,clustered,0.1,4,planner_knn10,5.354,5.321,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_thr,4.419,4.343,30,0,0,0,0,0
+filter2 text,clustered,0.1,4,flat_visible_knn10,4.429,4.275,30,0,0,0,0,0
+filter2 random 0.01: 10000 visible; permuting into row order 0.34 ms
+filter2 item,random,0.01,1,planner,1.331,1.358,30,0,101,0,0,10000
+filter2 item,random,0.01,1,index_only,2.990,8.519,30,2430,101,0,349,74
+filter2 item,random,0.01,1,range_then_full,1.595,2.074,30,2430,101,0,0,423
+filter2 item,random,0.01,1,planner_knn10,3.704,4.024,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_thr,1.209,1.196,30,0,0,0,0,0
+filter2 item,random,0.01,1,flat_visible_knn10,1.244,1.217,30,0,0,0,0,0
+filter2 item,random,0.01,4,planner,0.635,0.637,30,0,101,0,0,10000
+filter2 item,random,0.01,4,index_only,1.885,3.082,30,2430,101,0,349,74
+filter2 item,random,0.01,4,range_then_full,0.765,1.004,30,2430,101,0,0,423
+filter2 item,random,0.01,4,planner_knn10,2.426,2.567,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_thr,0.485,0.524,30,0,0,0,0,0
+filter2 item,random,0.01,4,flat_visible_knn10,0.539,0.551,30,0,0,0,0,0
+filter2 text,random,0.01,1,planner,1.430,1.450,30,0,95,0,0,10000
+filter2 text,random,0.01,1,index_only,28.131,28.694,30,9528,95,0,988,1
+filter2 text,random,0.01,1,range_then_full,4.394,4.541,30,9528,95,0,0,989
+filter2 text,random,0.01,1,planner_knn10,4.262,4.830,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_thr,0.991,1.048,30,0,0,0,0,0
+filter2 text,random,0.01,1,flat_visible_knn10,1.011,1.133,30,0,0,0,0,0
+filter2 text,random,0.01,4,planner,0.615,0.639,30,0,95,0,0,10000
+filter2 text,random,0.01,4,index_only,7.897,8.075,30,9528,95,0,988,1
+filter2 text,random,0.01,4,range_then_full,1.574,1.655,30,9528,95,0,0,989
+filter2 text,random,0.01,4,planner_knn10,3.214,3.211,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_thr,0.470,0.501,30,0,0,0,0,0
+filter2 text,random,0.01,4,flat_visible_knn10,0.526,0.563,30,0,0,0,0,0
+filter2 clustered 0.01: 10000 visible; permuting into row order 0.15 ms
+filter2 item,clustered,0.01,1,planner,0.392,0.625,30,1729,150,0,1,335
+filter2 item,clustered,0.01,1,index_only,0.401,0.679,30,2051,150,0,3,0
+filter2 item,clustered,0.01,1,range_then_full,0.376,0.546,30,2051,150,0,0,3
+filter2 item,clustered,0.01,1,planner_knn10,1.588,1.547,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_thr,0.729,0.735,30,0,0,0,0,0
+filter2 item,clustered,0.01,1,flat_visible_knn10,0.773,0.770,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,planner,0.435,0.596,30,1729,150,0,1,335
+filter2 item,clustered,0.01,4,index_only,0.419,0.599,30,2051,150,0,3,0
+filter2 item,clustered,0.01,4,range_then_full,0.417,0.491,30,2051,150,0,0,3
+filter2 item,clustered,0.01,4,planner_knn10,1.475,1.383,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_thr,0.388,0.384,30,0,0,0,0,0
+filter2 item,clustered,0.01,4,flat_visible_knn10,0.458,0.478,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,planner,0.954,1.000,30,0,12,0,0,10000
+filter2 text,clustered,0.01,1,index_only,1.568,1.626,30,9979,12,0,7,0
+filter2 text,clustered,0.01,1,range_then_full,1.233,1.201,30,9979,12,0,0,7
+filter2 text,clustered,0.01,1,planner_knn10,1.615,1.844,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_thr,0.780,0.809,30,0,0,0,0,0
+filter2 text,clustered,0.01,1,flat_visible_knn10,0.854,0.975,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,planner,0.612,0.611,30,0,12,0,0,10000
+filter2 text,clustered,0.01,4,index_only,1.125,1.135,30,9979,12,0,7,0
+filter2 text,clustered,0.01,4,range_then_full,0.713,0.744,30,9979,12,0,0,7
+filter2 text,clustered,0.01,4,planner_knn10,1.203,1.186,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_thr,0.370,0.371,30,0,0,0,0,0
+filter2 text,clustered,0.01,4,flat_visible_knn10,0.428,0.446,30,0,0,0,0,0
+filter2 random 0.001: 1000 visible; permuting into row order 0.11 ms
+filter2 item,random,0.001,1,planner,0.425,0.435,30,0,10,0,0,10000
+filter2 item,random,0.001,1,index_only,1.901,4.685,30,243,10,0,161,88
+filter2 item,random,0.001,1,range_then_full,1.000,1.195,30,243,10,0,0,250
+filter2 item,random,0.001,1,planner_knn10,2.221,2.476,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_thr,0.151,0.158,30,0,0,0,0,0
+filter2 item,random,0.001,1,flat_visible_knn10,0.152,0.172,30,0,0,0,0,0
+filter2 item,random,0.001,4,planner,0.371,0.376,30,0,10,0,0,10000
+filter2 item,random,0.001,4,index_only,1.470,2.281,30,243,10,0,161,88
+filter2 item,random,0.001,4,range_then_full,0.696,0.787,30,243,10,0,0,250
+filter2 item,random,0.001,4,planner_knn10,2.669,2.829,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_thr,0.170,0.180,30,0,0,0,0,0
+filter2 item,random,0.001,4,flat_visible_knn10,0.212,0.214,30,0,0,0,0,0
+filter2 text,random,0.001,1,planner,0.418,0.433,30,0,11,0,0,10000
+filter2 text,random,0.001,1,index_only,16.206,16.482,30,955,11,0,576,9
+filter2 text,random,0.001,1,range_then_full,2.380,2.464,30,955,11,0,0,585
+filter2 text,random,0.001,1,planner_knn10,4.296,4.279,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_thr,0.188,0.190,30,0,0,0,0,0
+filter2 text,random,0.001,1,flat_visible_knn10,0.192,0.197,30,0,0,0,0,0
+filter2 text,random,0.001,4,planner,0.347,0.356,30,0,11,0,0,10000
+filter2 text,random,0.001,4,index_only,4.256,4.508,30,955,11,0,576,9
+filter2 text,random,0.001,4,range_then_full,0.947,0.942,30,955,11,0,0,585
+filter2 text,random,0.001,4,planner_knn10,3.524,3.564,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_thr,0.151,0.164,30,0,0,0,0,0
+filter2 text,random,0.001,4,flat_visible_knn10,0.189,0.189,30,0,0,0,0,0
+filter2 clustered 0.001: 1000 visible; permuting into row order 0.09 ms
+filter2 item,clustered,0.001,1,planner,0.363,0.368,30,7,0,0,0,4000
+filter2 item,clustered,0.001,1,index_only,0.384,0.518,30,407,0,0,1,0
+filter2 item,clustered,0.001,1,range_then_full,0.378,0.388,30,407,0,0,0,1
+filter2 item,clustered,0.001,1,planner_knn10,0.822,0.843,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_thr,0.110,0.123,30,0,0,0,0,0
+filter2 item,clustered,0.001,1,flat_visible_knn10,0.102,0.113,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,planner,0.416,0.425,30,7,0,0,0,4000
+filter2 item,clustered,0.001,4,index_only,0.427,0.543,30,407,0,0,1,0
+filter2 item,clustered,0.001,4,range_then_full,0.409,0.417,30,407,0,0,0,1
+filter2 item,clustered,0.001,4,planner_knn10,0.851,0.863,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_thr,0.109,0.112,30,0,0,0,0,0
+filter2 item,clustered,0.001,4,flat_visible_knn10,0.136,0.143,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,planner,0.385,0.401,30,0,58,0,0,10000
+filter2 text,clustered,0.001,1,index_only,0.796,0.813,30,1000,58,0,2,0
+filter2 text,clustered,0.001,1,range_then_full,0.414,0.433,30,1000,58,0,0,2
+filter2 text,clustered,0.001,1,planner_knn10,0.786,0.809,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_thr,0.094,0.103,30,0,0,0,0,0
+filter2 text,clustered,0.001,1,flat_visible_knn10,0.098,0.109,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,planner,0.425,0.426,30,0,58,0,0,10000
+filter2 text,clustered,0.001,4,index_only,0.844,0.873,30,1000,58,0,2,0
+filter2 text,clustered,0.001,4,range_then_full,0.394,0.397,30,1000,58,0,0,2
+filter2 text,clustered,0.001,4,planner_knn10,0.752,0.756,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_thr,0.089,0.093,30,0,0,0,0,0
+filter2 text,clustered,0.001,4,flat_visible_knn10,0.102,0.112,30,0,0,0,0,0

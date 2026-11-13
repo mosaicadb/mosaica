@@ -1,0 +1,15 @@
+code,profile,tables,class,b_0.0001,b_0.001,b_0.01,b_0.05,note
+old_tree,qmix,-,item,2.26,5.46,17.7,60.5,previous prototype report
+old_tree,qmix,-,text,16.2,25.2,57.2,119.9,previous prototype report
+old_tree,h25,-,item,2.20,5.38,17.41,59.70,bytesq 100 queries
+old_tree,h25,-,text,16.74,25.90,58.20,120.76,bytesq 100 queries
+v2_additive_det,h25,u8,item,2.53,6.42,21.96,76.93,first fast-scan code (fitted additive det code)
+v2_additive_det,h25,u8,text,18.63,29.46,69.41,154.86,first fast-scan code (fitted additive det code)
+v2_tree_recode,h25,u8,item,2.54,6.64,22.87,79.77,tree re-code det fields; 8-bit tables
+v2_tree_recode,h25,u8,text,19.41,31.00,72.41,158.89,tree re-code det fields; 8-bit tables
+v2_tree_recode,h25,u16,item,2.43,6.11,20.09,68.56,16-bit tables
+v2_tree_recode,h25,u16,text,18.79,29.39,65.83,135.99,16-bit tables
+v2_final,h25,u16,item,2.42,6.05,19.82,67.50,adaptive 4/8-bit kappa; index path only
+v2_final,h25,u16,text,18.60,29.03,64.81,133.96,adaptive 4/8-bit kappa; index path only
+v2_final_planner,h25,u16,item,10.77,16.27,30.57,80.99,e2e with the planner (full vectors for small clusters counted at 1536 B)
+v2_final_planner,h25,u16,text,31.47,40.55,74.71,143.53,e2e with the planner

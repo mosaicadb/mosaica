@@ -30,6 +30,7 @@ pub struct Stats {
     pub viol_rand: u64,
     pub checked: u64,
     pub max_sd: f64,
+    pub cyc: [u64; 12], // time-stamp-counter cycles by phase (v2 breakdown)
 }
 impl Stats {
     pub fn new(nl: usize) -> Stats {
@@ -62,6 +63,9 @@ impl Stats {
         self.viol_rand += o.viol_rand;
         self.checked += o.checked;
         self.max_sd = self.max_sd.max(o.max_sd);
+        for k in 0..12 {
+            self.cyc[k] += o.cyc[k];
+        }
     }
 }
 

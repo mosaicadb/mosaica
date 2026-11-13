@@ -101,6 +101,23 @@ pub fn load_params(dir: &str) -> Params {
     }
 }
 
+/// Replace the exported profile-dependent parameters by ones derived from a profile file (old tree code).
+/// Returns how many entries differ from the exported ones (frb, rates), for checking the port.
+pub fn apply_profile(p: &mut Params, prof_path: &str) -> (usize, usize) {
+    let prof = crate::derive::load_profile(prof_path);
+    let m = &p.meta;
+    let tof = crate::derive::tof_tree(&p.gtree);
+    let d = crate::derive::derive(&p.lam, &prof, m.n, m.g, &m.dlv, &m.rlv, &m.bounds, m.csg, &p.gtree, &tof, 1);
+    let dfrb = d.frb.iter().zip(&p.frb).filter(|(a, b)| a != b).count();
+    let drates = d.rates.iter().zip(&p.rates).filter(|(a, b)| a != b).count();
+    p.frb = d.frb;
+    p.dl = d.dl;
+    p.dt = d.dt;
+    p.ridx = d.ridx;
+    p.rates = d.rates;
+    (dfrb, drates)
+}
+
 /// Nested tree quantiser tables. dtab[bo*9+bn][idx] = cent_bn[idx] - cent_bo[idx >> (bn-bo)] (cent_0 = 0), f32;
 /// dsq the same for squared centroids. The reconstruction of a coordinate is defined as the sum of the f32 steps.
 pub struct Tree {
