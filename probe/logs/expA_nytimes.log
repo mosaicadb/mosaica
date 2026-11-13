@@ -3,3 +3,11 @@
 [     11s] K=256: k-means
 [     15s] balanced k-means
 [     25s] SOAR
+[     41s] structures built
+[     42s] K=256 plain          centre     R0.9: p=72 share=0.2662  R0.95: p=107 share=0.4141  R0.99: p=176 share=0.7097
+[     42s] K=256 plain          l2         R0.9: p=54 share=0.2868  R0.95: p=95 share=0.4885  R0.99: p=171 share=0.7857
+[     43s] K=256 plain          bound0.1   R0.9: p=60 share=0.2385  R0.95: p=94 share=0.3855  R0.99: p=164 share=0.6865
+[     43s] K=256 plain          bound0.2   R0.9: p=52 share=0.2210  R0.95: p=83 share=0.3593  R0.99: p=154 share=0.6677
+[     43s] K=256 plain          bound0.35  R0.9: p=44 share=0.2031  R0.95: p=77 share=0.3566  R0.99: p=150 share=0.6778
+[     43s] K=256 plain          bound0.5   R0.9: p=43 share=0.2104  R0.95: p=77 share=0.3739  R0.99: p=153 share=0.7069
+[     44s] K=256 plain          bound0.75  R0.9: p=50 share=0.2575  R0.95: p=88 share=0.4444  R0.99: p=166 share=0.7672
