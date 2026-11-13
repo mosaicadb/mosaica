@@ -578,7 +578,7 @@ pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
     [_mm512_reduce_add_ps(s[0]), _mm512_reduce_add_ps(s[1]), _mm512_reduce_add_ps(s[2]), _mm512_reduce_add_ps(s[3])]
 }
 
-/// int8 x int16 dot via vpmaddwd (exactly as the review's baseline).
+/// int8 x int16 dot via vpmaddwd.
 #[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {

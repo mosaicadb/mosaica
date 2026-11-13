@@ -1297,9 +1297,9 @@ pub enum PlanMode {
 }
 
 /// Cost model of the planner, in microseconds on one thread. d is the fraction of the visible items of opened
-/// clusters that the cut and the sorted range leave undecided: a proxy for how deep candidates will go (text-like
-/// queries leave most items undecided), known before any code is read. `Plan::default` holds the values measured at
-/// 1M BioCLIP (n = 768, AVX-512); `Plan::calibrate` re-times them on the index at hand.
+/// clusters that the cut and the sorted range leave undecided, a proxy for how deep candidates will go, known before
+/// any code is read. `Plan::default` holds constants for 1M BioCLIP (n = 768, AVX-512); `Plan::calibrate` times them
+/// on the index at hand.
 #[derive(Clone, Copy, Debug)]
 pub struct Plan {
     pub mode: PlanMode,

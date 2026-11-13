@@ -8,7 +8,7 @@
 //! re-ranked items, level of the interval scores); `--flat` adds brute force over the same stored values and visible
 //! rows on the same thread.
 //! `--nq N` times the first N queries, `--methods exact,flat,approx` picks the methods, `--no-all` skips the unfiltered run, `--prof` prints the mean ms per phase.
-//! `--dial np:d,...` adds the approximate mode with the dial (method `dial`): exact k-NN over the first np clusters by
+//! `--dial np:d,...` adds the approximate mode with the dial (method `approx`, unfiltered unless `--approx-filtered`): exact k-NN over the first np clusters by
 //! the fitted bound, each level's item half-widths cut to its (1 - d) error quantile (`fitT`: the d fitted for target
 //! recall T; needs `--fit-dial` unless a fit is named); `--dial-plan` its plan. `np:d:soar` adds the second
 //! assignment (needs `--soar`).
@@ -189,7 +189,8 @@ pub fn run(c: &Ctx2, k: usize) {
         }
         // approximate mode with the dial: --dial np:d,... where d is eps (the dial's miss rate per level) or fitT (the
         // eps fitted for target recall T)
-        for spec in arg_str("--dial", "").split(',').filter(|s| !s.is_empty()) {
+        let dial_here = bm.is_none() || args().iter().any(|a| a == "--approx-filtered");
+        for spec in arg_str("--dial", "").split(',').filter(|s| !s.is_empty() && dial_here) {
             let (spec, soar) = match spec.strip_suffix(":soar") {
                 Some(s) => (s, true),
                 None => (spec, false),
@@ -207,7 +208,7 @@ pub fn run(c: &Ctx2, k: usize) {
                 }
             };
             let (v, plan) = (vis.as_ref(), Plan { mode: match arg_str("--dial-plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto }, ..c.plan });
-            cfgs.push(("dial".into(), format!("nprobe={np} eps={d}{}", if soar { " soar" } else { "" }), Box::new(move |q: &[f32]| knn2_dial(&c.ix, &c.approx, q, k, v, np, factors.as_deref(), soar, plan))));
+            cfgs.push(("approx".into(), format!("nprobe={np} eps={d}{}", if soar { " soar" } else { "" }), Box::new(move |q: &[f32]| knn2_dial(&c.ix, &c.approx, q, k, v, np, factors.as_deref(), soar, plan))));
         }
         for (method, params, f) in &cfgs {
             let r = timed(c, k, reps, nq, f.as_ref());
