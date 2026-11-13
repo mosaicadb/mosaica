@@ -1,0 +1,15 @@
+[      0s] nytimes-256-angular K=4096 f=0.35 queries=1000 probe counts [145, 373, 1134]; flat pass scores 4096 centres
+[      3s] two levels, sqrt K [64]: p=145: centres scored mean 4126 (internal 64), p90 4127, 1.01 of flat; p=373: centres scored mean 4126 (internal 64), p90 4127, 1.01 of flat; p=1134: centres scored mean 4127 (internal 64), p90 4128, 1.01 of flat
+[      5s] three levels, cube root [256, 16]: p=145: centres scored mean 4212 (internal 262), p90 4213, 1.03 of flat; p=373: centres scored mean 4213 (internal 262), p90 4215, 1.03 of flat; p=1134: centres scored mean 4219 (internal 262), p90 4222, 1.03 of flat
+[      7s] fan-out 16, 3 levels [256, 16]: p=145: centres scored mean 4212 (internal 262), p90 4213, 1.03 of flat; p=373: centres scored mean 4213 (internal 262), p90 4215, 1.03 of flat; p=1134: centres scored mean 4219 (internal 262), p90 4222, 1.03 of flat
+[      7s] done
+[      1s] glove-100-angular K=4096 f=0.35 queries=1000 probe counts [60, 150, 566]; flat pass scores 4096 centres
+[      3s] two levels, sqrt K [64]: p=60: centres scored mean 4160 (internal 64), p90 4160, 1.02 of flat; p=150: centres scored mean 4160 (internal 64), p90 4160, 1.02 of flat; p=566: centres scored mean 4160 (internal 64), p90 4160, 1.02 of flat
+[      5s] three levels, cube root [256, 16]: p=60: centres scored mean 4358 (internal 272), p90 4364, 1.06 of flat; p=150: centres scored mean 4362 (internal 272), p90 4364, 1.06 of flat; p=566: centres scored mean 4364 (internal 272), p90 4365, 1.07 of flat
+[      8s] fan-out 16, 3 levels [256, 16]: p=60: centres scored mean 4358 (internal 272), p90 4364, 1.06 of flat; p=150: centres scored mean 4362 (internal 272), p90 4364, 1.06 of flat; p=566: centres scored mean 4364 (internal 272), p90 4365, 1.07 of flat
+[      8s] done
+[      1s] glove-100-angular K=16384 f=0.35 queries=1000 probe counts [139, 369, 1554]; flat pass scores 16384 centres
+[      8s] two levels, sqrt K [128]: p=139: centres scored mean 16509 (internal 128), p90 16509, 1.01 of flat; p=369: centres scored mean 16509 (internal 128), p90 16509, 1.01 of flat; p=1554: centres scored mean 16509 (internal 128), p90 16509, 1.01 of flat
+[     18s] three levels, cube root [645, 25]: p=139: centres scored mean 17014 (internal 667), p90 17021, 1.04 of flat; p=369: centres scored mean 17019 (internal 667), p90 17021, 1.04 of flat; p=1554: centres scored mean 17021 (internal 667), p90 17023, 1.04 of flat
+[     30s] fan-out 16, 4 levels [1024, 64, 4]: p=139: centres scored mean 17382 (internal 1090), p90 17412, 1.06 of flat; p=369: centres scored mean 17404 (internal 1090), p90 17414, 1.06 of flat; p=1554: centres scored mean 17415 (internal 1090), p90 17420, 1.06 of flat
+[     30s] done
