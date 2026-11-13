@@ -308,3 +308,14 @@ pub fn median(v: &[f64]) -> f64 {
 pub fn mean(v: &[f64]) -> f64 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
 }
+
+extern "C" {
+    fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
+}
+
+/// Pin the calling thread to one logical CPU.
+pub fn pin(cpu: usize) {
+    let mut mask = [0u64; 16];
+    mask[cpu / 64] = 1 << (cpu % 64);
+    assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
+}

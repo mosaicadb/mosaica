@@ -68,17 +68,6 @@ struct Run {
     cyc: [f64; 12],    // time-stamp-counter cycles by phase, summed (with --prof)
 }
 
-extern "C" {
-    fn sched_setaffinity(pid: i32, size: usize, mask: *const u64) -> i32;
-}
-
-/// Pin the calling thread to one logical CPU.
-fn pin(cpu: usize) {
-    let mut mask = [0u64; 16];
-    mask[cpu / 64] = 1 << (cpu % 64);
-    assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
-}
-
 /// Every query once per repetition, timed one at a time on one thread (pinned to `--core` when given); the
 /// repetition with the least total time is kept.
 fn timed(c: &Ctx2, k: usize, reps: usize, nq: usize, f: &(dyn Fn(&[f32]) -> KnnOut2 + Sync)) -> Run {
@@ -88,7 +77,7 @@ fn timed(c: &Ctx2, k: usize, reps: usize, nq: usize, f: &(dyn Fn(&[f32]) -> KnnO
         let mut r = Run { ids: vec![-1; nq * k], times: Vec::with_capacity(nq), touched: 0.0, full_reads: 0.0, bytes: 0.0, phases: [0.0; 3], cyc: [0.0; 12] };
         pool.install(|| {
             if let Some(cpu) = arg_str("--core", "").parse().ok() {
-                pin(cpu);
+                crate::util::pin(cpu);
             }
             for (i, q) in c.texts[..nq].iter().enumerate() {
                 let t = Timer::new();
@@ -169,7 +158,7 @@ pub fn run(c: &Ctx2, k: usize) {
     let fresh = !std::path::Path::new(&csv).exists();
     let mut out = std::fs::OpenOptions::new().create(true).append(true).open(&csv).unwrap();
     if fresh {
-        writeln!(out, "dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids").unwrap();
+        writeln!(out, "dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids,plan").unwrap();
     }
     let nq = arg_usize("--nq", c.texts.len()).min(c.texts.len());
     let methods = arg_str("--methods", "exact,flat,approx");
@@ -227,8 +216,8 @@ pub fn run(c: &Ctx2, k: usize) {
             write_npy(&format!("{dir}/{fname}"), "<i4", &[nq, k], &ids_bytes(&r.ids));
             let tot: f64 = r.times.iter().sum();
             let mut ts = r.times.clone();
-            let line = format!("{name},{method},{tag},{params},{nq},{k},{reps},{:.1},{:.4},{:.4},{:.4},{wset},{wsc},{:.0},{:.1},{:.0},{fname}",
-                nq as f64 / (tot / 1e3), tot / nq as f64, quantile(&mut ts, 0.5), quantile(&mut ts, 0.99), r.touched / nq as f64, r.full_reads / nq as f64, r.bytes / nq as f64);
+            let line = format!("{name},{method},{tag},{params},{nq},{k},{reps},{:.1},{:.4},{:.4},{:.4},{wset},{wsc},{:.0},{:.1},{:.0},{fname},{}",
+                nq as f64 / (tot / 1e3), tot / nq as f64, quantile(&mut ts, 0.5), quantile(&mut ts, 0.99), r.touched / nq as f64, r.full_reads / nq as f64, r.bytes / nq as f64, c.plan.to_kv().trim().replace('\n', ";"));
             println!("ann {line}");
             if prof {
                 let names = ["anchor", "cut", "basis", "rot", "clsetup", "tables", "repack", "decode", "bounds", "full", "init", "plan"];

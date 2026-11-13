@@ -122,13 +122,20 @@ pub fn setup2(tag: &str) -> Ctx2 {
         jump_level: arg_usize("--jump", 0),
         ..Plan::default()
     };
-    // the cost model re-timed on this index (`--plan-default` keeps the BioCLIP constants)
-    let plan = if args().iter().any(|a| a == "--plan-default") { plan } else {
+    // the cost model: from --plan-file, the BioCLIP constants (--plan-default), or re-timed on this index (pinned to
+    // --core when given); the constants used are written to RESULTS/plan.txt
+    let plan = if let Some(f) = Some(arg_str("--plan-file", "")).filter(|f| !f.is_empty()) {
+        Plan::from_kv(plan, &std::fs::read_to_string(&f).unwrap_or_else(|e| panic!("cannot read {f}: {e}")))
+    } else if args().iter().any(|a| a == "--plan-default") {
+        plan
+    } else {
         let t = Timer::new();
-        let pc = Plan::calibrate(&ix, plan, arg_usize("--calib", 16));
-        out!("[plan] calibrated in {:.1}s: {:?}", t.s(), pc);
+        let pc = Plan::calibrate(&ix, plan, arg_usize("--calib", 16), arg_str("--core", "").parse().ok());
+        out!("[plan] calibrated in {:.1}s", t.s());
         pc
     };
+    out!("[plan] {}", plan.to_kv().replace('\n', " "));
+    std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
     let pseudo = pseudo_queries(&ix, arg_usize("--pseudo", 1000), 10);
     let (mut approx, fres) = Approx::fit(&ix, &pseudo);

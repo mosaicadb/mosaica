@@ -1322,18 +1322,50 @@ impl Default for Plan {
     }
 }
 impl Plan {
+    /// The timed constants as `name=value` lines.
+    pub fn to_kv(&self) -> String {
+        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\n",
+                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us)
+    }
+    /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
+    pub fn from_kv(base: Plan, text: &str) -> Plan {
+        let mut p = base;
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let (k, v) = line.split_once('=').unwrap_or_else(|| panic!("plan line {line:?} is not name=value"));
+            let v: f64 = v.trim().parse().unwrap_or_else(|_| panic!("plan value {v:?} is not a number"));
+            *match k.trim() {
+                "full_us" => &mut p.full_us,
+                "item_us0" => &mut p.item_us0,
+                "item_us1" => &mut p.item_us1,
+                "cl_us0" => &mut p.cl_us0,
+                "cl_us1" => &mut p.cl_us1,
+                "grp_us" => &mut p.grp_us,
+                "scan_us" => &mut p.scan_us,
+                "cut_us" => &mut p.cut_us,
+                "seed_us" => &mut p.seed_us,
+                k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
+            } = v;
+        }
+        p
+    }
+
     /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
     pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
         ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
     }
 
     /// The constants re-timed on this index and machine, on one thread, from corpus pseudo-queries (`nq` stored rows
-    /// spread over the index) at their 10th best score, unfiltered and over a fixed random tenth of the rows: the
+    /// spread over the index) at their 10th best score, unfiltered and over a fixed random eighth of the rows: the
     /// visible scan, the cut, full vectors after the cut, the k-NN seed, and one factor scaling every index-path
     /// constant (least squares of measured against modelled time). Data only: no example queries.
-    pub fn calibrate(ix: &Index2, base: Plan, nq: usize) -> Plan {
+    /// `cpu`: the CPU to pin the timing thread to.
+    pub fn calibrate(ix: &Index2, base: Plan, nq: usize, cpu: Option<usize>) -> Plan {
+        assert!(nq >= 1, "calibration needs at least one pseudo-query; pass --calib 1 or more, or --plan-file");
         let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
         pool.install(|| {
+            if let Some(c) = cpu {
+                crate::util::pin(c);
+            }
             let ents: Vec<u32> = (0..ix.nrows).filter(|&r| (r as u64).wrapping_mul(0x9E3779B97F4A7C15) >> 60 < 2).map(|r| ix.row_ent[r]).collect();
             let mut ents = ents;
             ents.sort_unstable();
