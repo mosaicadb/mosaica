@@ -124,6 +124,8 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             }
             "nopscan" => p.pscan = false,
             "nusort" => {} // a build option, read by setup2_at
+            f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
+            "nobail" => p.bail = 0.0,
             f if f.starts_with("repackx=") => {
                 p.repack = true;
                 p.repack_mul = f[8..].parse().expect("repackx=FACTOR");

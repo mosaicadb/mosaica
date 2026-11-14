@@ -415,6 +415,7 @@ pub struct CQ2 {
     pub shared: bool, // tables from the group (alpha = 0)
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
+    pub bail: f32,    // a threshold query sends its survivors to full vectors before a level of more than bail x live units (0: never)
     pub int: Option<IntDet>,
 }
 
@@ -523,7 +524,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -1052,8 +1053,14 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             let iv0 = _mm512_maskz_loadu_epi32(m0, sv.idx.as_ptr().add(k) as *const _);
             let m = m0 & !_mm512_cmpeq_epi32_mask(iv0, _mm512_set1_epi32(-1));
             let iv = _mm512_maskz_mov_epi32(m, iv0);
-            // 16-bit keys read as the low half of a 32-bit gather at a 2-byte stride (the key array is padded)
-            let raw = _mm512_mask_i32gather_epi32::<2>(_mm512_setzero_si512(), m, iv, ahp as *const _);
+            // 16-bit keys read as the low half of a 32-bit gather at a 2-byte stride (the key array is padded); slots
+            // held in place are items a0 + k.., read in one load
+            let r = c.r0 + a0 as usize + k;
+            let raw = if aligned && r + 16 <= ix.ahat.len() {
+                _mm512_maskz_mov_epi32(m, _mm512_cvtepi16_epi32(_mm256_loadu_si256(ix.ahat.as_ptr().add(r) as *const _)))
+            } else {
+                _mm512_mask_i32gather_epi32::<2>(_mm512_setzero_si512(), m, iv, ahp as *const _)
+            };
             let ah = _mm512_srai_epi32(_mm512_slli_epi32(raw, 16), 16);
             let a = _mm512_div_ps(_mm512_cvtepi32_ps(ah), _mm512_set1_ps(32767.0));
             let s2 = _mm512_sub_ps(one_mn2, _mm512_mul_ps(two_mn, a));
@@ -1111,13 +1118,24 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             break;
         }
         let lp = &gp.levels[l];
+        // few survivors left: their full vectors cost less than this level's table
+        if cq.bail > 0.0 && mode == Mode2::Thr && l > 0 && cq.luts[l].is_none() && (lp.units as f32) > cq.bail * live as f32 {
+            break;
+        }
         let tl1 = tick();
         if intm && l == NDL {
             // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
             let id = cq.int.as_ref().unwrap();
             let (b, sg) = (id.b[NDL - 1], id.sigma as f64);
-            for k in 0..nsurv {
-                sv.adet[k] = (b + sg * (256.0 * sv.ist[ip(k, 0)] as f64 + sv.ist[ip(k, 1)] as f64)) as f32;
+            // four slots at a time (the rows of a block of 32 are contiguous; the state is padded to whole blocks)
+            let (vb, vs, v256) = (_mm256_set1_pd(b), _mm256_set1_pd(sg), _mm256_set1_pd(256.0));
+            let mut k = 0;
+            while k < nsurv {
+                let h = _mm256_cvtepi32_pd(_mm_cvtepi16_epi32(_mm_loadl_epi64(sv.ist.as_ptr().add(ip(k, 0)) as *const _)));
+                let lo = _mm256_cvtepi32_pd(_mm_cvtepi16_epi32(_mm_loadl_epi64(sv.ist.as_ptr().add(ip(k, 1)) as *const _)));
+                let v = _mm256_add_pd(vb, _mm256_mul_pd(vs, _mm256_add_pd(_mm256_mul_pd(v256, h), lo)));
+                _mm_storeu_ps(sv.adet.as_mut_ptr().add(k), _mm256_cvtpd_ps(v));
+                k += 4;
             }
             edet = ((id.e[NDL - 1] + (b.abs() + sg * THETA_MAX as f64) * 2f64.powi(-23)) * (1.0 + 1e-6)) as f32;
         }
@@ -1781,6 +1799,7 @@ pub struct Plan {
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
+    pub bail: f32,         // threshold queries: survivors go to full vectors before a level whose table has more than bail units per survivor (0: off)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
     pub colq: bool,        // in an order chosen per (query, cluster)
@@ -1788,7 +1807,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
@@ -2100,7 +2119,10 @@ pub enum Planned {
 
 fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) -> Vec<u32> {
     let c = &ix.cl[ci];
-    (d0..d1).filter(|&r| vis.map_or(true, |v| v.has(r))).map(|r| (r - c.r0) as u32).collect()
+    match vis {
+        None => ((d0 - c.r0) as u32..(d1 - c.r0) as u32).collect(),
+        Some(v) => (d0..d1).filter(|&r| v.has(r)).map(|r| (r - c.r0) as u32).collect(),
+    }
 }
 
 /// The cluster cut and sorted range at t, then the planner's choice. `fixed_us` is index-path work already committed
@@ -2265,6 +2287,10 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
             let tcl = tick();
             let c = &ix.cl[ci];
             let push = |acc: &mut ThrOut2, r0: usize, r1: usize, iv: Option<(f64, f64)>| {
+                if o.vis.is_none() && iv.is_none() {
+                    acc.rows.extend(r0 as u32..r1 as u32);
+                    return;
+                }
                 for r in r0..r1 {
                     if o.vis.map_or(true, |v| v.has(r)) {
                         acc.rows.push(r as u32);
@@ -2338,6 +2364,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             let mut cq = cluster_q2w(ix, ci, gq, pr, qm, pl.alpha0, !gt);
                             cq.gtab = gt;
                             cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
+                            cq.bail = pl.bail;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
                                 cq.enable_int(ix, ci, gq);
@@ -2385,6 +2412,16 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
 }
 
 pub fn to_bitmap2(ix: &Index2, rows: &[u32]) -> RoaringBitmap {
+    // many rows: set the entities' bits in a plain bitset and build the bitmap from its bytes (no sort)
+    if rows.len() * 64 >= ix.ent_row.len() {
+        let mut bits = vec![0u64; ix.ent_row.len() / 64 + 1];
+        for &r in rows {
+            let e = ix.row_ent[r as usize] as usize;
+            bits[e / 64] |= 1 << (e % 64);
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(bits.as_ptr() as *const u8, bits.len() * 8) };
+        return RoaringBitmap::from_lsb0_bytes(0, bytes);
+    }
     let mut e: Vec<u32> = rows.iter().map(|&r| ix.row_ent[r as usize]).collect();
     e.sort_unstable();
     RoaringBitmap::from_sorted_iter(e.into_iter()).unwrap()

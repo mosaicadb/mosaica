@@ -179,6 +179,10 @@ mod emu {
         __m512i(_mm256_sra_epi32(a.0, c), _mm256_sra_epi32(a.1, c))
     }
     #[inline(always)]
+    pub unsafe fn _mm512_cvtepi16_epi32(a: __m256i) -> __m512i {
+        __m512i(_mm256_cvtepi16_epi32(_mm256_castsi256_si128(a)), _mm256_cvtepi16_epi32(_mm256_extracti128_si256::<1>(a)))
+    }
+    #[inline(always)]
     pub unsafe fn _mm512_cvtepu8_epi32(a: __m128i) -> __m512i {
         __m512i(_mm256_cvtepu8_epi32(a), _mm256_cvtepu8_epi32(_mm_srli_si128::<8>(a)))
     }

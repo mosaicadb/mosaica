@@ -10,7 +10,8 @@ unsafe fn hsum_epi32(v: __m256i) -> i32 {
 }
 
 /// V_q^T q exactly, as q::qv_exact (int8 basis rows times the query's 13-bit halves, i32 sums, one rounding to f64), R
-/// basis rows at a time sharing the query loads, the rows of the next block prefetched `PFD` bytes ahead.
+/// basis rows at a time sharing the query loads; PFD 1 to 4: the block PFD blocks ahead is prefetched meanwhile, line by
+/// line; larger: the bytes PFD ahead in each row's stream.
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn qv_exact_r<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
     assert!(n % 32 == 0 && n % R == 0 && v8t.len() >= n * n);
@@ -25,9 +26,9 @@ pub unsafe fn qv_exact_r<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f6
         let mut i = 0;
         while i < n {
             if PFD > 0 && i % 64 == 0 {
-                // the block's bytes PFD ahead in the contiguous stream of rows
+                // a later block, or the bytes PFD ahead in each row
                 for r in 0..R {
-                    let p = if PFD == 1 { rows.add((R + r) * n + i) } else { rows.add(r * n + i + PFD) };
+                    let p = if PFD <= 4 { rows.add((PFD * R + r) * n + i) } else { rows.add(r * n + i + PFD) };
                     if p < end {
                         _mm_prefetch::<_MM_HINT_T0>(p as *const i8);
                     }
@@ -98,6 +99,8 @@ pub fn qvbench(n: usize, g: usize, reps: usize) {
     run("r8 pf2048", &|b, o| unsafe { qv_exact_r::<8, 2048>(b, &vsc, n, &qhi, &qlo, o) });
     run("r6 pf1024", &|b, o| unsafe { qv_exact_r::<6, 1024>(b, &vsc, n, &qhi, &qlo, o) });
     run("r4 next", &|b, o| unsafe { qv_exact_r::<4, 1>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 next2", &|b, o| unsafe { qv_exact_r::<4, 2>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 next3", &|b, o| unsafe { qv_exact_r::<4, 3>(b, &vsc, n, &qhi, &qlo, o) });
     run("r8 next", &|b, o| unsafe { qv_exact_r::<8, 1>(b, &vsc, n, &qhi, &qlo, o) });
     run("r2", &|b, o| unsafe { qv_exact_r::<2, 0>(b, &vsc, n, &qhi, &qlo, o) });
 }

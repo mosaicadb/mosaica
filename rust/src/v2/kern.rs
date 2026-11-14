@@ -701,13 +701,31 @@ pub unsafe fn group_tab(w: &[f32], lp: &LevelPlan, et: &ExpTab) -> GTab {
             }
             let mut a = [0f32; 16];
             _mm512_storeu_ps(a.as_mut_ptr(), t);
-            g.tmin.push(a.iter().cloned().fold(f32::INFINITY, f32::min));
-            g.tmax.push(a.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
             g.t.push(a);
         }
         // each entry: at most 4 fields, a rounded product and sum each
         g.err.push(8.0 * U32 * sabs * (1.0 + 1e-6));
     }
+    // the units' extremes, eight at a time
+    let nu = g.t.len();
+    g.tmin.resize(nu + 8, 0.0);
+    g.tmax.resize(nu + 8, 0.0);
+    let mut u0 = 0;
+    while u0 < nu {
+        let mut mn = [_mm256_setzero_ps(); 8];
+        let mut mx = [_mm256_setzero_ps(); 8];
+        for i in 0..8 {
+            let p = g.t.get_unchecked((u0 + i).min(nu - 1)).as_ptr();
+            let (a, b) = (_mm256_loadu_ps(p), _mm256_loadu_ps(p.add(8)));
+            mn[i] = _mm256_min_ps(a, b);
+            mx[i] = _mm256_max_ps(a, b);
+        }
+        _mm256_storeu_ps(g.tmin.as_mut_ptr().add(u0), reduce8::<false>(&mn));
+        _mm256_storeu_ps(g.tmax.as_mut_ptr().add(u0), reduce8::<true>(&mx));
+        u0 += 8;
+    }
+    g.tmin.truncate(nu);
+    g.tmax.truncate(nu);
     g
 }
 
