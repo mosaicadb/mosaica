@@ -570,7 +570,8 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
     std::fs::write(format!("{}/e2e2_1m{}.csv", crate::run2::res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
 }
 
-/// Where the time of a threshold query goes (text queries at 1% and 5%; 1 and 4 threads), for plan variants.
+/// Where the time of a threshold query goes (item and text queries at 1% and 5%; 1 and 4 threads), for the plan as
+/// given and, with `--variants`, the earlier plan variants.
 pub fn breakdown2(c: &Ctx2, nq: usize) {
     use std::sync::atomic::Ordering;
     let ix = &c.ix;
@@ -582,7 +583,13 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
     let hz = (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.s();
     let names = ["anchor", "cut", "basis", "rotations", "cluster setup", "tables", "re-pack", "level decode", "bounds+decisions+compaction", "full vectors", "candidate init", "result bitmap"];
     let mut lines = vec!["variant,class,answer_frac,threads,wall_ms,cpu_ms_total,".to_string() + &names.join(",") + ",bytes_read,full_reads,wrong"];
-    let qs: Vec<Vec<f32>> = c.texts.iter().take(nq).cloned().collect();
+    let variants: &[(&str, bool, usize)] = if args().iter().any(|a| a == "--variants") {
+        &[("levels", false, 0usize), ("shared_tables", true, 0), ("single_pass_64B", false, 9), ("single_pass_96B", false, 12), ("single_pass_128B", false, 14), ("shared+single_96B", true, 12)]
+    } else {
+        &[("levels", false, 0usize)]
+    };
+    for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
+    let qs: Vec<Vec<f32>> = qs.iter().take(nq).cloned().collect();
     for &frac in &[0.01, 0.05] {
         let kk = ((nrows as f64 * frac).round() as usize).max(1);
         let ths: Vec<f64> = qs.iter().map(|q| {
@@ -594,7 +601,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
             let pr = prep2(ix, q);
             fl.threshold(&pr.q16, &pr.q32, t, full_err2(ix, &pr), None, &c.ent_xs)
         }).collect();
-        for (vname, alpha0, jump) in [("levels", false, 0usize), ("shared_tables", true, 0), ("single_pass_64B", false, 9), ("single_pass_96B", false, 12), ("single_pass_128B", false, 14), ("shared+single_96B", true, 12)] {
+        for &(vname, alpha0, jump) in variants {
             let plan = Plan { alpha0, jump_level: jump, jump_d: 0.8, ..c.plan };
             for th in [1usize, 4] {
                 let pl = pool(th);
@@ -636,13 +643,14 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     walls.push(best);
                 }
                 let tot: f64 = cyc.iter().sum();
-                let line = format!("{},text,{},{},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), tot, cyc.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
+                let line = format!("{},{cls},{},{},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), tot, cyc.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
                 lines.push(line);
             }
         }
     }
-    std::fs::write(format!("{}/breakdown2_text.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
+    }
+    std::fs::write(format!("{}/breakdown2.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 pub fn make_filter(ix: &Index2, kind: &str, frac: f64, rng: &mut rand::rngs::StdRng) -> RoaringBitmap {
