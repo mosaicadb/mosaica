@@ -521,6 +521,28 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
     let ix = &c.ix;
     let raw: Vec<f64> = (0..10).map(|_| raw_read_ms(ix)).collect();
     out!("setup2 raw read of all {} groups' int8 bases ({:.1} MB): {:.2} ms", ix.groups.len(), ix.groups.iter().map(|g| g.v8t.len()).sum::<usize>() as f64 / 1e6, median(&raw));
+    // the basis-product kernel's prefetch depth on this index's bases (one query, every group)
+    if let Some(q) = c.texts.first().or(c.items.first()) {
+        let pr = prep2(ix, q);
+        let n = ix.n();
+        let mut qv = vec![0f64; n];
+        let time = |f: &dyn Fn(&[i8], &[f64], &mut [f64])| -> f64 {
+            let mut qv = vec![0f64; n];
+            median(&(0..10).map(|_| {
+                let t = Timer::new();
+                for gp in &ix.groups {
+                    f(&gp.v8t, &gp.vsc, &mut qv);
+                    std::hint::black_box(&qv);
+                }
+                t.ms()
+            }).collect::<Vec<_>>())
+        };
+        let _ = &mut qv;
+        use crate::v2::setup::qv_exact_r;
+        out!("setup2 basis products of all groups by prefetch: none {:.2} ms, next block {:.2} ms, two ahead {:.2} ms, three ahead {:.2} ms",
+            time(&|v, s, o| unsafe { qv_exact_r::<4, 0>(v, s, n, &pr.qhi, &pr.qlo, o) }), time(&|v, s, o| unsafe { qv_exact_r::<4, 1>(v, s, n, &pr.qhi, &pr.qlo, o) }),
+            time(&|v, s, o| unsafe { qv_exact_r::<4, 2>(v, s, n, &pr.qhi, &pr.qlo, o) }), time(&|v, s, o| unsafe { qv_exact_r::<4, 3>(v, s, n, &pr.qhi, &pr.qlo, o) }));
+    }
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
         let (mut tg, mut tc, mut tl, mut tq, mut tw, mut trot) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for q in qs.iter().take(nq) {
