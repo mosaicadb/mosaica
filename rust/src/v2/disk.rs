@@ -82,6 +82,19 @@ impl Rows {
         }
     }
 
+    /// Whether `rows` (rows of `n` f16 each) are most likely in the page cache: a sample of eight is.
+    pub fn cached(&self, rows: &[u32], n: usize) -> bool {
+        let Rows::Map { map, .. } = self else { return true };
+        let (base, rb) = (map.as_ptr() as usize, 2 * n);
+        let k = rows.len().min(8);
+        k > 0 && (0..k).all(|j| {
+            let o = rows[j * rows.len() / k] as usize * rb;
+            let p0 = (base + o) & !4095;
+            let mut v = [0u8; 2];
+            unsafe { libc::mincore(p0 as *mut libc::c_void, base + o + rb - p0, v.as_mut_ptr()) == 0 && v[0] & 1 == 1 }
+        })
+    }
+
     /// Starts reading the pages of `rows` (rows of `n` f16 each) without waiting, when `--willneed` is on.
     #[inline]
     pub fn willneed(&self, rows: &[u32], n: usize) {
@@ -91,15 +104,9 @@ impl Rows {
         if let Rows::Map { map, .. } = self {
             let base = map.as_ptr() as usize;
             let rb = 2 * n;
-            // when a sample of the batch's rows is already resident, the batch most likely is too: a madvise per row
-            // would then cost more than the reads it starts (10k rows: 14 ms against 1 ms)
-            let k = rows.len().min(8);
-            if k > 0 && (0..k).all(|j| {
-                let o = rows[j * rows.len() / k] as usize * rb;
-                let p0 = (base + o) & !4095;
-                let mut v = [0u8; 2];
-                unsafe { libc::mincore(p0 as *mut libc::c_void, base + o + rb - p0, v.as_mut_ptr()) == 0 && v[0] & 1 == 1 }
-            }) {
+            // a madvise per row of a resident batch would cost more than the reads it starts (10k rows: 14 ms against
+            // 1 ms)
+            if self.cached(rows, n) {
                 return;
             }
             let mut i = 0;

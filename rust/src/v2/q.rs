@@ -2202,9 +2202,6 @@ fn scan_chunks(ix: &Index2, vis: Option<&Vis2>) -> usize {
     (vis.map_or(ix.nrows, |v| v.rows.len()) + SCAN_ROWS - 1) / SCAN_ROWS
 }
 /// Appends the visible rows of scan chunk `ch`, ascending.
-/// A scan through the reader reads visible rows this many bytes apart or closer with one read.
-const SCAN_GAP: usize = 8192;
-
 fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
     let nr = vis.map_or(ix.nrows, |v| v.rows.len());
     let (a, b) = (ch * SCAN_ROWS, ((ch + 1) * SCAN_ROWS).min(nr));
@@ -2219,9 +2216,10 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
     let nch = scan_chunks(ix, vis);
-    // full vectors on file read through io_uring: each thread's chunks are read while it decides the earlier ones
+    // every row's full vector on file: read through io_uring, each thread's chunks read while it decides the earlier
+    // ones (a filtered scan's scattered rows are read faster by madvise(WILLNEED) on the mapping, and stay cached)
     let fr = match &ix.full {
-        Full2::Real { rows: fr @ super::disk::Rows::Map { .. }, .. } if !packed && super::disk::URING.load(std::sync::atomic::Ordering::Relaxed) => Some(fr),
+        Full2::Real { rows: fr @ super::disk::Rows::Map { .. }, .. } if vis.is_none() && !packed && super::disk::URING.load(std::sync::atomic::Ordering::Relaxed) => Some(fr),
         _ => None,
     };
     let parts: Vec<ThrOut2> = if let Some(fr) = fr {
@@ -2231,13 +2229,17 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
             rd.recycle(b);
         };
         (0..nch).into_par_iter().fold(
-            || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), SCAN_GAP).unwrap()),
+            || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), 0).unwrap()),
             |(mut acc, mut rd), ch| {
                 let mut rows = Vec::new();
                 scan_rows(ix, vis, ch, &mut rows);
-                rd.push((), rows);
-                while rd.full() {
-                    decide(&mut acc, &mut rd);
+                if fr.cached(&rows, ix.n()) {
+                    decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+                } else {
+                    rd.push((), rows);
+                    while rd.full() {
+                        decide(&mut acc, &mut rd);
+                    }
                 }
                 (acc, rd)
             },
@@ -2736,8 +2738,9 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.flat_items += cands.len() as u64;
                             pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
                         }
+                        // rows already in the page cache are decided from the mapping, without reads
                         match rd.as_mut() {
-                            Some(r) if !pend.is_empty() => {
+                            Some(r) if !pend.is_empty() && !ix.full_cached(&pend) => {
                                 r.push((), pend);
                                 while r.full() {
                                     decide_batch(&mut acc, r);

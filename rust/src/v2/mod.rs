@@ -839,6 +839,13 @@ impl Index2 {
         let n = self.n();
         &self.centres64[ci * n..(ci + 1) * n]
     }
+    /// Whether the stored vectors of `rows` are most likely in memory (always, unless they are on file).
+    pub fn full_cached(&self, rows: &[u32]) -> bool {
+        match &self.full {
+            Full2::Real { rows: fr, .. } => fr.cached(rows, self.n()),
+            Full2::Synth(_) => true,
+        }
+    }
     pub fn full_row_f16(&self, row: usize) -> &[u16] {
         match &self.full {
             Full2::Real { rows, .. } => rows.row(row, self.n()),

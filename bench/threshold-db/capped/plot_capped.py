@@ -1,7 +1,8 @@
 # The capped plot, in the style of ../plot.py: LIMINAL's index and f16 scan under the memory cap against its
 # uncapped index, with the competitors whose capped runs completed.
 # usage: python3 -I plot_capped.py RESULTS_DIR
-# Reads RESULTS_DIR/capped/{ours_*.csv, clickhouse.csv, faiss.csv} and RESULTS_DIR/ours/dbcmp_r4_1t.csv (uncapped);
+# Reads RESULTS_DIR/capped/{ours_*.csv, clickhouse.csv, faiss.csv}, RESULTS_DIR/disk/ours_*.csv (LIMINAL reading its
+# full vectors through io_uring) and RESULTS_DIR/ours/dbcmp_r4_1t.csv (uncapped);
 # writes RESULTS_DIR/latency_capped_1t.png. Every system on the queries with index divisible by 10; y is the median over
 # them of each query's median time, x the answer share.
 import csv, sys
@@ -28,6 +29,10 @@ for f, key, vis in (("capped/ours_r4_index_1t.csv", "index", "all"), ("capped/ou
     for r in csv.DictReader(open(f"{res}/{f}")):
         if r["kind"] == "warm" and r["vis"] == vis and r["what"] in ("index", "flat") and int(r["query"]) % 10 == 0:
             add(key or r["what"], r["vis"], int(r["share_index"]), float(r["median_ms"]))
+for f, key in (("disk/ours_r4_index_1t.csv", "disk"), ("disk/ours_r384_index_1t.csv", "disk384")):
+    for r in csv.DictReader(open(f"{res}/{f}")):
+        if r["kind"] == "warm" and r["what"] == "index" and int(r["query"]) % 10 == 0:
+            add(key, r["vis"], int(r["share_index"]), float(r["median_ms"]))
 for r in csv.DictReader(open(f"{res}/ours/dbcmp_r4_1t.csv")):
     if r["what"] == "index" and r["vis"] in ("all", "vis_1") and int(r["query"]) % 10 == 0:
         add("uncapped", r["vis"], int(r["share_index"]), float(r["median_ms"]))
@@ -40,10 +45,12 @@ for r in csv.DictReader(open(f"{res}/capped/faiss.csv")):
         add("ivf", r["vis"], int(r["share_index"]), float(r["median_ms"]), float(r["recall"]))
 
 SERIES = [  # (key, name, colour, style, width, alpha)
-    ("index", "LIMINAL, capped", "#2a78d6", "-", 2.8, 1),
+    ("disk", "LIMINAL", "#2a78d6", "-", 2.8, 1),
+    ("disk384", "LIMINAL, five levels", "#1baf7a", "-", 2.2, 1),
     ("uncapped", "LIMINAL, uncapped", "#2a78d6", (0, (4, 3)), 1.2, 1),
-    ("r384", "LIMINAL, five levels, capped", "#1baf7a", "-", 1.8, 1),
-    ("flat", "LIMINAL f16 scan, capped", "#2a78d6", "-", 1.8, 0.55),
+    ("index", "LIMINAL, mmap (before)", "#2a78d6", (0, (1, 2)), 1.8, 0.6),
+    ("r384", "LIMINAL, five levels, mmap (before)", "#1baf7a", (0, (1, 2)), 1.6, 0.6),
+    ("flat", "LIMINAL f16 scan, mmap (before)", "#2a78d6", "-", 1.6, 0.35),
     ("ch", "ClickHouse bf16, capped", "#008300", "-", 1.8, 1),
     ("ivf", "faiss IVF-SQfp16 on disk, capped (partial)", "#eda100", (0, (5, 3)), 1.8, 1),
 ]
@@ -91,8 +98,9 @@ fig.suptitle(f"LIMINAL under a {CAP_MB} MB memory cap: 1M BioCLIP-2, 1 thread", 
 fig.text(0.06, 0.875,
          f"The cap ({CAP_MB} MB = 740 MiB, cgroup memory.max, no swap) holds the whole process including its page cache: LIMINAL's codes and\n"
          "parameters (428 MiB for the default four levels, 577 MiB for five) stay in memory and the rest caches about a fifth of the 1.5 GB of\n"
-         "f16 vectors, which are read from disk. Median time to return the whole set of matching ids, warm within the cap. Solid lines are exact;\n"
-         "faiss IVF is approximate at its uncapped tight nprobe (recall ≥ 0.99), its 1% points from one repetition.",
+         "f16 vectors, which are read from disk. LIMINAL reads them with io_uring (O_DIRECT for merged reads, a disk-aware planner); the dotted\n"
+         "lines read them through the mapping. Median time to return the whole set of matching ids, warm within the cap. All lines but faiss are\n"
+         "exact; faiss IVF is approximate at its uncapped tight nprobe (recall ≥ 0.99), its 1% points from one repetition.",
          fontsize=9, color=MUTED)
 fig.tight_layout(rect=(0.03, 0.02, 0.97, 0.85))
 fig.savefig(f"{res}/latency_capped_1t.png", dpi=130, facecolor="white")
