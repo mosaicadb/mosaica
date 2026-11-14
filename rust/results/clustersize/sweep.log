@@ -1,0 +1,41 @@
+20:16:51 start s_base_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 766695652 (det violations 0, rand violations 0); largest randomised error 5.42 sd (c = 9.33); k-NN mismatches 0 of 40 (thre
+VERIFY2 checker: 112293549 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [420867040, 386284311, 36980472
+20:26:20 end s_base_1
+20:26:20 start s_p4_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 789078542 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.33); k-NN mismatches 0 of 40 (thre
+VERIFY2 checker: 125403442 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [441519307, 395468387, 37773894
+20:35:58 end s_p4_1
+20:35:58 start s_p16_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 792569658 (det violations 0, rand violations 0); largest randomised error 5.49 sd (c = 9.33); k-NN mismatches 0 of 40 (thre
+VERIFY2 checker: 148683510 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [467505385, 399338138, 38045818
+20:45:56 end s_p16_1
+20:45:56 start s_d4_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 816538723 (det violations 0, rand violations 0); largest randomised error 5.51 sd (c = 9.33); k-NN mismatches 0 of 40 (thre
+VERIFY2 checker: 117322528 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [441612185, 401711823, 38481010
+20:55:03 end s_d4_1
+20:55:03 start s_d16_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 915070125 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.33); k-NN mismatches 0 of 40 (thre
+VERIFY2 checker: 117380943 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [467627647, 427155601, 41056623
+21:04:16 end s_d16_1
+21:04:16 start s_d16_2
+exit 0
+21:09:58 end s_d16_2
+21:09:58 start s_d4_2
+exit 0
+21:15:50 end s_d4_2
+21:15:50 start s_p16_2
+exit 0
+21:22:15 end s_p16_2
+21:22:15 start s_p4_2
+exit 0
+21:28:16 end s_p4_2
+21:28:16 start s_base_2
+exit 0
+21:34:02 end s_base_2
+SWEEP_DONE
