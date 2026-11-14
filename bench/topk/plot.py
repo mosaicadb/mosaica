@@ -1,6 +1,9 @@
 # Top-k latency against k, log-log, 1 thread, unfiltered: one panel per recall target (0.8 and 0.99), LIMINAL exact in
-# both. usage: python3 -I plot.py RESULTS_DIR
-# Reads RESULTS_DIR/{liminal_topk.csv, ann_*.csv}; writes RESULTS_DIR/plot_data.csv and ../latency_topk_1t.png.
+# both, and LIMINAL approximate before its best-first rework as a faint line. With RESULTS_DIR/liminal_topk_vis_1.csv,
+# a second figure at 1% visible: LIMINAL approximate before and after, both targets.
+# usage: python3 -I plot.py RESULTS_DIR
+# Reads RESULTS_DIR/{liminal_topk.csv, liminal_topk_vis_1.csv, ann_*.csv}; writes RESULTS_DIR/plot_data.csv,
+# ../latency_topk_1t.png and ../latency_topk_vis1_1t.png.
 # y is the median over the queries of each query's median time; recall is the mean over the queries.
 import csv, glob, os, sys
 from collections import defaultdict
@@ -18,20 +21,27 @@ for f in sorted(glob.glob(f"{res}/ann_*.csv")):
         pts[(r["method"], str(float(r["target"])), int(r["k"]))].append(
             (float(r["median_ms"]), float(r["recall"]), r["param"], int(r["reached"])))
 
-rows = [["method", "target", "k", "param", "median_ms", "p90_ms", "mean_recall", "reached", "queries"]]
-lines = defaultdict(list)
-for (m, tg, k), v in sorted(pts.items()):
-    ms = [x[0] for x in v]
-    rec = float(np.mean([x[1] for x in v]))
-    ok = all(x[3] for x in v)
-    rows.append([m, tg, k, v[0][2], f"{np.median(ms):.3f}", f"{np.quantile(ms, 0.9):.3f}", f"{rec:.4f}", int(ok), len(v)])
-    lines[(m, tg)].append((k, float(np.median(ms)), rec, ok))
+vpts = defaultdict(list)
+if os.path.exists(f"{res}/liminal_topk_vis_1.csv"):
+    for r in csv.DictReader(open(f"{res}/liminal_topk_vis_1.csv")):
+        vpts[(r["method"], r["target"], int(r["k"]))].append((float(r["median_ms"]), float(r["recall"]), r["param"], 1))
+
+rows = [["vis", "method", "target", "k", "param", "median_ms", "p90_ms", "mean_recall", "reached", "queries"]]
+lines, vlines = defaultdict(list), defaultdict(list)
+for vis, src, dst in (("all", pts, lines), ("vis_1", vpts, vlines)):
+    for (m, tg, k), v in sorted(src.items()):
+        ms = [x[0] for x in v]
+        rec = float(np.mean([x[1] for x in v]))
+        ok = all(x[3] for x in v)
+        rows.append([vis, m, tg, k, v[0][2], f"{np.median(ms):.3f}", f"{np.quantile(ms, 0.9):.3f}", f"{rec:.4f}", int(ok), len(v)])
+        dst[(m, tg)].append((k, float(np.median(ms)), rec, ok))
 with open(f"{res}/plot_data.csv", "w", newline="") as f:
     csv.writer(f).writerows(rows)
 
 SERIES = [  # (method, name, colour, exact)
     ("liminal_exact", "LIMINAL (exact)", "#2a78d6", True),
     ("liminal_approx", "LIMINAL approximate", "#2a78d6", False),
+    ("liminal_approx_before", "LIMINAL approximate, before", "#9cc0ea", False),
     ("hnsw_sq16", "faiss HNSW-SQfp16", "#eb6834", False),
     ("ivf_sq16", "faiss IVF4096-SQfp16", "#eda100", False),
     ("rabitq", "RaBitQ", "#e87ba4", False),
@@ -81,4 +91,31 @@ fig.text(0.06, 0.885, "Median time per query over 15 queries (5 image, 10 text).
          fontsize=9, color=MUTED)
 fig.tight_layout(rect=(0.03, 0.02, 0.97, 0.9))
 fig.savefig(f"{os.path.dirname(os.path.abspath(res))}/latency_topk_1t.png", dpi=130, facecolor="white")
+
+if vlines:
+    fig, ax = plt.subplots(figsize=(8, 5.6))
+    for m, name, colour in (("liminal_approx", "LIMINAL approximate", "#2a78d6"), ("liminal_approx_before", "LIMINAL approximate, before", "#9cc0ea")):
+        for tg, ls in (("0.8", (0, (2, 2))), ("0.99", "-")):
+            p = sorted(vlines.get((m, tg), []))
+            if not p:
+                continue
+            xs, ys, rs, oks = zip(*p)
+            ax.plot(xs, ys, linestyle=ls, color=colour, lw=2, marker="o", ms=5, label=f"{name}, recall ≥ {tg}")
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(0.6, 2000)
+    ax.set_ylim(0.2, 10)
+    ax.set_xticks(KS)
+    ax.set_xticklabels(["1", "10", "100", "1k"])
+    ax.minorticks_off()
+    yt = [0.2, 0.5, 1, 2, 5, 10]
+    ax.set_yticks(yt)
+    ax.set_yticklabels([f"{v:g} ms" for v in yt])
+    ax.grid(True, axis="y", color=GRID, lw=0.8)
+    ax.set_xlabel("k")
+    ax.tick_params(length=0)
+    ax.set_title("LIMINAL approximate top-k at 1% visible, 1 thread", loc="left", fontsize=12, color=INK, fontweight="bold", pad=10)
+    fig.tight_layout()
+    fig.savefig(f"{os.path.dirname(os.path.abspath(res))}/latency_topk_vis1_1t.png", dpi=130, facecolor="white")
 print(len(rows) - 1, "points")
