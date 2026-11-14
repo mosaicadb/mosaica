@@ -77,7 +77,6 @@ TEXT_COPIES = [
     ("clients/py/pyproject.toml", r'"mosaica-native==([^;"]+);', 1, full),
     ("clients/py-native/pyproject.toml", r'^version = "([^"]+)"$', 1, full),
     ("clients/py/mosaica/__init__.py", r'^__version__ = "([^"]+)"$', 1, pep440),
-    ("clients/py/README.md", r"`mosaica-native==([^`]+)`", 1, full),
 ]
 
 
