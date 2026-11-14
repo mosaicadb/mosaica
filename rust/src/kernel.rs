@@ -30,12 +30,16 @@ pub struct Stats {
     pub viol_rand: u64,
     pub checked: u64,
     pub max_sd: f64,
+    pub imp_checked: u64, // deterministic decisions checked against the f64 certificate (verify)
+    pub imp_fail: u64,    // of which the f64 certificate does not imply the decision
+    pub cert_viol: u64,   // lanes whose exact score lies outside the f64 certificate
     pub cyc: [u64; 12], // time-stamp-counter cycles by phase (v2 breakdown)
+    pub lcyc: Vec<u64>, // time-stamp-counter cycles of each level's blocks, tables not included
     pub errs: Vec<(u8, f32)>, // (level, |true - estimate| / half-width), when v2::q::ERRS is set
 }
 impl Stats {
     pub fn new(nl: usize) -> Stats {
-        Stats { enter: vec![0; nl + 1], dec_in: vec![0; nl + 1], dec_out: vec![0; nl + 1], blocks: vec![0; nl + 1], ..Default::default() }
+        Stats { lcyc: vec![0; nl + 1], enter: vec![0; nl + 1], dec_in: vec![0; nl + 1], dec_out: vec![0; nl + 1], blocks: vec![0; nl + 1], ..Default::default() }
     }
     pub fn add(&mut self, o: &Stats) {
         self.errs.extend_from_slice(&o.errs);
@@ -65,8 +69,14 @@ impl Stats {
         self.viol_rand += o.viol_rand;
         self.checked += o.checked;
         self.max_sd = self.max_sd.max(o.max_sd);
+        self.imp_checked += o.imp_checked;
+        self.imp_fail += o.imp_fail;
+        self.cert_viol += o.cert_viol;
         for k in 0..12 {
             self.cyc[k] += o.cyc[k];
+        }
+        for (a, b) in self.lcyc.iter_mut().zip(&o.lcyc) {
+            *a += b;
         }
     }
 }

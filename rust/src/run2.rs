@@ -119,6 +119,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
     let plan = Plan {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
         alpha0: args().iter().any(|a| a == "--alpha0"),
+        int_det: args().iter().any(|a| a == "--int"),
         jump_level: arg_usize("--jump", 0),
         ..Plan::default()
     };
@@ -293,54 +294,94 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     }
     out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each){}",
         qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
+    out!("VERIFY2 checker: {} deterministic decisions checked against the f64 certificate, {} not implied; {} lanes outside it; entering each level (unfiltered, both plans): {:?}; decided in/out {:?} / {:?}",
+        tot.imp_checked, tot.imp_fail, tot.cert_viol, tot.enter, tot.dec_in, tot.dec_out);
     std::fs::write(format!("{}/verify2.csv", crate::run2::res_dir()), rows.join("\n") + "\n").unwrap();
 }
 
-/// ns per item per level: all items of every cluster, no decisions (interval at each level), tables built beforehand.
+/// ns per item per level: all items of every cluster, tables built beforehand. By default no decisions (interval at
+/// each level); with `--sweep` every item is decided against the query's 1% threshold at every level and kept, on the
+/// integer deterministic levels with `--int`. Each timing is of `--passes` passes over the index.
 pub fn levels2(c: &Ctx2, reps: usize) {
     let ix = &c.ix;
     let nl = ix.meta.nl();
+    let sweep = args().iter().any(|a| a == "--sweep");
+    let passes = arg_usize("--passes", 1); // passes over the index per timing
+    if let Ok(cpu) = arg_str("--core", "").parse::<usize>() {
+        pin(cpu);
+    }
+    let fl = c.flat();
     let bytes = ix.stored_bytes_per_item();
-    let mut lines = vec!["query,level,level_bytes_cum,stored_bytes_cum,ns_per_item_cum,ns_per_item_level,ns_per_stored_byte_level".to_string()];
+    let mut lines = vec!["query,level,level_bytes_cum,stored_bytes_cum,ns_per_item_level,ns_per_stored_byte_level,level_min,level_max,decided".to_string()];
     for (name, q) in [("item", c.items[0].clone()), ("text", c.texts[0].clone())] {
         let pr = prep2(ix, &q);
         let mut st = Stats::new(nl);
         let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| {
             let gq = get_gq2(ix, &pr, ix.cl[ci].g, &mut st);
-            cluster_q2(ix, ci, gq, &pr, dot64(&pr.q64, ix.centres_f64(ci)))
+            let mut cq = cluster_q2(ix, ci, gq, &pr, dot64(&pr.q64, ix.centres_f64(ci)));
+            if sweep && c.plan.int_det {
+                cq.enable_int(ix, ci);
+            }
+            cq
         }).collect();
+        let t = if sweep {
+            let sc = fl.scores(&pr.q32);
+            thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &[((fl.nrows as f64 * 0.01).round() as usize).max(1)])[0]
+        } else {
+            f64::NAN
+        };
+        let mode = |l: usize| if sweep { Mode2::Sweep(l) } else { Mode2::Interval(l) };
+        let mut decided = vec![0u64; nl];
         // build every table once (lazily inside the first run)
         let cands: Vec<Vec<u32>> = ix.cl.iter().map(|cl| (0..(cl.r1 - cl.r0) as u32).collect()).collect();
         let mut sv = State::default();
         for ci in 0..ix.k() {
             let (mut a, mut b, mut iv) = (Vec::new(), Vec::new(), Vec::new());
-            let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: Some(&mut iv) };
-            unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], f64::NAN, Mode2::Interval(nl - 1), 0, false, &mut sv, &mut st, &mut out) };
+            let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: if sweep { None } else { Some(&mut iv) } };
+            unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nl - 1), 0, false, &mut sv, &mut st, &mut out) };
         }
-        let mut prev = 0.0;
         for l in 0..nl {
-            let mut best = f64::MAX;
-            for _ in 0..reps {
-                let t = Timer::new();
-                let mut st = Stats::new(nl);
-                let mut iv = Vec::with_capacity(2048);
-                for ci in 0..ix.k() {
-                    iv.clear();
-                    let (mut a, mut b) = (Vec::new(), Vec::new());
-                    let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: Some(&mut iv) };
-                    unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], f64::NAN, Mode2::Interval(l), 0, false, &mut sv, &mut st, &mut out) };
-                }
-                best = best.min(t.s());
+            decided[l] = st.dec_in[l] + st.dec_out[l];
+        }
+        // each repetition runs every level once; a level's time is its own blocks'
+        // cycles (tables built beforehand, the key and thresholds of level 0 not included), converted at the counter's
+        // rate over the repetition
+        let nlv = arg_usize("--levels", nl).min(nl);
+        let mut ts = vec![Vec::new(); nlv];
+        let mut cum = Vec::new();
+        for _ in 0..reps {
+            let mut st = Stats::new(nl);
+            let mut iv = Vec::with_capacity(2048);
+            PROF.store(std::env::var("VEXACT_PROF").is_ok(), std::sync::atomic::Ordering::Relaxed);
+            let tm = Timer::new();
+            let c0 = unsafe { core::arch::x86_64::_rdtsc() };
+            for ci in (0..passes).flat_map(|_| 0..ix.k()) {
+                iv.clear();
+                let (mut a, mut b) = (Vec::new(), Vec::new());
+                let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: if sweep { None } else { Some(&mut iv) } };
+                unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nlv - 1), 0, false, &mut sv, &mut st, &mut out) };
             }
-            let ns = best * 1e9 / ix.nrows as f64;
+            let ghz = (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / (tm.s() * 1e9);
+            cum.push(tm.s() * 1e9 / (ix.nrows * passes) as f64);
+            for l in 0..nlv {
+                ts[l].push(st.lcyc[l] as f64 / ghz / st.enter[l] as f64);
+            }
+            if std::env::var("VEXACT_PROF").is_ok() {
+                out!("levels2 phases (ns per item entering level 0): repack {:.2} decode {:.2} bounds {:.2}", st.cyc[P_REPACK] as f64 / ghz / st.enter[0] as f64, st.cyc[P_DECODE] as f64 / ghz / st.enter[0] as f64, st.cyc[P_BOUNDS] as f64 / ghz / st.enter[0] as f64);
+            }
+        }
+        out!("levels2 {name}: all {nlv} levels {:.2} ns per item (median of {reps}; {:.2} to {:.2})", median(&cum), cum.iter().cloned().fold(f64::MAX, f64::min), cum.iter().cloned().fold(0.0, f64::max));
+        for l in 0..nlv {
+            let mut v = ts[l].clone();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
             let sb = bytes[l] - if l == 0 { 2.0 } else { bytes[l - 1] };
-            let line = format!("{},{},{},{:.2},{:.2},{:.2},{:.4}", name, l, ix.meta.level_bytes(l), bytes[l], ns, ns - prev, (ns - prev) / sb);
+            let line = format!("{},{},{},{:.2},{:.3},{:.4},{:.3},{:.3},{}", name, l, ix.meta.level_bytes(l), bytes[l], median(&v), median(&v) / sb, v[0], v[reps - 1], decided[l]);
             out!("levels2 {line}");
             lines.push(line);
-            prev = ns;
         }
     }
-    std::fs::write(format!("{}/levels2{}.csv", crate::run2::res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+    let tag = format!("{}{}{}", if ix.split { "" } else { "_u8" }, if sweep { "_sweep" } else { "" }, if c.plan.int_det { "_int" } else { "" });
+    std::fs::write(format!("{}/levels2{tag}.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 /// Fixed setup per query: group setup (exact int8 basis product, rotated weights) and cluster setup with tables.
@@ -389,7 +430,7 @@ pub fn setup_cost(c: &Ctx2, nq: usize) {
                 let gp = &ix.groups[ix.cl[ci].g];
                 for l in 0..ix.meta.nl() {
                     let mut lut = crate::v2::kern::LevelLut::default();
-                    unsafe { crate::v2::kern::build_lut(&cq.w, &gp.levels[l], &ix.etab, ix.split, &mut lut) };
+                    unsafe { crate::v2::kern::build_lut(&cq.w, &gp.levels[l], &ix.etab, ix.split, None, &mut lut) };
                     cq.luts[l] = Some(lut);
                 }
             }
@@ -401,7 +442,7 @@ pub fn setup_cost(c: &Ctx2, nq: usize) {
             let mut nu = 0;
             for _ in 0..200 {
                 for l in 0..ix.meta.nl() {
-                    unsafe { crate::v2::kern::build_lut(&cqs[0].w, &gp.levels[l], &ix.etab, ix.split, &mut lut) };
+                    unsafe { crate::v2::kern::build_lut(&cqs[0].w, &gp.levels[l], &ix.etab, ix.split, None, &mut lut) };
                     nu += gp.levels[l].units;
                 }
             }

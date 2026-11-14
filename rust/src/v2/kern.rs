@@ -24,12 +24,16 @@ pub struct LevelLut {
     pub parts: Vec<PartLut>,
     pub hi: Vec<u8>, // per group 64 bytes: lane j = unit 4g + j, 16 entries
     pub lo: Vec<u8>, // low bytes of 16-bit tables (split)
+    pub qsum: f64,   // with a common step: a bound on the sum over units of the largest entry
 }
 
 /// Build the level's tables from the cluster's combined weights w (det by coordinate, rand by n + position).
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, out: &mut LevelLut) {
+/// With `step`, every part uses that table step (the integer deterministic levels, split only).
+pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, step: Option<f32>, out: &mut LevelLut) {
+    assert!(step.is_none() || split, "the integer levels need 16-bit tables");
     let qmax: f32 = if split { 65535.0 } else { 255.0 };
+    out.qsum = 0.0;
     out.parts.clear();
     out.hi.clear();
     out.lo.clear();
@@ -65,11 +69,18 @@ pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, out
             }
             // the computed minimum may differ from the f32 table's by rounding: covered by the f32 error term
             rmax = rmax.max(hi - lo);
+            if let Some(st) = step {
+                out.qsum += ((hi - lo) as f64 / st as f64 * (1.0 + 1e-5)).ceil() + 1.0;
+            }
             sabs += sa as f64;
             off += lo as f64;
             tabs.push(_mm512_sub_ps(t, _mm512_set1_ps(lo)));
         }
-        let scale = if rmax > 0.0 { rmax / qmax } else { 1e-30 };
+        let scale = match step {
+            Some(st) => st,
+            None if rmax > 0.0 => rmax / qmax,
+            None => 1e-30,
+        };
         let inv = _mm512_set1_ps(1.0 / scale);
         for (u, t) in tabs.iter().enumerate() {
             let q = _mm512_min_epi32(_mm512_max_epi32(_mm512_cvtps_epi32(_mm512_mul_ps(*t, inv)), _mm512_setzero_si512()), _mm512_set1_epi32(qmax as i32));
@@ -332,30 +343,307 @@ pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8
 #[cfg(not(target_feature = "avx512f"))]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m512, __m512) {
+    let [(a, b)] = sums16::<1>(codes, [tab], groups);
+    let f = |v: __m256i| {
+        let lo = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(v));
+        let hi = _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(v));
+        __m512(_mm256_cvtepi32_ps(lo), _mm256_cvtepi32_ps(hi))
+    };
+    (f(a), f(b))
+}
+
+/// Table sums of one part over one block for each of NT tables (the same codes), as u16 in item order: items 0..15
+/// and items 16..31. Each sum is exact while it is below 65,536.
+#[inline(always)]
+pub unsafe fn sums16<const NT: usize>(codes: *const u8, tabs: [*const u8; NT], groups: usize) -> [(__m256i, __m256i); NT] {
     let m0f = _mm256_set1_epi8(0x0f);
-    let (mut a0, mut b0, mut a1, mut b1) = (_mm256_setzero_si256(), _mm256_setzero_si256(), _mm256_setzero_si256(), _mm256_setzero_si256());
+    let z = _mm256_setzero_si256();
+    let mut acc = [[z; 4]; NT];
     for h in 0..2 * groups {
         let c = _mm256_loadu_si256(codes.add(h * 32) as *const _);
-        let t = _mm256_loadu_si256(tab.add(h * 32) as *const _);
-        let r0 = _mm256_shuffle_epi8(t, _mm256_and_si256(c, m0f));
-        let r1 = _mm256_shuffle_epi8(t, _mm256_and_si256(_mm256_srli_epi16::<4>(c), m0f));
-        a0 = _mm256_add_epi16(a0, r0);
-        b0 = _mm256_add_epi16(b0, _mm256_srli_epi16::<8>(r0));
-        a1 = _mm256_add_epi16(a1, r1);
-        b1 = _mm256_add_epi16(b1, _mm256_srli_epi16::<8>(r1));
+        let lo = _mm256_and_si256(c, m0f);
+        let hi = _mm256_and_si256(_mm256_srli_epi16::<4>(c), m0f);
+        for k in 0..NT {
+            let t = _mm256_loadu_si256(tabs[k].add(h * 32) as *const _);
+            let r0 = _mm256_shuffle_epi8(t, lo);
+            let r1 = _mm256_shuffle_epi8(t, hi);
+            let a = &mut acc[k];
+            a[0] = _mm256_add_epi16(a[0], r0);
+            a[1] = _mm256_add_epi16(a[1], _mm256_srli_epi16::<8>(r0));
+            a[2] = _mm256_add_epi16(a[2], r1);
+            a[3] = _mm256_add_epi16(a[3], _mm256_srli_epi16::<8>(r1));
+        }
     }
-    (lane_sum(_mm256_sub_epi16(a0, _mm256_slli_epi16::<8>(b0)), b0), lane_sum(_mm256_sub_epi16(a1, _mm256_slli_epi16::<8>(b1)), b1))
+    core::array::from_fn(|k| {
+        let a = &acc[k];
+        (order16(_mm256_sub_epi16(a[0], _mm256_slli_epi16::<8>(a[1])), a[1]), order16(_mm256_sub_epi16(a[2], _mm256_slli_epi16::<8>(a[3])), a[3]))
+    })
 }
 
 /// e: words = sums of even bytes per 128-bit lane, o: odd; sum the two lanes and interleave to item order.
-#[cfg(not(target_feature = "avx512f"))]
 #[inline(always)]
-unsafe fn lane_sum(e: __m256i, o: __m256i) -> __m512 {
+unsafe fn order16(e: __m256i, o: __m256i) -> __m256i {
     let f = |x: __m256i| _mm_add_epi16(_mm256_castsi256_si128(x), _mm256_extracti128_si256::<1>(x));
     let (e, o) = (f(e), f(o));
-    let a = _mm256_cvtepu16_epi32(_mm_unpacklo_epi16(e, o));
-    let b = _mm256_cvtepu16_epi32(_mm_unpackhi_epi16(e, o));
-    __m512(_mm256_cvtepi32_ps(a), _mm256_cvtepi32_ps(b))
+    _mm256_set_m128i(_mm_unpackhi_epi16(e, o), _mm_unpacklo_epi16(e, o))
+}
+
+// ---------------- integer deterministic levels ----------------
+//
+// A cluster's deterministic levels share one table step sigma, chosen so that the units' largest entries theta_u(e)
+// (each at most 65,535, stored as a high and a low byte) sum to at most 256 IHMAX over all deterministic levels. The
+// item's accumulators Hs (sum of high bytes) and Ls (sum of low bytes) run over every deterministic level:
+// Theta = 256 Hs + Ls, Hs <= IHMAX, Ls <= 64 x 255. With B_l the sum of the
+// units' minima and e_l the tables' error bound through level l, |sigma Theta + B_l - A| <= e_l for the real table sum
+// A. Per item, from its key: Tin = ceil(Kin / sigma), Tout = floor(Kout / sigma), Kin = (t + fixed - qm - alr mr) / s,
+// Kout = (t - D fixed - qm - alr mr) / s. Per level and norm code n, with X(n) = dwa pconst ntab(n) (1 + 1e-6) + ewdet:
+// Rin(n) = ceil((X(n) + e_l - B_l) / sigma), Rout(n) = ceil((B_l + e_l + D X(n)) / sigma).
+// IN iff Theta - Rin >= Tin; OUT iff Theta + Rout < Tout. Both imply the real-valued bound (dividing it by s > 0).
+//
+// Ranges. Tin and Tout are clamped to [TMIN, TMAX], so their high words lie in [-24000, 24000] and Hs - TH is exact in
+// i16. Clamping is sound: raising Tin or lowering Tout only withholds decisions; lowering Tin to TMAX cannot make an
+// IN, because Theta - Rin <= THETA_MAX - RIN_MIN < TMAX; raising Tout to TMIN cannot make an OUT, because
+// Theta + Rout >= ROUT_MIN > TMIN. A margin outside [RIN_MIN or ROUT_MIN, RSENT) is replaced by RSENT, which never
+// decides (THETA_MAX - RSENT < TMIN and RSENT > TMAX); so is the escape code 15. The rest of each compare saturates in
+// the order (Hs - TH), then -/+ RH, then + (g >> 8), with g = Ls - TL -/+ RL in [-510, 16575]: a saturated word has
+// magnitude at least 32,768, which g >> 8 (in [-2, 64]) cannot bring across zero.
+
+pub const IHMAX: i64 = 8128;
+pub const THETA_MAX: i64 = 256 * IHMAX + 64 * 255;
+pub const TMIN: i64 = -24000 * 256;
+pub const TMAX: i64 = 24000 * 256 + 255;
+pub const RSENT: i64 = 32767 * 256;
+pub const RIN_MIN: i64 = THETA_MAX - TMAX + 1;
+pub const ROUT_MIN: i64 = TMIN;
+
+/// The table step of a cluster's deterministic levels: the sum of the units' ranges (each the sum of its fields'
+/// ranges, as `build_lut` finds it) over the budget 256 IHMAX, or the widest unit range over 65,535 if that is larger,
+/// with margins for rounding.
+pub fn int_sigma(w: &[f32], levels: &[LevelPlan], et: &ExpTab) -> f32 {
+    let mut rmax = 0f64;
+    let mut rsum = 0f64;
+    let mut units = 0;
+    for lp in levels {
+        units += lp.units;
+        for part in &lp.parts {
+            for fs in &part.ufields {
+                let mut r = 0f64;
+                for &fi in fs.iter().take_while(|&&f| f != u16::MAX) {
+                    let f = &part.fields[fi as usize];
+                    r += (w[f.widx as usize] as f64).abs() * (et.hi[f.eid as usize] as f64 - et.lo[f.eid as usize] as f64).abs();
+                }
+                rmax = rmax.max(r);
+                rsum += r;
+            }
+        }
+    }
+    assert!(units <= 64, "{units} deterministic units overflow the 16-bit low-byte sums; at most 64 fit");
+    let budget = (256 * IHMAX - 3 * units as i64) as f64;
+    ((rsum * (1.0 + 1.0 / 512.0) / budget).max(rmax * (1.0 + 1.0 / 512.0) / 65535.0) as f32).max(1e-30)
+}
+
+/// A level's margins over the norm code: in and out, each as a signed high word (low- and high-byte tables) and a low
+/// byte, every table repeated in both 128-bit lanes for byte shuffles.
+#[derive(Clone)]
+pub struct RTab {
+    pub inh: [[u8; 32]; 2],
+    pub inl: [u8; 32],
+    pub outh: [[u8; 32]; 2],
+    pub outl: [u8; 32],
+    pub sent: u32, // codes whose in (bit n) or out (bit 16 + n) margin is the sentinel
+}
+
+/// Margins in fine steps (real values; None for the escape code), rounded up and checked against their ranges.
+pub fn rtab(rin: &[Option<f64>; 16], rout: &[Option<f64>; 16]) -> RTab {
+    let mut r = RTab { inh: [[0; 32]; 2], inl: [0; 32], outh: [[0; 32]; 2], outl: [0; 32], sent: 0 };
+    let up = |x: f64| (x + (x.abs() + 1.0) * 1e-12).ceil();
+    for n in 0..16 {
+        let ri = match rin[n] {
+            Some(x) if up(x) >= RIN_MIN as f64 && up(x) < RSENT as f64 => up(x) as i64,
+            _ => {
+                r.sent |= 1 << n;
+                RSENT
+            }
+        };
+        let ro = match rout[n] {
+            Some(x) if up(x) >= ROUT_MIN as f64 && up(x) < RSENT as f64 => up(x) as i64,
+            _ => {
+                r.sent |= 1 << (16 + n);
+                RSENT
+            }
+        };
+        for lane in [n, n + 16] {
+            let (hi, lo) = ((ri >> 8) as i16, (ri & 255) as u8);
+            r.inh[0][lane] = hi as u16 as u8;
+            r.inh[1][lane] = (hi as u16 >> 8) as u8;
+            r.inl[lane] = lo;
+            let (hi, lo) = ((ro >> 8) as i16, (ro & 255) as u8);
+            r.outh[0][lane] = hi as u16 as u8;
+            r.outh[1][lane] = (hi as u16 >> 8) as u8;
+            r.outl[lane] = lo;
+        }
+    }
+    r
+}
+
+/// A threshold in fine steps, clamped to [TMIN, TMAX], as (high word, low byte).
+#[inline(always)]
+pub fn split_t(v: f64) -> (i16, i16) {
+    let v = v.clamp(TMIN as f64, TMAX as f64) as i64;
+    ((v >> 8) as i16, (v & 255) as i16)
+}
+
+/// The integer state of the slots is stored by block of 32: six rows of 32 words, Hs, Ls, TinH, TinL, ToutH, ToutL.
+pub const IROWS: usize = 6;
+/// Position of field f of slot k in the integer state.
+#[inline(always)]
+pub fn ip(k: usize, f: usize) -> usize {
+    (k / 32) * (32 * IROWS) + f * 32 + (k & 31)
+}
+
+/// Per-item thresholds for slots 0..n (rounded up to 4; s and mr are read that far) from s and mr:
+/// kin = (cin - alr mr) / s and kout = (cout - alr mr) / s, divided by sigma and rounded outward with a slack covering
+/// the f64 evaluation (`mag` bounds |t| + |fixed| + |qm|).
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f64, alr: f64, mag: f64, sigma: f64, ist: &mut [i16]) {
+    let eps = 2f64.powi(-46);
+    let (vcin, vcout, valr, vmag) = (_mm256_set1_pd(cin), _mm256_set1_pd(cout), _mm256_set1_pd(alr), _mm256_set1_pd(mag));
+    let (vinv, veps, vse) = (_mm256_set1_pd(1.0 / sigma), _mm256_set1_pd(eps), _mm256_set1_pd(eps / sigma));
+    let (lo, hi) = (_mm256_set1_pd(TMIN as f64), _mm256_set1_pd(TMAX as f64));
+    let sign = _mm256_set1_pd(-0.0);
+    let abs = |x: __m256d| _mm256_andnot_pd(sign, x);
+    let put = |v: __m256d, k: usize, f: usize, ist: &mut [i16]| {
+        let v = _mm256_cvtpd_epi32(_mm256_min_pd(_mm256_max_pd(v, lo), hi));
+        let h = _mm_packs_epi32(_mm_srai_epi32::<8>(v), v);
+        let l = _mm_packs_epi32(_mm_and_si128(v, _mm_set1_epi32(255)), v);
+        _mm_storel_epi64(ist.as_mut_ptr().add(ip(k, f)) as *mut _, h);
+        _mm_storel_epi64(ist.as_mut_ptr().add(ip(k, f + 1)) as *mut _, l);
+    };
+    for k in (0..n).step_by(4) {
+        let r = _mm256_div_pd(_mm256_set1_pd(1.0), _mm256_cvtps_pd(_mm_loadu_ps(s.as_ptr().add(k))));
+        let a = _mm256_mul_pd(valr, _mm256_cvtps_pd(_mm_loadu_ps(mr.as_ptr().add(k))));
+        let slack = _mm256_mul_pd(_mm256_mul_pd(_mm256_add_pd(vmag, abs(a)), r), vse);
+        let yi = _mm256_mul_pd(_mm256_mul_pd(_mm256_sub_pd(vcin, a), r), vinv);
+        let yo = _mm256_mul_pd(_mm256_mul_pd(_mm256_sub_pd(vcout, a), r), vinv);
+        let ti = _mm256_ceil_pd(_mm256_add_pd(_mm256_add_pd(yi, slack), _mm256_mul_pd(abs(yi), veps)));
+        let to = _mm256_floor_pd(_mm256_sub_pd(_mm256_sub_pd(yo, slack), _mm256_mul_pd(abs(yo), veps)));
+        put(ti, k, 2, ist);
+        put(to, k, 4, ist);
+    }
+}
+
+/// The 16 i16 words looked up from a high-word table pair (low, high bytes) by the nibbles in idx (lane 0: items 0..15,
+/// lane 1: items 16..31), as (items 0..15, items 16..31).
+#[inline(always)]
+unsafe fn look16(tlo: __m256i, thi: __m256i, idx: __m256i) -> (__m256i, __m256i) {
+    let a = _mm256_shuffle_epi8(tlo, idx);
+    let b = _mm256_shuffle_epi8(thi, idx);
+    let u0 = _mm256_unpacklo_epi8(a, b);
+    let u1 = _mm256_unpackhi_epi8(a, b);
+    (_mm256_permute2x128_si256::<0x20>(u0, u1), _mm256_permute2x128_si256::<0x31>(u0, u1))
+}
+
+#[inline(always)]
+unsafe fn ld32(p: &[u8; 32]) -> __m256i {
+    _mm256_loadu_si256(p.as_ptr() as *const _)
+}
+
+/// The two-word compares for 16 slots: in lanes where Theta - Rin >= Tin, out lanes where Theta + Rout < Tout (all ones).
+#[inline(always)]
+pub unsafe fn cmp2w(hs: __m256i, ls: __m256i, t: [__m256i; 4], rin: (__m256i, __m256i), rout: (__m256i, __m256i)) -> (__m256i, __m256i) {
+    let d = _mm256_subs_epi16(_mm256_subs_epi16(hs, t[0]), rin.0);
+    let g = _mm256_sub_epi16(_mm256_sub_epi16(ls, t[1]), rin.1);
+    let vin = _mm256_adds_epi16(d, _mm256_srai_epi16::<8>(g));
+    let d = _mm256_adds_epi16(_mm256_subs_epi16(hs, t[2]), rout.0);
+    let g = _mm256_sub_epi16(_mm256_add_epi16(ls, rout.1), t[3]);
+    let vout = _mm256_adds_epi16(d, _mm256_srai_epi16::<8>(g));
+    (_mm256_cmpgt_epi16(vin, _mm256_set1_epi16(-1)), _mm256_cmpgt_epi16(_mm256_setzero_si256(), vout))
+}
+
+/// 32-bit item-order mask from 16-bit lane masks of items 0..15 and 16..31.
+#[inline(always)]
+unsafe fn mask32(a: __m256i, b: __m256i) -> u32 {
+    _mm256_movemask_epi8(_mm256_permute4x64_epi64::<0xd8>(_mm256_packs_epi16(a, b))) as u32
+}
+
+/// One deterministic level of one block of 32 slots on the integer path: adds the level's sums to Hs and Ls of the
+/// block's state (`ist`, its six rows) and, when `decide`, returns the (in, out) masks from its thresholds and the
+/// margins by the norm code in the scalar row sp.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn int_level(codes: *const u8, lut: &LevelLut, sp: *const u8, rt: &RTab, ist: *mut i16, decide: bool) -> (u32, u32) {
+    let (hs, ls) = (ist, ist.add(32));
+    let mut acc = [[_mm256_setzero_si256(); 2]; 2];
+    for pl in &lut.parts {
+        let [(h0, h1), (l0, l1)] = sums16::<2>(codes.add(pl.g0 * 64), [lut.hi.as_ptr().add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64)], pl.groups);
+        acc[0][0] = _mm256_add_epi16(acc[0][0], h0);
+        acc[0][1] = _mm256_add_epi16(acc[0][1], h1);
+        acc[1][0] = _mm256_add_epi16(acc[1][0], l0);
+        acc[1][1] = _mm256_add_epi16(acc[1][1], l1);
+    }
+    let mut hv = [_mm256_setzero_si256(); 2];
+    let mut lv = [_mm256_setzero_si256(); 2];
+    for h in 0..2 {
+        hv[h] = _mm256_add_epi16(_mm256_loadu_si256(hs.add(16 * h) as *const _), acc[0][h]);
+        lv[h] = _mm256_add_epi16(_mm256_loadu_si256(ls.add(16 * h) as *const _), acc[1][h]);
+        _mm256_storeu_si256(hs.add(16 * h) as *mut _, hv[h]);
+        _mm256_storeu_si256(ls.add(16 * h) as *mut _, lv[h]);
+    }
+    if !decide {
+        return (0, 0);
+    }
+    let r = _mm_loadu_si128(sp as *const _);
+    let m = _mm_set1_epi8(0x0f);
+    let idx = _mm256_set_m128i(_mm_and_si128(_mm_srli_epi16::<4>(r), m), _mm_and_si128(r, m));
+    let z = _mm256_setzero_si256();
+    let rih = look16(ld32(&rt.inh[0]), ld32(&rt.inh[1]), idx);
+    let ril = look16(ld32(&rt.inl), z, idx);
+    let roh = look16(ld32(&rt.outh[0]), ld32(&rt.outh[1]), idx);
+    let rol = look16(ld32(&rt.outl), z, idx);
+    let ldt = |k: usize, h: usize| _mm256_loadu_si256(ist.add(64 + 32 * k + 16 * h) as *const _);
+    let (i0, o0) = cmp2w(hv[0], lv[0], [ldt(0, 0), ldt(1, 0), ldt(2, 0), ldt(3, 0)], (rih.0, ril.0), (roh.0, rol.0));
+    let (i1, o1) = cmp2w(hv[1], lv[1], [ldt(0, 1), ldt(1, 1), ldt(2, 1), ldt(3, 1)], (rih.1, ril.1), (roh.1, rol.1));
+    (mask32(i0, i1), mask32(o0, o1))
+}
+
+const fn compress16_lut() -> [[u8; 16]; 256] {
+    let mut t = [[0x80u8; 16]; 256];
+    let mut m = 0;
+    while m < 256 {
+        let mut k = 0;
+        let mut i = 0;
+        while i < 8 {
+            if m >> i & 1 == 1 {
+                t[m][2 * k] = 2 * i as u8;
+                t[m][2 * k + 1] = 2 * i as u8 + 1;
+                k += 1;
+            }
+            i += 1;
+        }
+        m += 1;
+    }
+    t
+}
+static C16: [[u8; 16]; 256] = compress16_lut();
+
+/// Move the kept slots of o..o+16 (o a multiple of 16) to slots w.. of the integer state, every row (w <= o: only
+/// slots already read are overwritten).
+#[inline(always)]
+pub unsafe fn cs_int(v: &mut [i16], w: usize, m: u16, o: usize) {
+    let (m0, m1) = ((m & 255) as usize, (m >> 8) as usize);
+    let (c0, n) = (m0.count_ones() as usize, m.count_ones() as usize);
+    let n1 = n.min(32 - (w & 31));
+    let mut buf = [0i16; 24];
+    for f in 0..IROWS {
+        let x = _mm256_loadu_si256(v.as_ptr().add(ip(o, f)) as *const _);
+        let a = _mm_shuffle_epi8(_mm256_castsi256_si128(x), _mm_loadu_si128(C16[m0].as_ptr() as *const _));
+        let b = _mm_shuffle_epi8(_mm256_extracti128_si256::<1>(x), _mm_loadu_si128(C16[m1].as_ptr() as *const _));
+        _mm_storeu_si128(buf.as_mut_ptr() as *mut _, a);
+        _mm_storeu_si128(buf.as_mut_ptr().add(c0) as *mut _, b);
+        std::ptr::copy_nonoverlapping(buf.as_ptr(), v.as_mut_ptr().add(ip(w, f)), n1);
+        if n > n1 {
+            std::ptr::copy_nonoverlapping(buf.as_ptr().add(n1), v.as_mut_ptr().add(ip(w + n1, f)), n - n1);
+        }
+    }
 }
 
 /// Nibble of every lane of a scalar row (lanes 0..15 low nibbles, 16..31 high nibbles) as i32.
@@ -372,6 +660,110 @@ mod tests {
     fn nib(buf: &[u8], row: usize, item: usize) -> u8 {
         let b = buf[row * 16 + item % 16];
         if item < 16 { b & 15 } else { b >> 4 }
+    }
+
+    /// The two-word compares against i64 arithmetic over the full ranges, with the extremes over-sampled; thresholds
+    /// beyond the clamp must never give a decision the true threshold would not.
+    #[test]
+    fn two_word_compare_matches_i64() {
+        let mut x = 0x9E3779B97F4A7C15u64;
+        let mut rnd = |lo: i64, hi: i64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            match x % 8 {
+                0 => lo,
+                1 => hi,
+                2 => lo + (x >> 8) as i64 % 3,
+                3 => hi - (x >> 8) as i64 % 3,
+                _ => lo + ((x >> 8) % (hi - lo + 1) as u64) as i64,
+            }
+        };
+        let split = |v: i64| ((v >> 8) as i16, (v & 255) as i16);
+        let mut wrong = 0;
+        for _ in 0..200_000 {
+            let mut hs = [0i16; 16];
+            let mut ls = [0i16; 16];
+            let mut t = [[0i16; 16]; 4];
+            let mut rr = [[0i16; 16]; 4];
+            let mut want = [(false, false); 16];
+            for i in 0..16 {
+                let (h, l) = (rnd(0, IHMAX), rnd(0, 64 * 255));
+                hs[i] = h as i16;
+                ls[i] = l as i16;
+                let theta = 256 * h + l;
+                // true thresholds may lie far outside the clamp
+                let (tin, tout) = (rnd(-3 * THETA_MAX - TMAX, 3 * TMAX), rnd(-3 * TMAX, 3 * TMAX));
+                let rin = if rnd(0, 4) == 0 { RSENT } else { rnd(RIN_MIN, RSENT - 1) };
+                let rout = if rnd(0, 6) == 0 { RSENT } else { rnd(ROUT_MIN, RSENT - 1) };
+                let ci = split(tin.clamp(TMIN, TMAX));
+                let co = split(tout.clamp(TMIN, TMAX));
+                (t[0][i], t[1][i], t[2][i], t[3][i]) = (ci.0, ci.1, co.0, co.1);
+                let (a, b) = split(rin);
+                (rr[0][i], rr[1][i]) = (a, b);
+                let (a, b) = split(rout);
+                (rr[2][i], rr[3][i]) = (a, b);
+                let tin_c = tin.clamp(TMIN, TMAX);
+                let tout_c = tout.clamp(TMIN, TMAX);
+                let got = (theta - rin >= tin_c && rin != RSENT, theta + rout < tout_c && rout != RSENT);
+                // the clamped decision must be implied by the true one, and equal the exact clamped arithmetic
+                assert!(!got.0 || theta - rin >= tin, "clamped IN not implied");
+                assert!(!got.1 || theta + rout < tout, "clamped OUT not implied");
+                assert!(!(rin == RSENT && theta - rin >= tin_c) && !(rout == RSENT && theta + rout < tout_c), "sentinel decided");
+                want[i] = got;
+            }
+            let ld = |a: &[i16; 16]| unsafe { _mm256_loadu_si256(a.as_ptr() as *const _) };
+            let (mi, mo) = unsafe { cmp2w(ld(&hs), ld(&ls), [ld(&t[0]), ld(&t[1]), ld(&t[2]), ld(&t[3])], (ld(&rr[0]), ld(&rr[1])), (ld(&rr[2]), ld(&rr[3]))) };
+            let (mut gi, mut go) = ([0i16; 16], [0i16; 16]);
+            unsafe {
+                _mm256_storeu_si256(gi.as_mut_ptr() as *mut _, mi);
+                _mm256_storeu_si256(go.as_mut_ptr() as *mut _, mo);
+            }
+            for i in 0..16 {
+                if (gi[i] != 0, go[i] != 0) != want[i] {
+                    wrong += 1;
+                }
+            }
+        }
+        assert_eq!(wrong, 0);
+    }
+
+    #[test]
+    #[ignore]
+    fn int_level_speed() {
+        let groups = 2;
+        let nb: usize = std::env::var("NB").map(|v| v.parse().unwrap()).unwrap_or(4096);
+        let codes: Vec<u8> = (0..nb * groups * 64).map(|i| (i * 37 % 251) as u8).collect();
+        let lut = LevelLut { parts: vec![PartLut { j: None, g0: 0, groups, off: 0.0, scale: 1.0, err: 0.0 }], hi: vec![3; groups * 64], lo: vec![7; groups * 64], qsum: 0.0 };
+        let rt = rtab(&[Some(100.0); 16], &[Some(100.0); 16]);
+        let sp: Vec<u8> = (0..nb * 16).map(|i| (i * 13 % 256) as u8).collect();
+        let mut ist = vec![3i16; 64 * 32 * IROWS];
+        let mut x = 0u32;
+        let t = std::time::Instant::now();
+        let reps = (200_000 / nb).max(3);
+        for _ in 0..reps {
+            for b in 0..nb {
+                let (i, o) = unsafe { int_level(codes.as_ptr().add(b * groups * 64), &lut, sp.as_ptr().add(b * 16), &rt, ist.as_mut_ptr().add(b % 64 * 32 * IROWS), true) };
+                x = x.wrapping_add(i ^ o);
+            }
+        }
+        let ns = t.elapsed().as_nanos() as f64 / (reps * nb * 32) as f64;
+        println!("int_level, 8 units: {ns:.3} ns per item ({x})");
+    }
+
+    #[test]
+    fn cs_int_keeps_order() {
+        for (w, o) in [(3usize, 16usize), (25, 32), (31, 48), (40, 48), (0, 0)] {
+            for m in [0u16, 1, 0x8000, 0xffff, 0x5a5a, 0x00f0, 0x0f0f, 0x1234] {
+                let mut v: Vec<i16> = (0..4 * 32 * IROWS).map(|i| i as i16).collect();
+                let src: Vec<Vec<i16>> = (0..IROWS).map(|f| (0..16).filter(|&i| m >> i & 1 == 1).map(|i| v[ip(o + i, f)]).collect()).collect();
+                unsafe { cs_int(&mut v, w, m, o) };
+                for f in 0..IROWS {
+                    let got: Vec<i16> = (0..src[f].len()).map(|k| v[ip(w + k, f)]).collect();
+                    assert_eq!(got, src[f], "w {w} o {o} m {m:#x} row {f}");
+                }
+            }
+        }
     }
 
     #[test]

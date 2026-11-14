@@ -411,6 +411,26 @@ pub struct CQ2 {
     pub w: Vec<f32>,
     pub luts: Vec<Option<LevelLut>>,
     pub shared: bool, // tables from the group (alpha = 0)
+    pub int: Option<IntDet>,
+}
+
+/// The integer deterministic levels of one (query, cluster): the common table step, and per level the margins and
+/// the sums through that level of the units' minima (B) and of the tables' error bounds (e).
+pub struct IntDet {
+    pub sigma: f32,
+    pub rt: Vec<Option<RTab>>,
+    pub b: [f64; NDL],
+    pub e: [f64; NDL],
+    pub q: [f64; NDL], // bound on the largest Theta through each level
+}
+
+impl CQ2 {
+    /// Decide the deterministic levels of threshold queries on the integer path.
+    pub fn enable_int(&mut self, ix: &Index2, ci: usize) {
+        assert!(!self.shared, "the integer levels need the cluster's own tables");
+        let gp = &ix.groups[ix.cl[ci].g];
+        self.int = Some(IntDet { sigma: int_sigma(&self.w, &gp.levels[..NDL], &ix.etab), rt: vec![None; NDL], b: [0.0; NDL], e: [0.0; NDL], q: [0.0; NDL] });
+    }
 }
 
 /// f32 dot product (four 16-lane accumulators); |result - exact| <= 64 u sum |a_i b_i| for n <= 4096.
@@ -480,7 +500,7 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0 }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -722,6 +742,8 @@ pub fn exact_ge2(ix: &Index2, pr: &Prep2, row: usize, t: f64, st: &mut Stats) ->
 pub enum Mode2 {
     Thr,
     Interval(usize),
+    /// decide at every level up to this one but keep every candidate (timing of the decision kernel)
+    Sweep(usize),
 }
 
 /// Survivor state, compacted after every level (structure of arrays, padded to whole blocks).
@@ -736,6 +758,8 @@ pub struct State {
     pub kap: [Vec<f32>; J],
     pub eps: [Vec<f32>; J],
     pub truth: Vec<f64>,
+    pub ist: Vec<i16>,     // integer levels, by block (kern::ip): Hs, Ls, TinH, TinL, ToutH, ToutL
+    pub a64: Vec<f64>,     // verify: the real deterministic table sum
     pub tmp: Vec<u8>,
     pub stmp: Vec<u8>,
 }
@@ -763,9 +787,17 @@ impl State {
         }
         if self.truth.len() < full {
             self.truth.resize(full, 0.0);
+            self.a64.resize(full, 0.0);
+        }
+        if self.ist.len() < full * IROWS {
+            self.ist.resize(full * IROWS, 0);
         }
         let used = (cap + BLK - 1) / BLK * BLK + BLK;
         self.adet[..used].fill(0.0);
+        for b in 0..used / BLK {
+            self.ist[b * BLK * IROWS..b * BLK * IROWS + 2 * BLK].fill(0);
+        }
+        self.a64[..used].fill(0.0);
         for j in 0..J {
             self.aj[j][..used].fill(0.0);
         }
@@ -795,6 +827,72 @@ unsafe fn arr(v: __m512) -> [f32; 16] {
     let mut o = [0f32; 16];
     _mm512_storeu_ps(o.as_mut_ptr(), v);
     o
+}
+
+/// Blocks ahead whose codes are prefetched on the aligned path.
+const PF: usize = 8;
+
+/// Nibble of slot i of a block in row u.
+#[inline(always)]
+unsafe fn nib(p: *const u8, u: usize, i: usize) -> usize {
+    let b = *p.add(u * 16 + (i & 15));
+    (if i < 16 { b & 15 } else { b >> 4 }) as usize
+}
+
+/// Compact the deterministic state of 16 slots: the integer accumulators and thresholds on the integer path, else the
+/// float sum; in verify mode also the f64 sum.
+#[inline(always)]
+unsafe fn compact_det(sv: &mut State, int: bool, verify: bool, w: usize, m: u16, o: usize) {
+    if int {
+        cs_int(&mut sv.ist, w, m, o);
+    } else {
+        cs(&mut sv.adet, w, m, o);
+    }
+    if verify {
+        let mut k = w;
+        for i in 0..16 {
+            if m >> i & 1 == 1 {
+                sv.a64[k] = sv.a64[o + i];
+                k += 1;
+            }
+        }
+    }
+}
+
+/// Verify mode, a deterministic level of one block (bit i: slot k0 + i): count the decisions (in, out) that the
+/// real-valued certificate, evaluated in f64 from the f64 table sum, does not imply, and the active lanes whose exact
+/// score it does not contain.
+unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f64, sv: &State, k0: usize, sp: *const u8, act: u32, inm: u32, outm: u32, st: &mut Stats) {
+    let c = &ix.cl[ci];
+    let gp = &ix.groups[c.g];
+    let (qm, alr, fixed, ew, dwa, d) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64, cq.ewdet as f64, cq.dwa[l] as f64, pr.dial[l] as f64);
+    for i in 0..32 {
+        if act >> i & 1 == 0 {
+            continue;
+        }
+        let k = k0 + i;
+        let s = sv.s[k] as f64;
+        let code = nib(sp, 0, i);
+        let rho = if code == 15 { ix.esc[&(l as u8, 0u8, (c.r0 + sv.idx[k] as usize) as u32)] as f64 } else { gp.pconst[l] as f64 * s * gp.ntab[l][code] as f64 };
+        let hh = dwa * rho * (1.0 + 1e-6) + fixed + s * ew;
+        let est = qm + alr * sv.mr[k] as f64 + s * sv.a64[k];
+        let tr = sv.truth[k];
+        if tr < est - hh - 1e-12 || tr > est + hh + 1e-12 {
+            st.cert_viol += 1;
+        }
+        if inm >> i & 1 == 1 {
+            st.imp_checked += 1;
+            if !(est - hh >= t) {
+                st.imp_fail += 1;
+            }
+        }
+        if outm >> i & 1 == 1 {
+            st.imp_checked += 1;
+            if !(est + d * hh < t) {
+                st.imp_fail += 1;
+            }
+        }
+    }
 }
 
 /// Run the index path for candidates `cands` (local item indices, ascending) of one cluster. Decisions in Thr mode;
@@ -867,10 +965,23 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             };
         }
     }
+    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
+    if intm {
+        // the dial's largest factor on the fixed term: a larger factor only lowers Tout
+        let dmax = pr.dial[..NDL].iter().fold(1f32, |a, &d| a.max(d)) as f64;
+        let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
+        let sigma = cq.int.as_ref().unwrap().sigma as f64;
+        int_thresholds(&sv.s, &sv.mr, nsurv, t + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
+    }
     st.cyc[P_INIT] += tick() - ti;
     let t32 = t as f32;
     let tin = crate::query::next_up_if_below(t32, t);
-    let stop = if let Mode2::Interval(l) = mode { l } else { usize::MAX };
+    let stop = match mode {
+        Mode2::Interval(l) | Mode2::Sweep(l) => l,
+        Mode2::Thr => usize::MAX,
+    };
+    let interval = matches!(mode, Mode2::Interval(_));
+    let sweep = matches!(mode, Mode2::Sweep(_));
     let csg = _mm512_set1_ps(ix.meta.csg as f32);
     let one6 = _mm512_set1_ps(1.0 + 1e-6);
     let u16x = _mm512_set1_ps((16.0 * U) as f32);
@@ -883,17 +994,27 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             break;
         }
         let lp = &gp.levels[l];
+        if intm && l == NDL {
+            // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
+            let id = cq.int.as_ref().unwrap();
+            let (b, sg) = (id.b[NDL - 1], id.sigma as f64);
+            for k in 0..nsurv {
+                sv.adet[k] = (b + sg * (256.0 * sv.ist[ip(k, 0)] as f64 + sv.ist[ip(k, 1)] as f64)) as f32;
+            }
+            edet = ((id.e[NDL - 1] + (b.abs() + sg * THETA_MAX as f64) * 2f64.powi(-23)) * (1.0 + 1e-6)) as f32;
+        }
         let tt = tick();
         let lut: &LevelLut = if cq.shared {
             gq.glut[l].get_or_init(|| {
                 let mut lut = LevelLut::default();
-                build_lut(&gq.wq, lp, &ix.etab, ix.split, &mut lut);
+                build_lut(&gq.wq, lp, &ix.etab, ix.split, None, &mut lut);
                 lut
             })
         } else {
             if cq.luts[l].is_none() {
                 let mut lut = LevelLut::default();
-                build_lut(&cq.w, lp, &ix.etab, ix.split, &mut lut);
+                let step = if intm && l < NDL { Some(cq.int.as_ref().unwrap().sigma) } else { None };
+                build_lut(&cq.w, lp, &ix.etab, ix.split, step, &mut lut);
                 cq.luts[l] = Some(lut);
             }
             cq.luts[l].as_ref().unwrap()
@@ -906,6 +1027,44 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 Some(j) => ej[j] += pl.err,
             }
         }
+        if intm && l < NDL {
+            let id = cq.int.as_mut().unwrap();
+            let (b0, e0) = if l > 0 { (id.b[l - 1], id.e[l - 1]) } else { (0.0, 0.0) };
+            id.q[l] = (if l > 0 { id.q[l - 1] } else { 0.0 }) + lut.qsum;
+            assert!(id.q[l] <= (256 * IHMAX) as f64, "integer tables overflow the accumulators");
+            id.b[l] = b0 + lut.parts.iter().map(|p| p.off as f64).sum::<f64>();
+            id.e[l] = e0 + lut.parts.iter().map(|p| p.err as f64).sum::<f64>() * (1.0 + 1e-6);
+            if id.rt[l].is_none() {
+                let (b, e, sg, d) = (id.b[l], id.e[l], id.sigma as f64, pr.dial[l] as f64);
+                let dw = cq.dwa[l] as f64 * gp.pconst[l] as f64 * (1.0 + 1e-6);
+                let mut rin = [None; 16];
+                let mut rout = [None; 16];
+                for n in 0..15 {
+                    let x = dw * gp.ntab[l][n] as f64 + cq.ewdet as f64;
+                    rin[n] = Some((x + e - b) / sg);
+                    rout[n] = Some((b + e + d * x) / sg);
+                }
+                id.rt[l] = Some(rtab(&rin, &rout));
+            }
+        }
+        // verify: the level's tables in f64 from the same weights, unit by unit in row order
+        let mut tab64: Vec<[f64; 16]> = Vec::new();
+        if verify && l < NDL {
+            for part in &lp.parts {
+                for fs in &part.ufields {
+                    let mut tv = [0f64; 16];
+                    for &fi in fs.iter().take_while(|&&f| f != u16::MAX) {
+                        let f = &part.fields[fi as usize];
+                        let w = cq.w[f.widx as usize] as f64;
+                        for e in 0..16 {
+                            tv[e] += w * ix.etab.e[f.eid as usize][e] as f64;
+                        }
+                    }
+                    tab64.push(tv);
+                }
+            }
+        }
+        let tl0 = _rdtsc();
         let nb = (nsurv + BLK - 1) / BLK;
         let mut kept_tot = 0usize;
         st.blocks[l] += nb as u64;
@@ -925,6 +1084,13 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 dmxj[j] = (e / (1.0 - e) + 1e-6) as f32;
             }
         }
+        if aligned {
+            let sb = a0 as usize / BLK;
+            let pc = cbase.add(sb * units * 16);
+            for x in (0..(units * 16 * PF.min(nb))).step_by(64) {
+                _mm_prefetch::<_MM_HINT_T0>(pc.add(x) as *const i8);
+            }
+        }
         let mut wpos = 0usize;
         for b in 0..nb {
             let k0 = b * BLK;
@@ -939,7 +1105,16 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 continue;
             }
             if aligned {
-                g.ident = Some((a0 as usize + k0) / BLK);
+                let sb = (a0 as usize + k0) / BLK;
+                g.ident = Some(sb);
+                // the level's codes of a cluster span a few pages, which the hardware prefetcher ramps up on late
+                if b + PF < nb {
+                    let pc = cbase.add((sb + PF) * units * 16);
+                    for x in (0..units * 16).step_by(64) {
+                        _mm_prefetch::<_MM_HINT_T0>(pc.add(x) as *const i8);
+                    }
+                    _mm_prefetch::<_MM_HINT_T0>(sbase.add((sb + PF) * srows * 16) as *const i8);
+                }
             } else {
                 let mut lanes = [u32::MAX; 32];
                 _mm512_storeu_si512(lanes.as_mut_ptr() as *mut _, l0);
@@ -957,6 +1132,37 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             let t1 = tick();
             st.cyc[P_REPACK] += t1 - t0;
             let mut keep = [0u16; 2];
+            if verify && l < NDL {
+                for i in 0..32 {
+                    if act >> i & 1 == 1 {
+                        sv.a64[k0 + i] += tab64.iter().enumerate().map(|(u, tv)| tv[nib(cp, u, i)]).sum::<f64>();
+                    }
+                }
+            }
+            if intm && l < NDL {
+                let rt = cq.int.as_ref().unwrap().rt[l].as_ref().unwrap();
+                let (inm, outm) = int_level(cp, lut, sp, rt, sv.ist.as_mut_ptr().add(ip(k0, 0)), !skip);
+                let t2 = tick();
+                st.cyc[P_DECODE] += t2 - t1;
+                let (inm, outm) = (inm & act, outm & act);
+                if verify && !skip {
+                    check_det(ix, ci, pr, cq, l, t, sv, k0, sp, act, inm, outm, st);
+                }
+                let k = if skip || sweep { act } else { act & !(inm | outm) };
+                if !skip {
+                    st.dec_in[l] += inm.count_ones() as u64;
+                    st.dec_out[l] += outm.count_ones() as u64;
+                }
+                if !skip && !sweep && inm != 0 {
+                    for i in 0..32 {
+                        if inm >> i & 1 == 1 {
+                            out.rows_in.push((c.r0 + sv.idx[k0 + i] as usize) as u32);
+                        }
+                    }
+                }
+                keep = [k as u16, (k >> 16) as u16];
+                st.cyc[P_BOUNDS] += tick() - t2;
+            } else {
             let mut lbh = [_mm512_setzero_ps(); 2];
             let mut ubh = [_mm512_setzero_ps(); 2];
             // part values
@@ -1138,7 +1344,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         }
                     }
                 }
-                if l == stop {
+                if interval && l == stop {
                     if let Some(iv) = out.iv.as_deref_mut() {
                         let (lbs, ubs) = (arr(lb), arr(ub));
                         for i in 0..16 {
@@ -1152,6 +1358,16 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 let tv = _mm512_set1_ps(tin);
                 let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, tv) & hm;
                 let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, tv) & hm;
+                if verify && l < NDL {
+                    let sh = 16 * h;
+                    check_det(ix, ci, pr, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);
+                }
+                if sweep {
+                    st.dec_in[l] += inm.count_ones() as u64;
+                    st.dec_out[l] += outm.count_ones() as u64;
+                    keep[h] = hm;
+                    continue;
+                }
                 if inm != 0 {
                     st.dec_in[l] += inm.count_ones() as u64;
                     let (lbs, ubs) = (arr(lb), arr(ub));
@@ -1170,7 +1386,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
             let _ = (lbh, ubh);
             st.cyc[P_BOUNDS] += tick() - t2;
-            if l == stop {
+            }
+            if interval && l == stop {
                 continue;
             }
             if aligned {
@@ -1200,7 +1417,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, _mm512_loadu_si512(sv.idx.as_ptr().add(o) as *const _)));
                 cs(&mut sv.s, w, m, o);
                 cs(&mut sv.mr, w, m, o);
-                cs(&mut sv.adet, w, m, o);
+                compact_det(sv, intm && l < NDL, verify, w, m, o);
                 if l >= NDL {
                     for j in 0..J {
                         cs(&mut sv.aj[j], w, m, o);
@@ -1222,6 +1439,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
         }
         if l == stop {
+            st.lcyc[l] += _rdtsc() - tl0;
             return;
         }
         if aligned {
@@ -1238,7 +1456,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, iv));
                         cs(&mut sv.s, w, m, o);
                         cs(&mut sv.mr, w, m, o);
-                        cs(&mut sv.adet, w, m, o);
+                        compact_det(sv, intm && l < NDL, verify, w, m, o);
                         for j in 0..J {
                             cs(&mut sv.aj[j], w, m, o);
                             cs(&mut sv.yh[j], w, m, o);
@@ -1270,6 +1488,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 sv.idx[k] = u32::MAX;
             }
         }
+        st.lcyc[l] += _rdtsc() - tl0;
         // single-pass rule: decide once at first_decide, the rest go to their full vectors
         if mode == Mode2::Thr && first_decide > 0 && l == first_decide {
             break;
@@ -1315,10 +1534,11 @@ pub struct Plan {
     pub alpha0: bool,      // tables shared per group (no centre multiple taken out of the query)
     pub jump_level: usize, // when most items stay undecided (d > jump_d): no decisions before this level
     pub jump_d: f64,
+    pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8 }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false }
     }
 }
 impl Plan {
@@ -1771,6 +1991,9 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
                             let mut cq = cluster_q2a(ix, ci, gq, pr, qm, pl.alpha0);
+                            if pl.int_det && !o.want_iv {
+                                cq.enable_int(ix, ci);
+                            }
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
