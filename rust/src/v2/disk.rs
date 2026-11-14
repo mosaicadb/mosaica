@@ -209,10 +209,11 @@ pub static QD: AtomicUsize = AtomicUsize::new(64);
 const RING: u32 = 256;
 /// Longest single read; a longer extent is split so that its pieces are read in parallel.
 const PIECE: usize = 256 << 10;
-/// Bytes of read buffers a `Reader` holds before it waits for the oldest batch, and keeps for reuse. Buffers are
-/// anonymous mappings, so that a freed one goes back to the system rather than to the heap: under a cap, memory the
-/// heap keeps is memory the page cache loses.
-const BUDGET: usize = 4 << 20;
+/// Bytes of read buffers a `Reader` holds before it waits for the oldest batch, and bytes of free buffers it keeps for
+/// reuse (in power-of-two sizes, so that they fit later batches). Buffers are anonymous mappings, so that a freed one
+/// goes back to the system rather than to the heap: under a cap, memory the heap keeps is memory the page cache loses.
+const BUDGET: usize = 8 << 20;
+const KEEP: usize = 4 << 20;
 
 /// One batch of rows read into a buffer: `rows` ascending, `at[k]` the byte offset of row k in `buf`.
 pub struct Batch<T> {
@@ -317,7 +318,7 @@ impl<T> Reader<T> {
             at[k] = x.2 + (s - x.0) as u32;
         }
         // the smallest free buffer that holds the batch, else a new one
-        let need = tot.max(1).next_multiple_of(64 << 10);
+        let need = tot.max(64 << 10).next_power_of_two();
         let buf = match self.free.iter().enumerate().filter(|(_, b)| b.len() >= need).min_by_key(|(_, b)| b.len()) {
             Some((k, _)) => self.free.swap_remove(k),
             None => memmap2::MmapMut::map_anon(need).expect("read buffer"),
@@ -404,9 +405,9 @@ impl<T> Reader<T> {
         Some(b)
     }
 
-    /// Returns a batch's buffer for reuse; buffers beyond the budget are freed.
+    /// Returns a batch's buffer for reuse; buffers beyond KEEP are freed.
     pub fn recycle(&mut self, b: Batch<T>) {
-        if self.free.iter().map(|b| b.len()).sum::<usize>() + b.buf.len() <= BUDGET {
+        if self.free.iter().map(|b| b.len()).sum::<usize>() + b.buf.len() <= KEEP {
             self.free.push(b.buf);
         }
     }
