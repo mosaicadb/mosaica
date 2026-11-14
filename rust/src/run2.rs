@@ -1246,7 +1246,7 @@ pub fn dbtopk(c: &Ctx2) {
         }
         f
     };
-    let mut fs = open("liminal_topk_stats.csv", &format!("method,target,k,vis,query,param,recall,touched,full_reads,bytes,{}",
+    let mut fs = open("liminal_topk_stats.csv", &format!("method,target,k,vis,query,param,recall,touched,full_reads,bytes,groups,clusters_indexed,{}",
         (0..nl).map(|l| format!("enter{l}")).collect::<Vec<_>>().join(",")));
     for vspec in arg_str("--vis-sets", "all").split(',') {
         let (vname, bm) = if vspec == "all" { ("all".to_string(), None) } else {
@@ -1355,20 +1355,20 @@ pub fn dbtopk(c: &Ctx2) {
                 }
                 let (np, dname) = param.split_once(':').unwrap();
                 let (np, dial): (usize, Option<&[f32]>) = (np.parse().unwrap(), dial_of(dname));
-                let mut tot = vec![0f64; 4 + nl];
+                let mut tot = vec![0f64; 6 + nl];
                 for (qi, es) in &exact {
                     let o = pl.install(|| run(np, dial, &qs[*qi]));
                     let rec = o.ents.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64;
                     let bytes = bytes_read2(ix, &o.st) * ix.nrows as f64;
-                    let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
+                    let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes, o.st.groups as f64, o.st.clusters_open as f64].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
                     writeln!(fs, "liminal_approx_{},{},{k},{vname},{qi},{param},{}", if fast { "new" } else { "old" }, targets[ti],
                         v.iter().map(|x| format!("{x:.4}")).collect::<Vec<_>>().join(",")).unwrap();
                     for (a, b) in tot.iter_mut().zip(&v) {
                         *a += b / exact.len() as f64;
                     }
                 }
-                out!("dbtopk {vname} stats {} k {k} {param}: recall {:.4} touched {:.0} full {:.0} bytes {:.0}; entering by level {:?}", targets[ti], tot[0], tot[1], tot[2], tot[3],
-                    tot[4..].iter().map(|x| x.round()).collect::<Vec<_>>());
+                out!("dbtopk {vname} stats {} k {k} {param}: recall {:.4} touched {:.0} full {:.0} bytes {:.0} groups {:.1} clusters indexed {:.1}; entering by level {:?}", targets[ti], tot[0], tot[1], tot[2], tot[3], tot[4], tot[5],
+                    tot[6..].iter().map(|x| x.round()).collect::<Vec<_>>());
             }
         }
     }

@@ -3099,7 +3099,17 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
                 pend.push(r as u32);
             }
         }
-        let cands = cands_of(ix, ci, d0, d1, vis);
+        let mut cands = cands_of(ix, ci, d0, d1, vis);
+        if !top.full() && cands.len() > kk - top.h.len() {
+            // enough here to fill the k best: score the items nearest the centre direction (largest key), then run the
+            // rest against the k-th of those
+            let first = cands.split_off(cands.len() - (kk - top.h.len()));
+            let rows: Vec<u32> = first.iter().map(|&i| (c.r0 + i as usize) as u32).collect();
+            st.touched += rows.len() as u64;
+            ncand += rows.len();
+            top.score(ix, &pr, &rows, &mut st);
+        }
+        let t = top.kth();
         st.range_in += pend.len() as u64;
         st.range_out += ((u0 - c.r0) + (c.r1 - u1)) as u64;
         st.touched += (cands.len() + pend.len()) as u64;
