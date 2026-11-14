@@ -715,6 +715,74 @@ impl GroupPlan2 {
     }
 }
 
+/// `k` values that round up the samples `v` at or below their `top` quantile with the least mean square ratio of the
+/// rounded value to the sample, the largest being that quantile (the rest escape): dynamic programming over up to
+/// 1,024 candidate values at quantiles of `v`.
+pub fn roundup_levels(v: &mut Vec<f64>, k: usize, top: f64) -> Vec<f64> {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let hi = quantile(v, top);
+    let xs: Vec<f64> = v.iter().copied().filter(|&x| x <= hi && x > 0.0).collect();
+    let m = xs.len().min(1024);
+    if m < k {
+        return (0..k).map(|c| quantile(v, top * (c + 1) as f64 / k as f64)).collect();
+    }
+    // candidate b is the largest sample of the b-th of m equal-count runs; prefix sums of 1/x^2 and counts by candidate
+    let ends: Vec<usize> = (1..=m).map(|b| b * xs.len() / m).collect();
+    let mut cand: Vec<f64> = ends.iter().map(|&e| xs[e - 1]).collect();
+    cand[m - 1] = hi;
+    let mut pinv = vec![0f64; m + 1];
+    let mut cnt = vec![0f64; m + 1];
+    for b in 0..m {
+        let a = if b == 0 { 0 } else { ends[b - 1] };
+        pinv[b + 1] = pinv[b] + xs[a..ends[b]].iter().map(|x| 1.0 / (x * x)).sum::<f64>();
+        cnt[b + 1] = ends[b] as f64;
+    }
+    // cost of rounding the samples of runs a..=b (a = 0: from the bottom) up to cand[b]
+    let cost = |a: usize, b: usize| cand[b] * cand[b] * (pinv[b + 1] - pinv[a]) - (cnt[b + 1] - cnt[a]);
+    let mut f: Vec<f64> = (0..m).map(|b| cost(0, b)).collect();
+    let mut from = vec![vec![usize::MAX; m]; k];
+    for l in 1..k {
+        let mut g = vec![f64::INFINITY; m];
+        for b in l..m {
+            for a in l - 1..b {
+                let c = f[a] + cost(a + 1, b);
+                if c < g[b] {
+                    g[b] = c;
+                    from[l][b] = a;
+                }
+            }
+        }
+        f = g;
+    }
+    let mut out = vec![0f64; k];
+    let mut b = m - 1;
+    for l in (0..k).rev() {
+        out[l] = cand[b];
+        if l > 0 {
+            b = from[l][b];
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod roundup_tests {
+    use super::*;
+    #[test]
+    fn optimal_levels_round_up_no_worse_than_equal_mass_quantiles() {
+        use rand::SeedableRng;
+        use rand_distr::{Distribution, LogNormal};
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
+        let d = LogNormal::new(-1.0, 0.25).unwrap();
+        let mut v: Vec<f64> = (0..20_000).map(|_| d.sample(&mut rng)).collect();
+        let lv = roundup_levels(&mut v, 15, 0.998);
+        assert!(lv.windows(2).all(|w| w[0] < w[1]) && lv[14] == quantile(&mut v, 0.998));
+        let q: Vec<f64> = (0..15).map(|c| quantile(&mut v, 0.002 + 0.996 * c as f64 / 14.0)).collect();
+        let ex = |l: &[f64]| v.iter().filter(|&&x| x <= l[14]).map(|&x| (l[l.partition_point(|&y| y < x)] / x).powi(2) - 1.0).sum::<f64>();
+        assert!(ex(&lv) < 0.8 * ex(&q), "{} {}", ex(&lv), ex(&q));
+    }
+}
+
 /// largest relative error of a kappa decoded from its nearest code on a grid of `steps` per octave, with f32 slack
 pub fn eta_steps(steps: f64) -> f64 {
     2f64.powf(0.5 / steps) * (1.0 + 1e-6) - 1.0
@@ -1175,6 +1243,9 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                         15
                     }
                 };
+                // the decoded scale must bound the true one: tan(phi) here, |y| at the first randomised level
+                let tdec = if tc < 15 { gp.ttab[lr][j][tc as usize] } else { esc.last().unwrap().3 };
+                assert!(tdec as f64 >= tanf && yhv[j] >= yn[j], "item {i} block {j} level {l}: decoded scale below the true one (tan {tdec} < {tanf} or |y| {} < {})", yhv[j], yn[j]);
                 setnib(&mut ls[l], lp.srows, i, row + kb / 4, tc);
                 // kappa, nearest on the grid; decoded as yh_decoded * ktab[code] in f32
                 let ks = gp.kstep[lr][j];
@@ -1359,8 +1430,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
             for j in 0..J {
                 let mut v = pool(&|c| &c.tpool[lr][j]);
                 if !v.is_empty() {
+                    let lv = roundup_levels(&mut v, 15, 0.998);
                     for cc in 0..15 {
-                        tq[lr][j][cc] = (quantile(&mut v, 0.002 + 0.996 * cc as f64 / 14.0) * (1.0 + 1e-6)) as f32;
+                        tq[lr][j][cc] = (lv[cc] * (1.0 + 1e-6)) as f32;
                     }
                 }
                 let (a, b) = grid(&mut pool(&|c| &c.kapool[lr][j]), 256.0);
