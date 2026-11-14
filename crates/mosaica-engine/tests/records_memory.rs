@@ -141,6 +141,55 @@ fn read(
     sink.rows
 }
 
+/// A read in `rank`'s order resumed response by response, `pages` pages of `page_rows` rows to a
+/// response, under `filter` for the responses `filtered` picks out of their numbering: every row
+/// the responses returned.
+fn read_ranked(
+    engine: &Engine,
+    session: &Session,
+    filter: &FilterExpr,
+    filtered: impl Fn(usize) -> bool,
+    page_rows: u32,
+    pages: u32,
+    max_page_bytes: usize,
+) -> usize {
+    let order = RecordsOrder::Value(ValueOrder {
+        field: "rank".to_string(),
+        descending: true,
+    });
+    let (mut rows, mut cursor): (usize, Option<String>) = (0, None);
+    for response in 0.. {
+        let req = ItemsRequest {
+            view: "s0",
+            fields: Some(&[]),
+            system_fields: &[],
+            filter: filtered(response).then(|| filter.clone()),
+            keep_unmatched: false,
+            count: false,
+            order: Some(order.clone()),
+            page_rows: Some(page_rows),
+            pages: Some(pages),
+            cursor: cursor.as_deref(),
+            limits: RecordsLimits {
+                max_page_rows: 1 << 20,
+                max_page_bytes,
+                response_bytes: 1 << 40,
+                response_time: Duration::from_secs(600),
+                stream_deadline: Duration::from_secs(600),
+            },
+            cancel: None,
+        };
+        let mut sink = Count::default();
+        let trailer = engine.items_stream(session, req, &mut sink).expect("a response");
+        rows += sink.rows;
+        cursor = trailer.next;
+        if cursor.is_none() {
+            return rows;
+        }
+    }
+    unreachable!("the loop returns at the read's end")
+}
+
 /// Both walks, and the order of `rank`, which runs against them.
 fn orders() -> [RecordsOrder; 3] {
     let rank = ValueOrder {
@@ -243,7 +292,9 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
 /// stretch no more than the ceiling**: short notes and then notes of 100 KB, read under a 256 KiB
 /// ceiling, in every order; and a sparse filter whose stretches grow to their ceiling, for a
 /// viewer who sees every item and one who sees every third. What a stretch holds a row is
-/// measured from two reads whose stretches differ in size and nothing else.
+/// measured from two reads whose stretches differ in size and nothing else. A read in a field's
+/// order whose filter changes between its responses is held to the same multiple as the skewed
+/// reads.
 #[test]
 fn a_reads_peak_is_held_to_its_page_ceiling() {
     // SAFETY: called before this process allocates a bitmap.
@@ -319,4 +370,21 @@ fn a_reads_peak_is_held_to_its_page_ceiling() {
             );
         }
     }
+
+    // A read in `rank`'s order resumed response by response, whose filter is dropped for some
+    // responses and taken up again, so the cursor's points were counted under another filter.
+    let session = engine.authorise(&full_coverage_credential()).unwrap();
+    let ceiling = 256usize << 10;
+    let switching = |response: usize| (response / 4) % 2 == 1;
+    let peak = peak_of(|| {
+        read_ranked(&engine, &session, &band, switching, 4096, 4, ceiling);
+    });
+    eprintln!(
+        "ranked, switching filters: peak {peak} bytes, {:.2} times the page ceiling",
+        peak as f64 / ceiling as f64
+    );
+    assert!(
+        peak < 8 * ceiling as u64,
+        "the switching read held {peak} bytes under a {ceiling}-byte ceiling"
+    );
 }

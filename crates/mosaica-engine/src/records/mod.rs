@@ -74,6 +74,15 @@ impl RecordsOrder {
             Scan::Stored => RecordsOrder::Stored,
         }
     }
+
+    /// The walk this order takes through the view; `None` for a value order, which walks none.
+    fn scan(&self) -> Option<Scan> {
+        match self {
+            RecordsOrder::Map => Some(Scan::Map),
+            RecordsOrder::Stored => Some(Scan::Stored),
+            RecordsOrder::Value(_) => None,
+        }
+    }
 }
 
 /// A response's ceilings and budgets, from the deployment's configuration.
@@ -402,7 +411,7 @@ trait Pager {
 }
 
 /// The items route's pager: the request as planned and the walk through the view, or for a read
-/// in a field's order, that order's state. A sorted read's walk only counts.
+/// in a field's order, that order's state, which also counts the read's matches.
 struct ItemsPager<'r> {
     planned: Planned<'r>,
     walk: Walk,
@@ -498,20 +507,22 @@ impl Engine {
         let (position, stretch, sorted) = match (&order, resumed) {
             (RecordsOrder::Value(value), resumed) => {
                 let field = resolve_sort(&meta, req.view, session.visible_views(), value)?;
-                let (key, points) = match resumed {
-                    Some(ItemsCursor::Value(ValueCursor { key, points, .. })) => (key, points),
-                    _ => (None, Vec::new()),
+                let (key, scope, points) = match resumed {
+                    Some(ItemsCursor::Value(ValueCursor {
+                        key, scope, points, ..
+                    })) => (key, scope, points),
+                    _ => (None, 0, Vec::new()),
                 };
-                let sorted =
+                let mut sorted =
                     Sorted::new(field, req.filter.clone(), req.keep_unmatched, key, points);
+                if sorted.scope != scope {
+                    sorted.forget_points();
+                }
                 (Position::start(Scan::Map), page_rows, Some(sorted))
             }
             (_, Some(ItemsCursor::Walk { position, stretch })) => (position, stretch, None),
             (order, _) => {
-                let scan = match order {
-                    RecordsOrder::Map => Scan::Map,
-                    _ => Scan::Stored,
-                };
+                let scan = order.scan().expect("a value order is planned above");
                 (Position::start(scan), page_rows, None)
             }
         };
@@ -711,7 +722,10 @@ impl Pager for ItemsPager<'_> {
                 None,
             ));
         }
-        let (matched, region) = self.walk.count(&cx, &clock.cancel)?;
+        let (matched, region) = match &mut self.sorted {
+            Some(sorted) => sorted.count(&cx, &clock.cancel)?,
+            None => self.walk.count(&cx, &clock.cancel)?,
+        };
         Ok((
             RecordsCounts {
                 served: visible,
@@ -791,6 +805,7 @@ impl Pager for ItemsPager<'_> {
                 field: sorted.field.spelling.clone(),
                 descending: sorted.field.descending,
                 key: sorted.cursor,
+                scope: sorted.scope,
                 points: sorted.points(),
             }),
             None => ItemsCursor::Walk {
@@ -816,13 +831,7 @@ impl ItemsPager<'_> {
         let req = &planned.req;
         let sorted = self.sorted.as_mut().expect("a sorted read");
         let caps = sort_caps(cx.engine, req, planned.page_rows);
-        let (rows, keys, end) = loop {
-            let (rows, keys, end) =
-                sorted.take(cx, planned.page_rows as usize, caps, &clock.cancel)?;
-            if !rows.is_empty() || end {
-                break (rows, keys, end);
-            }
-        };
+        let (rows, keys, end) = sorted.take(cx, planned.page_rows as usize, caps, &clock.cancel)?;
         if rows.is_empty() {
             return Ok(Paged::End);
         }
@@ -853,12 +862,13 @@ impl ItemsPager<'_> {
 /// How many keys a sorted read's pass holds: as many as the response could send, within a bulk
 /// read's allowance of seven times the page ceiling, and never fewer than a page. A pass that
 /// selects holds up to twice that in each of the pool's threads; one that keeps every key up to a
-/// point holds about that many in all.
+/// point holds up to twice that in all, since it is abandoned past that. Each buffer may hold
+/// twice its keys again before it grows no more.
 fn sort_caps(engine: &Engine, req: &ItemsRequest<'_>, page_rows: u32) -> sorted::Caps {
     let page_rows = page_rows as usize;
     let wanted = page_rows.saturating_mul(req.pages.map_or(usize::MAX, |pages| pages as usize));
     let allowance = req.limits.max_page_bytes.saturating_mul(7);
-    let key = 2 * std::mem::size_of::<SortKey>();
+    let key = 4 * std::mem::size_of::<SortKey>();
     let threads = engine.pool.current_num_threads() + 1;
     let held = |most: usize| wanted.min(most.max(1)).max(page_rows);
     sorted::Caps {

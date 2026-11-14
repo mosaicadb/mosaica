@@ -51,6 +51,8 @@
 //! a set is sampled depends on `N` and `s` alone, so it says nothing of rows the viewer cannot see.
 //! The head then says the set was not sampled, and counts `N` items.
 
+use std::ops::Range;
+
 use rayon::prelude::*;
 use mosaica_filter::RecordValue;
 use mosaica_lifecycle::WalScalar;
@@ -714,41 +716,21 @@ impl Numbers {
                         return (tally, none);
                     }
                     let (segment, row_base) = segments[*s];
-                    let base = row_base as usize;
-                    let present = segment.columns.presence(column).bitmap();
-                    macro_rules! walk {
-                        ($read:expr) => {{
-                            let read = $read;
-                            set.for_each_run(rows.clone(), &mut |run| {
-                                for row in run {
-                                    let local = row as usize - base;
-                                    if present.is_some_and(|p| !p.contains(local as u32)) {
-                                        none += 1;
-                                    } else {
-                                        tally.add(read(local), row);
-                                    }
-                                }
-                            })
-                        }};
-                    }
-                    let int = |x: i128| K::int(x);
-                    match segment.columns.scalar(column) {
-                        Some(ScalarSlice::U8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::U16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::U32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::U64(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::I8(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::I16(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::I32(v)) => walk!(|l: usize| int(i128::from(v[l]))),
-                        Some(ScalarSlice::I64(v)) | Some(ScalarSlice::TimestampUs(v)) => {
-                            walk!(|l: usize| int(i128::from(v[l])))
-                        }
-                        Some(ScalarSlice::F32(v)) => walk!(|l: usize| K::float(f64::from(v[l]))),
-                        Some(ScalarSlice::F64(v)) => walk!(|l: usize| K::float(v[l])),
-                        Some(ScalarSlice::Bool(v)) => {
-                            walk!(|l: usize| int(i128::from(v.value(l))))
-                        }
-                        _ => none += set.count(rows.clone()),
+                    let mut runs = |f: &mut dyn FnMut(Range<u32>)| {
+                        set.for_each_run(rows.clone(), &mut |run| f(run))
+                    };
+                    let drawn = for_each_drawn_number(
+                        segment,
+                        row_base,
+                        column,
+                        &mut runs,
+                        |row, value| match value.as_ref().and_then(K::of_record) {
+                            Some(x) => tally.add(x, row),
+                            None => none += 1,
+                        },
+                    );
+                    if !drawn {
+                        none += set.count(rows.clone());
                     }
                     (tally, none)
                 },
@@ -933,6 +915,53 @@ impl Num for f64 {
 
 /// What a pass accumulates, piece by piece, then merged. `at` is where the value was read: the
 /// row in a pass over rows, the entity in a pass over entities.
+/// Calls its argument with each run of rows a walk covers, in ascending order.
+pub(crate) type Runs<'a> = dyn FnMut(&mut dyn FnMut(Range<u32>)) + 'a;
+
+/// Each row of `runs` in `segment`, whose first row is `row_base`, with the value its drawn
+/// column `column` holds there, or `None` where the column's presence leaves the row out. The
+/// column's type is matched once for all the rows. Answers `false`, visiting nothing, where the
+/// segment has no number, timestamp or bool column of that name.
+pub(crate) fn for_each_drawn_number(
+    segment: &mosaica_store::read::SegmentData,
+    row_base: u32,
+    column: &str,
+    runs: &mut Runs<'_>,
+    mut visit: impl FnMut(u32, Option<RecordValue>),
+) -> bool {
+    let present = segment.columns.presence(column).bitmap();
+    macro_rules! walk {
+        ($read:expr) => {{
+            let read = $read;
+            runs(&mut |run| {
+                for row in run {
+                    let local = row - row_base;
+                    match present.is_some_and(|p| !p.contains(local)) {
+                        true => visit(row, None),
+                        false => visit(row, Some(read(local as usize))),
+                    }
+                }
+            })
+        }};
+    }
+    match segment.columns.scalar(column) {
+        Some(ScalarSlice::U8(v)) => walk!(|l: usize| RecordValue::U8(v[l])),
+        Some(ScalarSlice::U16(v)) => walk!(|l: usize| RecordValue::U16(v[l])),
+        Some(ScalarSlice::U32(v)) => walk!(|l: usize| RecordValue::U32(v[l])),
+        Some(ScalarSlice::U64(v)) => walk!(|l: usize| RecordValue::U64(v[l])),
+        Some(ScalarSlice::I8(v)) => walk!(|l: usize| RecordValue::I8(v[l])),
+        Some(ScalarSlice::I16(v)) => walk!(|l: usize| RecordValue::I16(v[l])),
+        Some(ScalarSlice::I32(v)) => walk!(|l: usize| RecordValue::I32(v[l])),
+        Some(ScalarSlice::I64(v)) => walk!(|l: usize| RecordValue::I64(v[l])),
+        Some(ScalarSlice::TimestampUs(v)) => walk!(|l: usize| RecordValue::TimestampUs(v[l])),
+        Some(ScalarSlice::F32(v)) => walk!(|l: usize| RecordValue::F32(v[l])),
+        Some(ScalarSlice::F64(v)) => walk!(|l: usize| RecordValue::F64(v[l])),
+        Some(ScalarSlice::Bool(v)) => walk!(|l: usize| RecordValue::Bool(v.value(l))),
+        _ => return false,
+    }
+    true
+}
+
 trait Tally<K>: Send {
     fn add(&mut self, x: K, at: u32);
     fn merge(self, other: Self) -> Self;

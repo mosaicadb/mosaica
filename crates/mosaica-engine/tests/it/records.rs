@@ -4124,3 +4124,81 @@ fn a_value_order_is_refused_for_a_field_it_cannot_order_by_and_a_cursor_resumes_
         );
     }
 }
+
+/// **A read in a field's order stays exact when its filter changes between responses and items
+/// arrive ahead of its cursor**: each response returns, in order, the items after the last one
+/// returned that its own filter matches, among the items present then. Items arrive inside the
+/// span the cursor's points cover, so that span holds more than its point says, and some arrive
+/// with negative scores, at the far end of a descending read.
+#[test]
+fn a_value_order_stays_exact_when_the_filter_changes_or_items_arrive_between_responses() {
+    let mut fx = Fx::new();
+    // Authorised again after items arrive, as a viewer's next session sees them; the cursor is
+    // bound to the credential, which is the same.
+    let mut session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let fields = names(&["score"]);
+    let mid = leaf(
+        "band",
+        FilterOperand::Equals(AttrLocalId::new(band_code("mid"))),
+    );
+    // The descending key of a source: items without a score last, then by entity.
+    let key = |fx: &Fx, s: u64| {
+        let score = score_of(s);
+        (score.is_none(), -score.map_or(0, i64::from), fx.entity[&s])
+    };
+    let mut present: Vec<u64> = (0..N).collect();
+    let mut returned: Vec<u64> = Vec::new();
+    let mut cursor: Option<String> = None;
+    for response in 0.. {
+        let filter = match (response / 10) % 3 {
+            1 => Some(mid.clone()),
+            _ => None,
+        };
+        if response == 15 || response == 40 {
+            // Scores just past the cursor's, and below every other.
+            let last = *returned.last().unwrap();
+            let at = i64::from(score_of(last).unwrap_or(0));
+            // A source's score is its low 32 bits, so each batch sets its own high bit.
+            let batch = if response == 15 { 1u64 } else { 2 };
+            let arriving: Vec<u64> = (at - 100..at - 40)
+                .chain(-60..-20)
+                .map(|v| batch << 33 | u64::from(v as i32 as u32))
+                .collect();
+            fx.ingest(&format!("between-{response}"), &arriving);
+            publish_buffered(&fx.engine);
+            present.extend(&arriving);
+            session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+        }
+        let mut req = request("s0", &fields);
+        req.order = Some(by("score", true));
+        req.page_rows = Some(7);
+        req.pages = Some(3);
+        req.filter = filter.clone();
+        req.cursor = cursor.as_deref();
+        let (sink, trailer) = respond(&fx.engine, &session, req).unwrap();
+        let ids: Vec<u64> = sink.pages.iter().flat_map(|(b, _)| ids_of(b)).collect();
+        let matches = |s: u64| filter.is_none() || band_of(s) == Some("mid");
+        let after = returned.last().map(|&s| key(&fx, s));
+        let mut expected: Vec<u64> = present
+            .iter()
+            .copied()
+            .filter(|&s| matches(s) && after.is_none_or(|after| key(&fx, s) > after))
+            .collect();
+        expected.sort_by_key(|&s| key(&fx, s));
+        let full = trailer.next.is_some();
+        let sent = if full { 21 } else { expected.len() };
+        assert_eq!(ids.len(), sent, "response {response}: its rows");
+        assert_eq!(ids, fx.tids(&expected[..sent]), "response {response}");
+        returned.extend(&expected[..sent]);
+        cursor = trailer.next;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_each_once(&fx.tids(&returned));
+    assert!(
+        returned.iter().any(|&s| score_of(s).is_some_and(|v| v < 0)),
+        "the read reached the negative scores"
+    );
+}
+

@@ -164,11 +164,6 @@ impl<'a> PageCx<'a> {
     pub(super) fn side_shard(&self, place: usize) -> &'a crate::Shard {
         self.side(place).shard
     }
-
-    /// The view's data in the side at `place`.
-    pub(super) fn side_data(&self, place: usize) -> &'a mosaica_store::read::ViewData {
-        self.side(place).data
-    }
 }
 
 impl WalkCx for PageCx<'_> {
@@ -340,7 +335,12 @@ fn take_sides<'s>(cx: &'s impl WalkCx, stretch: Option<&'s Stretch>) -> Vec<Take
 }
 
 /// [`WalkCx::entity_of`] for a side's shard.
-fn entity_in(segment: &SegmentData, local: u32, key: &IdentityKey, shard: ShardId) -> u32 {
+pub(super) fn entity_in(
+    segment: &SegmentData,
+    local: u32,
+    key: &IdentityKey,
+    shard: ShardId,
+) -> u32 {
     let entity = segment
         .entity_of(local, key, shard)
         .expect("an opened segment's rows invert to its own shard");

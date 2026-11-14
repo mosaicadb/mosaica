@@ -15,6 +15,7 @@ import socket
 import threading
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -393,8 +394,8 @@ def test_a_read_in_a_fields_order_returns_the_items_by_their_value(db, sent):
     read = db.items("map", ["n"], order=order, page_rows=3, pages=1)
     assert sent.bodies[0]["order"] == order
     assert read.column("n").to_pylist() == list(range(19, -1, -1))
-    head = db.items("map", ["n"], order={"field": "n"}, batches=True).head
-    assert head["order"] == {"field": "n", "direction": "asc"}
+    with closing(db.items("map", ["n"], order={"field": "n"}, batches=True)) as pages:
+        assert pages.head["order"] == {"field": "n", "direction": "asc"}
 
 
 def test_a_position_is_the_coordinates_the_item_was_inserted_with(db):

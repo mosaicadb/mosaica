@@ -210,6 +210,8 @@ pub(super) struct ValueCursor {
     pub(super) descending: bool,
     /// The last key returned.
     pub(super) key: Option<SortKey>,
+    /// The digest of the filter the points were counted under ([`super::sorted::scope_of`]).
+    pub(super) scope: u64,
     pub(super) points: Vec<Point>,
 }
 
@@ -221,8 +223,8 @@ const WALK_LEN: usize = 1 + 1 + 12 + 4;
 
 impl ItemsCursor {
     /// A walk's payload as above. A value read's: `2, descending, field length (u16), field,
-    /// has_key, absent, value (u64), shard (u32), entity (u32), points (u8), each point's value
-    /// and count (u64, u64)`, little-endian.
+    /// has_key, absent, value (u64), shard (u32), entity (u32), scope (u64), points (u8), each
+    /// point's value and count (u64, u64)`, little-endian.
     pub(super) fn encode(&self) -> Vec<u8> {
         match self {
             ItemsCursor::Walk { position, stretch } => {
@@ -242,7 +244,7 @@ impl ItemsCursor {
             ItemsCursor::Value(value) => {
                 let field = value.field.as_bytes();
                 let points = &value.points[..value.points.len().min(MOST_POINTS)];
-                let mut out = Vec::with_capacity(4 + field.len() + 18 + 1 + 16 * points.len());
+                let mut out = Vec::with_capacity(4 + field.len() + 26 + 1 + 16 * points.len());
                 out.push(VALUE);
                 out.push(u8::from(value.descending));
                 out.extend_from_slice(
@@ -262,6 +264,7 @@ impl ItemsCursor {
                 out.extend_from_slice(&key.value.to_le_bytes());
                 out.extend_from_slice(&key.shard.to_le_bytes());
                 out.extend_from_slice(&key.entity.to_le_bytes());
+                out.extend_from_slice(&value.scope.to_le_bytes());
                 out.push(points.len() as u8);
                 for &(at, count) in points {
                     out.extend_from_slice(&at.to_le_bytes());
@@ -317,6 +320,7 @@ impl ItemsCursor {
                     shard: u32_of(bytes(4)?),
                     entity: u32_of(bytes(4)?),
                 };
+                let scope = u64_of(bytes(8)?);
                 let count = usize::from(bytes(1)?[0]);
                 if count > MOST_POINTS {
                     return Err(refused());
@@ -329,6 +333,7 @@ impl ItemsCursor {
                     field,
                     descending,
                     key: has_key.then_some(key),
+                    scope,
                     points,
                 })
             }
@@ -490,6 +495,7 @@ mod tests {
                 shard: 3,
                 entity: 41,
             }),
+            scope: 77,
             points: vec![(9, 100), (u64::MAX, 4_000)],
         });
         let payload = cursor.encode();
@@ -498,6 +504,7 @@ mod tests {
             field: "when".to_string(),
             descending: false,
             key: None,
+            scope: 0,
             points: Vec::new(),
         });
         assert_eq!(ItemsCursor::decode(&started.encode()).unwrap(), started);

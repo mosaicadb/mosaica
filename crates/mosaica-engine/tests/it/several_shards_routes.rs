@@ -25,7 +25,7 @@ use mosaica_engine::filter::{
 use mosaica_engine::{
     AggregateHead, AggregateRequest, AggregateSink, ArtifactOut, ArtifactsRequest, By,
     CategoryQuery, Engine, Figure, FigureField, FigureList, Grouping, PageEnd, Pick, RecordsCounts,
-    RecordsOrder, Reference, Session, SinkResult, SuggestRequest, TableHead,
+    RecordsOrder, Reference, Session, SinkResult, SuggestRequest, TableHead, ValueOrder,
     ViewportArtifactsRequest, ViewportRequest,
 };
 use mosaica_types::{AttrLocalId, MosaicaId, ShardId};
@@ -1528,12 +1528,17 @@ fn mosaica_ids_in(built: &Built) -> FilterExpr {
     }
 }
 
-/// An items read in either order, resumed page by page across every shard boundary, serves the
-/// rows, pages and counts one shard serves, unfiltered and under every kind of filter.
+/// An items read in either walk's order or a field's, resumed page by page across every shard
+/// boundary, serves the rows, pages and counts one shard serves, unfiltered and under every kind of
+/// filter.
 #[test]
 fn an_items_read_resumed_across_every_shard_equals_one_shards() {
     let pair = Pair::new();
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    let by_score = RecordsOrder::Value(ValueOrder {
+        field: "score".to_string(),
+        descending: true,
+    });
+    for order in [RecordsOrder::Map, RecordsOrder::Stored, by_score] {
         let reads = |built: &Built| {
             let every = every_field(order.clone());
             vec![

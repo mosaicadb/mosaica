@@ -398,7 +398,7 @@ fn tally_rows(
 
 /// The view's rows cut into pieces of at most [`PIECE_ROWS`], each within one segment: the segment's
 /// position in `segments`, and the piece's rows in view row space.
-pub(super) fn pieces(
+pub(crate) fn pieces(
     segments: &[(&mosaica_store::read::SegmentData, u32)],
 ) -> Vec<(usize, std::ops::Range<u32>)> {
     segments

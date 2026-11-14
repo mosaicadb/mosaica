@@ -13,17 +13,21 @@
 //! that can hold every key up to a point keeps only those, which needs no selection.
 
 use std::collections::VecDeque;
+use std::ops::Range;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use croaring::Bitmap;
 use rayon::prelude::*;
 
 use mosaica_filter::{RecordValue, ValueColumn};
+use mosaica_roaring::for_each_run_in;
 use mosaica_store::key_index::{signed_key, unsigned_key};
-use mosaica_types::scalar::ScalarValue;
+use mosaica_store::read::SegmentData;
+use mosaica_types::{IdentityKey, ShardId};
 
-use super::walk::{segment_of, PageCx, Taken, WalkCx};
-use crate::aggregate::ENTITY_PIECE as PIECE;
+use super::walk::{entity_in, same_publication, segment_of, PageCx, Taken, WalkCx};
+use crate::aggregate::{for_each_drawn_number, pieces, ENTITY_PIECE as PIECE};
 use crate::cancel::CancelToken;
 use crate::error::Result;
 use crate::figures::MaskIdentity;
@@ -64,7 +68,8 @@ pub(super) struct Caps {
 pub(super) struct SortField {
     pub(super) spelling: String,
     pub(super) descending: bool,
-    /// The entity-space value column's key, where the field has one.
+    /// The entity-space value column's key, where a page reads the field from one; `None` where
+    /// it reads the view's own columns.
     pub(super) held: Option<String>,
 }
 
@@ -83,24 +88,6 @@ fn number_key(value: RecordValue) -> Option<u64> {
         RecordValue::I64(v) | RecordValue::TimestampUs(v) => signed_key(v),
         RecordValue::F32(v) => float_key(f64::from(v)),
         RecordValue::F64(v) => float_key(v),
-        _ => return None,
-    })
-}
-
-fn drawn_key(value: ScalarValue) -> Option<u64> {
-    number_key(match value {
-        ScalarValue::Bool(v) => RecordValue::Bool(v),
-        ScalarValue::U8(v) => RecordValue::U8(v),
-        ScalarValue::U16(v) => RecordValue::U16(v),
-        ScalarValue::U32(v) => RecordValue::U32(v),
-        ScalarValue::U64(v) => RecordValue::U64(v),
-        ScalarValue::I8(v) => RecordValue::I8(v),
-        ScalarValue::I16(v) => RecordValue::I16(v),
-        ScalarValue::I32(v) => RecordValue::I32(v),
-        ScalarValue::I64(v) => RecordValue::I64(v),
-        ScalarValue::F32(v) => RecordValue::F32(v),
-        ScalarValue::F64(v) => RecordValue::F64(v),
-        ScalarValue::TimestampUs(v) => RecordValue::TimestampUs(v),
         _ => return None,
     })
 }
@@ -236,11 +223,36 @@ impl Histogram {
     }
 }
 
-/// What one side of a pass reads: its shard's items in the set.
+/// The digest of what a read's points were counted under: its filter and whether it keeps the
+/// unmatched. A request that changes either is answered without the points.
+pub(super) fn scope_of(filter: Option<&FilterExpr>, keep_unmatched: bool) -> u64 {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(b"mosaica-items-order-scope-v1");
+    hasher.update([u8::from(keep_unmatched)]);
+    hasher.update(format!("{filter:?}").as_bytes());
+    let digest: [u8; 32] = hasher.finalize().into();
+    u64::from_le_bytes(digest[..8].try_into().expect("8 bytes"))
+}
+
+/// What one side of a pass reads: its shard's items in the set, as entities where the field has a
+/// value column and as the view's rows where it is drawn only.
 struct Side {
     place: usize,
-    shard: u32,
-    entities: Bitmap,
+    shard: ShardId,
+    set: Bitmap,
+}
+
+/// The sets a response's pages read, composed once for a publication and a mask.
+struct Composed {
+    generation: Arc<Generation>,
+    mask: MaskIdentity,
+    /// In shard order.
+    sides: Vec<Side>,
+    /// By place, the rows the filter matches, where every visible row is kept.
+    matched: Vec<Option<Bitmap>>,
+    /// The visible rows the filter matches, over every side.
+    matches: u64,
 }
 
 /// One pass's answer.
@@ -249,20 +261,23 @@ struct Passed {
     /// Valued keys past the start and within the bound, kept or not.
     seen: u64,
     histogram: Option<Histogram>,
+    /// The window held more keys than the pass may hold, so it was abandoned.
+    overfull: bool,
 }
 
-/// The read's state between pages: the field, the keys passed and not yet sent, and the points.
+/// The read's state between pages: the field, the sets composed, the keys passed and not yet sent,
+/// and the points.
 pub(super) struct Sorted {
     pub(super) field: SortField,
     filter: Option<FilterExpr>,
     keep_unmatched: bool,
+    /// The digest the points are bound to.
+    pub(super) scope: u64,
     /// The last key sent.
     pub(super) cursor: Option<SortKey>,
-    /// Keys after the cursor, in order, under the publication and mask they were passed in.
+    composed: Option<Composed>,
+    /// Keys after the cursor, in order, passed under `composed`.
     pending: VecDeque<SortKey>,
-    made: Option<(Arc<Generation>, MaskIdentity)>,
-    /// By place, the rows the filter matches, where every visible row is kept.
-    matched: Vec<Option<Bitmap>>,
     /// Whether no key follows the last pending one.
     exhausted: bool,
     /// Counted from the last pending key, or from the cursor where none is pending.
@@ -278,18 +293,24 @@ impl Sorted {
         cursor: Option<SortKey>,
         points: Vec<Point>,
     ) -> Sorted {
+        let scope = scope_of(filter.as_ref(), keep_unmatched);
         Sorted {
             field,
             filter,
             keep_unmatched,
+            scope,
             cursor,
+            composed: None,
             pending: VecDeque::new(),
-            made: None,
-            matched: Vec::new(),
             exhausted: false,
             points,
             region: None,
         }
+    }
+
+    /// Drop the points, which were counted under another filter.
+    pub(super) fn forget_points(&mut self) {
+        self.points.clear();
     }
 
     /// The points, counted from the cursor.
@@ -298,9 +319,20 @@ impl Sorted {
         self.points.iter().map(|&(v, n)| (v, n + behind)).collect()
     }
 
+    /// How many visible items the filter matches, from the sets the first page reads.
+    pub(super) fn count(
+        &mut self,
+        cx: &PageCx<'_>,
+        cancel: &Option<CancelToken>,
+    ) -> Result<(u64, Option<RegionVerdict>)> {
+        self.compose(cx, cancel)?;
+        let matches = self.composed.as_ref().map_or(0, |composed| composed.matches);
+        Ok((matches, self.region))
+    }
+
     /// Up to `rows` rows in order under `cx`, after the cursor, and whether none follows them.
-    /// Rows passed under another publication or mask are passed again. Keys a page does not keep
-    /// go back with [`Sorted::unsend`].
+    /// The rows fall short of `rows` only where the read ends. Keys a page does not keep go back
+    /// with [`Sorted::unsend`].
     pub(super) fn take(
         &mut self,
         cx: &PageCx<'_>,
@@ -308,27 +340,15 @@ impl Sorted {
         caps: Caps,
         cancel: &Option<CancelToken>,
     ) -> Result<(Vec<Taken>, Vec<SortKey>, bool)> {
-        let current = (Arc::clone(cx.generation()), cx.mask_identity());
-        let same = self.made.as_ref().is_some_and(|(generation, mask)| {
-            super::walk::same_publication(generation, &current.0) && *mask == current.1
-        });
-        if !same && !self.pending.is_empty() {
-            let dropped = self.pending.len() as u64;
-            self.pending.clear();
-            for point in &mut self.points {
-                point.1 += dropped;
-            }
-            self.exhausted = false;
-        }
-        while self.pending.len() < rows && !self.exhausted {
-            self.pass(cx, caps, cancel)?;
-            self.made = Some((Arc::clone(&current.0), current.1));
-        }
-        let mut taken = Vec::with_capacity(rows.min(self.pending.len()));
-        let mut keys = Vec::with_capacity(taken.capacity());
+        self.compose(cx, cancel)?;
+        let (mut taken, mut keys) = (Vec::new(), Vec::new());
         while taken.len() < rows {
             let Some(key) = self.pending.pop_front() else {
-                break;
+                if self.exhausted {
+                    break;
+                }
+                self.pass(cx, caps, cancel)?;
+                continue;
             };
             if let Some(row) = self.taken(cx, &key) {
                 taken.push(row);
@@ -336,8 +356,7 @@ impl Sorted {
             }
             self.cursor = Some(key);
         }
-        let end = self.exhausted && self.pending.is_empty();
-        Ok((taken, keys, end))
+        Ok((taken, keys, self.exhausted && self.pending.is_empty()))
     }
 
     /// Return the keys a page did not keep, which follow `kept_last`, the last key it kept.
@@ -361,9 +380,9 @@ impl Sorted {
         }
         let (seg, local, mosaica_id) = segment_of(cx.segments(place), row)?;
         let matched = self
-            .matched
-            .get(place)
-            .and_then(Option::as_ref)
+            .composed
+            .as_ref()
+            .and_then(|composed| composed.matched.get(place)?.as_ref())
             .is_none_or(|rows| rows.contains(row));
         Some(Taken {
             place,
@@ -375,71 +394,99 @@ impl Sorted {
         })
     }
 
-    /// The set each side reads, composed under `cx`'s mask.
-    fn sides(&mut self, cx: &PageCx<'_>, cancel: &Option<CancelToken>) -> Result<Vec<Side>> {
-        let mut sides = Vec::with_capacity(cx.reads().len());
-        let mut matched = Vec::new();
+    /// The sets each side reads, composed under `cx`'s mask unless they already are. Keys passed
+    /// under another publication or mask are dropped, to be passed again.
+    fn compose(&mut self, cx: &PageCx<'_>, cancel: &Option<CancelToken>) -> Result<()> {
+        let mask = cx.mask_identity();
+        let held = self.composed.as_ref().is_some_and(|composed| {
+            composed.mask == mask && same_publication(&composed.generation, cx.generation())
+        });
+        if held {
+            return Ok(());
+        }
+        if !self.pending.is_empty() {
+            let dropped = self.pending.len() as u64;
+            self.pending.clear();
+            for point in &mut self.points {
+                point.1 += dropped;
+            }
+            self.exhausted = false;
+        }
+        let (mut sides, mut matched, mut matches) = (Vec::new(), Vec::new(), 0u64);
         for &place in cx.reads() {
             let whole = 0..cx.total_rows(place);
             let visible = cx.leaf(place).rows_in_range(whole.clone());
             let filtered = match &self.filter {
                 None => None,
                 Some(expr) => {
-                    let routed = cx.filter_rows(
-                        place,
-                        expr,
-                        None,
-                        std::slice::from_ref(&whole),
-                        false,
-                        cancel,
-                    )?;
+                    let domain = std::slice::from_ref(&whole);
+                    let routed = cx.filter_rows(place, expr, None, domain, false, cancel)?;
                     self.region = RegionVerdict::coarsest(self.region, routed.region);
                     Some(routed.rows.rows() & &visible)
                 }
             };
+            matches += filtered.as_ref().unwrap_or(&visible).cardinality();
             let rows = match (&filtered, self.keep_unmatched) {
                 (Some(filtered), false) => filtered.clone(),
                 _ => visible,
             };
-            let entities = cx.engine.entities_of_rows(&cx.open.served, place, &rows)?;
+            let set = match self.field.held {
+                Some(_) => cx.engine.entities_of_rows(&cx.open.served, place, &rows)?,
+                None => rows,
+            };
             if matched.len() <= place {
                 matched.resize(place + 1, None);
             }
             matched[place] = filtered.filter(|_| self.keep_unmatched);
             sides.push(Side {
                 place,
-                shard: cx.shard(place).raw(),
-                entities,
+                shard: cx.shard(place),
+                set,
             });
         }
-        sides.sort_by_key(|side| side.shard);
-        self.matched = matched;
-        Ok(sides)
+        sides.sort_by_key(|side| side.shard.raw());
+        self.composed = Some(Composed {
+            generation: Arc::clone(cx.generation()),
+            mask,
+            sides,
+            matched,
+            matches,
+        });
+        Ok(())
     }
 
-    /// One pass after the last pending key, appending at most `cap` keys. Where a point holds no
-    /// more than twice `cap`, it offers only the keys up to that point; otherwise it offers every
-    /// key and, after a valued key, takes a histogram for new points.
+    /// One pass after the last pending key, appending its keys. Where a point holds no more than
+    /// twice the window's cap, it offers only the keys up to that point, and abandons the window
+    /// for a selecting pass once more keys than that arrive. A selecting pass offers every key,
+    /// keeps the first `caps.select` and, after a valued key, takes a histogram for new points.
     fn pass(&mut self, cx: &PageCx<'_>, caps: Caps, cancel: &Option<CancelToken>) -> Result<()> {
+        let composed = self.composed.take().expect("the sets are composed before a pass");
+        let passed = self.pass_over(cx, &composed, caps, cancel);
+        self.composed = Some(composed);
+        passed
+    }
+
+    fn pass_over(
+        &mut self,
+        cx: &PageCx<'_>,
+        composed: &Composed,
+        caps: Caps,
+        cancel: &Option<CancelToken>,
+    ) -> Result<()> {
         let after = self.pending.back().copied().or(self.cursor);
-        let sides = self.sides(cx, cancel)?;
-        let window = self
+        let most = 2 * caps.window as u64;
+        let mut window = self
             .points
             .iter()
             .rev()
-            .find(|&&(_, n)| n <= 2 * caps.window as u64)
+            .find(|&&(_, n)| n <= most)
             .map(|&(value, _)| value);
-        let cap = match window {
-            Some(_) => caps.window,
-            None => caps.select,
-        };
         let valued_done = after.is_some_and(|key| key.absent);
-        let mut keys = Vec::new();
-        let mut seen = 0u64;
+        let (mut keys, mut seen) = (Vec::new(), 0u64);
         if !valued_done {
-            let lo = after.map(|key| key.value);
-            let histogram = window.is_none().then_some(lo).flatten();
-            let readers: Vec<Reader<'_>> = sides
+            let identity_key = &cx.engine.identity_key;
+            let readers: Vec<Reader<'_>> = composed
+                .sides
                 .iter()
                 .map(|side| match &self.field.held {
                     Some(column) => Reader::Held(
@@ -451,31 +498,47 @@ impl Sorted {
                             })
                             .unwrap_or_default(),
                     ),
-                    None => Reader::Drawn(cx.side_data(side.place), &self.field.spelling),
+                    None => Reader::Drawn {
+                        segments: cx.segments(side.place),
+                        column: &self.field.spelling,
+                        identity_key,
+                    },
                 })
                 .collect();
-            let bounds = Bounds {
-                descending: self.field.descending,
-                after,
-                window,
-            };
-            let passed = cx
-                .engine
-                .pool
-                .install(|| pass_values(&sides, &readers, bounds, cap, histogram, cancel));
-            crate::cancel::check_cancelled(cancel)?;
-            seen = passed.seen;
-            keys = passed.keys;
-            self.points = match passed.histogram {
-                Some(histogram) => histogram.points(caps.window as u64),
-                None => std::mem::take(&mut self.points),
-            };
+            loop {
+                let bounds = Bounds {
+                    descending: self.field.descending,
+                    after,
+                    window,
+                    most: window.map(|_| most),
+                };
+                let cap = window.map_or(caps.select, |_| caps.window);
+                let histogram = window.is_none().then(|| after.map(|key| key.value)).flatten();
+                let sides = &composed.sides;
+                let passed = cx
+                    .engine
+                    .pool
+                    .install(|| pass_values(sides, &readers, bounds, cap, histogram, cancel));
+                crate::cancel::check_cancelled(cancel)?;
+                if passed.overfull {
+                    self.points.clear();
+                    window = None;
+                    continue;
+                }
+                seen = passed.seen;
+                keys = passed.keys;
+                if let Some(histogram) = passed.histogram {
+                    self.points = histogram.points(caps.window as u64);
+                }
+                break;
+            }
         }
+        let cap = window.map_or(caps.select, |_| caps.window);
         let through = window.is_none_or(|value| value == u64::MAX);
         let room = cap.saturating_sub(keys.len());
         let mut exhausted = false;
         if valued_done || (through && seen <= cap as u64) {
-            let absent = self.absent(cx, &sides, after, room + 1);
+            let absent = self.absent(cx, composed, after, room + 1)?;
             exhausted = absent.len() <= room;
             keys.extend(absent.into_iter().take(room));
         }
@@ -498,49 +561,38 @@ impl Sorted {
     fn absent(
         &self,
         cx: &PageCx<'_>,
-        sides: &[Side],
+        composed: &Composed,
         after: Option<SortKey>,
         most: usize,
-    ) -> Vec<SortKey> {
+    ) -> Result<Vec<SortKey>> {
         let mut out = Vec::new();
-        for side in sides {
+        for side in &composed.sides {
             if out.len() >= most {
                 break;
             }
+            let shard = side.shard.raw();
             let from = match after {
-                Some(key) if key.absent && key.shard > side.shard => continue,
-                Some(key) if key.absent && key.shard == side.shard => Some(key.entity),
+                Some(key) if key.absent && key.shard > shard => continue,
+                Some(key) if key.absent && key.shard == shard => Some(key.entity),
                 _ => None,
             };
-            let valued = match &self.field.held {
+            let mut absent = match &self.field.held {
                 Some(column) => {
                     let mut valued = Bitmap::new();
-                    if let Some(layers) = cx
-                        .side_shard(side.place)
-                        .filter_columns
-                        .value_layers(column)
-                    {
+                    let layers = cx.side_shard(side.place).filter_columns.value_layers(column);
+                    if let Some(layers) = layers {
                         for layer in layers.base().into_iter().chain(layers.extents()) {
-                            valued.or_inplace(&layer.present_in(&side.entities));
+                            valued.or_inplace(&layer.present_in(&side.set));
                         }
                     }
-                    valued
+                    &side.set - &valued
                 }
                 None => {
-                    let mut valued = Bitmap::new();
-                    let _ = cx.side_data(side.place).for_each_rendered(
-                        &self.field.spelling,
-                        &side.entities,
-                        &mut |entity, value| {
-                            if !matches!(value, ScalarValue::Null) {
-                                valued.add(entity);
-                            }
-                        },
-                    );
-                    valued
+                    let segments = cx.segments(side.place);
+                    let rows = absent_rows(segments, &self.field.spelling, &side.set);
+                    cx.engine.entities_of_rows(&cx.open.served, side.place, &rows)?
                 }
             };
-            let mut absent = &side.entities - &valued;
             if let Some(from) = from {
                 absent.remove_range(..=from);
             }
@@ -548,33 +600,168 @@ impl Sorted {
             out.extend(absent.iter().take(room).map(|entity| SortKey {
                 absent: true,
                 value: 0,
-                shard: side.shard,
+                shard,
                 entity,
             }));
         }
-        out
+        Ok(out)
     }
 }
 
+/// The rows of `set` where the drawn column `column` holds no value.
+fn absent_rows(segments: &[(&SegmentData, u32)], column: &str, set: &Bitmap) -> Bitmap {
+    let mut absent = Bitmap::new();
+    for &(segment, row_base) in segments {
+        let range = row_base..row_base + segment.row_count;
+        let mut runs =
+            |f: &mut dyn FnMut(Range<u32>)| for_each_run_in(set, range.clone(), &mut |r| f(r));
+        let drawn = for_each_drawn_number(segment, row_base, column, &mut runs, |row, value| {
+            if value.is_none() {
+                absent.add(row);
+            }
+        });
+        if !drawn {
+            for_each_run_in(set, range, &mut |run| absent.add_range(run));
+        }
+    }
+    absent
+}
+
 /// How a side's values are read: from its value column's layers, or from the view's own columns
-/// under the field's name.
+/// under the field's name, row by row, with the item a row holds found only for a key a pass
+/// keeps.
 enum Reader<'a> {
     Held(Vec<&'a ValueColumn>),
-    Drawn(&'a mosaica_store::read::ViewData, &'a str),
+    Drawn {
+        segments: &'a [(&'a SegmentData, u32)],
+        column: &'a str,
+        identity_key: &'a IdentityKey,
+    },
 }
 
 /// Which keys a pass offers: those after `after` whose value is at or before `window`, values
-/// inverted for a descending read.
+/// inverted for a descending read. With `most`, the pass is abandoned once it has offered more
+/// keys than that.
 #[derive(Clone, Copy)]
 struct Bounds {
     descending: bool,
     after: Option<SortKey>,
     window: Option<u64>,
+    most: Option<u64>,
+}
+
+/// Keys offered between two additions to a pass's shared count.
+const SHARED_EVERY: u64 = 1 << 16;
+
+/// One fold's part of a pass: the keys it keeps, how many it was offered, and their histogram.
+struct Gather<'a> {
+    best: Best,
+    seen: u64,
+    histogram: Option<Histogram>,
+    /// Offered since the fold last added to the shared count.
+    unshared: u64,
+    shared: &'a Shared,
+}
+
+/// What every fold of a pass reads and writes: how many keys were offered, and whether that is
+/// past the most a window may hold.
+struct Shared {
+    offered: AtomicU64,
+    overfull: AtomicBool,
+    most: Option<u64>,
+}
+
+impl Gather<'_> {
+    /// Count the key of `value`, which belongs to the item `entity` names, and keep it where it
+    /// comes early enough. `entity` is found only where the value alone does not settle that.
+    fn offer(&mut self, bounds: &Bounds, shard: u32, value: u64, entity: impl FnOnce() -> u32) {
+        let value = if bounds.descending { !value } else { value };
+        if bounds.window.is_some_and(|window| value > window) {
+            return;
+        }
+        let mut entity = Lazy::new(entity);
+        if let Some(after) = bounds.after {
+            let behind = match value.cmp(&after.value) {
+                std::cmp::Ordering::Less => true,
+                std::cmp::Ordering::Equal => (shard, entity.get()) <= (after.shard, after.entity),
+                std::cmp::Ordering::Greater => false,
+            };
+            if behind {
+                return;
+            }
+        }
+        self.seen += 1;
+        if let Some(histogram) = &mut self.histogram {
+            histogram.add(value);
+        }
+        self.unshared += 1;
+        if self.unshared == SHARED_EVERY {
+            self.share();
+        }
+        if self.best.bound.is_some_and(|bound| value > bound.value) {
+            return;
+        }
+        self.best.offer(SortKey {
+            absent: false,
+            value,
+            shard,
+            entity: entity.get(),
+        });
+    }
+
+    /// Add the fold's offers to the shared count, and mark the pass overfull past its most.
+    fn share(&mut self) {
+        let total = self.shared.offered.fetch_add(self.unshared, Ordering::Relaxed) + self.unshared;
+        self.unshared = 0;
+        if self.shared.most.is_some_and(|most| total > most) {
+            self.shared.overfull.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn stopped(&self) -> bool {
+        self.shared.overfull.load(Ordering::Relaxed)
+    }
+
+    fn merge(mut self, other: Gather<'_>) -> Self {
+        self.best = self.best.merge(other.best);
+        self.seen += other.seen;
+        self.histogram = match (self.histogram, other.histogram) {
+            (Some(a), Some(b)) => Some(a.merge(b)),
+            (a, b) => a.or(b),
+        };
+        self
+    }
+}
+
+/// A value found once, the first time it is asked for.
+struct Lazy<T, F: FnOnce() -> T> {
+    value: Option<T>,
+    make: Option<F>,
+}
+
+impl<T: Copy, F: FnOnce() -> T> Lazy<T, F> {
+    fn new(make: F) -> Self {
+        Lazy {
+            value: None,
+            make: Some(make),
+        }
+    }
+
+    fn get(&mut self) -> T {
+        match self.value {
+            Some(value) => value,
+            None => {
+                let value = (self.make.take().expect("made once"))();
+                self.value = Some(value);
+                value
+            }
+        }
+    }
 }
 
 /// The first `cap` valued keys within `bounds` in every side, how many keys there were, and with
 /// `histogram`, the counts of their values from that value. A request that has gone stops the
-/// pass between pieces.
+/// pass between pieces, and so does a window found to hold more than `bounds.most`.
 fn pass_values(
     sides: &[Side],
     readers: &[Reader<'_>],
@@ -583,165 +770,80 @@ fn pass_values(
     histogram: Option<u64>,
     cancel: &Option<CancelToken>,
 ) -> Passed {
-    let Bounds {
-        descending,
-        after,
-        window,
-    } = bounds;
-    let mut best = Best::new(cap);
-    let mut seen = 0u64;
-    let mut counts = histogram.map(Histogram::new);
+    let shared = Shared {
+        offered: AtomicU64::new(0),
+        overfull: AtomicBool::new(false),
+        most: bounds.most,
+    };
+    let fresh = || Gather {
+        best: Best::new(cap),
+        seen: 0,
+        histogram: histogram.map(Histogram::new),
+        unshared: 0,
+        shared: &shared,
+    };
+    let mut gathered = fresh();
     for (side, reader) in sides.iter().zip(readers) {
-        let shard = side.shard;
-        let offer = |best: &mut Best,
-                     seen: &mut u64,
-                     hist: &mut Option<Histogram>,
-                     entity: u32,
-                     value: u64| {
-            let value = if descending { !value } else { value };
-            let key = SortKey {
-                absent: false,
-                value,
-                shard,
-                entity,
-            };
-            if after.is_some_and(|after| key <= after) || window.is_some_and(|w| value > w) {
-                return;
-            }
-            *seen += 1;
-            if let Some(hist) = hist {
-                hist.add(value);
-            }
-            best.offer(key);
-        };
-        let end = side
-            .entities
-            .maximum()
-            .map_or(0, |last| u64::from(last) + 1);
-        let fresh = || (Best::new(cap), 0u64, histogram.map(Histogram::new));
-        let (b, n, h) = (0..end.div_ceil(PIECE))
-            .into_par_iter()
-            .fold(fresh, |(mut best, mut seen, mut hist), p| {
-                if crate::cancel::gone(cancel) {
-                    return (best, seen, hist);
-                }
-                let range = p * PIECE..((p + 1) * PIECE).min(end);
-                let mut piece = Bitmap::from_range(range.start as u32..range.end as u32);
-                piece.and_inplace(&side.entities);
-                if piece.is_empty() {
-                    return (best, seen, hist);
-                }
-                match reader {
-                    Reader::Held(layers) => {
+        let shard = side.shard.raw();
+        let ended = |gather: &Gather<'_>| crate::cancel::gone(cancel) || gather.stopped();
+        let part = match reader {
+            Reader::Held(layers) => {
+                let end = side.set.maximum().map_or(0, |last| u64::from(last) + 1);
+                (0..end.div_ceil(PIECE))
+                    .into_par_iter()
+                    .fold(fresh, |mut gather, p| {
+                        if ended(&gather) {
+                            return gather;
+                        }
+                        let range = p * PIECE..((p + 1) * PIECE).min(end);
+                        let mut piece = Bitmap::from_range(range.start as u32..range.end as u32);
+                        piece.and_inplace(&side.set);
                         for layer in layers {
                             let _ = layer.for_each_record_value_in(&piece, |entity, value| {
                                 if let Some(value) = number_key(value) {
-                                    offer(&mut best, &mut seen, &mut hist, entity, value);
+                                    gather.offer(&bounds, shard, value, || entity);
                                 }
                                 Ok::<(), ()>(())
                             });
                         }
-                    }
-                    Reader::Drawn(data, column) => {
-                        let _ = data.for_each_rendered(column, &piece, &mut |entity, value| {
-                            if let Some(value) = drawn_key(value) {
-                                offer(&mut best, &mut seen, &mut hist, entity, value);
-                            }
-                        });
-                    }
-                }
-                (best, seen, hist)
-            })
-            .reduce(fresh, merge_passes);
-        best = best.merge(b);
-        seen += n;
-        counts = merge_histograms(counts, h);
-    }
-    Passed {
-        keys: best.sorted(),
-        seen,
-        histogram: counts,
-    }
-}
-
-type Partial = (Best, u64, Option<Histogram>);
-
-fn merge_passes((a, m, x): Partial, (b, n, y): Partial) -> Partial {
-    (a.merge(b), m + n, merge_histograms(x, y))
-}
-
-fn merge_histograms(a: Option<Histogram>, b: Option<Histogram>) -> Option<Histogram> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.merge(b)),
-        (a, b) => a.or(b),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encoded_values_keep_their_order() {
-        let floats = [
-            f64::NEG_INFINITY,
-            -2.5,
-            -0.0,
-            0.0,
-            1e-300,
-            3.0,
-            f64::INFINITY,
-            f64::NAN,
-        ];
-        let keys: Vec<u64> = floats.iter().map(|&f| float_key(f)).collect();
-        assert!(keys.windows(2).all(|w| w[0] < w[1]), "{keys:?}");
-        let ints = [i64::MIN, -1, 0, 1, i64::MAX];
-        let keys: Vec<u64> = ints.iter().map(|&i| signed_key(i)).collect();
-        assert!(keys.windows(2).all(|w| w[0] < w[1]));
-    }
-
-    #[test]
-    fn every_distance_falls_in_a_bucket_that_ends_at_or_after_it() {
-        for distance in (0..4096u64).chain([u64::MAX / 3, u64::MAX - 1, u64::MAX]) {
-            let at = Histogram::bucket(distance);
-            assert!(at < BUCKETS);
-            assert!(Histogram::last_of(at) >= distance, "{distance} in {at}");
-            if at > 0 {
-                assert!(Histogram::last_of(at - 1) < distance, "{distance} in {at}");
+                        gather.share();
+                        gather
+                    })
+                    .reduce(fresh, Gather::merge)
             }
-        }
-    }
-
-    #[test]
-    fn points_count_exactly_the_values_up_to_them() {
-        let mut histogram = Histogram::new(1000);
-        let values: Vec<u64> = (0..10_000u64).map(|i| 1000 + i * 37 % 50_000).collect();
-        for &value in &values {
-            histogram.add(value);
-        }
-        let points = histogram.points(100);
-        assert_eq!(points.last(), Some(&(u64::MAX, values.len() as u64)));
-        for &(end, count) in &points {
-            assert_eq!(values.iter().filter(|&&v| v <= end).count() as u64, count);
-        }
-        assert!(points
-            .windows(2)
-            .all(|w| w[0].0 < w[1].0 && w[0].1 < w[1].1));
-    }
-
-    #[test]
-    fn the_best_keys_are_the_first_whatever_the_order_offered() {
-        let key = |value| SortKey {
-            absent: false,
-            value,
-            shard: 0,
-            entity: 0,
+            Reader::Drawn {
+                segments,
+                column,
+                identity_key,
+            } => pieces(segments)
+                .into_par_iter()
+                .fold(fresh, |mut gather, (s, rows)| {
+                    if ended(&gather) {
+                        return gather;
+                    }
+                    let (segment, row_base) = segments[s];
+                    let mut runs = |f: &mut dyn FnMut(Range<u32>)| {
+                        for_each_run_in(&side.set, rows.clone(), &mut |run| f(run))
+                    };
+                    for_each_drawn_number(segment, row_base, column, &mut runs, |row, value| {
+                        if let Some(value) = value.and_then(number_key) {
+                            let entity =
+                                || entity_in(segment, row - row_base, identity_key, side.shard);
+                            gather.offer(&bounds, shard, value, entity);
+                        }
+                    });
+                    gather.share();
+                    gather
+                })
+                .reduce(fresh, Gather::merge),
         };
-        let mut best = Best::new(10);
-        for value in (0..1000u64).rev() {
-            best.offer(key(value * 7919 % 1000));
-        }
-        let kept: Vec<u64> = best.sorted().iter().map(|k| k.value).collect();
-        assert_eq!(kept, (0..10).collect::<Vec<_>>());
+        gathered = gathered.merge(part);
+    }
+    let overfull = shared.overfull.load(Ordering::Relaxed);
+    Passed {
+        keys: gathered.best.sorted(),
+        seen: gathered.seen,
+        histogram: gathered.histogram,
+        overfull,
     }
 }

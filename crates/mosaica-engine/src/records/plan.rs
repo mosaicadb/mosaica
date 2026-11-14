@@ -123,8 +123,8 @@ pub(super) fn fields_digest(fields: &[String]) -> [u8; 32] {
 }
 
 /// The field a read is ordered by, resolved as `fields` resolves it: a number, timestamp or bool
-/// without a vocabulary, read from its value column where it has one and otherwise from the
-/// view's own columns.
+/// without a vocabulary, read from the home a page reads it from, so that the order is by the
+/// values the read serves.
 pub(super) fn resolve_sort(
     meta: &EngineMeta,
     view: &str,
@@ -139,12 +139,7 @@ pub(super) fn resolve_sort(
     }
     let held = match named.home {
         Home::ValueColumn(column) => Some(column),
-        Home::Rendered => meta
-            .declared_scalars
-            .iter()
-            .position(|declared| &declared.name == spelling)
-            .filter(|&index| meta.homes[index].value_column)
-            .map(|_| spelling.clone()),
+        Home::Rendered => None,
         Home::Record(_) => return refused(RecordsRefused::SortUnstored(spelling.clone())),
     };
     Ok(SortField {
