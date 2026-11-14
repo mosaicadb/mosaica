@@ -36,7 +36,8 @@ same 50k and 1M BioCLIP dual indexes as before (`vexact-rand-data/c50k_r4`, `c1m
    Python gives 554.
 3. **N from the index (7795133b4).** N is the number of rows rounded up to a power of two, over all rows and not
    any viewer's count; `--nguar N` overrides it. eps comes from meta `EPS` (fit.py writes 1e-9). The power is
-   `Meta2::npow`, and every `ThrOut2` and `KnnOut2` carries it.
+   `Meta2::npow`, and every `ThrOut2` and `KnnOut2` carries it. The row count is the number of rows the build
+   encodes, so the synthetic scale path (`--scale`) gets its own N.
    - **No result cache.** The prototype has none. A server that caches results must drop them when npow rises; a
      fall is safe.
    - **The doc comment on npow** states the referee's other conditions: no mixed constants inside one result, and
@@ -83,13 +84,14 @@ Not done: R5 (per-block constants), the eps split, Theorem B.
 |---|---|---|---|
 | start, two-sided, N = 1e9 | 7.413 | 8.933 (Chernoff) | 9.086 (Chernoff) |
 | step 1, two-sided, N = 1e9 | 7.413 | 8.748 (R4) | 8.775 (certificate) |
-| step 2, one-sided, N = 1e9 | 7.373 | ≤ 8.704 (certificate) | 8.704 (certificate) |
+| step 2, one-sided, N = 1e9 | 7.373 | 8.681 (R4) | 8.704 (certificate) |
 | step 3, 50k: N = 2^16 | 6.724 | — | 7.639 (certificate) |
 | step 3, 1M: N = 2^20 | 6.931 | 7.963 (certificate) | 7.963 (certificate) |
 
-Step 4 does not change the constants. At 1M the three-block set takes the four-block certificate, which covers its
-subsets. A certificate for the three blocks alone would be lower: the report's exact value is 8.568 one-sided at
-1e9. It is not built, because the design certifies one layout per index.
+Step 4 does not change the constants. At 1M the three-block set takes the smaller of the four-block certificate,
+which covers its subsets, and R4 for its own three blocks: R4 at steps 1 and 2, the certificate at step 3. A
+certificate for the three blocks alone would be lower: the report's exact value is 8.568 one-sided at 1e9. It is
+not built, because the design certifies one layout per index.
 
 ## Correctness after every step (50k, 200 item + 200 text queries, 7 answer sizes, filtered sets, three plans)
 
@@ -112,7 +114,9 @@ Items entering each level against the start (50k verify counts, both plans):
 | 3 own N (2^16) | −13.6% | −15.2% | −15.6% |
 | 4 tan levels | −14.1% | −15.9% | −16.2% |
 
-These are the report's predictions: rows C, D and N, −3.4%, −4.1% and −12.3% of exact reads.
+Steps 1 and 2 match the report's rows C and D (−3.4% and −4.1% of exact reads). Step 3 is a different quantity
+from the report's row N: row N puts N = 1e6 on this 50k index (−12.3%), while step 3 uses the index's own N = 2^16,
+a smaller N and so a smaller constant.
 
 ## Before and after at 1M
 
@@ -157,5 +161,6 @@ Bytes are per item of N and include full vectors. "Full" is the share of items w
 - The optimal tan levels, and the decoded-scale check at build.
 - `fit.py` writes `EPS` and a certificate (`--cert-time`). An index without one uses R4 and Chernoff.
 
-Flags: `--nguar N` puts N in place of the power of two. `--csg-plain` gives the sub-Gaussian constant at the same
+Flags: `--nguar N` puts N in place of the power of two. It refuses N of 0 or less, and below the row count it
+prints a line saying the guarantee then covers only N rows. `--csg-plain` gives the sub-Gaussian constant at the same
 budget.

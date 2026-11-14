@@ -962,6 +962,10 @@ impl Items2 {
 
 pub trait Source2: Sync {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2;
+    /// The number of rows the build encodes from this source.
+    fn rows(&self, p: &Params) -> usize {
+        p.cstart[p.meta.k]
+    }
 }
 
 pub struct Real2 {
@@ -1337,7 +1341,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let n = p.meta.n;
     let k = p.meta.k;
     // the guarantee's N: the item count rounded up to a power of two, or --nguar
-    let nguar = NGUAR.get().copied().unwrap_or_else(|| (p.cstart[k].max(1) as f64).log2().ceil().exp2());
+    let rows = src.rows(p);
+    let nguar = NGUAR.get().copied().unwrap_or_else(|| (rows.max(1) as f64).log2().ceil().exp2());
+    if nguar < rows as f64 {
+        log(format!("--nguar {nguar} is below the {rows} rows built: the guarantee covers only {nguar} rows"));
+    }
     let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg, npow: nguar.log2().ceil() as u32 };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
@@ -1369,7 +1377,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
         // one event per (item, level), on the side that would make the item's decision wrong: delta = eps / (N L)
         let l1 = (nguar * meta.rlv.len() as f64 / p.meta.eps).ln();
-        log(format!("query budget: N = {nguar:.0} (2^{}; {} items), L = {}, eps = {:e}, one side per event: ln(1/delta) = {l1:.4}", meta.npow, p.cstart[k], meta.rlv.len(), p.meta.eps));
+        log(format!("query budget: N = {nguar:.0} (2^{}; {} items), L = {}, eps = {:e}, one side per event: ln(1/delta) = {l1:.4}", meta.npow, rows, meta.rlv.len(), p.meta.eps));
         let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { ((2.0 * l1).sqrt(), tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
         for gp in groups.iter_mut() {
             for lr in 0..gp.rates.len() {

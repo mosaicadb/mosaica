@@ -168,7 +168,12 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let mut p = load_params(dir);
     // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
     if let Some(v) = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()) {
-        let _ = crate::v2::NGUAR.set(v.parse().expect("--nguar N (items the guarantee covers)"));
+        let nv: f64 = v.parse().expect("--nguar N (items the guarantee covers)");
+        if !(nv > 0.0) {
+            eprintln!("--nguar {v} is not a positive number of items; give the number of rows the guarantee should cover, or leave it out to use the row count");
+            std::process::exit(2);
+        }
+        let _ = crate::v2::NGUAR.set(nv);
     }
     if args().iter().any(|a| a == "--csg-plain") {
         crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);

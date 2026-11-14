@@ -2169,7 +2169,7 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
     let parts: Vec<ThrOut2> = (0..scan_chunks(ix, vis)).into_par_iter().map(|ch| {
-        let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
+        let mut acc = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
         let mut rows = Vec::with_capacity(4096);
         scan_rows(ix, vis, ch, &mut rows);
         if packed && vis.is_some() {
@@ -2179,7 +2179,7 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
         }
         acc
     }).collect();
-    let mut out = ThrOut2 { st: Stats::new(nl), scanned: true, ..Default::default() };
+    let mut out = ThrOut2 { st: Stats::new(nl), scanned: true, npow: ix.meta.npow, ..Default::default() };
     for p in parts {
         out.rows.extend(p.rows);
         out.st.add(&p.st);
@@ -2490,12 +2490,10 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
 }
 
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
-    let mut out = match plan2(ix, pr, t, o, 0.0) {
+    match plan2(ix, pr, t, o, 0.0) {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, first_decide, cut_cyc),
-    };
-    out.npow = ix.meta.npow;
-    out
+    }
 }
 
 /// The threshold query over the clusters as planned.
@@ -2512,7 +2510,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         setup_groups(ix, pr, &need, &mut gst);
     }
     let parts: Vec<ThrOut2> = (0..k).into_par_iter().fold(
-        || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, State::default()),
+        || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, State::default()),
         |(mut acc, mut sv), ci| {
             let tcl = tick();
             let c = &ix.cl[ci];
@@ -2628,7 +2626,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         },
     ).map(|x| x.0).collect();
     let tm = tick();
-    let mut out = ThrOut2 { st: Stats::new(nl), ..Default::default() };
+    let mut out = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
     out.st.cyc[P_CUT] += cut_cyc;
     out.st.add(&gst);
     for p in parts {
@@ -3210,6 +3208,9 @@ pub struct SynthSrc<'a> {
     pub sy: &'a Synth2,
 }
 impl<'a> Source2 for SynthSrc<'a> {
+    fn rows(&self, _p: &Params) -> usize {
+        self.sy.sizes.iter().sum()
+    }
     fn items(&self, c: usize, _p: &Params, _gp: &GroupPlan2, _mhat: &[f64]) -> Items2 {
         let n = self.sy.n;
         let nc = self.sy.sizes[c];
