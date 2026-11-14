@@ -224,6 +224,12 @@ guarantee about *one* item is cheap. You are welcome to attack any of these.
   first: 0.23, same as one code at double precision. **[measured, 200k]**
 - **Simultaneous diagonalisation of query-offset and residual covariances** (the theoretically
   optimal linear basis). Helps the first 4–8 bytes, hurts beyond 16. **[measured]**
+  *Overturned:* the result depends on how the query-offset covariance Σ_Q is fitted, not on the
+  basis. `exp5.py`'s per-group fit to nearest-cluster offsets loses at deep levels (reproduced;
+  clipping is not the cause). One global Σ_Q fitted to offsets from clusters drawn by size, with the
+  centre projected out and a ridge, wins at every budget: in the native version 2 code it cuts bytes
+  read by 9–30% for items (data-only fit) and 25–34% for text (fit including text prompts), with
+  0 violations. **[measured, `dualproto/REPORT.md`; theory in `groups/REPORT.md` 2.4]**
 - **Box ∩ ball bounds, one-sided sign bounds, Hölder variants.** No better than weighted
   Cauchy–Schwarz for spread errors. **[argued]**
 - **Sketches of the errors (count-sketch, compressed sensing).** A dense noise floor of typical
@@ -232,6 +238,25 @@ guarantee about *one* item is cheap. You are welcome to attack any of these.
   low-dimensional query subspace, spending the bits directly wins. **[argued]**
 - **Dropping the low-energy tail.** Past local dimension 256 the residual holds 2–3% of the
   energy and is isotropic between unrelated items, but near-duplicates share it. **[measured]**
+- **Better groupings and richer group summaries.** A partition is worth at most log₂K bits per
+  member and a shared summary S/M bits per member; an idealised summary with exact extremes in 64
+  local coordinates still leaves 89–100% of items for text; 16× more clusters costs more in centres
+  than it saves; k-means in the certificate's own metric changes nothing a member bound sees.
+  **[proved and measured, `groups/REPORT.md`]**
+- **A hierarchy over centres for skipping.** Reads 129% of the leaf centres for text, because the
+  ball bound barely tightens with depth. **[measured, `sublinear/REPORT.md` 5.6]**
+- **Hashing as a candidate generator (cap filters, idealised).** Leaves 34–61% of items as
+  candidates for text at 1–16 KB of tables per item, exponent in N of 0.81–0.89.
+  **[measured as an expectation, `sublinear/REPORT.md` 5.6]**
+- **A tolerance d below the threshold, to save reading the bulk.** A non-match u below t needs a
+  half-width below u whatever d is; only items near the threshold gain. A band above t is the same
+  as a higher threshold: a band a quarter sd wide drops the guarantee on 40–69% of a text answer
+  of 1% or less.
+  **[argued and measured, `groups/REPORT.md` 3.6]**
+- **A sublinear guarantee for fresh queries.** Under SETH no polynomial-build index answers exact
+  threshold queries in N^(1−δ); every level of fixed slack is asymptotically linear at fixed answer
+  size. Measured exponents at k = 10: 0.79–0.93 for text, 0.49–0.64 for items.
+  **[proved and measured, `sublinear/REPORT.md`]**
 - **Lower confidence (smaller c).** c 10 → 6 tightens the 96-byte bound by ~15%. **[measured]**
 
 ## 8. Known weaknesses and open questions

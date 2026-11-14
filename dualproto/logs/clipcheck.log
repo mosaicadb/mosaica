@@ -1,0 +1,39 @@
+[     4s] groups [4, 1, 60, 39, 37, 47, 14, 44, 16, 62, 57, 42] items 220263
+[    79s] group 4 done
+[   128s] group 1 done
+[   170s] group 60 done
+[   204s] group 39 done
+[   235s] group 37 done
+[   261s] group 47 done
+[   281s] group 14 done
+[   295s] group 44 done
+[   308s] group 16 done
+[   320s] group 62 done
+[   329s] group 57 done
+[   334s] group 42 done
+
+basis    budget(B) clip  clip-rate%   mean h item   mean h text   undecided@1% item%  text%  violations
+pca           4   False     2.599       0.20836       0.23791        48.896   83.496  0
+pca           4   True      2.599       0.21271       0.24289        50.218   83.985  0
+pca           8   False     2.152       0.17914       0.20764        39.174   77.827  0
+pca           8   True      2.152       0.18433       0.21366        40.939   78.601  0
+pca          16   False     2.149       0.14377       0.17028        26.370   68.174  0
+pca          16   True      2.149       0.15007       0.17776        28.813   69.646  0
+pca          32   False     2.063       0.10478       0.12846        13.219   51.452  0
+pca          32   True      2.063       0.11187       0.13719        15.953   54.367  0
+pca          48   False     2.095       0.08145       0.10280         7.317   37.981  0
+pca          48   True      2.095       0.08892       0.11230         9.888   42.081  0
+pca          96   False     1.967       0.04427       0.06041         2.143   15.998  0
+pca          96   True      1.967       0.05115       0.06992         3.634   20.778  0
+simdiag       4   False     2.350       0.18865       0.22248        41.941   77.465  0
+simdiag       4   True      2.350       0.19222       0.22669        43.069   77.936  0
+simdiag       8   False     2.186       0.16272       0.19629        33.493   73.027  0
+simdiag       8   True      2.186       0.16786       0.20251        35.275   73.811  0
+simdiag      16   False     2.175       0.13248       0.16573        22.943   65.620  0
+simdiag      16   True      2.175       0.13979       0.17492        25.654   67.207  0
+simdiag      32   False     2.169       0.10110       0.13386        12.862   53.621  0
+simdiag      32   True      2.169       0.11128       0.14746        16.515   56.862  0
+simdiag      48   False     2.165       0.08266       0.11480         8.326   44.206  0
+simdiag      48   True      2.165       0.09386       0.13052        12.096   48.715  0
+simdiag      96   False     1.985       0.05434       0.08508         3.956   28.259  0
+simdiag      96   True      1.985       0.06607       0.10366         7.142   34.662  0

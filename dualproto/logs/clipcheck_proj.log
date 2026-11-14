@@ -1,0 +1,27 @@
+[     7s] groups [4, 1, 60, 39, 37, 47, 14, 44, 16, 62, 57, 42] items 220263
+[    65s] group 4 done
+[   103s] group 1 done
+[   135s] group 60 done
+[   160s] group 39 done
+[   186s] group 37 done
+[   202s] group 47 done
+[   221s] group 14 done
+[   229s] group 44 done
+[   236s] group 16 done
+[   243s] group 62 done
+[   247s] group 57 done
+[   251s] group 42 done
+
+basis    budget(B) clip  clip-rate%   mean h item   mean h text   undecided@1% item%  text%  violations
+simdiag       4   False     2.320       0.19370       0.21847        43.784   79.271  0
+simdiag       4   True      2.320       0.19699       0.22219        44.848   79.731  0
+simdiag       8   False     2.186       0.16714       0.19192        34.882   74.238  0
+simdiag       8   True      2.186       0.17190       0.19740        36.563   75.008  0
+simdiag      16   False     2.158       0.13621       0.16083        23.788   65.735  0
+simdiag      16   True      2.158       0.14272       0.16857        26.288   67.282  0
+simdiag      32   False     2.131       0.10333       0.12730        12.957   51.765  0
+simdiag      32   True      2.131       0.11213       0.13827        16.244   54.893  0
+simdiag      48   False     2.155       0.08448       0.10800         8.261   41.447  0
+simdiag      48   True      2.155       0.09469       0.12123        11.792   45.921  0
+simdiag      96   False     2.013       0.05527       0.07739         3.792   24.222  0
+simdiag      96   True      2.013       0.06619       0.09292         6.770   30.532  0

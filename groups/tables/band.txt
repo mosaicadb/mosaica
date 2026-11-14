@@ -1,0 +1,11 @@
+# Output of scripts/band.py (200k sample, seed 11; all 369 text and 100 item queries).
+== text (369 queries): share of the answer within b sd above the threshold, b = 0.25 / 0.5 / 1
+  answer  0.01% (20 items):  69.0% /  89.3% /  98.6%   best match 0.68 sd above t
+  answer  0.10% (200 items):  53.8% /  78.1% /  95.0%   best match 1.42 sd above t
+  answer  1.00% (2000 items):  40.4% /  63.4% /  84.7%   best match 2.66 sd above t
+  answer  5.00% (10000 items):  27.5% /  47.0% /  71.6%   best match 3.84 sd above t
+== item (100 queries): share of the answer within b sd above the threshold, b = 0.25 / 0.5 / 1
+  answer  0.01% (20 items):  77.0% /  90.2% /  96.8%   best match 0.85 sd above t
+  answer  0.10% (200 items):  63.2% /  80.4% /  93.0%   best match 1.54 sd above t
+  answer  1.00% (2000 items):  42.8% /  59.7% /  80.2%   best match 2.88 sd above t
+  answer  5.00% (10000 items):  27.1% /  41.5% /  62.5%   best match 4.35 sd above t

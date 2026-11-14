@@ -1,0 +1,743 @@
+diff --git a/combined/build.py b/combined/build.py
+index abb1549..e73fefd 100644
+--- a/combined/build.py
++++ b/combined/build.py
+@@ -3,7 +3,7 @@
+ # usage: python3 build.py NAME
+ import numpy as np, sys, os, json
+ from core import *
+-ROOT = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/vec/"
++ROOT = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/"; OUTROOT = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"
+ CFG = {
+     "m768":  dict(files=[ROOT + f"data/e{i:02d}.npy" for i in range(20)], K=1000, G=64, nqi=200, text=True),
+     "p768":  dict(files=[ROOT + f"data/e{i:02d}.npy" for i in (0, 5, 10, 15)], K=200, G=16, nqi=60, text=True, ntext=90),
+@@ -11,7 +11,7 @@ CFG = {
+     "p128":  dict(files=[ROOT + f"data/e{i:02d}.npy" for i in (0, 5, 10, 15)], K=200, G=16, nqi=200, text=True, pca=128),
+     "g100":  dict(files=[ROOT + f"combined/data100/g{i:02d}.npy" for i in range(4)], K=200, G=16, nqi=200, text=False),
+ }
+-NAME = sys.argv[1]; C = CFG[NAME]; OUT = ROOT + f"combined/idx_{NAME}/"; os.makedirs(OUT, exist_ok=True)
++NAME = sys.argv[1]; C = CFG[NAME]; OUT = OUTROOT + f"idx_{NAME}/"; os.makedirs(OUT, exist_ok=True)
+ rng = np.random.default_rng(20261112)
+ X16 = np.concatenate([np.load(f) for f in C["files"]]); N, n = X16.shape
+ X = np.empty((N, n), np.float32)
+@@ -55,7 +55,7 @@ log("bases done; group sizes", np.diff(gstart).tolist())
+ # test queries
+ qi = np.sort(rng.choice(N, C["nqi"], replace=False)); Q = [X[qi]]; qcls = ["item"] * len(qi)
+ if C["text"]:
+-    T = proj(unit(np.load(ROOT + "agent2/text_q.npy")))
++    T = proj(unit(np.load(ROOT + "text_q.npy")))
+     if "ntext" in C: T = T[np.sort(rng.choice(len(T), C["ntext"], replace=False))]
+     Q.append(T); qcls += ["text"] * len(T)
+ Q = np.concatenate(Q).astype(np.float32); qcls = np.array(qcls); NQ = len(Q)
+@@ -67,7 +67,7 @@ for g in range(G):
+     rows, cols = np.where(grp[pk] == g)
+     Qi[g] = (((pq[rows] - Mq[pk[rows, cols]]) @ V[g]) ** 2).mean(0) if len(rows) > 50 else lam[g]
+ if C["text"]:
+-    Ttr = proj(unit(np.load(ROOT + "agent2/text_train.npy"))); tk = np.argsort(-(Ttr @ Mq.T), axis=1)[:, :50]
++    Ttr = proj(unit(np.load(ROOT + "text_train.npy"))); tk = np.argsort(-(Ttr @ Mq.T), axis=1)[:, :50]
+     for g in range(G):
+         rows, cols = np.where(grp[tk] == g)
+         if len(rows) < 200:
+diff --git a/rust/.cargo/config.toml b/rust/.cargo/config.toml
+index 68a8237..9e06461 100644
+--- a/rust/.cargo/config.toml
++++ b/rust/.cargo/config.toml
+@@ -1,3 +1,3 @@
+ [build]
+ rustflags = ["-C", "target-cpu=native"]
+-target-dir = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rust-target"
++target-dir = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/target"
+diff --git a/rust/src/index.rs b/rust/src/index.rs
+index 93a7ffd..016e17f 100644
+--- a/rust/src/index.rs
++++ b/rust/src/index.rs
+@@ -55,6 +55,7 @@ pub struct Params {
+     pub centres: Vec<f32>, // K x n, the stored 8-bit centres (int8 * scale) as f32 values
+     pub lam: Vec<f64>,
+     pub v: Vec<f32>, // G x n x n, z = V^T r
++    pub r2: Option<Vec<f64>>, // G: mean squared residual norm per group, when the basis is not orthogonal
+     pub frb: Vec<u8>, // G x 6 x n cumulative bits per coordinate
+     pub dl: Vec<f64>, // G x 6 x n
+     pub dt: Vec<f64>, // G x n
+@@ -86,6 +87,7 @@ pub fn load_params(dir: &str) -> Params {
+         centres,
+         lam: r("lam").f64s(),
+         v: r("V").f32s(),
++        r2: std::path::Path::new(&format!("{dir}/r2.npy")).exists().then(|| r("r2").f64s()),
+         frb: r("frb").u8s(),
+         dl: r("dl").f64s(),
+         dt: r("dt").f64s(),
+diff --git a/rust/src/main.rs b/rust/src/main.rs
+index 4897937..f12f7b9 100644
+--- a/rust/src/main.rs
++++ b/rust/src/main.rs
+@@ -16,8 +16,8 @@ use roaring::RoaringBitmap;
+ use std::io::Write;
+ use util::*;
+ 
+-const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
+-const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
++const DATA: &str = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/m768";
++const RES: &str = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/results";
+ 
+ struct Ctx {
+     p: Params,
+@@ -611,7 +611,7 @@ fn disk(c: &mut Ctx, nq: usize) {
+     let n = ix.n();
+     let nl = ix.meta.nl();
+     let fl = c.flat();
+-    let dir = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/diskfiles";
++    let dir = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/diskfiles";
+     std::fs::create_dir_all(dir).unwrap();
+     // files: one per level (planes; th words follow), and the full vectors in row order
+     let mut lvl_base = vec![0u64; nl];
+diff --git a/rust/src/run2.rs b/rust/src/run2.rs
+index 2fd79ce..38aeb3a 100644
+--- a/rust/src/run2.rs
++++ b/rust/src/run2.rs
+@@ -10,8 +10,15 @@ use rayon::prelude::*;
+ use roaring::RoaringBitmap;
+ use std::io::Write;
+ 
+-pub const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
+-pub const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
++/// Input directory (exported parameters) and results directory: `--data DIR`, `--res DIR`.
++pub fn data_dir() -> String {
++    arg_str("--data", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/m768")
++}
++pub fn res_dir() -> String {
++    let d = arg_str("--res", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/results");
++    std::fs::create_dir_all(&d).unwrap();
++    d
++}
+ const SIZES: [f64; 4] = [1e-4, 1e-3, 1e-2, 5e-2];
+ 
+ static LOG: std::sync::OnceLock<std::sync::Mutex<std::fs::File>> = std::sync::OnceLock::new();
+@@ -46,14 +53,14 @@ pub fn arg_str(k: &str, d: &str) -> String {
+ }
+ 
+ pub fn setup2(tag: &str) -> Ctx2 {
+-    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/{tag}.log")).unwrap();
++    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", res_dir())).unwrap();
+     let _ = LOG.set(std::sync::Mutex::new(log));
+     out!("==== run at {:.0}: {:?}", now_s(), args());
+     let kk = arg_usize("--clusters", 100000);
+-    let prof_path = arg_str("--profile", &format!("{DATA}/prof_h0.25.npy"));
++    let prof_path = arg_str("--profile", &format!("{}/prof_h0.25.npy", data_dir()));
+     let split = !args().iter().any(|a| a == "--u8");
+     let t = Timer::new();
+-    let mut p = load_params(DATA);
++    let mut p = load_params(&data_dir());
+     if kk < p.meta.k {
+         let n = p.meta.n;
+         p.meta.k = kk;
+@@ -182,7 +189,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
+     }
+     out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {}",
+         qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len());
+-    std::fs::write(format!("{RES}/verify2.csv"), rows.join("\n") + "\n").unwrap();
++    std::fs::write(format!("{}/verify2.csv", res_dir()), rows.join("\n") + "\n").unwrap();
+ }
+ 
+ /// ns per item per level: all items of every cluster, no decisions (interval at each level), tables built beforehand.
+@@ -229,7 +236,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
+             prev = ns;
+         }
+     }
+-    std::fs::write(format!("{RES}/levels2{}.csv", if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
++    std::fs::write(format!("{}/levels2{}.csv", res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+ }
+ 
+ /// Fixed setup per query: group setup (exact int8 basis product, rotated weights) and cluster setup with tables.
+@@ -415,7 +422,7 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
+             }
+         }
+     }
+-    std::fs::write(format!("{RES}/e2e2_1m{}.csv", if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
++    std::fs::write(format!("{}/e2e2_1m{}.csv", res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+ }
+ 
+ /// Where the time of a threshold query goes (text queries at 1% and 5%; 1 and 4 threads), for plan variants.
+@@ -490,7 +497,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
+             }
+         }
+     }
+-    std::fs::write(format!("{RES}/breakdown2_text.csv"), lines.join("\n") + "\n").unwrap();
++    std::fs::write(format!("{}/breakdown2_text.csv", res_dir()), lines.join("\n") + "\n").unwrap();
+ }
+ 
+ pub fn make_filter(ix: &Index2, kind: &str, frac: f64, rng: &mut rand::rngs::StdRng) -> RoaringBitmap {
+@@ -610,5 +617,5 @@ pub fn filter2(c: &Ctx2, nq: usize) {
+             }
+         }
+     }
+-    std::fs::write(format!("{RES}/filter2_1m.csv"), lines.join("\n") + "\n").unwrap();
++    std::fs::write(format!("{}/filter2_1m.csv", res_dir()), lines.join("\n") + "\n").unwrap();
+ }
+diff --git a/rust/src/scale.rs b/rust/src/scale.rs
+index 2f1d40a..bc62275 100644
+--- a/rust/src/scale.rs
++++ b/rust/src/scale.rs
+@@ -6,8 +6,8 @@ use crate::synth::*;
+ use crate::util::*;
+ use rayon::prelude::*;
+ 
+-const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
+-const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
++const DATA: &str = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/m768";
++const RES: &str = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/results";
+ 
+ fn log(s: String) {
+     println!("{s}");
+diff --git a/rust/src/v2/mod.rs b/rust/src/v2/mod.rs
+index 469815c..90d3b32 100644
+--- a/rust/src/v2/mod.rs
++++ b/rust/src/v2/mod.rs
+@@ -181,11 +181,12 @@ pub fn rand_value(p: u8, depth: usize) -> f64 {
+ 
+ /// Encode a block: positions to their final depth `maxd`, with the encoder scale (in units of the rms) chosen per block
+ /// from LAMS to minimise the sum over the block's rises of log tan^2 (any scale is sound: kappa is stored).
+-pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8]) {
++pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8]) -> f64 {
+     let m = y.len();
+     let yn2: f64 = y.iter().map(|v| v * v).sum();
+     let rms = (yn2 / m as f64).sqrt().max(1e-300);
+     let mut best = f64::INFINITY;
++    let mut best_lam = LAMS[0];
+     for &lam in LAMS.iter() {
+         for p in 0..m {
+             tmp[p] = rand_encode(y[p] / (lam * rms), maxd[p]);
+@@ -202,9 +203,11 @@ pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], t
+         }
+         if obj < best {
+             best = obj;
++            best_lam = lam;
+             out[..m].copy_from_slice(&tmp[..m]);
+         }
+     }
++    best_lam * rms
+ }
+ 
+ /// Mean tan^2 of the randomised code at each integer rate (simulated on Gaussian vectors), for the rate design.
+@@ -391,7 +394,45 @@ fn rate_depth(r: f64, k: usize, nb: usize) -> u8 {
+     }
+ }
+ 
+-/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz from the transpose.
++/// Inverse of a row-major n x n matrix by Gauss-Jordan elimination with partial pivoting.
++fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
++    let w = 2 * n;
++    let mut m = vec![0f64; n * w];
++    for i in 0..n {
++        m[i * w..i * w + n].copy_from_slice(&a[i * n..(i + 1) * n]);
++        m[i * w + n + i] = 1.0;
++    }
++    for col in 0..n {
++        let piv = (col..n).max_by(|&p, &q| m[p * w + col].abs().partial_cmp(&m[q * w + col].abs()).unwrap()).unwrap();
++        assert!(m[piv * w + col].abs() > 1e-300, "singular basis");
++        if piv != col {
++            for k in 0..w {
++                m.swap(piv * w + k, col * w + k);
++            }
++        }
++        let inv = 1.0 / m[col * w + col];
++        for k in 0..w {
++            m[col * w + k] *= inv;
++        }
++        let prow: Vec<f64> = m[col * w..(col + 1) * w].to_vec();
++        for r in 0..n {
++            if r == col {
++                continue;
++            }
++            let f = m[r * w + col];
++            if f != 0.0 {
++                let row = &mut m[r * w..(r + 1) * w];
++                for k in 0..w {
++                    row[k] -= f * prow[k];
++                }
++            }
++        }
++    }
++    (0..n * n).map(|i| m[(i / n) * w + n + i % n]).collect()
++}
++
++/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz from the transpose (or from a
++/// direct inverse when the basis is not orthogonal).
+ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f64) {
+     let mut vsc = vec![0f64; n];
+     let mut v8t = vec![0i8; n * n];
+@@ -408,7 +449,7 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
+             vq[i * n + c] = v8t[c * n + i] as f64 * vsc[c];
+         }
+     }
+-    // X = V_q^T, X <- X (2I - V_q X)
++    // X = V_q^T when V_q is near orthogonal, else a Gauss-Jordan inverse; then X <- X (2I - V_q X)
+     let mut x = vec![0f64; n * n];
+     for i in 0..n {
+         for c in 0..n {
+@@ -430,6 +471,10 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
+         }
+         s.sqrt()
+     };
++    mm(&vq, &x, &mut t);
++    if defect(&t) > 0.5 {
++        x = gauss_jordan_inverse(&vq, n);
++    }
+     for _ in 0..8 {
+         mm(&vq, &x, &mut t);
+         if defect(&t) < 1e-13 {
+@@ -455,7 +500,8 @@ impl GroupPlan2 {
+         let lam = &p.lam[g * n..(g + 1) * n];
+         let pq = &prof[g * n..(g + 1) * n];
+         let sig: Vec<f32> = lam.iter().map(|&l| l.sqrt() as f32).collect();
+-        let lamsum = lam.iter().sum::<f64>() as f32;
++        // the item scale divides |r|^2 by its mean, which equals the sum of coordinate variances only in an orthogonal basis
++        let lamsum = p.r2.as_ref().map_or(lam.iter().sum::<f64>(), |r| r[g]) as f32;
+         let (moves, states) = det_alloc_tree(lam, pq, dt_, &m.dlv);
+         let gc = |l: usize, c: usize| -> f64 {
+             let s = states[l][c];
+@@ -840,6 +886,21 @@ fn roundup_abs(v: f64, steps: f64, floor_log: f64) -> f64 {
+     r
+ }
+ 
++/// Overflow statistics of the encoder (VEXACT_CLIPSTATS=1), summed over every item and cluster.
++/// Per deterministic level l, at CS_DET * l: coded coordinates, coordinates beyond the code's reach, squared weighted
++/// error beyond the reach, squared weighted error in total, coded coordinates at tree depth 2 or more, those beyond reach.
++/// Then, over the coordinates coded at the last deterministic level: count, |u| > 3, |u| > 4, sum u^2, sum u^4
++/// (u = z / (sigma s), the quantiser's input). Then per randomised block: positions coded, positions beyond the encoder
++/// scale (|y| > lambda rms).
++pub const CS_DET: usize = 6;
++pub const CS_U: usize = CS_DET * NDL;
++pub const CS_R: usize = CS_U + 5;
++pub const CS_LEN: usize = CS_R + 2 * J;
++pub static CLIPSTATS: std::sync::Mutex<Vec<f64>> = std::sync::Mutex::new(Vec::new());
++pub fn clipstats_on() -> bool {
++    std::env::var("VEXACT_CLIPSTATS").map_or(false, |v| v == "1")
++}
++
+ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta: &Meta2, rots: &[Vec<f64>], mn32: f32, calib: bool) -> ClusterCode2 {
+     let n = meta.n;
+     let nc = it.ah.len();
+@@ -856,12 +917,33 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
+     };
+     // which (coordinate or position, stage) bit sits at which (level, unit, bit)
+     let svec: Vec<f32> = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).collect();
++    let stats = !calib && clipstats_on();
++    let mut cs = vec![0f64; CS_LEN];
++    // largest |value| a coordinate's code reaches in each state: outer tree centroid plus the residual stages
++    let reach = |st: (u8, u8)| -> f64 {
++        let k = st.0 as usize;
++        codes.cent[k].iter().map(|x| x.abs() as f64).fold(0.0, f64::max) + (0..st.1 as usize).map(|r| codes.delta[k][r] as f64).sum::<f64>()
++    };
+     let mut wmat = vec![0f64; nc * n];
+     let mut val = vec![0f64; n];
+     for i in 0..nc {
+         let z = &it.z[i * n..(i + 1) * n];
+         let s = svec[i] as f64;
+         val.iter_mut().for_each(|v| *v = 0.0);
++        if stats {
++            for c in 0..n {
++                if gp.states[NDL - 1][c].0 == 0 {
++                    continue;
++                }
++                let u = z[c] / (gp.sig[c] as f64 * s);
++                let u2 = u * u;
++                cs[CS_U] += 1.0;
++                cs[CS_U + 1] += (u2 > 9.0) as u8 as f64;
++                cs[CS_U + 2] += (u2 > 16.0) as u8 as f64;
++                cs[CS_U + 3] += u2;
++                cs[CS_U + 4] += u2 * u2;
++            }
++        }
+         for l in 0..NDL {
+             let lp = &gp.levels[l];
+             for f in &lp.parts[0].fields {
+@@ -881,6 +963,26 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
+                 rho2 += q * q;
+             }
+             let rho = rho2.sqrt();
++            if stats {
++                cs[CS_DET * l + 3] += rho2;
++                for c in 0..n {
++                    let st = gp.states[l][c];
++                    if st.0 == 0 {
++                        continue;
++                    }
++                    cs[CS_DET * l] += 1.0;
++                    let deep = st.0 >= 2;
++                    cs[CS_DET * l + 4] += deep as u8 as f64;
++                    let u = z[c] / (gp.sig[c] as f64 * s);
++                    let ex = u.abs() - reach(st);
++                    if ex > 0.0 {
++                        cs[CS_DET * l + 1] += 1.0;
++                        cs[CS_DET * l + 5] += deep as u8 as f64;
++                        let q = ex * s * gp.sig[c] as f64 / gp.d[l][c] as f64;
++                        cs[CS_DET * l + 2] += q * q;
++                    }
++                }
++            }
+             let need = rho * (1.0 + 1e-6) + 1e-12;
+             let pred = gp.pconst[l] * svec[i];
+             let kraw = ((rho.max(1e-30) / pred as f64).log2() * 16.0).ceil();
+@@ -933,7 +1035,15 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
+             yn[j] = y[gp.boff[j]..gp.boff[j + 1]].iter().map(|v| v * v).sum::<f64>().sqrt();
+             let (b0, b1) = (gp.boff[j], gp.boff[j + 1]);
+             let rises: Vec<&[u8]> = gp.thchg.iter().enumerate().filter(|(_, ch)| ch.contains(&j)).map(|(lr, _)| &gp.rdepth[lr][b0..b1]).collect();
+-            rand_choose(&y[b0..b1], &maxd[b0..b1], &rises, &mut rp[b0..b1], &mut rtmp);
++            let scale = rand_choose(&y[b0..b1], &maxd[b0..b1], &rises, &mut rp[b0..b1], &mut rtmp);
++            if stats {
++                for pp in b0..b1 {
++                    if maxd[pp] > 0 {
++                        cs[CS_R + 2 * j] += 1.0;
++                        cs[CS_R + 2 * j + 1] += (y[pp].abs() > scale) as u8 as f64;
++                    }
++                }
++            }
+             let pr = gp.ypredw[j] * s;
+             let need = yn[j] * (1.0 + 1e-7);
+             if let Some(cal) = cal.as_mut() {
+@@ -1032,6 +1142,15 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
+             }
+         }
+     }
++    if stats {
++        let mut g = CLIPSTATS.lock().unwrap();
++        if g.is_empty() {
++            g.resize(CS_LEN, 0.0);
++        }
++        for (a, b) in g.iter_mut().zip(&cs) {
++            *a += b;
++        }
++    }
+     let mut it = it;
+     it.z = Vec::new();
+     ClusterCode2 { codes: lc, scal: ls, esc, items: it, calib: cal }
+@@ -1198,6 +1317,17 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
+         encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], false)
+     }).collect();
+     log(format!("encoded {:.1}s", t.s()));
++    if clipstats_on() {
++        let c = CLIPSTATS.lock().unwrap().clone();
++        let det: Vec<String> = (0..NDL).map(|l| {
++            let b = &c[CS_DET * l..CS_DET * (l + 1)];
++            format!("L{}({}B): beyond reach {:.3}% of coded coords ({:.4}% of the {:.0} at depth >= 2), excess {:.3}% of rho^2", l, meta.dlv[l], 100.0 * b[1] / b[0].max(1.0), 100.0 * b[5] / b[4].max(1.0), b[4], 100.0 * b[2] / b[3].max(1e-300))
++        }).collect();
++        let u = &c[CS_U..CS_U + 5];
++        let rnd: Vec<String> = (0..J).map(|j| format!("block{}: {:.4}%", j, 100.0 * c[CS_R + 2 * j + 1] / c[CS_R + 2 * j].max(1.0))).collect();
++        log(format!("CLIPSTATS det [{}]; coded quantiser input u: |u|>3 {:.4}%, |u|>4 {:.4}%, E u^2 {:.4}, kurtosis {:.3}; randomised beyond scale [{}]",
++            det.join("; "), 100.0 * u[1] / u[0], 100.0 * u[2] / u[0], u[3] / u[0], (u[4] / u[0]) / (u[3] / u[0]).powi(2), rnd.join(", ")));
++    }
+     let x2 = 1.0 + ccodes.iter().map(|c| c.items.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
+     let infos: Vec<Cl2> = ccodes.par_iter().enumerate().map(|(c, cc)| {
+         let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, &cc.items, x2, n);
+diff --git a/rust/tools/export.py b/rust/tools/export.py
+index c1d5256..973bc8b 100644
+--- a/rust/tools/export.py
++++ b/rust/tools/export.py
+@@ -4,13 +4,13 @@
+ #   writes: meta.json, cstart, grp, mq8 (int8 centres), msc, lam, V, qmix, frb (bits per coord per det level),
+ #   dl (weights per det level), dt (randomised whitening), ridx (block index sets), rates, tree tables, queries.
+ import numpy as np, sys, os, json, math
+-VEC = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/vec/"
++VEC = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/xvs/"; IDXROOT = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"; VC = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/"
+ sys.path.insert(0, VEC + "combined")
+ from core import TREE, GTREE
+ 
+ NAME, OUT = sys.argv[1], sys.argv[2]
+ os.makedirs(OUT, exist_ok=True)
+-IDX = VEC + f"combined/idx_{NAME}/"
++IDX = IDXROOT + f"idx_{NAME}/"
+ I = dict(np.load(IDX + "index.npz"))
+ N, n, K, G = int(I["N"]), int(I["n"]), int(I["K"]), int(I["G"])
+ DLV = [4, 8, 12, 16, 24, 32]
+@@ -68,7 +68,7 @@ tree_edges = np.zeros((9, 256), np.float64); tree_cent = np.zeros((9, 256), np.f
+ for b in range(1, 9):
+     e, c = TREE[b]; tree_edges[b, :len(e)] = e; tree_cent[b, :len(c)] = c
+ qcls = (I["qcls"] == "text").astype(np.int8)
+-text = np.load(VEC + "agent2/text_q.npy").astype(np.float32)
++text = np.load(VC + "text_q.npy").astype(np.float32)
+ sv = lambda k, a: np.save(OUT + f"/{k}.npy", np.ascontiguousarray(a))
+ sv("cstart", I["cstart"].astype(np.int64)); sv("grp", I["grp"].astype(np.int64)); sv("mq8", mq8); sv("msc", msc)
+ sv("lam", lamA.astype(np.float64)); sv("V", I["V"].astype(np.float32)); sv("qmix", QmA.astype(np.float64))
+diff --git a/rust/tools/profile.py b/rust/tools/profile.py
+index 144a1e4..2d69c57 100644
+--- a/rust/tools/profile.py
++++ b/rust/tools/profile.py
+@@ -5,9 +5,9 @@
+ #   KIND: qmix (item/text mixture, text-tuned) | qi (corpus items as pseudo-queries) | h<w> (((1-w) sqrt Qi + w sqrt iso)^2,
+ #         iso isotropic with Qi's trace; h0.25 is the data-only "H25" profile) | npz:<file>:<key> (e.g. dataonly prof_m768.npz:Qi50)
+ import numpy as np, sys
+-VEC = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/vec/"
++IDXROOT = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"
+ NAME, KIND, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
+-I = np.load(VEC + f"combined/idx_{NAME}/index.npz")
++I = np.load(IDXROOT + f"idx_{NAME}/index.npz")
+ qi = I["Qi"].astype(np.float64)
+ if KIND == "qmix": P = I["Qmix"]
+ elif KIND == "qi": P = qi
+diff --git a/rust/tools/dual.py b/rust/tools/dual.py
+new file mode 100644
+index 0000000..a879c6c
+--- /dev/null
++++ b/rust/tools/dual.py
+@@ -0,0 +1,98 @@
++# Export the dual pair of transforms (geometric-mean metric) for the Rust v2 prototype.
++# usage: python dual.py MODE OUTDIR      MODE: item (Sigma_Q from corpus items) | mix (mean of normalised item and text)
++# Writes into OUTDIR (a copy of the baseline export, files symlinked): V.npy = query-side basis VQ (columns), lam.npy =
++# per-coordinate mean square of the item-side coordinates z = VQ8^-1 r under the int8 basis the Rust build will use,
++# r2.npy = mean |r|^2 per group, and profiles prof_qi / prof_h0.25 / prof_qt / prof_qmix in the query-side coordinates.
++import numpy as np, sys, os, json, time
++MODE, OUT = sys.argv[1], sys.argv[2]
++P = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"
++VC = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/"
++BASE = P + "rustdata/m768/"
++RIDGE = float(os.environ.get("RIDGE", "0.1"))
++t0 = time.time()
++def log(*a): print(f"[{time.time()-t0:6.0f}s]", *a, flush=True)
++def unit(a):
++    a = np.asarray(a, dtype=np.float32); return a / np.linalg.norm(a, axis=1, keepdims=True)
++
++I = np.load(P + "idx_m768/index.npz")
++Xs = np.load(P + "idx_m768/Xs.npy", mmap_mode="r")
++N, n, K, G = int(I["N"]), int(I["n"]), int(I["K"]), int(I["G"])
++Mq = I["Mq"].astype(np.float32); mn = I["mn"]; Mh = (Mq / mn[:, None]).astype(np.float32)
++assign, cstart, grp, qi = I["assign"], I["cstart"], I["grp"], I["qi"]
++lamP, VP = I["lam"], I["V"]
++cnt = np.diff(cstart); pc = cnt / cnt.sum()
++gstart = np.searchsorted(grp[assign], np.arange(G + 1))
++rng = np.random.default_rng(3)
++pool = np.setdiff1d(np.arange(N), qi)
++
++# ---- Sigma_Q: offsets q - (q.m^) m^ from clusters drawn in proportion to their size, 40 per query ----
++def cov(Q):
++    S = np.zeros((n, n)); c = 0
++    for i in range(0, len(Q), 200):
++        q = Q[i:i+200]; ks = rng.choice(K, (len(q), 40), p=pc); C = Mh[ks]                 # b x 40 x n
++        D = (q[:, None, :] - np.einsum("bkn,bn->bk", C, q)[:, :, None] * C).reshape(-1, n).astype(np.float64)
++        S += D.T @ D; c += len(D)
++    return S / c
++items = unit(Xs[np.sort(rng.choice(pool, 3000, replace=False))])
++Si = cov(items)
++if MODE == "item": SQ = Si
++elif MODE == "mix":
++    St = cov(unit(np.load(VC + "text_train.npy"))); SQ = 0.5 * (Si / np.trace(Si) + St / np.trace(St))
++else: raise SystemExit("MODE is item or mix")
++SQ = SQ + RIDGE * np.trace(SQ) / n * np.eye(n)
++lq, vq_ = np.linalg.eigh(SQ); A = (vq_ * np.sqrt(lq)) @ vq_.T; Ai = (vq_ / np.sqrt(lq)) @ vq_.T
++log("Sigma_Q", MODE, "largest eigenvalue share", float(lq.max() / lq.sum()), "condition", float(lq.max() / lq.min()))
++
++# ---- per group: the pair, its int8 query-side basis, the item-side coordinates' mean squares ----
++Vout = np.zeros((G, n, n), np.float32); lam = np.zeros((G, n)); r2 = np.zeros(G); gam_all = np.zeros((G, n)); cond = np.zeros(G)
++VQ8 = []
++for g in range(G):
++    SR = (VP[g].astype(np.float64) * lamP[g]) @ VP[g].T.astype(np.float64)
++    gam, W = np.linalg.eigh(A @ SR @ A); gam = gam[::-1]; W = W[:, ::-1]; gam = np.maximum(gam, 1e-12 * gam[0])
++    VQ = (Ai @ W) * gam ** 0.25; VD = (A @ W) * gam ** -0.25
++    assert np.abs(VQ.T @ VD - np.eye(n)).max() < 1e-6
++    V32 = VQ.astype(np.float32); Vout[g] = V32; gam_all[g] = gam
++    vsc = np.abs(V32.astype(np.float64)).max(0) / 127.0
++    v8 = np.clip(np.round(V32 / vsc), -127, 127); vq = v8 * vsc; VQ8.append(vq)
++    Xinv = np.linalg.inv(vq); sv = np.linalg.svd(vq, compute_uv=False); cond[g] = sv[0] / sv[-1]
++    s, e = gstart[g], gstart[g + 1]
++    R = np.asarray(Xs[s:e], dtype=np.float32) - Mq[assign[s:e]]
++    Z = R.astype(np.float64) @ Xinv.T
++    lam[g] = np.maximum((Z * Z).mean(0), 1e-30); r2[g] = (R.astype(np.float64) ** 2).sum(1).mean()
++    if g % 16 == 0:
++        log("group", g, "items", e - s, "cond(VQ8)", round(cond[g], 1), "sum mean-square z / sum sqrt gamma", float(lam[g].sum() / np.sqrt(gam).sum()),
++            "max ratio z ms / sqrt gamma", float((lam[g] / np.sqrt(gam)).max()), "r2", r2[g])
++log("bases done; largest condition number", cond.max())
++
++# ---- profiles in the query-side coordinates (as build.py computes Qi and Qt) ----
++pq = unit(Xs[rng.choice(pool, 5000, replace=False)]); pk = np.argsort(-(pq @ Mq.T), axis=1)[:, :4]
++Ttr = unit(np.load(VC + "text_train.npy")); tk = np.argsort(-(Ttr @ Mq.T), axis=1)[:, :50]
++Qi = np.zeros((G, n)); Qt = np.zeros((G, n)); QiP = np.zeros((G, n)); QtP = np.zeros((G, n))
++for g in range(G):
++    rows, cols = np.where(grp[pk] == g)
++    D = pq[rows] - Mq[pk[rows, cols]]
++    Qi[g] = ((D @ VQ8[g]) ** 2).mean(0) if len(rows) > 50 else lam[g]
++    QiP[g] = ((D @ VP[g]) ** 2).mean(0) if len(rows) > 50 else lamP[g]
++    rows, cols = np.where(grp[tk] == g)
++    if len(rows) < 200:
++        ks = np.where(grp == g)[0]; rows = np.repeat(np.arange(len(Ttr)), 2); kk = ks[np.arange(len(rows)) % len(ks)]
++    else: kk = tk[rows, cols]
++    D = Ttr[rows] - Mq[kk]
++    Qt[g] = ((D @ VQ8[g]) ** 2).mean(0); QtP[g] = ((D @ VP[g]) ** 2).mean(0)
++iso = np.repeat(Qi.sum(1, keepdims=True) / n, n, 1); H25 = (0.75 * np.sqrt(Qi) + 0.25 * np.sqrt(iso)) ** 2
++Qmix = ((np.sqrt(Qi) + np.sqrt(Qt)) / 2) ** 2
++w = np.diff(gstart) / N
++def slack(lm, q): return float((np.sqrt(lm * q).sum(1) * w).sum())
++log("zero-bit Cauchy-Schwarz slack E sum sqrt(lam q), item offsets: PCA", slack(lamP, QiP), "dual", slack(lam, Qi),
++    "| text offsets: PCA", slack(lamP, QtP), "dual", slack(lam, Qt))
++
++os.makedirs(OUT, exist_ok=True)
++for f in os.listdir(BASE):
++    if f in ("V.npy", "lam.npy") or f.startswith("prof_"): continue
++    d = os.path.join(OUT, f)
++    if not os.path.exists(d): os.symlink(BASE + f, d)
++np.save(OUT + "/V.npy", Vout); np.save(OUT + "/lam.npy", lam); np.save(OUT + "/r2.npy", r2); np.save(OUT + "/gamma.npy", gam_all)
++for k, v in (("qi", Qi), ("h0.25", H25), ("qt", Qt), ("qmix", Qmix)): np.save(OUT + f"/prof_{k}.npy", np.ascontiguousarray(v))
++json.dump(dict(mode=MODE, ridge=RIDGE, cond_max=float(cond.max()), slack=dict(item_pca=slack(lamP, QiP), item_dual=slack(lam, Qi), text_pca=slack(lamP, QtP), text_dual=slack(lam, Qt))),
++          open(OUT + "/dual.json", "w"), indent=1)
++log("written", OUT)
+diff --git a/rust/tools/diag_sq.py b/rust/tools/diag_sq.py
+new file mode 100644
+index 0000000..be0622e
+--- /dev/null
++++ b/rust/tools/diag_sq.py
+@@ -0,0 +1,46 @@
++# Which offset law to fit Sigma_Q on: zero-bit diagonal Cauchy-Schwarz slack E sum_c sqrt(lam_c q_c) per item, averaged
++# over groups by size, for several fits, evaluated on several offset populations (global covariances).
++# Offsets "proj" are q - (q.m^)m^; "raw" are q - m; "near" uses each query's nearest clusters, "rand" clusters drawn by size.
++import numpy as np, time
++P = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"
++VC = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/"
++t0 = time.time()
++def log(*a): print(f"[{time.time()-t0:6.0f}s]", *a, flush=True)
++def unit(a):
++    a = np.asarray(a, dtype=np.float32); return a / np.linalg.norm(a, axis=1, keepdims=True)
++I = np.load(P + "idx_m768/index.npz"); Xs = np.load(P + "idx_m768/Xs.npy", mmap_mode="r")
++N, n, K, G = int(I["N"]), int(I["n"]), int(I["K"]), int(I["G"])
++Mq = I["Mq"].astype(np.float32); mn = I["mn"]; Mh = (Mq / mn[:, None]).astype(np.float32)
++assign, cstart, grp, qi, lamP, VP = I["assign"], I["cstart"], I["grp"], I["qi"], I["lam"], I["V"]
++pc = np.diff(cstart) / N; w = np.bincount(grp[assign], minlength=G) / N
++rng = np.random.default_rng(7); pool = np.setdiff1d(np.arange(N), qi)
++def cov(Q, how, kn):
++    S = np.zeros((n, n)); c = 0
++    for i in range(0, len(Q), 200):
++        q = Q[i:i+200]
++        ks = rng.choice(K, (len(q), 40), p=pc) if how.startswith("rand") else np.argsort(-(q @ Mq.T), axis=1)[:, :kn]
++        C = Mh[ks]; M = Mq[ks]
++        D = q[:, None, :] - (np.einsum("bkn,bn->bk", C, q)[:, :, None] * C if how.endswith("proj") else M)
++        D = D.reshape(-1, n).astype(np.float64); S += D.T @ D; c += len(D)
++    return S / c
++IT = unit(Xs[np.sort(rng.choice(pool, 3000, replace=False))]); IT2 = unit(Xs[np.sort(rng.choice(pool, 3000, replace=False))])
++TT = unit(np.load(VC + "text_train.npy")); TQ = unit(np.load(VC + "text_q.npy"))
++fits = {"item_rand_proj": cov(IT, "rand_proj", 0), "item_near4_proj": cov(IT, "near_proj", 4), "item_near4_raw": cov(IT, "near_raw", 4)}
++St = cov(TT, "rand_proj", 0)
++fits["mix_rand_proj"] = 0.5 * (fits["item_rand_proj"] / np.trace(fits["item_rand_proj"]) + St / np.trace(St))
++pops = {"item near4 proj (held-out)": cov(IT2, "near_proj", 4), "item rand proj (held-out)": cov(IT2, "rand_proj", 0),
++        "text test near50 proj": cov(TQ, "near_proj", 50), "text test rand proj": cov(TQ, "rand_proj", 0)}
++log("covariances done")
++def slack_pca(C): return sum(w[g] * np.sqrt(lamP[g] * np.einsum("ic,ij,jc->c", VP[g], C, VP[g])).sum() for g in range(G))
++res = {"PCA": {k: slack_pca(C) for k, C in pops.items()}}
++for name, SQ in fits.items():
++    SQ = SQ + 0.1 * np.trace(SQ) / n * np.eye(n); lq, vq = np.linalg.eigh(SQ); A = (vq * np.sqrt(lq)) @ vq.T; Ai = (vq / np.sqrt(lq)) @ vq.T
++    acc = {k: 0.0 for k in pops}
++    for g in range(G):
++        SR = (VP[g].astype(np.float64) * lamP[g]) @ VP[g].T
++        gam, W = np.linalg.eigh(A @ SR @ A); gam = np.maximum(gam, 1e-12 * gam.max()); VQ = (Ai @ W) * gam ** 0.25
++        for k, C in pops.items(): acc[k] += w[g] * np.sqrt(np.sqrt(gam) * np.einsum("ic,ij,jc->c", VQ, C, VQ)).sum()
++    res[name] = acc; log(name, {k: round(v, 4) for k, v in acc.items()})
++print("\nslack (smaller is better), rows = basis fit, columns = offset population")
++print(f"{'':18s}" + "".join(f"{k:>28s}" for k in pops))
++for r, d in res.items(): print(f"{r:18s}" + "".join(f"{d[k]:28.4f}" for k in pops))
+diff --git a/rust/tools/clipcheck.py b/rust/tools/clipcheck.py
+new file mode 100644
+index 0000000..d66f29c
+--- /dev/null
++++ b/rust/tools/clipcheck.py
+@@ -0,0 +1,87 @@
++# The dead-list experiment (exp4 PCA basis vs exp5 simultaneous diagonalisation, uniform quantiser of FINDINGS 4) redone
++# on a subset of the prototype's groups, with and without clipping. Reports, per budget, the clip rate (coded coordinates
++# outside the quantiser's range), the mean certified half-width h, and the share of (item, query) pairs undecided at each
++# query's 1% threshold. The unclipped quantiser keeps the same cells but extends the outer ones without bound (not a
++# fixed-rate code: its outer indices would need escape bits, not counted here).
++import numpy as np, sys, time
++P = "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/"
++t0 = time.time()
++def log(*a): print(f"[{time.time()-t0:6.0f}s]", *a, flush=True)
++def unit(a):
++    a = np.asarray(a, dtype=np.float32); return a / np.linalg.norm(a, axis=1, keepdims=True)
++I = np.load(P + "idx_m768/index.npz"); Xs = np.load(P + "idx_m768/Xs.npy", mmap_mode="r")
++N, n, K, G = int(I["N"]), int(I["n"]), int(I["K"]), int(I["G"])
++Mq = I["Mq"].astype(np.float32); assign, cstart, grp, qi = I["assign"], I["cstart"], I["grp"], I["qi"]
++lamP, VP, Q, qcls, thr = I["lam"], I["V"], I["Q"].astype(np.float32), I["qcls"], I["thr"]
++NG = int(sys.argv[1]) if len(sys.argv) > 1 else 12
++STEP = {2: 0.9957, 3: 0.5860, 4: 0.3352, 5: 0.1881, 6: 0.1041, 7: 0.0569, 8: 0.0308}
++GT = np.array([1, .3634, .1188, .03744, .01154, .00349, .00104, .0003043, .0000876])
++BUDGETS = [32, 64, 128, 256, 384, 768]
++def quant(Z, bits, clip):
++    out = np.zeros_like(Z); nclip = 0; ncoded = 0
++    for b in np.unique(bits):
++        if b == 0: continue
++        cols = np.where(bits == b)[0]; z = Z[:, cols]; ncoded += z.size
++        if b == 1: out[:, cols] = np.where(z >= 0, 0.7979, -0.7979); continue
++        s = STEP[int(b)]; L = 2 ** int(b); k = np.floor(z / s)
++        nclip += int(((k < -L // 2) | (k > L // 2 - 1)).sum())
++        out[:, cols] = ((np.clip(k, -L // 2, L // 2 - 1) if clip else k) + 0.5) * s
++    return out, nclip, ncoded
++def alloc(a, B):                       # greedy bits minimising sum sqrt(a GT(b)), a = per-coordinate query x item energy
++    b = np.zeros(n, int); sg = np.sqrt(GT); gain = np.sqrt(a) * (sg[0] - sg[1])
++    for _ in range(B):
++        i = int(gain.argmax()); b[i] += 1; gain[i] = np.sqrt(a[i]) * (sg[b[i]] - sg[b[i] + 1]) if b[i] < 8 else -1
++    return b
++rng = np.random.default_rng(0); pool = np.setdiff1d(np.arange(N), qi)
++pq = unit(Xs[np.sort(rng.choice(pool, 20000, replace=False))]); pk = np.argsort(-(pq @ Mq.T), axis=1)
++def cov_delta(mask, kk):
++    rows, cols = np.where(mask[:, :kk]); M = Mq[pk[rows, cols]]
++    if __import__('os').environ.get('PROJ'):              # offsets q - (q.m^)m^ instead of q - m
++        Mh_ = M / np.linalg.norm(M, axis=1, keepdims=True); M = (Mh_ * (pq[rows] * Mh_).sum(1, keepdims=True))
++    D = (pq[rows] - M).astype(np.float64)
++    return D.T @ D / max(len(rows), 1), len(rows)
++SD_all, _ = cov_delta(np.ones_like(pk, bool), 8)
++gsz = np.bincount(grp[assign], minlength=G); gsel = np.argsort(-gsz)[::max(1, G // NG)][:NG]   # spread over sizes
++log("groups", gsel.tolist(), "items", int(gsz[gsel].sum()))
++T1 = thr[:, 2]; isitem = qcls == "item"
++acc = {}
++for g in gsel:
++    ks = np.where(grp == g)[0]; kpos = -np.ones(K, int); kpos[ks] = np.arange(len(ks))
++    lam = np.maximum(lamP[g], 1e-12); U = VP[g].astype(np.float64)
++    # exp4: PCA basis, profile from the 4 nearest clusters; exp5: simultaneous diagonalisation, 8 nearest, 0.8/0.2 shrink
++    m4 = grp[pk[:, :4]] == g; rows, cols = np.where(m4)
++    Qe = (((pq[rows] - Mq[pk[rows, cols]]) @ U) ** 2).mean(0) if len(rows) > 50 else lam
++    SDg, npair = cov_delta(np.pad(grp[pk[:, :8]] == g, ((0, 0), (0, pk.shape[1] - 8))), 8)
++    SDg = SD_all if npair < 200 or __import__('os').environ.get('GLOBAL') else 0.8 * SDg + 0.2 * SD_all
++    RIDGE = float(__import__('os').environ.get('RIDGE', '0')); SDg = SDg + RIDGE * np.trace(SDg) / n * np.eye(n)
++    Lh = np.sqrt(lam); gam, Pm = np.linalg.eigh((U * Lh).T @ SDg @ (U * Lh)); gam = np.maximum(gam[::-1], 1e-30); Pm = Pm[:, ::-1]
++    bases = {"pca": (U, U, np.sqrt(lam), lam * Qe), "simdiag": ((U / Lh) @ Pm, (U * Lh) @ Pm, np.ones(n), gam)}
++    if __import__('os').environ.get('DUALDIR'):                # the exported dual pair: z = VD^T r with mean square sqrt(gamma)
++        dd = __import__('os').environ['DUALDIR']; VQd = np.load(dd + "/V.npy", mmap_mode="r")[g].astype(np.float64); gd = np.load(dd + "/gamma.npy")[g]
++        bases["dual"] = (np.linalg.inv(VQd).T, VQd, gd ** 0.25, gd)
++    if __import__('os').environ.get('ONLY'): bases = {k: v for k, v in bases.items() if k == __import__('os').environ['ONLY']}
++    s, e = np.searchsorted(grp[assign], [g, g + 1])
++    for name, (Vi, Vq, sig, en) in bases.items():           # z = r Vi (item side), query side q Vq, <q Vq, z> = q.r
++        QV = Q @ Vq; MV = Mq[ks] @ Vq; Dl = QV[None] - MV[:, None]
++        specs = []
++        for B in BUDGETS:
++            bits = alloc(en, B); Dv = ((sig ** 2 * GT[bits] + 1e-20) / (en / sig ** 2 + 1e-20)) ** 0.25
++            specs.append((B, bits, Dv, np.sqrt(((Dl * Dv) ** 2).sum(2))))
++        for c in range(s, e, 20000):
++            c1 = min(e, c + 20000); x = np.asarray(Xs[c:c1], np.float32); a = assign[c:c1]; ap = kpos[a]
++            true = x @ Q.T; base = (Mq[a] @ Q.T); z = (x - Mq[a]) @ Vi; mva = MV[ap]
++            for B, bits, Dv, dw in specs:
++                for clip in (True, False):
++                    code, ncl, nco = quant(z / sig, bits, clip); code *= sig
++                    cn2 = (code * code).sum(1) + 1e-20; gm = (z * code).sum(1) / cn2
++                    ev = z - gm[:, None] * code; sc = code @ QV.T; ew = np.linalg.norm(ev / Dv, axis=1); me = (mva * ev).sum(1)
++                    est = base + gm[:, None] * sc + me[:, None]; h = dw[ap] * ew[:, None] * 1.0005 + 5e-5
++                    viol = int((np.abs(est - true) > h).sum())
++                    und = (est - h < T1[None]) & (est + h >= T1[None])
++                    k_ = (name, B, clip); r = acc.setdefault(k_, np.zeros(8))
++                    r += [ncl, nco, h[:, isitem].sum(), h[:, ~isitem].sum(), und[:, isitem].sum(), und[:, ~isitem].sum(), len(x), viol]
++    log("group", g, "done")
++nI, nT = isitem.sum(), (~isitem).sum()
++print("\nbasis    budget(B) clip  clip-rate%   mean h item   mean h text   undecided@1% item%  text%  violations")
++for (name, B, clip), r in sorted(acc.items()):
++    print(f"{name:8s} {B//8:6d}   {str(clip):5s} {100*r[0]/max(r[1],1):9.3f}   {r[2]/r[6]/nI:11.5f}   {r[3]/r[6]/nT:11.5f}   {100*r[4]/r[6]/nI:11.3f}  {100*r[5]/r[6]/nT:7.3f}  {int(r[7])}")
+diff --git a/rust/tools/run_e2e.sh b/rust/tools/run_e2e.sh
+new file mode 100755
+index 0000000..a931325
+--- /dev/null
++++ b/rust/tools/run_e2e.sh
+@@ -0,0 +1,11 @@
++#!/bin/bash
++# Timed runs, one at a time, holding the shared timing lock. Usage: run_e2e.sh TAG DATA PROFILE [extra args]
++P=/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto; LOCK=/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/TIMING.lock
++TAG=$1; DATA=$2; PROF=$3; shift 3
++touch $LOCK
++trap 'rm -f $LOCK' EXIT
++sleep 20
++echo "uptime before $TAG: $(uptime)" | tee -a $P/logs/uptime.log
++VEXACT_CLIPSTATS=1 $P/target/release/vexact --v2 e2e --nq 100 --nflat 10 --data $DATA --profile $PROF --res $P/results/$TAG "$@" > $P/logs/${TAG}_e2e.log 2>&1
++echo "uptime after $TAG: $(uptime)" | tee -a $P/logs/uptime.log
++rm -f $LOCK

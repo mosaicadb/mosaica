@@ -1,0 +1,42 @@
+
+== text queries (369): score sd 0.0400, median 0.491, max 0.726 (max is 5.87 sd above the median), kurtosis 4.68
+answer fraction p = k/N          1e-06     3e-06     1e-05     3e-05     1e-04     3e-04     1e-03     3e-03     1e-02     3e-02     1e-01
+threshold, sd above median        5.87      5.68      5.48      5.27      4.98      4.67      4.25      3.71      3.01      2.30      1.25
+  Gaussian tail would give        4.75      4.53      4.26      4.01      3.72      3.43      3.09      2.75      2.33      1.88      1.28
+shell fraction, w = 1 sd          0.115%    0.138%    0.181%    0.254%    0.413%    0.679%    1.246%    2.309%    5.308%   11.920%   39.057%
+  local exponent of the shell count in N     0.83    0.78    0.69    0.60    0.55    0.50    0.44    0.31    0.26    0.01
+shell fraction, w = 2 sd          0.676%    0.848%    1.129%    1.540%    2.274%    3.321%    5.246%    8.752%   18.528%   37.366%   80.354%
+  local exponent of the shell count in N     0.79    0.76    0.72    0.68    0.66    0.62    0.53    0.38    0.36    0.36
+shell fraction, w = 3 sd          2.718%    3.486%    4.502%    5.848%    8.033%   10.961%   15.994%   25.622%   48.226%   76.450%   97.587%
+  local exponent of the shell count in N     0.77    0.79    0.76    0.74    0.72    0.69    0.57    0.47    0.58    0.80
+shell fraction, w = 4 sd          9.439%   11.525%   14.210%   17.492%   22.536%   29.087%   40.254%   59.342%   84.024%   96.763%   99.865%
+  local exponent of the shell count in N     0.82    0.83    0.81    0.79    0.77    0.73    0.65    0.71    0.87    0.97
+shell fraction, w = 5 sd         25.627%   29.874%   35.098%   41.099%   50.082%   60.389%   74.401%   90.152%   98.208%   99.855%   99.996%
+  local exponent of the shell count in N     0.86    0.87    0.86    0.84    0.83    0.83    0.83    0.93    0.98    1.00
+shell fraction, w = 6 sd         53.049%   59.006%   65.300%   71.747%   79.979%   87.338%   94.449%   99.026%   99.932%   99.997%  100.000%
+  local exponent of the shell count in N     0.90    0.92    0.91    0.91    0.92    0.93    0.96    0.99    1.00    1.00
+expansion constant at the 10th / 100th / 1000th neighbour: median [99990.   9999.    999.9] mean log2 [16.609 13.288  9.966]
+local intrinsic dimension (k = 20 / 100 / 1000): median [89.354 68.946 52.049]
+Chavez-Navarro intrinsic dimension mu^2 / (2 sigma^2) of the distance histogram: median 279.3
+10th-neighbour distance ~ N^slope: slope median -0.0146, mean -0.0164 -> dimension 68.7; mean distance by N [0.794 0.784 0.774 0.766 0.758 0.752]
+
+== item queries (100): score sd 0.0682, median 0.573, max 0.943 (max is 6.03 sd above the median), kurtosis 5.17
+answer fraction p = k/N          1e-06     3e-06     1e-05     3e-05     1e-04     3e-04     1e-03     3e-03     1e-02     3e-02     1e-01
+threshold, sd above median        6.03      5.81      5.59      5.40      5.16      4.87      4.47      3.94      3.13      2.24      1.23
+  Gaussian tail would give        4.75      4.53      4.26      4.01      3.72      3.43      3.09      2.75      2.33      1.88      1.28
+shell fraction, w = 1 sd          0.829%    0.896%    0.947%    0.997%    1.069%    1.179%    1.421%    2.070%    4.487%   12.943%   41.539%
+  local exponent of the shell count in N     0.93    0.95    0.95    0.94    0.91    0.84    0.66    0.36    0.04    0.03
+shell fraction, w = 2 sd          3.019%    3.299%    3.509%    3.769%    4.158%    4.767%    5.951%    8.470%   17.134%   40.754%   79.650%
+  local exponent of the shell count in N     0.92    0.95    0.94    0.92    0.88    0.82    0.68    0.41    0.21    0.44
+shell fraction, w = 3 sd         10.291%   10.900%   11.401%   12.048%   13.088%   14.491%   17.313%   24.223%   44.226%   77.502%   98.411%
+  local exponent of the shell count in N     0.95    0.96    0.95    0.93    0.91    0.85    0.69    0.50    0.49    0.80
+shell fraction, w = 4 sd         22.200%   23.558%   24.791%   26.183%   28.429%   31.798%   38.793%   52.509%   80.069%   97.691%   99.965%
+  local exponent of the shell count in N     0.95    0.96    0.95    0.93    0.90    0.83    0.72    0.65    0.82    0.98
+shell fraction, w = 5 sd         36.250%   38.161%   40.351%   43.065%   47.447%   53.630%   64.384%   80.301%   97.128%   99.955%  100.000%
+  local exponent of the shell count in N     0.95    0.95    0.94    0.92    0.89    0.85    0.80    0.84    0.97    1.00
+shell fraction, w = 6 sd         49.371%   52.570%   56.559%   60.775%   67.191%   75.109%   85.406%   95.889%   99.862%  100.000%  100.000%
+  local exponent of the shell count in N     0.94    0.94    0.93    0.92    0.90    0.89    0.89    0.97    1.00    1.00
+expansion constant at the 10th / 100th / 1000th neighbour: median [4050.3   2958.075  998.056] mean log2 [12.495 10.595  8.392]
+local intrinsic dimension (k = 20 / 100 / 1000): median [21.557 20.17  15.7  ]
+Chavez-Navarro intrinsic dimension mu^2 / (2 sigma^2) of the distance histogram: median 91.8
+10th-neighbour distance ~ N^slope: slope median -0.0498, mean -0.0567 -> dimension 20.1; mean distance by N [0.463 0.443 0.426 0.408 0.394 0.38 ]

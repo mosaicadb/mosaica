@@ -1,0 +1,25 @@
+[     1s] query 0 violations 0 of 3941236
+[    10s] query 20 violations 0 of 82765956
+[    19s] query 40 violations 0 of 161590676
+[    28s] query 60 violations 0 of 240415396
+[    36s] query 80 violations 0 of 319240116
+[    44s] query 100 violations 0 of 398064836
+[    52s] query 120 violations 0 of 476889556
+[    61s] query 140 violations 0 of 555714276
+[    69s] query 160 violations 0 of 634538996
+[    78s] query 180 violations 0 of 713363716
+[    87s] query 200 violations 0 of 792188436
+[    95s] query 220 violations 0 of 871013156
+[   104s] query 240 violations 0 of 949837876
+[   112s] query 260 violations 0 of 1028662596
+[   120s] query 280 violations 0 of 1107487316
+[   128s] query 300 violations 0 of 1186312036
+[   136s] query 320 violations 0 of 1265136756
+[   144s] query 340 violations 0 of 1343961476
+[   153s] query 360 violations 0 of 1422786196
+[   160s] query 380 violations 0 of 1501610916
+[   168s] query 400 violations 0 of 1580435636
+[   176s] query 420 violations 0 of 1659260356
+[   183s] query 440 violations 0 of 1738085076
+[   190s] query 460 violations 0 of 1816909796
+[   194s] done; violations 0 of 1848439684 interval checks

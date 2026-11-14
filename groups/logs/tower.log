@@ -1,0 +1,16 @@
+446 tensors, 150 non-visual
+bytes 494601220
+ln_final.bias (768,) float32
+ln_final.weight (768,) float32
+logit_scale () float32
+positional_embedding (77, 768) float32
+text_projection (768, 768) float32
+token_embedding.weight (49408, 768) float32
+transformer.resblocks.0.attn.in_proj_bias (2304,) float32
+transformer.resblocks.0.attn.in_proj_weight (2304, 768) float32
+transformer.resblocks.9.ln_2.bias (768,) float32
+transformer.resblocks.9.ln_2.weight (768,) float32
+transformer.resblocks.9.mlp.c_fc.bias (3072,) float32
+transformer.resblocks.9.mlp.c_fc.weight (3072, 768) float32
+transformer.resblocks.9.mlp.c_proj.bias (768,) float32
+transformer.resblocks.9.mlp.c_proj.weight (768, 3072) float32
