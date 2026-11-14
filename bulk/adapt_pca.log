@@ -1,0 +1,130 @@
+[    45s] setup done: basis pca, sample 200000, clusters present 1000, queries text 93 item 60
+[    52s] query 1/153 (text); violations 0
+[   112s] query 11/153 (text); violations 0
+[   170s] query 21/153 (text); violations 0
+[   231s] query 31/153 (text); violations 0
+[   294s] query 41/153 (text); violations 0
+[   357s] query 51/153 (text); violations 0
+[   418s] query 61/153 (text); violations 0
+[   480s] query 71/153 (text); violations 0
+[   542s] query 81/153 (text); violations 0
+[   606s] query 91/153 (text); violations 0
+[   669s] query 101/153 (item); violations 0
+[   733s] query 111/153 (item); violations 0
+[   797s] query 121/153 (item); violations 0
+[   861s] query 131/153 (item); violations 0
+[   923s] query 141/153 (item); violations 0
+[   986s] query 151/153 (item); violations 0
+
+== text queries (93), basis pca; threshold above median (sd): [5.  4.2 3.  1.8]
+   items by band (%), rows = answer sizes, cols = |s-t|/sd in [0, 0.5, 1, 2, 4, 8, inf]
+[[ 0.1  0.2  2.  20.7 76.4  0.5]
+ [ 0.4  0.8  4.5 35.4 58.8  0. ]
+ [ 2.2  3.2 14.1 64.8 15.7  0. ]
+ [ 7.4 10.9 38.4 42.6  0.7  0. ]]
+ fix/both     dyad: coords/item [ 45.3  66.2 118.2 201.1]   undecided at zero read [68.8 78.  90.4 98.7]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[443.8 359.5 231.1  99.   24.5   3.7]
+ [514.1 385.5 241.5  94.5  28.    2.9]
+ [538.9 392.7 226.6  86.7  35.7   8. ]
+ [536.3 366.2 197.  105.9  60.3   nan]]
+      share of cost by band (%):
+[[ 1.3  1.8 10.2 45.4 41.3  0. ]
+ [ 3.2  4.8 16.5 50.6 24.9  0. ]
+ [10.1 10.6 27.  47.5  4.8  0. ]
+ [19.9 19.9 37.6 22.4  0.2  0. ]]
+ fix/both     fine: coords/item [ 37.4  54.7  98.4 168.7]   undecided at zero read [68.8 78.  90.4 98.7]%
+ fix/dq       dyad: coords/item [ 45.3  66.2 118.2 201.1]   undecided at zero read [68.8 78.  90.4 98.7]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[443.8 359.5 231.1  99.   24.5   3.7]
+ [514.1 385.5 241.5  94.5  28.    2.9]
+ [538.9 392.7 226.6  86.7  35.7   8. ]
+ [536.3 366.2 197.  105.9  60.3   nan]]
+      share of cost by band (%):
+[[ 1.3  1.8 10.2 45.4 41.3  0. ]
+ [ 3.2  4.8 16.5 50.6 24.9  0. ]
+ [10.1 10.6 27.  47.5  4.8  0. ]
+ [19.9 19.9 37.6 22.4  0.2  0. ]]
+ fix/dq       fine: coords/item [ 40.8  59.8 107.4 184. ]   undecided at zero read [68.8 78.  90.4 98.7]%
+ prod/both    dyad: coords/item [ 31.2  47.2  89.3 159.7]   undecided at zero read [68.8 78.  90.4 98.7]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[383.1 285.3 173.7  70.2  15.7   1.9]
+ [474.  306.7 182.9  67.2  18.1   1.4]
+ [505.1 313.7 173.5  61.8  23.2   3. ]
+ [501.6 290.5 151.   76.2  40.6   nan]]
+      share of cost by band (%):
+[[ 1.6  2.1 11.2 46.6 38.5  0. ]
+ [ 4.2  5.3 17.5 50.4 22.6  0. ]
+ [12.5 11.2 27.4 44.8  4.1  0. ]
+ [23.4 19.8 36.3 20.3  0.2  0. ]]
+ prod/both    fine: coords/item [ 25.9  39.2  74.3 133.3]   undecided at zero read [68.8 78.  90.4 98.7]%
+ prod/dq      dyad: coords/item [ 37.3  56.3 105.5 186.6]   undecided at zero read [68.8 78.  90.4 98.7]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[433.3 342.9 209.4  84.2  18.7   2.2]
+ [514.3 368.1 220.5  80.5  21.5   1.6]
+ [542.2 377.1 208.4  73.8  27.5   3. ]
+ [539.7 350.9 180.1  90.8  48.    nan]]
+      share of cost by band (%):
+[[ 1.5  2.1 11.3 46.8 38.3  0. ]
+ [ 3.8  5.4 17.7 50.7 22.4  0. ]
+ [11.3 11.4 27.8 45.3  4.1  0. ]
+ [21.5 20.5 37.1 20.7  0.2  0. ]]
+ prod/dq      fine: coords/item [ 30.9  46.7  88.1 157. ]   undecided at zero read [68.8 78.  90.4 98.7]%
+
+== item queries (60), basis pca; threshold above median (sd): [5.4 4.7 3.2 1.7]
+   items by band (%), rows = answer sizes, cols = |s-t|/sd in [0, 0.5, 1, 2, 4, 8, inf]
+[[ 0.7  0.4  2.9 22.4 67.5  6.1]
+ [ 1.   0.4  4.4 28.9 64.9  0.4]
+ [ 2.   2.  12.1 61.5 22.3  0. ]
+ [ 9.3 13.5 39.9 37.   0.3  0. ]]
+ fix/both     dyad: coords/item [  4.5  10.7  38.7 116.3]   undecided at zero read [19.3 31.9 62.6 95.5]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[ 42.9  31.5   8.    5.6   3.8   0.6]
+ [106.3  90.8  26.8  13.5   6.4   1.4]
+ [271.6 162.2  64.6  31.   13.8   nan]
+ [339.4 168.3 105.6  53.7  24.5   0. ]]
+      share of cost by band (%):
+[[ 6.9  2.7  5.1 27.8 56.8  0.8]
+ [ 9.7  3.7 11.  36.5 39.   0.1]
+ [14.2  8.3 20.2 49.3  8.   0. ]
+ [27.1 19.6 36.2 17.   0.1  0. ]]
+ fix/both     fine: coords/item [ 3.7  8.8 32.  96.6]   undecided at zero read [19.3 31.9 62.6 95.5]%
+ fix/dq       dyad: coords/item [  4.5  10.7  38.7 116.3]   undecided at zero read [19.3 31.9 62.6 95.5]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[ 42.9  31.5   8.    5.6   3.8   0.6]
+ [106.3  90.8  26.8  13.5   6.4   1.4]
+ [271.6 162.2  64.6  31.   13.8   nan]
+ [339.4 168.3 105.6  53.7  24.5   0. ]]
+      share of cost by band (%):
+[[ 6.9  2.7  5.1 27.8 56.8  0.8]
+ [ 9.7  3.7 11.  36.5 39.   0.1]
+ [14.2  8.3 20.2 49.3  8.   0. ]
+ [27.1 19.6 36.2 17.   0.1  0. ]]
+ fix/dq       fine: coords/item [  4.    9.5  34.7 105. ]   undecided at zero read [19.3 31.9 62.6 95.5]%
+ prod/both    dyad: coords/item [ 2.9  7.2 27.9 89.9]   undecided at zero read [19.3 31.9 62.6 95.5]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[ 33.5  23.2   5.7   3.8   2.3   0.3]
+ [ 88.4  69.5  19.6   9.2   3.8   0.7]
+ [234.  127.4  47.6  21.1   8.4   nan]
+ [291.2 132.8  77.6  37.4  15.6   0. ]]
+      share of cost by band (%):
+[[ 8.5  3.1  5.8 29.4 52.7  0.6]
+ [12.1  4.2 12.1 37.  34.7  0. ]
+ [17.   9.  20.7 46.5  6.8  0. ]
+ [30.1 20.  34.5 15.4  0.1  0. ]]
+ prod/both    fine: coords/item [ 2.4  5.9 23.1 74.5]   undecided at zero read [19.3 31.9 62.6 95.5]%
+ prod/dq      dyad: coords/item [  3.4   8.5  32.8 105.1]   undecided at zero read [19.3 31.9 62.6 95.5]%
+      coords per item in band (0.01% / 0.1% / 1% / 5% rows):
+[[ 38.5  27.1   6.8   4.5   2.7   0.3]
+ [100.4  83.1  23.3  10.9   4.5   0.7]
+ [264.3 150.7  56.6  25.    9.9   nan]
+ [330.5 156.1  92.6  44.1  18.    0. ]]
+      share of cost by band (%):
+[[ 8.3  3.1  5.8 29.6 52.7  0.6]
+ [11.6  4.3 12.1 37.3 34.7  0. ]
+ [16.4  9.  20.9 46.9  6.7  0. ]
+ [29.2 20.1 35.2 15.5  0.   0. ]]
+ prod/dq      fine: coords/item [ 2.8  7.  27.2 87.6]   undecided at zero read [19.3 31.9 62.6 95.5]%
+
+violations {'fix/both': 0, 'fix/dq': 0, 'prod/both': 0, 'prod/dq': 0} interval checks 2448000000
+[   998s] done

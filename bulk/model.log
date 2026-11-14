@@ -1,0 +1,15 @@
+target bound / zero-read slack R | share read: fixed, query-chosen | ratio
+  R=0.90   fixed 0.100   chosen 0.0249   ratio 4.02
+  R=0.80   fixed 0.200   chosen 0.0608   ratio 3.29
+  R=0.70   fixed 0.300   chosen 0.1050   ratio 2.86
+  R=0.50   fixed 0.500   chosen 0.2191   ratio 2.28
+  R=0.30   fixed 0.700   chosen 0.3784   ratio 1.85
+  R=0.20   fixed 0.800   chosen 0.4861   ratio 1.65
+  R=0.10   fixed 0.900   chosen 0.6324   ratio 1.42
+Proposition D: least k with k(1+2sqrt(L)+2L)+sqrt(pi k)+2 >= (1-R^2) D, L = ln(eM/k)
+  D=160 M=768 R=0.8: k >= 3   (fixed order in the flat model: 32)
+  D=160 M=768 R=0.5: k >= 7   (fixed order in the flat model: 80)
+  D=100 M=100 R=0.8: k >= 3   (fixed order in the flat model: 20)
+  D=100 M=100 R=0.5: k >= 6   (fixed order in the flat model: 50)
+  D=400 M=5000 R=0.8: k >= 7   (fixed order in the flat model: 80)
+  D=400 M=5000 R=0.5: k >= 15   (fixed order in the flat model: 200)

@@ -1,0 +1,19 @@
+Sat Nov 14 01:07:40 UTC 2026
+clusters 1000 x 1024 items, 8 then 16 more columns (12.0 B of code per item), 6 block norms, vector selection
+ns per item: total 5.17 | order selection 1.07 (1.10 us per cluster) | prefetch 1.62 | tables 0.17 | accumulate 0.96 (0.040 per item-column) | two checks 1.31
+(timer overhead is inside the parts; undecided count on random data 130475)
+clusters 1000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, vector selection
+ns per item: total 7.60 | order selection 1.16 (1.19 us per cluster) | prefetch 3.01 | tables 0.32 | accumulate 1.63 (0.034 per item-column) | two checks 1.44
+(timer overhead is inside the parts; undecided count on random data 130516)
+clusters 1000 x 1024 items, 32 then 32 more columns (32.0 B of code per item), 6 block norms, vector selection
+ns per item: total 8.87 | order selection 1.31 (1.34 us per cluster) | prefetch 3.55 | tables 0.41 | accumulate 2.11 (0.033 per item-column) | two checks 1.45
+(timer overhead is inside the parts; undecided count on random data 130744)
+clusters 1000 x 1024 items, 16 then 16 more columns (16.0 B of code per item), 6 block norms, vector selection
+ns per item: total 6.36 | order selection 1.15 (1.18 us per cluster) | prefetch 2.08 | tables 0.34 | accumulate 1.29 (0.040 per item-column) | two checks 1.45
+(timer overhead is inside the parts; undecided count on random data 130473)
+clusters 1000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, scalar selection
+ns per item: total 14.65 | order selection 8.51 (8.71 us per cluster) | prefetch 2.82 | tables 0.30 | accumulate 1.58 (0.033 per item-column) | two checks 1.37
+(timer overhead is inside the parts; undecided count on random data 130416)
+clusters 4000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, vector selection
+ns per item: total 7.18 | order selection 1.13 (1.16 us per cluster) | prefetch 2.76 | tables 0.32 | accumulate 1.55 (0.032 per item-column) | two checks 1.38
+(timer overhead is inside the parts; undecided count on random data 524756)

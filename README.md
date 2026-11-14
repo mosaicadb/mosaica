@@ -32,6 +32,7 @@ This branch holds no Mosaica code and shares no history with it.
 | `knn/` | k-nearest-neighbour on the same index, against HNSW and IVF-PQ, filtered and unfiltered |
 | `proofcheck/` | Referee report, consolidated proofs, numerical checks |
 | `groups/` | What a grouping can buy (at most log₂K bits per item); the geometric-mean metric for the per-item bound; where the cost goes by distance from the threshold; tolerance bands |
+| `bulk/` | Making the bulk cheaper: query-chosen column order, a columnar kernel, dithered cells, and which assumptions of the floors can be escaped |
 | `dualproto/` | The dual basis in the native version 2 prototype: bytes, timings, correctness, the code changes, and why `exp5.py` lost |
 | `sublinear/` | Whether a query's work can grow sublinearly in N: lower bounds, the shell law of cost, exponents measured from 31k to 1M items, caching |
 | `site/` | Builds the published proofs page from `proofcheck/CONSOLIDATED_PROOFS.md` (`python3 build.py` in `site/`) |
@@ -59,5 +60,5 @@ A native Rust prototype exists (`rust/`, results in `rust/REPORT2.md`); most oth
 byte or coordinate counts from numpy prototypes. `DESIGN.md` section 9 lists findings made after the
 design and not yet adopted.
 
-In progress (November 2026): a study of the per-item cost of the bulk, the items 1–8 score standard
-deviations from the threshold that carry most of the cost.
+Next (November 2026): the query-chosen column order of `bulk/REPORT.md` and the sort key of
+`groups/REPORT.md` section 3.3 in the native prototype; neither has been run there.

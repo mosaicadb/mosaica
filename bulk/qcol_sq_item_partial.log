@@ -1,0 +1,5 @@
+[    55s] setup done: basis ../sq_item.npy, sample 200000, clusters present 1000, queries text 24 item 14
+[    61s] profile and fixed orders done
+[    63s] code 4 bits, 14 cells, step 0.6 sd: escapes 0.124% of coordinates
+[    93s] fixW weights and stored norms done
+[   120s] query 1/38 (text); violations 0; largest randomised error 4.72 proxy sd
