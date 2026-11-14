@@ -117,3 +117,98 @@ Wrong decisions against brute force: **0** in every row of every code (5 shares 
 `split.py`, `runfit.py`, `shim.py` (scipy.special.gammaln stand-in), `adapt.py`, `adapt_gm.py`, `lb_run.py` +
 `lb_run.patch`, `flat.py` + `flat.patch` (against `thr768_orig.py`, with `consts2.py`, `consts3.py`), `tables.py`,
 `logs/`. Large files in the session scratchpad (`thr/`).
+
+## Text queries (2026-11-14, second run)
+
+The same run with real BioCLIP-2 text embeddings as the queries. Corpus, fit (`fit/`, data-only), `adapt.py`,
+`adapt_gm.py`, `lb_run.py`, `flat.py` and `tables.py` are unchanged; only `queries.npy` and `thr.npy` differ
+(`text_split.py`, split.py's threshold rule). No text embedding enters any fit. Driver `run_text.sh`, query sets
+`text_sets.py`, side-by-side tables `text_compare.py` (full output `logs/text_compare.md`, per-set tables
+`logs/text_*/tables.md`). Cores 8-9.
+
+**Embeddings** (`../textq/`): `fetch_text_tower.py` (vexact-bench agent2, unchanged) range-reads the 495 MB text tower;
+`encode.py` encodes the 369 test prompts of agent2's `text_q.json` and the 2,206 training prompts of `text_train.json`
+(encoded, not used here) with open_clip 4.2.2 on CPU torch 2.14.1. Data in `vexact-data/bioclip2-text/`.
+
+**The prompts were built for a different sample.** agent2 built them from files 38 / 88 / 246 / 444 of
+TreeOfLife-200M-Embeddings; `bioclip2-200k` is files 463 / 573 / 476 / 462 (`fetch_meta200k.py` re-read those row groups:
+emb equals g0-g3 row for row, 952 species, g0 is 50,000 images of one species). **None of the 239 species-labelled
+prompts names a species in this sample**, and 1 of the 60 higher-taxon labels occurs in it, so the label check over
+the test prompts is empty and every "names" query below is a species absent from the corpus. Encoder check instead
+(`check_insample.py`): "a photo of <Genus species>" for the 361 species with >= 20 images in the sample: the nearest
+image carries the label for **79.8%**, 67.7% of the 10 nearest do (56% / 89% / 99% for species with < 100 / 100-999 /
+>= 1,000 images). A seeded 100 of these prompts are run as an extra set, "in-sample species".
+
+Mean thresholds at 0.01 / 0.1 / 1 / 10 / 30 %: items 0.910 / 0.886 / 0.850 / 0.778 / 0.694; all text 0.617 / 0.592 /
+0.566 / 0.535 / 0.514; free text 0.488 / 0.466 / 0.442 / 0.415 / 0.397; in-sample species 0.768 / 0.742 / 0.706 / 0.639 /
+0.553.
+
+### Code bytes per item / exact reads per match (d = 0), and the flat-to-local-PCA ratios
+
+| Share | Queries | local PCA | local GM | flat | flat / PCA code B | flat / PCA reads |
+|---|---|---|---|---|---|---|
+| 0.01% | items (100) | 10.2 / 0.125 | 9.8 / 0.135 | 34.6 / 0.432 | 3.39 | 3.46 |
+| | text, all (369) | 78.1 / 0.330 | 80.9 / 0.377 | 79.5 / 0.890 | 1.02 | 2.70 |
+| | in-sample species (100) | 25.4 / 0.193 | 24.9 / 0.222 | 44.0 / 0.740 | 1.73 | 3.83 |
+| 0.1% | items | 15.3 / 0.064 | 14.6 / 0.072 | 39.2 / 0.266 | 2.56 | 4.16 |
+| | text, all | 101.0 / 0.214 | 103.3 / 0.248 | 111.2 / 0.695 | 1.10 | 3.25 |
+| | in-sample species | 34.0 / 0.121 | 32.9 / 0.144 | 53.0 / 0.534 | 1.56 | 4.41 |
+| 1% | items | 29.7 / 0.033 | 27.9 / 0.037 | 55.7 / 0.176 | 1.88 | 5.33 |
+| | text, all | 139.0 / 0.161 | 140.6 / 0.187 | 171.0 / 0.586 | 1.23 | 3.64 |
+| | in-sample species | 53.0 / 0.073 | 50.7 / 0.087 | 75.8 / 0.352 | 1.43 | 4.82 |
+| 10% | items | 70.6 / 0.016 | 64.0 / 0.016 | 110.4 / 0.098 | 1.56 | 6.12 |
+| | text, all | 217.1 / 0.100 | 218.3 / 0.115 | 285.1 / 0.375 | 1.31 | 3.75 |
+| | in-sample species | 100.9 / 0.029 | 96.4 / 0.033 | 137.3 / 0.147 | 1.36 | 5.07 |
+| 30% | items | 109.4 / 0.011 | 93.9 / 0.009 | 160.9 / 0.061 | 1.47 | 5.55 |
+| | text, all | 271.3 / 0.060 | 272.4 / 0.068 | 358.4 / 0.230 | 1.32 | 3.83 |
+| | in-sample species | 162.5 / 0.019 | 153.6 / 0.020 | 220.2 / 0.087 | 1.36 | 4.58 |
+
+By kind (flat / local PCA code bytes at 0.01 / 0.1 / 1 / 10 / 30 %): names (259, species not in the corpus) 1.03 /
+1.10 / 1.23 / 1.33 / 1.35; higher taxa (60) 1.01 / 1.11 / 1.24 / 1.33 / 1.33; free descriptions (50) 0.99 / 1.09 /
+1.20 / 1.23 / 1.21. Exact-read ratios 2.4-4.1 in every kind. Local PCA code bytes, names / higher / free at 0.01%:
+73.0 / 79.7 / 102.9; at 30%: 260 / 277 / 322.
+
+A tolerance removes the exact reads more slowly than for items: the local stream leaves 0.07-0.20 per match at
+d = 0.002 for 0.01% answers of out-of-corpus text (items: 0), at most 0.005 at d = 0.005 and none at d = 0.01; the
+in-sample species behave like items. Flat leaves 0.001-0.035 per match at d = 0.01. Code bytes fall 0-13%, as for items.
+
+### Undecided per true match after each level (d = 0), text against items
+
+Code-byte columns (stored bytes for the local stream as in the first section). Exact reads = the last column.
+
+| Share | Queries | PCA 32 | 96 | 192 | 384 | reads | GM 96 | 192 | reads | flat 32 | 96 | 192 | 384 | reads |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.01% | items | 160 | 6.48 | 1.29 | 0.275 | 0.125 | 8.89 | 1.57 | 0.135 | 553 | 32.6 | 6.29 | 1.31 | 0.432 |
+| | text, all | 6,170 | 305 | 15.7 | 1.08 | 0.330 | 345 | 16.1 | 0.377 | 7,240 | 1,120 | 72.1 | 3.67 | 0.890 |
+| | in-sample sp. | 1,250 | 41.3 | 4.35 | 0.560 | 0.193 | 46.5 | 4.71 | 0.222 | 2,090 | 232 | 33.8 | 2.81 | 0.740 |
+| 0.1% | items | 47.8 | 3.50 | 0.832 | 0.157 | 0.064 | 4.44 | 1.01 | 0.072 | 117 | 13.9 | 3.78 | 0.888 | 0.266 |
+| | text, all | 770 | 91.1 | 8.07 | 0.746 | 0.214 | 98.1 | 8.08 | 0.248 | 854 | 270 | 35.5 | 2.80 | 0.695 |
+| | in-sample sp. | 194 | 13.5 | 2.71 | 0.393 | 0.121 | 14.8 | 2.86 | 0.144 | 280 | 54.9 | 12.5 | 2.01 | 0.534 |
+| 1% | items | 15.4 | 2.03 | 0.508 | 0.091 | 0.033 | 2.31 | 0.599 | 0.037 | 25.4 | 6.34 | 2.28 | 0.592 | 0.176 |
+| | text, all | 89.9 | 25.1 | 4.49 | 0.570 | 0.161 | 25.9 | 4.46 | 0.187 | 94.6 | 52.5 | 15.0 | 2.18 | 0.586 |
+| | in-sample sp. | 31.9 | 4.95 | 1.43 | 0.245 | 0.073 | 5.18 | 1.49 | 0.087 | 41.1 | 12.6 | 4.80 | 1.20 | 0.352 |
+| 10% | items | 4.17 | 1.05 | 0.287 | 0.049 | 0.016 | 1.01 | 0.287 | 0.016 | 5.17 | 2.34 | 1.13 | 0.329 | 0.098 |
+| | text, all | 9.82 | 5.64 | 2.05 | 0.347 | 0.100 | 5.68 | 2.02 | 0.115 | 9.94 | 8.18 | 4.58 | 1.28 | 0.375 |
+| | in-sample sp. | 5.76 | 1.68 | 0.569 | 0.097 | 0.029 | 1.65 | 0.569 | 0.033 | 6.65 | 3.05 | 1.60 | 0.492 | 0.147 |
+| 30% | items | 1.93 | 0.713 | 0.217 | 0.036 | 0.011 | 0.594 | 0.169 | 0.009 | 2.37 | 1.31 | 0.685 | 0.203 | 0.061 |
+| | text, all | 3.33 | 2.53 | 1.14 | 0.207 | 0.060 | 2.53 | 1.12 | 0.068 | 3.33 | 3.13 | 2.23 | 0.764 | 0.230 |
+| | in-sample sp. | 2.90 | 1.16 | 0.384 | 0.064 | 0.019 | 1.04 | 0.338 | 0.020 | 3.14 | 2.00 | 1.01 | 0.292 | 0.087 |
+
+Wrong decisions against brute force: **0** in every row of every code and set (5 shares x 4 tolerances, 369 + 259 +
+60 + 50 + 100 queries), and 0 interval violations at every level of the local stream.
+
+### What the text numbers say
+
+- **Local PCA still wins, by much less in code bytes.** Over all 369 text queries flat needs 1.02-1.32x the code
+  bytes of local PCA (items 1.47-3.39x), level with it at 0.01%; exact reads stay 2.7-3.8x lower with local PCA
+  (items 3.5-6.1x). The 0.01% row is a tie in code bytes (78.1 against 79.5 B). Species actually in the corpus sit between: 1.36-1.73x code bytes, 3.8-5.1x reads.
+- **Text queries cost 2.5-7.7x the code bytes of item queries** with local PCA (78 against 10 B at 0.01%, 271 against
+  109 B at 30%), 2.2-3.1x with flat. At 32 B the local stream leaves 6,170 undecided per match at 0.01%, 62% of the
+  corpus: the first 32 B decide almost nothing for an out-of-corpus text query. Free descriptions are worst
+  (103 B at 0.01%), in-sample species best (25 B).
+- **The geometric-mean metric loses for text:** 0.4-3.6% more code bytes and 13-16% more exact reads than PCA across
+  the 369 queries (items: 4-14% fewer code bytes). For in-sample species it saves 2-5% of code bytes and costs 7-21%
+  more exact reads. Its Sigma_Q
+  is fitted on corpus items as pseudo-queries, so it does not describe text.
+- Caveat: no test prompt's species is in this corpus, and the in-sample set is 100 queries of one prompt form.
+  The flat code carries no scalar charge, the local stream does (0.77 B per item per cluster not included in either).
