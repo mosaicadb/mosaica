@@ -10,7 +10,7 @@ At answers of 10–75%, threshold queries are 29–35% faster, and at 0.01–1% 
 bytes. Most of the gain comes from one change: four randomised levels instead of fourteen. That removes three quarters
 of the per-level bound, decision, compaction and re-pack work for every item that reaches those levels. Compacting only
 the state a later level reads takes another 3 ms at large answers. The index now beats a plain scan of every row
-(87–89 ms) at every answer size, so the planner's new scan switch is built but stays off.
+(86–89 ms) at every answer size, so the planner's new scan switch is built but stays off.
 
 ## Steps
 
@@ -33,14 +33,18 @@ the state a later level reads takes another 3 ms at large answers. The index now
   Four levels gives most of the gain for few extra bytes. Three levels reads too much more.
 - **Plan flag `rdec=…`.** It decides only at the listed randomised levels; the others only read. It also skips any
   kappa that a later rise replaces before the next level that decides. It is covered by the same union, because it
-  evaluates a subset of the events. On 14 levels it gained 7–13% (`e2e_rdec_schedules.csv`), less than the coarser
-  schedule, because per-level reading and re-pack remain. It is off by default.
+  evaluates a subset of the events. On 14 levels it gained 7–13% at answers of 10% and above, but only 3–5% at 0.1–1%,
+  and text at 0.1% was 1–2% slower (`e2e_rdec_schedules.csv`). That is less than the coarser schedule gives, because
+  per-level reading and re-pack remain. It is off by default, and it can name randomised levels 0 to 31 only (more is
+  refused with an error).
 - **Compressed pushes.** Decided rows are appended with one compressed store per 16 lanes instead of a lane loop.
 - **The planner's scan switch.** The plan constants `scan_lo` and `scan_hi` set a band of answer shares. A query
   estimates its answer share from 256 evenly spaced visible rows' full vectors (about 28 µs), but only when at least a
   quarter of the visible items are candidates. If the estimate falls in the band, the query scans the visible set.
-  `Plan::scan_band` calibrates the band from stored rows at 5–99% answers, and `scanband=LO:HI` sets it by hand. It is
-  off by default, for the reason in step 2.
+  `scanband=LO:HI` sets the band by hand. `scanband=auto` makes `Plan::calibrate` also time the band with
+  `Plan::scan_band`, from stored rows at 5–99% answers, which takes about 9 s at 1M. The band and its calibration are
+  opt-in and off by default, for the reason in step 2, so default calibration costs what it did before (0.2 s at
+  50k). With fewer than 64 live clusters the same check applies, with the candidate share taken from the whole cut.
 
 **2. Compaction keeps only the state a later level reads** (commit b2ab4b3e5).
 - **What a compaction keeps.** After a randomised level:
@@ -56,7 +60,7 @@ the state a later level reads takes another 3 ms at large answers. The index now
   halves inner.
 - **Plan flags now override timed constants.** They apply after the timed or filed constants, so `scanband=` takes
   effect over a calibration.
-- **The index against a plain scan** (`e2e_index_vs_scan.csv`). The scan of every row takes 87–89 ms. The index takes:
+- **The index against a plain scan** (`e2e_index_vs_scan.csv`). The scan of every row takes 86–89 ms. The index takes:
 
   | Answer | item | text |
   |---|---|---|
@@ -97,7 +101,7 @@ Bytes are per item of N, and include full vectors.
 | 50% | 115.4 | 77.7 | −33% | 296.6 | 307.2 | 123.1 | 83.5 | −32% | 347.0 | 359.5 |
 | 75% | 111.2 | 72.2 | −35% | 254.0 | 264.9 | 120.9 | 78.8 | −35% | 300.5 | 313.7 |
 
-The two runs of each side agree within 2%. The files are `results/rand/e2e_final_{base,new}{1,2}.csv`.
+The two runs of each side agree within 2.4%. The files are `results/rand/e2e_final_{base,new}{1,2}.csv`.
 
 ## On by default
 
@@ -107,12 +111,26 @@ The two runs of each side agree within 2%. The files are `results/rand/e2e_final
 
 `rdec`, the scan band and `bail` are off by default.
 
-**Caveat for low dimensions.** The cap on the schedule leaves very small n (for example 100) with a single randomised
-level at 56 B, where there used to be several. That case was not measured.
+**Low dimensions.** When the cap of 40% of the f16 vector cuts the base list short, `fit.py` ends the schedule at the cap.
+The cap is rounded down to 8 bytes, and is at least 8 B past the deterministic 32 B. Levels are inserted so that
+consecutive levels are at most 1.8x apart. The schedule is never empty. From the schedule logic (n padded to a
+multiple of 32):
+
+| n | Randomised levels (B) |
+|---|---|
+| 25 | 40 (but `fit.py`'s existing check refuses any padded n below 64, as too small for four randomised blocks) |
+| 50 | 40 |
+| 100 | 56, 80 |
+| 128 | 56, 96 |
+| 200 | 56, 96, 160 |
+| 256 | 56, 96, 160, 200 |
+| 768 and 1024 | 56, 96, 160, 256 |
+
+None of the low-dimensional cases was measured.
 
 ## Breakdown now (ms, one thread, 20 queries, profiled; `breakdown_final.csv` against `breakdown_start.csv`)
 
-| Cell | wall | tables | re-pack | decode | bounds+dec (of which scalars) | full | compaction | level other |
+| Cell | wall | tables | re-pack | decode | bounds+dec (of which scalar decode) | full | compaction | level other |
 |---|---|---|---|---|---|---|---|---|
 | item 50% start | 104 | 6.8 | 8.9 | 16.8 | 44.0 | 10.4 | 8.0 | 10.1 |
 | item 50% new | 78 | 5.5 | 4.7 | 17.6 | 23.1 (12.3) | 11.9 | 4.5 | 6.6 |
@@ -125,8 +143,8 @@ The wall column is unprofiled. The profiler adds about 10 ms at large answers, m
 
 At large answers, three costs are now similar in size:
 
-- **Bounds and decisions:** about 23 ms. About half of it is the randomised scalars: the |y| and kappa gathers, tan,
-  and the accumulator updates.
+- **Bounds and decisions:** about 23 ms. About half of it is decoding the randomised scalars: the |y| and kappa
+  gathers and tan. The accumulator updates are in the other half, with the bound itself.
 - **Decode:** about 18 ms.
 - **Full vectors:** about 12 ms. About 10% of items are still undecided at 256 B.
 

@@ -130,13 +130,20 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                 p.scan_lo = 2.0;
                 p.scan_hi = 2.0;
             }
+            "scanband=auto" => p.scan_cal = true,
             f if f.starts_with("scanband=") => {
                 let (a, b) = f[9..].split_once(':').expect("scanband=LO:HI");
                 p.scan_lo = a.parse().expect("scanband=LO:HI");
                 p.scan_hi = b.parse().expect("scanband=LO:HI");
             }
             f if f.starts_with("rdec=") => {
-                p.rdec = if &f[5..] == "all" { u32::MAX } else { f[5..].split('.').map(|x| 1u32 << x.parse::<u32>().expect("rdec=LEVEL.LEVEL...")).fold(0, |a, b| a | b) };
+                p.rdec = if &f[5..] == "all" { u32::MAX } else {
+                    f[5..].split('.').map(|x| {
+                        let l = x.parse::<u32>().expect("rdec=LEVEL.LEVEL... (randomised level indices from 0)");
+                        assert!(l < 32, "rdec names randomised level {l}; it can name levels 0 to 31 only, so use rdec=all for an index with more");
+                        1u32 << l
+                    }).fold(0, |a, b| a | b)
+                };
             }
             f if f.starts_with("repackx=") => {
                 p.repack = true;
@@ -845,7 +852,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let tot: f64 = parts[..20].iter().sum();
                 let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
-                out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars and accumulators {:.2} ms", rkap);
+                out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
                 lines.push(line);
             }

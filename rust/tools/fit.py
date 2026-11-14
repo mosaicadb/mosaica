@@ -37,15 +37,30 @@ def log(*a):
 
 def schedule(n0, n):
     """Randomised level ends: the base list, then steps of 1.6x, while within 40% of the f16 vector, within 256 B
-    per 768 dimensions and within 8 bits per dimension."""
+    per 768 dimensions and within 8 bits per dimension; a list cut short by that cap ends at the cap."""
     cap = min(0.4 * 2 * n0, 256 * max(1.0, n0 / 768), DLV[-1] + n)
     rlv = [b for b in RLV_BASE if b <= cap]
-    b = RLV_BASE[-1]
-    while True:
-        b = int(round(b * 1.6 / 32)) * 32
-        if b > cap:
-            break
-        rlv.append(b)
+    if len(rlv) < len(RLV_BASE):
+        # the base list cut short (low dimension): end at the cap, on whole 8-byte steps, at least 8 B past the
+        # deterministic levels (within 8 bits per dimension), with levels between no more than 1.8x apart
+        top = max(int(cap) // 8 * 8, DLV[-1] + min(8, n))
+        prev = rlv[-1] if rlv else DLV[-1]
+        if top > prev:
+            mids = []
+            while top / (mids[-1] if mids else prev) > 1.8:
+                m = int(round(((mids[-1] if mids else prev) * top) ** 0.5 / 8)) * 8
+                if m <= (mids[-1] if mids else prev) or m >= top:
+                    break
+                mids.append(m)
+            rlv += mids + [top]
+    else:
+        b = RLV_BASE[-1]
+        while True:
+            b = int(round(b * 1.6 / 32)) * 32
+            if b > cap:
+                break
+            rlv.append(b)
+    assert rlv, "empty randomised schedule"
     bounds = [0] + [int(round(f * n / 16)) * 16 for f in BLOCK_FRACS] + [n]
     for j in range(1, len(bounds)):
         bounds[j] = max(bounds[j], bounds[j - 1] + 16)

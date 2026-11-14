@@ -44,8 +44,7 @@ pub const C_TABLES: usize = 20;
 pub const C_UNITS: usize = 21;
 pub const C_TSURV: usize = 22;
 pub const C_TSMALL: usize = 23;
-/// Inside bounds+decisions at the randomised levels: the scalars' decode (|y| at the first, kappa and tan at rises) and
-/// the accumulators' update.
+/// Inside bounds+decisions at the randomised levels: the scalars' decode (|y| at the first, kappa and tan at rises).
 pub const P_RKAP: usize = 24;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
@@ -1197,13 +1196,13 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         let tls = tick();
         let skip = l < first_decide && !verify && mode == Mode2::Thr;
         // a randomised level that only reads: its bounds are not computed (verify: computed and checked, not used)
-        let nodec = l >= NDL && mode == Mode2::Thr && (cq.rdec >> (l - NDL)) & 1 == 0;
+        let nodec = l >= NDL && mode == Mode2::Thr && !rdec_has(cq.rdec, l - NDL);
         let skipb = skip || (nodec && !verify);
         // blocks whose kappa this level stores and a later rise replaces before the next level that decides: unused
         let mut kap_unused = 0u32;
         if nodec && !verify && l >= NDL {
             let lr = l - NDL;
-            let nd = (lr + 1..nl - NDL).find(|&x| (cq.rdec >> x) & 1 == 1);
+            let nd = (lr + 1..nl - NDL).find(|&x| rdec_has(cq.rdec, x));
             for &j in &gp.thchg[lr] {
                 let again = match nd {
                     None => true,
@@ -1872,6 +1871,7 @@ pub struct Plan {
     pub rdec: u32,         // threshold queries decide at randomised level lr only when bit lr is set
     pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
     pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
+    pub scan_cal: bool,    // Plan::calibrate also times the scan band (about 9 s at 1M; off: the band is left as given)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
     pub colq: bool,        // in an order chosen per (query, cluster)
@@ -1879,7 +1879,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, scan_lo: 2.0, scan_hi: 2.0, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
@@ -1996,7 +1996,7 @@ impl Plan {
                 }
             }
             let s = tm_idx / mm_idx.max(1e-30);
-            let (scan_lo, scan_hi) = Plan::scan_band(ix, base, nq.min(3));
+            let (scan_lo, scan_hi) = if base.scan_cal { Plan::scan_band(ix, base, nq.min(3)) } else { (base.scan_lo, base.scan_hi) };
             Plan {
                 scan_lo,
                 scan_hi,
@@ -2241,6 +2241,12 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
     }
 }
 
+/// Whether a decision mask (Plan::rdec) decides at randomised level lr; all ones decides at every level.
+#[inline(always)]
+fn rdec_has(rdec: u32, lr: usize) -> bool {
+    rdec == u32::MAX || (lr < 32 && rdec >> lr & 1 == 1)
+}
+
 /// Rows sampled to estimate a threshold query's answer share.
 pub const SHARE_SAMPLE: usize = 256;
 
@@ -2341,9 +2347,6 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             p >= pl.scan_lo && p <= pl.scan_hi
         }
     };
-    if live.len() < 8 * SAMPLE && in_band(1.0) {
-        return Planned::Scan;
-    }
     if matches!(pl.mode, PlanMode::Auto) && live.len() >= 8 * SAMPLE {
         let (mut nv_s, mut nc_s, mut nvo_s) = (0usize, 0usize, 0usize);
         for &ci in live.iter().step_by(SAMPLE) {
@@ -2381,6 +2384,10 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
         }
     }
     let d = ncand_all as f64 / nvis_all.max(1) as f64;
+    // too few clusters for the sample above: the same check on the whole cut
+    if live.len() < 8 * SAMPLE && in_band(d) {
+        return Planned::Scan;
+    }
     let first_decide = if matches!(pl.mode, PlanMode::Auto) && pl.jump_level > 0 && d > pl.jump_d { pl.jump_level } else { 0 };
     let mut grp_gain = vec![0f64; ix.groups.len()];
     for (ci, p) in pre.iter().enumerate() {
@@ -2519,6 +2526,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             cq.gtab = gt;
                             cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
                             cq.bail = pl.bail;
+                            assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
                             cq.rdec = pl.rdec;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
