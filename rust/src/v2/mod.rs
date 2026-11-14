@@ -841,10 +841,7 @@ impl Index2 {
     }
     pub fn full_row_f16(&self, row: usize) -> &[u16] {
         match &self.full {
-            Full2::Real { rows, .. } => {
-                let n = self.n();
-                &rows[row * n..(row + 1) * n]
-            }
+            Full2::Real { rows, .. } => rows.row(row, self.n()),
             Full2::Synth(_) => panic!("synthetic rows have no stored f16 vector"),
         }
     }

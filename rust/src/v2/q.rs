@@ -1942,17 +1942,19 @@ pub struct Plan {
     pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
     pub colq: bool,        // in an order chosen per (query, cluster)
     pub collazy: bool,     // with the single stored norm first, block norms only for the items it leaves undecided
+    pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
+    pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false, io_us: 5.7, io_gbps: 3.3 }
     }
 }
 impl Plan {
     /// The timed constants as `name=value` lines.
     pub fn to_kv(&self) -> String {
-        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\n",
-                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi)
+        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\nio_us={}\nio_gbps={}\n",
+                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi, self.io_us, self.io_gbps)
     }
     /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
     pub fn from_kv(base: Plan, text: &str) -> Plan {
@@ -1972,10 +1974,18 @@ impl Plan {
                 "seed_us" => &mut p.seed_us,
                 "scan_lo" => &mut p.scan_lo,
                 "scan_hi" => &mut p.scan_hi,
+                "io_us" => &mut p.io_us,
+                "io_gbps" => &mut p.io_gbps,
                 k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
             } = v;
         }
         p
+    }
+
+    /// Full vectors on disk: rows this many bytes apart or closer are read with one read, the gap included, because
+    /// reading the gap costs less than another read.
+    pub fn io_gap(&self) -> usize {
+        (self.io_us * self.io_gbps * 1e3) as usize
     }
 
     /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
@@ -2078,6 +2088,32 @@ impl Plan {
                 ..base
             }
         })
+    }
+
+    /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
+    /// from 4,096 single rows spread over the file, `io_gbps` from 64 MiB of consecutive rows. The file's pages are
+    /// dropped from the cache before and after. Unchanged in memory or without `--full-read uring`.
+    pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
+        let Full2::Real { rows, .. } = &ix.full else { return base };
+        let n = ix.n();
+        let time = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
+            rows.evict();
+            let mut rd = super::disk::Reader::<()>::new(rows, n, gap)?;
+            let tm = Timer::new();
+            rd.push((), sel);
+            let b = rd.pop().unwrap();
+            let el = tm.ms() * 1e3;
+            std::hint::black_box(b.row(0, n)[0]);
+            rd.recycle(b);
+            Some((el, rd.bytes))
+        };
+        const NR: usize = 4096;
+        let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
+        let Some((t_rand, _)) = time(spread, 0) else { return base };
+        let nseq = ((64usize << 20) / (2 * n)).min(ix.nrows);
+        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2).unwrap();
+        rows.evict();
+        Plan { io_us: t_rand / NR as f64, io_gbps: bytes as f64 / t_seq / 1e3, ..base }
     }
 
     /// The answer shares at which a scan of every row beats the index path, timed on `nq` stored rows as queries at
@@ -2210,41 +2246,48 @@ pub fn scan_knn(ix: &Index2, q16: &[u16], q32: &[f32], qn: f64, kk: usize, vis: 
 
 /// Exact decisions from full vectors (four rows per pass of the query; exact integer products only near t).
 pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2) {
-    let mut k4 = 0;
     if let Full2::Real { rows, .. } = &ix.full {
         rows.willneed(pend, ix.n());
-        let e = full_err2(ix, pr);
-        while k4 + 4 <= pend.len() {
-            let rr = [pend[k4], pend[k4 + 1], pend[k4 + 2], pend[k4 + 3]];
-            let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, rr.map(|r| ix.full_row_f16(r as usize))) };
-            for q in 0..4 {
-                acc.st.full_reads += 1;
-                let s = sc[q] as f64;
-                let inn = if s >= t + e {
-                    true
-                } else if s < t - e {
-                    false
-                } else {
-                    acc.st.exact_fallbacks += 1;
-                    exact_ge(exact_dot(&pr.q16, ix.full_row_f16(rr[q] as usize)), t)
-                };
-                if inn {
-                    acc.rows.push(rr[q]);
-                    if want_exact {
-                        acc.exact.push((rr[q], exact_value2(ix, pr, rr[q] as usize)));
-                    }
-                }
-            }
-            k4 += 4;
-        }
+        decide_full_from(ix, pr, t, pend, want_exact, acc, |k| ix.full_row_f16(pend[k] as usize));
+        return;
     }
-    for &r in &pend[k4..] {
+    for &r in pend {
         if exact_ge2(ix, pr, r as usize, t, &mut acc.st) {
             acc.rows.push(r);
             if want_exact {
                 acc.exact.push((r, exact_value2(ix, pr, r as usize)));
             }
         }
+    }
+}
+
+/// decide_full over stored vectors given by `get(k)` for row `pend[k]`.
+pub fn decide_full_from<'a>(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2, get: impl Fn(usize) -> &'a [u16]) {
+    let e = full_err2(ix, pr);
+    let mut k = 0;
+    while k < pend.len() {
+        let m = (pend.len() - k).min(4);
+        let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, core::array::from_fn(|q| get(k + q.min(m - 1)))) };
+        for q in 0..m {
+            acc.st.full_reads += 1;
+            let s = sc[q] as f64;
+            let x = get(k + q);
+            let inn = if s >= t + e {
+                true
+            } else if s < t - e {
+                false
+            } else {
+                acc.st.exact_fallbacks += 1;
+                exact_ge(exact_dot(&pr.q16, x), t)
+            };
+            if inn {
+                acc.rows.push(pend[k + q]);
+                if want_exact {
+                    acc.exact.push((pend[k + q], exact_to_f64(exact_dot(&pr.q16, x))));
+                }
+            }
+        }
+        k += m;
     }
 }
 
@@ -2526,9 +2569,21 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         need.dedup();
         setup_groups(ix, pr, &need, &mut gst);
     }
+    let reader = || match &ix.full {
+        Full2::Real { rows, .. } => super::disk::Reader::<()>::new(rows, ix.n(), pl.io_gap()),
+        _ => None,
+    };
+    // with a reader, the rows of a cluster that need full vectors are read while the next clusters run their index path
+    let decide_batch = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
+        let b = rd.pop().unwrap();
+        let tf = tick();
+        decide_full_from(ix, pr, t, &b.rows, o.want_iv, acc, |k| b.row(k, ix.n()));
+        acc.st.cyc[P_FULL] += tick() - tf;
+        rd.recycle(b);
+    };
     let parts: Vec<ThrOut2> = (0..k).into_par_iter().fold(
-        || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, State::default()),
-        |(mut acc, mut sv), ci| {
+        || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, State::default(), reader()),
+        |(mut acc, mut sv, mut rd), ci| {
             let tcl = tick();
             let c = &ix.cl[ci];
             let push = |acc: &mut ThrOut2, r0: usize, r1: usize, iv: Option<(f64, f64)>| {
@@ -2632,16 +2687,33 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.flat_items += cands.len() as u64;
                             pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
                         }
-                        let tf = tick();
-                        decide_full(ix, pr, t, &pend, o.want_iv, &mut acc);
-                        acc.st.cyc[P_FULL] += tick() - tf;
+                        match rd.as_mut() {
+                            Some(r) if !pend.is_empty() => {
+                                r.push((), pend);
+                                while r.full() {
+                                    decide_batch(&mut acc, r);
+                                }
+                            }
+                            _ => {
+                                let tf = tick();
+                                decide_full(ix, pr, t, &pend, o.want_iv, &mut acc);
+                                acc.st.cyc[P_FULL] += tick() - tf;
+                            }
+                        }
                     }
                 }
             }
             acc.st.cyc[P_CLUSTER] += tick() - tcl;
-            (acc, sv)
+            (acc, sv, rd)
         },
-    ).map(|x| x.0).collect();
+    ).map(|(mut acc, _, rd)| {
+        if let Some(mut r) = rd {
+            while !r.is_empty() {
+                decide_batch(&mut acc, &mut r);
+            }
+        }
+        acc
+    }).collect();
     let tm = tick();
     let mut out = ThrOut2 { st: Stats::new(nl), ..Default::default() };
     out.st.cyc[P_CUT] += cut_cyc;

@@ -8,7 +8,7 @@ set -euo pipefail
 TAG=$1 RES=$2 CAP=$3 EXTRA=${4:-}
 D=/home/joe/code/vexact-data/bioclip2-1m/prep
 IDX=/home/joe/code/vexact-benchup-data/index_r4
-BIN=/home/joe/code/vexact-capped-target/release/vexact
+BIN=${BIN:-/home/joe/code/vexact-capped-target/release/vexact}
 FULL=${FULL:-/home/joe/code/vexact-capped-data/full.f16}
 PLAN=/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt
 mkdir -p "$RES"
