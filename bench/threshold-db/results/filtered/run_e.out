@@ -1,0 +1,3 @@
+dbknn ladder vis_50 share 5: nprobe 512 dial fit0.99: median 37.405 ms, mean recall 0.7280
+dbknn ladder vis_50 share 5: nprobe 1000 dial fit0.99: over the cap on its first three queries
+dbknn tight vis_50 share 5: nprobe 512 dial fit0.99: median 35.999 ms, mean recall 0.7280

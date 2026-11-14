@@ -17,7 +17,7 @@ import numpy as np
 
 ap = argparse.ArgumentParser()
 ap.add_argument("cmd", choices=["build", "query"])
-ap.add_argument("method", choices=["hnswlib", "faiss_hnsw", "ivf", "flat", "panorama", "rabitq", "sq16", "hnsw_sq16", "ivf_sq16"])
+ap.add_argument("method", choices=["hnswlib", "faiss_hnsw", "ivf", "flat", "panorama", "rabitq", "sq16", "hnsw_sq16", "ivf_sq16", "acorn"])
 ap.add_argument("prep")
 ap.add_argument("ann")
 ap.add_argument("out", nargs="?")
@@ -30,9 +30,16 @@ ap.add_argument("--settings", default="default,tight", help="default, tight, or 
 ap.add_argument("--tight", type=float, default=0, help="the tight rung, when known: skips the ladder")
 ap.add_argument("--ladder-from", type=float, default=0, help="skip the rungs below this one (its recall must be below 0.99)")
 ap.add_argument("--cap-ms", type=float, default=5000, help="the ladder stops at the first rung slower than this per query")
+ap.add_argument("--slow-ms", type=float, default=1000, help="a tight rung slower than this per query keeps its ladder timing (one repetition)")
+ap.add_argument("--acorn-bin", default="", help="acorn_bench, built against the ACORN fork of faiss")
+ap.add_argument("--flat-settings", default="idselector,compacted", help="for the flat indexes under a visible set")
 a = ap.parse_args()
 os.makedirs(a.ann, exist_ok=True)
-import faiss, hnswlib, rabitqlib
+import faiss
+if a.method == "hnswlib":
+    import hnswlib
+if a.method == "rabitq":
+    import rabitqlib
 EXACT = a.method in ("flat", "panorama", "sq16")
 FLAT = a.method in ("flat", "sq16")
 HNSW = a.method in ("faiss_hnsw", "hnsw_sq16")
@@ -131,6 +138,12 @@ elif a.method == "hnswlib":
     ix = hnswlib.Index(space="ip", dim=n)
     ix.load_index(path, max_elements=N)
     ix.set_num_threads(1)
+elif a.method == "acorn":
+    import subprocess
+    path = f"{a.ann}/acorn.index"
+    acorn = subprocess.Popen([a.acorn_bin, "serve", path, f"{a.prep}/queries.npy"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    acorn_ms = [0.0]
+    ix = None
 else:
     ix = faiss.read_index(path)
 ROT = np.load(f"{a.ann}/panorama_rot.npy") if a.method == "panorama" else None
@@ -138,6 +151,18 @@ print(f"{a.method}: loaded in {time.time() - t:.0f} s; RSS {rss_gb():.2f} GiB; t
       f"resident", flush=True)
 
 rows = []
+
+
+def flush():
+    # rows go out as each share finishes, so a run stopped part way keeps what it measured
+    if rows:
+        new = not os.path.exists(a.out)
+        with open(a.out, "a") as f:
+            f.write(("method,setting,vis,share_index,query,param,median_ms,recall,returned,nonmatch,exact\n" if new else "")
+                    + "\n".join(rows) + "\n")
+        rows.clear()
+
+
 for vis in a.vis.split(","):
     sel, mask = None, None
     if vis != "all":
@@ -148,6 +173,8 @@ for vis in a.vis.split(","):
         sel = faiss.IDSelectorBitmap(N, faiss.swig_ptr(bits))
         if a.method in ("hnswlib", "rabitq"):
             continue
+        if a.method == "acorn":
+            acorn.stdin.write(f"vis {vis} {os.path.abspath(f'{a.prep}/{vis}.npy')}\n".encode())
         if FLAT:
             t = time.time()
             compact = faiss.IndexFlatIP(n) if a.method == "flat" else faiss.IndexScalarQuantizer(n, FP16, faiss.METRIC_INNER_PRODUCT)
@@ -155,6 +182,7 @@ for vis in a.vis.split(","):
             compact.add(np.ascontiguousarray(X[ids]))
             print(f"{a.method}: compacted copy of {vis} in {(time.time() - t) * 1e3:.0f} ms", flush=True)
     for si in shares:
+        flush()
         k = ks[si]
         exact = {}
         for qi in qis:
@@ -177,6 +205,12 @@ for vis in a.vis.split(","):
                 return I
             if a.method == "rabitq":
                 return ix.search(q, m, p, True, 1)[0][0]
+            if a.method == "acorn":  # the time is the search's own, measured in the server
+                acorn.stdin.write(f"q {qi} {m} {p} {vis}\n".encode())
+                acorn.stdin.flush()
+                head = acorn.stdout.read(16)
+                acorn_ms[0] = float(np.frombuffer(head[:8], np.float64)[0])
+                return np.frombuffer(acorn.stdout.read(8 * int(np.frombuffer(head[8:], np.int64)[0])), np.int64)
             if a.method == "hnswlib":
                 ix.set_ef(p)
                 return ix.knn_query(q, k=m)[0][0]
@@ -188,24 +222,29 @@ for vis in a.vis.split(","):
             lims, D, I = ix.range_search(q, float(T[qi, si]), params=ps)
             return I
 
-        def evaluate(mult, timed):
+        def evaluate(mult, timed, probe=False):
             res = []
-            for qi in qis:
+            # a probe takes one query of each kind first (image, text_q, text_insample)
+            for qi in (qis[::5] + [x for x in qis if x not in qis[::5]] if probe else qis):
                 m = len(exact[qi])
                 if m == 0:
                     continue
+                if probe and len(res) == 3 and min(x[2] for x in res) > 2 * a.cap_ms:
+                    return None  # three queries each over twice the cap: the rung is over the cap
                 p = mult if IVF or EXACT or a.method == "rabitq" else int(np.ceil(m * mult))
                 ts = []
                 for _ in range(a.reps if timed else 1):
                     t0 = time.perf_counter()
                     got = one(qi, p)
-                    ts.append((time.perf_counter() - t0) * 1e3)
+                    ts.append(acorn_ms[0] if a.method == "acorn" else (time.perf_counter() - t0) * 1e3)
                 hit = len(np.intersect1d(got, exact[qi]))
                 res.append((qi, p, float(np.median(ts)), hit / m, len(got), len(got) - hit, m))
             return res
 
         if EXACT:
             for setting, p in (("idselector", 0), ("compacted", 1)) if sel is not None and FLAT else (("exact", 0),):
+                if sel is not None and FLAT and setting not in a.flat_settings.split(","):
+                    continue
                 r = evaluate(p, True)
                 for qi, _, ms, rec, ret, bad, m in r:
                     rows.append(f"{a.method},{setting},{vis},{si},{qi},{a.threads},{ms:.4f},{rec:.5f},{ret},{bad},{m}")
@@ -220,35 +259,45 @@ for vis in a.vis.split(","):
                   f"{np.mean([x[3] for x in r]):.5f}, min {np.min([x[3] for x in r]):.5f}", flush=True)
             continue
         ladder = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] if IVF else \
-            [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128, 256, 512, 1024]
+            [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32] + [2 ** i for i in range(6, 21)]
         if not IVF:  # ef at most N
             mmax = max(len(e) for e in exact.values())
             ladder = [x for x in ladder if mmax * x <= N] or [1]
         ladder = [x for x in ladder if x >= a.ladder_from] or ladder[-1:]
         tight = a.tight
         if not tight:
-            tight = ladder[0]
+            tight, walked = None, []
             for mult in ladder:
-                r = evaluate(mult, False)
+                r = evaluate(mult, False, probe=True)
+                if r is None:
+                    print(f"{a.method} ladder {vis} share {si}: rung {mult}, over the cap on its first three queries", flush=True)
+                    break
                 rec, ms = np.mean([x[3] for x in r]), np.median([x[2] for x in r])
                 print(f"{a.method} ladder {vis} share {si}: rung {mult}, mean recall {rec:.4f}, median {ms:.1f} ms", flush=True)
                 if ms > a.cap_ms:
                     break
-                tight = mult
+                tight, tight_r = mult, r
+                walked.append((round(rec, 4), mult, r))
                 if rec >= 0.99:
                     break
+            if walked and walked[-1][0] < 0.99:  # short of 0.99: the fastest rung reaching the best recall reached
+                best = max(w[0] for w in walked)
+                _, tight, tight_r = next(w for w in walked if w[0] == best)
+            if tight is None:
+                print(f"{a.method} tight {vis} share {si}: no rung within the cap", flush=True)
         for setting, mult in (("default", 1), ("tight", tight)):
-            if setting not in a.settings.split(","):
+            if setting not in a.settings.split(",") or mult is None:
                 continue
-            r = evaluate(mult, True)
+            if setting == "tight" and not a.tight and np.median([x[2] for x in tight_r]) > a.slow_ms:
+                r = tight_r  # slower than --slow-ms per query: the ladder's one repetition is the timing
+                print(f"{a.method} tight {vis} share {si}: timed at one repetition", flush=True)
+            else:
+                r = evaluate(mult, True)
             for qi, p, ms, rec, ret, bad, m in r:
                 rows.append(f"{a.method},{setting},{vis},{si},{qi},{p},{ms:.4f},{rec:.5f},{ret},{bad},{m}")
             if r:
                 print(f"{a.method} {setting} {vis} share {si}: param {'' if IVF else 'x'}{mult}, "
                       f"median {np.median([x[2] for x in r]):.2f} ms, mean recall {np.mean([x[3] for x in r]):.4f}, "
                       f"non-matches {sum(x[5] for x in r)} over {len(r)} queries", flush=True)
-new = rows and not os.path.exists(a.out)
-with open(a.out, "a") if rows else open(os.devnull, "w") as f:
-    f.write(("method,setting,vis,share_index,query,param,median_ms,recall,returned,nonmatch,exact\n" if new else "")
-            + "\n".join(rows) + "\n")
+flush()
 print(f"peak RSS {rss_gb():.2f} GiB", flush=True)

@@ -1,0 +1,6 @@
+hnsw_sq16: loaded in 2 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 ladder vis_50 share 5: rung 1, over the cap on its first three queries
+hnsw_sq16 tight vis_50 share 5: no rung within the cap
+hnsw_sq16 ladder vis_50 share 6: rung 1, over the cap on its first three queries
+hnsw_sq16 tight vis_50 share 6: no rung within the cap
+peak RSS 1.69 GiB

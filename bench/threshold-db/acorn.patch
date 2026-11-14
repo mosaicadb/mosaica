@@ -1,0 +1,38 @@
+diff --git a/faiss/impl/ACORN.cpp b/faiss/impl/ACORN.cpp
+index e2c3da5..c1e0c69 100644
+--- a/faiss/impl/ACORN.cpp
++++ b/faiss/impl/ACORN.cpp
+@@ -546,6 +546,7 @@ void ACORN::shrink_neighbor_list(
+ 
+         NodeDistFarther v1 = input.top();
+         input.pop();
++        if (v1.id < 0) continue; // patched: skip empty slots
+         float dist_v1_q = v1.d;
+ 
+         debug("shrink_neighbor_list: checking whether to keep v1: %d\n", v1.id);
+@@ -668,7 +669,7 @@ void add_link(
+         // storage_idx_t neigh = hnsw.neighbors[i];
+         // auto [neigh, metadata] = hnsw.neighbors[i]; // mod
+         auto neigh = hnsw.neighbors[i];
+-        auto metadata = hnsw.metadata[neigh];
++        if (neigh < 0) continue; // patched: skip empty slots (seen when adding to a reloaded index)
+         resultSet.emplace(qdis.symmetric_dis(src, neigh), neigh);
+     }
+ 
+@@ -1003,6 +1004,7 @@ void ACORN::add_links_starting_from(
+     neighbors.reserve(link_targets.size());
+     while (!link_targets.empty()) {
+         storage_idx_t other_id = link_targets.top().id;
++        if (other_id < 0) { link_targets.pop(); continue; } // patched: skip empty slots
+         add_link(*this, ptdis, pt_id, other_id, level); // mod
+         neighbors.push_back(other_id);
+         link_targets.pop();
+@@ -1058,7 +1060,7 @@ void ACORN::add_with_locks(
+     float d_nearest = ptdis(nearest);
+ 
+     // needed for backtracking in hybrid search - TODO DEPRECATED, remove backtracking things
+-    std::vector<storage_idx_t> ep_per_level(max_level); // idx of nearest node per level
++    std::vector<storage_idx_t> ep_per_level(max_level + 1); // idx of nearest node per level (patched: was max_level, one short)
+     ep_per_level[level] = nearest;
+ 
+     for (; level > pt_level; level--) {
