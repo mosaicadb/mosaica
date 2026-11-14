@@ -6,8 +6,10 @@ from numpy on the 1M BioCLIP-2 sample of `fetch.py` (n = 768), the 369 real text
 bound was checked against the exact score on every item, about 8·10⁹ interval checks per run:
 0 violations in all runs. Nothing is timed. The proofs in section 2 have not been refereed.
 
-Status: a native check of the dual basis of section 2.4 in the version 2 prototype (`rust/`) is in
-progress; until it reports, the gains in section 3.3 are for exact coordinates, not bytes.
+Status: the dual basis of section 2.4 has been checked in the native version 2 prototype
+(`dualproto/REPORT.md`): bytes read on the quantised code fall 9–30 % for items (data-only fit) and
+25–34 % for text (fit including text prompts), with 0 violations. The sort key of section 3.3 has not
+been run natively.
 
 ## 1. Question and answers
 
@@ -296,11 +298,10 @@ a cheaper query can raise t and knows what they asked for.
 
 - Coordinates are exact. A real stream quantises r″; the certificate carries over (section 2.4) but
   the byte counts were not measured here. The dead list of `FINDINGS.md` records the same transform
-  ("simultaneous diagonalisation") as hurting beyond 16 bytes. Its experiment, `exp5.py`, used item
-  queries only and a single-shot uniform quantiser that clips (`np.clip` in `quant`); the escape code
-  and the fast-scan code came later and clip nothing. Conjectured, not tested: clipping caused the
-  loss, because whitened coordinates make outliers overflow more often. The native check named at the
-  top of this report settles it.
+  ("simultaneous diagonalisation") as hurting beyond 16 bytes. I conjectured that `exp5.py`'s
+  clipping quantiser caused that loss; `dualproto/REPORT.md` section 6 refutes this. Clip rates are
+  equal in both bases, and the loss comes from `exp5.py`'s per-group, nearest-cluster fit of Σ_Q; the
+  fit used here wins at every budget in the same quantiser.
 - One dataset, one dimension, one ridge value, one Σ_Q for all groups.
 - Test and training prompts come from the same templates (`review/REPORT.md` section 1.6). The
   hand-written free descriptions and the absent species gain 21–37 % under the mixed fit, the

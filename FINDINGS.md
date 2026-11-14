@@ -224,10 +224,12 @@ guarantee about *one* item is cheap. You are welcome to attack any of these.
   first: 0.23, same as one code at double precision. **[measured, 200k]**
 - **Simultaneous diagonalisation of query-offset and residual covariances** (the theoretically
   optimal linear basis). Helps the first 4–8 bytes, hurts beyond 16. **[measured]**
-  *Contested:* `groups/REPORT.md` section 2.4 proves this is the best basis for a Cauchy–Schwarz
-  bound and measures it, in exact coordinates, cutting reads by 13–16% for text and 33–39% for
-  items when fitted to the data alone, and 30–44% for text with text prompts in the fit. The experiment here (`exp5.py`) used a single-shot quantiser that clips; the later codes
-  clip nothing. A native check in `rust/` is in progress. Treat as open until it reports.
+  *Overturned:* the result depends on how the query-offset covariance Σ_Q is fitted, not on the
+  basis. `exp5.py`'s per-group fit to nearest-cluster offsets loses at deep levels (reproduced;
+  clipping is not the cause). One global Σ_Q fitted to offsets from clusters drawn by size, with the
+  centre projected out and a ridge, wins at every budget: in the native version 2 code it cuts bytes
+  read by 9–30% for items (data-only fit) and 25–34% for text (fit including text prompts), with
+  0 violations. **[measured, `dualproto/REPORT.md`; theory in `groups/REPORT.md` 2.4]**
 - **Box ∩ ball bounds, one-sided sign bounds, Hölder variants.** No better than weighted
   Cauchy–Schwarz for spread errors. **[argued]**
 - **Sketches of the errors (count-sketch, compressed sensing).** A dense noise floor of typical

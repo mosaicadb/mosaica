@@ -234,14 +234,17 @@ below the threshold carry 56–87% of text cost at answers of 1% and below; item
 4–19%. Cost follows the distance of the bulk from the threshold, not the height of the score
 density there.
 
-**Proposed changes**, pending the native check named in the README:
+**Proposed changes:**
 1. **Replace each group's PCA basis and diagonal profile by the dual pair** of `groups/REPORT.md`
    section 2.4: the matrix geometric mean of the inverse query-offset covariance and the residual
-   covariance. Same storage and query work; soundness does not depend on the fit. Coordinates read
-   fall 30–44% for text with a query log in the fit, 13–16% for text and 33–39% for items with the
-   data-only fit. The best diagonal weighting recovers 2–4%.
+   covariance. Same storage and query work; soundness does not depend on the fit. **Checked natively**
+   (`dualproto/REPORT.md`): bytes read on the version 2 code fall 9–30% for items and 6–10% for text
+   with the data-only fit, and 25–34% for text with text prompts in the fit; text queries run 12–26%
+   faster at one thread with the mixed fit; 0 violations, exact k-NN on all queries. Two code changes
+   were needed (a non-orthogonal int8 basis inverse, and a per-item scale that assumed an orthogonal
+   basis), in `dualproto/changes.diff`.
 2. **Sort each cluster by the residual's norm in that metric** instead of by x·m̂, and drop the
-   support table and anchors. With nothing read per member this matches the table for items and
+   support table and anchors (not yet run natively). With nothing read per member this matches the table for items and
    beats it for text (61 / 71 / 86 / 97% of items left against 75 / 83 / 94 / 100%). It removes the
    table's size and anchor-ratio problem at 10⁹ and the atomic widening on insert.
 3. **Fit the query-offset covariance from corpus items at build, and refit it from the query log at
