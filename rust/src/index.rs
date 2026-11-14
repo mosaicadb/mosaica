@@ -39,6 +39,10 @@ pub struct Meta {
     pub rlv: Vec<usize>,
     pub bounds: Vec<usize>,
     pub csg: f64,
+    /// the guarantee's failure probability per query (meta "EPS", default 1e-9)
+    pub eps: f64,
+    /// certified worst-case constants of the randomised levels (meta "CERTS", written by tools/certify.py)
+    pub certs: Vec<crate::v2::tail::Cert>,
 }
 impl Meta {
     pub fn nl(&self) -> usize {
@@ -91,7 +95,13 @@ pub fn load_params(dir: &str) -> Params {
     let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
     let xs = meta["xs"].as_str().unwrap();
     Params {
-        meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap() },
+        meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
+            eps: meta["EPS"].as_f64().unwrap_or(1e-9),
+            certs: meta["CERTS"].as_array().map_or(Vec::new(), |a| a.iter().map(|c| crate::v2::tail::Cert {
+                ds: c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect(),
+                lnd: c["lnd"].as_f64().unwrap(),
+                x: c["X"].as_f64().unwrap(),
+            }).collect()) },
         cstart: r("cstart").i64s().iter().map(|&x| x as usize).collect(),
         grp: r("grp").i64s().iter().map(|&x| x as usize).collect(),
         centres,
@@ -973,7 +983,7 @@ impl Source for RealSource {
 /// Build the whole index from parameters and a source of items.
 pub fn build(p: &Params, src: Box<dyn Source>, nanch: usize, log: &mut dyn FnMut(String)) -> Index {
     let t = Timer::new();
-    let meta = Meta { n: p.meta.n, k: p.meta.k, g: p.meta.g, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), bounds: p.meta.bounds.clone(), csg: p.meta.csg };
+    let meta = Meta { n: p.meta.n, k: p.meta.k, g: p.meta.g, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), bounds: p.meta.bounds.clone(), csg: p.meta.csg, eps: p.meta.eps, certs: p.meta.certs.clone() };
     let n = meta.n;
     let k = meta.k;
     let tree = Tree::new(p);
