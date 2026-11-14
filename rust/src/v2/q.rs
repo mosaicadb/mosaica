@@ -2202,6 +2202,9 @@ fn scan_chunks(ix: &Index2, vis: Option<&Vis2>) -> usize {
     (vis.map_or(ix.nrows, |v| v.rows.len()) + SCAN_ROWS - 1) / SCAN_ROWS
 }
 /// Appends the visible rows of scan chunk `ch`, ascending.
+/// A scan through the reader reads visible rows this many bytes apart or closer with one read.
+const SCAN_GAP: usize = 8192;
+
 fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
     let nr = vis.map_or(ix.nrows, |v| v.rows.len());
     let (a, b) = (ch * SCAN_ROWS, ((ch + 1) * SCAN_ROWS).min(nr));
@@ -2216,28 +2219,58 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
     let nch = scan_chunks(ix, vis);
-    let parts: Vec<ThrOut2> = (0..nch).into_par_iter().map(|ch| {
-        let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
-        let mut rows = Vec::with_capacity(4096);
-        // with --willneed, reading runs SCAN_AHEAD chunks ahead of the scan
-        if let Full2::Real { rows: fr, .. } = &ix.full {
-            if super::disk::WILLNEED.load(std::sync::atomic::Ordering::Relaxed) {
-                let lo = if ch == 0 { 1 } else { ch + SCAN_AHEAD };
-                for c2 in lo..=(ch + SCAN_AHEAD).min(nch - 1) {
-                    scan_rows(ix, vis, c2, &mut rows);
-                    fr.willneed(&rows, ix.n());
-                    rows.clear();
+    // full vectors on file read through io_uring: each thread's chunks are read while it decides the earlier ones
+    let fr = match &ix.full {
+        Full2::Real { rows: fr @ super::disk::Rows::Map { .. }, .. } if !packed && super::disk::URING.load(std::sync::atomic::Ordering::Relaxed) => Some(fr),
+        _ => None,
+    };
+    let parts: Vec<ThrOut2> = if let Some(fr) = fr {
+        let decide = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
+            let b = rd.pop().unwrap();
+            decide_full_from(ix, pr, t, &b.rows, want_exact, acc, |k| b.row(k, ix.n()));
+            rd.recycle(b);
+        };
+        (0..nch).into_par_iter().fold(
+            || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), SCAN_GAP).unwrap()),
+            |(mut acc, mut rd), ch| {
+                let mut rows = Vec::new();
+                scan_rows(ix, vis, ch, &mut rows);
+                rd.push((), rows);
+                while rd.full() {
+                    decide(&mut acc, &mut rd);
+                }
+                (acc, rd)
+            },
+        ).map(|(mut acc, mut rd)| {
+            while !rd.is_empty() {
+                decide(&mut acc, &mut rd);
+            }
+            acc
+        }).collect()
+    } else {
+        (0..nch).into_par_iter().map(|ch| {
+            let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
+            let mut rows = Vec::with_capacity(4096);
+            // with --willneed, reading runs SCAN_AHEAD chunks ahead of the scan
+            if let Full2::Real { rows: fr, .. } = &ix.full {
+                if super::disk::WILLNEED.load(std::sync::atomic::Ordering::Relaxed) {
+                    let lo = if ch == 0 { 1 } else { ch + SCAN_AHEAD };
+                    for c2 in lo..=(ch + SCAN_AHEAD).min(nch - 1) {
+                        scan_rows(ix, vis, c2, &mut rows);
+                        fr.willneed(&rows, ix.n());
+                        rows.clear();
+                    }
                 }
             }
-        }
-        scan_rows(ix, vis, ch, &mut rows);
-        if packed && vis.is_some() {
-            decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
-        } else {
-            decide_full(ix, pr, t, &rows, want_exact, &mut acc);
-        }
-        acc
-    }).collect();
+            scan_rows(ix, vis, ch, &mut rows);
+            if packed && vis.is_some() {
+                decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
+            } else {
+                decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+            }
+            acc
+        }).collect()
+    };
     let mut out = ThrOut2 { st: Stats::new(nl), scanned: true, ..Default::default() };
     for p in parts {
         out.rows.extend(p.rows);

@@ -283,10 +283,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         let fr = arg_str("--full-read", "uring");
         assert!(fr == "uring" || fr == "mmap", "--full-read is uring or mmap");
         crate::v2::disk::URING.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
-        // extents of at least --direct-min bytes are read with O_DIRECT (default: never)
-        if let Ok(v) = arg_str("--direct-min", "").parse::<usize>() {
-            crate::v2::disk::DIRECT_MIN.store(v, std::sync::atomic::Ordering::Relaxed);
-        }
+        // extents of at least --direct-min bytes are read with O_DIRECT, past the page cache (0: every read; none:
+        // never)
+        let dm = arg_str("--direct-min", "8192");
+        crate::v2::disk::DIRECT_MIN.store(if dm == "none" { usize::MAX } else { dm.parse().expect("--direct-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
         out!("[disk] full vectors written to {ff} and mapped ({}, willneed {}, read {fr}) in {:.1}s", arg_str("--full-advice", "random"), args().iter().any(|a| a == "--willneed"), t.s());
     }
     if !ff.is_empty() {
@@ -1219,9 +1219,10 @@ pub fn dbcmp(c: &Ctx2) {
             out!("[cap] full vectors resident after eviction: {:.1} MiB", r.resident() as f64 / (1 << 20) as f64);
         }
     }
-    // the disk constants timed here, under the cap (`--calib-disk`), or as in the plan
-    let mut plan0 = c.plan;
-    if args().iter().any(|a| a == "--calib-disk") {
+    // full vectors read through the reader: the planner counts their reads (`:plan=mem` in a read mode: not), with the
+    // disk constants timed here under the cap (`--no-calib-disk`: as in the plan)
+    let mut plan0 = Plan { disk: on_file && disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..c.plan };
+    if plan0.disk && !args().iter().any(|a| a == "--no-calib-disk") {
         let t = Timer::new();
         plan0 = Plan::calibrate_disk(ix, plan0);
         out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
@@ -1243,13 +1244,14 @@ pub fn dbcmp(c: &Ctx2) {
             disk::DIRECT_MIN.store(dm0, std::sync::atomic::Ordering::Relaxed);
             for kv in mode.split(':') {
                 match kv.split_once('=') {
-                    None if kv == "mmap" => {}
+                    None if kv == "mmap" => plan.disk = false,
                     None if kv == "uring" => disk::URING.store(true, std::sync::atomic::Ordering::Relaxed),
                     Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
                     Some(("direct", v)) => disk::DIRECT_MIN.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
                     Some(("plan", "disk")) => plan.disk = true,
+                    Some(("plan", "mem")) => plan.disk = false,
                     Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
-                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES and :plan=disk"),
+                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES and :plan=disk or mem"),
                 }
             }
             // each mode starts from an empty cache, so that one mode's cached rows do not serve the next
