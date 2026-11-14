@@ -751,6 +751,10 @@ fn main() {
         println!("qmix profile re-derived: {a} frb entries and {b} rate entries differ from the numpy export");
         return;
     }
+    if has("qvbench") {
+        v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
+        return;
+    }
     if has("--v2") {
         if has("--scale") {
             crate::scale::run2(get("--scale", 10), get("--nq", 20));
@@ -772,16 +776,20 @@ fn main() {
         if has("e2e") {
             // further variants: another index (--index-b, --index-c) and/or plan switches (--b, --c), measured
             // interleaved with the first
+            // (a variant that only changes plan flags shares the first variant's index)
             let mut extra = Vec::new();
+            let mut same = Vec::new();
             for v in ["b", "c"] {
                 let (ib, bf) = (run2::arg_str(&format!("--index-{v}"), ""), run2::arg_str(&format!("--{v}"), ""));
-                if !ib.is_empty() || !bf.is_empty() {
-                    let dir = if ib.is_empty() { run2::data_dir() } else { ib };
-                    extra.push((v, run2::setup2_at("run2", &dir, &bf)));
+                if !ib.is_empty() {
+                    extra.push((v, run2::setup2_at("run2", &ib, &bf)));
+                } else if !bf.is_empty() {
+                    same.push((v, run2::plan_flags(c.plan, &bf)));
                 }
             }
-            let mut vs: Vec<(&str, &run2::Ctx2)> = vec![("a", &c)];
-            vs.extend(extra.iter().map(|(v, cx)| (*v, cx)));
+            let mut vs: Vec<(&str, &run2::Ctx2, v2::q::Plan)> = vec![("a", &c, c.plan)];
+            vs.extend(extra.iter().map(|(v, cx)| (*v, cx, cx.plan)));
+            vs.extend(same.iter().map(|(v, p)| (*v, &c, *p)));
             run2::e2e2(&vs, get("--nq", 100));
         }
         if has("breakdown") {

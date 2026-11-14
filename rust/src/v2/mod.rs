@@ -16,6 +16,7 @@
 pub mod col;
 pub mod kern;
 pub mod q;
+pub mod setup;
 
 use crate::derive;
 use crate::index::{item_scale, Params, DA, SEED};

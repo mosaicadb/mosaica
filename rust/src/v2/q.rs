@@ -25,6 +25,17 @@ pub const P_FULL: usize = 9;
 pub const P_INIT: usize = 10;
 pub const P_PLAN: usize = 11;
 pub const P_SEL: usize = 12;
+/// Enclosing totals, from which the breakdown derives the time between the phases above: all of run_cluster, all of
+/// one cluster's work in run_planned, all of a query (set by the caller), and the merge of the clusters' outputs.
+pub const P_RUNCL: usize = 13;
+pub const P_CLUSTER: usize = 14;
+pub const P_QUERY: usize = 15;
+pub const P_MERGE: usize = 16;
+/// Compaction of the survivors' state after each block and level (held-in-place holes or moved lanes).
+pub const P_COMPACT: usize = 17;
+/// Per (cluster, level) work outside the tables and blocks: the move to the randomised levels, the integer levels'
+/// thresholds, the scalar steps.
+pub const P_LVSETUP: usize = 18;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -1092,6 +1103,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             break;
         }
         let lp = &gp.levels[l];
+        let tl1 = tick();
         if intm && l == NDL {
             // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
             let id = cq.int.as_ref().unwrap();
@@ -1102,6 +1114,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             edet = ((id.e[NDL - 1] + (b.abs() + sg * THETA_MAX as f64) * 2f64.powi(-23)) * (1.0 + 1e-6)) as f32;
         }
         let tt = tick();
+        st.cyc[P_LVSETUP] += tt - tl1;
         let lut: &LevelLut = if cq.shared {
             gq.glut[l].get_or_init(|| {
                 let mut lut = LevelLut::default();
@@ -1123,6 +1136,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             cq.luts[l].as_ref().unwrap()
         };
         st.cyc[P_TABLES] += tick() - tt;
+        let tls = tick();
         let skip = l < first_decide && !verify && mode == Mode2::Thr;
         for pl in &lut.parts {
             match pl.j {
@@ -1178,6 +1192,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             }
         }
         let tl0 = _rdtsc();
+        st.cyc[P_LVSETUP] += tick() - tls;
         let nb = (nsurv + BLK - 1) / BLK;
         let mut kept_tot = 0usize;
         st.blocks[l] += nb as u64;
@@ -1523,6 +1538,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             if interval && l == stop {
                 continue;
             }
+            let tc = tick();
             if aligned {
                 // decided lanes become holes
                 for h in 0..2 {
@@ -1533,6 +1549,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     }
                     kept_tot += keep[h].count_ones() as usize;
                 }
+                st.cyc[P_COMPACT] += tick() - tc;
                 continue;
             }
             // compact the survivors' state (writes never pass the block being read)
@@ -1570,11 +1587,14 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 }
                 wpos += m.count_ones() as usize;
             }
+            st.cyc[P_COMPACT] += tick() - tc;
         }
         if l == stop {
             st.lcyc[l] += _rdtsc() - tl0;
+            st.cyc[P_RUNCL] += tick() - ti;
             return;
         }
+        let tc = tick();
         if aligned {
             if kept_tot == 0 {
                 nsurv = 0;
@@ -1621,6 +1641,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 sv.idx[k] = u32::MAX;
             }
         }
+        st.cyc[P_COMPACT] += tick() - tc;
         st.lcyc[l] += _rdtsc() - tl0;
         // single-pass rule: decide once at first_decide, the rest go to their full vectors
         if mode == Mode2::Thr && first_decide > 0 && l == first_decide {
@@ -1628,7 +1649,6 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         }
         let _ = nr;
     }
-    let _ = ti;
     let mut np = 0;
     for k in 0..nsurv {
         if sv.idx[k] != u32::MAX {
@@ -1637,6 +1657,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         }
     }
     st.enter[nl] += np;
+    st.cyc[P_RUNCL] += tick() - ti;
 }
 
 /// The occupancy of slots held in place (with holes) below which they are compacted before each level, from timings on
@@ -2228,6 +2249,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
     let parts: Vec<ThrOut2> = (0..k).into_par_iter().fold(
         || (ThrOut2 { st: Stats::new(nl), ..Default::default() }, State::default()),
         |(mut acc, mut sv), ci| {
+            let tcl = tick();
             let c = &ix.cl[ci];
             let push = |acc: &mut ThrOut2, r0: usize, r1: usize, iv: Option<(f64, f64)>| {
                 for r in r0..r1 {
@@ -2326,9 +2348,11 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     }
                 }
             }
+            acc.st.cyc[P_CLUSTER] += tick() - tcl;
             (acc, sv)
         },
     ).map(|x| x.0).collect();
+    let tm = tick();
     let mut out = ThrOut2 { st: Stats::new(nl), ..Default::default() };
     out.st.cyc[P_CUT] += cut_cyc;
     out.st.add(&gst);
@@ -2341,6 +2365,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         out.flat_clusters += p.flat_clusters;
         out.flat_items += p.flat_items;
     }
+    out.st.cyc[P_MERGE] += tick() - tm;
     out
 }
 

@@ -495,7 +495,30 @@ pub fn levels2(c: &Ctx2, reps: usize) {
 
 /// Fixed setup per query: group setup (exact int8 basis product, rotated weights) and cluster setup with tables.
 pub fn setup_cost(c: &Ctx2, nq: usize) {
+    pool(1).install(|| setup_cost1(c, nq));
+}
+
+/// Bytes of every group's int8 basis summed as a plain stream (the memory floor of the basis products), ms.
+fn raw_read_ms(ix: &Index2) -> f64 {
+    use core::arch::x86_64::*;
+    let t = Timer::new();
+    let mut acc = unsafe { _mm256_setzero_si256() };
+    for gp in &ix.groups {
+        let p = gp.v8t.as_ptr();
+        let mut i = 0;
+        while i + 32 <= gp.v8t.len() {
+            acc = unsafe { _mm256_add_epi8(acc, _mm256_loadu_si256(p.add(i) as *const _)) };
+            i += 32;
+        }
+    }
+    std::hint::black_box(acc);
+    t.ms()
+}
+
+fn setup_cost1(c: &Ctx2, nq: usize) {
     let ix = &c.ix;
+    let raw: Vec<f64> = (0..10).map(|_| raw_read_ms(ix)).collect();
+    out!("setup2 raw read of all {} groups' int8 bases ({:.1} MB): {:.2} ms", ix.groups.len(), ix.groups.iter().map(|g| g.v8t.len()).sum::<usize>() as f64 / 1e6, median(&raw));
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
         let (mut tg, mut tc, mut tl, mut tq, mut tw, mut trot) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for q in qs.iter().take(nq) {
@@ -568,13 +591,15 @@ pub fn setup_cost(c: &Ctx2, nq: usize) {
 /// warm-up run) on each of `--threads` (default 1,4; pinned with `--pin`), one timing per query per run, the variants
 /// interleaved cell by cell so that they share the machine's state; a cell's figure is the median over runs of the
 /// median over queries, with the smallest and largest run.
-pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
+pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
     let c0 = vs[0].1;
+    // answer shares from `--sizes` (fractions, comma-separated); `--knn 0` leaves out the k-NN cell
+    let sizes_f: Vec<f64> = { let a = arg_str("--sizes", ""); if a.is_empty() { SIZES.to_vec() } else { a.split(',').map(|x| x.parse().unwrap()).collect() } };
     let nrows = c0.flat().nrows;
     let nl = c0.ix.meta.nl();
     let runs = arg_usize("--runs", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|s| s.parse().unwrap()).collect();
-    let sizes: Vec<usize> = SIZES.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
+    let sizes: Vec<usize> = sizes_f.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
     let mut lines = vec!["variant,class,threads,what,answer_frac,median_of_runs_ms,min_run_ms,max_run_ms,nq,runs,bytes_read_per_item,touched_frac,full_reads_per_item,enter_frac_by_level".to_string()];
     for (cls, qs) in [("item", c0.items.clone()), ("text", c0.texts.clone())] {
         let qs: Vec<Vec<f32>> = qs.into_iter().take(nq).collect();
@@ -587,22 +612,22 @@ pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
             let sc = fl.scores(&pr.q32);
             thresholds_for(&fl, &pr.q16, &sc, full_err2(&c0.ix, &pr), &sizes)
         }).collect();
-        let ncell = SIZES.len() + 1; // the last cell is k-NN
-        let run_cell = |c: &Ctx2, cell: usize, qi: usize| -> Stats {
+        let ncell = sizes_f.len() + if arg_usize("--knn", 1) > 0 { 1 } else { 0 }; // the last cell is k-NN
+        let run_cell = |c: &Ctx2, plan: Plan, cell: usize, qi: usize| -> Stats {
             let ix = &c.ix;
-            if cell < SIZES.len() {
-                let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
+            if cell < sizes_f.len() {
+                let o = Opts2 { vis: None, verify: false, want_iv: false, plan };
                 let pr = prep2(ix, &qs[qi]);
                 let r = threshold2(ix, &pr, ths[qi][cell], &o);
                 std::hint::black_box(to_bitmap2(ix, &r.rows));
                 r.st
             } else {
-                knn2(ix, &qs[qi], 10, None, c.plan).st
+                knn2(ix, &qs[qi], 10, None, plan).st
             }
         };
         let k = qs.len() as f64;
         let mut cellinfo = vec![Vec::new(); vs.len()];
-        for (vi, &(vname, c)) in vs.iter().enumerate() {
+        for (vi, &(vname, c, plan)) in vs.iter().enumerate() {
             let pl = pool(1);
             for cell in 0..ncell {
                 let (mut br, mut tch, mut fr) = (0.0, 0.0, 0.0);
@@ -610,7 +635,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
                 let mut colst: [Vec<f64>; 3] = [Vec::new(), Vec::new(), vec![0.0]];
                 let mut hwacc: Vec<[f64; 5]> = Vec::new();
                 for qi in 0..qs.len() {
-                    let st = pl.install(|| run_cell(c, cell, qi));
+                    let st = pl.install(|| run_cell(c, plan, cell, qi));
                     if colst[0].len() < st.col_enter.len() {
                         colst[0].resize(st.col_enter.len(), 0.0);
                         colst[1].resize(st.col_enter.len(), 0.0);
@@ -631,14 +656,14 @@ pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
                 }
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
                 if !hwacc.is_empty() {
-                    out!("e2e2 colhw {vname} {cls} {}: per check mean fixed / rho5 / unread / |est-t|: {}", SIZES.get(cell).map_or(0.0, |x| *x), hwacc.iter().filter(|x| x[0] > 0.0).map(|x| format!("{:.4}/{:.4}/{:.4}/{:.4}", x[1] / x[0], x[2] / x[0], x[3] / x[0], x[4] / x[0])).collect::<Vec<_>>().join(" "));
+                    out!("e2e2 colhw {vname} {cls} {}: per check mean fixed / rho5 / unread / |est-t|: {}", sizes_f.get(cell).map_or(0.0, |x| *x), hwacc.iter().filter(|x| x[0] > 0.0).map(|x| format!("{:.4}/{:.4}/{:.4}/{:.4}", x[1] / x[0], x[2] / x[0], x[3] / x[0], x[4] / x[0])).collect::<Vec<_>>().join(" "));
                 }
                 if !colst[0].is_empty() {
-                    out!("e2e2 colchecks {vname} {cls} {}: entering {:?} decided {:?}; block norms read {:.4}", if cell < SIZES.len() { format!("{}", SIZES[cell]) } else { "knn10".into() },
+                    out!("e2e2 colchecks {vname} {cls} {}: entering {:?} decided {:?}; block norms read {:.4}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() },
                         colst[0].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[1].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[2][0] / k / nrows as f64);
                 }
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
-                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < SIZES.len() { format!("{}", SIZES[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
+                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }
         }
         for &th in &threads {
@@ -646,11 +671,11 @@ pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
             let mut per = vec![vec![Vec::new(); ncell]; vs.len()];
             for run in 0..=runs {
                 for cell in 0..ncell {
-                    for (vi, &(_, c)) in vs.iter().enumerate() {
+                    for (vi, &(_, c, plan)) in vs.iter().enumerate() {
                         let mut ts = Vec::with_capacity(qs.len());
                         for qi in 0..qs.len() {
                             let t = Timer::new();
-                            pl.install(|| run_cell(c, cell, qi));
+                            pl.install(|| run_cell(c, plan, cell, qi));
                             ts.push(t.ms());
                         }
                         if run > 0 {
@@ -659,10 +684,10 @@ pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
                     }
                 }
             }
-            for (vi, &(vname, _)) in vs.iter().enumerate() {
+            for (vi, &(vname, _, _)) in vs.iter().enumerate() {
                 for cell in 0..ncell {
                     let v = &per[vi][cell];
-                    let (what, frac) = if cell < SIZES.len() { ("index2_thr", SIZES[cell]) } else { ("index2_knn10", 0.0) };
+                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr", sizes_f[cell]) } else { ("index2_knn10", 0.0) };
                     let line = format!("{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", vname, cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[vi][cell]);
                     out!("e2e2 {line}");
                     lines.push(line);
@@ -684,8 +709,13 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
     let (t, c0) = (Timer::new(), unsafe { core::arch::x86_64::_rdtsc() });
     while t.ms() < 200.0 {}
     let hz = (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.s();
-    let names = ["anchor", "cut", "basis", "rotations", "cluster setup", "tables", "re-pack", "level decode", "bounds+decisions+compaction", "full vectors", "candidate init", "result bitmap", "column order"];
-    let mut lines = vec!["variant,class,answer_frac,threads,wall_ms,cpu_ms_total,".to_string() + &names.join(",") + ",bytes_read,full_reads,wrong"];
+    // the phases, then what the enclosing totals leave between them: in run_cluster outside its phases (per-level
+    // bookkeeping), in a cluster's work outside run_cluster, its setup and full vectors (candidates, ranges, allocation),
+    // in the query outside every cluster and phase (merge, drops), and outside the query's own counters (the pool's
+    // hand-off); all from the profiled run, whose wall time is prof_wall_ms (the mean over queries)
+    let names = ["anchor", "cut", "basis", "rotations", "cluster setup", "tables", "re-pack", "level decode", "bounds+decisions", "full vectors", "candidate init", "result bitmap", "column order",
+                 "compaction", "level setup", "level other", "cluster other", "merge", "query other", "unattributed"];
+    let mut lines = vec!["variant,class,answer_frac,threads,wall_ms,prof_wall_ms,cpu_ms_total,".to_string() + &names.join(",") + ",bytes_read,full_reads,wrong"];
     let variants: &[(&str, bool, usize)] = if args().iter().any(|a| a == "--variants") {
         &[("levels", false, 0usize), ("shared_tables", true, 0), ("single_pass_64B", false, 9), ("single_pass_96B", false, 12), ("single_pass_128B", false, 14), ("shared+single_96B", true, 12)]
     } else {
@@ -710,8 +740,10 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
             let plan = Plan { alpha0, jump_level: jump, jump_d: 0.8, ..c.plan };
             for &th in &bthreads {
                 let pl = pool(th);
-                let mut cyc = [0f64; 13];
-                let (mut walls, mut br, mut fr, mut wrong) = (Vec::new(), 0.0, 0.0, 0u64);
+                let mut cyc = [0f64; 20];
+                let ms = |c: u64| c as f64 / hz * 1e3 / qs.len() as f64;
+                let (mut walls, mut br, mut fr, mut wrong, mut pwall) = (Vec::new(), 0.0, 0.0, 0u64, 0.0);
+                let mut parts = [0f64; 20];
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -727,19 +759,33 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                             let bm = to_bitmap2(ix, &r.rows);
                             r.st.cyc[P_ANCHOR] += a1 - a0;
                             r.st.cyc[P_PLAN] += tick() - a2;
+                            drop(pr);
+                            r.st.cyc[P_QUERY] += tick() - a0;
                             (r, bm)
                         });
                         let w = tm.ms();
                         if rep < 2 {
                             best = best.min(w);
                         } else {
+                            pwall += w / qs.len() as f64;
                             keep = Some(r);
                         }
                     }
                     PROF.store(false, Ordering::Relaxed);
                     let (r, bm) = keep.unwrap();
+                    let cy = &r.st.cyc;
                     for k in 0..13 {
-                        cyc[k] += r.st.cyc[k] as f64 / hz * 1e3 / qs.len() as f64;
+                        parts[k] += ms(cy[k]);
+                    }
+                    let inner = |ks: &[usize]| ks.iter().map(|&k| cy[k] as i64).sum::<i64>();
+                    let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP]);
+                    let clo = cy[P_CLUSTER] as i64 - cy[P_RUNCL] as i64 - inner(&[P_CLSETUP, P_FULL]);
+                    let qo = cy[P_QUERY] as i64 - cy[P_CLUSTER] as i64 - cy[P_MERGE] as i64 - inner(&[P_ANCHOR, P_CUT, P_BASIS, P_ROT, P_PLAN]);
+                    for (k, v) in [(13, cy[P_COMPACT] as i64), (14, cy[P_LVSETUP] as i64), (15, lv), (16, clo), (17, cy[P_MERGE] as i64), (18, qo)] {
+                        parts[k] += v as f64 / hz * 1e3 / qs.len() as f64;
+                    }
+                    for k in 0..20 {
+                        cyc[k] += ms(cy[k]);
                     }
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
@@ -747,8 +793,9 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     wrong += a + b;
                     walls.push(best);
                 }
-                let tot: f64 = cyc.iter().sum();
-                let line = format!("{},{cls},{},{},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), tot, cyc.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
+                parts[19] = pwall - parts[..19].iter().sum::<f64>();
+                let tot: f64 = parts[..19].iter().sum();
+                let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
                 lines.push(line);
             }
