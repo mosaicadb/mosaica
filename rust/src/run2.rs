@@ -112,6 +112,8 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "nogtab" => p.gtab = false,
             "repack" => p.repack = true,
             "norepack" => p.repack = false,
+            "pscan" => p.pscan = true,
+            "nopscan" => p.pscan = false,
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("repackx=") => {
                 p.repack = true;
@@ -894,4 +896,67 @@ pub fn oracle_dump(c: &Ctx2, nq: usize) {
     write_npy(&format!("{dir}/knn.npy"), "<i8", &[nqt, 2, 10], &bi(&knn));
     write_npy(&format!("{dir}/vis.npy"), "<i8", &[ents.len()], &bi(&ents.iter().map(|&e| e as i64).collect::<Vec<_>>()));
     out!("oracle dump: {nqt} queries, {} results, {} visible entities, to {dir}", off.len() - 1, ents.len());
+}
+
+/// Filtered threshold queries (the unfiltered 1% threshold) over random visible sets of 0.1, 1 and 10% of the rows:
+/// the scan of the visible set in place against the packed scan (scan_visible), and as planned with each, on each of
+/// `--threads`, `--runs` interleaved runs; every variant's result is checked against the scan in place.
+pub fn scanbench(c: &Ctx2, nq: usize) {
+    use rand::SeedableRng;
+    let ix = &c.ix;
+    let fl = c.flat();
+    let runs = arg_usize("--runs", 5);
+    let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|s| s.parse().unwrap()).collect();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+    let mut lines = vec!["class,visible,threads,what,median_of_runs_ms,min_run_ms,max_run_ms,planned_scans".to_string()];
+    for &frac in &[0.001, 0.01, 0.1] {
+        let bm = make_filter(ix, "random", frac, &mut rng);
+        let vis = Vis2::new(ix, &bm);
+        for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
+            let qs: Vec<Vec<f32>> = qs.iter().take(nq).cloned().collect();
+            let ths: Vec<f64> = qs.iter().map(|q| {
+                let pr = prep2(ix, q);
+                thresholds_for(&fl, &pr.q16, &fl.scores(&pr.q32), full_err2(ix, &pr), &[(fl.nrows / 100).max(1)])[0]
+            }).collect();
+            let variants: [(&str, bool, bool); 4] = [("scan_in_place", false, false), ("scan_packed", true, false), ("planned_in_place", false, true), ("planned_packed", true, true)];
+            let mut scans = [0usize; 4];
+            for &th in &threads {
+                let pl = pool(th);
+                let mut per = vec![Vec::new(); 4];
+                for run in 0..=runs {
+                    for (vi, &(_, packed, planned)) in variants.iter().enumerate() {
+                        let mut ts = Vec::new();
+                        for (qi, q) in qs.iter().enumerate() {
+                            let pr = prep2(ix, q);
+                            let t = Timer::new();
+                            let r = pl.install(|| if planned {
+                                threshold2(ix, &pr, ths[qi], &Opts2 { vis: Some(&vis), verify: false, want_iv: false, plan: Plan { pscan: packed, ..c.plan } })
+                            } else {
+                                scan_visible(ix, &pr, ths[qi], Some(&vis), false, packed)
+                            });
+                            ts.push(t.ms());
+                            if run == 0 && th == threads[0] {
+                                scans[vi] += r.scanned as usize;
+                                let mut a = r.rows.clone();
+                                a.sort_unstable();
+                                let mut b = scan_visible(ix, &pr, ths[qi], Some(&vis), false, false).rows;
+                                b.sort_unstable();
+                                assert_eq!(a, b, "scan variants disagree");
+                            }
+                        }
+                        if run > 0 {
+                            per[vi].push(median(&ts));
+                        }
+                    }
+                }
+                for (vi, &(what, _, _)) in variants.iter().enumerate() {
+                    let v = &per[vi];
+                    let line = format!("{cls},{frac},{th},{what},{:.3},{:.3},{:.3},{}", median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), scans[vi]);
+                    out!("scanbench {line}");
+                    lines.push(line);
+                }
+            }
+        }
+    }
+    std::fs::write(format!("{}/scanbench.csv", res_dir()), lines.join("\n") + "\n").unwrap();
 }

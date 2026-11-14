@@ -1712,10 +1712,11 @@ pub struct Plan {
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
+    pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0 }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, pscan: false }
     }
 }
 impl Plan {
@@ -1891,13 +1892,17 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 
 /// Certified scan of the visible set (every row when vis is None): every visible row's full vector, exact near the
 /// threshold.
-pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool) -> ThrOut2 {
+pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
     let parts: Vec<ThrOut2> = (0..scan_chunks(ix, vis)).into_par_iter().map(|ch| {
         let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
         let mut rows = Vec::with_capacity(4096);
         scan_rows(ix, vis, ch, &mut rows);
-        decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+        if packed && vis.is_some() {
+            decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
+        } else {
+            decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+        }
         acc
     }).collect();
     let mut out = ThrOut2 { st: Stats::new(nl), scanned: true, ..Default::default() };
@@ -1951,6 +1956,58 @@ pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bo
             if want_exact {
                 acc.exact.push((r, exact_value2(ix, pr, r as usize)));
             }
+        }
+    }
+}
+
+/// decide_full over scattered rows by blocks of 32: each block's vectors are copied into a contiguous buffer (the next
+/// block's rows prefetched meanwhile) and scored there.
+pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_exact: bool, acc: &mut ThrOut2) {
+    const B: usize = 32;
+    let n = ix.n();
+    let e = full_err2(ix, pr);
+    let mut buf = vec![0u16; B * n];
+    let pf = |r: u32| unsafe {
+        let p = ix.full_row_f16(r as usize).as_ptr() as *const i8;
+        for x in (0..2 * n).step_by(64) {
+            _mm_prefetch::<_MM_HINT_T0>(p.add(x));
+        }
+    };
+    for &r in rows.iter().take(B) {
+        pf(r);
+    }
+    for (bi, blk) in rows.chunks(B).enumerate() {
+        for &r in rows.iter().skip((bi + 1) * B).take(B) {
+            pf(r);
+        }
+        for (i, &r) in blk.iter().enumerate() {
+            buf[i * n..(i + 1) * n].copy_from_slice(ix.full_row_f16(r as usize));
+        }
+        let mut k = 0;
+        while k < blk.len() {
+            let m = (blk.len() - k).min(4);
+            let rr: [&[u16]; 4] = core::array::from_fn(|q| &buf[(k + q.min(m - 1)) * n..(k + q.min(m - 1) + 1) * n]);
+            let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, rr) };
+            for q in 0..m {
+                acc.st.full_reads += 1;
+                let s = sc[q] as f64;
+                let row = blk[k + q];
+                let inn = if s >= t + e {
+                    true
+                } else if s < t - e {
+                    false
+                } else {
+                    acc.st.exact_fallbacks += 1;
+                    exact_ge(exact_dot(&pr.q16, ix.full_row_f16(row as usize)), t)
+                };
+                if inn {
+                    acc.rows.push(row);
+                    if want_exact {
+                        acc.exact.push((row, exact_value2(ix, pr, row as usize)));
+                    }
+                }
+            }
+            k += m;
         }
     }
 }
@@ -2112,7 +2169,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
 
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
     match plan2(ix, pr, t, o, 0.0) {
-        Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv),
+        Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, first_decide, cut_cyc),
     }
 }
@@ -2605,7 +2662,7 @@ pub fn knn2d(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, 
     let o = Opts2 { vis, verify: false, want_iv: true, plan };
     let sw = match plan2(ix, &pr, tau1, &o, 0.0) {
         Planned::Scan if stored => return scan(st, t_seed),
-        Planned::Scan => scan_visible(ix, &pr, tau1, vis, true),
+        Planned::Scan => scan_visible(ix, &pr, tau1, vis, true, plan.pscan),
         Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, &pr, tau1, &o, &pre, &use_idx, first_decide, cut_cyc),
     };
     st.add(&sw.st);

@@ -790,6 +790,9 @@ fn main() {
         if has("filter") {
             run2::filter2(&c, get("--fnq", 30));
         }
+        if has("scanbench") {
+            run2::scanbench(&c, get("--nq", 20));
+        }
         if has("oracle") {
             run2::oracle_dump(&c, get("--onq", 20));
         }

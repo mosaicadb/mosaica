@@ -1,0 +1,28 @@
+==== run at 1794629094: ["/home/joe/code/vexact-combined-target/release/vexact", "--v2", "--int", "--no-approx", "--index", "/home/joe/code/vexact-combined-data/c50k/dual", "--queries", "/home/joe/code/vexact-data/bioclip2-text/text_q.npy", "--item-queries", "/home/joe/code/vexact-combined-data/c50k/item_q.npy", "--results", "/home/joe/code/vexact-combined-data/res/s5_50k", "--gtab", "--flags", "repack,pscan", "verify", "oracle", "--vitem", "200", "--vtext", "200"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 1.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 1.0, 0.125, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [5.0, 3.0, 1.0, 0.5], [6.0, 4.0, 1.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 2.9s
+[build2] encoded 5.0s
+[build2] assembled 5.1s; x2 bound 2.290e-4; escapes: det norms 276, |y| 153, kappa 863, tan 1887
+[repack] occupancy thresholds by level [0.1, 0.09, 0.09, 0.09, 0.13, 0.13, 0.05, 0.08, 0.05, 0.05, 0.05, 0.06, 0.07, 0.08, 0.07, 0.07, 0.06, 0.14, 0.11, 0.1] (timed in 0.1s)
+[plan] calibrated in 0.2s
+[plan] full_us=0.10325964402290388 item_us0=0.009190393544083518 item_us1=0.03676157417633407 cl_us0=1.8380787088167034 cl_us1=9.190393544083516 grp_us=64.33275480858462 scan_us=0.10056631920127854 cut_us=1.3788225 seed_us=335.4880625 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":9.236085911594888,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-combined-data/c50k/dual/profile.npy) 49500 rows, 50 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 56.7, 68.0, 75.2, 82.0, 95.5, 111.5, 129.5, 147.5, 164.5, 180.7, 215.4, 247.3, 283.5]
+verify2 0/400 0s wrong in/out 0/0 det 0 rand 0 checked 2324001 maxsd 4.53
+verify2 50/400 4s wrong in/out 0/0 det 0 rand 0 checked 47180409 maxsd 5.28
+verify2 100/400 7s wrong in/out 0/0 det 0 rand 0 checked 47180409 maxsd 5.28
+verify2 150/400 10s wrong in/out 0/0 det 0 rand 0 checked 47180409 maxsd 5.28
+verify2 200/400 13s wrong in/out 0/0 det 0 rand 0 checked 50769586 maxsd 5.47
+verify2 250/400 18s wrong in/out 0/0 det 0 rand 0 checked 137508240 maxsd 5.47
+verify2 300/400 22s wrong in/out 0/0 det 0 rand 0 checked 137508240 maxsd 5.47
+verify2 350/400 25s wrong in/out 0/0 det 0 rand 0 checked 137508240 maxsd 5.47
+verify2 filtered 1/1000: 49 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/100: 496 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/10: 4950 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/2: 24751 visible, wrong in/out 0/0, k-NN mismatches 0
+VERIFY2 400 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 137508240 (det violations 0, rand violations 0); largest randomised error 5.47 sd (c = 9.46); k-NN mismatches 0 of 400 (three plans each); filtered: 40 queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts
+VERIFY2 checker: 10588045 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [226635938, 199526262, 189227115, 181654728, 175413125, 165110316, 156638022, 152375397, 143832363, 128002972, 116546882, 101717990, 91476861, 74913640, 66420653, 56888825, 42051698, 35638884, 29032792, 21800724, 15305318]; decided in/out [3099838, 1541423, 1125516, 938438, 1554246, 1277437, 431537, 1558834, 2778018, 1993203, 3129715, 2868393, 4898600, 3109215, 3468750, 6106334, 2892945, 2931378, 3458156, 2991585, 0] / [24009838, 8757724, 6446871, 5303165, 8748563, 7194857, 3831088, 6984200, 13051373, 9462887, 11699177, 7372736, 11664621, 5383772, 6063078, 8730793, 3519869, 3674714, 3773912, 3503821, 0]
+VERIFY2 item scale against f64: 49500 rows, 0 beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = 1.63e-3; the build's divisor over E|r|^2 per group 1.00000 to 1.00000
+oracle dump: 40 queries, 360 results, 773 visible entities, to /home/joe/code/vexact-combined-data/res/s5_50k/oracle
