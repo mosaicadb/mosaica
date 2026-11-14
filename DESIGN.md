@@ -1,4 +1,6 @@
-# Exact vector search for Mosaica: the design as it stands
+# LIMINAL: the design as it stands
+
+LIMINAL: A Level-wise Interval Membership Index for Nearness Above a Limit.
 
 One self-contained description of the end-to-end design, consolidating the research so far. Each
 section points to the report that holds the evidence. All figures are **measured** in a numpy

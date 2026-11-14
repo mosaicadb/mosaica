@@ -1,4 +1,10 @@
-# Exact threshold vector search: research
+# LIMINAL: research
+
+**LIMINAL: A Level-wise Interval Membership Index for Nearness Above a Limit** — exact, per-viewer
+threshold retrieval over billions of vectors. Use the name LIMINAL for the index and the system in
+reports, code and the planned whitepaper. Package names: `liminaldb` or `liminal-index` (free on
+crates.io, PyPI and npm when checked in November 2026; bare `liminal` is taken on crates.io and
+npm).
 
 Research into exact, filter-aware vector search at billion scale: return every item whose
 similarity to a query meets a threshold (and, from the same index, the exact k nearest), computed
