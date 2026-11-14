@@ -3096,6 +3096,7 @@ impl TopK {
 /// clusters in row order. No dial and every cluster is exact up to the f32
 /// products.
 pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, dial: Option<&[f32]>, plan: Plan) -> KnnOut2 {
+    assert!(kk > 0, "knn2_fast needs k of at least 1");
     let tm = Timer::new();
     let nl = ix.meta.nl();
     let t0 = tick();
@@ -3205,7 +3206,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     st.cyc[P_QUERY] += tick() - t0;
     let mut ents: Vec<(f64, u32)> = top.h.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
     ents.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
-    KnnOut2 { ents, st, cands: ncand, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0 }
+    KnnOut2 { ents, st, cands: ncand, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
 }
 
 /// knn2 with each level's item upper half-widths scaled by `dial`.
