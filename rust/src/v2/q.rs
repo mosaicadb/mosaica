@@ -572,6 +572,73 @@ fn isect(a: Option<(f64, f64)>, b: Option<(f64, f64)>) -> Option<(f64, f64)> {
     }
 }
 
+/// The norm-sort bound of one cluster: q.x = q.m + alpha m.r + (qv - alpha mv).z + (q - alpha m).eps with |eps| <=
+/// e_inv |r|, so for alpha in {qv.mv / |mv|^2, q.m / |m|^2, 0}, with b = m.r in [bmin, bmax] and nu >= |z|:
+/// q.m + alpha b - D nu - E <= q.x <= q.m + alpha b + D nu + E, D >= |qv - alpha mv|, E >= e_inv (|q| + |alpha| |m|) rmax.
+/// Both ends are monotone in nu, so the items decided in or out form a prefix of the cluster in sort order.
+pub struct NuCut {
+    pub qm: f64,
+    pub al: [(f64, f64, f64); 3], // (alpha, D, E)
+    pub bmin: f64,
+    pub bmax: f64,
+    pub numax: f64,
+}
+impl NuCut {
+    pub fn new(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, qm: f64) -> NuCut {
+        let c = &ix.cl[ci];
+        let gp = &ix.groups[c.g];
+        let qq: f64 = gq.qv.iter().map(|x| x * x).sum();
+        let qmv: f64 = gq.qv.iter().zip(&c.mv32).map(|(a, &b)| a * b as f64).sum();
+        let mm: f64 = c.mv32.iter().map(|&x| x as f64 * x as f64).sum();
+        let al = [qmv / mm.max(1e-300), qm / (c.mn * c.mn), 0.0].map(|a: f64| {
+            // mv32 is mv rounded to f32: |mv - mv32| <= 2^-24 |mv| per coordinate
+            let d = (qq - 2.0 * a * qmv + a * a * mm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12 * qq.sqrt() + a.abs() * c.mvn * 2f64.powi(-22);
+            let e = gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 1e-9;
+            (a, d, e)
+        });
+        NuCut { qm, al, bmin: c.bmin, bmax: c.bmax, numax: c.numax }
+    }
+    /// (lower, upper) bound of q.x for an item with |z| <= nu.
+    pub fn bounds(&self, nu: f64) -> (f64, f64) {
+        let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+        for &(a, d, e) in &self.al {
+            let (b0, b1) = (a * self.bmin, a * self.bmax);
+            hi = hi.min(self.qm + b0.max(b1) + d * nu + e);
+            lo = lo.max(self.qm + b0.min(b1) - d * nu - e);
+        }
+        (lo, hi)
+    }
+    /// The norms below which items are decided out (upper < t) and at or below which they are decided in (lower >= t).
+    pub fn cutoffs(&self, t: f64) -> (f64, f64) {
+        let (mut co, mut cin) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+        for &(a, d, e) in &self.al {
+            let (b0, b1) = (a * self.bmin, a * self.bmax);
+            co = co.max((t - self.qm - b0.max(b1) - e) / d.max(1e-300));
+            cin = cin.max((self.qm + b0.min(b1) - e - t) / d.max(1e-300));
+        }
+        (co, cin)
+    }
+    #[inline]
+    pub fn nu_of(&self, code: u16) -> f64 {
+        self.numax * code as f64 / 65535.0
+    }
+}
+
+/// The norm-sort cut and range of a cluster, as sorted_range2 returns them: rows [r0, u0) and [u1, r1) out, [u0, d0)
+/// and [d1, u1) in, [d0, d1) undecided.
+pub fn nu_range(ix: &Index2, ci: usize, nc: &NuCut, t: f64) -> (usize, usize, usize, usize) {
+    let c = &ix.cl[ci];
+    let key = &ix.nukey[c.r0..c.r1];
+    let (co, cin) = nc.cutoffs(t);
+    // a margin for the f64 evaluation of the cutoffs
+    let kout = key.partition_point(|&k| nc.nu_of(k) < co - 1e-9 * (1.0 + co.abs()));
+    if kout > 0 {
+        return (c.r0 + kout, c.r1, c.r0 + kout, c.r1);
+    }
+    let kin = key.partition_point(|&k| nc.nu_of(k) <= cin - 1e-9 * (1.0 + cin.abs()));
+    (c.r0, c.r1, c.r0 + kin, c.r1)
+}
+
 pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let n = ix.n();
     let c = &ix.cl[ci];
@@ -1918,13 +1985,37 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             return Planned::Scan;
         }
     }
-    // pass 1: cut and range per cluster
+    // pass 1: cut and range per cluster (the norm sort needs every group's basis product first)
     let tc0 = tick();
+    let nusort = !ix.nukey.is_empty();
+    if nusort {
+        let mut gs: Vec<usize> = (0..k).filter(|&ci| o.vis.map_or(true, |v| v.cl_cnt[ci] > 0)).map(|ci| ix.cl[ci].g).collect();
+        gs.sort_unstable();
+        gs.dedup();
+        setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
+    }
     let pre_of = |ci: usize| -> Pre {
         if let Some(v) = o.vis {
             if v.cl_cnt[ci] == 0 {
                 return Pre::Skip;
             }
+        }
+        if nusort {
+            let c = &ix.cl[ci];
+            let qm = dot64(&pr.q64, ix.centres_f64(ci));
+            let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
+            let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
+            if u0 == c.r1 {
+                return Pre::Skip;
+            }
+            if d0 == c.r1 && u0 == c.r0 {
+                return Pre::In;
+            }
+            let ncand = match o.vis {
+                None => d1 - d0,
+                Some(v) => count_bits(&v.bits, d0, d1),
+            };
+            return Pre::Open { qm, u0, u1, d0, d1, ncand };
         }
         let a = pr.anchor;
         let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
@@ -2061,7 +2152,16 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     acc.st.clusters_in += 1;
                     let iv = if o.want_iv { Some((-1.0, 1.0)) } else { None };
                     push(&mut acc, c.r0, c.r1, iv);
-                    if o.want_iv {
+                    if o.want_iv && !ix.nukey.is_empty() {
+                        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+                        let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
+                        let nn = acc.iv.len();
+                        let cnt = (c.r0..c.r1).filter(|&r| o.vis.map_or(true, |v| v.has(r))).count();
+                        for x in &mut acc.iv[nn - cnt..] {
+                            x.1 = lb as f32;
+                            x.2 = ub as f32;
+                        }
+                    } else if o.want_iv {
                         // interval from the table alone
                         let a = pr.anchor;
                         let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
@@ -2080,11 +2180,15 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     acc.st.range_out += ((u0 - c.r0) + (c.r1 - u1)) as u64;
                     acc.st.range_in += ((d0 - u0) + (u1 - d1)) as u64;
                     if o.want_iv {
-                        let cu = cut_params2(ix, ci, pr, qm);
+                        let nc = if ix.nukey.is_empty() { None } else { Some(NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm)) };
+                        let cu = if nc.is_none() { Some(cut_params2(ix, ci, pr, qm)) } else { None };
                         for r in (u0..d0).chain(d1..u1) {
                             if o.vis.map_or(true, |v| v.has(r)) {
                                 acc.rows.push(r as u32);
-                                let (lb, ub) = key_interval2(ix, &cu, r);
+                                let (lb, ub) = match &nc {
+                                    Some(nc) => nc.bounds(nc.nu_of(ix.nukey[r])),
+                                    None => key_interval2(ix, cu.as_ref().unwrap(), r),
+                                };
                                 acc.iv.push((r as u32, lb as f32, ub as f32, 254));
                             }
                         }
@@ -2426,11 +2530,23 @@ pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut St
     let k = ix.k();
     let rr = ix.x2.sqrt();
     let a = pr.anchor;
-    let mut cand: Vec<(f64, usize)> = (0..k).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).map(|ci| {
-        let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
-        let bh = if pr.beta >= 0.0 { pr.beta * hi } else { pr.beta * lo };
-        (bh + pr.rho * rr, ci)
-    }).collect();
+    let live: Vec<usize> = (0..k).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0)).collect();
+    let mut cand: Vec<(f64, usize)> = if ix.nukey.is_empty() {
+        live.iter().map(|&ci| {
+            let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
+            let bh = if pr.beta >= 0.0 { pr.beta * hi } else { pr.beta * lo };
+            (bh + pr.rho * rr, ci)
+        }).collect()
+    } else {
+        let mut gs: Vec<usize> = live.iter().map(|&ci| ix.cl[ci].g).collect();
+        gs.sort_unstable();
+        gs.dedup();
+        setup_groups(ix, pr, &gs, st);
+        live.iter().map(|&ci| {
+            let qm = dot64(&pr.q64, ix.centres_f64(ci));
+            (NuCut::new(ix, ci, pr, pr.gq[ix.cl[ci].g].get().unwrap(), qm).bounds(ix.cl[ci].numax).1, ci)
+        }).collect()
+    };
     cand.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     cand.truncate(64);
     let clusters: Vec<usize> = cand.iter().map(|&(_, ci)| ci).collect();
@@ -2643,6 +2759,6 @@ impl<'a> Source2 for SynthSrc<'a> {
         for (j, k) in key.iter().enumerate() {
             zs[j * n..(j + 1) * n].copy_from_slice(&z[k.2 * n..(k.2 + 1) * n]);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new() }
     }
 }

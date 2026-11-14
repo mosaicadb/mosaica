@@ -112,6 +112,7 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "nogtab" => p.gtab = false,
             "repack" => p.repack = true,
             "norepack" => p.repack = false,
+            "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("repackx=") => {
                 p.repack = true;
                 p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
@@ -145,11 +146,14 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let f2 = RealSource::open(&p.xs_path);
     let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
     let mut lg = |s: String| out!("[build2] {s}");
-    let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, &mut lg);
+    let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
+    let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
     let tr = Timer::new();
     ix.repack = calibrate_repack(&ix);
     out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
-    build_table2(&mut ix, p.meta.k);
+    if !nusort {
+        build_table2(&mut ix, p.meta.k);
+    }
     let n = p.meta.n;
     let mut ent_xs = vec![u32::MAX; p.perm.len()];
     for (r, &e) in p.perm.iter().enumerate() {

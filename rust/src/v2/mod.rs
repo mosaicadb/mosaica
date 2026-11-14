@@ -714,6 +714,9 @@ pub struct Cl2 {
     pub mvn: f64,
     pub rmax: f64,
     pub smax: f32,
+    pub numax: f64,      // norm sort: the largest |z|, the grid of the stored codes (nu = numax code / 65535)
+    pub bmin: f64,       // norm sort: bounds of m.r over the cluster
+    pub bmax: f64,
 }
 
 /// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
@@ -748,7 +751,8 @@ pub struct Index2 {
     pub nrows: usize,
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
     pub ctab: Vec<Vec<kern::CTab>>, // per cluster, per level: the centre's tables (query-independent)
-    pub repack: Vec<f32>,            // per level: occupancy of slots held in place below which they are compacted first
+    pub repack: Vec<f32>,
+    pub nukey: Vec<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
 }
 
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
@@ -771,11 +775,12 @@ impl Index2 {
     pub fn k(&self) -> usize {
         self.cl.len()
     }
-    /// cumulative stored bytes per item by level: code, scalars and the 2-byte key
+    /// cumulative stored bytes per item by level: code, scalars and the 2-byte key (with the norm sort, also the
+    /// 2-byte norm code)
     pub fn stored_bytes_per_item(&self) -> Vec<f64> {
         let nl = self.meta.nl();
         let mut out = vec![0.0; nl];
-        let mut tot = 2.0 * self.nrows as f64;
+        let mut tot = if self.nukey.is_empty() { 2.0 } else { 4.0 } * self.nrows as f64;
         for l in 0..nl {
             let mut b = 0.0;
             for c in &self.cl {
@@ -819,6 +824,22 @@ pub struct Items2 {
     pub ent: Vec<u32>,
     pub ext: Vec<u32>,
     pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
+    pub nu: Vec<f64>, // with the norm sort: |z|, the residual's norm in the metric, rounded up
+}
+
+impl Items2 {
+    /// The items in ascending order of |z| (z = V_q^-1 r, the residual in the metric of the dual pair), with nu set.
+    pub fn sort_by_nu(self, n: usize) -> Items2 {
+        let nc = self.ah.len();
+        let nu: Vec<f64> = (0..nc).map(|i| self.z[i * n..(i + 1) * n].iter().map(|v| v * v).sum::<f64>().sqrt() * (1.0 + 1e-9) + 1e-12).collect();
+        let mut o: Vec<usize> = (0..nc).collect();
+        o.sort_by(|&a, &b| nu[a].partial_cmp(&nu[b]).unwrap());
+        let mut z = vec![0f64; nc * n];
+        for (i, &k) in o.iter().enumerate() {
+            z[i * n..(i + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
+        }
+        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect() }
+    }
 }
 
 pub trait Source2: Sync {
@@ -857,7 +878,7 @@ impl Source2 for Real2 {
         unsafe {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new() }
     }
 }
 
@@ -1141,7 +1162,7 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat, mv32, wmr, bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax }
+    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat, mv32, wmr, bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
 }
 
 pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
@@ -1149,7 +1170,8 @@ pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
 }
 
 /// Build the fast-scan index. `prof` is the G x n profile.
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, log: &mut dyn FnMut(String)) -> Index2 {
+/// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
@@ -1253,6 +1275,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let ccodes: Vec<ClusterCode2> = (0..k).into_par_iter().map(|c| {
         let g = p.grp[c];
         let it = src.items(c, p, &groups[g], &mhats[c]);
+        let it = if nusort { it.sort_by_nu(n) } else { it };
         encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], false)
     }).collect();
     log(format!("encoded {:.1}s", t.s()));
@@ -1260,12 +1283,20 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let infos: Vec<Cl2> = ccodes.par_iter().enumerate().map(|(c, cc)| {
         let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, &cc.items, x2, n);
         info.g = p.grp[c];
+        if nusort {
+            // m.r = mn a - mn^2 from the key, within mn DA
+            let it = &cc.items;
+            info.numax = (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30);
+            let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
+            info.bmax = it.ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
+            info.bmin = it.ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
+        }
         info
     }).collect();
     let nl = meta.nl();
     let mut row0 = 0;
     let mut cl = Vec::with_capacity(k);
-    let (mut ahat, mut row_ent, mut xs_row) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut ahat, mut row_ent, mut xs_row, mut nukey) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut lcode: Vec<Vec<u8>> = vec![Vec::new(); nl];
     let mut lscal: Vec<Vec<u8>> = vec![Vec::new(); nl];
     let mut coff: Vec<Vec<usize>> = vec![Vec::new(); nl];
@@ -1285,6 +1316,8 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
             esc.insert((l, slot, (row0 + i as usize) as u32), v);
         }
         ahat.extend_from_slice(&cc.items.ah);
+        // codes rounded up on the cluster's grid: nondecreasing in sort order
+        nukey.extend(cc.items.nu.iter().map(|&v| ((v / info.numax * 65535.0).ceil() as u32).min(65535) as u16));
         row_ent.extend_from_slice(&cc.items.ent);
         xs_row.extend_from_slice(&cc.items.ext);
         row0 += nc;
@@ -1324,6 +1357,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let ix = Index2 {
+        nukey,
         repack: vec![0.6; meta.nl()],
         ctab,
         meta,
