@@ -184,7 +184,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         let l1 = p.meta.csg * p.meta.csg / 2.0;
         let cs: Vec<f64> = (0..1u32 << (b.len() - 1)).into_par_iter().map(|set| {
             let ds: Vec<usize> = (0..b.len() - 1).filter(|&j| set >> j & 1 == 1).map(|j| b[j + 1] - b[j] - 1).collect();
-            crate::v2::tail::level_constant(&ds, l1)
+            crate::v2::tail::level_constant(&ds, l1, &[]).0
         }).collect();
         out!("[design] constants by coded set {:?}", cs.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
         let _ = crate::v2::DESIGN_C.set(cs);

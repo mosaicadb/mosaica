@@ -12,12 +12,15 @@
 #     profile is the mean square of V_Q8^T (q - m) for corpus items against their 4 nearest centres.
 # Writes to OUTDIR: Xs.npy (unit vectors in cluster order, f16, zero-padded to a multiple of 32 dimensions), perm.npy
 # (row -> entity), cstart, grp, mq8, msc, lam, V, r2 (mean |r|^2 per group), profile.npy, tree tables, qi (rows for
-# verification), meta.json (with the fit used, under "fit").
+# verification), meta.json (with the fit used, under "fit", and the randomised levels' certified constant under
+# "CERTS", from certify.py; --cert-time caps that step, after which the build falls back to closed-form bounds).
 import argparse, json, math, os, sys, time
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "combined"))
 from core import kmeans, TREE, GTREE  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import certify  # noqa: E402
 
 # Design constants (not fitted): items per cluster, the guarantee's N and epsilon, the deterministic level ends, the
 # randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25 hedge weight.
@@ -114,6 +117,7 @@ def main():
     ap.add_argument("--seed", type=int, default=20261112)
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
+    ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
@@ -263,11 +267,12 @@ def main():
     sv("gtree", GTREE.astype(np.float64))
     sv("qi", np.sort(rng.choice(N, min(N, 200), replace=False)).astype(np.int64))
     meta = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(K), G=int(G), metric=a.metric, DLV=DLV, RLV=rlv, BOUNDS=bounds,
-                CSG=math.sqrt(2 * L1), L1=L1, xs="Xs.npy", source=os.path.abspath(a.vectors),
+                CSG=math.sqrt(2 * L1), L1=L1, EPS=EPS, xs="Xs.npy", source=os.path.abspath(a.vectors),
                 format=FORMAT, fit=fit)
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("saved", meta)
+    certify.add_certificate(a.out, certify.ln_delta(meta), a.cert_time, log)
 
 
 if __name__ == "__main__":

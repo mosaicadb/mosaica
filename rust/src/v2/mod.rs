@@ -1287,13 +1287,13 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         sets.dedup();
         let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
         let l1 = p.meta.csg * p.meta.csg / 2.0;
-        let vals: HashMap<Vec<usize>, f64> = sets.par_iter().map(|s| (s.clone(), if plain { p.meta.csg } else { tail::level_constant(s, l1) })).collect();
+        let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { (p.meta.csg, tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
         for gp in groups.iter_mut() {
             for lr in 0..gp.rates.len() {
-                gp.csgl[lr] = vals[&set(gp, lr)] as f32;
+                gp.csgl[lr] = vals[&set(gp, lr)].0 as f32;
             }
         }
-        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), p.meta.csg, sets.iter().map(|s| (s.clone(), (vals[s] * 1000.0).round() / 1000.0)).collect::<Vec<_>>()));
+        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), p.meta.csg, sets.iter().map(|s| (s.clone(), (vals[s].0 * 1000.0).round() / 1000.0, vals[s].1)).collect::<Vec<_>>()));
     }
     log(format!("plans {:.1}s; residual-stage distortion / tree {:?}; largest inverse defect {:.2e}; rates g0 {:?}", t.s(), TREE_DEPTHS.iter().map(|&j| (1..=MAX_STAGES).map(|r| (codes.d[j][r] / p.gtree[j + r] * 1000.0).round() / 1000.0).collect::<Vec<_>>()).collect::<Vec<_>>(), groups.iter().map(|g| g.e_inv).fold(0.0, f64::max), groups[0].rates));
     let mhats: Vec<Vec<f64>> = (0..k).map(|c| {
