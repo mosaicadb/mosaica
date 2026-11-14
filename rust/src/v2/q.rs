@@ -3211,6 +3211,9 @@ impl<'a> Source2 for SynthSrc<'a> {
     fn rows(&self, _p: &Params) -> usize {
         self.sy.sizes.iter().sum()
     }
+    fn size(&self, c: usize, _p: &Params) -> usize {
+        self.sy.sizes[c]
+    }
     fn items(&self, c: usize, _p: &Params, _gp: &GroupPlan2, _mhat: &[f64]) -> Items2 {
         let n = self.sy.n;
         let nc = self.sy.sizes[c];
@@ -3230,6 +3233,6 @@ impl<'a> Source2 for SynthSrc<'a> {
         for (j, k) in key.iter().enumerate() {
             zs[j * n..(j + 1) * n].copy_from_slice(&z[k.2 * n..(k.2 + 1) * n]);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new() }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new(), x16: Vec::new() }
     }
 }

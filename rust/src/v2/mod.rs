@@ -1064,6 +1064,7 @@ pub struct Items2 {
     pub ext: Vec<u32>,
     pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
     pub nu: Vec<f64>, // with the norm sort: |z|, the residual's norm in the metric, rounded up
+    pub x16: Vec<u16>, // the f16 vectors in the same order (empty for a source without stored vectors)
 }
 
 impl Items2 {
@@ -1077,7 +1078,8 @@ impl Items2 {
         for (i, &k) in o.iter().enumerate() {
             z[i * n..(i + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
         }
-        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect() }
+        let x16 = if self.x16.is_empty() { Vec::new() } else { o.iter().flat_map(|&k| self.x16[k * n..(k + 1) * n].iter().copied()).collect() };
+        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect(), x16 }
     }
 }
 
@@ -1101,11 +1103,12 @@ pub trait Source2: Sync {
             ext: keep.iter().map(|&i| it.ext[i]).collect(),
             x2max: it.x2max,
             nu: Vec::new(),
+            x16: Vec::new(),
         }
     }
-    /// The source's f16 vectors by source row, when it has them.
-    fn f16(&self) -> Option<&crate::index::RealSource> {
-        None
+    /// The number of items of cluster c.
+    fn size(&self, c: usize, p: &Params) -> usize {
+        p.cstart[c + 1] - p.cstart[c]
     }
     /// The number of rows the build encodes from this source.
     fn rows(&self, p: &Params) -> usize {
@@ -1117,9 +1120,6 @@ pub struct Real2 {
     pub src: crate::index::RealSource,
 }
 impl Source2 for Real2 {
-    fn f16(&self) -> Option<&crate::index::RealSource> {
-        Some(&self.src)
-    }
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
         self.rows_of(c, p.cstart[c]..p.cstart[c + 1], p, gp, mhat)
     }
@@ -1157,7 +1157,8 @@ impl Real2 {
         unsafe {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new() }
+        let x16 = key.iter().flat_map(|k| self.src.row(k.1).iter().copied()).collect();
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new(), x16 }
     }
 }
 
@@ -1441,7 +1442,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 }
 
 /// Query-independent per-cluster data.
-fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: f64, n: usize) -> Cl2 {
+fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
     assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
@@ -1474,12 +1475,12 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
         }
     }
     let mn32 = mn as f32;
-    let smax = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).fold(0f32, f32::max);
-    let rmax = it.ah.iter().map(|&a| {
+    let smax = ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).fold(0f32, f32::max);
+    let rmax = ah.iter().map(|&a| {
         let al = a as f64 / 32767.0 - DA;
         (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
     }).fold(0f64, f64::max);
-    let nc = it.ah.len();
+    let nc = ah.len();
     let mut l1m = [0f32; J + 1];
     l1m[0] = (wm[..n].iter().map(|x| x.abs() as f64).sum::<f64>() * 1.001) as f32;
     for j in 0..J {
@@ -1494,8 +1495,6 @@ pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
     quantile(v, q)
 }
 
-/// Build the fast-scan index. `prof` is the G x n profile.
-/// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
 /// What the build and the opening of a saved index both derive from the fit: the level metadata, the rotations, the
 /// code tables and every group's plan with its int8 basis. With `inverse` (the build) also each basis's inverse and
 /// its defect; an open reads the defect from the saved index instead.
@@ -1539,7 +1538,10 @@ pub fn plans(p: &Params, prof: &[f64], rows: usize, inverse: bool, log: &mut dyn
     Plans { meta, rots, codes, et, groups }
 }
 
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
+/// Build the fast-scan index from `src`: in memory, or, with `dir`, straight into the files of a saved index there
+/// (sealed afterwards by `store::seal`). `prof` is the G x n profile. With `nusort`, each cluster is sorted by the
+/// residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: bool, nusort: bool, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Index2 {
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
@@ -1646,138 +1648,154 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         groups[g].set_calibration(CalIn { kmin, y0, ys, tq, k0, ks: ksv, kb: kbv });
     }
     log(format!("calibrated {:.1}s", t.s()));
-    let ccodes: Vec<ClusterCode2> = (0..k).into_par_iter().map(|c| {
-        let g = p.grp[c];
-        let it = src.items(c, p, &groups[g], &mhats[c]);
+    let nl = meta.nl();
+    let build_col = groups[0].col.is_some();
+    let real = matches!(full, Full2::Real { .. });
+    if let Some(d) = dir {
+        assert!(!build_col, "an index with the columnar store is built in memory only; build without it to write {d}");
+        assert!(real, "a synthetic index has no stored vectors and is built in memory only, not in {d}");
+    }
+    // every cluster's place in every array, from its size and its group's plan, before anything is encoded
+    let sizes: Vec<usize> = (0..k).map(|c| src.size(c, p)).collect();
+    let mut row0 = vec![0usize; k + 1];
+    for c in 0..k {
+        row0[c + 1] = row0[c] + sizes[c];
+    }
+    let nrows = row0[k];
+    let (mut coff, mut soff) = (vec![vec![0usize; k]; nl], vec![vec![0usize; k]; nl]);
+    let (mut ctot, mut stot) = (vec![0usize; nl], vec![0usize; nl]);
+    for l in 0..nl {
+        for c in 0..k {
+            let (nb, lp) = (sizes[c].div_ceil(BLK), &groups[p.grp[c]].levels[l]);
+            (coff[l][c], soff[l][c]) = (ctot[l], stot[l]);
+            ctot[l] += nb * lp.units * 16;
+            stot[l] += nb * lp.srows * 16;
+        }
+    }
+    // 128 bytes of slack after each level and 32 keys after the last row, so masked and full vector loads past an
+    // array's end stay inside it
+    let lcode: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("code{l}.bin"), ctot[l] + 128)).collect();
+    let lscal: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("scal{l}.bin"), stot[l] + 128)).collect();
+    let ahat = store::Out::<i16>::new(dir, "ahat.bin", nrows + 32);
+    let row_ent = store::Out::<u32>::new(dir, "row_ent.bin", nrows);
+    let nukey = store::Out::<u16>::new(dir, "nukey.bin", if nusort { nrows } else { 0 });
+    let vecs = store::Out::<u16>::new(dir, "vectors.bin", if real { nrows * n } else { 0 });
+    let ext = store::Out::<u32>::new(None, "", if real { 0 } else { nrows });
+    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid, and
+    // the columnar store's codes and norms
+    struct Done {
+        esc: Vec<(u8, u8, u32, f32)>,
+        x2max: f64,
+        numax: f64,
+        col: Option<(Vec<u8>, Vec<f64>)>,
+    }
+    let done: Vec<Done> = (0..k).into_par_iter().map(|c| {
+        let gp = &groups[p.grp[c]];
+        let it = src.items(c, p, gp, &mhats[c]);
         let it = if nusort { it.sort_by_nu(n) } else { it };
-        encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], false)
+        assert_eq!(it.ah.len(), sizes[c], "cluster {c} gave {} items where the source gave its size as {}", it.ah.len(), sizes[c]);
+        let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false);
+        let r0 = row0[c];
+        for l in 0..nl {
+            lcode[l].put(coff[l][c], &cc.codes[l]);
+            lscal[l].put(soff[l][c], &cc.scal[l]);
+        }
+        let it = &cc.items;
+        ahat.put(r0, &it.ah);
+        row_ent.put(r0, &it.ent);
+        let numax = if nusort { (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30) } else { 0.0 };
+        if nusort {
+            // codes rounded up on the cluster's grid: nondecreasing in sort order
+            let key: Vec<u16> = it.nu.iter().map(|&v| ((v / numax * 65535.0).ceil() as u32).min(65535) as u16).collect();
+            nukey.put(r0, &key);
+        }
+        if real {
+            assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
+            vecs.put(r0 * n, &it.x16);
+        } else {
+            ext.put(r0, &it.ext);
+        }
+        Done { esc: cc.esc, x2max: it.x2max, numax, col: build_col.then_some((cc.ccode, cc.cnrm)) }
     }).collect();
     log(format!("encoded {:.1}s", t.s()));
-    let x2 = 1.0 + ccodes.iter().map(|c| c.items.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
-    let infos: Vec<Cl2> = ccodes.par_iter().enumerate().map(|(c, cc)| {
-        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, &cc.items, x2, n);
-        info.g = p.grp[c];
+    let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
+    let ah_all = ahat.get();
+    let cl: Vec<Cl2> = (0..k).into_par_iter().map(|c| {
+        let ah = &ah_all[row0[c]..row0[c + 1]];
+        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, ah, x2, n);
+        (info.g, info.r0, info.r1) = (p.grp[c], row0[c], row0[c + 1]);
         if nusort {
             // m.r = mn a - mn^2 from the key, within mn DA
-            let it = &cc.items;
-            info.numax = (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30);
+            info.numax = done[c].numax;
             let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
-            info.bmax = it.ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
-            info.bmin = it.ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
+            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
+            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
         }
         info
     }).collect();
-    let nl = meta.nl();
-    // the columnar store's norm grids per group, from every item of the group
-    let build_col = groups[0].col.is_some();
+    let mut esc = HashMap::new();
+    for (c, d) in done.iter().enumerate() {
+        for &(l, slot, i, v) in &d.esc {
+            esc.insert((l, slot, (row0[c] + i as usize) as u32), v);
+        }
+    }
+    // the columnar store: its norm grids per group from every item of the group, then its arrays
+    let mut cst = col::ColStore::default();
     if build_col {
         for g in 0..groups.len() {
             let nn = groups[g].col.as_ref().unwrap().nb + 1;
             let mut vals = vec![Vec::new(); nn];
-            for (c, cc) in ccodes.iter().enumerate() {
-                if p.grp[c] != g {
-                    continue;
-                }
-                for (i, x) in cc.cnrm.iter().enumerate() {
+            for c in (0..k).filter(|&c| p.grp[c] == g) {
+                for (i, x) in done[c].col.as_ref().unwrap().1.iter().enumerate() {
                     vals[i % nn].push(*x);
                 }
             }
             groups[g].col.as_mut().unwrap().set_grids(&vals);
         }
-    }
-    if build_col {
         let cps: Vec<&col::ColPlan> = groups.iter().map(|g| g.col.as_ref().unwrap()).collect();
-        let nd: Vec<usize> = cps.iter().map(|c| c.coords.len()).collect();
-        let nr: Vec<usize> = cps.iter().map(|c| c.rows.len()).collect();
         let nu: Vec<usize> = cps.iter().map(|c| c.units.len()).collect();
         log(format!("columnar store: units per group mean {:.1}", nu.iter().sum::<usize>() as f64 / nu.len() as f64));
-        let mut hist = [0usize; 9];
-        for c in &cps {
-            for cc in &c.coords {
-                hist[(cc.j + cc.r) as usize] += 1;
-            }
-        }
-        log(format!("columnar store: coded coordinates per group {}..{} (mean {:.0}), rows {}..{} (mean {:.0}, {:.1} B); bits per coordinate (count over groups, 0..8) {:?}; blocks {:?} of group 0",
-            nd.iter().min().unwrap(), nd.iter().max().unwrap(), nd.iter().sum::<usize>() as f64 / nd.len() as f64, nr.iter().min().unwrap(), nr.iter().max().unwrap(), nr.iter().sum::<usize>() as f64 / nr.len() as f64, nr.iter().sum::<usize>() as f64 / nr.len() as f64 / 2.0, hist, cps[0].bstart));
-    }
-    let mut cst = col::ColStore::default();
-    let mut row0 = 0;
-    let mut cl = Vec::with_capacity(k);
-    let (mut ahat, mut row_ent, mut xs_row, mut nukey) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let mut lcode: Vec<Vec<u8>> = vec![Vec::new(); nl];
-    let mut lscal: Vec<Vec<u8>> = vec![Vec::new(); nl];
-    let mut coff: Vec<Vec<usize>> = vec![Vec::new(); nl];
-    let mut soff: Vec<Vec<usize>> = vec![Vec::new(); nl];
-    let mut esc = HashMap::new();
-    for (cc, mut info) in ccodes.into_iter().zip(infos) {
-        let nc = cc.items.ah.len();
-        info.r0 = row0;
-        info.r1 = row0 + nc;
-        for l in 0..nl {
-            coff[l].push(lcode[l].len());
-            lcode[l].extend_from_slice(&cc.codes[l]);
-            soff[l].push(lscal[l].len());
-            lscal[l].extend_from_slice(&cc.scal[l]);
-        }
-        for &(l, slot, i, v) in &cc.esc {
-            esc.insert((l, slot, (row0 + i as usize) as u32), v);
-        }
-        if build_col {
-            let cp = groups[info.g].col.as_ref().unwrap();
-            let nn = cp.nb + 1;
-            let nblk = (nc + BLK - 1) / BLK;
+        for c in 0..k {
+            let cp = cps[p.grp[c]];
+            let (ccode, cnrm) = done[c].col.as_ref().unwrap();
+            let (nc, nn) = (sizes[c], cp.nb + 1);
+            let nblk = nc.div_ceil(BLK);
             cst.coff.push(cst.code.len());
-            cst.code.extend_from_slice(&cc.ccode);
+            cst.code.extend_from_slice(ccode);
             cst.noff.push(cst.nrm.len());
             let base = cst.nrm.len();
             cst.nrm.resize(base + nn * nblk * BLK, 0);
             for i in 0..nc {
                 for q in 0..nn {
-                    cst.nrm[base + q * nblk * BLK + i] = cp.nu_code(q, cc.cnrm[i * nn + q]);
+                    cst.nrm[base + q * nblk * BLK + i] = cp.nu_code(q, cnrm[i * nn + q]);
                 }
             }
         }
-        ahat.extend_from_slice(&cc.items.ah);
-        // codes rounded up on the cluster's grid: nondecreasing in sort order
-        nukey.extend(cc.items.nu.iter().map(|&v| ((v / info.numax * 65535.0).ceil() as u32).min(65535) as u16));
-        row_ent.extend_from_slice(&cc.items.ent);
-        xs_row.extend_from_slice(&cc.items.ext);
-        row0 += nc;
-        cl.push(info);
+        cst.code.extend_from_slice(&[0u8; 128]);
+        cst.nrm.extend_from_slice(&[0u8; 128]);
     }
-    ahat.extend_from_slice(&[0i16; 32]);
-    // 64 bytes of slack so masked and full vector loads past a level's end stay inside the allocation
-    for l in 0..nl {
-        lcode[l].extend_from_slice(&[0u8; 128]);
-        lscal[l].extend_from_slice(&[0u8; 128]);
-    }
-    cst.code.extend_from_slice(&[0u8; 128]);
-    cst.nrm.extend_from_slice(&[0u8; 128]);
+    drop(done);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
         gp.vq = Vec::new();
     }
-    let nrows = row0;
+    let row_ent = row_ent.finish();
     let maxent = row_ent.iter().copied().max().unwrap_or(0) as usize;
-    let mut ent_row = vec![u32::MAX; maxent + 1];
+    let ent_row = store::Out::<u32>::new(dir, "ent_row.bin", maxent + 1);
+    ent_row.put(0, &vec![u32::MAX; maxent + 1]);
     for (r, &e) in row_ent.iter().enumerate() {
         // k-NN counts rows, which is exact only with one row per entity
-        assert!(ent_row[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
-        ent_row[e as usize] = r as u32;
+        assert!(ent_row.get()[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
+        ent_row.put(e as usize, &[r as u32]);
     }
-    let mut full = full;
-    match &mut full {
-        Full2::Real { rows } => {
-            let src = src.f16().expect("a real index needs a source with f16 vectors");
-            let mut v = vec![0u16; nrows * n];
-            v.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(src.row(r as usize)));
-            *rows = v.into();
+    let full = match full {
+        Full2::Real { .. } => Full2::Real { rows: vecs.finish() },
+        Full2::Synth(mut sy) => {
+            sy.ext = ext.finish().to_vec();
+            sy.row_cl = (0..k).flat_map(|c| std::iter::repeat(c as u32).take(sizes[c])).collect();
+            Full2::Synth(sy)
         }
-        Full2::Synth(sy) => {
-            sy.ext = xs_row;
-            sy.row_cl = cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
-        }
-    }
+    };
     let ctab: Vec<Vec<kern::CTab>> = cl.par_iter().map(|c| {
         let gp = &groups[c.g];
         let wm = c.wm(gp);
@@ -1785,7 +1803,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     }).collect();
     let ix = Index2 {
         col: if build_col { Some(cst) } else { None },
-        nukey: nukey.into(),
+        nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
         ctab,
         meta,
@@ -1799,11 +1817,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         hi: Vec::new(),
         lo: Vec::new(),
         nanch: 0,
-        ahat: ahat.into(),
-        row_ent: row_ent.into(),
-        ent_row: ent_row.into(),
-        lcode: lcode.into_iter().map(Arr::from).collect(),
-        lscal: lscal.into_iter().map(Arr::from).collect(),
+        ahat: ahat.finish(),
+        row_ent,
+        ent_row: ent_row.finish(),
+        lcode: lcode.into_iter().map(|o| o.finish()).collect(),
+        lscal: lscal.into_iter().map(|o| o.finish()).collect(),
         coff,
         soff,
         esc,
@@ -1812,6 +1830,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         nrows,
         split,
     };
+    if let Some(d) = dir {
+        store::save_rest(&ix, d);
+    }
     let mut ek = [0usize; 4];
     for (key, _) in ix.esc.iter() {
         ek[match key.1 { 0 => 0, 1..=7 => 1, 8..=15 => 2, _ => 3 }] += 1;

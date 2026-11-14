@@ -214,25 +214,34 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         BUILD_COL.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     // the encoded index is saved beside the fit, keyed by everything that changes it, and opened in place of a build
-    // (--rebuild builds it again; an index with the columnar store is always built)
+    // (--rebuild builds it again; --in-memory, or the columnar store, builds it on the heap and saves nothing)
     let build_col = BUILD_COL.load(std::sync::atomic::Ordering::Relaxed);
     if args().iter().any(|a| a == "--resident") {
         crate::v2::store::RESIDENT.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let key = crate::v2::store::build_key(&p, &prof, &format!("nusort {nusort}"));
     let edir = format!("{dir}/encoded-{key}");
-    let saved = !build_col && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
+    let in_memory = build_col || args().iter().any(|a| a == "--in-memory");
+    let saved = !in_memory && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
     let mut ix = if saved {
         crate::v2::store::open(&p, &prof, &edir, split, &mut lg)
     } else {
-        let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
+        // built into a scratch directory, sealed with its key, then moved into place
+        let tmp = format!("{edir}.tmp");
+        let dir = (!in_memory).then_some(tmp.as_str());
+        if let Some(d) = dir {
+            let _ = std::fs::remove_dir_all(d);
+            std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("cannot create {d}: {e}"));
+        }
+        let mut ix = build2(&p, &prof, &src, full, split, nusort, dir, &mut lg);
         if !nusort {
             build_table2(&mut ix, p.meta.k);
         }
-        if !build_col {
-            let ts = Timer::new();
-            crate::v2::store::save(&ix, &edir, &key);
-            out!("[build2] saved to {edir} in {:.1}s", ts.s());
+        if let Some(d) = dir {
+            crate::v2::store::seal(&ix, d, &key);
+            let _ = std::fs::remove_dir_all(&edir);
+            std::fs::rename(d, &edir).unwrap_or_else(|e| panic!("cannot move {d} to {edir}: {e}"));
+            out!("[build2] saved to {edir}");
         }
         ix
     };
