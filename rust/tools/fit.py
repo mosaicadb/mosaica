@@ -24,7 +24,7 @@ from core import kmeans, TREE, GTREE  # noqa: E402
 PER_CLUSTER = 1000
 NTARGET, EPS = 1e9, 1e-9
 DLV = [4, 8, 12, 16, 24, 32]
-RLV_BASE = [40, 48, 56, 64, 72, 80, 96, 112, 128, 144, 160, 192, 224, 256]
+RLV_BASE = [56, 96, 160, 256]
 BLOCK_FRACS = [0.125, 0.29167, 0.625]
 HEDGE = 0.25
 FORMAT = 2
@@ -36,13 +36,13 @@ def log(*a):
 
 
 def schedule(n0, n):
-    """Randomised level ends: the base list, then steps of 1.25x, while within 40% of the f16 vector, within 256 B
+    """Randomised level ends: the base list, then steps of 1.6x, while within 40% of the f16 vector, within 256 B
     per 768 dimensions and within 8 bits per dimension."""
     cap = min(0.4 * 2 * n0, 256 * max(1.0, n0 / 768), DLV[-1] + n)
     rlv = [b for b in RLV_BASE if b <= cap]
     b = RLV_BASE[-1]
     while True:
-        b = int(round(b * 1.25 / 32)) * 32
+        b = int(round(b * 1.6 / 32)) * 32
         if b > cap:
             break
         rlv.append(b)

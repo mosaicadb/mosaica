@@ -126,6 +126,18 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
             "nobail" => p.bail = 0.0,
+            "noscanband" => {
+                p.scan_lo = 2.0;
+                p.scan_hi = 2.0;
+            }
+            f if f.starts_with("scanband=") => {
+                let (a, b) = f[9..].split_once(':').expect("scanband=LO:HI");
+                p.scan_lo = a.parse().expect("scanband=LO:HI");
+                p.scan_hi = b.parse().expect("scanband=LO:HI");
+            }
+            f if f.starts_with("rdec=") => {
+                p.rdec = if &f[5..] == "all" { u32::MAX } else { f[5..].split('.').map(|x| 1u32 << x.parse::<u32>().expect("rdec=LEVEL.LEVEL...")).fold(0, |a, b| a | b) };
+            }
             f if f.starts_with("repackx=") => {
                 p.repack = true;
                 p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
@@ -146,6 +158,15 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let split = !args().iter().any(|a| a == "--u8");
     let t = Timer::new();
     let mut p = load_params(dir);
+    // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
+    let rlv = arg_str("--rlv", "");
+    if !rlv.is_empty() {
+        let new: Vec<usize> = rlv.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect();
+        assert!(new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "--rlv must rise from above the last deterministic level");
+        let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
+        p.meta.csg = (2.0 * l1).sqrt();
+        p.meta.rlv = new;
+    }
     if kk < p.meta.k {
         let n = p.meta.n;
         p.meta.k = kk;
@@ -768,6 +789,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let (mut walls, mut br, mut fr, mut wrong, mut pwall) = (Vec::new(), 0.0, 0.0, 0u64, 0.0);
                 let mut parts = [0f64; 21];
                 let mut cnt = [0f64; 4];
+                let mut rkap = 0f64;
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -811,6 +833,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     for k in 0..4 {
                         cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
+                    rkap += ms(cy[P_RKAP]);
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
                     let (a, b) = sym_diff(&bm, &truths[qi]);
@@ -821,6 +844,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let tot: f64 = parts[..20].iter().sum();
                 let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
+                out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars and accumulators {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
                 lines.push(line);
             }

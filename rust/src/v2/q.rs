@@ -44,6 +44,9 @@ pub const C_TABLES: usize = 20;
 pub const C_UNITS: usize = 21;
 pub const C_TSURV: usize = 22;
 pub const C_TSMALL: usize = 23;
+/// Inside bounds+decisions at the randomised levels: the scalars' decode (|y| at the first, kappa and tan at rises) and
+/// the accumulators' update.
+pub const P_RKAP: usize = 24;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -406,6 +409,7 @@ pub struct CQ2 {
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub bail: f32,    // a threshold query sends its survivors to full vectors before a level of more than bail x live units (0: never)
+    pub rdec: u32,    // threshold queries decide at randomised level lr only if bit lr is set (the others only read)
     pub int: Option<IntDet>,
 }
 
@@ -514,7 +518,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -921,6 +925,15 @@ unsafe fn arr(v: __m512) -> [f32; 16] {
     o
 }
 
+/// Append r0 + idx[i] for the lanes i of `m` (16 slots from `idx`), in order, with one compressed store.
+#[inline(always)]
+unsafe fn push_rows(v: &mut Vec<u32>, idx: *const u32, m: u16, r0: u32) {
+    v.reserve(16);
+    let x = _mm512_add_epi32(_mm512_loadu_si512(idx as *const _), _mm512_set1_epi32(r0 as i32));
+    _mm512_storeu_si512(v.as_mut_ptr().add(v.len()) as *mut _, _mm512_maskz_compress_epi32(m, x));
+    v.set_len(v.len() + m.count_ones() as usize);
+}
+
 /// Blocks ahead whose codes are prefetched on the aligned path.
 const PF: usize = 8;
 
@@ -1158,6 +1171,24 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         st.cyc[P_TABLES] += tick() - tt;
         let tls = tick();
         let skip = l < first_decide && !verify && mode == Mode2::Thr;
+        // a randomised level that only reads: its bounds are not computed (verify: computed and checked, not used)
+        let nodec = l >= NDL && mode == Mode2::Thr && (cq.rdec >> (l - NDL)) & 1 == 0;
+        let skipb = skip || (nodec && !verify);
+        // blocks whose kappa this level stores and a later rise replaces before the next level that decides: unused
+        let mut kap_unused = 0u32;
+        if nodec && !verify && l >= NDL {
+            let lr = l - NDL;
+            let nd = (lr + 1..nl - NDL).find(|&x| (cq.rdec >> x) & 1 == 1);
+            for &j in &gp.thchg[lr] {
+                let again = match nd {
+                    None => true,
+                    Some(d) => (lr + 1..=d).any(|x| gp.thchg[x].contains(&j)),
+                };
+                if again {
+                    kap_unused |= 1 << j;
+                }
+            }
+        }
         for pl in &lut.parts {
             match pl.j {
                 None => edet += pl.err,
@@ -1302,9 +1333,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     st.dec_out[l] += outm.count_ones() as u64;
                 }
                 if !skip && !sweep && inm != 0 {
-                    for i in 0..32 {
-                        if inm >> i & 1 == 1 {
-                            out.rows_in.push((c.r0 + sv.idx[k0 + i] as usize) as u32);
+                    for h in 0..2 {
+                        let m = (inm >> (16 * h)) as u16;
+                        if m != 0 {
+                            push_rows(out.rows_in, sv.idx.as_ptr().add(k0 + 16 * h), m, c.r0 as u32);
                         }
                     }
                 }
@@ -1371,6 +1403,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
+                    let tk = tick();
                     if lr == 0 {
                         for j in 0..J {
                             let (a0, a1) = row_nibbles(sp.add(2 * j * 16));
@@ -1398,6 +1431,9 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                         _mm512_storeu_ps(sv.aj[j].as_mut_ptr().add(o), a);
                     }
                     for (slot, &j) in gp.thchg[lr].iter().enumerate() {
+                        if kap_unused >> j & 1 == 1 {
+                            continue;
+                        }
                         let row = gp.rrow[lr][slot];
                         let kb = gp.kbits[lr][j] as usize;
                         let (a0, a1) = row_nibbles(sp.add(row * 16));
@@ -1434,7 +1470,8 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                         _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), kap);
                         _mm512_storeu_ps(sv.eps[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)));
                     }
-                    if skip {
+                    st.cyc[P_RKAP] += tick() - tk;
+                    if skipb {
                         keep[h] = hm;
                         continue;
                     }
@@ -1506,6 +1543,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     }
                     continue;
                 }
+                if nodec {
+                    keep[h] = hm;
+                    continue;
+                }
                 let tv = _mm512_set1_ps(tin);
                 let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, tv) & hm;
                 let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, tv) & hm;
@@ -1521,13 +1562,12 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 }
                 if inm != 0 {
                     st.dec_in[l] += inm.count_ones() as u64;
-                    let (lbs, ubs) = (arr(lb), arr(ub));
-                    for i in 0..16 {
-                        if inm >> i & 1 == 1 {
-                            let row = (c.r0 + sv.idx[o + i] as usize) as u32;
-                            out.rows_in.push(row);
-                            if let Some(iv) = out.iv.as_deref_mut() {
-                                iv.push((row, lbs[i], ubs[i], l as u8));
+                    push_rows(out.rows_in, sv.idx.as_ptr().add(o), inm, c.r0 as u32);
+                    if let Some(iv) = out.iv.as_deref_mut() {
+                        let (lbs, ubs) = (arr(lb), arr(ub));
+                        for i in 0..16 {
+                            if inm >> i & 1 == 1 {
+                                iv.push(((c.r0 + sv.idx[o + i] as usize) as u32, lbs[i], ubs[i], l as u8));
                             }
                         }
                     }
@@ -1773,6 +1813,9 @@ pub struct Plan {
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub bail: f32,         // threshold queries: survivors go to full vectors before a level whose table has more than bail units per survivor (0: off)
+    pub rdec: u32,         // threshold queries decide at randomised level lr only when bit lr is set
+    pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
+    pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
     pub colq: bool,        // in an order chosen per (query, cluster)
@@ -1780,14 +1823,14 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, scan_lo: 2.0, scan_hi: 2.0, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
     /// The timed constants as `name=value` lines.
     pub fn to_kv(&self) -> String {
-        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\n",
-                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us)
+        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\n",
+                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi)
     }
     /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
     pub fn from_kv(base: Plan, text: &str) -> Plan {
@@ -1805,6 +1848,8 @@ impl Plan {
                 "scan_us" => &mut p.scan_us,
                 "cut_us" => &mut p.cut_us,
                 "seed_us" => &mut p.seed_us,
+                "scan_lo" => &mut p.scan_lo,
+                "scan_hi" => &mut p.scan_hi,
                 k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
             } = v;
         }
@@ -1895,7 +1940,10 @@ impl Plan {
                 }
             }
             let s = tm_idx / mm_idx.max(1e-30);
+            let (scan_lo, scan_hi) = Plan::scan_band(ix, base, nq.min(3));
             Plan {
+                scan_lo,
+                scan_hi,
                 scan_us: scan_t / scan_n,
                 cut_us: cut_t / cut_n,
                 full_us: full_t / full_n.max(1.0),
@@ -1908,6 +1956,45 @@ impl Plan {
                 ..base
             }
         })
+    }
+
+    /// The answer shares at which a scan of every row beats the index path, timed on `nq` stored rows as queries at
+    /// thresholds of 5 to 99% answers: (lo, hi) spans the shares where the index was slower, extended halfway to the
+    /// neighbouring shares; (2, 2) when it never was.
+    pub fn scan_band(ix: &Index2, base: Plan, nq: usize) -> (f64, f64) {
+        const F: [f64; 10] = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 0.99];
+        let plan = Plan { scan_lo: 2.0, scan_hi: 2.0, ..base };
+        let o = Opts2 { vis: None, verify: false, want_iv: false, plan };
+        let mut slower = [0usize; F.len()];
+        for i in 0..nq.max(1) {
+            let row = (2 * i + 1) * ix.nrows / (2 * nq.max(1)) + 1;
+            let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
+            let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+            let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
+            let pr = prep2(ix, &q);
+            let mut sc: Vec<f32> = (0..ix.nrows).map(|r| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r)) }).collect();
+            sc.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
+            for (k, &f) in F.iter().enumerate() {
+                let t = sc[((ix.nrows as f64 * f) as usize).min(ix.nrows - 1)] as f64;
+                let (mut ti, mut ts) = (f64::MAX, f64::MAX);
+                for _ in 0..2 {
+                    let tm = Timer::new();
+                    std::hint::black_box(threshold2(ix, &pr, t, &o).rows.len());
+                    ti = ti.min(tm.ms());
+                    let tm = Timer::new();
+                    std::hint::black_box(scan_visible(ix, &pr, t, None, false, false).rows.len());
+                    ts = ts.min(tm.ms());
+                }
+                if ti > ts {
+                    slower[k] += 1;
+                }
+            }
+        }
+        let sl: Vec<usize> = (0..F.len()).filter(|&k| 2 * slower[k] > nq.max(1)).collect();
+        match (sl.first(), sl.last()) {
+            (Some(&a), Some(&b)) => (if a == 0 { 0.0 } else { (F[a - 1] + F[a]) / 2.0 }, if b + 1 == F.len() { 1.0 } else { (F[b] + F[b + 1]) / 2.0 }),
+            _ => (2.0, 2.0),
+        }
     }
 
     /// Before anything is read: a scan of the visible set costs no more than cutting every cluster that holds a
@@ -2098,6 +2185,31 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
     }
 }
 
+/// Rows sampled to estimate a threshold query's answer share.
+pub const SHARE_SAMPLE: usize = 256;
+
+/// The share of `ns` visible rows (every row when vis is None), evenly spaced, whose f32 score from the stored vector
+/// is at least t: an estimate of the answer's share of the visible set (planning only).
+pub fn answer_share(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ns: usize) -> f64 {
+    if !matches!(ix.full, Full2::Real { .. }) {
+        return 0.0;
+    }
+    let nvis = vis.map_or(ix.nrows, |v| v.rows.len());
+    let ns = ns.min(nvis);
+    if ns == 0 {
+        return 0.0;
+    }
+    let mut hit = 0usize;
+    for i in 0..ns {
+        let k = (2 * i + 1) * nvis / (2 * ns);
+        let row = vis.map_or(k, |v| v.rows[k] as usize);
+        if unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(row)) } as f64 >= t {
+            hit += 1;
+        }
+    }
+    hit as f64 / ns as f64
+}
+
 /// The cluster cut and sorted range at t, then the planner's choice. `fixed_us` is index-path work already committed
 /// to by the caller that a scan would have avoided (nothing for a threshold query).
 pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Planned {
@@ -2178,6 +2290,13 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             pre[ci] = Some(p);
         }
         let d = nc_s as f64 / nvo_s.max(1) as f64;
+        // most visible items are candidates: a large answer, where the index reads most of them deeply, scans
+        if pl.scan_lo <= 1.0 && d >= 0.25 {
+            let p = answer_share(ix, pr, t, o.vis, SHARE_SAMPLE);
+            if p >= pl.scan_lo && p <= pl.scan_hi {
+                return Planned::Scan;
+            }
+        }
         let cost_s: f64 = live.iter().step_by(SAMPLE).map(|&ci| match pre[ci] {
             Some(Pre::Open { ncand, .. }) if ncand > 0 => (ncand as f64 * pl.full_us).min(pl.index_us(ncand, d)),
             _ => 0.0,
@@ -2338,6 +2457,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             cq.gtab = gt;
                             cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
                             cq.bail = pl.bail;
+                            cq.rdec = pl.rdec;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
                                 cq.enable_int(ix, ci, gq);

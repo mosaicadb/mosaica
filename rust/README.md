@@ -30,7 +30,7 @@ It normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with
 centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the
 residuals per group, and writes the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
 blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deterministic levels end at 4 / 8 / 12 / 16 /
-24 / 32 B; the randomised ones at 40 to 256 B, extended by steps of 1.25x for n above 768 and capped at 40% of the f16
+24 / 32 B; the randomised ones at 56, 96, 160 and 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16
 vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every
 other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
 derived from these in Rust when the index is opened, and every item is encoded then (about 11 s at 1.2M items on 12
