@@ -2101,12 +2101,13 @@ impl Plan {
     }
 
     /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
-    /// from 4,096 single rows spread over the file, `io_gbps` from 64 MiB of consecutive rows. The file's pages are
-    /// dropped from the cache before and after. Unchanged in memory or without `--full-read uring`.
+    /// from 4,096 single rows spread over the file, `io_gbps` from 64 MiB of consecutive rows, each the fastest of three
+    /// timings. The file's pages are dropped from the cache before each and after. Unchanged in memory or without
+    /// `--full-read uring`.
     pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
         let Full2::Real { rows, .. } = &ix.full else { return base };
         let n = ix.n();
-        let time = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
+        let time1 = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
             rows.evict();
             let mut rd = super::disk::Reader::<()>::new(rows, n, gap)?;
             let tm = Timer::new();
@@ -2116,6 +2117,9 @@ impl Plan {
             std::hint::black_box(b.row(0, n)[0]);
             rd.recycle(b);
             Some((el, rd.bytes))
+        };
+        let time = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
+            (0..3).map(|_| time1(sel.clone(), gap)).try_fold((f64::MAX, 0), |a, x| x.map(|x| if x.0 < a.0 { x } else { a }))
         };
         const NR: usize = 4096;
         let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
