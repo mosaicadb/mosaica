@@ -1356,8 +1356,16 @@ pub fn dbtopk(c: &Ctx2) {
                 let (np, dname) = param.split_once(':').unwrap();
                 let (np, dial): (usize, Option<&[f32]>) = (np.parse().unwrap(), dial_of(dname));
                 let mut tot = vec![0f64; 6 + nl];
+                // with VEXACT_PROF, the share of the query's cycles by phase (knn2_fast only)
+                let prof = std::env::var("VEXACT_PROF").is_ok() && fast;
+                let mut cyc = [0f64; 32];
                 for (qi, es) in &exact {
+                    PROF.store(prof, std::sync::atomic::Ordering::Relaxed);
                     let o = pl.install(|| run(np, dial, &qs[*qi]));
+                    PROF.store(false, std::sync::atomic::Ordering::Relaxed);
+                    for (a, &b) in cyc.iter_mut().zip(&o.st.cyc) {
+                        *a += b as f64;
+                    }
                     let rec = o.ents.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64;
                     let bytes = bytes_read2(ix, &o.st) * ix.nrows as f64;
                     let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes, o.st.groups as f64, o.st.clusters_open as f64].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
@@ -1369,6 +1377,14 @@ pub fn dbtopk(c: &Ctx2) {
                 }
                 out!("dbtopk {vname} stats {} k {k} {param}: recall {:.4} touched {:.0} full {:.0} bytes {:.0} groups {:.1} clusters indexed {:.1}; entering by level {:?}", targets[ti], tot[0], tot[1], tot[2], tot[3], tot[4], tot[5],
                     tot[6..].iter().map(|x| x.round()).collect::<Vec<_>>());
+                if prof {
+                    let q = cyc[P_QUERY].max(1.0);
+                    let lv: f64 = [P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP].iter().map(|&p| cyc[p]).sum();
+                    let sh = |x: f64| (x / q * 1000.0).round() / 10.0;
+                    out!("dbtopk {vname} phases {} k {k} {param} (% of the query): order {} groups {} cluster setup {} tables {} levels {} (of which item work {}) full vectors {} rest {}", targets[ti],
+                        sh(cyc[P_PLAN]), sh(cyc[P_BASIS] + cyc[P_GPOST]), sh(cyc[P_CLSETUP]), sh(cyc[P_TABLES]), sh(cyc[P_RUNCL]), sh(lv - cyc[P_TABLES]), sh(cyc[P_FULL]),
+                        sh(q - cyc[P_PLAN] - cyc[P_BASIS] - cyc[P_GPOST] - cyc[P_CLSETUP] - cyc[P_RUNCL] - cyc[P_FULL]));
+                }
             }
         }
     }
