@@ -818,6 +818,9 @@ fn main() {
         if has("dbcmp") {
             run2::dbcmp(&c);
         }
+        if has("dbknn") {
+            run2::dbknn(&c);
+        }
         return;
     }
     if !std::arch::is_x86_feature_detected!("avx512f") {

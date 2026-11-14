@@ -1199,3 +1199,98 @@ pub fn dbcmp(c: &Ctx2) {
     let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));
 }
+
+/// The approximate mode as top-m on the threshold-db queries, in ann.py's form: for every `--step`-th query and each
+/// share in `--shares`, m is the size of the exact answer (the first k of `--order`, within the visible set), the query
+/// asks knn2_dial for the m best, and recall is |returned ∩ exact| / m. Settings: `default` is every cluster with the
+/// dial fitted for target recall 0.99; `tight` is the fastest of the smallest cluster counts on a doubling ladder
+/// that reaches mean recall 0.99 with the fitted dial (also with the dial off when `--tight-dials off` is given; walked
+/// at one repetition from `--ladder-from`, the winner timed at `--reps`). One thread, pinned by `--pin`. Rows are
+/// appended to RESULTS/liminal_approx.csv as each setting finishes, in ann.csv's columns; param is "nprobe:dial".
+pub fn dbknn(c: &Ctx2) {
+    let ix = &c.ix;
+    let order = read_npy(&arg_str("--order", ""));
+    let ncol = order.shape[1];
+    let order = order.i32s();
+    let qs = &c.texts;
+    let n = ix.nrows;
+    let ks: Vec<usize> = [1e-4, 1e-3, 1e-2, 1e-1, 0.3, 0.5, 0.75].iter().map(|s| (s * n as f64).round() as usize).collect();
+    let reps = arg_usize("--reps", 5);
+    let step = arg_usize("--step", 10);
+    let k_cl = ix.k();
+    let dial99: Vec<f32> = c.dial.as_ref().expect("dbknn needs --fit-dial").for_target(0.99).to_vec();
+    let pl = pool(1);
+    for spec in arg_str("--sets", "all:0,1,2,3").split(';') {
+        let (vname, shares) = spec.split_once(':').unwrap();
+        let bm: Option<RoaringBitmap> = (vname != "all").then(|| {
+            let ids: Vec<u32> = read_npy(&arg_str("--vis", "")).i32s().iter().map(|&x| x as u32).collect();
+            RoaringBitmap::from_sorted_iter(ids).unwrap()
+        });
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        for si in shares.split(',').map(|x| x.parse::<usize>().unwrap()) {
+            let k = ks[si].min(ncol); // 0.75 N rounds half to even in prep.py, to the stored column count
+            let exact: Vec<(usize, Vec<u32>)> = (0..qs.len()).step_by(step).map(|qi| {
+                let e: Vec<u32> = order[qi * ncol..qi * ncol + k].iter().map(|&x| x as u32).filter(|&x| bm.as_ref().map_or(true, |b| b.contains(x))).collect();
+                (qi, e)
+            }).filter(|x| !x.1.is_empty()).collect();
+            // (qi, median ms, recall, returned, nonmatch, m) for one setting
+            let eval = |np: usize, dial: Option<&[f32]>, r: usize| -> Vec<(usize, f64, f64, usize, usize, usize)> {
+                exact.iter().map(|(qi, e)| {
+                    let m = e.len();
+                    let mut ts = Vec::new();
+                    let mut got = Vec::new();
+                    for _ in 0..r {
+                        let t = Timer::new();
+                        let out = pl.install(|| knn2_dial(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, false, c.plan));
+                        got = out.ents.iter().map(|x| x.1).collect::<Vec<u32>>();
+                        ts.push(t.ms());
+                    }
+                    let es: std::collections::HashSet<u32> = e.iter().copied().collect();
+                    let hit = got.iter().filter(|x| es.contains(x)).count();
+                    (*qi, median(&ts), hit as f64 / m as f64, got.len(), got.len() - hit, m)
+                }).collect()
+            };
+            let summ = |r: &[(usize, f64, f64, usize, usize, usize)]| (median(&r.iter().map(|x| x.1).collect::<Vec<_>>()), mean(&r.iter().map(|x| x.2).collect::<Vec<_>>()));
+            let emit = |setting: &str, np: usize, dname: &str, r: &[(usize, f64, f64, usize, usize, usize)]| {
+                let (ms, rec) = summ(r);
+                out!("dbknn {setting} {vname} share {si}: nprobe {np} dial {dname}: median {ms:.3} ms, mean recall {rec:.4}");
+                let path = format!("{}/liminal_approx.csv", res_dir());
+                let fresh = !std::path::Path::new(&path).exists();
+                let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+                if fresh {
+                    writeln!(f, "method,setting,vis,share_index,query,param,median_ms,recall,returned,nonmatch,exact").unwrap();
+                }
+                for &(qi, ms, rec, ret, bad, m) in r {
+                    writeln!(f, "liminal,{setting},{vname},{si},{qi},{np}:{dname},{ms:.4},{rec:.5},{ret},{bad},{m}").unwrap();
+                }
+            };
+            if !arg_str("--skip-default", "").split(',').any(|x| x == format!("{vname}:{si}")) {
+                let r = eval(k_cl, Some(&dial99), reps);
+                emit("default", k_cl, "fit0.99", &r);
+            }
+            let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).filter(|&p| p >= arg_usize("--ladder-from", 1)).collect();
+            ladder.push(k_cl);
+            let mut best: Option<(f64, usize, &str, Vec<(usize, f64, f64, usize, usize, usize)>)> = None;
+            let dials: Vec<(&str, Option<&[f32]>)> = if arg_str("--tight-dials", "fit").contains("off") { vec![("off", None), ("fit0.99", Some(&dial99[..]))] } else { vec![("fit0.99", Some(&dial99[..]))] };
+            for (dname, dial) in dials {
+                for &np in &ladder {
+                    let r1 = eval(np, dial, 1);
+                    let (ms, rec) = summ(&r1);
+                    out!("dbknn ladder {vname} share {si}: nprobe {np} dial {dname}: median {ms:.3} ms, mean recall {rec:.4}");
+                    if rec >= 0.99 || np == k_cl {
+                        let r = eval(np, dial, reps);
+                        let (ms, rec) = summ(&r);
+                        if rec >= 0.99 && best.as_ref().map_or(true, |b| ms < b.0) {
+                            best = Some((ms, np, dname, r));
+                        }
+                        break;
+                    }
+                }
+            }
+            match best {
+                Some((_, np, dname, r)) => emit("tight", np, dname, &r),
+                None => out!("dbknn tight {vname} share {si}: no setting reaches 0.99"),
+            }
+        }
+    }
+}

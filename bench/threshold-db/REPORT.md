@@ -1,10 +1,10 @@
-# Exact threshold filter: databases, ANN libraries and our index
+# Exact threshold filter: databases, ANN libraries and LIMINAL
 
 ![latency against answer size, 1 thread](results/latency_1t.png)
 
 ![the same at 4 threads](results/latency_4t.png)
 
-The plots show one line per system so that they stay readable; the tables below hold every row, including our index
+The plots show one line per system so that they stay readable; the tables below hold every row, including LIMINAL
 as measured on 13 Nov, ClickHouse Float32, the half-precision faiss variants (the same speed as f32 at half the memory,
 except flat range search) and each approximate method at its default setting. Approximate methods appear at their
 fastest setting with mean recall at least 0.99; a hollow point is one where the method could not reach 0.99 within
@@ -12,7 +12,7 @@ fastest setting with mean recall at least 0.99; a hollow point is one where the 
 copy of the visible rows, which takes about 30 ms to build per visible set. The data behind both plots is in
 [results/plot_data.csv](results/plot_data.csv).
 
-This is the 14 Nov update of the 13 Nov report. Our rows were re-measured with the current index. The approximate
+This is the 14 Nov update of the 13 Nov report. The LIMINAL rows were re-measured with the current index. The approximate
 rows were extended to larger answers, and half-precision faiss variants were added. The ClickHouse rows and the other
 existing rows are as measured on 13 Nov.
 
@@ -29,17 +29,17 @@ covers the whole query, from the call to holding the full id set, so returning 7
   f64. 50 further rows were held out as image queries.
 - **Queries.** 150 queries: 50 held-out images (in-distribution) and 100 out-of-distribution (OOD) queries, text-prompt
   embeddings searched against the image embeddings: 50 from `text_q.npy` and 50 from `text_insample.npy`. Timing used
-  every 10th query, which gives 15 queries (5 of each kind). OOD queries cost our index more, because they point where
+  every 10th query, which gives 15 queries (5 of each kind). OOD queries cost LIMINAL more, because they point where
   the code is coarse and their scores bunch near any threshold; the medians mix the two kinds.
 - **Thresholds.** For each query there are seven thresholds, with answers of 0.01%, 0.1%, 1%, 10%, 30%, 50% and 75% of
   the corpus. Each is the midpoint between the k-th and (k+1)-th f64 similarity, so the exact answer has exactly k items.
   Answer sizes run from 100 to 749,962.
 - **Visible sets.** Random sets of 50%, 10% and 1% of the ids. ClickHouse and the ANN libraries ran unfiltered and at
-  1%. Ours ran at all four.
+  1%. LIMINAL ran at all four.
 - **Machine.** Ryzen 9 5900X (AVX2, no AVX-512) under WSL2.
   - 13 Nov: every run was pinned to cores 8–11, with another agent timing on cores 0–7.
   - 14 Nov: 1-thread runs were pinned to core 10 and 4-thread runs to cores 8–11. Builds ran on cores 9–11 (3
-    threads). Other agents were running on cores 0–3 throughout, and on cores 4–8 during our 1-thread run and the
+    threads). Other agents were running on cores 0–3 throughout, and on cores 4–8 during the LIMINAL 1-thread run and the
     first approximate runs. Memory bandwidth is shared, so expect up to 35% run-to-run variation.
 - **Repetitions.** Each (query, threshold, visible set) ran 5 times. A system's figure is the median over queries of each
   query's median, and the p90 is over the same per-query medians.
@@ -65,7 +65,7 @@ covers the whole query, from the call to holding the full id set, so returning 7
 - **DuckDB 1.5.6** was measured on 13 Nov and is left out of the plots, the table and the conclusion: it took about
   2 s per query (2.1–2.3 s unfiltered, 1.7–1.8 s at 1% visible, 1 thread), bound by reading the `FLOAT[768]` column
   (`SELECT sum(vec[1])` alone takes 1.6 s). Its rows are still in `results/duckdb.csv`.
-- **Ours.** The `research/bench-update` branch (from `research/rand-bounds` at 1d827e0de), with the `dbcmp` mode
+- **LIMINAL.** The `research/bench-update` branch (from `research/rand-bounds` at 1d827e0de), with the `dbcmp` mode
   ported into `rust/src/run2.rs`. It takes explicit thresholds and visible-set files. It times query preparation, the
   query, and the entity-id answer as a Roaring bitmap.
   - The index is the current default: `fit.py --basis dual` (four randomised levels at 56, 96, 160 and 256 B), run
@@ -95,6 +95,14 @@ covers the whole query, from the call to holding the full id set, so returning 7
   - The bound is a probabilistic heuristic, not a certificate.
   - faiss 1.16's RaBitQ indexes re-rank only by a fixed factor (IndexRefine), so they were not used.
   - rabitqlib has no filter, so RaBitQ ran unfiltered only.
+- **LIMINAL approximate.** The index's approximate k-NN mode (`knn2_dial`, timed by the `dbknn` mode in
+  `rust/src/run2.rs`), run as top-m with m the exact answer size, like hnswlib. It probes clusters in order of
+  q·m + f·r, the centre score plus f times the cluster's RMS radius (f = 0.2, fitted on 1,000 corpus pseudo-queries),
+  and runs the exact k-NN over the visible items of the probed clusters, with each code level's upper interval
+  half-widths cut by a dial fitted on 200 pseudo-queries for a target recall. It reads only visible rows, so it runs
+  filtered. "Default" is every cluster (all 1,000) with the dial fitted for recall 0.99, so only the dial
+  approximates. "Tight" is the smallest cluster count on a doubling ladder with that dial and mean recall ≥ 0.99.
+  Recall is ann.py's, |returned ∩ exact| / m.
 - **Panorama PR.** [faiss PR 4970](https://github.com/facebookresearch/faiss/pull/4970) (head fa834bf3ea04) was not
   built. It adds `IndexIVFPQPanorama`, which is approximate because it uses PQ codes.
 - **Rebuilt indexes.** The 13 Nov ANN index files had been deleted, so IVF, RaBitQ, hnswlib and faiss HNSW were
@@ -113,6 +121,12 @@ covers the whole query, from the call to holding the full id set, so returning 7
   than 5 s. If 0.99 is not reached within that, the tight point is the last rung within the cap, and its recall is
   labelled. The 13 Nov points capped ef at 200k instead.
 - **Tuning.** The tight settings were tuned on the timed queries themselves, so they are optimistic.
+- **LIMINAL approximate** was measured on 14 Nov in three runs (`results/approx/`; flags were added to the mode between them, the query path did not change). Its ladder
+  started at 32 clusters unfiltered, 16 at 1% visible and 256 for the 1% visible 7.5k point and the unfiltered 10k
+  point, each below a rung with recall under 0.99 where it was walked. At 10k items unfiltered, 256 clusters took
+  8.7 s per query (one repetition) for recall 0.986, past the 5 s cap, so there is no tight point; the default took
+  over 3.5 s per query and did not finish within the run's 10 minutes, and 100k items was not run. At 1% visible
+  every default point has mean recall 1.0000 or 0.9999.
 - **Recall cases that need a note:**
   - Unfiltered at 100 items, hnswlib and f32 HNSW stopped at 32 m on 13 Nov, at recall 0.985–0.987. HNSW-SQfp16,
     on the new ladder, reached 0.991 at 64 m (16 ms).
@@ -130,9 +144,9 @@ over 1 s are rounded to whole ms.
 
 | system | precision | unfiltered, 1 thread | 1% visible, 1 thread | unfiltered, 4 threads | 1% visible, 4 threads |
 |---|---|---|---|---|---|
-| **ours: index** | f16 | **29.7 / 43.6 / 76.9 / 76.6** | **1.22 / 1.11 / 1.18 / 1.33** | **11.0 / 15.0 / 27.3 / 27.9** | **1.03 / 1.08 / 1.11 / 1.23** |
-| ours: index (13 Nov) | f16 | 48.7 / 80.6 / 148 / 157 | 1.27 / 1.23 / 1.29 / 1.40 | 14.9 / 23.0 / 43.9 / 52.5 | 0.71 / 0.73 / 0.83 / 0.88 |
-| ours: f16 scan | f16 | 80.9 / 83.0 / 90.7 / 98.9 | 0.91 / 0.75 / 0.85 / 0.86 | 36.1 / 35.6 / 40.2 / 47.7 | 0.81 / 0.78 / 0.84 / 0.88 |
+| **LIMINAL** | f16 | **29.7 / 43.6 / 76.9 / 76.6** | **1.22 / 1.11 / 1.18 / 1.33** | **11.0 / 15.0 / 27.3 / 27.9** | **1.03 / 1.08 / 1.11 / 1.23** |
+| LIMINAL (13 Nov) | f16 | 48.7 / 80.6 / 148 / 157 | 1.27 / 1.23 / 1.29 / 1.40 | 14.9 / 23.0 / 43.9 / 52.5 | 0.71 / 0.73 / 0.83 / 0.88 |
+| LIMINAL f16 scan | f16 | 80.9 / 83.0 / 90.7 / 98.9 | 0.91 / 0.75 / 0.85 / 0.86 | 36.1 / 35.6 / 40.2 / 47.7 | 0.81 / 0.78 / 0.84 / 0.88 |
 | faiss Panorama flat (exact) | f32 | 42.0 / 61.7 / 159 / 191 | 3.4 / 4.5 / 7.9 / 9.9 | – | – |
 | faiss IndexFlatIP range (exact) | f32 | 151 / 151 / 134 / 131 | 1.0 (compacted) / 5.4 (selector) | 125–132 | 1.0 / 5.8 |
 | faiss SQfp16 flat range (exact) | f16 | 1070 / 1094 / 1150 / 1146 | 11 (compacted) / 16 (selector) | 1097–1186 | 11 / 15 |
@@ -156,11 +170,13 @@ SQfp16 rows. `r` is mean recall, shown where it is below 1.
 | faiss IVF4096-SQfp16 range, nprobe 1 | f16 | 0.26 r .23 / 0.26 r .11 / 0.27 r .02 / 0.31 r .002 | 0.25 r .22 / 0.29 r .08 / 0.28 r .02 / 0.26 r .002 / 0.34 r .001 / 0.29 r .0004 / 0.27 r .0003 |
 | faiss IVF4096-SQfp16 range, tight | f16 | 13.9 r .997 / 14.7 r .992 / 27.0 r .992 / 138 (all clusters) | 0.32 / 3.9 / 2.0 r .991 / 8.0 / 10.3 / 10.4 / 8.5 (all clusters from 1k) |
 | RaBitQ 7-bit, all clusters | 7-bit + extended code | 11.6 r .989 / 12.7 r .994 / 23.9 r .996 / 378 r .997 | – |
+| LIMINAL approximate, default (all clusters, dial for 0.99) | f16 | 42.5 r .9987 / 86.0 r .9990 / over 3.5 s (not finished) / not run | 1.66 / 1.56 / 1.88 / 3.35 / 6.50 / 10.1 / 16.1 |
+| LIMINAL approximate, tight | f16 | 9.3 r .991 (128 clusters) / 66.9 r .996 (256) / 8,710 r .986 at 256 clusters, one repetition (not timed) / not run | 0.34 (32 clusters) / 0.61 (256) / 0.79 r .9987 (512) / 3.61 / 6.83 / 9.85 / 15.8 (all clusters from 1k) |
 
-The CSVs are in `results/`. `summary.md` has p90s and the 10% and 50% visible sets for ours, and `results/ann_logs/`
+The CSVs are in `results/`. `summary.md` has p90s and the 10% and 50% visible sets for LIMINAL, and `results/ann_logs/`
 has every ladder walked for the new points.
 
-## What changed in our index
+## What changed in LIMINAL
 
 The 13 Nov rows used the `research/vector-bench` index: a PCA basis per group of clusters, fourteen randomised levels
 from 40 to 256 B, and floating-point decisions at the deterministic levels. The current default differs in these ways:
@@ -187,7 +203,7 @@ Together these take 39% off at 100 items and 51% off at 750k unfiltered at 1 thr
 Differing items are counted over all checked answers. "Beyond rounding" counts items whose |s − t| exceeds the
 rounding bound of the stored type.
 
-- **Ours, index and f16 scan (14 Nov).** The index's answers are byte-identical to the scan's at all four visible
+- **LIMINAL and the LIMINAL f16 scan (14 Nov).** The index's answers are byte-identical to the scan's at all four visible
   sets. The differing items match 13 Nov in every cell: unfiltered, 6, 30, 122, 690, 1271, 1378 and 1143 items
   across the seven sizes, and 0–20 at 1% visible. Every one lies within f16 rounding: the largest |s − t| is 6.7e-5,
   and none is beyond rounding (`results/correct_dump_ours_r4.csv`).
@@ -205,7 +221,7 @@ resident memory added by loading the index.
 
 | system | precision | on disk | in RAM |
 |---|---|---|---|
-| ours | f16 vectors, 276 B/item of codes | 1.43 GiB of vectors, 0.14 GiB of bases and 0.01 GiB of other parameters; the codes are rebuilt at open (about 140 s on 3 cores) | 1.43 GiB of vectors, 0.26 GiB of codes and 0.14 GiB of bases, about 1.8 GiB. The prototype process measured 6.2 GiB resident after the queries (peak 6.6 GB), because it keeps what the build at open allocated and maps the vector file more than once |
+| LIMINAL | f16 vectors, 276 B/item of codes | 1.43 GiB of vectors, 0.14 GiB of bases and 0.01 GiB of other parameters; the codes are rebuilt at open (about 140 s on 3 cores) | 1.43 GiB of vectors, 0.26 GiB of codes and 0.14 GiB of bases, about 1.8 GiB. The prototype process measured 6.2 GiB resident after the queries (peak 6.6 GB), because it keeps what the build at open allocated and maps the vector file more than once |
 | ClickHouse Float32 | f32 | 2.87 GiB table | the `vec` column in the page cache (2.87 GiB); server RSS peak 5.5 GiB with both tables loaded |
 | ClickHouse BFloat16 | bf16 | 1.44 GiB table | the `vec` column in the page cache (1.44 GiB) |
 | faiss IndexFlatIP | f32 | none (built in RAM) | 2.86 GiB |
@@ -232,7 +248,7 @@ Against the other exact methods:
 
 - **faiss Panorama.** On 13 Nov Panorama was level with the index at 0.01–1%. The index is now faster at every
   size: 30 against 42 ms at 100 items, 44 against 62 ms at 10k, and 77 against 191 ms at 750k.
-- **Our own f16 scan.** On 13 Nov the scan beat the index from about 1% of the corpus upwards. The index now beats it
+- **The LIMINAL f16 scan.** On 13 Nov the scan beat the index from about 1% of the corpus upwards. The index now beats it
   at every unfiltered size, by 2.7× at 100 items and 1.3× at 750k, and at 4 threads by 1.7–3.3×.
 - **faiss over f16.** The half-precision flat range search takes about 1.1 s per query, 7–9× its f32 version, because
   the range search over `QT_fp16` does not take the batched path that the top-k search does (137 ms for k = 100 on
@@ -248,7 +264,12 @@ Against the approximate methods:
   are faster than the exact index at 100 and 1k items, and level with it at 10k (26–41 ms against 44 ms).
 - **Unfiltered, at 100k items** (10%), the exact index (62 ms) is faster than every approximate method at recall
   0.99: IVF 113 ms (only with every cluster, so exact), hnswlib 224 ms, RaBitQ 378 ms and faiss HNSW 4.5 s.
-- **At 1% visible**, approximate search does not help. IVF needs every cluster from 1k items on (7–10 ms, 6–8× the
+- **LIMINAL approximate.** Unfiltered at 100 items, its tight setting (128 of 1,000 clusters) takes 9.3 ms, against
+  30 ms for the exact index and 5–13 ms for the other approximate methods. From 1k items on it is slower than the
+  exact threshold query, because a top-m selection over m items costs more than the threshold test: 67 ms at 1k, and at
+  10k it cannot reach 0.99 within 5 s per query (256 clusters take 8.7 s for recall 0.986). At 1% visible it is the fastest method up to 100 items (0.34–0.79 ms
+  against 1.1–1.2 ms for the exact index), and from 1k items it needs every cluster and takes 3.6–16 ms.
+- **At 1% visible**, the approximate libraries do not help. IVF needs every cluster from 1k items on (7–10 ms, 6–8× the
   index). HNSW collapses: 3.2 s for recall 0.989 at 1k items, and at 3k–7.5k items it cannot pass 0.66 recall within
   5 s per query.
 
@@ -279,6 +300,9 @@ python3 -I dbrun.py clickhouse $D/prep results/clickhouse.csv --table t32|tbf --
 taskset -c 9-11 python3 -I ann.py build ivf|rabitq|hnswlib|faiss_hnsw|sq16|ivf_sq16|hnsw_sq16|panorama $D/prep $A --threads 3
 taskset -c 10 python3 -I ann.py query METHOD $D/prep $A results/ann.csv [--vis all|vis_1] [--shares 3,4,5,6] \
   [--settings default,tight|ladder] [--ladder-from X] [--tight X] [--cap-ms 5000]
+taskset -c 10,11 vexact --v2 --int --gtab --flags repack --index $I --queries $D/prep/queries.npy --results results/approx \
+  --core 10 --pin 10 --fit-dial dbknn --order $D/prep/order.npy --vis $D/prep/vis_1.npy --sets "all:0,1,2;vis_1:0,1,2,3,4,5,6" \
+  [--ladder-from 32] [--skip-default all:2] --step 10 --reps 5        # LIMINAL approximate
 python3 -I summarise.py results/summary.md results/ours/dbcmp_r4_1t.csv results/ours/dbcmp_r4_4t.csv results/clickhouse.csv
 python3 -I plot.py results $D/prep
 ```
