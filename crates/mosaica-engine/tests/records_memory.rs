@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::array::{ArrayRef, Float64Array, StringArray, UInt64Array};
+use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::ArrowWriter;
@@ -27,7 +27,7 @@ use mosaica_engine::filter::{FilterExpr, RegionLeaf};
 use mosaica_engine::shapes::ShapeF64;
 use mosaica_engine::{
     Engine, RecordsHead, RecordsLimits, PageEnd, ItemsRequest, RecordsSink, RecordsOrder,
-    Session, SinkResult,
+    Session, SinkResult, ValueOrder,
 };
 use mosaica_spatial::shape::Space;
 use mosaica_spatial::Projection;
@@ -109,7 +109,7 @@ impl RecordsSink for Count {
 fn read(
     engine: &Engine,
     session: &Session,
-    order: RecordsOrder,
+    order: &RecordsOrder,
     fields: &[String],
     filter: Option<FilterExpr>,
     page_rows: Option<u32>,
@@ -122,7 +122,7 @@ fn read(
         filter,
         keep_unmatched: false,
         count: false,
-        order: Some(order),
+        order: Some(order.clone()),
         page_rows,
         pages: None,
         cursor: None,
@@ -141,8 +141,18 @@ fn read(
     sink.rows
 }
 
+/// Both walks, and the order of `rank`, which runs against them.
+fn orders() -> [RecordsOrder; 3] {
+    let rank = ValueOrder {
+        field: "rank".to_string(),
+        descending: false,
+    };
+    [RecordsOrder::Stored, RecordsOrder::Map, RecordsOrder::Value(rank)]
+}
+
 /// A bundle of `n` items along the diagonal, so source order, item order and map order agree,
-/// each with a `note` of `note_of(s)` bytes, held in the record store.
+/// each with a `note` of `note_of(s)` bytes, held in the record store, and a `rank` of `n - s`,
+/// held in a value column.
 fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
     let ids: Vec<u64> = (0..n).collect();
     let at = |s: u64| (s as f64 + 0.5) * 999.0 / n as f64;
@@ -158,6 +168,10 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
         (
             Field::new("y", DataType::Float64, false),
             Arc::new(Float64Array::from_iter_values(ids.iter().map(|&s| at(s)))),
+        ),
+        (
+            Field::new("rank", DataType::Int64, false),
+            Arc::new(Int64Array::from_iter_values(ids.iter().map(|&s| (n - s) as i64))),
         ),
         (
             Field::new("note", DataType::Utf8, true),
@@ -177,7 +191,12 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
     let pairs = dir.join("pairs.parquet");
     write_pairs_n(&pairs, n);
     let schema_path = dir.join("schema.toml");
-    std::fs::write(&schema_path, "[[attribute]]\nname = \"note\"\ntype = \"keyword\"\n").unwrap();
+    std::fs::write(
+        &schema_path,
+        "[[attribute]]\nname = \"note\"\ntype = \"keyword\"\n\n\
+         [[attribute]]\nname = \"rank\"\ntype = \"i64\"\nindex = true\n",
+    )
+    .unwrap();
     let schema = with_id(
         Config::parse(&schema_path, &std::collections::HashMap::new())
             .map(|c| c.schema)
@@ -222,7 +241,7 @@ fn bundle(dir: &Path, n: u64, note_of: impl Fn(u64) -> usize) -> Engine {
 
 /// **A read holds a bounded multiple of its page ceiling however skewed its rows are, and a
 /// stretch no more than the ceiling**: short notes and then notes of 100 KB, read under a 256 KiB
-/// ceiling, in both orders; and a sparse filter whose stretches grow to their ceiling, for a
+/// ceiling, in every order; and a sparse filter whose stretches grow to their ceiling, for a
 /// viewer who sees every item and one who sees every third. What a stretch holds a row is
 /// measured from two reads whose stretches differ in size and nothing else.
 #[test]
@@ -237,10 +256,10 @@ fn a_reads_peak_is_held_to_its_page_ceiling() {
     let engine = bundle(&skewed, 4000, |s| if s < 3700 { 8 } else { big });
     let session = engine.authorise(&full_coverage_credential()).unwrap();
     let fields = vec!["note".to_string()];
-    for order in [RecordsOrder::Stored, RecordsOrder::Map] {
-        assert_eq!(read(&engine, &session, order, &fields, None, None, ceiling), 4000);
+    for order in orders() {
+        assert_eq!(read(&engine, &session, &order, &fields, None, None, ceiling), 4000);
         let peak = peak_of(|| {
-            read(&engine, &session, order, &fields, None, None, ceiling);
+            read(&engine, &session, &order, &fields, None, None, ceiling);
         });
         eprintln!(
             "skewed {order:?}: peak {peak} bytes, {:.2} times the page ceiling",
@@ -273,14 +292,14 @@ fn a_reads_peak_is_held_to_its_page_ceiling() {
     let viewers = [("every", full_coverage_credential()), ("third", subset_credential())];
     for (viewer, credential) in viewers {
         let session = engine.authorise(&credential).unwrap();
-        for order in [RecordsOrder::Stored, RecordsOrder::Map] {
+        for order in orders() {
             let mut peaks = Vec::new();
             for ceiling in [256usize << 10, 1 << 20] {
                 let matched =
-                    read(&engine, &session, order, &[], Some(band.clone()), Some(16), ceiling);
+                    read(&engine, &session, &order, &[], Some(band.clone()), Some(16), ceiling);
                 assert!(matched > 50, "the band holds {matched} items");
                 let peak = peak_of(|| {
-                    read(&engine, &session, order, &[], Some(band.clone()), Some(16), ceiling);
+                    read(&engine, &session, &order, &[], Some(band.clone()), Some(16), ceiling);
                 });
                 eprintln!(
                     "sparse, {viewer} item, {order:?} under {ceiling}: peak {peak} bytes, {:.2} \

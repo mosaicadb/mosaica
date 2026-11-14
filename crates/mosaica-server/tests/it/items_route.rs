@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use arrow::array::{Float32Array, Int32Array, StringArray};
+use arrow::array::{Array, Float32Array, Float64Array, Int32Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use common::*;
 use serde_json::{json, Value};
@@ -218,6 +218,62 @@ async fn a_full_read_returns_every_visible_row_once_in_either_order() {
             }
             assert_eq!(sets[0], sets[1], "the two orders return different rows");
         }
+    }
+}
+
+/// **A read in a field's order returns the same rows as a walk, by the field's value, items
+/// without one last**, for an indexed field descending and a rendered field ascending, across
+/// responses that each carry a few pages, and every head names the order.
+#[tokio::test]
+async fn a_read_in_a_fields_order_returns_every_row_once_by_its_value() {
+    let f = fixture().await;
+    let token = token_for(&f.server, &["1"]).await;
+    let walked: HashSet<u64> = ids_of(
+        &read_items(&f.server, &token, &json!({ "view": "s0", "fields": [], "order": "map" })).await,
+    )
+    .into_iter()
+    .collect();
+    let cases = [
+        (json!({ "field": "year", "direction": "desc" }), "desc"),
+        (json!({ "field": "score" }), "asc"),
+    ];
+    for (order, direction) in cases {
+        let field = order["field"].as_str().unwrap();
+        let body = json!({
+            "view": "s0", "fields": [field], "order": order, "page_rows": 97, "pages": 3,
+        });
+        let responses = read_items(&f.server, &token, &body).await;
+        assert!(responses.len() > 1, "the read spans several responses");
+        for response in &responses {
+            assert_eq!(response.head["order"], json!({ "field": field, "direction": direction }));
+        }
+        let ids = ids_of(&responses);
+        assert_eq!(ids.len(), walked.len(), "{field}: a row lost or repeated");
+        assert_eq!(ids.iter().copied().collect::<HashSet<_>>(), walked, "{field}");
+        let values: Vec<Option<f64>> = responses
+            .iter()
+            .flat_map(|r| r.pages.iter())
+            .flat_map(|(batch, _)| {
+                let column = arrow::compute::cast(
+                    batch.column_by_name(field).unwrap(),
+                    &arrow::datatypes::DataType::Float64,
+                )
+                .unwrap();
+                let column = column.as_any().downcast_ref::<Float64Array>().unwrap().clone();
+                (0..column.len())
+                    .map(move |i| column.is_valid(i).then(|| column.value(i)))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let valued = values.iter().take_while(|v| v.is_some()).count();
+        assert!(valued > 0, "{field}: no valued row");
+        assert!(values[valued..].iter().all(Option::is_none), "{field}: a value after a null");
+        let valued: Vec<f64> = values[..valued].iter().map(|v| v.unwrap()).collect();
+        let ordered = valued.windows(2).all(|w| match direction {
+            "desc" => w[0] >= w[1],
+            _ => w[0] <= w[1],
+        });
+        assert!(ordered, "{field}: rows out of order");
     }
 }
 
@@ -532,6 +588,14 @@ async fn every_refusal_has_its_status() {
         json!({ "view": "s0", "fields": [], "cursor": tampered }),
         json!({ "view": "s0", "fields": [], "cursor": "not a cursor" }),
         json!({ "view": "s0", "fields": [], "cursor": cursor, "order": "stored" }),
+        json!({ "view": "s0", "fields": [], "cursor": cursor, "order": { "field": "year" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "note" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "archive" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "no_such_field" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "year", "direction": "up" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "year", "nulls": "first" } }),
+        json!({ "view": "s0", "fields": [], "order": { "direction": "asc" } }),
+        json!({ "view": "s0", "fields": [], "order": 1 }),
     ];
     for body in contract {
         let resp = post_items(&f.server, &token, &body).await;

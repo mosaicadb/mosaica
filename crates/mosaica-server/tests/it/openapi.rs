@@ -2094,6 +2094,9 @@ async fn the_items_read_matches_the_description_with_its_refusals() {
         json!({ "fields": [] }),
         json!({ "view": "s0", "fields": [], "page_rows": 0 }),
         json!({ "view": "s0", "fields": [], "order": "random" }),
+        json!({ "view": "s0", "fields": [], "order": { "direction": "asc" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "score", "direction": "up" } }),
+        json!({ "view": "s0", "fields": [], "order": { "field": "score", "nulls": "first" } }),
         json!({ "view": "s0", "fields": [], "compression": "gzip" }),
         json!({ "view": "s0", "fields": [], "system_fields": ["position"] }),
     ] {

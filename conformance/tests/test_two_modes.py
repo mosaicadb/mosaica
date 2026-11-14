@@ -21,7 +21,8 @@ one-shard answer, which is how this module looks for them.
    rows of one artifacts frame sharing layer, rung and count; browse rows sharing the count they
    are ordered by, joined across pages; an artifact's parents; the artifacts a layer grouping
    ranks. A stored-order read walks shards in number order, so its rows are compared as one
-   multiset. A point's `membership:<layer>` names the deepest served artifact holding it, the
+   multiset. A read in a field's order breaks ties in stored order, so its rows are compared as
+   a multiset within each run of equal values, once each side's values are checked in order. A point's `membership:<layer>` names the deepest served artifact holding it, the
    lowest `mosaica_id` among those at one rung, so it is put as that tie class, and a tag
    outside its class or not the lowest identifier in it fails the comparison.
 4. *Samples drawn by rank:* a sampled histogram's counts, and the groups and items its head says
@@ -616,6 +617,16 @@ def send_paged(path: str):
             rows = ties_in_place(rows, side.map_cell)
         elif order == "stored":
             rows = multiset(rows)
+        elif isinstance(order, dict):
+            field = order["field"]
+            values = [row.get(field) for row in rows]
+            valued = [v for v in values if v is not None]
+            assert values[: len(valued)] == valued, f"{field}: a value after an item without one"
+            ascending = sorted(valued)
+            assert valued == (ascending[::-1] if order.get("direction") == "desc" else ascending), (
+                f"{field}: rows out of order"
+            )
+            rows = ties_in_place(rows, lambda row: row.get(field))
         heads, trailers = side.rekey(heads), side.rekey(trailers)
         return {
             "heads": heads,
@@ -900,9 +911,18 @@ def live_viewports(principal: str, view: str, **extra) -> list[Request]:
     ]
 
 
-def items_reads(principal: str, view: str, fields: list[str], filters: dict) -> list[Request]:
+def items_reads(
+    principal: str, view: str, fields: list[str], filters: dict, sort: str | None = None
+) -> list[Request]:
+    """Reads in map and stored order, and with `sort`, one in that field's order, descending."""
     base = {"view": view, "fields": fields, "page_rows": 4_999, "pages": 2}
-    return [
+    by_value = []
+    if sort is not None:
+        order = {"field": sort, "direction": "desc"}
+        by_value.append(
+            Request("POST /v1/items", principal, {**base, "order": order, "filters": filters})
+        )
+    return by_value + [
         Request(
             "POST /v1/items",
             principal,
@@ -991,7 +1011,9 @@ def catalogue_battery(side: Side) -> list[Request]:
     for principal in CATALOGUE_PRINCIPALS:
         out += viewports(principal, view, None, filters, highlight)
         out += live_viewports(principal, view, filters=filters, highlight=highlight)
-        out += items_reads(principal, view, CATALOGUE_FIELDS, {"department": {"eq": "beta"}})
+        out += items_reads(
+            principal, view, CATALOGUE_FIELDS, {"department": {"eq": "beta"}}, sort="fx_key"
+        )
         out.append(
             Request(
                 "POST /v1/items",
@@ -1212,7 +1234,11 @@ def shapes_battery(side: Side) -> list[Request]:
             depths=False,
         )
         out += items_reads(
-            principal, view, ["fx_key"], {"member_of": {"layer": SHAPES, "artifact": square}}
+            principal,
+            view,
+            ["fx_key"],
+            {"member_of": {"layer": SHAPES, "artifact": square}},
+            sort="fx_key",
         )
         out += [
             Request("POST /v1/items/{id}", principal, {"id": f"@item {JOIN_FIELD}={source}"})

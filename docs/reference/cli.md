@@ -150,6 +150,8 @@ For example, `mosaica items --server http://127.0.0.1:8080 --view papers --field
 | `--keep-unmatched` |  |  | Return every item, with a `mosaica:matched` column saying whether it matches `--filters`. |
 | `--count` |  |  | Count the items the token may see in the view and those that match. The counts are printed on stderr at the end. Refused with `--cursor`. |
 | `--order` | `ORDER` |  | `map` returns the items by their place on the map; `stored` in the order the server stores records, which is faster for a field that is neither rendered nor indexed. Without it the order is the one `--cursor` was read in, or the server's choice. With `--cursor`, another order is refused. |
+| `--sort` | `FIELD` |  | Return the items by the value of this number, timestamp or bool field, ascending, with the items that have no value last. Each response goes over every matching item once, so it takes longer the more items match. With `--cursor`, another field is refused. |
+| `--desc` |  |  | With `--sort`, return the items by descending value. |
 | `--page-rows` | `N` |  | Rows in a page, at most the server's `selection.max_page_rows`, which applies without it. 0 is refused. |
 | `--pages` | `N` |  | The most pages in one response. Responses are requested until the read is done. 0 is refused. |
 | `--cursor` | `CURSOR` |  | Start after the last page of an earlier read: the cursor a read cut short printed. |

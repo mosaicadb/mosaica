@@ -245,6 +245,20 @@ describe('MosaicaClient.items and artifacts', () => {
     }
   });
 
+  it('sends a field’s order as the object it is, and reads it back from the head', async () => {
+    const order = {field: 'score', direction: 'desc'};
+    const {client, sent} = clientFor(
+      byCursor({
+        '': () => chunked(responseOf([[PAGES[0]!, 'c1']], 't2', {order, page_rows: 3})),
+        t2: () => chunked(responseOf([[PAGES[1]!, null]], null, {order, page_rows: 3}))
+      })
+    );
+    const read = await client.items('tok', {...REQUEST, order: {field: 'score', direction: 'desc'}});
+    await drain(read);
+    expect(sent[0]!.body).toMatchObject({order: {field: 'score', direction: 'desc'}});
+    expect(read.head.order).toEqual({field: 'score', direction: 'desc'});
+  });
+
   it('follows each response’s cursor until it is null, sending the caller’s request with only the cursor changed and no count', async () => {
     const {client, sent} = clientFor(byCursor(TWO));
     const request: ItemsRequest = {...REQUEST, labels: true, filters: {archive: {in: ['cs']}}, count: true, pageRows: 3, pages: 2, order: 'map'};

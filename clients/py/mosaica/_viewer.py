@@ -1249,7 +1249,7 @@ class Viewer:
         filters: Optional[dict] = None,
         keep_unmatched: Optional[bool] = None,
         count: Optional[bool] = None,
-        order: Optional[str] = None,
+        order: Optional[Union[str, dict]] = None,
         page_rows: Optional[int] = None,
         pages: Optional[int] = None,
         cursor: Optional[str] = None,
@@ -1285,7 +1285,10 @@ class Viewer:
           `cursor`.
         - `order`: `"map"` returns the items by their place on the map and `"stored"` in the
           order the server stores them, the faster order for a field that is neither rendered nor
-          indexed. Without it the server chooses.
+          indexed. `{"field": "year", "direction": "desc"}` returns them by a number, timestamp or
+          bool field's value, `"asc"` without `direction`, with the items that have no value last.
+          Each response then goes over every matching item once, so it takes longer the more
+          items match. Without it the server chooses.
         - `page_rows`: the rows in a page, capped at the server's `max_page_rows`.
         - `pages`: the most pages in one response.
         - `cursor`: the `next` of an earlier read or the `cursor` of a `PartialRead`, to read the
@@ -1302,6 +1305,7 @@ class Viewer:
             papers.to_pandas()
             everything = db.items("papers")
             recent = db.items("papers", ["title"], filters={"year": {"range": {"gte": 2020}}})
+            newest = db.items("papers", ["title"], order={"field": "year", "direction": "desc"})
         """
         request: dict = {"view": view}
         given = {

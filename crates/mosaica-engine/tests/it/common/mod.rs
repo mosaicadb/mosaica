@@ -1405,7 +1405,7 @@ pub fn read_items(engine: &Engine, session: &Session, read: &Items) -> ItemsRead
                     filter: read.filter.clone(),
                     keep_unmatched: read.keep_unmatched,
                     count: cursor.is_none(),
-                    order: Some(read.order),
+                    order: Some(read.order.clone()),
                     page_rows: Some(read.page_rows),
                     pages: Some(1),
                     cursor,

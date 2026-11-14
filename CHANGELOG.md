@@ -8,6 +8,17 @@ container image.
 
 ## [Unreleased]
 
+### Added
+
+- **Items in a field's order.** `POST /v1/items` takes `order: {"field": <name>, "direction":
+  "asc" | "desc"}` for a number, timestamp or bool field, with the items that have no value last
+  and equal values in stored order. The TypeScript client takes it as `order`, the Python client
+  as an `order` dict, and `mosaica items` as `--sort <field>` with `--desc`. Each response goes
+  over every matching item once, so a sorted read of millions of matches is interactive and one
+  of billions takes a pass for each response. An item whose value changes during a sorted read
+  can be returned twice or not at all. A cursor from an earlier version is refused; start the
+  read again.
+
 ## [0.4.1] - 2026-11-11
 
 Faster browsing of nested annotation layers, a build report that says what it measures, histogram

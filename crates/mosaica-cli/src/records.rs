@@ -56,8 +56,16 @@ pub(crate) struct ItemsArgs {
     /// records, which is faster for a field that is neither rendered nor indexed. Without it the
     /// order is the one `--cursor` was read in, or the server's choice. With `--cursor`, another
     /// order is refused.
-    #[arg(long, value_enum)]
+    #[arg(long, value_enum, conflicts_with = "sort")]
     order: Option<Order>,
+    /// Return the items by the value of this number, timestamp or bool field, ascending, with the
+    /// items that have no value last. Each response goes over every matching item once, so it
+    /// takes longer the more items match. With `--cursor`, another field is refused.
+    #[arg(long, value_name = "FIELD")]
+    sort: Option<String>,
+    /// With `--sort`, return the items by descending value.
+    #[arg(long, requires = "sort")]
+    desc: bool,
     #[command(flatten)]
     paging: Paging,
     #[command(flatten)]
@@ -219,6 +227,13 @@ pub(crate) fn items(args: ItemsArgs) -> ExitCode {
         }
         if let Some(order) = args.order {
             request.insert("order".into(), wire_name(order));
+        }
+        if let Some(field) = args.sort {
+            let direction = if args.desc { "desc" } else { "asc" };
+            request.insert(
+                "order".into(),
+                serde_json::json!({ "field": field, "direction": direction }),
+            );
         }
         request
     });

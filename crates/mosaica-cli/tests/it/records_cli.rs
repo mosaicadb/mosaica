@@ -456,6 +456,40 @@ fn an_items_read_without_fields_sends_none_and_returns_every_field() {
     assert_eq!(served.proxy.bodies()[0], asked, "the arguments, and nothing else");
 }
 
+/// `--sort` and `--desc` send the order by that field, and the read is the one the request
+/// returns; `--sort` alone sends `asc`.
+#[test]
+fn sort_sends_an_order_by_the_field_and_reads_what_it_returns() {
+    let served = serve();
+    for (desc, direction) in [(true, "desc"), (false, "asc")] {
+        let asked = json!({
+            "view": "s0",
+            "fields": ["seen_at"],
+            "order": { "field": "seen_at", "direction": direction },
+            "page_rows": 97,
+            "pages": 2,
+        });
+        let (read, _) = served.http_read("items", &asked);
+        let out = served.dir.path().join(format!("sorted-{direction}.arrows"));
+        let mut args = vec![
+            "items", "--view", "s0", "--fields", "seen_at", "--sort", "seen_at", "--page-rows",
+            "97", "--pages", "2",
+        ];
+        if desc {
+            args.push("--desc");
+        }
+        let args = with_out(args, &out);
+        served.proxy.bodies();
+        assert!(served.run(&args).status.success());
+        assert_eq!(plain(&read_output(&out)), plain(&read));
+        assert_eq!(served.proxy.bodies()[0], asked, "the arguments, and nothing else");
+    }
+    let both = served.run(&["items", "--view", "s0", "--order", "map", "--sort", "seen_at"]);
+    assert!(!both.status.success(), "--order and --sort together");
+    let alone = served.run(&["items", "--view", "s0", "--desc"]);
+    assert!(!alone.status.success(), "--desc without --sort");
+}
+
 #[test]
 fn stdout_carries_the_read_in_the_format_named() {
     let served = serve();

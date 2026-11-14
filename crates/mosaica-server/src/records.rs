@@ -21,7 +21,7 @@ use mosaica_engine::filter::FilterExpr;
 use mosaica_engine::viewport::MetaView;
 use mosaica_engine::{
     ArtifactsRequest, CancelToken, EngineError, ItemsRequest, PageEnd, RecordsHead, RecordsLimits,
-    RecordsOrder, RecordsSink, RecordsTrailer, RegionVerdict, SinkClosed, SinkResult,
+    RecordsOrder, RecordsSink, RecordsTrailer, RegionVerdict, SinkClosed, SinkResult, ValueOrder,
 };
 use mosaica_wire::{
     records_head_frame, page_end_frame, records_frame, trailer_frame, RecordsCompression,
@@ -102,11 +102,51 @@ pub(crate) struct ArtifactsReq {
     palette_size: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// `order`: `"map"`, `"stored"`, or the field a read is ordered by.
+#[derive(Debug, Clone)]
 enum OrderReq {
     Map,
     Stored,
+    Value(ValueOrderReq),
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValueOrderReq {
+    field: String,
+    #[serde(default)]
+    direction: DirectionReq,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum DirectionReq {
+    #[default]
+    Asc,
+    Desc,
+}
+
+impl<'de> Deserialize<'de> for OrderReq {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let shape = || {
+            D::Error::custom(
+                "order is not map, stored or an object; send \"map\", \"stored\" or \
+                 {\"field\": <name>, \"direction\": \"asc\" or \"desc\"}",
+            )
+        };
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(word) => match word.as_str() {
+                "map" => Ok(OrderReq::Map),
+                "stored" => Ok(OrderReq::Stored),
+                _ => Err(shape()),
+            },
+            value @ serde_json::Value::Object(_) => serde_json::from_value(value)
+                .map(OrderReq::Value)
+                .map_err(|e| D::Error::custom(format!("order: {e}"))),
+            _ => Err(shape()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -142,8 +182,15 @@ pub(crate) struct FrameSink {
 impl RecordsSink for FrameSink {
     fn head(&mut self, head: &RecordsHead) -> SinkResult {
         let mut json = serde_json::json!({ "page_rows": head.page_rows });
-        if let Some(order) = head.order {
-            json["order"] = order.as_str().into();
+        if let Some(order) = &head.order {
+            json["order"] = match order {
+                RecordsOrder::Map => "map".into(),
+                RecordsOrder::Stored => "stored".into(),
+                RecordsOrder::Value(value) => serde_json::json!({
+                    "field": value.field,
+                    "direction": if value.descending { "desc" } else { "asc" },
+                }),
+            };
         }
         if let Some(counts) = head.counts {
             json[self.served_as] = counts.served.into();
@@ -397,6 +444,10 @@ fn run_items(
         order: req.order.map(|order| match order {
             OrderReq::Map => RecordsOrder::Map,
             OrderReq::Stored => RecordsOrder::Stored,
+            OrderReq::Value(value) => RecordsOrder::Value(ValueOrder {
+                field: value.field,
+                descending: matches!(value.direction, DirectionReq::Desc),
+            }),
         }),
         page_rows: req.page_rows,
         pages: req.pages,

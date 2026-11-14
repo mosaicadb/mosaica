@@ -37,6 +37,7 @@ use mosaica_engine::shapes::ShapeF64;
 use mosaica_engine::{
     ColumnBuf, Engine, EngineError, ItemsRequest, LayerSelection, PageEnd, PageEndedBy,
     RecordsHead, RecordsOrder, RecordsRefused, RecordsSink, RecordsTrailer, RegionVerdict,
+    ValueOrder,
     ResponseEndedBy, Session, SinkResult, ViewportRequest,
 };
 use mosaica_lifecycle::wal::{ChangeOp, WalScalar};
@@ -557,6 +558,36 @@ impl Fx {
         keyed.into_iter().map(|(_, s)| s).collect()
     }
 
+    /// The sources in `order`: by the field's generated value, inverted for a descending order,
+    /// ties and the sources without a value in stored order, those after every other.
+    fn value_order(&self, sources: impl IntoIterator<Item = u64>, order: &ValueOrder) -> Vec<u64> {
+        let value = |s: u64| -> Option<f64> {
+            match order.field.as_str() {
+                "score" => score_of(s).map(f64::from),
+                "heat" => heat_of(s).map(f64::from),
+                "when" => when_of(s).map(|v| v as f64),
+                "flag" => flag_of(s).map(|v| f64::from(u8::from(v))),
+                "sentiment@q2" => QUARTERS[1]
+                    .1
+                    .contains(&s)
+                    .then(|| sentiment(1, s))
+                    .flatten()
+                    .map(f64::from),
+                other => panic!("no generator for {other}"),
+            }
+        };
+        let mut sources: Vec<u64> = sources.into_iter().collect();
+        sources.sort_by(|&a, &b| {
+            let by_value = match (value(a), value(b)) {
+                (Some(x), Some(y)) if order.descending => y.total_cmp(&x),
+                (Some(x), Some(y)) => x.total_cmp(&y),
+                (x, y) => x.is_none().cmp(&y.is_none()),
+            };
+            by_value.then(self.entity[&a].cmp(&self.entity[&b]))
+        });
+        sources
+    }
+
     fn tids(&self, sources: &[u64]) -> Vec<u64> {
         sources.iter().map(|&s| self.tid(s)).collect()
     }
@@ -634,6 +665,23 @@ fn request<'a>(view: &'a str, fields: &'a [String]) -> ItemsRequest<'a> {
         limits: limits(),
         cancel: None,
     }
+}
+
+/// The two walks and two value orders: a field read from its value column, descending, and one
+/// read from the view's columns alone, ascending.
+fn every_order() -> [RecordsOrder; 4] {
+    let by = |field: &str, descending| {
+        RecordsOrder::Value(ValueOrder {
+            field: field.to_string(),
+            descending,
+        })
+    };
+    [
+        RecordsOrder::Map,
+        RecordsOrder::Stored,
+        by("score", true),
+        by("heat", false),
+    ]
 }
 
 fn names(names: &[&str]) -> Vec<String> {
@@ -1052,9 +1100,9 @@ fn continue_read(
 /// and a filter stays exact across both, though each renumbers the rows it was evaluated over.
 #[test]
 fn a_flush_and_a_merge_landing_mid_read_lose_and_repeat_nothing() {
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         for filtered in [false, true] {
-            read_across_a_flush_and_a_merge(order, filtered);
+            read_across_a_flush_and_a_merge(order.clone(), filtered);
         }
     }
 }
@@ -1076,7 +1124,7 @@ fn read_across_a_flush_and_a_merge(order: RecordsOrder, filtered: bool) {
     let fields = names(&["band"]);
     let matches = |s: &u64| matches!(band_of(*s), Some("low") | Some("high"));
     let mut base = request("s0", &fields);
-    base.order = Some(order);
+    base.order = Some(order.clone());
     base.page_rows = Some(97);
     base.pages = Some(2);
     base.filter = filtered.then(|| {
@@ -1111,9 +1159,10 @@ fn read_across_a_flush_and_a_merge(order: RecordsOrder, filtered: bool) {
     // it exactly those the filter admits that sort after the last row returned before them.
     let mut all = before.clone();
     all.extend(&later);
-    let in_order: Vec<u64> = match order {
+    let in_order: Vec<u64> = match &order {
         RecordsOrder::Map => fx.map_order(all.iter().copied(), "s0"),
         RecordsOrder::Stored => fx.stored_order(all.iter().copied()),
+        RecordsOrder::Value(value) => fx.value_order(all.iter().copied(), value),
     };
     let rank: BTreeMap<u64, usize> = in_order
         .iter()
@@ -1145,13 +1194,14 @@ fn a_suppression_and_a_deletion_accepted_between_responses_are_absent_from_the_n
     let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
     let fields: Vec<String> = Vec::new();
     let mut hidden: Vec<u64> = Vec::new();
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
-        let everything: Vec<u64> = match order {
+    for order in every_order() {
+        let everything: Vec<u64> = match &order {
             RecordsOrder::Map => fx.map_order(0..N, "s0"),
             RecordsOrder::Stored => fx.stored_order(0..N),
+            RecordsOrder::Value(value) => fx.value_order(0..N, value),
         };
         let mut base = request("s0", &fields);
-        base.order = Some(order);
+        base.order = Some(order.clone());
         base.page_rows = Some(100);
         base.pages = Some(1);
         let (sink, trailer) = respond(&fx.engine, &session, base.clone()).unwrap();
@@ -1182,9 +1232,9 @@ fn a_suppression_and_a_deletion_accepted_between_responses_are_absent_from_the_n
             "{order:?}: the deleted item was served"
         );
     }
-    // Both reads together hid four items, and the viewport agrees on what is left.
+    // The reads together hid two items each, and the viewport agrees on what is left.
     let (visible, _) = viewport_counts(&fx.engine, &session, "s0", None);
-    assert_eq!(visible, N - 4);
+    assert_eq!(visible, N - hidden.len() as u64);
 }
 
 /// **A viewer who sees a subset reads that subset and nothing else**, and the head's counts are
@@ -1225,14 +1275,15 @@ fn a_narrower_viewer_reads_only_what_they_see_and_counts_as_the_viewport_does() 
             Some(visible_where(|s| heat_of(s).is_some_and(|v| v >= 2.0))),
         ),
     ];
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut base = request("s0", &fields);
-        base.order = Some(order);
+        base.order = Some(order.clone());
         base.page_rows = Some(64);
         let read = read_all(&fx.engine, &session, &base);
-        let expected = match order {
+        let expected = match &order {
             RecordsOrder::Map => fx.map_order(visible.iter().copied(), "s0"),
             RecordsOrder::Stored => fx.stored_order(visible.iter().copied()),
+            RecordsOrder::Value(value) => fx.value_order(visible.iter().copied(), value),
         };
         assert_eq!(read.ids(), fx.tids(&expected), "{order:?}");
 
@@ -1294,15 +1345,16 @@ fn a_negation_on_the_row_route_reads_and_counts_only_visible_items() {
         .filter(|&s| subset_sees(s) && s != suppressed && kept(s))
         .collect();
 
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.page_rows = Some(64);
         req.filter = Some(negation.clone());
         let ids = read_all(&fx.engine, &session, &req).ids();
-        let expected = match order {
+        let expected = match &order {
             RecordsOrder::Map => fx.map_order(want.iter().copied(), "s0"),
             RecordsOrder::Stored => fx.stored_order(want.iter().copied()),
+            RecordsOrder::Value(value) => fx.value_order(want.iter().copied(), value),
         };
         assert_eq!(ids, fx.tids(&expected), "{order:?}");
         assert!(!ids.contains(&fx.tid(suppressed)) && !ids.contains(&fx.tid(outside)));
@@ -1413,7 +1465,7 @@ fn a_sparse_filter_under_no_time_budget_still_advances_and_completes() {
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut base = request("s0", &fields);
         base.filter = Some(filter.clone());
-        base.order = Some(order);
+        base.order = Some(order.clone());
         base.page_rows = Some(1);
         base.limits.response_time = Duration::ZERO;
         let read = read_all(&engine, &session, &base);
@@ -1486,9 +1538,9 @@ fn a_read_that_finds_no_row_gives_one_typed_page_of_no_rows() {
     let schema = full.pages[0].0.schema();
     assert_eq!(schema.fields().len(), 1 + fields.len() + 3);
 
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut none = base.clone();
-        none.order = Some(order);
+        none.order = Some(order.clone());
         none.filter = Some(leaf("score", range(5_000_000, 6_000_000)));
         none.count = true;
         let (sink, trailer) = respond(&fx.engine, &session, none).unwrap();
@@ -2132,7 +2184,7 @@ fn a_joined_item_whose_own_record_is_unflushed_has_null_record_fields() {
     let mark = engine.mosaica_id_of(joiner).unwrap().raw();
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut req = request(GEO, &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         let (sink, _) = respond(&engine, &session, req).unwrap();
         let mut found = false;
         for (batch, _) in &sink.pages {
@@ -2167,9 +2219,9 @@ fn keep_unmatched_marks_every_visible_row_and_count_heads_the_response() {
     let fields = names(&["score"]);
     let filter = leaf("score", range(100, 700));
     let matches = |s: u64| score_of(s).is_some_and(|v| (100..=700).contains(&v));
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut base = request("s0", &fields);
-        base.order = Some(order);
+        base.order = Some(order.clone());
         base.filter = Some(filter.clone());
         base.keep_unmatched = true;
         base.count = true;
@@ -2538,15 +2590,16 @@ fn a_suppression_and_a_deletion_between_two_pages_of_one_response_apply_to_the_n
     let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
     let fields = names(&["score"]);
     let mut hidden: Vec<u64> = Vec::new();
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
-        let everything: Vec<u64> = match order {
+    for order in every_order() {
+        let everything: Vec<u64> = match &order {
             RecordsOrder::Map => fx.map_order(0..N, "s0"),
             RecordsOrder::Stored => fx.stored_order(0..N),
+            RecordsOrder::Value(value) => fx.value_order(0..N, value),
         };
         let mut ahead = everything.iter().rev().filter(|s| !hidden.contains(*s));
         let (suppressed, deleted) = (*ahead.next().unwrap(), *ahead.next().unwrap());
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.page_rows = Some(100);
         let engine = &fx.engine;
         let entity = |s: u64| EntityId::new(fx.entity[&s]);
@@ -2579,7 +2632,7 @@ fn a_suppression_and_a_deletion_between_two_pages_of_one_response_apply_to_the_n
 /// renumber.
 #[test]
 fn a_merge_and_a_flush_between_two_pages_of_one_filtered_response_keep_it_exact() {
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut fx = Fx::new();
         fx.engine.set_merge_for_test(false);
         for batch in 0..4u64 {
@@ -2595,7 +2648,7 @@ fn a_merge_and_a_flush_between_two_pages_of_one_filtered_response_keep_it_exact(
         let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
         let fields = names(&["band"]);
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.page_rows = Some(97);
         req.filter = Some(leaf(
             "band",
@@ -2627,9 +2680,10 @@ fn a_merge_and_a_flush_between_two_pages_of_one_filtered_response_keep_it_exact(
 
         let mut all = before.clone();
         all.extend(&later);
-        let in_order = match order {
+        let in_order = match &order {
             RecordsOrder::Map => fx.map_order(all.iter().copied(), "s0"),
             RecordsOrder::Stored => fx.stored_order(all.iter().copied()),
+            RecordsOrder::Value(value) => fx.value_order(all.iter().copied(), value),
         };
         let rank: BTreeMap<u64, usize> = in_order
             .iter()
@@ -2687,7 +2741,7 @@ fn every_row_is_read_once_across_stretch_boundaries() {
                 ("marked", Some(filter.clone()), true, visible),
             ] {
                 let mut req = request("s0", &fields);
-                req.order = Some(order);
+                req.order = Some(order.clone());
                 req.page_rows = Some(page_rows);
                 req.filter = filter;
                 req.keep_unmatched = keep_unmatched;
@@ -2723,14 +2777,15 @@ fn a_narrower_viewers_rows_and_labels_are_theirs_row_by_row() {
     let low = |s: u64| band_of(s) == Some("low");
     let fields = names(&["band"]);
     let system = names(&["labels"]);
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
-        let in_order = |sources: Vec<u64>| match order {
+    for order in every_order() {
+        let in_order = |sources: Vec<u64>| match &order {
             RecordsOrder::Map => fx.map_order(sources, "s0"),
             RecordsOrder::Stored => fx.stored_order(sources),
+            RecordsOrder::Value(value) => fx.value_order(sources, value),
         };
         let mut req = request("s0", &fields);
         req.system_fields = &system;
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.page_rows = Some(77);
         req.filter = Some(leaf(
             "band",
@@ -2814,7 +2869,7 @@ fn the_stored_walk_serves_what_the_mask_admits_where_the_candidate_is_wider() {
     let fields: Vec<String> = Vec::new();
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         let ids = read_all(&fx.engine, &session, &req).ids();
         assert_each_once(&ids);
         assert_eq!(ids.len() as u64, visible, "{order:?}: the viewport's count");
@@ -2893,7 +2948,7 @@ fn page_cut_by_time(batches: u64) {
     });
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.filter = Some(west.clone());
         req.page_rows = Some(3000);
         let whole = read_all(&engine, &session, &req).ids();
@@ -2956,7 +3011,7 @@ fn cancelled_mid_scan(batches: u64) {
     );
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.filter = Some(band.clone());
         // Larger than the band holds, so a page is still gathering rows whenever it is cut.
         req.page_rows = Some(1000);
@@ -3045,7 +3100,13 @@ fn rows_a_refreshed_projection_makes_visible_are_served_and_matched() {
     let mut present: Vec<u64> = (0..N).collect();
     let mut next = 1_000_000u64;
     for (name, filter, matches) in filters {
-        for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+        // Orders that sort the late rows, which have the largest scores, ahead of the cursor.
+        for order in [
+            RecordsOrder::Map,
+            RecordsOrder::Stored,
+            by("score", false),
+            by("heat", false),
+        ] {
             for keep_unmatched in [false, true] {
                 let held = present.len() as u64;
                 assert_eq!(viewport_counts(&fx.engine, &session, "s0", None).0, held);
@@ -3055,7 +3116,7 @@ fn rows_a_refreshed_projection_makes_visible_are_served_and_matched() {
                 assert!(later.iter().all(|&s| position(s).0 == 499.25));
                 let fields = names(&["prose"]);
                 let mut req = request("s0", &fields);
-                req.order = Some(order);
+                req.order = Some(order.clone());
                 req.page_rows = Some(100);
                 req.keep_unmatched = keep_unmatched;
                 req.filter = Some(filter.clone());
@@ -3098,9 +3159,10 @@ fn rows_a_refreshed_projection_makes_visible_are_served_and_matched() {
                 let cut = *ids_of(&sink.pages[1].0).last().unwrap();
                 let before: BTreeSet<u64> = present.iter().copied().collect();
                 present.extend(&later);
-                let in_order = match order {
+                let in_order = match &order {
                     RecordsOrder::Map => fx.map_order(present.iter().copied(), "s0"),
                     RecordsOrder::Stored => fx.stored_order(present.iter().copied()),
+                    RecordsOrder::Value(value) => fx.value_order(present.iter().copied(), value),
                 };
                 let rank: BTreeMap<u64, usize> = in_order
                     .iter()
@@ -3163,10 +3225,10 @@ fn a_pages_bytes_are_its_buffers_and_the_ceiling_holds_on_them() {
     let session = fx.engine.authorise(&both_credential()).unwrap();
     let fields = names(&["note", "prose", "tag", "band", "score", "when", "id"]);
     let system = names(&["labels", "position"]);
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut req = request("s0", &fields);
         req.system_fields = &system;
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.limits.max_page_bytes = 8192;
         let read = read_all(&fx.engine, &session, &req);
         assert_each_once(&read.ids());
@@ -3229,9 +3291,9 @@ fn a_columns_first_null_is_counted_against_the_ceiling() {
     publish_buffered(&fx.engine);
     let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
     let fields = names(&["score"]);
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.filter = Some(leaf("when", range(base + N as i64, base + N as i64 + 599)));
         let whole = read_all(&fx.engine, &session, &req);
         let scores = col::<Int32Array>(&whole.pages[0].0, "score");
@@ -3314,10 +3376,10 @@ fn a_malformed_filter_is_refused_whatever_rows_remain() {
     for credential in [full_coverage_credential(), zero_credential()] {
         let session = fx.engine.authorise(&credential).unwrap();
         for filter in &filters {
-            for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+            for order in every_order() {
                 for keep_unmatched in [false, true] {
                     let mut req = request("s0", &fields);
-                    req.order = Some(order);
+                    req.order = Some(order.clone());
                     req.keep_unmatched = keep_unmatched;
                     req.filter = Some(filter.clone());
                     assert!(
@@ -3380,7 +3442,7 @@ fn a_cell_larger_than_a_stretch_is_read_whole() {
     let fields: Vec<String> = Vec::new();
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let mut req = request("s0", &fields);
-        req.order = Some(order);
+        req.order = Some(order.clone());
         req.page_rows = Some(1000);
         // A page ceiling of 4,096 bytes holds a stretch to its floor of 4,096 rows at any cost a
         // row, so every stretch ends inside the 10,000 rows of the one cell.
@@ -3609,7 +3671,7 @@ fn a_read_driven_by_its_matches_sends_what_the_walk_sends() {
                     for shape in ["pages of 37", "pages of 250", "a small byte ceiling"] {
                         let mut base = request(view, &fields);
                         base.filter = Some(filter.clone());
-                        base.order = Some(order);
+                        base.order = Some(order.clone());
                         match shape {
                             "pages of 37" => {
                                 base.page_rows = Some(37);
@@ -3715,7 +3777,7 @@ fn read_through_changes(order: RecordsOrder, route: Route) -> Vec<Sent> {
     let fields = names(&["serial"]);
     let mut base = request("s0", &fields);
     base.filter = Some(serials_in(named.iter().copied(), &[]));
-    base.order = Some(order);
+    base.order = Some(order.clone());
     base.page_rows = Some(50);
     base.pages = Some(3);
     let in_order = |fx: &Fx, sources: &[u64]| -> Vec<u64> {
@@ -3723,9 +3785,10 @@ fn read_through_changes(order: RecordsOrder, route: Route) -> Vec<Sent> {
             .iter()
             .copied()
             .filter(|s| fx.entity.contains_key(s));
-        match order {
+        match &order {
             RecordsOrder::Map => fx.map_order(present, "s0"),
             RecordsOrder::Stored => fx.stored_order(present),
+            RecordsOrder::Value(value) => fx.value_order(present, value),
         }
     };
     let entity = |fx: &Fx, s: u64| EntityId::new(fx.entity[&s]);
@@ -3844,10 +3907,10 @@ fn read_through_changes(order: RecordsOrder, route: Route) -> Vec<Sent> {
 #[test]
 fn a_driven_read_sends_what_the_walk_sends_through_changes_mid_read() {
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
-        let walked = read_through_changes(order, Route::Walked);
-        let driven = read_through_changes(order, Route::Driven);
+        let walked = read_through_changes(order.clone(), Route::Walked);
+        let driven = read_through_changes(order.clone(), Route::Driven);
         assert_same(&driven, &walked, &format!("{order:?}"));
-        let turns = read_through_changes(order, Route::Alternating);
+        let turns = read_through_changes(order.clone(), Route::Alternating);
         assert_same(&turns, &walked, &format!("{order:?}, taking turns"));
     }
 }
@@ -3886,18 +3949,178 @@ fn a_rendered_filter_is_exact_across_segments_and_chunks() {
     let (_, matched) = viewport_counts(&fx.engine, &session, "s0", Some(hot.clone()));
     assert_eq!(matched, expected.len() as u64);
     let fields = names(&["heat"]);
-    for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+    for order in every_order() {
         let mut base = request("s0", &fields);
         base.filter = Some(hot.clone());
-        base.order = Some(order);
-        let want = match order {
+        base.order = Some(order.clone());
+        let want = match &order {
             RecordsOrder::Map => fx.map_order(expected.iter().copied(), "s0"),
             RecordsOrder::Stored => fx.stored_order(expected.iter().copied()),
+            RecordsOrder::Value(value) => fx.value_order(expected.iter().copied(), value),
         };
         assert_eq!(
             read_all(&fx.engine, &session, &base).ids(),
             fx.tids(&want),
             "{order:?}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Value orders
+// ---------------------------------------------------------------------------------------------
+
+fn by(field: &str, descending: bool) -> RecordsOrder {
+    RecordsOrder::Value(ValueOrder {
+        field: field.to_string(),
+        descending,
+    })
+}
+
+/// **A read in a field's order returns every row once, by the field's value, items without one
+/// last**, for a field read from its value column, from the view's columns alone, a timestamp, a
+/// bool and a group-scoped field pinned to its view, in both directions, under a filter and
+/// without one, at page sizes that take one response and ones that take many. The head names the
+/// order.
+#[test]
+fn a_value_order_returns_every_row_once_in_the_fields_order() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&both_credential()).unwrap();
+    let mid = leaf(
+        "band",
+        FilterOperand::Equals(AttrLocalId::new(band_code("mid"))),
+    );
+    let all: Vec<u64> = (0..N).collect();
+    let fields = names(&["score"]);
+    for field in ["score", "heat", "when", "flag", "sentiment@q2"] {
+        for descending in [false, true] {
+            let order = by(field, descending);
+            let RecordsOrder::Value(value) = &order else {
+                unreachable!()
+            };
+            for filtered in [false, true] {
+                let sources: Vec<u64> = all
+                    .iter()
+                    .copied()
+                    .filter(|&s| !filtered || band_of(s) == Some("mid"))
+                    .collect();
+                let expected = fx.tids(&fx.value_order(sources, value));
+                for (page_rows, pages) in [(7u32, Some(3u32)), (250, Some(1)), (5000, None)] {
+                    let mut base = request("s0", &fields);
+                    base.order = Some(order.clone());
+                    base.filter = filtered.then(|| mid.clone());
+                    base.page_rows = Some(page_rows);
+                    base.pages = pages;
+                    let read = read_all(&fx.engine, &session, &base);
+                    let what = format!("{field} desc={descending} filtered={filtered} {page_rows}");
+                    assert_eq!(read.ids(), expected, "{what}");
+                    assert!(
+                        read.heads.iter().all(|head| head.order == Some(order.clone())),
+                        "{what}: the head names the order"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// **The rows a read in a field's order keeps unmatched are marked, and its counts are the
+/// viewport's**, whichever order the read takes.
+#[test]
+fn a_value_order_keeps_the_unmatched_and_counts_as_the_viewport_does() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let low = leaf("score", range(0, 600));
+    let (visible, matched) = viewport_counts(&fx.engine, &session, "s0", Some(low.clone()));
+    let fields = names(&["score"]);
+    let order = by("score", true);
+    let mut base = request("s0", &fields);
+    base.order = Some(order.clone());
+    base.filter = Some(low);
+    base.keep_unmatched = true;
+    base.count = true;
+    base.page_rows = Some(300);
+    let read = read_all(&fx.engine, &session, &base);
+    let counts = read.heads[0].counts.expect("the first head counts");
+    assert_eq!((counts.served, counts.matched), (visible, matched));
+    let RecordsOrder::Value(value) = &order else {
+        unreachable!()
+    };
+    assert_eq!(read.ids(), fx.tids(&fx.value_order(0..N, value)));
+    let by_tid = sources_by_tid(&fx);
+    let mut marked = 0;
+    for (batch, _) in &read.pages {
+        let flags = col::<BooleanArray>(batch, "mosaica:matched");
+        for (i, tid) in ids_of(batch).into_iter().enumerate() {
+            let s = by_tid[&tid];
+            let expected = score_of(s).is_some_and(|v| (0..=600).contains(&v));
+            assert_eq!(flags.value(i), expected, "source {s}");
+            marked += usize::from(flags.value(i));
+        }
+    }
+    assert_eq!(marked as u64, matched);
+}
+
+/// **A field that cannot order a read is refused before the head**: a category, a keyword, a
+/// text field, a field held only in its record, and one that is not declared. A cursor resumes
+/// only the order it was issued for, and a request that names no order takes the cursor's.
+#[test]
+fn a_value_order_is_refused_for_a_field_it_cannot_order_by_and_a_cursor_resumes_only_its_own() {
+    let fx = Fx::new();
+    let session = fx.engine.authorise(&full_coverage_credential()).unwrap();
+    let fields: Vec<String> = Vec::new();
+    let refusal = |order: RecordsOrder| {
+        let mut req = request("s0", &fields);
+        req.order = Some(order);
+        respond(&fx.engine, &session, req).map(|_| ()).unwrap_err()
+    };
+    for field in ["band", "tag", "prose"] {
+        assert!(
+            matches!(
+                refusal(by(field, false)),
+                EngineError::RecordsRefused(RecordsRefused::NotSortable(_))
+            ),
+            "{field}"
+        );
+    }
+    assert!(matches!(
+        refusal(by("serial", false)),
+        EngineError::RecordsRefused(RecordsRefused::SortUnstored(_))
+    ));
+    assert!(matches!(
+        refusal(by("absent", false)),
+        EngineError::RecordsRefused(RecordsRefused::UnknownField(_))
+    ));
+
+    let mut first = request("s0", &fields);
+    first.order = Some(by("score", true));
+    first.page_rows = Some(10);
+    first.pages = Some(1);
+    let (_, trailer) = respond(&fx.engine, &session, first.clone()).unwrap();
+    let cursor = trailer.next.expect("rows remain");
+    let mut named = first.clone();
+    named.cursor = Some(&cursor);
+    let mut unnamed = named.clone();
+    unnamed.order = None;
+    let (named, _) = respond(&fx.engine, &session, named).unwrap();
+    let (unnamed, _) = respond(&fx.engine, &session, unnamed).unwrap();
+    assert_eq!(unnamed.head.unwrap().order, Some(by("score", true)));
+    assert_eq!(ids_of(&unnamed.pages[0].0), ids_of(&named.pages[0].0));
+    for other in [
+        by("score", false),
+        by("heat", true),
+        RecordsOrder::Map,
+        RecordsOrder::Stored,
+    ] {
+        let mut req = first.clone();
+        req.order = Some(other.clone());
+        req.cursor = Some(&cursor);
+        assert!(
+            matches!(
+                respond(&fx.engine, &session, req).map(|_| ()).unwrap_err(),
+                EngineError::CursorRefused
+            ),
+            "{other:?}"
         );
     }
 }

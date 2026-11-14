@@ -39,7 +39,7 @@ use mosaica_store::read::SegmentData;
 use mosaica_types::{EntityId, IdentityKey, ShardId};
 
 use super::cursor::{Key, Position};
-use super::{RecordsOrder, ResponseEndedBy};
+use super::{Scan, ResponseEndedBy};
 use crate::cancel::{gone, CancelToken};
 use crate::compose::{EffectiveMask, FilterRows, MaskedSet};
 use crate::engine::Engine;
@@ -158,6 +158,16 @@ impl<'a> PageCx<'a> {
 
     fn side(&self, place: usize) -> &'a ServedSide<'a> {
         &self.open.served.sides[place]
+    }
+
+    /// The shard of the side at `place`.
+    pub(super) fn side_shard(&self, place: usize) -> &'a crate::Shard {
+        self.side(place).shard
+    }
+
+    /// The view's data in the side at `place`.
+    pub(super) fn side_data(&self, place: usize) -> &'a mosaica_store::read::ViewData {
+        self.side(place).data
     }
 }
 
@@ -337,6 +347,12 @@ fn entity_in(segment: &SegmentData, local: u32, key: &IdentityKey, shard: ShardI
     u32::try_from(entity.raw()).expect("entity ids are capped at u32::MAX by I9")
 }
 
+/// The segment holding `row`, the row's place in it and its `mosaica_id`.
+pub(super) fn segment_of(segments: &[(&SegmentData, u32)], row: u32) -> Option<(usize, u32, u64)> {
+    let (seg, local) = segment_holding(segments, row)?;
+    Some((seg, local, segments[seg].0.columns.mosaica_id()[local as usize]))
+}
+
 /// A stored-order row's key: its shard, then its number there.
 fn stored_key(shard: ShardId, entity: u32) -> Key {
     (shard.raw(), u64::from(entity))
@@ -509,13 +525,13 @@ pub(crate) fn same_publication(a: &Generation, b: &Generation) -> bool {
 }
 
 /// A taken row's key in `order`.
-fn key_of(cx: &impl WalkCx, order: RecordsOrder, row: &Taken) -> Key {
+fn key_of(cx: &impl WalkCx, order: Scan, row: &Taken) -> Key {
     match order {
-        RecordsOrder::Map => {
+        Scan::Map => {
             let (segment, _) = cx.segments(row.place)[row.seg];
             (segment.morton.u32()[row.local as usize], row.mosaica_id)
         }
-        RecordsOrder::Stored => stored_key(cx.shard(row.place), row.entity),
+        Scan::Stored => stored_key(cx.shard(row.place), row.entity),
     }
 }
 
@@ -699,8 +715,8 @@ impl Walk {
                 let opened = match self.driving_rows(cx)? {
                     Some(rows) => self.open_driven_stretch(cx, scan, &rows, &clock.cancel)?,
                     None => match order {
-                        RecordsOrder::Map => self.open_map_stretch(cx, scan, &clock.cancel)?,
-                        RecordsOrder::Stored => {
+                        Scan::Map => self.open_map_stretch(cx, scan, &clock.cancel)?,
+                        Scan::Stored => {
                             self.open_stored_stretch(cx, scan, &clock.cancel)?
                         }
                     },
@@ -722,8 +738,8 @@ impl Walk {
                 cx,
             };
             let stopped = match order {
-                RecordsOrder::Map => take.map(scan, need, clock, &mut rows),
-                RecordsOrder::Stored => take.stored(scan, need, clock, &mut rows),
+                Scan::Map => take.map(scan, need, clock, &mut rows),
+                Scan::Stored => take.stored(scan, need, clock, &mut rows),
             };
             let (until, spanned) = (stretch.until, stretch.spanned);
             if let Some((reason, first_unreached)) = stopped {
@@ -996,11 +1012,11 @@ impl Walk {
                 let (segment, _) = segments[seg];
                 let entity = cx.entity_of(place, segment, local);
                 let key = match order {
-                    RecordsOrder::Map => (
+                    Scan::Map => (
                         segment.morton.u32()[local as usize],
                         segment.columns.mosaica_id()[local as usize],
                     ),
-                    RecordsOrder::Stored => stored_key(shard, entity),
+                    Scan::Stored => stored_key(shard, entity),
                 };
                 if scan.is_none_or(|scan| key > scan) {
                     items.push((entity, row));
@@ -1010,7 +1026,7 @@ impl Walk {
             let entities: Bitmap = items.iter().map(|&(entity, _)| entity).collect();
             let candidate = cx.candidate_within(place, &entities)?;
             drop(entities);
-            if order == RecordsOrder::Stored {
+            if order == Scan::Stored {
                 items.retain(|&(entity, _)| candidate.contains(entity));
             }
             if items.is_empty() {
@@ -1018,8 +1034,8 @@ impl Walk {
             }
             let ahead: Bitmap = items.iter().map(|&(_, row)| row).collect();
             match order {
-                RecordsOrder::Stored => held.push((place, items)),
-                RecordsOrder::Map => drop(items),
+                Scan::Stored => held.push((place, items)),
+                Scan::Map => drop(items),
             }
             let mut domain: Vec<Range<u32>> = Vec::new();
             for_each_run_in(&ahead, 0..cx.total_rows(place), &mut |run| domain.push(run));
@@ -1366,13 +1382,13 @@ impl<C: WalkCx> Take<'_, C> {
                 if !matched && !self.keep_unmatched {
                     continue;
                 }
-                let (seg, local) = segment_holding(side.segments, row)
-                    .expect("the first segment's rows begin at 0");
+                let (seg, local, mosaica_id) =
+                    segment_of(side.segments, row).expect("the first segment's rows begin at 0");
                 rows.push(Taken {
                     place: *place,
                     seg,
                     local,
-                    mosaica_id: side.segments[seg].0.columns.mosaica_id()[local as usize],
+                    mosaica_id,
                     entity,
                     matched,
                 });
@@ -1605,7 +1621,7 @@ mod tests {
         (pages, walk.target)
     }
 
-    fn start(order: RecordsOrder, stretch: u32) -> (Position, u32) {
+    fn start(order: Scan, stretch: u32) -> (Position, u32) {
         (Position::start(order), stretch)
     }
 
@@ -1725,12 +1741,12 @@ mod tests {
         let filter = unique_eq();
         let [two, one] = corpus.layouts(&visible, &matching);
         let (two, one) = (FakeCx::of(two, false), FakeCx::of(one, false));
-        for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+        for order in [Scan::Map, Scan::Stored] {
             for (filter, keep) in [(None, false), (Some(&filter), false), (Some(&filter), true)] {
                 let keep_all = keep || filter.is_none();
                 let mut expected = match order {
-                    RecordsOrder::Map => map_rows(&two.sides, keep_all),
-                    RecordsOrder::Stored => stored_rows(&two.sides, keep_all),
+                    Scan::Map => map_rows(&two.sides, keep_all),
+                    Scan::Stored => stored_rows(&two.sides, keep_all),
                 };
                 if filter.is_none() {
                     expected.iter_mut().for_each(|(_, matched)| *matched = true);
@@ -1744,7 +1760,7 @@ mod tests {
                         let (last, filled) = pages.split_last().unwrap();
                         assert!(filled.iter().all(|(rows, _, _)| rows.len() == need));
                         assert!(last.0.len() <= need);
-                        if order == RecordsOrder::Map {
+                        if order == Scan::Map {
                             let at = |pages: &[Page]| -> Vec<Position> {
                                 pages.iter().map(|&(_, position, _)| position).collect()
                             };
@@ -1759,7 +1775,7 @@ mod tests {
                             let from = (*position, *carried);
                             let (rest, _) = read(&two, filter, keep, need, from);
                             assert_eq!(rows_of(&rest), expected[past..]);
-                            if order == RecordsOrder::Map {
+                            if order == Scan::Map {
                                 let (rest, _) = read(&one, filter, keep, need, from);
                                 assert_eq!(rows_of(&rest), expected[past..]);
                             }
@@ -1806,7 +1822,7 @@ mod tests {
 
         for need in 1..=24 {
             for stretch in [1u32, 3, 4096] {
-                let (pages, _) = read(&cx, None, false, need, start(RecordsOrder::Stored, stretch));
+                let (pages, _) = read(&cx, None, false, need, start(Scan::Stored, stretch));
                 assert_eq!(rows_of(&pages), expected);
                 let mut past = 0;
                 for (rows, position, carried) in &pages {
@@ -1819,18 +1835,21 @@ mod tests {
 
         // A page ending at shard 0's last visible item; its cursor resumes at shard 3's first.
         let in_first = 8;
-        let (pages, _) = read(&cx, None, false, in_first, start(RecordsOrder::Stored, 2));
+        let (pages, _) = read(&cx, None, false, in_first, start(Scan::Stored, 2));
         let (_, position, carried) = pages[0];
         assert_eq!(position.scan, Some((0, 9)));
-        let sealed = crate::records::cursor::ItemsCursor {
+        let sealed = crate::records::cursor::ItemsCursor::Walk {
             position,
             stretch: carried,
         };
         let resumed = crate::records::cursor::ItemsCursor::decode(&sealed.encode()).unwrap();
-        let (rest, _) = read(&cx, None, false, in_first, (resumed.position, carried));
+        let crate::records::cursor::ItemsCursor::Walk { position: resumed, .. } = resumed else {
+            panic!("a walk's cursor opens as a walk's");
+        };
+        let (rest, _) = read(&cx, None, false, in_first, (resumed, carried));
         assert_eq!(rows_of(&rest), expected[in_first..]);
         let boundary = Position {
-            order: RecordsOrder::Stored,
+            order: Scan::Stored,
             scan: before((3, 0)),
         };
         let (rest, _) = read(&cx, None, false, in_first, (boundary, 2));
@@ -1854,7 +1873,7 @@ mod tests {
             .map(|stacked| FakeSide::of(stacked, &every, &every))
             .collect();
         let cx = FakeCx::of(sides, false);
-        let (pages, carried) = read(&cx, None, false, 1000, start(RecordsOrder::Stored, 32));
+        let (pages, carried) = read(&cx, None, false, 1000, start(Scan::Stored, 32));
         assert_eq!(rows_of(&pages).len(), 60);
         assert_eq!(carried, 32);
 
@@ -1867,7 +1886,7 @@ mod tests {
             Some(&filter),
             false,
             10,
-            start(RecordsOrder::Stored, 16),
+            start(Scan::Stored, 16),
         );
         assert!(pages.is_empty());
         assert_eq!(carried, 16 * 4 * 4);
@@ -1883,11 +1902,11 @@ mod tests {
         // A seventh of the rows, and the last cell's, which only the second shard holds.
         let few = corpus.ids(|id| id % 7 == 0 || (id.trailing_zeros() >= 40 && id >> 40 <= 40));
         let filter = unique_eq();
-        for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+        for order in [Scan::Map, Scan::Stored] {
             let [two, one] = corpus.layouts(&visible, &few);
             let expected = match order {
-                RecordsOrder::Map => map_rows(&two, false),
-                RecordsOrder::Stored => stored_rows(&two, false),
+                Scan::Map => map_rows(&two, false),
+                Scan::Stored => stored_rows(&two, false),
             };
             let matched = expected.len() as u64;
             let (two, one) = (FakeCx::of(two, true), FakeCx::of(one, true));
@@ -1910,7 +1929,7 @@ mod tests {
 
         // Each shard's bound fits a driven stretch, their sum does not: both walk the view.
         let corpus = Corpus::of(19, 9000);
-        let map = Position::start(RecordsOrder::Map);
+        let map = Position::start(Scan::Map);
         let most = Walk::new(None, false, 0, SMALL, map).driven_most;
         let many = corpus.ids(|id| id % 2 == 0);
         let [two, one] = corpus.layouts(&corpus.ids(|_| true), &many);
@@ -1942,7 +1961,7 @@ mod tests {
         let second = &cx.sides[1];
         let expected = second.leaf.count_intersection(&second.matching);
         assert!(expected > 0);
-        for order in [RecordsOrder::Map, RecordsOrder::Stored] {
+        for order in [Scan::Map, Scan::Stored] {
             let mut walk = Walk::new(Some(unique_eq()), false, 16, BYTES, start(order, 0).0);
             assert_eq!(walk.count(&cx, &None).unwrap(), (expected, None));
         }
@@ -1953,7 +1972,7 @@ mod tests {
     /// issued its cursor; a response with a smaller page ceiling holds it to its own.
     #[test]
     fn a_carried_stretch_is_held_to_the_resuming_responses_ceiling() {
-        let start = Position::start(RecordsOrder::Map);
+        let start = Position::start(Scan::Map);
         let bytes = 8 << 20;
         let ceiling = u32::try_from(bytes / STRETCH_BYTES_PER_ROW).unwrap();
         let walk = Walk::new(None, false, 64 << 20, bytes, start);

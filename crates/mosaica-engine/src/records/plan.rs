@@ -2,7 +2,8 @@
 
 use mosaica_spatial::tiler::ScalarType;
 
-use super::{RecordsOrder, RecordsRefused};
+use super::sorted::SortField;
+use super::{RecordsOrder, RecordsRefused, ValueOrder};
 use crate::error::{EngineError, Result};
 use crate::filter::{scoped_column_name, scoped_has_value_column, FieldHomes};
 use crate::viewport::{EngineMeta, Resolution};
@@ -119,6 +120,38 @@ pub(super) fn fields_digest(fields: &[String]) -> [u8; 32] {
         hasher.update(field.as_bytes());
     }
     hasher.finalize().into()
+}
+
+/// The field a read is ordered by, resolved as `fields` resolves it: a number, timestamp or bool
+/// without a vocabulary, read from its value column where it has one and otherwise from the
+/// view's own columns.
+pub(super) fn resolve_sort(
+    meta: &EngineMeta,
+    view: &str,
+    visible: &crate::gate::VisibleViews,
+    order: &ValueOrder,
+) -> Result<SortField> {
+    let refused = |why| Err(EngineError::RecordsRefused(why));
+    let spelling = &order.field;
+    let named = resolve_field(meta, view, visible, spelling)?;
+    if named.vocabulary.is_some() || crate::aggregate::Kind::of(named.ty).is_none() {
+        return refused(RecordsRefused::NotSortable(spelling.clone()));
+    }
+    let held = match named.home {
+        Home::ValueColumn(column) => Some(column),
+        Home::Rendered => meta
+            .declared_scalars
+            .iter()
+            .position(|declared| &declared.name == spelling)
+            .filter(|&index| meta.homes[index].value_column)
+            .map(|_| spelling.clone()),
+        Home::Record(_) => return refused(RecordsRefused::SortUnstored(spelling.clone())),
+    };
+    Ok(SortField {
+        spelling: spelling.clone(),
+        descending: order.descending,
+        held,
+    })
 }
 
 fn resolve_field(

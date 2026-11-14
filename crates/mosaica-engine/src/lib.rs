@@ -91,6 +91,7 @@ pub use projection::{ProjectionInputs, ProjectionRoute, RowProjection};
 pub use records::{
     ArtifactsRequest, ItemsRequest, PageEnd, PageEndedBy, RecordsCounts, RecordsHead,
     RecordsLimits, RecordsOrder, RecordsRefused, RecordsSink, RecordsTrailer, ResponseEndedBy,
+    ValueOrder,
 };
 // The publication guard's refusal, which a publisher outside this crate must handle.
 // `check_publishable` itself stays private: whether a geometry may be published is this crate's

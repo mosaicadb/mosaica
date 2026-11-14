@@ -1445,10 +1445,11 @@ export type ItemsRequest = {
   count?: boolean;
   /**
    * `map` orders rows by their place on the map. `stored` orders them as the record store holds
-   * them, which is faster for columns held only there. Unset keeps the cursor's order, or lets the
-   * server choose. An order different from the cursor's is a `422`.
+   * them, which is faster for columns held only there. An {@link ItemsValueOrder} orders them by a
+   * field's value. Unset keeps the cursor's order, or lets the server choose. An order different
+   * from the cursor's is a `422`.
    */
-  order?: 'map' | 'stored';
+  order?: 'map' | 'stored' | ItemsValueOrder;
   /** Rows per page, at most `meta.selection.maxPageRows`, which is the default. `0` is a `422`. */
   pageRows?: number;
   /** The most pages one response may carry. Unset carries as many as the server's limits allow; `0` is a `422`. */
@@ -1511,13 +1512,29 @@ export type ArtifactsRequest = {
 };
 
 /**
+ * An items read in the order of one field's values. The field is a number, timestamp or bool
+ * without a vocabulary, named as {@link ItemsRequest.fields} names it; any other, or one whose
+ * `homes` is `['record']`, is a `422`. Items without a value come last in either direction, and
+ * items with equal values in `stored` order. Each response passes once over every matching item,
+ * so a response takes longer the more items match, whatever its page size.
+ *
+ * @category Requests and responses
+ */
+export type ItemsValueOrder = {
+  /** The field to order by, as {@link ItemsRequest.fields} names it. */
+  field: string;
+  /** Unset is `asc`. */
+  direction?: 'asc' | 'desc';
+};
+
+/**
  * The head of a {@link MosaicaClient.items} response, as {@link RecordsRead.head}.
  *
  * @category Requests and responses
  */
 export type ItemsHead = {
-  /** The order of the rows. */
-  order: 'map' | 'stored';
+  /** The order of the rows. A field's order always names its direction. */
+  order: 'map' | 'stored' | Required<ItemsValueOrder>;
   /** The page size used. */
   pageRows: number;
   /** How many items in the view the viewer can see, or `null` unless the request set `count`. */

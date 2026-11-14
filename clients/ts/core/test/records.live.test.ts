@@ -276,6 +276,22 @@ describe('bulk reads against a live server', () => {
     expect(await ids('stored')).toEqual(await ids('map'));
   });
 
+  it('returns the same rows in a field’s order, newest first and the items without a date last', async (ctx) => {
+    live(ctx);
+    const sorted = await items({view: 's0', fields: ['submitted_at'], order: {field: 'submitted_at', direction: 'desc'}, pageRows: 300, pages: 2});
+    expect(sorted.responses).toBeGreaterThan(1);
+    expect(sorted.read.head.order).toEqual({field: 'submitted_at', direction: 'desc'});
+    const dates = column(sorted.tables, 'submitted_at') as (number | bigint | null)[];
+    const valued = dates.findIndex((d) => d === null);
+    const known = (valued === -1 ? dates : dates.slice(0, valued)).map(Number);
+    expect(known.length).toBeGreaterThan(0);
+    expect(known.every((d, i) => i === 0 || known[i - 1]! >= d)).toBe(true);
+    if (valued !== -1) expect(dates.slice(valued).every((d) => d === null)).toBe(true);
+    const ordered = (tables: Table[]) => (column(tables, 'mosaica_id') as bigint[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const walked = await items({view: 's0', fields: [], order: 'map', pageRows: 600, pages: 2});
+    expect(ordered(sorted.tables)).toEqual(ordered(walked.tables));
+  });
+
   it('decodes zstd-compressed pages to the tables sent uncompressed', async (ctx) => {
     live(ctx);
     const request: ItemsRequest = {view: 's0', fields: ['archive', 'primary_category', 'submitted_at', 'title', 'arxiv_id'], position: true, labels: true, pageRows: 700, pages: 2};

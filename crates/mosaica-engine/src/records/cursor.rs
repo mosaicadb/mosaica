@@ -16,13 +16,13 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-use super::RecordsOrder;
+use super::sorted::{Point, SortKey, MOST_POINTS};
 use crate::error::{EngineError, Result};
 
 const KEY_DOMAIN: &[u8] = b"mosaica-records-cursor-key-v1";
 const AAD_DOMAIN: &[u8] = b"mosaica-records-cursor-v1";
 /// The sealed payload's layout. A cursor of another format does not open.
-const FORMAT: u8 = 6;
+const FORMAT: u8 = 7;
 const NONCE_LEN: usize = 24;
 
 /// The route a cursor was issued on, bound into its associated data.
@@ -161,6 +161,13 @@ impl CursorKey {
     }
 }
 
+/// The order a walk through the view takes: by map cell, or by shard and item number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Scan {
+    Map,
+    Stored,
+}
+
 /// A row's place in its order: `(cell, mosaica_id)` in map order, and `(shard, item number)` in
 /// stored order, which walks the shards in number order. A scan position need not be a row's: the
 /// one just before a shard's first item is `(shard − 1, u64::MAX)`, past every item of the shard
@@ -171,64 +178,166 @@ pub(super) type Key = (u32, u64);
 /// returned or passed over, and a read resumes after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Position {
-    pub(super) order: RecordsOrder,
+    pub(super) order: Scan,
     pub(super) scan: Option<Key>,
 }
 
 impl Position {
     /// The start of a read in `order`.
-    pub(super) fn start(order: RecordsOrder) -> Position {
+    pub(super) fn start(order: Scan) -> Position {
         Position { order, scan: None }
     }
 }
 
 /// An items cursor's sealed payload.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct ItemsCursor {
-    pub(super) position: Position,
-    /// The rows the read's next stretch spans, so a resumed read continues at the size it had
-    /// grown to.
-    pub(super) stretch: u32,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ItemsCursor {
+    /// A walk through the view.
+    Walk {
+        position: Position,
+        /// The rows the read's next stretch spans, so a resumed read continues at the size it
+        /// had grown to.
+        stretch: u32,
+    },
+    /// A read in the order of one field's values.
+    Value(ValueCursor),
 }
 
-/// `order, has_scan, scan (u32, u64), stretch`, little-endian.
-const PAYLOAD_LEN: usize = 1 + 1 + 12 + 4;
+/// Where a read in a field's order has reached, and the points counted after it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ValueCursor {
+    pub(super) field: String,
+    pub(super) descending: bool,
+    /// The last key returned.
+    pub(super) key: Option<SortKey>,
+    pub(super) points: Vec<Point>,
+}
+
+const WALK_MAP: u8 = 0;
+const WALK_STORED: u8 = 1;
+const VALUE: u8 = 2;
+/// A walk's payload: `order, has_scan, scan (u32, u64), stretch`, little-endian.
+const WALK_LEN: usize = 1 + 1 + 12 + 4;
 
 impl ItemsCursor {
+    /// A walk's payload as above. A value read's: `2, descending, field length (u16), field,
+    /// has_key, absent, value (u64), shard (u32), entity (u32), points (u8), each point's value
+    /// and count (u64, u64)`, little-endian.
     pub(super) fn encode(&self) -> Vec<u8> {
-        let Position { order, scan } = self.position;
-        let order = match order {
-            RecordsOrder::Map => 0u8,
-            RecordsOrder::Stored => 1u8,
-        };
-        let mut out = Vec::with_capacity(PAYLOAD_LEN);
-        out.push(order);
-        out.push(u8::from(scan.is_some()));
-        let (a, b) = scan.unwrap_or((0, 0));
-        out.extend_from_slice(&a.to_le_bytes());
-        out.extend_from_slice(&b.to_le_bytes());
-        out.extend_from_slice(&self.stretch.to_le_bytes());
-        out
+        match self {
+            ItemsCursor::Walk { position, stretch } => {
+                let Position { order, scan } = *position;
+                let mut out = Vec::with_capacity(WALK_LEN);
+                out.push(match order {
+                    Scan::Map => WALK_MAP,
+                    Scan::Stored => WALK_STORED,
+                });
+                out.push(u8::from(scan.is_some()));
+                let (a, b) = scan.unwrap_or((0, 0));
+                out.extend_from_slice(&a.to_le_bytes());
+                out.extend_from_slice(&b.to_le_bytes());
+                out.extend_from_slice(&stretch.to_le_bytes());
+                out
+            }
+            ItemsCursor::Value(value) => {
+                let field = value.field.as_bytes();
+                let points = &value.points[..value.points.len().min(MOST_POINTS)];
+                let mut out = Vec::with_capacity(4 + field.len() + 18 + 1 + 16 * points.len());
+                out.push(VALUE);
+                out.push(u8::from(value.descending));
+                out.extend_from_slice(
+                    &u16::try_from(field.len())
+                        .expect("a field name fits a u16")
+                        .to_le_bytes(),
+                );
+                out.extend_from_slice(field);
+                out.push(u8::from(value.key.is_some()));
+                let key = value.key.unwrap_or(SortKey {
+                    absent: false,
+                    value: 0,
+                    shard: 0,
+                    entity: 0,
+                });
+                out.push(u8::from(key.absent));
+                out.extend_from_slice(&key.value.to_le_bytes());
+                out.extend_from_slice(&key.shard.to_le_bytes());
+                out.extend_from_slice(&key.entity.to_le_bytes());
+                out.push(points.len() as u8);
+                for &(at, count) in points {
+                    out.extend_from_slice(&at.to_le_bytes());
+                    out.extend_from_slice(&count.to_le_bytes());
+                }
+                out
+            }
+        }
     }
 
     /// A payload that opened but does not parse is refused like one that did not open: it can
     /// only be a payload of another format.
     pub(super) fn decode(payload: &[u8]) -> Result<ItemsCursor> {
-        if payload.len() != PAYLOAD_LEN || payload[1] > 1 {
-            return Err(EngineError::CursorRefused);
-        }
-        let u32_at = |at: usize| u32::from_le_bytes(payload[at..at + 4].try_into().expect("4"));
-        let u64_at = |at: usize| u64::from_le_bytes(payload[at..at + 8].try_into().expect("8"));
-        let scan = (payload[1] == 1).then(|| (u32_at(2), u64_at(6)));
-        let order = match payload[0] {
-            0 => RecordsOrder::Map,
-            1 => RecordsOrder::Stored,
-            _ => return Err(EngineError::CursorRefused),
+        let refused = || EngineError::CursorRefused;
+        let mut at = 0usize;
+        let mut bytes = |n: usize| -> Result<&[u8]> {
+            let slice = payload.get(at..at + n).ok_or_else(refused)?;
+            at += n;
+            Ok(slice)
         };
-        Ok(ItemsCursor {
-            position: Position { order, scan },
-            stretch: u32_at(14),
-        })
+        let flag = |b: u8| match b {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(refused()),
+        };
+        let u32_of = |b: &[u8]| u32::from_le_bytes(b.try_into().expect("4"));
+        let u64_of = |b: &[u8]| u64::from_le_bytes(b.try_into().expect("8"));
+        let cursor = match bytes(1)?[0] {
+            order @ (WALK_MAP | WALK_STORED) => {
+                let has_scan = flag(bytes(1)?[0])?;
+                let a = u32_of(bytes(4)?);
+                let b = u64_of(bytes(8)?);
+                ItemsCursor::Walk {
+                    position: Position {
+                        order: match order {
+                            WALK_MAP => Scan::Map,
+                            _ => Scan::Stored,
+                        },
+                        scan: has_scan.then_some((a, b)),
+                    },
+                    stretch: u32_of(bytes(4)?),
+                }
+            }
+            VALUE => {
+                let descending = flag(bytes(1)?[0])?;
+                let length = u16::from_le_bytes(bytes(2)?.try_into().expect("2"));
+                let field = String::from_utf8(bytes(usize::from(length))?.to_vec())
+                    .map_err(|_| refused())?;
+                let has_key = flag(bytes(1)?[0])?;
+                let key = SortKey {
+                    absent: flag(bytes(1)?[0])?,
+                    value: u64_of(bytes(8)?),
+                    shard: u32_of(bytes(4)?),
+                    entity: u32_of(bytes(4)?),
+                };
+                let count = usize::from(bytes(1)?[0]);
+                if count > MOST_POINTS {
+                    return Err(refused());
+                }
+                let mut points = Vec::with_capacity(count);
+                for _ in 0..count {
+                    points.push((u64_of(bytes(8)?), u64_of(bytes(8)?)));
+                }
+                ItemsCursor::Value(ValueCursor {
+                    field,
+                    descending,
+                    key: has_key.then_some(key),
+                    points,
+                })
+            }
+            _ => return Err(refused()),
+        };
+        if at != payload.len() {
+            return Err(refused());
+        }
+        Ok(cursor)
     }
 }
 
@@ -284,9 +393,9 @@ mod tests {
     #[test]
     fn a_cursor_opens_only_under_the_binding_it_was_sealed_with() {
         let key = CursorKey::of(KEY);
-        let cursor = ItemsCursor {
+        let cursor = ItemsCursor::Walk {
             position: Position {
-                order: RecordsOrder::Map,
+                order: Scan::Map,
                 scan: Some((4, u64::MAX)),
             },
             stretch: 16_384,
@@ -350,9 +459,9 @@ mod tests {
     fn a_cursor_of_an_earlier_format_does_not_open() {
         let key = CursorKey::of(KEY);
         let bound = binding("s0", 0, 1);
-        let payload = ItemsCursor {
+        let payload = ItemsCursor::Walk {
             position: Position {
-                order: RecordsOrder::Stored,
+                order: Scan::Stored,
                 scan: Some((3, 0)),
             },
             stretch: 4096,
@@ -368,12 +477,47 @@ mod tests {
         assert!(key.open(&bound, &key.seal(&bound, &payload)).is_ok());
     }
 
+    /// A value read's cursor gives back its field, direction, key and points, and a payload cut
+    /// short or run long does not parse.
+    #[test]
+    fn a_value_cursor_round_trips_and_a_damaged_one_is_refused() {
+        let cursor = ItemsCursor::Value(ValueCursor {
+            field: "score@topics".to_string(),
+            descending: true,
+            key: Some(SortKey {
+                absent: false,
+                value: u64::MAX - 7,
+                shard: 3,
+                entity: 41,
+            }),
+            points: vec![(9, 100), (u64::MAX, 4_000)],
+        });
+        let payload = cursor.encode();
+        assert_eq!(ItemsCursor::decode(&payload).unwrap(), cursor);
+        let started = ItemsCursor::Value(ValueCursor {
+            field: "when".to_string(),
+            descending: false,
+            key: None,
+            points: Vec::new(),
+        });
+        assert_eq!(ItemsCursor::decode(&started.encode()).unwrap(), started);
+        for damaged in [
+            &payload[..payload.len() - 1],
+            &[payload.as_slice(), &[0]].concat(),
+        ] {
+            assert!(matches!(
+                ItemsCursor::decode(damaged),
+                Err(EngineError::CursorRefused)
+            ));
+        }
+    }
+
     #[test]
     fn two_cursors_for_one_position_share_no_text() {
         let key = CursorKey::of(KEY);
-        let payload = ItemsCursor {
+        let payload = ItemsCursor::Walk {
             position: Position {
-                order: RecordsOrder::Stored,
+                order: Scan::Stored,
                 scan: Some((12, 0)),
             },
             stretch: 4096,

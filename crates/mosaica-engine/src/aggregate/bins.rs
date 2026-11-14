@@ -68,7 +68,7 @@ use crate::filter::Scalar;
 use crate::Generation;
 
 /// Entity ids one piece of a pass over a field's per-entity values spans.
-const ENTITY_PIECE: u64 = 1 << 20;
+pub(crate) const ENTITY_PIECE: u64 = 1 << 20;
 
 /// A number, timestamp or bool field resolved in one request's generation, and where its values
 /// are read.
@@ -105,7 +105,7 @@ const BAND_ENTRY_ROWS: u64 = 25;
 
 /// How a field's values are compared with an edge, and the type its edges are served as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Kind {
+pub(crate) enum Kind {
     /// A signed integer, its edges `int64`.
     Signed,
     /// An unsigned integer, its edges `uint64`.
@@ -116,7 +116,7 @@ pub(super) enum Kind {
 }
 
 impl Kind {
-    fn of(ty: ScalarType) -> Option<Kind> {
+    pub(crate) fn of(ty: ScalarType) -> Option<Kind> {
         use ScalarType as T;
         Some(match ty {
             T::Bool | T::U8 | T::U16 | T::U32 | T::U64 => Kind::Unsigned,

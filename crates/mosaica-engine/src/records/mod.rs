@@ -14,12 +14,14 @@
 //! shard, and its stored order is shard by shard in shard number order, ascending item number
 //! within a shard. Either resumes from a position that is a value, found again in whatever
 //! segments the next page's generation holds, so a flush, merge or fold between pages loses no
-//! row and repeats none.
+//! row and repeats none. A value order (`sorted`) resumes from a key of the field's value, shard
+//! and item number, which is a value too.
 
 mod artifacts;
 mod columns;
 mod cursor;
 mod plan;
+mod sorted;
 mod walk;
 
 use std::sync::Arc;
@@ -40,25 +42,36 @@ use crate::Generation;
 pub use artifacts::ArtifactsRequest;
 pub(crate) use cursor::{Binding, CursorKey, Route};
 pub(crate) use walk::{same_publication, Clock};
-use cursor::{ItemsCursor, Position};
+use cursor::{ItemsCursor, Position, Scan, ValueCursor};
 use columns::{empty_page, read_page};
-use plan::{fields_digest, unpinned_fields, FieldPlan};
+use plan::{fields_digest, resolve_sort, unpinned_fields, FieldPlan};
+use sorted::{SortKey, Sorted};
 use walk::{Collected, PageCx, Walk, Walked};
 
-/// The order a read returns its rows in. Both return the same rows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The order a read returns its rows in. Every order returns the same rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordsOrder {
     /// By map cell in the view, then `mosaica_id`.
     Map,
     /// By shard, then by the internal item numbering each shard's record store holds rows in.
     Stored,
+    /// By one field's values, items without a value last, ties in stored order.
+    Value(ValueOrder),
+}
+
+/// A read ordered by a number, timestamp or bool field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueOrder {
+    /// The field, spelt as `fields` spells it.
+    pub field: String,
+    pub descending: bool,
 }
 
 impl RecordsOrder {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RecordsOrder::Map => "map",
-            RecordsOrder::Stored => "stored",
+    fn of_scan(scan: Scan) -> RecordsOrder {
+        match scan {
+            Scan::Map => RecordsOrder::Map,
+            Scan::Stored => RecordsOrder::Stored,
         }
     }
 }
@@ -250,6 +263,10 @@ pub enum RecordsRefused {
     UnknownProperty(String),
     /// `parent` and `q` together.
     ParentWithQ,
+    /// An order by a field that is not a number, timestamp or bool, or that has a vocabulary.
+    NotSortable(String),
+    /// An order by a field held only in its record, which has no column to order by.
+    SortUnstored(String),
 }
 
 impl std::fmt::Display for RecordsRefused {
@@ -315,6 +332,15 @@ impl std::fmt::Display for RecordsRefused {
                 f,
                 "parent and q are both given; send one of them"
             ),
+            RecordsRefused::NotSortable(name) => write!(
+                f,
+                "field '{name}' is not a number, timestamp or bool; order by one of those"
+            ),
+            RecordsRefused::SortUnstored(name) => write!(
+                f,
+                "field '{name}' is held only in its record, which has no column to order by; \
+                 order by a field declared with index or render"
+            ),
         }
     }
 }
@@ -375,10 +401,12 @@ trait Pager {
     fn region(&self) -> Option<RegionVerdict>;
 }
 
-/// The items route's pager: the request as planned and the walk through the view.
+/// The items route's pager: the request as planned and the walk through the view, or for a read
+/// in a field's order, that order's state. A sorted read's walk only counts.
 struct ItemsPager<'r> {
     planned: Planned<'r>,
     walk: Walk,
+    sorted: Option<Sorted>,
 }
 
 /// Everything an items response fixes before its first page: the request, its fields and order,
@@ -438,8 +466,15 @@ impl Engine {
             None => None,
             Some(token) => Some(ItemsCursor::decode(&self.cursor_key.open(&binding, token)?)?),
         };
-        if let Some(cursor) = &resumed {
-            if req.order.is_some_and(|order| order != cursor.position.order) {
+        let resumed_order = resumed.as_ref().map(|cursor| match cursor {
+            ItemsCursor::Walk { position, .. } => RecordsOrder::of_scan(position.order),
+            ItemsCursor::Value(value) => RecordsOrder::Value(ValueOrder {
+                field: value.field.clone(),
+                descending: value.descending,
+            }),
+        });
+        if let (Some(asked), Some(held)) = (&req.order, &resumed_order) {
+            if asked != held {
                 return Err(EngineError::CursorRefused);
             }
         }
@@ -456,17 +491,36 @@ impl Engine {
                 .admit(expr, &|layer| self.layer_levels(session, layer))
                 .map_err(filter_refusal)?;
         }
-        let order = resumed
-            .map(|cursor| cursor.position.order)
-            .or(req.order)
+        let order = resumed_order
+            .or_else(|| req.order.clone())
             .unwrap_or_else(|| plan.preferred_order());
         let page_rows = page_rows_of(req.page_rows, &req.limits);
+        let (position, stretch, sorted) = match (&order, resumed) {
+            (RecordsOrder::Value(value), resumed) => {
+                let field = resolve_sort(&meta, req.view, session.visible_views(), value)?;
+                let (key, points) = match resumed {
+                    Some(ItemsCursor::Value(ValueCursor { key, points, .. })) => (key, points),
+                    _ => (None, Vec::new()),
+                };
+                let sorted =
+                    Sorted::new(field, req.filter.clone(), req.keep_unmatched, key, points);
+                (Position::start(Scan::Map), page_rows, Some(sorted))
+            }
+            (_, Some(ItemsCursor::Walk { position, stretch })) => (position, stretch, None),
+            (order, _) => {
+                let scan = match order {
+                    RecordsOrder::Map => Scan::Map,
+                    _ => Scan::Stored,
+                };
+                (Position::start(scan), page_rows, None)
+            }
+        };
         let walk = Walk::new(
             req.filter.clone(),
             req.keep_unmatched,
-            resumed.map_or(page_rows, |cursor| cursor.stretch),
+            stretch,
             req.limits.max_page_bytes,
-            resumed.map_or(Position::start(order), |cursor| cursor.position),
+            position,
         );
         let response = Response {
             session,
@@ -486,6 +540,7 @@ impl Engine {
                 binding,
             },
             walk,
+            sorted,
         };
         Ok((response, pager))
     }
@@ -518,7 +573,7 @@ impl Engine {
             if !head_sent {
                 head_sent = true;
                 let head = RecordsHead {
-                    order: response.order,
+                    order: response.order.clone(),
                     page_rows: response.page_rows,
                     counts: counted.map(|(counts, _)| counts),
                     region: RegionVerdict::coarsest(
@@ -678,6 +733,9 @@ impl Pager for ItemsPager<'_> {
         clock: &mut Clock,
     ) -> Result<Paged> {
         let cx = PageCx::new(engine, open, generation);
+        if self.sorted.is_some() {
+            return self.sorted_page(&cx, clock);
+        }
         let planned = &self.planned;
         let walk = &mut self.walk;
         let req = &planned.req;
@@ -728,15 +786,84 @@ impl Pager for ItemsPager<'_> {
     }
 
     fn cursor(&self, engine: &Engine) -> String {
-        let cursor = ItemsCursor {
-            position: self.walk.position,
-            stretch: self.walk.target,
+        let cursor = match &self.sorted {
+            Some(sorted) => ItemsCursor::Value(ValueCursor {
+                field: sorted.field.spelling.clone(),
+                descending: sorted.field.descending,
+                key: sorted.cursor,
+                points: sorted.points(),
+            }),
+            None => ItemsCursor::Walk {
+                position: self.walk.position,
+                stretch: self.walk.target,
+            },
         };
         engine.cursor_key.seal(&self.planned.binding, &cursor.encode())
     }
 
     fn region(&self) -> Option<RegionVerdict> {
-        self.walk.region
+        let sorted = self.sorted.as_ref().and_then(|sorted| sorted.region);
+        RegionVerdict::coarsest(self.walk.region, sorted)
+    }
+}
+
+impl ItemsPager<'_> {
+    /// The next page of a read in a field's order: rows taken in order after the cursor, their
+    /// fields read and the batch cut to the byte ceiling, the rows it does not keep returned for
+    /// the next page.
+    fn sorted_page(&mut self, cx: &PageCx<'_>, clock: &Clock) -> Result<Paged> {
+        let planned = &self.planned;
+        let req = &planned.req;
+        let sorted = self.sorted.as_mut().expect("a sorted read");
+        let caps = sort_caps(cx.engine, req, planned.page_rows);
+        let (rows, keys, end) = loop {
+            let (rows, keys, end) =
+                sorted.take(cx, planned.page_rows as usize, caps, &clock.cancel)?;
+            if !rows.is_empty() || end {
+                break (rows, keys, end);
+            }
+        };
+        if rows.is_empty() {
+            return Ok(Paged::End);
+        }
+        let (batch, kept, bytes) = read_page(
+            cx,
+            &planned.plan,
+            &rows,
+            req.keep_unmatched,
+            req.limits.max_page_bytes,
+        )?;
+        let ended_by = if kept < rows.len() {
+            sorted.unsend(keys[kept - 1], &keys[kept..]);
+            PageEndedBy::Bytes
+        } else if end {
+            PageEndedBy::End
+        } else {
+            PageEndedBy::Rows
+        };
+        Ok(Paged::Rows {
+            batch,
+            bytes,
+            ended_by,
+            then: None,
+        })
+    }
+}
+
+/// How many keys a sorted read's pass holds: as many as the response could send, within a bulk
+/// read's allowance of seven times the page ceiling, and never fewer than a page. A pass that
+/// selects holds up to twice that in each of the pool's threads; one that keeps every key up to a
+/// point holds about that many in all.
+fn sort_caps(engine: &Engine, req: &ItemsRequest<'_>, page_rows: u32) -> sorted::Caps {
+    let page_rows = page_rows as usize;
+    let wanted = page_rows.saturating_mul(req.pages.map_or(usize::MAX, |pages| pages as usize));
+    let allowance = req.limits.max_page_bytes.saturating_mul(7);
+    let key = 2 * std::mem::size_of::<SortKey>();
+    let threads = engine.pool.current_num_threads() + 1;
+    let held = |most: usize| wanted.min(most.max(1)).max(page_rows);
+    sorted::Caps {
+        select: held(allowance / (key * threads)),
+        window: held(allowance / key),
     }
 }
 

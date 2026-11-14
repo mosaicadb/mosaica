@@ -386,6 +386,17 @@ def test_the_values_read_are_the_values_inserted(db):
     assert got == {paper: (VENUES[i // 5], i, f"title {i}") for i, paper in enumerate(PAPERS)}
 
 
+def test_a_read_in_a_fields_order_returns_the_items_by_their_value(db, sent):
+    """An order by a field is sent as the object given, the head names it with its direction, and
+    the items come by the field's value across responses."""
+    order = {"field": "n", "direction": "desc"}
+    read = db.items("map", ["n"], order=order, page_rows=3, pages=1)
+    assert sent.bodies[0]["order"] == order
+    assert read.column("n").to_pylist() == list(range(19, -1, -1))
+    head = db.items("map", ["n"], order={"field": "n"}, batches=True).head
+    assert head["order"] == {"field": "n", "direction": "asc"}
+
+
 def test_a_position_is_the_coordinates_the_item_was_inserted_with(db):
     """In the view's own coordinates, to one step of its grid: 45 units over 2^32 steps."""
     rows = db.items("map", ["n"], position=True, page_rows=4, pages=1).to_pylist()

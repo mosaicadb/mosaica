@@ -1535,7 +1535,7 @@ fn an_items_read_resumed_across_every_shard_equals_one_shards() {
     let pair = Pair::new();
     for order in [RecordsOrder::Map, RecordsOrder::Stored] {
         let reads = |built: &Built| {
-            let every = every_field(order);
+            let every = every_field(order.clone());
             vec![
                 ("unfiltered", every.clone()),
                 ("scored", every.clone().filter(scored())),

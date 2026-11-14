@@ -1649,6 +1649,7 @@ class Database:
             db.items("papers").to_pandas()
             db.items("papers", ["title", "year"]).to_pandas()
             db.items("papers", ["title"], filters={"year": {"eq": 2023}}, order="stored")
+            db.items("papers", ["title", "year"], order={"field": "year", "direction": "desc"})
         """
         self._refuse_before_the_first_commit("items")
         return self.viewer().items(view, fields, **options)
