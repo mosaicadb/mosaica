@@ -714,7 +714,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
     // in the query outside every cluster and phase (merge, drops), and outside the query's own counters (the pool's
     // hand-off); all from the profiled run, whose wall time is prof_wall_ms (the mean over queries)
     let names = ["anchor", "cut", "basis", "rotations", "cluster setup", "tables", "re-pack", "level decode", "bounds+decisions", "full vectors", "candidate init", "result bitmap", "column order",
-                 "compaction", "level setup", "level other", "cluster other", "merge", "query other", "unattributed"];
+                 "compaction", "level setup", "group post", "level other", "cluster other", "merge", "query other", "unattributed"];
     let mut lines = vec!["variant,class,answer_frac,threads,wall_ms,prof_wall_ms,cpu_ms_total,".to_string() + &names.join(",") + ",bytes_read,full_reads,wrong"];
     let variants: &[(&str, bool, usize)] = if args().iter().any(|a| a == "--variants") {
         &[("levels", false, 0usize), ("shared_tables", true, 0), ("single_pass_64B", false, 9), ("single_pass_96B", false, 12), ("single_pass_128B", false, 14), ("shared+single_96B", true, 12)]
@@ -740,10 +740,10 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
             let plan = Plan { alpha0, jump_level: jump, jump_d: 0.8, ..c.plan };
             for &th in &bthreads {
                 let pl = pool(th);
-                let mut cyc = [0f64; 20];
                 let ms = |c: u64| c as f64 / hz * 1e3 / qs.len() as f64;
                 let (mut walls, mut br, mut fr, mut wrong, mut pwall) = (Vec::new(), 0.0, 0.0, 0u64, 0.0);
-                let mut parts = [0f64; 20];
+                let mut parts = [0f64; 21];
+                let mut cnt = [0f64; 4];
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -780,12 +780,12 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     let inner = |ks: &[usize]| ks.iter().map(|&k| cy[k] as i64).sum::<i64>();
                     let lv = cy[P_RUNCL] as i64 - inner(&[P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP]);
                     let clo = cy[P_CLUSTER] as i64 - cy[P_RUNCL] as i64 - inner(&[P_CLSETUP, P_FULL]);
-                    let qo = cy[P_QUERY] as i64 - cy[P_CLUSTER] as i64 - cy[P_MERGE] as i64 - inner(&[P_ANCHOR, P_CUT, P_BASIS, P_ROT, P_PLAN]);
-                    for (k, v) in [(13, cy[P_COMPACT] as i64), (14, cy[P_LVSETUP] as i64), (15, lv), (16, clo), (17, cy[P_MERGE] as i64), (18, qo)] {
+                    let qo = cy[P_QUERY] as i64 - cy[P_CLUSTER] as i64 - cy[P_MERGE] as i64 - inner(&[P_ANCHOR, P_CUT, P_BASIS, P_ROT, P_PLAN, P_GPOST]);
+                    for (k, v) in [(13, cy[P_COMPACT] as i64), (14, cy[P_LVSETUP] as i64), (15, cy[P_GPOST] as i64), (16, lv), (17, clo), (18, cy[P_MERGE] as i64), (19, qo)] {
                         parts[k] += v as f64 / hz * 1e3 / qs.len() as f64;
                     }
-                    for k in 0..20 {
-                        cyc[k] += ms(cy[k]);
+                    for k in 0..4 {
+                        cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
@@ -793,10 +793,11 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     wrong += a + b;
                     walls.push(best);
                 }
-                parts[19] = pwall - parts[..19].iter().sum::<f64>();
-                let tot: f64 = parts[..19].iter().sum();
+                parts[20] = pwall - parts[..20].iter().sum::<f64>();
+                let tot: f64 = parts[..20].iter().sum();
                 let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
+                out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
                 lines.push(line);
             }
         }

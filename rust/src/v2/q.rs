@@ -36,6 +36,14 @@ pub const P_COMPACT: usize = 17;
 /// Per (cluster, level) work outside the tables and blocks: the move to the randomised levels, the integer levels'
 /// thresholds, the scalar steps.
 pub const P_LVSETUP: usize = 18;
+/// The group setup after the basis product: weights, norms and the per-level and per-block query vectors.
+pub const P_GPOST: usize = 19;
+/// Counts kept in Stats::cyc after the phases: (cluster, level) tables built, their units, the survivors entering the
+/// levels whose tables were built, and the tables built for at most 8 survivors.
+pub const C_TABLES: usize = 20;
+pub const C_UNITS: usize = 21;
+pub const C_TSURV: usize = 22;
+pub const C_TSMALL: usize = 23;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -55,7 +63,7 @@ pub struct GQ2 {
     pub a2: [f64; J],
     pub l1det: f64,        // |wq| sums (weight rounding bound)
     pub l1j: [f64; J],
-    pub cyc: (u64, u64),   // basis product, rotations
+    pub cyc: (u64, u64),   // basis product, the rest of the group setup (rotations included when done per group)
     pub glut: Vec<OnceLock<LevelLut>>, // tables shared by the group's clusters (alpha = 0)
     pub gtab: Vec<OnceLock<GTab>>,     // f32 tables of wq per level, combined per cluster with the centre's
 }
@@ -185,35 +193,10 @@ pub unsafe fn matvec64(r: &[f64], x: &[f64], y: &mut [f64]) {
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (vpmaddwd), then one rounding to f64.
-/// Four basis vectors at a time share the query loads.
+/// Four basis vectors at a time share the query loads; the next four are prefetched meanwhile (setup::qv_exact_r).
 #[cfg(not(target_feature = "avx512f"))]
-#[target_feature(enable = "avx2,fma")]
 pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
-    assert!(n % 32 == 0 && n % 4 == 0);
-    // each i32 lane sums n/16 products of an int8 and a 13-bit half, up to 128 * 8191 * 2 each
-    assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
-    let mut c = 0;
-    while c < n {
-        let mut ah = [_mm256_setzero_si256(); 4];
-        let mut al = [_mm256_setzero_si256(); 4];
-        let mut i = 0;
-        while i < n {
-            let h = _mm256_loadu_si256(qhi.as_ptr().add(i) as *const _);
-            let l = _mm256_loadu_si256(qlo.as_ptr().add(i) as *const _);
-            for r in 0..4 {
-                let x = _mm256_cvtepi8_epi16(_mm_loadu_si128(v8t.as_ptr().add((c + r) * n + i) as *const _));
-                ah[r] = _mm256_add_epi32(ah[r], _mm256_madd_epi16(x, h));
-                al[r] = _mm256_add_epi32(al[r], _mm256_madd_epi16(x, l));
-            }
-            i += 16;
-        }
-        for r in 0..4 {
-            let h = hsum_epi32(ah[r]) as i64;
-            let l = hsum_epi32(al[r]) as i64;
-            out[c + r] = vsc[c + r] * ((h * 8192 + l) as f64) * (1.0 / 16777216.0);
-        }
-        c += 4;
-    }
+    super::setup::qv_exact_r::<4, 1>(v8t, vsc, n, qhi, qlo, out)
 }
 
 #[cfg(not(target_feature = "avx512f"))]
@@ -310,9 +293,22 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     for c in 0..n {
         wq[c] = (qv[c] * gp.sig[c] as f64) as f32;
     }
+    // cq[l] = sum qv^2 D_l^2 in four partial sums (any order is within the 1e-12 cq slack of cluster_q2a), with
+    // qvd2 = qv D_l^2 in the same pass
     let mut cq = [0f64; NDL];
+    let mut qvd2 = vec![0f32; NDL * n];
     for l in 0..NDL {
-        cq[l] = (0..n).map(|c| qv[c] * qv[c] * (gp.d[l][c] as f64).powi(2)).sum();
+        let d = &gp.d[l];
+        let mut acc = [0f64; 4];
+        for c4 in (0..n).step_by(4) {
+            for k in 0..4 {
+                let c = c4 + k;
+                let d2 = (d[c] as f64) * (d[c] as f64);
+                acc[k] += qv[c] * qv[c] * d2;
+                qvd2[l * n + c] = (qv[c] * d2) as f32;
+            }
+        }
+        cq[l] = (acc[0] + acc[1]) + (acc[2] + acc[3]);
     }
     let qvt_pos: Vec<f64> = (0..n).map(|pp| {
         let c = gp.ridx[pp] as usize;
@@ -320,10 +316,15 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     }).collect();
     let mut a2 = [0f64; J];
     let mut l1j = [0f64; J];
+    let mut qdt2 = vec![0f32; J * n];
     for j in 0..J {
         let nbj = gp.nb[j];
         let xs = &qvt_pos[gp.boff[j]..gp.boff[j + 1]];
         a2[j] = xs.iter().map(|x| x * x).sum();
+        for pp in gp.boff[j]..gp.boff[j + 1] {
+            let c = gp.ridx[pp] as usize;
+            qdt2[j * n + c] = (qv[c] * (gp.dt[c] as f64).powi(2)) as f32;
+        }
         if !rot {
             continue;
         }
@@ -336,21 +337,8 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     }
     let t2 = tick();
     let l1det = wq[..n].iter().map(|x| x.abs() as f64).sum();
-    let mut qvd2 = vec![0f32; NDL * n];
-    for l in 0..NDL {
-        for c in 0..n {
-            qvd2[l * n + c] = (qv[c] * (gp.d[l][c] as f64).powi(2)) as f32;
-        }
-    }
-    let mut qdt2 = vec![0f32; J * n];
-    for j in 0..J {
-        for pp in gp.boff[j]..gp.boff[j + 1] {
-            let c = gp.ridx[pp] as usize;
-            qdt2[j * n + c] = (qv[c] * (gp.dt[c] as f64).powi(2)) as f32;
-        }
-    }
     let t3 = tick();
-    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0 + t3 - t2, t2 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect(), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
+    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0, t3 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect(), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
 }
 
 /// Set up several groups at once: exact basis products in parallel, then one product per randomised block with the
@@ -363,7 +351,8 @@ pub fn setup_groups(ix: &Index2, pr: &Prep2, gs: &[usize], st: &mut Stats) {
     let n = ix.n();
     let mut gqs: Vec<GQ2> = gs.par_iter().map(|&g| group_q2r(ix, g, pr, false)).collect();
     for gq in &gqs {
-        st.cyc[P_BASIS] += gq.cyc.0 + gq.cyc.1;
+        st.cyc[P_BASIS] += gq.cyc.0;
+        st.cyc[P_GPOST] += gq.cyc.1;
     }
     let t0 = tick();
     let m = gs.len();
@@ -407,7 +396,7 @@ pub fn get_gq2<'a>(ix: &Index2, pr: &'a Prep2, g: usize, st: &mut Stats) -> &'a 
         st.groups += 1;
         let gq = group_q2(ix, g, pr);
         st.cyc[P_BASIS] += gq.cyc.0;
-        st.cyc[P_ROT] += gq.cyc.1;
+        st.cyc[P_GPOST] += gq.cyc.1;
         gq
     })
 }
@@ -1098,6 +1087,8 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     let mut edet = resume.map_or(0f32, |r| r.1); // cumulative table error of the deterministic part
     let mut ej = [0f32; J];
     let mut g = Gather::new();
+    // survivors entering the level (slots held in place may be holes)
+    let mut live = if resume.is_some() { nsurv } else { cands.len() };
     for l in if resume.is_some() { NDL } else { 0 }..nl {
         if nsurv == 0 {
             break;
@@ -1123,6 +1114,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             })
         } else {
             if cq.luts[l].is_none() {
+                st.cyc[C_TABLES] += 1;
+                st.cyc[C_UNITS] += lp.units as u64;
+                st.cyc[C_TSURV] += live as u64;
+                st.cyc[C_TSMALL] += (live <= 8) as u64;
                 let mut lut = LevelLut::default();
                 let step = if intm && l < NDL { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
@@ -1595,6 +1590,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             return;
         }
         let tc = tick();
+        live = if aligned { kept_tot } else { wpos };
         if aligned {
             if kept_tot == 0 {
                 nsurv = 0;

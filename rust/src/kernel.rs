@@ -33,7 +33,7 @@ pub struct Stats {
     pub imp_checked: u64, // deterministic decisions checked against the f64 certificate (verify)
     pub imp_fail: u64,    // of which the f64 certificate does not imply the decision
     pub cert_viol: u64,   // lanes whose exact score lies outside the f64 certificate
-    pub cyc: [u64; 20], // time-stamp-counter cycles by phase (v2 breakdown)
+    pub cyc: [u64; 24], // time-stamp-counter cycles by phase (v2 breakdown), then counts (v2::q::C_*)
     pub col_bytes: f64,     // bytes read on the columnar path (key, scalars, rows)
     pub col_enter: Vec<u64>, // items entering each check of the columnar path
     pub col_dec: Vec<u64>,   // and decided there
