@@ -1140,7 +1140,9 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     }
     st.cyc[P_INIT] += tick() - ti;
     let t32 = t as f32;
-    let tin = if cq.tol > 0.0 && mode == Mode2::Thr { crate::query::next_up_if_below((t - cq.tol) as f32, t - cq.tol) } else { crate::query::next_up_if_below(t32, t) };
+    let tout = crate::query::next_up_if_below(t32, t);
+    // in once the lower bound reaches t - tol, out once the upper bound is below t
+    let tin = if cq.tol > 0.0 && mode == Mode2::Thr { crate::query::next_up_if_below((t - cq.tol) as f32, t - cq.tol) } else { tout };
     let stop = match mode {
         Mode2::Interval(l) | Mode2::Sweep(l) => l,
         Mode2::Thr => usize::MAX,
@@ -1674,9 +1676,8 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     keep[h] = hm;
                     continue;
                 }
-                let tv = _mm512_set1_ps(tin);
-                let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, tv) & hm;
-                let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, tv) & hm;
+                let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, _mm512_set1_ps(tin)) & hm;
+                let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, _mm512_set1_ps(tout)) & hm;
                 if verify && l < NDL {
                     let sh = 16 * h;
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);

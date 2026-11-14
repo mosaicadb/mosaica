@@ -171,12 +171,23 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let rlv = arg_str("--rlv", "");
+    let design_exact = args().iter().any(|a| a == "--design-exact");
     if !rlv.is_empty() {
         let new: Vec<usize> = rlv.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect();
         assert!(new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "--rlv must rise from above the last deterministic level");
         let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
         p.meta.csg = (2.0 * l1).sqrt();
         p.meta.rlv = new;
+    }
+    if design_exact {
+        let b = &p.meta.bounds;
+        let l1 = p.meta.csg * p.meta.csg / 2.0;
+        let cs: Vec<f64> = (0..1u32 << (b.len() - 1)).into_par_iter().map(|set| {
+            let ds: Vec<usize> = (0..b.len() - 1).filter(|&j| set >> j & 1 == 1).map(|j| b[j + 1] - b[j] - 1).collect();
+            crate::v2::tail::level_constant(&ds, l1)
+        }).collect();
+        out!("[design] constants by coded set {:?}", cs.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+        let _ = crate::v2::DESIGN_C.set(cs);
     }
     if kk < p.meta.k {
         let n = p.meta.n;

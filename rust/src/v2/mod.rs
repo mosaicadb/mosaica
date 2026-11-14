@@ -21,6 +21,9 @@ pub mod tail;
 
 /// Keep the sub-Gaussian constant at every randomised level (`--csg-plain`) instead of the exact-law constants of `tail`.
 pub static CSG_PLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Design the randomised rates with the constants of `tail` for each set of coded blocks (`--design-exact`), indexed
+/// by the set's bits.
+pub static DESIGN_C: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
 
 use crate::derive;
 use crate::index::{item_scale, Params, DA, SEED};
@@ -542,7 +545,10 @@ impl GroupPlan2 {
         boff[J] = n;
         let sj: Vec<f64> = (0..J).map(|j| order[boff[j]..boff[j + 1]].iter().map(|&c| ai[c]).sum()).collect();
         let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[NDL - 1])).collect();
-        let rv = derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM);
+        let rv = match DESIGN_C.get() {
+            Some(cs) => derive::design_by(&sj, &nb, &budgets, &|set| cs[set as usize], tof, QUANTUM),
+            None => derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM),
+        };
         let rates: Vec<[f64; J]> = rv.iter().map(|r| core::array::from_fn(|j| r[j])).collect();
         let nr = rates.len();
         let mut ypredw = [0f32; J];
