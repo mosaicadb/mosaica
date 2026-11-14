@@ -1,0 +1,30 @@
+queries 2400; brute-force top-10 overlap with the dataset ground truth: 1.00000
+
+configuration              differ nbfail tau0=sk |   L1 mean       p90 |  L2 mean      p90 | L3 mean    p90 | full mean    p90 | MB mean    p90 |   visible
+thmB_ckL_nested                 0      0  0.1175 |  113622.4    266812 |    3390.5      9544 |     109.3       272 |     139.3       302 |   21.41  23.99 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 649
+thmB_ckL_nested_tied4           0      0  0.1175 |  113622.4    266812 |    5406.0     15166 |      58.2       140 |      88.2       170 |   21.46  24.13 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 327
+thmB_ckL_indep                  0      0  0.1175 |  113622.4    266812 |    3390.5      9544 |      58.2       140 |      88.2       170 |   21.44  24.08 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 327
+thmB_cN_nested                  0      0  0.1175 |  249421.4    520626 |    9126.0     25386 |     199.8       510 |     229.8       540 |   23.70  28.43 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 1204
+thmB_9.35_nested                0      0  0.1175 |  466242.5    826470 |   26188.8     71599 |     412.6      1106 |     442.6      1136 |   27.58  34.53 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 2505
+plain_ckL_nested                0      0  0.0496 |  245375.9    458056 |    7837.6     19951 |     199.0       452 |     229.0       482 |   21.91  25.14 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 958
+plain_cN_nested                 0      0  0.0496 |  495664.5    780024 |   22118.3     55267 |     387.1       907 |     417.1       937 |   25.69  30.50 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 1848
+plain_9.35_nested               0      0  0.0496 |  807845.0   1044443 |   64595.0    149882 |     860.6      2098 |     890.6      2128 |   31.11  36.78 |   1183514
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 4084
+vis10_thmB_ckL_nested           0      0  0.1233 |   24709.1     45570 |    1458.0      3418 |      71.0       162 |     101.0       192 |    2.40   2.79 |    118355
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 398
+vis1_thmB_ckL_nested            0      0  0.1404 |    4881.4      6932 |     590.6      1097 |      43.1        87 |      73.1       117 |    0.30   0.36 |     11838
+                           neighbour bound failures per level: [0, 0, 0]; worst query full reads 204
+
+z = (true - estimate)/(sd |D_perp|), centre-corrected, first 1000 queries, all items
+c1   pairs 1.184e+09 max|z| 5.72  |z|>3: 2717152 (2.296e-03, law 2.300e-03, expected 2722089.4); z>3: 1356143 (law 1361044.7)  |z|>4: 39604 (3.346e-05, law 3.384e-05, expected 40054.3); z>4: 19770 (law 20027.1)  |z|>5: 115 (9.717e-08, law 9.960e-08, expected 117.9); z>5: 60 (law 58.9)
+c2   pairs 1.184e+09 max|z| 5.48  |z|>3: 2719136 (2.298e-03, law 2.300e-03, expected 2722089.4); z>3: 1358789 (law 1361044.7)  |z|>4: 39750 (3.359e-05, law 3.384e-05, expected 40054.3); z>4: 19820 (law 20027.1)  |z|>5: 105 (8.872e-08, law 9.960e-08, expected 117.9); z>5: 58 (law 58.9)
+c2t  pairs 1.184e+09 max|z| 5.79  |z|>3: 2721462 (2.299e-03, law 2.300e-03, expected 2722089.4); z>3: 1361838 (law 1361044.7)  |z|>4: 40275 (3.403e-05, law 3.384e-05, expected 40054.3); z>4: 20166 (law 20027.1)  |z|>5: 136 (1.149e-07, law 9.960e-08, expected 117.9); z>5: 69 (law 58.9)
+c4n  pairs 1.184e+09 max|z| 5.72  |z|>3: 2736716 (2.312e-03, law 2.300e-03, expected 2722089.4); z>3: 1368074 (law 1361044.7)  |z|>4: 41038 (3.467e-05, law 3.384e-05, expected 40054.3); z>4: 20668 (law 20027.1)  |z|>5: 110 (9.294e-08, law 9.960e-08, expected 117.9); z>5: 50 (law 58.9)
+c4i  pairs 1.184e+09 max|z| 5.73  |z|>3: 2720751 (2.299e-03, law 2.300e-03, expected 2722089.4); z>3: 1359468 (law 1361044.7)  |z|>4: 39969 (3.377e-05, law 3.384e-05, expected 40054.3); z>4: 20109 (law 20027.1)  |z|>5: 115 (9.717e-08, law 9.960e-08, expected 117.9); z>5: 57 (law 58.9)

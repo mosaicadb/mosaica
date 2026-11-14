@@ -1,0 +1,50 @@
+queries 10000; brute-force top-10 overlap with the dataset ground truth: 0.98510
+
+configuration              differ nbfail tau0=sk |   L1 mean       p90 |  L2 mean      p90 | L3 mean    p90 | full mean    p90 | MB mean    p90 |   visible
+thmB_ckL_nested                 0      0  0.4981 |   54657.8    156535 |    2651.4      9347 |     324.3       230 |     354.3       260 |   12.71  16.69 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+thmB_ckL_nested                 0      0  0.4976 |   54445.9    156426 |    2392.6      9296 |      63.4       229 |      93.4       259 |   12.55  16.68 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 776
+thmB_ckL_nested_tied4           0      0  0.4981 |   54657.8    156535 |    4399.6     15829 |     290.9       105 |     320.9       135 |   12.81  17.06 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+thmB_ckL_nested_tied4           0      0  0.4976 |   54445.9    156426 |    4142.3     15766 |      29.9       104 |      59.9       134 |   12.65  17.05 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 431
+thmB_ckL_indep                  0      0  0.4981 |   54657.8    156535 |    2651.4      9347 |     290.9       105 |     320.9       135 |   12.78  16.92 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+thmB_ckL_indep                  0      0  0.4976 |   54445.9    156426 |    2392.6      9296 |      29.9       104 |      59.9       134 |   12.61  16.91 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 431
+thmB_cN_nested                  0      0  0.4981 |  110469.2    246722 |    8320.5     30379 |     402.7       533 |     432.7       563 |   15.09  21.40 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+thmB_cN_nested                  0      0  0.4976 |  110307.5    246577 |    8066.8     30237 |     141.8       530 |     171.8       560 |   14.93  21.38 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 1659
+thmB_9.35_nested                0      0  0.4981 |  136540.0    268214 |   13556.2     48627 |     468.8       798 |     498.8       828 |   16.38  23.50 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+thmB_9.35_nested                0      0  0.4976 |  136401.8    268131 |   13307.2     48496 |     208.0       794 |     238.0       824 |   16.23  23.49 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 2388
+plain_ckL_nested                0      0  0.4616 |   65466.1    172931 |    3173.7     11149 |     333.7       263 |     363.7       293 |   12.70  16.74 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+plain_ckL_nested                0      0  0.4611 |   65263.9    172742 |    2915.3     11109 |      72.8       262 |     102.8       292 |   12.55  16.74 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 878
+plain_cN_nested                 0      0  0.4616 |  130687.8    257997 |   10195.5     36309 |     427.0       617 |     457.0       647 |   15.36  21.36 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+plain_cN_nested                 0      0  0.4611 |  130544.3    257934 |    9943.5     36154 |     166.1       613 |     196.1       643 |   15.20  21.35 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 1885
+plain_9.35_nested               0      0  0.4616 |  160885.5    275372 |   16656.9     57580 |     506.8       930 |     536.8       960 |   16.82  23.47 |    290000
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 290000
+plain_9.35_nested               0      0  0.4611 |  160769.2    275323 |   16410.7     57385 |     246.0       927 |     276.0       957 |   16.66  23.46 |    290000
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 2732
+vis10_thmB_ckL_nested           0      0  0.2920 |   14482.6     21975 |    1632.3      3529 |      99.8       184 |     129.8       214 |    1.73   2.16 |     29002
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 29225
+vis10_thmB_ckL_nested           0      0  0.2914 |   14469.5     21970 |    1607.6      3524 |      73.8       183 |     103.8       213 |    1.71   2.16 |     29002
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 399
+vis1_thmB_ckL_nested            0      0  0.1198 |    2361.1      2605 |     651.4       908 |      60.5        99 |      90.5       129 |    0.28   0.32 |      2901
+                           10000 queries; neighbour bound failures per level: [0, 0, 0]; worst query full reads 3013
+vis1_thmB_ckL_nested            0      0  0.1190 |    2360.7      2605 |     649.4       907 |      58.0        99 |      88.0       129 |    0.28   0.32 |      2901
+                           9991 queries (zero queries left out); neighbour bound failures per level: [0, 0, 0]; worst query full reads 207
+
+z = (true - estimate)/(sd |D_perp|), centre-corrected, first 1000 queries, all items
+c1   pairs 2.892e+08 max|z| 488.11  |z|>3: 733829 (2.537e-03, law 2.544e-03, expected 735785.0); z>3: 367533 (law 367892.5)  |z|>4: 14445 (4.994e-05, law 5.056e-05, expected 14624.4); z>4: 7189 (law 7312.2)  |z|>5: 111 (3.838e-07, law 3.146e-07, expected 91.0); z>5: 59 (law 45.5)
+c2   pairs 2.892e+08 max|z| 109.85  |z|>3: 735381 (2.542e-03, law 2.544e-03, expected 735785.0); z>3: 367563 (law 367892.5)  |z|>4: 14786 (5.112e-05, law 5.056e-05, expected 14624.4); z>4: 7256 (law 7312.2)  |z|>5: 113 (3.907e-07, law 3.146e-07, expected 91.0); z>5: 59 (law 45.5)
+c2t  pairs 2.892e+08 max|z| 88.19  |z|>3: 734212 (2.538e-03, law 2.544e-03, expected 735785.0); z>3: 367201 (law 367892.5)  |z|>4: 14528 (5.023e-05, law 5.056e-05, expected 14624.4); z>4: 7216 (law 7312.2)  |z|>5: 96 (3.319e-07, law 3.146e-07, expected 91.0); z>5: 35 (law 45.5)
+c4n  pairs 2.892e+08 max|z| 110.54  |z|>3: 731392 (2.529e-03, law 2.544e-03, expected 735785.0); z>3: 364804 (law 367892.5)  |z|>4: 14580 (5.041e-05, law 5.056e-05, expected 14624.4); z>4: 7332 (law 7312.2)  |z|>5: 79 (2.731e-07, law 3.146e-07, expected 91.0); z>5: 39 (law 45.5)
+c4i  pairs 2.892e+08 max|z| 171.53  |z|>3: 732055 (2.531e-03, law 2.544e-03, expected 735785.0); z>3: 366633 (law 367892.5)  |z|>4: 14649 (5.064e-05, law 5.056e-05, expected 14624.4); z>4: 7186 (law 7312.2)  |z|>5: 115 (3.976e-07, law 3.146e-07, expected 91.0); z>5: 59 (law 45.5)

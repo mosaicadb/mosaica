@@ -1,0 +1,10 @@
+[    0s] nytimes-256-angular: N=290000 n=256 K=1024 queries=10000 zero queries=9 zero items=239
+[    1s] mean|r|=0.916 mean|c|=0.759 |r|<1e-6: 751
+[   69s] s2: grid units median 4.000, at lower edge 513, at upper edge 0
+[   69s] s4i: grid units median 2.375, at lower edge 513, at upper edge 0
+[   69s] c1: mean cos 0.7971 mean tan 0.7538 mean sd 0.04324 bad 751
+[   70s] c2: mean cos 0.9378 mean tan 0.3645 mean sd 0.02090 bad 751
+[   70s] c4n: mean cos 0.9885 mean tan 0.1391 mean sd 0.00797 bad 751
+[   71s] c4i: mean cos 0.9929 mean tan 0.1035 mean sd 0.00593 bad 751
+[   71s] c2t: mean cos 0.9251 mean tan 0.4044 mean sd 0.02319 bad 751
+[   71s] done

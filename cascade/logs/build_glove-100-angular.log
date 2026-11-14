@@ -1,0 +1,10 @@
+[    1s] glove-100-angular: N=1183514 n=100 K=4096 queries=10000 zero queries=0 zero items=0
+[    2s] mean|r|=0.769 mean|c|=0.614 |r|<1e-6: 0
+[  115s] s2: grid units median 4.000, at lower edge 0, at upper edge 0
+[  115s] s4i: grid units median 2.500, at lower edge 0, at upper edge 0
+[  115s] c1: mean cos 0.7999 mean tan 0.7504 mean sd 0.05803 bad 0
+[  116s] c2: mean cos 0.9407 mean tan 0.3598 mean sd 0.02782 bad 0
+[  117s] c4n: mean cos 0.9911 mean tan 0.1312 mean sd 0.01015 bad 0
+[  117s] c4i: mean cos 0.9952 mean tan 0.0974 mean sd 0.00753 bad 0
+[  118s] c2t: mean cos 0.9288 mean tan 0.3971 mean sd 0.03070 bad 0
+[  118s] done
