@@ -1,0 +1,15 @@
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 915070125 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filtered: 40 queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts
+VERIFY2 checker: 117380943 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [467627647, 427155601, 410566238, 396533821, 384593344, 365411762, 350246704, 294942055, 186329850, 83551516, 34445934]; decided in/out [653008, 467579, 522389, 566639, 1173281, 1215744, 7392265, 33567149, 44535200, 23400116, 0] / [39819038, 16121784, 13510028, 11373838, 18008301, 13949314, 47912384, 75045056, 58243134, 25705466, 0]
+VERIFY2 item scale against f64: 999000 rows, 0 beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = 4.84e-3; the build's divisor over E|r|^2 per group 1.00000 to 1.00000
+breakdown2 tables levels item 0.0001: per query 144 (cluster, level) tables, 2513 units, 2708.2 survivors per table, 33 tables for at most 8
+breakdown2 counts levels item 0.0001: per query 25.9 clusters on the index path, 5.8 on full vectors, 185275 items entering the first level, 390523 item-levels
+breakdown2 tables levels item 0.01: per query 413 (cluster, level) tables, 9768 units, 4459.7 survivors per table, 48 tables for at most 8
+breakdown2 counts levels item 0.01: per query 55.7 clusters on the index path, 4.7 on full vectors, 589752 items entering the first level, 1843622 item-levels
+breakdown2 tables levels item 0.5: per query 614 (cluster, level) tables, 30756 units, 14078.4 survivors per table, 2 tables for at most 8
+breakdown2 counts levels item 0.5: per query 61.6 clusters on the index path, 0.4 on full vectors, 983798 items entering the first level, 8637772 item-levels
+breakdown2 tables levels text 0.0001: per query 505 (cluster, level) tables, 13445 units, 6187.2 survivors per table, 28 tables for at most 8
+breakdown2 counts levels text 0.0001: per query 62.0 clusters on the index path, 0.0 on full vectors, 815789 items entering the first level, 3125160 item-levels
+breakdown2 tables levels text 0.01: per query 609 (cluster, level) tables, 29221 units, 10457.9 survivors per table, 17 tables for at most 8
+breakdown2 counts levels text 0.01: per query 62.0 clusters on the index path, 0.0 on full vectors, 993730 items entering the first level, 6366742 item-levels
+breakdown2 tables levels text 0.5: per query 620 (cluster, level) tables, 31275 units, 14592.1 survivors per table, 1 tables for at most 8
+breakdown2 counts levels text 0.5: per query 62.0 clusters on the index path, 0.0 on full vectors, 999000 items entering the first level, 9044171 item-levels

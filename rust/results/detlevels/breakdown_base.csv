@@ -1,0 +1,5 @@
+variant,class,answer_frac,threads,wall_ms,prof_wall_ms,cpu_ms_total,anchor,cut,basis,rotations,cluster setup,tables,re-pack,level decode,bounds+decisions,full vectors,candidate init,result bitmap,column order,compaction,level setup,group post,level other,cluster other,merge,query other,unattributed,bytes_read,full_reads,wrong
+levels,item,0.01,1,14.61,22.66,22.50,0.40,2.59,2.51,0.49,1.15,1.59,2.03,2.29,2.20,1.13,1.10,0.21,0.00,1.41,0.52,0.40,1.92,0.31,0.01,0.24,0.16,17.48,6128,0
+levels,item,0.5,1,114.98,153.92,153.65,0.47,3.00,6.20,0.99,3.26,10.98,18.32,27.78,30.58,17.67,4.86,1.04,0.00,6.84,2.06,1.06,16.51,1.09,0.35,0.59,0.27,292.52,90742,0
+levels,text,0.01,1,61.59,87.33,87.18,0.47,2.96,6.10,0.97,3.15,8.29,11.74,13.25,13.81,1.59,4.49,0.23,0.00,5.95,1.79,1.01,10.08,0.77,0.01,0.51,0.15,67.88,7308,0
+levels,text,0.5,1,129.20,175.56,175.40,0.50,3.21,6.66,0.98,3.67,12.28,18.66,32.25,35.63,23.74,5.51,1.03,0.00,7.14,2.26,1.12,18.59,1.22,0.29,0.65,0.16,348.28,115559,0

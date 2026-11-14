@@ -1,0 +1,4 @@
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 789285484 (det violations 0, rand violations 0); largest randomised error 5.34 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filtered: 40 queries x 4 visible se
+VERIFY2 checker: 125217980 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [441519307, 352332934, 316301327, 255999634, 153755719, 63228804, 26310589]; deci
+VERIFY2 item scale against f64: 999000 rows, 0 beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = 1.23e-2; the build's divisor over E|r|^2 per group 1.00000 to 1.00000
+VSTACK_DONE
