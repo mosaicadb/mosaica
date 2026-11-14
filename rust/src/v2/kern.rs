@@ -769,11 +769,122 @@ pub unsafe fn det_spans(gts: &[&GTab], cts: &[CTab], levels: &[LevelPlan], alpha
     (s, m)
 }
 
+/// Lane u of the result: the smallest (MAX: largest) of the 8 lanes of x[u].
+#[inline(always)]
+unsafe fn reduce8<const MAX: bool>(x: &[__m256; 8]) -> __m256 {
+    let f = |a: __m256, b: __m256| if MAX { _mm256_max_ps(a, b) } else { _mm256_min_ps(a, b) };
+    let t01 = f(_mm256_unpacklo_ps(x[0], x[1]), _mm256_unpackhi_ps(x[0], x[1]));
+    let t23 = f(_mm256_unpacklo_ps(x[2], x[3]), _mm256_unpackhi_ps(x[2], x[3]));
+    let t45 = f(_mm256_unpacklo_ps(x[4], x[5]), _mm256_unpackhi_ps(x[4], x[5]));
+    let t67 = f(_mm256_unpacklo_ps(x[6], x[7]), _mm256_unpackhi_ps(x[6], x[7]));
+    let u03 = f(_mm256_shuffle_ps::<0x44>(t01, t23), _mm256_shuffle_ps::<0xee>(t01, t23));
+    let u47 = f(_mm256_shuffle_ps::<0x44>(t45, t67), _mm256_shuffle_ps::<0xee>(t45, t67));
+    f(_mm256_permute2f128_ps::<0x20>(u03, u47), _mm256_permute2f128_ps::<0x31>(u03, u47))
+}
+
+/// The cluster's level tables from the group's f32 tables and the centre's stored ones, with `step` (the integer
+/// deterministic levels) or a step per part. Writes the same LevelLut as build_lut. Each unit is shifted by mu_u, the
+/// smallest of its computed values, so its entries run from 0. The units' extremes are reduced eight at a time; the
+/// tables equal combine_lut_unitwise's.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step: Option<f32>, out: &mut LevelLut) {
+    out.qsum = 0.0;
+    out.parts.clear();
+    out.hi.clear();
+    out.lo.clear();
+    out.hi.resize(lp.units * 16, 0);
+    out.lo.resize(lp.units * 16, 0);
+    let mut g0 = 0;
+    let mut u0 = 0;
+    // the units' extremes, eight at a time (on the stack unless a part is long)
+    let maxu = lp.parts.iter().map(|p| p.units()).max().unwrap_or(0) + 8;
+    let (mut ls, mut hs) = ([0f32; 136], [0f32; 136]);
+    let (mut lv, mut hv) = (Vec::new(), Vec::new());
+    let (los, his): (&mut [f32], &mut [f32]) = if maxu <= 136 {
+        (&mut ls, &mut hs)
+    } else {
+        lv.resize(maxu, 0f32);
+        hv.resize(maxu, 0f32);
+        (&mut lv, &mut hv)
+    };
+    for (p, part) in lp.parts.iter().enumerate() {
+        let nu = part.units();
+        let sm = ct.step[p];
+        let am = _mm256_set1_ps(alpha * sm);
+        let mut rmaxv = _mm256_setzero_ps();
+        let mut k0 = 0;
+        while k0 < nu {
+            let mut mn = [_mm256_setzero_ps(); 8];
+            let mut mx = [_mm256_setzero_ps(); 8];
+            for i in 0..8 {
+                // past the part's units, repeat its last one
+                let u = u0 + (k0 + i).min(nu - 1);
+                let tq = gt.t.get_unchecked(u).as_ptr();
+                let tm = _mm256_loadu_si256(ct.th.get_unchecked(u).as_ptr() as *const _);
+                let m0 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(tm)));
+                let m1 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(tm)));
+                let v0 = _mm256_fnmadd_ps(m0, am, _mm256_loadu_ps(tq));
+                let v1 = _mm256_fnmadd_ps(m1, am, _mm256_loadu_ps(tq.add(8)));
+                mn[i] = _mm256_min_ps(v0, v1);
+                mx[i] = _mm256_max_ps(v0, v1);
+            }
+            let lo = reduce8::<false>(&mn);
+            let hi = reduce8::<true>(&mx);
+            _mm256_storeu_ps(los.as_mut_ptr().add(k0), lo);
+            _mm256_storeu_ps(his.as_mut_ptr().add(k0), hi);
+            rmaxv = _mm256_max_ps(rmaxv, _mm256_sub_ps(hi, lo));
+            k0 += 8;
+        }
+        let rmax = reduce8::<true>(&[rmaxv; 8]);
+        let rmax = _mm_cvtss_f32(_mm256_castps256_ps128(rmax));
+        let sc = match step {
+            Some(s) => s,
+            None => (rmax / 65533.0).max(1e-30),
+        };
+        let inv = 1.0 / sc;
+        let a = _mm256_set1_ps(inv);
+        let (mut off, mut ey) = (0f64, 0f64);
+        let asm = (alpha as f64 * sm as f64).abs();
+        for k in 0..nu {
+            let u = u0 + k;
+            let tq = gt.t.get_unchecked(u).as_ptr();
+            let tm = _mm256_loadu_si256(ct.th.get_unchecked(u).as_ptr() as *const _);
+            let m0 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(tm)));
+            let m1 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(tm)));
+            let v0 = _mm256_fnmadd_ps(m0, am, _mm256_loadu_ps(tq));
+            let v1 = _mm256_fnmadd_ps(m1, am, _mm256_loadu_ps(tq.add(8)));
+            let (lo, hi) = (*los.get_unchecked(k), *his.get_unchecked(k));
+            off += lo as f64;
+            if step.is_some() {
+                out.qsum += ((hi - lo) as f64 / sc as f64 * (1.0 + 1e-6)).ceil() + 1.0;
+            }
+            // f32 error of v (the product alpha sigma_m theta^m and the fused subtraction) and of (v - mu) / sc, in steps
+            let mag = (gt.tmin[u].abs().max(gt.tmax[u].abs()) as f64 + asm * ct.tmax[u] as f64 + (lo.abs().max(hi.abs())) as f64) / sc as f64;
+            ey += 4.0 * U32 * mag + 3.0 * U32 * 65536.0;
+            let mu = _mm256_set1_ps(lo);
+            let y0 = _mm256_mul_ps(_mm256_sub_ps(v0, mu), a);
+            let y1 = _mm256_mul_ps(_mm256_sub_ps(v1, mu), a);
+            // to u16 (saturating; the step keeps every value within 0..65535), then high and low bytes
+            let v = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi32(_mm256_cvtps_epi32(y0), _mm256_cvtps_epi32(y1)));
+            let hl = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi16(_mm256_srli_epi16::<8>(v), _mm256_and_si256(v, _mm256_set1_epi16(255))));
+            let gl = (g0 + k / 4) * 64 + (k % 4) * 16;
+            _mm_storeu_si128(out.hi.as_mut_ptr().add(gl) as *mut _, _mm256_castsi256_si128(hl));
+            _mm_storeu_si128(out.lo.as_mut_ptr().add(gl) as *mut _, _mm256_extracti128_si256::<1>(hl));
+        }
+        off -= alpha as f64 * ct.off[p];
+        let err = gt.err[p] + (alpha as f64).abs() * ct.err[p] + sc as f64 * (nu as f64 * 0.5 * (1.0 + 1e-6) + ey) + 4.0 * U32 * off.abs() + 1e-30;
+        out.parts.push(PartLut { j: part.j, g0, groups: nu / 4, off: off as f32, scale: sc, err: err as f32 });
+        g0 += nu / 4;
+        u0 += nu;
+    }
+}
+
+/// combine_lut one unit at a time (each unit's extremes by its own horizontal reduction); kept as its reference.
 /// The cluster's level tables from the group's f32 tables and the centre's stored ones, with `step` (the integer
 /// deterministic levels) or a step per part. Writes the same LevelLut as build_lut. Each unit is shifted by mu_u, the
 /// smallest of its computed values, so its entries run from 0.
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step: Option<f32>, out: &mut LevelLut) {
+pub unsafe fn combine_lut_unitwise(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step: Option<f32>, out: &mut LevelLut) {
     out.qsum = 0.0;
     out.parts.clear();
     out.hi.clear();
@@ -1027,6 +1138,12 @@ mod tests {
             for step in [None, Some((rmax / 60000.0 * (1.0 + rnd())) as f32)] {
                 let mut lut = LevelLut::default();
                 unsafe { combine_lut(&gt, &ct, &lp, alpha, step, &mut lut) };
+                let mut lr = LevelLut::default();
+                unsafe { combine_lut_unitwise(&gt, &ct, &lp, alpha, step, &mut lr) };
+                assert!(lut.hi == lr.hi && lut.lo == lr.lo && lut.qsum == lr.qsum);
+                for (a, b) in lut.parts.iter().zip(&lr.parts) {
+                    assert!(a.off == b.off && a.scale == b.scale && a.err == b.err && a.g0 == b.g0);
+                }
                 for _ in 0..20 {
                     let codes: Vec<u8> = (0..units).map(|_| (rnd() * 16.0) as u8 & 15).collect();
                     for (pl, part) in lut.parts.iter().zip(&lp.parts) {
@@ -1052,7 +1169,7 @@ mod tests {
     #[test]
     fn compress_keeps_order() {
         let v: Vec<i32> = (0..16).map(|i| 100 + i).collect();
-        for m in [0u16, 1, 0x8000, 0xffff, 0x5a5a, 0x00f0, 0x0f0f] {
+        for m in 0..=u16::MAX {
             let mut out = [0i32; 16];
             unsafe {
                 let x = _mm512_loadu_si512(v.as_ptr() as *const _);

@@ -482,6 +482,12 @@ pub fn cluster_q2(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64) -> CQ2 
 
 /// alpha0: no multiple of the centre is taken out of the query, so every cluster of a group shares its tables.
 pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0: bool) -> CQ2 {
+    cluster_q2w(ix, ci, gq, pr, qm, alpha0, true)
+}
+
+/// As cluster_q2a; without `want_w` the combined weights w are left empty (tables combined from the group's and the
+/// centre's, `gtab`, never read them).
+pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0: bool, want_w: bool) -> CQ2 {
     let c = &ix.cl[ci];
     let n = ix.n();
     let gp = &ix.groups[c.g];
@@ -505,9 +511,11 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
         nd[j] = ((v.max(0.0) + 1e-12 * gq.a2[j]).sqrt() * (1.0 + 1e-7)) as f32;
     }
     let al = alr;
-    let mut w = Vec::with_capacity(2 * n);
-    w.extend(gq.wq[..n].iter().zip(&c.mv32).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
-    w.extend(gq.wq[n..].iter().zip(&c.wmr).map(|(&q, &m)| q - al * m));
+    let mut w = Vec::with_capacity(if want_w { 2 * n } else { 0 });
+    if want_w {
+        w.extend(gq.wq[..n].iter().zip(&c.mv32).zip(&gp.sig).map(|((&q, &m), &sg)| q - al * (m * sg)));
+        w.extend(gq.wq[n..].iter().zip(&c.wmr).map(|(&q, &m)| q - al * m));
+    }
     let mut ewj = [0f32; J];
     for j in 0..J {
         ewj[j] = (4.0 * U * (gq.l1j[j] + a.abs() * c.l1m[1 + j] as f64) + 1e-30) as f32;
@@ -846,8 +854,17 @@ pub struct State {
     pub stmp: Vec<u8>,
     pub colq: super::col::ColQ,
     pub cslots: Vec<super::col::ColSlot>,
+    pub luts: Vec<LevelLut>, // tables of finished clusters, their storage reused by the next
 }
 impl State {
+    /// A table to build into (storage of an earlier one when there is one).
+    pub fn lut(&mut self) -> LevelLut {
+        self.luts.pop().unwrap_or_default()
+    }
+    /// Keep a finished cluster's tables for reuse.
+    pub fn recycle(&mut self, cq: &mut CQ2) {
+        self.luts.extend(cq.luts.iter_mut().filter_map(|x| x.take()));
+    }
     /// Room for `cap` candidates; accumulators zeroed, lanes past the candidates empty. Everything else is written
     /// before it is read.
     pub fn reset(&mut self, cap: usize) {
@@ -1118,7 +1135,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 st.cyc[C_UNITS] += lp.units as u64;
                 st.cyc[C_TSURV] += live as u64;
                 st.cyc[C_TSMALL] += (live <= 8) as u64;
-                let mut lut = LevelLut::default();
+                let mut lut = sv.lut();
                 let step = if intm && l < NDL { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
                     let gt = gq.gtab[l].get_or_init(|| group_tab(&gq.wq, lp, &ix.etab));
@@ -2317,8 +2334,9 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.idx_clusters += 1;
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
-                            let mut cq = cluster_q2a(ix, ci, gq, pr, qm, pl.alpha0);
-                            cq.gtab = pl.gtab && !pl.alpha0;
+                            let gt = pl.gtab && !pl.alpha0;
+                            let mut cq = cluster_q2w(ix, ci, gq, pr, qm, pl.alpha0, !gt);
+                            cq.gtab = gt;
                             cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
@@ -2332,6 +2350,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             } else {
                                 unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
                             }
+                            sv.recycle(&mut cq);
                             acc.iv.extend(ivv);
                         } else {
                             acc.flat_clusters += 1;

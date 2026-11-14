@@ -215,13 +215,18 @@ mod emu {
         let keep = _mm256_cmpgt_epi32(_mm256_set1_epi32(m.count_ones() as i32), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
         _mm256_and_si256(v, keep)
     }
+    /// In registers: the high half's kept lanes rotated up by the low half's count and blended in (a round trip through
+    /// memory at an offset stalls on store forwarding).
     #[inline(always)]
     pub unsafe fn _mm512_maskz_compress_epi32(m: u16, a: __m512i) -> __m512i {
         let (lo, hi) = (m as u32 & 255, m as u32 >> 8);
-        let mut buf = [0i32; 24];
-        _mm256_storeu_si256(buf.as_mut_ptr() as *mut _, compress8(a.0, lo));
-        _mm256_storeu_si256(buf.as_mut_ptr().add(lo.count_ones() as usize) as *mut _, compress8(a.1, hi));
-        _mm512_loadu_si512(buf.as_ptr() as *const _)
+        let (x, y) = (compress8(a.0, lo), compress8(a.1, hi));
+        let c = _mm256_set1_epi32(lo.count_ones() as i32);
+        let i = _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7);
+        let below = _mm256_cmpgt_epi32(c, i); // lanes i < c
+        let r = _mm256_and_si256(_mm256_sub_epi32(i, c), _mm256_set1_epi32(7));
+        let y0 = _mm256_permutevar8x32_epi32(y, r); // lane i: y[i - c] (mod 8)
+        __m512i(_mm256_blendv_epi8(y0, x, below), _mm256_and_si256(y0, below))
     }
     #[inline(always)]
     pub unsafe fn _mm512_maskz_compress_ps(m: u16, a: __m512) -> __m512 {
