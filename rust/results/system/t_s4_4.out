@@ -1,0 +1,37 @@
+==== run at 1794679158: ["/home/joe/code/vexact-const-target/bin/s4", "--v2", "--int", "--no-approx", "--plan-file", "./../bounds/plan_fixed.txt", "--index", "/home/joe/code/vexact-const-data/c1m_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-text/text_q.npy", "--item-queries", "/home/joe/code/vexact-combined-data/c1m/item_q.npy", "--results", "/home/joe/code/vexact-const-target/res/t_s4_4", "--gtab", "--flags", "repack", "--pin", "7", "--threads", "1", "e2e", "--nq", "20", "--runs", "3", "--knn", "0", "--sizes", "0.0001,0.001,0.01,0.1,0.5,0.75"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 999000 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 9.2s (sub-Gaussian c = 8.482): [([95], 6.931, ExactTail), ([95, 127, 255], 7.963, Certificate), ([95, 127, 255, 287], 7.963, Certificate)]
+[build2] plans 18.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 91.2s
+[build2] encoded 201.2s
+[build2] assembled 202.4s; x2 bound 4.872e-4; escapes: det norms 1926, |y| 5508, kappa 10460, tan 23499
+[repack] occupancy thresholds by level [0.07, 0.06, 0.06, 0.06, 0.09, 0.09, 0.06, 0.1, 0.14, 0.17] (timed in 0.1s)
+[plan] full_us=0.11040814392237165 item_us0=0.007823806152788612 item_us1=0.03129522461115445 cl_us0=1.5647612305577223 cl_us1=7.823806152788611 grp_us=54.76664306952028 scan_us=0.08934893336859816 cut_us=1.3116749874874873 seed_us=591.2440624999999 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":123.8351462222359,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-const-data/c1m_r4/profile.npy) 999000 rows, 999 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.3]
+e2e2 bytes a item 0.0001: bytes/item 2.901, touched 0.0353, full reads/item 0.00108
+e2e2 bytes a item 0.001: bytes/item 5.759, touched 0.0566, full reads/item 0.00235
+e2e2 bytes a item 0.01: bytes/item 18.618, touched 0.2180, full reads/item 0.00707
+e2e2 bytes a item 0.1: bytes/item 133.246, touched 0.9795, full reads/item 0.02848
+e2e2 bytes a item 0.5: bytes/item 276.181, touched 0.9765, full reads/item 0.08428
+e2e2 bytes a item 0.75: bytes/item 238.861, touched 0.9670, full reads/item 0.06824
+e2e2 a,item,1,index2_thr,0.0001,2.563,2.406,2.737,20,3,2.901,0.0353,0.00108,0.03435;0.02479;0.02022;0.01724;0.01480;0.01164;0.00934;0.00414;0.00071;0.00022;0.00009
+e2e2 a,item,1,index2_thr,0.001,3.737,3.162,4.057,20,3,5.759,0.0566,0.00235,0.05475;0.03753;0.02913;0.02438;0.02099;0.01690;0.01415;0.00818;0.00284;0.00114;0.00046
+e2e2 a,item,1,index2_thr,0.01,8.025,7.538,8.074,20,3,18.618,0.2180,0.00707,0.21239;0.15039;0.11741;0.09706;0.08184;0.06214;0.05006;0.02535;0.00918;0.00379;0.00146
+e2e2 a,item,1,index2_thr,0.1,53.802,48.987,53.832,20,3,133.246,0.9795,0.02848,0.97709;0.92297;0.88450;0.84816;0.81256;0.74599;0.68526;0.46252;0.17915;0.06568;0.02611
+e2e2 a,item,1,index2_thr,0.5,72.252,70.065,73.937,20,3,276.181,0.9765,0.08428,0.97422;0.96773;0.96073;0.95285;0.94396;0.92561;0.90564;0.79276;0.46697;0.20260;0.08195
+e2e2 a,item,1,index2_thr,0.75,69.825,66.116,70.729,20,3,238.861,0.9670,0.06824,0.96469;0.95186;0.94191;0.93142;0.92019;0.89594;0.86971;0.73444;0.39954;0.16464;0.06594
+e2e2 bytes a text 0.0001: bytes/item 20.642, touched 0.6170, full reads/item 0.00545
+e2e2 bytes a text 0.001: bytes/item 26.109, touched 0.7377, full reads/item 0.00402
+e2e2 bytes a text 0.01: bytes/item 67.049, touched 0.9540, full reads/item 0.00776
+e2e2 bytes a text 0.1: bytes/item 184.525, touched 0.9995, full reads/item 0.04799
+e2e2 bytes a text 0.5: bytes/item 322.750, touched 0.9997, full reads/item 0.10381
+e2e2 bytes a text 0.75: bytes/item 282.247, touched 0.9994, full reads/item 0.08494
+e2e2 a,text,1,index2_thr,0.0001,19.877,18.264,20.619,20,3,20.642,0.6170,0.00545,0.61164;0.35327;0.25883;0.19580;0.15058;0.09385;0.06240;0.01439;0.00170;0.00038;0.00014
+e2e2 a,text,1,index2_thr,0.001,23.408,22.153,24.205,20,3,26.109,0.7377,0.00402,0.73430;0.49057;0.39030;0.31739;0.26135;0.18325;0.13303;0.03790;0.00525;0.00169;0.00067
+e2e2 a,text,1,index2_thr,0.01,38.156,37.807,40.280,20,3,67.049,0.9540,0.00776,0.95217;0.80558;0.74067;0.68336;0.63059;0.53950;0.46497;0.24440;0.05459;0.01565;0.00593
+e2e2 a,text,1,index2_thr,0.1,60.602,56.637,61.159,20,3,184.525,0.9995,0.04799,0.99606;0.95984;0.93275;0.90581;0.87918;0.82916;0.78236;0.59605;0.27520;0.10888;0.04453
+e2e2 a,text,1,index2_thr,0.5,80.268,79.493,80.774,20,3,322.750,0.9997,0.10381,0.99618;0.99578;0.99459;0.99257;0.98961;0.98135;0.96995;0.88743;0.54711;0.24065;0.10034
+e2e2 a,text,1,index2_thr,0.75,76.006,74.865,79.188,20,3,282.247,0.9994,0.08494,0.99589;0.99422;0.99197;0.98858;0.98420;0.97230;0.95643;0.84738;0.47364;0.19844;0.08147

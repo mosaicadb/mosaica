@@ -1,0 +1,24 @@
+==== run at 1794669688: ["/home/joe/code/vexact-bounds-target/bin/p2c", "--v2", "--int", "--no-approx", "--plan-file", "/home/joe/code/vexact-bounds/rust/results/bounds/plan_fixed.txt", "--index", "/home/joe/code/vexact-rand-data/c1m_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-text/text_q.npy", "--item-queries", "/home/joe/code/vexact-combined-data/c1m/item_q.npy", "--results", "/home/joe/code/vexact-bounds-target/res/bd_p2c", "--gtab", "--flags", "repack", "--pin", "10", "--threads", "1", "breakdown", "--nq", "20", "--bfracs", "0.01,0.5"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.1s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 14.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 63.5s
+[build2] encoded 145.8s
+[build2] assembled 146.8s; x2 bound 4.872e-4; escapes: det norms 1926, |y| 5508, kappa 10460, tan 23499
+[repack] occupancy thresholds by level [0.08, 0.08, 0.08, 0.07, 0.1, 0.1, 0.07, 0.12, 0.15, 0.19] (timed in 0.1s)
+[plan] full_us=0.11040814392237165 item_us0=0.007823806152788612 item_us1=0.03129522461115445 cl_us0=1.5647612305577223 cl_us1=7.823806152788611 grp_us=54.76664306952028 scan_us=0.08934893336859816 cut_us=1.3116749874874873 seed_us=591.2440624999999 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":123.8351462222359,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-rand-data/c1m_r4/profile.npy) 999000 rows, 999 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.3]
+breakdown2 levels,item,0.01,1,7.70,12.79,12.73,0.25,1.80,1.07,0.40,0.79,0.86,0.86,1.24,1.19,0.86,0.66,0.13,0.00,0.80,0.41,0.24,0.84,0.13,0.00,0.18,0.05,19.13,7272,0
+breakdown2 rand levels item 0.01: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) 0.58 ms
+breakdown2 tables levels item 0.01: per query 2543 (cluster, level) tables, 60429 units, 319.1 survivors per table, 444 tables for at most 8
+breakdown2 levels,item,0.5,1,75.75,87.69,87.61,0.28,1.89,3.00,0.82,2.26,6.11,4.68,18.23,21.23,10.90,3.03,0.58,0.00,4.46,1.45,0.67,6.73,0.55,0.31,0.42,0.08,301.07,96248,0
+breakdown2 rand levels item 0.5: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) 10.78 ms
+breakdown2 tables levels item 0.5: per query 9566 (cluster, level) tables, 476660 units, 853.7 survivors per table, 78 tables for at most 8
+breakdown2 levels,text,0.01,1,40.06,47.97,47.90,0.26,1.89,2.98,0.85,2.24,4.84,4.30,7.36,8.23,1.11,2.79,0.16,0.00,3.67,1.40,0.66,4.39,0.40,0.01,0.37,0.07,69.94,8668,0
+breakdown2 rand levels text 0.01: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) 4.20 ms
+breakdown2 tables levels text 0.01: per query 8997 (cluster, level) tables, 358084 units, 572.4 survivors per table, 684 tables for at most 8
+breakdown2 levels,text,0.5,1,79.77,93.34,93.28,0.26,1.82,2.88,0.82,2.27,6.29,4.52,19.55,22.66,13.54,3.08,0.57,0.00,4.38,1.48,0.63,7.27,0.58,0.23,0.44,0.06,352.56,118505,0
+breakdown2 rand levels text 0.5: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) 11.61 ms
+breakdown2 tables levels text 0.5: per query 9768 (cluster, level) tables, 492053 units, 888.3 survivors per table, 39 tables for at most 8
