@@ -40,9 +40,9 @@ for r in csv.DictReader(open(f"{res}/capped/faiss.csv")):
         add("ivf", r["vis"], int(r["share_index"]), float(r["median_ms"]), float(r["recall"]))
 
 SERIES = [  # (key, name, colour, style, width, alpha)
-    ("index", "LIMINAL index, capped", "#2a78d6", "-", 2.8, 1),
-    ("uncapped", "LIMINAL index, uncapped", "#2a78d6", (0, (4, 3)), 1.2, 1),
-    ("r384", "LIMINAL index, five levels, capped", "#1baf7a", "-", 1.8, 1),
+    ("index", "LIMINAL, capped", "#2a78d6", "-", 2.8, 1),
+    ("uncapped", "LIMINAL, uncapped", "#2a78d6", (0, (4, 3)), 1.2, 1),
+    ("r384", "LIMINAL, five levels, capped", "#1baf7a", "-", 1.8, 1),
     ("flat", "LIMINAL f16 scan, capped", "#2a78d6", "-", 1.8, 0.55),
     ("ch", "ClickHouse bf16, capped", "#008300", "-", 1.8, 1),
     ("ivf", "faiss IVF-SQfp16 on disk, capped (partial)", "#eda100", (0, (5, 3)), 1.8, 1),
