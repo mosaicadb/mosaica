@@ -12,55 +12,31 @@ pub static WILLNEED: AtomicBool = AtomicBool::new(false);
 /// The stored f16 vectors in index row order: in memory (the build's copy) or a mapped file.
 pub enum Rows {
     Mem(Vec<u16>),
-    // rfd: read with pread, no readahead; rows lie `per` to a block of `block` bytes (1 and the row size when packed)
-    Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File, per: usize, block: usize },
+    // rfd: read with pread, no readahead; dfd: the same file opened with O_DIRECT
+    Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File },
 }
 
 impl Rows {
-    /// Byte offset of row `r` (rows of `rb` bytes).
-    #[inline(always)]
-    pub fn off(&self, r: usize, rb: usize) -> usize {
-        match self {
-            Rows::Map { per, block, .. } => r / per * block + r % per * rb,
-            Rows::Mem(_) => r * rb,
-        }
-    }
-
     /// Row `r`'s stored vector (rows of `n` f16).
     #[inline(always)]
     pub fn row(&self, r: usize, n: usize) -> &[u16] {
         match self {
             Rows::Mem(v) => &v[r * n..(r + 1) * n],
             Rows::Map { map, .. } => {
-                let o = self.off(r, 2 * n);
+                let o = r * 2 * n;
                 assert!(o + 2 * n <= map.len());
                 unsafe { std::slice::from_raw_parts(map.as_ptr().add(o) as *const u16, n) }
             }
         }
     }
 
-    /// Writes the in-memory rows (of `n` f16) to `path`, syncs, drops the copy and maps the file with `advice` (normal,
-    /// random or sequential). With `pad`, no row straddles a 4 KiB page: rows are padded to whole pages when larger
-    /// than one, else as many as fit go in each page.
-    pub fn to_file(&mut self, path: &str, advice: &str, n: usize, pad: bool) {
-        let rb = 2 * n;
-        let (per, block) = match pad {
-            false => (1, rb),
-            true if rb <= 4096 => (4096 / rb, 4096),
-            true => (1, rb.div_ceil(4096) * 4096),
-        };
+    /// Writes the in-memory rows to `path`, syncs, drops the copy and maps the file with `advice` (normal, random or
+    /// sequential).
+    pub fn to_file(&mut self, path: &str, advice: &str) {
         if let Rows::Mem(v) = self {
             let bytes = unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2) };
             let mut f = std::io::BufWriter::with_capacity(64 << 20, std::fs::File::create(path).unwrap_or_else(|e| panic!("{path}: {e}")));
-            if per * rb == block {
-                f.write_all(bytes).unwrap();
-            } else {
-                let zero = vec![0u8; block - per * rb];
-                for ch in bytes.chunks(per * rb) {
-                    f.write_all(ch).unwrap();
-                    f.write_all(&zero).unwrap();
-                }
-            }
+            f.write_all(bytes).unwrap();
             let f = f.into_inner().unwrap();
             // whole pages, so that O_DIRECT reads of the last rows are not short
             let len = f.metadata().unwrap().len();
@@ -84,7 +60,7 @@ impl Rows {
             libc::posix_fadvise(rfd.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
         }
         let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).unwrap();
-        *self = Rows::Map { map, file, rfd, dfd, per, block };
+        *self = Rows::Map { map, file, rfd, dfd };
         self.evict();
     }
 
@@ -119,7 +95,7 @@ impl Rows {
             // would then cost more than the reads it starts (10k rows: 14 ms against 1 ms)
             let k = rows.len().min(8);
             if k > 0 && (0..k).all(|j| {
-                let o = self.off(rows[j * rows.len() / k] as usize, rb);
+                let o = rows[j * rows.len() / k] as usize * rb;
                 let p0 = (base + o) & !4095;
                 let mut v = [0u8; 2];
                 unsafe { libc::mincore(p0 as *mut libc::c_void, base + o + rb - p0, v.as_mut_ptr()) == 0 && v[0] & 1 == 1 }
@@ -129,11 +105,11 @@ impl Rows {
             let mut i = 0;
             // adjacent rows coalesce into one range
             while i < rows.len() {
-                let a = self.off(rows[i] as usize, rb);
+                let a = rows[i] as usize * rb;
                 let mut b = a + rb;
                 let mut j = i + 1;
-                while j < rows.len() && self.off(rows[j] as usize, rb) <= b + 4096 && self.off(rows[j] as usize, rb) >= a {
-                    b = b.max(self.off(rows[j] as usize, rb) + rb);
+                while j < rows.len() && rows[j] as usize * rb <= b + 4096 && rows[j] as usize * rb >= a {
+                    b = b.max(rows[j] as usize * rb + rb);
                     j += 1;
                 }
                 let p0 = (base + a) & !4095;
@@ -263,7 +239,6 @@ pub struct Reader<T> {
     dfd: i32, // the file opened with O_DIRECT
     dmin: usize,
     rb: usize,
-    lay: (usize, usize), // rows per block, block bytes
     gap: usize,
     q: std::collections::VecDeque<Batch<T>>,
     seq0: u64,          // sequence number of q[0]
@@ -281,12 +256,12 @@ impl<T> Reader<T> {
     /// A reader of `rows` (rows of `n` f16) merging rows `gap` bytes apart, on this thread's ring; None in memory or
     /// without `--full-read uring`.
     pub fn new(rows: &Rows, n: usize, gap: usize) -> Option<Reader<T>> {
-        let Rows::Map { rfd, dfd, per, block, .. } = rows else { return None };
+        let Rows::Map { rfd, dfd, .. } = rows else { return None };
         if !URING.load(Ordering::Relaxed) {
             return None;
         }
         let (ring, free) = THREAD_RING.with(|r| r.borrow_mut().take()).unwrap_or_else(|| (io_uring::IoUring::new(RING).expect("io_uring"), Vec::new()));
-        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: DIRECT_MIN.load(Ordering::Relaxed), rb: 2 * n, lay: (*per, *block), gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: QD.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
+        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: DIRECT_MIN.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: QD.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
     }
 
     /// Whether the caller should take a batch before pushing another: reads are waiting for a free slot, or the
@@ -304,13 +279,12 @@ impl<T> Reader<T> {
     pub fn push(&mut self, tag: T, mut rows: Vec<u32>) {
         rows.sort_unstable();
         let rb = self.rb as u64;
-        let (per, block) = self.lay;
         // extents [start, end) of rows merged across gaps, and each row's extent
         let mut sp: Vec<(u64, u64)> = Vec::new();
         let mut at: Vec<u32> = Vec::with_capacity(rows.len());
         let mut rx: Vec<u32> = Vec::with_capacity(rows.len());
         for &r in &rows {
-            let s = (r as usize / per * block + r as usize % per * rb as usize) as u64;
+            let s = r as u64 * rb;
             match sp.last_mut() {
                 Some(e) if s <= e.1 + self.gap as u64 && s + rb - e.0 <= PIECE as u64 => e.1 = s + rb,
                 _ => sp.push((s, s + rb)),
@@ -331,7 +305,7 @@ impl<T> Reader<T> {
         }
         for k in 0..rows.len() {
             let x = &ext[rx[k] as usize];
-            let s = (rows[k] as usize / per * block + rows[k] as usize % per * rb as usize) as u64;
+            let s = rows[k] as u64 * rb;
             at[k] = x.2 + (s - x.0) as u32;
         }
         // the smallest free buffer that holds the batch, else the largest, grown

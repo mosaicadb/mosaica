@@ -273,9 +273,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
         let t = Timer::new();
-        let n_full = ix.n();
         if let Full2::Real { rows, .. } = &mut ix.full {
-            rows.to_file(&ff, &arg_str("--full-advice", "random"), n_full, args().iter().any(|a| a == "--full-pad"));
+            rows.to_file(&ff, &arg_str("--full-advice", "random"));
         }
         crate::v2::disk::WILLNEED.store(args().iter().any(|a| a == "--willneed"), std::sync::atomic::Ordering::Relaxed);
         // `--full-read uring` (the default) reads the rows the index path leaves with pread through io_uring; `mmap`
@@ -292,6 +291,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
+    // full vectors read through the reader: the planner counts their reads
+    let plan = Plan { disk: !ff.is_empty() && crate::v2::disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..plan };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
@@ -1219,9 +1220,9 @@ pub fn dbcmp(c: &Ctx2) {
             out!("[cap] full vectors resident after eviction: {:.1} MiB", r.resident() as f64 / (1 << 20) as f64);
         }
     }
-    // full vectors read through the reader: the planner counts their reads (`:plan=mem` in a read mode: not), with the
-    // disk constants timed here under the cap (`--no-calib-disk`: as in the plan)
-    let mut plan0 = Plan { disk: on_file && disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..c.plan };
+    // with full vectors read through the reader, the planner's disk constants are timed here under the cap
+    // (`--no-calib-disk`: as in the plan; `:plan=mem` in a read mode: reads not counted)
+    let mut plan0 = c.plan;
     if plan0.disk && !args().iter().any(|a| a == "--no-calib-disk") {
         let t = Timer::new();
         plan0 = Plan::calibrate_disk(ix, plan0);
@@ -1245,7 +1246,10 @@ pub fn dbcmp(c: &Ctx2) {
             for kv in mode.split(':') {
                 match kv.split_once('=') {
                     None if kv == "mmap" => plan.disk = false,
-                    None if kv == "uring" => disk::URING.store(true, std::sync::atomic::Ordering::Relaxed),
+                    None if kv == "uring" => {
+                        disk::URING.store(true, std::sync::atomic::Ordering::Relaxed);
+                        plan.disk = true;
+                    }
                     Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
                     Some(("direct", v)) => disk::DIRECT_MIN.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
                     Some(("plan", "disk")) => plan.disk = true,
