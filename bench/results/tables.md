@@ -4,57 +4,59 @@ Exact (all test queries, one thread):
 
 | Method | Filter | QPS | Mean ms | Recall@10 | Sets differing from brute force | Score lists differing |
 |---|---|---|---|---|---|---|
-| ours exact | all | 29.9 | 33.49 | 1.0000 | 0 | 0 |
-| ours flat | all | 75.5 | 13.25 | 1.0000 | 0 | 0 |
-| ours exact | vis_0.001 | 2,442.5 | 0.41 | 1.0000 | 0 | 0 |
-| ours flat | vis_0.001 | 30,916.5 | 0.03 | 1.0000 | 0 | 0 |
-| ours exact | vis_0.01 | 1,354.8 | 0.74 | 1.0000 | 0 | 0 |
-| ours flat | vis_0.01 | 4,504.5 | 0.22 | 1.0000 | 0 | 0 |
-| ours exact | vis_0.1 | 173.4 | 5.77 | 1.0000 | 0 | 0 |
-| ours flat | vis_0.1 | 210.9 | 4.74 | 1.0000 | 0 | 0 |
-| ours exact | vis_0.5 | 49.7 | 20.13 | 1.0000 | 0 | 0 |
-| ours flat | vis_0.5 | 50.0 | 19.98 | 1.0000 | 0 | 0 |
+| ours exact | all | 68.3 | 14.64 | 1.0000 | 0 | 0 |
+| ours flat | all | 88.0 | 11.36 | 1.0000 | 0 | 0 |
+| ours exact | vis_0.001 | 31,882.3 | 0.03 | 1.0000 | 0 | 0 |
+| ours flat | vis_0.001 | 32,164.3 | 0.03 | 1.0000 | 0 | 0 |
+| ours exact | vis_0.01 | 4,519.7 | 0.22 | 1.0000 | 0 | 0 |
+| ours flat | vis_0.01 | 4,554.7 | 0.22 | 1.0000 | 0 | 0 |
+| ours exact | vis_0.1 | 218.9 | 4.57 | 1.0000 | 0 | 0 |
+| ours flat | vis_0.1 | 252.4 | 3.96 | 1.0000 | 0 | 0 |
+| ours exact | vis_0.5 | 59.1 | 16.91 | 1.0000 | 0 | 0 |
+| ours flat | vis_0.5 | 60.2 | 16.61 | 1.0000 | 0 | 0 |
 
 Best QPS at recall@10 at least the target, filter `all` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 2,668 (0.908; M-48 ef=80) | 1,501 (0.956; M-96 ef=120) | 605 (0.991; M-64 ef=400) | 280 (0.998; M-96 ef=800) |
-| faiss-ivfpqfs | 4,642 (0.908; nlist-1204 nprobe=100 k_reorder=10) | 2,696 (0.952; nlist-512 nprobe=50 k_reorder=100) | 1,145 (0.995; nlist-512 nprobe=200 k_reorder=100) | 485 (0.996; nlist-512 nprobe=200 k_reorder=1000) |
-| hnswlib | 3,004 (0.904; M-48 ef=80) | 1,536 (0.957; M-96 ef=120) | 611 (0.991; M-64 ef=400) | 268 (0.999; M-96 ef=800) |
-| ours approx | 232 (0.933; nprobe=64 rerank=100 level=5) | 116 (0.964; nprobe=128 rerank=100 level=5) | 57 (0.990; nprobe=256 rerank=1000 level=5) | 57 (0.990; nprobe=256 rerank=1000 level=5) |
+| faiss-flat | 52 (1.000; flat) | 52 (1.000; flat) | 52 (1.000; flat) | 52 (1.000; flat) |
+| faiss-hnsw | 2,592 (0.908; M-48 ef=80) | 1,503 (0.956; M-96 ef=120) | 576 (0.991; M-64 ef=400) | 278 (0.998; M-96 ef=800) |
+| faiss-ivfpqfs | 4,468 (0.908; nlist-1204 nprobe=100 k_reorder=10) | 2,527 (0.961; nlist-1204 nprobe=100 k_reorder=100) | 1,114 (0.995; nlist-512 nprobe=200 k_reorder=100) | 469 (0.996; nlist-512 nprobe=200 k_reorder=1000) |
+| hnswlib | 2,856 (0.904; M-48 ef=80) | 1,388 (0.957; M-96 ef=120) | 562 (0.991; M-64 ef=400) | 242 (0.999; M-96 ef=800) |
+| ours approx | 922 (0.901; nprobe=32 eps=0) | 307 (0.972; nprobe=128 eps=0.01) | 163 (0.991; nprobe=256 eps=0) | 85 (0.998; nprobe=512 eps=0) |
+| ours approx (stage 1) | 232 (0.933; nprobe=64 rerank=100 level=5) | 116 (0.964; nprobe=128 rerank=100 level=5) | 57 (0.990; nprobe=256 rerank=1000 level=5) | 57 (0.990; nprobe=256 rerank=1000 level=5) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.5` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 1,271 (0.915; M-16 ef=400) | 659 (0.950; M-16 ef=800) | – | 659 (0.950; M-16 ef=800) |
-| faiss-ivfpqfs | 2,722 (0.923; nlist-2048 nprobe=200 k_reorder=10) | 1,729 (0.968; nlist-2048 nprobe=200 k_reorder=100) | – | 596 (0.969; nlist-2048 nprobe=200 k_reorder=1000) |
-| hnswlib | 579 (0.952; M-16 ef=400) | 579 (0.952; M-16 ef=400) | – | 579 (0.952; M-16 ef=400) |
+| faiss-flat | 108 (1.000; flat) | 108 (1.000; flat) | 108 (1.000; flat) | 108 (1.000; flat) |
+| faiss-hnsw | 1,261 (0.911; M-16 ef=400) | 510 (0.959; M-16 ef=1000) | 76 (0.994; M-16 ef=5000) | 28 (0.998; M-16 ef=10000) |
+| faiss-ivfpqfs | 2,632 (0.922; nlist-2048 nprobe=200 k_reorder=10) | 1,700 (0.967; nlist-2048 nprobe=200 k_reorder=100) | 946 (0.992; nlist-2048 nprobe=500 k_reorder=100) | 188 (1.000; nlist-2048 nprobe=2048 k_reorder=1000) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.1` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 684 (0.918; M-16 ef=800) | – | – | 684 (0.918; M-16 ef=800) |
-| faiss-ivfpqfs | 2,449 (0.931; nlist-2048 nprobe=200 k_reorder=10) | 1,601 (0.951; nlist-2048 nprobe=200 k_reorder=100) | – | 637 (0.951; nlist-2048 nprobe=200 k_reorder=1000) |
-| hnswlib | 423 (0.940; M-16 ef=120) | 142 (0.988; M-16 ef=400) | – | 142 (0.988; M-16 ef=400) |
+| faiss-flat | 620 (1.000; flat) | 620 (1.000; flat) | 620 (1.000; flat) | 620 (1.000; flat) |
+| faiss-hnsw | 525 (0.928; M-16 ef=1000) | 250 (0.963; M-16 ef=2000) | 28 (0.996; M-16 ef=10000) | 28 (0.996; M-16 ef=10000) |
+| faiss-ivfpqfs | 2,349 (0.932; nlist-2048 nprobe=200 k_reorder=10) | 1,559 (0.952; nlist-2048 nprobe=200 k_reorder=100) | 494 (0.999; nlist-2048 nprobe=1000 k_reorder=100) | 270 (1.000; nlist-2048 nprobe=2048 k_reorder=100) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.01` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | – | – | – | 686 (0.790; M-16 ef=800) |
-| faiss-ivfpqfs | – | – | – | 2,032 (0.895; nlist-2048 nprobe=200 k_reorder=100) |
-| hnswlib | 139 (0.941; M-16 ef=40) | 51 (0.988; M-16 ef=120) | 17 (0.999; M-16 ef=400) | 17 (0.999; M-16 ef=400) |
+| faiss-flat | 10,890 (1.000; flat) | 10,890 (1.000; flat) | 10,890 (1.000; flat) | 10,890 (1.000; flat) |
+| faiss-hnsw | 80 (0.961; M-16 ef=5000) | 80 (0.961; M-16 ef=5000) | – | 28 (0.984; M-16 ef=10000) |
+| faiss-ivfpqfs | 1,199 (0.963; nlist-2048 nprobe=500 k_reorder=10) | 1,199 (0.963; nlist-2048 nprobe=500 k_reorder=10) | 543 (0.995; nlist-2048 nprobe=1000 k_reorder=100) | 289 (1.000; nlist-2048 nprobe=2048 k_reorder=100) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.001` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | – | – | – | 700 (0.439; M-16 ef=800) |
-| faiss-ivfpqfs | – | – | – | 3,300 (0.742; nlist-2048 nprobe=200 k_reorder=10) |
-| hnswlib | 65 (0.926; M-16 ef=10) | 18 (0.996; M-16 ef=40) | 18 (0.996; M-16 ef=40) | 3 (1.000; M-16 ef=400) |
+| faiss-flat | 45,033 (1.000; flat) | 45,033 (1.000; flat) | 45,033 (1.000; flat) | 45,033 (1.000; flat) |
+| faiss-hnsw | 29 (0.922; M-16 ef=10000) | – | – | 29 (0.922; M-16 ef=10000) |
+| faiss-ivfpqfs | 1,447 (0.907; nlist-2048 nprobe=500 k_reorder=10) | 783 (0.981; nlist-2048 nprobe=1000 k_reorder=10) | 403 (0.999; nlist-2048 nprobe=2048 k_reorder=10) | 397 (1.000; nlist-2048 nprobe=2048 k_reorder=100) |
 
 ### nytimes-256-angular
 
@@ -62,55 +64,57 @@ Exact (all test queries, one thread):
 
 | Method | Filter | QPS | Mean ms | Recall@10 | Sets differing from brute force | Score lists differing |
 |---|---|---|---|---|---|---|
-| ours exact | all | 44.6 | 22.42 | 0.9991 | 9 | 0 |
-| ours flat | all | 109.7 | 9.12 | 0.9991 | 1 | 0 |
-| ours exact | vis_0.001 | 2,096.7 | 0.48 | 0.9991 | 0 | 0 |
-| ours flat | vis_0.001 | 73,726.1 | 0.01 | 0.9991 | 0 | 0 |
-| ours exact | vis_0.01 | 1,490.4 | 0.67 | 0.9991 | 0 | 0 |
-| ours flat | vis_0.01 | 12,560.2 | 0.08 | 0.9991 | 0 | 0 |
-| ours exact | vis_0.1 | 499.2 | 2.00 | 0.9991 | 0 | 0 |
-| ours flat | vis_0.1 | 866.4 | 1.15 | 0.9991 | 0 | 0 |
-| ours exact | vis_0.5 | 133.6 | 7.48 | 0.9991 | 0 | 0 |
-| ours flat | vis_0.5 | 146.3 | 6.84 | 0.9991 | 0 | 0 |
+| ours exact | all | 104.2 | 9.59 | 0.9991 | 0 | 0 |
+| ours flat | all | 128.8 | 7.77 | 0.9991 | 0 | 0 |
+| ours exact | vis_0.001 | 103,836.2 | 0.01 | 0.9991 | 0 | 0 |
+| ours flat | vis_0.001 | 105,534.9 | 0.01 | 0.9991 | 0 | 0 |
+| ours exact | vis_0.01 | 13,336.0 | 0.07 | 0.9991 | 0 | 0 |
+| ours flat | vis_0.01 | 13,350.6 | 0.07 | 0.9991 | 0 | 0 |
+| ours exact | vis_0.1 | 656.6 | 1.52 | 0.9991 | 0 | 0 |
+| ours flat | vis_0.1 | 998.7 | 1.00 | 0.9991 | 0 | 0 |
+| ours exact | vis_0.5 | 161.1 | 6.21 | 0.9991 | 0 | 0 |
+| ours flat | vis_0.5 | 169.9 | 5.88 | 0.9991 | 0 | 0 |
 
 Best QPS at recall@10 at least the target, filter `all` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 3,707 (0.903; M-36 ef=40) | 1,534 (0.951; M-36 ef=120) | 360 (0.992; M-64 ef=400) | 131 (0.998; M-96 ef=800) |
-| faiss-ivfpqfs | 4,247 (0.919; nlist-512 nprobe=100 k_reorder=10) | 2,496 (0.962; nlist-512 nprobe=200 k_reorder=10) | – | 1,522 (0.967; nlist-512 nprobe=200 k_reorder=100) |
-| hnswlib | 4,221 (0.903; M-36 ef=40) | 1,727 (0.952; M-64 ef=80) | 374 (0.991; M-64 ef=400) | 152 (0.998; M-96 ef=800) |
-| ours approx | 199 (0.911; nprobe=64 rerank=1000 level=5) | 109 (0.957; nprobe=128 rerank=1000 level=5) | – | 56 (0.985; nprobe=256 rerank=1000 level=5) |
+| faiss-flat | 94 (0.999; flat) | 94 (0.999; flat) | 94 (0.999; flat) | 94 (0.999; flat) |
+| faiss-hnsw | 3,754 (0.903; M-36 ef=40) | 1,591 (0.951; M-36 ef=120) | 361 (0.990; M-36 ef=600) | 160 (0.998; M-96 ef=800) |
+| faiss-ivfpqfs | 4,571 (0.919; nlist-512 nprobe=100 k_reorder=10) | 2,788 (0.962; nlist-512 nprobe=200 k_reorder=10) | – | 1,651 (0.967; nlist-512 nprobe=200 k_reorder=100) |
+| hnswlib | 4,738 (0.903; M-36 ef=40) | 1,728 (0.952; M-64 ef=80) | 399 (0.991; M-64 ef=400) | 162 (0.998; M-96 ef=800) |
+| ours approx | 319 (0.918; nprobe=64 eps=0.01) | 178 (0.972; nprobe=64 eps=0 soar) | – | 178 (0.972; nprobe=64 eps=0 soar) |
+| ours approx (stage 1) | 199 (0.911; nprobe=64 rerank=1000 level=5) | 109 (0.957; nprobe=128 rerank=1000 level=5) | – | 56 (0.985; nprobe=256 rerank=1000 level=5) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.5` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 1,820 (0.911; M-16 ef=200) | 677 (0.953; M-16 ef=600) | – | 506 (0.963; M-16 ef=800) |
-| faiss-ivfpqfs | 3,565 (0.909; nlist-2048 nprobe=200 k_reorder=10) | – | – | 1,931 (0.911; nlist-2048 nprobe=200 k_reorder=100) |
-| hnswlib | 1,362 (0.923; M-16 ef=120) | 431 (0.965; M-16 ef=400) | – | 431 (0.965; M-16 ef=400) |
+| faiss-flat | 198 (0.999; flat) | 198 (0.999; flat) | 198 (0.999; flat) | 198 (0.999; flat) |
+| faiss-hnsw | 989 (0.934; M-16 ef=400) | 392 (0.967; M-16 ef=1000) | 64 (0.996; M-16 ef=5000) | 25 (0.998; M-16 ef=10000) |
+| faiss-ivfpqfs | 3,838 (0.908; nlist-2048 nprobe=200 k_reorder=10) | 2,111 (0.954; nlist-2048 nprobe=500 k_reorder=10) | 683 (0.992; nlist-2048 nprobe=2048 k_reorder=10) | 544 (0.999; nlist-2048 nprobe=2048 k_reorder=100) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.1` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | 503 (0.910; M-16 ef=800) | – | – | 503 (0.910; M-16 ef=800) |
-| faiss-ivfpqfs | – | – | – | 1,904 (0.862; nlist-2048 nprobe=200 k_reorder=100) |
-| hnswlib | 312 (0.948; M-16 ef=120) | 96 (0.990; M-16 ef=400) | 96 (0.990; M-16 ef=400) | 96 (0.990; M-16 ef=400) |
+| faiss-flat | 1,368 (0.999; flat) | 1,368 (0.999; flat) | 1,368 (0.999; flat) | 1,368 (0.999; flat) |
+| faiss-hnsw | 406 (0.927; M-16 ef=1000) | 191 (0.970; M-16 ef=2000) | 65 (0.993; M-16 ef=5000) | 25 (0.997; M-16 ef=10000) |
+| faiss-ivfpqfs | 1,958 (0.940; nlist-2048 nprobe=500 k_reorder=10) | 1,168 (0.978; nlist-2048 nprobe=1000 k_reorder=10) | 621 (0.995; nlist-2048 nprobe=2048 k_reorder=10) | 500 (0.999; nlist-2048 nprobe=2048 k_reorder=100) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.01` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | – | – | – | 502 (0.686; M-16 ef=800) |
-| faiss-ivfpqfs | – | – | – | 4,277 (0.702; nlist-2048 nprobe=200 k_reorder=10) |
-| hnswlib | 97 (0.941; M-16 ef=40) | 38 (0.996; M-16 ef=120) | 38 (0.996; M-16 ef=120) | 16 (1.000; M-16 ef=400) |
+| faiss-flat | 17,643 (0.999; flat) | 17,643 (0.999; flat) | 17,643 (0.999; flat) | 17,643 (0.999; flat) |
+| faiss-hnsw | 64 (0.958; M-16 ef=5000) | 64 (0.958; M-16 ef=5000) | – | 25 (0.988; M-16 ef=10000) |
+| faiss-ivfpqfs | 1,516 (0.956; nlist-2048 nprobe=1000 k_reorder=10) | 1,516 (0.956; nlist-2048 nprobe=1000 k_reorder=10) | 846 (0.998; nlist-2048 nprobe=2048 k_reorder=10) | 720 (0.999; nlist-2048 nprobe=2048 k_reorder=100) |
 
 Best QPS at recall@10 at least the target, filter `vis_0.001` (QPS (recall; configuration)):
 
 | Method | ≥ 0.9 | ≥ 0.95 | ≥ 0.99 | Highest recall |
 |---|---|---|---|---|
-| faiss-hnsw | – | – | – | 493 (0.299; M-16 ef=800) |
-| faiss-ivfpqfs | – | – | – | 5,704 (0.448; nlist-2048 nprobe=200 k_reorder=100) |
-| hnswlib | 42 (0.937; M-16 ef=10) | 16 (0.999; M-16 ef=40) | 16 (0.999; M-16 ef=40) | 8 (1.000; M-16 ef=120) |
+| faiss-flat | 52,944 (0.999; flat) | 52,944 (0.999; flat) | 52,944 (0.999; flat) | 52,944 (0.999; flat) |
+| faiss-hnsw | 25 (0.929; M-16 ef=10000) | – | – | 25 (0.929; M-16 ef=10000) |
+| faiss-ivfpqfs | 1,011 (0.999; nlist-2048 nprobe=2048 k_reorder=10) | 1,011 (0.999; nlist-2048 nprobe=2048 k_reorder=10) | 1,011 (0.999; nlist-2048 nprobe=2048 k_reorder=10) | 1,011 (0.999; nlist-2048 nprobe=2048 k_reorder=10) |
 

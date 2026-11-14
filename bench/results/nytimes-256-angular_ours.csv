@@ -1,29 +1,24 @@
 dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids,recall
-nytimes-256-angular,exact,all,-,10000,10,2,44.6,22.4165,21.1851,45.5092,9,0,286371,8982.3,34414728,exact_all_x.npy,0.9991
-nytimes-256-angular,flat,all,-,10000,10,2,109.7,9.1193,9.0781,10.0038,1,0,0,290000.0,148480000,flat_all_x.npy,0.9991
-nytimes-256-angular,approx,all,nprobe=1 rerank=100 level=5,10000,10,2,5521.9,0.1811,0.1741,0.2833,-1,-1,1240,100.0,97083,approx_all_nprobe_1_rerank_100_level_5.npy,0.5323
-nytimes-256-angular,approx,all,nprobe=2 rerank=100 level=5,10000,10,2,3898.4,0.2565,0.2511,0.3863,-1,-1,2433,100.0,141220,approx_all_nprobe_2_rerank_100_level_5.npy,0.6170
-nytimes-256-angular,approx,all,nprobe=4 rerank=100 level=5,10000,10,2,2473.3,0.4043,0.3980,0.5845,-1,-1,4688,100.0,224652,approx_all_nprobe_4_rerank_100_level_5.npy,0.6737
-nytimes-256-angular,approx,all,nprobe=8 rerank=100 level=5,10000,10,2,1508.6,0.6629,0.6555,0.9061,-1,-1,9001,100.0,384237,approx_all_nprobe_8_rerank_100_level_5.npy,0.7223
-nytimes-256-angular,approx,all,nprobe=16 rerank=100 level=5,10000,10,2,819.2,1.2207,1.2126,1.5762,-1,-1,17395,100.0,694800,approx_all_nprobe_16_rerank_100_level_5.npy,0.7696
-nytimes-256-angular,approx,all,nprobe=32 rerank=100 level=5,10000,10,2,433.3,2.3078,2.2997,2.8141,-1,-1,33929,100.0,1306573,approx_all_nprobe_32_rerank_100_level_5.npy,0.8136
-nytimes-256-angular,approx,all,nprobe=64 rerank=100 level=5,10000,10,2,225.4,4.4358,4.4266,5.1330,-1,-1,66595,100.0,2515206,approx_all_nprobe_64_rerank_100_level_5.npy,0.8550
-nytimes-256-angular,approx,all,nprobe=128 rerank=100 level=5,10000,10,2,112.0,8.9276,8.8482,11.9781,-1,-1,131148,100.0,4903678,approx_all_nprobe_128_rerank_100_level_5.npy,0.8881
-nytimes-256-angular,approx,all,nprobe=256 rerank=100 level=5,10000,10,2,57.7,17.3411,17.1726,23.5873,-1,-1,257712,100.0,9586531,approx_all_nprobe_256_rerank_100_level_5.npy,0.9075
-nytimes-256-angular,approx,all,nprobe=1 rerank=1000 level=5,10000,10,2,1744.1,0.5734,0.6051,0.7892,-1,-1,1240,890.7,501914,approx_all_nprobe_1_rerank_1000_level_5.npy,0.5346
-nytimes-256-angular,approx,all,nprobe=2 rerank=1000 level=5,10000,10,2,1347.8,0.7419,0.7399,0.9131,-1,-1,2433,999.2,601590,approx_all_nprobe_2_rerank_1000_level_5.npy,0.6229
-nytimes-256-angular,approx,all,nprobe=4 rerank=1000 level=5,10000,10,2,1086.6,0.9203,0.9141,1.1341,-1,-1,4688,1000.0,685452,approx_all_nprobe_4_rerank_1000_level_5.npy,0.6848
-nytimes-256-angular,approx,all,nprobe=8 rerank=1000 level=5,10000,10,2,821.9,1.2167,1.2096,1.4806,-1,-1,9001,1000.0,845037,approx_all_nprobe_8_rerank_1000_level_5.npy,0.7409
-nytimes-256-angular,approx,all,nprobe=16 rerank=1000 level=5,10000,10,2,565.2,1.7692,1.7615,2.1415,-1,-1,17395,1000.0,1155600,approx_all_nprobe_16_rerank_1000_level_5.npy,0.7980
-nytimes-256-angular,approx,all,nprobe=32 rerank=1000 level=5,10000,10,2,349.7,2.8593,2.8499,3.3920,-1,-1,33929,1000.0,1767373,approx_all_nprobe_32_rerank_1000_level_5.npy,0.8549
-nytimes-256-angular,approx,all,nprobe=64 rerank=1000 level=5,10000,10,2,198.6,5.0345,5.0288,5.7603,-1,-1,66595,1000.0,2976006,approx_all_nprobe_64_rerank_1000_level_5.npy,0.9111
-nytimes-256-angular,approx,all,nprobe=128 rerank=1000 level=5,10000,10,2,108.7,9.1991,9.1523,10.5407,-1,-1,131148,1000.0,5364478,approx_all_nprobe_128_rerank_1000_level_5.npy,0.9568
-nytimes-256-angular,approx,all,nprobe=256 rerank=1000 level=5,10000,10,2,56.4,17.7326,17.6693,19.2573,-1,-1,257712,1000.0,10047331,approx_all_nprobe_256_rerank_1000_level_5.npy,0.9846
-nytimes-256-angular,exact,vis_0.001,-,10000,10,2,2096.7,0.4769,0.4740,0.5546,0,0,106,318.0,164943,exact_vis_0.001_x.npy,0.9991
-nytimes-256-angular,flat,vis_0.001,-,10000,10,2,73726.1,0.0136,0.0132,0.0253,0,0,0,290.0,148480,flat_vis_0.001_x.npy,0.9991
-nytimes-256-angular,exact,vis_0.01,-,10000,10,2,1490.4,0.6710,0.6663,0.7984,0,0,774,2928.0,1514609,exact_vis_0.01_x.npy,0.9991
-nytimes-256-angular,flat,vis_0.01,-,10000,10,2,12560.2,0.0796,0.0776,0.1094,0,0,0,2900.0,1484800,flat_vis_0.01_x.npy,0.9991
-nytimes-256-angular,exact,vis_0.1,-,10000,10,2,499.2,2.0033,1.9652,2.4452,0,0,2077,28971.6,14874847,exact_vis_0.1_x.npy,0.9991
-nytimes-256-angular,flat,vis_0.1,-,10000,10,2,866.4,1.1542,1.1327,1.4647,0,0,0,29000.0,14848000,flat_vis_0.1_x.npy,0.9991
-nytimes-256-angular,exact,vis_0.5,-,10000,10,2,133.6,7.4839,7.2766,12.7390,0,0,3397,142798.3,73183629,exact_vis_0.5_x.npy,0.9991
-nytimes-256-angular,flat,vis_0.5,-,10000,10,2,146.3,6.8373,6.7366,8.6411,0,0,0,145000.0,74240000,flat_vis_0.5_x.npy,0.9991
+nytimes-256-angular,exact,all,-,10000,10,2,104.2,9.5933,9.6002,10.4635,0,0,5542,284342.2,145638915,exact_all_x.npy,0.9991
+nytimes-256-angular,flat,all,-,10000,10,2,128.8,7.7665,7.6367,8.2316,0,0,0,290000.0,148480000,flat_all_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.001,-,10000,10,2,103836.2,0.0096,0.0093,0.0186,0,0,0,290.0,148480,exact_vis_0.001_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.001,-,10000,10,2,105534.9,0.0095,0.0092,0.0175,0,0,0,290.0,148480,flat_vis_0.001_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.01,-,10000,10,2,13336.0,0.0750,0.0725,0.0960,0,0,0,2900.0,1484800,exact_vis_0.01_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.01,-,10000,10,2,13350.6,0.0749,0.0724,0.0986,0,0,0,2900.0,1484800,flat_vis_0.01_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.1,-,10000,10,2,656.6,1.5230,1.4981,1.8238,0,0,2080,28971.1,14874597,exact_vis_0.1_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.1,-,10000,10,2,998.7,1.0013,0.9656,1.2621,0,0,0,29000.0,14848000,flat_vis_0.1_x.npy,0.9991
+nytimes-256-angular,exact,vis_0.5,-,10000,10,2,161.1,6.2069,6.1435,7.0256,0,0,3115,143646.6,73594367,exact_vis_0.5_x.npy,0.9991
+nytimes-256-angular,flat,vis_0.5,-,10000,10,2,169.9,5.8845,5.8008,6.5053,0,0,0,145000.0,74240000,flat_vis_0.5_x.npy,0.9991
+nytimes-256-angular,approx,all,nprobe=2 eps=0,10000,10,2,7534.8,0.1327,0.1290,0.2202,-1,-1,0,2441.4,1250017,approx_all_nprobe_2_eps_0.npy,0.6118
+nytimes-256-angular,approx,all,nprobe=4 eps=0,10000,10,2,4092.2,0.2444,0.2302,0.6059,-1,-1,141,4731.6,2425368,approx_all_nprobe_4_eps_0.npy,0.6776
+nytimes-256-angular,approx,all,nprobe=8 eps=0,10000,10,2,1667.3,0.5998,0.6138,0.8206,-1,-1,2516,9038.4,4677343,approx_all_nprobe_8_eps_0.npy,0.7384
+nytimes-256-angular,approx,all,nprobe=16 eps=0,10000,10,2,1006.4,0.9937,0.9939,1.2514,-1,-1,2803,17380.0,8953015,approx_all_nprobe_16_eps_0.npy,0.7966
+nytimes-256-angular,approx,all,nprobe=32 eps=0,10000,10,2,580.4,1.7230,1.7272,2.0698,-1,-1,2880,33669.2,17293094,approx_all_nprobe_32_eps_0.npy,0.8568
+nytimes-256-angular,approx,all,nprobe=64 eps=0,10000,10,2,319.3,3.1315,3.1384,3.5992,-1,-1,2946,65679.7,33682507,approx_all_nprobe_64_eps_0.npy,0.9182
+nytimes-256-angular,approx,all,nprobe=128 eps=0,10000,10,2,168.0,5.9523,5.9687,6.5928,-1,-1,3304,128593.6,65895038,approx_all_nprobe_128_eps_0.npy,0.9676
+nytimes-256-angular,approx,all,nprobe=32 eps=0.01,10000,10,2,577.3,1.7322,1.7356,2.1068,-1,-1,2876,33669.5,17293267,approx_all_nprobe_32_eps_0.01.npy,0.8568
+nytimes-256-angular,approx,all,nprobe=64 eps=0.01,10000,10,2,319.4,3.1309,3.1365,3.6492,-1,-1,2946,65679.8,33682507,approx_all_nprobe_64_eps_0.01.npy,0.9182
+nytimes-256-angular,approx,all,nprobe=8 eps=0 soar,10000,10,2,931.4,1.0737,1.0904,1.4345,-1,-1,2493,16629.8,8563826,approx_all_nprobe_8_eps_0_soar.npy,0.8080
+nytimes-256-angular,approx,all,nprobe=16 eps=0 soar,10000,10,2,547.7,1.8258,1.8227,2.2073,-1,-1,2847,31805.5,16339721,approx_all_nprobe_16_eps_0_soar.npy,0.8702
+nytimes-256-angular,approx,all,nprobe=32 eps=0 soar,10000,10,2,316.3,3.1613,3.1656,3.6523,-1,-1,3036,60375.4,30967615,approx_all_nprobe_32_eps_0_soar.npy,0.9283
+nytimes-256-angular,approx,all,nprobe=64 eps=0 soar,10000,10,2,178.3,5.6083,5.6162,6.3237,-1,-1,3380,111783.2,57288423,approx_all_nprobe_64_eps_0_soar.npy,0.9718

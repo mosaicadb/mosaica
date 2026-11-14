@@ -1,18 +1,25 @@
 # Tables and plots from the scored runs: per dataset, the best QPS of each method at recall targets (Pareto front of
 # its grid), the exact rows, the filtered rows, and a recall/QPS plot.
-# usage: python3 -I report.py OUT_DIR NAME:RESULTS_DIR:BASELINES_DIR ...
-#   reads RESULTS_DIR/ours_scored.csv and BASELINES_DIR/baselines.csv; writes OUT_DIR/<name>.csv, <name>.png, tables.md
+# usage: python3 -I report.py OUT_DIR NAME:RESULTS_DIR:BASELINES_DIR[:STAGE1_RESULTS_DIR] ...
+#   reads RESULTS_DIR/ours_scored.csv and BASELINES_DIR/baselines.csv; writes OUT_DIR/<name>.csv, <name>.png, tables.md.
+#   With STAGE1_RESULTS_DIR, its approximate runs are plotted as "ours approx (stage 1)".
 import csv, os, sys
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 TARGETS = [0.9, 0.95, 0.99]
-COLOURS = {"ours approx": "#2a78d6", "hnswlib": "#eb6834", "faiss-hnsw": "#1baf7a", "faiss-ivfpqfs": "#eda100"}
+COLOURS = {"ours approx": "#2a78d6", "ours approx (stage 1)": "#9db8d9", "hnswlib": "#eb6834", "faiss-hnsw": "#1baf7a",
+           "faiss-ivfpqfs": "#eda100"}
 
 
-def rows_of(rdir, bdir):
+def rows_of(rdir, bdir, s1dir=None):
     out = []
+    if s1dir:
+        for r in csv.DictReader(open(os.path.join(s1dir, "ours_scored.csv"))):
+            if r["method"] == "approx":
+                out.append(dict(method="ours approx (stage 1)", build="-", params=r["params"], filter=r["filter"], qps=float(r["qps"]),
+                                recall=float(r["recall"]), mean_ms=float(r["mean_ms"]), wrong_sets="", wrong_scores=""))
     for r in csv.DictReader(open(os.path.join(rdir, "ours_scored.csv"))):
         out.append(dict(method="ours " + r["method"], build="-", params=r["params"], filter=r["filter"], qps=float(r["qps"]),
                         recall=float(r["recall"]), mean_ms=float(r["mean_ms"]), wrong_sets=r["wrong_sets"], wrong_scores=r["wrong_scores"]))
@@ -49,8 +56,8 @@ def main():
     out = sys.argv[1]
     md = []
     for spec in sys.argv[2:]:
-        name, rdir, bdir = spec.split(":")
-        rows = rows_of(rdir, bdir)
+        name, rdir, bdir, *s1 = spec.split(":")
+        rows = rows_of(rdir, bdir, s1[0] if s1 else None)
         with open(os.path.join(out, f"{name}.csv"), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
             w.writeheader()
@@ -80,11 +87,11 @@ def main():
         for m, col in COLOURS.items():
             fr = front([r for r in rows if r["method"] == m and r["filter"] == "all"])
             if fr:
-                ax.plot([r["recall"] for r in fr], [r["qps"] for r in fr], "-o", color=col, lw=2, ms=4, label=m)
-        for m, mk in (("ours exact", "*"), ("ours flat", "s")):
+                ax.plot([r["recall"] for r in fr], [r["qps"] for r in fr], "--o" if "stage 1" in m else "-o", color=col, lw=2, ms=4, label=m)
+        for m, mk in (("ours exact", "*"), ("ours flat", "s"), ("faiss-flat", "^")):
             ex = [r for r in rows if r["method"] == m and r["filter"] == "all"]
             if ex:
-                ax.plot([ex[0]["recall"]], [ex[0]["qps"]], mk, color="#444441", ms=11 if mk == "*" else 7, label=m, ls="none")
+                ax.plot([ex[0]["recall"]], [ex[0]["qps"]], mk, color="#444441", ms=11 if mk == "*" else 7, label=m, ls="none", mfc="none" if mk == "^" else None)
         ax.set_yscale("log")
         ax.set_xlim(left=max(0.0, min(r["recall"] for r in rows if r["filter"] == "all") - 0.02), right=1.005)
         ax.set_xlabel("Recall@10 (ANN-Benchmarks rule)")
