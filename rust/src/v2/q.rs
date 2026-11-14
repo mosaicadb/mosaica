@@ -1025,6 +1025,9 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
         if tr < est - hh - 1e-12 || tr > est + hh + 1e-12 {
             st.cert_viol += 1;
         }
+        if tr >= t && ERRS.load(std::sync::atomic::Ordering::Relaxed) {
+            st.errs.push((l as u8, ((tr - est) / hh.max(1e-30)) as f32));
+        }
         if inm >> i & 1 == 1 {
             st.imp_checked += 1;
             if !(est - hh >= t - cq.tol) {
@@ -1132,8 +1135,9 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     }
     let intm = resume.is_none() && cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
     if intm {
-        // the dial's largest factor on the fixed term: a larger factor only lowers Tout
-        let dmax = pr.dial[..NDL].iter().fold(1f32, |a, &d| a.max(d)) as f64;
+        // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
+        // only lowers Tout
+        let dmax = pr.dial[..NDL].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
         int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
