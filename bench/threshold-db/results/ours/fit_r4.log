@@ -1,0 +1,4 @@
+[    33s] N 999950 n 768 (padded to 768); zero vectors 0
+[    98s] K 1000 clusters (sizes 62..4228), G 64 groups
+[   182s] bases done (dual); group sizes 1478 .. 49207
+[   182s] saved {'N': 999950, 'n': 768, 'n_orig': 768, 'K': 1000, 'G': 64, 'metric': 'angular', 'DLV': [4, 8, 12, 16, 24, 32], 'RLV': [56, 96, 160, 256], 'BOUNDS': [0, 96, 224, 480, 768], 'CSG': 9.330163258547264, 'L1': 43.525973215572655, 'xs': 'Xs.npy', 'source': '/home/joe/code/vexact-data/bioclip2-1m/prep/corpus16.npy', 'format': 2, 'fit': {'basis': 'dual', 'profile': 'qi', 'ridge': 0.1, 'sigma_q': 'corpus items', 'cond_max': 16.9710254636224}}

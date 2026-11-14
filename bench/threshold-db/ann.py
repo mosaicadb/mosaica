@@ -5,10 +5,11 @@
 # rotation of data and queries, as Panorama needs) as range searches at the threshold. Filtering: faiss through an IDSelectorBitmap, the flat index also over a
 # compacted copy of the visible rows; hnswlib's Python binding filters only through a Python callback and rabitqlib has
 # no filter, so neither runs filtered.
-# usage: python3 -I ann.py build METHOD PREP_DIR ANN_DIR
+# usage: python3 -I ann.py build METHOD PREP_DIR ANN_DIR [--threads 4]
 #        python3 -I ann.py query METHOD PREP_DIR ANN_DIR OUT_CSV [--step 10] [--reps 5] [--threads 1]
 # Each setting runs at its default (top-m: ef = m; IVF: nprobe = 1) and at the tight one: the smallest ef (or nprobe) in
-# a doubling ladder whose mean recall over the queries reaches 0.99 at that share, or the ladder's last rung.
+# a doubling ladder whose mean recall over the queries reaches 0.99 at that share. Rungs stop at ef = N and at the first
+# rung whose median query exceeds --cap-ms; a ladder that ends short of 0.99 gives the last rung within the cap.
 # Latency is one query at a time, 1 thread, timed from the call to the numpy ids.
 import argparse, os, resource, sys, time
 import numpy as np
@@ -24,6 +25,9 @@ ap.add_argument("--reps", type=int, default=5)
 ap.add_argument("--vis", default="all,vis_1")
 ap.add_argument("--threads", type=int, default=1)
 ap.add_argument("--shares", default="")
+ap.add_argument("--settings", default="default,tight", help="default, tight, or ladder (walk the ladder only, no timing)")
+ap.add_argument("--tight", type=float, default=0, help="the tight rung, when known: skips the ladder")
+ap.add_argument("--cap-ms", type=float, default=5000, help="the ladder stops at the first rung slower than this per query")
 a = ap.parse_args()
 os.makedirs(a.ann, exist_ok=True)
 import faiss, hnswlib, rabitqlib
@@ -40,12 +44,12 @@ def rss_gb():
 
 if a.cmd == "build":
     X = np.ascontiguousarray(X)
-    faiss.omp_set_num_threads(4)
+    faiss.omp_set_num_threads(a.threads)
     t = time.time()
     if a.method == "hnswlib":
         ix = hnswlib.Index(space="ip", dim=n)
         ix.init_index(max_elements=N, M=16, ef_construction=200, random_seed=1)
-        ix.set_num_threads(4)
+        ix.set_num_threads(a.threads)
         ix.add_items(X, np.arange(N))
         bt = time.time() - t
         ix.save_index(path)
@@ -74,7 +78,7 @@ if a.cmd == "build":
         _, cid = ivf.quantizer.search(X, 1)
         t = time.time()
         ix = rabitqlib.IvfIndex(n, N, ivf.nlist, 7, "ip")
-        ix.build(X, cent, cid[:, 0].astype(np.uint32), 4)
+        ix.build(X, cent, cid[:, 0].astype(np.uint32), a.threads)
         bt = time.time() - t
         ix.save(path)
     else:
@@ -85,7 +89,7 @@ if a.cmd == "build":
         ix.add(X)
         bt = time.time() - t
         faiss.write_index(ix, path)
-    print(f"{a.method}: built in {bt:.0f} s on 4 threads; file {os.path.getsize(path) / 2 ** 30:.2f} GiB; "
+    print(f"{a.method}: built in {bt:.0f} s on {a.threads} threads; file {os.path.getsize(path) / 2 ** 30:.2f} GiB; "
           f"peak RSS {rss_gb():.2f} GiB", flush=True)
     sys.exit()
 
@@ -93,8 +97,8 @@ Q = np.load(f"{a.prep}/queries.npy").astype(np.float32)
 T = np.load(f"{a.prep}/thresholds.npy")
 order = np.load(f"{a.prep}/order.npy", mmap_mode="r")
 ALL = (1e-4, 1e-3, 1e-2, 1e-1, 0.3, 0.5, 0.75)
-ks = [round(s * N) for s in (ALL if EXACT else ALL[:3])]
-shares = [int(x) for x in a.shares.split(",")] if a.shares else list(range(len(ks)))
+ks = [round(s * N) for s in ALL]
+shares = [int(x) for x in a.shares.split(",")] if a.shares else list(range(len(ks) if EXACT else 3))
 qis = list(range(0, len(Q), a.step))
 faiss.omp_set_num_threads(a.threads)
 t = time.time()
@@ -195,16 +199,24 @@ for vis in a.vis.split(","):
             continue
         ladder = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096] if a.method == "ivf" else \
             [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32, 64, 128, 256, 512, 1024]
-        if a.method != "ivf":  # cap ef at 200k
+        if a.method != "ivf":  # ef at most N
             mmax = max(len(e) for e in exact.values())
-            ladder = [x for x in ladder if mmax * x <= 200_000] or [1]
-        tight = ladder[-1]
-        for mult in ladder:
-            r = evaluate(mult, False)
-            if r and np.mean([x[3] for x in r]) >= 0.99:
+            ladder = [x for x in ladder if mmax * x <= N] or [1]
+        tight = a.tight
+        if not tight:
+            tight = ladder[0]
+            for mult in ladder:
+                r = evaluate(mult, False)
+                rec, ms = np.mean([x[3] for x in r]), np.median([x[2] for x in r])
+                print(f"{a.method} ladder {vis} share {si}: rung {mult}, mean recall {rec:.4f}, median {ms:.1f} ms", flush=True)
+                if ms > a.cap_ms:
+                    break
                 tight = mult
-                break
+                if rec >= 0.99:
+                    break
         for setting, mult in (("default", 1), ("tight", tight)):
+            if setting not in a.settings.split(","):
+                continue
             r = evaluate(mult, True)
             for qi, p, ms, rec, ret, bad, m in r:
                 rows.append(f"{a.method},{setting},{vis},{si},{qi},{p},{ms:.4f},{rec:.5f},{ret},{bad},{m}")
@@ -212,8 +224,8 @@ for vis in a.vis.split(","):
                 print(f"{a.method} {setting} {vis} share {si}: param {'x' if a.method != 'ivf' else ''}{mult}, "
                       f"median {np.median([x[2] for x in r]):.2f} ms, mean recall {np.mean([x[3] for x in r]):.4f}, "
                       f"non-matches {sum(x[5] for x in r)} over {len(r)} queries", flush=True)
-new = not os.path.exists(a.out)
-with open(a.out, "a") as f:
+new = rows and not os.path.exists(a.out)
+with open(a.out, "a") if rows else open(os.devnull, "w") as f:
     f.write(("method,setting,vis,share_index,query,param,median_ms,recall,returned,nonmatch,exact\n" if new else "")
             + "\n".join(rows) + "\n")
 print(f"peak RSS {rss_gb():.2f} GiB", flush=True)

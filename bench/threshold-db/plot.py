@@ -1,6 +1,7 @@
 # Latency against answer size, log-log, one line per system: unfiltered and 1% visible, at 1 thread and at 4.
 # usage: python3 -I plot.py RESULTS_DIR PREP_DIR
-# Reads RESULTS_DIR/{ours/dbcmp_main.csv, clickhouse.csv, duckdb.csv, ann.csv}; writes RESULTS_DIR/plot_data.csv and
+# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, ours/dbcmp_r4_4t.csv, clickhouse.csv, duckdb.csv, ann.csv} and, for
+# comparison, the index rows of ours/dbcmp_main.csv (the index as measured on 13 Nov); writes RESULTS_DIR/plot_data.csv and
 # RESULTS_DIR/latency_{1,4}t.png. Every system on the queries with index divisible by 10 (DuckDB: by 30); x is the
 # median exact answer size over those queries, y the median over them of each query's median time.
 import csv, os, sys
@@ -30,12 +31,17 @@ def exact_size(vis, si, qi):
 
 LABEL = {"index": "ours: index", "flat": "ours: f16 scan", "clickhouse_t32_dot": "ClickHouse Float32",
          "clickhouse_tbf_dot": "ClickHouse BFloat16", "duckdb_t32_dot": "DuckDB FLOAT[768]",
-         "duckdb_t32_dot+mat": "DuckDB FLOAT[768]"}
+         "duckdb_t32_dot+mat": "DuckDB FLOAT[768]", "old_index": "ours: index (13 Nov)"}
+OLD = "ours: index (13 Nov)"
 pts = defaultdict(list)  # (label, exact, threads, vis, si) -> [(ms, recall)]
-for f in ("ours/dbcmp_main.csv", "clickhouse.csv", "duckdb.csv"):
+for f in ("ours/dbcmp_main.csv", "ours/dbcmp_r4_1t.csv", "ours/dbcmp_r4_4t.csv", "clickhouse.csv", "duckdb.csv"):
     if not os.path.exists(f"{res}/{f}"):
         continue
     for r in csv.DictReader(open(f"{res}/{f}")):
+        if f == "ours/dbcmp_main.csv":
+            if r["what"] != "index":
+                continue
+            r["what"] = "old_index"
         qi = int(r["query"])
         if qi % 10 or r["vis"] not in ("all", "vis_1"):
             continue
@@ -78,6 +84,9 @@ for th in (1, 4):
             p.sort()
             xs, ys, rs = zip(*p)
             ours = lab.startswith("ours")
+            if lab == OLD:
+                ax.plot(xs, ys, "--", marker="o", ms=3, lw=1.6, color="black", alpha=0.35, label=lab, zorder=3)
+                continue
             ax.plot(xs, ys, "-" if ex else "--", marker="o" if ex else "s", ms=4, lw=2.6 if ours else 1.4,
                     color=("black" if lab == "ours: index" else "dimgrey") if ours else col[lab], label=lab, zorder=3 if ours else 2)
             if not ex:
