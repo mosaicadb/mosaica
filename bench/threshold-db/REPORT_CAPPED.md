@@ -70,7 +70,8 @@ matters a great deal, as smoke runs at 50k rows showed:
   query needing 636 rows read 67 MB; a random 1% visible set of 471 rows read the whole 69 MB file.
 - **`MADV_RANDOM`** reads only the 4 KiB page or pages a row touches. That is right for the index, but each fault waits
   about 160 µs, and a scan through faults ran at 42 MB/s.
-- **`MADV_RANDOM` plus `--willneed`** (the option added, and used for every capped run here). Before deciding a list of
+- **`MADV_RANDOM` plus `--willneed`** (the option added, and used for every capped run here, with the residency check
+  described under the 1% visible results added for the last two). Before deciding a list of
   rows from full vectors, the run calls `madvise(MADV_WILLNEED)` on each row's pages, merging adjacent rows, and the
   scan does the same four 1,024-row chunks ahead. The reads are then in flight together. The cold 636-row query fell
   from 30 ms to 5.4 ms, the 471 random rows from 85 ms to 4.4 ms, and a scan ran at 2.5 GB/s, as fast as kernel
@@ -93,10 +94,16 @@ below the median: at 10% and above, query 0 needs fewer full vectors than the me
 | index, five levels to 384 B | 30.9 / 69 | 33.9 / 78 | 47.8 / 55 | 342 / 143 | 572 / 221 | 639 / 274 | 541 / 315 |
 | f16 scan | 986 / 832 / 80.9 | 1012 / 821 / 80.1 | 1008 / 852 / 83.0 | 1017 / 835 / 83.7 | 1019 / 825 / 90.7 | 1000 / 866 / 92.9 | 1005 / 826 / 98.9 |
 
-**1% visible** (about 1, 10, 100, 1k, 3k, 5k and 7.5k items)
+**1% visible** (about 1, 10, 100, 1k, 3k, 5k and 7.5k items). The first two rows use the read path now in the code,
+with `madvise(WILLNEED)` skipped when a sample of the batch is already resident (see below). The other rows are from
+the first runs, which issued it for every batch and so lost about 14 ms to it warm.
 
 | | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
+| **index (planner), default, residency-checked** | 1.69 / 76 / 1.22 | 1.68 / 88 / 1.11 | 1.76 / 79 / 1.11 | 1.72 / 72 / 1.09 | 1.73 / 71 / 1.18 | 1.73 / 72 / 1.25 | 1.82 / 66 / 1.33 |
+| **f16 scan, residency-checked** | 1.91 / 111 / 0.91 | 1.88 / 89 / 0.75 | 2.02 / 81 / 0.75 | 1.92 / 89 / 0.75 | 2.06 / 82 / 0.85 | 2.05 / 83 / 0.84 | 2.07 / 74 / 0.86 |
+| index (planner), default, no `--willneed` | 1.10 / 1756 | 1.07 / 1790 | 1.05 / 1761 | 1.11 / 1870 | 1.12 / 1829 | 1.12 / 1716 | 1.23 / 1744 |
+| f16 scan, no `--willneed` | 1.03 / 1768 | 1.00 / 1774 | 1.03 / 1772 | 1.05 / 1767 | 1.13 / 1758 | 1.22 / 1748 | 1.19 / 1758 |
 | index (planner), default | 15.0 / 72 / 1.22 | 15.4 / 73 / 1.11 | 15.4 / 76 / 1.11 | 15.1 / 76 / 1.09 | 15.1 / 73 / 1.18 | 15.7 / 65 / 1.25 | 15.4 / 64 / 1.33 |
 | index (planner), 320 B | 14.0 / 73 | 14.4 / 75 | 14.2 / 75 | 14.3 / 70 | 14.1 / 68 | 14.0 / 72 | 13.9 / 76 |
 | index (planner), five levels | 16.3 / 81 | 16.3 / 79 | 16.3 / 76 | 16.3 / 76 | 16.3 / 76 | 16.4 / 83 | 16.5 / 82 |
@@ -163,12 +170,16 @@ without a crash. No run used `bail`.
   are 20–29% faster from 10% upwards (342 against 479 ms at 100k, 541 against 716 ms at 750k). 320 B is best at 10%
   (87 ms, because its reads drop to 28 MB), but no better than five levels above that. At small answers all three
   schedules are the same.
-- **At 1% visible the capped figure is 15 ms against 1.1–1.3 ms uncapped, while reading nothing from storage.** The
-  10,000 visible vectors (about 50 MB) stay cached, so the time is not I/O. The likely cost is one `madvise(WILLNEED)`
-  per row (10k system calls) plus minor faults remapping cached pages, but this is not confirmed: a run without
-  `--willneed` is owed. Forcing the index path reads only 2–1,213 vectors, but is no faster warm (15–26 ms). Cold, it
-  is 3–5× faster than the planner's scan at small answers (15–22 ms against 72–76 ms), because the planner's choice
-  ignores disk.
+- **At 1% visible the cap costs about 0.5 ms warm.** The first runs gave 14–16 ms there, reading nothing from storage.
+  That was the read path, not the cap: one `madvise(WILLNEED)` per visible row, 10,000 system calls a query on pages
+  already cached. Without `--willneed`, warm queries take 1.1 ms, the uncapped figure, but a cold query takes 1.75 s,
+  because its 10,000 rows are read one 160 µs fault at a time. The read path now in the code first checks 8 sampled
+  rows of each batch with `mincore` and skips the `madvise` when they are resident. That gives 1.7 ms warm for the
+  index and 1.9–2.1 ms for the scan, and keeps the cold query at 66–88 ms. The remaining 0.6 ms over the uncapped
+  figure is the residency checks and the scan's look-ahead requests. The unfiltered rows above were measured before
+  this change, and small unfiltered answers may now gain a little too.
+- Forcing the index path at 1% visible reads only 2–1,213 vectors. Cold, it is 3–5× faster than the planner's scan at
+  small answers (15–22 ms against 72–76 ms), because the planner's choice ignores disk.
 
 ## Surprises
 
@@ -178,7 +189,7 @@ without a crash. No run used `bail`.
 - Anonymous memory grows by 15–80 MiB over a run (from 428 to 442–511 MiB for the default schedule), probably allocator
   retention of per-query buffers. That comes out of the cache.
 - The machine was not fully quiet. A constants benchmark held cores 6–7 (2 threads) for every timed run after the
-  first; all timed runs here were pinned to cores 8–11. LIMINAL's default-schedule index run started on a quiet machine.
+  first; all timed runs here were pinned to cores 8–11, and the two 1%-visible reruns to cores 8–9. LIMINAL's default-schedule index run started on a quiet machine.
 
 ## Reproducing
 

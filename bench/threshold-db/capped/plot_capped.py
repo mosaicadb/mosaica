@@ -21,12 +21,13 @@ def add(key, vis, si, ms, rec=1.0):
     pts[(key, vis, si)].append((ms, rec))
 
 
-for f, key in (("capped/ours_r4_index_1t.csv", "index"), ("capped/ours_r384_index_1t.csv", "r384"),
-               ("capped/ours_r320_index_1t.csv", "r320"), ("capped/ours_r4_flatall_1t.csv", "flat"),
-               ("capped/ours_r4_flatvis_1t.csv", "flat")):
+# unfiltered from the runs with a madvise(WILLNEED) per batch; at 1% visible from the run that skips it when a sample
+# of the batch is resident (ours_r4_visskip_1t), the read path now in the code
+for f, key, vis in (("capped/ours_r4_index_1t.csv", "index", "all"), ("capped/ours_r384_index_1t.csv", "r384", "all"),
+                    ("capped/ours_r4_flatall_1t.csv", "flat", "all"), ("capped/ours_r4_visskip_1t.csv", None, "vis_1")):
     for r in csv.DictReader(open(f"{res}/{f}")):
-        if r["kind"] == "warm" and r["what"] in ("index", "flat") and int(r["query"]) % 10 == 0:
-            add(key, r["vis"], int(r["share_index"]), float(r["median_ms"]))
+        if r["kind"] == "warm" and r["vis"] == vis and r["what"] in ("index", "flat") and int(r["query"]) % 10 == 0:
+            add(key or r["what"], r["vis"], int(r["share_index"]), float(r["median_ms"]))
 for r in csv.DictReader(open(f"{res}/ours/dbcmp_r4_1t.csv")):
     if r["what"] == "index" and r["vis"] in ("all", "vis_1") and int(r["query"]) % 10 == 0:
         add("uncapped", r["vis"], int(r["share_index"]), float(r["median_ms"]))
@@ -41,7 +42,7 @@ for r in csv.DictReader(open(f"{res}/capped/faiss.csv")):
 SERIES = [  # (key, name, colour, style, width, alpha)
     ("index", "LIMINAL index, capped", "#2a78d6", "-", 2.8, 1),
     ("uncapped", "LIMINAL index, uncapped", "#2a78d6", (0, (4, 3)), 1.2, 1),
-    ("r384", "LIMINAL index, five levels, capped", "#6250d6", "-", 1.8, 1),
+    ("r384", "LIMINAL index, five levels, capped", "#1baf7a", "-", 1.8, 1),
     ("flat", "LIMINAL f16 scan, capped", "#2a78d6", "-", 1.8, 0.55),
     ("ch", "ClickHouse bf16, capped", "#008300", "-", 1.8, 1),
     ("ivf", "faiss IVF-SQfp16 on disk, capped (partial)", "#eda100", (0, (5, 3)), 1.8, 1),
@@ -67,7 +68,7 @@ for ax, vis, title in ((axes[0], "all", "All 1M items visible"), (axes[1], "vis_
     ends.sort()
     ly = [np.log10(e[0]) for e in ends]
     for i in range(1, len(ly)):
-        ly[i] = max(ly[i], ly[i - 1] + 0.13)
+        ly[i] = max(ly[i], ly[i - 1] + 0.2)
     for (y, x, name), l in zip(ends, ly):
         ax.annotate(name, (x, y), xytext=(110, 10 ** l), textcoords="data", fontsize=9, color=INK, va="center",
                     arrowprops=dict(arrowstyle="-", color="#c9c8c2", lw=0.8, shrinkA=2, shrinkB=4) if x < 75 or abs(np.log10(y) - l) > 0.03 else None)

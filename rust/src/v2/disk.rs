@@ -79,6 +79,17 @@ impl Rows {
         if let Rows::Map { map, .. } = self {
             let base = map.as_ptr() as usize;
             let rb = 2 * n;
+            // when a sample of the batch's rows is already resident, the batch most likely is too: a madvise per row
+            // would then cost more than the reads it starts (10k rows: 14 ms against 1 ms)
+            let k = rows.len().min(8);
+            if k > 0 && (0..k).all(|j| {
+                let r = rows[j * rows.len() / k] as usize;
+                let p0 = (base + r * rb) & !4095;
+                let mut v = [0u8; 2];
+                unsafe { libc::mincore(p0 as *mut libc::c_void, base + r * rb + rb - p0, v.as_mut_ptr()) == 0 && v[0] & 1 == 1 }
+            }) {
+                return;
+            }
             let mut i = 0;
             // adjacent rows coalesce into one range
             while i < rows.len() {
