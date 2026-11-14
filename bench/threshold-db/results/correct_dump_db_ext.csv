@@ -1,0 +1,5 @@
+what,vis,share_index,answers,items_expected,items_differing,beyond_rounding,max_abs_s_minus_t
+clickhouse_t32_dot,all,5,15,7499625,8,0,1.97e-08
+clickhouse_t32_dot,all,6,15,11249430,4,0,3.37e-08
+clickhouse_t32_dot,vis_1,5,15,75061,0,0,0
+clickhouse_t32_dot,vis_1,6,15,112740,0,0,0

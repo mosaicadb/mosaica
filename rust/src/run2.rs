@@ -723,3 +723,80 @@ pub fn filter2(c: &Ctx2, nq: usize) {
     }
     std::fs::write(format!("{}/filter2_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
+
+/// Threshold queries at explicit thresholds (`--thr FILE`, Q x S f64, one row per `--queries` row), unfiltered and
+/// within each visible set (`--vis A.npy,B.npy`, entity ids), timed whole: query preparation, the query, and the
+/// answer as a bitmap of entity ids. `index` is the planner's path; `flat` scans every stored f16 vector (the visible
+/// ones only, under a visible set). Every `--step`-th query runs, `--reps` times, on each of `--threads` (1,4); the
+/// per-query median and minimum go to RESULTS/dbcmp_<--tag>.csv. With `--dump DIR`, the 1-thread answers go to DIR/<what>_<vis>.bin as
+/// (query, share, count, ids...) u32 records.
+pub fn dbcmp(c: &Ctx2) {
+    let ix = &c.ix;
+    let fl = c.flat();
+    let thr = read_npy(&arg_str("--thr", ""));
+    let ns = thr.shape[1];
+    let thr = thr.f64s();
+    let qs = &c.texts;
+    assert_eq!(thr.len(), qs.len() * ns, "--thr must have one row per query");
+    let reps = arg_usize("--reps", 5);
+    let step = arg_usize("--step", 5);
+    let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
+    let dump = arg_str("--dump", "");
+    let mut sets: Vec<(String, Option<RoaringBitmap>)> = vec![("all".into(), None)];
+    for f in arg_str("--vis", "").split(',').filter(|f| !f.is_empty()) {
+        let a = read_npy(f);
+        assert_eq!(a.descr, "<i4", "{f}: --vis files hold sorted int32 entity ids");
+        let ids: Vec<u32> = a.data.chunks(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        let name = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().to_string();
+        sets.push((name, Some(RoaringBitmap::from_sorted_iter(ids).unwrap())));
+    }
+    let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count".to_string()];
+    for (vname, bm) in &sets {
+        let t = Timer::new();
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        out!("dbcmp {vname}: {} visible; into row order once per session {:.2} ms", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()), t.ms());
+        for &th in &threads {
+            let pl = pool(th);
+            for what in ["index", "flat"] {
+                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{what}_{vname}.bin")).unwrap()));
+                for (qi, q) in qs.iter().enumerate() {
+                    if qi % step != 0 {
+                        continue;
+                    }
+                    for si in 0..ns {
+                        let t0 = thr[qi * ns + si];
+                        let mut ts = Vec::new();
+                        let mut ans = RoaringBitmap::new();
+                        for _ in 0..reps {
+                            let t = Timer::new();
+                            ans = pl.install(|| match what {
+                                "index" => {
+                                    let pr = prep2(ix, q);
+                                    let r = threshold2(ix, &pr, t0, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan: c.plan });
+                                    to_bitmap2(ix, &r.rows)
+                                }
+                                _ => {
+                                    let (q16, q32, qn) = crate::v2::q::query_f16(q);
+                                    let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
+                                    e.sort_unstable();
+                                    RoaringBitmap::from_sorted_iter(e).unwrap()
+                                }
+                            });
+                            ts.push(t.ms());
+                        }
+                        if let Some(w) = dumpf.as_mut() {
+                            for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
+                                w.write_all(&x.to_le_bytes()).unwrap();
+                            }
+                        }
+                        let mn = ts.iter().cloned().fold(f64::MAX, f64::min);
+                        lines.push(format!("{what},{th},{vname},{si},{qi},{:.4},{:.4},{}", median(&ts), mn, ans.len()));
+                    }
+                }
+                let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{what},{th},{vname},"))).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
+                out!("dbcmp {what} threads {th} vis {vname}: {} timings, median {:.3} ms", mine.len(), median(&mine));
+            }
+        }
+    }
+    std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
+}
