@@ -213,7 +213,7 @@ const PIECE: usize = 256 << 10;
 /// reuse (in power-of-two sizes, so that they fit later batches). Buffers are anonymous mappings, so that a freed one
 /// goes back to the system rather than to the heap: under a cap, memory the heap keeps is memory the page cache loses.
 const BUDGET: usize = 8 << 20;
-const KEEP: usize = 4 << 20;
+const KEEP: usize = 16 << 20;
 
 /// One batch of rows read into a buffer: `rows` ascending, `at[k]` the byte offset of row k in `buf`.
 pub struct Batch<T> {
