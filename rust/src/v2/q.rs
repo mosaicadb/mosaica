@@ -2101,7 +2101,7 @@ impl Plan {
     }
 
     /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
-    /// from 4,096 single rows spread over the file, `io_gbps` from 64 MiB of consecutive rows, each the fastest of three
+    /// from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest of three
     /// timings. The file's pages are dropped from the cache before each and after. Unchanged in memory or without
     /// `--full-read uring`.
     pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
@@ -2124,7 +2124,7 @@ impl Plan {
         const NR: usize = 4096;
         let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
         let Some((t_rand, _)) = time(spread, 0) else { return base };
-        let nseq = ((64usize << 20) / (2 * n)).min(ix.nrows);
+        let nseq = ((32usize << 20) / (2 * n)).min(ix.nrows);
         let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2).unwrap();
         rows.evict();
         Plan { io_us: t_rand / NR as f64, io_gbps: bytes as f64 / t_seq / 1e3, ..base }

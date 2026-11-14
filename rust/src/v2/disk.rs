@@ -209,17 +209,18 @@ pub static QD: AtomicUsize = AtomicUsize::new(64);
 const RING: u32 = 256;
 /// Longest single read; a longer extent is split so that its pieces are read in parallel.
 const PIECE: usize = 256 << 10;
-/// Bytes of read buffers a `Reader` holds before it waits for the oldest batch.
-const BUDGET: usize = 8 << 20;
+/// Bytes of read buffers a `Reader` holds before it waits for the oldest batch, and keeps for reuse. Buffers are
+/// anonymous mappings, so that a freed one goes back to the system rather than to the heap: under a cap, memory the
+/// heap keeps is memory the page cache loses.
+const BUDGET: usize = 4 << 20;
 
 /// One batch of rows read into a buffer: `rows` ascending, `at[k]` the byte offset of row k in `buf`.
 pub struct Batch<T> {
     pub tag: T,
     pub rows: Vec<u32>,
     at: Vec<u32>,
-    buf: Vec<u8>,
-    base: usize,                           // offset of the first 4 KiB boundary in buf
-    ext: Vec<(u64, u32, u32, u32, bool)>, // file offset, length, offset from base, bytes done, direct
+    buf: memmap2::MmapMut,
+    ext: Vec<(u64, u32, u32, u32, bool)>, // file offset, length, offset in buf, bytes done, direct
     left: usize,
 }
 
@@ -227,13 +228,13 @@ impl<T> Batch<T> {
     /// Row k's stored vector.
     #[inline]
     pub fn row(&self, k: usize, n: usize) -> &[u16] {
-        unsafe { std::slice::from_raw_parts(self.buf.as_ptr().add(self.base + self.at[k] as usize) as *const u16, n) }
+        unsafe { std::slice::from_raw_parts(self.buf.as_ptr().add(self.at[k] as usize) as *const u16, n) }
     }
 }
 
 thread_local! {
     // this thread's ring and read buffers, kept across queries so that buffers are not allocated afresh each time
-    static THREAD_RING: std::cell::RefCell<Option<(io_uring::IoUring, Vec<Vec<u8>>)>> = const { std::cell::RefCell::new(None) };
+    static THREAD_RING: std::cell::RefCell<Option<(io_uring::IoUring, Vec<memmap2::MmapMut>)>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Batches of rows read with many reads in flight: `push` plans a batch's reads and queues them, `pop` returns the
@@ -254,7 +255,7 @@ pub struct Reader<T> {
     inflight: usize,
     qd: usize,
     held: usize,
-    free: Vec<Vec<u8>>,
+    free: Vec<memmap2::MmapMut>,
     pub reads: u64,
     pub bytes: u64,
 }
@@ -315,22 +316,20 @@ impl<T> Reader<T> {
             let s = rows[k] as u64 * rb;
             at[k] = x.2 + (s - x.0) as u32;
         }
-        // the smallest free buffer that holds the batch, else the largest, grown
-        let need = tot + 4096;
-        let k = self.free.iter().enumerate().filter(|(_, b)| b.capacity() >= need).min_by_key(|(_, b)| b.capacity()).map(|x| x.0)
-            .or_else(|| self.free.iter().enumerate().max_by_key(|(_, b)| b.capacity()).map(|x| x.0));
-        let mut buf = k.map(|k| self.free.swap_remove(k)).unwrap_or_default();
-        buf.clear();
-        buf.reserve(need);
-        unsafe { buf.set_len(need) };
-        let base = buf.as_ptr().align_offset(4096);
+        // the smallest free buffer that holds the batch, else a new one
+        let need = tot.max(1).next_multiple_of(64 << 10);
+        let buf = match self.free.iter().enumerate().filter(|(_, b)| b.len() >= need).min_by_key(|(_, b)| b.len()) {
+            Some((k, _)) => self.free.swap_remove(k),
+            None => memmap2::MmapMut::map_anon(need).expect("read buffer"),
+        };
+        let need = buf.len();
         self.held += need;
         self.reads += ext.len() as u64;
         self.bytes += tot as u64;
         NREADS.fetch_add(ext.len() as u64, Ordering::Relaxed);
         NBYTES.fetch_add(tot as u64, Ordering::Relaxed);
         let left = ext.len();
-        self.q.push_back(Batch { tag, rows, at, buf, base, ext, left });
+        self.q.push_back(Batch { tag, rows, at, buf, ext, left });
         self.pump();
     }
 
@@ -355,7 +354,7 @@ impl<T> Reader<T> {
             let b = &self.q[(seq - self.seq0) as usize];
             let (off, len, bo, done, direct) = b.ext[i];
             let fd = if direct { self.dfd } else { self.fd };
-            let e = io_uring::opcode::Read::new(io_uring::types::Fd(fd), unsafe { b.buf.as_ptr().add(b.base + (bo + done) as usize) as *mut u8 }, len - done)
+            let e = io_uring::opcode::Read::new(io_uring::types::Fd(fd), unsafe { b.buf.as_ptr().add((bo + done) as usize) as *mut u8 }, len - done)
                 .offset(off + done as u64)
                 .build()
                 .user_data(seq << 24 | i as u64);
@@ -407,7 +406,7 @@ impl<T> Reader<T> {
 
     /// Returns a batch's buffer for reuse; buffers beyond the budget are freed.
     pub fn recycle(&mut self, b: Batch<T>) {
-        if self.free.iter().map(|b| b.capacity()).sum::<usize>() + b.buf.capacity() <= BUDGET {
+        if self.free.iter().map(|b| b.len()).sum::<usize>() + b.buf.len() <= BUDGET {
             self.free.push(b.buf);
         }
     }
