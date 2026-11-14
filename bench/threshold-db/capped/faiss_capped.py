@@ -108,11 +108,18 @@ t = time.time()
 if FLAT:
     ix = faiss.read_index(f"{a.ann}/{a.method}.bin", faiss.IO_FLAG_MMAP_IFC)
 else:
-    ix = faiss.read_index(f"{a.ann}/{a.method}_ondisk.bin", faiss.IO_FLAG_MMAP)
+    # OnDiskInvertedLists maps its data file itself; IO_FLAG_MMAP on top crashed the first search (faiss 1.16.0)
+    ix = faiss.read_index(f"{a.ann}/{a.method}_ondisk.bin")
 sel = None
 if mask is not None:
     bits = np.packbits(mask, bitorder="little")
     sel = faiss.IDSelectorBitmap(N, faiss.swig_ptr(bits))
+# the files may sit in the page cache charged to another cgroup (the build's): drop them first
+for f in os.listdir(a.ann):
+    if f.startswith(a.method):
+        fd = os.open(f"{a.ann}/{f}", os.O_RDONLY)
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+        os.close(fd)
 reclaim()
 print(f"{a.method}: opened in {time.time() - t:.1f} s; {cg_report()}", flush=True)
 
@@ -137,7 +144,7 @@ for si in shares:
         got = one(qis[0], si)
         ms = (time.perf_counter() - t0) * 1e3
         e = exact[si, qis[0]]
-        rec = len(np.intersect1d(got, e)) / max(len(e), 1)
+        rec = len(np.intersect1d(got, e)) / len(e) if len(e) else float(len(got) == 0)
         rows.append(f"{what},1,{vis},{si},{qis[0]},{ms:.4f},{ms:.4f},{len(got)},{rec:.5f},{(read_bytes() - b0) / 1024:.1f},cold")
     res = []
     b0, tb = read_bytes(), time.time()
@@ -148,7 +155,7 @@ for si in shares:
             got = one(qi, si)
             ts.append((time.perf_counter() - t0) * 1e3)
         e = exact[si, qi]
-        rec = len(np.intersect1d(got, e)) / max(len(e), 1)
+        rec = len(np.intersect1d(got, e)) / len(e) if len(e) else float(len(got) == 0)
         res.append((float(np.median(ts)), rec))
         rows.append(f"{what},1,{vis},{si},{qi},{np.median(ts):.4f},{min(ts):.4f},{len(got)},{rec:.5f},,warm")
     print(f"{what} {vis} share {si}: median {np.median([r[0] for r in res]):.1f} ms, mean recall {np.mean([r[1] for r in res]):.4f}; "
