@@ -1,0 +1,55 @@
+[    6s] 1 bit: mean tan(phi) 1.9209 (sd 0.0968), mean sd 0.02572
+[    7s] 1 bit: mean tan(phi) 1.1623 (sd 0.0428), mean sd 0.01558
+[    7s] 1 bit: mean tan(phi) 0.7551 (sd 0.0200), mean sd 0.01012
+[   18s] 2 bit: mean tan(phi) 0.3667 (sd 0.0116), mean sd 0.00492
+[   29s] 4 bit: mean tan(phi) 0.1075 (sd 0.0070), mean sd 0.00144
+[   41s] 6 bit: mean tan(phi) 0.0320 (sd 0.0036), mean sd 0.00043
+[   84s] N=150000 n=768 levels=(1, 1, 1, 2, 4, 6) bytes per level [np.float64(32.0), np.float64(32.0), np.float64(32.0), np.float64(96.0), np.float64(192.0), np.float64(192.0)]; as-if N=1e9: today two-sided 8.79, all N harmful side 8.72, single item 6.21; band rule: c_far 8.92 c_acc 7.35 floor 8.26
+[   87s] 10 queries
+[   91s] 20 queries
+[   94s] 30 queries
+[   98s] 40 queries
+[  101s] 50 queries
+[  106s] 60 queries
+[  110s] 70 queries
+[  113s] 80 queries
+[  116s] 90 queries
+[  120s] 100 queries
+
+BioCLIP-2 corpus N=150000, n=768, levels ['s256', 's512', '1', '2', '4', '6'] ([32, 64, 96, 192, 384, 576] B cumulative), eps=1e-09, constants as if N=1e9 at the same answer share, 100 held-out items as queries.
+und l = undecided after level l per true match; reads = exact reads per true match (match side + non-match side); lost / wrong-in are totals over all queries (must be 0 except single*).
+
+answer 15 of 150000 (0.01%; 1e+05 at 1e9); hazard 353.3 per unit score; median last-level sd*w near t 0.00016
+scheme        cex1  cex2  cex3  cex4  cex5  cex6  cin1  cin2  cin3  cin4  cin5  cin6    und 1    und 2    und 3    und 4    und 5    und 6   reads  (match   non)  lost wrong  % f16
+allN          8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  553.157  119.873   32.561    6.291    1.307    0.432   0.432   0.195  0.237     0     0   2.26
+allN d=0.002  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  553.157  119.872   32.551    6.167    0.801    0.115   0.115   0.016  0.099     0     0   2.25
+allN d=0.005  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  553.156  119.859   32.411    5.377    0.478    0.009   0.009   0.000  0.009     0     0   2.25
+allN d=0.01   8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  553.121  119.227   30.298    3.755    0.255    0.000   0.000   0.000  0.000     0     0   2.25
+
+answer 150 of 150000 (0.10%; 1e+06 at 1e9); hazard 209.1 per unit score; median last-level sd*w near t 0.00016
+scheme        cex1  cex2  cex3  cex4  cex5  cex6  cin1  cin2  cin3  cin4  cin5  cin6    und 1    und 2    und 3    und 4    und 5    und 6   reads  (match   non)  lost wrong  % f16
+allN          8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  117.279   37.583   13.903    3.784    0.888    0.266   0.266   0.126  0.139     0     0   2.58
+allN d=0.002  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  117.279   37.579   13.877    3.648    0.556    0.075   0.075   0.013  0.062     0     0   2.55
+allN d=0.005  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  117.279   37.553   13.749    3.174    0.342    0.010   0.010   0.000  0.010     0     0   2.54
+allN d=0.01   8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  117.246   37.255   12.901    2.330    0.185    0.000   0.000   0.000  0.000     0     0   2.52
+
+answer 1500 of 150000 (1.00%; 1e+07 at 1e9); hazard 108.4 per unit score; median last-level sd*w near t 0.00017
+scheme        cex1  cex2  cex3  cex4  cex5  cex6  cin1  cin2  cin3  cin4  cin5  cin6    und 1    und 2    und 3    und 4    und 5    und 6   reads  (match   non)  lost wrong  % f16
+allN          8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72   25.363   12.590    6.338    2.278    0.592    0.176   0.176   0.085  0.090     0     0   3.80
+allN d=0.002  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72   25.359   12.572    6.294    2.170    0.406    0.061   0.061   0.012  0.049     0     0   3.65
+allN d=0.005  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72   25.347   12.525    6.186    1.933    0.268    0.011   0.011   0.000  0.011     0     0   3.54
+allN d=0.01   8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72   25.292   12.349    5.846    1.531    0.159    0.000   0.000   0.000  0.000     0     0   3.44
+
+answer 15000 of 150000 (10.00%; 1e+08 at 1e9); hazard 34.5 per unit score; median last-level sd*w near t 0.00020
+scheme        cex1  cex2  cex3  cex4  cex5  cex6  cin1  cin2  cin3  cin4  cin5  cin6    und 1    und 2    und 3    und 4    und 5    und 6   reads  (match   non)  lost wrong  % f16
+allN          8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    5.167    3.562    2.338    1.129    0.329    0.098   0.098   0.048  0.050     0     0   8.17
+allN d=0.002  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    5.153    3.537    2.303    1.077    0.265    0.043   0.043   0.009  0.034     0     0   7.44
+allN d=0.005  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    5.127    3.497    2.248    0.999    0.184    0.010   0.010   0.000  0.010     0     0   6.87
+allN d=0.01   8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    5.078    3.424    2.150    0.867    0.106    0.000   0.000   0.000  0.000     0     0   6.41
+
+answer 45000 of 150000 (30.00%; 3e+08 at 1e9); hazard 13.3 per unit score; median last-level sd*w near t 0.00024
+scheme        cex1  cex2  cex3  cex4  cex5  cex6  cin1  cin2  cin3  cin4  cin5  cin6    und 1    und 2    und 3    und 4    und 5    und 6   reads  (match   non)  lost wrong  % f16
+allN          8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    2.368    1.782    1.315    0.685    0.203    0.061   0.061   0.030  0.031     0     0  12.29
+allN d=0.002  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    2.362    1.773    1.303    0.667    0.179    0.034   0.034   0.007  0.027     0     0  11.32
+allN d=0.005  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    2.353    1.758    1.284    0.638    0.142    0.008   0.008   0.000  0.008     0     0  10.24
+allN d=0.01   8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72  8.72    2.337    1.734    1.250    0.588    0.082    0.000   0.000   0.000  0.000     0     0   9.49
