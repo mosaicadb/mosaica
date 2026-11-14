@@ -114,6 +114,9 @@ def main():
     ap.add_argument("--seed", type=int, default=20261112)
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
+    ap.add_argument("--per-cluster", type=int, default=PER_CLUSTER, help="items per cluster on average")
+    ap.add_argument("--groups", type=int, default=0,
+                    help="groups of clusters (at most the cluster count); 0: min(64, K / 8, N / (20 n))")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
@@ -133,7 +136,7 @@ def main():
     nzero = int((np.abs(Xu).sum(1) == 0).sum())
     log(f"N {N} n {n0} (padded to {n}); zero vectors {nzero}")
 
-    K = max(1, round(N / PER_CLUSTER))
+    K = max(1, round(N / a.per_cluster))
     sub = Xu[rng.choice(N, min(N, 200_000), replace=False)]
     C = kmeans(sub, K, rng)
     del sub
@@ -155,14 +158,15 @@ def main():
     Mh = Mq / np.where(mn > 0, mn, 1)[:, None]
 
     # groups: enough items per group for a basis (20 n), at most 64 groups and 8 clusters per group on average
-    G = int(max(1, min(64, K // 8, N // (20 * n0))))
+    G = int(max(1, min(64, K // 8, N // (20 * n0)))) if a.groups <= 0 else min(a.groups, K)
     grp = (Mh @ kmeans(Mh.astype(np.float32).copy(), G, rng, 20).T).argmax(1)
     gk = np.unique(grp)
     gmap = -np.ones(G, np.int64)
     gmap[gk] = np.arange(len(gk))
     grp = gmap[grp]
     G = len(gk)
-    log(f"K {K} clusters (sizes {cnt.min()}..{cnt.max()}), G {G} groups")
+    gsz = np.bincount(grp[assign], minlength=G)
+    log(f"K {K} clusters (sizes {cnt.min()}..{cnt.max()}), G {G} groups (sizes {gsz.min()}..{gsz.max()}, clusters per group {np.bincount(grp, minlength=G).min()}..{np.bincount(grp, minlength=G).max()})")
 
     # rows in (group, cluster) order; clusters renumbered so they are contiguous
     order = np.lexsort((assign, grp[assign]))
