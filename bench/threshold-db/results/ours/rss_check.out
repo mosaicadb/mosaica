@@ -1,0 +1,17 @@
+==== run at 1794674449: ["/home/joe/code/vexact-benchup-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "rss", "--core", "10", "--pin", "10", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--step", "50", "--reps", "1", "--threads", "1", "--tag", "rss"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.7s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 13.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 60.7s
+[build2] encoded 150.2s
+[build2] assembled 151.2s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.07, 0.06, 0.06, 0.07, 0.09, 0.1, 0.06, 0.12, 0.15, 0.2] (timed in 0.1s)
+[plan] calibrated in 2.3s
+[plan] full_us=0.12578682182486794 item_us0=0.008999074510749147 item_us1=0.03599629804299659 cl_us0=1.7998149021498293 cl_us1=8.999074510749146 grp_us=62.993521575244024 scan_us=0.10466590820298609 cut_us=1.52941503125 seed_us=733.072625 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+dbcmp all: 999950 visible; into row order once per session 0.00 ms
+dbcmp index threads 1 vis all: 21 timings, median 56.180 ms
+dbcmp flat threads 1 vis all: 21 timings, median 99.405 ms
+dbcmp resident after the queries: VmRSS:	 6244624 kB, RssAnon:	 3239488 kB, RssFile:	 3005136 kB

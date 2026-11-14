@@ -1,0 +1,53 @@
+hnsw_sq16: loaded in 1 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 ladder vis_1 share 0: rung 1, mean recall 0.1111, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 1.5, mean recall 0.1111, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 2, mean recall 0.1111, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 3, mean recall 0.1111, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 4, mean recall 0.1852, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 6, mean recall 0.2222, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 8, mean recall 0.2222, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 12, mean recall 0.4444, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 16, mean recall 0.4444, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 0: rung 24, mean recall 0.5556, median 0.2 ms
+hnsw_sq16 ladder vis_1 share 0: rung 32, mean recall 0.6667, median 0.2 ms
+hnsw_sq16 ladder vis_1 share 0: rung 64, mean recall 0.8889, median 0.3 ms
+hnsw_sq16 ladder vis_1 share 0: rung 128, mean recall 0.8889, median 0.5 ms
+hnsw_sq16 ladder vis_1 share 0: rung 256, mean recall 1.0000, median 1.0 ms
+hnsw_sq16 default vis_1 share 0: param x1, median 0.02 ms, mean recall 0.1111, non-matches 4 over 9 queries
+hnsw_sq16 tight vis_1 share 0: param x256, median 0.47 ms, mean recall 1.0000, non-matches 0 over 9 queries
+hnsw_sq16 ladder vis_1 share 1: rung 1, mean recall 0.0673, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 1: rung 1.5, mean recall 0.1331, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 1: rung 2, mean recall 0.1591, median 0.1 ms
+hnsw_sq16 ladder vis_1 share 1: rung 3, mean recall 0.2086, median 0.2 ms
+hnsw_sq16 ladder vis_1 share 1: rung 4, mean recall 0.2314, median 0.2 ms
+hnsw_sq16 ladder vis_1 share 1: rung 6, mean recall 0.3355, median 0.3 ms
+hnsw_sq16 ladder vis_1 share 1: rung 8, mean recall 0.4333, median 0.4 ms
+hnsw_sq16 ladder vis_1 share 1: rung 12, mean recall 0.4681, median 0.5 ms
+hnsw_sq16 ladder vis_1 share 1: rung 16, mean recall 0.5644, median 0.6 ms
+hnsw_sq16 ladder vis_1 share 1: rung 24, mean recall 0.6417, median 0.7 ms
+hnsw_sq16 ladder vis_1 share 1: rung 32, mean recall 0.6957, median 1.0 ms
+hnsw_sq16 ladder vis_1 share 1: rung 64, mean recall 0.8388, median 1.5 ms
+hnsw_sq16 ladder vis_1 share 1: rung 128, mean recall 0.9038, median 2.7 ms
+hnsw_sq16 ladder vis_1 share 1: rung 256, mean recall 0.9579, median 5.5 ms
+hnsw_sq16 ladder vis_1 share 1: rung 512, mean recall 0.9725, median 13.1 ms
+hnsw_sq16 ladder vis_1 share 1: rung 1024, mean recall 0.9909, median 34.0 ms
+hnsw_sq16 default vis_1 share 1: param x1, median 0.04 ms, mean recall 0.0673, non-matches 19 over 15 queries
+hnsw_sq16 tight vis_1 share 1: param x1024, median 33.46 ms, mean recall 0.9909, non-matches 2 over 15 queries
+hnsw_sq16 ladder vis_1 share 2: rung 1, mean recall 0.0956, median 0.4 ms
+hnsw_sq16 ladder vis_1 share 2: rung 1.5, mean recall 0.1303, median 0.6 ms
+hnsw_sq16 ladder vis_1 share 2: rung 2, mean recall 0.1567, median 0.7 ms
+hnsw_sq16 ladder vis_1 share 2: rung 3, mean recall 0.2040, median 0.9 ms
+hnsw_sq16 ladder vis_1 share 2: rung 4, mean recall 0.2394, median 1.1 ms
+hnsw_sq16 ladder vis_1 share 2: rung 6, mean recall 0.3092, median 1.4 ms
+hnsw_sq16 ladder vis_1 share 2: rung 8, mean recall 0.3679, median 2.0 ms
+hnsw_sq16 ladder vis_1 share 2: rung 12, mean recall 0.4671, median 2.7 ms
+hnsw_sq16 ladder vis_1 share 2: rung 16, mean recall 0.5403, median 3.5 ms
+hnsw_sq16 ladder vis_1 share 2: rung 24, mean recall 0.6495, median 5.2 ms
+hnsw_sq16 ladder vis_1 share 2: rung 32, mean recall 0.7385, median 7.8 ms
+hnsw_sq16 ladder vis_1 share 2: rung 64, mean recall 0.9015, median 19.1 ms
+hnsw_sq16 ladder vis_1 share 2: rung 128, mean recall 0.9658, median 56.6 ms
+hnsw_sq16 ladder vis_1 share 2: rung 256, mean recall 0.9887, median 167.1 ms
+hnsw_sq16 ladder vis_1 share 2: rung 512, mean recall 0.9967, median 584.7 ms
+hnsw_sq16 default vis_1 share 2: param x1, median 0.17 ms, mean recall 0.0956, non-matches 64 over 15 queries
+hnsw_sq16 tight vis_1 share 2: param x512, median 583.78 ms, mean recall 0.9967, non-matches 5 over 15 queries
+peak RSS 1.61 GiB

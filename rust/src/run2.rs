@@ -1196,4 +1196,6 @@ pub fn dbcmp(c: &Ctx2) {
         }
     }
     std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
+    let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));
 }

@@ -83,7 +83,7 @@ F32 = lambda l: l.replace("faiss SQfp16 flat", "faiss IndexFlatIP").replace("-SQ
 col = {l: colours[i % 20] for i, l in enumerate(x for x in labs if "SQfp16" not in x)}
 col.update({l: col[F32(l)] for l in labs if "SQfp16" in l})  # half precision: the f32 version's colour, dotted
 for th in (1, 4):
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6.5), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 8), sharey=True)
     for ax, vis, title in ((axes[0], "all", "unfiltered"), (axes[1], "vis_1", "1% visible set")):
         for (lab, ex, t, v), p in sorted(lines.items()):
             if t != th or v != vis:
@@ -115,6 +115,6 @@ for th in (1, 4):
     fig.legend(h, l, loc="lower center", ncol=4, fontsize=8)
     fig.suptitle("Threshold filter q·x ≥ t on 1M BioCLIP-2 vectors (768 d): solid = exact, dashed = approximate "
                  "(labels: mean recall)", fontsize=10)
-    fig.tight_layout(rect=(0, 0.13, 1, 0.97))
+    fig.tight_layout(rect=(0, 0.19, 1, 0.97))
     fig.savefig(f"{res}/latency_{th}t.png", dpi=110)
 print(len(rows) - 1, "points")
