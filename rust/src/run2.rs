@@ -26,8 +26,8 @@ fn pool(t: usize) -> rayon::ThreadPool {
 pub struct Ctx2 {
     pub p: Params,
     pub ix: Index2,
-    pub xs: RealSource,
-    pub ent_xs: Vec<u32>,
+    pub row_ent: Vec<i64>,
+    pub ent_xs: Vec<u32>, // entity -> index row
     pub items: Vec<Vec<f32>>,
     pub texts: Vec<Vec<f32>>,
     pub plan: Plan,
@@ -205,9 +205,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         p.centres.truncate(kk * n);
     }
     let prof = crate::derive::load_profile(&prof_path);
-    let xs = RealSource::open(&p.xs_path);
-    let src = Real2 { src: RealSource::open(&p.xs_path) };
-    let full = Full2::Real { rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
@@ -228,16 +225,21 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     } else {
         // built into a scratch directory, sealed with its key, then moved into place
         let tmp = format!("{edir}.tmp");
-        let dir = (!in_memory).then_some(tmp.as_str());
-        if let Some(d) = dir {
+        let out = (!in_memory).then_some(tmp.as_str());
+        if let Some(d) = out {
             let _ = std::fs::remove_dir_all(d);
             std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("cannot create {d}: {e}"));
         }
-        let mut ix = build2(&p, &prof, &src, full, split, nusort, dir, &mut lg);
+        let full = Full2::Real { rows: Default::default() };
+        let mut ix = if p.xs_path.is_empty() {
+            panic!("{dir} has no Xs.npy; build its index with `vexact build {dir}`")
+        } else {
+            build2(&p, &prof, &Real2 { src: RealSource::open(&p.xs_path) }, full, split, nusort, out, &mut lg)
+        };
         if !nusort {
             build_table2(&mut ix, p.meta.k);
         }
-        if let Some(d) = dir {
+        if let Some(d) = out {
             crate::v2::store::seal(&ix, d, &key);
             let _ = std::fs::remove_dir_all(&edir);
             std::fs::rename(d, &edir).unwrap_or_else(|e| panic!("cannot move {d} to {edir}: {e}"));
@@ -252,13 +254,11 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     ix.repack = calibrate_repack(&ix);
     out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
     let n = p.meta.n;
-    let mut ent_xs = vec![u32::MAX; p.perm.len()];
-    for (r, &e) in p.perm.iter().enumerate() {
-        ent_xs[e as usize] = r as u32;
-    }
-    // item queries: held-out rows from --item-queries, else stored rows listed by the fit
+    let ent_xs = ix.ent_row.to_vec();
+    let row_ent: Vec<i64> = ix.row_ent.iter().map(|&e| e as i64).collect();
+    // item queries: held-out rows from --item-queries, else rows of the fit listed by it, read from the index
     let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
-        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect()
+        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| ix.full_row_f16(ix.ent_row[p.perm[r as usize] as usize] as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect()
     } else {
         load_queries_from(&arg_str("--item-queries", ""), n)
     };
@@ -307,7 +307,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     } else {
         None
     };
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
+    let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, dial };
     out!("[fit] {}", c.p.fit);
     out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -316,7 +316,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
 
 impl Ctx2 {
     pub fn flat(&self) -> Flat<'_> {
-        Flat { map: &self.xs.map, off: self.xs.off, n: self.p.meta.n, nrows: self.p.cstart[self.p.meta.k], ent: &self.p.perm }
+        let Full2::Real { rows } = &self.ix.full else { panic!("a synthetic index has no vectors to scan") };
+        let map = unsafe { std::slice::from_raw_parts(rows.as_ptr() as *const u8, rows.len() * 2) };
+        Flat { map, off: 0, n: self.p.meta.n, nrows: self.ix.nrows, ent: &self.row_ent }
     }
 }
 

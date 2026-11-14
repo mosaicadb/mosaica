@@ -366,9 +366,13 @@ pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
         f64s(r2, &mut h);
     }
     f64s(prof, &mut h);
-    // the vectors: their file's identity, not its contents
-    let md = std::fs::metadata(&p.xs_path).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.xs_path));
-    (&p.xs_path, md.len(), md.modified().ok()).hash(&mut h);
+    // the vectors: the identity of the files they come from, not their contents
+    for f in [p.xs_path.clone(), if p.partition.is_empty() { String::new() } else { format!("{}/manifest.json", p.partition) }] {
+        if !f.is_empty() {
+            let md = std::fs::metadata(&f).unwrap_or_else(|e| panic!("cannot read {f}: {e}"));
+            (&f, md.len(), md.modified().ok()).hash(&mut h);
+        }
+    }
     let cal = std::env::var("VEXACT_CAL_ITEMS").unwrap_or_default();
     let nguar = NGUAR.get().map(|x| x.to_bits());
     let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);

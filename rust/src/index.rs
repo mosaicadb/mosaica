@@ -74,7 +74,8 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
-    pub xs_path: String,
+    pub xs_path: String,   // the vectors in cluster order (fits with an Xs.npy; empty otherwise)
+    pub partition: String, // the partition the fit read its vectors from (empty for a fit with an Xs.npy)
 }
 
 pub fn load_params(dir: &str) -> Params {
@@ -93,7 +94,7 @@ pub fn load_params(dir: &str) -> Params {
     let n = us("n");
     let k = us("K");
     let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
-    let xs = meta["xs"].as_str().unwrap();
+    let xs = meta["xs"].as_str().unwrap_or("");
     Params {
         meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
             eps: meta["EPS"].as_f64().unwrap_or(1e-9),
@@ -119,7 +120,8 @@ pub fn load_params(dir: &str) -> Params {
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
-        xs_path: if xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
+        xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
+        partition: meta["partition"].as_str().unwrap_or("").to_string(),
     }
 }
 
