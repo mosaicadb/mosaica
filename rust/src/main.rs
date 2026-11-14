@@ -815,6 +815,9 @@ fn main() {
         if has("ann") {
             ann::run(&c, get("--k", 10));
         }
+        if has("dbcmp") {
+            run2::dbcmp(&c);
+        }
         return;
     }
     if !std::arch::is_x86_feature_detected!("avx512f") {
