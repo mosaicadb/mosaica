@@ -77,44 +77,83 @@ for (lab, ex, th, vis, si), v in sorted(pts.items()):
 with open(f"{res}/plot_data.csv", "w", newline="") as f:
     csv.writer(f).writerows(rows)
 
-colours = plt.get_cmap("tab20").colors
-labs = sorted({k[0] for k in lines})
-F32 = lambda l: l.replace("faiss SQfp16 flat", "faiss IndexFlatIP").replace("-SQfp16", "")
-col = {l: colours[i % 20] for i, l in enumerate(x for x in labs if "SQfp16" not in x)}
-col.update({l: col[F32(l)] for l in labs if "SQfp16" in l})  # half precision: the f32 version's colour, dotted
-for th in (1, 4):
-    fig, axes = plt.subplots(1, 2, figsize=(15, 8), sharey=True)
-    for ax, vis, title in ((axes[0], "all", "unfiltered"), (axes[1], "vis_1", "1% visible set")):
-        for (lab, ex, t, v), p in sorted(lines.items()):
-            if t != th or v != vis:
+
+# The figures: exact methods solid, approximate methods (at mean recall >= 0.99) dashed, hollow markers where a
+# method could not reach 0.99. Colours follow the system, in the validated categorical order; names sit at line ends.
+SHARES = [0.01, 0.1, 1, 10, 30, 50, 75]
+NVIS = {"all": 999_950, "vis_1": 9_999.5}
+SERIES = [  # (label in plot_data, name on the chart, colour, exact, panels)
+    ("ours: index", "ours: index", "#2a78d6", True, ("all", "vis_1")),
+    ("ours: f16 scan", "ours: f16 scan", "#2a78d6", True, ("all", "vis_1")),
+    ("faiss Panorama flat range", "faiss Panorama", "#6250d6", True, ("all", "vis_1")),
+    ("faiss IndexFlatIP range", "faiss flat", "#1baf7a", True, ("all",)),
+    ("faiss IndexFlatIP range, compacted visible copy", "faiss flat, compacted copy", "#1baf7a", True, ("vis_1",)),
+    ("ClickHouse BFloat16", "ClickHouse bf16", "#008300", True, ("all", "vis_1")),
+    ("hnswlib top-m, tight ef", "hnswlib", "#eb6834", False, ("all",)),
+    ("faiss HNSW top-m, tight ef", "faiss HNSW", "#eb6834", False, ("vis_1",)),
+    ("faiss IVF4096 range, tight nprobe", "faiss IVF", "#eda100", False, ("all", "vis_1")),
+    ("RaBitQ IVF 7-bit top-m, all clusters", "RaBitQ", "#e87ba4", False, ("all",)),
+]
+INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
+plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": MUTED, "axes.labelcolor": INK,
+                     "xtick.color": MUTED, "ytick.color": MUTED, "axes.spines.top": False, "axes.spines.right": False})
+
+def share(x, vis):
+    s = 100 * x / NVIS[vis]
+    return min(SHARES, key=lambda v: abs(np.log(v) - np.log(s)))
+
+def draw(th, path):
+    fig, axes = plt.subplots(1, 2, figsize=(13, 8.2), sharey=True)
+    for ax, vis, title in ((axes[0], "all", "All 1M items visible"), (axes[1], "vis_1", "1% of items visible (10k)")):
+        ends = []
+        for key, name, colour, exact, panels in SERIES:
+            pts = sorted(lines.get((key, 1 if exact else 0, th, vis), []))
+            if vis not in panels or not pts:
                 continue
-            p.sort()
-            xs, ys, rs = zip(*p)
-            ours = lab.startswith("ours")
-            if lab == OLD:
-                ax.plot(xs, ys, "--", marker="o", ms=3, lw=1.6, color="black", alpha=0.35, label=lab, zorder=3)
-                continue
-            h16 = "SQfp16" in lab
-            ax.plot(xs, ys, ("-." if h16 else "-") if ex else (":" if h16 else "--"), marker="^" if h16 else "o" if ex else "s", ms=4, lw=2.6 if ours else 1.4,
-                    color=("black" if lab == "ours: index" else "dimgrey") if ours else col[lab], label=lab, zorder=3 if ours else 2)
-            if not ex:
-                for x, y, r in p:
-                    ax.annotate(f"{r:.3f}", (x, y), fontsize=7, color=col[lab], xytext=(3, 3), textcoords="offset points")
+            xs = [share(x, vis) for x, _, _ in pts]
+            ys = [y for _, y, _ in pts]
+            rs = [r for _, _, r in pts]
+            scan = key == "ours: f16 scan"
+            lw = 2.8 if key == "ours: index" else 1.8
+            ax.plot(xs, ys, linestyle="-" if exact else (0, (5, 3)), color=colour, lw=lw, alpha=0.55 if scan else 1, zorder=4 if key.startswith("ours") else 3)
+            for x, y, r in zip(xs, ys, rs):
+                ok = exact or r >= 0.99
+                ax.plot([x], [y], "o", ms=5.5, mec=colour, mfc=colour if ok else "white", mew=1.6, alpha=0.55 if scan else 1, zorder=5)
+                if not ok and x != xs[-1] and x != 50:
+                    ax.annotate(f"recall {r:.3f}", (x, y), xytext=(7, -12), textcoords="offset points", fontsize=8, color=MUTED)
+            ends.append([ys[-1], xs[-1], name if exact or rs[-1] >= 0.99 else f"{name} (recall {rs[-1]:.2f})"])
+        # names at the line ends, nudged apart in log space
+        ends.sort()
+        ly = [np.log10(e[0]) for e in ends]
+        for i in range(1, len(ly)):
+            ly[i] = max(ly[i], ly[i - 1] + 0.1)
+        for (y, x, name), l in zip(ends, ly):
+            ax.annotate(name, (x, y), xytext=(110, 10 ** l), textcoords="data", fontsize=9, color=INK, va="center",
+                        arrowprops=dict(arrowstyle="-", color="#c9c8c2", lw=0.8, shrinkA=2, shrinkB=4) if x < 75 or abs(np.log10(y) - l) > 0.03 else None)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_title(f"{title}, {th} thread{'s' if th > 1 else ''}")
-        ax.set_xlabel("answer size (items, median exact count)")
-        ax.grid(True, which="both", alpha=0.3)
-    axes[0].set_ylabel("median ms per query (whole id set returned)")
-    h, l = [], []
-    for ax in axes:
-        for hh, ll in zip(*ax.get_legend_handles_labels()):
-            if ll not in l:
-                h.append(hh)
-                l.append(ll)
-    fig.legend(h, l, loc="lower center", ncol=4, fontsize=8)
-    fig.suptitle("Threshold filter q·x ≥ t on 1M BioCLIP-2 vectors (768 d): solid = exact, dashed = approximate "
-                 "(labels: mean recall)", fontsize=10)
-    fig.tight_layout(rect=(0, 0.19, 1, 0.97))
-    fig.savefig(f"{res}/latency_{th}t.png", dpi=110)
+        ax.set_xlim(0.007, 1500)
+        ax.set_xticks(SHARES)
+        ax.set_xticklabels([f"{s:g}%" if s not in (30, 50) else "" for s in SHARES])
+        ax.minorticks_off()
+        yt = [0.1, 1, 10, 100, 1000]
+        ax.set_yticks(yt)
+        ax.set_yticklabels([f"{v:g} ms" for v in yt])
+        ax.grid(True, axis="y", color=GRID, lw=0.8)
+        ax.set_title(title, loc="left", fontsize=11, color=INK, pad=10)
+        ax.set_xlabel("answer size, as a share of the visible items")
+        ax.tick_params(length=0)
+    axes[0].set_ylim(0.2, 8000)
+    fig.suptitle(f"Exact threshold filter q·x ≥ t on 1M BioCLIP-2 vectors (768 d), {th} thread{'s' if th > 1 else ''}",
+                 x=0.06, ha="left", fontsize=13, color=INK, fontweight="bold")
+    approx = any(k[1] == 0 and k[2] == th for k in lines)
+    fig.text(0.06, 0.885, "Median time to return the whole set of matching ids. Solid lines are exact." + (" Dashed lines are approximate methods at\n"
+             "their fastest setting with mean recall ≥ 0.99; hollow points could not reach 0.99 within 5 s and show the recall reached." if approx else ""),
+             fontsize=9, color=MUTED)
+    fig.tight_layout(rect=(0.03, 0.02, 0.97, 0.87))
+    fig.savefig(path, dpi=130, facecolor="white")
+    plt.close(fig)
+
+draw(1, f"{res}/latency_1t.png")
+draw(4, f"{res}/latency_4t.png")
 print(len(rows) - 1, "points")

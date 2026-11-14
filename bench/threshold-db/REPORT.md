@@ -4,10 +4,12 @@
 
 ![the same at 4 threads](results/latency_4t.png)
 
-Solid lines are exact methods and dashed lines approximate ones; each approximate point is labelled with its mean
-recall. Half-precision faiss variants have their f32 version's colour, with a dotted (approximate) or dash-dot (exact)
-line and triangle markers. The faint dashed black line is our index as measured on 13 Nov, before the changes listed
-under [What changed in our index](#what-changed-in-our-index). The data behind both plots is in
+The plots show one line per system so that they stay readable; the tables below hold every row, including our index
+as measured on 13 Nov, ClickHouse Float32, the half-precision faiss variants (the same speed as f32 at half the memory,
+except flat range search) and each approximate method at its default setting. Approximate methods appear at their
+fastest setting with mean recall at least 0.99; a hollow point is one where the method could not reach 0.99 within
+5 s per query, labelled with the recall it reached. In the 1% visible panel faiss flat is the search over a compacted
+copy of the visible rows, which takes about 30 ms to build per visible set. The data behind both plots is in
 [results/plot_data.csv](results/plot_data.csv).
 
 This is the 14 Nov update of the 13 Nov report. Our rows were re-measured with the current index. The approximate
