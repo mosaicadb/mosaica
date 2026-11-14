@@ -1,0 +1,83 @@
+== A2. radius bonus on every scheme: order by centre score + f * RMS radius; items scanned at mean recall 0.8/0.9/0.99
+K1000      f=0.0 | k1: 12125/30405/198437 | k10: 9198/30405/195456 | k100: 9198/28487/212709 | k1000: 15917/44455/245971 || img k10: 2954/5609/14161 txt k10: 16630/46029/271128
+K1000      f=0.1 | k1: 7735/15886/76488 | k10: 5871/14983/96179 | k100: 6820/16760/121773 | k1000: 12282/29850/172496 || img k10: 2831/4055/11450 txt k10: 8151/23466/101569
+K1000      f=0.2 | k1: 5621/17926/87187 | k10: 4740/11922/80606 | k100: 5621/15463/102582 | k1000: 11922/30227/160149 || img k10: 2553/3759/7095 txt k10: 7253/19004/85375
+K1000      f=0.3 | k1: 4610/12288/105391 | k10: 4610/11414/77724 | k100: 7164/17364/112460 | k1000: 14883/34779/184774 || img k10: 2345/4464/10843 txt k10: 6395/18512/97226
+K1000      f=0.4 | k1: 6778/13395/113707 | k10: 5988/15028/94776 | k100: 9225/19899/125130 | k1000: 19088/43538/233058 || img k10: 3175/5009/23093 txt k10: 6973/18302/107403
+sub x4     f=0.0 | k1: 3571/13344/183333 | k10: 4593/14283/130284 | k100: 5368/16696/139121 | k1000: 10551/28704/184307 || img k10: 1615/2412/14090 txt k10: 7078/25932/146612
+sub x4     f=0.1 | k1: 2382/6015/59870 | k10: 2612/7655/59870 | k100: 3349/9505/77657 | k1000: 7905/19448/119788 || img k10: 1143/1873/7688 txt k10: 3993/11139/60396
+sub x4     f=0.2 | k1: 1837/4424/55161 | k10: 2316/6042/42155 | k100: 3479/8531/62910 | k1000: 8531/19949/109518 || img k10: 1058/2087/4804 txt k10: 3154/8480/42265
+sub x4     f=0.3 | k1: 1797/3981/82435 | k10: 2682/6676/41873 | k100: 4412/9879/73078 | k1000: 10298/24190/130842 || img k10: 1303/2514/12445 txt k10: 3517/8542/52496
+sub x4     f=0.4 | k1: 2583/5724/147355 | k10: 3215/8630/47032 | k100: 5920/14467/87861 | k1000: 14871/31569/178764 || img k10: 1769/3783/21434 txt k10: 4097/10610/63111
+sub x16    f=0.0 | k1: 1884/6522/100969 | k10: 2569/8542/75524 | k100: 3201/9754/88764 | k1000: 7417/19258/132217 || img k10: 600/1237/7413 txt k10: 4141/11470/87300
+sub x16    f=0.1 | k1: 1080/2579/50028 | k10: 1343/4250/33147 | k100: 2066/5649/47996 | k1000: 5708/13052/83034 || img k10: 566/974/4526 txt k10: 1841/5043/43267
+sub x16    f=0.2 | k1: 950/1841/25889 | k10: 1271/3273/25889 | k100: 2163/5104/36997 | k1000: 6223/13952/76158 || img k10: 510/975/3680 txt k10: 1639/3868/30947
+sub x16    f=0.3 | k1: 1185/2467/31952 | k10: 1624/3758/27970 | k100: 2835/6755/42218 | k1000: 8234/17828/100714 || img k10: 643/1378/7661 txt k10: 1893/4572/34638
+sub x16    f=0.4 | k1: 1758/3527/32950 | k10: 2111/5270/32593 | k100: 3907/9443/59257 | k1000: 11370/25026/144996 || img k10: 877/3020/13974 txt k10: 2435/6194/37285
+flat 4096  f=0.0 | k1: 5210/22349/114947 | k10: 4748/13257/133265 | k100: 4748/14593/133265 | k1000: 9933/27436/177559 || img k10: 1281/2097/10379 txt k10: 6513/21239/152050
+flat 4096  f=0.1 | k1: 2902/9315/44985 | k10: 2676/6049/57842 | k100: 3140/8425/76759 | k1000: 7556/18668/118553 || img k10: 769/1533/6146 txt k10: 3283/9169/72417
+flat 4096  f=0.2 | k1: 2068/5116/34674 | k10: 2263/5116/46242 | k100: 3141/7651/63964 | k1000: 8276/19461/106876 || img k10: 1003/1689/5300 txt k10: 2684/6614/54437
+flat 4096  f=0.3 | k1: 2306/4598/32983 | k10: 2515/5390/41200 | k100: 3763/8982/75567 | k1000: 9978/23689/126207 || img k10: 900/2078/9289 txt k10: 3202/6820/55597
+flat 4096  f=0.4 | k1: 2586/6283/34975 | k10: 3171/6861/46841 | k100: 4914/11985/102306 | k1000: 13534/30302/182303 || img k10: 1758/3485/21398 txt k10: 3656/8076/55323
+== C2. adaptive stop on the radius-bonus order (key = cs + f rad; stop when key < tau - delta); cross-fitted halves
+K1000    f=0.2 k=    1 r0.8: fixed p=6 items=5621 | live-tau items=7008 probes=7.7 | xfit rec/items 0.853/8956 ; 0.747/5186 | oracle items=5589
+K1000    f=0.2 k=    1 r0.9: fixed p=20 items=17926 | live-tau items=16071 probes=19.8 | xfit rec/items 0.933/20852 ; 0.853/12331 | oracle items=5589
+K1000    f=0.2 k=    1 r0.99: fixed p=102 items=87187 | live-tau items=142127 probes=173.4 | xfit rec/items 1.000/208150 ; 0.973/43540 | oracle items=5589
+K1000    f=0.2 k=   10 r0.8: fixed p=5 items=4740 | live-tau items=5978 probes=6.8 | xfit rec/items 0.825/6400 ; 0.804/5556 | oracle items=6579
+K1000    f=0.2 k=   10 r0.9: fixed p=13 items=11922 | live-tau items=13011 probes=15.8 | xfit rec/items 0.901/14188 ; 0.903/11834 | oracle items=11694
+K1000    f=0.2 k=   10 r0.99: fixed p=94 items=80606 | live-tau items=84684 probes=105.6 | xfit rec/items 0.996/122768 ; 0.977/55161 | oracle items=20588
+K1000    f=0.2 k=  100 r0.8: fixed p=6 items=5621 | live-tau items=7371 probes=9.3 | xfit rec/items 0.843/8046 ; 0.849/6695 | oracle items=8527
+K1000    f=0.2 k=  100 r0.9: fixed p=17 items=15463 | live-tau items=13569 probes=17.0 | xfit rec/items 0.911/14750 ; 0.910/12388 | oracle items=16170
+K1000    f=0.2 k=  100 r0.99: fixed p=121 items=102582 | live-tau items=77349 probes=97.6 | xfit rec/items 0.993/84896 ; 0.989/58269 | oracle items=49657
+K1000    f=0.2 k= 1000 r0.8: fixed p=13 items=11922 | live-tau items=14666 probes=19.1 | xfit rec/items 0.832/15438 ; 0.837/13894 | oracle items=15960
+K1000    f=0.2 k= 1000 r0.9: fixed p=35 items=30227 | live-tau items=23622 probes=30.8 | xfit rec/items 0.909/24922 ; 0.904/22322 | oracle items=28174
+K1000    f=0.2 k= 1000 r0.99: fixed p=191 items=160149 | live-tau items=96149 probes=120.9 | xfit rec/items 0.994/103368 ; 0.988/74850 | oracle items=86546
+sub x16  f=0.2 k=    1 r0.8: fixed p=14 items=950 | live-tau items=1752 probes=24.1 | xfit rec/items 0.907/3361 ; 0.680/1055 | oracle items=1216
+sub x16  f=0.2 k=    1 r0.9: fixed p=28 items=1841 | live-tau items=3899 probes=59.3 | xfit rec/items 0.933/5175 ; 0.840/2849 | oracle items=1216
+sub x16  f=0.2 k=    1 r0.99: fixed p=472 items=25889 | live-tau items=56990 probes=1149.5 | xfit rec/items 1.000/114468 ; 0.973/10131 | oracle items=1216
+sub x16  f=0.2 k=   10 r0.8: fixed p=19 items=1271 | live-tau items=1868 probes=33.8 | xfit rec/items 0.856/2001 ; 0.837/1735 | oracle items=1538
+sub x16  f=0.2 k=   10 r0.9: fixed p=51 items=3273 | live-tau items=3840 probes=65.8 | xfit rec/items 0.919/4119 ; 0.923/3561 | oracle items=2922
+sub x16  f=0.2 k=   10 r0.99: fixed p=472 items=25889 | live-tau items=21944 probes=438.0 | xfit rec/items 0.996/29401 ; 0.987/20257 | oracle items=5886
+sub x16  f=0.2 k=  100 r0.8: fixed p=33 items=2163 | live-tau items=2395 probes=48.3 | xfit rec/items 0.805/2536 ; 0.810/2254 | oracle items=2561
+sub x16  f=0.2 k=  100 r0.9: fixed p=82 items=5104 | live-tau items=4471 probes=89.7 | xfit rec/items 0.905/4825 ; 0.905/4117 | oracle items=4867
+sub x16  f=0.2 k=  100 r0.99: fixed p=687 items=36997 | live-tau items=23298 probes=475.3 | xfit rec/items 0.993/25658 ; 0.990/20938 | oracle items=18207
+sub x16  f=0.2 k= 1000 r0.8: fixed p=101 items=6223 | live-tau items=7127 probes=148.5 | xfit rec/items 0.812/7374 ; 0.823/6880 | oracle items=7033
+sub x16  f=0.2 k= 1000 r0.9: fixed p=238 items=13952 | live-tau items=14777 probes=312.6 | xfit rec/items 0.928/15621 ; 0.928/13933 | oracle items=12520
+sub x16  f=0.2 k= 1000 r0.99: fixed p=1405 items=76158 | live-tau items=46672 probes=965.6 | xfit rec/items 0.994/50095 ; 0.989/35369 | oracle items=43994
+== D. within-cluster order by key x.mhat (K1000, +0.2rad order): prune item if beta*key + c*sqrt((1-beta^2)(1-key^2)) < true k-th score
+key spread inside a cluster: mean sd 0.025800347  key mean 0.92533255
+k=10 np=94 c=0.00: pruned 1.000 of scanned items, lost 0.9987 of the true top-k inside the probe set
+k=10 np=94 c=0.05: pruned 1.000 of scanned items, lost 0.9880 of the true top-k inside the probe set
+k=10 np=94 c=0.10: pruned 0.999 of scanned items, lost 0.9620 of the true top-k inside the probe set
+k=10 np=94 c=0.15: pruned 0.995 of scanned items, lost 0.8914 of the true top-k inside the probe set
+k=10 np=94 c=0.20: pruned 0.981 of scanned items, lost 0.7886 of the true top-k inside the probe set
+k=10 np=94 c=0.30: pruned 0.839 of scanned items, lost 0.4548 of the true top-k inside the probe set
+k=10 np=94 c=1.00: pruned 0.155 of scanned items, lost 0.0000 of the true top-k inside the probe set
+k=100 np=121 c=0.00: pruned 1.000 of scanned items, lost 0.9711 of the true top-k inside the probe set
+k=100 np=121 c=0.05: pruned 0.999 of scanned items, lost 0.9197 of the true top-k inside the probe set
+k=100 np=121 c=0.10: pruned 0.996 of scanned items, lost 0.8215 of the true top-k inside the probe set
+k=100 np=121 c=0.15: pruned 0.983 of scanned items, lost 0.6703 of the true top-k inside the probe set
+k=100 np=121 c=0.20: pruned 0.939 of scanned items, lost 0.4880 of the true top-k inside the probe set
+k=100 np=121 c=0.30: pruned 0.642 of scanned items, lost 0.1605 of the true top-k inside the probe set
+k=100 np=121 c=1.00: pruned 0.139 of scanned items, lost 0.0000 of the true top-k inside the probe set
+k=1000 np=191 c=0.00: pruned 0.997 of scanned items, lost 0.7809 of the true top-k inside the probe set
+k=1000 np=191 c=0.05: pruned 0.992 of scanned items, lost 0.6554 of the true top-k inside the probe set
+k=1000 np=191 c=0.10: pruned 0.976 of scanned items, lost 0.4904 of the true top-k inside the probe set
+k=1000 np=191 c=0.15: pruned 0.925 of scanned items, lost 0.3112 of the true top-k inside the probe set
+k=1000 np=191 c=0.20: pruned 0.811 of scanned items, lost 0.1597 of the true top-k inside the probe set
+k=1000 np=191 c=0.30: pruned 0.519 of scanned items, lost 0.0205 of the true top-k inside the probe set
+k=1000 np=191 c=1.00: pruned 0.118 of scanned items, lost 0.0000 of the true top-k inside the probe set
+k=10 np=13 c=0.00: pruned 1.000 of scanned items, lost 0.9987 of the true top-k inside the probe set
+k=10 np=13 c=0.05: pruned 0.998 of scanned items, lost 0.9880 of the true top-k inside the probe set
+k=10 np=13 c=0.10: pruned 0.993 of scanned items, lost 0.9612 of the true top-k inside the probe set
+k=10 np=13 c=0.15: pruned 0.968 of scanned items, lost 0.8796 of the true top-k inside the probe set
+k=10 np=13 c=0.20: pruned 0.901 of scanned items, lost 0.7642 of the true top-k inside the probe set
+k=10 np=13 c=0.30: pruned 0.537 of scanned items, lost 0.4045 of the true top-k inside the probe set
+k=10 np=13 c=1.00: pruned 0.027 of scanned items, lost 0.0000 of the true top-k inside the probe set
+k=100 np=17 c=0.00: pruned 0.998 of scanned items, lost 0.9706 of the true top-k inside the probe set
+k=100 np=17 c=0.05: pruned 0.993 of scanned items, lost 0.9166 of the true top-k inside the probe set
+k=100 np=17 c=0.10: pruned 0.970 of scanned items, lost 0.8076 of the true top-k inside the probe set
+k=100 np=17 c=0.15: pruned 0.894 of scanned items, lost 0.6402 of the true top-k inside the probe set
+k=100 np=17 c=0.20: pruned 0.715 of scanned items, lost 0.4365 of the true top-k inside the probe set
+k=100 np=17 c=0.30: pruned 0.414 of scanned items, lost 0.1342 of the true top-k inside the probe set
+k=100 np=17 c=1.00: pruned 0.018 of scanned items, lost 0.0000 of the true top-k inside the probe set

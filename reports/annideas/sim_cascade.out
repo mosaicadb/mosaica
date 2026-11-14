@@ -1,0 +1,99 @@
+queries 50
+== cascade with a per-level factor on the certified half-width, fitted to lose eps of the true top-k per level (cross-fitted: fit on one half of the queries, run on the other; both halves averaged)
+   enter = items entering levels 0,1,2,3,5,6,7 and full vectors; us = per-item work only from the planner constants (7.8 ns det level, 31 ns rand level, 109 ns full vector); B = bytes read
+np=  16 k=  10 eps=0.000: recall 0.900 (probe ceiling 0.900) enter [14239, 12166, 11032, 10144, 9484, 7868, 5887, 1399] us 1102 kB 3024 | f [certified]
+np=  16 k=  10 eps=0.002: recall 0.896 (probe ceiling 0.900) enter [14239, 7707, 6644, 5765, 5005, 2501, 635, 85] us 454 kB 499 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.33] | seed-tau (one half): rec 0.904 us 429
+np=  16 k=  10 eps=0.010: recall 0.890 (probe ceiling 0.900) enter [14239, 7149, 5742, 4681, 3728, 1518, 349, 62] us 372 kB 390 | f [0.48 0.41 0.39 0.37 0.35 0.27 0.27] | seed-tau (one half): rec 0.896 us 370
+np=  16 k=  10 eps=0.030: recall 0.876 (probe ceiling 0.900) enter [14239, 6377, 4809, 3563, 2678, 1012, 225, 40] us 311 kB 306 | f [0.43 0.39 0.34 0.34 0.31 0.25 0.19] | seed-tau (one half): rec 0.884 us 323
+np=  16 k= 100 eps=0.000: recall 0.895 (probe ceiling 0.895) enter [14239, 12884, 12078, 11335, 10736, 9045, 7103, 2920] us 1386 kB 5479 | f [certified]
+np=  16 k= 100 eps=0.002: recall 0.894 (probe ceiling 0.895) enter [14239, 8203, 7136, 6142, 5301, 3040, 1218, 356] us 534 kB 966 | f [0.45 0.42 0.38 0.36 0.34 0.27 0.30] | seed-tau (one half): rec 0.896 us 565
+np=  16 k= 100 eps=0.010: recall 0.893 (probe ceiling 0.895) enter [14239, 7480, 6288, 5150, 4338, 2113, 689, 281] us 445 kB 774 | f [0.40 0.37 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.895 us 486
+np=  16 k= 100 eps=0.030: recall 0.883 (probe ceiling 0.895) enter [14239, 6857, 5333, 3931, 3095, 1434, 459, 220] us 368 kB 617 | f [0.36 0.31 0.27 0.27 0.25 0.18 0.20] | seed-tau (one half): rec 0.887 us 412
+np=  16 k=1000 eps=0.000: recall 0.825 (probe ceiling 0.825) enter [14239, 13472, 13077, 12707, 12360, 11110, 9242, 5788] us 1878 kB 10072 | f [certified]
+np=  16 k=1000 eps=0.002: recall 0.825 (probe ceiling 0.825) enter [14239, 9716, 8597, 7751, 6983, 5036, 2796, 1827] us 868 kB 3398 | f [0.38 0.34 0.31 0.29 0.28 0.22 0.31] | seed-tau (one half): rec 0.812 us 1202
+np=  16 k=1000 eps=0.010: recall 0.823 (probe ceiling 0.825) enter [14239, 8777, 7561, 6516, 5732, 3853, 2202, 1546] us 737 kB 2870 | f [0.31 0.27 0.25 0.24 0.22 0.17 0.25] | seed-tau (one half): rec 0.811 us 1091
+np=  16 k=1000 eps=0.030: recall 0.817 (probe ceiling 0.825) enter [14239, 7854, 6437, 5276, 4526, 2978, 1807, 1335] us 630 kB 2470 | f [0.25 0.22 0.20 0.19 0.18 0.14 0.20] | seed-tau (one half): rec 0.808 us 997
+np=  64 k=  10 eps=0.000: recall 0.978 (probe ceiling 0.978) enter [53839, 39278, 35701, 33032, 30983, 25566, 16839, 2443] us 3339 kB 6551 | f [certified]
+np=  64 k=  10 eps=0.002: recall 0.974 (probe ceiling 0.978) enter [53839, 23949, 19284, 15074, 12073, 4591, 848, 100] us 1244 kB 1141 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.988 us 1253
+np=  64 k=  10 eps=0.010: recall 0.968 (probe ceiling 0.978) enter [53839, 21128, 14683, 10499, 7443, 2482, 428, 70] us 996 kB 884 | f [0.47 0.41 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.980 us 1049
+np=  64 k=  10 eps=0.030: recall 0.952 (probe ceiling 0.978) enter [53839, 17478, 11298, 6747, 4708, 1453, 254, 46] us 829 kB 714 | f [0.42 0.38 0.34 0.33 0.31 0.25 0.19] | seed-tau (one half): rec 0.968 us 903
+np=  64 k= 100 eps=0.000: recall 0.970 (probe ceiling 0.970) enter [53839, 42417, 39394, 36907, 34856, 29127, 21795, 5731] us 4108 kB 12020 | f [certified]
+np=  64 k= 100 eps=0.002: recall 0.970 (probe ceiling 0.970) enter [53839, 24820, 20912, 16442, 14267, 5928, 1779, 445] us 1417 kB 1804 | f [0.45 0.41 0.37 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.974 us 1526
+np=  64 k= 100 eps=0.010: recall 0.966 (probe ceiling 0.970) enter [53839, 22039, 16908, 12257, 9193, 3445, 922, 340] us 1137 kB 1399 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.973 us 1291
+np=  64 k= 100 eps=0.030: recall 0.956 (probe ceiling 0.970) enter [53839, 19036, 12250, 7722, 5499, 2051, 563, 258] us 920 kB 1099 | f [0.35 0.31 0.27 0.27 0.24 0.18 0.19] | seed-tau (one half): rec 0.964 us 1057
+np=  64 k=1000 eps=0.000: recall 0.944 (probe ceiling 0.944) enter [53839, 45542, 43571, 41945, 40507, 35623, 28174, 13222] us 5512 kB 24127 | f [certified]
+np=  64 k=1000 eps=0.002: recall 0.943 (probe ceiling 0.944) enter [53839, 28653, 24352, 20717, 17628, 9908, 4378, 2537] us 1994 kB 5348 | f [0.38 0.35 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.942 us 3493
+np=  64 k=1000 eps=0.010: recall 0.941 (probe ceiling 0.944) enter [53839, 24564, 19180, 14841, 12089, 6577, 3142, 2031] us 1591 kB 4261 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.941 us 3065
+np=  64 k=1000 eps=0.030: recall 0.932 (probe ceiling 0.944) enter [53839, 19763, 14116, 10413, 8272, 4570, 2437, 1683] us 1297 kB 3508 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.938 us 2733
+np= 128 k=  10 eps=0.000: recall 0.988 (probe ceiling 0.988) enter [106785, 70552, 64272, 59419, 55675, 44915, 25977, 2971] us 5759 kB 9453 | f [certified]
+np= 128 k=  10 eps=0.002: recall 0.984 (probe ceiling 0.988) enter [106785, 40677, 30426, 22062, 16881, 5680, 947, 103] us 2042 kB 1766 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.988 us 2040
+np= 128 k=  10 eps=0.010: recall 0.978 (probe ceiling 0.988) enter [106785, 34137, 21138, 14077, 9544, 2866, 453, 72] us 1635 kB 1382 | f [0.47 0.40 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.980 us 1695
+np= 128 k=  10 eps=0.030: recall 0.960 (probe ceiling 0.988) enter [106785, 26256, 15136, 8441, 5659, 1598, 262, 47] us 1373 kB 1145 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.19] | seed-tau (one half): rec 0.964 us 1472
+np= 128 k= 100 eps=0.000: recall 0.989 (probe ceiling 0.989) enter [106785, 76111, 70789, 66187, 62375, 51826, 36073, 7258] us 7010 kB 16848 | f [certified]
+np= 128 k= 100 eps=0.002: recall 0.988 (probe ceiling 0.989) enter [106785, 42425, 33169, 23861, 20152, 7702, 1937, 469] us 2276 kB 2511 | f [0.45 0.41 0.37 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.992 us 2395
+np= 128 k= 100 eps=0.010: recall 0.985 (probe ceiling 0.989) enter [106785, 35741, 24566, 16576, 11690, 4029, 989, 357] us 1811 kB 1947 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.991 us 2019
+np= 128 k= 100 eps=0.030: recall 0.974 (probe ceiling 0.989) enter [106785, 28621, 16352, 9600, 6529, 2227, 594, 267] us 1478 kB 1551 | f [0.35 0.30 0.27 0.27 0.24 0.18 0.20] | seed-tau (one half): rec 0.982 us 1657
+np= 128 k=1000 eps=0.000: recall 0.977 (probe ceiling 0.977) enter [106785, 82311, 78489, 75349, 72539, 62913, 48296, 18444] us 9298 kB 35127 | f [certified]
+np= 128 k=1000 eps=0.002: recall 0.976 (probe ceiling 0.977) enter [106785, 48368, 38845, 31107, 25395, 12617, 5034, 2802] us 3010 kB 6539 | f [0.38 0.34 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.978 us 5556
+np= 128 k=1000 eps=0.010: recall 0.973 (probe ceiling 0.977) enter [106785, 38971, 27624, 20105, 15647, 7811, 3531, 2206] us 2349 kB 5113 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.978 us 4781
+np= 128 k=1000 eps=0.030: recall 0.963 (probe ceiling 0.977) enter [106785, 28382, 18594, 13112, 10080, 5191, 2665, 1802] us 1901 kB 4165 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.975 us 4210
+np= 256 k=  10 eps=0.000: recall 0.996 (probe ceiling 0.996) enter [213243, 131024, 118737, 109204, 101530, 76984, 37054, 3397] us 9987 kB 13715 | f [certified]
+np= 256 k=  10 eps=0.002: recall 0.992 (probe ceiling 0.996) enter [213243, 65613, 44021, 29754, 21765, 6558, 1006, 106] us 3338 kB 2781 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.992 us 3319
+np= 256 k=  10 eps=0.010: recall 0.986 (probe ceiling 0.996) enter [213243, 50714, 27859, 17339, 11288, 3116, 469, 73] us 2708 kB 2233 | f [0.47 0.40 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.980 us 2778
+np= 256 k=  10 eps=0.030: recall 0.968 (probe ceiling 0.996) enter [213243, 35709, 18502, 9748, 6326, 1681, 266, 47] us 2327 kB 1915 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.18] | seed-tau (one half): rec 0.968 us 2459
+np= 256 k= 100 eps=0.000: recall 0.998 (probe ceiling 0.998) enter [213243, 141679, 130765, 121713, 114400, 92938, 56014, 8564] us 12118 kB 23264 | f [certified]
+np= 256 k= 100 eps=0.002: recall 0.998 (probe ceiling 0.998) enter [213243, 68466, 47943, 31458, 25879, 8710, 2038, 483] us 3610 kB 3573 | f [0.45 0.41 0.36 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.999 us 3753
+np= 256 k= 100 eps=0.010: recall 0.995 (probe ceiling 0.998) enter [213243, 52470, 31874, 20122, 13520, 4321, 1023, 365] us 2896 kB 2817 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.997 us 3171
+np= 256 k= 100 eps=0.030: recall 0.984 (probe ceiling 0.998) enter [213243, 38208, 19425, 10660, 7104, 2258, 612, 272] us 2426 kB 2324 | f [0.35 0.30 0.27 0.27 0.24 0.18 0.20] | seed-tau (one half): rec 0.988 us 2657
+np= 256 k=1000 eps=0.000: recall 0.995 (probe ceiling 0.995) enter [213243, 155136, 146540, 139387, 133157, 113336, 81933, 23589] us 15864 kB 48521 | f [certified]
+np= 256 k=1000 eps=0.002: recall 0.994 (probe ceiling 0.995) enter [213243, 79850, 57395, 42296, 32605, 14477, 5406, 2953] us 4517 kB 7930 | f [0.38 0.34 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.995 us 8613
+np= 256 k=1000 eps=0.010: recall 0.991 (probe ceiling 0.995) enter [213243, 56387, 35529, 24208, 18145, 8471, 3734, 2299] us 3485 kB 6150 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.995 us 7254
+np= 256 k=1000 eps=0.030: recall 0.980 (probe ceiling 0.995) enter [213243, 36259, 21908, 14792, 11205, 5533, 2789, 1864] us 2871 kB 5045 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.992 us 6332
+sp= 256 k=  10 eps=0.000: recall 0.974 (probe ceiling 0.974) enter [14564, 12356, 11191, 10300, 9652, 8054, 6210, 1662] us 1156 kB 3454 | f [certified]
+sp= 256 k=  10 eps=0.002: recall 0.970 (probe ceiling 0.974) enter [14564, 7783, 6765, 5954, 5264, 2750, 723, 96] us 475 kB 535 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.972 us 442
+sp= 256 k=  10 eps=0.010: recall 0.964 (probe ceiling 0.974) enter [14564, 7154, 5892, 4890, 3941, 1701, 392, 68] us 388 kB 414 | f [0.47 0.41 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.960 us 381
+sp= 256 k=  10 eps=0.030: recall 0.946 (probe ceiling 0.974) enter [14564, 6430, 5102, 3715, 2861, 1092, 242, 45] us 324 kB 323 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.19] | seed-tau (one half): rec 0.944 us 328
+sp= 256 k= 100 eps=0.000: recall 0.966 (probe ceiling 0.966) enter [14564, 13128, 12282, 11519, 10920, 9246, 7347, 3399] us 1462 kB 6237 | f [certified]
+sp= 256 k= 100 eps=0.002: recall 0.965 (probe ceiling 0.966) enter [14564, 8264, 7290, 6362, 5719, 3564, 1403, 409] us 574 kB 1081 | f [0.45 0.41 0.37 0.36 0.33 0.27 0.29] | seed-tau (one half): rec 0.964 us 572
+sp= 256 k= 100 eps=0.010: recall 0.962 (probe ceiling 0.966) enter [14564, 7548, 6526, 5568, 4741, 2448, 820, 320] us 478 kB 861 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.961 us 494
+sp= 256 k= 100 eps=0.030: recall 0.951 (probe ceiling 0.966) enter [14564, 6936, 5587, 4327, 3452, 1611, 531, 247] us 393 kB 679 | f [0.35 0.31 0.27 0.27 0.24 0.18 0.19] | seed-tau (one half): rec 0.951 us 413
+sp= 256 k=1000 eps=0.000: recall 0.903 (probe ceiling 0.903) enter [14564, 13773, 13339, 12951, 12596, 11341, 9518, 6351] us 1968 kB 10963 | f [certified]
+sp= 256 k=1000 eps=0.002: recall 0.903 (probe ceiling 0.903) enter [14564, 9909, 8841, 8074, 7467, 5527, 3230, 2102] us 943 kB 3865 | f [0.38 0.35 0.32 0.30 0.28 0.22 0.31] | seed-tau (one half): rec 0.897 us 1166
+sp= 256 k=1000 eps=0.010: recall 0.901 (probe ceiling 0.903) enter [14564, 8913, 7827, 6925, 6216, 4316, 2548, 1761] us 802 kB 3243 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.896 us 1039
+sp= 256 k=1000 eps=0.030: recall 0.893 (probe ceiling 0.903) enter [14564, 7971, 6766, 5767, 5024, 3377, 2074, 1508] us 687 kB 2772 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.892 us 932
+sp=1024 k=  10 eps=0.000: recall 0.992 (probe ceiling 0.992) enter [54135, 38396, 35082, 32614, 30688, 25537, 17668, 2723] us 3378 kB 7002 | f [certified]
+sp=1024 k=  10 eps=0.002: recall 0.988 (probe ceiling 0.992) enter [54135, 23646, 19464, 15510, 12669, 4949, 924, 104] us 1272 kB 1175 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.988 us 1229
+sp=1024 k=  10 eps=0.010: recall 0.982 (probe ceiling 0.992) enter [54135, 20883, 15042, 11009, 7911, 2657, 453, 72] us 1017 kB 906 | f [0.47 0.40 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.976 us 1024
+sp=1024 k=  10 eps=0.030: recall 0.964 (probe ceiling 0.992) enter [54135, 17486, 11658, 7126, 5000, 1533, 263, 47] us 845 kB 729 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.18] | seed-tau (one half): rec 0.960 us 880
+sp=1024 k= 100 eps=0.000: recall 0.994 (probe ceiling 0.994) enter [54135, 41477, 38626, 36331, 34442, 28973, 22256, 6412] us 4170 kB 13064 | f [certified]
+sp=1024 k= 100 eps=0.002: recall 0.993 (probe ceiling 0.994) enter [54135, 24494, 20910, 16801, 14886, 6795, 1903, 471] us 1463 kB 1887 | f [0.45 0.41 0.37 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.994 us 1463
+sp=1024 k= 100 eps=0.010: recall 0.990 (probe ceiling 0.994) enter [54135, 21828, 17229, 12910, 9816, 3807, 984, 357] us 1170 kB 1454 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.992 us 1234
+sp=1024 k= 100 eps=0.030: recall 0.979 (probe ceiling 0.994) enter [54135, 18962, 12815, 8263, 5890, 2144, 598, 268] us 942 kB 1133 | f [0.35 0.30 0.27 0.26 0.24 0.18 0.20] | seed-tau (one half): rec 0.981 us 1001
+sp=1024 k=1000 eps=0.000: recall 0.981 (probe ceiling 0.981) enter [54135, 44590, 42671, 41135, 39789, 35342, 28309, 14561] us 5624 kB 26158 | f [certified]
+sp=1024 k=1000 eps=0.002: recall 0.980 (probe ceiling 0.981) enter [54135, 28241, 24257, 21131, 18383, 10905, 4849, 2763] us 2078 kB 5758 | f [0.38 0.34 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.980 us 2921
+sp=1024 k=1000 eps=0.010: recall 0.977 (probe ceiling 0.981) enter [54135, 24206, 19516, 15683, 12994, 7223, 3474, 2192] us 1662 kB 4561 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.979 us 2470
+sp=1024 k=1000 eps=0.030: recall 0.967 (probe ceiling 0.981) enter [54135, 19863, 14875, 11312, 9076, 5005, 2645, 1799] us 1359 kB 3731 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.975 us 2128
+sp=2048 k=  10 eps=0.000: recall 0.996 (probe ceiling 0.996) enter [105401, 67346, 61634, 57134, 53587, 43702, 26593, 3140] us 5652 kB 9622 | f [certified]
+sp=2048 k=  10 eps=0.002: recall 0.992 (probe ceiling 0.996) enter [105401, 39168, 30111, 22247, 17240, 5878, 982, 105] us 2031 kB 1766 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.992 us 1967
+sp=2048 k=  10 eps=0.010: recall 0.986 (probe ceiling 0.996) enter [105401, 33092, 21249, 14375, 9795, 2957, 464, 73] us 1626 kB 1379 | f [0.47 0.40 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.980 us 1633
+sp=2048 k=  10 eps=0.030: recall 0.968 (probe ceiling 0.996) enter [105401, 25849, 15305, 8626, 5806, 1634, 265, 47] us 1366 kB 1140 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.18] | seed-tau (one half): rec 0.964 us 1420
+sp=2048 k= 100 eps=0.000: recall 0.998 (probe ceiling 0.998) enter [105401, 72732, 67818, 63604, 60048, 50041, 36261, 7728] us 6895 kB 17437 | f [certified]
+sp=2048 k= 100 eps=0.002: recall 0.997 (probe ceiling 0.998) enter [105401, 40794, 32732, 24090, 20599, 7988, 2001, 480] us 2270 kB 2530 | f [0.45 0.41 0.36 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.998 us 2254
+sp=2048 k= 100 eps=0.010: recall 0.994 (probe ceiling 0.998) enter [105401, 34707, 24668, 16893, 12059, 4162, 1015, 362] us 1807 kB 1954 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.996 us 1895
+sp=2048 k= 100 eps=0.030: recall 0.983 (probe ceiling 0.998) enter [105401, 28160, 16590, 9768, 6690, 2223, 609, 271] us 1470 kB 1552 | f [0.35 0.30 0.27 0.26 0.24 0.18 0.20] | seed-tau (one half): rec 0.985 us 1553
+sp=2048 k=1000 eps=0.000: recall 0.992 (probe ceiling 0.992) enter [105401, 78877, 75239, 72309, 69716, 60773, 47373, 19640] us 9202 kB 36764 | f [certified]
+sp=2048 k=1000 eps=0.002: recall 0.992 (probe ceiling 0.992) enter [105401, 46529, 38387, 31528, 26073, 13290, 5269, 2907] us 3035 kB 6723 | f [0.38 0.34 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.993 us 4366
+sp=2048 k=1000 eps=0.010: recall 0.989 (probe ceiling 0.992) enter [105401, 37965, 27933, 20776, 16281, 8131, 3674, 2275] us 2370 kB 5236 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.992 us 3603
+sp=2048 k=1000 eps=0.030: recall 0.978 (probe ceiling 0.992) enter [105401, 28401, 19225, 13644, 10566, 5399, 2752, 1849] us 1922 kB 4252 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.988 us 3064
+sp=4096 k=  10 eps=0.000: recall 0.996 (probe ceiling 0.996) enter [178693, 107857, 98163, 90524, 84467, 66035, 34340, 3344] us 8531 kB 12405 | f [certified]
+sp=4096 k=  10 eps=0.002: recall 0.992 (probe ceiling 0.996) enter [178693, 57023, 40061, 27783, 20634, 6398, 1002, 106] us 2933 kB 2467 | f [0.51 0.50 0.44 0.43 0.39 0.29 0.32] | seed-tau (one half): rec 0.992 us 2833
+sp=4096 k=  10 eps=0.010: recall 0.986 (probe ceiling 0.996) enter [178693, 45393, 26129, 16621, 10936, 3081, 468, 73] us 2371 kB 1967 | f [0.47 0.40 0.39 0.37 0.35 0.27 0.26] | seed-tau (one half): rec 0.980 us 2371
+sp=4096 k=  10 eps=0.030: recall 0.968 (probe ceiling 0.996) enter [178693, 32949, 17713, 9485, 6206, 1671, 266, 47] us 2026 kB 1671 | f [0.42 0.38 0.34 0.33 0.31 0.24 0.18] | seed-tau (one half): rec 0.964 us 2096
+sp=4096 k= 100 eps=0.000: recall 0.998 (probe ceiling 0.998) enter [178693, 116661, 108129, 100861, 94895, 78119, 50585, 8411] us 10360 kB 21508 | f [certified]
+sp=4096 k= 100 eps=0.002: recall 0.998 (probe ceiling 0.998) enter [178693, 59659, 43788, 29686, 24661, 8567, 2032, 482] us 3201 kB 3256 | f [0.45 0.41 0.36 0.36 0.33 0.27 0.30] | seed-tau (one half): rec 0.999 us 3155
+sp=4096 k= 100 eps=0.010: recall 0.995 (probe ceiling 0.998) enter [178693, 47348, 30142, 19455, 13227, 4293, 1022, 365] us 2563 kB 2552 | f [0.39 0.36 0.33 0.32 0.29 0.22 0.24] | seed-tau (one half): rec 0.996 us 2667
+sp=4096 k= 100 eps=0.030: recall 0.984 (probe ceiling 0.998) enter [178693, 35584, 18808, 10483, 7030, 2252, 611, 272] us 2129 kB 2083 | f [0.35 0.30 0.27 0.27 0.24 0.18 0.20] | seed-tau (one half): rec 0.986 us 2231
+sp=4096 k=1000 eps=0.000: recall 0.995 (probe ceiling 0.995) enter [178693, 127608, 120955, 115458, 110593, 94718, 71232, 22884] us 13647 kB 45502 | f [certified]
+sp=4096 k=1000 eps=0.002: recall 0.994 (probe ceiling 0.995) enter [178693, 69218, 52415, 39890, 31288, 14293, 5391, 2949] us 4079 kB 7590 | f [0.38 0.34 0.32 0.30 0.28 0.23 0.31] | seed-tau (one half): rec 0.995 us 5869
+sp=4096 k=1000 eps=0.010: recall 0.991 (probe ceiling 0.995) enter [178693, 51490, 33907, 23599, 17837, 8425, 3726, 2297] us 3153 kB 5883 | f [0.31 0.27 0.25 0.24 0.22 0.18 0.25] | seed-tau (one half): rec 0.994 us 4757
+sp=4096 k=1000 eps=0.030: recall 0.980 (probe ceiling 0.995) enter [178693, 34517, 21434, 14609, 11106, 5517, 2783, 1862] us 2580 kB 4804 | f [0.25 0.23 0.21 0.20 0.18 0.15 0.20] | seed-tau (one half): rec 0.990 us 4019

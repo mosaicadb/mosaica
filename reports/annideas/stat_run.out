@@ -1,0 +1,43 @@
+==== run at 1794685976: ["/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/annideas/rtarget/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/annideas/rres", "--core", "2", "--pin", "2", "--fit-dial", "dbknn", "--order", "/home/joe/code/vexact-data/bioclip2-1m/prep/order.npy", "--sets", "all:0,1", "--skip-default", "all:0,all:1", "--ladder-from", "1000", "--step", "10", "--reps", "1", "--stat-np", "64,128,256,1000"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.6s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 13.7s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 48.6s
+[build2] encoded 102.8s
+[build2] assembled 103.3s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.13, 0.13, 0.13, 0.13, 0.14, 0.14, 0.05, 0.1, 0.13, 0.13] (timed in 0.1s)
+[plan] calibrated in 2.1s
+[plan] full_us=0.10910674830319796 item_us0=0.007826845667270167 item_us1=0.03130738266908067 cl_us0=1.5653691334540334 cl_us1=7.826845667270167 grp_us=54.78791967089117 scan_us=0.0930563645834815 cut_us=1.2391984687499997 seed_us=582.3502499999998 scan_lo=2 scan_hi=2 
+[approx] f = 0.2 from 1000 pseudo-queries in 38.1s; mean items scanned at recall 0.95 by f: [(0.0, 9942.0), (0.1, 6940.0), (0.2, 5230.0), (0.35, 9713.0), (0.5, 23897.0), (0.75, 34860.0)]
+[approx] dial fitted in 20.0s: eps [0.0, 1e-5, 0.0001, 0.001, 0.003, 0.01, 0.03, 0.1, 0.2], pseudo-query recall [1.0, 1.0, 1.0, 0.9985, 0.9935, 0.9835, 0.961, 0.914, 0.8505], fits [(0.9, 7), (0.95, 6), (0.99, 4), (0.999, 2)]
+[approx] eps 0: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+[approx] eps 0.00001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.72, 0.437, 0.453, 0.389]
+[approx] eps 0.0001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.551, 0.386, 0.386, 0.373]
+[approx] eps 0.001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.298, 0.326, 0.318, 0.317]
+[approx] eps 0.003: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.247, 0.289, 0.284, 0.285]
+[approx] eps 0.01: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.206, 0.244, 0.242, 0.244]
+[approx] eps 0.03: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.168, 0.199, 0.197, 0.197]
+[approx] eps 0.1: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.123, 0.136, 0.135, 0.136]
+[approx] eps 0.2: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.091, 0.09, 0.09, 0.09]
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 58.1s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+STAT all share 0 np 64 dial true: mean ms 6.73 recall 0.9647 | t_seed 0.90 t_sweep 3.61 t_sel 1.21 | cands 509 full 3548 groups 8.7 cl_open 64 touched 54282 | enter [51576.0, 49059.0, 46300.0, 43870.0, 39606.0, 36577.0, 34344.0, 4239.0, 1957.0, 873.0, 426.0]
+STAT all share 0 np 64 dial false: mean ms 7.20 recall 0.9647 | t_seed 0.83 t_sweep 4.12 t_sel 1.31 | cands 510 full 4135 groups 8.7 cl_open 64 touched 54282 | enter [51581.0, 49064.0, 46305.0, 43875.0, 39612.0, 36582.0, 34349.0, 27893.0, 12827.0, 3071.0, 997.0]
+STAT all share 0 np 128 dial true: mean ms 9.05 recall 0.9913 | t_seed 0.84 t_sweep 5.56 t_sel 1.12 | cands 507 full 5605 groups 15.5 cl_open 128 touched 97093 | enter [92341.0, 85025.0, 80052.0, 75984.0, 70351.0, 65301.0, 61509.0, 4744.0, 2130.0, 916.0, 448.0]
+STAT all share 0 np 128 dial false: mean ms 10.63 recall 0.9913 | t_seed 0.92 t_sweep 6.96 t_sel 1.21 | cands 507 full 6247 groups 15.5 cl_open 128 touched 97093 | enter [92346.0, 85031.0, 80057.0, 75990.0, 70357.0, 65307.0, 61514.0, 48789.0, 17336.0, 3429.0, 1078.0]
+STAT all share 0 np 256 dial true: mean ms 14.33 recall 0.9973 | t_seed 0.99 t_sweep 9.39 t_sel 1.19 | cands 524 full 6980 groups 28.1 cl_open 256 touched 179660 | enter [173565.0, 154225.0, 144308.0, 136898.0, 128791.0, 120020.0, 113067.0, 5088.0, 2259.0, 962.0, 471.0]
+STAT all share 0 np 256 dial false: mean ms 16.45 recall 0.9973 | t_seed 0.94 t_sweep 11.41 t_sel 1.29 | cands 524 full 7657 groups 28.1 cl_open 256 touched 179660 | enter [173571.0, 154231.0, 144314.0, 136904.0, 128797.0, 120026.0, 113073.0, 82847.0, 21692.0, 3670.0, 1134.0]
+STAT all share 0 np 1000 dial true: mean ms 38.47 recall 0.9987 | t_seed 0.97 t_sweep 24.25 t_sel 1.18 | cands 526 full 3698 groups 55.9 cl_open 982 touched 693569 | enter [690763.0, 534140.0, 479287.0, 437903.0, 401642.0, 345594.0, 299020.0, 5280.0, 2325.0, 974.0, 481.0]
+STAT all share 0 np 1000 dial false: mean ms 42.65 recall 0.9987 | t_seed 0.97 t_sweep 28.56 t_sel 1.26 | cands 527 full 4391 groups 55.9 cl_open 982 touched 693569 | enter [690768.0, 534145.0, 479292.0, 437908.0, 401647.0, 345599.0, 299025.0, 148756.0, 25664.0, 3810.0, 1159.0]
+dbknn ladder all share 0: nprobe 1000 dial fit0.99: median 43.664 ms, mean recall 0.9987
+dbknn tight all share 0: nprobe 1000 dial fit0.99: median 44.094 ms, mean recall 0.9987
+STAT all share 1 np 64 dial true: mean ms 74.00 recall 0.9495 | t_seed 3.28 t_sweep 8.19 t_sel 61.49 | cands 9884 full 10537 groups 8.7 cl_open 64 touched 55384 | enter [57567.0, 56652.0, 55502.0, 54012.0, 50149.0, 47217.0, 44986.0, 26035.0, 18410.0, 10141.0, 3611.0]
+STAT all share 1 np 64 dial false: mean ms 87.19 recall 0.9497 | t_seed 3.25 t_sweep 8.72 t_sel 74.19 | cands 9888 full 14176 groups 8.7 cl_open 64 touched 55384 | enter [58458.0, 57543.0, 56393.0, 54903.0, 51040.0, 48108.0, 45877.0, 39940.0, 32516.0, 17872.0, 6336.0]
+STAT all share 1 np 128 dial true: mean ms 87.11 recall 0.9853 | t_seed 3.29 t_sweep 12.31 t_sel 69.87 | cands 12345 full 13881 groups 15.8 cl_open 128 touched 101066 | enter [101795.0, 96606.0, 92962.0, 89563.0, 84224.0, 79475.0, 76163.0, 35460.0, 24045.0, 12801.0, 4793.0]
+STAT all share 1 np 128 dial false: mean ms 106.60 recall 0.9854 | t_seed 3.29 t_sweep 13.29 t_sel 88.40 | cands 12350 full 18726 groups 15.8 cl_open 128 touched 101066 | enter [103006.0, 97817.0, 94173.0, 90775.0, 85436.0, 80686.0, 77375.0, 69161.0, 52219.0, 24586.0, 8605.0]
+STAT all share 1 np 256 dial true: mean ms 99.15 recall 0.9964 | t_seed 3.35 t_sweep 17.88 t_sel 75.03 | cands 14135 full 15939 groups 29.3 cl_open 256 touched 190081 | enter [190164.0, 173691.0, 165129.0, 158390.0, 150797.0, 143111.0, 137888.0, 43816.0, 28583.0, 14645.0, 5651.0]
+STAT all share 1 np 256 dial false: mean ms 135.70 recall 0.9966 | t_seed 3.33 t_sweep 20.15 t_sel 109.36 | cands 14141 full 21680 groups 29.3 cl_open 256 touched 190081 | enter [191717.0, 175244.0, 166681.0, 159943.0, 152350.0, 144664.0, 139441.0, 123896.0, 78453.0, 30231.0, 10382.0]
+STAT all share 1 np 1000 dial true: mean ms 129.97 recall 0.9990 | t_seed 3.30 t_sweep 36.34 t_sel 78.50 | cands 14960 full 12996 groups 58.5 cl_open 989 touched 765069 | enter [768650.0, 638617.0, 590695.0, 554525.0, 523372.0, 476534.0, 438193.0, 50046.0, 31466.0, 15793.0, 6214.0]
+STAT all share 1 np 1000 dial false: mean ms 183.06 recall 0.9992 | t_seed 3.66 t_sweep 47.57 t_sel 119.15 | cands 14966 full 19475 groups 58.5 cl_open 989 touched 765069 | enter [770274.0, 640242.0, 592320.0, 556150.0, 524996.0, 478159.0, 439818.0, 301846.0, 115021.0, 34485.0, 11614.0]
+dbknn ladder all share 1: nprobe 1000 dial fit0.99: median 86.622 ms, mean recall 0.9990
+dbknn tight all share 1: nprobe 1000 dial fit0.99: median 87.582 ms, mean recall 0.9990

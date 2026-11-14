@@ -1,0 +1,31 @@
+==== run at 1794689568: ["/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/annideas/rtarget/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/annideas/rres2", "--core", "2", "--pin", "2", "--fit-dial", "dbknn", "--order", "/home/joe/code/vexact-data/bioclip2-1m/prep/order.npy", "--dump-dir", "/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/annideas/dump", "--dump-np", "256", "--dump-step", "3"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.0s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 13.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 57.7s
+[build2] encoded 154.9s
+[build2] assembled 156.7s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.13, 0.13, 0.12, 0.13, 0.15, 0.18, 0.05, 0.11, 0.15, 0.15] (timed in 0.1s)
+[plan] calibrated in 5.2s
+[plan] full_us=0.26943665593245153 item_us0=0.014589340901897967 item_us1=0.05835736360759187 cl_us0=2.9178681803795934 cl_us1=14.589340901897966 grp_us=102.12538631328577 scan_us=0.23909760746979403 cut_us=2.8478527500000004 seed_us=1372.0591249999998 scan_lo=2 scan_hi=2 
+[approx] f = 0.2 from 1000 pseudo-queries in 113.0s; mean items scanned at recall 0.95 by f: [(0.0, 9942.0), (0.1, 6940.0), (0.2, 5230.0), (0.35, 9713.0), (0.5, 23897.0), (0.75, 34860.0)]
+[approx] dial fitted in 33.5s: eps [0.0, 1e-5, 0.0001, 0.001, 0.003, 0.01, 0.03, 0.1, 0.2], pseudo-query recall [1.0, 1.0, 1.0, 0.9985, 0.9935, 0.9835, 0.961, 0.914, 0.8505], fits [(0.9, 7), (0.95, 6), (0.99, 4), (0.999, 2)]
+[approx] eps 0: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+[approx] eps 0.00001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.72, 0.437, 0.453, 0.389]
+[approx] eps 0.0001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.551, 0.386, 0.386, 0.373]
+[approx] eps 0.001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.298, 0.326, 0.318, 0.317]
+[approx] eps 0.003: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.247, 0.289, 0.284, 0.285]
+[approx] eps 0.01: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.206, 0.244, 0.242, 0.244]
+[approx] eps 0.03: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.168, 0.199, 0.197, 0.197]
+[approx] eps 0.1: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.123, 0.136, 0.135, 0.136]
+[approx] eps 0.2: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.091, 0.09, 0.09, 0.09]
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 146.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+DUMP q 0 level 0: 263933 items, groups 28 touched 263933
+DUMP q 0 level 1: 263933 items, groups 0 touched 263933
+DUMP q 0 level 2: 263933 items, groups 0 touched 263933
+DUMP q 0 level 3: 263933 items, groups 0 touched 263933
+DUMP q 0 level 5: 263933 items, groups 0 touched 263933
+DUMP q 0 level 6: 263933 items, groups 0 touched 263933
+DUMP q 0 level 7: 263933 items, groups 0 touched 263933
+DUMP done; f = 0.2

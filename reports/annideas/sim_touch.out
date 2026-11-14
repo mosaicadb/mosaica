@@ -1,0 +1,16 @@
+K1000 +0.2rad: groups opened by nprobe: {5: 2.3, 13: 4.3, 35: 9.4, 94: 20.4, 121: 24.7, 191: 34.4}
+two-level P=  32 (centres scored 1512) k=10: r0.8: subs 19 items 1280 parents 6 groups 2.9 | r0.9: subs 55 items 3563 parents 13 groups 5.0 | r0.99: unreachable
+two-level P=  32 (centres scored 1512) k=100: r0.8: subs 34 items 2256 parents 9 groups 3.8 | r0.9: subs 97 items 6082 parents 20 groups 6.3 | r0.99: unreachable
+two-level P=  32 (centres scored 1512) k=1000: r0.8: subs 106 items 6638 parents 21 groups 6.6 | r0.9: unreachable | r0.99: unreachable
+two-level P=  64 (centres scored 2024) k=10: r0.8: subs 19 items 1274 parents 6 groups 3.0 | r0.9: subs 51 items 3288 parents 14 groups 5.2 | r0.99: unreachable
+two-level P=  64 (centres scored 2024) k=100: r0.8: subs 33 items 2172 parents 9 groups 3.9 | r0.9: subs 85 items 5317 parents 20 groups 6.9 | r0.99: unreachable
+two-level P=  64 (centres scored 2024) k=1000: r0.8: subs 102 items 6336 parents 23 groups 7.5 | r0.9: subs 257 items 15164 parents 44 groups 11.5 | r0.99: unreachable
+two-level P= 128 (centres scored 3048) k=10: r0.8: subs 19 items 1272 parents 6 groups 3.0 | r0.9: subs 50 items 3210 parents 14 groups 5.3 | r0.99: subs 487 items 26944 parents 81 groups 18.5
+two-level P= 128 (centres scored 3048) k=100: r0.8: subs 33 items 2163 parents 10 groups 4.0 | r0.9: subs 83 items 5170 parents 20 groups 7.1 | r0.99: subs 1044 items 58248 parents 121 groups 24.8
+two-level P= 128 (centres scored 3048) k=1000: r0.8: subs 101 items 6235 parents 24 groups 8.0 | r0.9: subs 241 items 14162 parents 48 groups 13.1 | r0.99: unreachable
+two-level P= 256 (centres scored 5096) k=10: r0.8: subs 19 items 1271 parents 6 groups 3.0 | r0.9: subs 51 items 3273 parents 14 groups 5.4 | r0.99: subs 473 items 25986 parents 87 groups 20.1
+two-level P= 256 (centres scored 5096) k=100: r0.8: subs 33 items 2163 parents 10 groups 4.0 | r0.9: subs 82 items 5105 parents 20 groups 7.2 | r0.99: subs 694 items 37483 parents 120 groups 25.3
+two-level P= 256 (centres scored 5096) k=1000: r0.8: subs 101 items 6224 parents 24 groups 8.2 | r0.9: subs 238 items 13962 parents 49 groups 13.6 | r0.99: subs 1511 items 82608 parents 212 groups 37.3
+two-level P=1000 (centres scored 17000) k=10: r0.8: subs 19 items 1271 parents 6 groups 3.0 | r0.9: subs 51 items 3273 parents 14 groups 5.4 | r0.99: subs 472 items 25889 parents 89 groups 20.6
+two-level P=1000 (centres scored 17000) k=100: r0.8: subs 33 items 2163 parents 10 groups 4.0 | r0.9: subs 82 items 5104 parents 20 groups 7.2 | r0.99: subs 687 items 36997 parents 122 groups 26.0
+two-level P=1000 (centres scored 17000) k=1000: r0.8: subs 101 items 6223 parents 24 groups 8.2 | r0.9: subs 238 items 13952 parents 50 groups 13.8 | r0.99: subs 1405 items 76158 parents 228 groups 39.7

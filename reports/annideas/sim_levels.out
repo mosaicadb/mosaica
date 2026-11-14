@@ -1,0 +1,708 @@
+queries dumped 50 (every 3rd of 150: images 17 text 33 )
+== 1. midpoint as an estimator: sd of (true - midpoint), mean certified half-width, their ratio; violations beyond 2e-3
+level 0 (  6.5 B): err sd 0.0171  mean hw 0.2330  hw/sd 13.6  viol 0
+level 1 ( 11.0 B): err sd 0.0142  mean hw 0.2066  hw/sd 14.6  viol 0
+level 2 ( 15.5 B): err sd 0.0123  mean hw 0.1878  hw/sd 15.2  viol 0
+level 3 ( 20.0 B): err sd 0.0111  mean hw 0.1733  hw/sd 15.7  viol 0
+level 5 ( 37.0 B): err sd 0.0079  mean hw 0.1349  hw/sd 17.0  viol 0
+level 6 ( 66.5 B): err sd 0.0057  mean hw 0.0904  hw/sd 15.9  viol 0
+level 7 (106.9 B): err sd 0.0051  mean hw 0.0434  hw/sd 8.4  viol 0
+== 2. IVF + re-rank: R = full vectors read (best R by level midpoint) for mean recall >= target. "-" = the probe set itself is below target
+-- parent clusters probed = 8; mean items scanned 7390; ceiling recall by k: k1:0.800 k10:0.852 k100:0.837 k1000:0.736
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 3681/-/- | k10: 2472/-/- | k100: 2880/-/- | k1000: -/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 3173/-/- | k10: 806/-/- | k100: 1508/-/- | k1000: -/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 2543/-/- | k10: 383/-/- | k100: 1008/-/- | k1000: -/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 2712/-/- | k10: 250/-/- | k100: 723/-/- | k1000: -/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 1454/-/- | k10: 79/-/- | k100: 320/-/- | k1000: -/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 673/-/- | k10: 28/-/- | k100: 187/-/- | k1000: -/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 9/-/- | k10: 23/-/- | k100: 143/-/- | k1000: -/-/-
+-- parent clusters probed = 16; mean items scanned 14240; ceiling recall by k: k1:0.860 k10:0.900 k100:0.895 k1000:0.825
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 4110/-/- | k10: 2026/12804/- | k100: 2255/-/- | k1000: 6115/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 1082/-/- | k10: 656/11812/- | k100: 1093/-/- | k1000: 4269/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 421/-/- | k10: 286/6301/- | k100: 692/-/- | k1000: 3344/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 213/-/- | k10: 171/6238/- | k100: 478/-/- | k1000: 2818/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 31/-/- | k10: 44/1947/- | k100: 220/-/- | k1000: 1766/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 17/-/- | k10: 21/731/- | k100: 139/-/- | k1000: 1307/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 3/-/- | k10: 16/126/- | k100: 113/-/- | k1000: 1164/-/-
+-- parent clusters probed = 32; mean items scanned 27246; ceiling recall by k: k1:0.960 k10:0.940 k100:0.935 k1000:0.888
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1673/5570/- | k10: 2244/9586/- | k100: 2128/8323/- | k1000: 4668/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 593/1925/- | k10: 639/3041/- | k100: 1001/4124/- | k1000: 2958/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/483/- | k10: 280/1188/- | k100: 607/2490/- | k1000: 2259/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 77/218/- | k10: 160/615/- | k100: 417/1544/- | k1000: 1887/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 16/45/- | k10: 37/148/- | k100: 194/547/- | k1000: 1265/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/19/- | k10: 18/71/- | k100: 123/278/- | k1000: 1025/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/4/- | k10: 14/34/- | k100: 106/191/- | k1000: 967/-/-
+-- parent clusters probed = 64; mean items scanned 53840; ceiling recall by k: k1:0.980 k10:0.978 k100:0.970 k1000:0.944
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1815/5819/- | k10: 2117/7748/- | k100: 2097/7748/- | k1000: 4407/13394/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/1974/- | k10: 639/2451/- | k100: 960/3122/- | k1000: 2657/8312/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/523/- | k10: 257/838/- | k100: 550/1773/- | k1000: 2020/5652/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 82/218/- | k10: 146/424/- | k100: 379/1177/- | k1000: 1680/4327/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 16/49/- | k10: 35/103/- | k100: 179/398/- | k1000: 1144/2264/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/18/- | k10: 17/32/- | k100: 116/210/- | k1000: 960/1553/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/4/- | k10: 13/23/- | k100: 102/154/- | k1000: 916/1280/-
+-- parent clusters probed = 128; mean items scanned 106786; ceiling recall by k: k1:0.980 k10:0.988 k100:0.989 k1000:0.977
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1995/5819/- | k10: 2244/8497/- | k100: 2070/7908/- | k1000: 4319/12275/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/2031/- | k10: 639/2500/- | k100: 938/3003/- | k1000: 2571/6944/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/533/- | k10: 257/806/- | k100: 532/1617/- | k1000: 1922/4589/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 82/218/- | k10: 148/417/- | k100: 372/1010/- | k1000: 1606/3512/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 17/50/- | k10: 35/103/- | k100: 173/352/- | k1000: 1105/1880/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/18/- | k10: 17/30/- | k100: 114/198/- | k1000: 939/1329/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/4/- | k10: 13/22/- | k100: 100/143/- | k1000: 901/1161/-
+-- parent clusters probed = 256; mean items scanned 213243; ceiling recall by k: k1:1.000 k10:0.996 k100:0.998 k1000:0.995
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 2048/5819/140107 | k10: 2244/9166/111017 | k100: 2077/8049/79661 | k1000: 4290/12287/98424
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/2044/84935 | k10: 639/2442/68045 | k100: 938/2981/40802 | k1000: 2534/6544/64028
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/534/49120 | k10: 257/750/39978 | k100: 525/1594/22050 | k1000: 1894/4300/42707
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 67/178/55513 | k10: 146/416/11676 | k100: 369/974/10985 | k1000: 1578/3280/30889
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 16/32/12466 | k10: 33/94/1353 | k100: 172/341/2693 | k1000: 1092/1776/12170
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 4/8/911 | k10: 16/30/679 | k100: 113/190/1008 | k1000: 930/1268/5728
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/3/9 | k10: 13/21/103 | k100: 99/141/443 | k1000: 894/1124/3176
+-- x16 sub-clusters probed = 32; mean items scanned 2100; ceiling recall by k: k1:0.800 k10:0.780 k100:0.760 k1000:0.605
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1327/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 1145/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 1070/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 975/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 116/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 112/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 9/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+-- x16 sub-clusters probed = 64; mean items scanned 4012; ceiling recall by k: k1:0.820 k10:0.830 k100:0.825 k1000:0.722
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 2384/-/- | k10: 2200/-/- | k100: 2229/-/- | k1000: -/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 2167/-/- | k10: 1317/-/- | k100: 1571/-/- | k1000: -/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 712/-/- | k10: 607/-/- | k100: 1082/-/- | k1000: -/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 238/-/- | k10: 383/-/- | k100: 764/-/- | k1000: -/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 98/-/- | k10: 87/-/- | k100: 346/-/- | k1000: -/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 21/-/- | k10: 44/-/- | k100: 193/-/- | k1000: -/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 3/-/- | k10: 33/-/- | k100: 155/-/- | k1000: -/-/-
+-- x16 sub-clusters probed = 128; mean items scanned 7766; ceiling recall by k: k1:0.900 k10:0.874 k100:0.882 k1000:0.813
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 2412/4980/- | k10: 2470/-/- | k100: 2238/-/- | k1000: 5360/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 803/4647/- | k10: 834/-/- | k100: 1167/-/- | k1000: 4248/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 285/4362/- | k10: 339/-/- | k100: 719/-/- | k1000: 3525/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 125/3224/- | k10: 195/-/- | k100: 499/-/- | k1000: 3069/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 23/132/- | k10: 56/-/- | k100: 229/-/- | k1000: 2008/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/142/- | k10: 22/-/- | k100: 143/-/- | k1000: 1465/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 3/9/- | k10: 18/-/- | k100: 116/-/- | k1000: 1280/-/-
+-- x16 sub-clusters probed = 256; mean items scanned 15147; ceiling recall by k: k1:0.920 k10:0.918 k100:0.926 k1000:0.881
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1863/10040/- | k10: 2138/9118/- | k100: 2185/7766/- | k1000: 4416/-/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 587/9100/- | k10: 640/4811/- | k100: 1028/4792/- | k1000: 2920/-/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 206/1348/- | k10: 277/1538/- | k100: 622/2761/- | k1000: 2229/-/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 123/350/- | k10: 174/1007/- | k100: 419/1838/- | k1000: 1869/-/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 18/98/- | k10: 39/226/- | k100: 196/607/- | k1000: 1266/-/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/25/- | k10: 20/144/- | k100: 125/304/- | k1000: 1025/-/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/6/- | k10: 15/45/- | k100: 106/208/- | k1000: 968/-/-
+-- x16 sub-clusters probed = 512; mean items scanned 29950; ceiling recall by k: k1:0.940 k10:0.954 k100:0.958 k1000:0.931
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1790/6729/- | k10: 2202/9520/- | k100: 2069/8021/- | k1000: 4334/13857/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/2471/- | k10: 645/3137/- | k100: 970/3404/- | k1000: 2645/9095/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 155/822/- | k10: 261/953/- | k100: 557/2014/- | k1000: 2014/6251/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 93/338/- | k10: 156/501/- | k100: 378/1237/- | k1000: 1683/4741/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 15/77/- | k10: 35/133/- | k100: 182/434/- | k1000: 1152/2473/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/19/- | k10: 17/46/- | k100: 118/227/- | k1000: 966/1678/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/5/- | k10: 14/33/- | k100: 102/161/- | k1000: 921/1375/-
+-- x16 sub-clusters probed = 1024; mean items scanned 59752; ceiling recall by k: k1:0.960 k10:0.970 k100:0.978 k1000:0.965
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 1971/5819/- | k10: 2244/9468/- | k100: 2077/8141/- | k1000: 4287/12795/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/2013/- | k10: 670/2906/- | k100: 958/3164/- | k1000: 2570/7156/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/534/- | k10: 258/859/- | k100: 538/1730/- | k1000: 1924/4774/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 82/218/- | k10: 153/420/- | k100: 375/1090/- | k1000: 1612/3643/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 16/50/- | k10: 35/117/- | k100: 175/373/- | k1000: 1113/1947/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 5/18/- | k10: 17/32/- | k100: 115/202/- | k1000: 942/1373/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/4/- | k10: 14/25/- | k100: 101/148/- | k1000: 903/1186/-
+-- x16 sub-clusters probed = 2048; mean items scanned 108387; ceiling recall by k: k1:1.000 k10:0.994 k100:0.993 k1000:0.986
+   level 0 (  6.5 B)  R for 0.8/0.9/0.99  k1: 2031/5819/86030 | k10: 2244/8906/84465 | k100: 2069/8035/77822 | k1000: 4287/12243/-
+   level 1 ( 11.0 B)  R for 0.8/0.9/0.99  k1: 594/2037/83600 | k10: 639/2405/70474 | k100: 940/3027/52445 | k1000: 2540/6654/-
+   level 2 ( 15.5 B)  R for 0.8/0.9/0.99  k1: 130/534/49088 | k10: 257/749/38525 | k100: 530/1617/31126 | k1000: 1897/4397/-
+   level 3 ( 20.0 B)  R for 0.8/0.9/0.99  k1: 67/178/55419 | k10: 146/415/20910 | k100: 370/994/19882 | k1000: 1586/3340/-
+   level 5 ( 37.0 B)  R for 0.8/0.9/0.99  k1: 16/32/12465 | k10: 33/94/2697 | k100: 172/346/6391 | k1000: 1096/1810/-
+   level 6 ( 66.5 B)  R for 0.8/0.9/0.99  k1: 4/8/911 | k10: 16/30/784 | k100: 114/194/1879 | k1000: 933/1294/-
+   level 7 (106.9 B)  R for 0.8/0.9/0.99  k1: 2/3/9 | k10: 13/21/149 | k100: 100/142/695 | k1000: 896/1135/-
+== 3. two-stage: R1 by level-a midpoint, then level b on those, R2 full vectors for recall 0.8/0.9/0.99
+np=   64 L0->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L0->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L0->L6 R1=  1000: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L0->L6 R1=  3000: k1: 6/-/- | k10: 69/-/- | k100: 188/-/- | k1000: -/-/-
+np=   64 L0->L6 R1= 10000: k1: 5/28/- | k10: 21/239/- | k100: 128/349/- | k1000: 1026/-/-
+np=   64 L1->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L1->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L1->L6 R1=  1000: k1: 7/-/- | k10: 25/-/- | k100: 257/-/- | k1000: -/-/-
+np=   64 L1->L6 R1=  3000: k1: 5/28/- | k10: 21/220/- | k100: 131/-/- | k1000: 1230/-/-
+np=   64 L1->L6 R1= 10000: k1: 5/28/- | k10: 18/40/- | k100: 118/232/- | k1000: 981/2191/-
+np=   64 L1->L7 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L1->L7 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L1->L7 R1=  1000: k1: 3/-/- | k10: 21/-/- | k100: 220/-/- | k1000: -/-/-
+np=   64 L1->L7 R1=  3000: k1: 2/7/- | k10: 15/57/- | k100: 110/-/- | k1000: 1135/-/-
+np=   64 L1->L7 R1= 10000: k1: 2/8/- | k10: 13/31/- | k100: 102/166/- | k1000: 936/1736/-
+np=   64 L3->L6 R1=   100: k1: 5/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L3->L6 R1=   300: k1: 5/110/- | k10: 21/-/- | k100: -/-/- | k1000: -/-/-
+np=   64 L3->L6 R1=  1000: k1: 5/19/- | k10: 18/54/- | k100: 127/-/- | k1000: -/-/-
+np=   64 L3->L6 R1=  3000: k1: 5/19/- | k10: 17/35/- | k100: 118/233/- | k1000: 1003/-/-
+np=   64 L3->L6 R1= 10000: k1: 5/18/- | k10: 17/32/- | k100: 116/211/- | k1000: 963/1614/-
+np=  128 L0->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L0->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L0->L6 R1=  1000: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L0->L6 R1=  3000: k1: 6/-/- | k10: 113/-/- | k100: 186/-/- | k1000: -/-/-
+np=  128 L0->L6 R1= 10000: k1: 5/30/- | k10: 21/308/- | k100: 127/332/- | k1000: 1016/-/-
+np=  128 L1->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L1->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L1->L6 R1=  1000: k1: 7/-/- | k10: 26/-/- | k100: 246/-/- | k1000: -/-/-
+np=  128 L1->L6 R1=  3000: k1: 5/31/- | k10: 21/232/- | k100: 130/-/- | k1000: 1173/-/-
+np=  128 L1->L6 R1= 10000: k1: 5/31/- | k10: 18/38/- | k100: 116/212/- | k1000: 964/1703/-
+np=  128 L1->L7 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L1->L7 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L1->L7 R1=  1000: k1: 3/-/- | k10: 21/-/- | k100: 211/-/- | k1000: -/-/-
+np=  128 L1->L7 R1=  3000: k1: 2/7/- | k10: 15/57/- | k100: 109/-/- | k1000: 1090/-/-
+np=  128 L1->L7 R1= 10000: k1: 2/8/- | k10: 14/26/- | k100: 102/160/- | k1000: 924/1429/-
+np=  128 L3->L6 R1=   100: k1: 5/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L3->L6 R1=   300: k1: 5/110/- | k10: 20/-/- | k100: -/-/- | k1000: -/-/-
+np=  128 L3->L6 R1=  1000: k1: 5/19/- | k10: 17/43/- | k100: 124/-/- | k1000: -/-/-
+np=  128 L3->L6 R1=  3000: k1: 5/19/- | k10: 17/32/- | k100: 116/213/- | k1000: 980/-/-
+np=  128 L3->L6 R1= 10000: k1: 5/19/- | k10: 17/31/- | k100: 114/200/- | k1000: 943/1375/-
+sp=  256 L0->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L0->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L0->L6 R1=  1000: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L0->L6 R1=  3000: k1: 24/-/- | k10: 62/-/- | k100: 195/-/- | k1000: -/-/-
+sp=  256 L0->L6 R1= 10000: k1: 7/-/- | k10: 20/239/- | k100: 129/343/- | k1000: 1042/-/-
+sp=  256 L1->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L6 R1=  1000: k1: 19/-/- | k10: 38/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L6 R1=  3000: k1: 7/-/- | k10: 21/-/- | k100: 139/-/- | k1000: 1632/-/-
+sp=  256 L1->L6 R1= 10000: k1: 5/25/- | k10: 20/149/- | k100: 126/306/- | k1000: 1030/-/-
+sp=  256 L1->L7 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L7 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L7 R1=  1000: k1: 4/-/- | k10: 27/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L1->L7 R1=  3000: k1: 3/-/- | k10: 16/-/- | k100: 114/-/- | k1000: 1444/-/-
+sp=  256 L1->L7 R1= 10000: k1: 2/6/- | k10: 15/52/- | k100: 106/212/- | k1000: 972/-/-
+sp=  256 L3->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L3->L6 R1=   300: k1: 7/-/- | k10: 23/-/- | k100: -/-/- | k1000: -/-/-
+sp=  256 L3->L6 R1=  1000: k1: 5/145/- | k10: 20/-/- | k100: 138/-/- | k1000: -/-/-
+sp=  256 L3->L6 R1=  3000: k1: 5/149/- | k10: 20/155/- | k100: 128/357/- | k1000: 1071/-/-
+sp=  256 L3->L6 R1= 10000: k1: 5/25/- | k10: 20/149/- | k100: 126/304/- | k1000: 1026/-/-
+sp= 1024 L0->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L0->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L0->L6 R1=  1000: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L0->L6 R1=  3000: k1: 6/-/- | k10: 143/-/- | k100: 188/-/- | k1000: -/-/-
+sp= 1024 L0->L6 R1= 10000: k1: 6/27/- | k10: 21/679/- | k100: 130/388/- | k1000: 1016/-/-
+sp= 1024 L1->L6 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L1->L6 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L1->L6 R1=  1000: k1: 7/-/- | k10: 28/-/- | k100: 260/-/- | k1000: -/-/-
+sp= 1024 L1->L6 R1=  3000: k1: 5/28/- | k10: 21/679/- | k100: 132/-/- | k1000: 1179/-/-
+sp= 1024 L1->L6 R1= 10000: k1: 6/28/- | k10: 18/47/- | k100: 118/227/- | k1000: 966/1783/-
+sp= 1024 L1->L7 R1=   100: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L1->L7 R1=   300: k1: -/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L1->L7 R1=  1000: k1: 3/-/- | k10: 24/-/- | k100: 220/-/- | k1000: -/-/-
+sp= 1024 L1->L7 R1=  3000: k1: 2/7/- | k10: 15/112/- | k100: 110/-/- | k1000: 1095/-/-
+sp= 1024 L1->L7 R1= 10000: k1: 2/8/- | k10: 14/34/- | k100: 103/166/- | k1000: 926/1484/-
+sp= 1024 L3->L6 R1=   100: k1: 5/-/- | k10: -/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L3->L6 R1=   300: k1: 6/110/- | k10: 20/-/- | k100: -/-/- | k1000: -/-/-
+sp= 1024 L3->L6 R1=  1000: k1: 5/19/- | k10: 18/54/- | k100: 126/-/- | k1000: -/-/-
+sp= 1024 L3->L6 R1=  3000: k1: 5/19/- | k10: 18/41/- | k100: 117/223/- | k1000: 982/-/-
+sp= 1024 L3->L6 R1= 10000: k1: 5/18/- | k10: 17/35/- | k100: 116/205/- | k1000: 947/1424/-
+== 4. threshold form: keep items with midpoint + f*halfwidth >= true k-th score; recall of top-k / mean survivors
+L0 np=   64 k=    1 f=0.00: recall 0.000 survivors 0
+L0 np=   64 k=    1 f=0.05: recall 0.000 survivors 0
+L0 np=   64 k=    1 f=0.10: recall 0.020 survivors 2
+L0 np=   64 k=    1 f=0.15: recall 0.060 survivors 42
+L0 np=   64 k=    1 f=0.20: recall 0.240 survivors 270
+L0 np=   64 k=    1 f=0.30: recall 0.600 survivors 2820
+L0 np=   64 k=    1 f=0.50: recall 0.960 survivors 17570
+L0 np=   64 k=    1 f=1.00: recall 0.980 survivors 36626
+L0 np=   64 k=   10 f=0.00: recall 0.006 survivors 0
+L0 np=   64 k=   10 f=0.05: recall 0.024 survivors 4
+L0 np=   64 k=   10 f=0.10: recall 0.130 survivors 42
+L0 np=   64 k=   10 f=0.15: recall 0.308 survivors 254
+L0 np=   64 k=   10 f=0.20: recall 0.550 survivors 1046
+L0 np=   64 k=   10 f=0.30: recall 0.858 survivors 6825
+L0 np=   64 k=   10 f=0.50: recall 0.978 survivors 22510
+L0 np=   64 k=   10 f=1.00: recall 0.978 survivors 39278
+L0 np=   64 k=  100 f=0.00: recall 0.079 survivors 13
+L0 np=   64 k=  100 f=0.05: recall 0.204 survivors 60
+L0 np=   64 k=  100 f=0.10: recall 0.434 survivors 307
+L0 np=   64 k=  100 f=0.15: recall 0.696 survivors 1266
+L0 np=   64 k=  100 f=0.20: recall 0.863 survivors 3848
+L0 np=   64 k=  100 f=0.30: recall 0.962 survivors 14188
+L0 np=   64 k=  100 f=0.50: recall 0.970 survivors 26809
+L0 np=   64 k=  100 f=1.00: recall 0.970 survivors 42417
+L0 np=   64 k= 1000 f=0.00: recall 0.343 survivors 443
+L0 np=   64 k= 1000 f=0.05: recall 0.545 survivors 1050
+L0 np=   64 k= 1000 f=0.10: recall 0.757 survivors 2839
+L0 np=   64 k= 1000 f=0.15: recall 0.886 survivors 7039
+L0 np=   64 k= 1000 f=0.20: recall 0.930 survivors 13392
+L0 np=   64 k= 1000 f=0.30: recall 0.943 survivors 23936
+L0 np=   64 k= 1000 f=0.50: recall 0.944 survivors 34174
+L0 np=   64 k= 1000 f=1.00: recall 0.944 survivors 45542
+L0 np=  128 k=    1 f=0.00: recall 0.000 survivors 0
+L0 np=  128 k=    1 f=0.05: recall 0.000 survivors 0
+L0 np=  128 k=    1 f=0.10: recall 0.020 survivors 2
+L0 np=  128 k=    1 f=0.15: recall 0.060 survivors 42
+L0 np=  128 k=    1 f=0.20: recall 0.240 survivors 274
+L0 np=  128 k=    1 f=0.30: recall 0.600 survivors 3200
+L0 np=  128 k=    1 f=0.50: recall 0.960 survivors 26997
+L0 np=  128 k=    1 f=1.00: recall 0.980 survivors 65984
+L0 np=  128 k=   10 f=0.00: recall 0.006 survivors 0
+L0 np=  128 k=   10 f=0.05: recall 0.024 survivors 4
+L0 np=  128 k=   10 f=0.10: recall 0.130 survivors 42
+L0 np=  128 k=   10 f=0.15: recall 0.308 survivors 256
+L0 np=  128 k=   10 f=0.20: recall 0.552 survivors 1088
+L0 np=  128 k=   10 f=0.30: recall 0.866 survivors 8267
+L0 np=  128 k=   10 f=0.50: recall 0.988 survivors 37529
+L0 np=  128 k=   10 f=1.00: recall 0.988 survivors 70552
+L0 np=  128 k=  100 f=0.00: recall 0.079 survivors 13
+L0 np=  128 k=  100 f=0.05: recall 0.205 survivors 60
+L0 np=  128 k=  100 f=0.10: recall 0.435 survivors 308
+L0 np=  128 k=  100 f=0.15: recall 0.701 survivors 1291
+L0 np=  128 k=  100 f=0.20: recall 0.873 survivors 4157
+L0 np=  128 k=  100 f=0.30: recall 0.980 survivors 19110
+L0 np=  128 k=  100 f=0.50: recall 0.989 survivors 46701
+L0 np=  128 k=  100 f=1.00: recall 0.989 survivors 76112
+L0 np=  128 k= 1000 f=0.00: recall 0.343 survivors 443
+L0 np=  128 k= 1000 f=0.05: recall 0.546 survivors 1054
+L0 np=  128 k= 1000 f=0.10: recall 0.766 survivors 2926
+L0 np=  128 k= 1000 f=0.15: recall 0.908 survivors 7829
+L0 np=  128 k= 1000 f=0.20: recall 0.960 survivors 16783
+L0 np=  128 k= 1000 f=0.30: recall 0.976 survivors 37495
+L0 np=  128 k= 1000 f=0.50: recall 0.977 survivors 59130
+L0 np=  128 k= 1000 f=1.00: recall 0.977 survivors 82312
+L0 sp=  256 k=    1 f=0.00: recall 0.000 survivors 0
+L0 sp=  256 k=    1 f=0.05: recall 0.000 survivors 0
+L0 sp=  256 k=    1 f=0.10: recall 0.020 survivors 2
+L0 sp=  256 k=    1 f=0.15: recall 0.060 survivors 39
+L0 sp=  256 k=    1 f=0.20: recall 0.220 survivors 199
+L0 sp=  256 k=    1 f=0.30: recall 0.540 survivors 1298
+L0 sp=  256 k=    1 f=0.50: recall 0.900 survivors 5218
+L0 sp=  256 k=    1 f=1.00: recall 0.920 survivors 11253
+L0 sp=  256 k=   10 f=0.00: recall 0.006 survivors 0
+L0 sp=  256 k=   10 f=0.05: recall 0.024 survivors 4
+L0 sp=  256 k=   10 f=0.10: recall 0.130 survivors 41
+L0 sp=  256 k=   10 f=0.15: recall 0.298 survivors 219
+L0 sp=  256 k=   10 f=0.20: recall 0.520 survivors 689
+L0 sp=  256 k=   10 f=0.30: recall 0.806 survivors 2773
+L0 sp=  256 k=   10 f=0.50: recall 0.918 survivors 6866
+L0 sp=  256 k=   10 f=1.00: recall 0.918 survivors 12166
+L0 sp=  256 k=  100 f=0.00: recall 0.079 survivors 13
+L0 sp=  256 k=  100 f=0.05: recall 0.204 survivors 60
+L0 sp=  256 k=  100 f=0.10: recall 0.429 survivors 289
+L0 sp=  256 k=  100 f=0.15: recall 0.677 survivors 970
+L0 sp=  256 k=  100 f=0.20: recall 0.826 survivors 2165
+L0 sp=  256 k=  100 f=0.30: recall 0.918 survivors 5114
+L0 sp=  256 k=  100 f=0.50: recall 0.926 survivors 8499
+L0 sp=  256 k=  100 f=1.00: recall 0.926 survivors 13238
+L0 sp=  256 k= 1000 f=0.00: recall 0.342 survivors 442
+L0 sp=  256 k= 1000 f=0.05: recall 0.540 survivors 1013
+L0 sp=  256 k= 1000 f=0.10: recall 0.732 survivors 2325
+L0 sp=  256 k= 1000 f=0.15: recall 0.835 survivors 4311
+L0 sp=  256 k= 1000 f=0.20: recall 0.869 survivors 6240
+L0 sp=  256 k= 1000 f=0.30: recall 0.880 survivors 8577
+L0 sp=  256 k= 1000 f=0.50: recall 0.881 survivors 11195
+L0 sp=  256 k= 1000 f=1.00: recall 0.881 survivors 14043
+L0 sp= 1024 k=    1 f=0.00: recall 0.000 survivors 0
+L0 sp= 1024 k=    1 f=0.05: recall 0.000 survivors 0
+L0 sp= 1024 k=    1 f=0.10: recall 0.020 survivors 2
+L0 sp= 1024 k=    1 f=0.15: recall 0.060 survivors 42
+L0 sp= 1024 k=    1 f=0.20: recall 0.220 survivors 260
+L0 sp= 1024 k=    1 f=0.30: recall 0.580 survivors 2305
+L0 sp= 1024 k=    1 f=0.50: recall 0.940 survivors 13869
+L0 sp= 1024 k=    1 f=1.00: recall 0.960 survivors 35088
+L0 sp= 1024 k=   10 f=0.00: recall 0.006 survivors 0
+L0 sp= 1024 k=   10 f=0.05: recall 0.024 survivors 4
+L0 sp= 1024 k=   10 f=0.10: recall 0.130 survivors 42
+L0 sp= 1024 k=   10 f=0.15: recall 0.302 survivors 251
+L0 sp= 1024 k=   10 f=0.20: recall 0.540 survivors 969
+L0 sp= 1024 k=   10 f=0.30: recall 0.852 survivors 5513
+L0 sp= 1024 k=   10 f=0.50: recall 0.970 survivors 19389
+L0 sp= 1024 k=   10 f=1.00: recall 0.970 survivors 38230
+L0 sp= 1024 k=  100 f=0.00: recall 0.079 survivors 13
+L0 sp= 1024 k=  100 f=0.05: recall 0.205 survivors 60
+L0 sp= 1024 k=  100 f=0.10: recall 0.434 survivors 306
+L0 sp= 1024 k=  100 f=0.15: recall 0.695 survivors 1230
+L0 sp= 1024 k=  100 f=0.20: recall 0.866 survivors 3468
+L0 sp= 1024 k=  100 f=0.30: recall 0.970 survivors 11793
+L0 sp= 1024 k=  100 f=0.50: recall 0.978 survivors 25191
+L0 sp= 1024 k=  100 f=1.00: recall 0.978 survivors 41910
+L0 sp= 1024 k= 1000 f=0.00: recall 0.343 survivors 443
+L0 sp= 1024 k= 1000 f=0.05: recall 0.546 survivors 1051
+L0 sp= 1024 k= 1000 f=0.10: recall 0.763 survivors 2829
+L0 sp= 1024 k= 1000 f=0.15: recall 0.900 survivors 6795
+L0 sp= 1024 k= 1000 f=0.20: recall 0.949 survivors 12401
+L0 sp= 1024 k= 1000 f=0.30: recall 0.964 survivors 22192
+L0 sp= 1024 k= 1000 f=0.50: recall 0.965 survivors 33788
+L0 sp= 1024 k= 1000 f=1.00: recall 0.965 survivors 45777
+L1 np=   64 k=    1 f=0.00: recall 0.000 survivors 0
+L1 np=   64 k=    1 f=0.05: recall 0.000 survivors 0
+L1 np=   64 k=    1 f=0.10: recall 0.020 survivors 2
+L1 np=   64 k=    1 f=0.15: recall 0.160 survivors 34
+L1 np=   64 k=    1 f=0.20: recall 0.320 survivors 206
+L1 np=   64 k=    1 f=0.30: recall 0.680 survivors 1922
+L1 np=   64 k=    1 f=0.50: recall 0.980 survivors 14009
+L1 np=   64 k=    1 f=1.00: recall 0.980 survivors 32975
+L1 np=   64 k=   10 f=0.00: recall 0.008 survivors 0
+L1 np=   64 k=   10 f=0.05: recall 0.064 survivors 4
+L1 np=   64 k=   10 f=0.10: recall 0.228 survivors 40
+L1 np=   64 k=   10 f=0.15: recall 0.448 survivors 219
+L1 np=   64 k=   10 f=0.20: recall 0.682 survivors 823
+L1 np=   64 k=   10 f=0.30: recall 0.928 survivors 4891
+L1 np=   64 k=   10 f=0.50: recall 0.978 survivors 19536
+L1 np=   64 k=   10 f=1.00: recall 0.978 survivors 35705
+L1 np=   64 k=  100 f=0.00: recall 0.141 survivors 20
+L1 np=   64 k=  100 f=0.05: recall 0.310 survivors 73
+L1 np=   64 k=  100 f=0.10: recall 0.575 survivors 313
+L1 np=   64 k=  100 f=0.15: recall 0.805 survivors 1109
+L1 np=   64 k=  100 f=0.20: recall 0.917 survivors 3027
+L1 np=   64 k=  100 f=0.30: recall 0.966 survivors 11123
+L1 np=   64 k=  100 f=0.50: recall 0.970 survivors 24361
+L1 np=   64 k=  100 f=1.00: recall 0.970 survivors 39397
+L1 np=   64 k= 1000 f=0.00: recall 0.419 survivors 517
+L1 np=   64 k= 1000 f=0.05: recall 0.638 survivors 1133
+L1 np=   64 k= 1000 f=0.10: recall 0.821 survivors 2711
+L1 np=   64 k= 1000 f=0.15: recall 0.910 survivors 6016
+L1 np=   64 k= 1000 f=0.20: recall 0.937 survivors 11051
+L1 np=   64 k= 1000 f=0.30: recall 0.943 survivors 21134
+L1 np=   64 k= 1000 f=0.50: recall 0.944 survivors 31289
+L1 np=   64 k= 1000 f=1.00: recall 0.944 survivors 43573
+L1 np=  128 k=    1 f=0.00: recall 0.000 survivors 0
+L1 np=  128 k=    1 f=0.05: recall 0.000 survivors 0
+L1 np=  128 k=    1 f=0.10: recall 0.020 survivors 2
+L1 np=  128 k=    1 f=0.15: recall 0.160 survivors 35
+L1 np=  128 k=    1 f=0.20: recall 0.320 survivors 209
+L1 np=  128 k=    1 f=0.30: recall 0.680 survivors 2152
+L1 np=  128 k=    1 f=0.50: recall 0.980 survivors 20301
+L1 np=  128 k=    1 f=1.00: recall 0.980 survivors 59428
+L1 np=  128 k=   10 f=0.00: recall 0.008 survivors 0
+L1 np=  128 k=   10 f=0.05: recall 0.064 survivors 4
+L1 np=  128 k=   10 f=0.10: recall 0.228 survivors 40
+L1 np=  128 k=   10 f=0.15: recall 0.450 survivors 221
+L1 np=  128 k=   10 f=0.20: recall 0.686 survivors 854
+L1 np=  128 k=   10 f=0.30: recall 0.938 survivors 5784
+L1 np=  128 k=   10 f=0.50: recall 0.988 survivors 30963
+L1 np=  128 k=   10 f=1.00: recall 0.988 survivors 64280
+L1 np=  128 k=  100 f=0.00: recall 0.141 survivors 20
+L1 np=  128 k=  100 f=0.05: recall 0.311 survivors 73
+L1 np=  128 k=  100 f=0.10: recall 0.578 survivors 316
+L1 np=  128 k=  100 f=0.15: recall 0.812 survivors 1136
+L1 np=  128 k=  100 f=0.20: recall 0.931 survivors 3266
+L1 np=  128 k=  100 f=0.30: recall 0.985 survivors 14350
+L1 np=  128 k=  100 f=0.50: recall 0.989 survivors 41477
+L1 np=  128 k=  100 f=1.00: recall 0.989 survivors 70794
+L1 np=  128 k= 1000 f=0.00: recall 0.420 survivors 518
+L1 np=  128 k= 1000 f=0.05: recall 0.642 survivors 1144
+L1 np=  128 k= 1000 f=0.10: recall 0.836 survivors 2822
+L1 np=  128 k= 1000 f=0.15: recall 0.936 survivors 6711
+L1 np=  128 k= 1000 f=0.20: recall 0.968 survivors 13597
+L1 np=  128 k= 1000 f=0.30: recall 0.976 survivors 31627
+L1 np=  128 k= 1000 f=0.50: recall 0.977 survivors 53876
+L1 np=  128 k= 1000 f=1.00: recall 0.977 survivors 78493
+L1 sp=  256 k=    1 f=0.00: recall 0.000 survivors 0
+L1 sp=  256 k=    1 f=0.05: recall 0.000 survivors 0
+L1 sp=  256 k=    1 f=0.10: recall 0.020 survivors 2
+L1 sp=  256 k=    1 f=0.15: recall 0.160 survivors 32
+L1 sp=  256 k=    1 f=0.20: recall 0.300 survivors 158
+L1 sp=  256 k=    1 f=0.30: recall 0.620 survivors 973
+L1 sp=  256 k=    1 f=0.50: recall 0.920 survivors 4397
+L1 sp=  256 k=    1 f=1.00: recall 0.920 survivors 9891
+L1 sp=  256 k=   10 f=0.00: recall 0.008 survivors 0
+L1 sp=  256 k=   10 f=0.05: recall 0.064 survivors 4
+L1 sp=  256 k=   10 f=0.10: recall 0.226 survivors 38
+L1 sp=  256 k=   10 f=0.15: recall 0.436 survivors 190
+L1 sp=  256 k=   10 f=0.20: recall 0.644 survivors 574
+L1 sp=  256 k=   10 f=0.30: recall 0.874 survivors 2207
+L1 sp=  256 k=   10 f=0.50: recall 0.918 survivors 6065
+L1 sp=  256 k=   10 f=1.00: recall 0.918 survivors 10907
+L1 sp=  256 k=  100 f=0.00: recall 0.141 survivors 20
+L1 sp=  256 k=  100 f=0.05: recall 0.309 survivors 72
+L1 sp=  256 k=  100 f=0.10: recall 0.567 survivors 293
+L1 sp=  256 k=  100 f=0.15: recall 0.777 survivors 870
+L1 sp=  256 k=  100 f=0.20: recall 0.876 survivors 1847
+L1 sp=  256 k=  100 f=0.30: recall 0.922 survivors 4424
+L1 sp=  256 k=  100 f=0.50: recall 0.926 survivors 7744
+L1 sp=  256 k=  100 f=1.00: recall 0.926 survivors 12252
+L1 sp=  256 k= 1000 f=0.00: recall 0.418 survivors 514
+L1 sp=  256 k= 1000 f=0.05: recall 0.627 survivors 1080
+L1 sp=  256 k= 1000 f=0.10: recall 0.785 survivors 2236
+L1 sp=  256 k= 1000 f=0.15: recall 0.855 survivors 3909
+L1 sp=  256 k= 1000 f=0.20: recall 0.875 survivors 5638
+L1 sp=  256 k= 1000 f=0.30: recall 0.880 survivors 7954
+L1 sp=  256 k= 1000 f=0.50: recall 0.881 survivors 10442
+L1 sp=  256 k= 1000 f=1.00: recall 0.881 survivors 13561
+L1 sp= 1024 k=    1 f=0.00: recall 0.000 survivors 0
+L1 sp= 1024 k=    1 f=0.05: recall 0.000 survivors 0
+L1 sp= 1024 k=    1 f=0.10: recall 0.020 survivors 2
+L1 sp= 1024 k=    1 f=0.15: recall 0.160 survivors 34
+L1 sp= 1024 k=    1 f=0.20: recall 0.300 survivors 200
+L1 sp= 1024 k=    1 f=0.30: recall 0.660 survivors 1642
+L1 sp= 1024 k=    1 f=0.50: recall 0.960 survivors 11018
+L1 sp= 1024 k=    1 f=1.00: recall 0.960 survivors 31182
+L1 sp= 1024 k=   10 f=0.00: recall 0.008 survivors 0
+L1 sp= 1024 k=   10 f=0.05: recall 0.064 survivors 4
+L1 sp= 1024 k=   10 f=0.10: recall 0.226 survivors 40
+L1 sp= 1024 k=   10 f=0.15: recall 0.444 survivors 216
+L1 sp= 1024 k=   10 f=0.20: recall 0.670 survivors 777
+L1 sp= 1024 k=   10 f=0.30: recall 0.922 survivors 4122
+L1 sp= 1024 k=   10 f=0.50: recall 0.970 survivors 16487
+L1 sp= 1024 k=   10 f=1.00: recall 0.970 survivors 34640
+L1 sp= 1024 k=  100 f=0.00: recall 0.141 survivors 20
+L1 sp= 1024 k=  100 f=0.05: recall 0.311 survivors 73
+L1 sp= 1024 k=  100 f=0.10: recall 0.576 survivors 313
+L1 sp= 1024 k=  100 f=0.15: recall 0.805 survivors 1085
+L1 sp= 1024 k=  100 f=0.20: recall 0.921 survivors 2821
+L1 sp= 1024 k=  100 f=0.30: recall 0.975 survivors 9549
+L1 sp= 1024 k=  100 f=0.50: recall 0.978 survivors 22398
+L1 sp= 1024 k=  100 f=1.00: recall 0.978 survivors 38733
+L1 sp= 1024 k= 1000 f=0.00: recall 0.420 survivors 518
+L1 sp= 1024 k= 1000 f=0.05: recall 0.641 survivors 1138
+L1 sp= 1024 k= 1000 f=0.10: recall 0.830 survivors 2725
+L1 sp= 1024 k= 1000 f=0.15: recall 0.927 survivors 5959
+L1 sp= 1024 k= 1000 f=0.20: recall 0.957 survivors 10625
+L1 sp= 1024 k= 1000 f=0.30: recall 0.965 survivors 19726
+L1 sp= 1024 k= 1000 f=0.50: recall 0.965 survivors 30987
+L1 sp= 1024 k= 1000 f=1.00: recall 0.965 survivors 43705
+L3 np=   64 k=    1 f=0.00: recall 0.000 survivors 0
+L3 np=   64 k=    1 f=0.05: recall 0.020 survivors 0
+L3 np=   64 k=    1 f=0.10: recall 0.100 survivors 2
+L3 np=   64 k=    1 f=0.15: recall 0.280 survivors 25
+L3 np=   64 k=    1 f=0.20: recall 0.500 survivors 132
+L3 np=   64 k=    1 f=0.30: recall 0.760 survivors 1103
+L3 np=   64 k=    1 f=0.50: recall 0.980 survivors 9192
+L3 np=   64 k=    1 f=1.00: recall 0.980 survivors 28308
+L3 np=   64 k=   10 f=0.00: recall 0.030 survivors 1
+L3 np=   64 k=   10 f=0.05: recall 0.142 survivors 6
+L3 np=   64 k=   10 f=0.10: recall 0.356 survivors 36
+L3 np=   64 k=   10 f=0.15: recall 0.662 survivors 170
+L3 np=   64 k=   10 f=0.20: recall 0.830 survivors 556
+L3 np=   64 k=   10 f=0.30: recall 0.966 survivors 2992
+L3 np=   64 k=   10 f=0.50: recall 0.978 survivors 14738
+L3 np=   64 k=   10 f=1.00: recall 0.978 survivors 30990
+L3 np=   64 k=  100 f=0.00: recall 0.240 survivors 30
+L3 np=   64 k=  100 f=0.05: recall 0.472 survivors 90
+L3 np=   64 k=  100 f=0.10: recall 0.734 survivors 302
+L3 np=   64 k=  100 f=0.15: recall 0.891 survivors 872
+L3 np=   64 k=  100 f=0.20: recall 0.951 survivors 2132
+L3 np=   64 k=  100 f=0.30: recall 0.969 survivors 7531
+L3 np=   64 k=  100 f=0.50: recall 0.970 survivors 20647
+L3 np=   64 k=  100 f=1.00: recall 0.970 survivors 34861
+L3 np=   64 k= 1000 f=0.00: recall 0.522 survivors 615
+L3 np=   64 k= 1000 f=0.05: recall 0.731 survivors 1191
+L3 np=   64 k= 1000 f=0.10: recall 0.874 survivors 2457
+L3 np=   64 k= 1000 f=0.15: recall 0.929 survivors 4824
+L3 np=   64 k= 1000 f=0.20: recall 0.941 survivors 8400
+L3 np=   64 k= 1000 f=0.30: recall 0.944 survivors 16958
+L3 np=   64 k= 1000 f=0.50: recall 0.944 survivors 27713
+L3 np=   64 k= 1000 f=1.00: recall 0.944 survivors 40511
+L3 np=  128 k=    1 f=0.00: recall 0.000 survivors 0
+L3 np=  128 k=    1 f=0.05: recall 0.020 survivors 0
+L3 np=  128 k=    1 f=0.10: recall 0.100 survivors 2
+L3 np=  128 k=    1 f=0.15: recall 0.280 survivors 25
+L3 np=  128 k=    1 f=0.20: recall 0.500 survivors 135
+L3 np=  128 k=    1 f=0.30: recall 0.760 survivors 1207
+L3 np=  128 k=    1 f=0.50: recall 0.980 survivors 12370
+L3 np=  128 k=    1 f=1.00: recall 0.980 survivors 50500
+L3 np=  128 k=   10 f=0.00: recall 0.030 survivors 1
+L3 np=  128 k=   10 f=0.05: recall 0.142 survivors 6
+L3 np=  128 k=   10 f=0.10: recall 0.356 survivors 36
+L3 np=  128 k=   10 f=0.15: recall 0.666 survivors 172
+L3 np=  128 k=   10 f=0.20: recall 0.834 survivors 577
+L3 np=  128 k=   10 f=0.30: recall 0.976 survivors 3423
+L3 np=  128 k=   10 f=0.50: recall 0.988 survivors 21514
+L3 np=  128 k=   10 f=1.00: recall 0.988 survivors 55688
+L3 np=  128 k=  100 f=0.00: recall 0.240 survivors 30
+L3 np=  128 k=  100 f=0.05: recall 0.474 survivors 90
+L3 np=  128 k=  100 f=0.10: recall 0.739 survivors 305
+L3 np=  128 k=  100 f=0.15: recall 0.903 survivors 898
+L3 np=  128 k=  100 f=0.20: recall 0.968 survivors 2280
+L3 np=  128 k=  100 f=0.30: recall 0.988 survivors 9226
+L3 np=  128 k=  100 f=0.50: recall 0.989 survivors 33043
+L3 np=  128 k=  100 f=1.00: recall 0.989 survivors 62385
+L3 np=  128 k= 1000 f=0.00: recall 0.524 survivors 618
+L3 np=  128 k= 1000 f=0.05: recall 0.741 survivors 1212
+L3 np=  128 k= 1000 f=0.10: recall 0.896 survivors 2577
+L3 np=  128 k= 1000 f=0.15: recall 0.958 survivors 5346
+L3 np=  128 k= 1000 f=0.20: recall 0.974 survivors 10048
+L3 np=  128 k= 1000 f=0.30: recall 0.977 survivors 23847
+L3 np=  128 k= 1000 f=0.50: recall 0.977 survivors 46815
+L3 np=  128 k= 1000 f=1.00: recall 0.977 survivors 72547
+L3 sp=  256 k=    1 f=0.00: recall 0.000 survivors 0
+L3 sp=  256 k=    1 f=0.05: recall 0.020 survivors 0
+L3 sp=  256 k=    1 f=0.10: recall 0.100 survivors 2
+L3 sp=  256 k=    1 f=0.15: recall 0.260 survivors 23
+L3 sp=  256 k=    1 f=0.20: recall 0.440 survivors 108
+L3 sp=  256 k=    1 f=0.30: recall 0.700 survivors 619
+L3 sp=  256 k=    1 f=0.50: recall 0.920 survivors 3224
+L3 sp=  256 k=    1 f=1.00: recall 0.920 survivors 8279
+L3 sp=  256 k=   10 f=0.00: recall 0.030 survivors 1
+L3 sp=  256 k=   10 f=0.05: recall 0.142 survivors 6
+L3 sp=  256 k=   10 f=0.10: recall 0.348 survivors 35
+L3 sp=  256 k=   10 f=0.15: recall 0.630 survivors 150
+L3 sp=  256 k=   10 f=0.20: recall 0.782 survivors 415
+L3 sp=  256 k=   10 f=0.30: recall 0.908 survivors 1540
+L3 sp=  256 k=   10 f=0.50: recall 0.918 survivors 4912
+L3 sp=  256 k=   10 f=1.00: recall 0.918 survivors 9312
+L3 sp=  256 k=  100 f=0.00: recall 0.239 survivors 30
+L3 sp=  256 k=  100 f=0.05: recall 0.466 survivors 89
+L3 sp=  256 k=  100 f=0.10: recall 0.714 survivors 281
+L3 sp=  256 k=  100 f=0.15: recall 0.858 survivors 711
+L3 sp=  256 k=  100 f=0.20: recall 0.908 survivors 1428
+L3 sp=  256 k=  100 f=0.30: recall 0.925 survivors 3456
+L3 sp=  256 k=  100 f=0.50: recall 0.926 survivors 6737
+L3 sp=  256 k=  100 f=1.00: recall 0.926 survivors 10724
+L3 sp=  256 k= 1000 f=0.00: recall 0.516 survivors 606
+L3 sp=  256 k= 1000 f=0.05: recall 0.709 survivors 1122
+L3 sp=  256 k= 1000 f=0.10: recall 0.829 survivors 2058
+L3 sp=  256 k= 1000 f=0.15: recall 0.870 survivors 3367
+L3 sp=  256 k= 1000 f=0.20: recall 0.879 survivors 4805
+L3 sp=  256 k= 1000 f=0.30: recall 0.881 survivors 7055
+L3 sp=  256 k= 1000 f=0.50: recall 0.881 survivors 9462
+L3 sp=  256 k= 1000 f=1.00: recall 0.881 survivors 12710
+L3 sp= 1024 k=    1 f=0.00: recall 0.000 survivors 0
+L3 sp= 1024 k=    1 f=0.05: recall 0.020 survivors 0
+L3 sp= 1024 k=    1 f=0.10: recall 0.100 survivors 2
+L3 sp= 1024 k=    1 f=0.15: recall 0.280 survivors 25
+L3 sp= 1024 k=    1 f=0.20: recall 0.480 survivors 130
+L3 sp= 1024 k=    1 f=0.30: recall 0.740 survivors 980
+L3 sp= 1024 k=    1 f=0.50: recall 0.960 survivors 7339
+L3 sp= 1024 k=    1 f=1.00: recall 0.960 survivors 26067
+L3 sp= 1024 k=   10 f=0.00: recall 0.030 survivors 1
+L3 sp= 1024 k=   10 f=0.05: recall 0.142 survivors 6
+L3 sp= 1024 k=   10 f=0.10: recall 0.354 survivors 36
+L3 sp= 1024 k=   10 f=0.15: recall 0.654 survivors 168
+L3 sp= 1024 k=   10 f=0.20: recall 0.822 survivors 534
+L3 sp= 1024 k=   10 f=0.30: recall 0.960 survivors 2628
+L3 sp= 1024 k=   10 f=0.50: recall 0.970 survivors 12321
+L3 sp= 1024 k=   10 f=1.00: recall 0.970 survivors 29893
+L3 sp= 1024 k=  100 f=0.00: recall 0.240 survivors 30
+L3 sp= 1024 k=  100 f=0.05: recall 0.473 survivors 90
+L3 sp= 1024 k=  100 f=0.10: recall 0.735 survivors 302
+L3 sp= 1024 k=  100 f=0.15: recall 0.896 survivors 864
+L3 sp= 1024 k=  100 f=0.20: recall 0.958 survivors 2046
+L3 sp= 1024 k=  100 f=0.30: recall 0.978 survivors 6744
+L3 sp= 1024 k=  100 f=0.50: recall 0.978 survivors 18470
+L3 sp= 1024 k=  100 f=1.00: recall 0.978 survivors 34171
+L3 sp= 1024 k= 1000 f=0.00: recall 0.524 survivors 617
+L3 sp= 1024 k= 1000 f=0.05: recall 0.738 survivors 1203
+L3 sp= 1024 k= 1000 f=0.10: recall 0.889 survivors 2497
+L3 sp= 1024 k= 1000 f=0.15: recall 0.948 survivors 4877
+L3 sp= 1024 k= 1000 f=0.20: recall 0.962 survivors 8354
+L3 sp= 1024 k= 1000 f=0.30: recall 0.965 survivors 16199
+L3 sp= 1024 k= 1000 f=0.50: recall 0.965 survivors 27190
+L3 sp= 1024 k= 1000 f=1.00: recall 0.965 survivors 40462
+L6 np=   64 k=    1 f=0.00: recall 0.020 survivors 0
+L6 np=   64 k=    1 f=0.05: recall 0.140 survivors 1
+L6 np=   64 k=    1 f=0.10: recall 0.340 survivors 2
+L6 np=   64 k=    1 f=0.15: recall 0.480 survivors 6
+L6 np=   64 k=    1 f=0.20: recall 0.720 survivors 19
+L6 np=   64 k=    1 f=0.30: recall 0.960 survivors 108
+L6 np=   64 k=    1 f=0.50: recall 0.980 survivors 1041
+L6 np=   64 k=    1 f=1.00: recall 0.980 survivors 11884
+L6 np=   64 k=   10 f=0.00: recall 0.430 survivors 6
+L6 np=   64 k=   10 f=0.05: recall 0.674 survivors 12
+L6 np=   64 k=   10 f=0.10: recall 0.830 survivors 27
+L6 np=   64 k=   10 f=0.15: recall 0.926 survivors 61
+L6 np=   64 k=   10 f=0.20: recall 0.970 survivors 126
+L6 np=   64 k=   10 f=0.30: recall 0.976 survivors 444
+L6 np=   64 k=   10 f=0.50: recall 0.978 survivors 2714
+L6 np=   64 k=   10 f=1.00: recall 0.978 survivors 16839
+L6 np=   64 k=  100 f=0.00: recall 0.635 survivors 74
+L6 np=   64 k=  100 f=0.05: recall 0.819 survivors 126
+L6 np=   64 k=  100 f=0.10: recall 0.926 survivors 220
+L6 np=   64 k=  100 f=0.15: recall 0.960 survivors 381
+L6 np=   64 k=  100 f=0.20: recall 0.967 survivors 648
+L6 np=   64 k=  100 f=0.30: recall 0.970 survivors 1674
+L6 np=   64 k=  100 f=0.50: recall 0.970 survivors 6471
+L6 np=   64 k=  100 f=1.00: recall 0.970 survivors 21795
+L6 np=   64 k= 1000 f=0.00: recall 0.760 survivors 857
+L6 np=   64 k= 1000 f=0.05: recall 0.875 survivors 1208
+L6 np=   64 k= 1000 f=0.10: recall 0.927 survivors 1738
+L6 np=   64 k= 1000 f=0.15: recall 0.941 survivors 2487
+L6 np=   64 k= 1000 f=0.20: recall 0.943 survivors 3516
+L6 np=   64 k= 1000 f=0.30: recall 0.944 survivors 6459
+L6 np=   64 k= 1000 f=0.50: recall 0.944 survivors 14535
+L6 np=   64 k= 1000 f=1.00: recall 0.944 survivors 28175
+L6 np=  128 k=    1 f=0.00: recall 0.020 survivors 0
+L6 np=  128 k=    1 f=0.05: recall 0.140 survivors 1
+L6 np=  128 k=    1 f=0.10: recall 0.340 survivors 2
+L6 np=  128 k=    1 f=0.15: recall 0.480 survivors 6
+L6 np=  128 k=    1 f=0.20: recall 0.720 survivors 19
+L6 np=  128 k=    1 f=0.30: recall 0.960 survivors 111
+L6 np=  128 k=    1 f=0.50: recall 0.980 survivors 1166
+L6 np=  128 k=    1 f=1.00: recall 0.980 survivors 17006
+L6 np=  128 k=   10 f=0.00: recall 0.430 survivors 6
+L6 np=  128 k=   10 f=0.05: recall 0.676 survivors 12
+L6 np=  128 k=   10 f=0.10: recall 0.838 survivors 27
+L6 np=  128 k=   10 f=0.15: recall 0.934 survivors 62
+L6 np=  128 k=   10 f=0.20: recall 0.978 survivors 130
+L6 np=  128 k=   10 f=0.30: recall 0.986 survivors 467
+L6 np=  128 k=   10 f=0.50: recall 0.988 survivors 3165
+L6 np=  128 k=   10 f=1.00: recall 0.988 survivors 25978
+L6 np=  128 k=  100 f=0.00: recall 0.642 survivors 75
+L6 np=  128 k=  100 f=0.05: recall 0.830 survivors 129
+L6 np=  128 k=  100 f=0.10: recall 0.942 survivors 226
+L6 np=  128 k=  100 f=0.15: recall 0.978 survivors 394
+L6 np=  128 k=  100 f=0.20: recall 0.986 survivors 680
+L6 np=  128 k=  100 f=0.30: recall 0.989 survivors 1825
+L6 np=  128 k=  100 f=0.50: recall 0.989 survivors 7998
+L6 np=  128 k=  100 f=1.00: recall 0.989 survivors 36074
+L6 np=  128 k= 1000 f=0.00: recall 0.777 survivors 880
+L6 np=  128 k= 1000 f=0.05: recall 0.901 survivors 1256
+L6 np=  128 k= 1000 f=0.10: recall 0.957 survivors 1839
+L6 np=  128 k= 1000 f=0.15: recall 0.973 survivors 2693
+L6 np=  128 k= 1000 f=0.20: recall 0.976 survivors 3916
+L6 np=  128 k= 1000 f=0.30: recall 0.977 survivors 7711
+L6 np=  128 k= 1000 f=0.50: recall 0.977 survivors 20191
+L6 np=  128 k= 1000 f=1.00: recall 0.977 survivors 48296
+L6 sp=  256 k=    1 f=0.00: recall 0.020 survivors 0
+L6 sp=  256 k=    1 f=0.05: recall 0.140 survivors 1
+L6 sp=  256 k=    1 f=0.10: recall 0.320 survivors 2
+L6 sp=  256 k=    1 f=0.15: recall 0.440 survivors 6
+L6 sp=  256 k=    1 f=0.20: recall 0.660 survivors 17
+L6 sp=  256 k=    1 f=0.30: recall 0.900 survivors 89
+L6 sp=  256 k=    1 f=0.50: recall 0.920 survivors 602
+L6 sp=  256 k=    1 f=1.00: recall 0.920 survivors 3960
+L6 sp=  256 k=   10 f=0.00: recall 0.420 survivors 6
+L6 sp=  256 k=   10 f=0.05: recall 0.650 survivors 12
+L6 sp=  256 k=   10 f=0.10: recall 0.792 survivors 26
+L6 sp=  256 k=   10 f=0.15: recall 0.874 survivors 57
+L6 sp=  256 k=   10 f=0.20: recall 0.912 survivors 112
+L6 sp=  256 k=   10 f=0.30: recall 0.918 survivors 341
+L6 sp=  256 k=   10 f=0.50: recall 0.918 survivors 1444
+L6 sp=  256 k=   10 f=1.00: recall 0.918 survivors 5494
+L6 sp=  256 k=  100 f=0.00: recall 0.620 survivors 73
+L6 sp=  256 k=  100 f=0.05: recall 0.792 survivors 121
+L6 sp=  256 k=  100 f=0.10: recall 0.889 survivors 205
+L6 sp=  256 k=  100 f=0.15: recall 0.918 survivors 340
+L6 sp=  256 k=  100 f=0.20: recall 0.924 survivors 541
+L6 sp=  256 k=  100 f=0.30: recall 0.926 survivors 1179
+L6 sp=  256 k=  100 f=0.50: recall 0.926 survivors 3135
+L6 sp=  256 k=  100 f=1.00: recall 0.926 survivors 7004
+L6 sp=  256 k= 1000 f=0.00: recall 0.730 survivors 817
+L6 sp=  256 k= 1000 f=0.05: recall 0.829 survivors 1112
+L6 sp=  256 k= 1000 f=0.10: recall 0.869 survivors 1520
+L6 sp=  256 k= 1000 f=0.15: recall 0.879 survivors 2034
+L6 sp=  256 k= 1000 f=0.20: recall 0.880 survivors 2648
+L6 sp=  256 k= 1000 f=0.30: recall 0.881 survivors 4035
+L6 sp=  256 k= 1000 f=0.50: recall 0.881 survivors 6461
+L6 sp=  256 k= 1000 f=1.00: recall 0.881 survivors 9380
+L6 sp= 1024 k=    1 f=0.00: recall 0.020 survivors 0
+L6 sp= 1024 k=    1 f=0.05: recall 0.140 survivors 1
+L6 sp= 1024 k=    1 f=0.10: recall 0.340 survivors 2
+L6 sp= 1024 k=    1 f=0.15: recall 0.480 survivors 6
+L6 sp= 1024 k=    1 f=0.20: recall 0.700 survivors 19
+L6 sp= 1024 k=    1 f=0.30: recall 0.940 survivors 107
+L6 sp= 1024 k=    1 f=0.50: recall 0.960 survivors 941
+L6 sp= 1024 k=    1 f=1.00: recall 0.960 survivors 9806
+L6 sp= 1024 k=   10 f=0.00: recall 0.426 survivors 6
+L6 sp= 1024 k=   10 f=0.05: recall 0.670 survivors 12
+L6 sp= 1024 k=   10 f=0.10: recall 0.828 survivors 27
+L6 sp= 1024 k=   10 f=0.15: recall 0.920 survivors 61
+L6 sp= 1024 k=   10 f=0.20: recall 0.964 survivors 126
+L6 sp= 1024 k=   10 f=0.30: recall 0.970 survivors 434
+L6 sp= 1024 k=   10 f=0.50: recall 0.970 survivors 2444
+L6 sp= 1024 k=   10 f=1.00: recall 0.970 survivors 14736
+L6 sp= 1024 k=  100 f=0.00: recall 0.639 survivors 75
+L6 sp= 1024 k=  100 f=0.05: recall 0.824 survivors 128
+L6 sp= 1024 k=  100 f=0.10: recall 0.934 survivors 223
+L6 sp= 1024 k=  100 f=0.15: recall 0.968 survivors 386
+L6 sp= 1024 k=  100 f=0.20: recall 0.976 survivors 653
+L6 sp= 1024 k=  100 f=0.30: recall 0.978 survivors 1651
+L6 sp= 1024 k=  100 f=0.50: recall 0.978 survivors 6000
+L6 sp= 1024 k=  100 f=1.00: recall 0.978 survivors 20345
+L6 sp= 1024 k= 1000 f=0.00: recall 0.773 survivors 873
+L6 sp= 1024 k= 1000 f=0.05: recall 0.893 survivors 1239
+L6 sp= 1024 k= 1000 f=0.10: recall 0.947 survivors 1793
+L6 sp= 1024 k= 1000 f=0.15: recall 0.962 survivors 2575
+L6 sp= 1024 k= 1000 f=0.20: recall 0.965 survivors 3647
+L6 sp= 1024 k= 1000 f=0.30: recall 0.965 survivors 6645
+L6 sp= 1024 k= 1000 f=0.50: recall 0.965 survivors 14433
+L6 sp= 1024 k= 1000 f=1.00: recall 0.965 survivors 28075
