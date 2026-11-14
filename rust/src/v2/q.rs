@@ -1944,10 +1944,11 @@ pub struct Plan {
     pub collazy: bool,     // with the single stored norm first, block norms only for the items it leaves undecided
     pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
     pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
+    pub disk: bool,        // the planner adds the cost of reading full vectors from disk (io_us, io_gbps)
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false, io_us: 5.7, io_gbps: 3.3 }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false, io_us: 5.7, io_gbps: 3.3, disk: false }
     }
 }
 impl Plan {
@@ -1986,6 +1987,15 @@ impl Plan {
     /// reading the gap costs less than another read.
     pub fn io_gap(&self) -> usize {
         (self.io_us * self.io_gbps * 1e3) as usize
+    }
+
+    /// Modelled cost of reading `ncand` full vectors (of `rb` bytes) lying in a span of `span` rows: one read each, or
+    /// the span in one sequential read when that is cheaper; 0 unless `disk`.
+    pub fn disk_us(&self, ncand: usize, span: usize, rb: usize) -> f64 {
+        if !self.disk || ncand == 0 {
+            return 0.0;
+        }
+        (ncand as f64 * self.io_us).min(self.io_us + (span * rb) as f64 / (self.io_gbps * 1e3))
     }
 
     /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
@@ -2419,6 +2429,9 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
         gs.dedup();
         setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
     }
+    // on disk a full vector costs its read too; a scan reads the file sequentially
+    let rb = 2 * ix.n();
+    let scan_row_us = pl.scan_us + if pl.disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
     let pre_of = |ci: usize| -> Pre {
         if let Some(v) = o.vis {
             if v.cl_cnt[ci] == 0 {
@@ -2490,12 +2503,12 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             return Planned::Scan;
         }
         let cost_s: f64 = live.iter().step_by(SAMPLE).map(|&ci| match pre[ci] {
-            Some(Pre::Open { ncand, .. }) if ncand > 0 => (ncand as f64 * pl.full_us).min(pl.index_us(ncand, d)),
+            Some(Pre::Open { ncand, d0, d1, .. }) if ncand > 0 => (ncand as f64 * pl.full_us + pl.disk_us(ncand, d1 - d0, rb)).min(pl.index_us(ncand, d)),
             _ => 0.0,
         }).sum();
         let nvis = o.vis.map_or(ix.nrows, |v| v.rows.len());
         let rest = live.len() - (live.len() + SAMPLE - 1) / SAMPLE;
-        if nvis as f64 * pl.scan_us < rest as f64 * pl.cut_us + cost_s * nvis as f64 / nv_s.max(1) as f64 {
+        if nvis as f64 * scan_row_us < rest as f64 * pl.cut_us + cost_s * nvis as f64 / nv_s.max(1) as f64 {
             return Planned::Scan;
         }
     }
@@ -2517,12 +2530,15 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
     }
     let first_decide = if matches!(pl.mode, PlanMode::Auto) && pl.jump_level > 0 && d > pl.jump_d { pl.jump_level } else { 0 };
     let mut grp_gain = vec![0f64; ix.groups.len()];
+    let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
-        if let Pre::Open { ncand, .. } = p {
+        if let Pre::Open { ncand, d0, d1, .. } = p {
             if *ncand == 0 {
                 continue;
             }
-            let gain = *ncand as f64 * pl.full_us - pl.index_us(*ncand, d);
+            let full = *ncand as f64 * pl.full_us + pl.disk_us(*ncand, d1 - d0, rb);
+            full_all += full;
+            let gain = full - pl.index_us(*ncand, d);
             use_idx[ci] = match pl.mode {
                 PlanMode::Index => true,
                 PlanMode::Flat => false,
@@ -2542,7 +2558,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
         // what remains costs every candidate's full vector less the kept gains; a plain scan may be cheaper
         let nvis = o.vis.map_or(ix.nrows, |v| v.cl_cnt.iter().map(|&x| x as usize).sum());
         let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
-        if ncand_all as f64 * pl.full_us - gains > nvis as f64 * pl.scan_us {
+        if full_all - gains > nvis as f64 * scan_row_us {
             return Planned::Scan;
         }
     }

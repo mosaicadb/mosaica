@@ -1247,8 +1247,9 @@ pub fn dbcmp(c: &Ctx2) {
                     None if kv == "uring" => disk::URING.store(true, std::sync::atomic::Ordering::Relaxed),
                     Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
                     Some(("direct", v)) => disk::DIRECT_MIN.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
+                    Some(("plan", "disk")) => plan.disk = true,
                     Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
-                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES and :direct=BYTES"),
+                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES and :plan=disk"),
                 }
             }
             // each mode starts from an empty cache, so that one mode's cached rows do not serve the next
