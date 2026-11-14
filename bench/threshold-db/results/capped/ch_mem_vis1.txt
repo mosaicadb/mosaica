@@ -1,0 +1,4 @@
+memory.current 759619584 max 775946240 swap.max 0
+anon 249077760
+file 475701248
+max 483790 oom 0 oom_kill 0 oom_group_kill 0 

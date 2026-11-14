@@ -1,0 +1,8 @@
+rand 4096 B x 1 threads: 30697 reads in 5.0s, 6139 IOPS, 25.1 MB/s; latency mean 162.7 us, p50 160.2, p90 186.9, p99 227.3
+rand 4096 B x 4 threads: 113184 reads in 5.0s, 22635 IOPS, 92.7 MB/s; latency mean 176.5 us, p50 173.6, p90 206.2, p99 253.0
+rand 4096 B x 16 threads: 401510 reads in 5.0s, 80274 IOPS, 328.8 MB/s; latency mean 199.0 us, p50 191.7, p90 249.6, p99 331.5
+rand 4096 B x 64 threads: 882627 reads in 5.0s, 175669 IOPS, 719.5 MB/s; latency mean 362.4 us, p50 330.8, p90 566.1, p99 789.6
+rand 65536 B x 1 threads: 23968 reads in 5.0s, 4793 IOPS, 314.1 MB/s; latency mean 208.5 us, p50 206.5, p90 229.0, p99 277.6
+rand 65536 B x 16 threads: 252551 reads in 5.0s, 50485 IOPS, 3308.6 MB/s; latency mean 316.5 us, p50 307.4, p90 393.8, p99 494.6
+seq 1048576 B x 1 threads: 8432 reads in 5.0s, 1686 IOPS, 1768.2 MB/s; latency mean 592.8 us, p50 573.5, p90 705.7, p99 894.4
+seq 1048576 B x 4 threads: 15879 reads in 5.0s, 3175 IOPS, 3328.9 MB/s; latency mean 1259.3 us, p50 1255.6, p90 1598.3, p99 1886.1
