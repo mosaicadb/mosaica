@@ -27,8 +27,10 @@ covers the whole query, from the call to holding the full id set, so returning 7
 - **Corpus.** 999,950 BioCLIP-2 image embeddings (768 d), from 20 random row groups of
   `imageomics/TreeOfLife-200M-Embeddings/bioclip-2_float16` (seed 7, the same picks as `../../fetch.py`), normalised in
   f64. 50 further rows were held out as image queries.
-- **Queries.** 150 queries: 50 held-out images, 50 from `text_q.npy` and 50 from `text_insample.npy`. Timing used
-  every 10th query, which gives 15 queries (5 of each kind).
+- **Queries.** 150 queries: 50 held-out images (in-distribution) and 100 out-of-distribution (OOD) queries, text-prompt
+  embeddings searched against the image embeddings: 50 from `text_q.npy` and 50 from `text_insample.npy`. Timing used
+  every 10th query, which gives 15 queries (5 of each kind). OOD queries cost our index more, because they point where
+  the code is coarse and their scores bunch near any threshold; the medians mix the two kinds.
 - **Thresholds.** For each query there are seven thresholds, with answers of 0.01%, 0.1%, 1%, 10%, 30%, 50% and 75% of
   the corpus. Each is the midpoint between the k-th and (k+1)-th f64 similarity, so the exact answer has exactly k items.
   Answer sizes run from 100 to 749,962.
