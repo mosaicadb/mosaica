@@ -19,14 +19,25 @@ cargo build --release
 
 ## Inputs
 
-`tools/fit.py` fits the build parameters to any file of vectors, from the data alone (no example queries, no text
-anchors), and writes an index directory:
+`vexact fit` fits the build parameters to any file of vectors, from the data alone (no example queries, no text
+anchors), and writes an index directory. The clustering comes first, from faiss:
 
 ```bash
-python3 -I tools/fit.py VECTORS.npy INDEX [--metric angular]   # N x n floats; row i is entity i
+python3 -I tools/cluster.py VECTORS.npy CLUSTERING [--cells C]      # N x n floats; row i is entity i
 ```
 
-It normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
+```bash
+$CARGO_TARGET_DIR/release/vexact fit VECTORS.npy INDEX --clustering CLUSTERING [--basis pca|dual] [--query-sample Q.npy]
+```
+
+`tools/cluster.py` trains spherical k-means to about 1,000 items per cluster from 200 sampled rows per centre and
+assigns every row to its nearest centre (`assign.npy`); `--cells C` trains in two levels, C coarse cells with fine
+centres per cell, still assigning over all centres. The fit takes the clusters' exact means as the stored centres,
+passes over the vectors cluster by cluster, and runs `tools/certify.py` for the randomised constant (`--cert-time`,
+600 s by default). `tools/fit.py` does the same in numpy with its own k-means, holding the corpus in memory, and
+writes the same directory. `tools/synth_vectors.py` writes the synthetic set `REPORT_BUILD.md` measures.
+
+The fit normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
 centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the
 residuals per group, and writes the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
 blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deterministic levels end at 4 / 8 / 12 / 16 /

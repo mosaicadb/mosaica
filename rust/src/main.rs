@@ -1,5 +1,6 @@
 mod ann;
 mod derive;
+mod fit;
 mod index;
 mod kernel;
 mod query;
@@ -740,6 +741,10 @@ fn disk(c: &mut Ctx, nq: usize) {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|s| s.as_str()) == Some("fit") {
+        fit::main(&args);
+        return;
+    }
     let get = |k: &str, d: usize| -> usize { args.iter().position(|a| a == k).map(|i| args[i + 1].parse().unwrap()).unwrap_or(d) };
     let has = |k: &str| args.iter().any(|a| a == k);
     let kk = get("--clusters", 100000);

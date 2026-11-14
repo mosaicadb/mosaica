@@ -21,7 +21,8 @@ pub fn read_npy(path: &str) -> Npy {
 }
 
 /// Write a little-endian .npy file (`descr` as numpy writes it, e.g. "<i4", "<f8").
-pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
+/// The bytes of an .npy header (version 1) for C-ordered data of type `descr` and shape `shape`.
+pub fn npy_header_bytes(descr: &str, shape: &[usize]) -> Vec<u8> {
     let dims: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
     let tuple = if dims.len() == 1 { format!("({},)", dims[0]) } else { format!("({})", dims.join(", ")) };
     let mut hdr = format!("{{'descr': '{descr}', 'fortran_order': False, 'shape': {tuple}, }}");
@@ -32,6 +33,11 @@ pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
     let mut out = b"\x93NUMPY\x01\x00".to_vec();
     out.extend_from_slice(&(hdr.len() as u16).to_le_bytes());
     out.extend_from_slice(hdr.as_bytes());
+    out
+}
+
+pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
+    let mut out = npy_header_bytes(descr, shape);
     out.extend_from_slice(data);
     std::fs::write(path, out).unwrap_or_else(|e| panic!("{path}: {e}"));
 }
@@ -46,7 +52,7 @@ pub fn npy_header(buf: &[u8]) -> (String, usize) {
     (String::from_utf8_lossy(&buf[start..start + hl]).to_string(), start + hl)
 }
 
-fn field(hdr: &str, key: &str) -> String {
+pub fn field(hdr: &str, key: &str) -> String {
     let i = hdr.find(&format!("'{key}'")).unwrap();
     let rest = &hdr[i + key.len() + 3..];
     let a = rest.find('\'').unwrap();
@@ -74,6 +80,7 @@ impl Npy {
     conv!(i64s, i64, 8);
     conv!(i32s, i32, 4);
     conv!(u16s, u16, 2);
+    conv!(u32s, u32, 4);
     pub fn i8s(&self) -> Vec<i8> {
         self.data.iter().map(|&b| b as i8).collect()
     }

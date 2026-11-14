@@ -495,7 +495,7 @@ fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
 /// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz, started from the transpose when
 /// the basis is near orthogonal and from a Gauss-Jordan inverse otherwise (the dual basis).
 /// The int8 basis: row c of `v8t` is basis vector c in int8, `vsc[c]` its scale.
-fn int8_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>) {
+pub fn int8_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>) {
     let mut vsc = vec![0f64; n];
     let mut v8t = vec![0i8; n * n];
     for c in 0..n {
