@@ -169,51 +169,79 @@ pub fn det_alloc_tree(lam: &[f64], q: &[f64], t: &DetTab, dlv: &[usize]) -> (Vec
 
 // ---------------- the randomised code ----------------
 
-/// Greedy nested binary expansion of v (already divided by lambda rms) to `depth` bits; bit d set: t_d = +1.
-#[inline]
-pub fn rand_encode(v: f64, depth: usize) -> u8 {
-    let mut c = 0.0;
-    let mut p = 0u8;
-    for d in 0..depth {
-        let dl = 0.5f64.powi(d as i32 + 1);
-        if v - c >= 0.0 {
-            p |= 1 << d;
-            c += dl;
-        } else {
-            c -= dl;
+/// The randomised code's tables: `VALUE[depth][code]` is the decoded value of a code's first `depth` bits, and
+/// `CODE[depth][cell]` the code of the greedy expansion that ends in `cell` (cells numbered from -1 upwards, each
+/// 2^(1 - depth) wide; the expansion's first step is the cell index's top bit and the code's bit 0).
+static RAND_TABLES: std::sync::LazyLock<([[f64; 256]; 9], [[u8; 256]; 9])> = std::sync::LazyLock::new(|| {
+    let mut value = [[0f64; 256]; 9];
+    let mut code = [[0u8; 256]; 9];
+    for d in 0..9 {
+        for p in 0..256usize {
+            value[d][p] = (0..d).map(|b| if p >> b & 1 == 1 { 0.5f64.powi(b as i32 + 1) } else { -0.5f64.powi(b as i32 + 1) }).sum();
+        }
+        for cell in 0..1usize << d {
+            code[d][cell] = if d == 0 { 0 } else { (cell as u8).reverse_bits() >> (8 - d) };
         }
     }
-    p
+    (value, code)
+});
+
+/// Greedy nested binary expansion of v (already divided by lambda rms) to `depth` bits; bit d set: t_d = +1. The
+/// expansion's decisions compare v with dyadic points exactly, so it is the cell of v on the grid of step 2^(1 - depth).
+#[inline]
+pub fn rand_encode(v: f64, depth: usize) -> u8 {
+    if depth == 0 {
+        return 0;
+    }
+    let half = (1u32 << (depth - 1)) as f64;
+    let cell = ((v * half).floor() + half).clamp(0.0, 2.0 * half - 1.0) as usize;
+    RAND_TABLES.1[depth][cell]
 }
 #[inline]
 pub fn rand_value(p: u8, depth: usize) -> f64 {
-    (0..depth).map(|d| if p >> d & 1 == 1 { 0.5f64.powi(d as i32 + 1) } else { -0.5f64.powi(d as i32 + 1) }).sum()
+    RAND_TABLES.0[depth][p as usize & ((1usize << depth) - 1)]
 }
 
+/// The most rises a block can have: one per randomised level.
+pub const MAX_RISES: usize = 16;
+
 /// Encode a block: positions to their final depth `maxd`, with the encoder scale (in units of the rms) chosen per block
-/// from LAMS to minimise the sum over the block's rises of log tan^2 (any scale is sound: kappa is stored).
-pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8]) {
+/// from LAMS to minimise the sum over the block's rises of log tan^2 (any scale is sound: kappa is stored). Writes the
+/// chosen code to `out` and, per rise, the decoded estimate's dot product with y and squared norm to `dc`.
+pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8], dc: &mut [(f64, f64)]) {
     let m = y.len();
+    let nr = rises.len();
+    assert!(nr <= MAX_RISES, "a block rises at {nr} levels; at most {MAX_RISES} are supported");
     let yn2: f64 = y.iter().map(|v| v * v).sum();
     let rms = (yn2 / m as f64).sqrt().max(1e-300);
     let mut best = f64::INFINITY;
+    let value = &RAND_TABLES.0;
     for &lam in LAMS.iter() {
         for p in 0..m {
             tmp[p] = rand_encode(y[p] / (lam * rms), maxd[p]);
         }
-        let mut obj = 0.0;
-        for r in rises {
-            let (mut dot, mut cn) = (0.0, 0.0);
-            for p in 0..m {
-                let v = rand_value(tmp[p], r[p] as usize);
-                dot += v * y[p];
-                cn += v * v;
+        // every rise's sums in one pass over the positions, each summed in position order
+        let mut dot = [0f64; MAX_RISES];
+        let mut cn = [0f64; MAX_RISES];
+        for p in 0..m {
+            let (t, yp) = (tmp[p] as usize, y[p]);
+            for k in 0..nr {
+                let d = rises[k][p] as usize;
+                let v = value[d][t & ((1 << d) - 1)];
+                dot[k] += v * yp;
+                cn[k] += v * v;
             }
-            obj += ((cn * yn2 - dot * dot).max(1e-300) / (dot * dot).max(1e-300)).ln();
+        }
+        let mut obj = 0.0;
+        for k in 0..nr {
+            obj += ((cn[k] * yn2 - dot[k] * dot[k]).max(1e-300) / (dot[k] * dot[k]).max(1e-300)).ln();
         }
         if obj < best {
             best = obj;
             out[..m].copy_from_slice(&tmp[..m]);
+            for k in 0..nr {
+                dc[k] = (dot[k], cn[k]);
+            }
         }
     }
 }
@@ -238,7 +266,8 @@ pub fn rand_tan2() -> [f64; 9] {
             let rises: Vec<&[u8]> = deps.iter().map(|v| v.as_slice()).collect();
             let mut pat = vec![0u8; m];
             let mut tmp = vec![0u8; m];
-            rand_choose(&y, &maxd, &rises, &mut pat, &mut tmp);
+            let mut dc = [(0f64, 0f64); MAX_RISES];
+            rand_choose(&y, &maxd, &rises, &mut pat, &mut tmp, &mut dc);
             pats.push(pat);
         }
         for b in 1..9 {
@@ -766,6 +795,51 @@ pub fn roundup_levels(v: &mut Vec<f64>, k: usize, top: f64) -> Vec<f64> {
 }
 
 #[cfg(test)]
+mod rand_code_tests {
+    use super::*;
+
+    /// The greedy expansion and its decoder as first written: one decision per bit against the running estimate.
+    fn greedy(v: f64, depth: usize) -> u8 {
+        let (mut c, mut p) = (0.0, 0u8);
+        for d in 0..depth {
+            let dl = 0.5f64.powi(d as i32 + 1);
+            if v - c >= 0.0 {
+                p |= 1 << d;
+                c += dl;
+            } else {
+                c -= dl;
+            }
+        }
+        p
+    }
+    fn value(p: u8, depth: usize) -> f64 {
+        (0..depth).map(|d| if p >> d & 1 == 1 { 0.5f64.powi(d as i32 + 1) } else { -0.5f64.powi(d as i32 + 1) }).sum()
+    }
+
+    #[test]
+    fn tables_match_the_greedy_expansion() {
+        let mut vs: Vec<f64> = (-3000..=3000).map(|i| i as f64 / 1024.0).collect();
+        // every cell edge at every depth, and the values either side of it
+        for d in 1..=8 {
+            for k in -(1i64 << d)..=(1i64 << d) {
+                let e = k as f64 / (1u64 << (d - 1)) as f64;
+                vs.extend([e, e.next_down(), e.next_up()]);
+            }
+        }
+        vs.extend([f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1e300, -1e300, 0.0, -0.0]);
+        for &v in &vs {
+            for d in 0..=8 {
+                let p = greedy(v, d);
+                assert_eq!(rand_encode(v, d), p, "v {v} depth {d}");
+                for e in 0..=d {
+                    assert_eq!(rand_value(p, e).to_bits(), value(p, e).to_bits(), "prefix {e} of v {v} depth {d}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod roundup_tests {
     use super::*;
     #[test]
@@ -887,6 +961,17 @@ impl Cl2 {
 }
 
 impl Index2 {
+    /// A hash of everything the encoder stores: codes, scalars, keys, row order and escapes. Two builds with the same
+    /// hash answer every query identically.
+    pub fn code_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (&self.lcode, &self.lscal, &self.ahat, &self.row_ent).hash(&mut h);
+        let mut e: Vec<(u8, u8, u32, u32)> = self.esc.iter().map(|(k, v)| (k.0, k.1, k.2, v.to_bits())).collect();
+        e.sort_unstable();
+        e.hash(&mut h);
+        h.finish()
+    }
     pub fn n(&self) -> usize {
         self.meta.n
     }
@@ -1164,6 +1249,12 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let maxd: Vec<usize> = (0..n).map(|pp| gp.rdepth.iter().map(|r| r[pp] as usize).max().unwrap_or(0)).collect();
     let mut rp = vec![0u8; n];
     let mut rtmp = vec![0u8; n];
+    // per block: the randomised levels at which it rises, and their depths over the block
+    let rise_lr: Vec<Vec<usize>> = (0..J).map(|j| (0..nr).filter(|&lr| gp.thchg[lr].contains(&j)).collect()).collect();
+    let rises: Vec<Vec<&[u8]>> = (0..J).map(|j| rise_lr[j].iter().map(|&lr| &gp.rdepth[lr][gp.boff[j]..gp.boff[j + 1]]).collect()).collect();
+    // per (block, randomised level): the chosen code's dot product with y and squared norm
+    let mut rdc = vec![(0f64, 0f64); J * nr];
+    let mut dc = [(0f64, 0f64); MAX_RISES];
     for i in 0..nc {
         let s = svec[i];
         let y = &ymat[i * n..(i + 1) * n];
@@ -1172,8 +1263,10 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
         for j in 0..J {
             yn[j] = y[gp.boff[j]..gp.boff[j + 1]].iter().map(|v| v * v).sum::<f64>().sqrt();
             let (b0, b1) = (gp.boff[j], gp.boff[j + 1]);
-            let rises: Vec<&[u8]> = gp.thchg.iter().enumerate().filter(|(_, ch)| ch.contains(&j)).map(|(lr, _)| &gp.rdepth[lr][b0..b1]).collect();
-            rand_choose(&y[b0..b1], &maxd[b0..b1], &rises, &mut rp[b0..b1], &mut rtmp);
+            rand_choose(&y[b0..b1], &maxd[b0..b1], &rises[j], &mut rp[b0..b1], &mut rtmp, &mut dc);
+            for (k, &lr) in rise_lr[j].iter().enumerate() {
+                rdc[j * nr + lr] = dc[k];
+            }
             let pr = gp.ypredw[j] * s;
             let need = yn[j] * (1.0 + 1e-7);
             if let Some(cal) = cal.as_mut() {
@@ -1217,12 +1310,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                 ubase += part.units();
             }
             for (slot, &j) in gp.thchg[lr].iter().enumerate() {
-                let (mut dot, mut cn) = (0.0, 0.0);
-                for pp in gp.boff[j]..gp.boff[j + 1] {
-                    let v = rand_value(rp[pp], gp.rdepth[lr][pp] as usize);
-                    dot += v * y[pp];
-                    cn += v * v;
-                }
+                let (dot, cn) = rdc[j * nr + lr];
                 let cosf = (dot / (cn.sqrt() * yn[j] + 1e-300)).clamp(1e-9, 1.0);
                 let tanf = (1.0 - cosf * cosf).max(0.0).sqrt() / cosf;
                 let kappa = yn[j] * yn[j] / dot.max(1e-300);
@@ -1632,7 +1720,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     for (key, _) in ix.esc.iter() {
         ek[match key.1 { 0 => 0, 1..=7 => 1, 8..=15 => 2, _ => 3 }] += 1;
     }
-    log(format!("assembled {:.1}s; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}", t.s(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3]));
+    log(format!("assembled {:.1}s; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
     ix
 }
 
