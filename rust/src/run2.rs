@@ -960,3 +960,47 @@ pub fn scanbench(c: &Ctx2, nq: usize) {
     }
     std::fs::write(format!("{}/scanbench.csv", res_dir()), lines.join("\n") + "\n").unwrap();
 }
+
+/// Per-item demand: for each query and answer size, the deepest level each row was read at (0: not read past its
+/// key, l + 1: read through level l, nl + 1: read in full), on the index path with nothing filtered. Writes
+/// `--out DIR`: {item,text}_lv.u8 (queries x sizes x rows), levels.txt (cumulative stored bytes per item by level),
+/// clusters.txt (first row of each cluster and the row count), and bytes read per item as the harness counts them.
+pub fn demand(c: &Ctx2, nq: usize) {
+    use std::sync::atomic::Ordering;
+    let ix = &c.ix;
+    let fl = c.flat();
+    let nrows = ix.nrows;
+    let dir = arg_str("--out", "demand");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fracs: Vec<f64> = arg_str("--fracs", "0.0001,0.001,0.01,0.1,0.5").split(',').map(|s| s.parse().unwrap()).collect();
+    let sb = ix.stored_bytes_per_item();
+    std::fs::write(format!("{dir}/levels.txt"), sb.iter().map(|x| format!("{x}")).collect::<Vec<_>>().join("\n") + "\n").unwrap();
+    let mut cl = String::new();
+    for x in &ix.cl {
+        cl += &format!("{} {}\n", x.r0, x.r1);
+    }
+    cl += &format!("{} {}\n", nrows, ix.n());
+    std::fs::write(format!("{dir}/clusters.txt"), cl).unwrap();
+    let mut summary = String::from("class,query,frac,threshold,bytes_read,touched,full_reads\n");
+    for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
+        let k = qs.len().min(nq);
+        let mut buf = vec![0u8; k * fracs.len() * nrows];
+        for (qi, q) in qs.iter().take(k).enumerate() {
+            let pr = prep2(ix, q);
+            let sc = fl.scores(&pr.q32);
+            let sizes: Vec<usize> = fracs.iter().map(|f| ((fl.nrows as f64 * f).round() as usize).max(1)).collect();
+            let ths = thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &sizes);
+            for si in 0..fracs.len() {
+                let off = (qi * fracs.len() + si) * nrows;
+                DEMAND.store(buf[off..].as_mut_ptr(), Ordering::SeqCst);
+                let o = Opts2 { vis: None, verify: false, want_iv: false, plan: Plan { mode: PlanMode::Index, ..c.plan } };
+                let r = threshold2(ix, &pr, ths[si], &o);
+                DEMAND.store(std::ptr::null_mut(), Ordering::SeqCst);
+                summary += &format!("{cls},{qi},{},{},{:.3},{},{}\n", fracs[si], ths[si], bytes_read2(ix, &r.st), r.st.touched, r.st.full_reads);
+            }
+            out!("demand {cls} query {qi} done");
+        }
+        std::fs::write(format!("{dir}/{cls}_lv.u8"), &buf).unwrap();
+    }
+    std::fs::write(format!("{dir}/summary.csv"), summary).unwrap();
+}

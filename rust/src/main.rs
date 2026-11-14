@@ -784,6 +784,9 @@ fn main() {
             vs.extend(extra.iter().map(|(v, cx)| (*v, cx)));
             run2::e2e2(&vs, get("--nq", 100));
         }
+        if has("demand") {
+            run2::demand(&c, get("--nq", 20));
+        }
         if has("breakdown") {
             run2::breakdown2(&c, get("--nq", 20));
         }

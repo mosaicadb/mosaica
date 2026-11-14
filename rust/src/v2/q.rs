@@ -27,6 +27,16 @@ pub const P_PLAN: usize = 11;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
+/// When set, every row the level walk reads at level l gets l + 1 written at its index, and every row sent to its full
+/// vector gets nl + 1 (the demand dump of `run2::demand`).
+pub static DEMAND: std::sync::atomic::AtomicPtr<u8> = std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+#[inline]
+fn demand_mark(row: usize, v: usize) {
+    let p = DEMAND.load(std::sync::atomic::Ordering::Relaxed);
+    if !p.is_null() {
+        unsafe { *p.add(row) = v as u8 };
+    }
+}
 pub static ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[inline(always)]
 pub fn tick() -> u64 {
@@ -1199,6 +1209,14 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             let none = _mm512_set1_epi32(-1);
             let act: u32 = (!_mm512_cmpeq_epi32_mask(l0, none)) as u32 | ((!_mm512_cmpeq_epi32_mask(l1, none)) as u32) << 16;
             st.enter[l] += act.count_ones() as u64;
+            {
+                let mut a = act;
+                while a != 0 {
+                    let i = a.trailing_zeros() as usize;
+                    demand_mark(c.r0 + sv.idx[k0 + i] as usize, l + 1);
+                    a &= a - 1;
+                }
+            }
             if act == 0 {
                 continue;
             }
@@ -1923,6 +1941,9 @@ pub fn scan_knn(ix: &Index2, q16: &[u16], q32: &[f32], qn: f64, kk: usize, vis: 
 
 /// Exact decisions from full vectors (four rows per pass of the query; exact integer products only near t).
 pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2) {
+    for &r in pend {
+        demand_mark(r as usize, ix.meta.nl() + 1);
+    }
     let mut k4 = 0;
     if let Full2::Real { .. } = &ix.full {
         let e = full_err2(ix, pr);
@@ -1963,6 +1984,9 @@ pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bo
 /// decide_full over scattered rows by blocks of 32: each block's vectors are copied into a contiguous buffer (the next
 /// block's rows prefetched meanwhile) and scored there.
 pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_exact: bool, acc: &mut ThrOut2) {
+    for &r in rows {
+        demand_mark(r as usize, ix.meta.nl() + 1);
+    }
     const B: usize = 32;
     let n = ix.n();
     let e = full_err2(ix, pr);
