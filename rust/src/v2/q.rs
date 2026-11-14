@@ -964,6 +964,31 @@ unsafe fn compact_det(sv: &mut State, int: bool, verify: bool, w: usize, m: u16,
     }
 }
 
+/// Which randomised-level arrays of the survivors' state a compaction keeps (bit j: block j).
+#[derive(Default, Clone, Copy)]
+struct RandNeed {
+    aj: u32,
+    kap: u32, // kappa and tan
+    yh: bool,
+}
+
+/// Compact the randomised-level state of 16 slots that a later level reads.
+#[inline(always)]
+unsafe fn compact_rand(sv: &mut State, w: usize, m: u16, o: usize, need: RandNeed) {
+    for j in 0..J {
+        if need.aj >> j & 1 == 1 {
+            cs(&mut sv.aj[j], w, m, o);
+        }
+        if need.yh {
+            cs(&mut sv.yh[j], w, m, o);
+        }
+        if need.kap >> j & 1 == 1 {
+            cs(&mut sv.kap[j], w, m, o);
+            cs(&mut sv.eps[j], w, m, o);
+        }
+    }
+}
+
 /// Verify mode, a deterministic level of one block (bit i: slot k0 + i): count the decisions (in, out) that the
 /// real-valued certificate, evaluated in f64 from the f64 table sum, does not imply, and the active lanes whose exact
 /// score it does not contain.
@@ -1270,6 +1295,22 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 _mm_prefetch::<_MM_HINT_T0>(pc.add(x) as *const i8);
             }
         }
+        // what a later level reads of the survivors' state: nothing after the last level but their slots; the
+        // accumulators of blocks coded so far; kappa and tan of a coded block that does not rise at the next level
+        // (a rise recomputes them before any use); |y| from the first randomised level on
+        let last = l + 1 == nl;
+        let mut need = RandNeed::default();
+        if l >= NDL && !last {
+            need.yh = true;
+            for j in 0..J {
+                if gp.rates[l - NDL][j] > 0.0 {
+                    need.aj |= 1 << j;
+                    if !gp.thchg[l + 1 - NDL].contains(&j) {
+                        need.kap |= 1 << j;
+                    }
+                }
+            }
+        }
         let mut wpos = 0usize;
         for b in 0..nb {
             let k0 = b * BLK;
@@ -1363,6 +1404,92 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             }
             let t2 = tick();
             st.cyc[P_DECODE] += t2 - t1;
+            // the randomised levels' scalars, both halves of the block from each row: |y| at the first, kappa and tan
+            // at a block's rise
+            if l >= NDL {
+                let tk = tick();
+                let hms = [act as u16, (act >> 16) as u16];
+                    if lr == 0 {
+                        for j in 0..J {
+                            let (a0, a1) = row_nibbles(sp.add(2 * j * 16));
+                            let (b0, b1) = row_nibbles(sp.add((2 * j + 1) * 16));
+                            for h in 0..2 {
+                            let hm = hms[h];
+                            if hm == 0 {
+                                continue;
+                            }
+                            let o = k0 + 16 * h;
+                            let s = ld(&sv.s, o);
+                            let code = if h == 0 { _mm512_add_epi32(a0, _mm512_slli_epi32(b0, 4)) } else { _mm512_add_epi32(a1, _mm512_slli_epi32(b1, 4)) };
+                            let pr_ = _mm512_mul_ps(_mm512_set1_ps(gp.ypredw[j]), s);
+                            let tv = _mm512_i32gather_ps::<4>(_mm512_min_epi32(code, _mm512_set1_epi32(254)), gp.ytab[j].as_ptr() as *const _);
+                            let mut y = _mm512_mul_ps(pr_, tv);
+                            let em = _mm512_cmpeq_epi32_mask(code, _mm512_set1_epi32(255)) & hm;
+                            if em != 0 {
+                                let mut r = arr(y);
+                                for i in 0..16 {
+                                    if em >> i & 1 == 1 {
+                                        r[i] = ix.esc[&(l as u8, 1 + j as u8, (c.r0 + sv.idx[o + i] as usize) as u32)];
+                                    }
+                                }
+                                y = _mm512_loadu_ps(r.as_ptr());
+                            }
+                            _mm512_storeu_ps(sv.yh[j].as_mut_ptr().add(o), y);
+                            }
+                        }
+                    }
+                    for (slot, &j) in gp.thchg[lr].iter().enumerate() {
+                        if kap_unused >> j & 1 == 1 {
+                            continue;
+                        }
+                        let row = gp.rrow[lr][slot];
+                        let kb = gp.kbits[lr][j] as usize;
+                        let (a0, a1) = row_nibbles(sp.add(row * 16));
+                        let (t0, t1) = row_nibbles(sp.add((row + kb / 4) * 16));
+                        let (mut b0, mut b1) = (_mm512_setzero_si512(), _mm512_setzero_si512());
+                        if kb == 8 {
+                            (b0, b1) = row_nibbles(sp.add((row + 1) * 16));
+                        }
+                        for h in 0..2 {
+                        let hm = hms[h];
+                        if hm == 0 {
+                            continue;
+                        }
+                        let o = k0 + 16 * h;
+                        let mut kc = if h == 0 { a0 } else { a1 };
+                        if kb == 8 {
+                            kc = _mm512_add_epi32(kc, _mm512_slli_epi32(if h == 0 { b0 } else { b1 }, 4));
+                        }
+                        let kesc = if kb == 8 { 255 } else { 15 };
+                        let tc = if h == 0 { t0 } else { t1 };
+                        let yv = ld(&sv.yh[j], o);
+                        let mut kap = _mm512_mul_ps(yv, _mm512_i32gather_ps::<4>(_mm512_min_epi32(kc, _mm512_set1_epi32(kesc - 1)), gp.ktab[lr][j].as_ptr() as *const _));
+                        let mut th = _mm512_permutexvar_ps(tc, _mm512_loadu_ps(gp.ttab[lr][j].as_ptr()));
+                        let ek = _mm512_cmpeq_epi32_mask(kc, _mm512_set1_epi32(kesc)) & hm;
+                        let et = _mm512_cmpeq_epi32_mask(tc, _mm512_set1_epi32(15)) & hm;
+                        if ek | et != 0 {
+                            let (mut rk, mut rt) = (arr(kap), arr(th));
+                            for i in 0..16 {
+                                if (ek | et) >> i & 1 == 0 {
+                                    continue;
+                                }
+                                let row = (c.r0 + sv.idx[o + i] as usize) as u32;
+                                if ek >> i & 1 == 1 {
+                                    rk[i] = ix.esc[&(l as u8, 8 + j as u8, row)];
+                                }
+                                if et >> i & 1 == 1 {
+                                    rt[i] = ix.esc[&(l as u8, 16 + j as u8, row)];
+                                }
+                            }
+                            kap = _mm512_loadu_ps(rk.as_ptr());
+                            th = _mm512_loadu_ps(rt.as_ptr());
+                        }
+                        _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), kap);
+                        _mm512_storeu_ps(sv.eps[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)));
+                        }
+                    }
+                st.cyc[P_RKAP] += tick() - tk;
+            }
             for h in 0..2 {
                 let hm: u16 = (act >> (16 * h)) as u16;
                 if hm == 0 {
@@ -1403,74 +1530,11 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
-                    let tk = tick();
-                    if lr == 0 {
-                        for j in 0..J {
-                            let (a0, a1) = row_nibbles(sp.add(2 * j * 16));
-                            let (b0, b1) = row_nibbles(sp.add((2 * j + 1) * 16));
-                            let code = if h == 0 { _mm512_add_epi32(a0, _mm512_slli_epi32(b0, 4)) } else { _mm512_add_epi32(a1, _mm512_slli_epi32(b1, 4)) };
-                            let pr_ = _mm512_mul_ps(_mm512_set1_ps(gp.ypredw[j]), s);
-                            let tv = _mm512_i32gather_ps::<4>(_mm512_min_epi32(code, _mm512_set1_epi32(254)), gp.ytab[j].as_ptr() as *const _);
-                            let mut y = _mm512_mul_ps(pr_, tv);
-                            let em = _mm512_cmpeq_epi32_mask(code, _mm512_set1_epi32(255)) & hm;
-                            if em != 0 {
-                                let mut r = arr(y);
-                                for i in 0..16 {
-                                    if em >> i & 1 == 1 {
-                                        r[i] = ix.esc[&(l as u8, 1 + j as u8, (c.r0 + sv.idx[o + i] as usize) as u32)];
-                                    }
-                                }
-                                y = _mm512_loadu_ps(r.as_ptr());
-                            }
-                            _mm512_storeu_ps(sv.yh[j].as_mut_ptr().add(o), y);
-                        }
-                    }
                     for pl in &lut.parts {
                         let j = pl.j.unwrap();
                         let a = _mm512_add_ps(ld(&sv.aj[j], o), pv[1 + j][h]);
                         _mm512_storeu_ps(sv.aj[j].as_mut_ptr().add(o), a);
                     }
-                    for (slot, &j) in gp.thchg[lr].iter().enumerate() {
-                        if kap_unused >> j & 1 == 1 {
-                            continue;
-                        }
-                        let row = gp.rrow[lr][slot];
-                        let kb = gp.kbits[lr][j] as usize;
-                        let (a0, a1) = row_nibbles(sp.add(row * 16));
-                        let (t0, t1) = row_nibbles(sp.add((row + kb / 4) * 16));
-                        let mut kc = if h == 0 { a0 } else { a1 };
-                        if kb == 8 {
-                            let (b0, b1) = row_nibbles(sp.add((row + 1) * 16));
-                            kc = _mm512_add_epi32(kc, _mm512_slli_epi32(if h == 0 { b0 } else { b1 }, 4));
-                        }
-                        let kesc = if kb == 8 { 255 } else { 15 };
-                        let tc = if h == 0 { t0 } else { t1 };
-                        let yv = ld(&sv.yh[j], o);
-                        let mut kap = _mm512_mul_ps(yv, _mm512_i32gather_ps::<4>(_mm512_min_epi32(kc, _mm512_set1_epi32(kesc - 1)), gp.ktab[lr][j].as_ptr() as *const _));
-                        let mut th = _mm512_permutexvar_ps(tc, _mm512_loadu_ps(gp.ttab[lr][j].as_ptr()));
-                        let ek = _mm512_cmpeq_epi32_mask(kc, _mm512_set1_epi32(kesc)) & hm;
-                        let et = _mm512_cmpeq_epi32_mask(tc, _mm512_set1_epi32(15)) & hm;
-                        if ek | et != 0 {
-                            let (mut rk, mut rt) = (arr(kap), arr(th));
-                            for i in 0..16 {
-                                if (ek | et) >> i & 1 == 0 {
-                                    continue;
-                                }
-                                let row = (c.r0 + sv.idx[o + i] as usize) as u32;
-                                if ek >> i & 1 == 1 {
-                                    rk[i] = ix.esc[&(l as u8, 8 + j as u8, row)];
-                                }
-                                if et >> i & 1 == 1 {
-                                    rt[i] = ix.esc[&(l as u8, 16 + j as u8, row)];
-                                }
-                            }
-                            kap = _mm512_loadu_ps(rk.as_ptr());
-                            th = _mm512_loadu_ps(rt.as_ptr());
-                        }
-                        _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), kap);
-                        _mm512_storeu_ps(sv.eps[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)));
-                    }
-                    st.cyc[P_RKAP] += tick() - tk;
                     if skipb {
                         keep[h] = hm;
                         continue;
@@ -1608,17 +1672,12 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     continue;
                 }
                 _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, _mm512_loadu_si512(sv.idx.as_ptr().add(o) as *const _)));
-                cs(&mut sv.s, w, m, o);
-                cs(&mut sv.mr, w, m, o);
-                compact_det(sv, intm && l < NDL, verify, w, m, o);
-                if l >= NDL {
-                    for j in 0..J {
-                        cs(&mut sv.aj[j], w, m, o);
-                        cs(&mut sv.yh[j], w, m, o);
-                        cs(&mut sv.kap[j], w, m, o);
-                        cs(&mut sv.eps[j], w, m, o);
-                    }
+                if !last {
+                    cs(&mut sv.s, w, m, o);
+                    cs(&mut sv.mr, w, m, o);
+                    compact_det(sv, intm && l < NDL, verify, w, m, o);
                 }
+                compact_rand(sv, w, m, o, need);
                 if verify {
                     let mut k = w;
                     for i in 0..16 {
@@ -1651,15 +1710,12 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     let m = !_mm512_cmpeq_epi32_mask(iv, _mm512_set1_epi32(-1));
                     if m != 0 {
                         _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, iv));
-                        cs(&mut sv.s, w, m, o);
-                        cs(&mut sv.mr, w, m, o);
-                        compact_det(sv, intm && l < NDL, verify, w, m, o);
-                        for j in 0..J {
-                            cs(&mut sv.aj[j], w, m, o);
-                            cs(&mut sv.yh[j], w, m, o);
-                            cs(&mut sv.kap[j], w, m, o);
-                            cs(&mut sv.eps[j], w, m, o);
+                        if !last {
+                            cs(&mut sv.s, w, m, o);
+                            cs(&mut sv.mr, w, m, o);
+                            compact_det(sv, intm && l < NDL, verify, w, m, o);
                         }
+                        compact_rand(sv, w, m, o, need);
                         if verify {
                             let mut kk = w;
                             for i in 0..16 {
@@ -2278,6 +2334,16 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
     // cut and of every candidate's cheaper path, the cut stops there
     const SAMPLE: usize = 8;
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
+    // when most visible items are candidates (d), an answer share in the scan band (estimated from a sample) scans
+    let in_band = |d: f64| {
+        matches!(pl.mode, PlanMode::Auto) && pl.scan_lo <= 1.0 && d >= 0.25 && {
+            let p = answer_share(ix, pr, t, o.vis, SHARE_SAMPLE);
+            p >= pl.scan_lo && p <= pl.scan_hi
+        }
+    };
+    if live.len() < 8 * SAMPLE && in_band(1.0) {
+        return Planned::Scan;
+    }
     if matches!(pl.mode, PlanMode::Auto) && live.len() >= 8 * SAMPLE {
         let (mut nv_s, mut nc_s, mut nvo_s) = (0usize, 0usize, 0usize);
         for &ci in live.iter().step_by(SAMPLE) {
@@ -2290,12 +2356,8 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             pre[ci] = Some(p);
         }
         let d = nc_s as f64 / nvo_s.max(1) as f64;
-        // most visible items are candidates: a large answer, where the index reads most of them deeply, scans
-        if pl.scan_lo <= 1.0 && d >= 0.25 {
-            let p = answer_share(ix, pr, t, o.vis, SHARE_SAMPLE);
-            if p >= pl.scan_lo && p <= pl.scan_hi {
-                return Planned::Scan;
-            }
+        if in_band(d) {
+            return Planned::Scan;
         }
         let cost_s: f64 = live.iter().step_by(SAMPLE).map(|&ci| match pre[ci] {
             Some(Pre::Open { ncand, .. }) if ncand > 0 => (ncand as f64 * pl.full_us).min(pl.index_us(ncand, d)),

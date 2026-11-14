@@ -224,6 +224,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         out!("[plan] calibrated in {:.1}s", t.s());
         pc
     };
+    let plan = plan_flags(plan, flags); // flags win over timed or filed constants (scanband)
     out!("[plan] {}", plan.to_kv().replace('\n', " "));
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
