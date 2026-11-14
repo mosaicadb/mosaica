@@ -21,6 +21,8 @@ pub mod tail;
 
 /// Keep the sub-Gaussian constant at every randomised level (`--csg-plain`) instead of the exact-law constants of `tail`.
 pub static CSG_PLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// N in the randomised levels' budget (`--nguar N`) in place of the item count rounded up to a power of two.
+pub static NGUAR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
 /// Design the randomised rates with the constants of `tail` for each set of coded blocks (`--design-exact`), indexed
 /// by the set's bits.
 pub static DESIGN_C: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
@@ -725,6 +727,12 @@ pub struct Meta2 {
     pub dlv: Vec<usize>,
     pub rlv: Vec<usize>,
     pub csg: f64,
+    /// The randomised levels' constants are for an index of 2^npow items (all rows, whatever any viewer sees, rounded
+    /// up, unless `--nguar` gave N). Every result carries it; a result cache must not mix constants inside one result
+    /// and must drop its results when npow rises (a fall is safe). The budget is one-sided, so a result is valid for
+    /// its own (query, threshold) or its own k-NN query only: reusing an item's intervals for another threshold, or a
+    /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
+    pub npow: u32,
 }
 impl Meta2 {
     pub fn nl(&self) -> usize {
@@ -1257,7 +1265,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg };
+    // the guarantee's N: the item count rounded up to a power of two, or --nguar
+    let nguar = NGUAR.get().copied().unwrap_or_else(|| (p.cstart[k].max(1) as f64).log2().ceil().exp2());
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg, npow: nguar.log2().ceil() as u32 };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
@@ -1287,14 +1297,15 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         sets.dedup();
         let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
         // one event per (item, level), on the side that would make the item's decision wrong: delta = eps / (N L)
-        let l1 = p.meta.csg * p.meta.csg / 2.0 - 2f64.ln();
+        let l1 = (nguar * meta.rlv.len() as f64 / p.meta.eps).ln();
+        log(format!("query budget: N = {nguar:.0} (2^{}; {} items), L = {}, eps = {:e}, one side per event: ln(1/delta) = {l1:.4}", meta.npow, p.cstart[k], meta.rlv.len(), p.meta.eps));
         let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { ((2.0 * l1).sqrt(), tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
         for gp in groups.iter_mut() {
             for lr in 0..gp.rates.len() {
                 gp.csgl[lr] = vals[&set(gp, lr)].0 as f32;
             }
         }
-        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), p.meta.csg, sets.iter().map(|s| (s.clone(), (vals[s].0 * 1000.0).round() / 1000.0, vals[s].1)).collect::<Vec<_>>()));
+        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), (2.0 * l1).sqrt(), sets.iter().map(|s| (s.clone(), (vals[s].0 * 1000.0).round() / 1000.0, vals[s].1)).collect::<Vec<_>>()));
     }
     log(format!("plans {:.1}s; residual-stage distortion / tree {:?}; largest inverse defect {:.2e}; rates g0 {:?}", t.s(), TREE_DEPTHS.iter().map(|&j| (1..=MAX_STAGES).map(|r| (codes.d[j][r] / p.gtree[j + r] * 1000.0).round() / 1000.0).collect::<Vec<_>>()).collect::<Vec<_>>(), groups.iter().map(|g| g.e_inv).fold(0.0, f64::max), groups[0].rates));
     let mhats: Vec<Vec<f64>> = (0..k).map(|c| {
@@ -1487,6 +1498,8 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let maxent = row_ent.iter().copied().max().unwrap_or(0) as usize;
     let mut ent_row = vec![u32::MAX; maxent + 1];
     for (r, &e) in row_ent.iter().enumerate() {
+        // k-NN counts rows, which is exact only with one row per entity
+        assert!(ent_row[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
         ent_row[e as usize] = r as u32;
     }
     let mut full = full;

@@ -1,0 +1,15 @@
+   K 1024: evaluated 15995176, failing 1409744, max ln tail -42.77103 at shares [0.12598 0.16699 0.33398 0.37598] [21s]
+   K 2048: evaluated 24581760, failing 0, max ln tail -42.83289 at shares [0.12549 0.16748 0.3335  0.375  ] [38s]
+ds [95, 127, 255, 287] ln delta -42.832826 X 8.704: certified True at K 2048; max ln tail at the last level -42.832889
+   K 2048: evaluated 28808472, failing 528414, max ln tail -43.51767 at shares [0.12549 0.16748 0.3335  0.375  ] [43s]
+   K 4096: evaluated 9235440, failing 0, max ln tail -43.54922 at shares [0.12549 0.16699 0.33325 0.375  ] [50s]
+ds [95, 127, 255, 287] ln delta -43.525973 X 8.774: certified True at K 4096; max ln tail at the last level -43.549217
+   K 1024: evaluated 20170408, failing 1766273, max ln tail -35.87535 at shares [0.12598 0.16699 0.33398 0.37598] [25s]
+   K 2048: evaluated 30755680, failing 0, max ln tail -35.92626 at shares [0.12549 0.16748 0.3335  0.375  ] [45s]
+ds [95, 127, 255, 287] ln delta -35.925071 X 7.957: certified True at K 2048; max ln tail at the last level -35.926257
+   K 1024: evaluated 19171664, failing 1558307, max ln tail -36.57061 at shares [0.12598 0.16699 0.33398 0.37598] [24s]
+   K 2048: evaluated 27046656, failing 0, max ln tail -36.62261 at shares [0.12549 0.16748 0.3335  0.375  ] [43s]
+ds [95, 127, 255, 287] ln delta -36.618218 X 8.036: certified True at K 2048; max ln tail at the last level -36.622610
+   K 2048: evaluated 91803152, failing 18886613, max ln tail -42.74532 at shares [0.12549 0.16748 0.3335  0.375  ] [88s]
+   K 4096: evaluated 329078400, failing 78530940, max ln tail -42.77625 at shares [0.12549 0.16699 0.33325 0.375  ] [281s]
+ds [95, 127, 255, 287] ln delta -42.832826 X 8.695: certified False at K 4096; max ln tail at the last level -42.776253
