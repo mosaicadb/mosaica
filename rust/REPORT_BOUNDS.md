@@ -19,7 +19,7 @@ fewer items reaching their full vectors. Two changes are on by default:
 
 The other candidates were measured and left off. None of the bound refinements studied would remove more than about
 3% of full-vector reads, and the quantiser is already at the Lloyd–Max optimum for its cells. A deeper last level
-cuts bytes by 16–27% but costs 3–15% in time, because a level's per-cluster cost is larger than the full vectors it
+cuts bytes by 16–27% but costs 1–26% in time, because a level's per-cluster cost is larger than the full vectors it
 saves. Only the caller's tolerance d moves the full-vector share a lot: d = 0.01 halves the bytes and saves 17–19% at
 large answers.
 
@@ -54,7 +54,7 @@ of roundings that any one term passes through:
 - **The random term:** about 6u inside each variance term, 3u for their sum, half of that through the square root,
   then the constant's rounding and the last two operations. That is about 8.5u.
 
-Both are below 1e-6 ≈ 16.8u. The old order had about 13u on its longest chain, so the new one is no worse, and the
+Both are below the factor's 16u ((1.0 + 1e-6) as f32 is exactly 1 + 16u). The old order had about 13u on its longest chain, so the new one is no worse, and the
 slacks are unchanged. The new constants carry their own 1 + 1e-6.
 
 ## Part 2: tighter bounds
@@ -137,14 +137,15 @@ under a single scale. Unequal deltas do not recover it. Nothing to build.
 | Schedule | bytes per item | full share | time |
 |---|---|---|---|
 | 56 / 96 / 160 / 256 (default) | 301 (item 50%), 353 (text 50%) | 9.6%, 11.9% | — |
-| 56 / 96 / 160 / 320 | −16%, −15% | 5.5%, 7.3% | +4 to +15% |
-| 56 / 96 / 160 / 256 / 384 | −27%, −26% | 3.6%, 4.9% | +3 to +7% |
+| 56 / 96 / 160 / 320 | −16%, −15% | 5.5%, 7.3% | +4 to +26% (item 0.01% is +26%) |
+| 56 / 96 / 160 / 256 / 384 | −27%, −26% | 3.6%, 4.9% | +1 to +9% |
 
 The deeper levels cut full-vector reads by 42–63%, but every answer size is slower. A level costs a table per
 (cluster, level) and a decode and bound per survivor. At the deep end, about 10 survivors per cluster share each
 table, so the per-entrant cost is close to the 104 ns of a full vector. This is the schedule for a disk-resident
 store, where bytes are the cost. `bail=8` or `bail=24` (sending a cluster's last survivors to full vectors instead of
-building a table) brought five levels back to within −5% to +16% of five levels without bail, still slower than four.
+building a table) was 0–7% faster than five levels without bail, measured within one process, which is still
+slower than four levels.
 
 ### The tolerance d (the caller's parameter; report only, default exact)
 
@@ -226,7 +227,9 @@ the same configuration did not crash (`x_bail_base` on the start binary, `x_bail
 AddressSanitizer build (stable with `RUSTC_BOOTSTRAP=1`, `-Zsanitizer=address`) found nothing on the configuration,
 at 50k and at 1M. The level loop's state is created fresh for every query, so a heap over-read is the likely cause.
 It would have to land in memory that ASan does not watch: the 128-byte slack after the code arrays, or the memory
-map of the full vectors. **Not found.** Both bail and five levels are off by default.
+map of the full vectors. Four further runs of the crashing configuration were also clean, three of them with guard
+pages and bounds asserts. **The cause is unknown, and may be hardware.** Both bail and five levels are off by
+default.
 
 ## The next bottleneck
 
