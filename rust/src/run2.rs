@@ -145,6 +145,17 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                     }).fold(0, |a, b| a | b)
                 };
             }
+            f if f.starts_with("ddec=") => {
+                p.ddec = match &f[5..] {
+                    "all" => u32::MAX,
+                    "none" => 0,
+                    v => v.split('.').map(|x| {
+                        let l = x.parse::<usize>().expect("ddec=LEVEL.LEVEL... (deterministic level indices from 0), all or none");
+                        assert!(l < crate::v2::NDL, "ddec names deterministic level {l}; this build has {} (0 to {})", crate::v2::NDL, crate::v2::NDL - 1);
+                        1u32 << l
+                    }).fold(0, |a, b| a | b),
+                };
+            }
             f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
             f if f.starts_with("repackx=") => {
                 p.repack = true;
@@ -170,6 +181,14 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if args().iter().any(|a| a == "--csg-plain") {
         crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    // another deterministic level schedule (cumulative bytes); its length is the build's NDL
+    let dlv = arg_str("--dlv", "");
+    if !dlv.is_empty() {
+        p.meta.dlv = dlv.split(',').map(|x| x.parse().expect("--dlv BYTES,BYTES,...")).collect();
+    }
+    assert!(p.meta.dlv.len() == crate::v2::NDL && p.meta.dlv.windows(2).all(|w| w[0] < w[1]) && p.meta.dlv[crate::v2::NDL - 1] < p.meta.rlv[0],
+        "the deterministic levels {:?} must be {} rising byte counts below the first randomised level; pass --dlv with {} values or build with VEXACT_NDL={}",
+        p.meta.dlv, crate::v2::NDL, crate::v2::NDL, p.meta.dlv.len());
     let rlv = arg_str("--rlv", "");
     let design_exact = args().iter().any(|a| a == "--design-exact");
     if !rlv.is_empty() {

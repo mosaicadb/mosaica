@@ -31,7 +31,23 @@ use crate::util::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-pub const NDL: usize = 6;
+/// The number of deterministic levels, 6 unless the build sets VEXACT_NDL (the index's DLV, or --dlv, must match).
+pub const NDL: usize = match option_env!("VEXACT_NDL") {
+    Some(v) => parse_ndl(v),
+    None => 6,
+};
+const fn parse_ndl(v: &str) -> usize {
+    let b = v.as_bytes();
+    let mut i = 0;
+    let mut x = 0;
+    while i < b.len() {
+        assert!(b[i].is_ascii_digit(), "VEXACT_NDL must be a whole number");
+        x = x * 10 + (b[i] - b'0') as usize;
+        i += 1;
+    }
+    assert!(x >= 1, "VEXACT_NDL must be at least 1");
+    x
+}
 pub const J: usize = 4;
 pub const BLK: usize = 32;
 pub const LAMS: [f64; 6] = [2.0, 2.3, 2.6, 3.0, 3.5, 4.2];

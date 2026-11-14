@@ -412,6 +412,7 @@ pub struct CQ2 {
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub bail: f32,    // a threshold query sends its survivors to full vectors before a level of more than bail x live units (0: never)
     pub rdec: u32,    // threshold queries decide at randomised level lr only if bit lr is set (the others only read)
+    pub ddec: u32,    // the same for deterministic level l
     pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
     pub int: Option<IntDet>,
 }
@@ -521,7 +522,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, ddec: u32::MAX, tol: 0.0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -1211,7 +1212,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         };
         st.cyc[P_TABLES] += tick() - tt;
         let tls = tick();
-        let skip = l < first_decide && !verify && mode == Mode2::Thr;
+        // a deterministic level that only reads: its accumulators advance, nothing is decided (verify: bounds
+        // computed and checked, not used)
+        let dnodec = l < NDL && mode == Mode2::Thr && !rdec_has(cq.ddec, l);
+        let skip = (l < first_decide || dnodec) && !verify && mode == Mode2::Thr;
         // a randomised level that only reads: its bounds are not computed (verify: computed and checked, not used)
         let nodec = l >= NDL && mode == Mode2::Thr && !rdec_has(cq.rdec, l - NDL);
         let skipb = skip || (nodec && !verify);
@@ -1385,12 +1389,13 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                 if verify && !skip {
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, act, inm, outm, st);
                 }
-                let k = if skip || sweep { act } else { act & !(inm | outm) };
-                if !skip {
+                let used = !skip && !dnodec;
+                let k = if !used || sweep { act } else { act & !(inm | outm) };
+                if used {
                     st.dec_in[l] += inm.count_ones() as u64;
                     st.dec_out[l] += outm.count_ones() as u64;
                 }
-                if !skip && !sweep && inm != 0 {
+                if used && !sweep && inm != 0 {
                     for h in 0..2 {
                         let m = (inm >> (16 * h)) as u16;
                         if m != 0 {
@@ -1682,6 +1687,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     let sh = 16 * h;
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);
                 }
+                if dnodec {
+                    keep[h] = hm;
+                    continue;
+                }
                 if sweep {
                     st.dec_in[l] += inm.count_ones() as u64;
                     st.dec_out[l] += outm.count_ones() as u64;
@@ -1934,6 +1943,7 @@ pub struct Plan {
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub bail: f32,         // threshold queries: survivors go to full vectors before a level whose table has more than bail units per survivor (0: off)
     pub rdec: u32,         // threshold queries decide at randomised level lr only when bit lr is set
+    pub ddec: u32,         // the same for deterministic level l
     pub tol: f64,          // the tolerance d: an item whose lower bound reaches t - d is taken in (0: exact)
     pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
     pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
@@ -1945,7 +1955,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, ddec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
@@ -2594,6 +2604,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             cq.bail = pl.bail;
                             assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
                             cq.rdec = pl.rdec;
+                            cq.ddec = pl.ddec;
                             cq.tol = pl.tol;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
