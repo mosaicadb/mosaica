@@ -111,6 +111,17 @@ pub struct Session {
     /// The newest generation this session has been served each view at, per shard: only a view it
     /// has been served may be answered from its grant's previous generation.
     served: std::sync::Mutex<Vec<Served>>,
+    /// The last filter whose matches this session counted over a whole view.
+    matched: std::sync::Mutex<Option<Matched>>,
+}
+
+/// How many of a session's visible items in `view` `filter` admitted, under the mask `shards`
+/// names ([`crate::figures::MaskIdentity::shards`]).
+struct Matched {
+    shards: [u8; 32],
+    view: String,
+    filter: crate::filter::FilterExpr,
+    total: u64,
 }
 
 /// A view of a shard a session has been served, and the newest generation it was served at.
@@ -223,6 +234,36 @@ impl Session {
                 segments_version,
             }),
         }
+    }
+
+    /// How many visible items in `view` `filter` admits under the mask `shards` names, where this
+    /// session last counted that.
+    pub(crate) fn matched_total(
+        &self,
+        shards: &[u8; 32],
+        view: &str,
+        filter: &crate::filter::FilterExpr,
+    ) -> Option<u64> {
+        let held = self.matched.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        held.as_ref()
+            .filter(|m| &m.shards == shards && m.view == view && &m.filter == filter)
+            .map(|m| m.total)
+    }
+
+    /// Keep `total` as [`Self::matched_total`]'s answer, in place of the one held.
+    pub(crate) fn keep_matched_total(
+        &self,
+        shards: [u8; 32],
+        view: &str,
+        filter: &crate::filter::FilterExpr,
+        total: u64,
+    ) {
+        *self.matched.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Matched {
+            shards,
+            view: view.to_string(),
+            filter: filter.clone(),
+            total,
+        });
     }
 
     /// `sha256(auth_data)`.
@@ -441,6 +482,7 @@ impl Engine {
             expires_at,
             dict_len_at_authorise: generation.dict.len(),
             served: Default::default(),
+            matched: Default::default(),
         })
     }
 

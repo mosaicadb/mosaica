@@ -22,6 +22,27 @@ pub(crate) struct OpenView<'a> {
 pub(super) struct Theta {
     pub(super) v_total: u64,
     pub(super) threshold: Threshold,
+    /// `N_occ(zoom)`, or 1 where the threshold did not need it.
+    pub(super) n_occ: u64,
+}
+
+/// What a filtered request's threshold is taken from once its matches are counted:
+/// `P_f = ⌊m_target · N_occ · 2⁶⁴ / V_matched⌋`, with the unfiltered `N_occ`.
+#[derive(Clone, Copy)]
+pub(super) struct FilteredAnchor {
+    pub(super) m_target: u64,
+    pub(super) n_occ: u64,
+    /// `V_matched`, where it was counted before the sweep; `None` where the request's tiles hold
+    /// every visible row and their matched counts sum to it.
+    pub(super) matched: Option<u64>,
+}
+
+impl FilteredAnchor {
+    /// The threshold over `matched`, or over the tiles' own matched counts `in_tiles`.
+    pub(super) fn threshold(&self, in_tiles: impl FnOnce() -> u64) -> Threshold {
+        let matched = self.matched.unwrap_or_else(in_tiles);
+        Threshold::at_depth(matched, self.m_target, self.n_occ)
+    }
 }
 
 /// A session's geometry in every shard holding a view, from one generation.
@@ -168,10 +189,8 @@ impl Engine {
 
     /// θ's two anchors, over the session's composed mask and this view's whole row space:
     /// `V_total`, the visible cardinality, and `N_occ(zoom)`, the number of depth-`zoom` tiles
-    /// holding a visible row. Both are taken from the pre-filter mask — a filtered request
-    /// saturates the threshold instead, so an artifact's presence and a tile's density do not move
-    /// as a viewer types — and depend only on the session's mask, view and generation, never on
-    /// `bbox`, so θ does not move on a pan.
+    /// holding a visible row. Both are taken from the pre-filter mask and depend only on the
+    /// session's mask, view and generation, never on `bbox`, so θ does not move on a pan.
     pub(super) fn theta(
         &self,
         served: &ServedView<'_>,
@@ -184,24 +203,19 @@ impl Engine {
         let v_total = mask.visible_total();
         probe.lap(|t| &mut t.theta_anchor_ns);
         let mut walked = false;
-        let threshold = match req.filter {
-            // A filtered request serves every match up to the cap. Neither anchor is consulted:
-            // anchoring on the narrower matched set would make θ move as the viewer types,
-            // thinning a filtered tile in proportion to the filter's selectivity instead of
-            // showing its matches.
-            Some(_) => Threshold::Saturated,
-            None => Threshold::for_tiles(
-                v_total,
-                self.config.theta_target_marks,
-                req.zoom,
-                self.config.k_min,
-                cap,
-                || {
-                    walked = true;
-                    self.occupied_tiles(served, mask, req.zoom)
-                },
-            ),
-        };
+        let mut n_occ = 1;
+        let threshold = Threshold::for_tiles(
+            v_total,
+            self.config.theta_target_marks,
+            req.zoom,
+            self.config.k_min,
+            cap,
+            || {
+                walked = true;
+                n_occ = self.occupied_tiles(served, mask, req.zoom);
+                n_occ
+            },
+        );
         probe.lap(|t| &mut t.theta_occupancy_ns);
         // Takes the ladder to `stage::BACKGROUND_DEPTH` on the pool so a zoom in and back costs
         // nothing on the way back. Only where the anchor was taken: a request that did not need
@@ -215,7 +229,59 @@ impl Engine {
                 &served.sides,
             );
         }
-        Theta { v_total, threshold }
+        Theta {
+            v_total,
+            threshold,
+            n_occ,
+        }
+    }
+
+    /// Where the request's filter re-anchors θ on its matches. `V_total` gives way to how many
+    /// visible items the filter admits, and `N_occ` stays the unfiltered mask's, so a filtered map
+    /// spends about the marks the unfiltered one does, spread over the matches by density. That
+    /// cut is never below the unfiltered one, so a point the unfiltered map draws is still drawn
+    /// once a filter it passes is added, and a saturated unfiltered threshold stays saturated.
+    ///
+    /// Where the request's `tiles` cover the grid, `V_matched` is the sum of their matched counts,
+    /// which the sweep takes anyway. Otherwise it is the session's held count for this mask, view
+    /// and filter, or is counted here, over the whole view under the pre-filter `mask`, and held.
+    pub(super) fn filtered_anchor(
+        &self,
+        served: &ServedView<'_>,
+        mask: &ShardedMask,
+        req: &ViewportRequest<'_>,
+        theta: &Theta,
+        tiles: usize,
+    ) -> Result<Option<FilteredAnchor>> {
+        let (Some(expr), Threshold::Cut(_)) = (&req.filter, theta.threshold) else {
+            return Ok(None);
+        };
+        let covered = tiles as u64 == 1u64 << (2 * u32::from(req.zoom));
+        let shards = &served.mask_identity.shards;
+        let matched = match covered {
+            true => None,
+            false => match served.session.matched_total(shards, served.name, expr) {
+                Some(held) => Some(held),
+                None => {
+                    let total = crate::aggregate::set::passing_total(
+                        self,
+                        served,
+                        mask,
+                        expr,
+                        &req.cancel,
+                    )?;
+                    served
+                        .session
+                        .keep_matched_total(*shards, served.name, expr, total);
+                    Some(total)
+                }
+            },
+        };
+        Ok(Some(FilteredAnchor {
+            m_target: self.config.theta_target_marks,
+            n_occ: theta.n_occ,
+            matched,
+        }))
     }
 
     /// This session's grant's fragment and row projection in every shard holding `view`, all from
@@ -442,8 +508,9 @@ impl Engine {
     /// kept in both. Evaluated per requested depth, never for all seventeen: a session touches a
     /// handful of depths, and the whole ladder eagerly costs an order of magnitude more.
     ///
-    /// The mask passed in must be the unfiltered composed one: `N_occ` is an anchor, and a
-    /// filtered mask reaching it would make θ move as the viewer types.
+    /// The mask passed in must be the unfiltered composed one, under a filter too: a filtered
+    /// count here could put a filtered request's cut below the unfiltered one
+    /// ([`crate::occupancy`]).
     pub(crate) fn occupied_tiles(&self, served: &ServedView<'_>, mask: &ShardedMask, depth: u8) -> u64 {
         let key = crate::occupancy::OccupancyKey::of(&served.mask_identity, served.name, depth);
         if let mosaica_cache::Peek::Ready(hit) = self.occupancy.peek(&key) {

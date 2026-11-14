@@ -45,8 +45,8 @@ function harness(opts: {
   hang?: (call: number, k?: number) => boolean;
   prefetch?: boolean;
   respond?: () => ViewportResponse;
-  /** Serve as under a filter: every match up to `k`, with no thinning. */
-  filtered?: boolean;
+  /** A floor at the cap, so the server serves every match up to `k`, with no thinning. */
+  saturated?: boolean;
 } = {}) {
   const clock = fakeClock();
   const calls: {zoom: number; k?: number; background?: boolean}[] = [];
@@ -66,7 +66,7 @@ function harness(opts: {
   replica.reset();
   const driver = new Driver(
     replica,
-    {kMaxMarks: 500, maxTilesPerRequest: 4096, thetaTargetMarks: 10, filtered: () => opts.filtered ?? false},
+    {kMaxMarks: 500, maxTilesPerRequest: 4096, thetaTargetMarks: 10, ...(opts.saturated ? {kMin: 500} : {})},
     clock,
     {
       onFrame: () => {},
@@ -327,7 +327,7 @@ describe('driver', () => {
   it('a budget change replans at its depth on the very next schedule: no motion, no settle', async () => {
     // `setBudget` reaches the next plan and suspends the depth hold, which would otherwise keep a
     // one-step depth change at the presented depth.
-    const h = harness({prefetch: false, filtered: true, respond: () => servedResponse(10_000_000n, 8)});
+    const h = harness({prefetch: false, saturated: true, respond: () => servedResponse(10_000_000n, 8)});
     h.driver.schedule(h.view, 400, 300);
     await h.clock.advance(600); // fetch, calibration, settle: presented at the budget's depth
     // Same view again: covered, and the settle's banked suspension is consumed and re-armed.
@@ -366,8 +366,7 @@ describe('driver', () => {
       async (req) => {
         calls.push({zoom: req.zoom, k: req.k});
         if (req.k !== 0) return servedResponse(10_000n, 8);
-        // Every tile saturated, so a filtered request costs `k` per tile and the budget bounds the
-        // choice.
+        // Every tile saturated, so a request costs `k` per tile and the budget bounds the choice.
         const n = Math.min(4 ** req.zoom, 4096);
         const result = emptyResponse().result;
         return {
@@ -384,7 +383,7 @@ describe('driver', () => {
     replica.reset();
     const driver = new Driver(
       replica,
-      {kMaxMarks: 500, maxTilesPerRequest: 4096, thetaTargetMarks: 10, filtered: () => true},
+      {kMaxMarks: 500, maxTilesPerRequest: 4096, thetaTargetMarks: 10, kMin: 500},
       clock,
       {onFrame: () => {}, onTrace: (kind, fields) => traces.push({kind, fields})},
       {budget: 50_000},
@@ -485,7 +484,7 @@ describe('driver', () => {
     replica.reset();
     const driver = new Driver(
       replica,
-      {kMaxMarks: 500, maxTilesPerRequest: 65_536, thetaTargetMarks: 10, kMin: 2, filtered: () => false},
+      {kMaxMarks: 500, maxTilesPerRequest: 65_536, thetaTargetMarks: 10, kMin: 2},
       clock,
       {onFrame: () => {}},
       {budget: 500_000},

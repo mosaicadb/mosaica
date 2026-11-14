@@ -11,9 +11,9 @@ What this module covers:
 
 - **I12, mask half** — `M_sel ⊆ M_auth` across the catalogue's principals, asserted three ways:
   per-tile `matched ≤ visible`, the filtered served set a subset of the unfiltered one, and the
-  filtered served set *equal* to the oracle's brute-force `M_sel` (θ is saturated on this server,
-  so served == matched == the whole filtered set — a subset check would pass a filter that
-  dropped visible items, which is I7's failure mode, not I12's).
+  filtered served set *equal* to the oracle's brute-force `M_sel` (θ is saturated on the sweep's
+  server, so served == matched == the whole filtered set — a subset check would pass a filter
+  that dropped visible items, which is I7's failure mode, not I12's).
 - **The frontier direction** — a filter moves `matched` and never `visible`, per tile, including
   under the empty-combinator identities (`all_of: []` is the whole candidate, `any_of: []` is
   nothing).
@@ -42,12 +42,12 @@ What it deliberately does **not** cover, so the next reader is not left inferrin
   overlay-journal differential owns the machinery, and extending it with a filtered request is
   the natural home. Uncovered here, stated rather than implied.
 - **θ-live filtered selection** — covered, in one deliberate place
-  (`test_a_live_theta_never_thins_a_filtered_selection`, against `catalogue_density_server`):
-  §8.5's match-layer rule is that a filtered request serves every match up to the cap, with θ's
-  threshold clause never applied to it — the θ-thinned filtered map was a real defect
-  (2026-08-14), invisible to every θ-saturated test in this module. The sweep and everything
-  else here still runs θ saturated so that a composition bug and a θ bug cannot masquerade as
-  each other (the same argument `conftest.catalogue_server` makes for the mask tests).
+  (`test_a_live_theta_thins_a_filtered_selection_by_its_matches`, against
+  `catalogue_density_server`): a filtered request takes its cut from how many visible items the
+  filter admits, with the unfiltered `N_occ`, and serves the definition's sample of the matches.
+  The sweep and everything else here runs θ saturated so that a composition bug and a θ bug cannot
+  masquerade as each other (the same argument `conftest.catalogue_server` makes for the mask
+  tests).
 - **Post-build ingest** — a flush now appends a value-column extent and a filter answers over the
   entities it published (`filter-index.md` §2.1). The fixture here is build-only, so that path is
   exercised in `crates/mosaica-engine/tests/it/filtering.rs` against a real flush rather than over
@@ -273,47 +273,52 @@ def test_i12_a_filter_narrows_matched_and_never_touches_visible(
     )
 
 
-def test_a_live_theta_never_thins_a_filtered_selection(
+def test_a_live_theta_thins_a_filtered_selection_by_its_matches(
     catalogue_bundle, catalogue_density_server, catalogue_filter_columns, entity_of_fx
 ):
-    """§8.5's match-layer count rule, at the configuration the density rule actually ships in.
+    """A filtered request serves the definition's sample of its matches, anchored on them.
 
-    A filtered request serves every match up to the cap; θ's threshold clause applies to the
-    context of an unfiltered map, never to a match set. The defect this pins: the filtered
-    selection used to run under the *unfiltered* θ odds, so a filter that narrowed a tile a
-    hundredfold drew the `k_min` floor instead of its matches — the map thinned in proportion to
-    the filter's selectivity, silently, and every θ-saturated test in this module passed over it.
-
-    The control comes first: on this server θ genuinely thins the *unfiltered* map, or the
-    assertions after it prove nothing. Caps are huge here (`harness.write_config`'s defaults), so
-    served == matched per tile is the whole rule; the capped interaction lives in the engine's own
-    tests against a small `k`."""
+    The cut is `P_f = ⌊m_target · N_occ(d) · 2⁶⁴ / V_matched⌋`, with `V_matched` the viewer's
+    visible items the filter admits over the whole view and `N_occ(d)` the unfiltered mask's. Every
+    tile's served points are compared, in order, with the oracle's selection over `M_sel`; the
+    filtered map must be thinned somewhere, or θ is not live here and the comparison proves only
+    the saturated case the sweep already covers. And a point the unfiltered map draws that matches
+    is drawn filtered too, since `V_matched ≤ V_total` puts the filtered cut no lower."""
     server = catalogue_density_server
     case = next(c for c in cat.catalogue() if c.name == "full_100pct")
     token = server.authorise(list(case.grants))["token"]
+    constants = server.meta(token)["selection"]
+    k = constants["k_max_marks"]
 
-    plain = server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT)
-    plain_tiles = _tiles_by_id(decode_viewport(plain)[0])
-    assert any(s < v for v, _m, s in plain_tiles.values()), (
-        "θ is not live on this server — no unfiltered tile was thinned, so this test has lost "
-        "its control and the fixture needs looking at"
-    )
-
-    filtered = server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, filters=SWEEP_EXPR)
-    filt_tiles = _tiles_by_id(decode_viewport(filtered)[0])
-    for tile, (visible, matched, served) in filt_tiles.items():
-        assert matched <= visible, f"tile {tile}: matched {matched} > visible {visible} — I12"
-        assert served == matched, (
-            f"tile {tile}: served {served} != matched {matched} under a live θ — the filtered "
-            "selection is being pushed through the unfiltered threshold odds again"
-        )
-
-    # And the membership, not just the counts: the served set is the oracle's brute-force M_sel,
-    # exactly — the same equality the saturated sweep asserts, now with θ live enough to have
-    # thinned it if the rule regressed.
     m_auth = cat.items_of(catalogue_bundle, case.entities)
     m_sel = filt.evaluate(SWEEP_EXPR, catalogue_filter_columns, m_auth)
-    assert _served_entities(filtered, entity_of_fx) == m_sel
+    unfiltered = vp.Selection(catalogue_bundle, m_auth, cat.VIEW_ID, ZOOM)
+    matches = vp.Selection(catalogue_bundle, m_sel, cat.VIEW_ID, ZOOM)
+    params = vp.params_from_meta(
+        constants, k=k, v_total=vp.visible_total(catalogue_bundle, m_sel, cat.VIEW_ID)
+    )
+
+    filtered = server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, k=k, filters=SWEEP_EXPR)
+    tiles, points = decode_viewport(filtered)
+    cursor = 0
+    for tile, visible, matched, served, _highlighted in tiles:
+        assert matched <= visible, f"tile {tile}: matched {matched} > visible {visible} — I12"
+        drawn = [code for _ident, code in points[cursor : cursor + served]]
+        cursor += served
+        assert drawn == matches.served_points(tile, **params, n_occ=unfiltered.n_occ), (
+            f"tile {tile}: the filtered sample disagrees with the definition over the matches"
+        )
+    assert cursor == len(points), "the points batch must be exactly consumed by the tile batch"
+    assert any(s < m for _t, _v, m, s, _h in tiles), (
+        "θ thinned no filtered tile on this server, so this test has lost its control and the "
+        "fixture needs looking at"
+    )
+
+    plain = server.viewport(token, cat.VIEW_ID, ZOOM, cat.FULL_VIEWPORT, k=k)
+    kept = _served_entities(plain, entity_of_fx) & m_sel
+    assert kept <= _served_entities(filtered, entity_of_fx), (
+        "adding the filter dropped a matching point the unfiltered map drew"
+    )
 
 
 def test_the_empty_combinators_are_their_operators_identities(

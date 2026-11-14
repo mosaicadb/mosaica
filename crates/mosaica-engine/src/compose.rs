@@ -388,9 +388,8 @@ impl EffectiveMask {
     /// suppression. Anchoring on `base.cardinality()` alone would let a viewer difference it
     /// against its own summed per-tile `visible` and recover how many of its own items have
     /// been denied. The same arithmetic as [`Self::count_range`], so the anchor and the
-    /// per-tile counts cannot disagree. Blind to `filter`: anchoring on a filtered count would
-    /// make θ move as a viewer typed, coarsening the visible frontier rather than only refining
-    /// it.
+    /// per-tile counts cannot disagree. Blind to `filter`: a filtered request's anchor is how
+    /// many of these rows the filter admits, counted apart.
     pub fn visible_total(&self) -> u64 {
         self.base.cardinality() - self.minus.cardinality() + self.plus.cardinality()
     }
@@ -498,10 +497,16 @@ impl EffectiveMask {
     }
 
     /// Visit runs of `r` holding every visible row and possibly some rows the diffs or a filter
-    /// remove: the projection's runs, then each row the diffs add. Nothing is materialised, so
-    /// read advice taken from these costs no second composition of the mask; a page too many is
-    /// read for nothing, and none the visible rows sit on is missed.
+    /// remove: the filter's runs where there is a filter, and otherwise the projection's runs,
+    /// then each row the diffs add. Nothing is materialised, so read advice taken from these costs
+    /// no second composition of the mask; a page too many is read for nothing, and none the
+    /// visible rows sit on is missed.
     pub fn for_each_run_holding_visible(&self, r: Range<u32>, mut f: impl FnMut(Range<u32>)) {
+        if let Some(filter) = &self.filter {
+            self.debug_assert_in_domain(&r);
+            for_each_run_in(filter.rows(), r, &mut f);
+            return;
+        }
         for_each_run_in(self.base.bitmap(), r.clone(), &mut f);
         let mut added = self.plus.iter();
         added.reset_at_or_after(r.start);
@@ -629,7 +634,7 @@ impl ShardedMask {
         })
     }
 
-    /// The visible rows over every shard: θ's anchor. Filter-blind, as
+    /// The visible rows over every shard: θ's unfiltered anchor. Filter-blind, as
     /// [`EffectiveMask::visible_total`] is.
     pub fn visible_total(&self) -> u64 {
         self.leaves

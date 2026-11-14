@@ -516,8 +516,8 @@ fn the_point_bit_is_present_only_with_a_highlight_and_agrees_with_the_counts() {
             .as_ref()
             .expect("a highlight carries the column");
         assert_eq!(bits.len(), lit.points.len(), "one bit per served point");
-        // The engine is uncapped and θ saturates under a filter, so at this budget every match is
-        // served and the two channels count the same set.
+        // The engine is uncapped and θ saturated, so at this budget every match is served and the
+        // two channels count the same set.
         assert_eq!(
             bits.iter().filter(|&&b| b).count() as u64,
             highlighted_total(&lit),

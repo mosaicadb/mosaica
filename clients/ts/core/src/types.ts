@@ -562,8 +562,8 @@ export type Meta = {
     /** The largest `k` a request can ask for. A tile serves at most `min(k, maxK, kMaxMarks)` points. */
     maxK: number;
     /**
-     * The number of points an unfiltered request aims to serve in an average occupied tile. A
-     * filtered request serves every match up to the per-tile limit.
+     * The number of points a request aims to serve in an average occupied tile. A filtered request
+     * spends about as many over the whole map as an unfiltered one, shared among its matches.
      */
     thetaTargetMarks: number;
     /** The largest `underlayOffset` a viewport request may ask for. */

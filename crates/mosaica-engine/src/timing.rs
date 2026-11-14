@@ -112,8 +112,7 @@ pub struct StageTimings {
     /// (`crate::occupancy::OccupancyKey`) is what keeps a pan at one zoom from paying it again, so
     /// a deployment seeing this stay non-zero across a pan has lost the memo, not the walk.
     ///
-    /// Zero for a request carrying a filter: §8.5's match-layer rule saturates the threshold, so
-    /// the walk is not taken.
+    /// Zero where θ saturates whatever `N_occ` is, so the walk is not taken.
     pub theta_occupancy_ns: u64,
     /// `tiles_for_bbox` — pure geometry, no data touched. Serial-prefix: computed once, before
     /// the parallel tile sweep, so this keeps its wall-clock meaning at every `compute_threads`.

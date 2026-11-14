@@ -69,9 +69,9 @@ The counts arrive before the points, so a client can start drawing before the wh
 
 ### Which points are drawn
 
-A tile at a wide zoom can hold millions of items, so Mosaica draws a sample of them. Without a filter, each tile draws about the same share of its items, so a crowded area still looks crowded, and every tile with a matching item draws at least a couple of points, so a sparse area never looks empty. A cap per tile keeps the answer to a size a browser can draw.
+A tile at a wide zoom can hold millions of items, so Mosaica draws a sample of them. Each tile draws about the same share of its items, so a crowded area still looks crowded, and every tile with a matching item draws at least a couple of points, so a sparse area never looks empty. A cap per tile keeps the answer to a size a browser can draw.
 
-The sample is the same on every request, and it nests across zoom levels: a point drawn at one zoom is still drawn when the viewer zooms in, with more appearing around it. Adding a filter works the same way. A filtered tile draws every match, up to the cap, so the points that matched and were already drawn stay where they were, and the other matches appear around them.
+The sample is the same on every request, and it nests across zoom levels: a point drawn at one zoom is still drawn when the viewer zooms in, with more appearing around it. Adding a filter works the same way. Over the whole map, the filtered map draws about as many points as the unfiltered one, shared among the matches in proportion to how crowded they are, so every point that matched and was already drawn stays where it was and the other matches appear around them. A broad filter at the widest zoom therefore draws few points, as the unfiltered map does there, and more appear as the viewer zooms in. A filter that matches few items draws all of them.
 
 Because the sample is taken from the items the viewer may see, a viewer with access to a few thousand items sees those items drawn, rather than a sample of everything with most of it removed.
 
@@ -113,6 +113,8 @@ Search results aren't ranked. A relevance score is usually worked out from how c
 ### Highlighting
 
 Where a filter changes what's drawn, a highlight keeps everything drawn and marks the items that also match a second expression, so a client can light them up and dull the rest. You can send both at once, filtering to computer science papers, say, and highlighting those from 2024. Each point then carries a `highlighted` flag, and each tile counts its highlighted items.
+
+![20.7 million PubMed papers with the 639,621 in chemistry highlighted and the rest dulled](../assets/screenshots/mosaica_pubmed.webp)
 
 ## Annotations on the map
 

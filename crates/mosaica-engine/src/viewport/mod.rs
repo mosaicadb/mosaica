@@ -18,11 +18,12 @@
 //! unmasked figure would disclose the existence or extent of items a viewer may not see. The
 //! verdict for a tile, artifact or item is decided before anything about it is read, and an
 //! invisible, suppressed or nonexistent item takes the same path to that verdict as a visible one,
-//! so a timing difference cannot tell a viewer which it was. θ's anchor and the masked counts are
-//! taken from the pre-filter mask, and the filter and the highlight are both evaluated against
-//! that same mask, so an artifact's presence and a tile's density do not move as a viewer types or
-//! highlights. A refusal is preferred to an empty answer wherever the answer could not actually be
-//! computed: an empty response is a real one. Entity ids, ordinals and term ids never reach a
+//! so a timing difference cannot tell a viewer which it was. The masked counts are taken from the
+//! pre-filter mask, and the filter and the highlight are both evaluated against that same mask, so
+//! an artifact's presence and a tile's count do not move as a viewer types or highlights. θ is
+//! anchored on the same mask, and under a filter on how many of its items the filter admits. A
+//! refusal is preferred to an empty answer wherever the answer could not actually be computed: an
+//! empty response is a real one. Entity ids, ordinals and term ids never reach a
 //! response or a log line. Nothing reachable from a rayon worker touches the single-flight
 //! row-projection cache built in `open_view` — it would deadlock the pool — and the availability
 //! bounds on tile count, underlay cells and frame bytes are what keep one request's resource use
@@ -106,6 +107,7 @@ pub(crate) use sweep::{
 };
 
 pub(crate) use geometry::{check_view, OpenView};
+use geometry::FilteredAnchor;
 use out::{emit_points, CollectSink, FilterBits, PointSchema};
 use tag::Tagging;
 use sweep::{
@@ -230,6 +232,8 @@ impl Engine {
         // free, since the served set is a prefix, and bounds the selection heap too.
         let cap = k.min(self.config.k_max_marks);
         let theta = self.theta(&served, &generation, &mask, &req, cap, &mut probe);
+        let filtered = self.filtered_anchor(&served, &mask, &req, &theta, tiles.tiles.len())?;
+        probe.skip();
         let params = SelectParams {
             k_min: self.config.k_min,
             cap,
@@ -299,7 +303,13 @@ impl Engine {
             tile_counts,
             sub_cells,
             swept,
-        } = self.sweep_tiles(&mask, &tiling, &params, &req, &mut probe)?;
+        } = self.sweep_tiles(&mask, &tiling, &params, filtered, &req, &mut probe)?;
+        // A covered request's matches, counted over every tile, are the view's: held for the
+        // session's next request under the same filter that does not cover it.
+        if let (Some(FilteredAnchor { matched: None, .. }), Some(expr)) = (filtered, &req.filter) {
+            let total = tile_counts.iter().map(|t| t.matched).sum();
+            session.keep_matched_total(served.mask_identity.shards, req.view, expr, total);
+        }
 
         // The first flush: every count, before any point. `None`, not an empty slice, when the
         // underlay was not requested — the wire's frame-presence rule needs that distinction.

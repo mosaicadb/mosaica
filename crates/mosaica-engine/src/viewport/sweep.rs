@@ -537,8 +537,7 @@ pub(super) fn tile_sweep<'a>(
         .collect();
 
     // Anchored on `matched`, not `visible`: selection's cap and tier decisions are about the set
-    // it draws from. θ's threshold anchor stays unfiltered and, on a filtered request, arrives
-    // saturated, so `served = min(matched, cap)` there.
+    // it draws from.
     let answer = if bands {
         crate::bands::select(&shards, params, matched)?
     } else {
@@ -691,6 +690,7 @@ impl Engine {
         mask: &ShardedMask,
         tiling: &'a Tiling<'a>,
         params: &SelectParams,
+        filtered: Option<FilteredAnchor>,
         req: &ViewportRequest<'_>,
         probe: &mut Probe,
     ) -> Result<Swept<'a>> {
@@ -704,6 +704,13 @@ impl Engine {
         probe.skip();
         let counts = part_counts(mask, tiling);
         probe.lap(|t| &mut t.count_ns);
+        let params = &match filtered {
+            Some(anchor) => SelectParams {
+                threshold: anchor.threshold(|| counts.matched.iter().sum()),
+                ..*params
+            },
+            None => *params,
+        };
 
         // Below `SERIAL_FALLBACK_MAX_ROWS`, fold `tile_sweep` in place, since the fan-out's own
         // entry/scheduling cost exceeds the per-tile work it would parallelise below that line. At

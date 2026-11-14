@@ -17,13 +17,13 @@ use super::{AggregateRequest, Reference};
 use crate::cancel::{check_cancelled, CancelToken};
 use crate::records::Clock;
 use crate::cells::CellSet;
-use crate::compose::{EffectiveMask, MaskedSet, WholeMask};
+use crate::compose::{EffectiveMask, MaskedSet, ShardedMask, WholeMask};
 use crate::engine::Engine;
 use crate::error::{EngineError, Result};
 use crate::filter::{RouteChoice, FilterExpr};
 use crate::region::RegionVerdict;
 use crate::viewport::{
-    FilterCandidate, OpenView, OverView, ResolvedLeaves, ServedSide, ViewLeafCosts,
+    FilterCandidate, OpenView, OverView, ResolvedLeaves, ServedSide, ServedView, ViewLeafCosts,
 };
 use crate::Generation;
 
@@ -192,7 +192,7 @@ impl Set {
                     return Ok(held);
                 }
                 let candidate = cx.sets.candidate(place).expect("a side the page reads");
-                let restricted = in_view(cx.open, place, candidate)?;
+                let restricted = in_view(&cx.open.served, place, candidate)?;
                 Ok(part.entities.get_or_init(|| restricted))
             }
             Held::Rows(rows) => {
@@ -213,17 +213,17 @@ type Routed = (Part, Option<RegionVerdict>);
 
 /// The members of `entities`, of the side at `place`'s shard, holding a row in the view's rows
 /// the page's mask was projected over there.
-pub(crate) fn in_view(open: &OpenView<'_>, place: usize, entities: &Bitmap) -> Result<Bitmap> {
+pub(crate) fn in_view(served: &ServedView<'_>, place: usize, entities: &Bitmap) -> Result<Bitmap> {
     // The projection covers an extent of this generation's row space: a projection served from
     // the generation before is served only where this one extends it, which a merge does not.
-    let side = &open.served.sides[place];
+    let side = &served.sides[place];
     side.data
         .row_space
         .restrict_to_view(entities, side.geometry.projection.covers_through())
         .ok_or_else(|| {
             EngineError::Malformed(format!(
                 "view '{}' no longer holds the extent its projection was taken through",
-                open.served.name
+                served.name
             ))
         })
 }
@@ -287,7 +287,7 @@ pub(super) fn compose(
                     expr,
                     choice,
                 )?;
-                into.add(place, routed(open, place, over)?);
+                into.add(place, routed(&open.served, &open.mask, place, over)?);
                 Ok(())
             };
             if let Some(expr) = &req.filter {
@@ -319,17 +319,21 @@ pub(super) fn compose(
 
 /// One filter's answer over the view as a set's part in the side at `place`: an entity-space
 /// answer kept to the entities the leaf's rows cover, a row-space one taken under the leaf.
-fn routed(open: &OpenView<'_>, place: usize, over: OverView) -> Result<Routed> {
+fn routed(
+    served: &ServedView<'_>,
+    mask: &ShardedMask,
+    place: usize,
+    over: OverView,
+) -> Result<Routed> {
     Ok(match over {
         OverView::Entities(entities) => {
-            let restricted = in_view(open, place, &entities)?;
+            let restricted = in_view(served, place, &entities)?;
             let size = restricted.cardinality();
             (Part::of(Held::Entities(restricted), size), None)
         }
         OverView::Rows { rows, region } => {
-            let rows = open
-                .served
-                .leaf(&open.mask, place)
+            let rows = served
+                .leaf(mask, place)
                 .expect("a side the page reads")
                 .visible_rows(&rows);
             let size = rows.cardinality();
@@ -351,22 +355,81 @@ pub(crate) fn entities_passing(
     resolved: &ResolvedLeaves<'_>,
     cancel: &Option<CancelToken>,
 ) -> Result<(Bitmap, Option<RegionVerdict>)> {
+    let (served, mask) = (&open.served, &open.mask);
+    let costs = engine.region_costs(served, mask, resolved, cancel, expr)?;
+    let choice = costs
+        .as_ref()
+        .map_or(RouteChoice::Entity, ViewLeafCosts::routes);
+    let (part, region) = part_passing(
+        engine,
+        (served, mask),
+        place,
+        candidate,
+        expr,
+        choice,
+        resolved,
+        cancel,
+    )?;
     check_cancelled(cancel)?;
-    let served = &open.served;
+    let entities = match part.held {
+        Held::Entities(entities) => entities,
+        Held::Rows(rows) => engine.entities_of_rows(served, place, &rows)?,
+        Held::Whole => unreachable!("a routed filter is never the whole view"),
+    };
+    Ok((entities, region))
+}
+
+/// How many items `expr` admits among those this viewer may see in `served`'s view under `mask`,
+/// over every shard: the size of the set an aggregate page filtered by `expr` counts.
+pub(crate) fn passing_total(
+    engine: &Engine,
+    served: &ServedView<'_>,
+    mask: &ShardedMask,
+    expr: &FilterExpr,
+    cancel: &Option<CancelToken>,
+) -> Result<u64> {
+    let resolved = ResolvedLeaves::new(mask);
+    let costs = engine.region_costs(served, mask, &resolved, cancel, expr)?;
+    let choice = costs
+        .as_ref()
+        .map_or(RouteChoice::Entity, ViewLeafCosts::routes);
+    let mut total = 0;
+    for (place, side, _) in served.filtered_sides(mask) {
+        let candidate =
+            engine.filter_candidate(served.session, side.shard, Some(&side.geometry.fragment))?;
+        let (part, _) = part_passing(
+            engine,
+            (served, mask),
+            place,
+            &candidate,
+            expr,
+            choice,
+            &resolved,
+            cancel,
+        )?;
+        total += part.size;
+    }
+    Ok(total)
+}
+
+/// `expr` routed under `candidate` in the side at `place`, as a set's part.
+#[allow(clippy::too_many_arguments)]
+fn part_passing(
+    engine: &Engine,
+    (served, mask): (&ServedView<'_>, &ShardedMask),
+    place: usize,
+    candidate: &Bitmap,
+    expr: &FilterExpr,
+    choice: RouteChoice<'_>,
+    resolved: &ResolvedLeaves<'_>,
+    cancel: &Option<CancelToken>,
+) -> Result<Routed> {
+    check_cancelled(cancel)?;
     let side = &served.sides[place];
     let whole = FilterCandidate::Whole(candidate);
-    let costs = engine.region_costs(served, &open.mask, resolved, cancel, expr)?;
-    let choice = costs.as_ref().map_or(RouteChoice::Entity, ViewLeafCosts::routes);
     engine.route_filters_under(served, side, whole, resolved, cancel, |route| {
         let over = engine.route_over_view(served, side, resolved, cancel, route, expr, choice)?;
-        let (part, region) = routed(open, place, over)?;
-        check_cancelled(cancel)?;
-        let entities = match part.held {
-            Held::Entities(entities) => entities,
-            Held::Rows(rows) => engine.entities_of_rows(&open.served, place, &rows)?,
-            Held::Whole => unreachable!("a routed filter is never the whole view"),
-        };
-        Ok((entities, region))
+        routed(served, mask, place, over)
     })
 }
 
