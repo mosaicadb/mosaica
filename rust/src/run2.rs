@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use roaring::RoaringBitmap;
 use std::io::Write;
 
-const SIZES: [f64; 5] = [1e-4, 1e-3, 1e-2, 0.1, 0.3];
+const SIZES: [f64; 7] = [1e-4, 1e-3, 1e-2, 0.1, 0.3, 0.5, 0.75];
 
 static LOG: std::sync::OnceLock<std::sync::Mutex<std::fs::File>> = std::sync::OnceLock::new();
 macro_rules! out {
@@ -99,14 +99,31 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {
+    setup2_at(tag, &data_dir(), "")
+}
+
+/// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...).
+pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
+    for f in flags.split(',').map(|f| f.trim()).filter(|f| !f.is_empty()) {
+        match f {
+            "int" => p.int_det = true,
+            "noint" => p.int_det = false,
+            _ => panic!("unknown plan flag {f:?}"),
+        }
+    }
+    p
+}
+
+/// The index of `dir` with the plan of the command line changed by `flags` (for a second variant, `--b`).
+pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), args());
     let kk = arg_usize("--clusters", 100000);
-    let prof_path = arg_str("--profile", &format!("{}/profile.npy", crate::run2::data_dir()));
+    let prof_path = if dir == data_dir() { arg_str("--profile", &format!("{dir}/profile.npy")) } else { format!("{dir}/profile.npy") };
     let split = !args().iter().any(|a| a == "--u8");
     let t = Timer::new();
-    let mut p = load_params(&crate::run2::data_dir());
+    let mut p = load_params(dir);
     if kk < p.meta.k {
         let n = p.meta.n;
         p.meta.k = kk;
@@ -141,6 +158,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
         jump_level: arg_usize("--jump", 0),
         ..Plan::default()
     };
+    let plan = plan_flags(plan, flags);
     // the cost model: from --plan-file, the BioCLIP constants (--plan-default), or re-timed on this index (pinned to
     // --core when given); the constants used are written to RESULTS/plan.txt
     let plan = if let Some(f) = Some(arg_str("--plan-file", "")).filter(|f| !f.is_empty()) {
@@ -176,6 +194,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
         None
     };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
+    out!("[fit] {}", c.p.fit);
     out!("built v2 ({} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c
@@ -512,28 +531,34 @@ pub fn setup_cost(c: &Ctx2, nq: usize) {
     }
 }
 
-pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
-    let ix = &c.ix;
-    let fl = c.flat();
-    let nrows = fl.nrows;
-    let n = ix.n();
-    let nl = ix.meta.nl();
+/// End to end, threshold queries at every answer share and exact k-NN (k = 10), item and text queries, as planned, for
+/// each variant (an index and plan; with two, the second from `--index-b` and `--b`). First one untimed pass on one
+/// thread for bytes read per item and items entering each level (survivors); then `--runs` timed runs (after one
+/// warm-up run) on each of `--threads` (default 1,4; pinned with `--pin`), one timing per query per run, the variants
+/// interleaved cell by cell so that they share the machine's state; a cell's figure is the median over runs of the
+/// median over queries, with the smallest and largest run.
+pub fn e2e2(vs: &[(&str, &Ctx2)], nq: usize) {
+    let c0 = vs[0].1;
+    let nrows = c0.flat().nrows;
+    let nl = c0.ix.meta.nl();
     let runs = arg_usize("--runs", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|s| s.parse().unwrap()).collect();
     let sizes: Vec<usize> = SIZES.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
-    let mut lines = vec!["class,threads,what,answer_frac,median_of_runs_ms,min_run_ms,max_run_ms,nq,runs,bytes_read_per_item,touched_frac,full_reads_per_item,enter_frac_by_level".to_string()];
-    for (cls, qs) in [("item", c.items.clone()), ("text", c.texts.clone())] {
+    let mut lines = vec!["variant,class,threads,what,answer_frac,median_of_runs_ms,min_run_ms,max_run_ms,nq,runs,bytes_read_per_item,touched_frac,full_reads_per_item,enter_frac_by_level".to_string()];
+    for (cls, qs) in [("item", c0.items.clone()), ("text", c0.texts.clone())] {
         let qs: Vec<Vec<f32>> = qs.into_iter().take(nq).collect();
         if qs.is_empty() {
             continue;
         }
         let ths: Vec<Vec<f64>> = qs.iter().map(|q| {
-            let pr = prep2(ix, q);
+            let fl = c0.flat();
+            let pr = prep2(&c0.ix, q);
             let sc = fl.scores(&pr.q32);
-            thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &sizes)
+            thresholds_for(&fl, &pr.q16, &sc, full_err2(&c0.ix, &pr), &sizes)
         }).collect();
         let ncell = SIZES.len() + 1; // the last cell is k-NN
-        let run_cell = |cell: usize, qi: usize| -> Stats {
+        let run_cell = |c: &Ctx2, cell: usize, qi: usize| -> Stats {
+            let ix = &c.ix;
             if cell < SIZES.len() {
                 let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
                 let pr = prep2(ix, &qs[qi]);
@@ -545,15 +570,15 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
             }
         };
         let k = qs.len() as f64;
-        let mut cellinfo = Vec::new();
-        {
+        let mut cellinfo = vec![Vec::new(); vs.len()];
+        for (vi, &(vname, c)) in vs.iter().enumerate() {
             let pl = pool(1);
             for cell in 0..ncell {
                 let (mut br, mut tch, mut fr) = (0.0, 0.0, 0.0);
                 let mut enter = vec![0f64; nl + 1];
                 for qi in 0..qs.len() {
-                    let st = pl.install(|| run_cell(cell, qi));
-                    br += bytes_read2(ix, &st);
+                    let st = pl.install(|| run_cell(c, cell, qi));
+                    br += bytes_read2(&c.ix, &st);
                     tch += st.touched as f64;
                     fr += st.full_reads as f64;
                     for (e, x) in enter.iter_mut().zip(&st.enter) {
@@ -561,63 +586,36 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
                     }
                 }
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
-                cellinfo.push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
-                out!("e2e2 bytes {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}; entering each level (fraction of N, last = full vectors) {}", if cell < SIZES.len() { format!("{}", SIZES[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(" "));
+                cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
+                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < SIZES.len() { format!("{}", SIZES[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }
         }
         for &th in &threads {
             let pl = pool(th);
-            let mut per = vec![Vec::new(); ncell];
+            let mut per = vec![vec![Vec::new(); ncell]; vs.len()];
             for run in 0..=runs {
                 for cell in 0..ncell {
-                    let mut ts = Vec::with_capacity(qs.len());
-                    for qi in 0..qs.len() {
-                        let t = Timer::new();
-                        pl.install(|| run_cell(cell, qi));
-                        ts.push(t.ms());
-                    }
-                    if run > 0 {
-                        per[cell].push(median(&ts));
+                    for (vi, &(_, c)) in vs.iter().enumerate() {
+                        let mut ts = Vec::with_capacity(qs.len());
+                        for qi in 0..qs.len() {
+                            let t = Timer::new();
+                            pl.install(|| run_cell(c, cell, qi));
+                            ts.push(t.ms());
+                        }
+                        if run > 0 {
+                            per[vi][cell].push(median(&ts));
+                        }
                     }
                 }
             }
-            for cell in 0..ncell {
-                let v = &per[cell];
-                let (what, frac) = if cell < SIZES.len() { ("index2_thr", SIZES[cell]) } else { ("index2_knn10", 0.0) };
-                let line = format!("{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[cell]);
-                out!("e2e2 {line}");
-                lines.push(line);
-            }
-        }
-        if nflat == 0 {
-            continue;
-        }
-        let x8: Vec<i8> = (0..nrows * n).into_par_iter().map(|i| (f16_to_f32(fl.row(i / n)[i % n]) * 127.0).round().clamp(-127.0, 127.0) as i8).collect();
-        for &th in &threads {
-            let pl = pool(th);
-            let (mut tf, mut t8) = (Vec::new(), Vec::new());
-            for (qi, q) in qs.iter().take(nflat).enumerate() {
-                let pr = prep2(ix, q);
-                let err = full_err2(ix, &pr);
-                let qmax = pr.q32.iter().fold(0f32, |a, &x| a.max(x.abs()));
-                let q16i: Vec<i16> = pr.q32.iter().map(|&x| (x / qmax * 8191.0).round() as i16).collect();
-                let t8thr = (ths[qi][1] * 127.0 * 8191.0 / qmax as f64) as i32;
-                let (mut b1, mut b3) = (f64::MAX, f64::MAX);
-                for _ in 0..2 {
-                    let t = Timer::new();
-                    std::hint::black_box(pl.install(|| fl.threshold(&pr.q16, &pr.q32, ths[qi][1], err, None, &c.ent_xs)).len());
-                    b1 = b1.min(t.ms());
-                    let t = Timer::new();
-                    std::hint::black_box(pl.install(|| (0..nrows).into_par_iter().with_min_len(4096).filter(|&r| unsafe { dot_i8(&q16i, &x8[r * n..(r + 1) * n]) } >= t8thr).count()));
-                    b3 = b3.min(t.ms());
+            for (vi, &(vname, _)) in vs.iter().enumerate() {
+                for cell in 0..ncell {
+                    let v = &per[vi][cell];
+                    let (what, frac) = if cell < SIZES.len() { ("index2_thr", SIZES[cell]) } else { ("index2_knn10", 0.0) };
+                    let line = format!("{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", vname, cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[vi][cell]);
+                    out!("e2e2 {line}");
+                    lines.push(line);
                 }
-                tf.push(b1);
-                t8.push(b3);
-            }
-            for (what, v) in [("flat_f16_thr", &tf), ("flat_int8_thr", &t8)] {
-                let line = format!("{},{},{},0.001,{:.3},0,0,{},1,0,0,0,", cls, th, what, median(v), v.len());
-                out!("e2e2 {line}");
-                lines.push(line);
             }
         }
     }

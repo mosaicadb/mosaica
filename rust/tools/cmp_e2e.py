@@ -2,14 +2,17 @@
 # usage: python3 cmp.py LABEL=FILE.csv ...
 import csv, sys
 runs = [a.split("=", 1) for a in sys.argv[1:]]
+labs = []
 data = {}
 for lab, f in runs:
     for r in csv.DictReader(open(f)):
         if not r["what"].startswith("index2"):
             continue
         cell = "knn" if "knn" in r["what"] else r["answer_frac"]
-        data.setdefault((r["class"], cell), {})[(lab, r["threads"])] = r
-labs = [l for l, _ in runs]
+        l2 = lab + ("/" + r["variant"] if "variant" in r and r["variant"] != "a" else "")
+        if l2 not in labs:
+            labs.append(l2)
+        data.setdefault((r["class"], cell), {})[(l2, r["threads"])] = r
 print("class cell | " + " | ".join(f"{l}: B/item, ms1 [min-max], ms4 [min-max]" for l in labs))
 for (cls, cell), d in data.items():
     out = []

@@ -1,0 +1,1 @@
+oracle: 280 threshold results (40 queries x 5 answer shares unfiltered + 2 over 773 visible), 0 entities wrong, 0 within 1e-12 of t; k-NN 80 results, 0 differ from the oracle

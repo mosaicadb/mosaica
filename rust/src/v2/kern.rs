@@ -653,6 +653,186 @@ pub unsafe fn row_nibbles(p: *const u8) -> (__m512i, __m512i) {
     (_mm512_and_si512(v, _mm512_set1_epi32(15)), _mm512_srli_epi32(v, 4))
 }
 
+// ---------------- tables per (group, level) and the per-cluster combine ----------------
+//
+// A cluster's weights are w = wq - alpha wm (wq per query and group, wm the centre's, per cluster), and a unit's table
+// is linear in the weights: tau_u(e) = Tq_u(e) - alpha tau^m_u(e). Tq is built in f32 once per (query, group, level);
+// tau^m is stored per (cluster, level) as 16-bit entries theta^m on a step sigma_m per part, shifted to a minimum of 0:
+// |sigma_m theta^m_u(e) + lo^m_u - tau^m_u(e)| summed over a part's units is at most err_m. The combine quantises
+// v_u(e) = Tq_u(e) - alpha sigma_m theta^m_u(e) on the cluster's step sigma_c from mu_u, a lower bound of v_u known
+// without reading the entries: theta_u(e) = round((v_u(e) - mu_u) / sigma_c), so that the table value is
+// sigma_c theta_u(e) + mu_u - alpha lo^m_u, and the part's offset is the sum of mu_u - alpha lo^m_u.
+
+/// The f32 tables of the query weights of one (group, level): per unit 16 entries, their extremes, and per part the
+/// bound on the f32 build error (summed over the part's units).
+#[derive(Default)]
+pub struct GTab {
+    pub t: Vec<[f32; 16]>,
+    pub tmin: Vec<f32>,
+    pub tmax: Vec<f32>,
+    pub err: Vec<f64>,
+}
+
+/// The centre's tables of one (cluster, level): per unit 16 entries theta^m and their largest, and per part the step,
+/// the sum of the units' minima lo^m and the error bound.
+#[derive(Default, Clone)]
+pub struct CTab {
+    pub th: Vec<[u16; 16]>,
+    pub tmax: Vec<u16>,
+    pub step: Vec<f32>,
+    pub off: Vec<f64>,
+    pub err: Vec<f64>,
+}
+
+/// f32 tables of weights w over a level's units.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn group_tab(w: &[f32], lp: &LevelPlan, et: &ExpTab) -> GTab {
+    let mut g = GTab { t: Vec::with_capacity(lp.units), tmin: Vec::with_capacity(lp.units), tmax: Vec::with_capacity(lp.units), err: Vec::new() };
+    for part in &lp.parts {
+        let mut sabs = 0f64;
+        for fs in &part.ufields {
+            let mut t = _mm512_setzero_ps();
+            for &fi in fs.iter().take_while(|&&f| f != u16::MAX) {
+                let f = part.fields.get_unchecked(fi as usize);
+                let w = *w.get_unchecked(f.widx as usize);
+                let e = f.eid as usize;
+                t = _mm512_fmadd_ps(_mm512_set1_ps(w), _mm512_loadu_ps(et.e.get_unchecked(e).as_ptr()), t);
+                sabs += w.abs() as f64 * (*et.hi.get_unchecked(e)).abs().max((*et.lo.get_unchecked(e)).abs()) as f64;
+            }
+            let mut a = [0f32; 16];
+            _mm512_storeu_ps(a.as_mut_ptr(), t);
+            g.tmin.push(a.iter().cloned().fold(f32::INFINITY, f32::min));
+            g.tmax.push(a.iter().cloned().fold(f32::NEG_INFINITY, f32::max));
+            g.t.push(a);
+        }
+        // each entry: at most 4 fields, a rounded product and sum each
+        g.err.push(8.0 * U32 * sabs * (1.0 + 1e-6));
+    }
+    g
+}
+
+/// The centre's tables of one (cluster, level) from its weights wm, as build_lut quantises them (16-bit).
+pub fn centre_tab(wm: &[f32], lp: &LevelPlan, et: &ExpTab) -> CTab {
+    let mut lut = LevelLut::default();
+    unsafe { build_lut(wm, lp, et, true, None, &mut lut) };
+    let mut c = CTab::default();
+    for pl in &lut.parts {
+        c.step.push(pl.scale);
+        c.off.push(pl.off as f64);
+        c.err.push(pl.err as f64);
+        for u in 0..pl.groups * 4 {
+            let gl = (pl.g0 + u / 4) * 64 + (u % 4) * 16;
+            let th: [u16; 16] = core::array::from_fn(|e| (lut.hi[gl + e] as u16) << 8 | lut.lo[gl + e] as u16);
+            c.tmax.push(*th.iter().max().unwrap());
+            c.th.push(th);
+        }
+    }
+    c
+}
+
+/// Bounds of a unit's combined values v = Tq - alpha sigma_m theta^m: (mu, range), with a relative margin for the f32
+/// evaluation of v.
+#[inline(always)]
+pub fn unit_span(tmin: f32, tmax: f32, tm: u16, sm: f32, alpha: f32) -> (f64, f64) {
+    let am = alpha as f64 * sm as f64 * tm as f64;
+    let marg = 1e-5 * ((tmin as f64).abs() + (tmax as f64).abs() + am.abs()) + 1e-30;
+    let lo = tmin as f64 - am.max(0.0) - marg;
+    let hi = tmax as f64 + (-am).max(0.0) + marg;
+    (lo, hi - lo)
+}
+
+/// Sums and largest of the units' ranges over the deterministic levels: of Tq (from the group's tables) or of
+/// sigma_m theta^m (from the cluster's), for the integer step.
+pub fn det_spans_q(gts: &[&GTab]) -> (f64, f64) {
+    let (mut s, mut m) = (0f64, 0f64);
+    for g in gts {
+        for u in 0..g.t.len() {
+            let r = (g.tmax[u] as f64 - g.tmin[u] as f64) + 1e-5 * ((g.tmin[u] as f64).abs() + (g.tmax[u] as f64).abs());
+            s += r;
+            m = m.max(r);
+        }
+    }
+    (s, m)
+}
+pub fn det_spans_m(cts: &[CTab], levels: &[LevelPlan]) -> (f64, f64) {
+    let (mut s, mut m) = (0f64, 0f64);
+    for (ct, lp) in cts.iter().zip(levels) {
+        let mut u = 0;
+        for (p, part) in lp.parts.iter().enumerate() {
+            for _ in 0..part.units() {
+                let r = ct.step[p] as f64 * ct.tmax[u] as f64 * (1.0 + 1e-5);
+                s += r;
+                m = m.max(r);
+                u += 1;
+            }
+        }
+    }
+    (s, m)
+}
+
+/// The cluster's level tables from the group's f32 tables and the centre's stored ones, with `step` (the integer
+/// deterministic levels) or a step per part. Writes the same LevelLut as build_lut.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step: Option<f32>, out: &mut LevelLut) {
+    out.qsum = 0.0;
+    out.parts.clear();
+    out.hi.clear();
+    out.lo.clear();
+    out.hi.resize(lp.units * 16, 0);
+    out.lo.resize(lp.units * 16, 0);
+    let mut g0 = 0;
+    let mut u0 = 0;
+    let mut spans: Vec<(f64, f64)> = Vec::new();
+    for (p, part) in lp.parts.iter().enumerate() {
+        let nu = part.units();
+        let sm = ct.step[p];
+        spans.clear();
+        let mut rmax = 0f64;
+        for u in u0..u0 + nu {
+            let sp = unit_span(gt.tmin[u], gt.tmax[u], ct.tmax[u], sm, alpha);
+            rmax = rmax.max(sp.1);
+            spans.push(sp);
+        }
+        let sc = match step {
+            Some(s) => s,
+            None => ((rmax / 65533.0) as f32).max(1e-30),
+        };
+        let inv = 1.0 / sc as f64;
+        let a = _mm256_set1_ps(inv as f32);
+        let b = _mm256_set1_ps((-(alpha as f64) * sm as f64 * inv) as f32);
+        let (mut off, mut ey) = (0f64, 0f64);
+        for (k, u) in (u0..u0 + nu).enumerate() {
+            let (mu, r) = spans[k];
+            off += mu;
+            let c = -mu * inv;
+            let qmax = (gt.tmin[u].abs().max(gt.tmax[u].abs()) as f64) * inv;
+            // f32 error of y = theta^m b + (Tq a + c), in steps
+            ey += 6.0 * U32 * (qmax + c.abs() + ct.tmax[u] as f64 * (alpha as f64 * sm as f64 * inv).abs()) + 1e-12;
+            if step.is_some() {
+                out.qsum += (r * inv * (1.0 + 1e-6)).ceil() + 2.0;
+            }
+            let cv = _mm256_set1_ps(c as f32);
+            let tq = gt.t.get_unchecked(u).as_ptr();
+            let tm = _mm256_loadu_si256(ct.th.get_unchecked(u).as_ptr() as *const _);
+            let m0 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(tm)));
+            let m1 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(tm)));
+            let y0 = _mm256_fmadd_ps(m0, b, _mm256_fmadd_ps(_mm256_loadu_ps(tq), a, cv));
+            let y1 = _mm256_fmadd_ps(m1, b, _mm256_fmadd_ps(_mm256_loadu_ps(tq.add(8)), a, cv));
+            // to u16 (saturating; the step keeps every value within 0..65535), then high and low bytes
+            let v = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi32(_mm256_cvtps_epi32(y0), _mm256_cvtps_epi32(y1)));
+            let hl = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi16(_mm256_srli_epi16::<8>(v), _mm256_and_si256(v, _mm256_set1_epi16(255))));
+            let gl = (g0 + k / 4) * 64 + (k % 4) * 16;
+            _mm_storeu_si128(out.hi.as_mut_ptr().add(gl) as *mut _, _mm256_castsi256_si128(hl));
+            _mm_storeu_si128(out.lo.as_mut_ptr().add(gl) as *mut _, _mm256_extracti128_si256::<1>(hl));
+        }
+        off -= alpha as f64 * ct.off[p];
+        let err = gt.err[p] + (alpha as f64).abs() * ct.err[p] + sc as f64 * (nu as f64 * 0.5 * (1.0 + 1e-6) + ey) + 4.0 * U32 * off.abs() + 1e-30;
+        out.parts.push(PartLut { j: part.j, g0, groups: nu / 4, off: off as f32, scale: sc, err: err as f32 });
+        g0 += nu / 4;
+        u0 += nu;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -814,6 +994,68 @@ mod tests {
             for row in 0..rows {
                 let want = if v == u32::MAX { 0 } else { nib(&src[(v as usize / 32) * rows * 16..], row, v as usize % 32) };
                 assert_eq!(nib(&dst, row, d), want, "lane {d} row {row}");
+            }
+        }
+    }
+
+    /// The combined tables against f64 tables of the weights wq - alpha wm: for random weights, signs of alpha and
+    /// codes, every part's value off + scale S is within its error bound of the exact sum, on a step per part and on a
+    /// common step.
+    #[test]
+    fn combine_lut_within_bound() {
+        let mut x = 0x2545F4914F6CDD1Du64;
+        let mut rnd = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut et = ExpTab::default();
+        let n = 64;
+        // 2-bit fields over n coordinates, then 1-bit fields: 2 parts
+        let mk = |j: Option<usize>, nb: u8, et: &mut ExpTab, r: &mut dyn FnMut() -> f64| {
+            let fields: Vec<Field> = (0..n).map(|c| Field { widx: c as u16, nb, unit: 0, off: 0, kind: FK::Rand { d: 0 }, eid: 0 }).collect();
+            let vals: Vec<[f32; 16]> = (0..n).map(|_| core::array::from_fn(|k| if k < 1 << nb { (r() * 4.0 - 2.0) as f32 } else { 0.0 })).collect();
+            Part::pack(j, fields, vals, et)
+        };
+        let parts = vec![mk(None, 2, &mut et, &mut rnd), mk(Some(1), 1, &mut et, &mut rnd)];
+        let units = parts.iter().map(|p| p.units()).sum();
+        let lp = LevelPlan { parts, units, srows: 0 };
+        for trial in 0..200 {
+            let wq: Vec<f32> = (0..n).map(|_| (rnd() * 2.0 - 1.0) as f32 * 10f32.powi(trial % 3 - 1)).collect();
+            let wm: Vec<f32> = (0..n).map(|_| (rnd() * 2.0 - 1.0) as f32).collect();
+            let alpha = ((rnd() * 2.0 - 1.0) * 3.0) as f32;
+            let gt = unsafe { group_tab(&wq, &lp, &et) };
+            let ct = centre_tab(&wm, &lp, &et);
+            let mut rmax = 0f64;
+            let mut u = 0;
+            for (p, part) in lp.parts.iter().enumerate() {
+                for _ in 0..part.units() {
+                    rmax = rmax.max(unit_span(gt.tmin[u], gt.tmax[u], ct.tmax[u], ct.step[p], alpha).1);
+                    u += 1;
+                }
+            }
+            for step in [None, Some((rmax / 60000.0 * (1.0 + rnd())) as f32)] {
+                let mut lut = LevelLut::default();
+                unsafe { combine_lut(&gt, &ct, &lp, alpha, step, &mut lut) };
+                for _ in 0..20 {
+                    let codes: Vec<u8> = (0..units).map(|_| (rnd() * 16.0) as u8 & 15).collect();
+                    for (pl, part) in lut.parts.iter().zip(&lp.parts) {
+                        let (mut exact, mut sum) = (0f64, 0f64);
+                        for (k, fs) in part.ufields.iter().enumerate() {
+                            let u = pl.g0 * 4 + k;
+                            let e = codes[u] as usize;
+                            for &fi in fs.iter().take_while(|&&f| f != u16::MAX) {
+                                let f = &part.fields[fi as usize];
+                                exact += (wq[f.widx as usize] as f64 - alpha as f64 * wm[f.widx as usize] as f64) * et.e[f.eid as usize][e] as f64;
+                            }
+                            let gl = (pl.g0 + k / 4) * 64 + (k % 4) * 16;
+                            sum += ((lut.hi[gl + e] as u32) << 8 | lut.lo[gl + e] as u32) as f64;
+                        }
+                        let got = pl.off as f64 + pl.scale as f64 * sum;
+                        assert!((got - exact).abs() <= pl.err as f64, "trial {trial} step {step:?}: |{got} - {exact}| > {}", pl.err);
+                    }
+                }
             }
         }
     }

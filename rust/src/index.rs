@@ -10,6 +10,8 @@ pub const OFF: [i32; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 18];
 pub const DA: f64 = 0.5 / 32767.0 + 1e-7;
 pub const SEED: u64 = 20261112;
 pub const LANES: usize = 16;
+/// The format of a fitted index directory (meta.json "format") that this build reads.
+pub const FIT_FORMAT: u64 = 2;
 
 pub fn ry() -> f64 {
     2f64.powf(1.0 / 256.0)
@@ -56,6 +58,8 @@ pub struct Params {
     pub centres: Vec<f32>, // K x n, the stored 8-bit centres (int8 * scale) as f32 values
     pub lam: Vec<f64>,
     pub v: Vec<f32>, // G x n x n, z = V^T r
+    pub r2: Option<Vec<f64>>, // G: mean |r|^2 per group (version 2 item scale)
+    pub fit: String,          // the fit used, as tools/fit.py recorded it
     pub frb: Vec<u8>, // G x 6 x n cumulative bits per coordinate
     pub dl: Vec<f64>, // G x 6 x n
     pub dt: Vec<f64>, // G x n
@@ -71,6 +75,11 @@ pub struct Params {
 
 pub fn load_params(dir: &str) -> Params {
     let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/meta.json")).unwrap()).unwrap();
+    let fmt = meta["format"].as_u64().unwrap_or(1);
+    if fmt != FIT_FORMAT {
+        eprintln!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py.");
+        std::process::exit(2);
+    }
     let us = |k: &str| meta[k].as_u64().unwrap() as usize;
     let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
     let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
@@ -88,6 +97,8 @@ pub fn load_params(dir: &str) -> Params {
         centres,
         lam: r("lam").f64s(),
         v: r("V").f32s(),
+        r2: opt("r2").map(|a| a.f64s()),
+        fit: meta["fit"].to_string(),
         frb: opt("frb").map_or(Vec::new(), |a| a.u8s()),
         dl: opt("dl").map_or(Vec::new(), |a| a.f64s()),
         dt: opt("dt").map_or(Vec::new(), |a| a.f64s()),

@@ -1,10 +1,18 @@
-# Fit the build parameters of the fast-scan index (v2) to a file of vectors, from the data alone: clusters with 8-bit
-# centres, groups of clusters with local PCA bases, the data-only query-offset profile H25, the level schedule and the
-# randomised blocks. The Rust build (`vexact --v2 --index OUTDIR`) encodes every item from these.
-# usage: python3 -I fit.py VECTORS.npy OUTDIR [--metric angular] [--seed S]
+# Fit the build parameters of the fast-scan index (v2) to a file of vectors: clusters with 8-bit centres, groups of
+# clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
+# build (`vexact --v2 --index OUTDIR`) encodes every item from these.
+# usage: python3 fit.py VECTORS.npy OUTDIR [--basis pca|dual] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i.
+#   --basis pca (default): each group's PCA basis of the residuals and the data-only profile H25.
+#   --basis dual: the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
+#     covariance of query offsets q - (q.m^) m^ from clusters drawn by size, 40 per pseudo-query, with a ridge of 0.1
+#     of its mean eigenvalue; the pseudo-queries are 3,000 corpus items, or with --query-sample the normalised mean of
+#     that and the same covariance of the given queries. V is the query-side transform V_Q (q.r = (V_Q^T q).(V_Q^-1 r));
+#     lam is the mean square of the item-side coordinates V_Q8^-1 r under the int8 V_Q8 the Rust build uses; the
+#     profile is the mean square of V_Q8^T (q - m) for corpus items against their 4 nearest centres.
 # Writes to OUTDIR: Xs.npy (unit vectors in cluster order, f16, zero-padded to a multiple of 32 dimensions), perm.npy
-# (row -> entity), cstart, grp, mq8, msc, lam, V, profile.npy, tree tables, qi (rows for verification), meta.json.
+# (row -> entity), cstart, grp, mq8, msc, lam, V, r2 (mean |r|^2 per group), profile.npy, tree tables, qi (rows for
+# verification), meta.json (with the fit used, under "fit").
 import argparse, json, math, os, sys, time
 import numpy as np
 
@@ -19,6 +27,8 @@ DLV = [4, 8, 12, 16, 24, 32]
 RLV_BASE = [40, 48, 56, 64, 72, 80, 96, 112, 128, 144, 160, 192, 224, 256]
 BLOCK_FRACS = [0.125, 0.29167, 0.625]
 HEDGE = 0.25
+FORMAT = 2
+RIDGE = 0.1
 
 T0 = time.time()
 def log(*a):
@@ -43,13 +53,55 @@ def schedule(n0, n):
     return rlv, bounds
 
 
+def int8_basis(v):
+    """The int8 basis the Rust build makes from V (f32, columns): one scale per column, max |v| / 127."""
+    v = v.astype(np.float64)
+    sc = np.abs(v).max(0) / 127.0
+    sc[sc == 0] = 1.0
+    return np.clip(np.round(v / sc), -127, 127) * sc
+
+
+def offset_cov(Q, Mh, p, rng):
+    """Covariance of the offsets q - (q.m^) m^ of unit queries Q from 40 centres each, drawn with probabilities p."""
+    n = Mh.shape[1]
+    S = np.zeros((n, n))
+    c = 0
+    for i in range(0, len(Q), 200):
+        q = Q[i:i + 200]
+        C = Mh[rng.choice(len(Mh), (len(q), 40), p=p)]
+        D = (q[:, None, :] - np.einsum("bkn,bn->bk", C, q)[:, :, None] * C).reshape(-1, n).astype(np.float64)
+        S += D.T @ D
+        c += len(D)
+    return S / c
+
+
+def sigma_q(Xu, Mh, cnt, n, sample):
+    """Sigma_Q of the dual basis: offsets of 3,000 corpus items (and, with a query sample, the normalised mean of that
+    and the queries' offsets), with a ridge of RIDGE times the mean eigenvalue."""
+    rng = np.random.default_rng(3)
+    p = cnt / cnt.sum()
+    S = offset_cov(Xu[np.sort(rng.choice(len(Xu), min(len(Xu), 3000), replace=False))], Mh, p, rng)
+    if sample:
+        T = np.load(sample).astype(np.float32)
+        T = np.pad(T, ((0, 0), (0, n - T.shape[1])))
+        T /= np.linalg.norm(T, axis=1, keepdims=True)
+        St = offset_cov(T, Mh, p, rng)
+        S = 0.5 * (S / np.trace(S) + St / np.trace(St))
+        log(f"Sigma_Q: {min(len(Xu), 3000)} corpus items and {len(T)} queries from {sample}")
+    return S + RIDGE * np.trace(S) / n * np.eye(n)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vectors")
     ap.add_argument("out")
     ap.add_argument("--metric", default="angular", choices=["angular"])
     ap.add_argument("--seed", type=int, default=20261112)
+    ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
+    ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
     a = ap.parse_args()
+    if a.query_sample and a.basis != "dual":
+        sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
     os.makedirs(a.out, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     X = np.load(a.vectors, mmap_mode="r")
@@ -112,17 +164,42 @@ def main():
 
     lam = np.zeros((G, n))
     V = np.zeros((G, n, n), np.float32)
+    r2 = np.zeros(G)
     gstart = np.searchsorted(grp[assign], np.arange(G + 1))
+    resid = lambda i, j: (Xu[i:j] - Mq[assign[i:j]]).astype(np.float64)
+    if a.basis == "dual":
+        SQ = sigma_q(Xu, Mh, cnt, n, a.query_sample)
+        lq, uq = np.linalg.eigh(SQ)
+        A, Ai = (uq * np.sqrt(lq)) @ uq.T, (uq / np.sqrt(lq)) @ uq.T
+        cond = np.zeros(G)
     for g in range(G):
         Cv = np.zeros((n, n))
         for i in range(gstart[g], gstart[g + 1], 50_000):
-            j = min(i + 50_000, gstart[g + 1])
-            R = (Xu[i:j] - Mq[assign[i:j]]).astype(np.float64)
+            R = resid(i, min(i + 50_000, gstart[g + 1]))
             Cv += R.T @ R
-        l, v = np.linalg.eigh(Cv / max(gstart[g + 1] - gstart[g], 1))
-        lam[g] = np.maximum(l[::-1], 1e-12)
-        V[g] = v[:, ::-1]
-    log("bases done; group sizes", np.diff(gstart).min(), "..", np.diff(gstart).max())
+            r2[g] += (R * R).sum()
+        ng = max(gstart[g + 1] - gstart[g], 1)
+        r2[g] /= ng
+        if a.basis == "pca":
+            l, v = np.linalg.eigh(Cv / ng)
+            lam[g] = np.maximum(l[::-1], 1e-12)
+            V[g] = v[:, ::-1]
+            continue
+        gam, W = np.linalg.eigh(A @ (Cv / ng) @ A)
+        gam, W = gam[::-1], W[:, ::-1]
+        gam = np.maximum(gam, 1e-12 * gam[0])
+        V[g] = ((Ai @ W) * gam ** 0.25).astype(np.float32)
+        # the coded coordinates z = V_Q8^-1 r under the int8 basis of the Rust build (one scale per column)
+        vq = int8_basis(V[g])
+        inv = np.linalg.inv(vq)
+        sv = np.linalg.svd(vq, compute_uv=False)
+        cond[g] = sv[0] / sv[-1]
+        zz = np.zeros(n)
+        for i in range(gstart[g], gstart[g + 1], 50_000):
+            Z = resid(i, min(i + 50_000, gstart[g + 1])) @ inv.T
+            zz += (Z * Z).sum(0)
+        lam[g] = np.maximum(zz / ng, 1e-30)
+    log("bases done (" + a.basis + "); group sizes", np.diff(gstart).min(), "..", np.diff(gstart).max())
 
     # data-only profile: corpus items as pseudo-queries against their 4 nearest centres, hedged towards isotropic
     # (spread over the n0 data dimensions; the padding has none)
@@ -132,9 +209,22 @@ def main():
     for g in range(G):
         rows, cols = np.where(grp[pk] == g)
         Qi[g] = (((pq[rows] - Mq[pk[rows, cols]]) @ V[g]) ** 2).mean(0) if len(rows) > 50 else lam[g]
-    iso = np.zeros((G, n))
-    iso[:, :n0] = Qi.sum(1, keepdims=True) / n0
-    prof = ((1 - HEDGE) * np.sqrt(Qi) + HEDGE * np.sqrt(iso)) ** 2
+    if a.basis == "pca":
+        iso = np.zeros((G, n))
+        iso[:, :n0] = Qi.sum(1, keepdims=True) / n0
+        prof = ((1 - HEDGE) * np.sqrt(Qi) + HEDGE * np.sqrt(iso)) ** 2
+        fit = dict(basis="pca", profile="h25")
+    else:
+        # in the int8 query-side coordinates the build uses, no hedge
+        rq = np.random.default_rng(a.seed + 2)
+        pq2 = Xu[rq.choice(N, min(N, 5000), replace=False)]
+        pk2 = np.argsort(-(pq2 @ Mq.T), axis=1)[:, :4]
+        prof = np.zeros((G, n))
+        for g in range(G):
+            rows, cols = np.where(grp[pk2] == g)
+            prof[g] = (((pq2[rows] - Mq[pk2[rows, cols]]) @ int8_basis(V[g])) ** 2).mean(0) if len(rows) > 50 else lam[g]
+        fit = dict(basis="dual", profile="qi", ridge=RIDGE, sigma_q="corpus items" + (" + queries " + os.path.abspath(a.query_sample) if a.query_sample else ""),
+                   cond_max=float(cond.max()))
 
     rlv, bounds = schedule(n0, n)
     L1 = math.log(2 * NTARGET * len(rlv) / EPS)
@@ -151,13 +241,15 @@ def main():
     sv("msc", msc.astype(np.float64))
     sv("lam", lam)
     sv("V", V)
+    sv("r2", r2)
     sv("profile", prof)
     sv("tree_edges", tree_edges)
     sv("tree_cent", tree_cent)
     sv("gtree", GTREE.astype(np.float64))
     sv("qi", np.sort(rng.choice(N, min(N, 200), replace=False)).astype(np.int64))
     meta = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(K), G=int(G), metric=a.metric, DLV=DLV, RLV=rlv, BOUNDS=bounds,
-                CSG=math.sqrt(2 * L1), L1=L1, xs="Xs.npy", source=os.path.abspath(a.vectors))
+                CSG=math.sqrt(2 * L1), L1=L1, xs="Xs.npy", source=os.path.abspath(a.vectors),
+                format=FORMAT, fit=fit)
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("saved", meta)

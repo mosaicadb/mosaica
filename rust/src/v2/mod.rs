@@ -393,7 +393,41 @@ fn rate_depth(r: f64, k: usize, nb: usize) -> u8 {
     }
 }
 
-/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz from the transpose.
+/// Inverse of a row-major n x n matrix by Gauss-Jordan elimination with partial pivoting.
+fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
+    let w = 2 * n;
+    let mut m = vec![0f64; n * w];
+    for i in 0..n {
+        m[i * w..i * w + n].copy_from_slice(&a[i * n..(i + 1) * n]);
+        m[i * w + n + i] = 1.0;
+    }
+    for col in 0..n {
+        let piv = (col..n).max_by(|&p, &q| m[p * w + col].abs().partial_cmp(&m[q * w + col].abs()).unwrap()).unwrap();
+        assert!(m[piv * w + col].abs() > 1e-300, "the int8 basis is singular; refit the index");
+        if piv != col {
+            for k in 0..w {
+                m.swap(piv * w + k, col * w + k);
+            }
+        }
+        let inv = 1.0 / m[col * w + col];
+        for k in 0..w {
+            m[col * w + k] *= inv;
+        }
+        let prow: Vec<f64> = m[col * w..(col + 1) * w].to_vec();
+        for r in 0..n {
+            let f = m[r * w + col];
+            if r != col && f != 0.0 {
+                for (x, &p) in m[r * w..(r + 1) * w].iter_mut().zip(&prow) {
+                    *x -= f * p;
+                }
+            }
+        }
+    }
+    (0..n * n).map(|i| m[(i / n) * w + n + i % n]).collect()
+}
+
+/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz, started from the transpose when
+/// the basis is near orthogonal and from a Gauss-Jordan inverse otherwise (the dual basis).
 fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f64) {
     let mut vsc = vec![0f64; n];
     let mut v8t = vec![0i8; n * n];
@@ -432,6 +466,10 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
         }
         s.sqrt()
     };
+    mm(&vq, &x, &mut t);
+    if defect(&t) > 0.5 {
+        x = gauss_jordan_inverse(&vq, n);
+    }
     for _ in 0..8 {
         mm(&vq, &x, &mut t);
         if defect(&t) < 1e-13 {
@@ -457,7 +495,9 @@ impl GroupPlan2 {
         let lam = &p.lam[g * n..(g + 1) * n];
         let pq = &prof[g * n..(g + 1) * n];
         let sig: Vec<f32> = lam.iter().map(|&l| l.sqrt() as f32).collect();
-        let lamsum = lam.iter().sum::<f64>() as f32;
+        // the item scale divides |r|^2 by its group mean, which is the sum of the coordinates' variances only in an
+        // orthogonal basis
+        let lamsum = p.r2.as_ref().map_or(lam.iter().sum::<f64>(), |r| r[g]) as f32;
         let (moves, states) = det_alloc_tree(lam, pq, dt_, &m.dlv);
         let gc = |l: usize, c: usize| -> f64 {
             let s = states[l][c];

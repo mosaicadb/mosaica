@@ -770,7 +770,16 @@ fn main() {
             run2::bytesq2(&c, get("--nq", 100));
         }
         if has("e2e") {
-            run2::e2e2(&c, get("--nq", 100), get("--nflat", 20));
+            // a second variant: another index (--index-b) and/or plan switches (--b), measured interleaved with the first
+            let ib = run2::arg_str("--index-b", "");
+            let bf = run2::arg_str("--b", "");
+            if ib.is_empty() && bf.is_empty() {
+                run2::e2e2(&[("a", &c)], get("--nq", 100));
+            } else {
+                let dir = if ib.is_empty() { run2::data_dir() } else { ib };
+                let cb = run2::setup2_at("run2", &dir, &bf);
+                run2::e2e2(&[("a", &c), ("b", &cb)], get("--nq", 100));
+            }
         }
         if has("breakdown") {
             run2::breakdown2(&c, get("--nq", 20));
