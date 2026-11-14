@@ -33,8 +33,8 @@ blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deter
 24 / 32 B; the randomised ones at 56, 96, 160 and 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16
 vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every
 other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
-derived from these in Rust when the index is opened, and every item is encoded then (about 11 s at 1.2M items on 12
-cores); the codes are not stored.
+derived from these in Rust, and every item is encoded, by the first run on a fit (about 11 s at 1.2M items on 12
+cores).
 
 Version 1 reads the same directory and needs `--profile INDEX/profile.npy` to derive its allocation.
 
@@ -49,7 +49,10 @@ VEXACT_CAL_PER_GROUP=1 $B --scale 10 --nq 20 --anchors 1000   # synthetic 10M it
 $B --clusters 40 verify levels        # quick development check on a 40-cluster subset
 ```
 
-Each run rebuilds the index (about 100 s at 1M on 4 cores) and appends to `results/*.log`; tables go to
+The first run on a fit builds the version 2 index (about 100 s at 1M on 4 cores) and saves it to
+`INDEX/encoded-KEY/`, where KEY covers the fit, the profile and every option that changes what is built; later runs
+with the same key map it instead (`--rebuild` builds again, `--resident` reads it onto the heap instead of mapping it,
+`--hash` logs a hash of everything encoded). Runs append to `results/*.log`; tables go to
 `results/*.csv`. Large files (the disk experiment's level and full-vector files) are written under the scratchpad, not
 here.
 

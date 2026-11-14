@@ -207,20 +207,41 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let prof = crate::derive::load_profile(&prof_path);
     let xs = RealSource::open(&p.xs_path);
     let src = Real2 { src: RealSource::open(&p.xs_path) };
-    let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
+    let full = Full2::Real { rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
         BUILD_COL.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
+    // the encoded index is saved beside the fit, keyed by everything that changes it, and opened in place of a build
+    // (--rebuild builds it again; an index with the columnar store is always built)
+    let build_col = BUILD_COL.load(std::sync::atomic::Ordering::Relaxed);
+    if args().iter().any(|a| a == "--resident") {
+        crate::v2::store::RESIDENT.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let key = crate::v2::store::build_key(&p, &prof, &format!("nusort {nusort}"));
+    let edir = format!("{dir}/encoded-{key}");
+    let saved = !build_col && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
+    let mut ix = if saved {
+        crate::v2::store::open(&p, &prof, &edir, split, &mut lg)
+    } else {
+        let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
+        if !nusort {
+            build_table2(&mut ix, p.meta.k);
+        }
+        if !build_col {
+            let ts = Timer::new();
+            crate::v2::store::save(&ix, &edir, &key);
+            out!("[build2] saved to {edir} in {:.1}s", ts.s());
+        }
+        ix
+    };
+    if args().iter().any(|a| a == "--hash") {
+        out!("[build2] code hash {:016x}", ix.code_hash());
+    }
     let tr = Timer::new();
     ix.repack = calibrate_repack(&ix);
     out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
-    if !nusort {
-        build_table2(&mut ix, p.meta.k);
-    }
     let n = p.meta.n;
     let mut ent_xs = vec![u32::MAX; p.perm.len()];
     for (r, &e) in p.perm.iter().enumerate() {
