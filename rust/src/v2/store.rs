@@ -332,3 +332,34 @@ pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
     (cal, nguar, plain, design, extra).hash(&mut h);
     format!("{:016x}", h.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The calibration an opened index sets its grids from is the build's, bit for bit.
+    #[test]
+    fn calibration_round_trips_exactly() {
+        use rand::{Rng, SeedableRng};
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
+        let mut f = || -> f64 { rng.gen::<f64>() * 10f64.powi(rng.gen_range(-30..30)) * if rng.gen() { -1.0 } else { 1.0 } };
+        let nr = 4;
+        let cal = CalIn {
+            kmin: core::array::from_fn(|l| l as i32 * 7 - 20),
+            y0: core::array::from_fn(|_| f()),
+            ys: core::array::from_fn(|_| f()),
+            tq: (0..nr).map(|_| core::array::from_fn(|_| core::array::from_fn(|_| f() as f32))).collect(),
+            k0: (0..nr).map(|_| core::array::from_fn(|_| f())).collect(),
+            ks: (0..nr).map(|_| core::array::from_fn(|_| f())).collect(),
+            kb: (0..nr).map(|_| core::array::from_fn(|j| if j % 2 == 0 { 4 } else { 8 })).collect(),
+        };
+        let text = serde_json::to_string(&cal_json(&cal)).unwrap();
+        let back = cal_from(&serde_json::from_str(&text).unwrap());
+        assert_eq!(format!("{:?}", back), format!("{:?}", cal));
+        let bits = |c: &CalIn| -> Vec<u64> {
+            c.y0.iter().chain(&c.ys).chain(c.k0.iter().flatten()).chain(c.ks.iter().flatten()).map(|x| x.to_bits())
+                .chain(c.tq.iter().flatten().flatten().map(|x| x.to_bits() as u64)).collect()
+        };
+        assert_eq!(bits(&back), bits(&cal));
+    }
+}
