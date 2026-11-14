@@ -1,0 +1,5 @@
+faiss_hnsw: loaded in 3 s; RSS 3.04 GiB
+faiss_hnsw ladder all share 3: rung 1, mean recall 0.9767, median 1996.3 ms
+faiss_hnsw ladder all share 3: rung 1.5, mean recall 0.9921, median 4319.1 ms
+faiss_hnsw default all share 3: param x1, median 2010.70 ms, mean recall 0.9767, non-matches 35005 over 15 queries
+peak RSS 3.05 GiB

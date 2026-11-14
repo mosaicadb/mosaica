@@ -1,8 +1,8 @@
 # Latency against answer size, log-log, one line per system: unfiltered and 1% visible, at 1 thread and at 4.
 # usage: python3 -I plot.py RESULTS_DIR PREP_DIR
-# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, ours/dbcmp_r4_4t.csv, clickhouse.csv, duckdb.csv, ann.csv} and, for
+# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, ours/dbcmp_r4_4t.csv, clickhouse.csv, ann.csv} and, for
 # comparison, the index rows of ours/dbcmp_main.csv (the index as measured on 13 Nov); writes RESULTS_DIR/plot_data.csv and
-# RESULTS_DIR/latency_{1,4}t.png. Every system on the queries with index divisible by 10 (DuckDB: by 30); x is the
+# RESULTS_DIR/latency_{1,4}t.png. Every system on the queries with index divisible by 10; x is the
 # median exact answer size over those queries, y the median over them of each query's median time.
 import csv, os, sys
 from collections import defaultdict
@@ -34,7 +34,7 @@ LABEL = {"index": "ours: index", "flat": "ours: f16 scan", "clickhouse_t32_dot":
          "duckdb_t32_dot+mat": "DuckDB FLOAT[768]", "old_index": "ours: index (13 Nov)"}
 OLD = "ours: index (13 Nov)"
 pts = defaultdict(list)  # (label, exact, threads, vis, si) -> [(ms, recall)]
-for f in ("ours/dbcmp_main.csv", "ours/dbcmp_r4_1t.csv", "ours/dbcmp_r4_4t.csv", "clickhouse.csv", "duckdb.csv"):
+for f in ("ours/dbcmp_main.csv", "ours/dbcmp_r4_1t.csv", "ours/dbcmp_r4_4t.csv", "clickhouse.csv"):
     if not os.path.exists(f"{res}/{f}"):
         continue
     for r in csv.DictReader(open(f"{res}/{f}")):
@@ -53,10 +53,15 @@ ANN = {("hnswlib", "default"): "hnswlib top-m, ef = m", ("hnswlib", "tight"): "h
        ("rabitq", "all_clusters"): "RaBitQ IVF 7-bit top-m, all clusters",
        ("flat", "exact"): "faiss IndexFlatIP range", ("flat", "idselector"): "faiss IndexFlatIP range",
        ("flat", "compacted"): "faiss IndexFlatIP range, compacted visible copy",
-       ("panorama", "exact"): "faiss Panorama flat range"}
+       ("panorama", "exact"): "faiss Panorama flat range",
+       ("sq16", "exact"): "faiss SQfp16 flat range", ("sq16", "idselector"): "faiss SQfp16 flat range",
+       ("sq16", "compacted"): "faiss SQfp16 flat range, compacted visible copy",
+       ("hnsw_sq16", "default"): "faiss HNSW-SQfp16 top-m, ef = m", ("hnsw_sq16", "tight"): "faiss HNSW-SQfp16 top-m, tight ef",
+       ("ivf_sq16", "default"): "faiss IVF4096-SQfp16 range, nprobe 1",
+       ("ivf_sq16", "tight"): "faiss IVF4096-SQfp16 range, tight nprobe"}
 if os.path.exists(f"{res}/ann.csv"):
     for r in csv.DictReader(open(f"{res}/ann.csv")):
-        exact = r["method"] in ("flat", "panorama")
+        exact = r["method"] in ("flat", "panorama", "sq16")
         th = int(r["param"]) if exact else 1
         pts[(ANN[(r["method"], r["setting"])], exact, th, r["vis"], int(r["share_index"]))].append(
             (float(r["median_ms"]), float(r["recall"]), int(r["exact"])))
@@ -74,7 +79,9 @@ with open(f"{res}/plot_data.csv", "w", newline="") as f:
 
 colours = plt.get_cmap("tab20").colors
 labs = sorted({k[0] for k in lines})
-col = {l: colours[i % 20] for i, l in enumerate(labs)}
+F32 = lambda l: l.replace("faiss SQfp16 flat", "faiss IndexFlatIP").replace("-SQfp16", "")
+col = {l: colours[i % 20] for i, l in enumerate(x for x in labs if "SQfp16" not in x)}
+col.update({l: col[F32(l)] for l in labs if "SQfp16" in l})  # half precision: the f32 version's colour, dotted
 for th in (1, 4):
     fig, axes = plt.subplots(1, 2, figsize=(15, 6.5), sharey=True)
     for ax, vis, title in ((axes[0], "all", "unfiltered"), (axes[1], "vis_1", "1% visible set")):
@@ -87,7 +94,8 @@ for th in (1, 4):
             if lab == OLD:
                 ax.plot(xs, ys, "--", marker="o", ms=3, lw=1.6, color="black", alpha=0.35, label=lab, zorder=3)
                 continue
-            ax.plot(xs, ys, "-" if ex else "--", marker="o" if ex else "s", ms=4, lw=2.6 if ours else 1.4,
+            h16 = "SQfp16" in lab
+            ax.plot(xs, ys, ("-." if h16 else "-") if ex else (":" if h16 else "--"), marker="^" if h16 else "o" if ex else "s", ms=4, lw=2.6 if ours else 1.4,
                     color=("black" if lab == "ours: index" else "dimgrey") if ours else col[lab], label=lab, zorder=3 if ours else 2)
             if not ex:
                 for x, y, r in p:
