@@ -108,6 +108,10 @@ def draw(th, path):
         ends = []
         for key, name, colour, exact, panels in SERIES:
             pts = sorted(lines.get((key, 1 if exact else 0, th, vis), []))
+            if not pts and key == "faiss Panorama flat range":
+                # faiss runs one range-search query on one thread, so its 1-thread figures stand in, labelled as such
+                pts = sorted(lines.get((key, 1, 1, vis), []))
+                name = f"{name} (1-thread run)" if pts else name
             if vis not in panels or not pts:
                 continue
             xs = [share(x, vis) for x, _, _ in pts]
