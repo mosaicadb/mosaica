@@ -1206,7 +1206,11 @@ pub fn dbcmp(c: &Ctx2) {
         }
     }
     let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count,full_reads,disk_kb,majflt,kind".to_string()];
+    let only = arg_str("--sets", "");
     for (vi, (vname, bm)) in sets.iter().enumerate() {
+        if !only.is_empty() && !only.split(',').any(|x| x == vname) {
+            continue;
+        }
         let vis = vis_all[vi].as_ref();
         out!("dbcmp {vname}: {} visible", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()));
         for &th in &threads {
