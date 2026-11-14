@@ -1,0 +1,8 @@
+hnsw_sq16: loaded in 1 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 default vis_1 share 3: param x1, median 1.41 ms, mean recall 0.0682, non-matches 71 over 15 queries
+hnsw_sq16 tight vis_1 share 3: param x128.0, median 3370.52 ms, mean recall 0.9890, non-matches 165 over 15 queries
+peak RSS 1.62 GiB
+hnsw_sq16: loaded in 1 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 default vis_1 share 4: param x1, median 5.38 ms, mean recall 0.0516, non-matches 42 over 15 queries
+hnsw_sq16 tight vis_1 share 4: param x32.0, median 1915.80 ms, mean recall 0.6568, non-matches 6014 over 15 queries
+peak RSS 1.63 GiB

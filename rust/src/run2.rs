@@ -33,6 +33,7 @@ pub struct Ctx2 {
     pub plan: Plan,
     pub approx: Approx,
     pub dial: Option<Dial>,
+    pub pseudo: Vec<(usize, Vec<f32>, Vec<u32>)>,
 }
 
 pub fn args() -> Vec<String> {
@@ -268,7 +269,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     out!("[approx] f = {} from {} pseudo-queries in {:.1}s; mean items scanned at recall 0.95 by f: {:?}", approx.f, pseudo.len(), t.s(), fres.iter().map(|x| (x.0, x.1.round())).collect::<Vec<_>>());
     let dial = if args().iter().any(|a| a == "--fit-dial") || arg_str("--dial", "").contains("fit") {
         let t = Timer::new();
-        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999]);
+        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999], 10, None);
         out!("[approx] dial fitted in {:.1}s: eps {:?}, pseudo-query recall {:?}, fits {:?}", t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>(), d.fits);
         for (e, f) in d.eps.iter().zip(&d.factors) {
             out!("[approx] eps {e}: factors by level {:?}", f.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
@@ -277,7 +278,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     } else {
         None
     };
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
+    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial, pseudo };
     out!("[fit] {}", c.p.fit);
     out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -1126,4 +1127,273 @@ pub fn scanbench(c: &Ctx2, nq: usize) {
         }
     }
     std::fs::write(format!("{}/scanbench.csv", res_dir()), lines.join("\n") + "\n").unwrap();
+}
+
+
+/// Threshold queries at explicit thresholds (`--thr FILE`, Q x S f64, one row per `--queries` row), unfiltered and
+/// within each visible set (`--vis A.npy,B.npy`, entity ids), timed whole: query preparation, the query, and the
+/// answer as a bitmap of entity ids. `index` is the planner's path; `flat` scans every stored f16 vector (the visible
+/// ones only, under a visible set). Every `--step`-th query runs, `--reps` times, on each of `--threads` (1,4); the
+/// per-query median and minimum go to RESULTS/dbcmp_<--tag>.csv. With `--dump DIR`, the 1-thread answers go to DIR/<what>_<vis>.bin as
+/// (query, share, count, ids...) u32 records.
+pub fn dbcmp(c: &Ctx2) {
+    let ix = &c.ix;
+    let fl = c.flat();
+    let thr = read_npy(&arg_str("--thr", ""));
+    let ns = thr.shape[1];
+    let thr = thr.f64s();
+    let qs = &c.texts;
+    assert_eq!(thr.len(), qs.len() * ns, "--thr must have one row per query");
+    let reps = arg_usize("--reps", 5);
+    let step = arg_usize("--step", 5);
+    let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
+    let dump = arg_str("--dump", "");
+    let mut sets: Vec<(String, Option<RoaringBitmap>)> = vec![("all".into(), None)];
+    for f in arg_str("--vis", "").split(',').filter(|f| !f.is_empty()) {
+        let a = read_npy(f);
+        assert_eq!(a.descr, "<i4", "{f}: --vis files hold sorted int32 entity ids");
+        let ids: Vec<u32> = a.data.chunks(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+        let name = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().to_string();
+        sets.push((name, Some(RoaringBitmap::from_sorted_iter(ids).unwrap())));
+    }
+    let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count".to_string()];
+    for (vname, bm) in &sets {
+        let t = Timer::new();
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        out!("dbcmp {vname}: {} visible; into row order once per session {:.2} ms", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()), t.ms());
+        for &th in &threads {
+            let pl = pool(th);
+            for what in ["index", "flat"] {
+                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{what}_{vname}.bin")).unwrap()));
+                for (qi, q) in qs.iter().enumerate() {
+                    if qi % step != 0 {
+                        continue;
+                    }
+                    for si in 0..ns {
+                        let t0 = thr[qi * ns + si];
+                        let mut ts = Vec::new();
+                        let mut ans = RoaringBitmap::new();
+                        for _ in 0..reps {
+                            let t = Timer::new();
+                            ans = pl.install(|| match what {
+                                "index" => {
+                                    let pr = prep2(ix, q);
+                                    let r = threshold2(ix, &pr, t0, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan: c.plan });
+                                    to_bitmap2(ix, &r.rows)
+                                }
+                                _ => {
+                                    let (q16, q32, qn) = crate::v2::q::query_f16(q);
+                                    let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
+                                    e.sort_unstable();
+                                    RoaringBitmap::from_sorted_iter(e).unwrap()
+                                }
+                            });
+                            ts.push(t.ms());
+                        }
+                        if let Some(w) = dumpf.as_mut() {
+                            for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
+                                w.write_all(&x.to_le_bytes()).unwrap();
+                            }
+                        }
+                        let mn = ts.iter().cloned().fold(f64::MAX, f64::min);
+                        lines.push(format!("{what},{th},{vname},{si},{qi},{:.4},{:.4},{}", median(&ts), mn, ans.len()));
+                    }
+                }
+                let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{what},{th},{vname},"))).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
+                out!("dbcmp {what} threads {th} vis {vname}: {} timings, median {:.3} ms", mine.len(), median(&mine));
+            }
+        }
+    }
+    std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
+    let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));
+}
+
+/// Top-k on the threshold-db queries, one thread: for every `--step`-th query, each visible set in `--vis-sets`
+/// (`all`, or a file of sorted int32 entity ids) and each k in `--ks`, the exact k-NN path (knn2, unless `--no-exact`)
+/// and the approximate mode at the cheapest setting reaching each mean recall in `--targets`. Recall is |returned ∩
+/// the first k visible entries of `--order`| / k. The approximate ladder doubles the cluster count up to every cluster
+/// for each dial; each dial's first rung reaching a target is timed at `--reps` and the fastest is kept.
+/// `--approx-mode new` (knn2_fast) walks the dial off and the dials fitted for this k at each eps in `--dial-eps` on
+/// the pseudo-queries; `old` (knn2_dial) the dial off and the setup's dial fitted for 0.99. With `--params FILE` (a
+/// liminal_topk.csv), the approximate mode runs only at the settings listed there and is not timed.
+/// Rows go to RESULTS/liminal_topk.csv (all) or liminal_topk_<set>.csv, param "nprobe:dial"; per query, the items
+/// touched, entering each level, full vectors read and bytes read of the chosen settings go to
+/// RESULTS/liminal_topk_stats.csv.
+pub fn dbtopk(c: &Ctx2) {
+    let ix = &c.ix;
+    let order = read_npy(&arg_str("--order", ""));
+    let ncol = order.shape[1];
+    let order = order.i32s();
+    let qs = &c.texts;
+    let reps = arg_usize("--reps", 5);
+    let step = arg_usize("--step", 10);
+    let ks: Vec<usize> = arg_str("--ks", "1,10,100,1000").split(',').map(|x| x.parse().unwrap()).collect();
+    let targets: Vec<f64> = arg_str("--targets", "0.8,0.99").split(',').map(|x| x.parse().unwrap()).collect();
+    let fast = match arg_str("--approx-mode", "new").as_str() {
+        "new" => true,
+        "old" => false,
+        m => panic!("--approx-mode {m}: write new or old"),
+    };
+    let eps_list: Vec<f64> = arg_str("--dial-eps", "0.001,0.01,0.03,0.1").split(',').map(|x| x.parse().unwrap()).collect();
+    let fixed: Option<Vec<(String, usize, String)>> = Some(arg_str("--params", "")).filter(|f| !f.is_empty()).map(|f| {
+        std::fs::read_to_string(&f).unwrap().lines().skip(1).filter_map(|l| {
+            let v: Vec<&str> = l.split(',').collect();
+            (v[0] == "liminal_approx").then(|| (v[1].to_string(), v[2].parse().unwrap(), v[4].to_string()))
+        }).collect()
+    });
+    let k_cl = ix.k();
+    let nl = ix.meta.nl();
+    let pl = pool(1);
+    let open = |name: &str, head: &str| {
+        let path = format!("{}/{name}", res_dir());
+        let fresh = !std::path::Path::new(&path).exists();
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        if fresh {
+            writeln!(f, "{head}").unwrap();
+        }
+        f
+    };
+    let mut fs = open("liminal_topk_stats.csv", &format!("method,target,k,vis,query,param,recall,touched,full_reads,bytes,groups,clusters_indexed,{}",
+        (0..nl).map(|l| format!("enter{l}")).collect::<Vec<_>>().join(",")));
+    for vspec in arg_str("--vis-sets", "all").split(',') {
+        let (vname, bm) = if vspec == "all" { ("all".to_string(), None) } else {
+            let ids: Vec<u32> = read_npy(vspec).i32s().iter().map(|&x| x as u32).collect();
+            (std::path::Path::new(vspec).file_stem().unwrap().to_string_lossy().to_string(), Some(RoaringBitmap::from_sorted_iter(ids).unwrap()))
+        };
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        let vis = vis.as_ref();
+        let mut f = open(&if vname == "all" { "liminal_topk.csv".to_string() } else { format!("liminal_topk_{vname}.csv") }, "method,target,k,query,param,median_ms,recall");
+        type Row = (usize, f64, f64);
+        for &k in &ks {
+            let exact: Vec<(usize, std::collections::HashSet<u32>)> = (0..qs.len()).step_by(step).map(|qi| {
+                let e: std::collections::HashSet<u32> = order[qi * ncol..(qi + 1) * ncol].iter().map(|&x| x as u32)
+                    .filter(|&x| bm.as_ref().map_or(true, |b| b.contains(x))).take(k).collect();
+                assert_eq!(e.len(), k, "--order holds fewer than k visible entries for query {qi}");
+                (qi, e)
+            }).collect();
+            let eval = |run: &(dyn Fn(&[f32]) -> KnnOut2 + Sync), r: usize| -> Vec<Row> {
+                exact.iter().map(|(qi, es)| {
+                    let mut ts = Vec::new();
+                    let mut got = Vec::new();
+                    for _ in 0..r {
+                        let t = Timer::new();
+                        got = pl.install(|| run(&qs[*qi])).ents;
+                        ts.push(t.ms());
+                    }
+                    (*qi, median(&ts), got.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64)
+                }).collect()
+            };
+            let summ = |r: &[Row]| (median(&r.iter().map(|x| x.1).collect::<Vec<_>>()), mean(&r.iter().map(|x| x.2).collect::<Vec<_>>()));
+            let mut emit = |method: &str, target: &str, param: &str, r: &[Row]| {
+                let (ms, rec) = summ(r);
+                out!("dbtopk {vname} {method} {target} k {k}: {param}: median {ms:.3} ms, mean recall {rec:.4}");
+                for &(qi, ms, rec) in r {
+                    writeln!(f, "{method},{target},{k},{qi},{param},{ms:.4},{rec:.5}").unwrap();
+                }
+            };
+            if !args().iter().any(|a| a == "--no-exact") {
+                let r = eval(&|q| knn2(ix, q, k, vis, c.plan), reps);
+                emit("liminal_exact", "exact", "-", &r);
+            }
+            // the dials of the ladder, by name
+            let dials: Vec<(String, Option<Vec<f32>>)> = if fast {
+                let t = Timer::new();
+                // the fit's queries: the setup's pseudo-queries, or with --dial-from queries the queries that are not timed
+                let held: Vec<(usize, Vec<f32>, Vec<u32>)> = (0..qs.len()).filter(|qi| qi % step != 0).map(|qi| (usize::MAX, qs[qi].clone(), Vec::new())).collect();
+                let fq = if arg_str("--dial-from", "pseudo") == "queries" { &held[..] } else { &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))] };
+                let d = Dial::fit(ix, fq, c.plan, &targets, k, Some(&c.approx));
+                out!("[dial k {k}] fitted on {} queries in {:.1}s: eps {:?}, their recall@{k} over every cluster {:?}", fq.len(), t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>());
+                for (e, fa) in d.eps.iter().zip(&d.factors) {
+                    out!("[dial k {k}] eps {e}: factors by level {:?}", fa.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
+                }
+                std::iter::once(("off".to_string(), None)).chain(eps_list.iter().map(|&e| (format!("e{e}"), Some(d.for_eps(e).to_vec())))).collect()
+            } else {
+                vec![("off".into(), None), ("fit0.99".into(), Some(c.dial.as_ref().expect("--approx-mode old needs --fit-dial").for_target(0.99).to_vec()))]
+            };
+            let run = |np: usize, dial: Option<&[f32]>, q: &[f32]| if fast {
+                knn2_fast(ix, &c.approx, q, k, vis, np, dial, c.plan)
+            } else {
+                knn2_dial(ix, &c.approx, q, k, vis, np, dial, false, c.plan)
+            };
+            let dial_of = |name: &str| dials.iter().find(|d| d.0 == name).unwrap_or_else(|| panic!("no dial {name}")).1.as_deref();
+            // per target: (param, rows timed or None)
+            let mut chosen: Vec<Option<(String, Option<Vec<Row>>)>> = vec![None; targets.len()];
+            if let Some(fx) = &fixed {
+                for (ti, &tg) in targets.iter().enumerate() {
+                    chosen[ti] = fx.iter().find(|x| x.1 == k && x.0.parse::<f64>().ok() == Some(tg)).map(|x| (x.2.clone(), None));
+                }
+            } else {
+                let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).collect();
+                ladder.push(k_cl);
+                let mut best: Vec<Option<(f64, String, Vec<Row>)>> = vec![None; targets.len()];
+                for (dname, dial) in &dials {
+                    let mut done = vec![false; targets.len()];
+                    for &np in &ladder {
+                        let (ms1, rec1) = summ(&eval(&|q| run(np, dial.as_deref(), q), 1));
+                        out!("dbtopk {vname} ladder k {k}: nprobe {np} dial {dname}: median {ms1:.3} ms, mean recall {rec1:.4}");
+                        let mut timed: Option<Vec<Row>> = None;
+                        for (ti, &tg) in targets.iter().enumerate() {
+                            if done[ti] || rec1 < tg {
+                                continue;
+                            }
+                            done[ti] = true;
+                            let r = timed.get_or_insert_with(|| eval(&|q| run(np, dial.as_deref(), q), reps)).clone();
+                            let (ms, rec) = summ(&r);
+                            if rec >= tg && best[ti].as_ref().map_or(true, |b| ms < b.0) {
+                                best[ti] = Some((ms, format!("{np}:{dname}"), r));
+                            }
+                        }
+                        if done.iter().all(|&d| d) {
+                            break;
+                        }
+                    }
+                }
+                for (ti, b) in best.into_iter().enumerate() {
+                    chosen[ti] = b.map(|(_, p, r)| (p, Some(r)));
+                }
+            }
+            for (ti, ch) in chosen.iter().enumerate() {
+                let Some((param, rows)) = ch else {
+                    out!("dbtopk {vname} approx {} k {k}: not reached", targets[ti]);
+                    continue;
+                };
+                if let Some(r) = rows {
+                    emit("liminal_approx", &targets[ti].to_string(), param, r);
+                }
+                let (np, dname) = param.split_once(':').unwrap();
+                let (np, dial): (usize, Option<&[f32]>) = (np.parse().unwrap(), dial_of(dname));
+                let mut tot = vec![0f64; 6 + nl];
+                // with VEXACT_PROF, the share of the query's cycles by phase (knn2_fast only)
+                let prof = std::env::var("VEXACT_PROF").is_ok() && fast;
+                let mut cyc = [0f64; 32];
+                for (qi, es) in &exact {
+                    PROF.store(prof, std::sync::atomic::Ordering::Relaxed);
+                    let o = pl.install(|| run(np, dial, &qs[*qi]));
+                    PROF.store(false, std::sync::atomic::Ordering::Relaxed);
+                    for (a, &b) in cyc.iter_mut().zip(&o.st.cyc) {
+                        *a += b as f64;
+                    }
+                    let rec = o.ents.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64;
+                    let bytes = bytes_read2(ix, &o.st) * ix.nrows as f64;
+                    let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes, o.st.groups as f64, o.st.clusters_open as f64].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
+                    writeln!(fs, "liminal_approx_{},{},{k},{vname},{qi},{param},{}", if fast { "new" } else { "old" }, targets[ti],
+                        v.iter().map(|x| format!("{x:.4}")).collect::<Vec<_>>().join(",")).unwrap();
+                    for (a, b) in tot.iter_mut().zip(&v) {
+                        *a += b / exact.len() as f64;
+                    }
+                }
+                out!("dbtopk {vname} stats {} k {k} {param}: recall {:.4} touched {:.0} full {:.0} bytes {:.0} groups {:.1} clusters indexed {:.1}; entering by level {:?}", targets[ti], tot[0], tot[1], tot[2], tot[3], tot[4], tot[5],
+                    tot[6..].iter().map(|x| x.round()).collect::<Vec<_>>());
+                if prof {
+                    let q = cyc[P_QUERY].max(1.0);
+                    let lv: f64 = [P_INIT, P_TABLES, P_REPACK, P_DECODE, P_BOUNDS, P_COMPACT, P_LVSETUP].iter().map(|&p| cyc[p]).sum();
+                    let sh = |x: f64| (x / q * 1000.0).round() / 10.0;
+                    out!("dbtopk {vname} phases {} k {k} {param} (% of the query): order {} groups {} cluster setup {} tables {} levels {} (of which item work {}) full vectors {} rest {}", targets[ti],
+                        sh(cyc[P_PLAN]), sh(cyc[P_BASIS] + cyc[P_GPOST]), sh(cyc[P_CLSETUP]), sh(cyc[P_TABLES]), sh(cyc[P_RUNCL]), sh(lv - cyc[P_TABLES]), sh(cyc[P_FULL]),
+                        sh(q - cyc[P_PLAN] - cyc[P_BASIS] - cyc[P_GPOST] - cyc[P_CLSETUP] - cyc[P_RUNCL] - cyc[P_FULL]));
+                }
+            }
+        }
+    }
 }

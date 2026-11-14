@@ -1,0 +1,32 @@
+hnsw_sq16: loaded in 1 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 ladder all share 0: rung 1, mean recall 0.6840, median 0.5 ms
+hnsw_sq16 ladder all share 0: rung 1.5, mean recall 0.8120, median 0.5 ms
+hnsw_sq16 ladder all share 0: rung 2, mean recall 0.8653, median 0.6 ms
+hnsw_sq16 ladder all share 0: rung 3, mean recall 0.9087, median 0.9 ms
+hnsw_sq16 ladder all share 0: rung 4, mean recall 0.9273, median 1.1 ms
+hnsw_sq16 ladder all share 0: rung 6, mean recall 0.9427, median 1.4 ms
+hnsw_sq16 ladder all share 0: rung 8, mean recall 0.9500, median 1.9 ms
+hnsw_sq16 ladder all share 0: rung 12, mean recall 0.9640, median 2.6 ms
+hnsw_sq16 ladder all share 0: rung 16, mean recall 0.9707, median 3.3 ms
+hnsw_sq16 ladder all share 0: rung 24, mean recall 0.9793, median 4.7 ms
+hnsw_sq16 ladder all share 0: rung 32, mean recall 0.9860, median 7.2 ms
+hnsw_sq16 ladder all share 0: rung 64, mean recall 0.9907, median 17.2 ms
+hnsw_sq16 default all share 0: param x1, median 0.17 ms, mean recall 0.6840, non-matches 474 over 15 queries
+hnsw_sq16 tight all share 0: param x64, median 16.10 ms, mean recall 0.9907, non-matches 14 over 15 queries
+hnsw_sq16 ladder all share 1: rung 1, mean recall 0.8995, median 3.2 ms
+hnsw_sq16 ladder all share 1: rung 1.5, mean recall 0.9335, median 4.0 ms
+hnsw_sq16 ladder all share 1: rung 2, mean recall 0.9521, median 5.8 ms
+hnsw_sq16 ladder all share 1: rung 3, mean recall 0.9703, median 7.7 ms
+hnsw_sq16 ladder all share 1: rung 4, mean recall 0.9777, median 9.9 ms
+hnsw_sq16 ladder all share 1: rung 6, mean recall 0.9858, median 15.8 ms
+hnsw_sq16 ladder all share 1: rung 8, mean recall 0.9895, median 25.4 ms
+hnsw_sq16 ladder all share 1: rung 12, mean recall 0.9935, median 48.3 ms
+hnsw_sq16 default all share 1: param x1, median 1.44 ms, mean recall 0.8995, non-matches 1508 over 15 queries
+hnsw_sq16 tight all share 1: param x12, median 44.58 ms, mean recall 0.9935, non-matches 98 over 15 queries
+hnsw_sq16 ladder all share 2: rung 1, mean recall 0.9527, median 35.7 ms
+hnsw_sq16 ladder all share 2: rung 1.5, mean recall 0.9758, median 69.4 ms
+hnsw_sq16 ladder all share 2: rung 2, mean recall 0.9846, median 106.8 ms
+hnsw_sq16 ladder all share 2: rung 3, mean recall 0.9915, median 237.9 ms
+hnsw_sq16 default all share 2: param x1, median 36.41 ms, mean recall 0.9527, non-matches 7102 over 15 queries
+hnsw_sq16 tight all share 2: param x3, median 236.07 ms, mean recall 0.9915, non-matches 1275 over 15 queries
+peak RSS 1.61 GiB

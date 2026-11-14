@@ -1,0 +1,44 @@
+hnsw_sq16: loaded in 4 s
+hnsw_sq16 k 1 ladder: param 1, mean recall 0.0667, median 0.05 ms
+hnsw_sq16 k 1 ladder: param 2, mean recall 0.1333, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 3, mean recall 0.1333, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 4, mean recall 0.2000, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 6, mean recall 0.2667, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 8, mean recall 0.3333, median 0.07 ms
+hnsw_sq16 k 1 ladder: param 12, mean recall 0.4000, median 0.10 ms
+hnsw_sq16 k 1 ladder: param 16, mean recall 0.4000, median 0.12 ms
+hnsw_sq16 k 1 ladder: param 24, mean recall 0.4000, median 0.16 ms
+hnsw_sq16 k 1 ladder: param 32, mean recall 0.5333, median 0.16 ms
+hnsw_sq16 k 1 ladder: param 64, mean recall 0.6000, median 0.26 ms
+hnsw_sq16 k 1 ladder: param 128, mean recall 0.6667, median 0.41 ms
+hnsw_sq16 k 1 ladder: param 256, mean recall 0.7333, median 0.93 ms
+hnsw_sq16 k 1 ladder: param 512, mean recall 0.7333, median 1.25 ms
+hnsw_sq16 k 1 ladder: param 1024, mean recall 0.7333, median 2.00 ms
+hnsw_sq16 k 1 ladder: param 2048, mean recall 0.7333, median 4.32 ms
+hnsw_sq16 k 1 ladder: param 4096, mean recall 0.8000, median 9.85 ms
+hnsw_sq16 k 1 target 0.8: param 4096, median 8.022 ms, mean recall 0.8000
+hnsw_sq16 k 1 ladder: param 8192, mean recall 0.8000, median 27.49 ms
+hnsw_sq16 k 1 ladder: param 16384, mean recall 0.8000, median 79.89 ms
+hnsw_sq16 k 1 ladder: param 32768, mean recall 0.9333, median 245.22 ms
+hnsw_sq16 k 1 ladder: param 65536, mean recall 1.0000, median 973.80 ms
+hnsw_sq16 k 1 target 0.99: param 65536, median 960.986 ms, mean recall 1.0000
+hnsw_sq16 k 10 ladder: param 10, mean recall 0.3933, median 0.15 ms
+hnsw_sq16 k 10 ladder: param 15, mean recall 0.4600, median 0.15 ms
+hnsw_sq16 k 10 ladder: param 20, mean recall 0.5067, median 0.17 ms
+hnsw_sq16 k 10 ladder: param 30, mean recall 0.5467, median 0.23 ms
+hnsw_sq16 k 10 ladder: param 40, mean recall 0.6533, median 0.27 ms
+hnsw_sq16 k 10 ladder: param 60, mean recall 0.6933, median 0.44 ms
+hnsw_sq16 k 10 ladder: param 80, mean recall 0.7667, median 0.48 ms
+hnsw_sq16 k 10 ladder: param 120, mean recall 0.8333, median 0.65 ms
+hnsw_sq16 k 10 target 0.8: param 120, median 0.288 ms, mean recall 0.8333
+hnsw_sq16 k 10 ladder: param 160, mean recall 0.8467, median 0.71 ms
+hnsw_sq16 k 10 ladder: param 240, mean recall 0.9067, median 1.06 ms
+hnsw_sq16 k 10 ladder: param 320, mean recall 0.9200, median 1.62 ms
+hnsw_sq16 k 10 ladder: param 640, mean recall 0.9400, median 2.45 ms
+hnsw_sq16 k 10 ladder: param 1280, mean recall 0.9533, median 4.46 ms
+hnsw_sq16 k 10 ladder: param 2560, mean recall 0.9600, median 6.18 ms
+hnsw_sq16 k 10 ladder: param 5120, mean recall 0.9800, median 14.37 ms
+hnsw_sq16 k 10 ladder: param 10240, mean recall 0.9800, median 49.34 ms
+hnsw_sq16 k 10 ladder: param 20480, mean recall 0.9867, median 141.90 ms
+hnsw_sq16 k 10 ladder: param 40960, mean recall 1.0000, median 429.59 ms
+hnsw_sq16 k 10 target 0.99: param 40960, median 420.042 ms, mean recall 1.0000

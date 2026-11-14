@@ -1,0 +1,8 @@
+faiss_hnsw: loaded in 2 s; RSS 3.04 GiB
+faiss_hnsw default vis_1 share 5: param x1, median 14.26 ms, mean recall 0.0469, non-matches 27 over 15 queries
+faiss_hnsw tight vis_1 share 5: param x24.0, median 3017.12 ms, mean recall 0.5286, non-matches 2977 over 15 queries
+peak RSS 3.07 GiB
+faiss_hnsw: loaded in 2 s; RSS 3.04 GiB
+faiss_hnsw default vis_1 share 6: param x1, median 22.03 ms, mean recall 0.0438, non-matches 8 over 15 queries
+faiss_hnsw tight vis_1 share 6: param x16.0, median 3004.75 ms, mean recall 0.3744, non-matches 503 over 15 queries
+peak RSS 3.09 GiB

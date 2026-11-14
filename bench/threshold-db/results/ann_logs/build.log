@@ -1,0 +1,8 @@
+ivf: built in 76 s on 3 threads; file 2.88 GiB; peak RSS 6.25 GiB
+	Loading clustering information...
+Allocating memory for IVF...
+hnswlib: built in 132 s on 3 threads; file 3.00 GiB; peak RSS 6.01 GiB
+faiss_hnsw: built in 222 s on 3 threads; file 3.00 GiB; peak RSS 5.91 GiB
+sq16: built in 1 s on 3 threads; file 1.43 GiB; peak RSS 4.33 GiB
+ivf_sq16: built in 71 s on 3 threads; file 1.45 GiB; peak RSS 4.60 GiB
+hnsw_sq16: built in 223 s on 3 threads; file 1.56 GiB; peak RSS 4.48 GiB

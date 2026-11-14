@@ -1,0 +1,6 @@
+sq16: loaded in 1 s; RSS 1.47 GiB; the index adds 1.43 GiB resident
+sq16 exact all share 0 threads 1: median 1070.28 ms, mean recall 0.99933, non-matches 3
+sq16 exact all share 1 threads 1: median 1080.94 ms, mean recall 0.99893, non-matches 11
+sq16 exact all share 2 threads 1: median 1094.28 ms, mean recall 0.99973, non-matches 42
+sq16 exact all share 3 threads 1: median 1073.71 ms, mean recall 0.99986, non-matches 191
+peak RSS 1.49 GiB

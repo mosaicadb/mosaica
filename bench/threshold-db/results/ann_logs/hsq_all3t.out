@@ -1,0 +1,3 @@
+hnsw_sq16: loaded in 1 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 tight all share 3: param x1.5, median 4577.65 ms, mean recall 0.9921, non-matches 11780 over 15 queries
+peak RSS 1.62 GiB

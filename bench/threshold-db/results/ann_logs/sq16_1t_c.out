@@ -1,0 +1,17 @@
+sq16: loaded in 1 s; RSS 1.47 GiB; the index adds 1.43 GiB resident
+sq16: compacted copy of vis_1 in 35 ms
+sq16 idselector vis_1 share 0 threads 1: median 23.34 ms, mean recall 1.00000, non-matches 0
+sq16 compacted vis_1 share 0 threads 1: median 17.43 ms, mean recall 1.00000, non-matches 0
+sq16 idselector vis_1 share 1 threads 1: median 15.37 ms, mean recall 1.00000, non-matches 0
+sq16 compacted vis_1 share 1 threads 1: median 16.60 ms, mean recall 1.00000, non-matches 0
+sq16 idselector vis_1 share 2 threads 1: median 15.72 ms, mean recall 0.99940, non-matches 0
+sq16 compacted vis_1 share 2 threads 1: median 11.00 ms, mean recall 0.99940, non-matches 0
+sq16 idselector vis_1 share 3 threads 1: median 16.19 ms, mean recall 1.00000, non-matches 1
+sq16 compacted vis_1 share 3 threads 1: median 11.57 ms, mean recall 1.00000, non-matches 1
+sq16 idselector vis_1 share 4 threads 1: median 16.42 ms, mean recall 0.99987, non-matches 6
+sq16 compacted vis_1 share 4 threads 1: median 11.27 ms, mean recall 0.99987, non-matches 6
+sq16 idselector vis_1 share 5 threads 1: median 16.28 ms, mean recall 0.99987, non-matches 8
+sq16 compacted vis_1 share 5 threads 1: median 11.25 ms, mean recall 0.99987, non-matches 8
+sq16 idselector vis_1 share 6 threads 1: median 15.52 ms, mean recall 0.99999, non-matches 2
+sq16 compacted vis_1 share 6 threads 1: median 11.17 ms, mean recall 0.99999, non-matches 2
+peak RSS 4.06 GiB

@@ -1,0 +1,54 @@
+ivf_sq16: loaded in 4 s; RSS 1.49 GiB; the index adds 1.45 GiB resident
+ivf_sq16 ladder all share 0: rung 1, mean recall 0.2287, median 0.3 ms
+ivf_sq16 ladder all share 0: rung 2, mean recall 0.3440, median 0.3 ms
+ivf_sq16 ladder all share 0: rung 4, mean recall 0.4627, median 0.4 ms
+ivf_sq16 ladder all share 0: rung 8, mean recall 0.5813, median 0.6 ms
+ivf_sq16 ladder all share 0: rung 16, mean recall 0.7340, median 0.8 ms
+ivf_sq16 ladder all share 0: rung 32, mean recall 0.8093, median 1.3 ms
+ivf_sq16 ladder all share 0: rung 64, mean recall 0.8973, median 2.1 ms
+ivf_sq16 ladder all share 0: rung 128, mean recall 0.9560, median 3.6 ms
+ivf_sq16 ladder all share 0: rung 256, mean recall 0.9800, median 7.0 ms
+ivf_sq16 ladder all share 0: rung 512, mean recall 0.9967, median 14.0 ms
+ivf_sq16 default all share 0: param 1, median 0.26 ms, mean recall 0.2287, non-matches 0 over 15 queries
+ivf_sq16 tight all share 0: param 512, median 13.85 ms, mean recall 0.9967, non-matches 0 over 15 queries
+ivf_sq16 ladder all share 1: rung 1, mean recall 0.1086, median 0.3 ms
+ivf_sq16 ladder all share 1: rung 2, mean recall 0.1814, median 0.3 ms
+ivf_sq16 ladder all share 1: rung 4, mean recall 0.2867, median 0.4 ms
+ivf_sq16 ladder all share 1: rung 8, mean recall 0.4035, median 0.5 ms
+ivf_sq16 ladder all share 1: rung 16, mean recall 0.5591, median 0.7 ms
+ivf_sq16 ladder all share 1: rung 32, mean recall 0.6688, median 1.2 ms
+ivf_sq16 ladder all share 1: rung 64, mean recall 0.8077, median 2.0 ms
+ivf_sq16 ladder all share 1: rung 128, mean recall 0.9052, median 3.6 ms
+ivf_sq16 ladder all share 1: rung 256, mean recall 0.9594, median 7.0 ms
+ivf_sq16 ladder all share 1: rung 512, mean recall 0.9916, median 14.0 ms
+ivf_sq16 default all share 1: param 1, median 0.26 ms, mean recall 0.1086, non-matches 0 over 15 queries
+ivf_sq16 tight all share 1: param 512, median 14.69 ms, mean recall 0.9916, non-matches 4 over 15 queries
+ivf_sq16 ladder all share 2: rung 1, mean recall 0.0187, median 0.3 ms
+ivf_sq16 ladder all share 2: rung 2, mean recall 0.0374, median 0.4 ms
+ivf_sq16 ladder all share 2: rung 4, mean recall 0.0710, median 0.4 ms
+ivf_sq16 ladder all share 2: rung 8, mean recall 0.1233, median 0.6 ms
+ivf_sq16 ladder all share 2: rung 16, mean recall 0.2080, median 0.8 ms
+ivf_sq16 ladder all share 2: rung 32, mean recall 0.3474, median 1.3 ms
+ivf_sq16 ladder all share 2: rung 64, mean recall 0.5405, median 2.4 ms
+ivf_sq16 ladder all share 2: rung 128, mean recall 0.7181, median 3.8 ms
+ivf_sq16 ladder all share 2: rung 256, mean recall 0.8518, median 7.4 ms
+ivf_sq16 ladder all share 2: rung 512, mean recall 0.9521, median 13.6 ms
+ivf_sq16 ladder all share 2: rung 1024, mean recall 0.9915, median 26.6 ms
+ivf_sq16 default all share 2: param 1, median 0.27 ms, mean recall 0.0187, non-matches 0 over 15 queries
+ivf_sq16 tight all share 2: param 1024, median 27.01 ms, mean recall 0.9915, non-matches 12 over 15 queries
+ivf_sq16 ladder all share 3: rung 1, mean recall 0.0022, median 0.4 ms
+ivf_sq16 ladder all share 3: rung 2, mean recall 0.0046, median 0.4 ms
+ivf_sq16 ladder all share 3: rung 4, mean recall 0.0090, median 0.7 ms
+ivf_sq16 ladder all share 3: rung 8, mean recall 0.0165, median 0.9 ms
+ivf_sq16 ladder all share 3: rung 16, mean recall 0.0314, median 1.3 ms
+ivf_sq16 ladder all share 3: rung 32, mean recall 0.0602, median 1.6 ms
+ivf_sq16 ladder all share 3: rung 64, mean recall 0.1171, median 2.7 ms
+ivf_sq16 ladder all share 3: rung 128, mean recall 0.2129, median 5.0 ms
+ivf_sq16 ladder all share 3: rung 256, mean recall 0.3855, median 9.9 ms
+ivf_sq16 ladder all share 3: rung 512, mean recall 0.6355, median 17.8 ms
+ivf_sq16 ladder all share 3: rung 1024, mean recall 0.8693, median 28.0 ms
+ivf_sq16 ladder all share 3: rung 2048, mean recall 0.9889, median 61.0 ms
+ivf_sq16 ladder all share 3: rung 4096, mean recall 1.0000, median 136.6 ms
+ivf_sq16 default all share 3: param 1, median 0.31 ms, mean recall 0.0022, non-matches 0 over 15 queries
+ivf_sq16 tight all share 3: param 4096, median 137.62 ms, mean recall 1.0000, non-matches 56 over 15 queries
+peak RSS 1.51 GiB

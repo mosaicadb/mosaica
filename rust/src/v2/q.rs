@@ -96,6 +96,12 @@ pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
 }
 
 pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
+    prep2_qm(ix, q, None)
+}
+
+/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (one per cluster): the
+/// anchor is the cluster with the largest q.m / |m|, and only its product is taken again.
+pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
     let n = ix.n();
     let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
@@ -103,17 +109,26 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
     let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
-    let mut pa = vec![0f64; ix.nanch];
-    for a in 0..ix.nanch {
-        pa[a] = unsafe { dot64v(&q64, &ix.anchors[a * n..(a + 1) * n]) };
-    }
-    for (a, &b) in pa.iter().enumerate() {
-        if b > best {
-            best = b;
-            ba = a;
+    match qm {
+        Some(qm) if ix.nanch == ix.k() && ix.nanch > 0 => {
+            for (c, &v) in qm.iter().enumerate() {
+                if v / ix.cl[c].mn > best {
+                    best = v / ix.cl[c].mn;
+                    ba = c;
+                }
+            }
+            best = unsafe { dot64v(&q64, &ix.anchors[ba * n..(ba + 1) * n]) };
+        }
+        _ => {
+            for a in 0..ix.nanch {
+                let b = unsafe { dot64v(&q64, &ix.anchors[a * n..(a + 1) * n]) };
+                if b > best {
+                    best = b;
+                    ba = a;
+                }
+            }
         }
     }
-    let _ = n;
     let rho = (qn * qn - best * best).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
     Prep2 { q16, q32, q64, qn, qhi, qlo, anchor: ba, beta: best, rho, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
 }
@@ -1025,6 +1040,9 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
         if tr < est - hh - 1e-12 || tr > est + hh + 1e-12 {
             st.cert_viol += 1;
         }
+        if tr >= t && ERRS.load(std::sync::atomic::Ordering::Relaxed) {
+            st.errs.push((l as u8, ((tr - est) / hh.max(1e-30)) as f32));
+        }
         if inm >> i & 1 == 1 {
             st.imp_checked += 1;
             if !(est - hh >= t - cq.tol) {
@@ -1132,8 +1150,9 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     }
     let intm = resume.is_none() && cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
     if intm {
-        // the dial's largest factor on the fixed term: a larger factor only lowers Tout
-        let dmax = pr.dial[..NDL].iter().fold(1f32, |a, &d| a.max(d)) as f64;
+        // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
+        // only lowers Tout
+        let dmax = pr.dial[..NDL].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
         int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
@@ -2496,6 +2515,22 @@ pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
     }
 }
 
+/// A cluster's per-query setup for a threshold query under plan `pl`, on the integer deterministic levels when `int`.
+pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: Plan, int: bool) -> CQ2 {
+    let gt = pl.gtab && !pl.alpha0;
+    let mut cq = cluster_q2w(ix, ci, gq, pr, qm, pl.alpha0, !gt);
+    cq.gtab = gt;
+    cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
+    cq.bail = pl.bail;
+    assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
+    cq.rdec = pl.rdec;
+    cq.tol = pl.tol;
+    if int {
+        cq.enable_int(ix, ci, gq);
+    }
+    cq
+}
+
 /// The threshold query over the clusters as planned.
 pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], first_decide: usize, cut_cyc: u64) -> ThrOut2 {
     let nl = ix.meta.nl();
@@ -2588,18 +2623,8 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.idx_clusters += 1;
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
-                            let gt = pl.gtab && !pl.alpha0;
-                            let mut cq = cluster_q2w(ix, ci, gq, pr, qm, pl.alpha0, !gt);
-                            cq.gtab = gt;
-                            cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
-                            cq.bail = pl.bail;
-                            assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
-                            cq.rdec = pl.rdec;
-                            cq.tol = pl.tol;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
-                            if pl.int_det && !o.want_iv && !colp {
-                                cq.enable_int(ix, ci, gq);
-                            }
+                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det && !o.want_iv && !colp);
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
@@ -2800,6 +2825,13 @@ impl Approx {
         }
         out
     }
+    /// As `order`, from q.m of every cluster.
+    pub fn order_qm(&self, qm: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+        let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0))
+            .map(|ci| (qm[ci] + self.f * self.rad[ci], ci)).collect();
+        keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+        keys.into_iter().map(|x| x.1).collect()
+    }
     /// Clusters holding a visible item, by descending q.m + f r.
     pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
         let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0))
@@ -2858,12 +2890,14 @@ impl Approx {
 }
 
 /// The confidence dial, fitted on corpus pseudo-queries. It cuts only the upper side of each item interval, the side
-/// that prunes; lower bounds stay certified, so the selection's k-th largest lower bound never overshoots. Each
-/// level's factor for a miss rate eps is the (1 - eps) quantile of (true - estimate) / half-width over the intervals
-/// that level computed for the items in the answer of the pseudo-queries' threshold queries at their 1,000th best
-/// score (index path), clipped to [0, 1]; eps = 0 gives 1 everywhere, the exact mode. Then the mean
-/// recall@k of the approximate mode over all clusters (index path) for each eps of a grid, and for each target recall
-/// the largest eps that reaches it.
+/// that prunes; lower bounds stay certified. Each level's factor for a miss rate eps is the (1 - eps) quantile of
+/// (true - estimate) / half-width over the intervals that level computed, in a verified threshold query (index path),
+/// for the items scoring at least the threshold, clipped to [0, 1]; eps = 0 gives 1 everywhere, the exact mode.
+/// A pseudo-query whose row is past the index is a held-out query, not a stored row.
+/// `fast` fits the best-first mode for k = kk: the threshold is the pseudo-query's max(kk, 10)-th best score, every
+/// level gets a factor, and recall@kk is that of knn2_fast over every cluster. Without it, the fit is the one knn2_dial
+/// was tuned with: the 1,000th best score, factor 1 on the deterministic levels, and recall@10 of knn2d. Then for each
+/// target recall the largest eps that reaches it on the pseudo-queries.
 pub struct Dial {
     pub eps: Vec<f64>,
     pub factors: Vec<Vec<f32>>, // per eps, per level
@@ -2875,20 +2909,33 @@ impl Dial {
         let i = self.fits.iter().find(|x| (x.0 - t).abs() < 1e-9).expect("no dial fitted for that target").1;
         &self.factors[i]
     }
-    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)], plan: Plan, targets: &[f64]) -> Dial {
+    pub fn for_eps(&self, e: f64) -> &[f32] {
+        let i = self.eps.iter().position(|&x| (x - e).abs() <= 1e-12 * e.max(1e-12)).expect("no dial fitted for that eps");
+        &self.factors[i]
+    }
+    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)], plan: Plan, targets: &[f64], kk: usize, fast: Option<&Approx>) -> Dial {
         let nl = ix.meta.nl();
         let pidx = Plan { mode: PlanMode::Index, ..plan };
+        let kthr = if fast.is_some() { kk.max(10) } else { 1000 };
+        // per pseudo-query: its errors and its kk nearest other rows
         ERRS.store(true, std::sync::atomic::Ordering::Relaxed);
-        let errs: Vec<Vec<(u8, f32)>> = pseudo.par_iter().map(|(_, q, _)| {
+        let per: Vec<(Vec<(u8, f32)>, Vec<u32>)> = pseudo.par_iter().map(|(row, q, _)| {
             let pr = prep2(ix, q);
-            let t = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, 1000, None).last().unwrap().0;
+            let best = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, kthr.max(kk + 1), None);
+            let t = best[kthr - 1].0;
+            let me = ix.row_ent.get(*row).copied().unwrap_or(u32::MAX);
+            let gt: Vec<u32> = best.iter().map(|x| x.1).filter(|&e| e != me).take(kk).collect();
             let o = Opts2 { vis: None, verify: true, want_iv: false, plan: pidx };
-            threshold2(ix, &pr, t, &o).st.errs
+            (threshold2(ix, &pr, t, &o).st.errs, gt)
         }).collect();
         ERRS.store(false, std::sync::atomic::Ordering::Relaxed);
         let mut by_level: Vec<Vec<f32>> = vec![Vec::new(); nl];
-        for e in errs.into_iter().flatten() {
-            by_level[e.0 as usize].push(e.1);
+        for (errs, _) in &per {
+            for e in errs {
+                if fast.is_some() || e.0 as usize >= NDL {
+                    by_level[e.0 as usize].push(e.1);
+                }
+            }
         }
         for v in &mut by_level {
             v.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -2897,12 +2944,15 @@ impl Dial {
         let factors: Vec<Vec<f32>> = eps.iter().map(|&e| by_level.iter().map(|v| {
             if e == 0.0 || v.is_empty() { 1.0 } else { v[(((1.0 - e) * v.len() as f64) as usize).min(v.len() - 1)].clamp(0.0, 1.0) }
         }).collect()).collect();
-        let kk = pseudo.first().map_or(10, |p| p.2.len());
         let mut recall = Vec::new();
         for f in &factors {
-            let rec: f64 = pseudo.par_iter().map(|(row, q, gt)| {
-                let me = ix.row_ent[*row];
-                let got: Vec<u32> = knn2d(ix, q, kk + 1, None, pidx, Some(f)).ents.iter().map(|x| x.1).filter(|&e| e != me).take(kk).collect();
+            let rec: f64 = pseudo.par_iter().zip(&per).map(|((row, q, _), (_, gt))| {
+                let me = ix.row_ent.get(*row).copied().unwrap_or(u32::MAX);
+                let out = match fast {
+                    Some(ap) => knn2_fast(ix, ap, q, kk + 1, None, ix.k(), Some(f), plan),
+                    None => knn2d(ix, q, kk + 1, None, pidx, Some(f)),
+                };
+                let got: Vec<u32> = out.ents.iter().map(|x| x.1).filter(|&e| e != me).take(kk).collect();
                 got.iter().filter(|e| gt.contains(e)).count() as f64 / gt.len() as f64
             }).sum::<f64>() / pseudo.len() as f64;
             recall.push(rec);
@@ -2985,6 +3035,177 @@ pub fn knn2_dial(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     order.truncate(nprobe);
     let sub = Vis2::restrict(ix, vis, &order, if soar { Some(&ap.second) } else { None });
     knn2d(ix, q, kk, Some(&sub), plan, dial)
+}
+
+/// The k best (score, entity) seen so far, as a min-heap on score.
+struct TopK {
+    kk: usize,
+    h: std::collections::BinaryHeap<std::cmp::Reverse<Scored>>,
+}
+#[derive(PartialEq)]
+struct Scored(f64, u32);
+impl Eq for Scored {}
+impl PartialOrd for Scored {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for Scored {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&o.0).then(o.1.cmp(&self.1))
+    }
+}
+impl TopK {
+    fn full(&self) -> bool {
+        self.h.len() >= self.kk
+    }
+    /// The k-th best score, or -inf until k are held.
+    fn kth(&self) -> f64 {
+        if self.full() { self.h.peek().unwrap().0 .0 } else { f64::NEG_INFINITY }
+    }
+    fn push(&mut self, s: f64, e: u32) {
+        if !self.full() {
+            self.h.push(std::cmp::Reverse(Scored(s, e)));
+        } else if s > self.kth() {
+            self.h.pop();
+            self.h.push(std::cmp::Reverse(Scored(s, e)));
+        }
+    }
+    /// Scores `rows` from their stored vectors (f32 products) and keeps the k best.
+    fn score(&mut self, ix: &Index2, pr: &Prep2, rows: &[u32], st: &mut Stats) {
+        st.full_reads += rows.len() as u64;
+        let mut ch = rows.chunks_exact(4);
+        for r in &mut ch {
+            let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, [0, 1, 2, 3].map(|i| ix.full_row_f16(r[i] as usize))) };
+            for i in 0..4 {
+                self.push(sc[i] as f64, ix.row_ent[r[i] as usize]);
+            }
+        }
+        for &r in ch.remainder() {
+            self.push(unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r as usize)) } as f64, ix.row_ent[r as usize]);
+        }
+    }
+}
+
+/// Approximate k-NN, best-first over the first `nprobe` clusters in the order of `ap`, reading only visible rows.
+/// Until k items are held, a cluster's visible items are scored from their stored vectors. After that, each cluster
+/// runs as a threshold query at the running k-th best score: the key range and the levels drop an item once its upper
+/// bound falls below it, each level's half-width scaled by `dial`, and the items left (or taken in by a certified
+/// lower bound) are scored from their stored vectors into the k best. A cluster with too few visible items to pay for
+/// the index path's per-cluster setup, by the plan's costs, has every visible item scored, batched with other such
+/// clusters in row order. No dial and every cluster is exact up to the f32
+/// products.
+pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, dial: Option<&[f32]>, plan: Plan) -> KnnOut2 {
+    let tm = Timer::new();
+    let nl = ix.meta.nl();
+    let t0 = tick();
+    // q.m of every cluster, for the order, the anchor and each probed cluster
+    let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
+    let qm: Vec<f64> = (0..ix.k()).map(|ci| dot64(&q64, ix.centres_f64(ci))).collect();
+    let mut pr = prep2_qm(ix, q, Some(&qm));
+    if let Some(d) = dial {
+        pr.dial = d.to_vec();
+    }
+    let mut st = Stats::new(nl);
+    let mut order = ap.order_qm(&qm, vis);
+    order.truncate(nprobe);
+    st.cyc[P_PLAN] += tick() - t0;
+    let mut top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
+    let mut sv = State::default();
+    let (mut rows_in, mut pend) = (Vec::new(), Vec::new());
+    let stored = matches!(ix.full, Full2::Real { .. });
+    assert!(stored, "knn2_fast scores from stored vectors");
+    let mut ncand = 0;
+    // visible rows of clusters too small for the index path, scored together in row order
+    let mut flat: Vec<u32> = Vec::new();
+    let flush = |flat: &mut Vec<u32>, top: &mut TopK, st: &mut Stats| {
+        let tf = tick();
+        flat.sort_unstable();
+        top.score(ix, &pr, flat, st);
+        flat.clear();
+        st.cyc[P_FULL] += tick() - tf;
+    };
+    let vis_rows = |a: usize, b: usize| -> &[u32] {
+        let v = vis.unwrap();
+        let i = v.rows.partition_point(|&r| (r as usize) < a);
+        &v.rows[i..i + v.rows[i..].partition_point(|&r| (r as usize) < b)]
+    };
+    for ci in order {
+        let c = &ix.cl[ci];
+        let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
+        if (top.full() && nv as f64 * plan.full_us <= plan.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
+            match vis {
+                None => flat.extend(c.r0 as u32..c.r1 as u32),
+                Some(_) => flat.extend_from_slice(vis_rows(c.r0, c.r1)),
+            }
+            ncand += nv;
+            st.touched += nv as u64;
+            if flat.len() >= 256 || !top.full() {
+                flush(&mut flat, &mut top, &mut st);
+            }
+            continue;
+        }
+        flush(&mut flat, &mut top, &mut st);
+        let t = top.kth();
+        rows_in.clear();
+        pend.clear();
+        let qm = qm[ci];
+        let (u0, u1, d0, d1) = if top.full() && ix.nukey.is_empty() { sorted_range2(ix, ci, &cut_params2(ix, ci, &pr, qm), t) } else { (c.r0, c.r1, c.r0, c.r1) };
+        // the key alone takes these in
+        if u0 < d0 || d1 < u1 {
+            for r in (u0..d0).chain(d1..u1) {
+                if vis.map_or(true, |v| v.has(r)) {
+                    pend.push(r as u32);
+                }
+            }
+        }
+        // the visible rows of [d0, d1) from the sorted list, not by testing every row
+        let mut cands: Vec<u32> = match vis {
+            None => (0..(d1 - d0) as u32).map(|i| i + (d0 - c.r0) as u32).collect(),
+            Some(_) => vis_rows(d0, d1).iter().map(|&r| r - c.r0 as u32).collect(),
+        };
+        if !top.full() && cands.len() > kk - top.h.len() {
+            // enough here to fill the k best: score the items nearest the centre direction (largest key), then run the
+            // rest against the k-th of those
+            let first = cands.split_off(cands.len() - (kk - top.h.len()));
+            let rows: Vec<u32> = first.iter().map(|&i| (c.r0 + i as usize) as u32).collect();
+            st.touched += rows.len() as u64;
+            ncand += rows.len();
+            top.score(ix, &pr, &rows, &mut st);
+        }
+        let t = top.kth();
+        st.range_in += pend.len() as u64;
+        st.range_out += ((u0 - c.r0) + (c.r1 - u1)) as u64;
+        st.touched += (cands.len() + pend.len()) as u64;
+        if !cands.is_empty() {
+            let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize).max(1);
+            let d = cands.len() as f64 / nv as f64;
+            // the group's setup is left out: charged to the first cluster of each group, it sends that cluster's items
+            // to their full vectors, which reads far more and saves no time
+            if top.full() && cands.len() as f64 * plan.full_us > plan.index_us(cands.len(), d) {
+                st.clusters_open += 1;
+                let gq = get_gq2(ix, &pr, c.g, &mut st);
+                let tq = tick();
+                let mut cq = open_cluster(ix, ci, gq, &pr, qm, plan, plan.int_det);
+                st.cyc[P_CLSETUP] += tick() - tq;
+                let mut out = RunOut { rows_in: &mut rows_in, pend: &mut pend, iv: None };
+                unsafe { run_cluster(ix, ci, &pr, gq, &mut cq, &cands, t, Mode2::Thr, 0, false, &mut sv, &mut st, &mut out) };
+                sv.recycle(&mut cq);
+            } else {
+                pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
+            }
+        }
+        ncand += rows_in.len() + pend.len();
+        let tf = tick();
+        top.score(ix, &pr, &rows_in, &mut st);
+        top.score(ix, &pr, &pend, &mut st);
+        st.cyc[P_FULL] += tick() - tf;
+    }
+    flush(&mut flat, &mut top, &mut st);
+    st.cyc[P_QUERY] += tick() - t0;
+    let mut ents: Vec<(f64, u32)> = top.h.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
+    ents.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
+    KnnOut2 { ents, st, cands: ncand, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0 }
 }
 
 /// knn2 with each level's item upper half-widths scaled by `dial`.
