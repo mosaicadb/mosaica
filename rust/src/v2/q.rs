@@ -1147,7 +1147,6 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     };
     let interval = matches!(mode, Mode2::Interval(_));
     let sweep = matches!(mode, Mode2::Sweep(_));
-    let csg = _mm512_set1_ps(ix.meta.csg as f32);
     let one6 = _mm512_set1_ps(1.0 + 1e-6);
     let u16x = _mm512_set1_ps((16.0 * U) as f32);
     let mut dmxj = [0f32; J]; // relative rounding bound of each block's latest kappa
@@ -1594,7 +1593,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     }
                     let sdv = _mm512_sqrt_ps(var);
                     let hnv = hpar;
-                    let hh = _mm512_mul_ps(_mm512_fmadd_ps(csg, sdv, hnv), one6);
+                    let hh = _mm512_mul_ps(_mm512_fmadd_ps(_mm512_set1_ps(gp.csgl[lr]), sdv, hnv), one6);
                     est = e;
                     lb = _mm512_sub_ps(e, hh);
                     ub = _mm512_add_ps(e, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));

@@ -167,6 +167,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let t = Timer::new();
     let mut p = load_params(dir);
     // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
+    if args().iter().any(|a| a == "--csg-plain") {
+        crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let rlv = arg_str("--rlv", "");
     if !rlv.is_empty() {
         let new: Vec<usize> = rlv.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect();

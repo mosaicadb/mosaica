@@ -17,6 +17,10 @@ pub mod col;
 pub mod kern;
 pub mod q;
 pub mod setup;
+pub mod tail;
+
+/// Keep the sub-Gaussian constant at every randomised level (`--csg-plain`) instead of the exact-law constants of `tail`.
+pub static CSG_PLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 use crate::derive;
 use crate::index::{item_scale, Params, DA, SEED};
@@ -370,6 +374,8 @@ pub struct GroupPlan2 {
     pub boff: [usize; J + 1],
     pub ypredw: [f32; J],
     pub ytab: Vec<[f32; 256]>,
+    /// per randomised level: the bound's constant for this group's coded blocks there (`tail`)
+    pub csgl: Vec<f32>,
     /// ytab[c] = yhl[1][c >> 4] * yhl[0][c & 15] in f32, so a code is decoded with two 16-entry permutes
     pub yhl: [[[f32; 16]; 2]; J],
     pub rates: Vec<[f64; J]>,
@@ -620,6 +626,7 @@ impl GroupPlan2 {
             boff,
             ypredw,
             ytab: vec![[0.0; 256]; J],
+            csgl: vec![p.meta.csg as f32; nr],
             yhl: [[[0.0; 16]; 2]; J],
             ystep: [256.0; J],
             rates,
@@ -1265,6 +1272,23 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         gp.vq = vq;
         gp.e_inv = e;
     });
+    {
+        // the randomised levels' constants, one per distinct set of coded blocks
+        let tc = Timer::new();
+        let set = |gp: &GroupPlan2, lr: usize| -> Vec<usize> { (0..J).filter(|&j| gp.rates[lr][j] > 0.0).map(|j| gp.nb[j] - 1).collect() };
+        let mut sets: Vec<Vec<usize>> = groups.iter().flat_map(|gp| (0..gp.rates.len()).map(move |lr| set(gp, lr))).collect();
+        sets.sort();
+        sets.dedup();
+        let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
+        let l1 = p.meta.csg * p.meta.csg / 2.0;
+        let vals: HashMap<Vec<usize>, f64> = sets.par_iter().map(|s| (s.clone(), if plain { p.meta.csg } else { tail::level_constant(s, l1) })).collect();
+        for gp in groups.iter_mut() {
+            for lr in 0..gp.rates.len() {
+                gp.csgl[lr] = vals[&set(gp, lr)] as f32;
+            }
+        }
+        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), p.meta.csg, sets.iter().map(|s| (s.clone(), (vals[s] * 1000.0).round() / 1000.0)).collect::<Vec<_>>()));
+    }
     log(format!("plans {:.1}s; residual-stage distortion / tree {:?}; largest inverse defect {:.2e}; rates g0 {:?}", t.s(), TREE_DEPTHS.iter().map(|&j| (1..=MAX_STAGES).map(|r| (codes.d[j][r] / p.gtree[j + r] * 1000.0).round() / 1000.0).collect::<Vec<_>>()).collect::<Vec<_>>(), groups.iter().map(|g| g.e_inv).fold(0.0, f64::max), groups[0].rates));
     let mhats: Vec<Vec<f64>> = (0..k).map(|c| {
         let m = &p.centres[c * n..(c + 1) * n];
