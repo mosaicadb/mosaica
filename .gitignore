@@ -12,3 +12,4 @@ model/
 idx_*/
 work_*/
 site/proofs.html
+.venv/

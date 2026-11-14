@@ -88,11 +88,13 @@ stored contiguously per cluster in sort order.
 1. **Seed.** From the clusters with the best table bound that hold a visible item, read 16-byte
    levels, refine the best candidates, read ~2k + 8 in full; τ₁ = exact k-th best among them.
 2. **Sweep.** The threshold query at τ₁ over visible items.
-3. **Selection.** Among survivors, τ = k-th largest lower bound; exclude items whose upper bound is
-   below τ; certify an item when at most k − 1 others can beat it; refine the rest a level at a
-   time.
+3. **Selection.** Among survivors, drop an item when at least k other items have a lower bound
+   above its upper bound; certify it when at most k − 1 other items have an upper bound at or
+   above its lower bound; refine the rest a level at a time. An exact score replaces the interval.
 
-Cost is within 5–22% of an oracle that knows the k-th score. Correct given valid intervals (proved).
+Cost is within 5–22% of an oracle that knows the k-th score. Correct when the upper bounds of the
+true k best and the lower bounds of every other item hold, whatever the other sides do (proved in
+`reports/bounds3/REPORT.txt`, R6), so k-NN and threshold queries share the one-sided budget.
 
 ### Caching (not built)
 

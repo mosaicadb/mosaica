@@ -1,0 +1,24 @@
+dataset,method,filter,params,nq,k,reps,qps,mean_ms,p50_ms,p99_ms,wrong_sets,wrong_scores,touched_mean,full_reads_mean,bytes_read_mean,ids,recall
+glove-100-angular,exact,all,-,10000,10,2,68.3,14.6373,13.0145,35.4310,0,0,30389,1142753.5,292729676,exact_all_x.npy,1.0000
+glove-100-angular,flat,all,-,10000,10,2,88.0,11.3589,11.2991,12.3029,0,0,0,1183514.0,302979584,flat_all_x.npy,1.0000
+glove-100-angular,exact,vis_0.001,-,10000,10,2,31882.3,0.0314,0.0307,0.0449,0,0,0,1183.0,302848,exact_vis_0.001_x.npy,1.0000
+glove-100-angular,flat,vis_0.001,-,10000,10,2,32164.3,0.0311,0.0303,0.0445,0,0,0,1183.0,302848,flat_vis_0.001_x.npy,1.0000
+glove-100-angular,exact,vis_0.01,-,10000,10,2,4519.7,0.2213,0.2183,0.2641,0,0,0,11835.0,3029760,exact_vis_0.01_x.npy,1.0000
+glove-100-angular,flat,vis_0.01,-,10000,10,2,4554.7,0.2196,0.2160,0.2642,0,0,0,11835.0,3029760,flat_vis_0.01_x.npy,1.0000
+glove-100-angular,exact,vis_0.1,-,10000,10,2,218.9,4.5689,4.5512,5.0735,0,0,2265,117623.4,30153056,exact_vis_0.1_x.npy,1.0000
+glove-100-angular,flat,vis_0.1,-,10000,10,2,252.4,3.9625,3.9300,4.4070,0,0,0,118351.0,30297856,flat_vis_0.1_x.npy,1.0000
+glove-100-angular,exact,vis_0.5,-,10000,10,2,59.1,16.9083,17.0384,17.9906,0,0,10764,579951.8,148526859,exact_vis_0.5_x.npy,1.0000
+glove-100-angular,flat,vis_0.5,-,10000,10,2,60.2,16.6095,16.5418,17.5491,0,0,0,591757.0,151489792,flat_vis_0.5_x.npy,1.0000
+glove-100-angular,approx,all,nprobe=8 eps=0,10000,10,2,3462.1,0.2888,0.2875,0.4028,-1,-1,0,10264.2,2627652,approx_all_nprobe_8_eps_0.npy,0.7702
+glove-100-angular,approx,all,nprobe=16 eps=0,10000,10,2,1637.8,0.6106,0.6800,0.8895,-1,-1,1750,19948.3,5141374,approx_all_nprobe_16_eps_0.npy,0.8437
+glove-100-angular,approx,all,nprobe=32 eps=0,10000,10,2,921.9,1.0847,1.0862,1.3797,-1,-1,2764,38593.1,9933651,approx_all_nprobe_32_eps_0.npy,0.9010
+glove-100-angular,approx,all,nprobe=64 eps=0,10000,10,2,554.3,1.8040,1.8086,2.2607,-1,-1,2888,74021.9,19004029,approx_all_nprobe_64_eps_0.npy,0.9436
+glove-100-angular,approx,all,nprobe=128 eps=0,10000,10,2,305.7,3.2715,3.2804,4.0483,-1,-1,3320,141589.7,36303239,approx_all_nprobe_128_eps_0.npy,0.9731
+glove-100-angular,approx,all,nprobe=256 eps=0,10000,10,2,163.2,6.1267,6.1427,7.3170,-1,-1,4468,270162.2,69222143,approx_all_nprobe_256_eps_0.npy,0.9906
+glove-100-angular,approx,all,nprobe=512 eps=0,10000,10,2,85.1,11.7541,11.8094,13.2814,-1,-1,7731,517701.4,132603540,approx_all_nprobe_512_eps_0.npy,0.9983
+glove-100-angular,approx,all,nprobe=128 eps=0.01,10000,10,2,306.7,3.2603,3.2709,3.9979,-1,-1,3305,141615.7,36309100,approx_all_nprobe_128_eps_0.01.npy,0.9718
+glove-100-angular,approx,all,nprobe=256 eps=0.01,10000,10,2,163.2,6.1271,6.1475,7.3027,-1,-1,4396,270225.7,69236119,approx_all_nprobe_256_eps_0.01.npy,0.9885
+glove-100-angular,approx,all,nprobe=16 eps=0 soar,10000,10,2,863.2,1.1585,1.1615,1.4670,-1,-1,0,33893.2,8676647,approx_all_nprobe_16_eps_0_soar.npy,0.9063
+glove-100-angular,approx,all,nprobe=32 eps=0 soar,10000,10,2,476.2,2.1001,2.0863,3.0520,-1,-1,138,64052.6,16400173,approx_all_nprobe_32_eps_0_soar.npy,0.9496
+glove-100-angular,approx,all,nprobe=64 eps=0 soar,10000,10,2,240.5,4.1579,4.1903,5.0555,-1,-1,2933,120162.1,30816839,approx_all_nprobe_64_eps_0_soar.npy,0.9773
+glove-100-angular,approx,all,nprobe=128 eps=0 soar,10000,10,2,136.4,7.3309,7.3749,8.6759,-1,-1,3950,224238.5,57465222,approx_all_nprobe_128_eps_0_soar.npy,0.9926

@@ -6,13 +6,11 @@ use crate::synth::*;
 use crate::util::*;
 use rayon::prelude::*;
 
-const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
-const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
 
 fn log(s: String) {
     println!("{s}");
     use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/scale.log")).unwrap();
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/scale.log", crate::run2::res_dir())).unwrap();
     writeln!(f, "{s}").unwrap();
 }
 
@@ -69,7 +67,7 @@ fn synth_table(ix: &mut Index, src: &SynthSource, p: &Params, nanch: usize) {
 pub fn run(scale: usize, nq: usize, nanch: usize) {
     let t = Timer::new();
     log(format!("==== scale run x{scale} at {:.0}", now_s()));
-    let p = load_params(DATA);
+    let p = load_params(&crate::run2::data_dir());
     let real = build(&p, Box::new(RealSource::open(&p.xs_path)), 1, &mut |s| log(format!("[real] {s}")));
     let sy = Synth::new(&p, &real, scale);
     let groups_ref: Vec<GroupPlan> = (0..p.meta.g).map(|g| GroupPlan::new(&p, &real.tree, g)).collect();
@@ -77,10 +75,7 @@ pub fn run(scale: usize, nq: usize, nanch: usize) {
     let n = p.meta.n;
     // the build consumes the source; keep a second one for the table and truth passes
     let src2 = SynthSource { sy: Synth::new(&p, &real, scale), groups: &groups_ref };
-    let texts: Vec<Vec<f32>> = p.text_q.chunks(n).map(|v| {
-        let nn = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        v.iter().map(|x| x / nn).collect()
-    }).collect();
+    let texts = crate::run2::load_queries(n);
     drop(real);
     let src_box: Box<dyn Source + '_> = Box::new(src);
     let src_static: Box<dyn Source> = unsafe { std::mem::transmute(src_box) };
@@ -218,7 +213,7 @@ pub fn run(scale: usize, nq: usize, nanch: usize) {
             lines.push(line);
         }
     }
-    std::fs::write(format!("{RES}/scale_{}m.csv", ix.nrows / 1_000_000), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/scale_{}m.csv", crate::run2::res_dir(), ix.nrows / 1_000_000), lines.join("\n") + "\n").unwrap();
     log(format!("scale run done in {:.0}s", t.s()));
 }
 
@@ -228,16 +223,16 @@ pub fn run2(scale: usize, nq: usize) {
     use crate::v2::*;
     let t = Timer::new();
     log(format!("==== v2 scale run x{scale} at {:.0}", now_s()));
-    let p = load_params(DATA);
+    let p = load_params(&crate::run2::data_dir());
     let n = p.meta.n;
     let k = p.meta.k;
-    let prof = crate::derive::load_profile(&format!("{DATA}/prof_h0.25.npy"));
+    let prof = crate::derive::load_profile(&format!("{}/profile.npy", crate::run2::data_dir()));
     let split = !std::env::args().any(|a| a == "--u8");
     // a real build supplies the int8 bases, residual norms and centres
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
         let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: f.map, off: f.off, xs_row: Vec::new() }, 1, split, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { map: f.map, off: f.off, rows: Vec::new() }, 1, split, false, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];
@@ -292,15 +287,12 @@ pub fn run2(scale: usize, nq: usize) {
         vq: vq.clone(),
     };
     let sy_src = mk();
-    let texts: Vec<Vec<f32>> = p.text_q.chunks(n).map(|v| {
-        let nn = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        v.iter().map(|x| x / nn).collect()
-    }).collect();
+    let texts = crate::run2::load_queries(n);
     let real_mhat: Vec<Vec<f64>> = real.cl.iter().map(|c| c.mhat.clone()).collect();
     let sy_full = mk();
     drop(mk);
     drop(real);
-    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), 1, split, &mut |s| log(format!("[synth2] {s}")));
+    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), 1, split, false, &mut |s| log(format!("[synth2] {s}")));
     // support table for synthetic items: p.x = p.m + (V_q^T p).z
     let nanch = 1000.min(k);
     let mut anchors = vec![0f64; nanch * n];
@@ -470,6 +462,6 @@ pub fn run2(scale: usize, nq: usize) {
             lines.push(line);
         }
     }
-    std::fs::write(format!("{RES}/scale2_{}m.csv", ix.nrows / 1_000_000), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/scale2_{}m.csv", crate::run2::res_dir(), ix.nrows / 1_000_000), lines.join("\n") + "\n").unwrap();
     log(format!("v2 scale run done in {:.0}s", t.s()));
 }

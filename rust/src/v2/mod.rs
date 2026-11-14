@@ -13,8 +13,19 @@
 //!
 //! The basis of each group is stored in int8 (one scale per basis vector). The encoder codes z = V_q^-1 r, so
 //! q.r = (V_q^T q).z + q.eps with |eps| <= e_inv |r|, and V_q^T q is computed exactly in integers.
+pub mod col;
 pub mod kern;
 pub mod q;
+pub mod setup;
+pub mod tail;
+
+/// Keep the sub-Gaussian constant at every randomised level (`--csg-plain`) instead of the exact-law constants of `tail`.
+pub static CSG_PLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// N in the randomised levels' budget (`--nguar N`) in place of the item count rounded up to a power of two.
+pub static NGUAR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+/// Design the randomised rates with the constants of `tail` for each set of coded blocks (`--design-exact`), indexed
+/// by the set's bits.
+pub static DESIGN_C: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
 
 use crate::derive;
 use crate::index::{item_scale, Params, DA, SEED};
@@ -341,7 +352,9 @@ impl Part {
             let mask = (1usize << f.nb) - 1;
             f.eid = et.id(core::array::from_fn(|k| v[(k >> f.off) & mask]), f.nb);
         }
-        let ufields = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
+        let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
+        // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        assert!(ufields.len() <= 257, "a part of {} units can overflow its 16-bit table sums; split it into parts of at most 257 units", ufields.len());
         Part { j, fields, ufields }
     }
 }
@@ -366,10 +379,16 @@ pub struct GroupPlan2 {
     pub boff: [usize; J + 1],
     pub ypredw: [f32; J],
     pub ytab: Vec<[f32; 256]>,
+    /// per randomised level: the bound's constant for this group's coded blocks there (`tail`)
+    pub csgl: Vec<f32>,
+    /// ytab[c] = yhl[1][c >> 4] * yhl[0][c & 15] in f32, so a code is decoded with two 16-entry permutes
+    pub yhl: [[[f32; 16]; 2]; J],
     pub rates: Vec<[f64; J]>,
     pub thchg: Vec<Vec<usize>>,
     pub ttab: Vec<[[f32; 16]; J]>,
     pub ktab: Vec<[[f32; 256]; J]>,
+    /// 8-bit kappa codes: ktab[c] = khl[1][c >> 4] * khl[0][c & 15] in f32 (4-bit codes read ktab[..16])
+    pub khl: Vec<[[[f32; 16]; 2]; J]>,
     pub kstep: Vec<[f64; J]>, // kappa code steps per octave, per rise
     pub kbits: Vec<[u8; J]>,  // kappa code bits (4 or 8), per rise
     pub rrow: Vec<Vec<usize>>, // per rand level, per rising block (thchg order): first scalar row of that rise
@@ -380,6 +399,7 @@ pub struct GroupPlan2 {
     pub v8t: Vec<i8>,  // row c = basis vector c (int8)
     pub vsc: Vec<f64>, // scale of basis vector c
     pub vinv: Vec<f64>, // V_q^-1 (build only)
+    pub col: Option<col::ColPlan>, // the columnar store's plan (built with BUILD_COL)
     pub vq: Vec<f64>,   // V_q row-major n x n (build only)
 }
 
@@ -391,7 +411,41 @@ fn rate_depth(r: f64, k: usize, nb: usize) -> u8 {
     }
 }
 
-/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz from the transpose.
+/// Inverse of a row-major n x n matrix by Gauss-Jordan elimination with partial pivoting.
+fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
+    let w = 2 * n;
+    let mut m = vec![0f64; n * w];
+    for i in 0..n {
+        m[i * w..i * w + n].copy_from_slice(&a[i * n..(i + 1) * n]);
+        m[i * w + n + i] = 1.0;
+    }
+    for col in 0..n {
+        let piv = (col..n).max_by(|&p, &q| m[p * w + col].abs().partial_cmp(&m[q * w + col].abs()).unwrap()).unwrap();
+        assert!(m[piv * w + col].abs() > 1e-300, "the int8 basis is singular; refit the index");
+        if piv != col {
+            for k in 0..w {
+                m.swap(piv * w + k, col * w + k);
+            }
+        }
+        let inv = 1.0 / m[col * w + col];
+        for k in 0..w {
+            m[col * w + k] *= inv;
+        }
+        let prow: Vec<f64> = m[col * w..(col + 1) * w].to_vec();
+        for r in 0..n {
+            let f = m[r * w + col];
+            if r != col && f != 0.0 {
+                for (x, &p) in m[r * w..(r + 1) * w].iter_mut().zip(&prow) {
+                    *x -= f * p;
+                }
+            }
+        }
+    }
+    (0..n * n).map(|i| m[(i / n) * w + n + i % n]).collect()
+}
+
+/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz, started from the transpose when
+/// the basis is near orthogonal and from a Gauss-Jordan inverse otherwise (the dual basis).
 fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f64) {
     let mut vsc = vec![0f64; n];
     let mut v8t = vec![0i8; n * n];
@@ -430,6 +484,10 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
         }
         s.sqrt()
     };
+    mm(&vq, &x, &mut t);
+    if defect(&t) > 0.5 {
+        x = gauss_jordan_inverse(&vq, n);
+    }
     for _ in 0..8 {
         mm(&vq, &x, &mut t);
         if defect(&t) < 1e-13 {
@@ -455,7 +513,9 @@ impl GroupPlan2 {
         let lam = &p.lam[g * n..(g + 1) * n];
         let pq = &prof[g * n..(g + 1) * n];
         let sig: Vec<f32> = lam.iter().map(|&l| l.sqrt() as f32).collect();
-        let lamsum = lam.iter().sum::<f64>() as f32;
+        // the item scale divides |r|^2 by its group mean, which is the sum of the coordinates' variances only in an
+        // orthogonal basis
+        let lamsum = p.r2.as_ref().map_or(lam.iter().sum::<f64>(), |r| r[g]) as f32;
         let (moves, states) = det_alloc_tree(lam, pq, dt_, &m.dlv);
         let gc = |l: usize, c: usize| -> f64 {
             let s = states[l][c];
@@ -487,7 +547,10 @@ impl GroupPlan2 {
         boff[J] = n;
         let sj: Vec<f64> = (0..J).map(|j| order[boff[j]..boff[j + 1]].iter().map(|&c| ai[c]).sum()).collect();
         let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[NDL - 1])).collect();
-        let rv = derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM);
+        let rv = match DESIGN_C.get() {
+            Some(cs) => derive::design_by(&sj, &nb, &budgets, &|set| cs[set as usize], tof, QUANTUM),
+            None => derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM),
+        };
         let rates: Vec<[f64; J]> = rv.iter().map(|r| core::array::from_fn(|j| r[j])).collect();
         let nr = rates.len();
         let mut ypredw = [0f32; J];
@@ -555,7 +618,9 @@ impl GroupPlan2 {
             levels.push(LevelPlan { parts, units, srows: 0 });
         }
         let (v8t, vsc, vinv, vq, e_inv) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0.0);
+        let colp = if BUILD_COL.load(std::sync::atomic::Ordering::Relaxed) { Some(col::col_plan(n, lam, pq, &states[NDL - 1], &levels, &d[NDL - 1], et, dt_)) } else { None };
         let mut gp = GroupPlan2 {
+            col: colp,
             sig,
             lamsum,
             states,
@@ -569,11 +634,14 @@ impl GroupPlan2 {
             boff,
             ypredw,
             ytab: vec![[0.0; 256]; J],
+            csgl: vec![p.meta.csg as f32; nr],
+            yhl: [[[0.0; 16]; 2]; J],
             ystep: [256.0; J],
             rates,
             thchg,
             ttab: vec![[[0.0; 16]; J]; nr],
             ktab: vec![[[0.0; 256]; J]; nr],
+            khl: vec![[[[0.0; 16]; 2]; J]; nr],
             kstep: vec![[256.0; J]; nr],
             kbits: vec![[8; J]; nr],
             rrow: Vec::new(),
@@ -613,8 +681,12 @@ impl GroupPlan2 {
         }
         for j in 0..J {
             self.ystep[j] = ys[j];
-            for c in 0..255 {
-                self.ytab[j][c] = 2f64.powf(y0[j] + c as f64 / ys[j]) as f32;
+            for x in 0..16 {
+                self.yhl[j][0][x] = 2f64.powf(x as f64 / ys[j]) as f32;
+                self.yhl[j][1][x] = 2f64.powf(y0[j] + (16 * x) as f64 / ys[j]) as f32;
+            }
+            for c in 0..256 {
+                self.ytab[j][c] = self.yhl[j][1][c >> 4] * self.yhl[j][0][c & 15];
             }
         }
         for lr in 0..tq.len() {
@@ -623,13 +695,91 @@ impl GroupPlan2 {
                     self.ttab[lr][j][c] = tq[lr][j][c];
                 }
                 self.kstep[lr][j] = ks[lr][j];
-                for c in 0..255 {
-                    self.ktab[lr][j][c] = 2f64.powf(k0[lr][j] + c as f64 / ks[lr][j]) as f32;
+                if kb[lr][j] == 8 {
+                    for x in 0..16 {
+                        self.khl[lr][j][0][x] = 2f64.powf(x as f64 / ks[lr][j]) as f32;
+                        self.khl[lr][j][1][x] = 2f64.powf(k0[lr][j] + (16 * x) as f64 / ks[lr][j]) as f32;
+                    }
+                    for c in 0..256 {
+                        self.ktab[lr][j][c] = self.khl[lr][j][1][c >> 4] * self.khl[lr][j][0][c & 15];
+                    }
+                } else {
+                    for c in 0..256 {
+                        self.ktab[lr][j][c] = 2f64.powf(k0[lr][j] + c as f64 / ks[lr][j]) as f32;
+                    }
                 }
             }
         }
         self.kbits = kb;
         self.set_rows();
+    }
+}
+
+/// `k` values that round up the samples `v` at or below their `top` quantile with the least mean square ratio of the
+/// rounded value to the sample, the largest being that quantile (the rest escape): dynamic programming over up to
+/// 1,024 candidate values at quantiles of `v`.
+pub fn roundup_levels(v: &mut Vec<f64>, k: usize, top: f64) -> Vec<f64> {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let hi = quantile(v, top);
+    let xs: Vec<f64> = v.iter().copied().filter(|&x| x <= hi && x > 0.0).collect();
+    let m = xs.len().min(1024);
+    if m < k {
+        return (0..k).map(|c| quantile(v, top * (c + 1) as f64 / k as f64)).collect();
+    }
+    // candidate b is the largest sample of the b-th of m equal-count runs; prefix sums of 1/x^2 and counts by candidate
+    let ends: Vec<usize> = (1..=m).map(|b| b * xs.len() / m).collect();
+    let mut cand: Vec<f64> = ends.iter().map(|&e| xs[e - 1]).collect();
+    cand[m - 1] = hi;
+    let mut pinv = vec![0f64; m + 1];
+    let mut cnt = vec![0f64; m + 1];
+    for b in 0..m {
+        let a = if b == 0 { 0 } else { ends[b - 1] };
+        pinv[b + 1] = pinv[b] + xs[a..ends[b]].iter().map(|x| 1.0 / (x * x)).sum::<f64>();
+        cnt[b + 1] = ends[b] as f64;
+    }
+    // cost of rounding the samples of runs a..=b (a = 0: from the bottom) up to cand[b]
+    let cost = |a: usize, b: usize| cand[b] * cand[b] * (pinv[b + 1] - pinv[a]) - (cnt[b + 1] - cnt[a]);
+    let mut f: Vec<f64> = (0..m).map(|b| cost(0, b)).collect();
+    let mut from = vec![vec![usize::MAX; m]; k];
+    for l in 1..k {
+        let mut g = vec![f64::INFINITY; m];
+        for b in l..m {
+            for a in l - 1..b {
+                let c = f[a] + cost(a + 1, b);
+                if c < g[b] {
+                    g[b] = c;
+                    from[l][b] = a;
+                }
+            }
+        }
+        f = g;
+    }
+    let mut out = vec![0f64; k];
+    let mut b = m - 1;
+    for l in (0..k).rev() {
+        out[l] = cand[b];
+        if l > 0 {
+            b = from[l][b];
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod roundup_tests {
+    use super::*;
+    #[test]
+    fn optimal_levels_round_up_no_worse_than_equal_mass_quantiles() {
+        use rand::SeedableRng;
+        use rand_distr::{Distribution, LogNormal};
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
+        let d = LogNormal::new(-1.0, 0.25).unwrap();
+        let mut v: Vec<f64> = (0..20_000).map(|_| d.sample(&mut rng)).collect();
+        let lv = roundup_levels(&mut v, 15, 0.998);
+        assert!(lv.windows(2).all(|w| w[0] < w[1]) && lv[14] == quantile(&mut v, 0.998));
+        let q: Vec<f64> = (0..15).map(|c| quantile(&mut v, 0.002 + 0.996 * c as f64 / 14.0)).collect();
+        let ex = |l: &[f64]| v.iter().filter(|&&x| x <= l[14]).map(|&x| (l[l.partition_point(|&y| y < x)] / x).powi(2) - 1.0).sum::<f64>();
+        assert!(ex(&lv) < 0.8 * ex(&q), "{} {}", ex(&lv), ex(&q));
     }
 }
 
@@ -645,6 +795,12 @@ pub struct Meta2 {
     pub dlv: Vec<usize>,
     pub rlv: Vec<usize>,
     pub csg: f64,
+    /// The randomised levels' constants are for an index of 2^npow items (all rows, whatever any viewer sees, rounded
+    /// up, unless `--nguar` gave N). Every result carries it; a result cache must not mix constants inside one result
+    /// and must drop its results when npow rises (a fall is safe). The budget is one-sided, so a result is valid for
+    /// its own (query, threshold) or its own k-NN query only: reusing an item's intervals for another threshold, or a
+    /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
+    pub npow: u32,
 }
 impl Meta2 {
     pub fn nl(&self) -> usize {
@@ -672,10 +828,15 @@ pub struct Cl2 {
     pub mvn: f64,
     pub rmax: f64,
     pub smax: f32,
+    pub numax: f64,      // norm sort: the largest |z|, the grid of the stored codes (nu = numax code / 65535)
+    pub bmin: f64,       // norm sort: bounds of m.r over the cluster
+    pub bmax: f64,
 }
 
+/// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
+/// rows in order reads memory in order.
 pub enum Full2 {
-    Real { map: memmap2::Mmap, off: usize, xs_row: Vec<u32> },
+    Real { map: memmap2::Mmap, off: usize, rows: Vec<u16> },
     Synth(q::Synth2),
 }
 
@@ -703,6 +864,26 @@ pub struct Index2 {
     pub full: Full2,
     pub nrows: usize,
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
+    pub ctab: Vec<Vec<kern::CTab>>, // per cluster, per level: the centre's tables (query-independent)
+    pub repack: Vec<f32>,
+    pub col: Option<col::ColStore>,
+    pub nukey: Vec<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
+}
+
+/// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
+/// directory.
+pub const INDEX_FORMAT: u32 = 3;
+
+/// Build the columnar store of the deterministic code as well (index::col).
+pub static BUILD_COL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+impl Cl2 {
+    /// The centre's weights, as the query side combines them: det by coordinate mv sig (f32), rand by position.
+    pub fn wm(&self, gp: &GroupPlan2) -> Vec<f32> {
+        let mut w: Vec<f32> = self.mv32.iter().zip(&gp.sig).map(|(&m, &s)| m * s).collect();
+        w.extend_from_slice(&self.wmr);
+        w
+    }
 }
 
 impl Index2 {
@@ -712,11 +893,12 @@ impl Index2 {
     pub fn k(&self) -> usize {
         self.cl.len()
     }
-    /// cumulative stored bytes per item by level: code, scalars and the 2-byte key
+    /// cumulative stored bytes per item by level: code, scalars and the 2-byte key (with the norm sort, also the
+    /// 2-byte norm code)
     pub fn stored_bytes_per_item(&self) -> Vec<f64> {
         let nl = self.meta.nl();
         let mut out = vec![0.0; nl];
-        let mut tot = 2.0 * self.nrows as f64;
+        let mut tot = if self.nukey.is_empty() { 2.0 } else { 4.0 } * self.nrows as f64;
         for l in 0..nl {
             let mut b = 0.0;
             for c in &self.cl {
@@ -734,11 +916,9 @@ impl Index2 {
     }
     pub fn full_row_f16(&self, row: usize) -> &[u16] {
         match &self.full {
-            Full2::Real { map, off, xs_row } => {
+            Full2::Real { rows, .. } => {
                 let n = self.n();
-                let r = xs_row[row] as usize;
-                let b = &map[off + r * n * 2..off + (r + 1) * n * 2];
-                unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u16, n) }
+                &rows[row * n..(row + 1) * n]
             }
             Full2::Synth(_) => panic!("synthetic rows have no stored f16 vector"),
         }
@@ -761,11 +941,31 @@ pub struct Items2 {
     pub z: Vec<f64>,
     pub ent: Vec<u32>,
     pub ext: Vec<u32>,
-    pub x2max: f64,
+    pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
+    pub nu: Vec<f64>, // with the norm sort: |z|, the residual's norm in the metric, rounded up
+}
+
+impl Items2 {
+    /// The items in ascending order of |z| (z = V_q^-1 r, the residual in the metric of the dual pair), with nu set.
+    pub fn sort_by_nu(self, n: usize) -> Items2 {
+        let nc = self.ah.len();
+        let nu: Vec<f64> = (0..nc).map(|i| self.z[i * n..(i + 1) * n].iter().map(|v| v * v).sum::<f64>().sqrt() * (1.0 + 1e-9) + 1e-12).collect();
+        let mut o: Vec<usize> = (0..nc).collect();
+        o.sort_by(|&a, &b| nu[a].partial_cmp(&nu[b]).unwrap());
+        let mut z = vec![0f64; nc * n];
+        for (i, &k) in o.iter().enumerate() {
+            z[i * n..(i + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
+        }
+        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect() }
+    }
 }
 
 pub trait Source2: Sync {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2;
+    /// The number of rows the build encodes from this source.
+    fn rows(&self, p: &Params) -> usize {
+        p.cstart[p.meta.k]
+    }
 }
 
 pub struct Real2 {
@@ -793,14 +993,14 @@ impl Source2 for Real2 {
                 nx += xv * xv;
                 rmat[i * n + k] = xv - m[k] as f64;
             }
-            x2max = x2max.max((nx - 1.0).abs());
+            x2max = x2max.max(nx - 1.0);
         }
         // z^T = r^T M^T: z_i = M r_i
         let mut z = vec![0f64; nc * n];
         unsafe {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new() }
     }
 }
 
@@ -812,6 +1012,8 @@ struct Calib {
 }
 
 pub struct ClusterCode2 {
+    ccode: Vec<u8>,       // columnar rows (empty without the columnar store)
+    cnrm: Vec<f64>,       // per item: the single norm, then each block's
     codes: Vec<Vec<u8>>,
     scal: Vec<Vec<u8>>,
     esc: Vec<(u8, u8, u32, f32)>, // (level, slot, local row, value)
@@ -858,10 +1060,20 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let svec: Vec<f32> = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).collect();
     let mut wmat = vec![0f64; nc * n];
     let mut val = vec![0f64; n];
+    let cp = if calib { None } else { gp.col.as_ref() };
+    let ncr = cp.map_or(0, |p| p.nrows());
+    let ncn = cp.map_or(0, |p| p.nb + 1);
+    let mut ccode = vec![0u8; ncr * nblk * 16];
+    let mut cnrm = vec![0f64; nc * ncn];
+    let (mut tid, mut sb, mut sc) = (vec![0u8; n], vec![0u8; n], vec![0u8; n]);
     for i in 0..nc {
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
         val.iter_mut().for_each(|v| *v = 0.0);
+        if cp.is_some() {
+            sb.iter_mut().for_each(|v| *v = 0);
+            sc.iter_mut().for_each(|v| *v = 0);
+        }
         for l in 0..NDL {
             let lp = &gp.levels[l];
             for f in &lp.parts[0].fields {
@@ -871,6 +1083,15 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                     FK::Tree { to, .. } => codes.index(to as usize, u),
                     _ => (u - val[c] >= 0.0) as usize,
                 };
+                if cp.is_some() {
+                    match f.kind {
+                        FK::Tree { .. } => tid[c] = code as u8,
+                        _ => {
+                            sb[c] |= (code as u8) << sc[c];
+                            sc[c] += 1;
+                        }
+                    }
+                }
                 val[c] += et.e[f.eid as usize][code << f.off] as f64;
                 setnib(&mut lc[l], lp.units, i, f.unit as usize, (code << f.off) as u8);
             }
@@ -910,6 +1131,25 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
             let k = gp.ridx[pp] as usize;
             let e = z[k] - s * gp.sig[k] as f64 * val[k];
             wmat[i * n + pp] = e / gp.dt[k] as f64;
+        }
+        if let Some(cp) = cp {
+            let mut nb2 = [0f64; col::MAXB];
+            for (k, cc) in cp.coords.iter().enumerate() {
+                let c = cc.c as usize;
+                let v = cp.value(k, tid[c], sb[c]);
+                assert!((v - val[c]).abs() <= 1e-12 * (1.0 + val[c].abs()), "the columnar code of coordinate {c} decodes to {v}, the stream's to {}", val[c]);
+                col::setnib_col(&mut ccode, nblk, i, cc.tree.0 as usize, tid[c] << cc.tree.1);
+                for (q, &(row, off)) in cc.stages.iter().enumerate() {
+                    col::setnib_col(&mut ccode, nblk, i, row as usize, ((sb[c] >> q) & 1) << off);
+                }
+                let u = z[c] / (gp.sig[c] as f64 * s) / cc.h;
+                nb2[cc.blk as usize] += u * u;
+            }
+            let tot: f64 = nb2.iter().sum();
+            cnrm[i * ncn] = tot.sqrt() * (1.0 + 1e-9);
+            for b in 0..cp.nb {
+                cnrm[i * ncn + 1 + b] = nb2[b].sqrt() * (1.0 + 1e-9);
+            }
         }
     }
     let mut ymat = vec![0f64; nc * n];
@@ -1007,6 +1247,9 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                         15
                     }
                 };
+                // the decoded scale must bound the true one: tan(phi) here, |y| at the first randomised level
+                let tdec = if tc < 15 { gp.ttab[lr][j][tc as usize] } else { esc.last().unwrap().3 };
+                assert!(tdec as f64 >= tanf && yhv[j] >= yn[j], "item {i} block {j} level {l}: decoded scale below the true one (tan {tdec} < {tanf} or |y| {} < {})", yhv[j], yn[j]);
                 setnib(&mut ls[l], lp.srows, i, row + kb / 4, tc);
                 // kappa, nearest on the grid; decoded as yh_decoded * ktab[code] in f32
                 let ks = gp.kstep[lr][j];
@@ -1034,12 +1277,13 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     }
     let mut it = it;
     it.z = Vec::new();
-    ClusterCode2 { codes: lc, scal: ls, esc, items: it, calib: cal }
+    ClusterCode2 { ccode, cnrm, codes: lc, scal: ls, esc, items: it, calib: cal }
 }
 
 /// Query-independent per-cluster data.
 fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+    assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
     // mv = V_q^T m
     let mut mv = vec![0f64; n];
@@ -1083,7 +1327,7 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat, mv32, wmr, bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax }
+    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat, mv32, wmr, bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
 }
 
 pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
@@ -1091,11 +1335,18 @@ pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
 }
 
 /// Build the fast-scan index. `prof` is the G x n profile.
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, log: &mut dyn FnMut(String)) -> Index2 {
+/// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg };
+    // the guarantee's N: the item count rounded up to a power of two, or --nguar
+    let rows = src.rows(p);
+    let nguar = NGUAR.get().copied().unwrap_or_else(|| (rows.max(1) as f64).log2().ceil().exp2());
+    if nguar < rows as f64 {
+        log(format!("--nguar {nguar} is below the {rows} rows built: the guarantee covers only {nguar} rows"));
+    }
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg, npow: nguar.log2().ceil() as u32 };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
@@ -1116,6 +1367,25 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         gp.vq = vq;
         gp.e_inv = e;
     });
+    {
+        // the randomised levels' constants, one per distinct set of coded blocks
+        let tc = Timer::new();
+        let set = |gp: &GroupPlan2, lr: usize| -> Vec<usize> { (0..J).filter(|&j| gp.rates[lr][j] > 0.0).map(|j| gp.nb[j] - 1).collect() };
+        let mut sets: Vec<Vec<usize>> = groups.iter().flat_map(|gp| (0..gp.rates.len()).map(move |lr| set(gp, lr))).collect();
+        sets.sort();
+        sets.dedup();
+        let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
+        // one event per (item, level), on the side that would make the item's decision wrong: delta = eps / (N L)
+        let l1 = (nguar * meta.rlv.len() as f64 / p.meta.eps).ln();
+        log(format!("query budget: N = {nguar:.0} (2^{}; {} items), L = {}, eps = {:e}, one side per event: ln(1/delta) = {l1:.4}", meta.npow, rows, meta.rlv.len(), p.meta.eps));
+        let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { ((2.0 * l1).sqrt(), tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
+        for gp in groups.iter_mut() {
+            for lr in 0..gp.rates.len() {
+                gp.csgl[lr] = vals[&set(gp, lr)].0 as f32;
+            }
+        }
+        log(format!("randomised constants {:.1}s (sub-Gaussian c = {:.3}): {:?}", tc.s(), (2.0 * l1).sqrt(), sets.iter().map(|s| (s.clone(), (vals[s].0 * 1000.0).round() / 1000.0, vals[s].1)).collect::<Vec<_>>()));
+    }
     log(format!("plans {:.1}s; residual-stage distortion / tree {:?}; largest inverse defect {:.2e}; rates g0 {:?}", t.s(), TREE_DEPTHS.iter().map(|&j| (1..=MAX_STAGES).map(|r| (codes.d[j][r] / p.gtree[j + r] * 1000.0).round() / 1000.0).collect::<Vec<_>>()).collect::<Vec<_>>(), groups.iter().map(|g| g.e_inv).fold(0.0, f64::max), groups[0].rates));
     let mhats: Vec<Vec<f64>> = (0..k).map(|c| {
         let m = &p.centres[c * n..(c + 1) * n];
@@ -1168,8 +1438,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
             for j in 0..J {
                 let mut v = pool(&|c| &c.tpool[lr][j]);
                 if !v.is_empty() {
+                    let lv = roundup_levels(&mut v, 15, 0.998);
                     for cc in 0..15 {
-                        tq[lr][j][cc] = (quantile(&mut v, 0.002 + 0.996 * cc as f64 / 14.0) * (1.0 + 1e-6)) as f32;
+                        tq[lr][j][cc] = (lv[cc] * (1.0 + 1e-6)) as f32;
                     }
                 }
                 let (a, b) = grid(&mut pool(&|c| &c.kapool[lr][j]), 256.0);
@@ -1195,6 +1466,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let ccodes: Vec<ClusterCode2> = (0..k).into_par_iter().map(|c| {
         let g = p.grp[c];
         let it = src.items(c, p, &groups[g], &mhats[c]);
+        let it = if nusort { it.sort_by_nu(n) } else { it };
         encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], false)
     }).collect();
     log(format!("encoded {:.1}s", t.s()));
@@ -1202,12 +1474,53 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let infos: Vec<Cl2> = ccodes.par_iter().enumerate().map(|(c, cc)| {
         let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, &cc.items, x2, n);
         info.g = p.grp[c];
+        if nusort {
+            // m.r = mn a - mn^2 from the key, within mn DA
+            let it = &cc.items;
+            info.numax = (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30);
+            let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
+            info.bmax = it.ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
+            info.bmin = it.ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
+        }
         info
     }).collect();
     let nl = meta.nl();
+    // the columnar store's norm grids per group, from every item of the group
+    let build_col = groups[0].col.is_some();
+    if build_col {
+        for g in 0..groups.len() {
+            let nn = groups[g].col.as_ref().unwrap().nb + 1;
+            let mut vals = vec![Vec::new(); nn];
+            for (c, cc) in ccodes.iter().enumerate() {
+                if p.grp[c] != g {
+                    continue;
+                }
+                for (i, x) in cc.cnrm.iter().enumerate() {
+                    vals[i % nn].push(*x);
+                }
+            }
+            groups[g].col.as_mut().unwrap().set_grids(&vals);
+        }
+    }
+    if build_col {
+        let cps: Vec<&col::ColPlan> = groups.iter().map(|g| g.col.as_ref().unwrap()).collect();
+        let nd: Vec<usize> = cps.iter().map(|c| c.coords.len()).collect();
+        let nr: Vec<usize> = cps.iter().map(|c| c.rows.len()).collect();
+        let nu: Vec<usize> = cps.iter().map(|c| c.units.len()).collect();
+        log(format!("columnar store: units per group mean {:.1}", nu.iter().sum::<usize>() as f64 / nu.len() as f64));
+        let mut hist = [0usize; 9];
+        for c in &cps {
+            for cc in &c.coords {
+                hist[(cc.j + cc.r) as usize] += 1;
+            }
+        }
+        log(format!("columnar store: coded coordinates per group {}..{} (mean {:.0}), rows {}..{} (mean {:.0}, {:.1} B); bits per coordinate (count over groups, 0..8) {:?}; blocks {:?} of group 0",
+            nd.iter().min().unwrap(), nd.iter().max().unwrap(), nd.iter().sum::<usize>() as f64 / nd.len() as f64, nr.iter().min().unwrap(), nr.iter().max().unwrap(), nr.iter().sum::<usize>() as f64 / nr.len() as f64, nr.iter().sum::<usize>() as f64 / nr.len() as f64 / 2.0, hist, cps[0].bstart));
+    }
+    let mut cst = col::ColStore::default();
     let mut row0 = 0;
     let mut cl = Vec::with_capacity(k);
-    let (mut ahat, mut row_ent, mut xs_row) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut ahat, mut row_ent, mut xs_row, mut nukey) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut lcode: Vec<Vec<u8>> = vec![Vec::new(); nl];
     let mut lscal: Vec<Vec<u8>> = vec![Vec::new(); nl];
     let mut coff: Vec<Vec<usize>> = vec![Vec::new(); nl];
@@ -1226,7 +1539,24 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         for &(l, slot, i, v) in &cc.esc {
             esc.insert((l, slot, (row0 + i as usize) as u32), v);
         }
+        if build_col {
+            let cp = groups[info.g].col.as_ref().unwrap();
+            let nn = cp.nb + 1;
+            let nblk = (nc + BLK - 1) / BLK;
+            cst.coff.push(cst.code.len());
+            cst.code.extend_from_slice(&cc.ccode);
+            cst.noff.push(cst.nrm.len());
+            let base = cst.nrm.len();
+            cst.nrm.resize(base + nn * nblk * BLK, 0);
+            for i in 0..nc {
+                for q in 0..nn {
+                    cst.nrm[base + q * nblk * BLK + i] = cp.nu_code(q, cc.cnrm[i * nn + q]);
+                }
+            }
+        }
         ahat.extend_from_slice(&cc.items.ah);
+        // codes rounded up on the cluster's grid: nondecreasing in sort order
+        nukey.extend(cc.items.nu.iter().map(|&v| ((v / info.numax * 65535.0).ceil() as u32).min(65535) as u16));
         row_ent.extend_from_slice(&cc.items.ent);
         xs_row.extend_from_slice(&cc.items.ext);
         row0 += nc;
@@ -1238,6 +1568,8 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         lcode[l].extend_from_slice(&[0u8; 128]);
         lscal[l].extend_from_slice(&[0u8; 128]);
     }
+    cst.code.extend_from_slice(&[0u8; 128]);
+    cst.nrm.extend_from_slice(&[0u8; 128]);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
         gp.vq = Vec::new();
@@ -1246,17 +1578,32 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     let maxent = row_ent.iter().copied().max().unwrap_or(0) as usize;
     let mut ent_row = vec![u32::MAX; maxent + 1];
     for (r, &e) in row_ent.iter().enumerate() {
+        // k-NN counts rows, which is exact only with one row per entity
+        assert!(ent_row[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
         ent_row[e as usize] = r as u32;
     }
     let mut full = full;
     match &mut full {
-        Full2::Real { xs_row: xr, .. } => *xr = xs_row,
+        Full2::Real { map, off, rows } => {
+            let src = unsafe { std::slice::from_raw_parts(map[*off..].as_ptr() as *const u16, (map.len() - *off) / 2) };
+            *rows = vec![0u16; nrows * n];
+            rows.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+        }
         Full2::Synth(sy) => {
             sy.ext = xs_row;
             sy.row_cl = cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
         }
     }
+    let ctab: Vec<Vec<kern::CTab>> = cl.par_iter().map(|c| {
+        let gp = &groups[c.g];
+        let wm = c.wm(gp);
+        gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
+    }).collect();
     let ix = Index2 {
+        col: if build_col { Some(cst) } else { None },
+        nukey,
+        repack: vec![0.6; meta.nl()],
+        ctab,
         meta,
         groups,
         codes,

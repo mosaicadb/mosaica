@@ -1,0 +1,27 @@
+==== run at 1794623866: ["/home/joe/code/vexact-combined-target/release/vexact", "--v2", "--int", "--no-approx", "--index", "/home/joe/code/vexact-combined-data/c50k/pca", "--queries", "/home/joe/code/vexact-data/bioclip2-text/text_q.npy", "--item-queries", "/home/joe/code/vexact-combined-data/c50k/item_q.npy", "--results", "/home/joe/code/vexact-combined-data/res/s1_50k_pca", "verify", "oracle", "--vitem", "200", "--vtext", "200"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 1.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 0.5, 0.25, 0.0], [1.0, 1.0, 0.25, 0.0], [1.0, 1.0, 0.5, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 3.2s
+[build2] encoded 5.2s
+[build2] assembled 5.2s; x2 bound 2.290e-4; escapes: det norms 3, |y| 158, kappa 810, tan 1960
+[plan] calibrated in 0.2s
+[plan] full_us=0.11834386574201276 item_us0=0.009581260631144983 item_us1=0.03832504252457993 cl_us0=1.9162521262289967 cl_us1=9.581260631144984 grp_us=67.06882441801488 scan_us=0.10804706719459858 cut_us=1.564889375 seed_us=367.25812500000006 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"pca","profile":"h25"}
+built v2 (16-bit tables, profile /home/joe/code/vexact-combined-data/c50k/pca/profile.npy) 49500 rows, 50 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 55.6, 68.0, 73.0, 82.0, 92.4, 111.5, 129.1, 146.8, 164.5, 180.7, 214.6, 247.6, 284.7]
+verify2 0/400 0s wrong in/out 0/0 det 0 rand 0 checked 1318485 maxsd 4.79
+verify2 50/400 3s wrong in/out 0/0 det 0 rand 0 checked 28470440 maxsd 4.79
+verify2 100/400 5s wrong in/out 0/0 det 0 rand 0 checked 28470440 maxsd 4.79
+verify2 150/400 8s wrong in/out 0/0 det 0 rand 0 checked 28470440 maxsd 4.79
+verify2 200/400 10s wrong in/out 0/0 det 0 rand 0 checked 30500407 maxsd 4.79
+verify2 250/400 14s wrong in/out 0/0 det 0 rand 0 checked 78360134 maxsd 5.01
+verify2 300/400 17s wrong in/out 0/0 det 0 rand 0 checked 78360134 maxsd 5.01
+verify2 350/400 20s wrong in/out 0/0 det 0 rand 0 checked 78360134 maxsd 5.01
+verify2 filtered 1/1000: 49 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/100: 496 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/10: 4950 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/2: 24751 visible, wrong in/out 0/0, k-NN mismatches 0
+VERIFY2 400 queries x 5 answer sizes: wrong-in 0 wrong-out 0; interval checks 78360134 (det violations 0, rand violations 0); largest randomised error 5.01 sd (c = 9.46); k-NN mismatches 0 of 400 (three plans each); filtered: 40 queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts
+VERIFY2 checker: 7475790 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [153226091, 145855735, 137766210, 131005792, 125108372, 115227582, 107008684, 103685977, 95324719, 82338637, 73318359, 61628314, 52886335, 41896777, 35818138, 29190726, 22681081, 19239114, 15930448, 10356819, 8315871]; decided in/out [423962, 255247, 202169, 170509, 293667, 261281, 121884, 364956, 581409, 270698, 505216, 403064, 873934, 563403, 902397, 1162267, 805058, 910948, 1746498, 760063, 0] / [6946394, 7834278, 6558249, 5726911, 9587123, 7957617, 3200823, 7996302, 12404673, 8749580, 11184829, 8338915, 10115624, 5515236, 5725015, 5347378, 2636909, 2397718, 3827131, 1280885, 0]
+VERIFY2 item scale against f64: 49500 rows, 0 beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = 1.63e-3; the build's divisor over E|r|^2 per group 1.00000 to 1.00000
+oracle dump: 40 queries, 280 results, 773 visible entities, to /home/joe/code/vexact-combined-data/res/s1_50k_pca/oracle

@@ -1,0 +1,5 @@
+variant,class,answer_frac,threads,wall_ms,cpu_ms_total,anchor,cut,basis,rotations,cluster setup,tables,re-pack,level decode,bounds+decisions+compaction,full vectors,candidate init,result bitmap,bytes_read,full_reads,wrong
+levels,item,0.01,1,11.13,13.70,0.19,1.53,1.51,0.37,0.56,1.99,2.43,1.41,2.14,0.69,0.75,0.13,21.36,7083,0
+levels,item,0.1,1,101.72,87.37,0.21,1.61,3.89,0.77,1.81,11.57,17.00,12.03,27.49,6.24,3.34,1.42,203.75,56667,0
+levels,text,0.01,1,72.88,55.76,0.21,1.69,4.07,0.81,1.77,9.30,12.45,7.30,13.52,1.23,3.25,0.15,75.83,9739,0
+levels,text,0.1,1,107.04,92.98,0.22,1.66,3.96,0.78,1.92,12.30,18.60,12.36,28.75,7.44,3.52,1.48,216.95,65044,0

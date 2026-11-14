@@ -1,9 +1,11 @@
+mod ann;
 mod derive;
 mod index;
 mod kernel;
 mod query;
 mod run2;
 mod scale;
+mod simd;
 mod v2;
 mod synth;
 mod util;
@@ -16,8 +18,6 @@ use roaring::RoaringBitmap;
 use std::io::Write;
 use util::*;
 
-const DATA: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/rustdata/m768";
-const RES: &str = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/research-branch/rust/results";
 
 struct Ctx {
     p: Params,
@@ -56,7 +56,7 @@ fn arg_str(k: &str) -> Option<String> {
 
 /// Parameters with the profile-dependent ones derived from `--profile <file.npy>` when given.
 pub fn params_with_profile(kk: usize) -> Params {
-    let mut p = load_params(DATA);
+    let mut p = load_params(&crate::run2::data_dir());
     if let Some(pf) = arg_str("--profile") {
         let (a, b) = apply_profile(&mut p, &pf);
         println!("profile {pf}: derived parameters differ from the exported ones in {a} frb and {b} rate entries");
@@ -65,7 +65,7 @@ pub fn params_with_profile(kk: usize) -> Params {
 }
 
 fn setup(kk: usize, nanch: usize, tag: &str) -> Ctx {
-    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{RES}/{tag}.log")).unwrap();
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), std::env::args().collect::<Vec<_>>());
     let t = Timer::new();
@@ -82,10 +82,7 @@ fn setup(kk: usize, nanch: usize, tag: &str) -> Ctx {
         ent_xs[e as usize] = r as u32;
     }
     let items: Vec<Vec<f32>> = p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect();
-    let texts: Vec<Vec<f32>> = p.text_q.chunks(n).map(|v| {
-        let nn = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        v.iter().map(|x| x / nn).collect()
-    }).collect();
+    let texts = crate::run2::load_queries(n);
     let c = Ctx { p, ix, xs, ent_xs, items, texts };
     out!("built {} rows, {} clusters, {} anchors in {:.1}s; stored bytes/item cumulative by level: {:?}", c.ix.nrows, c.ix.k(), c.ix.nanch, t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -156,7 +153,7 @@ fn verify(c: &mut Ctx, nitem: usize, ntext: usize, ncheck: usize) {
     let _ = n;
     out!("VERIFY {} queries x 4 answer sizes: result-set violations wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN k=10 mismatches {} of {}",
         qs.len(), wrong_in, wrong_out, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, knn_bad, qs.len());
-    let mut f = std::fs::File::create(format!("{RES}/verify_1m.csv")).unwrap();
+    let mut f = std::fs::File::create(format!("{}/verify_1m.csv", crate::run2::res_dir())).unwrap();
     writeln!(f, "q,class,answer_frac,t,truth_size,wrong_in,wrong_out,touched,full_reads").unwrap();
     for r in rows {
         writeln!(f, "{r}").unwrap();
@@ -206,7 +203,7 @@ fn levels(c: &mut Ctx) {
             prev = ns;
         }
     }
-    std::fs::write(format!("{RES}/levels.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/levels.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 /// memory read bandwidth (sum of u64 over a large buffer)
@@ -429,7 +426,7 @@ fn e2e(c: &mut Ctx, nq: usize, nflat: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/e2e_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/e2e_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn batch(c: &mut Ctx, total: usize) {
@@ -482,7 +479,7 @@ fn batch(c: &mut Ctx, total: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/batch_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/batch_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn filtered(c: &mut Ctx, nq: usize) {
@@ -599,7 +596,7 @@ fn filtered(c: &mut Ctx, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/filter_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/filter_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 /// Disk: levels past a residency cut and the full vectors in files, laid out as in memory (level-major, per cluster,
@@ -611,7 +608,8 @@ fn disk(c: &mut Ctx, nq: usize) {
     let n = ix.n();
     let nl = ix.meta.nl();
     let fl = c.flat();
-    let dir = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/diskfiles";
+    let dir = format!("{}/diskfiles", crate::run2::res_dir());
+    let dir = dir.as_str();
     std::fs::create_dir_all(dir).unwrap();
     // files: one per level (planes; th words follow), and the full vectors in row order
     let mut lvl_base = vec![0u64; nl];
@@ -737,7 +735,7 @@ fn disk(c: &mut Ctx, nq: usize) {
             }
         }
     }
-    std::fs::write(format!("{RES}/disk_1m.csv"), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/disk_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
 fn main() {
@@ -747,10 +745,14 @@ fn main() {
     let kk = get("--clusters", 100000);
     let nanch = get("--anchors", 100000);
     if has("checkderive") {
-        let mut p = load_params(DATA);
-        let pf = format!("{DATA}/prof_qmix.npy");
+        let mut p = load_params(&crate::run2::data_dir());
+        let pf = format!("{}/prof_qmix.npy", crate::run2::data_dir());
         let (a, b) = apply_profile(&mut p, &pf);
         println!("qmix profile re-derived: {a} frb entries and {b} rate entries differ from the numpy export");
+        return;
+    }
+    if has("qvbench") {
+        v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
         return;
     }
     if has("--v2") {
@@ -772,7 +774,28 @@ fn main() {
             run2::bytesq2(&c, get("--nq", 100));
         }
         if has("e2e") {
-            run2::e2e2(&c, get("--nq", 100), get("--nflat", 20));
+            // further variants: another index (--index-b, --index-c) and/or plan switches (--b, --c), measured
+            // interleaved with the first
+            // (a variant that only changes plan flags shares the first variant's index)
+            let mut extra = Vec::new();
+            let mut same = Vec::new();
+            for v in ["b", "c"] {
+                let (ib, bf) = (run2::arg_str(&format!("--index-{v}"), ""), run2::arg_str(&format!("--{v}"), ""));
+                if !ib.is_empty() {
+                    extra.push((v, run2::setup2_at("run2", &ib, &bf)));
+                } else if !bf.is_empty() {
+                    // the columnar store is built only when the first variant's flags ask for it
+                    if bf.split(',').any(|f| f.trim().starts_with("col")) && c.ix.col.is_none() {
+                        eprintln!("--{v} {bf} needs the columnar store, which the first variant's index was built without; add --index-{v} DIR to build its own, or --colstore");
+                        std::process::exit(2);
+                    }
+                    same.push((v, run2::plan_flags(c.plan, &bf)));
+                }
+            }
+            let mut vs: Vec<(&str, &run2::Ctx2, v2::q::Plan)> = vec![("a", &c, c.plan)];
+            vs.extend(extra.iter().map(|(v, cx)| (*v, cx, cx.plan)));
+            vs.extend(same.iter().map(|(v, p)| (*v, &c, *p)));
+            run2::e2e2(&vs, get("--nq", 100));
         }
         if has("breakdown") {
             run2::breakdown2(&c, get("--nq", 20));
@@ -780,7 +803,23 @@ fn main() {
         if has("filter") {
             run2::filter2(&c, get("--fnq", 30));
         }
+        if has("scanbench") {
+            run2::scanbench(&c, get("--nq", 20));
+        }
+        if has("oracle") {
+            run2::oracle_dump(&c, get("--onq", 20));
+        }
+        if has("ann-truth") {
+            ann::truth(&c, get("--k", 10));
+        }
+        if has("ann") {
+            ann::run(&c, get("--k", 10));
+        }
         return;
+    }
+    if !std::arch::is_x86_feature_detected!("avx512f") {
+        eprintln!("the version 1 index needs AVX-512, which this CPU lacks; use --v2");
+        std::process::exit(2);
     }
     let tag = if has("--scale") { "scale" } else { "run1m" };
     if has("--scale") {

@@ -60,20 +60,25 @@ pub fn bits_of(r: f64, nb: usize, quantum: usize) -> usize {
 
 /// Greedy design of the randomised levels' block rates (port of the numpy `design`).
 pub fn design(s: &[f64], nb: &[usize], budgets: &[usize], c: f64, tof: &dyn Fn(f64) -> f64, quantum: usize) -> Vec<Vec<f64>> {
+    design_by(s, nb, budgets, &|_| c, tof, quantum)
+}
+
+/// As `design`, with the bound's constant a function of the set of coded blocks (bit k: block k).
+pub fn design_by(s: &[f64], nb: &[usize], budgets: &[usize], cf: &dyn Fn(u32) -> f64, tof: &dyn Fn(f64) -> f64, quantum: usize) -> Vec<Vec<f64>> {
     let j = s.len();
     let h = |ri: &[usize]| -> f64 {
         let mut unc = 0.0;
         let mut v = 0.0;
-        let mut any = false;
+        let mut set = 0u32;
         for k in 0..j {
             if ri[k] == 0 {
                 unc += s[k];
             } else {
-                any = true;
+                set |= 1 << k;
                 v += s[k] * s[k] * tof(MENU[ri[k]]) / (nb[k] - 1) as f64;
             }
         }
-        if any { unc + c * v.sqrt() } else { s.iter().sum() }
+        if set != 0 { unc + cf(set) * v.sqrt() } else { s.iter().sum() }
     };
     let mut ri = vec![0usize; j];
     let mut used = 0usize;

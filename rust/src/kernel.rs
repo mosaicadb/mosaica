@@ -30,13 +30,24 @@ pub struct Stats {
     pub viol_rand: u64,
     pub checked: u64,
     pub max_sd: f64,
-    pub cyc: [u64; 12], // time-stamp-counter cycles by phase (v2 breakdown)
+    pub imp_checked: u64, // deterministic decisions checked against the f64 certificate (verify)
+    pub imp_fail: u64,    // of which the f64 certificate does not imply the decision
+    pub cert_viol: u64,   // lanes whose exact score lies outside the f64 certificate
+    pub cyc: [u64; 32], // time-stamp-counter cycles by phase (v2 breakdown), then counts (v2::q::C_*)
+    pub col_bytes: f64,     // bytes read on the columnar path (key, scalars, rows)
+    pub col_enter: Vec<u64>, // items entering each check of the columnar path
+    pub col_dec: Vec<u64>,   // and decided there
+    pub col_nread: u64,      // items that read their block norms
+    pub col_hw: Vec<[f64; 5]>, // diagnostics per check (VEXACT_COLDBG): lanes, fixed part, rho5 part, unread part, |est - t|
+    pub lcyc: Vec<u64>, // time-stamp-counter cycles of each level's blocks, tables not included
+    pub errs: Vec<(u8, f32)>, // (level, |true - estimate| / half-width), when v2::q::ERRS is set
 }
 impl Stats {
     pub fn new(nl: usize) -> Stats {
-        Stats { enter: vec![0; nl + 1], dec_in: vec![0; nl + 1], dec_out: vec![0; nl + 1], blocks: vec![0; nl + 1], ..Default::default() }
+        Stats { lcyc: vec![0; nl + 1], enter: vec![0; nl + 1], dec_in: vec![0; nl + 1], dec_out: vec![0; nl + 1], blocks: vec![0; nl + 1], ..Default::default() }
     }
     pub fn add(&mut self, o: &Stats) {
+        self.errs.extend_from_slice(&o.errs);
         for (a, b) in self.enter.iter_mut().zip(&o.enter) {
             *a += b;
         }
@@ -63,8 +74,32 @@ impl Stats {
         self.viol_rand += o.viol_rand;
         self.checked += o.checked;
         self.max_sd = self.max_sd.max(o.max_sd);
-        for k in 0..12 {
+        self.imp_checked += o.imp_checked;
+        self.imp_fail += o.imp_fail;
+        self.cert_viol += o.cert_viol;
+        for k in 0..self.cyc.len() {
             self.cyc[k] += o.cyc[k];
+        }
+        self.col_bytes += o.col_bytes;
+        self.col_nread += o.col_nread;
+        if self.col_enter.len() < o.col_enter.len() {
+            self.col_enter.resize(o.col_enter.len(), 0);
+            self.col_dec.resize(o.col_enter.len(), 0);
+        }
+        if self.col_hw.len() < o.col_hw.len() {
+            self.col_hw.resize(o.col_hw.len(), [0.0; 5]);
+        }
+        for (a, b) in self.col_hw.iter_mut().zip(&o.col_hw) {
+            for i in 0..5 {
+                a[i] += b[i];
+            }
+        }
+        for (k, (a, b)) in o.col_enter.iter().zip(&o.col_dec).enumerate() {
+            self.col_enter[k] += a;
+            self.col_dec[k] += b;
+        }
+        for (a, b) in self.lcyc.iter_mut().zip(&o.lcyc) {
+            *a += b;
         }
     }
 }
@@ -531,6 +566,7 @@ pub unsafe fn run_block<const NQ: usize>(
 // ---------------- flat scans ----------------
 
 /// f16 x f32 dot, 16 lanes, f32 accumulation. |error| <= (n/16 + 4) * 2^-24 * sum |q_i x_i|.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
     let n = q.len();
@@ -558,6 +594,7 @@ pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
 }
 
 /// Four rows at a time (more loads in flight).
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
     let n = q.len();
@@ -574,7 +611,8 @@ pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
     [_mm512_reduce_add_ps(s[0]), _mm512_reduce_add_ps(s[1]), _mm512_reduce_add_ps(s[2]), _mm512_reduce_add_ps(s[3])]
 }
 
-/// int8 x int16 dot via vpmaddwd (exactly as the review's baseline).
+/// int8 x int16 dot via vpmaddwd.
+#[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
 pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
     let n = q.len();
@@ -587,6 +625,84 @@ pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
         i += 32;
     }
     _mm512_reduce_add_epi32(s)
+}
+
+#[cfg(not(target_feature = "avx512f"))]
+#[inline(always)]
+unsafe fn hsum_ps(v: __m256) -> f32 {
+    let x = _mm_add_ps(_mm256_castps256_ps128(v), _mm256_extractf128_ps::<1>(v));
+    let x = _mm_add_ps(x, _mm_movehl_ps(x, x));
+    _mm_cvtss_f32(_mm_add_ss(x, _mm_movehdup_ps(x)))
+}
+
+/// f16 x f32 dot, four 8-lane accumulators (32 lanes, as the AVX-512 kernel), f32 accumulation.
+/// |error| <= (n/16 + 4) * 2^-24 * sum |q_i x_i|.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma,f16c")]
+pub unsafe fn dot_f16(q: &[f32], x: &[u16]) -> f32 {
+    let n = q.len();
+    let mut s = [_mm256_setzero_ps(); 4];
+    let mut i = 0;
+    while i + 32 <= n {
+        for k in 0..4 {
+            let xv = _mm256_cvtph_ps(_mm_loadu_si128(x.as_ptr().add(i + 8 * k) as *const _));
+            s[k] = _mm256_fmadd_ps(xv, _mm256_loadu_ps(q.as_ptr().add(i + 8 * k)), s[k]);
+        }
+        i += 32;
+    }
+    while i + 16 <= n {
+        for k in 0..2 {
+            let xv = _mm256_cvtph_ps(_mm_loadu_si128(x.as_ptr().add(i + 8 * k) as *const _));
+            s[k] = _mm256_fmadd_ps(xv, _mm256_loadu_ps(q.as_ptr().add(i + 8 * k)), s[k]);
+        }
+        i += 16;
+    }
+    let mut r = hsum_ps(_mm256_add_ps(_mm256_add_ps(s[0], s[2]), _mm256_add_ps(s[1], s[3])));
+    while i < n {
+        r += crate::util::f16_to_f32(x[i]) * q[i];
+        i += 1;
+    }
+    r
+}
+
+/// Four rows at a time (more loads in flight); n a multiple of 16, two 8-lane accumulators per row.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma,f16c")]
+pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
+    let n = q.len();
+    let mut s = [[_mm256_setzero_ps(); 2]; 4];
+    let mut i = 0;
+    while i + 16 <= n {
+        let q0 = _mm256_loadu_ps(q.as_ptr().add(i));
+        let q1 = _mm256_loadu_ps(q.as_ptr().add(i + 8));
+        for r in 0..4 {
+            let x0 = _mm256_cvtph_ps(_mm_loadu_si128(x[r].as_ptr().add(i) as *const _));
+            let x1 = _mm256_cvtph_ps(_mm_loadu_si128(x[r].as_ptr().add(i + 8) as *const _));
+            s[r][0] = _mm256_fmadd_ps(x0, q0, s[r][0]);
+            s[r][1] = _mm256_fmadd_ps(x1, q1, s[r][1]);
+        }
+        i += 16;
+    }
+    core::array::from_fn(|r| hsum_ps(_mm256_add_ps(s[r][0], s[r][1])))
+}
+
+/// int8 x int16 dot via vpmaddwd.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn dot_i8(q: &[i16], x: &[i8]) -> i32 {
+    let n = q.len();
+    let mut s = _mm256_setzero_si256();
+    let mut i = 0;
+    while i + 16 <= n {
+        let xv = _mm256_cvtepi8_epi16(_mm_loadu_si128(x.as_ptr().add(i) as *const _));
+        let qv = _mm256_loadu_si256(q.as_ptr().add(i) as *const _);
+        s = _mm256_add_epi32(s, _mm256_madd_epi16(xv, qv));
+        i += 16;
+    }
+    let v = _mm_add_epi32(_mm256_castsi256_si128(s), _mm256_extracti128_si256::<1>(s));
+    let v = _mm_add_epi32(v, _mm_shuffle_epi32::<0x4e>(v));
+    let v = _mm_add_epi32(v, _mm_shuffle_epi32::<0xb1>(v));
+    _mm_cvtsi128_si32(v)
 }
 
 /// QV = V^T q for several queries in one pass over a transposed basis (row c of vt is column c of V); f32 products,
@@ -619,6 +735,44 @@ pub unsafe fn basis_matvec(vt: &[f32], n: usize, qs: &[&[f64]], out: &mut [Vec<f
                 out[q0 + b][c] = r;
             }
             q0 += 4;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::*;
+
+    /// dot_f16 and dot_f16_x4 against the exact product, within the bound the scans use: (n/16 + 6) u |q| |x|.
+    #[test]
+    fn f16_dots_within_their_bound() {
+        let mut z = 12345u64;
+        let mut rnd = || {
+            z = z.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((z >> 33) as f64 / (1u64 << 31) as f64 * 2.0 - 1.0) as f32
+        };
+        for n in [32usize, 96, 128, 256, 768, 2048] {
+            let q16: Vec<u16> = (0..n).map(|_| f32_to_f16(rnd())).collect();
+            let q32: Vec<f32> = q16.iter().map(|&h| f16_to_f32(h)).collect();
+            let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+            let xs: Vec<Vec<u16>> = (0..8).map(|i| (0..n).map(|_| f32_to_f16(rnd() * if i % 2 == 0 { 1.0 } else { 1e-3 })).collect()).collect();
+            let bound = |x: &[u16]| {
+                let xn = x.iter().map(|&h| f16_to_f32(h) as f64 * f16_to_f32(h) as f64).sum::<f64>().sqrt();
+                (n / 16 + 6) as f64 * (1.0 / 16777216.0) * qn * xn
+            };
+            for x in &xs {
+                let e = exact_to_f64(exact_dot(&q16, x));
+                let d = unsafe { dot_f16(&q32, x) } as f64;
+                assert!((d - e).abs() <= bound(x), "n {n}: dot_f16 off by {} > {}", (d - e).abs(), bound(x));
+            }
+            for c in xs.chunks(4) {
+                let d4 = unsafe { dot_f16_x4(&q32, [&c[0], &c[1], &c[2], &c[3]]) };
+                for k in 0..4 {
+                    let e = exact_to_f64(exact_dot(&q16, &c[k]));
+                    assert!((d4[k] as f64 - e).abs() <= bound(&c[k]), "n {n}: dot_f16_x4 lane {k} off by {}", (d4[k] as f64 - e).abs());
+                }
+            }
         }
     }
 }

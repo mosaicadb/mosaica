@@ -10,6 +10,8 @@ pub const OFF: [i32; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 18];
 pub const DA: f64 = 0.5 / 32767.0 + 1e-7;
 pub const SEED: u64 = 20261112;
 pub const LANES: usize = 16;
+/// The format of a fitted index directory (meta.json "format") that this build reads.
+pub const FIT_FORMAT: u64 = 2;
 
 pub fn ry() -> f64 {
     2f64.powf(1.0 / 256.0)
@@ -37,6 +39,10 @@ pub struct Meta {
     pub rlv: Vec<usize>,
     pub bounds: Vec<usize>,
     pub csg: f64,
+    /// the guarantee's failure probability per query (meta "EPS", default 1e-9)
+    pub eps: f64,
+    /// certified worst-case constants of the randomised levels (meta "CERTS", written by tools/certify.py)
+    pub certs: Vec<crate::v2::tail::Cert>,
 }
 impl Meta {
     pub fn nl(&self) -> usize {
@@ -47,7 +53,8 @@ impl Meta {
     }
 }
 
-/// Exported numpy build parameters.
+/// Build parameters fitted by tools/fit.py. The version 1 allocation (frb, dl, dt, ridx, rates) is derived from a
+/// profile (`--profile`), or read when present.
 pub struct Params {
     pub meta: Meta,
     pub cstart: Vec<usize>,
@@ -55,6 +62,8 @@ pub struct Params {
     pub centres: Vec<f32>, // K x n, the stored 8-bit centres (int8 * scale) as f32 values
     pub lam: Vec<f64>,
     pub v: Vec<f32>, // G x n x n, z = V^T r
+    pub r2: Option<Vec<f64>>, // G: mean |r|^2 per group (version 2 item scale)
+    pub fit: String,          // the fit used, as tools/fit.py recorded it
     pub frb: Vec<u8>, // G x 6 x n cumulative bits per coordinate
     pub dl: Vec<f64>, // G x 6 x n
     pub dt: Vec<f64>, // G x n
@@ -65,39 +74,52 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
-    pub text_q: Vec<f32>,
     pub xs_path: String,
 }
 
 pub fn load_params(dir: &str) -> Params {
     let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/meta.json")).unwrap()).unwrap();
+    let fmt = meta["format"].as_u64().unwrap_or(1);
+    if fmt != FIT_FORMAT {
+        eprintln!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py.");
+        std::process::exit(2);
+    }
     let us = |k: &str| meta[k].as_u64().unwrap() as usize;
     let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
     let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
+    let opt = |k: &str| std::path::Path::new(&format!("{dir}/{k}.npy")).exists().then(|| r(k));
     let mq8 = r("mq8").i8s();
     let msc = r("msc").f64s();
     let n = us("n");
     let k = us("K");
     let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
+    let xs = meta["xs"].as_str().unwrap();
     Params {
-        meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap() },
+        meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
+            eps: meta["EPS"].as_f64().unwrap_or(1e-9),
+            certs: meta["CERTS"].as_array().map_or(Vec::new(), |a| a.iter().map(|c| crate::v2::tail::Cert {
+                ds: c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect(),
+                lnd: c["lnd"].as_f64().unwrap(),
+                x: c["X"].as_f64().unwrap(),
+            }).collect()) },
         cstart: r("cstart").i64s().iter().map(|&x| x as usize).collect(),
         grp: r("grp").i64s().iter().map(|&x| x as usize).collect(),
         centres,
         lam: r("lam").f64s(),
         v: r("V").f32s(),
-        frb: r("frb").u8s(),
-        dl: r("dl").f64s(),
-        dt: r("dt").f64s(),
-        ridx: r("ridx").i32s(),
-        rates: r("rates").f64s(),
+        r2: opt("r2").map(|a| a.f64s()),
+        fit: meta["fit"].to_string(),
+        frb: opt("frb").map_or(Vec::new(), |a| a.u8s()),
+        dl: opt("dl").map_or(Vec::new(), |a| a.f64s()),
+        dt: opt("dt").map_or(Vec::new(), |a| a.f64s()),
+        ridx: opt("ridx").map_or(Vec::new(), |a| a.i32s()),
+        rates: opt("rates").map_or(Vec::new(), |a| a.f64s()),
         tree_edges: r("tree_edges").f64s(),
         tree_cent: r("tree_cent").f64s(),
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
-        text_q: r("text_q").f32s(),
-        xs_path: meta["xs"].as_str().unwrap().to_string(),
+        xs_path: if xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
     }
 }
 
@@ -961,7 +983,7 @@ impl Source for RealSource {
 /// Build the whole index from parameters and a source of items.
 pub fn build(p: &Params, src: Box<dyn Source>, nanch: usize, log: &mut dyn FnMut(String)) -> Index {
     let t = Timer::new();
-    let meta = Meta { n: p.meta.n, k: p.meta.k, g: p.meta.g, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), bounds: p.meta.bounds.clone(), csg: p.meta.csg };
+    let meta = Meta { n: p.meta.n, k: p.meta.k, g: p.meta.g, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), bounds: p.meta.bounds.clone(), csg: p.meta.csg, eps: p.meta.eps, certs: p.meta.certs.clone() };
     let n = meta.n;
     let k = meta.k;
     let tree = Tree::new(p);
