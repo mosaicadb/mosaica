@@ -1,0 +1,6 @@
+levels 1,2: pairs 1868363; corr(z_l, z_m) = 0.454; mean sd_m/sd_l = 0.429 (median 0.428); regression of z_m on z_l: slope 0.454; of z_l on z_m: 0.454
+levels 2,3: pairs 878012; corr(z_l, z_m) = 0.470; mean sd_m/sd_l = 0.404 (median 0.407); regression of z_m on z_l: slope 0.473; of z_l on z_m: 0.468
+levels 1,3: pairs 878012; corr(z_l, z_m) = 0.224; mean sd_m/sd_l = 0.174 (median 0.175); regression of z_m on z_l: slope 0.225; of z_l on z_m: 0.224
+level 1: mean z^2 = 0.9514 -> stored sd / true sd (rms) = 1.0252
+level 2: mean z^2 = 0.9471 -> stored sd / true sd (rms) = 1.0275
+level 3: mean z^2 = 0.9568 -> stored sd / true sd (rms) = 1.0223

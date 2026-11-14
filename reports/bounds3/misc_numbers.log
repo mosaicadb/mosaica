@@ -1,0 +1,13 @@
+single block d = 95 by share of eps/N: 1.0: 7.291, 0.7: 7.312, 0.25: 7.373, 0.1: 7.426, 0.03333333333333333: 7.487
+four blocks, exact worst case by share of eps/N (argmax fixed at (d+2)/sum): 1.0: 8.5514, 0.7: 8.5887, 0.25: 8.6951, 0.1: 8.7886, 0.03333333333333333: 8.8991
+n 768: four blocks at L = 4: 8.6951; L = 5: 8.7180; L = 3: 8.6655
+n 1536: four blocks at L = 4: 8.8026; L = 5: 8.8263; L = 3: 8.7718
+rho 0.45: P[both fail] / delta <= exp(-33.4) (one block, d = 95), exp(-16.4) (four blocks, worst shares)
+rho 0.47: P[both fail] / delta <= exp(-31.1) (one block, d = 95), exp(-15.6) (four blocks, worst shares)
+rho 0.6: P[both fail] / delta <= exp(-19.2) (one block, d = 95), exp(-10.7) (four blocks, worst shares)
+rho 0.8: P[both fail] / delta <= exp(-7.6) (one block, d = 95), exp(-4.7) (four blocks, worst shares)
+rho 0.9: P[both fail] / delta <= exp(-3.5) (one block, d = 95), exp(-2.2) (four blocks, worst shares)
+adding block-wise bounds at delta/4 each, worst-case shares: 15.865 sd against 8.695
+[95, 127] sphere at D' = 224 : 8.2003
+[95, 127, 255] sphere at D' = 481 : 8.5689
+Gaussian quantile at delta (one-sided, N = 1e9, L = 4): 8.912266005257283 ; sub-Gaussian bound: 9.25557410807268
