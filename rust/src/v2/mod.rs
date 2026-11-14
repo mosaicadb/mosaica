@@ -370,10 +370,14 @@ pub struct GroupPlan2 {
     pub boff: [usize; J + 1],
     pub ypredw: [f32; J],
     pub ytab: Vec<[f32; 256]>,
+    /// ytab[c] = yhl[1][c >> 4] * yhl[0][c & 15] in f32, so a code is decoded with two 16-entry permutes
+    pub yhl: [[[f32; 16]; 2]; J],
     pub rates: Vec<[f64; J]>,
     pub thchg: Vec<Vec<usize>>,
     pub ttab: Vec<[[f32; 16]; J]>,
     pub ktab: Vec<[[f32; 256]; J]>,
+    /// 8-bit kappa codes: ktab[c] = khl[1][c >> 4] * khl[0][c & 15] in f32 (4-bit codes read ktab[..16])
+    pub khl: Vec<[[[f32; 16]; 2]; J]>,
     pub kstep: Vec<[f64; J]>, // kappa code steps per octave, per rise
     pub kbits: Vec<[u8; J]>,  // kappa code bits (4 or 8), per rise
     pub rrow: Vec<Vec<usize>>, // per rand level, per rising block (thchg order): first scalar row of that rise
@@ -616,11 +620,13 @@ impl GroupPlan2 {
             boff,
             ypredw,
             ytab: vec![[0.0; 256]; J],
+            yhl: [[[0.0; 16]; 2]; J],
             ystep: [256.0; J],
             rates,
             thchg,
             ttab: vec![[[0.0; 16]; J]; nr],
             ktab: vec![[[0.0; 256]; J]; nr],
+            khl: vec![[[[0.0; 16]; 2]; J]; nr],
             kstep: vec![[256.0; J]; nr],
             kbits: vec![[8; J]; nr],
             rrow: Vec::new(),
@@ -660,8 +666,12 @@ impl GroupPlan2 {
         }
         for j in 0..J {
             self.ystep[j] = ys[j];
-            for c in 0..255 {
-                self.ytab[j][c] = 2f64.powf(y0[j] + c as f64 / ys[j]) as f32;
+            for x in 0..16 {
+                self.yhl[j][0][x] = 2f64.powf(x as f64 / ys[j]) as f32;
+                self.yhl[j][1][x] = 2f64.powf(y0[j] + (16 * x) as f64 / ys[j]) as f32;
+            }
+            for c in 0..256 {
+                self.ytab[j][c] = self.yhl[j][1][c >> 4] * self.yhl[j][0][c & 15];
             }
         }
         for lr in 0..tq.len() {
@@ -670,8 +680,18 @@ impl GroupPlan2 {
                     self.ttab[lr][j][c] = tq[lr][j][c];
                 }
                 self.kstep[lr][j] = ks[lr][j];
-                for c in 0..255 {
-                    self.ktab[lr][j][c] = 2f64.powf(k0[lr][j] + c as f64 / ks[lr][j]) as f32;
+                if kb[lr][j] == 8 {
+                    for x in 0..16 {
+                        self.khl[lr][j][0][x] = 2f64.powf(x as f64 / ks[lr][j]) as f32;
+                        self.khl[lr][j][1][x] = 2f64.powf(k0[lr][j] + (16 * x) as f64 / ks[lr][j]) as f32;
+                    }
+                    for c in 0..256 {
+                        self.ktab[lr][j][c] = self.khl[lr][j][1][c >> 4] * self.khl[lr][j][0][c & 15];
+                    }
+                } else {
+                    for c in 0..256 {
+                        self.ktab[lr][j][c] = 2f64.powf(k0[lr][j] + c as f64 / ks[lr][j]) as f32;
+                    }
                 }
             }
         }

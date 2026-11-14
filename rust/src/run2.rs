@@ -145,6 +145,7 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                     }).fold(0, |a, b| a | b)
                 };
             }
+            f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
             f if f.starts_with("repackx=") => {
                 p.repack = true;
                 p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
@@ -359,6 +360,9 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     let (mut wi, mut wo, mut kb) = (0u64, 0u64, 0u64);
     let mut rows = vec!["q,class,answer_frac,t,truth_size,wrong_in,wrong_out,touched,full_reads,bytes_read".to_string()];
     let t = Timer::new();
+    if let Ok(p) = std::env::var("VEXACT_DUMP") {
+        *crate::v2::q::DUMP.lock().unwrap() = Some(std::io::BufWriter::new(std::fs::File::create(p).unwrap()));
+    }
     for (qi, (cls, q)) in qs.iter().enumerate() {
         let pr = prep2(ix, q);
         let err = full_err2(ix, &pr);
@@ -369,7 +373,8 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         let modes = [c.plan, Plan { mode: PlanMode::Index, ..c.plan }];
         for (si, &th) in ths.iter().enumerate() {
             let truth = fl.threshold(&pr.q16, &pr.q32, th, err, None, &c.ent_xs);
-            for plan in modes {
+            for (mi, plan) in modes.into_iter().enumerate() {
+                crate::v2::q::DUMP_TAG.store((qi * 64 + si * 2 + mi) as u32, std::sync::atomic::Ordering::Relaxed);
                 let pr2 = prep2(ix, q);
                 let o = Opts2 { vis: None, verify: chk, want_iv: false, plan };
                 let r = threshold2(ix, &pr2, th, &o);
@@ -399,6 +404,10 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
     // filtered: random visible sets (one row in 1,000 / 100 / 10 / 2), the first `nf` queries; threshold queries at
     // the 100th best visible score and k-NN, as planned and on each forced path, against a brute force over the
     // visible rows that uses only exact integer products
+    if let Some(mut f) = crate::v2::q::DUMP.lock().unwrap().take() {
+        use std::io::Write;
+        f.flush().unwrap();
+    }
     let nf = arg_usize("--vfilt", 40).min(qs.len());
     for (fi, &den) in [1000u64, 100, 10, 2].iter().enumerate() {
         let mut ents: Vec<u32> = (0..ix.nrows).filter(|&r| ((r as u64) ^ (fi as u64 * 0x51ed27)).wrapping_mul(0x9E3779B97F4A7C15) >> 32 < (1u64 << 32) / den).map(|r| ix.row_ent[r]).collect();

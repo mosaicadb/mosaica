@@ -50,6 +50,9 @@ pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
 pub static ERRS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Study only (VEXACT_DUMP): in verify mode, one record per (item, randomised level) checked, tagged with DUMP_TAG.
+pub static DUMP: std::sync::Mutex<Option<std::io::BufWriter<std::fs::File>>> = std::sync::Mutex::new(None);
+pub static DUMP_TAG: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 #[inline(always)]
 pub fn tick() -> u64 {
     if PROF.load(std::sync::atomic::Ordering::Relaxed) { unsafe { core::arch::x86_64::_rdtsc() } } else { 0 }
@@ -409,6 +412,7 @@ pub struct CQ2 {
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub bail: f32,    // a threshold query sends its survivors to full vectors before a level of more than bail x live units (0: never)
     pub rdec: u32,    // threshold queries decide at randomised level lr only if bit lr is set (the others only read)
+    pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
     pub int: Option<IntDet>,
 }
 
@@ -517,7 +521,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -837,10 +841,15 @@ pub struct State {
     pub s: Vec<f32>,
     pub mr: Vec<f32>,
     pub adet: Vec<f32>,
+    /// From the first randomised level on, in place of s, mr and adet: the estimate's constant part
+    /// qm + alr mr + s adet, and the half-width's (fixed + s (edet + ewdet) + 16 u (|qm + alr mr| + |s adet|)).
+    pub c0: Vec<f32>,
+    pub h0: Vec<f32>,
     pub aj: [Vec<f32>; J],
     pub yh: [Vec<f32>; J],
     pub kap: [Vec<f32>; J],
-    pub eps: [Vec<f32>; J],
+    /// The block's variance term at its latest rise: (|y| tan (1 + 1e-6) nd)^2 / (nb - 1).
+    pub var: [Vec<f32>; J],
     pub truth: Vec<f64>,
     pub ist: Vec<i16>,     // integer levels, by block (kern::ip): Hs, Ls, TinH, TinL, ToutH, ToutL
     pub a64: Vec<f64>,     // verify: the real deterministic table sum
@@ -874,11 +883,13 @@ impl State {
         grow(&mut self.s);
         grow(&mut self.mr);
         grow(&mut self.adet);
+        grow(&mut self.c0);
+        grow(&mut self.h0);
         for j in 0..J {
             grow(&mut self.aj[j]);
             grow(&mut self.yh[j]);
             grow(&mut self.kap[j]);
-            grow(&mut self.eps[j]);
+            grow(&mut self.var[j]);
         }
         if self.truth.len() < full {
             self.truth.resize(full, 0.0);
@@ -967,8 +978,9 @@ unsafe fn compact_det(sv: &mut State, int: bool, verify: bool, w: usize, m: u16,
 #[derive(Default, Clone, Copy)]
 struct RandNeed {
     aj: u32,
-    kap: u32, // kappa and tan
+    kap: u32, // kappa and the variance term
     yh: bool,
+    c0: bool, // the constant parts c0 and h0
 }
 
 /// Compact the randomised-level state of 16 slots that a later level reads.
@@ -983,8 +995,12 @@ unsafe fn compact_rand(sv: &mut State, w: usize, m: u16, o: usize, need: RandNee
         }
         if need.kap >> j & 1 == 1 {
             cs(&mut sv.kap[j], w, m, o);
-            cs(&mut sv.eps[j], w, m, o);
+            cs(&mut sv.var[j], w, m, o);
         }
+    }
+    if need.c0 {
+        cs(&mut sv.c0, w, m, o);
+        cs(&mut sv.h0, w, m, o);
     }
 }
 
@@ -1011,7 +1027,7 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
         }
         if inm >> i & 1 == 1 {
             st.imp_checked += 1;
-            if !(est - hh >= t) {
+            if !(est - hh >= t - cq.tol) {
                 st.imp_fail += 1;
             }
         }
@@ -1120,11 +1136,11 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         let dmax = pr.dial[..NDL].iter().fold(1f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
-        int_thresholds(&sv.s, &sv.mr, nsurv, t + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
+        int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
     }
     st.cyc[P_INIT] += tick() - ti;
     let t32 = t as f32;
-    let tin = crate::query::next_up_if_below(t32, t);
+    let tin = if cq.tol > 0.0 && mode == Mode2::Thr { crate::query::next_up_if_below((t - cq.tol) as f32, t - cq.tol) } else { crate::query::next_up_if_below(t32, t) };
     let stop = match mode {
         Mode2::Interval(l) | Mode2::Sweep(l) => l,
         Mode2::Thr => usize::MAX,
@@ -1301,6 +1317,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         let mut need = RandNeed::default();
         if l >= NDL && !last {
             need.yh = true;
+            need.c0 = true;
             for j in 0..J {
                 if gp.rates[l - NDL][j] > 0.0 {
                     need.aj |= 1 << j;
@@ -1419,11 +1436,11 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                             }
                             let o = k0 + 16 * h;
                             let s = ld(&sv.s, o);
-                            let code = if h == 0 { _mm512_add_epi32(a0, _mm512_slli_epi32(b0, 4)) } else { _mm512_add_epi32(a1, _mm512_slli_epi32(b1, 4)) };
+                            let (lo, hi) = if h == 0 { (a0, b0) } else { (a1, b1) };
                             let pr_ = _mm512_mul_ps(_mm512_set1_ps(gp.ypredw[j]), s);
-                            let tv = _mm512_i32gather_ps::<4>(_mm512_min_epi32(code, _mm512_set1_epi32(254)), gp.ytab[j].as_ptr() as *const _);
+                            let tv = _mm512_mul_ps(_mm512_permutexvar_ps(hi, _mm512_loadu_ps(gp.yhl[j][1].as_ptr())), _mm512_permutexvar_ps(lo, _mm512_loadu_ps(gp.yhl[j][0].as_ptr())));
                             let mut y = _mm512_mul_ps(pr_, tv);
-                            let em = _mm512_cmpeq_epi32_mask(code, _mm512_set1_epi32(255)) & hm;
+                            let em = _mm512_cmpeq_epi32_mask(_mm512_and_si512(lo, hi), _mm512_set1_epi32(15)) & hm;
                             if em != 0 {
                                 let mut r = arr(y);
                                 for i in 0..16 {
@@ -1455,16 +1472,21 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                             continue;
                         }
                         let o = k0 + 16 * h;
-                        let mut kc = if h == 0 { a0 } else { a1 };
-                        if kb == 8 {
-                            kc = _mm512_add_epi32(kc, _mm512_slli_epi32(if h == 0 { b0 } else { b1 }, 4));
-                        }
-                        let kesc = if kb == 8 { 255 } else { 15 };
+                        // a 4-bit code reads the table's first 16 entries; an 8-bit one is the product of its nibbles'
+                        // entries (an escape's value is replaced below)
+                        let kl = if h == 0 { a0 } else { a1 };
+                        let (kv, kx) = if kb == 8 {
+                            let kh = if h == 0 { b0 } else { b1 };
+                            let v = _mm512_mul_ps(_mm512_permutexvar_ps(kh, _mm512_loadu_ps(gp.khl[lr][j][1].as_ptr())), _mm512_permutexvar_ps(kl, _mm512_loadu_ps(gp.khl[lr][j][0].as_ptr())));
+                            (v, _mm512_and_si512(kl, kh))
+                        } else {
+                            (_mm512_permutexvar_ps(kl, _mm512_loadu_ps(gp.ktab[lr][j].as_ptr())), kl)
+                        };
                         let tc = if h == 0 { t0 } else { t1 };
                         let yv = ld(&sv.yh[j], o);
-                        let mut kap = _mm512_mul_ps(yv, _mm512_i32gather_ps::<4>(_mm512_min_epi32(kc, _mm512_set1_epi32(kesc - 1)), gp.ktab[lr][j].as_ptr() as *const _));
+                        let mut kap = _mm512_mul_ps(yv, kv);
                         let mut th = _mm512_permutexvar_ps(tc, _mm512_loadu_ps(gp.ttab[lr][j].as_ptr()));
-                        let ek = _mm512_cmpeq_epi32_mask(kc, _mm512_set1_epi32(kesc)) & hm;
+                        let ek = _mm512_cmpeq_epi32_mask(kx, _mm512_set1_epi32(15)) & hm;
                         let et = _mm512_cmpeq_epi32_mask(tc, _mm512_set1_epi32(15)) & hm;
                         if ek | et != 0 {
                             let (mut rk, mut rt) = (arr(kap), arr(th));
@@ -1484,7 +1506,8 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                             th = _mm512_loadu_ps(rt.as_ptr());
                         }
                         _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), kap);
-                        _mm512_storeu_ps(sv.eps[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)));
+                        let ab = _mm512_mul_ps(_mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)), _mm512_set1_ps(cq.nd[j]));
+                        _mm512_storeu_ps(sv.var[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(ab, ab), _mm512_set1_ps(1.0 / (gp.nb[j] - 1) as f32)));
                         }
                     }
                 st.cyc[P_RKAP] += tick() - tk;
@@ -1495,10 +1518,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     continue;
                 }
                 let o = k0 + 16 * h;
-                let s = ld(&sv.s, o);
-                let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
                 let (lb, ub, est, hn, sd);
                 if l < NDL {
+                    let s = ld(&sv.s, o);
+                    let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
                     let adet = _mm512_add_ps(ld(&sv.adet, o), pv[0][h]);
                     _mm512_storeu_ps(sv.adet.as_mut_ptr().add(o), adet);
                     if skip {
@@ -1534,34 +1557,43 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                         let a = _mm512_add_ps(ld(&sv.aj[j], o), pv[1 + j][h]);
                         _mm512_storeu_ps(sv.aj[j].as_mut_ptr().add(o), a);
                     }
+                    // the constant parts, once at the first randomised level (the same f32 operations as before)
+                    let (c0, h0) = if lr == 0 {
+                        let s = ld(&sv.s, o);
+                        let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
+                        let sa = _mm512_mul_ps(s, ld(&sv.adet, o));
+                        let c0 = _mm512_add_ps(alrmr, sa);
+                        let fl = _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa));
+                        let h0 = _mm512_fmadd_ps(u16x, fl, _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), _mm512_set1_ps(cq.fixed)));
+                        _mm512_storeu_ps(sv.c0.as_mut_ptr().add(o), c0);
+                        _mm512_storeu_ps(sv.h0.as_mut_ptr().add(o), h0);
+                        (c0, h0)
+                    } else {
+                        (ld(&sv.c0, o), ld(&sv.h0, o))
+                    };
                     if skipb {
                         keep[h] = hm;
                         continue;
                     }
-                    let sa = _mm512_mul_ps(s, ld(&sv.adet, o));
-                    let mut e = _mm512_add_ps(alrmr, sa);
-                    let mut hdet = _mm512_setzero_ps();
-                    let mut hpar = _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), _mm512_set1_ps(cq.fixed));
-                    let mut fl = _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa));
+                    let mut e = c0;
+                    let mut hpar = h0;
                     let mut var = _mm512_setzero_ps();
                     let rates = &gp.rates[lr];
                     for j in 0..J {
-                        let ndv = _mm512_set1_ps(cq.nd[j]);
                         if rates[j] == 0.0 {
-                            hdet = _mm512_fmadd_ps(ld(&sv.yh[j], o), ndv, hdet);
+                            hpar = _mm512_fmadd_ps(ld(&sv.yh[j], o), _mm512_set1_ps(cq.nd[j]), hpar);
                             continue;
                         }
                         let kap = ld(&sv.kap[j], o);
                         let eb = _mm512_mul_ps(kap, ld(&sv.aj[j], o));
                         e = _mm512_add_ps(e, eb);
-                        fl = _mm512_add_ps(fl, _mm512_abs_ps(eb));
-                        hpar = _mm512_fmadd_ps(_mm512_set1_ps(dmxj[j]), _mm512_abs_ps(eb), hpar);
+                        // the kappa rounding bound and the estimate's 16 u share of |eb| in one product
+                        hpar = _mm512_fmadd_ps(_mm512_set1_ps(dmxj[j] + (16.0 * U) as f32), _mm512_abs_ps(eb), hpar);
                         hpar = _mm512_fmadd_ps(kap, _mm512_set1_ps(ej[j] + cq.ewj[j]), hpar);
-                        let ab = _mm512_mul_ps(ld(&sv.eps[j], o), ndv);
-                        var = _mm512_fmadd_ps(_mm512_mul_ps(ab, ab), _mm512_set1_ps(1.0 / (gp.nb[j] - 1) as f32), var);
+                        var = _mm512_add_ps(var, ld(&sv.var[j], o));
                     }
                     let sdv = _mm512_sqrt_ps(var);
-                    let hnv = _mm512_add_ps(_mm512_add_ps(hdet, hpar), _mm512_mul_ps(u16x, fl));
+                    let hnv = hpar;
                     let hh = _mm512_mul_ps(_mm512_fmadd_ps(csg, sdv, hnv), one6);
                     est = e;
                     lb = _mm512_sub_ps(e, hh);
@@ -1592,6 +1624,39 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                             if zz > st.max_sd {
                                 st.max_sd = zz;
                             }
+                        }
+                    }
+                }
+                if verify && l >= NDL {
+                    let mut dg = DUMP.lock().unwrap();
+                    if let Some(f) = dg.as_mut() {
+                        use std::io::Write;
+                        let es = arr(est);
+                        let (hs, sds) = (arr(hn), arr(sd));
+                        let tag = DUMP_TAG.load(std::sync::atomic::Ordering::Relaxed);
+                        for i in 0..16 {
+                            if hm >> i & 1 == 0 {
+                                continue;
+                            }
+                            let k = o + i;
+                            let mut r = [0f32; 24];
+                            r[0] = f32::from_bits(tag);
+                            r[1] = f32::from_bits((c.r0 + sv.idx[k] as usize) as u32);
+                            r[2] = lr as f32;
+                            r[3] = t as f32;
+                            r[4] = (sv.truth[k] - t) as f32;
+                            r[5] = (es[i] as f64 - t) as f32;
+                            r[6] = hs[i];
+                            r[7] = sds[i];
+                            for j in 0..J {
+                                let nd = cq.nd[j];
+                                r[8 + 4 * j] = if gp.rates[lr][j] > 0.0 { 1.0 } else { 0.0 };
+                                r[9 + 4 * j] = if gp.rates[lr][j] > 0.0 { (sv.var[j][k] * (gp.nb[j] - 1) as f32).sqrt() } else { 0.0 };
+                                r[10 + 4 * j] = sv.yh[j][k] * nd;
+                                r[11 + 4 * j] = if gp.rates[lr][j] > 0.0 { sv.kap[j][k] * sv.aj[j][k] } else { 0.0 };
+                            }
+                            let b: Vec<u8> = r.iter().flat_map(|x| x.to_le_bytes()).collect();
+                            f.write_all(&b).unwrap();
                         }
                     }
                 }
@@ -1671,10 +1736,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     continue;
                 }
                 _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, _mm512_loadu_si512(sv.idx.as_ptr().add(o) as *const _)));
-                if !last {
+                if l < NDL {
                     cs(&mut sv.s, w, m, o);
                     cs(&mut sv.mr, w, m, o);
-                    compact_det(sv, intm && l < NDL, verify, w, m, o);
+                    compact_det(sv, intm, verify, w, m, o);
                 }
                 compact_rand(sv, w, m, o, need);
                 if verify {
@@ -1709,10 +1774,10 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     let m = !_mm512_cmpeq_epi32_mask(iv, _mm512_set1_epi32(-1));
                     if m != 0 {
                         _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, iv));
-                        if !last {
+                        if l < NDL {
                             cs(&mut sv.s, w, m, o);
                             cs(&mut sv.mr, w, m, o);
-                            compact_det(sv, intm && l < NDL, verify, w, m, o);
+                            compact_det(sv, intm, verify, w, m, o);
                         }
                         compact_rand(sv, w, m, o, need);
                         if verify {
@@ -1869,6 +1934,7 @@ pub struct Plan {
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub bail: f32,         // threshold queries: survivors go to full vectors before a level whose table has more than bail units per survivor (0: off)
     pub rdec: u32,         // threshold queries decide at randomised level lr only when bit lr is set
+    pub tol: f64,          // the tolerance d: an item whose lower bound reaches t - d is taken in (0: exact)
     pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
     pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
     pub scan_cal: bool,    // Plan::calibrate also times the scan band (about 9 s at 1M; off: the band is left as given)
@@ -1879,7 +1945,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
@@ -2528,6 +2594,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             cq.bail = pl.bail;
                             assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
                             cq.rdec = pl.rdec;
+                            cq.tol = pl.tol;
                             let colp = pl.col && !o.want_iv && ix.col.is_some();
                             if pl.int_det && !o.want_iv && !colp {
                                 cq.enable_int(ix, ci, gq);
