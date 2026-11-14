@@ -1,0 +1,6 @@
+[    8s] loaded (1000000, 768) K0 1000 G 64
+[  118s] k-means done; sizes min/med/max 1 838 4321
+[  166s] level 1 groups 3997 median size 203
+[  242s] level 2 groups 15880 median size 48
+[  257s] level 3 groups 58750 median size 10
+[  259s] done

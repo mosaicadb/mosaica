@@ -1,0 +1,79 @@
+
+=== level 0: K = 1000, median group size 838, rms residual 0.4702, half log-det bits (top 16/64/256) {'16': -130.9529357416317, '64': -590.6565766156249, '256': -2828.5144954037623}, violations 0
+
+-- text queries (369); answer sizes 0.01 / 0.1 / 1 / 5 %; thresholds [0.691 0.663 0.613 0.565]
+   between-cluster share of score variance 0.750; sd total 0.0401, within 0.0197; threshold minus median [0.2   0.172 0.122 0.074]
+   |q_perp| 0.839; plain Cauchy-Schwarz slack 0.296; block slack 0.192; rms cosine(q_perp, x_perp) 0.0787 (effective dimension 162)
+   offset energy by block   [0.0065, 0.0069, 0.0107, 0.0161, 0.0204, 0.0258, 0.0317, 0.0368, 0.0352, 0.0159, 0.0004]
+   residual energy by block [0.0001, 0.0, 0.0, 0.0001, 0.0001, 0.0001, 0.0001, 0.0, 0.0, 0.0, 0.0]
+   sorted range only           80.2 /  86.6 /  95.6 /  99.7
+   range + support table       74.8 /  82.7 /  94.1 /  99.6
+   group summary: first k local coordinates' extremes exact (ideal), rest by block norms; with sorted range
+     k =    0                  80.2 /  86.6 /  95.6 /  99.7     (groups alone  98.8 /  99.7 / 100.0 / 100.0)
+     k =    1                  80.2 /  86.6 /  95.6 /  99.7     (groups alone  98.4 /  99.5 / 100.0 / 100.0)
+     k =    2                  80.2 /  86.6 /  95.6 /  99.7     (groups alone  98.0 /  99.3 / 100.0 / 100.0)
+     k =    4                  80.2 /  86.6 /  95.6 /  99.7     (groups alone  97.3 /  99.0 /  99.9 / 100.0)
+     k =    8                  80.1 /  86.6 /  95.6 /  99.7     (groups alone  95.9 /  98.2 /  99.9 / 100.0)
+     k =   16                  79.8 /  86.4 /  95.5 /  99.7     (groups alone  93.0 /  96.3 /  99.6 / 100.0)
+     k =   32                  77.3 /  84.9 /  95.2 /  99.7     (groups alone  86.1 /  91.9 /  98.5 /  99.9)
+     k =   64                  65.5 /  76.8 /  92.3 /  99.4     (groups alone  68.4 /  79.6 /  94.0 /  99.6)
+     k =  128                  36.9 /  49.9 /  77.2 /  96.3     (groups alone  37.1 /  50.1 /  77.4 /  96.3)
+     k =  256                  9.70 /  16.8 /  39.8 /  76.6     (groups alone  9.70 /  16.8 /  39.8 /  76.6)
+     k =  512                  1.19 /  3.81 /  16.4 /  47.1     (groups alone  1.19 /  3.81 /  16.4 /  47.1)
+     k =  768                  0.98 /  3.35 /  15.2 /  45.0     (groups alone  0.98 /  3.35 /  15.2 /  45.0)
+   same information per member: first k coordinates exact, rest by block norms
+     k =    0                  46.7 /  58.2 /  77.8 /  93.8
+     k =    1                  44.6 /  55.9 /  75.5 /  92.4
+     k =    2                  42.9 /  54.2 /  74.3 /  91.7
+     k =    4                  39.8 /  51.0 /  71.8 /  90.3
+     k =    8                  34.3 /  45.2 /  66.7 /  87.4
+     k =   16                  26.7 /  36.7 /  58.3 /  81.9
+     k =   32                  17.5 /  25.4 /  45.1 /  71.2
+     k =   64                  8.54 /  13.6 /  27.9 /  52.7
+     k =  128                  2.50 /  4.81 /  11.9 /  27.9
+     k =  256                  0.20 /  0.69 /  2.86 /  8.08
+     k =  512                  0.00 /  0.02 /  0.16 /  0.48
+     k =  768                  0.00 /  0.00 /  0.02 /  0.07
+   oracle, extremes to +-0.05  9.38 /  18.5 /  49.7 /  89.7
+   oracle, extremes to +-0.02  2.89 /  7.49 /  27.1 /  66.1
+   oracle, exact extremes      0.97 /  3.32 /  15.1 /  44.8
+
+-- item queries (100); answer sizes 0.01 / 0.1 / 1 / 5 %; thresholds [0.897 0.86  0.783 0.687]
+   between-cluster share of score variance 0.841; sd total 0.0682, within 0.0251; threshold minus median [0.324 0.287 0.21  0.114]
+   |q_perp| 0.772; plain Cauchy-Schwarz slack 0.275; block slack 0.227; rms cosine(q_perp, x_perp) 0.0949 (effective dimension 111)
+   offset energy by block   [0.0083, 0.0083, 0.0142, 0.0254, 0.0335, 0.0423, 0.0493, 0.0524, 0.0416, 0.0131, 0.0004]
+   residual energy by block [0.0001, 0.0, 0.0, 0.0001, 0.0001, 0.0001, 0.0001, 0.0, 0.0, 0.0, 0.0]
+   sorted range only           30.9 /  44.8 /  72.7 /  97.7
+   range + support table       13.8 /  23.2 /  47.8 /  84.2
+   group summary: first k local coordinates' extremes exact (ideal), rest by block norms; with sorted range
+     k =    0                  30.9 /  44.8 /  72.7 /  97.7     (groups alone  96.1 /  98.2 /  99.9 /  99.9)
+     k =    1                  30.9 /  44.8 /  72.7 /  97.7     (groups alone  95.4 /  97.8 /  99.8 /  99.9)
+     k =    2                  30.9 /  44.8 /  72.7 /  97.7     (groups alone  94.9 /  97.4 /  99.8 /  99.9)
+     k =    4                  30.8 /  44.8 /  72.7 /  97.7     (groups alone  93.5 /  96.5 /  99.6 /  99.9)
+     k =    8                  30.8 /  44.8 /  72.7 /  97.7     (groups alone  89.8 /  94.1 /  98.8 /  99.9)
+     k =   16                  30.8 /  44.7 /  72.6 /  97.7     (groups alone  80.6 /  87.3 /  95.9 /  99.9)
+     k =   32                  29.5 /  43.6 /  72.0 /  97.6     (groups alone  58.7 /  70.0 /  87.5 /  99.5)
+     k =   64                  20.7 /  33.9 /  65.5 /  95.5     (groups alone  27.2 /  41.2 /  71.2 /  96.9)
+     k =  128                  7.16 /  14.7 /  41.2 /  84.1     (groups alone  7.38 /  15.0 /  41.8 /  84.6)
+     k =  256                  1.59 /  3.81 /  14.2 /  53.3     (groups alone  1.59 /  3.81 /  14.2 /  53.5)
+     k =  512                  0.69 /  1.65 /  6.80 /  29.5     (groups alone  0.69 /  1.65 /  6.85 /  29.7)
+     k =  768                  0.66 /  1.58 /  6.52 /  28.3     (groups alone  0.66 /  1.58 /  6.57 /  28.4)
+   same information per member: first k coordinates exact, rest by block norms
+     k =    0                  16.3 /  26.9 /  55.7 /  91.7
+     k =    1                  15.1 /  25.3 /  53.6 /  90.0
+     k =    2                  14.3 /  24.2 /  52.1 /  89.0
+     k =    4                  12.7 /  22.0 /  49.1 /  86.6
+     k =    8                  9.75 /  17.9 /  43.3 /  81.9
+     k =   16                  6.19 /  12.5 /  34.2 /  73.5
+     k =   32                  2.93 /  6.88 /  22.3 /  59.2
+     k =   64                  0.90 /  2.70 /  11.0 /  37.7
+     k =  128                  0.17 /  0.71 /  3.69 /  15.6
+     k =  256                  0.02 /  0.14 /  0.88 /  3.75
+     k =  512                  0.00 /  0.01 /  0.06 /  0.25
+     k =  768                  0.00 /  0.00 /  0.02 /  0.05
+   oracle, extremes to +-0.05  2.13 /  4.35 /  17.2 /  66.2
+   oracle, extremes to +-0.02  1.26 /  2.59 /  9.68 /  43.6
+   oracle, exact extremes      0.66 /  1.57 /  6.54 /  28.3
+
+=== adaptive per-member read: mean coordinates read per item (plus n*K/N for the centres)
+level 0 (K =   1000, centres   0.8): text:   25.1 /   38.6 /   75.8 /  141.5   item:    4.7 /   10.6 /   34.3 /   98.6

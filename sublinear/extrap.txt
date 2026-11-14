@@ -1,0 +1,64 @@
+
+text, k = 10
+  annulus_items                      at 1M:  75.341% of N   exponent 0.929 / last doubling 0.927   at 1e9:  46.252% /  45.447% of N = 4.63e+08 / 4.54e+08
+  table_items                        at 1M:  69.101% of N   exponent 0.908 / last doubling 0.902   at 1e9:  36.534% /  35.140% of N = 3.65e+08 / 3.51e+08
+  oracle_items                       at 1M:   0.303% of N   exponent 0.115 / last doubling -0.087   at 1e9:   0.001% /   0.000% of N = 6.71e+03 / 1.66e+03
+  oracle02_items                     at 1M:   1.171% of N   exponent 0.337 / last doubling 0.237   at 1e9:   0.012% /   0.006% of N = 1.21e+05 / 6e+04
+  shell, 1 sd                        at 1M:   0.181% of N   exponent 0.606 / last doubling 0.688   at 1e9:   0.012% /   0.021% of N = 1.19e+05 / 2.09e+05
+  shell, 2 sd                        at 1M:   1.129% of N   exponent 0.683 / last doubling 0.713   at 1e9:   0.127% /   0.155% of N = 1.27e+06 / 1.55e+06
+  shell, 3 sd                        at 1M:   4.502% of N   exponent 0.741 / last doubling 0.759   at 1e9:   0.751% /   0.855% of N = 7.51e+06 / 8.55e+06
+  shell, 4 sd                        at 1M:  14.210% of N   exponent 0.791 / last doubling 0.811   at 1e9:   3.345% /   3.850% of N = 3.34e+07 / 3.85e+07
+  ladder, undecided at 0 coords (bases 12..64) at 1M:  61.834% of N   exponent 0.906 / last doubling 0.846   at 1e9:  32.408% /  21.402% of N = 3.24e+08 / 2.14e+08
+  ladder, undecided at 32 coords (bases 12..64) at 1M:  24.827% of N   exponent 0.809 / last doubling 0.634   at 1e9:   6.645% /   1.974% of N = 6.64e+07 / 1.97e+07
+  coordinates per item (bases 12..64): at 1M 35.9; exponent of the total 0.793 / last doubling 0.632; at 1e9: 8.62 / 2.82 per item
+  ladder, undecided at 0 coords (12 bases) at 1M:  67.389% of N   exponent 0.930 / last doubling 0.914   at 1e9:  41.490% /  37.134% of N = 4.15e+08 / 3.71e+08
+  ladder, undecided at 32 coords (12 bases) at 1M:  32.953% of N   exponent 0.890 / last doubling 0.799   at 1e9:  15.367% /   8.235% of N = 1.54e+08 / 8.24e+07
+  coordinates per item (12 bases): at 1M 47.3; exponent of the total 0.873 / last doubling 0.781; at 1e9: 19.68 / 10.42 per item
+
+text, k = 1000
+  annulus_items                      at 1M:  86.621% of N   exponent 0.957 / last doubling 0.937   at 1e9:  64.567% /  55.911% of N = 6.46e+08 / 5.59e+08
+  table_items                        at 1M:  82.674% of N   exponent 0.944 / last doubling 0.914   at 1e9:  56.164% /  45.720% of N = 5.62e+08 / 4.57e+08
+  oracle_items                       at 1M:   3.318% of N   exponent 0.170 / last doubling 0.216   at 1e9:   0.011% /   0.015% of N = 1.08e+05 / 1.47e+05
+  oracle02_items                     at 1M:   7.485% of N   exponent 0.324 / last doubling 0.392   at 1e9:   0.070% /   0.113% of N = 7.01e+05 / 1.13e+06
+  shell, 1 sd                        at 1M:   1.246% of N   exponent 0.328 / last doubling 0.453   at 1e9:   0.012% /   0.028% of N = 1.2e+05 / 2.85e+05
+  shell, 2 sd                        at 1M:   5.246% of N   exponent 0.412 / last doubling 0.568   at 1e9:   0.090% /   0.265% of N = 9.03e+05 / 2.65e+06
+  shell, 3 sd                        at 1M:  15.994% of N   exponent 0.528 / last doubling 0.612   at 1e9:   0.615% /   1.099% of N = 6.15e+06 / 1.1e+07
+  shell, 4 sd                        at 1M:  40.254% of N   exponent 0.738 / last doubling 0.672   at 1e9:   6.589% /   4.169% of N = 6.59e+07 / 4.17e+07
+  ladder, undecided at 0 coords (bases 12..64) at 1M:  77.480% of N   exponent 0.928 / last doubling 0.889   at 1e9:  47.025% /  36.064% of N = 4.7e+08 / 3.61e+08
+  ladder, undecided at 32 coords (bases 12..64) at 1M:  42.526% of N   exponent 0.799 / last doubling 0.651   at 1e9:  10.618% /   3.826% of N = 1.06e+08 / 3.83e+07
+  coordinates per item (bases 12..64): at 1M 67.0; exponent of the total 0.703 / last doubling 0.609; at 1e9: 8.63 / 4.50 per item
+  ladder, undecided at 0 coords (12 bases) at 1M:  81.516% of N   exponent 0.941 / last doubling 0.930   at 1e9:  54.414% /  50.276% of N = 5.44e+08 / 5.03e+08
+  ladder, undecided at 32 coords (12 bases) at 1M:  52.372% of N   exponent 0.857 / last doubling 0.793   at 1e9:  19.476% /  12.510% of N = 1.95e+08 / 1.25e+08
+  coordinates per item (12 bases): at 1M 83.5; exponent of the total 0.766 / last doubling 0.742; at 1e9: 16.56 / 14.04 per item
+
+item, k = 10
+  annulus_items                      at 1M:  22.193% of N   exponent 0.643 / last doubling 0.616   at 1e9:   1.883% /   1.566% of N = 1.88e+07 / 1.57e+07
+  table_items                        at 1M:   9.339% of N   exponent 0.488 / last doubling 0.560   at 1e9:   0.272% /   0.448% of N = 2.72e+06 / 4.48e+06
+  oracle_items                       at 1M:   0.324% of N   exponent 0.223 / last doubling 0.268   at 1e9:   0.002% /   0.002% of N = 1.51e+04 / 2.06e+04
+  oracle02_items                     at 1M:   0.884% of N   exponent 0.486 / last doubling 0.690   at 1e9:   0.025% /   0.104% of N = 2.54e+05 / 1.04e+06
+  shell, 1 sd                        at 1M:   0.947% of N   exponent 0.942 / last doubling 0.956   at 1e9:   0.636% /   0.698% of N = 6.36e+06 / 6.98e+06
+  shell, 2 sd                        at 1M:   3.509% of N   exponent 0.915 / last doubling 0.936   at 1e9:   1.945% /   2.253% of N = 1.94e+07 / 2.25e+07
+  shell, 3 sd                        at 1M:  11.401% of N   exponent 0.932 / last doubling 0.955   at 1e9:   7.122% /   8.371% of N = 7.12e+07 / 8.37e+07
+  shell, 4 sd                        at 1M:  24.791% of N   exponent 0.928 / last doubling 0.954   at 1e9:  15.078% /  18.069% of N = 1.51e+08 / 1.81e+08
+  ladder, undecided at 0 coords (bases 12..64) at 1M:  12.719% of N   exponent 0.618 / last doubling 0.471   at 1e9:   0.908% /   0.330% of N = 9.08e+06 / 3.3e+06
+  ladder, undecided at 32 coords (bases 12..64) at 1M:   0.771% of N   exponent 0.376 / last doubling 0.052   at 1e9:   0.010% /   0.001% of N = 1.04e+05 / 1.11e+04
+  coordinates per item (bases 12..64): at 1M 2.0; exponent of the total 0.493 / last doubling 0.286; at 1e9: 0.06 / 0.01 per item
+  ladder, undecided at 0 coords (12 bases) at 1M:  14.776% of N   exponent 0.659 / last doubling 0.572   at 1e9:   1.405% /   0.769% of N = 1.41e+07 / 7.69e+06
+  ladder, undecided at 32 coords (12 bases) at 1M:   1.435% of N   exponent 0.557 / last doubling 0.353   at 1e9:   0.067% /   0.016% of N = 6.73e+05 / 1.64e+05
+  coordinates per item (12 bases): at 1M 2.9; exponent of the total 0.597 / last doubling 0.463; at 1e9: 0.18 / 0.07 per item
+
+item, k = 1000
+  annulus_items                      at 1M:  44.812% of N   exponent 0.770 / last doubling 0.684   at 1e9:   9.140% /   5.060% of N = 9.14e+07 / 5.06e+07
+  table_items                        at 1M:  23.221% of N   exponent 0.599 / last doubling 0.514   at 1e9:   1.452% /   0.807% of N = 1.45e+07 / 8.07e+06
+  oracle_items                       at 1M:   1.576% of N   exponent 0.140 / last doubling 0.248   at 1e9:   0.004% /   0.009% of N = 4.14e+04 / 8.73e+04
+  oracle02_items                     at 1M:   2.594% of N   exponent 0.175 / last doubling 0.376   at 1e9:   0.009% /   0.035% of N = 8.7e+04 / 3.48e+05
+  shell, 1 sd                        at 1M:   1.421% of N   exponent 0.344 / last doubling 0.689   at 1e9:   0.015% /   0.165% of N = 1.53e+05 / 1.65e+06
+  shell, 2 sd                        at 1M:   5.951% of N   exponent 0.425 / last doubling 0.720   at 1e9:   0.112% /   0.859% of N = 1.12e+06 / 8.59e+06
+  shell, 3 sd                        at 1M:  17.313% of N   exponent 0.546 / last doubling 0.725   at 1e9:   0.751% /   2.597% of N = 7.51e+06 / 2.6e+07
+  shell, 4 sd                        at 1M:  38.793% of N   exponent 0.717 / last doubling 0.734   at 1e9:   5.482% /   6.179% of N = 5.48e+07 / 6.18e+07
+  ladder, undecided at 0 coords (bases 12..64) at 1M:  33.243% of N   exponent 0.701 / last doubling 0.560   at 1e9:   4.213% /   1.595% of N = 4.21e+07 / 1.59e+07
+  ladder, undecided at 32 coords (bases 12..64) at 1M:   6.813% of N   exponent 0.373 / last doubling 0.141   at 1e9:   0.090% /   0.018% of N = 8.97e+05 / 1.8e+05
+  coordinates per item (bases 12..64): at 1M 10.5; exponent of the total 0.378 / last doubling 0.246; at 1e9: 0.14 / 0.06 per item
+  ladder, undecided at 0 coords (12 bases) at 1M:  36.495% of N   exponent 0.726 / last doubling 0.637   at 1e9:   5.490% /   2.978% of N = 5.49e+07 / 2.98e+07
+  ladder, undecided at 32 coords (12 bases) at 1M:   9.492% of N   exponent 0.469 / last doubling 0.325   at 1e9:   0.242% /   0.090% of N = 2.42e+06 / 8.95e+05
+  coordinates per item (12 bases): at 1M 13.6; exponent of the total 0.453 / last doubling 0.393; at 1e9: 0.31 / 0.21 per item

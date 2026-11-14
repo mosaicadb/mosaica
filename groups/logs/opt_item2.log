@@ -1,0 +1,11 @@
+[    16s] scores done; mean thresholds text [0.691 0.663 0.613 0.565] item [0.897 0.86  0.783 0.687]
+[    48s] level 0: K=1000 median size 838 rms residual 0.4706 half log-det of the top 64 local dimensions, bits per item -583.2
+[    63s] support table done
+[   105s] level 0: queries 64/469, violations 0
+[   143s] level 0: queries 128/469, violations 0
+[   182s] level 0: queries 192/469, violations 0
+[   218s] level 0: queries 256/469, violations 0
+[   257s] level 0: queries 320/469, violations 0
+[   296s] level 0: queries 384/469, violations 0
+[   335s] level 0: queries 448/469, violations 0
+[   350s] done

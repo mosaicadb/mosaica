@@ -1,0 +1,105 @@
+interval checks 5,268,107,400; violations 0
+
+N grows (own clustering per N, 12 local bases at every N): text queries, k = 10
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       2.33M   74.4    4.41M   70.5    8.35M   66.8   15.39M   61.6   27.56M   55.1   47.34M   47.3   0.873 [0.862, 0.882]  last step 0.781   (M coordinates; per item)
+  undecided after 0 coords      26878  86.0%    51867  83.0%    99502  79.6%   191530  76.6%   357704  71.5%   673820  67.4%   0.930 [0.923, 0.936]  last step 0.914
+  undecided after 2 coords      25788  82.5%    50278  80.4%    96270  77.0%   184907  74.0%   343846  68.8%   643672  64.4%   0.928 [0.921, 0.935]  last step 0.905
+  undecided after 8 coords      23326  74.6%    45857  73.4%    88233  70.6%   167908  67.2%   307705  61.5%   567140  56.7%   0.920 [0.911, 0.928]  last step 0.882
+  undecided after 16 coords     20479  65.5%    39612  63.4%    76975  61.6%   142373  56.9%   264121  52.8%   473627  47.4%   0.907 [0.897, 0.917]  last step 0.843
+  undecided after 32 coords     15289  48.9%    29134  46.6%    56365  45.1%   104076  41.6%   189356  37.9%   329493  33.0%   0.890 [0.874, 0.903]  last step 0.799
+  undecided after 64 coords      8656  27.7%    16416  26.3%    31281  25.0%    56775  22.7%   102392  20.5%   173226  17.3%   0.869 [0.846, 0.884]  last step 0.759
+  undecided after 128 coords     3324  10.6%     6184   9.9%    11348   9.1%    20796   8.3%    35524   7.1%    56277   5.6%   0.824 [0.795, 0.849]  last step 0.664
+  undecided after 256 coords      533   1.7%      909   1.5%     1495   1.2%     2621   1.0%     3823   0.8%     5053   0.5%   0.664 [0.615, 0.703]  last step 0.403
+  unresolved at full read               1.38            1.58            1.48            1.52            1.57            1.72
+
+N grows (own clustering per N, 12 local bases at every N): text queries, k = 100
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       3.39M  108.4    6.06M   97.0   11.03M   88.2   19.96M   79.9   35.21M   70.4   60.49M   60.5   0.836 [0.821, 0.850]  last step 0.781   (M coordinates; per item)
+  undecided after 0 coords      29287  93.7%    55771  89.2%   106783  85.4%   206140  82.5%   386775  77.4%   733420  73.3%   0.930 [0.923, 0.938]  last step 0.923
+  undecided after 2 coords      28363  90.8%    54374  87.0%   103819  83.1%   200400  80.2%   374252  74.9%   705803  70.6%   0.928 [0.920, 0.935]  last step 0.915
+  undecided after 8 coords      26562  85.0%    51193  81.9%    97650  78.1%   187063  74.8%   343010  68.6%   637925  63.8%   0.917 [0.908, 0.927]  last step 0.895
+  undecided after 16 coords     24495  78.4%    46672  74.7%    88842  71.1%   165450  66.2%   304330  60.9%   550143  55.0%   0.899 [0.887, 0.911]  last step 0.854
+  undecided after 32 coords     20412  65.3%    37493  60.0%    70504  56.4%   128893  51.6%   231053  46.2%   402146  40.2%   0.864 [0.845, 0.879]  last step 0.800
+  undecided after 64 coords     13394  42.9%    23573  37.7%    42685  34.1%    75731  30.3%   133422  26.7%   226752  22.7%   0.821 [0.791, 0.846]  last step 0.765
+  undecided after 128 coords     5577  17.8%     9622  15.4%    17012  13.6%    30185  12.1%    51564  10.3%    83301   8.3%   0.788 [0.748, 0.819]  last step 0.692
+  undecided after 256 coords     1249   4.0%     2013   3.2%     3191   2.6%     5344   2.1%     8054   1.6%    11373   1.1%   0.648 [0.594, 0.686]  last step 0.498
+  unresolved at full read               4.05            4.28            4.97            5.14            5.48            5.79
+
+N grows (own clustering per N, 12 local bases at every N): text queries, k = 1000
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       5.93M  189.7   10.05M  160.8   17.40M  139.2   29.93M  119.7   49.93M   99.9   83.50M   83.5   0.766 [0.743, 0.788]  last step 0.742   (M coordinates; per item)
+  undecided after 0 coords      31098  99.5%    60888  97.4%   117581  94.1%   227630  91.1%   427828  85.6%   815076  81.5%   0.941 [0.936, 0.948]  last step 0.930
+  undecided after 2 coords      30842  98.7%    59984  96.0%   115367  92.3%   223367  89.3%   417822  83.6%   792067  79.2%   0.936 [0.930, 0.944]  last step 0.923
+  undecided after 8 coords      30136  96.4%    58227  93.2%   111247  89.0%   214904  86.0%   394063  78.8%   739391  73.9%   0.923 [0.915, 0.932]  last step 0.908
+  undecided after 16 coords     29224  93.5%    55915  89.5%   106077  84.9%   200761  80.3%   364449  72.9%   666231  66.6%   0.903 [0.891, 0.914]  last step 0.870
+  undecided after 32 coords     27143  86.9%    50374  80.6%    93931  75.1%   173091  69.2%   302310  60.5%   523663  52.4%   0.857 [0.839, 0.873]  last step 0.793
+  undecided after 64 coords     22389  71.6%    39058  62.5%    69392  55.5%   118684  47.5%   195327  39.1%   321363  32.1%   0.770 [0.738, 0.803]  last step 0.718
+  undecided after 128 coords    12618  40.4%    20026  32.0%    32754  26.2%    52501  21.0%    83084  16.6%   130417  13.0%   0.677 [0.611, 0.725]  last step 0.651
+  undecided after 256 coords     3846  12.3%     5625   9.0%     8322   6.7%    12545   5.0%    18161   3.6%    25110   2.5%   0.549 [0.476, 0.598]  last step 0.468
+  unresolved at full read              18.24           25.28           28.87           31.62           35.76           35.67
+
+N grows (own clustering per N, 12 local bases at every N): text queries, k = 10000
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total      12.25M  391.9   21.29M  340.7   35.06M  280.4   53.64M  214.6   85.28M  170.6  139.77M  139.8   0.691 [0.668, 0.711]  last step 0.713   (M coordinates; per item)
+  undecided after 0 coords      31249 100.0%    62439  99.9%   124829  99.9%   247208  98.9%   477856  95.6%   925058  92.5%   0.978 [0.975, 0.982]  last step 0.953
+  undecided after 2 coords      31208  99.9%    62427  99.9%   124648  99.7%   245641  98.3%   472174  94.4%   910241  91.0%   0.973 [0.970, 0.977]  last step 0.947
+  undecided after 8 coords      31188  99.8%    62380  99.8%   124053  99.2%   243062  97.2%   459191  91.8%   880894  88.1%   0.963 [0.958, 0.968]  last step 0.940
+  undecided after 16 coords     31158  99.7%    62249  99.6%   123232  98.6%   237990  95.2%   442595  88.5%   837909  83.8%   0.948 [0.941, 0.955]  last step 0.921
+  undecided after 32 coords     31067  99.4%    61706  98.7%   120642  96.5%   226160  90.5%   404931  81.0%   738671  73.9%   0.912 [0.899, 0.922]  last step 0.867
+  undecided after 64 coords     30626  98.0%    59469  95.2%   112099  89.7%   193371  77.3%   322998  64.6%   546161  54.6%   0.826 [0.804, 0.845]  last step 0.758
+  undecided after 128 coords    27855  89.1%    50114  80.2%    84777  67.8%   121690  48.7%   177698  35.5%   267587  26.8%   0.638 [0.592, 0.676]  last step 0.591
+  undecided after 256 coords    16876  54.0%    25574  40.9%    33576  26.9%    39296  15.7%    52581  10.5%    70718   7.1%   0.391 [0.337, 0.445]  last step 0.428
+  unresolved at full read             127.23          153.68          149.39          150.41          224.01          276.89
+
+N grows (own clustering per N, 12 local bases at every N): item queries, k = 10
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       0.37M   11.7    0.59M    9.5    0.97M    7.8    1.44M    5.8    2.09M    4.2    2.88M    2.9   0.597 [0.566, 0.624]  last step 0.463   (M coordinates; per item)
+  undecided after 0 coords      14877  47.6%    25385  40.6%    42625  34.1%    65120  26.0%    99378  19.9%   147743  14.8%   0.659 [0.622, 0.694]  last step 0.572
+  undecided after 2 coords      12430  39.8%    21942  35.1%    36963  29.6%    55735  22.3%    84954  17.0%   125108  12.5%   0.660 [0.622, 0.699]  last step 0.558
+  undecided after 8 coords       8059  25.8%    14011  22.4%    23533  18.8%    35730  14.3%    53298  10.7%    76026   7.6%   0.645 [0.597, 0.684]  last step 0.512
+  undecided after 16 coords      4997  16.0%     8114  13.0%    13668  10.9%    20100   8.0%    29967   6.0%    41677   4.2%   0.615 [0.558, 0.654]  last step 0.476
+  undecided after 32 coords      2173   7.0%     3287   5.3%     5442   4.4%     8016   3.2%    11240   2.2%    14351   1.4%   0.557 [0.503, 0.594]  last step 0.353
+  undecided after 64 coords       586   1.9%      862   1.4%     1284   1.0%     1777   0.7%     2150   0.4%     2395   0.2%   0.416 [0.350, 0.470]  last step 0.156
+  undecided after 128 coords      102   0.3%      133   0.2%      165   0.1%      209   0.1%      218   0.0%      205   0.0%   0.216 [0.126, 0.291]  last step -0.088
+  undecided after 256 coords       17   0.1%       18   0.0%       20   0.0%       23   0.0%       24   0.0%       25   0.0%   0.117 [0.081, 0.164]  last step 0.042
+  unresolved at full read               1.46            1.58            1.77            1.82            1.95            2.10
+
+N grows (own clustering per N, 12 local bases at every N): item queries, k = 100
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       0.85M   27.2    1.31M   21.0    1.97M   15.8    2.92M   11.7    4.24M    8.5    5.83M    5.8   0.558 [0.501, 0.607]  last step 0.461   (M coordinates; per item)
+  undecided after 0 coords      20695  66.2%    35472  56.8%    59831  47.9%    95766  38.3%   148101  29.6%   226267  22.6%   0.689 [0.653, 0.724]  last step 0.612
+  undecided after 2 coords      18414  58.9%    32059  51.3%    53715  43.0%    85061  34.0%   130633  26.1%   197239  19.7%   0.681 [0.643, 0.720]  last step 0.595
+  undecided after 8 coords      14080  45.1%    23877  38.2%    39180  31.3%    61297  24.5%    91134  18.2%   132969  13.3%   0.647 [0.595, 0.698]  last step 0.545
+  undecided after 16 coords     10494  33.6%    16742  26.8%    26661  21.3%    39627  15.9%    58688  11.7%    82480   8.2%   0.596 [0.531, 0.646]  last step 0.491
+  undecided after 32 coords      6044  19.3%     9051  14.5%    13412  10.7%    19246   7.7%    27248   5.4%    35652   3.6%   0.517 [0.429, 0.589]  last step 0.388
+  undecided after 64 coords      2248   7.2%     3200   5.1%     4080   3.3%     5439   2.2%     7529   1.5%     8951   0.9%   0.402 [0.249, 0.488]  last step 0.250
+  undecided after 128 coords      476   1.5%      637   1.0%      729   0.6%      980   0.4%     1214   0.2%     1227   0.1%   0.287 [0.191, 0.357]  last step 0.016
+  undecided after 256 coords       97   0.3%      113   0.2%      126   0.1%      161   0.1%      167   0.0%      169   0.0%   0.173 [0.126, 0.219]  last step 0.020
+  unresolved at full read               3.50            4.18            4.87            5.73            6.75            8.19
+
+N grows (own clustering per N, 12 local bases at every N): item queries, k = 1000
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       2.87M   91.9    3.98M   63.6    5.55M   44.4    7.67M   30.7   10.39M   20.8   13.64M   13.6   0.453 [0.392, 0.507]  last step 0.393   (M coordinates; per item)
+  undecided after 0 coords      29223  93.5%    52492  84.0%    90704  72.6%   148254  59.3%   234636  46.9%   364911  36.5%   0.726 [0.685, 0.764]  last step 0.637
+  undecided after 2 coords      27808  89.0%    50130  80.2%    85566  68.5%   137834  55.1%   215119  43.0%   329859  33.0%   0.710 [0.670, 0.752]  last step 0.617
+  undecided after 8 coords      25353  81.1%    44610  71.4%    72838  58.3%   114093  45.6%   170069  34.0%   250107  25.0%   0.656 [0.599, 0.699]  last step 0.557
+  undecided after 16 coords     22944  73.4%    38385  61.4%    59591  47.7%    87857  35.1%   128036  25.6%   177591  17.8%   0.587 [0.523, 0.639]  last step 0.472
+  undecided after 32 coords     18925  60.6%    28102  45.0%    40488  32.4%    56364  22.5%    75779  15.2%    94913   9.5%   0.469 [0.386, 0.538]  last step 0.325
+  undecided after 64 coords     11995  38.4%    15072  24.1%    18939  15.2%    23665   9.5%    28619   5.7%    32482   3.2%   0.294 [0.194, 0.400]  last step 0.183
+  undecided after 128 coords     4007  12.8%     4202   6.7%     4682   3.7%     5382   2.2%     5868   1.2%     6249   0.6%   0.139 [0.012, 0.242]  last step 0.091
+  undecided after 256 coords      721   2.3%      759   1.2%      847   0.7%      966   0.4%     1051   0.2%     1116   0.1%   0.136 [0.064, 0.197]  last step 0.087
+  unresolved at full read              10.11           14.67           18.44           23.99           30.38           37.02
+
+N grows (own clustering per N, 12 local bases at every N): item queries, k = 10000
+  measure                             31,250          62,500         125,000         250,000         500,000         999,900   exponent
+  coordinates read, total       7.96M  254.7   13.39M  214.2   20.93M  167.5   28.07M  112.3   35.10M   70.2   45.00M   45.0   0.488 [0.446, 0.521]  last step 0.359   (M coordinates; per item)
+  undecided after 0 coords      30722  98.3%    61835  98.9%   123462  98.8%   233199  93.3%   396961  79.4%   666666  66.7%   0.890 [0.864, 0.912]  last step 0.748
+  undecided after 2 coords      30571  97.8%    61741  98.8%   123077  98.5%   227733  91.1%   382843  76.6%   631851  63.2%   0.875 [0.847, 0.901]  last step 0.723
+  undecided after 8 coords      30339  97.1%    61106  97.8%   120211  96.2%   214397  85.8%   350192  70.0%   550730  55.1%   0.837 [0.804, 0.867]  last step 0.653
+  undecided after 16 coords     29976  95.9%    59400  95.0%   114740  91.8%   197561  79.0%   311650  62.3%   458900  45.9%   0.790 [0.754, 0.821]  last step 0.558
+  undecided after 32 coords     28840  92.3%    54943  87.9%   103472  82.8%   169321  67.7%   241424  48.3%   320913  32.1%   0.700 [0.655, 0.735]  last step 0.411
+  undecided after 64 coords     25650  82.1%    46263  74.0%    81022  64.8%   117152  46.9%   138230  27.6%   159396  15.9%   0.527 [0.472, 0.581]  last step 0.206
+  undecided after 128 coords    18450  59.0%    30036  48.1%    43382  34.7%    46894  18.8%    42725   8.5%    43022   4.3%   0.221 [0.140, 0.295]  last step 0.010
+  undecided after 256 coords     7613  24.4%    10691  17.1%    11517   9.2%     9165   3.7%     8256   1.7%     8385   0.8%   -0.021 [-0.081, 0.046]  last step 0.022
+  unresolved at full read              80.58          110.45          120.77           90.62          118.70          165.92

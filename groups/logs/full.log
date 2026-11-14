@@ -1,0 +1,27 @@
+[    16s] scores done; mean thresholds text [0.691 0.663 0.613 0.565] item [0.897 0.86  0.783 0.687]
+[    45s] level 0: K=1000 median size 838 rms residual 0.3765 half log-det of the top 64 local dimensions, bits per item -313.5
+[    58s] support table done
+[    92s] level 0: queries 64/469, violations 0
+[   124s] level 0: queries 128/469, violations 0
+[   156s] level 0: queries 192/469, violations 0
+[   190s] level 0: queries 256/469, violations 0
+[   222s] level 0: queries 320/469, violations 0
+[   256s] level 0: queries 384/469, violations 0
+[   289s] level 0: queries 448/469, violations 0
+[   336s] level 1: K=3997 median size 203 rms residual 0.3509 half log-det of the top 64 local dimensions, bits per item -319.2
+[   371s] level 1: queries 64/469, violations 0
+[   404s] level 1: queries 128/469, violations 0
+[   439s] level 1: queries 192/469, violations 0
+[   477s] level 1: queries 256/469, violations 0
+[   513s] level 1: queries 320/469, violations 0
+[   549s] level 1: queries 384/469, violations 0
+[   585s] level 1: queries 448/469, violations 0
+[   636s] level 2: K=15880 median size 48 rms residual 0.3288 half log-det of the top 64 local dimensions, bits per item -324.9
+[   675s] level 2: queries 64/469, violations 0
+[   713s] level 2: queries 128/469, violations 0
+[   750s] level 2: queries 192/469, violations 0
+[   788s] level 2: queries 256/469, violations 0
+[   826s] level 2: queries 320/469, violations 0
+[   864s] level 2: queries 384/469, violations 0
+[   903s] level 2: queries 448/469, violations 0
+[   960s] level 3: K=58750 median size 10 rms residual 0.3034 half log-det of the top 64 local dimensions, bits per item -332.1

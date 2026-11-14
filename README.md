@@ -31,6 +31,8 @@ This branch holds no Mosaica code and shares no history with it.
 | `entropy/` | How far real embeddings are from Gaussian, across six datasets |
 | `knn/` | k-nearest-neighbour on the same index, against HNSW and IVF-PQ, filtered and unfiltered |
 | `proofcheck/` | Referee report, consolidated proofs, numerical checks |
+| `groups/` | What a grouping can buy (at most log₂K bits per item); the geometric-mean metric for the per-item bound; where the cost goes by distance from the threshold; tolerance bands |
+| `sublinear/` | Whether a query's work can grow sublinearly in N: lower bounds, the shell law of cost, exponents measured from 31k to 1M items, caching |
 | `site/` | Builds the published proofs page from `proofcheck/CONSOLIDATED_PROOFS.md` (`python3 build.py` in `site/`) |
 
 Each directory's `REPORT.md` summarises its results; the scripts and logs beside it are the
@@ -52,6 +54,12 @@ Scripts use absolute paths from the machine they ran on; adjust them to rerun.
 
 ## Status
 
-Every figure is a byte count or a model from numpy prototypes; nothing has been timed natively.
-Work in progress: a rework of the per-item code, an end-to-end review, then a standalone Rust
-prototype for real timings.
+A native Rust prototype exists (`rust/`, results in `rust/REPORT2.md`); most other figures are
+byte or coordinate counts from numpy prototypes. `DESIGN.md` section 9 lists findings made after the
+design and not yet adopted.
+
+In progress (November 2026):
+- the dual basis of `groups/REPORT.md` section 2.4 checked in the version 2 prototype, with the
+  quantised code, bytes read and timings;
+- a study of the per-item cost of the bulk: items 1–8 score standard deviations from the threshold,
+  which carry most of the cost.

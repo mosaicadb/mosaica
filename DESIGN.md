@@ -221,3 +221,48 @@ selectivity; all treat filtering first and scanning exactly as the correct basel
 Cash [52] show that post-filtering over a shared index leaks hidden rows through timing and relevance
 scores. Our results depend, item by item, only on that item's data, so a masked result equals a
 result computed over the visible set. Timing is outside this guarantee.
+
+## 9. Findings after this design (not yet adopted)
+
+From `groups/REPORT.md` and `sublinear/REPORT.md`. Counts are exact coordinates read, not bytes or
+times, unless stated.
+
+**Where the cost is.** With nothing read, an item's interval is ±6.1 score standard deviations (sd)
+for text and ±4.5 sd for items, wider than the threshold's height above the median (1.8–4.9 sd).
+Almost every item starts undecided and is read until its slack is below its own margin. Items 2–8 sd
+below the threshold carry 56–87% of text cost at answers of 1% and below; items within 0.5 sd carry
+4–19%. Cost follows the distance of the bulk from the threshold, not the height of the score
+density there.
+
+**Proposed changes**, pending the native check named in the README:
+1. **Replace each group's PCA basis and diagonal profile by the dual pair** of `groups/REPORT.md`
+   section 2.4: the matrix geometric mean of the inverse query-offset covariance and the residual
+   covariance. Same storage and query work; soundness does not depend on the fit. Coordinates read
+   fall 30–44% for text with a query log in the fit, 13–16% for text and 33–39% for items with the
+   data-only fit. The best diagonal weighting recovers 2–4%.
+2. **Sort each cluster by the residual's norm in that metric** instead of by x·m̂, and drop the
+   support table and anchors. With nothing read per member this matches the table for items and
+   beats it for text (61 / 71 / 86 / 97% of items left against 75 / 83 / 94 / 100%). It removes the
+   table's size and anchor-ratio problem at 10⁹ and the atomic widening on insert.
+3. **Fit the query-offset covariance from corpus items at build, and refit it from the query log at
+   compaction.** The data-only fit keeps about two fifths of the text gain.
+4. **Cache each executed query's cluster extremes with its result.** The only measured route to a
+   growth exponent well below one (0.12–0.34 at k = 10), and only for repeated query directions. It
+   opens a timing channel unless rows are kept per grant.
+
+**What to stop.** Better groupings, richer group summaries, hierarchies over centres for skipping,
+hashing, finer clusters and more anchors (see `FINDINGS.md` section 7). The number of clusters
+should be set by the cost of centres and per-cluster setup, keeping clusters near 1,000 items as N
+grows.
+
+**Scaling.** No index promises sublinear work for a fresh query (conditional on SETH). Each level
+of the design is read by the items within its slack below the threshold, so its work tends to
+linear at fixed answer size. Measured from 31k to 1M items at k = 10: items left after the first
+pass grow as N^0.91–0.93 for text and N^0.49–0.64 for items; coordinates read as N^0.79–0.87 and
+N^0.49–0.60. Each sd of slack removed from the first certificate leaves 3–4× fewer items at that
+level and lowers its exponent by about 0.05, so the first certificate is the main lever on both cost
+and scaling. Extrapolated (conjectured), a fresh text query at 10⁹ still touches a third to a half
+of the items in its first pass.
+
+**Tolerance.** Keep d = 0. A tolerance below the threshold does not help the bulk; a band above it
+is the same as a higher threshold and drops the guarantee on many matches (`groups/REPORT.md` 3.6).

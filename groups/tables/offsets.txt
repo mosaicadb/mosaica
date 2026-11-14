@@ -1,0 +1,2 @@
+text: mean |offset|^2 0.696; top eigenvalue share 0.180; effective rank tr/lmax 5.6; after removing the top 1/4/16 directions 13.9 / 20.2 / 52.9; participation ratio 22.4
+item: mean |offset|^2 0.595; top eigenvalue share 0.124; effective rank tr/lmax 8.1; after removing the top 1/4/16 directions 12.8 / 23.5 / 32.1; participation ratio 31.7

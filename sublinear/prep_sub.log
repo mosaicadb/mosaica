@@ -1,0 +1,21 @@
+[     0s] sizes [31250, 62500, 125000, 250000, 500000, 999900] K [31, 62, 125, 250, 500, 1000]
+[     7s] scores written
+[    15s] k-means iteration 0 empties [0, 0, 0, 0, 0]
+[    22s] k-means iteration 1 empties [0, 0, 0, 0, 0]
+[    29s] k-means iteration 2 empties [0, 0, 0, 0, 0]
+[    36s] k-means iteration 3 empties [0, 0, 0, 0, 0]
+[    43s] k-means iteration 4 empties [0, 0, 0, 0, 0]
+[    50s] k-means iteration 5 empties [0, 0, 0, 0, 0]
+[    57s] k-means iteration 6 empties [0, 0, 0, 0, 0]
+[    64s] k-means iteration 7 empties [0, 0, 0, 0, 0]
+[    70s] k-means iteration 8 empties [0, 0, 0, 0, 0]
+[    77s] k-means iteration 9 empties [0, 0, 0, 0, 0]
+[    84s] k-means iteration 10 empties [0, 0, 0, 0, 0]
+[    91s] k-means iteration 11 empties [0, 0, 0, 0, 0]
+[   101s] clustering 0: N=31250 K=31 G=12 sizes min/med/max 264/957/2982 rms residual 0.5069
+[   105s] clustering 1: N=62500 K=62 G=12 sizes min/med/max 265/822/3028 rms residual 0.4706
+[   110s] clustering 2: N=125000 K=125 G=12 sizes min/med/max 86/900/4684 rms residual 0.4408
+[   118s] clustering 3: N=250000 K=250 G=16 sizes min/med/max 84/831/3409 rms residual 0.4158
+[   133s] clustering 4: N=500000 K=500 G=32 sizes min/med/max 82/848/3711 rms residual 0.3942
+[   173s] clustering 5: N=999900 K=1000 G=64 sizes min/med/max 1/838/4321 rms residual 0.3765
+[   173s] done

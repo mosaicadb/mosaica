@@ -1,0 +1,18 @@
+[    11s] levels [1000, 3997, 15880, 58750] max angle (deg), median per level [38.20399475097656, 33.99626922607422, 28.684995651245117, 22.0452880859375]
+[    11s] query 0 violations 0 of 159254
+[    14s] query 50 violations 0 of 8121954
+[    16s] query 100 violations 0 of 16084654
+[    19s] query 150 violations 0 of 24047354
+[    22s] query 200 violations 0 of 32010054
+[    24s] query 250 violations 0 of 39972754
+[    26s] query 300 violations 0 of 47935454
+[    29s] query 350 violations 0 of 55898154
+[    32s] query 400 violations 0 of 63860854
+[    34s] query 450 violations 0 of 71823554
+cluster-bound checks 74,690,126; violations 0
+text k=10: centres read per level [1000, 3972, 15552, 55313] of [1000, 3997, 15880, 58750]; total 75837 = 129.1% of the leaf centres; undecided nodes [99.3, 97.5, 92.0, 75.5]%; items under undecided nodes [98.5, 95.8, 90.9, 82.3]%; nodes holding both matches and non-matches [3.3, 4.5, 5.7, 6.7]
+text k=100: centres read per level [1000, 3983, 15672, 56365] of [1000, 3997, 15880, 58750]; total 77020 = 131.1% of the leaf centres; undecided nodes [99.6, 98.3, 93.9, 79.7]%; items under undecided nodes [99.2, 97.3, 93.7, 86.8]%; nodes holding both matches and non-matches [10.9, 18.9, 30.1, 43.5]
+text k=1000: centres read per level [1000, 3993, 15798, 57497] of [1000, 3997, 15880, 58750]; total 78288 = 133.3% of the leaf centres; undecided nodes [99.8, 99.1, 96.1, 84.7]%; items under undecided nodes [99.8, 99.0, 97.0, 92.3]%; nodes holding both matches and non-matches [36.2, 76.4, 152.1, 266.0]
+item k=10: centres read per level [1000, 3211, 9983, 24868] of [1000, 3997, 15880, 58750]; total 39061 = 66.5% of the leaf centres; undecided nodes [80.3, 62.5, 40.3, 19.1]%; items under undecided nodes [73.8, 55.5, 37.4, 22.5]%; nodes holding both matches and non-matches [2.3, 3.4, 4.8, 6.1]
+item k=100: centres read per level [1000, 3455, 11516, 31742] of [1000, 3997, 15880, 58750]; total 47713 = 81.2% of the leaf centres; undecided nodes [86.4, 72.1, 51.7, 28.2]%; items under undecided nodes [81.3, 65.9, 48.9, 32.6]%; nodes holding both matches and non-matches [4.9, 9.9, 18.3, 30.2]
+item k=1000: centres read per level [1000, 3681, 13094, 40074] of [1000, 3997, 15880, 58750]; total 57849 = 98.5% of the leaf centres; undecided nodes [92.0, 82.0, 65.8, 42.6]%; items under undecided nodes [88.9, 77.8, 64.1, 48.8]%; nodes holding both matches and non-matches [13.7, 32.2, 72.1, 146.5]
