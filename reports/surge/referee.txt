@@ -1,0 +1,313 @@
+REFEREE REPORT: THEOREMS A AND B, THE SPHERE-TAIL CONSTANTS, THE RECALL BOUND, THE INTEGER KERNEL
+2026-11-13. No repository was edited. Scripts and outputs are in
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/surge/referee_work/
+(tailcheck.py, lawmc.py, lawmc2.py, lawmc3.py, algebra.py, thmA_mc.py, thresh_consts.py). One run (thmA_mc.py,
+4 min 40 s) was moved to the background by the harness when it passed 180 s; it finished and nothing is running.
+The venv has no scipy, so the tail is my own series for the incomplete beta function, checked against closed
+forms at m = 2, 3, 4.
+
+VERDICTS
+
+ 1  Theorem A (union over k x levels)            correct with repair: six conditions must be written into it
+ 2  Exact sphere tail, constants table            correct; every table value reproduced to the printed digit
+    Lemma 8 for this quantiser                    correct if the scale is chosen per item from its own rotated
+                                                  vector; three repairs for the global scale, quantised scalars
+                                                  and the floating-point rotation
+ 3  Theorem B (i) centre correction               correct
+    Theorem B (ii) self-normalised interval       correct for the two-sided event; three repairs in use
+    Theorem B (iii) deterministic interval        correct
+    Backstop inequality (section 3 of the report) wrong for the self-normalised width; right for the plain width
+    Level-1 integer test with w_j and no e_c      wrong (unsound); the specification writer is right
+    Cascade spec section 2, rotation error        correct with repair (two error terms too small, one step missing)
+ 4  What is guaranteed                            statement below, for the owner to accept or reject
+ 5  Approximate recall >= 1 - L delta(m)          formula correct; the quoted 0.994 and 0.93 are for L = 1
+ 6  Theorem D                                     correct; the saturation paragraph is wrong, and the f32
+                                                  threshold slack is not a proof
+    Lemma R, Theorem R                            correct with repair (multiplier error, one sentence of the
+                                                  argument, a conflict with Theorem A in section 4)
+    Threshold sketch (exclusion side)             correct, and stronger than claimed: no eps/J split is needed
+    Threshold certify-in at a reduced constant    not proved by anything I was given
+
+No constant in the table changes. Constants change only where a repair adds events (below).
+
+
+1. THEOREM A
+
+The adaptivity question. It does not break the union bound. For each fixed pair (true neighbour x*, level l) the
+event F(x*, l) = {upper bound of x* at level l is below its true score} is a function of the rotation alone,
+defined whether or not the algorithm ever evaluates that bound. The implication "answer wrong => some F(x*, l)
+with x* in T" holds for every rotation, one rotation at a time. Nothing is conditioned on, so which bounds get
+evaluated, in what order, and against which tau, cannot matter. tau depending on the seed is harmless for the
+same reason: only "tau <= s_k for every seed" is used.
+
+Numerical confirmation (thmA_mc.py: n = 16, 1,501 items, 12 clusters, k = 5, two levels, 60% visible, a tie
+placed at rank k/k+1, seed step chosen from estimates, tau raised cluster by cluster, 8 queries x 3,000
+rotations, c = 2.2 so that failures are frequent):
+  some true neighbour's bound fails        0.1042   (k L delta one-sided = 0.1085, two-sided 0.217)
+  answer wrong, serial                     0.0102   wrong while every true-neighbour bound held: 0 of 24,000
+  answer wrong, two thread-local taus      0.0064   wrong while every true-neighbour bound held: 0 of 24,000
+  level-1 width w_j without the centre term 0.0466  wrong while every (correct) bound held: 810
+  tau raised by randomised lower bounds    0.0106   0 outside the event; this test had no power to show the gap
+
+Repaired statement.
+
+  Setting. The corpus, the centres and assignment, the visible set V (after every filter) and the query q are
+  fixed independently of the rotation P, which is Haar. s(x) is the one score function used for full reads.
+  T is the first k entities of V in the order (s descending, id ascending). c is fixed before the query from
+  (n, k, L, eps) only. For each item and level, U_l(x) is computed from q, the item's level-l code and scalars,
+  per-cluster constants and c, and from nothing else.
+  Algorithm class. (a) Every threshold tau used in a drop test is at most the k-th largest s among distinct
+  visible entities scored exactly so far (minus infinity with fewer than k). (b) An item is discarded only by
+  the strict test U_l(x) < tau, or by a bound that holds for every rotation. (c) Every visible item not
+  discarded is scored exactly. (d) The result is the first k scored entities in the same order.
+  Claim. Pr over P [result != T] <= sum over x* in T and levels l of Pr[U_l(x*) < s(x*)] <= k L delta, where
+  delta is the failure probability of one bound.
+  Proof. tau <= s_k always, by (a). If no F(x*, l) occurs then U_l(x*) >= s(x*) >= s_k >= tau, so by (b) no
+  member of T is discarded, by (c) all are scored, and by (d) the result is T. Union bound over the fixed set
+  T x levels.
+
+Conditions the original leaves out, each of which can break it:
+ a. Distinct entities in tau. If one entity can be scored through two rows (SOAR copies, two versions of an
+    upserted item), the k-th best over rows can exceed s_k. The same holds for a deleted or suppressed row.
+    The cascade spec keys the heap by row; check that Index2 rows are one per entity.
+ b. Strict test and one order. "<= tau" can drop a tied neighbour.
+ c. The bound must bound the score that full reads compute. The spec handles this (r defined on the f16 vector,
+    tau lowered by full_err_qn, near-ties settled by the integer product). The report did not.
+ d. One event per bound direction. If level 1 uses the uncorrected estimator (direction q) in the kernel and
+    the corrected one (direction q - alpha c) in the re-check, that is two events at level 1: L = 4, c = 6.02 /
+    6.41 / 6.58 at n = 100 / 256 / 768 instead of 5.99 / 6.37 / 6.54. Plain and self-normalised widths on the
+    same estimator are one event.
+ e. No randomised lower bound may raise tau or admit an item, and no randomised bound may skip a cluster. The
+    integer-kernel note, section 4, lets tau be "the k-th largest lower bound"; that is sound only for the
+    deterministic lower bounds.
+ f. The filter must be independent of the rotation. A filter built from an exact-mode result is fine (add its
+    eps). A filter built from an approximate-mode result is correlated with the code errors and voids the bound.
+
+The listed cases.
+ - Ties: covered by (b) and the id order. Checked with a duplicated k-th neighbour.
+ - Filter: T and tau are over V; nothing else changes.
+ - Seed step: any rule may choose which items to score first. It changes cost only.
+ - Cluster-by-cluster tau: any non-decreasing tau satisfying (a) is fine.
+ - Thread-local tau: each is the k-th best of a subset, so (a) holds; so does a shared maximum, read stale.
+   A thread with fewer than k scores must hold minus infinity.
+ - Repeated queries: the probability is over the rotation, not over executions. A query that fails keeps
+   failing until the item is re-encoded under a new rotation. With thread-local taus a failing query can
+   return different sets on different runs.
+ - Adaptive queries: Theorem 5 applies unchanged, because T is unique. It covers a client that sees only
+   answers. Latency and bytes read depend on the rotation, so a client adapting on those needs Theorem 6.
+ - Batches: the guarantee is per query. Over 100,000 queries at eps = 1e-9 the probability that any answer is
+   wrong is at most 1e-4, and the expected number of wrong answers is at most 1e-4. Failures are not
+   independent across queries (one rotation), which does not affect either figure. For 1e-9 over the whole
+   run, c = 7.00 / 7.68 / 7.99 at n = 100 / 256 / 768.
+
+Two standing assumptions, not new to Theorem A but relied on by it:
+ - Haar is a model of a pseudo-random matrix from a 64-bit seed. Probabilities near 2^-64 (5e-20) mean
+   nothing; the old per-side budget of 1e-19 was already there. Theorem A's 1.7e-11 is not.
+ - "The seed may be kept at compaction" is unsafe. Centres refitted from a corpus that contains items crafted
+   against the public seed make other items' residuals depend on the rotation, so the owner's "crafting harms
+   only the crafter" stops holding for the randomised bound. Draw a new rotation whenever centres are refitted.
+
+Prior work. I did not verify the literature notes. The proof above is self-contained and does not rest on
+ADSampling's corollary or on arXiv:2611.07579; the latter I could not check at all.
+
+
+2. THE EXACT TAIL AND LEMMA 8
+
+Closed form. For u uniform on the unit sphere of the (n-1)-dimensional space orthogonal to r,
+Pr[u_1 >= s] = (1/2) I_{1-s^2}((m-1)/2, 1/2) with m = n - 1. This is right, and m = n - 1 is the right
+dimension (using n instead would move c by 0.02 at n = 100). consts.py's trapezoid agrees with my series to six
+digits at tails from 1e-3 to 1e-19.
+
+Table, recomputed (half-width in sd units; "one-sided" rows count one harmful side per event):
+  events                                per-side   sub-G   n=100   n=256   n=768   n=1536
+  N x 5 two-sided                        1e-19      9.35    7.48    8.36    8.79    8.90
+  k=10 x 3 two-sided (Theorem A)         1.7e-11    7.05    5.99    6.37    6.54    6.59
+  k=100 x 3 two-sided                    1.7e-12    7.36    6.23    6.66    6.86    6.91
+  k=1000 x 3 two-sided                   1.7e-13    7.67    6.44    6.94    7.16    7.22
+  k=10 x 3 two-sided, eps 1e-6           1.7e-8     5.98    5.16    5.38    5.47    5.50
+  k=10 x 3 one-sided (needs the cap in 3)  3.3e-11  6.95    5.92    6.28    6.44    6.49
+  k=10 x 4 two-sided (item d above)      1.3e-11    7.09    6.02    6.41    6.58    6.63
+  N=1e9 x 3 one-sided (all-items event)  3.3e-19    9.22    7.41    8.26    8.66    8.77
+The report's "N items, one-sided, 1e-18" row is for one level; with three levels it is the last row.
+Proposition 10's closed bound gives 6.25 / 6.72 / 6.93 / 6.99 for the Theorem A row, so the numerical tail is
+worth using.
+
+Lemma 8 for this quantiser. The proof needs the code to be a function of the item's own rotated vector Pr and
+of nothing else that depends on P. Sign plus nested magnitude bits with a scale chosen per item from Pr
+satisfies that at every level, and I confirmed the law at n = 8 where the tail near the cap is visible (3 and
+4 million rotations, 1-bit and 3-bit codes: one-sided frequencies at s = 0.3 to 0.9 within 2.8 standard errors
+of the exact law in every run, error orthogonal to r to 1e-16, no dependence on A beyond noise).
+ - Global scale. lawcheck.py and lvl0c.py fit the grid step on the first 20,000 rotated items, so the codebook
+   depends on P through other items and the invariance step of the proof does not apply. I could not make this
+   show: fitting the scale on the rotated query direction itself left the tail unchanged at n = 8. It is still
+   unproved. Either use the per-item scale (the spec does; the step need not be stored), or pay a union over
+   the grid (13 values: c = 6.25 / 6.69 / 6.90).
+ - Quantised scalars. The direction stays uniform, but an estimator scale f' derived from rounded scalars adds
+   a radial error (f'/f - 1) x estimate, which "round so the width rounds up" does not cover when the residual
+   is nearly parallel to the offset and the estimate is negative. At n = 8 with |t|/R = 0.995 and a 1-byte
+   cos(phi), upper-bound failures ran at 1.1x to 4x the exact law (lawmc3.py). Repair: add eta |estimate| with
+   eta >= |1 - f/f'|, or do as the spec does and bracket 1/f between A ua and (A+2) ua.
+ - Floating-point rotation. See the spec check below.
+
+Cascade spec, section 2.
+ - "Nearest exact rotation within eta": right. The polar factor P* satisfies |P - P*|_2 <= |P^T P - I|_F.
+ - The float term n 2^-50 is too small for a worst-case bound when n > 64: the error of a computed matrix-vector
+   product paired with a code is up to n^1.5 2^-53 |o||q|. Use eta + n^1.5 2^-52 in dl and eS. It is still
+   about 1e-12 and costs nothing.
+ - d = a rho - <o, Pc> can cancel, so its error is absolute, not "relative dl". The full step charged covers it
+   unless ud is tiny (ud = 1e-30 when all d are zero). Floor ud at 4 (eta + n^1.5 2^-52) max(|o||c| + |a rho|).
+ - Missing step: the code is computed from fl(P r), not from P* r, so it is not a function of P* r where a
+   coordinate lies within rounding of a quantiser boundary or two grid steps tie. Conditional on P* r each
+   candidate code has the exact law, so the failure probability is at most delta x E[2^J], J the number of
+   such coordinates. With errors of 1e-12 that factor is 1 + about 1e-8. One sentence fixes it.
+ - A = 0 (a below one unit) divides by zero; make it a sentinel.
+ - "P* is Haar" is the modelling assumption above; state it.
+ - The interval logic (t = R when E >= R, the negative-discriminant branch, rounding directions of A, B, RN,
+   D, RHO) is right; see section 3.
+
+Level-1 test without the centre term: ruling. Unsound. The estimator f S estimates q.r, whose error is
+A |q_perp| u_1 with |q_perp| up to 1; w_j is the norm of q - alpha c_j and applies only to the estimator that
+includes alpha e_c. With w = 0.80 (glove) the effective constant is 4.80, a per-event tail of 1.9e-7 against a
+budget of 1.7e-11 (11,500 times), so k L 2 delta = 1.2e-5, not 1e-9; at w = 0.93 (nytimes) 27 times. In the
+Monte Carlo it produced 810 wrong answers in 24,000 with every correct bound holding. Keep the byte, as the spec
+does, or use width c |q| with no centre term.
+
+
+3. THEOREM B
+
+(i) Correct. D = q - alpha c_j is fixed independently of P; e_c is a cached function of the code, the centre and
+P, not new information; rho cancels from the score estimate.
+
+(ii) The event |t - est| <= kappa sqrt(R^2 - t^2), R = |r| w, is exactly the event |u_1| <= c/sqrt(m), with the
+same probability, and for the two-sided event the solution set is exactly [t-, t+] in every sign case (20,000
+random cases against a grid: 0 mismatches). Repairs:
+ - Negative discriminant (est^2 > (1 + kappa^2) R^2) means the event has failed; the formula gives a NaN. Keep
+   the item or use the deterministic interval. lvl0c.py clamps to zero; the spec uses the plain width.
+ - Rounding est. t+ increases with est only while est <= R; beyond R it decreases (R = 1, kappa = 0.4: t+ =
+   1.000 at est = 1.00, 0.988 at 1.05, 0.965 at 1.07). So "round est up" narrows the bound there. Repair: if
+   est + slack >= R, use t_hi = R. The spec does this.
+ - One-sided use. With only the upper event, t+ is wrong when est > R (1,931 of 20,000 cases, up to 0.40 R too
+   low); with "t_hi = R when est > R" it is right in all cases. That buys the one-sided row (5.92 / 6.28 / 6.44).
+
+Repaired statement. On the event |u_1| <= c/sqrt(m) of the item's level-l code, with kappa >= c tan(phi)/sqrt(m),
+R >= |r| w and E >= est:  D.r <= R if E >= R;  otherwise D.r <= min(R, (E + kappa sqrt((1 + kappa^2) R^2 -
+E^2))/(1 + kappa^2)) when the root is real, and the item is kept when it is not.
+
+(iii) Correct: with kappa = tan(phi) the interval holds for every rotation, and contains the randomised one
+whenever c <= sqrt(n-1).
+
+Backstop. "A missed neighbour satisfies q.x* < tau + (sqrt(n-1) - c) w sd" is proved only for the plain width.
+For the self-normalised width the gap between the deterministic and randomised ends exceeds that in 32% of
+random cases with est < 0 and 0.8% with est > R, by up to 8.9 times, and never for 0 <= est <= R (R = 1, kappa
+= 0.3, tan(phi) = 0.5, est = -1.044: ends -0.675 and -0.956, gap 0.280 against 0.200). Repaired: with certainty
+a missed neighbour's score is at most its deterministic upper end (the same formula with kappa = tan(phi)); the
+closed-form gap holds when 0 <= est <= R.
+
+
+4. WHAT IS GUARANTEED
+
+Exact k-NN under Theorem A, for the owner to accept or reject:
+  For each query, visible set and filter chosen without reference to the rotation, with probability at least
+  1 - eps over the rotation the result is exactly the k best visible items. Every returned score is exact in
+  every case.
+What a user could see with probability eps: one or more true neighbours missing, each replaced by the next best
+item. Never a wrong score, never an invisible item. The missing item's score is below the deterministic upper
+end computed at its drop. The miss repeats on every run of that query, and for every viewer whose top k contains
+that item, until re-encoding.
+What is no longer promised: anything about items not returned. There are no certified lower bounds, no
+certified intervals for all items, and no item may be admitted or tau raised from a code. The all-items event
+costs 7.41 / 8.26 / 8.66.
+Not covered: threshold queries; approximate mode; clients or writers who use the seed; filters derived from
+approximate results; a rotation kept across a refit of the centres.
+
+Threshold queries returning a bitmap (1e9 items, n >= 512, matches certified in from codes).
+ - What is proved today. A wrong exclusion needs a match's upper bound to fail; a wrong inclusion needs a
+   non-match's lower bound to fail. So each item has one harmful side, and the union is N x L one-sided events.
+   Both the exclude and the certify-in constant are then (eps = 1e-9, L = 3):
+       n = 512: 8.56    n = 768: 8.66    n = 1024: 8.72    (sub-Gaussian 9.22; today's 9.35)
+   With deterministic levels on unrotated codes first, Proposition 12 lets c be set per query from the count
+   still undecided, because that set does not depend on the rotation: 1e7 undecided gives 8.09 / 8.17 / 8.22.
+ - Exclude side, reducible. The union is over matches only. The report's self-bounding scheme is sound and
+   needs no eps/J split: let c* = c(|S| L), a fixed number. On the event that every match's bound holds at c*
+   (probability >= 1 - eps_ex), every constant c(U) taken from a count U of items not yet excluded is >= c*
+   by induction, starting from U = N. This needs the width to be monotone in c and gives, at eps_ex = eps/2:
+       |S| = 1e7: 8.16 / 8.25 / 8.30     |S| = 1e5: 7.66 / 7.73 / 7.77     |S| = 1e3: 7.11 / 7.16 / 7.19
+   The ood report's cap-and-Markov variant is also sound (failure at most twice the stage budget).
+ - Certify-in side, not reducible by anything proved. The union is over non-matches: 8.63 / 8.74 / 8.79 at
+   eps/2. The two sides may use different constants; the total is the sum of the two budgets.
+ - So at this scale the proved gain over today is about 1% to 8% of the constant on certify-in and 7% to 18%
+   on exclusion. The large gain of Theorem A comes from k replacing N and from low n; neither applies here.
+ - What a sound tighter certify-in must establish. A bound, independent of the rotation, on
+   sum over non-matches x and levels l of Pr[lower bound of x at level l >= t], which is a sum of tails at
+   c + (margin of x)/(its sd), dominated by non-matches near t. An observed count cannot be put into the
+   formula directly: the undecided set depends on the rotation and is a subset of the near-threshold set, the
+   wrong direction. A proof has to show, one rotation at a time, that the observed count is at least a fixed
+   count. A route that I think closes for one level and the plain width: with V_a the fixed set of items
+   within a sd of t, on the event that every item of V_a has error below (c_N - a) sd, all of V_a is undecided
+   at c_N, so c(observed) >= c(|V_a|) = c*; choose a with a + c* = c_N; then the three failure terms are
+   |V_a| tail(c*), |V_a| tail(c_N - a) and N tail(c_N). Not proved: ties at the boundary of V_a, several levels,
+   the self-normalised width, blocks above 1,024 dimensions (no closed-form tail; Proposition 11 only).
+   I did not test this numerically.
+ - The answer is no longer made of exactly scored items, so an included item can be a non-match. The
+   deterministic statement is S(t + G) inside the result inside S(t - G), G the largest gap between
+   deterministic and randomised ends among the decisions made; at n >= 512 that gap is about 1.6 to 2.7 times
+   the randomised width.
+ - Theorem 5 applies (the exact answer is unique).
+
+
+5. APPROXIMATE-MODE RECALL
+
+The bound is right: tau <= s_k still holds, a neighbour is missed only if one of its L bounds fails, and a
+neighbour that is not dropped is returned, so expected recall over the rotation is at least 1 - L delta(m) for
+each fixed query, all clusters scanned. The numbers quoted (0.994 at 2.5, 0.93 at 1.5) are 1 - delta, that is
+L = 1. With three levels at the same dial, exact tail, one-sided:
+    dial      1.5      2.0      2.5      3.0      3.5
+    n = 100   0.799    0.933    0.983    0.997    0.9995
+    n = 256   0.799    0.932    0.982    0.996    0.9994
+Limits to state: it is an expectation over the rotation, not an average over queries for the built index (only
+Markov is available: Pr[miss fraction >= a] <= L delta/a); Theorem 5 does not extend, since approximate answers
+are not unique; the one-sided delta needs the cap of section 3; with thread-local taus the result depends on
+scheduling.
+
+
+6. INTEGER KERNEL
+
+Theorem D. The implication is right: R up, Tin up, Tout down, e_l and |B_l| on both sides, and the two-word
+lemma holds. Three gaps:
+ - Saturation. The budget 2U(2^h - 1) + Rcap + 64 <= 32767 counts Rcap once. Unmasked lanes allow |Hs| <= 8128,
+   |TH| <= 24128, RH <= 16000, so Hs - TH - RH reaches -48256. With wrapping arithmetic that is +17280 and a
+   false IN. "The saturating adds never saturate" is false. Either Rcap <= 8222 (2U(2^h - 1) + 2 Rcap + 66 <=
+   32767), or keep 16000 and make every operation saturating in the order (Hs - TH), then -/+ RH, then
+   + (g >> 8): 0 sign mismatches in 4,000,000 random cases.
+ - Thresholds in f32 "with a relative 2^-20". Kin is a difference of nearly equal terms divided by s_i, so
+   its error is absolute, (|t| + |D fixed| + |qm| + |alpha mr_i|) 2^-22/(s_i sigma) steps, and unbounded
+   relative to Kin. Use f64 or that absolute slack. Rounding (T - b)/sigma in f32 also adds up to 2^-8 step to
+   delta_u.
+ - The range of the per-level centring constant is not bounded in the text, so |Hs| <= U(2^h - 1) is unproved.
+
+Lemma R. Right for K = round(2^15 m): measured maximum 0.993 against the claimed 1.5. But K is built by a
+truncating mulhi chain; each unit K is low adds 1 (1.98, 2.98, 3.98 for 1, 2, 3 units), so "2 per coded block"
+in W is short. Derive the slack from the actual bound on |K - 2^15 m|. mulhi in W rounds down; add 1.
+
+Theorem R. Right. The clean proof is one line: the integer interval contains the ideal one for every rotation,
+so its failure event is inside the ideal one. The "conditional on the code" paragraph is not needed. Gaps: the
+containment rests on the constants above; Din and Dout must saturate into the mask, since a survivor's
+deterministic margin can exceed int16 in randomised-level steps; and section 4's "k-th largest lower bound" for
+tau must be restricted to deterministic bounds if c comes from Theorem A.
+
+
+WHAT MUST BE TESTED NUMERICALLY
+
+ 1. Verify mode, deterministic, zero failures: every integer prune implies the f64 plain bound; every f32 prune
+    implies the f64 self-normalised bound; include est > R, negative discriminant, A = 0, zero residuals,
+    alpha and T of both signs, extreme tau.
+ 2. The law on the stored integers: z = (t - est)/(sd |D_perp|) from the decoded scalars, tails at 3, 4, 5 sd
+    against the exact law, split by sign of the estimate and by |t|/R above 0.8 (where the scale bias shows).
+ 3. The law at small n (8 to 16) with the production encoder, where s near 1 is reachable: 1e7 rotations.
+ 4. Theorem A end to end at a small constant (as thmA_mc.py) on the Rust path: zero wrong answers outside the
+    event, with filters, ties, threads, and one entity under two rows.
+ 5. tan(phi) at 4 bits with the scale tied to the 2-bit code, against the independent scale.
+ 6. The integer kernel's range cases: thresholds and R at the mask limits, wrapping against saturating.
+ 7. Counts with the spec's stored scalars and u8 tables against the report's 149k / 7.6k / 81.
+ 8. For thresholds: the sum of margin-weighted tails over non-matches on real data, to see what a tighter
+    certify-in constant could be before anyone proves it.

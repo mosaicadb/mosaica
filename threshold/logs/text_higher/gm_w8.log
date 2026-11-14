@@ -1,0 +1,4 @@
+[     1s] bio worker 8 LV [0, 4, 8, 16, 32, 48, 96, 192, 384, 576] LD 32 random levels [48, 96, 192, 384, 576] blocks [0, 96, 224, 480, 768] c(sub-Gaussian) 9.28
+[     1s] sub rates per level [[1, 0.25, 0, 0], [5, 0.25, 0, 0], [8, 4, 0, 0], [8, 8, 2, 1], [8, 8, 5, 4]] scalar bytes per level [10, 1, 2, 3, 2] block dims [96, 128, 256, 288]
+[     1s] group 0 clusters 1 violations: decisions {} intervals {'det': 0, 'pre': 0, 'rand': 0} rand max sd {'sub': 3.7}
+[     1s] done

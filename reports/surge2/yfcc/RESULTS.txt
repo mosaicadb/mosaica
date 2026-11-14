@@ -1,0 +1,96 @@
+YFCC stage 0: pruning fractions for the filtered-track design (stage2-design.txt, sections 1.9, 3, 5)
+Measured 2026-11-13, numpy/faiss, one thread on core 11. All numbers MEASURED unless marked.
+
+SETUP
+- Base: first 1,000,000 rows of base.10M.u8bin (HTTP range request; a prefix, not a random sample) with their tags.
+- Clusters: 1,000 (faiss k-means, 10 iterations on a 256k sample, one seed), centres rounded to uint8, rows assigned
+  to the nearest rounded centre. Sizes: min 178, median 975, max 2,610.
+- k = 10. Bounds I1, I2, I3 exactly as in section 1.9 (integers, prune only when bound > threshold).
+- Queries: 650 from query.public.100K, stratified by visible-set size V on the 1M prefix:
+  one-tag 100 each in V 10-99, 100-999, 1k-10k, 10k-50k, 50k+; two-tag 50 each in 10-99, 100-999, 1k-10k
+  (no two-tag query of 3,000 sampled has V >= 10k on the prefix). 12,157,760 (query, visible row) pairs.
+- "Large one-tag" = one-tag, V >= 10k on 1M (the design's V >= 100k at 10M): 200 queries, 11,633,664 pairs,
+  median V 50,290. Reweighting the strata to the whole query set, these carry 92% of all pairs.
+- Thresholds: "true" = true 10th smallest integer distance among visible rows; "seed" = 10th best after scanning
+  the two nearest occupied clusters (extended to more clusters until 10 rows were seen: needed in 350 of 650
+  queries, 1 of the 200 large one-tag). The seed is never tightened, so a real sweep lies between the two columns.
+- s is the share of I1 survivors that pass I2 (the design's cost formula); "all" is I2 alone over all pairs.
+- Exact distances checked against int64 numpy on 20 queries: 0 mismatches.
+
+(a)-(c) LARGE ONE-TAG QUERIES (200 queries, pair-weighted)
+                       true 10th      seed
+  cluster cut alone     0.966         0.967     (share of pairs left)
+  f_c (cut + item I1)   0.915         0.921
+  s, p = 32             0.746         0.783     (all pairs: 0.682 / 0.721)
+  s, p = 48             0.552         0.612     (all pairs: 0.505 / 0.564)
+  s, p = 64             0.348         0.424     (all pairs: 0.318 / 0.390)
+  s, p = 96 (extra)     0.090         0.149     (all pairs: 0.082 / 0.137)
+  Head alone without the tail-norm bound, among I1 survivors, true 10th: 0.922 / 0.754 / 0.511 for p = 32 / 48 / 64.
+
+WHOLE QUERY SET, strata reweighted to their populations (94.5k queries with V >= 10, 1.447e9 pairs on the prefix)
+  true 10th:  f_c 0.916;  s 0.750 / 0.562 / 0.362 / 0.103  for p = 32 / 48 / 64 / 96
+  seed:       f_c 0.922;  s 0.790 / 0.626 / 0.444 / 0.174
+
+BY STRATUM, true 10th (seed in brackets), pair-weighted
+  one-tag V      queries   pairs        f_c            s p=32         s p=48         s p=64
+  10-99          100       2,150        1.000 (1.000)  0.997 (0.998)  0.996 (0.997)  0.991 (0.994)
+  100-999        100       51,313       0.986 (0.986)  0.937 (0.952)  0.877 (0.919)  0.772 (0.866)
+  1k-10k         100       376,520      0.988 (0.994)  0.858 (0.927)  0.715 (0.846)  0.553 (0.741)
+  10k-50k        100       2,442,993    0.988 (0.991)  0.819 (0.862)  0.628 (0.705)  0.420 (0.527)
+  50k+           100       9,190,671    0.895 (0.902)  0.724 (0.760)  0.530 (0.585)  0.327 (0.394)
+  two-tag V
+  10-99          50        1,996        1.000 (1.000)  0.999 (1.000)  0.992 (0.999)  0.980 (0.997)
+  100-999        50        15,093       0.999 (0.999)  0.977 (0.991)  0.936 (0.978)  0.869 (0.944)
+  1k-10k         50        77,024       0.996 (0.997)  0.910 (0.944)  0.804 (0.877)  0.669 (0.789)
+
+PROXY FOR 10M (not a 10M measurement): threshold = distance to the nearest visible row (k = 1) on the 1M prefix,
+standing in for the 10th neighbour among ten times as many visible rows at the same rows per cluster. Seed here =
+nearest row in the two nearest occupied clusters. Large one-tag, 200 queries:
+  true:  f_c 0.863;  s 0.570 / 0.351 / 0.182 / 0.031  for p = 32 / 48 / 64 / 96
+  seed:  f_c 0.870;  s 0.602 / 0.391 / 0.218 / 0.045
+  Whole set reweighted: true f_c 0.864, s 0.575 / 0.358 / 0.190 / 0.035; seed f_c 0.871, s 0.609 / 0.402 / 0.229 / 0.052.
+  Not covered by the proxy: 10,000 clusters over 10M rows have smaller residuals than 1,000 over 1M.
+
+(d) VARIANCE PROFILE (1M rows, 192 dimensions)
+  Per-dimension variance: max 741, median 437, min 309 (max/min 2.4); total 86,190. It is nearly flat.
+  Share of variance in the top 32 / 48 / 64 / 96 / 128 dimensions: 22.1% / 31.4% / 40.2% / 57.0% / 72.6%
+  (a uniform profile would give 16.7% / 25.0% / 33.3% / 50.0% / 66.7%).
+  Within-cluster residual: 51.8% of the variance is left after 1,000 clusters (mean |x - centre|^2 = 44,632);
+  its share in the 32 / 48 / 64 head dimensions is 17.6% / 26.2% / 34.8%, i.e. uniform.
+
+(e) BOUND VIOLATIONS: 0
+  Lower bound > true distance: 0 of 12,157,760 pairs for each of the cluster cut, item I1, and I2 at p = 32, 48,
+  64, 96. Pairs pruned although within the true 10th distance: 0 at the true, seed and k = 1 thresholds.
+
+(f) ONE BIT PER DIMENSION, GLOBAL RANDOM ROTATION, DIAL m sd (approximate; one rotation seed)
+  Code = signs of the rotated residual from the integer centre; RaBitQ-style estimate with its standard error;
+  a row survives when estimate - m sd <= threshold. Thresholds are the exact ones above, held fixed.
+  Large one-tag (200 queries, median V 50,290), survivors per query mean (median), share of pairs, true top-10
+  rows lost of 2,012:
+    true 10th:  m=2: 75 (62), 0.13%, 11 lost    m=2.5: 112 (88), 0.19%, 3 lost    m=3: 168 (126), 0.29%, 1 lost
+    seed:       m=2: 246 (122), 0.42%, 4 lost   m=2.5: 347 (176), 0.60%, 0 lost   m=3: 485 (242), 0.83%, 0 lost
+  All 650 queries: true 10th mean 43 / 59 / 83 survivors, 22 / 4 / 2 lost of 6,536; seed 166 / 213 / 274, 5 / 1 / 1 lost.
+
+VERDICT against the rule (s <= 0.3 keeps the head stage; otherwise plan for 11-18k QPS)
+  As the rule is written (1M rows, true 10th distance, p = 32/48/64) s is 0.75 / 0.55 / 0.35 on the queries that
+  carry the pairs, and 0.78 / 0.61 / 0.42 from a realistic seed: above 0.3 at every p, so the 48-dimension head
+  is out and the exact plan is 11-18k QPS, with the cut worth about 8% (f_c 0.92).
+  Two things sit just outside the rule: a 96-dimension head passes it here (0.09-0.15), and the 10M proxy puts
+  p = 64 at 0.18-0.22 and p = 48 at 0.35-0.39. A 64- or 96-dimension head costs a third to a half of the full
+  kernel before any saving, so neither reaches the 22-31k the design hoped for from p = 48 at s = 0.2 (ARGUED).
+
+NOT DONE / LIMITS
+- 10M was not measured; the k = 1 figures are a proxy. The prefix is not a uniform sample of tags: the reweighted
+  pair count is 1.45e9 against 1.89e9 for a tenth of the design's 18.9e9, and 20,564 one-tag queries have
+  V >= 10k here against 29,702 with V >= 100k at 10M.
+- Float ground truth against integer truth (the last item of stage 0) was not checked; the published ground truth
+  was not downloaded.
+- One k-means seed, one rotation seed, thresholds never tightened during a sweep, nothing timed.
+
+FILES (scripts and logs in this directory)
+  stage0.py (final script), stage0_v1.py (before the k = 1 threshold was added), reweight.py
+  stage0.log + stage0_records.json        run 1: p = 32/48/64, with the one-bit code
+  stage0_k1.log + stage0_records_k1.json  run 2: p = 32/48/64/96, adds the k = 1 thresholds, no one-bit code
+  km_centroids.npy                        the k-means centres (float, before rounding)
+  Data: /home/joe/code/vexact-data/yfcc/base.first1M.u8bin.part (header says 10M rows; only the first 1M are in
+  the file), /home/joe/code/vexact-data/yfcc/query.public.100K.u8bin

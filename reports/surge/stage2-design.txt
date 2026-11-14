@@ -1,0 +1,315 @@
+STAGE 2 DESIGN: EUCLIDEAN DISTANCE AND THE YFCC-10M FILTERED TRACK
+
+Status words: MEASURED (a number from a run), DERIVED (arithmetic on measured numbers), MODELLED (measured counts
+times an assumed rate), ARGUED (reasoning only), FROM MEMORY (check before quoting).
+Nothing here was timed. The one thing I ran: 200,000 random checks of the integer bounds I1 and I2 below, 0 violations
+(MEASURED, synthetic uint8 data, 0.5 s of numpy).
+
+SUMMARY
+
+- L2 is cleaner than cosine in this design. With x = m + r and D = q - m:
+      |q - x|^2 = |D|^2 + |r|^2 - 2 D.r
+  The uncertain term is the same one every existing bound already covers. The smallest port keeps the whole q.x
+  pipeline and subtracts one more stored scalar per item, |r|^2 / 2.
+- The unit-norm assumption is used silently in exactly one structural place: level 0 stores one scalar (a = x.m^)
+  that, because |x| = 1, fixes both m.r and |r|. Without unit norms these are two scalars, and the sorted-range
+  proposition (contiguous undecided range in a-order) no longer holds. Sorting by |r| restores it with a
+  three-line proof.
+- For YFCC the level stream is not the tool. The pick for the large one-tag queries is: group queries by tag, read
+  each visible vector once per tag, and score it against all of that tag's queries with an exact integer kernel,
+  pruned by integer-sound bounds (cluster cut, then a 48-dimension head with a tail-norm bound).
+  With about 7 core-seconds of fixed work included: 11-18k QPS exact with no pruning at all (ARGUED); 22-31k if
+  the head stage passes 20% of pairs (ARGUED; that fraction is unmeasured and is the main risk).
+  Track reference: faiss baseline 3,033, winner 37,902 (from proposal 2).
+- Why batching is forced: sum of V over the 100k queries is 18.9e9 (MEASURED). Read per query, that is 3.6 TB of
+  uint8 vectors; at the measured 42.5 GB/s this is 85 s, about 1,200 QPS, whatever the kernel (DERIVED).
+  The 29,702 one-tag queries with V >= 100k use at most 42 tags, so at least 707 queries share each large tag
+  (DERIVED from RESULTS.md).
+
+======================================================================================================
+1. EUCLIDEAN DISTANCE, SOUNDLY
+======================================================================================================
+
+1.1 Score
+  s(q, x) = q.x - |x|^2 / 2.   |q - x|^2 = |q|^2 - 2 s(q, x).
+  k nearest by L2 = k largest s. "Distance <= Dmax" is the threshold query s >= t with t = (|q|^2 - Dmax^2) / 2.
+  Items and queries are any vectors in the domain; no normalisation anywhere.
+
+1.2 Per-cluster decomposition (replaces q.x = q.m + m.r + D.r)
+  (E1)  s(q, x) = s(q, m) + D.r - |r|^2 / 2,      D = q - m, r = x - m.
+  Proof: q.x - |x|^2/2 = q.m + q.r - |m|^2/2 - m.r - |r|^2/2 = (q.m - |m|^2/2) + (q - m).r - |r|^2/2.
+  The code does not bound D.r directly: it bounds (q - a m).r for a per-(query, cluster) multiple a (`alr`, the
+  optimal alpha; a = 0 shares tables across a group) and takes m.r from the stored scalar. The form to implement
+  and proof-check is therefore, for any real a:
+  (E1') s(q, x) = s(q, m) + (a - 1) mu(x) + (q - a m).r - nu(x) / 2,     mu = m.r,  nu = |r|^2.
+  Proof: D.r = (q - a m).r + (a - 1) m.r; substitute in (E1).
+  - s(q, m) = q.m - |m|^2/2: one number per (query, cluster), as q.m was.
+  - mu: the scalar derived today from a-hat (m.r = |m| (a-hat - |m|)). Its coefficient changes from a to a - 1.
+  - nu: one new stored scalar per item.
+  - (q - a m).r: the only uncertain term, identical to the cosine case, with the same optimal a.
+  Read the other way: s = (today's interval for q.x) - |x|^2/2 with |x|^2 = |m|^2 + 2 mu + nu. With unit vectors
+  nu = 1 - |m|^2 - 2 mu, so one scalar served for both. That is the silent use of |x| = 1.
+  Only a = 1 needs no mu, and it costs per-cluster tables.
+
+1.3 Where the norm is stored, and precision
+  General (f16) index, level 0 = mu (2 B, as a-hat today, grid rescaled) + nu (4 B, f32) + error norm (1 B) = 7 B
+  (was 3 B). Items are sorted within a cluster by nu.
+  - nu as f32 rounded to nearest: |nu_stored - nu| <= 2^-24 nu =: d_nu. Every interval for s widens by d_nu / 2,
+    far below any level's half-width (ARGUED).
+  - mu on its i16 grid with error d_mu contributes |a - 1| d_mu (today: |a| d_mu, the `a.abs() * c.mn * DA` term).
+  - R = sqrt(nu) with outward rounding gives R_lo <= |r| <= R_hi for the cut and the range.
+  - The final (full-vector) decision uses no stored scalar: it computes 2 q.x - |x|^2 from the stored vector in
+    exact fixed-point integers, as exact_dot does today for q.x (i128, no range limit).
+  uint8 index: nu = sum (x_i - mbar_i)^2 as u32, exact, with mbar the centre rounded to uint8 (so r is an integer
+  vector and x = mbar + r exactly).
+
+1.4 Deterministic levels
+  With decoded prefix rhat_l, e = r - rhat_l and w = q - a m:
+  (E2)  s in  s(q,m) + (a - 1) mu + w.rhat_l - nu/2
+              +/- ( min(|w||e|, |W w||W^-1 e|) + e_inv (|q| + |a||m|) R_max + |a - 1| d_mu + d_nu/2 + rounding ).
+  The weighted Cauchy-Schwarz term, the stored per-level error norms and the int8-basis defect term are unchanged;
+  none uses |x| = 1 or |q| = 1.
+
+1.5 Randomised levels
+  Lemma 8, Propositions 10, 11 and 13 are statements about a block vector y and a uniform direction u; they hold
+  for any y. The estimate of the block's part of w.r, its error A_b u, and the Chernoff bound over blocks are
+  unchanged:
+  (E3)  s in  shat +/- ( c sqrt(sum_b A_b^2 |wt_b|^2 / m_b) + deterministic part of (E2) ),   wt = whitened w,
+  c from 2 |U| exp(-c^2/2) <= eps. At N = 1e7, five randomised levels, eps = 1e-9: c = sqrt(2 ln 1e17) = 8.85
+  (DERIVED). nu and R do not depend on the seed, so Proposition 12's set U is still seed-independent.
+
+1.6 Cluster cut and sorted range (this is the part that changes)
+  Sort each cluster by R. For a query with |D| = |q - m| (interval [A_lo, A_hi] after rounding):
+  (E4)  |q - x| >= g(x) := max(A_lo - R_hi(x), R_lo(x) - A_hi, 0)      (reverse triangle inequality)
+  (E5)  |q - x| <= A_hi + R_hi(x)                                       (triangle inequality)
+  Proposition (contiguous range, L2). For a threshold Dmax, items with A_hi + R_hi <= Dmax are certified in; they
+  are a prefix of the sort order. Items with g > Dmax are certified out; they are the complement of the key
+  interval [A_lo - Dmax, A_hi + Dmax]. So the undecided items are one contiguous range, found by two binary
+  searches. Proof: both conditions are intervals in the single key R. For k-NN only (E4) is needed.
+  Support table, L2 form: for anchor point a_j and cluster c store lo = min and hi = max of |x - a_j| over the
+  cluster's members, rounded outward. With u = |q - a_j|: every member has |q - x| in
+  [max(lo - u, u - hi, 0), u + hi].
+  Optional directional refinement (keeps the current table's strength): store extremes [lo', hi'] of p^.r per
+  (anchor direction, cluster). With D = (D.p^) p^ + Dperp:
+  (E6)  |q - x|^2 >= |D|^2 + R^2 - 2 max((D.p^) lo', (D.p^) hi') - 2 |Dperp| R.
+  The right side is a convex quadratic in R, so {lower bound <= Dmax^2} is still an interval of the sort order.
+
+1.7 Escape code and calibration
+  - Escape code: codes r in the group's local basis in units of the group's per-coordinate scale, with nothing
+    clipped. It never sees |x|. It carries over unchanged. The v2 fast-scan code is fixed-rate; an out-of-range
+    coordinate lands in the stored error norm, which stays sound. Requirement to state and test: the 1-byte error
+    norm's top value means "unbounded" (item goes to its full vector), never a clamp.
+  - fit.py: add --metric l2: no normalisation (fit.py:61-62), and scale by a power of two so every coordinate is in
+    [-1, 1] (uint8: divide by 256, exact in f16). Record the scale; report distances multiplied back. This keeps the
+    fixed-point path valid: prep2 splits q * 2^24 into i16 halves (q.rs:77-78), which needs |q_i| < 16.
+  - Profile fit: pseudo-queries are stored rows, un-normalised.
+  - Plan::calibrate and pseudo_queries normalise their pseudo-queries (q.rs:1332, 1851); for L2 they must not.
+
+1.8 Places that silently use unit norm or unit scale (to fix or re-derive)
+  a. Level 0: one scalar gives m.r and |r| only because |x| = 1 (1.2). mod.rs:1074-1076 derives rmax from a-hat
+     and x2, and mod.rs:1201 sets x2 = 1 + the largest excess. Sound while |x|^2 <= x2 but arbitrarily loose when
+     norms vary. Compute rmax from the real |r|.
+  b. Sorted range: sup_set / inf_set / sorted_range2 / key_interval2 (q.rs, the cut and range section) bound the
+     part of x orthogonal to m^ by sqrt(x2 - a^2). Replace by 1.6. The proposition "concave above, convex below in a" does not transfer.
+  c. Support table, plan and seed: bh + rho * sqrt(x2) (q.rs:1556, 1697, 2004) uses |x| <= sqrt(x2). Replace by
+     the L2 table.
+  d. Grids that assume values in [-1, 1]: ahat / 32767 (q.rs:562-563, 585), DA (index.rs:10), the 2-byte table
+     extremes.
+  e. Absolute slacks sized for unit vectors: 4e-6 in CQ2.fixed (q.rs:478), 1e-9 in sorted_range2 and
+     key_interval2, the 1e-12 terms. After scaling, |q| and |x| reach sqrt(192) = 13.9 and products reach 192, so
+     f32 rounding grows by up to that factor. Each must become relative to |q| * max|x| or be re-derived.
+     full_err_qn (q.rs:675) already scales correctly.
+  f. Proofs, section 0: "an item is a unit vector", "a query is a unit vector". Theorems 1-3 and 5-13 concern D.r,
+     the error E and the direction u and never use it. Theorem 4's fibre F_l(x) is "the set of unit vectors with
+     the same first l levels"; it becomes all vectors of the domain. The proof is unchanged; l* can only grow.
+     The remark that stored scalars count at their bit width now covers nu.
+  I did not read the original proof of the sorted-range proposition (it is not in CONSOLIDATED_PROOFS); (b) is
+  inferred from the code.
+
+1.9 What "exact" means on uint8
+  Dist(q, x) = sum_i (q_i - x_i)^2, an integer in [0, 192 * 255^2 = 12,484,800] < 2^24.
+  The answer is the k visible rows smallest in (Dist, entity id), lexicographically. No floating point, no epsilon.
+  - i32 is enough: a 16-bit difference is in [-255, 255]; vpmaddwd gives pair sums <= 130,050; a lane holds 12
+    of them, <= 1,560,600.
+  - Published ground truth: every partial sum is an integer below 2^24, so a float32 evaluation in any order is
+    exact and equals ours (ARGUED). Only ties at the k-th distance can differ; verify by distance, not id.
+  Integer bounds, with mbar an integer centre, T the tail dimensions, isqrt the floor square root:
+  (I1) cluster: A2 = sum (q_i - mbar_i)^2, A_lo = isqrt(A2), A_hi = A_lo + [A_lo^2 < A2];
+       R_lo(x) = isqrt(nu(x)), R_hi = R_lo + 1; g = max(A_lo - R_hi, R_lo - A_hi, 0); Dist >= g^2.
+       Whole cluster: use max and min of R over its members.
+  (I2) head and tail: h = sum over head dims of (q_i - x_i)^2; a, b = tail norms of q - mbar and x - mbar with
+       floors and ceilings as in I1; gT = max(a_lo - b_hi, b_lo - a_hi, 0); Dist >= h + gT^2.
+  (I3) prune a pair only if its lower bound is strictly greater than the query's current k-th Dist (ties are
+       broken by id, so equality must be scored).
+  The head is the first p dimensions after a fixed permutation by descending variance. A permutation keeps the
+  arithmetic exact; a rotation would not.
+
+======================================================================================================
+2. THE FILTER-FIRST PATH
+======================================================================================================
+
+2.1 Storage (rows in cluster order, sorted by R within a cluster)
+  vectors      uint8, 192 B per row, 64-byte aligned, 2 MB pages          1.92 GB   (DERIVED)
+  postings     one Roaring bitmap per tag over row ids                    0.28 GB serialised (MEASURED in entity
+               order: 275.7 MiB; row order should be no larger since tags correlate with clusters, ARGUED);
+               allow 0.45 GB in memory
+  row -> entity u32                                                       40 MB
+  nu u32, R_lo u16, tail norm b_lo u16                                    80 MB
+  centres      K = 10,000, uint8 mbar plus f32                            10 MB
+  cluster row starts, R min / max per cluster                             < 1 MB
+  queries      100k x 192 B, plus a u16 copy                              58 MB
+  heaps, buffers, per-thread scratch                                      < 100 MB
+  Total resident about 2.7 GB of 16 GiB (DERIVED). The build must not hold 10M x 192 float32 (7.7 GB): train
+  k-means on a 1M sample, assign in chunks.
+
+2.2 Per-cluster offsets
+  Not stored at first. In row space a cluster is a row range [r0, r1), and Roaring answers "this tag's rows in
+  that range" by a seek (rank / advance_to). The sweep walks a posting once and cuts it at cluster starts. If
+  profiling shows seeks, add u32[K+1] per tag above 50k items: 40 KB per tag, under 55 MB even for all 1,326 tags
+  above 10k (DERIVED).
+
+2.3 Two-tag queries
+  Intersect the two postings (Roaring and), materialise sorted rows. Where one side is more than 64 times smaller,
+  probe its elements into the larger one instead. Identical tag-sets are computed once (23,930 distinct sets in
+  100k queries, MEASURED). Sum of the rarer tag's count is 621M and of V 138M (MEASURED): at 1-3 ns per element
+  0.6-1.9 core-seconds for the intersections and, at 20 ns per item, 2.8 core-seconds for the scans (MODELLED).
+
+2.4 Planner
+  Per tag-set group, with V visible rows over K_occ occupied clusters:
+  - FLAT when V <= 4,096 or V / K_occ < 8: gather rows in blocks of 64, full kernel on every (query, row).
+  - CLUSTER otherwise: per occupied cluster, centre distances for the group's queries, the cluster cut (I1), the
+    per-item norm bound (I1), then the head stage (I2) and the tail for survivors. A cluster with fewer than 8
+    visible rows skips the head stage.
+  Reason for 8: a centre distance costs one kernel call (about 2 ns) per (query, cluster); it must be small against
+  the cluster's rows times the saving per row (about 1.5 ns) (ARGUED). Both constants are re-timed at open, as
+  Plan::calibrate does now.
+  The certified level stream is not built for YFCC in stage 2. When it is, the existing rule stands: scan when
+  V * scan_us <= K_occ * cut_us + fixed.
+
+2.5 Exact kernel on uint8, AVX2 (Zen 3, no VNNI)
+  Direct form, one query against two rows; q16 is the query widened to 192 u16:
+      vpxor     acc0, acc1
+      repeat j = 0..11                         ; 16 dimensions per step
+        vpmovzxbw ymm0, [x0 + 16 j]            ; 16 u8 -> 16 u16
+        vpmovzxbw ymm1, [x1 + 16 j]
+        vpsubw    ymm0, ymm0, [q16 + 32 j]
+        vpsubw    ymm1, ymm1, [q16 + 32 j]
+        vpmaddwd  ymm0, ymm0, ymm0             ; 8 x i32
+        vpmaddwd  ymm1, ymm1, ymm1
+        vpaddd    acc0, acc0, ymm0
+        vpaddd    acc1, acc1, ymm1
+      reduce each: vextracti128, vpaddd, vpshufd 0x4E, vpaddd, vpshufd 0x55, vpaddd, vmovd
+  48 + 7 micro-ops per row, 12 multiplies. Expected 11-14 cycles, 2.5-3.5 ns per row with the row in cache
+  (ARGUED; Zen 3 port counts from memory, so microbench first).
+  Dot form for batches: S = 2 q.x - |x|^2 with |x|^2 stored; widen the row once and run four queries against it
+  (vpmaddwd with [q16], vpaddd): 27 + 3 micro-ops per pair, 1.6-2.5 ns (ARGUED).
+  vpmaddubsw on the raw bytes is not usable: 2 * 255 * 128 overflows its saturating i16.
+  Head stage: the first three steps only (48 dims), 0.5-0.9 ns (ARGUED). Scores go to an i32 row; the bound and
+  the compare against the k-th best run eight pairs per instruction.
+  Sparse, unbatched: three cache lines per row dominate: 15-25 ns per row (rough, proposal 2), 6-10 ns with 2 MB
+  pages and a prefetch eight rows ahead (ARGUED).
+
+======================================================================================================
+3. THE LARGE ONE-TAG QUERIES
+======================================================================================================
+
+Pairs to cover: P = 18.89e9 (query, visible row) pairs (MEASURED), 99% from one-tag queries.
+
+  Option                                   Arithmetic                                             QPS (8 threads)
+  0. Exact scan per query                  P * 192 B = 3.63 TB at 42.5 GB/s = 85 s                about 1,200
+                                           (bandwidth MEASURED, rest DERIVED)
+  A. Bound-ordered cluster walk, visible   Scores a share f of P, one query at a time: f * 3.63   1,500-3,900 at f =
+     rows only, stop at the k-th best      TB, so capped at 1,170 / f by bandwidth, and 378 f     0.8-0.3 (ARGUED)
+                                           core-s at 20 ns sparse. Needs f < 0.06 for 20k. Exact
+                                           triangle bounds in 192 dims rarely prune that hard
+                                           (the dead list's finding).
+  B. 24-byte first level over visible      P * 24 B = 453 GB = 10.7 s of bandwidth alone.         exact: collapses;
+     rows, exact re-rank                   Scan 1.9 ns per row if packed. Certified (c = 8.85)    dialled, batched:
+                                           re-ranks 9-70% (glove, MEASURED at c = 9.35) at 20 ns  50-60k at recall
+                                           each. Dialled to m = 2-3 it re-ranks 0.1-1.5%          about 0.99 (MODELLED on
+                                                                                                  an ARGUED 0.3-0.5 ns),
+                                           (MEASURED, glove / nytimes).                           not exact
+  C. Sub-indexes for the nine tags > 1M    Covers 5,658 queries, 8.0e9 pairs, 42% of P (DERIVED). no exact gain
+                                           Packing is worth nothing once batched. Their own
+                                           clusters would be coarser than the global ones seen
+                                           through the tag (100-190 visible rows per cluster),
+                                           so the exact cut gets weaker. Pays only with a graph
+                                           inside, which is approximate and on the dead list.
+  D. Batch queries that share a tag        Each visible row is read once per tag, then stays in   11-18k (ARGUED)
+                                           L1 for every query of the tag. P * 2-3.5 ns =
+                                           38-66 core-s, + 7 fixed.
+  D + cut + head stage                     Per pair f_c * (0.1 + 0.5-0.9 + s * 2-3) ns. At        22-31k (ARGUED);
+                                           f_c = 1, s = 0.2: 1.0-1.5 ns, 19-29 core-s, + 7 fixed. more if f_c < 1
+
+PICK: D with the cluster cut and the head stage. It is exact in integers, needs no new index structure, and A's
+bound survives inside it as the cut. B with the dial is the follow-on for the leaderboard figure; it is the
+approximate mode, and its code can live in the 13 GB left over.
+
+The algorithm, per tag t with queries Q_t and posting P_t:
+  1. Seed. Each query scans the visible rows of its two nearest occupied clusters and takes its k-th Dist as tau_q.
+  2. Sweep clusters in row order (parallel over cluster ranges). For cluster c:
+     a. gather its visible rows into an aligned buffer (at most 96 rows per block), with nu, R_lo, b_lo;
+     b. for each query: A2 and the tail part a2 against mbar_c (one kernel call); skip the cluster if (I1) with
+        the cluster's R range exceeds tau_q;
+     c. per row: (I1) from R_lo; head h; (I2); survivors get the tail; exact Dist = h + tail; update the heap and
+        tau_q.
+  3. Merge per-thread heaps per query by (Dist, id).
+Soundness: every skip uses a proved lower bound and (I3). tau_q may be any thread's local k-th best, since that
+is never below the final k-th best.
+
+Fixed work in the D rows (MODELLED): intersections 0.6-1.9, two-tag scans 2.8, gathers of 246M rows at 10 ns 2.5
+core-seconds.
+Unmeasured and decisive: s (share of pairs that pass the head stage) and f_c (share of pairs left by the cut).
+
+======================================================================================================
+4. THROUGHPUT MECHANICS
+======================================================================================================
+
+- Grouping. Sort the 100k queries by tag-set; 23,930 groups (MEASURED). Results are written back by query index.
+- Scheduling. Eight threads on eight physical cores. Groups largest first on a work-stealing pool. A group above
+  about 2M pairs is split into cluster ranges of 1-5 ms; smaller groups are one task.
+- Per-thread state. A heap per query of the group (707 queries * 10 entries * 8 B = 57 KB, in L2). tau_q is a
+  shared atomic, relaxed, only ever lowered.
+- Cache. A row block of 96 rows is 18 KB (L1). A large tag's queries, 707 * 384 B = 271 KB as u16, stream from L2
+  (512 KB on Zen 3) once per block: about 5 us against about 70 us of kernel work per block (ARGUED). Groups above
+  1,024 queries are processed in sub-batches of 512.
+- Memory bandwidth. Measured 13.4 GB/s on one thread and 42.5 GB/s on four (rust/REPORT.md). Batched, each
+  tag-set's rows are read once: at most 138M rows (two-tag, if all sets were distinct) + 108M (every tag once) =
+  246M rows = 47 GB, about 1.1 s of the machine's bandwidth in total (DERIVED upper bound). Compute, not memory,
+  is then the limit. Unbatched it is 3.63 TB.
+- Pages. 2 MB pages for the vectors: 1.92 GB in 4 KB pages is 480k pages against a 2,048-entry second-level TLB.
+- Hardware caveat. The track's machine is an Azure 8-vCPU instance with AVX-512 (FROM MEMORY); figures on the
+  5900X are not leaderboard figures.
+
+======================================================================================================
+5. BUILD ORDER, TESTS, RISKS
+======================================================================================================
+
+  0. Measure before building (numpy, 1M base rows, 1,000 queries): per-dimension variance order; s for p = 32, 48,
+     64 at the true k-th distance; f_c at 1,000 rows per cluster; float ground truth against integer truth.
+     Test: s <= 0.3 keeps the head stage; otherwise drop it and plan for 11-18k.
+  1. Integer kernel and brute-force truth.
+     Test: equal to int64 numpy on 1,000 queries; all-0 against all-255 rows; ns per row in cache and sparse.
+  2. Row space, postings, intersections, FLAT arm, one query at a time.
+     Test: V per query reproduces RESULTS.md (median 14,141, max 1,915,985, sum 18,886,961,087); distances equal
+     brute force on 2,000 queries; recall against the published truth.
+  3. Tag batching and threads.
+     Test: output identical to stage 2 on all 100k queries; QPS; 1 to 8 threads scales by at least 6.
+  4. Seed, cluster cut, norm bound.
+     Test: output identical; property test of I1 and I3 on duplicates, constant vectors and ties at the k-th place;
+     pairs pruned reported.
+  5. Head stage.
+     Test: output identical; pass rate within 20% of stage 0's.
+  6. L2 in the certified level stream (section 1), not needed for the YFCC run.
+     Test: verify reports zero violations on YFCC-1M and on BioCLIP rescaled by random norms; cosine results on
+     BioCLIP unchanged.
+
+  Risks
+  1. The pruning fractions are unmeasured on this data. If s and f_c are both near 1, exact stops at 11-18k QPS,
+     and at the low end if the kernel is 3.5 ns. Stage 0 settles it in an hour.
+  2. The batching gain belongs to this query set (at least 707 queries per large tag). One exact query on a
+     1.9M-row tag is 5-10 ms on a thread (ARGUED). The result says little about a live service, and it rests on
+     the harness handing over all queries in one call (FROM MEMORY; check the track's rules).
+  3. A soundness slip in the L2 port of the level stream: the level-0 scalar, the grids and the absolute slacks in
+     1.8 were all sized for unit vectors. The integer path does not depend on any of them, which is why it goes
+     first.

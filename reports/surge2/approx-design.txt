@@ -1,0 +1,205 @@
+APPROXIMATE k-NN FOR THE EXACT, FILTER-AWARE VECTOR INDEX: ONE DESIGN
+2026-11-13. Design only; nothing here was run. Tags: [measured] = a count or time from the four reports;
+[modelled] = measured counts x an assumed per-item time; [argued] = no measurement.
+Sources: surge/level0/REPORT.txt (L0), clusters/REPORT.txt (CL), vexact-probe-clusters/probe (PR),
+vexact-bench/bench/REPORT.md (BE).
+
+THE IDEA IN ONE PARAGRAPH
+One loop serves both modes. Clusters are visited in key order; each cluster's 1-bit codes are tested with the
+shared-table integer test "upper estimate < tau"; survivors go 2 bit -> 4 bit -> full vector; tau is the k-th
+best exact score among visible items. Two dials: m (interval half-width in sd) and delta (stop when the next
+cluster key < tau - delta). Exact mode is m = certified c and delta = infinity. Approximate mode is small m,
+finite delta, plus SOAR second copies read during the ordered phase. A full 1-bit scan is the same loop when
+the stop never fires, so "probe or scan" is not a separate path.
+
+1. STORED LAYOUT
+
+Clusters. Balanced k-means on unit vectors, K = round(N / 72), size cap 128 primaries (2 x mean is what
+PR's balanced runs used; N/70 is CL's knee: 4x more centres bought 34% fewer items and no time). glove
+K = 16,384, nytimes K = 4,096. Below N = 2,000: K = 0, one cluster with centre 0 (c = 0, w = 1 is valid from
+the first item, so an empty database works). Split a cluster at 128 primaries (2-means on its members).
+Rows. A row id is a slot. Each cluster owns whole 32-slot blocks; unused slots are free (never-used, bit
+clear in the live bitmap) and take inserts. Expect about 80% fill, i.e. 1.2-1.25x slots per item [argued].
+Because blocks are row-aligned, block b's visibility is word b of the row-space bitmap.
+Cluster directory entry: centre (f16), |c|^2, rms radius, a 4-bit product code of the centre (n/2 nibbles
+for n <= 128, n/4 nibbles up to 512, n/8 above; codebooks trained on the centres; CL P2 measured 25 B on
+glove, 32 B on nytimes), extent list of primary blocks, extent list of copy blocks.
+Primary planes, each in 32-slot fast-scan layout, one plane per level, cluster order (L0 section 3):
+  level 1: sign of P r, n/8 B. Scalars a_i = |obar| cos(phi_1)/|r| and b_i = |obar| sin(phi_1)/sqrt(n-1) as
+           u16 each, rounded so the bound widens.
+  level 2: one magnitude bit per dimension, n/8 B; cos(phi_2) 1 B.
+  level 3: two more magnitude bits, n/4 B; cos(phi_3) 1 B.
+  shared:  |r| 2 B, e_c 2 B (code error along the centre), rho derivable for unit vectors.
+  full:    f16 vector, as today.
+  P is one Haar rotation from the public seed for n <= 1,024; above that, a seeded permutation and Haar
+  blocks of 256 with one tan(phi) per block (L0 Prop 11) so the query rotation stays under ~1.3M flops at
+  n = 5,000.
+  glove: 16.5 B level 1, 50 B codes + 10 B scalars through level 3. nytimes: 36 B level 1.
+SOAR copies. Every item gets a second cluster: among the 32 next-nearest centres, the one minimising
+|x - c'|^2 + (rhat . (x - c'))^2, rhat the primary residual direction. The copy lives in that cluster's copy
+blocks and holds: level-1 sign code of the residual against the copy's centre (same P), its a_i and b_i, and
+the primary row (u32). glove: 12.5 + 4 + 4 = 20.5 B per item. The primary keeps (copy cluster, slot) so a
+move can fix the pointer. Copies have no level 2/3 and no vector.
+Duplicates. A per-query open-addressed set of primary rows ("seen"), 2,048 entries growing. Any code that
+passes level 1, primary or copy, is looked up by primary row: present -> skip; absent -> insert and continue
+on the primary's own levels 2, 3 and vector (needs q.c of the primary's cluster: one exact centre score,
+memoised per query). The result heap is keyed by primary row. A copy pruned at level 1 does not mark the
+item, so the other copy can still admit it. Only level-1 survivors touch the set (hundreds per query).
+
+2. QUERY ALGORITHM
+
+Inputs: q (unit), k, mode/target, the session's row-space visible bitmap (already ANDed with the live
+bitmap) and its popcount V; f = V / N.
+ 0. Plan. If V * t_full <= C_index(target, f bucket): score every visible full vector, return (section 3).
+ 1. q' = P q. Build the item table T_g[v] (n/4 groups x 16, u8, rounded outward) once; it is shared by all
+    clusters and both primaries and copies. Build the centre-code table.
+ 2. Centres. Scan all K centre codes with the item kernel -> approximate key_j = q.c_j + 0.35 rad_j (0.35
+    chosen on pseudo-queries, PR sweep). Partial-sort. Exact centre scores are taken lazily in chunks of 64
+    in approximate-key order; a cluster may be opened once its exact key >= next unscored approximate key
+    + e_cen (e_cen = fitted 99.9th percentile of centre-code error). Clusters with no visible primary and
+    no visible copy are dropped here at no cost.
+ 3. Seed. Open clusters in key order until 32 visible primaries are seen; score them with the 4-bit code,
+    read the best k vectors; tau = k-th exact score (-inf if fewer than k).
+ 4. Ordered phase. For each cluster in key order:
+      stop test: if key_j < tau - delta, go to step 6 (approximate mode only).
+      per-cluster scalars: q.c_j, alpha_j = q.c_j/|c_j|^2, w_j = sqrt(1 - (q.c_j)^2/|c_j|^2).
+      for each block with a non-zero visibility word: S = shuffle sums (u16); prune lane i iff
+          S_i < (tau - q.c_j) a_i - m1 w_j b_i     (two 16-bit multiplies, one compare, movemask)
+      survivor mask &= visibility word. This AND comes before anything else uses the lane.
+      copy blocks (read only if mode = approximate and the phase is ordered): visibility word gathered from
+      the primary rows' bits (skipped when the viewer sees everything), then the same kernel.
+      survivors, in order: seen-set; f32 re-evaluation with the self-normalised width at m1; level 2
+      (256-entry tables, width m2); level 3 (dot product, width m3); full vector; push to the heap; tau
+      rises. Re-derive the two per-cluster integer constants when tau changes.
+      budget: if slots read > theta * total slots (theta = 0.35), leave the ordered phase for step 5.
+ 5. Sweep phase. Visit every unopened cluster in storage order, primaries only, stop test off, same block
+    code. (Storage order keeps the stream sequential; key order over 16k clusters would be 16k misses.)
+ 6. Return the heap: k items, all exactly scored, all visible.
+Parameters and their fit. The build draws 2,000 corpus items as pseudo-queries (the item itself and exact
+duplicates removed from its truth), with random masks at f = 1, 0.5, 0.1, 0.01. For each target T in
+{0.9, 0.95, 0.99, 0.999} and each f it runs the real query path over a grid of m (0 to 3 in 0.25, one value
+for all three levels) x delta (16 values from 0 to the 99.9th percentile of key gap), and stores the
+cheapest (m, delta) whose pseudo recall >= 1 - 0.7 (1 - T). The 0.7 covers the transfer gaps seen: 0.948
+for 0.95, 0.9897 and 0.988 for 0.99 [measured, PR and CL]. A query uses the row of the next higher f
+bucket: a delta fitted for more visibility overshoots recall, never undershoots (CL P3: unfiltered delta
+gave 0.97-0.99 at 10% and 1%). Also fitted: 0.35 (key factor), e_cen, t_full and the per-code time (timed
+on this machine at open), C_index(T, f) = mean time of the chosen row. Fixed, not fitted: theta = 0.35,
+seed size 32, chunk 64, SOAR candidates 32.
+
+3. UNDER A FILTER
+
+Exactness: tau, the heap, the stop test, the seen-set and the seed see visible items only. A block with a
+zero visibility word is not loaded. In a block with some visible lanes the kernel computes all 32 sums and
+the mask discards invisible lanes before any use, so an invisible item changes no result, no threshold and
+no stopping point. If "never read" must mean its bytes are never loaded, replace the block kernel with a
+per-lane gather below 25% visible; say so and I will cost it. Deleted rows are bits cleared in the live
+bitmap, the same mechanism.
+glove, K = 16,384, modelled from CL's counts (clusters opened at 0.9 / 0.95 / 0.99):
+  100%   51 / 110 / 335-455        ~85 / 110 / 240-280 us
+  50%    no count exists; interpolated ~1.2x unfiltered: ~100 / 130 / 320 us
+  10%    115 / 232 / 850           97% of blocks hold a visible item: ~95 / 140 / 350 us
+                                   visible scan 4.7 ms [measured] -> index path
+  1%     247 / 438 / 978           27% of blocks: ~90 / 115 / 180 us
+                                   visible scan 222 us [measured], recall 1 -> index path for a recall
+                                   target, by 1.2-2.5x, inside modelling error at 0.99; scan for exact
+  0.1%   visible scan 32 us [measured] against a 50-60 us centre stage -> always scan
+Rule: scan the visible set iff V * t_full <= C_index(T, f). t_full measured 19-27 ns per glove vector at
+1% and 0.1%, 40 ns at 10% (BE). That puts the switch near 4-9k visible items in approximate mode whatever
+N is (the index path's cost is nearly flat in f), and near 3% of N in exact mode (7% at 768 dimensions,
+CL P6). The scan is exact, so below the switch approximate mode returns exact answers.
+nytimes: scan measured 80 us at 1%, 14 us at 0.1% -> scan at 1% and below. At 10% the scan is 1.15 ms
+and the index path should win, but CL's filtered nytimes counts were unusable; unmodelled.
+Not covered: masks correlated with clusters. Empty clusters cost nothing, but delta was fitted on random
+masks; test before trusting (build step 6).
+
+4. COST BUDGET [all modelled]
+Rates: 2.7 ns per 25-byte code and 10 ns per 100-d exact centre score are faiss on this machine (CL). I
+take 1.75 ns per 12.5 B glove code, 3.8 ns per 32 B nytimes code, 40 ns per opened cluster, 10 / 15 / 60 ns
+per level-2 / level-3 / full read on glove, 20 / 30 / 80 ns on nytimes, slots = 1.2 x codes.
+
+glove (us)                        0.90      0.95      0.99
+  rotation, tables, seed, heap     5         5         5
+  centre codes (16,384 x 2.7 ns)   44        44        44
+  exact centres (256/512/1,024)    3         5         10
+  clusters opened x 40 ns          2         4         16
+  level 1 (11.4k/23k/77k slots)    20        40        134
+  level 2 survivors                4         6         30-50
+  level 3 + full reads             3         4         13
+  total                            ~81       ~108      ~250-270
+  QPS                              ~12,000   ~9,000    ~3,700-4,000
+  hnswlib [measured]               3,004     1,536     611
+  IVF-PQ [measured]                4,642     2,696     1,145
+CL's own model gave 95 / 120 / 220-270 us; treat 10,000 / 8,000 / 4,000 as the claim. The counts are from
+runs that scored every scanned item exactly; the dial then takes part of the recall budget, which is why
+the 0.99 row carries extra level-2 reads.
+
+nytimes, K = 4,096 (us)           0.90      0.95      0.99 probe   0.99 sweep
+  fixed                            6         6         6            6
+  centre codes (4,096 x 3.4 ns)    14        14        14           0
+  exact centres x 25 ns            8         13        26           100 (all)
+  clusters opened x 40 ns          4         10        32           0
+  level 1                          74        188       605          1,320 (348k slots)
+  later levels                     12        14        18           25
+  total                            ~120      ~245      ~700         ~1,450
+  QPS                              ~8,000    ~4,000    ~1,400       ~690
+  hnswlib [measured]               4,221     1,727     374          374
+Items: 4.8 / 12.2 / 39.2% scanned [measured, PR], x 1.16 for copies, x 1.2 for slots.
+The nytimes path. Probing reads 47% of the slots a sweep reads at 0.99, so it is about 2x cheaper if the
+fitted stop transfers. It may not: nytimes difficulty is bimodal (median 5 probes, 90th percentile 684),
+the stop rule gained nothing there, and test queries cost ~10x pseudo-queries. So: 0.9 and 0.95 probe. At
+0.99 the same loop runs and the theta budget turns hard queries into a sweep, whose recall depends on m
+alone (expected recall >= 1 - L delta(m), proved, L0). Promise 690 QPS at 0.99; 1,400 is the upside. L0's
+~1,000 QPS for the flat pass used a rate CL found 40% optimistic and no slot padding.
+
+5. EXACT MODE
+Same loop with: m1 = m2 = m3 = c(k, 3 levels, eps = 1e-9, n) from L0's table (k = 10: 5.99 at n = 100,
+6.37 at 256, 6.54 at 768, 6.59 at 1,536; k = 100: 6.23 / 6.66 / 6.86 / 6.91); delta = infinity; copies
+never read; the ordered phase limited to the seed plus theta = 0.01 of slots, then the sweep. Theorem A
+needs exactly what the loop already does: tau from exact scores of visible items only, every returned item
+scored exactly, an item dropped only by an upper bound. The integer test uses the plain width; the f32
+re-evaluation uses the self-normalised width, which is contained in it. eps = 0: kappa = tan(phi).
+Modelled glove 3-4 ms (250-330 QPS) against 13.2 ms flat [measured]; L0's 2.6 ms assumed the faster rate
+and no padding. The approximate mode costs exact mode nothing but the 20% slot padding, and that padding
+is also where inserts go.
+
+6. BUILD ORDER, EACH WITH A PASS/FAIL TEST
+ 1. numpy, 1 day: the loop of section 2 with nested codes and both dials, 10,000 test queries, both
+    datasets. Pass: exact setting gives zero differing results; approximate targets met within 0.005 using
+    only pseudo-query fits; glove slots read <= 12k / 25k / 85k; nytimes stop transfers or the theta path
+    is confirmed as the 0.99 route. This is the first joint test of stop + dial + SOAR; fail here changes
+    the budget, not the structure.
+ 2. Rust kernel: shared table, integer test, visibility word, on 1.18M glove items. Pass: <= 2 ns per
+    slot on one thread; survivor set identical to numpy.
+ 3. Centre stage: centre codes through the same kernel, lazy exact chunks. Pass: <= 60 us on glove;
+    scanned share within 2% of flat exact centre scoring (CL: 0.85 / 1.97 / 7.16% at R = 1,024).
+ 4. Cascade, seen-set, SOAR copies, end to end unfiltered. Pass: glove >= 6,000 / 4,000 / 1,500 QPS at
+    0.9 / 0.95 / 0.99 (2x hnswlib on the same core, same day); nytimes >= 5,000 / 2,200 / 500; no item
+    twice in any result.
+ 5. Exact through the same binary. Pass: zero differing results in 10,000 queries; >= 3x the flat f16
+    scan; z tail matches the sphere law at 3, 4, 5 sd.
+ 6. Filters and the scan rule. Pass: results equal brute force over the visible set in exact mode at 50 /
+    10 / 1 / 0.1%; recall targets met at each; never slower than the visible scan by more than 10%; a
+    clustered mask (whole clusters visible or not) meets its targets; a run with invisible items' codes
+    overwritten by noise returns identical results.
+ 7. Writes: insert into a free slot, split at 128, delete as a bit, restart. Pass: after 20% inserts and
+    10% deletes recall is within 0.005 of a rebuild and exact mode is still exact; a build equals an
+    ingest into an empty index.
+
+7. WHERE IT STILL LOSES TO HNSW
+- Scale. Items scanned at fixed recall fall only as K^-0.38 (glove 2.61% at K = 1,024 to 0.91% at 16,384
+  [measured]), so with K = N/72 the item stage grows about N^0.6 and the flat centre stage grows as N.
+  HNSW grows about log N. At 100x glove the item stage is ~17x and the centre stage needs CL's graph over
+  centres (7-12% of centres at 0.9-0.95, measured only at K = 16,384). I expect HNSW ahead somewhere
+  between 10M and 100M items per shard at recall 0.9 [argued].
+- Low recall targets and easy data. The centre pass is a 45-55 us floor on glove; HNSW answers a recall
+  0.5-0.8 query, or a strongly clustered corpus, in a few hundred distance evaluations.
+- nytimes-like data at 0.99. 39% of items must be scanned whatever the partition; the promised margin is
+  1.8x over a measured hnswlib that ran 25-35% slower than it does alone (BE), i.e. about level.
+- Evidence. Every figure of ours is modelled; the built kernel is 11-14x off the rate assumed (CL).
+  HNSW's figures are measured. Stop, dial and SOAR were measured separately, never together.
+- Queries unlike the corpus (text against images). w is near 1, tau lower, the fit is on corpus items;
+  the stop fires late, so recall holds and cost rises by an unmeasured factor.
+- Memory. Copies add 20.5 B per glove item and padding 20%; HNSW M = 16 adds ~130 B of links but no
+  second code. Not a loss, but not free.
+It keeps winning where HNSW cannot follow: any filter (hnswlib 17 QPS at 1% visible, faiss HNSW recall
+0.79), exact mode from the same bytes, cheap inserts, deletes as one bit.

@@ -1,0 +1,20 @@
+[     0s] nytimes-256-angular N=290000 n=256 queries=1000
+[     1s]   round 0: mean squared residual 0.8944
+[     4s]   round 1: mean squared residual 0.8867
+[     6s]   round 2: mean squared residual 0.8842
+[     9s]   round 3: mean squared residual 0.8825
+[    12s]   round 4: mean squared residual 0.8813
+[    12s] additive 64x64: 4096 cells, 3828 nonempty, mean size 75.8, max 953, centre dots 128
+[    12s] additive 64x64 f=0.0: 21.98% (p=937) | 35.92% (p=1431) | 63.33% (p=2370)   nonempty cells 3828, mean rad 0.938
+[    12s] additive 64x64 f=0.2: 18.07% (p=707) | 31.60% (p=1169) | 61.87% (p=2193)   nonempty cells 3828, mean rad 0.938
+[    12s] additive 64x64 f=0.35: 17.19% (p=632) | 30.81% (p=1081) | 62.46% (p=2139)   nonempty cells 3828, mean rad 0.938
+[    14s]   round 0: mean squared residual 0.8821
+[    17s]   round 1: mean squared residual 0.8763
+[    20s]   round 2: mean squared residual 0.8738
+[    23s]   round 3: mean squared residual 0.8721
+[    26s]   round 4: mean squared residual 0.8707
+[    26s] additive 128x128: 16384 cells, 4860 nonempty, mean size 59.7, max 590, centre dots 256
+[    27s] additive 128x128 f=0.0: 22.16% (p=1315) | 34.65% (p=1836) | 61.22% (p=2864)   nonempty cells 4860, mean rad 0.931
+[    27s] additive 128x128 f=0.2: 17.42% (p=890) | 29.87% (p=1365) | 57.92% (p=2405)   nonempty cells 4860, mean rad 0.931
+[    28s] additive 128x128 f=0.35: 16.67% (p=766) | 29.03% (p=1203) | 59.93% (p=2317)   nonempty cells 4860, mean rad 0.931
+[    28s] done

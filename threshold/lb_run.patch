@@ -1,0 +1,101 @@
+--- ../combined/run.py	2026-11-13 01:00:49.439020050 +0000
++++ lb_run.py	2026-11-14 00:45:23.618559287 +0000
+@@ -1,24 +1,27 @@
+ # One pass over the items of a share of the groups; every variant and accounting track of the ablation is evaluated on the
+ # same items, queries and thresholds. usage: python3 run.py NAME WORKER NWORKERS   (env LD = last deterministic level, bytes)
+ import numpy as np, sys, os, math, json
++sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import shim  # noqa
++sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "combined"))
+ from core import *
+-ROOT = "/tmp/claude-0/-home-user-mosaica/252074fe-d322-54df-bd82-fcf5f63ee10f/scratchpad/vec/combined/"
++ROOT = os.environ["WORK"] + "/"
+ NAME, WID, NW = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+ LD = int(os.environ.get("LD", 32)); TAG = os.environ.get("TAG", "")
+-I = dict(np.load(ROOT + f"idx_{NAME}/index.npz")); Xs = np.load(ROOT + f"idx_{NAME}/Xs.npy", mmap_mode="r")
++I = dict(np.load(ROOT + os.environ.get("IDX", "index.npz"))); Xs = np.load(ROOT + "fit/Xs.npy", mmap_mode="r"); TL = I["tl"]
+ N, n, K, G = int(I["N"]), int(I["n"]), int(I["K"]), int(I["G"])
+ assign, cstart, grp, Mq, mn, ahat = I["assign"], I["cstart"], I["grp"], I["Mq"], I["mn"], I["ahat"]
+ lamA, VA, QiA, QmA = I["lam"], I["V"], I["Qi"], I["Qmix"]
++VQA = I["VQ"] if "VQ" in I else VA   # query-side transform; the item side is V, and Q V_Q . (x - m) V = q.(x - m)
+ Q, qcls, thr, P, nimg, HI, LO = I["Q"], I["qcls"], I["thr"], I["P"], int(I["nimg"]), I["hi"], I["lo"]
+ NQ, NT = len(Q), thr.shape[1]; FULL = 2 * n
+ LV = [b for b in (0, 4, 8, 16, 32, 48, 96, 192, 384, 576) if b <= 0.4 * FULL]
+ LD = max(b for b in LV if b <= LD); ld = LV.index(LD); RLV = [b for b in LV if b > LD]; NR = len(RLV)
+ BOUNDS = [0] + [b for b in (96, 224, 480, 992, 2016, 4064) if b <= n - 64] + [n]; J = len(BOUNDS) - 1
+ EPS, NTARGET = 1e-9, 1e9
+-L1 = math.log(2 * NTARGET * max(NR, 1) / EPS)            # one-sided exp(-L1) = delta/2, delta = eps / (N * levels)
++L1 = math.log(NTARGET * max(NR, 1) / EPS)                # one harmful side per item: exp(-L1) = eps / (N * levels)
+ CSG = math.sqrt(2 * L1)
+ DA = 0.5 / 32767 + 1e-7                                    # rounding of the stored a
+-RATES = {"int": [0, 1, 2, 3, 4, 5, 6, 7, 8], "sub": [0, 0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8]}
++RATES = {"sub": [0, 0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8]}
+ def Tof(r): return np.inf if r == 0 else (np.pi / (2 * r) - 1 if r < 1 else GTREE[int(r)] / (1 - GTREE[int(r)]))
+ def bits_of(r, nb): return int(r * nb)
+ MS = np.array([BOUNDS[j + 1] - BOUNDS[j] - 1 for j in range(J)], float)
+@@ -47,28 +50,30 @@
+             s.cb += n + 4; s.cent += 1; s.touch |= True; return
+         s.LB, s.UB = pre[0].copy(), pre[1].copy(); nlog = math.ceil(math.log2(nc + 1))
+         for ti in range(NT):
+-            t = thr[:, ti]; al = ((s.LB < t) & (s.UB >= t)).any(0); nin = (s.LB >= t).any(0); nout = (s.UB < t).any(0)
++            t = thr[:, ti]; al = ((s.LB < TL[:, ti]) & (s.UB >= t)).any(0); nin = (s.LB >= t).any(0); nout = (s.UB < t).any(0)
+             op = opened[ti] if opened is not None else np.ones(NQ, bool)
+             sr = op & (al | (nin & nout))
+             s.cb[ti] += op * (n + 4) + sr * 4 * nlog * 2; s.cent[ti] += op; s.srch[ti] += sr; s.touch[ti] |= al
+     def level(s, lb, ub, inc):
+         for ti in range(NT):
+-            t = thr[:, ti]; c = ((s.LB < t) & (s.UB >= t)).sum(0); s.enter[s.li, ti] += c; s.ib[ti] += inc * c
++            t = thr[:, ti]; c = ((s.LB < TL[:, ti]) & (s.UB >= t)).sum(0); s.enter[s.li, ti] += c; s.ib[ti] += inc * c
+         np.maximum(s.LB, lb, out=s.LB); np.minimum(s.UB, ub, out=s.UB); s.li += 1
+     def alive_any(s):
+         m = np.zeros(s.LB.shape, bool)
+-        for ti in range(NT): t = thr[:, ti]; m |= (s.LB < t) & (s.UB >= t)
++        for ti in range(NT): t = thr[:, ti]; m |= (s.LB < TL[:, ti]) & (s.UB >= t)
+         return m
+     def finish(s, true):
+         for ti in range(NT):
+-            t = thr[:, ti]; c = ((s.LB < t) & (s.UB >= t)).sum(0); s.enter[s.li, ti] += c; s.ib[ti] += FULL * c
+-            A = true >= t; s.viol[ti] += int((A & (s.UB < t)).sum() + (~A & (s.LB >= t)).sum())
++            t = thr[:, ti]; tl = TL[:, ti]; c = ((s.LB < tl) & (s.UB >= t)).sum(0); s.enter[s.li, ti] += c; s.ib[ti] += FULL * c
++            A = true >= t; s.viol[ti] += int((A & (s.UB < t)).sum() + ((true < tl) & (s.LB >= tl)).sum())
+     def gstart(s): s.touch = np.zeros((NT, NQ), bool)
+     def gend(s): s.gt += s.touch
+ 
+ ND = len(LV)
+-TR = {nm: Track(nm, ND if nm in ("V0", "V1", "V2", "V2+C1+C2") else ld + 1 + NR) for nm in
+-      ("V0", "V1", "V2", "V3int", "V3int-sg", "V3sub", "V3sub-sg", "V3sub+C1", "V3sub+C1+C2", "V3sub+C1+C2img", "V2+C1+C2")}
++class Off:
++    viol = np.zeros(1)
++    def __getattr__(s, k): return lambda *a, **kw: False
++TR = {"V0": Off(), "V1": Off(), "V3sub": Track("V3sub", ld + 1 + NR), "V3sub+C1": Track("V3sub+C1", ld + 1 + NR)}
+ if NR == 0:
+     for k in ("V3int", "V3int-sg", "V3sub", "V3sub-sg", "V3sub+C1", "V3sub+C1+C2", "V3sub+C1+C2img"): del TR[k]
+     TR["V2+C1"] = Track("V2+C1", ND); TR["V2+C1+C2img"] = Track("V2+C1+C2img", ND)
+@@ -110,8 +115,8 @@
+     ks = np.arange(gstart[g], gstart[g + 1])
+     if len(ks) == 0: continue
+     for tr in TR.values(): tr.gstart()
+-    lam, V, Qi, Qm = lamA[g], VA[g], QiA[g], QmA[g]; sig = np.sqrt(lam).astype(np.float32)
+-    QV = (Q @ V).astype(np.float32); MV = (Mq[ks] @ V).astype(np.float32)
++    lam, V, Qi, Qm, VQg = lamA[g], VA[g], QiA[g], QmA[g], VQA[g]; sig = np.sqrt(lam).astype(np.float32)
++    QV = (Q @ VQg).astype(np.float32); MV = (Mq[ks] @ VQg).astype(np.float32)
+     D0 = (((lam + 1e-10) / (Qi + 1e-10)) ** 0.25).astype(np.float32); dw0, al0, dwa0 = dws(D0, QV, MV)
+     uni = []
+     for l in range(1, ND):
+@@ -169,6 +174,7 @@
+             ubc = Bh + rho + 3e-5; lbc = Bl - rho - 3e-5
+             opened = [(ubc >= thr[:, ti]) & (lbc < thr[:, ti]) for ti in range(NT)]
+             pre["C1+C2" + ("" if k == "all" else "img")] = (np.maximum(lb1, lb2), np.minimum(ub1, ub2), opened)
++        pre = {k: v for k, v in pre.items() if k == "C1"}
+         PRE = {"V3sub+C1": "C1", "V3sub+C1+C2": "C1+C2", "V3sub+C1+C2img": "C1+C2img", "V2+C1+C2": "C1+C2", "V2+C1": "C1", "V2+C1+C2img": "C1+C2img"}
+         for nm, tr in TR.items():
+             if nm in PRE: p = pre[PRE[nm]]; tr.start(nc, (p[0], p[1]), p[2])
+@@ -253,7 +259,7 @@
+     for tr in TR.values(): tr.gend()
+     log("group", g, "clusters", len(ks), "violations: decisions", {nm: int(tr.viol.sum()) for nm, tr in TR.items() if tr.viol.sum()},
+         "intervals", IV, "rand max sd", {k: round(v[0], 2) for k, v in RSTAT.items()})
+-np.savez(ROOT + f"out_{NAME}{TAG}_w{WID}.npz", A=A_, LV=np.array(LV), LD=LD, RLV=np.array(RLV), groups=np.array(groups),
++np.savez(ROOT + f"out_{NAME}{TAG}_w{WID}.npz", INC=np.array([3] + [LV[l] - LV[l - 1] + 1 for l in range(1, ld + 1)]), NQ=NQ, A=A_, LV=np.array(LV), LD=LD, RLV=np.array(RLV), groups=np.array(groups),
+          IV=json.dumps(IV), RSTAT=json.dumps(RSTAT), RMAX=json.dumps(RMAX_CLS), SCAL=json.dumps(SCAL), CSG=CSG, L1=L1,
+-         **{f"{nm}|{f}": getattr(tr, f) for nm, tr in TR.items() for f in ("enter", "ib", "cb", "gt", "viol", "cent", "srch")})
++         **{f"{nm}|{f}": getattr(tr, f) for nm, tr in TR.items() if isinstance(tr, Track) for f in ("enter", "ib", "cb", "gt", "viol", "cent", "srch")})
+ log("done")

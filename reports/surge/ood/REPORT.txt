@@ -1,0 +1,92 @@
+OUT-OF-DISTRIBUTION (TEXT) QUERIES WITHOUT EXAMPLE QUERIES
+Scripts: standin.py, twonorm.py, leverage.py in this directory (200k BioCLIP-2 sample g0-g3, K = 200, G = 12, numpy,
+cores 8-11, 152 s / 12 s / 10 s). No repository was edited.
+
+LIMIT OF THIS WORK. The text embeddings are not on disk: agent2/text_q.json and text_train.json hold prompt strings only;
+text_q.npy, the text tower and open_clip are gone. Nothing below was measured on real text queries. "Measured" means
+measured on the corpus or on data-only stand-in queries, compared with agent2's reported text statistics.
+
+VIEW ON THE 6x GAP
+- Touched items (59% against 10.6%): almost none of it is closable without a query log. Touching is decided before any
+  code byte is read, from the cluster table, a-hat and one norm. On the best stand-in the plain level-0 bound (no table,
+  no alpha*) excludes 2% of items
+  (items: 48%); with the whole tail term removed, which no certificate can do at that price, it would exclude 26%
+  (items: 73%). (measured on stand-ins) Log-learned anchors are the only lever seen to move it: 74.8% -> 64.1% touched
+  at 0.01% answers. (measured by dataonly)
+- Bytes (30 MB against 2.6 MB, 11.5x): data-only, items 1 and 5 below give about 10-17% of text bytes (to about 10x).
+  With a query log, items 1-3 and 5 stack to about 25-40% (to 7-9x). (modelled) The rest is intrinsic to per-item certificates at this confidence: a text
+  query needs the query-weighted error cut to about a quarter before the bulk separates, an item query needs no code
+  bits for most items.
+- Undecided counts go as width^2.5 to width^4 for text-like queries at 16-96 B and 0.01% answers (width^1.8 to
+  width^3 at 0.1%; measured on stand-ins with modelled deterministic widths), so 1% of width is worth about 3% of
+  survivors. Small width gains matter more than they look.
+
+RANKED IDEAS
+
+1. One-sided union bound for exclusions. (sound by a short argument; gain modelled; not in the design)
+   Mechanism: a wrong exclusion can only happen to a true match, and a wrong inclusion only to a non-match. So the
+   upper bounds used to exclude need a union over (true matches x levels), not N x 5. Lower bounds (used for tau and for
+   certifying inclusion) keep the constant for N. For k-NN the count is k. For thresholds use a cap M on the answer size,
+   doubling with a halved share of epsilon; Markov on the number of false exclusions covers the case |S| > M.
+   Arithmetic: N = 1e9, eps = 1e-9: c = 9.35 now; k = 10 gives c_ex = 7.1 (width x0.76 on the randomised part);
+   a 0.01% answer gives 8.4 (x0.90). On the stand-in, scaling the modelled width by 0.76 takes undecided from 19.6% to 8.3% at 32 B and 1.7% to
+   0.6% at 96 B. Applied to agent2's level table for text: about -8 to -14% bytes for k-NN, -4 to -7% for thresholds;
+   more if the schedule is re-tuned, since the randomised gain goes as sqrt(n)/c.
+   Cost per item: none. Data-only: yes. Test: in knn/sim.py use c = 7.1 for upper bounds and 9.35 for lower bounds;
+   check zero violations and bytes. The proof needs a proofcheck pass.
+
+2. Gap direction as one exact scalar per item, learned from the query log. (argued; not data-only)
+   Mechanism: for any fixed unit g with g.r stored per item, D.r = (D.g)(g.r) + D'.r with D' orthogonal to g; the first
+   term is exact, and the certificate uses D' in place of D at every level.
+   Arithmetic: the gap holds 17% of text offset energy (agent2, measured), so width x0.91 if it is spread like the rest,
+   up to about x0.8 if it sits in the uncoded mid band; with the exponent of 3 that is 25-50% fewer undecided, about
+   -10 to -25% bytes after charging the scalar. Item queries gain nothing and pay 1 B.
+   Cost: 1 B per item at level 0. The gap is mostly orthogonal to the corpus mean (61-98% of its energy, derived from
+   cosine 0.92 and norms 0.76 and 0.31; the text mean norm is not reported), so the corpus cannot supply it; about 100 logged queries can. Test: needs text_q.npy re-encoded; measure
+   |WD'|/|WD| over (query, cluster) pairs.
+
+3. Query log at compaction, profile and anchors. (upper bound measured by dataonly)
+   Worth exactly the mixture-tuned build: text -8.3 / -5.6 / -2.5 / -1.1% bytes against H25 and touched 75% -> 64%.
+   A log-fitted prefix basis is the larger prize (predicted text -24% width at 96 B) but the full version costs items
+   +21% (agent2, predicted), so it only fits as a few leading dimensions. 
+
+4. Spectrum-flattened items as the data-only stand-in for out-of-distribution queries. (measured match; small saving)
+   q = unit(mu + |x - mu| * unit(L^(-p/2) (x - mu))) in the global PCA basis, p = 0.5 to 0.75.
+   Against agent2's text figures (|D| 0.73; band shares 12 / 14 / 12 / 15 / 20 / 23 / 4; score sd 0.052; threshold minus
+   median 0.185; nearest-centre cosine 0.75): p = 0.75 gives 0.68; 16 / 15 / 9 / 13 / 18 / 21 / 9; 0.063; 0.140; 0.80.
+   Items within +-0.005 / 0.01 / 0.02 of the top-20 threshold per match: 1.9 / 6.2 / 38.6 against text 1.7 / 5.5 / 38.
+   Undecided after 16 / 32 B: 39.5% / 19.6% against text 45% / 29%; it under-predicts at 96 B (1.7% against 8.5%).
+   Other stand-ins are worse: item differences match the bands but not the distance (|D| 1.19); item plus noise and
+   PC-removed items put energy in the wrong bands; random directions are far off.
+   As a profile it buys little: modelled width loss for text (a synthetic profile with agent2's band shares) is 1.17 (item profile), 1.056 (H25), 1.018 (H50), 1.013
+   (square root of the item profile), against item losses of 1.00 / 1.014 / 1.053 / 1.081. My reconstruction reproduces
+   dataonly's 1.14-1.19 and 1.06-1.08, and no candidate beats the H family's trade by more than 2-3%. The profile
+   route is exhausted. Its use is as a test workload: it gives every dataset an out-of-distribution cost figure and
+   a way to set the hedge weight that does not rest on BioCLIP text. Cost: none. Test: run the 1M harness with it.
+
+5. Free deterministic refinements already known (D orthogonal to the code, alpha*). A few per cent. (argued)
+
+NEGATIVE RESULTS
+
+6. Per-query certificate weights are not free. (proved for one norm; measured for two)
+   With one stored norm s = |W^-1 e| the feasible errors are an ellipsoid whose support function in direction D is
+   exactly s|WD|; any other diagonal W' gives |W'D| * max_i(W_i/W'_i) * s >= |WD| * s. With the plain norm stored as
+   well there is a free one-parameter family, bound^2 = min_k (|e|^2 + k s^2) * sum_i D_i^2 / (1 + k W_i^-2), valid for
+   every k. It gains 2-10% over min(plain, weighted) for text-like queries under the item profile, and 0-2% under H25.
+   H25 already is that compromise.
+
+7. Query-side subspace split, tail scalars, banded norms. (measured on stand-ins; agrees with agent2)
+   Level-0 exclusion for the p = 0.75 stand-in: plain 2.2%, two bands 3.1%, three bands 3.4%. The premise is only
+   partly right: text has 3.8% of its offset energy in local dimensions 512-768, which really are dead, but 43% in
+   128-512, where residuals still hold 14% of their energy. A sketch of that band needs over 137 bits to match
+   Cauchy-Schwarz at c = 9.35 (79 bits at c = 7.1). (argued)
+
+8. Rank rather than bound for k-NN. (argued from knn's measured oracle gap)
+   The k-th score is known exactly once the seed is read, so a relative bound is the same bound. A perfect seed is
+   worth at most 7% for text (29.9 against 27.8 MB).
+
+CORRECTION TO THE BRIEF'S PICTURE. On stand-ins the clusters still explain about 85% of score variance, as for items;
+the margin from threshold to median is 5-7 within-cluster sds against 9 for items. The loss is that Cauchy-Schwarz is
+9-15x above the actual |D.r| and the margin is only about that wide. (measured on stand-ins; unverified on text)
+
+OWED: every text-specific figure above needs one run with text_q.npy re-encoded (encode_text.py, 495 MB tower).

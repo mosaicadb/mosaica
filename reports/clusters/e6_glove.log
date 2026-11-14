@@ -1,0 +1,11 @@
+[    10s] glove-100-angular N=1183514 n=100 K=1024: tables done; mean centre norm 0.582, mean max radius 0.965
+[    19s]                         oracle:   0.48%
+[    19s]                           ball:  99.83%
+[    19s]                       own cone:  99.69%
+[    19s]                    near anchor:  98.26%
+[    19s]                    best anchor:  98.23%
+[    19s]                    two anchors:  98.57%
+[    19s]               items by own key:  97.44%
+[    19s]     items in opened (own cone):  99.69%
+[    19s]  items in opened (best anchor):  98.29%
+[    19s] done

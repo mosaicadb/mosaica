@@ -1,0 +1,223 @@
+CASCADE LEVEL: RUST IMPLEMENTATION SPECIFICATION (2026-11-13)
+New module rust/src/v2/cascade.rs in vexact-bench, attached to an existing Index2 (same clusters, row order,
+centres64, row_ent, full rows). Nothing was built or run; every number below is from the two design reports.
+[CHOSEN] marks a point the reports left undefined or where I depart from them.
+
+0. NOTATION
+ n dimensions, m = n - 1. G = ceil(n/4) nibble groups, Gp = G rounded up to even, n4 = 4*Gp (padding dims are 0 in
+ q' and code 0). Cluster j: rows r0..r1 (Index2.cl), centre c_j = ix.centres_f64(j). Item x (f16 values as f64),
+ r = x - c_j, y = P r (f64), q' = P q (f64), q = the f16-rounded query (Prep-style q64), qn = |q|.
+ Code vectors (integers): level 1 o1_i = s_i; level 2 o2_i = s_i(2 m2_i + 1); level 3 o3_i = s_i(2 m4_i + 1);
+ s_i = +1 if y_i >= 0 else -1, m4_i = min(7, floor(|y_i|/Delta)), m2_i = m4_i >> 2 (tied scales: step 4 Delta).
+ Per level l: g_l = <o_l, y>, a_l = g_l/|r|^2 (= 1/f), b_l = |o_l| sin(phi_l)/sqrt(m) (= sd/f), d_l = a_l rho -
+ <o_l, P c_j> (= e_c/f), rho = c_j.r. S_l = <o_l, q'>. Score estimate = q.c_j + (S_l + alpha_j d_l)/a_l.
+ Per (query, cluster): qc_j = q.c_j, alpha_j = qc_j/|c_j|^2 (0 if c_j = 0), w_j = sqrt(max(0, qn^2 - qc_j^2/|c_j|^2))
+ (qn if c_j = 0). [CHOSEN] the report assumes |q| = 1; w uses qn.
+
+1. LAYOUT (little-endian; the file is the in-memory arrays, read or mapped whole)
+ File cascade.bin: header 64 B: magic "VXCASC01", u32 version = 1, u32 n, u32 K, u64 nrows, u64 seed, u64 stream,
+ f64 eta (rotation defect, section 2), 12 B zero. Then sections in this order, each 64-byte aligned:
+ DIR   K x 48 B (8 + 4 + 4 + 12 + 12 + 4 + 4): u64 off1 (byte offset of the cluster's level-1 blocks), u32 r0, u32 nitems, f32 ua[3], f32 ud[3],
+       f32 ur, f32 urho. Blocks of a cluster = ceil(nitems/32); the cold sections are indexed by row.
+ L1    per cluster, per block of 32 items, one record of Gp*16 + 128 B:
+         Gp rows x 16 B  sign plane. Row g, byte p: low nibble = item p, high nibble = item 16 + p; nibble bit t
+                         = 1 iff s = +1 for dimension 4g + t. (v2/kern.rs layout.)
+         A  32 x u16     in (even, odd) order: slot eo_pos(i) = (i>>4)*8 + ((i&15)>>1) + (i&1)*16
+         B  32 x u8      same order
+         D  32 x u8      same order, offset binary (value + 128)
+       Padding lanes of the last block: code 0, A = 0, B = 255, D = 128.
+ C0    nrows x 4 B, row order: RN u16, RHO i16.
+ L2P   per cluster, per block: Gp rows x 16 B, the m2 bit plane, same nibble layout as the sign plane.
+ L2S   nrows x 6 B: A2 u16, B2 u16, D2 i16.
+ L3    nrows x (6 + n4/2) B, row order: A3 u16, B3 u16, D3 i16, then n4 nibbles, dimension i in byte i/2 (low
+       nibble for even i): bit 3 = sign (1 = +), bits 0..2 = m4.
+       [CHOSEN] the level-3 record repeats the sign and m2 bits (n/2 B, not the report's n/4) so that level 3 is
+       the plain dot product the report asks for; cost n/4 B per item on disk, about 1% more bytes read per query.
+ Glove (n = 100, Gp = 26): 17 B per item resident for level 1 (13 code + 4 scalars), 4 cold, 13 + 6 level 2,
+ 56 level 3. The report's 15.5 B assumed no D byte and no padding to Gp.
+ Per-item scalars, units and rounding (a*, b*, d* are the ideal values with an exact rotation):
+   A_l = floor(a~ (1 - dl)/ua_l)      a* in [A ua, (A+2) ua]. ua_l,j = 4 median_i(a~)/65535.  u16 at every level.
+   B_1 = ceil(b~up/ub1), u8, ub1 = sqrt(n/m)/254 (global), values 0..254; 255 = sentinel "never prune at level 1".
+   B_l = ceil(b~up/ub_l), u16, l = 2, 3: ub_2 = 3 sqrt(n/m)/65534, ub_3 = 15 sqrt(n/m)/65534; 65535 = sentinel.
+   D_l = round(d~/ud_l), i8 (level 1, clamp +-127) or i16 (clamp +-32767); ud_l,j = max_i |d~|/127 or /32767
+         (1e-30 if all zero). d* in D ud +- ud.
+   RN  = floor(|r|/ur_j), ur_j = max_i |r| (1 + 1e-9)/65534.  |r| in [RN ur, (RN+1) ur].
+   RHO = round(rho/urho_j), urho_j = max_i |rho|/32767 (1e-30 if zero).  rho in RHO urho +- urho.
+   Directions: A down (and A+2 as its upper end), B up, RN both ends used, D and RHO nearest with a full step
+   charged. b~up = |o| sqrt(sin~^2 + 2 dl)/sqrt(m). dl = 4 (eta + n 2^-50).
+   Sentinel (B_1 = 255, or B_l = 65535) is set when |r| = 0, g_l <= |o_l||r|/4, a~ >= 65533 ua, or RN = 0.
+   [CHOSEN] a zero residual is a sentinel at every level (read in full), not "f = 0, width 0".
+ In memory: struct Cascade { n, gp, k, eta, rot: Vec<f64> (n x n row-major; centres are rotated
+ at encode only), dir: Vec<CDir>, l1: Vec<u8>, c0: Vec<u8>, l2p: Vec<u8>, l2off: Vec<usize>, l2s: Vec<u8>,
+ l3: Vec<u8>, ub: [f64; 3] }.
+
+2. ENCODER
+ P = util::haar_rotation(n, index::SEED, CASCADE_STREAM = 0xCA5C) (f64, row-major, y = P x through q::matvec64).
+ eta = Frobenius norm of P^T P - I, computed in f64 at build and stored; build and load assert eta <= 1e-12.
+ The nearest exact rotation P* satisfies |P - P*|_2 <= eta; the guarantee is stated for P*. Every computed scalar
+ is within relative dl of its ideal (cos phi >= 1/4 is asserted, else sentinel), and S computed from q' differs
+ from <o, P* q> by at most eS_l = (eta + n 2^-50) omax_l qn, omax = sqrt(n) x (1, 3, 15). These are the only
+ float terms; they enter the widths below. [CHOSEN] this is the "not yet written down" item of the report.
+ Per cluster: c' = P c_j. Per item, all in f64:
+   r = x - c_j; rr = r.r; rho = c_j.r; y = P r.
+   Delta: grid Delta_t = 0.20 * 2^(t/8) * sqrt(rr/n), t = 0..15; take the t with the smallest tan(phi_2), lowest t
+   on ties. [CHOSEN] tied scale fitted to the 2-bit code, because level 2 gates twenty times more work than level
+   3; the cost at 4 bits is unmeasured and step 1 (numpy) must report tan(phi_3) against the independent scale.
+   For l in 1..3: oo = sum o_i^2 (integer), g = <o, y>, a~ = g/rr, sin~^2 = max(0, 1 - g^2/(oo rr)),
+   d~ = a~ rho - <o, c'>. f and tan(phi) are never stored: f = 1/a, sd = b/a, tan(phi) = sqrt(m) b/(a |r|).
+   Then the per-cluster units (ua, ud, ur, urho), then the integers of section 1.
+ fn encode_cluster(ix: &Index2, cx: &CascadeParams, ci: usize) -> ClusterEnc (rayon over clusters, as build2).
+ Estimator on stored integers (the definition used by every test and by verify), for level l, table sum S:
+   num = S + alpha D ud + |alpha| ud + eS_l          (upper end of S + alpha d)
+   E   = (num >= 0 ? num/(A ua) : num/((A+2) ua)) - alpha RHO urho + |alpha| urho      (upper end of est of D.r)
+   plain upper bound of q.x:  qc + (num + c w B ub) / (A ua or (A+2) ua by the sign of the numerator)
+   self-normalised: kappa = c B ub/(A ua RN ur), R = (RN+1) ur w;
+     t = R if E >= R; else arg = (1 + kappa^2) R^2 - E^2; t = min(E + kappa R, R) if arg < 0,
+     else min((E + kappa sqrt(arg))/(1 + kappa^2), R)
+     UB = qc + alpha RHO urho + |alpha| urho + t + 2^-30.
+   Both hold on the event |u_1| <= c/sqrt(m) of the item's level-l code, so one event per (item, level).
+   [CHOSEN] the report's level-1 test used w_j without e_c, which is not sound (w is the norm of q - alpha c and
+   needs the centre term). The byte D is kept and the centre term is in the integer test; without it the width
+   would be c qn (254k instead of about 130-150k glove survivors).
+
+3. LEVEL-1 KERNEL (AVX2; std::arch::x86_64 through crate::simd)
+ 3.1 Table, once per query. T_g[v] = sum_{t<4} q'_{4g+t} (v>>t & 1 ? +1 : -1), base_g = -sum_t |q'_{4g+t}|,
+   sigma = max_g(2 |base_g|)/254 (if 0: all entries 0, sigma = 1). theta_g[v] = min(255, ceil((T_g[v] - base_g)
+   (1 + 2^-40)/sigma)) so sigma theta + base_g >= T_g[v]. Bt = sum_g base_g rounded up (+ n 2^-50 qn).
+   Stored in pair layout: Gp/2 x 32 B, lane 0 = group 2p, lane 1 = group 2p+1 (padding groups all zero).
+   [CHOSEN] u8 tables at level 1 for every n (one pshufb per row). Mean loss is (G/2) sigma against a width of
+   c w b: about 1% at n = 100, 3.4% at 1,024, 7.6% at 5,000. u16 (hi, lo) tables are used at level 2 only.
+   Sint = sum_g theta_g[nibble]; S <= sigma Sint + Bt.
+ 3.2 Accumulate (per block; microbench unit_sums with Gp/2 pairs):
+   for p in 0..Gp/2: c = load 32 B codes; t = load 32 B table; r0 = pshufb(t, c & 0x0f);
+     r1 = pshufb(t, (c >> 4) & 0x0f); a0 += r0; b0 += r0 >> 8; a1 += r1; b1 += r1 >> 8   (epi16 adds/shifts)
+   e0 = a0 - (b0 << 8); e1 = a1 - (b1 << 8); ev = perm2x128(e0, e1, 0x20) + perm2x128(e0, e1, 0x31);
+   od likewise from b0, b1. ev, od are u16 sums in the (even, odd) item order of A, B, D.
+ 3.3 Overflow. A lane sums at most 255 per pass, two lanes are added: exact while Gp/2 <= 128 passes, i.e.
+   Gp <= 256, n <= 1,024 (65,280 <= 65,535), with sh = 0. For 1,024 < n <= 5,000 (Gp <= 1,250, Sint <= 318,750):
+   run the passes in chunks of 128, add each chunk's (ev, od) zero-extended into four u32 vectors, and at the end
+   L = packus_epi32((sum + 2^sh - 1) >> sh) with sh = ceil(log2(255 Gp/65535)) (3 at n = 5,000); sigma is replaced
+   by sigma 2^sh in 3.4. The shift rounds Sint up, which is sound. Kernel const generic WIDE: bool.
+ 3.4 Prune test. Real form, with T = tau - qc_j - 2^-30, W = c w_j, sg = sigma 2^sh:
+     prune iff Sint' < [T a - W b - alpha d - Bt - eS_1]/sg, taking a = A ua if T >= 0 else (A+2) ua,
+     b = B ub1, d = (D - 128) ud +- ud.
+   Per cluster, f64 then integers (fx = a multiplier pair (M: u16, s: 0..15), s the least shift with K 2^(16-s)
+   <= 65535; "down" M = floor(K 2^(16-s)), "up" M = ceil):
+     KA = |T| ua/sg  (down if T >= 0, up if T < 0);  KB = W ub1/(256 sg) (up; the kernel multiplies B << 8, which keeps one-step precision);
+     KD = |alpha| ud/(256 sg) (down if alpha < 0, up if alpha >= 0; the kernel multiplies D << 8)
+     constants: real c0 = -(Bt + eS_1)/sg + (alpha >= 0 ? 128 |alpha| ud/sg : -128 |alpha| ud/sg) - |alpha| ud/sg
+                - (T < 0 ? 2 KA : 0);  Cpos = floor(max(c0, 0)) clamped to 65535, Cneg = ceil(max(-c0, 0)) + 1,
+                if Cneg > 65535 the cluster prunes nothing at level 1.
+   Vector ops, on the ev and od halves alike (all unsigned saturating):
+     mul(X, M, s, up) = satsll(mulhi_epu16(X, M) (+1 saturating if up), s),
+     satsll(t, s) = sll(t, s) | cmpeq(max_epu16(t, cap1), t), cap1 = min(65535, (65535 >> s) + 1)
+     pA = mul(A, MA, sA, T < 0); pB = mul(B << 8, MB, sB, true); pD = mul(D << 8, MD, sD, alpha >= 0)
+     POS = adds(Cpos, (T >= 0 ? pA : 0), (alpha < 0 ? pD : 0));  NEG = adds(Cneg, pB, (T < 0 ? pA : 0),
+     (alpha >= 0 ? pD : 0));  RHS = subs_epu16(POS, NEG)
+     prune = RHS >u Sint'  (cmpeq(max_epu16(RHS, Sint' + 1 saturating), RHS)), and not (B == 255)
+   Soundness: every positive term is rounded down and may saturate low, every subtracted term is rounded up and a
+   saturated NEG gives RHS = 0 (no prune), so RHS <= the real right side for every input; no range precondition.
+   The sign selections are per-cluster masks, not branches.
+ 3.5 Survivors. Level 1 never compacts. Per block: vmask = the 32 visible bits of rows r0 + 32b.. taken from
+   Vis2.bits (all ones without a filter) and lanes < nitems; a block with vmask = 0 is skipped before its record is
+   touched; a cluster with cl_cnt = 0 is skipped before its directory entry is used. live = vmask & !prune
+   (item-order bits through eo_mask). For each set bit push (local index, Sint') to the cluster's survivor list.
+ 3.6 Float re-check of level-1 survivors (reads C0 only): self-normalised UB of section 2 with S = sg Sint' + Bt, in
+   f32, 8 lanes, increased by 4e-6 (|qc| + |alpha RHO urho| + R) + 1e-6; prune iff UB < tau. Sentinels survive.
+
+4. LEVELS 2 AND 3 (survivors only; tau as at the start of the cluster)
+ Level 2. Survivors in chunks of 32 (ascending local index, u32::MAX padding): kern::plan_gather, then
+   kern::gather_rows twice (sign rows from L1 with stride Gp*16 + 128, m2 rows from L2P with stride Gp*16) into
+   two dense Gp x 16 buffers. gather_rows takes the row stride as `rows * 16`; add a stride argument (as the
+   microbench's gather_rows has). Half-group index: for sign nibble a and m2 nibble b of group g,
+   i_even = (a & 3) | ((b & 3) << 2) for dimensions 4g, 4g+1; i_odd = (a >> 2) | (b & 12) for 4g+2, 4g+3.
+   Tables per half group h (dims 2h, 2h+1): T2_h[v] = q'_{2h} sgn(v&1)(1 + 2(v>>2 & 1)) + q'_{2h+1} sgn(v>>1 & 1)
+   (1 + 2(v>>3 & 1)); theta = ceil((T2 - base_h)/sigma2), sigma2 = max range/65534, stored as hi and lo bytes
+   (four pair-layout arrays: hi even, hi odd, lo even, lo odd). Eight pshufb per row pair; hi and lo are summed
+   separately as in 3.2 (Hs, Ls exact for Gp <= 128; flush to u32 every 64 pairs otherwise).
+   Theta = 256 Hs + Ls in u32, S2 = sigma2 Theta + Bt2 (upper bound), then the self-normalised UB with (A2, B2, D2)
+   and eS_2, f32 x 8 as 3.6. No integer test at level 2: the float bound is the tight one and survivors are few.
+ Level 3. Per survivor: decode the n4 nibbles to i8 values s(2 m4 + 1) with one pshufb per 16 bytes, widen, and
+   take the f32 dot product with q'32 (q' rounded to f32); S3 = that + 2^-17 * 15 sqrt(n) qn (f32 slack), then the
+   self-normalised UB with (A3, B3, D3) and eS_3, scalar f64. Prune iff UB < tau.
+ Survivors of level 3 are scored from the full vector at the end of the cluster.
+
+5. k-NN DRIVER
+ pub fn knn_cascade(ix: &Index2, cx: &Cascade, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, c: Option<f64>,
+                    verify: bool) -> KnnCascadeOut
+ 1. Scan rule, before anything is read: with a filter and Full2::Real, scan iff plan.mode is Auto and
+    nvis * plan.scan_us <= nvb * 32 * plan.l1_us + plan.seed_us, nvb = number of 32-row blocks holding a visible
+    row (one pass over vis.rows). Then return q::scan_knn(ix, &q16, &q32, qn, kk, vis). Plan gains l1_us (default
+    0.0015, set by the microbenchmark) in to_kv/from_kv. PlanMode::Flat always scans, Index never.
+    If the visible count <= kk: scan.
+ 2. Query setup: query_f16; q64; q' = matvec64(cx.rot, q64); level-1 table; qc_j = dot64v(q64, centre) for all K;
+    level-2 table and q'32 on first use.
+ 3. Constant: c = cascade_c(n, kk, 3, 1e-9) unless the caller passes one (the approximate dial). It is the same c
+    at all three levels and in both the integer and the float tests: per-side tail eps/(2 * 3 * kk) of the exact
+    sphere law, c = s sqrt(m) with (1/2) I_{1-s^2}((m-1)/2, 1/2) = that tail, times (1 + 1e-6). Checks: 5.99 at
+    n = 100, 6.37 at 256, 6.54 at 768 for kk = 10; 6.23 / 6.66 / 6.86 for kk = 100. Not used: 9.35, the N-union
+    constants, the deterministic kappa = tan(phi) (verify may report it).
+ 4. Seed: clusters with a visible item in descending qc_j; score every visible row of the leading clusters from the
+    full vector (kernel::dot_f16) until at least max(8 kk, 512) rows are scored; those clusters are done.
+    [CHOSEN] q::seed2 is not used: it needs prep2's anchors and the v2 levels, several milliseconds.
+ 5. tau = (kk-th best f32 score so far) - full_err_qn(ix, qn), or -inf with fewer than kk. Only visible rows are
+    ever scored. tau is read once per cluster and raised only when a cluster's full reads finish.
+ 6. Sweep the remaining clusters in the same order: 3.4-3.6, then 4, then full reads; every fully read row goes to
+    `cands` and the heap.
+ 7. Result: crate::query::topk_f16 over `cands` (chunks of 1,024; rows by ix.full_row_f16, ids by ix.row_ent), which
+    settles near-ties with the exact integer product. Every returned item has an exact score (Theorem A); the
+    certify-by-bound step of knn2d is not used.
+ pub struct KnnCascadeOut { ents: Vec<(f64, u32)>, cs: CascadeStats, scanned: bool, t_seed, t_sweep, t_sel: f64 }
+ pub struct CascadeStats { l1_items, l1_int_surv, l1_surv, l2_surv, l3_surv, full_reads, bytes: u64 }
+
+6. REUSED AND NEW
+ Reused unchanged: util::haar_rotation, DetGauss, f16_to_f32, exact_dot (inside topk_f16), dot64; q::matvec64,
+ dot64v, query_f16, Vis2 (bits, cl_cnt, rows), scan_knn, full_err_qn, Plan/PlanMode; kernel::dot_f16;
+ query::topk_f16; kern::plan_gather, Gather; Index2 (cl, centres_f64, full_row_f16, row_ent); simd shim.
+ Changed: kern::gather_rows(g, base, stride, rows, dst) (explicit stride); Plan { l1_us }.
+ Moved from the microbench into v2/kern.rs, not copied: unit_sums (as pair_sums(codes, tab, pairs)), eo_mask,
+ eo_pos, push_bits.
+ New, in v2/cascade.rs:
+   pub fn build_cascade(ix: &Index2, log: &mut dyn FnMut(String)) -> Cascade
+   pub fn write_cascade(cx: &Cascade, path: &str);  pub fn read_cascade(path: &str, ix: &Index2) -> Cascade
+   pub fn cascade_c(n: usize, kk: usize, levels: usize, eps: f64) -> f64      (Lentz continued fraction, bisection)
+   pub struct QTab1 { tab: Vec<u8>, sigma: f64, bt: f64, sh: u32 };  pub fn build_tab1(qp: &[f64], qn, eta) -> QTab1
+   pub struct QTab2 { hi_e, hi_o, lo_e, lo_o: Vec<u8>, sigma: f64, bt: f64 };  pub fn build_tab2(...) -> QTab2
+   pub struct ClusterK { ma, mb, md: u16, sa, sb, sd: u32, cpos, cneg: u16, t_neg, alpha_neg, none: bool }
+   pub fn cluster_k(cx, ci, tab: &QTab1, tau, qc, qn, c) -> (ClusterK, ClusterF)   (ClusterF: the f64 constants)
+   #[target_feature(enable = "avx2")] pub unsafe fn l1_block<const WIDE: bool>(rec: *const u8, gp: usize, tab:
+       *const u8, k: &ClusterK) -> (u32 /* prune bits, item order */, __m256i, __m256i /* Sint' as (even, odd) */)
+   pub unsafe fn l1_cluster(cx, ci, tab, k, vis: Option<&Vis2>, out: &mut Vec<(u32, u16)>)
+   pub fn ub_selfnorm(sc: ItemScalars, s_up: f64, kf: &ClusterF, level: usize) -> f64;  ub_selfnorm_x8 (f32)
+   pub unsafe fn l2_chunk(cx, ci, lanes: &[u32; 32], tab2, g: &mut Gather, out: &mut [u32; 32])
+   pub unsafe fn l3_item(cx, row: usize, qp32: &[f32]) -> f32
+   pub fn knn_cascade(...) as above
+   pub mod reference { l1_sint, l1_prune (the same saturating u16 steps on u16 scalars), s_exact(level) in f64,
+       ub_plain64, ub_selfnorm64, knn_reference }
+
+7. TESTS
+ Scalar reference: reference::* mirrors 3.1-3.4 operation for operation in scalar integer code and levels 2, 3 from
+   item-major decoded codes; knn_reference runs the whole cascade with it.
+ Differential (random n in {4, 7, 100, 256, 1024, 1500, 5000}, clusters of 1..200 items, zero residuals, zero
+   centre, T and alpha of both signs, extreme tau): l1_block against reference for every lane (Sint' and prune
+   bit); l2_chunk and l3_item sums equal the reference integers and within the stated f32 slack; filtered runs
+   equal runs over the visible subset; knn_cascade ids equal scan_knn ids on 1,000 glove and nytimes queries,
+   unfiltered and at 10%, 1%, 0.1% visible.
+ Verify mode (knn_cascade verify = true), deterministic, 0 failures allowed: for every integer prune, the plain f64
+   bound of section 2 with S = s_exact < tau; for every f32 prune, ub_selfnorm64 < tau; for every prune at any
+   level, the exact score < tau (the truth check; a failure here is a seed event, reported with its z). Also
+   checks S_exact <= sigma Sint + Bt for every item touched, and cascade_c against the six table values to 0.01.
+ Microbenchmark (new subcommand `cascade-bench` in main.rs; one pinned thread, util::pin): glove 1,183,514 items,
+   K = 4,096, kk = 10, tau = the seed's, 100 queries, level-1 pass only (3.2-3.5, survivors pushed), best of 5.
+   Pass: under 2.0 ns per item, and the level-1 integer survivor set of every query identical to the numpy
+   reference of 3.1-3.4 (lvl0-style script fed the same cascade.bin and queries; compare sorted row lists).
+   It also prints survivors per level against the report's 149k / 7.6k / 81 and writes l1_us.
+
+FLAGGED, IN ONE PLACE
+ 1 e_c at level 1: kept (1 B), because w_j without it is unsound.  2 |q| is not assumed 1.  3 rotation error:
+ eta bound, dl and eS_l as above.  4 tied scale fitted to the 2-bit code; 4-bit cost unmeasured.  5 level 3
+ stored self-contained (n/2 B).  6 scalars stored as 1/f, sd/f, e_c/f, |r|, rho, not |r| and cos(phi); rho is
+ stored, not derived from unit norm.  7 zero residual and out-of-range scalars are sentinels.  8 u8 level-1
+ tables at every n; above 1,024 the loss grows and the report's block rotations are not specified here.
+ 9 new seed.  10 level 2 has no integer test; it is re-packed always, level 1 never.  11 the scan rule and its
+ constant l1_us.  12 threshold queries and the approximate dial beyond passing c are out of scope.

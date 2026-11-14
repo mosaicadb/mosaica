@@ -1,0 +1,5 @@
+[     1s] glove-100-angular N=1183514 n=100 queries=1000
+[     1s] flat balanced K=4096 f=0.35: 1.69% (p=59) | 3.73% (p=134) | 14.47% (p=555)   nonempty cells 4096, mean rad 0.771
+[     4s] flat balanced+soar K=4096 f=0.35: 1.38% (p=27) | 3.18% (p=66) | 10.24% (p=231)   nonempty cells 4096, mean rad 0.771
+[     6s] flat balanced K=16384 f=0.35: 1.07% (p=137) | 2.57% (p=345) | 9.44% (p=1379)   nonempty cells 16384, mean rad 0.741
+[    11s] flat balanced+soar K=16384 f=0.35: 0.85% (p=61) | 1.99% (p=153) | 6.71% (p=574)   nonempty cells 16384, mean rad 0.741

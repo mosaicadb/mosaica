@@ -1,0 +1,23 @@
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial.py:26: RuntimeWarning: invalid value encountered in divide
+  O = (R / rn[:, None]) @ P.T                   # rotated unit residuals
+N=1183514 n=100 K=4096 prep 29s  mean |r|=0.783  mean kth score=0.603
+b=1: 12.5 B/item, mean cos nan, mean sd nan, err/sd: sd nan max|z| nan
+  nprobe=   32 m= 0.00 scanned=    15395 rerank=     100 recall=0.6530 recall_eps=0.6755 model=     44 us ->  22525 QPS
+  nprobe=   32 m= 1.00 scanned=    15395 rerank=     295 recall=0.7595 recall_eps=0.7860 model=     52 us ->  19163 QPS
+  nprobe=   32 m= 2.00 scanned=    15395 rerank=     983 recall=0.8015 recall_eps=0.8220 model=     80 us ->  12548 QPS
+  nprobe=   32 m= 3.00 scanned=    15395 rerank=    2525 recall=0.8055 recall_eps=0.8255 model=    141 us ->   7073 QPS
+  nprobe=   32 m= 9.35 scanned=    15395 rerank=   14783 recall=0.8055 recall_eps=0.8255 model=    632 us ->   1583 QPS
+  nprobe=  128 m= 0.00 scanned=    55562 rerank=     100 recall=0.6885 recall_eps=0.7100 model=     85 us ->  11826 QPS
+  nprobe=  128 m= 1.00 scanned=    55562 rerank=     443 recall=0.8420 recall_eps=0.8710 model=     98 us ->  10173 QPS
+  nprobe=  128 m= 2.00 scanned=    55562 rerank=    1703 recall=0.8985 recall_eps=0.9170 model=    149 us ->   6726 QPS
+  nprobe=  128 m= 3.00 scanned=    55562 rerank=    5069 recall=0.9035 recall_eps=0.9220 model=    283 us ->   3530 QPS
+  nprobe=  128 m= 9.35 scanned=    55562 rerank=   51200 recall=0.9035 recall_eps=0.9220 model=   2129 us ->    470 QPS
+  nprobe=  512 m= 0.00 scanned=   197078 rerank=     100 recall=0.7065 recall_eps=0.7290 model=    226 us ->   4423 QPS
+  nprobe=  512 m= 1.00 scanned=   197078 rerank=     630 recall=0.9085 recall_eps=0.9365 model=    247 us ->   4044 QPS
+  nprobe=  512 m= 2.00 scanned=   197078 rerank=    2788 recall=0.9725 recall_eps=0.9835 model=    334 us ->   2998 QPS
+  nprobe=  512 m= 3.00 scanned=   197078 rerank=    9541 recall=0.9785 recall_eps=0.9885 model=    604 us ->   1656 QPS
+  nprobe=  512 m= 9.35 scanned=   197078 rerank=  171600 recall=0.9785 recall_eps=0.9885 model=   7086 us ->    141 QPS
+  nprobe= 4096 m= 0.00 scanned=  1183514 rerank=     100 recall=0.6965 recall_eps=0.7185 model=   1213 us ->    825 QPS
+  nprobe= 4096 m= 1.00 scanned=  1183514 rerank=     859 recall=0.9255 recall_eps=0.9495 model=   1243 us ->    805 QPS
+  nprobe= 4096 m= 2.00 scanned=  1183514 rerank=    4391 recall=0.9935 recall_eps=0.9955 model=   1384 us ->    722 QPS
+  nprobe= 4096 m= 3.00 scanned=  1183514 rerank=   17715 recall=1.0000 recall_eps=1.0000 model=   1917 us ->    522 QPS

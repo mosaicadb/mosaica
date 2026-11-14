@@ -1,0 +1,11 @@
+[     4s] bioclip N=200000 n=768 K=200: tables done; mean centre norm 0.907, mean max radius 0.617
+[     8s]                         oracle:   1.13%
+[     8s]                           ball:  99.93%
+[     8s]                       own cone:  93.08%
+[     8s]                    near anchor:  63.33%
+[     8s]                    best anchor:  60.60%
+[     8s]                    two anchors:  81.68%
+[     8s]               items by own key:  41.55%
+[     8s]     items in opened (own cone):  89.80%
+[     8s]  items in opened (best anchor):  59.93%
+[     8s] done

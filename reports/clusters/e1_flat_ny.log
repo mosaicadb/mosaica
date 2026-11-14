@@ -1,0 +1,5 @@
+[     0s] nytimes-256-angular N=290000 n=256 queries=1000
+[     1s] flat balanced K=1024 f=0.35: 13.55% (p=84) | 27.32% (p=166) | 61.71% (p=383)   nonempty cells 1023, mean rad 0.910
+[     2s] flat balanced+soar K=1024 f=0.35: 9.96% (p=33) | 21.17% (p=71) | 50.90% (p=190)   nonempty cells 1023, mean rad 0.910
+[     2s] flat balanced K=4096 f=0.35: 5.84% (p=136) | 15.67% (p=359) | 46.47% (p=1079)   nonempty cells 4096, mean rad 0.862
+[     3s] flat balanced+soar K=4096 f=0.35: 4.43% (p=53) | 11.99% (p=145) | 37.10% (p=491)   nonempty cells 4096, mean rad 0.862

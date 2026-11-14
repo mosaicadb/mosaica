@@ -1,0 +1,88 @@
+REFEREE REPORT ON reports/bounds3/REPORT.txt (third pass, confidence constants)
+2026-11-14. Referee: an independent agent that did not write the report. Scripts beside this file.
+
+Nothing in the report is unsound. Four claims need a condition written into them (R2, R6, the "index's own N"
+rule, the scale attribution). The four main constants hold: independent values 8.7659 / 8.6951 / 8.0271 / 7.9485
+for the exact worst case, each 0.008-0.009 below the certified 8.774 / 8.704 / 8.036 / 7.957.
+
+VERDICTS, MOST SERIOUS FIRST
+
+1. R6 k-NN, changed rule: sound with conditions.
+- The proof is correct. A top-k item x has upper(x) >= s(x), and any z with lower(z) > upper(x) must itself be in
+  the top k, so at most k-1 others can count against x. A non-member y always sees k members with
+  upper >= s >= s(y) >= lower(y), so it is never certified. A stale sorted list of upper bounds inside a pass is
+  harmless.
+- Adversarial run (knn_adv.py, 2 seeds x 20,000 trials per row): adds the sweep at tau_1, integer arithmetic so
+  score ties, bound ties and bound = score are exact, a harmless side wrong by up to 30 half-widths, a harmful side
+  tight 15% of the time.
+    intervals valid on both sides, rule as coded:            0 / 0 wrong sets
+    both sides, others only:                                 0 / 0
+    harmful side only, as coded:                             2,214 / 2,201
+    harmful side only, others only, no clamp:                0 / 0
+    harmful side only, others only, exact score clamped:     0 / 0, but 604 / 578 right sets carry a wrong score
+  So "no clamping" is needed for the returned scores, not for the set.
+- Condition (a), distinct entities, is required and deterministic. With k = 2, two rows of one entity at 0.9 and
+  the true second-best x at 0.8, both rows have lower > upper(x), so x is dropped. The loop counts rows, and
+  Index2's ent_row assumes one row per entity.
+- Condition (c) is live: a float version of the test lost true neighbours whenever upper = score was off by one
+  rounding. The bound must bound the exact-read score bit for bit.
+- The candidates must contain the top k: tau_1 must come from exact scores of distinct visible entities (seed2 does).
+- The select_knn patch (uncommitted at the time) matches the proved rule.
+
+2. Index's own N rounded up to a power of two: sound, with this exact condition.
+- Per query: the result is exact with probability at least 1 - eps over the rotation if every randomised decision
+  in it uses a constant valid at delta = eps / (N_c L), where N_c is at least the number of live rows whose bounds
+  can affect the result at the query's snapshot, and L is that index's number of randomised levels.
+- N_c, the item set and the filter must not depend on the rotation. The row count satisfies that; inserts crafted
+  from the seed or from observed failures do not.
+- Inserts and deletes do not break it. The guarantee is per query at its snapshot, not uniform over the index's life.
+- Cached all-items result masked per viewer: sound if, when served, every decision about a still-live row was made
+  at a constant for N_c at least the live rows the result covers then. It must have been computed over all rows.
+- Mixing constants inside one result breaks it (2^20 rows at 2^20 plus 2^20 more at 2^21 gives 1.5 eps), so
+  dropping on an increase of the power is necessary; dropping on a decrease is not needed. Churn at a fixed power
+  is fine.
+- A one-sided result is valid only for its own (query, threshold). Cached intervals reused for another threshold
+  or for k-NN need the two-sided budget.
+- Each power needs its own valid constant: a certificate at a ln delta at most the one needed, or R4. Do not
+  interpolate certified constants in ln delta (the quantile is concave in ln delta; a chord underestimates).
+- "+0.08 in c per doubling" is right (ln 2 / c).
+
+3. R2: sound with a wording fix. Conditional on stored scalars calibrated on other rotated items, U_j is no longer
+   uniform, so the conditional argument does not go through literally. The correct argument is pointwise: the true
+   a is a function of the item's own rotated vector, and h >= H_delta(a) pointwise holds when h is non-decreasing
+   in abar and abar >= a. c* sd, R5 and R8 with barred quantities all satisfy this.
+
+4. Section 7, the 2.45% scale: measurement right, a loss not a soundness issue, attribution incomplete.
+- Reproduced: mean z^2 0.9527 / 0.9492 / 0.9559, ratio 1.0245 / 1.0264 / 1.0228, bootstrap s.e. 0.002-0.003.
+- Too large is safe by R1. An average cannot show the pointwise round-up R2 needs; no bin by block share, stored
+  sd or dominant block has mean z^2 above 1; per-query means 0.89-1.02, median 0.95.
+- True / stored variance by block (scale3.py):
+    level 1: 0.88  0.96  0.995 +- 0.017  1.2 +- 0.27
+    level 2: 0.87  0.92  1.005 +- 0.014  1.02 +- 0.13
+    level 3: 0.84  0.89  0.984 +- 0.011  0.99 +- 0.05
+  All the excess is in blocks 0 and 1 (about 7% and 3% high). Blocks 2 and 3 have no measurable margin, so their
+  round-up deserves a direct build-time check (decoded scalar >= true scalar per item).
+- The first randomised level cannot be checked this way (uncoded blocks dominate its error; mean z^2 5.5).
+
+5. R1: sound (Birnbaum's peakedness theorem; proof complete; 360 corner-against-interior cases never violated it).
+
+6. R3 certificate: sound; numbers confirmed. Cell cover, refinement, lattice rounding direction, DFT truncation
+   all correct; floating point about 1e-12 relative against margins of 1e-6 / 1e-11. certcheck.py: certificate >=
+   full-frequency lattice >= exact tail at corner >= exact tail at w in 360 cases. Reruns reproduce 8.704, 8.774,
+   7.957, 8.036; X = 8.695 fails as it must. Independent tails by FFT convolution, mpmath inversion (agree to 1e-9)
+   and importance sampling (within 0.002 in ln). Supremum over shares: one local maximum, at (.1254 .167 .333
+   .3746); true ln tail at the certified X is 0.07-0.09 below ln delta. Limit: the supremum check is a scan, not a
+   second certificate.
+
+7. R4 closed form: sound, every step (independence of rho from the omegas, Jensen's direction, Beta mean,
+   stop-loss formula, Markov, monotonicity). Recomputed: theta 1.002307; 8.8851 / 8.8151 at 1e9, 8.1557 / 8.0782
+   at 1e6. tail.rs's convex_order implements the same inequality and bisects on the safe side.
+
+8. R6 thresholds, harmful side only: sound as coded. Each randomised level's lb and ub come from that level alone,
+   no intersection across levels; in is lb >= tin, out is ub < tout with tout the smallest f32 >= t; seed and nu
+   cuts deterministic; tol moves only the in-test. Today's k-NN loop with one-sided constants gives 2 eps.
+
+9. R5: statement sound; the three certified planes hold on a 1/24 grid with margin 0.010-0.011; plane_cert.py not
+   refereed line by line; concavity unproved.
+
+10. R7, R8: no errors found. 11. R9: unchecked (a sketch; nothing rests on it).

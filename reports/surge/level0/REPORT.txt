@@ -1,0 +1,233 @@
+A CERTIFIED GLOBAL-ROTATION LEVEL FOR FLAT-SPECTRUM DATA
+(written 2026-11-13; tags: [proved] [measured] [modelled] [argued])
+
+Scripts and outputs: this directory (lvl0.py, lvl0b.py, lvl0c.py, consts.py, glove.json, nytimes.json,
+nytimes_b.json, glove_c.json). Counts are means per query at k = 10, glove K = 4,096 (40-100 test queries),
+nytimes K = 1,024 (200 test queries), all clusters scanned, threshold = true k-th score unless "seed" is said.
+
+HEADLINE
+- 9.35 is not the right constant for k-NN at this level. Three sound reductions stack:
+  (a) exact sphere tail instead of sub-Gaussian: 9.35 -> 7.48 at n = 100, 8.36 at n = 256 [proved, computed];
+  (b) union over the k true neighbours x L levels instead of N x 5: -> 5.99 (n = 100), 6.37 (n = 256),
+      6.54 (n = 768); independent of N [proved below];
+  (c) a narrower interval at the same constant: centre-corrected offset plus a self-normalised width [proved];
+      worth another 1.2-2.2x in survivors [measured].
+- With these, glove 2-bit survivors fall from 105k (9.35) to 5.8k; a 4-bit level leaves 56-81 full reads.
+- Cheapest exact k-NN is a cascade 1 bit -> 2 bit -> 4 bit -> full vector: about 17 MB read per glove query
+  (7% of the f16 data) and 11 MB on nytimes (8%) [measured counts]; modelled 2.6 ms and 1.4 ms, i.e. about
+  5x and 6.5x faster than the flat f16 scan (13.2 and 9.1 ms measured) [modelled, kernel rates assumed].
+
+1. THE GUARANTEE
+
+Setting. x = c_j + r, r = |r| o. P is one Haar rotation from the public seed. Code obar = Q(P o), any
+codebook. Estimator of q.r: f * <obar, P q> with f = |r| / <obar, P o>. Stored: tan(phi), phi the angle
+between obar and P o; A = |r| tan(phi).
+
+Lemma (law of the error) [proved: CONSOLIDATED_PROOFS Lemma 8, with y = r and one block]. The error vector
+E is orthogonal to r, |E| = A, and E = A u with u uniform on the unit sphere of r-perp (dimension
+m = n - 1), independent of A and of the code. So for any vector D fixed independently of the seed,
+  estimate error of D.r = A * |D_perp| * u_1,   |D_perp|^2 = |D|^2 - (D.r)^2 / |r|^2,
+and Pr[u_1 > s] = (1/2) I_{1-s^2}((m-1)/2, 1/2) exactly (Prop 10 gives the closed bound (1-s^2)^(m/2)
+per side, proved with the factor 2). The experiment's sd = A / sqrt(n-1) is exactly the standard deviation
+of this error for |D_perp| = 1.
+
+Theorem A (k-NN needs a union over k items, not N) [proved].
+Algorithm class: every returned item has been scored exactly; an item is dropped only when its upper bound
+at some level is below tau, the k-th best exact score seen so far among visible items.
+Let T be the true top-k of the visible set (ties broken by id). T depends on q, the corpus and the filter,
+not on the seed. tau <= s_k (the true k-th score) for every seed, because tau is the k-th best of a subset.
+If every x* in T has upper bound >= q.x* at every level, then no x* is ever dropped (bound >= q.x* >= s_k
+>= tau), T is scored exactly and the answer is exact. So
+  Pr[answer wrong] <= sum over x* in T, levels l of Pr[upper bound l fails for x*] <= k * L * delta_1(c).
+This is Prop 12 with U = T x levels; |U| = kL is known in advance, so c is fixed before the query runs.
+Dropping or scoring a non-neighbour is correct for every seed. Theorem 5 (T adaptive queries, T*eps) is
+unchanged. The bound does not cover: the existing knn2 "certify by bounds without an exact score" step, or
+threshold queries (see below).
+
+Constants (half-width in units of sd, eps = 1e-9; consts.py) [proved tail, computed numerically]:
+
+  events                              per-side tail  sub-G   n=100  n=256  n=768  n=1536
+  today: N x 5, two-sided             1e-19          9.35    7.48   8.36   8.79   8.90
+  N items, one-sided                  1e-18          9.10    7.34   8.16   8.55   8.65
+  k=10 x 3 levels, two-sided          1.7e-11        7.05    5.99   6.37   6.54   6.59
+  k=100 x 3 levels                    1.7e-12        7.36    6.23   6.66   6.86   6.91
+  k=1000 x 3 levels                   1.7e-13        7.67    6.44   6.94   7.16   7.22
+  k=10 x 3 levels, eps = 1e-6         1.7e-8         5.98    5.16   5.38   5.47   5.50
+  deterministic (Cauchy-Schwarz) cap  -              -       9.95   15.97  27.69  39.18
+
+Note the last row: the deterministic bound |E.D| <= A |D_perp| is sqrt(n-1) sd. At n = 100 the sub-Gaussian
+9.35 is 94% of the deterministic bound, which is why it pruned nothing. [proved]
+
+Theorem B (narrower interval at the same constant) [proved from the Lemma].
+(i) Centre correction. Take D = q - alpha c_j with alpha = q.c_j / |c_j|^2, fixed per (query, cluster) and
+independent of the seed. Then q.x = q.c_j + alpha rho + D.r with rho = c_j.r known (for unit x,
+rho = (1 - |c|^2 - |r|^2)/2), and |D| = w_j = sqrt(1 - (q.chat_j)^2) <= 1. The estimate of D.r is
+f<obar,Pq> + alpha (e_c - rho), where e_c = rho - f<obar, P c_j> is one stored scalar per item (the code's
+error along its centre). Measured w over true neighbours: 0.80-0.81 glove, 0.93 nytimes.
+(ii) Self-normalised width. With t = D.r the unknown, |D_perp|^2 = w^2 - t^2/|r|^2, so the event
+|t - est| <= kappa sqrt(|r|^2 w^2 - t^2), kappa = c tan(phi)/sqrt(m), holds with the same probability, and
+solving the quadratic gives the interval end
+  t_hi = ( est + kappa sqrt((1 + kappa^2) |r|^2 w^2 - est^2) ) / (1 + kappa^2).
+An item far from the query's direction needs a large t to reach tau, which leaves little orthogonal mass
+for error; the plain width ignores this. Use the two-sided tail (already in the table rows above).
+(iii) The same formula with kappa = tan(phi) is the deterministic backstop interval.
+Check of the law [measured, lawcheck.py]: z = (t - est) / (sd |D_perp|) over 5.8e7 nytimes and 4.7e7 glove
+(query, item) pairs, 1- and 2-bit codes, has sd 0.9999-1.0000, and its tail matches the exact sphere law,
+not the Gaussian:
+  nytimes (m = 255)  |z|>3: 2.53e-3 measured, 2.54e-3 law, 2.70e-3 Gaussian;  |z|>4: 5.01e-5, 5.06e-5, 6.33e-5
+  glove   (m = 99)   |z|>3: 2.30e-3 measured, 2.30e-3 law, 2.70e-3 Gaussian;  |z|>4: 3.3-3.6e-5, 3.38e-5, 6.33e-5
+  |z|>5: 2-14 events per run, within sampling noise of the law (1.0e-7 glove, 3.1e-7 nytimes).
+
+What does not help [argued]: storing projections of E on fixed directions (no preferred directions on a
+flat spectrum; Theorem 9's sqrt(k/m) term); query-time randomness (Theorem 7); a second independent code
+(dead list). A tighter per-item scalar than tan(phi) does not exist: A is the exact error norm.
+
+Threshold queries [argued, proof sketch]. Errors can come from any item, so the union is N one-sided
+events (7.34 / 8.16 / 8.55) unless every admitted item is verified. If admitted items are verified
+(exactly or deterministically), only true matches can fail, and a self-bounding union works: stage 1 at
+c_N gives a count U_1 of items not excluded, U_1 >= |S(t)| on the good event; stage 2 uses c(U_1); iterate
+J times at eps/J each. Sound because c(.) is monotone and U_j >= |S| on the previous good event. The gain is
+small where stage 1 excludes little (glove), so k-NN is the case to build first.
+
+Value of the constant [measured]. Survivors of a single level, plain bound, glove (N = 1,183,514):
+
+  c        2.5    3     4      5      5.5    6      6.5    7      7.5    8      8.5    9.1    9.35
+  1 bit    8.5k   17k   52k    127k   184k   254k   334k   423k   516k   608k   698k   796k   833k
+  2 bit    431    750   2.1k   5.4k   8.3k   12.5k  18.3k  26.2k  36.7k  50.2k  67.3k  92.9k  105k
+  4 bit    24     28    40     56     67     80     95     112    133    158    187    229    249
+
+  nytimes (N = 290,000): 2 bit 206 / 1.36k / 3.07k / 4.45k / 6.3k / 11.8k / 23.8k at c = 3 / 5 / 6 / 6.5 /
+  7 / 8 / 9.35; 1 bit 52k at 6, 67k at 6.5, 158k at 9.35; 4 bit 33 at 6, 79 at 9.35.
+
+Around c = 6-9 each unit of c is about 2x in 2-bit survivors. With Theorem B (centre + self-normalised):
+  glove  c = 6:    1 bit 131k, 2 bit 5.8k, 4 bit 56   (seed threshold: 149k, 7.6k, 81)
+  glove  c = 7.5:  1 bit 289k, 2 bit 16.5k, 4 bit 85;  c = 9.35: 531k, 47.9k, 147
+  nytimes c = 6.5: 1 bit 56.0k, 2 bit 3.57k, 4 bit 34 (seed threshold: 57.8k, 4.2k, 42)
+So against today's figure (2 bit, 9.35, plain: 105k glove, 23.8k nytimes) the certified level gives 5.8k
+and 3.6k: 18x and 6.7x fewer. Checks: z = error/sd has sd 0.995-0.998 and max |z| 5.2-5.8 over 1.2e8 and
+5.8e7 pairs, as the law predicts; no true neighbour dropped in 2,400 neighbour events at c = 6 (uninformative
+at 1e-10, but nothing is off).
+
+2. EXACT MODE ON FLAT-SPECTRUM DATA
+
+Bytes per item: glove n = 100: 12.5 / 25 / 50 B for 1 / 2 / 4 bits, full f16 200 B; nytimes n = 256:
+32 / 64 / 128, full 512 B. Per-item scalars: 3 B at level 1 (|r| 2 B, cos(phi) 1 B), 1-2 B per later level.
+
+Glove, c = 5.99, seed-threshold counts [measured counts, bytes computed]:
+  1 -> 2 -> 4 -> full:  1.18M x 12.5 + 149k x 12.5 + 7.6k x 25 + 81 x 200 = 14.8 + 1.9 + 0.2 + 0.02 = 16.9 MB
+                        (+3.6 MB scalars) = 7-9% of the 237 MB f16 data
+  2 -> 4 -> full:       29.6 + 0.2 + 0.02 = 29.8 MB (13%)
+  2 -> full:            29.6 + 7.6k x 200 = 31.1 MB
+  at c = 9.35 plain, 2 -> 4 -> full: 29.6 + 2.6 + 0.05 = 32.3 MB; a 1-bit first level is useless (70% pass).
+Nytimes, c = 6.37 (6.5 row): 1 -> 2 -> 4 -> full: 9.3 + 1.85 + 0.27 + 0.02 = 11.4 MB (7.7% of 148.5 MB).
+
+So: 1 bit for everything, 2 bits for the 13-20% that pass, 4 bits for the 0.6-1.5% that pass that, full
+vectors for 40-80 items. 4 bits is the right last code: at 4 bits tan(phi) is 0.105-0.13 and survivors
+are within 2-8x of k at any constant, so 8 bits buys nothing. The lower constant matters most for the first
+level: it is what makes a 1-bit first level work, halving bytes.
+
+Time [modelled; rates assumed from the ideas report: 0.3 + 0.066 x code bytes ns per item for a 4-bit
+shuffle scan, +0.3 ns decision, 60 ns per full read; none timed]:
+  glove   1.18M x 1.4 ns = 1.7 ms; 149k x 5 ns = 0.75; 7.6k x 10 ns = 0.08; centres 0.03  -> 2.6 ms, ~380 QPS
+          flat f16 measured 75.5 QPS (13.2 ms): ~5x; current exact 29.9 QPS: ~13x
+  nytimes 290k x 2.7 ns = 0.8 ms; 57.8k x 8 ns = 0.46; 4.2k x 20 ns = 0.08               -> 1.4 ms, ~700 QPS
+          flat f16 measured 110 QPS (9.1 ms): ~6.5x; current exact 44.6 QPS: ~16x
+  glove at 9.35 with 2 -> 4 -> full: 2.8 + 1.05 + 0.02 = 3.9 ms (256 QPS): the 4-bit middle level already
+  rescues the old constant; the new constant then buys a further 1.5x in time and 1.9x in bytes.
+Yes, exact search can beat brute force on both, by about 5-6x in modelled time and 12-14x in bytes read.
+It stays linear in N: at 1e9 items of glove's shape, 1.5-2.5 s per core per query unfiltered.
+Deterministic-only (eps = 0) exact mode with the same codes at n = 100 costs about 33 MB (2 -> 4 -> full at
+c = 9.95) [modelled from the 9.35 row]; at low n randomness buys only sqrt(n-1)/c = 1.66x in width.
+
+3. FIT WITH THE DESIGN
+
+Choice from data alone [argued]. Both first levels are encoders with a certificate; the build encodes a
+sample (say 20k items) both ways and, with 200 held-out corpus items as pseudo-queries, measures the share
+still undecided at the k-th score after B bytes. Take the cheaper per group; start per dataset (one
+manifest flag), since one flag keeps one kernel. Closed-form predictor: the global level's width is
+c w |r| tan(phi_b)/sqrt(n-1) with tan(phi) = 0.75 / 0.40 / 0.105-0.13 at 1 / 2 / 4 bits [measured], the
+local-basis width is the existing certificate at equal bytes. BioCLIP goes local (0.005 vs 0.03 at 96 B),
+glove and nytimes go global. The rule changes cost only.
+
+This level is the existing randomised level with a zero-byte deterministic prefix, no whitening and one
+rotation for all groups; nothing else in the stream changes. Deeper local-basis levels can follow it.
+
+Backstop [proved]. Every randomised interval is contained in the deterministic one (kappa = tan(phi)), so
+with certainty a missed neighbour x* satisfies q.x* < tau + (sqrt(n-1) - c) w sd(x*). A crafted item or
+query changes only its own decision, by at most that.
+
+Escape code [argued]. Not needed here: Lemma 8 holds for any codebook, clipping included; whatever the
+quantiser loses is inside tan(phi). A zero residual is exact (f = 0, width 0). The escape code keeps its
+role in the local-basis stream.
+
+Layout per item, cluster order, one plane per level:
+  level 1: sign plane n/8 B; scalars |r| (2 B, shared by all levels), cos(phi_1) 1 B rounded so the width
+           rounds up; optional e_c 1 B
+  level 2: one magnitude bit per dimension (n/8 B) + cos(phi_2) 1 B + e_c 1-2 B
+  level 3: two more magnitude bits (n/4 B) + cos(phi_3) 1 B + e_c 2 B
+  full vector as today. rho = c.r is derivable for unit vectors; keep the existing 2 B where they are not.
+  Codes nest as sign + magnitude bits with scales tied (s_4 = 4 s_2); each level has its own f and
+  tan(phi), so nesting costs accuracy only [argued; the tables used independent scales, cost unmeasured].
+  Stored scalars are quantised; the estimator is defined on the stored values and the rounding is added to
+  the width deterministically.
+  glove: 15.5 B resident for level 1, 29 B through level 2; nytimes 35 and 68 B.
+
+Approximate mode. The dial is the same constant: for any m, each true neighbour is missed with probability
+at most L delta(m), so expected recall >= 1 - L delta(m) over the seed, for every query, with all clusters
+scanned [proved]. That gives roughly 0.994 at m = 2.5 and 0.93 at m = 1.5 (measured 0.999 and 0.99, since a
+failed bound rarely drops the item). The fitted m from corpus pseudo-queries stays as the cheaper,
+unproved setting. The filter stays exact: the visible bitmap is applied before the scan, tau comes from
+visible items only, and each decision reads one item's code. Probing fewer clusters is a second,
+independent dial.
+
+Inserts and deletes [argued]. Insert: nearest centre, residual, one rotation (n^2 flops), quantise, scalars.
+No basis, no support-table widening for this level. With no centres (empty database) c = 0, w = 1 and the
+level is valid from the first item, so a build is an ingest. Delete and suppress: bitmap only. Compaction
+re-clusters and re-encodes; the seed may be kept. Drift from stale centres raises |r|, hence cost only.
+
+4. KERNEL
+
+q' = P q once per query. For nibble position g, T_g[v] = sum over the 4 dimensions i in g of
+q'_i * sign_i(v), 16 entries; S_1 = sum_g T_g[nibble_g]. The table does not depend on the cluster, because
+the estimate is of q.r with the unrotated-offset query; the cluster enters through three scalars:
+  q.c_j,   alpha_j = q.c_j/|c_j|^2,   w_j = sqrt(1 - (q.c_j)^2/|c_j|^2)
+  score estimate = q.c_j + alpha_j rho + f S + alpha_j (e_c - rho) = q.c_j + f S + alpha_j e_c
+  upper bound    = q.c_j + f S + alpha_j e_c + c w_j sd        (plain width)
+Prune test in integers: with a_i = 1/f = |obar| cos(phi)/|r| and b_i = sd/f = |obar| sin(phi)/sqrt(n-1),
+  prune iff  S < (tau - q.c_j) a_i - c w_j b_i     (drop e_c at level 1; it saves 1 B and costs ~30% more level-1 survivors)
+i.e. two 16-bit multiplies by per-cluster constants and one compare per item, on the u16 sums the shuffle
+kernel already holds. Tables are u8, rounded outward; the slack is at most (n/4) steps = range/255, about
+0.008 against c sd ~ 0.3 at 1 bit. Survivors are re-evaluated in f32 with the self-normalised width before
+any further read, at no extra bytes. Level 2 for survivors: 8-bit index (4 signs + 4 magnitude bits), n/4
+lookups from 256-entry tables (25 KB at n = 100). Level 3: a plain dot product.
+Cost [modelled]: per query, rotation n^2 flops (10k at n = 100, 0.6M at n = 768), table n/4 x 16 entries,
+centres K x n (0.1% of the scan). Per item: 0.3 + 0.066 n/8 + 0.3 ns = 1.4 ns glove, 2.7 ns nytimes,
+6.9 ns at n = 768. v2 today is 45-60 ns per touched item with tables per (query, cluster, level).
+Above n ~ 1,024 use block-diagonal Haar rotations (Prop 11); that needs one tan(phi) per block.
+
+5. BUILD ORDER, TESTS, RISKS
+
+1. numpy, half a day: expB with nested codes, Theorem B's interval, c from the table, the three-level
+   cascade, all 10,000 test queries. Pass: zero differing results; survivors glove <= 180k / 9k / 100 and
+   nytimes <= 70k / 5k / 50; tail of z matches the beta law at 3, 4, 5 sd.
+2. Rust microbenchmark of level 1 (shared table, integer test) on 1.18M glove items. Pass: under 2 ns per
+   item on one thread, survivor set identical to numpy.
+3. End to end in the bench harness. Pass: unfiltered exact at least 3x the flat f16 scan on both datasets,
+   zero differing results in 10,000 queries; at 1% and 0.1% visible not slower than scanning the visible set
+   (needs the direct-scan rule the k-NN path lacks).
+
+Risks.
+- Theorem A covers only answers made of exactly scored items. Threshold queries and knn2's certify-by-bound
+  step keep the N union (7.3-8.6 with the exact tail) or need the self-bounding scheme.
+- "Simultaneous over all items" is no longer what is proved for k-NN; the statement about the returned set
+  is. If the owner wants the all-items event, the constant is 7.34 / 8.16, and glove costs about 2x more
+  (2 bit 16.5k, 1 bit 289k survivors at 7.5).
+- Timing is modelled. The level-2 pass over 13-20% of items is a strided walk of a second plane; if it runs
+  at memory bandwidth instead of 5-8 ns per survivor, start at 2 bits (glove 3.3 ms, still 4x flat).
+- P must be orthogonal to working precision and the estimator defined on stored integers; add the
+  rotation's rounding to the width. Not yet written down.
+- Full Haar rotation is n^2 memory and time; block rotations above ~1,024 dimensions change the scalars.
+- Counts here are from 40-200 queries and an oracle or seed threshold, not the full walk; the earlier
+  full-walk figures (111k at 9.35) agree with the plain rows.
+- Text-like queries far from every centre have w ~ 1 and a lower tau; the guarantee holds, cost rises
+  (nytimes test queries already cost about 10x pseudo-queries at small m).

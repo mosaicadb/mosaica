@@ -1,0 +1,55 @@
+N=1183514 n=100 K=4096 prep 30s  mean |r|=0.783  mean kth score=0.603
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial.py:48: RuntimeWarning: invalid value encountered in divide
+  fac = rn / (cn * cos)
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial.py:49: RuntimeWarning: invalid value encountered in divide
+  sd = rn * np.sqrt(np.maximum(1 - cos * cos, 0)) / cos / np.sqrt(n - 1)
+/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial.py:52: RuntimeWarning: invalid value encountered in divide
+  z = (E - S) / sd[None, :]
+b=1: 12.5 B/item, mean cos 0.7999, mean sd 0.0591, err/sd: sd nan max|z| nan
+  nprobe=   32 m= 0.00 scanned=    15395 rerank=     100 recall=0.6530 recall_eps=0.6755 model=     44 us ->  22525 QPS
+  nprobe=   32 m= 1.00 scanned=    15395 rerank=     316 recall=0.7820 recall_eps=0.8065 model=     53 us ->  18854 QPS
+  nprobe=   32 m= 2.00 scanned=    15395 rerank=    1011 recall=0.8045 recall_eps=0.8250 model=     81 us ->  12371 QPS
+  nprobe=   32 m= 3.00 scanned=    15395 rerank=    2555 recall=0.8055 recall_eps=0.8255 model=    143 us ->   7014 QPS
+  nprobe=   32 m= 9.35 scanned=    15395 rerank=   14813 recall=0.8055 recall_eps=0.8255 model=    633 us ->   1580 QPS
+  nprobe=  128 m= 0.00 scanned=    55562 rerank=     100 recall=0.6885 recall_eps=0.7100 model=     85 us ->  11826 QPS
+  nprobe=  128 m= 1.00 scanned=    55562 rerank=     456 recall=0.8755 recall_eps=0.9005 model=     99 us ->  10122 QPS
+  nprobe=  128 m= 2.00 scanned=    55562 rerank=    1728 recall=0.9025 recall_eps=0.9215 model=    150 us ->   6680 QPS
+  nprobe=  128 m= 3.00 scanned=    55562 rerank=    5099 recall=0.9035 recall_eps=0.9220 model=    285 us ->   3515 QPS
+  nprobe=  128 m= 9.35 scanned=    55562 rerank=   51230 recall=0.9035 recall_eps=0.9220 model=   2130 us ->    470 QPS
+  nprobe=  512 m= 0.00 scanned=   197078 rerank=     100 recall=0.7065 recall_eps=0.7290 model=    226 us ->   4423 QPS
+  nprobe=  512 m= 1.00 scanned=   197078 rerank=     632 recall=0.9515 recall_eps=0.9700 model=    247 us ->   4043 QPS
+  nprobe=  512 m= 2.00 scanned=   197078 rerank=    2807 recall=0.9780 recall_eps=0.9880 model=    334 us ->   2991 QPS
+  nprobe=  512 m= 3.00 scanned=   197078 rerank=    9571 recall=0.9785 recall_eps=0.9885 model=    605 us ->   1653 QPS
+  nprobe=  512 m= 9.35 scanned=   197078 rerank=  171630 recall=0.9785 recall_eps=0.9885 model=   7087 us ->    141 QPS
+  nprobe= 4096 m= 0.00 scanned=  1183514 rerank=     100 recall=0.6965 recall_eps=0.7185 model=   1213 us ->    825 QPS
+  nprobe= 4096 m= 1.00 scanned=  1183514 rerank=     847 recall=0.9730 recall_eps=0.9820 model=   1242 us ->    805 QPS
+  nprobe= 4096 m= 2.00 scanned=  1183514 rerank=    4404 recall=0.9995 recall_eps=0.9995 model=   1385 us ->    722 QPS
+  nprobe= 4096 m= 3.00 scanned=  1183514 rerank=   17745 recall=1.0000 recall_eps=1.0000 model=   1918 us ->    521 QPS
+  nprobe= 4096 m= 9.35 scanned=  1183514 rerank=  833019 recall=1.0000 recall_eps=1.0000 model=  34529 us ->     29 QPS
+b=2: 25.0 B/item, mean cos 0.9283, mean sd 0.0315, err/sd: sd nan max|z| nan
+  nprobe=   32 m= 0.00 scanned=    15395 rerank=     100 recall=0.7950 recall_eps=0.8155 model=     57 us ->  17633 QPS
+  nprobe=   32 m= 1.00 scanned=    15395 rerank=      87 recall=0.7770 recall_eps=0.8035 model=     56 us ->  17793 QPS
+  nprobe=   32 m= 2.00 scanned=    15395 rerank=     180 recall=0.8050 recall_eps=0.8250 model=     60 us ->  16693 QPS
+  nprobe=   32 m= 3.00 scanned=    15395 rerank=     391 recall=0.8055 recall_eps=0.8255 model=     68 us ->  14627 QPS
+  nprobe=   32 m= 9.35 scanned=    15395 rerank=    8119 recall=0.8055 recall_eps=0.8255 model=    377 us ->   2649 QPS
+  nprobe=  128 m= 0.00 scanned=    55562 rerank=     100 recall=0.8810 recall_eps=0.9010 model=    129 us ->   7751 QPS
+  nprobe=  128 m= 1.00 scanned=    55562 rerank=      96 recall=0.8690 recall_eps=0.8945 model=    129 us ->   7762 QPS
+  nprobe=  128 m= 2.00 scanned=    55562 rerank=     217 recall=0.9025 recall_eps=0.9210 model=    134 us ->   7480 QPS
+  nprobe=  128 m= 3.00 scanned=    55562 rerank=     526 recall=0.9035 recall_eps=0.9220 model=    146 us ->   6846 QPS
+  nprobe=  128 m= 9.35 scanned=    55562 rerank=   20330 recall=0.9035 recall_eps=0.9220 model=    938 us ->   1066 QPS
+  nprobe=  512 m= 0.00 scanned=   197078 rerank=     100 recall=0.9385 recall_eps=0.9570 model=    384 us ->   2606 QPS
+  nprobe=  512 m= 1.00 scanned=   197078 rerank=     102 recall=0.9400 recall_eps=0.9605 model=    384 us ->   2605 QPS
+  nprobe=  512 m= 2.00 scanned=   197078 rerank=     253 recall=0.9770 recall_eps=0.9875 model=    390 us ->   2565 QPS
+  nprobe=  512 m= 3.00 scanned=   197078 rerank=     677 recall=0.9785 recall_eps=0.9885 model=    407 us ->   2458 QPS
+  nprobe=  512 m= 9.35 scanned=   197078 rerank=   46981 recall=0.9785 recall_eps=0.9885 model=   2259 us ->    443 QPS
+  nprobe= 4096 m= 0.00 scanned=  1183514 rerank=     100 recall=0.9525 recall_eps=0.9695 model=   2159 us ->    463 QPS
+  nprobe= 4096 m= 1.00 scanned=  1183514 rerank=     108 recall=0.9615 recall_eps=0.9750 model=   2160 us ->    463 QPS
+  nprobe= 4096 m= 2.00 scanned=  1183514 rerank=     287 recall=0.9985 recall_eps=0.9990 model=   2167 us ->    462 QPS
+  nprobe= 4096 m= 3.00 scanned=  1183514 rerank=     829 recall=1.0000 recall_eps=1.0000 model=   2188 us ->    457 QPS
+  nprobe= 4096 m= 9.35 scanned=  1183514 rerank=  111126 recall=1.0000 recall_eps=1.0000 model=   6600 us ->    152 QPS
+b=4: 50.0 B/item, mean cos 0.9945, mean sd 0.0082, err/sd: sd nan max|z| nan
+  nprobe=   32 m= 0.00 scanned=    15395 rerank=     100 recall=0.8055 recall_eps=0.8255 model=     80 us ->  12531 QPS
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/ideas/code/dial.py", line 67, in <module>
+    tau1 = np.sort(sc[surv])[-k]
+IndexError: index -10 is out of bounds for axis 0 with size 9

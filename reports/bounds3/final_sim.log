@@ -1,0 +1,21 @@
+records 9736897; (item, query) pairs reaching the randomised levels: item 1527489, text 2289162
+B committed 7.413 / 9.086, item: enter [1527489, 1186137, 680906, 306146], full 118623, bytes 352.9M
+B committed 7.413 / 9.086, text: enter [2289162, 1900629, 1147501, 550019], full 235872, bytes 641.0M
+A  sub-Gaussian 9.330 everywhere (before c25333fa9)              | item: L2-4  +3.08% full  +2.63% bytes  +2.39% | text: L2-4  +2.28% full  +2.61% bytes  +2.24%
+S  harmful side only, committed method: 7.373 / 9.018            | item: L2-4  -0.35% full  -0.76% bytes  -0.55% | text: L2-4  -0.32% full  -0.72% bytes  -0.55%
+C  exact worst case, two-sided, certified: 7.413 / 8.774         | item: L2-4  -1.39% full  -3.37% bytes  -2.42% | text: L2-4  -1.36% full  -3.37% bytes  -2.51%
+C1 closed form (convex order), one-sided: 7.373 / 8.815          | item: L2-4  -1.25% full  -2.97% bytes  -2.13% | text: L2-4  -1.21% full  -2.91% bytes  -2.18%
+D  exact worst case, one-sided, certified: 7.373 / 8.704         | item: L2-4  -1.75% full  -4.12% bytes  -2.97% | text: L2-4  -1.70% full  -4.12% bytes  -3.08%
+      level 2: per-block constants give mean 8.533 (p10 8.467, p90 8.607); the item's own exact constant mean 8.484
+      level 3: per-block constants give mean 8.592 (p10 8.527, p90 8.642); the item's own exact constant mean 8.515
+      level 4: per-block constants give mean 8.615 (p10 8.563, p90 8.677); the item's own exact constant mean 8.564
+P  D with certified per-block constants (one plane a level)      | item: L2-4  -2.57% full  -5.25% bytes  -3.94% | text: L2-4  -2.29% full  -5.04% bytes  -3.85%
+E  D with each item's own exact constant (ideal per item)        | item: L2-4  -2.87% full  -5.93% bytes  -4.44% | text: L2-4  -2.54% full  -5.51% bytes  -4.24%
+L  D with eps split 0.1 / 0.1 / 0.1 / 0.7 over the levels        | item: L2-4  -1.27% full  -5.28% bytes  -3.35% | text: L2-4  -1.25% full  -5.27% bytes  -3.54%
+L' D with eps split 1/30 x 3 / 0.9                               | item: L2-4  -0.71% full  -5.57% bytes  -3.24% | text: L2-4  -0.73% full  -5.54% bytes  -3.47%
+EL E with the split 0.1 / 0.1 / 0.1 / 0.7 (best sound found)     | item: L2-4  -2.42% full  -7.06% bytes  -4.82% | text: L2-4  -2.11% full  -6.62% bytes  -4.68%
+T  D with the self-normalised interval (Theorem B)               | item: L2-4  -3.27% full  -4.20% bytes  -3.60% | text: L2-4  -3.01% full  -4.17% bytes  -3.59%
+      Theorem B: k = c^2 / W median by level 0.0916, 0.0788, 0.0118, 0.0008; records with E^2 > VW: 0
+N  D for the index's own size, N = 1e6: 6.927 / 7.957            | item: L2-4  -5.61% full -12.26% bytes  -8.93% | text: L2-4  -5.36% full -12.27% bytes  -9.26%
+R  D with the stored scale's 2.45% rounding removed (n/a)        | item: L2-4  -2.87% full  -6.42% bytes  -4.65% | text: L2-4  -2.75% full  -6.36% bytes  -4.79%
+X  single-item constant 5.67 / 6.15 (not sound)                  | item: L2-4 -15.59% full -31.81% bytes -23.53% | text: L2-4 -14.86% full -31.89% bytes -24.39%

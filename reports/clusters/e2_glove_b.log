@@ -1,0 +1,40 @@
+[     1s] glove-100-angular K=16384 N=1183514 n=100 queries=1000; centre norm mean 0.647; key sd per query 0.074
+[     5s] pq 4-bit M=10 (5.0 B/centre, key error sd 0.047) R=512: n/a | n/a | n/a   cost 16384 codes x 5.0 B + 512 exact
+[     8s] pq 4-bit M=10 (5.0 B/centre, key error sd 0.047) R=1024: n/a | n/a | n/a   cost 16384 codes x 5.0 B + 1024 exact
+[    12s] pq 4-bit M=10 (5.0 B/centre, key error sd 0.047) R=2048: 1.50% (p=115) | 7.19% (p=650) | n/a   cost 16384 codes x 5.0 B + 2048 exact
+[    17s] pq 4-bit M=10 (5.0 B/centre, key error sd 0.047) R=4096: 1.01% (p=74) | 2.59% (p=206) | n/a   cost 16384 codes x 5.0 B + 4096 exact
+[    20s] pq 4-bit M=25 (12.5 B/centre, key error sd 0.035) R=512: 1.10% (p=82) | n/a | n/a   cost 16384 codes x 12.5 B + 512 exact
+[    24s] pq 4-bit M=25 (12.5 B/centre, key error sd 0.035) R=1024: 0.93% (p=68) | 2.49% (p=197) | n/a   cost 16384 codes x 12.5 B + 1024 exact
+[    28s] pq 4-bit M=25 (12.5 B/centre, key error sd 0.035) R=2048: 0.86% (p=62) | 2.15% (p=167) | 10.83% (p=984)   cost 16384 codes x 12.5 B + 2048 exact
+[    33s] pq 4-bit M=25 (12.5 B/centre, key error sd 0.035) R=4096: 0.85% (p=61) | 1.99% (p=153) | 7.28% (p=629)   cost 16384 codes x 12.5 B + 4096 exact
+[    36s] pq 4-bit M=50 (25.0 B/centre, key error sd 0.020) R=512: 0.85% (p=61) | 2.07% (p=160) | n/a   cost 16384 codes x 25.0 B + 512 exact
+[    40s] pq 4-bit M=50 (25.0 B/centre, key error sd 0.020) R=1024: 0.85% (p=61) | 1.97% (p=152) | 7.16% (p=619)   cost 16384 codes x 25.0 B + 1024 exact
+[    44s] pq 4-bit M=50 (25.0 B/centre, key error sd 0.020) R=2048: 0.85% (p=61) | 1.99% (p=153) | 6.78% (p=581)   cost 16384 codes x 25.0 B + 2048 exact
+[    48s] pq 4-bit M=50 (25.0 B/centre, key error sd 0.020) R=4096: 0.85% (p=61) | 1.99% (p=153) | 6.72% (p=575)   cost 16384 codes x 25.0 B + 4096 exact
+[    52s] hnsw M=16 ef=128 (finds 86.5 of the true top 100 centres): 1.01% (p=72) | n/a | n/a   cost 1159 centre distances (0.071 of flat)
+[    56s] hnsw M=16 ef=256 (finds 91.9 of the true top 100 centres): 0.90% (p=64) | 2.30% (p=175) | n/a   cost 1955 centre distances (0.119 of flat)
+[    60s] hnsw M=16 ef=512 (finds 94.9 of the true top 100 centres): 0.88% (p=63) | 2.08% (p=158) | n/a   cost 3303 centre distances (0.202 of flat)
+[    65s] hnsw M=16 ef=1024 (finds 96.7 of the true top 100 centres): 0.87% (p=62) | 2.07% (p=158) | 8.87% (p=755)   cost 5444 centre distances (0.332 of flat)
+[    70s] hnsw M=16 ef=2048 (finds 97.6 of the true top 100 centres): 0.86% (p=62) | 2.05% (p=157) | 8.30% (p=709)   cost 8412 centre distances (0.513 of flat)
+[    74s] hnsw M=32 ef=128 (finds 88.7 of the true top 100 centres): 0.96% (p=69) | n/a | n/a   cost 1375 centre distances (0.084 of flat)
+[    78s] hnsw M=32 ef=256 (finds 93.5 of the true top 100 centres): 0.88% (p=63) | 2.29% (p=175) | n/a   cost 2273 centre distances (0.139 of flat)
+[    83s] hnsw M=32 ef=512 (finds 96.0 of the true top 100 centres): 0.88% (p=63) | 2.11% (p=161) | n/a   cost 3732 centre distances (0.228 of flat)
+[    91s] hnsw M=32 ef=1024 (finds 97.4 of the true top 100 centres): 0.86% (p=62) | 2.12% (p=162) | 8.74% (p=747)   cost 5949 centre distances (0.363 of flat)
+[   104s] hnsw M=32 ef=2048 (finds 98.2 of the true top 100 centres): 0.86% (p=62) | 2.05% (p=157) | 7.68% (p=654)   cost 8906 centre distances (0.544 of flat)
+[   114s] tree2 G=128 one group per centre fg=0.0 beam=8: 17.33% (p=1602) | n/a | n/a   cost 128 + 981 centres (0.068 of flat)
+[   118s] tree2 G=128 one group per centre fg=0.0 beam=16: 1.49% (p=109) | 24.06% (p=2343) | n/a   cost 128 + 1980 centres (0.129 of flat)
+[   122s] tree2 G=128 one group per centre fg=0.0 beam=32: 1.01% (p=73) | 2.69% (p=209) | n/a   cost 128 + 4132 centres (0.260 of flat)
+[   126s] tree2 G=128 one group per centre fg=0.0 beam=64: 0.86% (p=62) | 2.02% (p=155) | 7.78% (p=670)   cost 128 + 8869 centres (0.549 of flat)
+[   130s] tree2 G=128 one group per centre fg=0.5 beam=8: n/a | n/a | n/a   cost 128 + 996 centres (0.069 of flat)
+[   133s] tree2 G=128 one group per centre fg=0.5 beam=16: 1.46% (p=107) | 28.04% (p=2772) | n/a   cost 128 + 2014 centres (0.131 of flat)
+[   137s] tree2 G=128 one group per centre fg=0.5 beam=32: 0.97% (p=70) | 2.48% (p=192) | n/a   cost 128 + 4214 centres (0.265 of flat)
+[   142s] tree2 G=128 one group per centre fg=0.5 beam=64: 0.85% (p=61) | 1.98% (p=152) | 7.39% (p=634)   cost 128 + 8903 centres (0.551 of flat)
+[   146s] tree2 G=128 two groups per centre fg=0.0 beam=8: 1.73% (p=129) | n/a | n/a   cost 128 + 1690 centres (0.111 of flat)
+[   150s] tree2 G=128 two groups per centre fg=0.0 beam=16: 1.01% (p=73) | 3.00% (p=234) | n/a   cost 128 + 3248 centres (0.206 of flat)
+[   154s] tree2 G=128 two groups per centre fg=0.0 beam=32: 0.86% (p=62) | 2.13% (p=164) | 10.56% (p=925)   cost 128 + 6350 centres (0.395 of flat)
+[   159s] tree2 G=128 two groups per centre fg=0.0 beam=64: 0.85% (p=61) | 1.99% (p=153) | 6.68% (p=571)   cost 128 + 11827 centres (0.730 of flat)
+[   163s] tree2 G=128 two groups per centre fg=0.5 beam=8: 2.19% (p=166) | n/a | n/a   cost 128 + 1710 centres (0.112 of flat)
+[   168s] tree2 G=128 two groups per centre fg=0.5 beam=16: 1.01% (p=73) | 3.25% (p=256) | n/a   cost 128 + 3295 centres (0.209 of flat)
+[   172s] tree2 G=128 two groups per centre fg=0.5 beam=32: 0.86% (p=62) | 2.07% (p=159) | 9.23% (p=802)   cost 128 + 6473 centres (0.403 of flat)
+[   177s] tree2 G=128 two groups per centre fg=0.5 beam=64: 0.85% (p=61) | 1.98% (p=152) | 6.80% (p=582)   cost 128 + 11923 centres (0.736 of flat)
+[   177s] done

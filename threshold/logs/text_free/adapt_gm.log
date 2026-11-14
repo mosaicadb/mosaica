@@ -1,0 +1,10 @@
+group 0 items 97 sum sqrt(gamma) 0.0998
+group 1 items 19266 sum sqrt(gamma) 0.1716
+group 2 items 9336 sum sqrt(gamma) 0.1926
+group 3 items 7778 sum sqrt(gamma) 0.1759
+group 4 items 14333 sum sqrt(gamma) 0.1639
+group 5 items 50910 sum sqrt(gamma) 0.1206
+group 6 items 19945 sum sqrt(gamma) 0.2183
+group 7 items 24407 sum sqrt(gamma) 0.221
+group 8 items 3928 sum sqrt(gamma) 0.1889
+index_gm.npz written
