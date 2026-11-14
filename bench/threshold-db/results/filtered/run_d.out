@@ -1,0 +1,20 @@
+dbknn ladder vis_50 share 3: nprobe 16 dial fit0.99: median 5.524 ms, mean recall 0.1315
+dbknn ladder vis_50 share 3: nprobe 32 dial fit0.99: median 5.662 ms, mean recall 0.2318
+dbknn ladder vis_50 share 3: nprobe 64 dial fit0.99: median 7.523 ms, mean recall 0.4175
+dbknn ladder vis_50 share 3: nprobe 128 dial fit0.99: median 2840.437 ms, mean recall 0.6589
+dbknn ladder vis_50 share 3: nprobe 256 dial fit0.99: median 6341.932 ms, mean recall 0.8585
+dbknn tight vis_50 share 3: timed at one repetition
+dbknn tight vis_50 share 3: nprobe 128 dial fit0.99: median 2840.437 ms, mean recall 0.6589
+dbknn ladder vis_50 share 4: nprobe 16 dial fit0.99: median 5.249 ms, mean recall 0.0475
+dbknn ladder vis_50 share 4: nprobe 32 dial fit0.99: median 5.722 ms, mean recall 0.0884
+dbknn ladder vis_50 share 4: nprobe 64 dial fit0.99: median 7.334 ms, mean recall 0.1720
+dbknn ladder vis_50 share 4: nprobe 128 dial fit0.99: median 10.699 ms, mean recall 0.3271
+dbknn ladder vis_50 share 4: nprobe 256 dial fit0.99: median 18.430 ms, mean recall 0.5787
+dbknn ladder vis_50 share 4: nprobe 512 dial fit0.99: over the cap on its first three queries
+dbknn tight vis_50 share 4: nprobe 256 dial fit0.99: median 18.167 ms, mean recall 0.5787
+dbknn ladder vis_50 share 5: nprobe 16 dial fit0.99: median 5.350 ms, mean recall 0.0289
+dbknn ladder vis_50 share 5: nprobe 32 dial fit0.99: median 5.790 ms, mean recall 0.0542
+dbknn ladder vis_50 share 5: nprobe 64 dial fit0.99: median 7.617 ms, mean recall 0.1074
+dbknn ladder vis_50 share 5: nprobe 128 dial fit0.99: median 10.970 ms, mean recall 0.2121
+dbknn ladder vis_50 share 5: nprobe 256 dial fit0.99: median 17.832 ms, mean recall 0.4088
+dbknn ladder vis_50 share 5: nprobe 512 dial fit0.99: median 37.479 ms, mean recall 0.7280

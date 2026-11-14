@@ -821,6 +821,9 @@ fn main() {
         if has("dbtopk") {
             run2::dbtopk(&c);
         }
+        if has("dbknn") {
+            run2::dbknn(&c);
+        }
         return;
     }
     if !std::arch::is_x86_feature_detected!("avx512f") {

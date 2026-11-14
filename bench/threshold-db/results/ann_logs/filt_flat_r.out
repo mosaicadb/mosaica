@@ -1,0 +1,18 @@
+flat: loaded in 12 s; RSS 5.76 GiB; the index adds 5.72 GiB resident
+flat: compacted copy of vis_10 in 450 ms
+flat compacted vis_10 share 0 threads 1: median 9.02 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_10 share 1 threads 1: median 9.12 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_10 share 2 threads 1: median 8.90 ms, mean recall 0.99993, non-matches 0
+flat compacted vis_10 share 3 threads 1: median 9.12 ms, mean recall 0.99999, non-matches 0
+flat compacted vis_10 share 4 threads 1: median 9.05 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_10 share 5 threads 1: median 9.10 ms, mean recall 1.00000, non-matches 1
+flat compacted vis_10 share 6 threads 1: median 9.25 ms, mean recall 1.00000, non-matches 0
+flat: compacted copy of vis_50 in 2725 ms
+flat compacted vis_50 share 0 threads 1: median 57.74 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_50 share 1 threads 1: median 58.99 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_50 share 2 threads 1: median 53.72 ms, mean recall 0.99997, non-matches 0
+flat compacted vis_50 share 3 threads 1: median 49.54 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_50 share 4 threads 1: median 49.32 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_50 share 5 threads 1: median 49.93 ms, mean recall 1.00000, non-matches 0
+flat compacted vis_50 share 6 threads 1: median 52.85 ms, mean recall 1.00000, non-matches 1
+peak RSS 8.68 GiB

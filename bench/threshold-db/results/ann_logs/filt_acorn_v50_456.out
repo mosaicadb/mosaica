@@ -1,0 +1,6 @@
+acorn: loaded in 0 s; RSS 0.04 GiB; the index adds 0.00 GiB resident
+acorn: loaded 999950 rows in 3.7 s; M 32 gamma 12 M_beta 32; peak RSS 3.23 GiB
+acorn ladder vis_50 share 4: rung 1, over the cap on its first three queries
+acorn tight vis_50 share 4: no rung within the cap
+acorn ladder vis_50 share 5: rung 1, over the cap on its first three queries
+acorn tight vis_50 share 5: no rung within the cap
