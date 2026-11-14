@@ -15,7 +15,7 @@
 # Margins REL (relative) and ABS (absolute) cover quadrature and rounding.
 #
 # usage: python3 -I certify.py INDEX [--lnd LN_DELTA] [--time-cap SECONDS]
-#   The default budget is the one the Rust build uses, exp(-L1) from meta.json.
+#   The default budget is the one the Rust build uses, 2 exp(-L1) with L1 from meta.json.
 import argparse, itertools, json, math, os, sys, time
 import numpy as np
 from scipy.special import betaincinv, gammaln
@@ -160,8 +160,8 @@ def block_dims(meta):
 
 
 def ln_delta(meta):
-    """ln of the per-event probability the Rust build uses: the design's, exp(-L1)."""
-    return -meta["L1"]
+    """ln of the per-event probability the Rust build uses: one side of the design's, 2 exp(-L1)."""
+    return -meta["L1"] + math.log(2)
 
 
 def add_certificate(out, lnd, time_cap, log=print):
