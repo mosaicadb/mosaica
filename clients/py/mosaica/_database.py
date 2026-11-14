@@ -1525,8 +1525,8 @@ class Database:
         The reader sees only the items those terms admit, by the rule that `Viewer` states.
 
         - `terms`: the access terms, as a list or as one term in a string. Without them the reader
-          reads with the operator's token, as `db.view` and the other reads on `Database` do. An empty list is refused
-          because such a reader would see nothing, while a term that no item carries is accepted.
+          reads with the operator's token, as `db.view` and the other reads on `Database` do. An
+          empty list is a reader with no grants, who sees what the declaration makes public.
 
         ```
         db.viewer(["cs.LG"]).view("papers").count()
@@ -1535,11 +1535,6 @@ class Database:
         """
         self._refuse_before_the_first_commit("viewer")
         chosen = None if terms is None else listed(terms)
-        if chosen == []:
-            raise Refusal(
-                "viewer: a reader holding no terms sees nothing. Name at least one term, or "
-                "call viewer() with no terms to read everything"
-            )
         self.serve()
         reader = Viewer(self.viewer_url, lambda: self.token(chosen), terms=chosen)
         # A new token is made for each call, so a commit's new views are seen, while the category

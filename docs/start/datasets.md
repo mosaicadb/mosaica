@@ -2,7 +2,7 @@
 
 These datasets let you see Mosaica working on real data with one command. `mosaica demo` downloads a dataset, builds a database from it and opens its map in your browser. Above the map you can switch between datasets and choose whom to view the map as, and every point, count and cluster changes to what that viewer may see.
 
-To look before installing anything, open the hosted demo at [demo.mosaicadb.com](https://demo.mosaicadb.com/). It shows the same page over 88.4 million places from Overture Maps, 20.7 million PubMed papers and 50,000 arXiv papers.
+To look before installing anything, open the hosted demo at [demo.mosaicadb.com](https://demo.mosaicadb.com/). It shows the same page over 88.4 million places from Overture Maps, 20.7 million PubMed papers, 50,000 arXiv papers and the 202.6 million cells of the CELLxGENE Census.
 
 ![Overture Maps places across Europe on the hosted demo, with each country named](../assets/screenshots/mosaica_europe.webp)
 
@@ -35,6 +35,8 @@ After you upgrade Mosaica, the next run rebuilds the dataset, which replaces any
 |---|---|---|---|
 | [`places`](#places) | 150,000 | 3 MB, or nothing in a clone | 23 MB |
 | [`arxiv-sample`](#arxiv-sample) | 50,000 | 4 MB, or nothing in a clone | 20 MB |
+| [`cellxgene`](#cellxgene) | 3.2 million | 58 MB | 540 MB |
+| [`cellxgene`](#cellxgene) as `cellxgene:128` | 202.6 million | 3.7 GB | 32 GB |
 | [`geonames`](#geonames) | 13.5 million | 425 MB | 2.8 GB |
 | [`gbif`](#gbif) as `gbif:64` | 24 million | 530 MB | 3.6 GB |
 | [`gbif`](#gbif), whole | about 3.8 billion | about 86 GB | about 400 GB |
@@ -176,3 +178,50 @@ The whole snapshot is very large, so start with a sample. `mosaica demo gbif:64`
 | `taxonomy/tree` | tiered | Family, genus, species |
 
 **Access.** A viewer sees an occurrence when they hold its country code, its year as in `y:1900`, or its species key as in `s:2498036`. The picker's viewers are Everything, the European Union, the United States, the United Kingdom and Japan.
+
+## `cellxgene`
+
+The single cells of the CZ CELLxGENE Discover Census, version 2025-11-08: 202.6 million human and mouse cells, each placed on a map of its species by a UMAP of the scVI embedding that the Census publishes for it, with the Cell Ontology drawn over both maps. The Chan Zuckerberg Initiative publishes the Census under CC BY 4.0. Cite it as CZ CELLxGENE Discover, *Nucleic Acids Research* 53(D1), D886-D900 (2025), PubMed 39607691.
+
+Laying the cells out takes a GPU, so Mosaica reads them from files its own [`corpora/cellxgene`](https://github.com/mosaicadb/mosaica/tree/main/corpora/cellxgene) recipe made from the Census and published on Hugging Face as [`mosaicadb/cellxgene-census-map`](https://huggingface.co/datasets/mosaicadb/cellxgene-census-map), under CC BY 4.0 as well. The cells are in 128 parts of about 1.6 million, and each part is a uniform sample of each species, so any number of parts looks like the whole map. `mosaica demo cellxgene` reads the first 2 parts, about 3.2 million cells. `cellxgene:16` reads 16 parts, and `cellxgene:128` reads every cell. Fetching, preparing and building all 128 parts took 29.6 minutes and at most 20.5 GB of memory on a 12-core machine with 47 GB of memory and a local NVMe disk.
+
+A cell that appears in more than one Census dataset is listed once for each. Filter on `is_primary_data` to count each cell once.
+
+**Views**
+
+| View | Projection | What it shows |
+|---|---|---|
+| `human` | none | Each human cell, near cells of similar type |
+| `mouse` | none | Each mouse cell, near cells of similar type |
+
+**Fields**
+
+| Field | Type | Use |
+|---|---|---|
+| `id` | 64-bit integer | The cell's id in the dataset |
+| `soma_joinid` | 64-bit integer | Shown on the item card: the cell's row in its species' Census experiment |
+| `cell_type` | category | Coloured by and filtered on |
+| `tissue` | category | Coloured by and filtered on |
+| `tissue_general` | category | Coloured by and filtered on |
+| `disease` | category | Coloured by and filtered on |
+| `assay` | category | Coloured by and filtered on |
+| `sex` | category | Coloured by and filtered on |
+| `development_stage` | category | Coloured by and filtered on |
+| `self_reported_ethnicity` | category | Coloured by and filtered on |
+| `suspension_type` | category | Coloured by and filtered on |
+| `organism` | category | Filtered on |
+| `collection` | category | Coloured by and filtered on |
+| `dataset` | category | Filtered on |
+| `is_primary_data` | true or false | Coloured by and filtered on |
+| `dataset_id` | keyword | Filtered on |
+| `donor_id` | keyword | Filtered on |
+| `n_genes` | 32-bit integer | Coloured by and filtered on |
+| `raw_sum` | 32-bit float | Filtered on |
+
+**Layers**
+
+| Layer | Kind | Levels |
+|---|---|---|
+| `cell-ontology` | tiered, each type named | Class, lineage, parent type, cell type |
+
+**Access.** Every Census collection is public, so this dataset picks 35 of its 304 collections by a seeded rule to stand in for restricted ones. Their cells, 12.8% of the whole, carry the term `collection:` followed by the collection's id, and every other cell is public. A category value, such as a disease, is listed only to a viewer who can see one of its cells. The picker's viewers are Public collections, who hold no terms, Every collection, the Human Lung Cell Atlas and a study of inflammatory gut diseases. The first is the default, and none of them reads as the operator.

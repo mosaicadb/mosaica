@@ -95,10 +95,10 @@ def test_a_term_the_database_has_not_inserted_is_minted_and_sees_nothing_of_it(d
     assert typo.view("s0").count() == 0
 
 
-def test_viewer_refuses_an_empty_term_set(db):
-    """A principal holding no term sees nothing, which is the blank map the verb prevents."""
-    with pytest.raises(Refusal):
-        db.viewer([])
+def test_a_reader_given_an_empty_term_set_holds_no_grants(db):
+    """An empty list is a reader with no grants: it sees what a reader holding only a term no row
+    carries sees, which is what the declaration makes public."""
+    assert db.viewer([]).view("s0").count() == db.viewer(["cs.LGG"]).view("s0").count()
 
 
 def test_one_value_given_alone_is_read_as_one_value(db):

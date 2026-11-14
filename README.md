@@ -35,7 +35,7 @@ We served one map of GBIF's species records, from Mosaica and compared it to del
 
 ## Try it in your browser
 
-[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves three maps from one machine: 88.4 million places from Overture Maps on a world map, 20.7 million PubMed papers laid out by their abstracts, and 50,000 arXiv papers laid out by their topics. Pick whom to view the map as, such as a viewer who may see only the places Foursquare contributed or only the cancer papers, and every point, count and cluster changes to what that viewer may see.
+[demo.mosaicadb.com](https://demo.mosaicadb.com/) serves four maps from one machine: 88.4 million places from Overture Maps on a world map, 20.7 million PubMed papers laid out by their abstracts, 50,000 arXiv papers laid out by their topics, and the 202.6 million human and mouse cells of the CELLxGENE Census placed by their gene expression. Pick whom to view the map as, such as a viewer who may see only the places Foursquare contributed or only the cancer papers, and every point, count and cluster changes to what that viewer may see.
 
 ## See a map in one command
 
@@ -99,7 +99,7 @@ Mosaica is an alpha. Expect formats and APIs to change before 1.0.
 
 - [Documentation](docs/index.md): tutorials, [how it works](docs/system/overview.md), [guides](docs/guides/index.md) and the [reference](docs/reference/index.md).
 - The same documentation as a website, with search, at [docs.mosaicadb.com](https://docs.mosaicadb.com/).
-- A [hosted demo](https://demo.mosaicadb.com/) of 88.4 million places, 20.7 million PubMed papers and 50,000 arXiv papers.
+- A [hosted demo](https://demo.mosaicadb.com/) of 88.4 million places, 20.7 million PubMed papers, 50,000 arXiv papers and 202.6 million cells.
 - Examples for the [browser](clients/ts/examples) and [Python](clients/py/examples).
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
 

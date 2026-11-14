@@ -341,13 +341,14 @@ def write_vocabulary(out: Path, name: str, keys: list[str]) -> int:
 
 def vocabulary_toml(size: int, rows: int) -> str:
     """The `kingdom` `[[vocabulary]]` block, its width the size of the code space it needs."""
-    width = "u8" if size < 255 else ("u16" if size < 65_535 else "u32")
+    from ._steps import width
+
     return (
         f"# Minted by this run from {rows:,} placed occurrences.\n"
         "[[vocabulary]]\n"
         'name       = "kingdom"\n'
         f'title      = "Kingdom"  # {size:,} keys\n'
-        f'width      = "{width}"\n'
+        f'width      = "{width(size)}"\n'
         'value_set  = "closed"\n'
         'visibility = "public"\n'
         'source     = "kingdom"'
@@ -357,11 +358,9 @@ def vocabulary_toml(size: int, rows: int) -> str:
 def write_declaration(out: Path, *, size: int, rows: int) -> None:
     """`gbif.toml` beside the data as `schema.toml`, its `# <vocabulary>` line replaced by the
     block."""
-    lines = DECLARATION.read_text(encoding="utf-8").splitlines()
-    hit = [i for i, line in enumerate(lines) if line.strip() == "# <vocabulary>"]
-    assert len(hit) == 1, f"# <vocabulary> appears {len(hit)} times as a line of its own"
-    lines[hit[0]] = vocabulary_toml(size, rows)
-    (out / "schema.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from ._steps import declared
+
+    declared(DECLARATION, "# <vocabulary>", vocabulary_toml(size, rows), out / "schema.toml")
 
 
 def select_parts(every: list, take: int, spread: bool = True) -> list:

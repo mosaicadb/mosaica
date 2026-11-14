@@ -1,0 +1,7 @@
+# The embedding rungs' environment, `~/venvs/projection`, installed from the arXiv rung's file,
+# and the Census's own reader for `stage.py`. matplotlib draws the overview pictures.
+
+-r ../arxiv/requirements.txt
+cellxgene-census
+matplotlib
+numpy<2.3

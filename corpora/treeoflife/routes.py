@@ -39,28 +39,22 @@ from __future__ import annotations
 import argparse
 import collections
 import concurrent.futures as cf
-import contextlib
 import json
 import sys
-import threading
 import time
 from pathlib import Path
 
 import numpy as np
 
-#: One set of UMAP parameters, and `n_neighbors` is also the graph's `k`. Rungs 1, 3 and 4's.
-UMAP_PARAMS = dict(n_neighbors=15, min_dist=0.1, n_components=2)
-
-SEED = 0
-
-#: CAGRA's graph degree and its intermediate, and the search's candidate list. The arXiv rung's
-#: values; nothing here re-tuned them, the rung being a demonstrator whose recall is not measured.
-GRAPH_DEGREE = 32
-ITOPK = 128
-
-#: Query rows per search call. 50,000 x 768 float16 is 77 MB on the card, and it is also one source
-#: row group — so a batch off the share is a batch through the index with no re-slicing.
-BATCH_ROWS = 50_000
+from ..common.fit_place import (
+    DeviceWatermark,
+    Placer,
+    fit_layout,
+    knn_graph,
+    layout,
+    normalise,
+    step,
+)
 
 #: Row groups read ahead of the card while it searches. Three readers is what the share sustains;
 #: the queue is one deeper so a reader never waits on the GPU.
@@ -71,152 +65,6 @@ READ_QUEUE = 4
 #: multi-hour SMB pass — a 2026-09-03 placement died on `ZSTD decompression failed` from a file the
 #: fit pass had read cleanly — so a read is retried and the count is reported.
 RETRIES = 4
-
-
-@contextlib.contextmanager
-def _step(name: str, out: dict):
-    t = time.time()
-    yield
-    out[name] = round(time.time() - t, 2)
-    print(f"    {name}: {out[name]:.1f}s", flush=True)
-
-
-class DeviceWatermark:
-    """Peak device memory, sampled from the driver rather than from an allocator.
-
-    CuPy's pool reports what CuPy allocated; cuML, cuVS and RMM each have their own. What the
-    driver reports free is the only number that covers all of them, and the peak of the card is
-    what decides whether a size fits.
-    """
-
-    def __init__(self, interval: float = 0.2):
-        import cupy as cp
-
-        self.total = cp.cuda.runtime.memGetInfo()[1]
-        self.interval = interval
-        self.peak = 0
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-
-    def _run(self) -> None:
-        import cupy as cp
-
-        while not self._stop.wait(self.interval):
-            free, total = cp.cuda.runtime.memGetInfo()
-            self.peak = max(self.peak, total - free)
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def __exit__(self, *exc):
-        self._stop.set()
-        self._thread.join()
-
-    @property
-    def peak_gb(self) -> float:
-        return self.peak / 2**30
-
-
-def normalise(block: np.ndarray) -> np.ndarray:
-    """L2-normalised float16, in place on a float32 working copy."""
-    out = np.asarray(block, dtype=np.float32)
-    norms = np.linalg.norm(out, axis=1, keepdims=True)
-    np.divide(out, np.maximum(norms, 1e-12), out=out)
-    return out.astype(np.float16)
-
-
-# ------------------------------------------------------------------------------- the fit half
-
-
-def knn_graph(
-    block: np.ndarray,
-    t: dict,
-    *,
-    k: int = UMAP_PARAMS["n_neighbors"],
-    batch_rows: int = BATCH_ROWS,
-) -> tuple[np.ndarray, np.ndarray]:
-    """A cosine kNN graph over a resident block, through one CAGRA index.
-
-    Rung 4's sharded merge is gone rather than retained-and-unused: the fit set is one index by
-    construction here, and a merge that never runs is a path nothing measured.
-    """
-    import cupy as cp
-    from cuvs.neighbors import cagra
-
-    n = len(block)
-    t0 = time.time()
-    resident = cp.asarray(block)
-    index = cagra.build(
-        cagra.IndexParams(metric="cosine", intermediate_graph_degree=2 * GRAPH_DEGREE,
-                          graph_degree=GRAPH_DEGREE),
-        resident,
-    )
-    cp.cuda.runtime.deviceSynchronize()
-    t["build_seconds"] = round(time.time() - t0, 1)
-
-    best_i = np.zeros((n, k), dtype=np.int32)
-    best_d = np.zeros((n, k), dtype=np.float32)
-    t1 = time.time()
-    params = cagra.SearchParams(itopk_size=ITOPK)
-    for lo in range(0, n, batch_rows):
-        hi = min(lo + batch_rows, n)
-        q = cp.asarray(block[lo:hi])
-        nb = cp.empty((hi - lo, k), dtype=cp.uint32)
-        ds = cp.empty((hi - lo, k), dtype=cp.float32)
-        cagra.search(params, index, q, k, neighbors=nb, distances=ds)
-        best_i[lo:hi] = cp.asnumpy(nb.astype(cp.int32))
-        best_d[lo:hi] = cp.asnumpy(ds)
-        del q, nb, ds
-    cp.cuda.runtime.deviceSynchronize()
-    search = time.time() - t1
-    t["search_seconds"] = round(search, 1)
-    print(f"    cagra build {t['build_seconds']:.1f}s, {n:,} queries in {search:.1f}s "
-          f"({n / search:,.0f}/s)", flush=True)
-    del resident, index
-    cp.get_default_memory_pool().free_all_blocks()
-
-    # An approximate index does not always return a row first in its own neighbour list, and a row
-    # whose first neighbour is not itself would have UMAP place it on another specimen's position.
-    # A photographic corpus carries near-duplicates, so this fires. Repaired rather than trusted.
-    rows = np.arange(n, dtype=np.int32)
-    t["self_first"] = float((best_i[:, 0] == rows).mean())
-    wrong = best_i[:, 0] != rows
-    if wrong.any():
-        best_i[wrong, 0] = rows[wrong]
-        best_d[wrong, 0] = 0.0
-    np.clip(best_d, 0.0, None, out=best_d)  # cosine distance is non-negative; fp16 rounds below 0
-    return best_i, best_d
-
-
-def layout(nbi: np.ndarray, nbd: np.ndarray, t: dict, *, managed: bool = False) -> np.ndarray:
-    """cuML's UMAP over a precomputed graph.
-
-    **The point matrix is a placeholder.** With `precomputed_knn` cuML reads the graph and takes
-    only the row count from `X`, so a `(n, 1)` array of zeros stands in for the vectors and they
-    are never on the card at layout time.
-    """
-    if managed:
-        import rmm
-
-        rmm.reinitialize(managed_memory=True, pool_allocator=True)
-
-    from cuml.manifold import UMAP
-
-    with _step("umap", t):
-        xy = UMAP(**UMAP_PARAMS, metric="cosine", random_state=SEED, output_type="numpy",
-                  precomputed_knn=(nbi, nbd)).fit_transform(
-            np.zeros((len(nbi), 1), dtype=np.float32)
-        )
-    return np.asarray(xy, dtype=np.float32)
-
-
-def fit_layout(block: np.ndarray, t: dict, *, managed: bool = False) -> np.ndarray:
-    """The fit set's own positions: UMAP over its own CAGRA graph."""
-    nbi, nbd = knn_graph(block, t)
-    xy = layout(nbi, nbd, t, managed=managed)
-    del nbi, nbd
-    return xy
 
 
 # ----------------------------------------------------------------------------- the place half
@@ -313,9 +161,6 @@ def place_from_share(fit_block, fit_xy, fit_rows, n: int, t: dict, files, checkp
     reads the ledger, plans only what is missing, and costs the share only that. The fit rows are
     overwritten with their own UMAP positions at the end, so every row goes through one code path.
     """
-    import cupy as cp
-    from cuvs.neighbors import cagra
-
     checkpoint.mkdir(parents=True, exist_ok=True)
     path = checkpoint / "place.f32"
     mode = "r+" if path.exists() and path.stat().st_size == n * 8 else "w+"
@@ -337,22 +182,14 @@ def place_from_share(fit_block, fit_xy, fit_rows, n: int, t: dict, files, checkp
     print(f"    {len(plan):,} of {len(full):,} row groups to place "
           f"({placed_before:,} rows already on disk)", flush=True)
 
-    k = UMAP_PARAMS["n_neighbors"]
     placed, retries, last_report = 0, 0, 0
     unreadable: list[dict] = []
     # Where a row whose vector cannot be read goes. The middle of the layout, so the defect is one
     # visible pile at one place rather than 50,000 points smeared invisibly through real structure.
     centroid = fit_xy.mean(axis=0).astype(np.float32)
     t0 = time.time()
-    with _step("place", t):
-        resident = cp.asarray(fit_block)
-        index = cagra.build(
-            cagra.IndexParams(metric="cosine", intermediate_graph_degree=2 * GRAPH_DEGREE,
-                              graph_degree=GRAPH_DEGREE),
-            resident,
-        )
-        positions = cp.asarray(fit_xy)
-        params = cagra.SearchParams(itopk_size=ITOPK)
+    with step("place", t):
+        placer = Placer(fit_block, fit_xy)
         with open(ledger_path, "a") as ledger:
             for i, g, offset, block, tries in share_batches(files, plan):
                 retries += tries
@@ -365,22 +202,7 @@ def place_from_share(fit_block, fit_xy, fit_rows, n: int, t: dict, files, checkp
                         {"file": i, "group": g, "rows": rows, "unreadable": True}) + "\n")
                     ledger.flush()
                     continue
-                for lo in range(0, len(block), BATCH_ROWS):
-                    part = block[lo : lo + BATCH_ROWS]
-                    m = len(part)
-                    q = cp.asarray(part)
-                    nb = cp.empty((m, k), dtype=cp.uint32)
-                    ds = cp.empty((m, k), dtype=cp.float32)
-                    cagra.search(params, index, q, k, neighbors=nb, distances=ds)
-                    # Similarity, not distance: a neighbour at distance 0 must dominate the mean,
-                    # and a cosine distance of 1 is orthogonal and should count for nothing.
-                    w = cp.clip(1.0 - ds, 0.0, None) + 1e-6
-                    w /= w.sum(axis=1, keepdims=True)
-                    got = positions[nb.astype(cp.int32)]
-                    xy[offset + lo : offset + lo + m] = cp.asnumpy(
-                        (got * w[:, :, None]).sum(axis=1)
-                    )
-                    del q, nb, ds, w, got
+                xy[offset : offset + len(block)] = placer.place(block)
                 placed += len(block)
                 ledger.write(json.dumps({"file": i, "group": g, "rows": len(block)}) + "\n")
                 ledger.flush()
@@ -392,9 +214,7 @@ def place_from_share(fit_block, fit_xy, fit_rows, n: int, t: dict, files, checkp
                     print(f"    placed {placed + placed_before:,}/{n:,} in {wall / 60:.1f} min "
                           f"({placed / wall:,.0f} rows/s, {placed * 1536 / wall / 1e6:.1f} MB/s "
                           f"off the share, {retries} retry(ies))", flush=True)
-        cp.cuda.runtime.deviceSynchronize()
-        del resident, index, positions
-        cp.get_default_memory_pool().free_all_blocks()
+        placer.close()
     xy.flush()
     t["placed"], t["read_retries"] = placed + placed_before, retries
     t["unreadable_groups"] = unreadable
@@ -438,7 +258,7 @@ def main() -> None:
     print(f"{n:,} rows x {meta['dim']} off the staged fit sample", flush=True)
 
     with DeviceWatermark() as watch:
-        with _step("knn", t):
+        with step("knn", t):
             nbi, nbd = knn_graph(block, t)
     t["graph_peak_vram_gb"] = round(watch.peak_gb, 2)
     print(f"  graph peak device memory {t['graph_peak_vram_gb']:.2f} GB, "

@@ -1,4 +1,6 @@
 """Datasets to try, each fetched from its publisher, prepared, built and served with one call.
+`cellxgene` is fetched from the files this repository's `corpora/cellxgene` prepared from the
+Census and published, since laying the Census out takes a GPU.
 
     db = mosaica.datasets.load("places")
     db.map()
@@ -24,7 +26,7 @@ from .. import _instance, _progress
 from .._database import Database, _reason_first
 from .._database import open as _open
 from .._refusal import Refusal
-from . import _steps, gbif, geonames
+from . import _steps, cellxgene, gbif, geonames
 
 __all__ = ["Dataset", "Persona", "describe", "load", "names", "prepared", "root"]
 
@@ -36,7 +38,8 @@ class Persona:
 
     - `id`: the persona's name in the page's address, as in `?as=gb`.
     - `label`, `description`: what the picker shows.
-    - `terms`: the access terms the persona holds, or `None` for one who reads everything.
+    - `terms`: the access terms the persona holds, `()` for one who holds none and so sees only
+      what is public, or `None` for one who reads everything.
     """
 
     id: str
@@ -53,6 +56,8 @@ class Dataset:
     - `download`: the bytes fetched where the files are not on disk; a checkout of the
       repository holds those of the two samples. GBIF's whole-snapshot figures are modelled from
       a 64-part sample and from the ladder's build of an earlier snapshot; the rest were measured.
+      CELLxGENE's `items` and sizes are those of what it reads without a sample, and its `sample`
+      gives the whole's.
     - `personas`: who `mosaica demo` offers to view the dataset as, the first by default.
     - `disk`: the bytes on disk once built, the fetched files and the bundle included.
     - `bundle`: the bytes of the built bundle.
@@ -61,6 +66,9 @@ class Dataset:
     - `sample`: what `sample=N` keeps, or `None` where the dataset takes no sample.
     - `per_sample`: the bytes downloaded and on disk for each unit of `sample=N`, as
       `(download, disk)`, where a sample downloads less than the whole, or `None`.
+    - `default_sample`: the sample taken when none is given, or `None` for the whole.
+    - `samples`: the largest sample that differs from the whole, where a larger one reads the
+      same files; a larger sample is taken as this one.
     - `fetch`, `prepare`: how `load` makes it. `fetch` puts the files a sample needs in a
       directory, or finds them in a checkout, and returns their paths, the declaration first
       where there is nothing to prepare. `prepare` writes `schema.toml` and the files it names
@@ -84,6 +92,8 @@ class Dataset:
     prepare: Optional[Callable[[Path, Path, Optional[int]], None]] = dataclasses.field(
         default=None, repr=False
     )
+    default_sample: Optional[int] = None
+    samples: Optional[int] = None
 
 
 def root() -> Path:
@@ -181,6 +191,35 @@ _BY_ARCHIVE = (
     Persona("stats", "Statistics", "Holds the stat.* categories.", _STATS),
 )
 
+#: Readers of CELLxGENE, which restricts 35 of its collections each to its own term, as the hosted
+#: demo offers them.
+_BY_COLLECTION = (
+    Persona(
+        "public",
+        "Public collections",
+        "Holds no terms, so sees the cells of the 269 collections that are not restricted.",
+        (),
+    ),
+    Persona(
+        "every-collection",
+        "Every collection",
+        "Holds all 35 restricted collections, so sees every cell.",
+        cellxgene.RESTRICTED,
+    ),
+    Persona(
+        "lung-atlas",
+        "Human Lung Cell Atlas",
+        "Holds one restricted collection: the integrated Human Lung Cell Atlas.",
+        ("collection:6f6d381a-7701-4781-935c-db10d30de293",),
+    ),
+    Persona(
+        "gut-study",
+        "Gut inflammation study",
+        "Holds one restricted collection: single-cell integration of inflammatory gut diseases.",
+        ("collection:f11cb29c-b546-4738-9bd8-66ea621a7bd5",),
+    ),
+)
+
 
 _CATALOGUE = (
     Dataset(
@@ -212,6 +251,28 @@ _CATALOGUE = (
         per_sample=None,
         personas=_BY_ARCHIVE,
         fetch=_example("arxiv"),
+    ),
+    Dataset(
+        name="cellxgene",
+        title="CELLxGENE Census cells on UMAP maps of human and mouse",
+        items=3_166_194,
+        licence="CC BY 4.0: the CZ CELLxGENE Census, the Cell Ontology, and the layout and tiers",
+        publisher="CZ CELLxGENE Census 2025-11-08, prepared by this repository, on Hugging Face",
+        download=58_148_934,
+        disk=540_455_162,
+        bundle=409_627_959,
+        needs=("duckdb",),
+        sample=(
+            "N of its 128 parts, each a uniform sample of about 1.58 million cells, and 2 without "
+            "N; all 128 are the whole 202,636,280 cells, a 3.7 GB download that takes 31.8 GB on "
+            "disk with a 23.6 GB bundle"
+        ),
+        per_sample=(28_944_000, 270_000_000),
+        personas=_BY_COLLECTION,
+        fetch=cellxgene.fetch,
+        prepare=cellxgene.prepare,
+        default_sample=cellxgene.DEFAULT_PARTS,
+        samples=cellxgene.PARTS,
     ),
     Dataset(
         name="geonames",
@@ -274,6 +335,7 @@ def prepared(
     `progress` are `load`'s.
     """
     dataset = _checked(name, sample)
+    sample = _taken(dataset, sample)
     raw = _home(name, dir) / "raw"
     fetched = dataset.fetch(raw, progress, sample)
     if dataset.prepare is None:
@@ -315,6 +377,7 @@ def load(
         db.view("world").count()
     """
     schema = prepared(name, dir, sample, progress)
+    sample = _taken(describe(name), sample)
     database = _home(name, dir) / ("db" if sample is None else f"db-{sample}")
     binary, _ = _instance.find_binary()
     found = os.stat(binary)
@@ -343,6 +406,14 @@ def _checked(name: str, sample: int | None) -> Dataset:
             "the demo extra, `pip install 'mosaica[demo]'`"
         )
     return dataset
+
+
+def _taken(dataset: Dataset, sample: int | None) -> int | None:
+    """The sample `dataset` takes for `sample`: its default for none, and its largest for one
+    above that, so samples that read the same files share their directories."""
+    if sample is None:
+        return dataset.default_sample
+    return sample if dataset.samples is None else min(sample, dataset.samples)
 
 
 def _home(name: str, dir: str | os.PathLike | None) -> Path:  # noqa: A002

@@ -44,6 +44,12 @@ EXPLORER = {
     },
     "geonames": {"title-field": "name", "colour-by": "feature_class"},
     "gbif": {"title-field": "scientificname", "colour-by": "kingdom"},
+    "cellxgene": {
+        "title-field": "cell_type",
+        "colour-by": "tissue_general",
+        "pinned-filters": "cell_type tissue_general disease is_primary_data",
+        "layers": "cell-ontology",
+    },
 }
 
 
@@ -210,9 +216,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     from ._bundle import bundle_path
-    from .datasets import _checked
+    from .datasets import _checked, _taken
 
-    chosen = list(dict.fromkeys(args.datasets))
     served: dict = {}
     try:
         bundle = bundle_path()
@@ -222,7 +227,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "`pip install --force-reinstall mosaica`, or in a checkout run "
                 "`npm run bundle -w @mosaicajs/components` in clients/ts"
             )
-        datasets = [(_checked(name, sample), sample) for name, sample in chosen]
+        checked = [(_checked(name, sample), sample) for name, sample in args.datasets]
+        # Two names for the same sample, as `cellxgene` and `cellxgene:2`, are one database.
+        datasets = list(dict.fromkeys((d, _taken(d, sample)) for d, sample in checked))
         for dataset, sample in datasets:
             download, disk = dataset.download, dataset.disk
             if sample is not None and dataset.per_sample is not None:
