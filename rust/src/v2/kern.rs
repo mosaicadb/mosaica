@@ -898,6 +898,7 @@ pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step
 }
 
 /// combine_lut one unit at a time (each unit's extremes by its own horizontal reduction); kept as its reference.
+#[cfg(test)]
 /// The cluster's level tables from the group's f32 tables and the centre's stored ones, with `step` (the integer
 /// deterministic levels) or a step per part. Writes the same LevelLut as build_lut. Each unit is shifted by mu_u, the
 /// smallest of its computed values, so its entries run from 0.

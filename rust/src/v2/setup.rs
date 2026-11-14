@@ -14,7 +14,7 @@ unsafe fn hsum_epi32(v: __m256i) -> i32 {
 /// line; larger: the bytes PFD ahead in each row's stream.
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn qv_exact_r<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
-    assert!(n % 32 == 0 && n % R == 0 && v8t.len() >= n * n);
+    assert!(n % 32 == 0 && n % R == 0 && v8t.len() >= n * n && vsc.len() >= n && qhi.len() >= n && qlo.len() >= n && out.len() >= n);
     assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
     let base = v8t.as_ptr();
     let end = base.add(n * n);
@@ -28,7 +28,7 @@ pub unsafe fn qv_exact_r<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f6
             if PFD > 0 && i % 64 == 0 {
                 // a later block, or the bytes PFD ahead in each row
                 for r in 0..R {
-                    let p = if PFD <= 4 { rows.add((PFD * R + r) * n + i) } else { rows.add(r * n + i + PFD) };
+                    let p = if PFD <= 4 { rows.wrapping_add((PFD * R + r) * n + i) } else { rows.wrapping_add(r * n + i + PFD) };
                     if p < end {
                         _mm_prefetch::<_MM_HINT_T0>(p as *const i8);
                     }

@@ -784,6 +784,11 @@ fn main() {
                 if !ib.is_empty() {
                     extra.push((v, run2::setup2_at("run2", &ib, &bf)));
                 } else if !bf.is_empty() {
+                    // the columnar store is built only when the first variant's flags ask for it
+                    if bf.split(',').any(|f| f.trim().starts_with("col")) && c.ix.col.is_none() {
+                        eprintln!("--{v} {bf} needs the columnar store, which the first variant's index was built without; add --index-{v} DIR to build its own, or --colstore");
+                        std::process::exit(2);
+                    }
                     same.push((v, run2::plan_flags(c.plan, &bf)));
                 }
             }

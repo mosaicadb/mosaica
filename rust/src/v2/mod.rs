@@ -957,8 +957,10 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
         val.iter_mut().for_each(|v| *v = 0.0);
-        sb.iter_mut().for_each(|v| *v = 0);
-        sc.iter_mut().for_each(|v| *v = 0);
+        if cp.is_some() {
+            sb.iter_mut().for_each(|v| *v = 0);
+            sc.iter_mut().for_each(|v| *v = 0);
+        }
         for l in 0..NDL {
             let lp = &gp.levels[l];
             for f in &lp.parts[0].fields {
@@ -968,11 +970,13 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                     FK::Tree { to, .. } => codes.index(to as usize, u),
                     _ => (u - val[c] >= 0.0) as usize,
                 };
-                match f.kind {
-                    FK::Tree { .. } => tid[c] = code as u8,
-                    _ => {
-                        sb[c] |= (code as u8) << sc[c];
-                        sc[c] += 1;
+                if cp.is_some() {
+                    match f.kind {
+                        FK::Tree { .. } => tid[c] = code as u8,
+                        _ => {
+                            sb[c] |= (code as u8) << sc[c];
+                            sc[c] += 1;
+                        }
                     }
                 }
                 val[c] += et.e[f.eid as usize][code << f.off] as f64;

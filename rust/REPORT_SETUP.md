@@ -34,7 +34,10 @@ exact and no bound changes. A dense batched product cannot help: there is one qu
 product and every basis byte is used once. The group post-processing (`cq` and `qvd2` in one pass, four partial
 sums, inside the 1e-12 `cq` slack of `cluster_q2a`) is timed apart: 0.55 ms. Rotations stay at 0.75 ms.
 
-Basis and post-processing: 4.15 -> 3.0 ms per text query (64 groups).
+Two figures for the same product: `setup` times the kernel alone, the same query's 64 groups repeated back to back
+(1.5–1.7 ms); the breakdown times it inside each query, after the cut has run and with the bases evicted by the
+previous query's reads (basis 2.3–2.5 ms; before, 4.15 ms including the post-processing). In the query: basis and
+post-processing 4.15 -> 3.0 ms per text query (64 groups).
 
 ## 3. Cluster setup and tables
 
@@ -70,7 +73,9 @@ default** (`results/setup/e2e_bail.csv`).
 ## Correctness
 
 50k, 200 item and 200 text queries, 7 answer sizes, filtered runs, float64 oracle, after every step: 0 wrong
-decisions, 0 deterministic and 0 randomised interval violations (137.7M checks), 0 deterministic decisions not implied
+decisions, 0 deterministic and 0 randomised interval violations (about 137.7M checks; the count differs slightly from run to
+run because the 50k check recalibrates the planner's cost model, which moves a few clusters between the index path
+and full vectors), 0 deterministic decisions not implied
 by the f64 certificate, k-NN exact on 400/400, oracle 0 wrong. The same with `bail=2`. At 1M every breakdown run had 0
 wrong against brute force, and bytes read per item are identical to the baseline at every answer size.
 
@@ -144,6 +149,7 @@ tables.
    after every block through the AVX2 emulation of the 16-lane compress. Fewer arrays per survivor, or compacting less
    often, is the lever.
 2. **Bounds and decisions** (12 ms at 1%, 46 ms at 50%): the randomised levels' per-lane arithmetic.
-3. **Basis products on the real index** run at 1.5–1.7 ms against a 1.0 ms read floor, and the cut reads 6 MB of f64
+3. **Basis products on the real index** run at 1.5–1.7 ms alone and 2.3–2.5 ms inside a query, against a 1.0 ms
+   read floor, and the cut reads 6 MB of f64
    centres per query for `q.m` (reading the f32 centres and widening in registers would give identical results from
    half the bytes).

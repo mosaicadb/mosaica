@@ -201,15 +201,6 @@ pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i1
 
 #[cfg(not(target_feature = "avx512f"))]
 #[inline(always)]
-unsafe fn hsum_epi32(v: __m256i) -> i32 {
-    let x = _mm_add_epi32(_mm256_castsi256_si128(v), _mm256_extracti128_si256::<1>(v));
-    let x = _mm_add_epi32(x, _mm_shuffle_epi32::<0x4e>(x));
-    let x = _mm_add_epi32(x, _mm_shuffle_epi32::<0xb1>(x));
-    _mm_cvtsi128_si32(x)
-}
-
-#[cfg(not(target_feature = "avx512f"))]
-#[inline(always)]
 unsafe fn hsum_pd(v: __m256d) -> f64 {
     let x = _mm_add_pd(_mm256_castpd256_pd128(v), _mm256_extractf128_pd::<1>(v));
     _mm_cvtsd_f64(_mm_add_sd(x, _mm_unpackhi_pd(x, x)))
@@ -335,7 +326,6 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
             l1j[j] += y[a].abs();
         }
     }
-    let t2 = tick();
     let l1det = wq[..n].iter().map(|x| x.abs() as f64).sum();
     let t3 = tick();
     GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0, t3 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect(), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
@@ -1378,23 +1368,6 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
                     let hh = _mm512_add_ps(_mm512_mul_ps(_mm512_mul_ps(_mm512_set1_ps(cq.dwa[l]), rho), one6), _mm512_add_ps(_mm512_set1_ps(cq.fixed), _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), fl)));
                     lb = _mm512_sub_ps(est, hh);
                     ub = _mm512_add_ps(est, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
-                    if super::col::dbg() {
-                        let (hs, es, rs, ss) = (arr(hh), arr(est), arr(rho), arr(s));
-                        if st.col_hw.len() <= 100 + l {
-                            st.col_hw.resize(101 + l, [0.0; 5]);
-                        }
-                        for i in 0..16 {
-                            if hm >> i & 1 == 1 {
-                                let x = &mut st.col_hw[100 + l];
-                                let r = cq.dwa[l] as f64 * rs[i] as f64;
-                                x[0] += 1.0;
-                                x[1] += hs[i] as f64 - r;
-                                x[2] += r;
-                                x[4] += (es[i] as f64 - t).abs();
-                                let _ = ss;
-                            }
-                        }
-                    }
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
