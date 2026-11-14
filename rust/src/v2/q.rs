@@ -24,6 +24,7 @@ pub const P_BOUNDS: usize = 8;
 pub const P_FULL: usize = 9;
 pub const P_INIT: usize = 10;
 pub const P_PLAN: usize = 11;
+pub const P_SEL: usize = 12;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -843,11 +844,13 @@ pub struct State {
     pub a64: Vec<f64>,     // verify: the real deterministic table sum
     pub tmp: Vec<u8>,
     pub stmp: Vec<u8>,
+    pub colq: super::col::ColQ,
+    pub cslots: Vec<super::col::ColSlot>,
 }
 impl State {
     /// Room for `cap` candidates; accumulators zeroed, lanes past the candidates empty. Everything else is written
     /// before it is read.
-    fn reset(&mut self, cap: usize) {
+    pub fn reset(&mut self, cap: usize) {
         let full = (cap + 2 * BLK) / BLK * BLK;
         let grow = |v: &mut Vec<f32>| {
             if v.len() < full {
@@ -980,6 +983,14 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
 /// in Interval(L) mode every candidate's interval at level L goes to out.iv.
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut) {
+    run_cluster_from(ix, ci, pr, gq, cq, cands, t, mode, first_decide, verify, sv, st, out, None)
+}
+
+/// As run_cluster; with `resume = Some((nsurv, edet, a0))` (a0: slots held in place from item a0, holes u32::MAX) the deterministic part is already done (the columnar path): the
+/// state holds nsurv compacted survivors with idx, s, mr, adet (and truth in verify mode) set, edet bounds the error of
+/// adet, and the walk starts at the first randomised level.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut, resume: Option<(usize, f32, Option<u32>)>) {
     let ti = tick();
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
@@ -988,13 +999,17 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     let nr = nl - NDL;
     // dense candidates keep their item positions (slot k = item a0 + k, holes for the rest), so blocks are source
     // blocks and need no re-packing; sparse ones are compacted
-    let a0 = cands[0] / 32 * 32;
-    let span = ((cands[cands.len() - 1] + 1 - a0) as usize + BLK - 1) / BLK * BLK;
     let rp = cq.repack;
     let occ = |l: usize| if rp > 0.0 { (ix.repack[l] * rp).min(0.95) } else { 0.6 };
-    let mut aligned = cands.len() as f32 >= span as f32 * occ(0);
+    let (a0, span) = if let Some((ns, _, a)) = resume { (a.unwrap_or(0), ns) } else {
+        let a0 = cands[0] / 32 * 32;
+        (a0, ((cands[cands.len() - 1] + 1 - a0) as usize + BLK - 1) / BLK * BLK)
+    };
+    let mut aligned = match resume { Some((_, _, a)) => a.is_some(), None => cands.len() as f32 >= span as f32 * occ(0) };
     let mut nsurv;
-    if aligned {
+    if let Some((ns, _, _)) = resume {
+        nsurv = ns;
+    } else if aligned {
         sv.reset(span);
         sv.idx[..span].fill(u32::MAX);
         for &i in cands {
@@ -1007,7 +1022,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         nsurv = cands.len();
     }
     let mut xbuf = vec![0f64; if verify { n } else { 0 }];
-    {
+    if resume.is_none() {
         // item scale and m.r from the stored key, with the encoder's f32 operations
         let ahp = ix.ahat.as_ptr().add(c.r0) as *const i32;
         let mn = _mm512_set1_ps(c.mn32);
@@ -1031,7 +1046,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             k += 16;
         }
     }
-    if verify {
+    if verify && resume.is_none() {
         for k in 0..nsurv {
             let i = sv.idx[k];
             if i == u32::MAX {
@@ -1048,7 +1063,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             };
         }
     }
-    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
+    let intm = resume.is_none() && cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
     if intm {
         // the dial's largest factor on the fixed term: a larger factor only lowers Tout
         let dmax = pr.dial[..NDL].iter().fold(1f32, |a, &d| a.max(d)) as f64;
@@ -1069,10 +1084,10 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     let one6 = _mm512_set1_ps(1.0 + 1e-6);
     let u16x = _mm512_set1_ps((16.0 * U) as f32);
     let mut dmxj = [0f32; J]; // relative rounding bound of each block's latest kappa
-    let mut edet = 0f32; // cumulative table error of the deterministic part
+    let mut edet = resume.map_or(0f32, |r| r.1); // cumulative table error of the deterministic part
     let mut ej = [0f32; J];
     let mut g = Gather::new();
-    for l in 0..nl {
+    for l in if resume.is_some() { NDL } else { 0 }..nl {
         if nsurv == 0 {
             break;
         }
@@ -1318,6 +1333,23 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let hh = _mm512_add_ps(_mm512_mul_ps(_mm512_mul_ps(_mm512_set1_ps(cq.dwa[l]), rho), one6), _mm512_add_ps(_mm512_set1_ps(cq.fixed), _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), fl)));
                     lb = _mm512_sub_ps(est, hh);
                     ub = _mm512_add_ps(est, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
+                    if super::col::dbg() {
+                        let (hs, es, rs, ss) = (arr(hh), arr(est), arr(rho), arr(s));
+                        if st.col_hw.len() <= 100 + l {
+                            st.col_hw.resize(101 + l, [0.0; 5]);
+                        }
+                        for i in 0..16 {
+                            if hm >> i & 1 == 1 {
+                                let x = &mut st.col_hw[100 + l];
+                                let r = cq.dwa[l] as f64 * rs[i] as f64;
+                                x[0] += 1.0;
+                                x[1] += hs[i] as f64 - r;
+                                x[2] += r;
+                                x[4] += (es[i] as f64 - t).abs();
+                                let _ = ss;
+                            }
+                        }
+                    }
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
@@ -1716,10 +1748,13 @@ pub struct Plan {
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
+    pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
+    pub colq: bool,        // in an order chosen per (query, cluster)
+    pub collazy: bool,     // with the single stored norm first, block norms only for the items it leaves undecided
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, pscan: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, pscan: false, col: false, colq: false, collazy: false }
     }
 }
 impl Plan {
@@ -2267,13 +2302,18 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             let mut cq = cluster_q2a(ix, ci, gq, pr, qm, pl.alpha0);
                             cq.gtab = pl.gtab && !pl.alpha0;
                             cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
-                            if pl.int_det && !o.want_iv {
+                            let colp = pl.col && !o.want_iv && ix.col.is_some();
+                            if pl.int_det && !o.want_iv && !colp {
                                 cq.enable_int(ix, ci, gq);
                             }
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
-                            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
+                            if colp {
+                                unsafe { super::col::run_col(ix, ci, pr, gq, &mut cq, &cands, t, pl.colq, pl.collazy, o.verify, &mut sv, &mut acc.st, &mut out) };
+                            } else {
+                                unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
+                            }
                             acc.iv.extend(ivv);
                         } else {
                             acc.flat_clusters += 1;
