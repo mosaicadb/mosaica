@@ -778,6 +778,9 @@ fn main() {
         if has("filter") {
             run2::filter2(&c, get("--fnq", 30));
         }
+        if has("oracle") {
+            run2::oracle_dump(&c, get("--onq", 20));
+        }
         if has("ann-truth") {
             ann::truth(&c, get("--k", 10));
         }

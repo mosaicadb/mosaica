@@ -73,6 +73,7 @@ impl Npy {
     conv!(f32s, f32, 4);
     conv!(i64s, i64, 8);
     conv!(i32s, i32, 4);
+    conv!(u16s, u16, 2);
     pub fn i8s(&self) -> Vec<i8> {
         self.data.iter().map(|&b| b as i8).collect()
     }

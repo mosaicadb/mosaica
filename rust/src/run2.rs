@@ -10,15 +10,17 @@ use rayon::prelude::*;
 use roaring::RoaringBitmap;
 use std::io::Write;
 
-const SIZES: [f64; 4] = [1e-4, 1e-3, 1e-2, 5e-2];
+const SIZES: [f64; 5] = [1e-4, 1e-3, 1e-2, 0.1, 0.3];
 
 static LOG: std::sync::OnceLock<std::sync::Mutex<std::fs::File>> = std::sync::OnceLock::new();
 macro_rules! out {
     ($($a:tt)*) => {{ let s = format!($($a)*); println!("{}", s); if let Some(l) = LOG.get() { writeln!(l.lock().unwrap(), "{}", s).unwrap(); } }};
 }
 
+/// A pool of t threads; with `--pin C`, thread i runs on CPU C + i.
 fn pool(t: usize) -> rayon::ThreadPool {
-    rayon::ThreadPoolBuilder::new().num_threads(t).build().unwrap()
+    let pin0: Option<usize> = arg_str("--pin", "").parse().ok();
+    rayon::ThreadPoolBuilder::new().num_threads(t).start_handler(move |i| if let Some(c) = pin0 { pin(c + i) }).build().unwrap()
 }
 
 pub struct Ctx2 {
@@ -70,9 +72,20 @@ pub fn load_queries(n: usize) -> Vec<Vec<f32>> {
     if path.is_empty() {
         return Vec::new();
     }
-    let a = read_npy(&path);
+    load_queries_from(&path, n)
+}
+
+/// Rows of an npy file (f16, f32 or f64; original dimension), zero-padded to n and normalised.
+pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
+    let a = read_npy(path);
     let n0 = a.shape[1];
-    let v: Vec<f32> = if a.descr.contains("f8") { a.f64s().iter().map(|&x| x as f32).collect() } else { a.f32s() };
+    let v: Vec<f32> = if a.descr.contains("f8") {
+        a.f64s().iter().map(|&x| x as f32).collect()
+    } else if a.descr.contains("f2") {
+        a.u16s().iter().map(|&h| f16_to_f32(h)).collect()
+    } else {
+        a.f32s()
+    };
     v.chunks(n0).map(|r| {
         let nn = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
         let mut q = vec![0f32; n];
@@ -114,7 +127,12 @@ pub fn setup2(tag: &str) -> Ctx2 {
     for (r, &e) in p.perm.iter().enumerate() {
         ent_xs[e as usize] = r as u32;
     }
-    let items: Vec<Vec<f32>> = p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect();
+    // item queries: held-out rows from --item-queries, else stored rows listed by the fit
+    let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
+        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect()
+    } else {
+        load_queries_from(&arg_str("--item-queries", ""), n)
+    };
     let texts = load_queries(n);
     let plan = Plan {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
@@ -138,8 +156,8 @@ pub fn setup2(tag: &str) -> Ctx2 {
     out!("[plan] {}", plan.to_kv().replace('\n', " "));
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
-    let pseudo = pseudo_queries(&ix, arg_usize("--pseudo", 1000), 10);
-    let (mut approx, fres) = Approx::fit(&ix, &pseudo);
+    let pseudo = pseudo_queries(&ix, if args().iter().any(|a| a == "--no-approx") { 0 } else { arg_usize("--pseudo", 1000) }, 10);
+    let (mut approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new(), second: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
     if args().iter().any(|a| a == "--soar") {
         let t = Timer::new();
         approx.second = Approx::second_assignment(&ix);
@@ -205,6 +223,45 @@ pub fn bytesq2(c: &Ctx2, nq: usize) {
         }
         out!("bytesq v2 {cls} ({k} queries): bytes read per item {:?}; touched {:?}", br.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tch.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
     }
+}
+
+/// The item scale against f64: for every row, s^2 E_g|r|^2 (s from the stored key by the build's f32 formula, E_g|r|^2
+/// the group's mean squared residual recomputed here from the stored vectors) must equal |r|^2 = |x - m|^2 in f64 to
+/// within what the key's rounding and |x| != 1 allow, plus 0.1% of |r|^2. Returns (rows, rows beyond, largest error
+/// over E_g|r|^2, smallest and largest ratio of the build's divisor to the recomputed E_g|r|^2).
+pub fn scale_check(ix: &Index2) -> (usize, usize, f64, f64, f64) {
+    let n = ix.n();
+    let ng = ix.groups.len();
+    let r2row: Vec<(usize, f64, f64)> = (0..ix.k()).into_par_iter().flat_map_iter(|ci| {
+        let c = &ix.cl[ci];
+        let m = ix.centres_f64(ci);
+        let mut x = vec![0f64; n];
+        (c.r0..c.r1).map(move |r| {
+            ix.full_row_f64(r, &mut x);
+            let x2: f64 = x.iter().map(|v| v * v).sum();
+            let rr: f64 = x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum();
+            (ci, rr, x2)
+        }).collect::<Vec<_>>()
+    }).collect();
+    let mut sum = vec![0f64; ng];
+    let mut cnt = vec![0usize; ng];
+    for &(ci, rr, _) in &r2row {
+        sum[ix.cl[ci].g] += rr;
+        cnt[ix.cl[ci].g] += 1;
+    }
+    let mean: Vec<f64> = (0..ng).map(|g| sum[g] / cnt[g].max(1) as f64).collect();
+    let (mut bad, mut worst) = (0, 0f64);
+    for (r, &(ci, rr, x2)) in r2row.iter().enumerate() {
+        let c = &ix.cl[ci];
+        let gp = &ix.groups[c.g];
+        let s = item_scale(ix.ahat[r], c.mn32, gp.lamsum) as f64;
+        let pred = s * s * mean[c.g];
+        let tol = (x2 - 1.0).abs() + 2.0 * c.mn * crate::index::DA + 1e-6 + 1e-3 * rr;
+        bad += ((pred - rr).abs() > tol) as usize;
+        worst = worst.max((pred - rr).abs() / mean[c.g]);
+    }
+    let ratios: Vec<f64> = (0..ng).filter(|&g| cnt[g] > 0).map(|g| ix.groups[g].lamsum as f64 / mean[g]).collect();
+    (r2row.len(), bad, worst, ratios.iter().cloned().fold(f64::MAX, f64::min), ratios.iter().cloned().fold(0.0, f64::max))
 }
 
 /// Every threshold query and k-NN against brute force, as planned and on the index path; k-NN also on full vectors
@@ -292,10 +349,12 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         }
         println!("verify2 filtered 1/{den}: {} visible, wrong in/out {wi}/{wo}, k-NN mismatches {kb}", vis.rows.len());
     }
-    out!("VERIFY2 {} queries x 4 answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each){}",
-        qs.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
+    out!("VERIFY2 {} queries x {} answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each){}",
+        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
     out!("VERIFY2 checker: {} deterministic decisions checked against the f64 certificate, {} not implied; {} lanes outside it; entering each level (unfiltered, both plans): {:?}; decided in/out {:?} / {:?}",
         tot.imp_checked, tot.imp_fail, tot.cert_viol, tot.enter, tot.dec_in, tot.dec_out);
+    let sc = scale_check(ix);
+    out!("VERIFY2 item scale against f64: {} rows, {} beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = {:.2e}; the build's divisor over E|r|^2 per group {:.5} to {:.5}", sc.0, sc.1, sc.2, sc.3, sc.4);
     std::fs::write(format!("{}/verify2.csv", crate::run2::res_dir()), rows.join("\n") + "\n").unwrap();
 }
 
@@ -458,116 +517,111 @@ pub fn e2e2(c: &Ctx2, nq: usize, nflat: usize) {
     let fl = c.flat();
     let nrows = fl.nrows;
     let n = ix.n();
+    let nl = ix.meta.nl();
+    let runs = arg_usize("--runs", 5);
+    let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|s| s.parse().unwrap()).collect();
     let sizes: Vec<usize> = SIZES.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
-    let x8: Vec<i8> = if nflat > 0 { (0..nrows * n).into_par_iter().map(|i| (f16_to_f32(fl.row(i / n)[i % n]) * 127.0).round().clamp(-127.0, 127.0) as i8).collect() } else { Vec::new() };
-    let mut lines = vec!["class,threads,what,answer_frac,median_ms,mean_ms,p90_ms,nq,touched_mean,full_reads_mean,result_mean,bytes_read_per_item,occupancy".to_string()];
+    let mut lines = vec!["class,threads,what,answer_frac,median_of_runs_ms,min_run_ms,max_run_ms,nq,runs,bytes_read_per_item,touched_frac,full_reads_per_item,enter_frac_by_level".to_string()];
     for (cls, qs) in [("item", c.items.clone()), ("text", c.texts.clone())] {
         let qs: Vec<Vec<f32>> = qs.into_iter().take(nq).collect();
+        if qs.is_empty() {
+            continue;
+        }
         let ths: Vec<Vec<f64>> = qs.iter().map(|q| {
             let pr = prep2(ix, q);
             let sc = fl.scores(&pr.q32);
             thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &sizes)
         }).collect();
-        for th in [1usize, 4] {
-            let pl = pool(th);
-            for si in 0..4 {
-                let mut ts = Vec::new();
-                let (mut tch, mut fr, mut rs, mut br, mut ent, mut blk) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-                let mut enter = vec![0f64; ix.meta.nl() + 1];
-                for (qi, q) in qs.iter().enumerate() {
-                    let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
-                    let mut best = f64::MAX;
-                    let mut last = None;
-                    for _ in 0..2 {
-                        let t = Timer::new();
-                        let r = pl.install(|| {
-                            let pr = prep2(ix, q);
-                            let r = threshold2(ix, &pr, ths[qi][si], &o);
-                            let bm = to_bitmap2(ix, &r.rows);
-                            (r, bm)
-                        });
-                        best = best.min(t.ms());
-                        last = Some(r);
-                    }
-                    let (r, bm) = last.unwrap();
-                    br += bytes_read2(ix, &r.st);
-                    tch += r.st.touched as f64;
-                    fr += r.st.full_reads as f64;
-                    rs += bm.len() as f64;
-                    ent += r.st.enter[..ix.meta.nl()].iter().sum::<u64>() as f64;
-                    blk += r.st.blocks.iter().sum::<u64>() as f64;
-                    for (e, x) in enter.iter_mut().zip(&r.st.enter) {
+        let ncell = SIZES.len() + 1; // the last cell is k-NN
+        let run_cell = |cell: usize, qi: usize| -> Stats {
+            if cell < SIZES.len() {
+                let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
+                let pr = prep2(ix, &qs[qi]);
+                let r = threshold2(ix, &pr, ths[qi][cell], &o);
+                std::hint::black_box(to_bitmap2(ix, &r.rows));
+                r.st
+            } else {
+                knn2(ix, &qs[qi], 10, None, c.plan).st
+            }
+        };
+        let k = qs.len() as f64;
+        let mut cellinfo = Vec::new();
+        {
+            let pl = pool(1);
+            for cell in 0..ncell {
+                let (mut br, mut tch, mut fr) = (0.0, 0.0, 0.0);
+                let mut enter = vec![0f64; nl + 1];
+                for qi in 0..qs.len() {
+                    let st = pl.install(|| run_cell(cell, qi));
+                    br += bytes_read2(ix, &st);
+                    tch += st.touched as f64;
+                    fr += st.full_reads as f64;
+                    for (e, x) in enter.iter_mut().zip(&st.enter) {
                         *e += *x as f64;
                     }
-                    ts.push(best);
                 }
-                let k = qs.len() as f64;
-                let mut s = ts.clone();
-                let occ = ent / (32.0 * blk).max(1.0);
-                let line = format!("{},{},index2_thr,{},{:.3},{:.3},{:.3},{},{:.0},{:.1},{:.0},{:.2},{:.3}", cls, th, SIZES[si], median(&ts), mean(&ts), quantile(&mut s, 0.9), qs.len(), tch / k, fr / k, rs / k, br / k, occ);
+                let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
+                cellinfo.push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
+                out!("e2e2 bytes {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}; entering each level (fraction of N, last = full vectors) {}", if cell < SIZES.len() { format!("{}", SIZES[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(" "));
+            }
+        }
+        for &th in &threads {
+            let pl = pool(th);
+            let mut per = vec![Vec::new(); ncell];
+            for run in 0..=runs {
+                for cell in 0..ncell {
+                    let mut ts = Vec::with_capacity(qs.len());
+                    for qi in 0..qs.len() {
+                        let t = Timer::new();
+                        pl.install(|| run_cell(cell, qi));
+                        ts.push(t.ms());
+                    }
+                    if run > 0 {
+                        per[cell].push(median(&ts));
+                    }
+                }
+            }
+            for cell in 0..ncell {
+                let v = &per[cell];
+                let (what, frac) = if cell < SIZES.len() { ("index2_thr", SIZES[cell]) } else { ("index2_knn10", 0.0) };
+                let line = format!("{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[cell]);
                 out!("e2e2 {line}");
-                if th == 1 {
-                    out!("e2e2 enter-fraction by level ({cls}, {}): {:?}", SIZES[si], enter.iter().map(|x| (x / k / ix.nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>());
-                }
                 lines.push(line);
             }
-            let mut ts = Vec::new();
-            let (mut seed, mut sweep, mut sel) = (0.0, 0.0, 0.0);
-            for q in &qs {
-                let mut best = f64::MAX;
-                let mut last = None;
-                for _ in 0..2 {
-                    let t = Timer::new();
-                    let r = pl.install(|| knn2(ix, q, 10, None, c.plan));
-                    best = best.min(t.ms());
-                    last = Some(r);
-                }
-                let r = last.unwrap();
-                seed += r.t_seed;
-                sweep += r.t_sweep;
-                sel += r.t_sel;
-                ts.push(best);
-            }
-            let k = qs.len() as f64;
-            let mut s = ts.clone();
-            let line = format!("{},{},index2_knn10,0,{:.3},{:.3},{:.3},{},0,0,10,0,0", cls, th, median(&ts), mean(&ts), quantile(&mut s, 0.9), qs.len());
-            out!("e2e2 {line}   (seed {:.2} / sweep {:.2} / selection {:.2} ms mean)", seed / k, sweep / k, sel / k);
-            lines.push(line);
-            if nflat == 0 {
-                continue;
-            }
-            let (mut tf, mut tk, mut t8) = (Vec::new(), Vec::new(), Vec::new());
+        }
+        if nflat == 0 {
+            continue;
+        }
+        let x8: Vec<i8> = (0..nrows * n).into_par_iter().map(|i| (f16_to_f32(fl.row(i / n)[i % n]) * 127.0).round().clamp(-127.0, 127.0) as i8).collect();
+        for &th in &threads {
+            let pl = pool(th);
+            let (mut tf, mut t8) = (Vec::new(), Vec::new());
             for (qi, q) in qs.iter().take(nflat).enumerate() {
                 let pr = prep2(ix, q);
                 let err = full_err2(ix, &pr);
-                let (mut b1, mut b2, mut b3) = (f64::MAX, f64::MAX, f64::MAX);
                 let qmax = pr.q32.iter().fold(0f32, |a, &x| a.max(x.abs()));
                 let q16i: Vec<i16> = pr.q32.iter().map(|&x| (x / qmax * 8191.0).round() as i16).collect();
                 let t8thr = (ths[qi][1] * 127.0 * 8191.0 / qmax as f64) as i32;
+                let (mut b1, mut b3) = (f64::MAX, f64::MAX);
                 for _ in 0..2 {
                     let t = Timer::new();
                     std::hint::black_box(pl.install(|| fl.threshold(&pr.q16, &pr.q32, ths[qi][1], err, None, &c.ent_xs)).len());
                     b1 = b1.min(t.ms());
                     let t = Timer::new();
-                    std::hint::black_box(pl.install(|| fl.knn(&pr.q16, &pr.q32, 10, err, None, &c.ent_xs)).len());
-                    b2 = b2.min(t.ms());
-                    let t = Timer::new();
                     std::hint::black_box(pl.install(|| (0..nrows).into_par_iter().with_min_len(4096).filter(|&r| unsafe { dot_i8(&q16i, &x8[r * n..(r + 1) * n]) } >= t8thr).count()));
                     b3 = b3.min(t.ms());
                 }
                 tf.push(b1);
-                tk.push(b2);
                 t8.push(b3);
             }
-            for (what, v) in [("flat_f16_thr", &tf), ("flat_f16_knn10", &tk), ("flat_int8_thr", &t8)] {
-                let mut s = v.clone();
-                let line = format!("{},{},{},0.001,{:.3},{:.3},{:.3},{},{},0,0,0,0", cls, th, what, median(v), mean(v), quantile(&mut s, 0.9), v.len(), nrows);
+            for (what, v) in [("flat_f16_thr", &tf), ("flat_int8_thr", &t8)] {
+                let line = format!("{},{},{},0.001,{:.3},0,0,{},1,0,0,0,", cls, th, what, median(v), v.len());
                 out!("e2e2 {line}");
                 lines.push(line);
             }
         }
     }
-    std::fs::write(format!("{}/e2e2_1m{}.csv", crate::run2::res_dir(), if ix.split { "" } else { "_u8" }), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/e2e2{}.csv", crate::run2::res_dir(), arg_str("--tag", "")), lines.join("\n") + "\n").unwrap();
 }
 
 /// Where the time of a threshold query goes (item and text queries at 1% and 5%; 1 and 4 threads), for the plan as
@@ -590,7 +644,9 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
     };
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
     let qs: Vec<Vec<f32>> = qs.iter().take(nq).cloned().collect();
-    for &frac in &[0.01, 0.05] {
+    let bfracs: Vec<f64> = arg_str("--bfracs", "0.01,0.1").split(',').map(|s| s.parse().unwrap()).collect();
+    let bthreads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|s| s.parse().unwrap()).collect();
+    for &frac in &bfracs {
         let kk = ((nrows as f64 * frac).round() as usize).max(1);
         let ths: Vec<f64> = qs.iter().map(|q| {
             let pr = prep2(ix, q);
@@ -603,7 +659,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
         }).collect();
         for &(vname, alpha0, jump) in variants {
             let plan = Plan { alpha0, jump_level: jump, jump_d: 0.8, ..c.plan };
-            for th in [1usize, 4] {
+            for &th in &bthreads {
                 let pl = pool(th);
                 let mut cyc = [0f64; 12];
                 let (mut walls, mut br, mut fr, mut wrong) = (Vec::new(), 0.0, 0.0, 0u64);
@@ -650,7 +706,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
         }
     }
     }
-    std::fs::write(format!("{}/breakdown2.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
+    std::fs::write(format!("{}/breakdown2{}.csv", crate::run2::res_dir(), arg_str("--tag", "")), lines.join("\n") + "\n").unwrap();
 }
 
 pub fn make_filter(ix: &Index2, kind: &str, frac: f64, rng: &mut rand::rngs::StdRng) -> RoaringBitmap {
@@ -771,4 +827,56 @@ pub fn filter2(c: &Ctx2, nq: usize) {
         }
     }
     std::fs::write(format!("{}/filter2_1m.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
+}
+
+/// Results for the independent float64 oracle (bench/oracle_thr.py): the first `nq` item and text queries, threshold
+/// queries at every answer share as planned, and k-NN (k = 10); then the same at the 1% and 10% thresholds and k-NN
+/// over a visible set of about one entity in fifty. Writes to RESULTS/oracle: queries.npy (the queries as the index
+/// used them, f16 values as f32), thr.npy, res_ids.npy and res_off.npy (entity ids of each result, concatenated),
+/// knn.npy, vis.npy (the visible entities).
+pub fn oracle_dump(c: &Ctx2, nq: usize) {
+    let ix = &c.ix;
+    let fl = c.flat();
+    let nrows = fl.nrows;
+    let dir = format!("{}/oracle", res_dir());
+    std::fs::create_dir_all(&dir).unwrap();
+    let sizes: Vec<usize> = SIZES.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
+    let mut ents: Vec<u32> = (0..nrows as u32).map(|r| ix.row_ent[r as usize]).filter(|&e| (e as u64).wrapping_mul(0x9E3779B97F4A7C15) >> 58 == 0).collect();
+    ents.sort_unstable();
+    let bm = RoaringBitmap::from_sorted_iter(ents.iter().copied()).unwrap();
+    let vis = Vis2::new(ix, &bm);
+    let qs: Vec<&Vec<f32>> = c.items.iter().take(nq).chain(c.texts.iter().take(nq)).collect();
+    let (mut qv, mut thr, mut ids, mut off, mut knn) = (Vec::new(), Vec::new(), Vec::new(), vec![0i64], Vec::new());
+    for q in &qs {
+        let pr = prep2(ix, q);
+        qv.extend_from_slice(&pr.q32);
+        let ths = thresholds_for(&fl, &pr.q16, &fl.scores(&pr.q32), full_err2(ix, &pr), &sizes);
+        let mut run = |t: f64, vis: Option<&Vis2>| {
+            let r = threshold2(ix, &pr, t, &Opts2 { vis, verify: false, want_iv: false, plan: c.plan });
+            ids.extend(to_bitmap2(ix, &r.rows).iter().map(|e| e as i64));
+            off.push(ids.len() as i64);
+            thr.push(t);
+        };
+        for &t in &ths {
+            run(t, None);
+        }
+        for &t in &ths[2..4] {
+            run(t, Some(&vis));
+        }
+        for v in [None, Some(&vis)] {
+            let kn = knn2(ix, q, 10, v, c.plan);
+            assert_eq!(kn.ents.len(), 10);
+            knn.extend(kn.ents.iter().map(|x| x.1 as i64));
+        }
+    }
+    let nqt = qs.len();
+    let b = |v: &[f64]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    let bi = |v: &[i64]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+    write_npy(&format!("{dir}/queries.npy"), "<f4", &[nqt, ix.n()], &qv.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>());
+    write_npy(&format!("{dir}/thr.npy"), "<f8", &[nqt, SIZES.len() + 2], &b(&thr));
+    write_npy(&format!("{dir}/res_ids.npy"), "<i8", &[ids.len()], &bi(&ids));
+    write_npy(&format!("{dir}/res_off.npy"), "<i8", &[off.len()], &bi(&off));
+    write_npy(&format!("{dir}/knn.npy"), "<i8", &[nqt, 2, 10], &bi(&knn));
+    write_npy(&format!("{dir}/vis.npy"), "<i8", &[ents.len()], &bi(&ents.iter().map(|&e| e as i64).collect::<Vec<_>>()));
+    out!("oracle dump: {nqt} queries, {} results, {} visible entities, to {dir}", off.len() - 1, ents.len());
 }
