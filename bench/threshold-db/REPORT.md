@@ -260,6 +260,10 @@ of that size as noise. And the 13 Nov 1-thread rows floated over cores 8–11, w
 
 ## Reproducing
 
+A new pass reruns only the rows whose system, settings, data or machine changed; every other row is kept from the
+committed CSVs, and the tables say when each row was measured. Keep the built indexes in the data directory so that a
+single row can be rerun without rebuilding the rest.
+
 ```bash
 V=venv-with: numpy 2.2.6, duckdb 1.5.6, pyarrow 21.0.0, scipy 1.15.3, faiss-cpu 1.16.0, hnswlib 0.8.0, rabitqlib 0.2.0, matplotlib 3.10.9
 D=/home/joe/code/vexact-data/bioclip2-1m; I=/home/joe/code/vexact-benchup-data/index_r4; A=/home/joe/code/vexact-benchup-data/ann
