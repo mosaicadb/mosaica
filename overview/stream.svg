@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 190" width="760" height="190" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<style>
+.d0{fill:#4f7397}.d{fill:#8fb0d6}.r{fill:#e0b36a}.f{fill:#c9c9c9}
+.e{stroke:#333;stroke-width:1;fill:none}.t{fill:#222}.tm{fill:#555}.br{stroke:#333;stroke-width:1.2;fill:none}
+@media (prefers-color-scheme: dark){.d0{fill:#36597c}.d{fill:#5f84ad}.r{fill:#a57a35}.f{fill:#6a6a6a}
+.e{stroke:#ddd}.t{fill:#e6e6e6}.tm{fill:#bbb}.br{stroke:#ddd}}
+</style>
+<rect class="d0" x="30.0" y="60" width="11.8" height="40"/><rect class="e" x="30.0" y="60" width="11.8" height="40"/>
+<text class="tm" x="41.8" y="116" text-anchor="middle">3</text>
+<rect class="d" x="41.8" y="60" width="15.2" height="40"/><rect class="e" x="41.8" y="60" width="15.2" height="40"/>
+<text class="tm" x="57.0" y="116" text-anchor="middle">8</text>
+<rect class="d" x="57.0" y="60" width="15.2" height="40"/><rect class="e" x="57.0" y="60" width="15.2" height="40"/>
+<text class="tm" x="72.2" y="116" text-anchor="middle">13</text>
+<rect class="d" x="72.2" y="60" width="20.4" height="40"/><rect class="e" x="72.2" y="60" width="20.4" height="40"/>
+<text class="tm" x="92.5" y="116" text-anchor="middle">22</text>
+<rect class="d" x="92.5" y="60" width="28.0" height="40"/><rect class="e" x="92.5" y="60" width="28.0" height="40"/>
+<text class="tm" x="120.6" y="116" text-anchor="middle">39</text>
+<rect class="r" x="120.6" y="60" width="36.0" height="40"/><rect class="e" x="120.6" y="60" width="36.0" height="40"/>
+<text class="tm" x="156.5" y="116" text-anchor="middle">67</text>
+<rect class="r" x="156.5" y="60" width="49.0" height="40"/><rect class="e" x="156.5" y="60" width="49.0" height="40"/>
+<text class="tm" x="205.5" y="116" text-anchor="middle">119</text>
+<rect class="r" x="205.5" y="60" width="67.9" height="40"/><rect class="e" x="205.5" y="60" width="67.9" height="40"/>
+<text class="tm" x="273.5" y="116" text-anchor="middle">219</text>
+<rect class="r" x="273.5" y="60" width="95.1" height="40"/><rect class="e" x="273.5" y="60" width="95.1" height="40"/>
+<text class="tm" x="368.6" y="116" text-anchor="middle">415</text>
+<rect class="r" x="368.6" y="60" width="95.1" height="40"/><rect class="e" x="368.6" y="60" width="95.1" height="40"/>
+<text class="tm" x="463.7" y="116" text-anchor="middle">611</text>
+<rect class="f" x="463.7" y="60" width="266.3" height="40"/><rect class="e" x="463.7" y="60" width="266.3" height="40"/>
+<text class="t" x="596.9" y="85" text-anchor="middle">full f16 vector, 1,536 B</text>
+<text class="tm" x="30" y="134">cumulative stored bytes per item, n = 768 (widths not to scale; level 0 is the first 3 bytes)</text>
+<path class="br" d="M41.8,52 V44 H120.6 V52"/><text class="t" x="81.2" y="38" text-anchor="middle">deterministic</text><text class="tm" x="81.2" y="20" text-anchor="middle">sound for every seed</text>
+<path class="br" d="M120.6,52 V44 H463.7 V52"/><text class="t" x="292.1" y="38" text-anchor="middle">randomised (seeded rotations)</text><text class="tm" x="292.1" y="20" text-anchor="middle">sound with probability 1 − ε over the seed</text>
+<path class="br" d="M30.0,146 V154 H205.5 V146"/><text class="t" x="30.0" y="172">in memory through 96 B (119 B)</text>
+<path class="br" d="M205.5,146 V154 H730.0 V146"/><text class="t" x="467.8" y="172" text-anchor="middle">on disk, read only for items still undecided</text>
+</svg>
