@@ -316,6 +316,7 @@ name = "vexact"
 version = "0.1.0"
 dependencies = [
  "half",
+ "libc",
  "matrixmultiply",
  "memmap2",
  "rand",

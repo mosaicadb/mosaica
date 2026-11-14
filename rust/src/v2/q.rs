@@ -2148,6 +2148,8 @@ pub struct ThrOut2 {
 }
 
 const SCAN_ROWS: usize = 1024;
+/// Scan chunks whose full vectors are requested ahead of the one being scanned (`--willneed`).
+const SCAN_AHEAD: usize = 4;
 
 /// Number of scan chunks over the visible rows (all rows when vis is None), SCAN_ROWS each.
 fn scan_chunks(ix: &Index2, vis: Option<&Vis2>) -> usize {
@@ -2167,9 +2169,21 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 /// threshold.
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
-    let parts: Vec<ThrOut2> = (0..scan_chunks(ix, vis)).into_par_iter().map(|ch| {
+    let nch = scan_chunks(ix, vis);
+    let parts: Vec<ThrOut2> = (0..nch).into_par_iter().map(|ch| {
         let mut acc = ThrOut2 { st: Stats::new(nl), ..Default::default() };
         let mut rows = Vec::with_capacity(4096);
+        // with --willneed, reading runs SCAN_AHEAD chunks ahead of the scan
+        if let Full2::Real { rows: fr, .. } = &ix.full {
+            if super::disk::WILLNEED.load(std::sync::atomic::Ordering::Relaxed) {
+                let lo = if ch == 0 { 1 } else { ch + SCAN_AHEAD };
+                for c2 in lo..=(ch + SCAN_AHEAD).min(nch - 1) {
+                    scan_rows(ix, vis, c2, &mut rows);
+                    fr.willneed(&rows, ix.n());
+                    rows.clear();
+                }
+            }
+        }
         scan_rows(ix, vis, ch, &mut rows);
         if packed && vis.is_some() {
             decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
@@ -2197,7 +2211,8 @@ pub fn scan_knn(ix: &Index2, q16: &[u16], q32: &[f32], qn: f64, kk: usize, vis: 
 /// Exact decisions from full vectors (four rows per pass of the query; exact integer products only near t).
 pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2) {
     let mut k4 = 0;
-    if let Full2::Real { .. } = &ix.full {
+    if let Full2::Real { rows, .. } = &ix.full {
+        rows.willneed(pend, ix.n());
         let e = full_err2(ix, pr);
         while k4 + 4 <= pend.len() {
             let rr = [pend[k4], pend[k4 + 1], pend[k4 + 2], pend[k4 + 3]];
@@ -2239,6 +2254,9 @@ pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_ex
     const B: usize = 32;
     let n = ix.n();
     let e = full_err2(ix, pr);
+    if let Full2::Real { rows: fr, .. } = &ix.full {
+        fr.willneed(rows, n);
+    }
     let mut buf = vec![0u16; B * n];
     let pf = |r: u32| unsafe {
         let p = ix.full_row_f16(r as usize).as_ptr() as *const i8;
