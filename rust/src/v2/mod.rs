@@ -748,6 +748,7 @@ pub struct Index2 {
     pub nrows: usize,
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
     pub ctab: Vec<Vec<kern::CTab>>, // per cluster, per level: the centre's tables (query-independent)
+    pub repack: Vec<f32>,            // per level: occupancy of slots held in place below which they are compacted first
 }
 
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
@@ -1323,6 +1324,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let ix = Index2 {
+        repack: vec![0.6; meta.nl()],
         ctab,
         meta,
         groups,

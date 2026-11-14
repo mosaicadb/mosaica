@@ -99,7 +99,7 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {
-    setup2_at(tag, &data_dir(), "")
+    setup2_at(tag, &data_dir(), &arg_str("--flags", ""))
 }
 
 /// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...).
@@ -110,6 +110,12 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "noint" => p.int_det = false,
             "gtab" => p.gtab = true,
             "nogtab" => p.gtab = false,
+            "repack" => p.repack = true,
+            "norepack" => p.repack = false,
+            f if f.starts_with("repackx=") => {
+                p.repack = true;
+                p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
+            }
             _ => panic!("unknown plan flag {f:?}"),
         }
     }
@@ -140,6 +146,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
     let mut lg = |s: String| out!("[build2] {s}");
     let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, &mut lg);
+    let tr = Timer::new();
+    ix.repack = calibrate_repack(&ix);
+    out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
     build_table2(&mut ix, p.meta.k);
     let n = p.meta.n;
     let mut ent_xs = vec![u32::MAX; p.perm.len()];

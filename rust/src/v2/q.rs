@@ -413,6 +413,7 @@ pub struct CQ2 {
     pub luts: Vec<Option<LevelLut>>,
     pub shared: bool, // tables from the group (alpha = 0)
     pub gtab: bool,   // tables combined from the group's and the centre's
+    pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub int: Option<IntDet>,
 }
 
@@ -513,7 +514,7 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -922,7 +923,9 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     // blocks and need no re-packing; sparse ones are compacted
     let a0 = cands[0] / 32 * 32;
     let span = ((cands[cands.len() - 1] + 1 - a0) as usize + BLK - 1) / BLK * BLK;
-    let mut aligned = cands.len() * 10 >= span * 6;
+    let rp = cq.repack;
+    let occ = |l: usize| if rp > 0.0 { (ix.repack[l] * rp).min(0.95) } else { 0.6 };
+    let mut aligned = cands.len() as f32 >= span as f32 * occ(0);
     let mut nsurv;
     if aligned {
         sv.reset(span);
@@ -1473,7 +1476,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         if aligned {
             if kept_tot == 0 {
                 nsurv = 0;
-            } else if kept_tot * 10 < nsurv * 6 {
+            } else if (kept_tot as f32) < nsurv as f32 * occ((l + 1).min(nl - 1)) {
                 // occupancy fell: compact once, then re-pack from here on
                 let mut w = 0;
                 let mut o = 0;
@@ -1534,6 +1537,82 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     st.enter[nl] += np;
 }
 
+/// The occupancy of slots held in place (with holes) below which they are compacted before each level, from timings on
+/// this index's largest cluster: a level of one block in place, against one assembled from two source blocks at half
+/// occupancy plus the compaction of the survivors' state. In place, every live item costs the block's decode over the
+/// occupancy f; gathered, the gather and decode of a full block plus its compaction. Compacting pays when f is below
+/// their ratio. The decisions' cost per block is the same either way and is left out.
+pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
+    let ci = (0..ix.k()).max_by_key(|&c| ix.cl[c].nblk).unwrap();
+    let c = &ix.cl[ci];
+    let gp = &ix.groups[c.g];
+    let nb = c.nblk & !1;
+    let mut out = Vec::new();
+    let time = |f: &mut dyn FnMut()| -> f64 {
+        f();
+        let t = Timer::new();
+        let mut reps = 0;
+        while t.ms() < 2.0 {
+            f();
+            reps += 1;
+        }
+        t.ms() * 1e6 / reps as f64
+    };
+    for l in 0..ix.meta.nl() {
+        let lp = &gp.levels[l];
+        let mut lut = LevelLut::default();
+        lut.hi = vec![1; lp.units * 16];
+        lut.lo = vec![1; lp.units * 16];
+        let mut g0 = 0;
+        for p in &lp.parts {
+            lut.parts.push(PartLut { j: p.j, g0, groups: p.units() / 4, off: 0.0, scale: 1.0, err: 0.0 });
+            g0 += p.units() / 4;
+        }
+        let (units, srows) = (lp.units, lp.srows);
+        let cbase = unsafe { ix.lcode[l].as_ptr().add(ix.coff[l][ci]) };
+        let sbase = unsafe { ix.lscal[l].as_ptr().add(ix.soff[l][ci]) };
+        let decode = |cp: *const u8| unsafe {
+            let mut acc = _mm512_setzero_ps();
+            for pl in &lut.parts {
+                let (a, b) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
+                let (x, y) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
+                acc = _mm512_add_ps(acc, _mm512_add_ps(_mm512_add_ps(a, b), _mm512_add_ps(x, y)));
+            }
+            std::hint::black_box(arr(acc));
+        };
+        let t_ip = time(&mut || {
+            for b in 0..nb {
+                decode(unsafe { cbase.add(b * units * 16) });
+            }
+        }) / nb as f64;
+        let (mut tmp, mut stmp) = (vec![0u8; units * 16 + 64], vec![0u8; srows * 16 + 64]);
+        let mut g = Gather::new();
+        let t_pk = time(&mut || unsafe {
+            for d in 0..nb / 2 {
+                let lanes: [u32; 32] = core::array::from_fn(|i| (64 * d + 2 * i) as u32);
+                plan_gather(&lanes, &mut g);
+                gather_rows(&g, cbase, units, tmp.as_mut_ptr());
+                gather_rows(&g, sbase, srows, stmp.as_mut_ptr());
+                decode(tmp.as_ptr());
+            }
+        }) / (nb / 2) as f64;
+        // the survivors' state: 6 integer rows on the integer deterministic levels, 3 + 4 J float arrays after
+        let narr = if l < NDL { 4 } else { 3 + 4 * J };
+        let mut st = vec![vec![0f32; 64 * nb + 32]; narr];
+        let t_c = time(&mut || unsafe {
+            let mut w = 0;
+            for o in (0..32 * nb).step_by(16) {
+                for v in st.iter_mut() {
+                    cs(v, w, 0x5555, o);
+                }
+                w += 8;
+            }
+        }) / (16 * nb) as f64;
+        out.push((t_ip / (t_pk + 32.0 * t_c)).clamp(0.05, 0.95) as f32);
+    }
+    out
+}
+
 // ---------------- the threshold query with the planner ----------------
 
 #[derive(Clone, Copy, Debug)]
@@ -1564,10 +1643,12 @@ pub struct Plan {
     pub jump_d: f64,
     pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
+    pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
+    pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0 }
     }
 }
 impl Plan {
@@ -2021,6 +2102,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             let tq = tick();
                             let mut cq = cluster_q2a(ix, ci, gq, pr, qm, pl.alpha0);
                             cq.gtab = pl.gtab && !pl.alpha0;
+                            cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
                             if pl.int_det && !o.want_iv {
                                 cq.enable_int(ix, ci, gq);
                             }
