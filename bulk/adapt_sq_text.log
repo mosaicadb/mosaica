@@ -1,0 +1,12 @@
+[    54s] setup done: basis ../sq_text.npy, sample 200000, clusters present 1000, queries text 93 item 60
+[    60s] query 1/153 (text); violations 0
+[   122s] query 11/153 (text); violations 0
+[   183s] query 21/153 (text); violations 0
+[   235s] TIMING.lock present, waiting
+[  1101s] query 31/153 (text); violations 0
+[  1122s] TIMING.lock present, waiting
+[  1420s] query 41/153 (text); violations 0
+[  1476s] query 51/153 (text); violations 0
+[  1534s] query 61/153 (text); violations 0
+[  1592s] query 71/153 (text); violations 0
+[  1646s] TIMING.lock present, waiting

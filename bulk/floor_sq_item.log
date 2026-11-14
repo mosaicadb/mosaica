@@ -1,0 +1,15 @@
+[    54s] setup done: basis /tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/sq_item.npy, sample 200000, clusters present 1000, queries text 1 item 0
+basis /tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/sq_item.npy: zero-read l1 = sum sqrt(gamma) = 0.2195, l2 = 0.0234, participation ratio (l1/l2)^2 = 88, c = 9.47
+bytes                  [  0   1   2   4   8  12  16  24  32  48  64  96 128 192 256 384]
+proved   / zero-read l1  [0.603 0.574 0.549 0.507 0.444 0.396 0.359 0.302 0.261 0.204 0.165 0.115 0.082 0.045 0.027 0.011]
+conj     / zero-read l1  [1.    0.887 0.824 0.733 0.614 0.534 0.473 0.386 0.325 0.244 0.191 0.127 0.09  0.049 0.028 0.011]
+rand     / zero-read l1  [1.009 0.734 0.637 0.521 0.394 0.32  0.269 0.203 0.162 0.112 0.083 0.052 0.035 0.018 0.01  0.004]
+bytes (or exact coordinates) at which the bound is R times the zero-read l1:
+  R=0.90: proved floor    0.0 B   conjectured floor    0.9 B   ideal randomised    0.4 B   exact coordinates in order    2.7
+  R=0.75: proved floor    0.0 B   conjectured floor    3.6 B   ideal randomised    0.9 B   exact coordinates in order   10.4
+  R=0.60: proved floor    0.1 B   conjectured floor    8.7 B   ideal randomised    2.6 B   exact coordinates in order   22.5
+  R=0.50: proved floor    4.4 B   conjectured floor   14.2 B   ideal randomised    4.7 B   exact coordinates in order   34.3
+  R=0.40: proved floor   11.7 B   conjectured floor   22.7 B   ideal randomised    7.8 B   exact coordinates in order   50.9
+  R=0.33: proved floor   20.1 B   conjectured floor   31.4 B   ideal randomised   11.5 B   exact coordinates in order   66.9
+  R=0.25: proved floor   35.1 B   conjectured floor   46.8 B   ideal randomised   18.3 B   exact coordinates in order   93.0
+[    55s] done

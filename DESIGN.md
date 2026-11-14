@@ -247,9 +247,20 @@ density there.
    support table and anchors (not yet run natively). With nothing read per member this matches the table for items and
    beats it for text (61 / 71 / 86 / 97% of items left against 75 / 83 / 94 / 100%). It removes the
    table's size and anchor-ratio problem at 10⁹ and the atomic widening on insert.
-3. **Fit the query-offset covariance from corpus items at build, and refit it from the query log at
+   This also stores ‖r‖ in the new metric at level 0. `bulk/REPORT.md` section 5 conjectures that
+   the native level 0 still bounds with a Euclidean norm, which would explain why the native check
+   saw almost no gain with nothing read.
+3. **Read the first ~128–192 coordinates as columns per cluster, in an order each query chooses**
+   (`bulk/REPORT.md`). Measured on a 4-bit columnar code, 200k items, 0 violations: text bytes fall
+   11–25% against the design's shape, 28–44% for items 2–8 sd from the threshold, and 35–38% with a
+   dithered randomised bound and sign columns added; it stacks with the dual basis. A columnar kernel
+   costs 9–14 ns per item at 12–32 B against 39–48 ns in the native prototype (kernel only, synthetic
+   data). Item queries at small answers get worse unless block norms are read only when the single
+   stored norm fails. Not yet run natively, and the absolute bytes of that code are not comparable
+   with the native escape code.
+4. **Fit the query-offset covariance from corpus items at build, and refit it from the query log at
    compaction.** The data-only fit keeps about two fifths of the text gain.
-4. **Cache each executed query's cluster extremes with its result.** The only measured route to a
+5. **Cache each executed query's cluster extremes with its result.** The only measured route to a
    growth exponent well below one (0.12–0.34 at k = 10), and only for repeated query directions. It
    opens a timing channel unless rows are kept per grant.
 

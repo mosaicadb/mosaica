@@ -253,6 +253,12 @@ guarantee about *one* item is cheap. You are welcome to attack any of these.
   as a higher threshold: a band a quarter sd wide drops the guarantee on 40–69% of a text answer
   of 1% or less.
   **[argued and measured, `groups/REPORT.md` 3.6]**
+- **Escaping the per-item floors in the bulk.** One-sided (upper-only) certificates obey the same
+  volume floor as two-sided ones; randomising the first certificate or sketching the unread part
+  loses to deterministic codes below about 60 B; an overcomplete dictionary for query-chosen reads
+  buys at most a log factor; beyond four block norms extra norms gain under 4%; a one-sided union
+  bound gains about 1%. Only reading in a query-chosen order (a real escape from the non-adaptive
+  floor, bounded by a log factor) and time per byte remain. **[proved and measured, `bulk/REPORT.md`]**
 - **A sublinear guarantee for fresh queries.** Under SETH no polynomial-build index answers exact
   threshold queries in N^(1−δ); every level of fixed slack is asymptotically linear at fixed answer
   size. Measured exponents at k = 10: 0.79–0.93 for text, 0.49–0.64 for items.

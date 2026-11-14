@@ -1,0 +1,24 @@
+[   132s] setup done: basis pca, sample 200000, clusters present 1000, queries text 41 item 40
+
+== text queries (41), basis pca
+ share of the zero-read slack by block (%), blocks [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 768]
+  [ 2.4  1.6  3.8  6.8 10.  13.7 16.7 18.1 16.  10.   0.8]
+ zero-read slack in sd of the query's scores, by number of block norms: {'11 dyadic': np.float64(6.19), '6': np.float64(6.44), '4': np.float64(6.55), '2': np.float64(6.87), '1': np.float64(7.4)}
+ k = [4, 8, 16, 32, 64, 128]
+ share of ||Delta||^2 in its k largest coordinates (%): [13.8 21.  31.  44.2 60.3 77.7]
+ share of ||Delta||^2 in the first k coordinates    (%): [ 6.6 10.6 16.  24.4 36.6 53.7]
+ share of sum Delta^2*lambda in its k largest terms (%): [49.7 64.3 77.6 88.1 95.  98.6]
+ share of sum Delta^2*lambda in the first k terms   (%): [32.8 49.  64.4 79.1 90.  96.6]
+ flat Gaussian offset, k largest of 768             (%): [ 5.   8.7 14.8 24.6 39.2 59.1]
+
+== item queries (40), basis pca
+ share of the zero-read slack by block (%), blocks [0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 768]
+  [ 2.5  1.9  4.2  7.8 11.4 14.6 17.2 17.9 14.5  7.7  0.4]
+ zero-read slack in sd of the query's scores, by number of block norms: {'11 dyadic': np.float64(4.52), '6': np.float64(4.68), '4': np.float64(4.76), '2': np.float64(4.89), '1': np.float64(5.13)}
+ k = [4, 8, 16, 32, 64, 128]
+ share of ||Delta||^2 in its k largest coordinates (%): [17.9 26.7 38.2 52.3 68.1 83.6]
+ share of ||Delta||^2 in the first k coordinates    (%): [ 8.4 14.3 22.  32.2 46.3 64.9]
+ share of sum Delta^2*lambda in its k largest terms (%): [51.8 66.9 80.1 90.  96.2 99.1]
+ share of sum Delta^2*lambda in the first k terms   (%): [33.1 50.8 67.9 82.  91.9 97.6]
+ flat Gaussian offset, k largest of 768             (%): [ 5.   8.7 14.8 24.6 39.2 59.1]
+[   143s] done

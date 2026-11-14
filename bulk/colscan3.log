@@ -1,0 +1,16 @@
+Sat Nov 14 02:06:24 UTC 2026
+clusters 1000 x 1024 items, 8 then 16 more columns (12.0 B of code per item), 6 block norms, vector selection, energy-accounting check
+ns per item: total 8.87 | order selection 1.16 (1.19 us per cluster) | prefetch 1.62 | tables 0.18 | accumulate 1.94 (0.081 per item-column) | two checks 3.93
+(timer overhead is inside the parts; undecided count on random data 329432)
+clusters 1000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, vector selection, energy-accounting check
+ns per item: total 11.70 | order selection 1.27 (1.30 us per cluster) | prefetch 2.86 | tables 0.30 | accumulate 3.36 (0.070 per item-column) | two checks 3.87
+(timer overhead is inside the parts; undecided count on random data 328326)
+clusters 1000 x 1024 items, 32 then 32 more columns (32.0 B of code per item), 6 block norms, vector selection, energy-accounting check
+ns per item: total 13.91 | order selection 1.38 (1.41 us per cluster) | prefetch 3.60 | tables 0.45 | accumulate 4.46 (0.070 per item-column) | two checks 3.96
+(timer overhead is inside the parts; undecided count on random data 327048)
+clusters 1000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, vector selection, norms-only check
+ns per item: total 7.97 | order selection 1.30 (1.33 us per cluster) | prefetch 3.20 | tables 0.34 | accumulate 1.58 (0.033 per item-column) | two checks 1.52
+(timer overhead is inside the parts; undecided count on random data 128450)
+clusters 4000 x 1024 items, 16 then 32 more columns (24.0 B of code per item), 6 block norms, vector selection, energy-accounting check
+ns per item: total 11.62 | order selection 1.21 (1.24 us per cluster) | prefetch 2.98 | tables 0.34 | accumulate 3.19 (0.067 per item-column) | two checks 3.87
+(timer overhead is inside the parts; undecided count on random data 1318993)
