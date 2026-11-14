@@ -7,9 +7,14 @@ alone. The index described here is the native prototype under `rust/` on `resear
 code and a report disagree the code is followed and the disagreement named.
 
 Every figure comes from one dataset and one machine unless it says otherwise. The dataset is 999,000 BioCLIP-2 image
-embeddings in 768 dimensions, stored as half-precision (f16) vectors of 1,536 bytes. Item queries are held-out image
-embeddings, and text queries are embeddings of species prompts from the model's text tower, which sit further from the
-data and are harder. The machine is a Ryzen 9 5900X (AVX2, no AVX-512) under WSL2, timed on one pinned thread.
+embeddings in 768 dimensions, stored as half-precision (f16) vectors of 1,536 bytes. Queries come in two kinds, and
+the distinction matters more than the modality. In-distribution queries are held-out image embeddings, drawn from the
+same distribution as the data. Out-of-distribution (OOD) queries are embeddings of species prompts from the model's
+text tower, searched against the image embeddings, so they come from a different region of the space. OOD queries
+cost more for two reasons: they put much of their weight in directions where the data varies little and the code is
+coarse, so each interval is wider for the same bytes; and their similarities to the data are low and bunched, so many
+more items lie near any threshold. Supplying a sample of expected queries at build, which the fit uses for the basis
+and the bit allocation, addresses the first reason directly (section 2). The machine is a Ryzen 9 5900X (AVX2, no AVX-512) under WSL2, timed on one pinned thread.
 
 ## 1. What it answers
 
@@ -58,8 +63,12 @@ clusters and 20n items per group on average), and each group gets a basis. The m
 3,000 corpus items used as pseudo-queries (`--query-sample` mixes real queries in). In this basis the query-side
 coordinates V_qᵀq and the item-side coordinates V_q⁻¹r are both uncorrelated, with equal variance on the two sides of
 each coordinate, the pair that `groups/REPORT.md` section 2.4 derives as minimising the expected width of the bound.
-Measured natively it reads 9–30% fewer bytes for item queries and 6–10% fewer for text than a PCA basis
-(`dualproto/REPORT.md`). Every bound holds for any basis, so the fit affects only cost. The basis is stored in int8 with
+Measured natively it reads 9–30% fewer bytes for in-distribution queries and 6–10% fewer for OOD queries than a PCA basis
+(`dualproto/REPORT.md`). When the expected queries come from another distribution, as text prompts do against image
+embeddings, supplying a sample of them with `--query-sample` fits the query side to where those queries point: on
+BioCLIP-2 the text training prompts cut the bytes OOD queries read by a further 20–22% at answers of 1–75%
+(`rust/results/combined/s1/bytes_dual_vs_dualmix.log`). The sample is optional and the default fit uses the data
+alone. Every bound holds for any basis, so the fit affects only cost. The basis is stored in int8 with
 one scale per vector and the build encodes z = V_q⁻¹r for that int8 V_q, so q·r = (V_qᵀq)·z + q·ε with |ε| ≤ e_inv|r|,
 and the query computes V_qᵀq exactly in integers. A **profile**, the mean square of V_qᵀ(q − m) for 5,000 corpus items
 against their four nearest centres, weights the bit allocation of both kinds of level.
@@ -127,7 +136,7 @@ item norm, bounds every q·x in the cluster, so a cluster wholly above t is take
 unread. In each remaining cluster the query computes q·m and bounds each item from its key alone. The items this decides
 lie at the two ends of the sort order, which is a proved property of the bound, so the undecided items form one
 contiguous range found by binary search, with certain matches above it and certain non-matches below. The visible rows
-in the range are the cluster's **candidates**. At a 1% answer they are 22% of items for item queries and 95% for text
+in the range are the cluster's **candidates**. At a 1% answer they are 22% of items for in-distribution queries and 95% for OOD queries
 queries, whose scores are spread less widely.
 
 **Planner.** A cost model in microseconds, timed when the index opens, chooses per cluster between the index path and
@@ -203,7 +212,7 @@ one-sided budget for threshold queries and for the k-NN counts above. The refere
 0.008–0.009 below each certified value; the certified figures are floating-point computations, not interval-verified.
 The bit rates are designed with a fixed constant (`CSG`), so the stored code does not depend on N.
 
-On a 50k index (N = 2¹⁶, constants 6.724 and 7.639), 200 item and 200 text queries at seven answer sizes and four
+On a 50k index (N = 2¹⁶, constants 6.724 and 7.639), 200 item and 200 OOD queries at seven answer sizes and four
 filtered visible sets gave no wrong item, no violation in 42.2 million interval checks, exact k-NN throughout, and a
 largest randomised error of 5.47 standard deviations against a constant of 7.64. At 1M the benchmark of section 6 found
 the index's answers byte-identical to the plain f16 scan at every visible set.
@@ -218,7 +227,7 @@ median over three runs of the median over 20 queries, computed with `rust/result
 while bytes and the full-vector share are exact. Bytes are read per item of N and include full vectors, so 15.4 B/item
 is 1% of the f16 data. "Full" is the share of all rows whose full vector is read.
 
-| Answer | Item ms | Item B/item | Item full | Text ms | Text B/item | Text full |
+| Answer | In-dist ms | In-dist B/item | In-dist full | OOD ms | OOD B/item | OOD full |
 |---|---|---|---|---|---|---|
 | 0.01% | 2.48 | 2.9 | 0.11% | 20.2 | 20.6 | 0.55% |
 | 0.1% | 3.51 | 5.8 | 0.24% | 23.6 | 26.1 | 0.40% |
@@ -228,20 +237,20 @@ is 1% of the f16 data. "Full" is the share of all rows whose full vector is read
 | 75% | 69.0 | 238.9 | 6.82% | 75.5 | 282.2 | 8.49% |
 
 A plain f16 scan of every row takes 86–89 ms on the same machine (`rust/REPORT_RAND.md`), so the index is faster at
-every size, by 35× for item queries at 0.01% and by 1.1–1.2× at 50%. Large answers cost nearly as much as a scan because
-almost every item must be read deep enough to be decided: at a 50% item answer 91% of items enter the first randomised
-level and 20% the last. Text queries cost more at small answers because their scores are concentrated, so at a 1% text
+every size, by 35× for in-distribution queries at 0.01% and by 1.1–1.2× at 50%. Large answers cost nearly as much as a scan because
+almost every item must be read deep enough to be decided: at a 50% in-distribution answer 91% of items enter the first randomised
+level and 20% the last. OOD queries cost more at small answers because their scores are concentrated, so at a 1% OOD
 answer 95% of items enter the first level and 46% reach 56 B.
 
 ### 4.2 Where the time goes
 
 The newest full breakdown, `rust/results/system/bd_p2c.out`, comes from the build of `rust/REPORT_BOUNDS.md`, just
 before the constants work (constants 7.413 and 9.086 at N = 10⁹). The constants work changed bytes and the full-vector
-share (item 50%: 301 → 276 B/item, 9.63% → 8.43%) and no phase. Its columns are decoded from `breakdown2` in
+share (in-distribution 50%: 301 → 276 B/item, 9.63% → 8.43%) and no phase. Its columns are decoded from `breakdown2` in
 `rust/src/run2.rs`: the wall time is the best of two unprofiled runs, and the phases come from a third, profiled run
 whose time stamps add their own cost, mostly to "level other". Times are ms per query, means over 20 queries.
 
-| Phase | Item 1% | Item 50% | Text 1% | Text 50% |
+| Phase | In-dist 1% | In-dist 50% | OOD 1% | OOD 50% |
 |---|---|---|---|---|
 | Wall, unprofiled | 7.70 | 75.75 | 40.06 | 79.77 |
 | Wall, profiled | 12.79 | 87.69 | 47.97 | 93.34 |
@@ -261,7 +270,7 @@ whose time stamps add their own cost, mostly to "level other". Times are ms per 
 | Wrong items against brute force | 0 | 0 | 0 | 0 |
 
 A query's fixed cost is 6–7 ms once most groups are open: about 3 ms for the 37.7 MB of int8 basis products, 1.8–1.9 ms
-for the cut, which reads 6 MB of float64 centres, and 0.8 ms for the rotations. That is a sixth of a 1% text query and a
+for the cut, which reads 6 MB of float64 centres, and 0.8 ms for the rotations. That is a sixth of a 1% OOD query and a
 third of a 0.01% one. At large answers the work per item dominates. Decode, bounds and decisions together take 39–42 ms,
 nearly half of the profiled time, and decode is bound by the bytes read, while half of the bounds time is decoding the
 randomised scalars. Full vectors take 11–14 ms at 50% for about 100,000 reads, and re-pack and compaction 9 ms.
@@ -288,7 +297,7 @@ int8 copy.
 
 The share of a query's items that reads each part decides what must be resident. Every query reads the fixed parts of
 the groups and clusters it opens, so those stay in memory. The first levels are read by most candidates: 95% of items
-enter the 4-byte level for a 1% text answer and 97% for a 50% item answer. The 256-byte level is entered by 1.6% to 20%
+enter the 4-byte level for a 1% OOD answer and 97% for a 50% in-distribution answer. The 256-byte level is entered by 1.6% to 20%
 of items across those two cells and full vectors by 0.1% to 10%, so the deep levels and the vectors are the parts to
 leave on disk, where each level is already stored contiguously per cluster. Not measured yet: the index with any part on
 disk or under a memory cap, which is in progress on `research/bench-capped`. The planner's plain scan reads every
@@ -302,7 +311,7 @@ reads in full.
 ## 6. Against other systems
 
 `bench/threshold-db/REPORT.md` on branch `research/bench-update` (to be merged) compares the index with databases and
-vector libraries on 999,950 vectors of the same corpus and 15 mixed queries (5 image, 10 text), with every answer
+vector libraries on 999,950 vectors of the same corpus and 15 mixed queries (5 in-distribution image queries, 10 OOD OOD queries), with every answer
 returned as a complete id set. Its index is the build of section 4.2, which reads 6.5–8.5% more bytes than the final
 build at answers of 10–75%. Times are medians in ms at one thread.
 
@@ -336,7 +345,7 @@ of the visible rows (`pscan`) is built and off by default.
 **Codes rebuilt at open.** Opening the index re-encodes every item, which takes 2.5–3.5 minutes at 1M on two or three
 cores and leaves the process at 6.2 GiB. Not built: writing the encoded index to disk and opening it from there.
 
-**One unexplained crash.** One run segfaulted in the timing loop for text queries with a fifth randomised level at 384 B
+**One unexplained crash.** One run segfaulted in the timing loop for OOD queries with a fifth randomised level at 384 B
 and the `bail` option, both off by default. Seven reruns of that configuration, three with guard pages and bounds
 assertions, and an AddressSanitizer build at 50k and 1M were clean. The cause is unknown and may be hardware.
 
