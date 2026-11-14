@@ -1,0 +1,339 @@
+CONFIDENCE CONSTANTS, SECOND PASS: THRESHOLD SETS FIRST, THEN k-NN
+2026-11-14. Tags: [proved] [proved here, not refereed] [sketched: gap named] [refuted] [measured] [modelled]
+
+Scripts and logs: /tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/surge/bounds2_work/
+  consts2.py, consts3.py (constants), thr768.py (mixed rule, BioCLIP-2 200k, n = 768), thr.py (glove, n = 100),
+  simcap.py, simband.py (toy checks of the data-dependent constants), pairdep.py (two items under one rotation).
+No repository was edited. Nothing is running. (One toy run was moved to the background by the harness when it
+passed three minutes; I killed it by pid and reran it shorter in the foreground.)
+Every proof below is mine and unchecked by anyone else. T1-T3 and T5 are a few lines each; T4 is longer and
+is the one to referee.
+
+Notation. delta(c) is the exact one-sided tail of a coordinate of a uniform unit vector in R^(n-1), at c
+standard deviations (Lemma 8, Prop 10). c(E) is the constant with E x delta(c) = eps: a union over E one-sided
+events. eps = 1e-9, N = 1e9. L = number of randomised levels. sigma_l(x) is item x's error sd at level l.
+"Exclude" = upper bound below t. "Certify in" = lower bound at or above t. "Exact read" = full vector.
+
+
+0. SHORT ANSWER
+
+Thresholds at a billion items (the first priority).
+- The mixed rule is sound and is the right scheme: certify in from codes, exclude from codes, read exactly only
+  what the last code level leaves undecided. Verifying every admitted item costs at least one exact read per
+  match and is out for large answers (measured: 0.89-1.17 reads per match against 0.08-0.37 for the mixed rule).
+- Which side gets which constant [proved]. The upper-bound constant c_ex can only hurt true matches; its
+  union is over matches that reach a randomised level. The lower-bound constant c_in can only hurt
+  non-matches; its union is over non-matches that reach a randomised level. Each item has one harmful side,
+  so even the all-items union is N x L one-sided events, not 2 x N x L.
+- Constants below the all-items union exist and are proved (section 1), but at N = 1e9 with answers of 1e6
+  and more they are worth little: everything sound lies between 8.2 and 8.8 at n = 768 (today 8.79 exact,
+  9.35 as implemented). The reason is arithmetic: c grows as the square root of a logarithm.
+- The number of exact reads is linear in (c_in + c_ex), not exponential, because the last level is narrow.
+  Measured at n = 768: the best provable constants cut exact reads by 1-5% against the plain all-items
+  constant; even the unattainable single-item constant (6.1) would cut them by only 25-30%.
+- What does move exact reads: the depth of the last code level (4 bits to 6 bits per dimension: 3-3.4x fewer),
+  and a tolerance d (d = 0.005 with a 6-bit last level leaves 0.4-1.2% of a read per match; d = 0.01 none).
+- Exact reads grow slightly slower than the answer: about |S|^0.8 on the measured sample, 0.37 per match at
+  a 0.01% answer falling to 0.08 at 30% (flat 6-bit code, 576 B). The local-basis design should be several
+  times lower (0.02-0.06 per match modelled from FINDINGS 6.2 and 6.3).
+- Recommendation: for threshold sets use the mixed rule with the one-sided all-items constant on both sides
+  (8.61 / 8.72 / 8.83 at n = 512 / 768 / 1,536, five levels). It keeps each item's decision a function of that
+  item alone, so a cached result masked per viewer equals the result computed over the visible set, for every
+  seed. Add the cap-grid constant for exclusion only when answers below about 1e6 matter.
+
+k-NN. The union over k is tight in the worst case [proved, and measured in a toy]. Two small sound gains
+remain: one-sided tail (5.92 / 6.28 / 6.44 against 5.99 / 6.37 / 6.54) and an uneven split of eps across
+levels (level 1 at 5.81 / 6.15 / 6.30). Together about 1% of bytes and 5-12% of first-level survivors on
+glove. Nothing in the structure ideas of question 3 survives.
+
+
+1. THRESHOLD QUERIES
+
+Setting. V is the viewer's visible set, S = {x in V : q.x >= t}. U0 is the set of visible items that reach a
+randomised level; it must not depend on the seed (in the local-basis stream it is what the deterministic
+levels through 32 B leave undecided; in the flat design it is every visible item in a cluster that the
+cluster bounds do not decide). N0 = |U0|. At level l an undecided item is excluded if e + c_ex sigma < t,
+certified in if e - c_in sigma >= t, otherwise passed to level l + 1; after level L it is read exactly.
+
+T1. One harmful side [proved]. A match is decided wrongly only by its upper bound, a non-match only by its
+lower bound. Hence Pr[R != S] <= L (|S and U0| delta(c_ex) + |U0 minus S| delta(c_in)).
+Proof: union bound over the (item, level) pairs of U0, one event each; U0 is fixed (Prop 12).
+Consequences: (a) the all-items constant is c(N0 L), one-sided: 8.61 / 8.72 / 8.83 instead of 8.68 / 8.79 /
+8.90. (b) Any pair (c_ex, c_in) with the displayed sum at most eps is sound. (c) Prop 12 already lets the
+constant be chosen per query from N0, because N0 is known before any randomised decision and is the same
+for every seed. On the local-basis stream N0 is 1-5 times the answer for item-like queries (FINDINGS 6.2).
+
+T2. Self-bounding exclusion [proved]. Let c*(.) be c with (count) x L x delta = eps_ex. Let the algorithm, at
+each exclusion, use any constant at least c*(U), U = the number of items of U0 not yet excluded. Then
+Pr[some match is excluded] <= eps_ex, for any order of work and any number of re-tests.
+Proof. Let c0 = c*(|S and U0|), a number that does not depend on the seed, and G = {every match's upper
+bound at constant c0 holds at every level}; Pr[not G] <= eps_ex. Take the first wrong exclusion in execution
+order. Before it no match was excluded, so U >= |S and U0| and the constant used was at least c0. An upper
+bound that fails at a larger constant fails at c0, so G fails. So the bad event is inside not-G. The
+data-dependent constant needs no union over its possible values, because the only event used is the fixed
+event G. (Same first-failure argument as Theorem 5.)
+Weakness: U counts everything not yet excluded, so on weak first levels it is far above |S|.
+
+T3. Cap grid for exclusion [proved]. Caps M_j = M_0 2^j, constants c_j with L delta(c_j) = eps_0 / M_j.
+Run the query at c_j; let R_j be the result. Accept if |R_j and U0| <= M_j, else go to the next cap.
+Assume no non-match is admitted (true with certainty under verified inclusion; true on T1's certify-in
+event under the mixed rule). Then Pr[the accepted result differs from S] <= 2.1 eps_0 when caps are tried
+in increasing order (M_0 = 64), and <= 3.1 eps_0 for any order or starting cap.
+Proof. Fix j and let F_j = number of matches whose upper bound fails at c_j; E F_j <= |S| eps_0 / M_j and
+|R_j| >= |S| - F_j. If |S| <= M_j: Pr[R_j != S] <= |S| eps_0 / M_j. If |S| > M_j: acceptance needs
+F_j >= |S| - M_j >= 1, and Markov gives eps_0 (|S| / M_j) / (|S| - M_j), which is at most (1 + 1/M_j) eps_0
+at the cap just below |S| and at most 2 eps_0 / M_j at lower caps. In increasing order the search stops at
+the first cap >= |S| at the latest, so the sum over caps is eps_0 (1 + 1 + 1/M_0 + 4/M_0). In any order the
+caps above |S| add a geometric series, total eps_0 (2 + 1 + 5/M_0). Markov is the right tool: near-duplicate
+matches fail together (pairdep.py: correlation 0.38 / 0.77 / 0.92 at cosine 0.9 / 0.99 / 0.999).
+Result: c_ex = c(about 4.2 |S and U0| L) with the whole eps, 8.4 with half. No dependence on N.
+Toy check [measured, simcap.py, n = 16, eps = 0.1, 40,000 seeds]: failure rate at most 0.046 for independent
+matches sitting exactly at t, 0.003 for duplicates; without the factor 2.1 it sits at eps (0.098-0.102 at
+|S| = M_0 and M_0 + 1; the proof allows slightly above eps there), so there is no room to drop the factor.
+The oracle constant c(|S|) fails at 0.093-0.101: the union bound is tight.
+
+T4. Band rule, both sides [proved here, not refereed]. The union can be taken over the items left undecided
+after a level, which for a large answer is far fewer than the matches.
+Fix nominal scales sbar_l(x), not depending on the seed and non-increasing in l (say a design tan(phi) per
+level times the item's |r| w / sqrt(n-1)), and a bracket gamma >= 1. An item whose realised scale exceeds
+gamma sbar uses the all-items constant c_far at that level; otherwise its scale is raised to at least sbar.
+Constants: L N0 delta(c_far) = eps_0; delta(c_acc) = eps_0 / (2 J L (L+1)) with J the number of caps;
+floor c_min = (gamma c_far + c_acc) / (1 + gamma). At level l use c_l = max(c_min, c(M)) with
+L delta(c(M)) = eps_0 / M for a cap M, on both sides, and accept the level if the number D_l of items still
+undecided after it is at most M. Then Pr[some wrong decision] <= 6 eps_0.
+Proof. For item x, level l, constant c, let b = |q.x - t| / sbar_l(x) (seed-free).
+(i) Far or badly coded items: if b > gamma (c_far - c), a wrong decision at c needs a harmful error beyond
+c + b / gamma > c_far. Those events do not depend on c; their union over items and levels has probability
+at most eps_0.
+(ii) Near items P = {b <= gamma (c_far - c)}: a seed-free set of size n_P, non-increasing in c. Each is wrong
+with probability at most delta(c). A near item is decided at or before level l only if some level's error
+exceeds c_min - gamma (c_far - c) >= c_acc in absolute value (scales at earlier levels are at least
+sbar_l). So the number Y of near items not left undecided has E Y <= 2 l delta(c_acc) n_P.
+(iii) If n_P <= 2M the near items contribute at most (n_P / M) eps_0 / L; summed over the caps where this
+case holds (an upper set of a doubling grid, n_P non-increasing) that is at most 4 eps_0 / L per level.
+If n_P > 2M, acceptance (D_l <= M) forces Y >= n_P / 2, probability at most 4 l delta(c_acc) by Markov;
+summed over caps and levels, at most eps_0.
+Every event is defined per (item, level, cap) and does not depend on which items reached the level, so the
+rule for choosing caps is free. Total 6 eps_0. Only per-item laws are used (each conditional on that item's
+own rotated vector), never a joint law.
+Result: c_l = max(floor, c(12 L D_l)). The floor is 8.12 / 8.21 / 8.30 (five levels, gamma = 1.4).
+Gaps to name: (a) gamma needs a seed-free bracket on tan(phi) per level. At n = 768 the measured relative
+spread of tan(phi) is 2.6% / 3.1% / 6.5% / 11% at 1 / 2 / 4 / 6 bits, so gamma = 1.4 is safe for 1-4 bits
+and needs care at 6. (b) The proof is written for the plain width; Theorem B's self-normalised width needs
+the same steps in the pivot's units, not written out. The measured "band" rows below use Theorem B's
+interval and no bracket, so they show the size of the effect, not a run of the proved rule.
+The floor is an artefact of using Markov with no joint law.
+
+T5. What the constant would have to be [proved inequality; the rule built on it is a conjecture].
+For a fixed constant c and one level, E[number of wrong decisions] <= K delta(c) E[number left undecided],
+K = 2 / (1 - 2 delta(c)). Proof: the sphere coordinate has a symmetric log-concave density, so
+delta(a + b) <= 2 delta(a) delta(b). An item at distance p sd from t is wrong with probability at most
+delta(c + p). If p <= c it stays undecided with probability at least 1/2 - delta(c). If p > c it stays
+undecided with probability delta(p - c) - delta(p + c), and delta(c + p) <= 2 delta(c) delta(p - c).
+So the natural rule is delta(c) = eps / (K L D_l): a union over the undecided, with no floor.
+Conjecture: that rule is sound up to a small factor. Gap: a lower-tail bound for D_l under one shared
+rotation that beats Markov (a second-moment bound would do if near-threshold items contain no giant group
+of near-duplicates; duplicates are exactly where the per-item law says nothing jointly).
+Toy evidence [measured, simband.py, n = 64, N = 2,000, eps = 0.1, 4,000 seeds]: with 100 independent items at
+the threshold and the rest far away, the raw rule runs at c = 3.02 (all-items 3.71) and fails at 0.087; with
+half of the 100 as duplicates 0.040; with everything at the threshold 0.090. Never above eps.
+Necessary constant: with near-independent items the true failure probability of a level at constant c is
+about (undecided after the level) / c^2 x delta(c). At the last level with 1e7 exact reads and a fifth of
+eps, n = 768, that needs c of about 7.7-7.8. So no analysis of this decision rule can go below that there;
+T4 proves 8.5; the all-items constant is 8.72. The whole prize is about 10% of exact reads.
+
+Constants for thresholds, N = 1e9, eps = 1e-9, five randomised levels [computed, consts3.py]
+(one rotation over all n dimensions; with block rotations the constant lies between this and the sub-G column)
+
+  union                                              sub-G   n=512   n=768  n=1536
+  today: N x 5, two-sided                             9.35    8.68    8.79    8.90
+  T1: all N, harmful side only, whole eps             9.28    8.61    8.72    8.83
+  mixed, certify-in side: N x L at eps/2              9.35    8.68    8.79    8.90
+  mixed, exclude side, T3, |S| = 1e3 (eps/2)          7.92    7.34    7.41    7.47
+  mixed, exclude side, T3, |S| = 1e5                  8.48    7.87    7.95    8.03
+  mixed, exclude side, T3, |S| = 1e6                  8.75    8.12    8.21    8.30
+  mixed, exclude side, T3, |S| = 1e7                  9.01    8.36    8.46    8.56
+  mixed, exclude side, T3, |S| = 1e8                  9.26    8.59    8.70    8.81
+  T1(c): both sides, exposed set N0 = 1e6             8.50    7.89    7.97    8.06
+  T1(c): both sides, exposed set N0 = 1e7             8.77    8.14    8.23    8.32
+  T1(c): both sides, exposed set N0 = 1e8             9.03    8.38    8.48    8.58
+  T4: both sides, undecided after the level = 1e4     8.25    7.66*   7.73*   7.80*   (* below the floor)
+  T4: undecided = 1e6                                 8.79    8.16    8.25    8.34
+  T4: undecided = 1e7                                 9.05    8.40    8.50    8.60
+  T4: undecided = 1e8                                 9.30    8.63    8.74    8.85
+  T4 floor (gamma 1.4)                                8.75    8.12    8.21    8.30
+  single item x L (not attainable simultaneously)     6.68    6.14    6.18    6.22
+  deterministic cap sqrt(n-1)                           -    22.61   27.69   39.18
+
+Smallest sound constants today, n = 768: certify in 8.21-8.72 (T4 at deep levels, else T1); exclude 7.4-8.7
+(T3 for answers up to 1e7, T1 or T4 beyond). With three levels subtract about 0.06.
+
+Measured effect at n = 768 [measured, thr768.py: BioCLIP-2 200k, flat global-rotation codes of 1, 2, 4, 6 bits
+(96 / 192 / 384 / 576 B cumulative), 40 corpus items as queries, constants as if N = 1e9 at the same answer
+share, Theorem B's interval; no match lost and no non-match admitted in any row]
+Exact reads per true match after the 6-bit level:
+
+  answer share (matches at 1e9)        0.01% (1e5)  0.1% (1e6)  1% (1e7)  10% (1e8)  30% (3e8)
+  hazard: density at t / answer, per unit score  267   152       79        30         18
+  today, 8.79 both sides                    0.376     0.229     0.159     0.104      0.080
+  T1 all N one-sided, 8.69                  0.374     0.227     0.157     0.103      0.079
+  mixed: T3 exclude, all-N certify-in       0.361     0.221     0.155     0.103      0.080
+  T4 band rule                              0.359     0.215     0.150     0.100      0.078
+  verified inclusion (no certify-in)        1.167     1.109     1.073     1.000      0.886
+  single item constant 6.15 (not sound)     0.281     0.160     0.112     0.073      0.056
+  T1 with tolerance d = 0.002               0.099     0.076     0.065     0.052      0.044
+  T1 with tolerance d = 0.005               0.004     0.008     0.010     0.012      0.010
+  T1 with tolerance d = 0.01                0         0         0         0          0
+  same, stopping at the 4-bit level (384 B), T1   1.13  0.78    0.53      0.35       0.27
+
+Undecided per match after the 1-bit / 2-bit / 4-bit levels, T1: 23.8 / 5.0 / 1.14 at 0.01%; 2.8 / 1.24 /
+0.35 at 10%. The exclude-side constant matters at the weak levels and small answers (T3: 19.0 after 1 bit
+at 0.01%, 20% fewer) and not at all from a 1% answer up.
+
+How exact reads scale [measured + argued]. Reads = (score density at t) x (c_in + c_ex) x (last-level sd),
+within a factor of two on this sample. So: linear in the two constants; linear in the last level's
+width; and against answer size they follow the hazard, which falls as the threshold moves into the bulk:
+3.7e4 reads at 1e5 matches, 2.3e5 at 1e6, 1.6e6 at 1e7, 1.0e7 at 1e8, 2.4e7 at 3e8, about |S|^0.8.
+These are for the flat code, which the level-0 report puts about 6x wider than the local-basis stream on
+this data. From FINDINGS 6.2 (deterministic, 384 B: 0.05-0.15 undecided per match) and 6.3 (randomised
+width 0.4x the deterministic at 384 B) the local-basis stream should read 0.02-0.06 per match [modelled].
+Glove, n = 100 [measured, thr.py, N = 1.18M, 4-bit last level]: 10 / 8 / 6.4 / 4.6 / 2.6 reads per match at
+answers of 10 / 100 / 1e3 / 1e4 / 1e5; T3 cuts first-level survivors 35% at 10 matches, 3% at 1e4.
+
+Tolerance d [proved]. Certify in when the lower bound reaches t - d, exclude when the upper bound is below
+t. The unions are unchanged (matches above t; non-matches below t - d). An item is undecided at level l
+only if its estimate lies in a window of width (c_in + c_ex) sigma_l - d, so
+- a level with (c_in + c_ex) sigma_l <= d leaves nothing: no item is read past it, whatever the answer size;
+- otherwise the undecided fall by the fraction d / ((c_in + c_ex) sigma_l) where density is locally flat;
+- d is worth d / (2 sigma_l) units of c at level l: nothing at weak levels, everything at the last.
+Measured above: (c_in + c_ex) sigma is 0.003-0.004 at 6 bits. What is given up: the answer is no longer
+unique, so Theorem 5 (adaptive queries) and "a filter built from another vector result" lose their proofs.
+
+Expected-error guarantees.
+- "Expected number of wrongly decided items <= eps" has the same constant as "probability of any error
+  <= eps": the union bound is the expectation. Nothing gained. [proved]
+- Per-item guarantee: each item is decided wrongly with probability at most eps_item. Constant c(L) at
+  eps_item: 6.14 / 6.18 / 6.22, independent of N and of the answer. By T5 the expected number of wrong items
+  in a query is at most 2 eps_item x (undecided after the first level). Exact reads fall 25-30% (row "single
+  item" above). Given up: for a 1e8 answer the chance that the bitmap has some wrong bit is bounded only by
+  0.4 at eps_item = 1e-9 (2e8 undecided after the first level); with near-independent errors the estimate is
+  1e-3 to 1e-2. This is not the owner's ruling as written (simultaneous, 1e-9 per query); it is that ruling
+  with eps scaled by the number of borderline items.
+
+
+2. k-NN: SHARPER THAN THE UNION?
+
+Independence across items under one rotation [refuted]. Lemma 8 gives each item's error a uniform direction;
+it gives no joint law. Given the two rotated vectors, both errors are images of fixed vectors under one
+Haar isometry of the complement, so their Gram matrix is fixed by the codes. Duplicates have identical
+errors. Measured (pairdep.py, n = 100, 1 bit, 400,000 rotations): correlation of the normalised errors
+0.00 / 0.02 / 0.09 / 0.38 / 0.77 / 0.92 at residual cosine 0 / 0.3 / 0.6 / 0.9 / 0.99 / 0.999; joint 2.5-sd
+exceedance 0.9x / 0.7x / 2x / 11x / 55x / 110x the product.
+It would not help if true [proved]: for independent events Pr[union] >= sum - sum^2 / 2, so the union bound
+loses a factor 1 - eps/2. Dependence can only make the union smaller, and cannot be assumed.
+
+The union over k is tight [proved by example, measured]. k matches tied at the k-th score with unrelated
+residuals fail nearly independently: the toy gives 0.093-0.101 at eps = 0.1 for the oracle constant.
+
+Gap slack [refuted as a constant; bounded]. The i-th neighbour is lost only if its bound fails by the gap
+s_i - s_k as well, so its risk is delta(c + gap / sd). The gaps are unknown until the answer is known, a
+rank-dependent rule is unsound (dropping against tau_j is only valid for j = k), and a posterior check on
+the returned gaps is unsound (losing a tied neighbour makes the returned gaps look safe). Lowering tau to
+the (k+j)-th score to manufacture a gap is the same rule as raising c. The most the gaps could ever give is
+c(kL) - c(L): 0.26 / 0.31 / 0.34 at k = 10, 0.50 / 0.61 / 0.67 at k = 100 (n = 100 / 256 / 768).
+
+Levels [proved]. An item is dropped once, so the drop events at different levels are disjoint and the
+probability of a drop is exactly the sum over levels. Nesting would help only if a failure at level 2 nearly
+always came with a failure at level 1; for a correlation of 0.5 between the two errors that overlap is of
+order 1e-3 [argued, not measured]. The only slack is the split: give level 1 most of eps. Sound for any
+fixed weights.
+
+One-sided tail [proved]. Theorem B's upper end needs only the event t - est <= kappa sqrt(R^2 - t^2): the
+left side minus the right is decreasing then increasing in t, so the event implies t <= the larger root.
+
+Best sound constants for the class (every returned item scored exactly, drop by upper bound against the
+k-th best exact score), eps = 1e-9 [computed, consts2.py]:
+
+  k-NN, k = 10, 3 levels                       sub-G   n=100   n=256   n=768
+  Theorem A as reported (two-sided)             7.05    5.99    6.37    6.54
+  one-sided                                     6.95    5.92    6.28    6.44
+  one-sided, level 1 holds 0.9 eps              6.80    5.81    6.15    6.30
+     level 2 holds 0.09 eps                     7.13    6.06    6.45    6.63
+     level 3 holds 0.01 eps                     7.43    6.28    6.72    6.93
+  k = 100 / k = 1,000, one-sided, even split    7.27 / 7.58   6.16 / 6.38   6.58 / 6.86   6.77 / 7.07
+  eps = 1e-6, k = 10, one-sided                 5.87    5.06    5.26    5.35
+
+Effect on glove [modelled from the level-0 table, Theorem B rows]: 1-bit survivors 130k -> 124k (one-sided)
+-> 115k (weighted); 2-bit 5.7k -> 5.4k or 6.1k; 4-bit 56 -> 60. Bytes 16.6 -> 16.4 MB (1%), because the 1-bit
+pass over every item is 89% of the bytes. The lever left is eps: 1e-9 -> 1e-6 is worth 0.9-1.1 units.
+
+
+3. STRUCTURE [all refuted as ways to lower the constant]
+
+- Requiring two independent failures (independent rotations or a second sketch, drop only if both say so).
+  Sound: each runs at c / sqrt(2). But the width is then (c / sqrt 2) sd plus the larger of two errors,
+  which is never better than averaging the two estimates at the full c (sd / sqrt 2 x c), and both lose to
+  spending the bits on one finer code (tan(phi) 0.755 -> 0.367 from 1 to 2 bits, against 0.755 / 1.41).
+  Worked case, glove 1 bit [modelled from the level-0 table]: after the same extra bytes, a rescue sketch
+  for the band between c = 4.2 and 6 still has about 64k items to refine, the plain second bit 12.5k.
+- Union of rescues is not the dead list's intersection (it multiplies failure probabilities instead of
+  intersecting intervals), but it lands on the same dead end for the reason above.
+- Independent rotations per level: drop events are already disjoint across levels; nothing to multiply.
+- Independent rotations per block: the sum of block errors is closer to Gaussian than one sphere
+  coordinate, so the exact-tail gain shrinks (at n = 768 one rotation gives 8.79 where sub-Gaussian gives
+  9.35). Use blocks only where the rotation cost forces it. [argued]
+- Deterministic bounds on some dimensions: they add width in l1 and remove no event from the union. With
+  the exact tail the randomised bound is never wider than the deterministic one for the same block.
+- Query-time randomness, a second pass on the same codes at another constant: Theorem 7; the second pass
+  fails on the same event.
+
+
+4. FILTERED QUERIES
+
+- k-NN: the union is over the k visible neighbours; the constant does not change. [proved]
+- Thresholds: every count above is over visible items, so the all-items constant becomes c(N_V L)
+  (7.92 at n = 768 for 1e6 visible, against 8.66) and T3 / T4 use visible counts. [proved]
+- The visible set must not depend on the seed. Access bitmaps do not. A filter that is itself an earlier
+  vector result does; with d = 0 it is covered by Theorem 5's argument (add the two eps), with d > 0 not.
+- "Computed over exactly what the viewer may see". With the all-items constant each decision depends on one
+  item, so masking a result equals computing it over the visible set, for every seed. With count-based
+  constants (T1(c), T3, T4) the constant depends on other items: count visible items only, and then nothing
+  invisible can influence the result. A cached all-viewer result masked afterwards is still exact with
+  probability 1 - eps for each viewer, but its constant was set by counts that include invisible items, so
+  on a failing seed (probability at most eps) a visible bit could depend on invisible data. To keep the
+  rule exact rather than exact-with-probability, cache only results made with the all-items constant. That
+  costs 1-5% more exact reads than the best provable rule (table above).
+
+
+5. THE MENU (N = 1e9, eps = 1e-9, three levels; n = 100 / 256 / 768)
+
+  guarantee                                   constant               what a user could see go wrong
+  all items simultaneous, today               7.48 / 8.36 / 8.79     nothing, at 1e-9 per query
+  all items, harmful side only (T1)           7.41 / 8.26 / 8.66     the same; a free 1-2% of width
+  returned set, k-NN, k = 10                  5.92 / 6.28 / 6.44     a true neighbour missing, 1e-9 per query;
+    (level 1 at 5.81 / 6.15 / 6.30)                                  never a wrong score or a non-neighbour
+                                                                     above a returned one
+  verified inclusion, thresholds (T3),        6.51 / 7.02 / 7.26     a match missing, 1e-9 per query; never
+    |S| = 1e3 / 1e5 / 1e7                     6.88 / 7.52 / 7.82     a non-match present. One exact read per
+                                              7.21 / 7.97 / 8.33     match: unusable for large answers
+  mixed rule, thresholds                      exclude as the row     a match missing or a non-match present,
+                                              above (+0.1), certify  1e-9 per query in total
+                                              in 7.45 / 8.31 / 8.74
+  per item (expected error), eps_item 1e-9    5.66 / 5.97 / 6.10     each bit wrong with probability 1e-9; a
+                                                                     1e8 answer has some wrong bit perhaps one
+                                                                     query in 100-1,000 (proved bound: 0.4)
+  any of the above with tolerance d           same constants         items within d below t may be in or out;
+                                                                     no exact reads once d >= 2c x last sd
+
+In every row the deterministic backstop holds with certainty: a wrongly decided item is within
+(sqrt(n-1) - c) sd of the threshold.
+
+Related work (from surge2/literature.txt, not verified by me): the k x levels union is ADSampling Corollary 4.2
+and PQR-Search Theorem 2; PQR-Search uses delta / n for range queries. T1's one-sided count, T2-T4 (unions
+over the exposed set, the answer, and the undecided band, chosen from the data without a union over the
+choice) and T5's inequality are not in those notes. T4 should go to the referee before anyone relies on it.
+
+Limits of this work. Constants are for one Haar rotation over all n dimensions; the BioCLIP stream's block
+rotations sit between those and the sub-Gaussian column. The n = 768 measurement uses flat codes and corpus
+items as queries; text queries and the local-basis stream were not run. "As if N = 1e9" scales counts at a
+fixed answer share. Zero violations in 200 (query, answer size) cases says nothing at 1e-9.
