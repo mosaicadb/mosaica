@@ -108,6 +108,8 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
         match f {
             "int" => p.int_det = true,
             "noint" => p.int_det = false,
+            "gtab" => p.gtab = true,
+            "nogtab" => p.gtab = false,
             _ => panic!("unknown plan flag {f:?}"),
         }
     }
@@ -155,6 +157,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
         alpha0: args().iter().any(|a| a == "--alpha0"),
         int_det: args().iter().any(|a| a == "--int"),
+        gtab: args().iter().any(|a| a == "--gtab"),
         jump_level: arg_usize("--jump", 0),
         ..Plan::default()
     };
@@ -195,7 +198,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
     out!("[fit] {}", c.p.fit);
-    out!("built v2 ({} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
+    out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c
 }
@@ -398,7 +401,8 @@ pub fn levels2(c: &Ctx2, reps: usize) {
             let gq = get_gq2(ix, &pr, ix.cl[ci].g, &mut st);
             let mut cq = cluster_q2(ix, ci, gq, &pr, dot64(&pr.q64, ix.centres_f64(ci)));
             if sweep && c.plan.int_det {
-                cq.enable_int(ix, ci);
+                cq.gtab = c.plan.gtab;
+                cq.enable_int(ix, ci, gq);
             }
             cq
         }).collect();

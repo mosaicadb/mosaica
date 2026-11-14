@@ -45,6 +45,7 @@ pub struct GQ2 {
     pub l1j: [f64; J],
     pub cyc: (u64, u64),   // basis product, rotations
     pub glut: Vec<OnceLock<LevelLut>>, // tables shared by the group's clusters (alpha = 0)
+    pub gtab: Vec<OnceLock<GTab>>,     // f32 tables of wq per level, combined per cluster with the centre's
 }
 
 pub struct Prep2 {
@@ -337,7 +338,7 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
         }
     }
     let t3 = tick();
-    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0 + t3 - t2, t2 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
+    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0 + t3 - t2, t2 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect(), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
 }
 
 /// Set up several groups at once: exact basis products in parallel, then one product per randomised block with the
@@ -411,6 +412,7 @@ pub struct CQ2 {
     pub w: Vec<f32>,
     pub luts: Vec<Option<LevelLut>>,
     pub shared: bool, // tables from the group (alpha = 0)
+    pub gtab: bool,   // tables combined from the group's and the centre's
     pub int: Option<IntDet>,
 }
 
@@ -426,10 +428,21 @@ pub struct IntDet {
 
 impl CQ2 {
     /// Decide the deterministic levels of threshold queries on the integer path.
-    pub fn enable_int(&mut self, ix: &Index2, ci: usize) {
+    /// With combined tables (set `gtab` first), the common step comes from the units' range bounds: the group's sum
+    /// and largest plus |alpha| times the centre's.
+    pub fn enable_int(&mut self, ix: &Index2, ci: usize, gq: &GQ2) {
         assert!(!self.shared, "the integer levels need the cluster's own tables");
         let gp = &ix.groups[ix.cl[ci].g];
-        self.int = Some(IntDet { sigma: int_sigma(&self.w, &gp.levels[..NDL], &ix.etab), rt: vec![None; NDL], b: [0.0; NDL], e: [0.0; NDL], q: [0.0; NDL] });
+        let sigma = if self.gtab {
+            let ts: Vec<&GTab> = (0..NDL).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
+            let (s, m) = unsafe { det_spans(&ts, &ix.ctab[ci][..NDL], &gp.levels[..NDL], self.alr) };
+            let units: usize = gp.levels[..NDL].iter().map(|l| l.units).sum();
+            let budget = (256 * IHMAX - 3 * units as i64) as f64;
+            ((s * (1.0 + 1.0 / 512.0) / budget).max(m * (1.0 + 1.0 / 512.0) / 65533.0) as f32).max(1e-30)
+        } else {
+            int_sigma(&self.w, &gp.levels[..NDL], &ix.etab)
+        };
+        self.int = Some(IntDet { sigma, rt: vec![None; NDL], b: [0.0; NDL], e: [0.0; NDL], q: [0.0; NDL] });
     }
 }
 
@@ -500,7 +513,7 @@ pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -1014,7 +1027,12 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             if cq.luts[l].is_none() {
                 let mut lut = LevelLut::default();
                 let step = if intm && l < NDL { Some(cq.int.as_ref().unwrap().sigma) } else { None };
-                build_lut(&cq.w, lp, &ix.etab, ix.split, step, &mut lut);
+                if cq.gtab {
+                    let gt = gq.gtab[l].get_or_init(|| group_tab(&gq.wq, lp, &ix.etab));
+                    combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
+                } else {
+                    build_lut(&cq.w, lp, &ix.etab, ix.split, step, &mut lut);
+                }
                 cq.luts[l] = Some(lut);
             }
             cq.luts[l].as_ref().unwrap()
@@ -1049,13 +1067,23 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         // verify: the level's tables in f64 from the same weights, unit by unit in row order
         let mut tab64: Vec<[f64; 16]> = Vec::new();
+        let w64: Vec<f64> = if verify && l < NDL {
+            if cq.gtab {
+                let wm = c.wm(gp);
+                gq.wq.iter().zip(&wm).map(|(&q, &m)| q as f64 - cq.alr as f64 * m as f64).collect()
+            } else {
+                cq.w.iter().map(|&x| x as f64).collect()
+            }
+        } else {
+            Vec::new()
+        };
         if verify && l < NDL {
             for part in &lp.parts {
                 for fs in &part.ufields {
                     let mut tv = [0f64; 16];
                     for &fi in fs.iter().take_while(|&&f| f != u16::MAX) {
                         let f = &part.fields[fi as usize];
-                        let w = cq.w[f.widx as usize] as f64;
+                        let w = w64[f.widx as usize];
                         for e in 0..16 {
                             tv[e] += w * ix.etab.e[f.eid as usize][e] as f64;
                         }
@@ -1535,10 +1563,11 @@ pub struct Plan {
     pub jump_level: usize, // when most items stay undecided (d > jump_d): no decisions before this level
     pub jump_d: f64,
     pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
+    pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false }
     }
 }
 impl Plan {
@@ -1991,8 +2020,9 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
                             let mut cq = cluster_q2a(ix, ci, gq, pr, qm, pl.alpha0);
+                            cq.gtab = pl.gtab && !pl.alpha0;
                             if pl.int_det && !o.want_iv {
-                                cq.enable_int(ix, ci);
+                                cq.enable_int(ix, ci, gq);
                             }
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();

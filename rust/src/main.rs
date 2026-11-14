@@ -770,16 +770,19 @@ fn main() {
             run2::bytesq2(&c, get("--nq", 100));
         }
         if has("e2e") {
-            // a second variant: another index (--index-b) and/or plan switches (--b), measured interleaved with the first
-            let ib = run2::arg_str("--index-b", "");
-            let bf = run2::arg_str("--b", "");
-            if ib.is_empty() && bf.is_empty() {
-                run2::e2e2(&[("a", &c)], get("--nq", 100));
-            } else {
-                let dir = if ib.is_empty() { run2::data_dir() } else { ib };
-                let cb = run2::setup2_at("run2", &dir, &bf);
-                run2::e2e2(&[("a", &c), ("b", &cb)], get("--nq", 100));
+            // further variants: another index (--index-b, --index-c) and/or plan switches (--b, --c), measured
+            // interleaved with the first
+            let mut extra = Vec::new();
+            for v in ["b", "c"] {
+                let (ib, bf) = (run2::arg_str(&format!("--index-{v}"), ""), run2::arg_str(&format!("--{v}"), ""));
+                if !ib.is_empty() || !bf.is_empty() {
+                    let dir = if ib.is_empty() { run2::data_dir() } else { ib };
+                    extra.push((v, run2::setup2_at("run2", &dir, &bf)));
+                }
             }
+            let mut vs: Vec<(&str, &run2::Ctx2)> = vec![("a", &c)];
+            vs.extend(extra.iter().map(|(v, cx)| (*v, cx)));
+            run2::e2e2(&vs, get("--nq", 100));
         }
         if has("breakdown") {
             run2::breakdown2(&c, get("--nq", 20));

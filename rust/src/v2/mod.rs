@@ -747,6 +747,20 @@ pub struct Index2 {
     pub full: Full2,
     pub nrows: usize,
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
+    pub ctab: Vec<Vec<kern::CTab>>, // per cluster, per level: the centre's tables (query-independent)
+}
+
+/// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
+/// directory.
+pub const INDEX_FORMAT: u32 = 3;
+
+impl Cl2 {
+    /// The centre's weights, as the query side combines them: det by coordinate mv sig (f32), rand by position.
+    pub fn wm(&self, gp: &GroupPlan2) -> Vec<f32> {
+        let mut w: Vec<f32> = self.mv32.iter().zip(&gp.sig).map(|(&m, &s)| m * s).collect();
+        w.extend_from_slice(&self.wmr);
+        w
+    }
 }
 
 impl Index2 {
@@ -1303,7 +1317,13 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
             sy.row_cl = cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
         }
     }
+    let ctab: Vec<Vec<kern::CTab>> = cl.par_iter().map(|c| {
+        let gp = &groups[c.g];
+        let wm = c.wm(gp);
+        gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
+    }).collect();
     let ix = Index2 {
+        ctab,
         meta,
         groups,
         codes,

@@ -730,37 +730,36 @@ pub fn centre_tab(wm: &[f32], lp: &LevelPlan, et: &ExpTab) -> CTab {
     c
 }
 
-/// Bounds of a unit's combined values v = Tq - alpha sigma_m theta^m: (mu, range), with a relative margin for the f32
-/// evaluation of v.
+/// A unit's combined values v = Tq - alpha sigma_m theta^m in f32 (entries 0..7, 8..15) and their extremes.
 #[inline(always)]
-pub fn unit_span(tmin: f32, tmax: f32, tm: u16, sm: f32, alpha: f32) -> (f64, f64) {
-    let am = alpha as f64 * sm as f64 * tm as f64;
-    let marg = 1e-5 * ((tmin as f64).abs() + (tmax as f64).abs() + am.abs()) + 1e-30;
-    let lo = tmin as f64 - am.max(0.0) - marg;
-    let hi = tmax as f64 + (-am).max(0.0) + marg;
-    (lo, hi - lo)
+pub unsafe fn unit_v(gt: &GTab, ct: &CTab, u: usize, am: __m256) -> (__m256, __m256, f32, f32) {
+    let tq = gt.t.get_unchecked(u).as_ptr();
+    let tm = _mm256_loadu_si256(ct.th.get_unchecked(u).as_ptr() as *const _);
+    let m0 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(tm)));
+    let m1 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(tm)));
+    let v0 = _mm256_fnmadd_ps(m0, am, _mm256_loadu_ps(tq));
+    let v1 = _mm256_fnmadd_ps(m1, am, _mm256_loadu_ps(tq.add(8)));
+    let hred = |x: __m256, f: &dyn Fn(__m128, __m128) -> __m128| {
+        let a = f(_mm256_castps256_ps128(x), _mm256_extractf128_ps::<1>(x));
+        let b = f(a, _mm_movehl_ps(a, a));
+        _mm_cvtss_f32(f(b, _mm_shuffle_ps::<1>(b, b)))
+    };
+    let lo = hred(_mm256_min_ps(v0, v1), &|a, b| _mm_min_ps(a, b));
+    let hi = hred(_mm256_max_ps(v0, v1), &|a, b| _mm_max_ps(a, b));
+    (v0, v1, lo, hi)
 }
 
-/// Sums and largest of the units' ranges over the deterministic levels: of Tq (from the group's tables) or of
-/// sigma_m theta^m (from the cluster's), for the integer step.
-pub fn det_spans_q(gts: &[&GTab]) -> (f64, f64) {
+/// Sum and largest of the combined units' ranges over the deterministic levels, for the integer step.
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn det_spans(gts: &[&GTab], cts: &[CTab], levels: &[LevelPlan], alpha: f32) -> (f64, f64) {
     let (mut s, mut m) = (0f64, 0f64);
-    for g in gts {
-        for u in 0..g.t.len() {
-            let r = (g.tmax[u] as f64 - g.tmin[u] as f64) + 1e-5 * ((g.tmin[u] as f64).abs() + (g.tmax[u] as f64).abs());
-            s += r;
-            m = m.max(r);
-        }
-    }
-    (s, m)
-}
-pub fn det_spans_m(cts: &[CTab], levels: &[LevelPlan]) -> (f64, f64) {
-    let (mut s, mut m) = (0f64, 0f64);
-    for (ct, lp) in cts.iter().zip(levels) {
+    for ((gt, ct), lp) in gts.iter().zip(cts).zip(levels) {
         let mut u = 0;
         for (p, part) in lp.parts.iter().enumerate() {
+            let am = _mm256_set1_ps(alpha * ct.step[p]);
             for _ in 0..part.units() {
-                let r = ct.step[p] as f64 * ct.tmax[u] as f64 * (1.0 + 1e-5);
+                let (_, _, lo, hi) = unit_v(gt, ct, u, am);
+                let r = (hi - lo) as f64;
                 s += r;
                 m = m.max(r);
                 u += 1;
@@ -771,7 +770,8 @@ pub fn det_spans_m(cts: &[CTab], levels: &[LevelPlan]) -> (f64, f64) {
 }
 
 /// The cluster's level tables from the group's f32 tables and the centre's stored ones, with `step` (the integer
-/// deterministic levels) or a step per part. Writes the same LevelLut as build_lut.
+/// deterministic levels) or a step per part. Writes the same LevelLut as build_lut. Each unit is shifted by mu_u, the
+/// smallest of its computed values, so its entries run from 0.
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step: Option<f32>, out: &mut LevelLut) {
     out.qsum = 0.0;
@@ -782,42 +782,38 @@ pub unsafe fn combine_lut(gt: &GTab, ct: &CTab, lp: &LevelPlan, alpha: f32, step
     out.lo.resize(lp.units * 16, 0);
     let mut g0 = 0;
     let mut u0 = 0;
-    let mut spans: Vec<(f64, f64)> = Vec::new();
+    let mut vs: Vec<(__m256, __m256, f32, f32)> = Vec::with_capacity(64);
     for (p, part) in lp.parts.iter().enumerate() {
         let nu = part.units();
         let sm = ct.step[p];
-        spans.clear();
-        let mut rmax = 0f64;
+        let am = _mm256_set1_ps(alpha * sm);
+        vs.clear();
+        let mut rmax = 0f32;
         for u in u0..u0 + nu {
-            let sp = unit_span(gt.tmin[u], gt.tmax[u], ct.tmax[u], sm, alpha);
-            rmax = rmax.max(sp.1);
-            spans.push(sp);
+            let x = unit_v(gt, ct, u, am);
+            rmax = rmax.max(x.3 - x.2);
+            vs.push(x);
         }
         let sc = match step {
             Some(s) => s,
-            None => ((rmax / 65533.0) as f32).max(1e-30),
+            None => (rmax / 65533.0).max(1e-30),
         };
-        let inv = 1.0 / sc as f64;
-        let a = _mm256_set1_ps(inv as f32);
-        let b = _mm256_set1_ps((-(alpha as f64) * sm as f64 * inv) as f32);
+        let inv = 1.0 / sc;
+        let a = _mm256_set1_ps(inv);
         let (mut off, mut ey) = (0f64, 0f64);
+        let asm = (alpha as f64 * sm as f64).abs();
         for (k, u) in (u0..u0 + nu).enumerate() {
-            let (mu, r) = spans[k];
-            off += mu;
-            let c = -mu * inv;
-            let qmax = (gt.tmin[u].abs().max(gt.tmax[u].abs()) as f64) * inv;
-            // f32 error of y = theta^m b + (Tq a + c), in steps
-            ey += 6.0 * U32 * (qmax + c.abs() + ct.tmax[u] as f64 * (alpha as f64 * sm as f64 * inv).abs()) + 1e-12;
+            let (v0, v1, lo, hi) = vs[k];
+            off += lo as f64;
             if step.is_some() {
-                out.qsum += (r * inv * (1.0 + 1e-6)).ceil() + 2.0;
+                out.qsum += ((hi - lo) as f64 / sc as f64 * (1.0 + 1e-6)).ceil() + 1.0;
             }
-            let cv = _mm256_set1_ps(c as f32);
-            let tq = gt.t.get_unchecked(u).as_ptr();
-            let tm = _mm256_loadu_si256(ct.th.get_unchecked(u).as_ptr() as *const _);
-            let m0 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(tm)));
-            let m1 = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(tm)));
-            let y0 = _mm256_fmadd_ps(m0, b, _mm256_fmadd_ps(_mm256_loadu_ps(tq), a, cv));
-            let y1 = _mm256_fmadd_ps(m1, b, _mm256_fmadd_ps(_mm256_loadu_ps(tq.add(8)), a, cv));
+            // f32 error of v (the product alpha sigma_m theta^m and the fused subtraction) and of (v - mu) / sc, in steps
+            let mag = (gt.tmin[u].abs().max(gt.tmax[u].abs()) as f64 + asm * ct.tmax[u] as f64 + (lo.abs().max(hi.abs())) as f64) / sc as f64;
+            ey += 4.0 * U32 * mag + 3.0 * U32 * 65536.0;
+            let mu = _mm256_set1_ps(lo);
+            let y0 = _mm256_mul_ps(_mm256_sub_ps(v0, mu), a);
+            let y1 = _mm256_mul_ps(_mm256_sub_ps(v1, mu), a);
             // to u16 (saturating; the step keeps every value within 0..65535), then high and low bytes
             let v = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi32(_mm256_cvtps_epi32(y0), _mm256_cvtps_epi32(y1)));
             let hl = _mm256_permute4x64_epi64::<0xd8>(_mm256_packus_epi16(_mm256_srli_epi16::<8>(v), _mm256_and_si256(v, _mm256_set1_epi16(255))));
@@ -1027,14 +1023,7 @@ mod tests {
             let alpha = ((rnd() * 2.0 - 1.0) * 3.0) as f32;
             let gt = unsafe { group_tab(&wq, &lp, &et) };
             let ct = centre_tab(&wm, &lp, &et);
-            let mut rmax = 0f64;
-            let mut u = 0;
-            for (p, part) in lp.parts.iter().enumerate() {
-                for _ in 0..part.units() {
-                    rmax = rmax.max(unit_span(gt.tmin[u], gt.tmax[u], ct.tmax[u], ct.step[p], alpha).1);
-                    u += 1;
-                }
-            }
+            let (_, rmax) = unsafe { det_spans(&[&gt], std::slice::from_ref(&ct), std::slice::from_ref(&lp), alpha) };
             for step in [None, Some((rmax / 60000.0 * (1.0 + rnd())) as f32)] {
                 let mut lut = LevelLut::default();
                 unsafe { combine_lut(&gt, &ct, &lp, alpha, step, &mut lut) };
