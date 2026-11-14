@@ -1,0 +1,23 @@
+==== run at 1794613216: ["/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/target/release/vexact", "--v2", "verify", "bytesq", "--nq", "369", "--data", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix", "--profile", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix/prof_qi.npy", "--res", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/results/c"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 20.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 1.0, 0.125, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 1.0, 0.5, 0.25], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [6.0, 4.0, 1.0, 0.5], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 128.1s
+[build2] encoded 311.0s
+[build2] CLIPSTATS det [L0(4B): beyond reach 32.735% of coded coords (0.000% of those at depth >= 2), excess 14.227% of rho^2; L1(8B): beyond reach 29.433% of coded coords (0.000% of those at depth >= 2), excess 19.692% of rho^2; L2(12B): beyond reach 27.135% of coded coords (0.000% of those at depth >= 2), excess 23.493% of rho^2; L3(16B): beyond reach 26.109% of coded coords (0.000% of those at depth >= 2), excess 26.918% of rho^2; L4(24B): beyond reach 24.229% of coded coords (0.000% of those at depth >= 2), excess 32.372% of rho^2; L5(32B): beyond reach 22.804% of coded coords (0.000% of those at depth >= 2), excess 36.952% of rho^2]; coded quantiser input u: |u|>3 0.2808%, |u|>4 0.0106%, E u^2 0.9778, kurtosis 3.069; randomised beyond scale [block0: 0.6574%, block1: 1.5105%, block2: 4.3938%, block3: 4.4724%]
+[build2] assembled 311.9s; x2 bound 4.882e-4; escapes: det norms 1252, |y| 5675, kappa 14522, tan 38463
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix/prof_qi.npy) 1000000 rows, 1000 clusters in 340.4s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 68.0, 76.7, 82.0, 95.3, 110.9, 129.7, 147.3, 163.8, 180.1, 215.2, 247.9, 281.7]
+verify2 0/569 2s wrong in/out 0/0 det 0 rand 0 checked 2257420 maxsd 4.18
+verify2 50/569 55s wrong in/out 0/0 det 0 rand 0 checked 98265196 maxsd 4.97
+verify2 100/569 90s wrong in/out 0/0 det 0 rand 0 checked 98265196 maxsd 4.97
+verify2 150/569 126s wrong in/out 0/0 det 0 rand 0 checked 98265196 maxsd 4.97
+verify2 200/569 165s wrong in/out 0/0 det 0 rand 0 checked 119442553 maxsd 4.97
+verify2 250/569 234s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 300/569 272s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 350/569 311s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 400/569 350s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 450/569 388s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 500/569 427s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+verify2 550/569 467s wrong in/out 0/0 det 0 rand 0 checked 512503417 maxsd 5.41
+VERIFY2 569 queries x 4 answer sizes: wrong-in 0 wrong-out 0; interval checks 512503417 (det violations 0, rand violations 0); largest randomised error 5.41 sd (c = 9.46); k-NN mismatches 0 of 569
+bytesq v2 item (200 queries): bytes read per item [2.22, 5.34, 18.87, 60.52]; touched [0.13, 0.224, 0.47, 0.842]
+bytesq v2 text (369 queries): bytes read per item [18.3, 27.32, 57.38, 116.8]; touched [0.75, 0.828, 0.943, 0.996]

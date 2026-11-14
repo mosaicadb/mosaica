@@ -1,0 +1,9 @@
+==== run at 1794614597: ["/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/target/release/vexact", "--v2", "bytesq", "--nq", "369", "--data", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix", "--profile", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix/prof_qmix.npy", "--res", "/tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/results/c_qmix"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] plans 14.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.125, 0.0], [1.0, 0.5, 0.125, 0.0], [1.0, 1.0, 0.125, 0.0], [1.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.25, 0.0], [2.0, 1.0, 0.5, 0.125], [2.0, 2.0, 0.5, 0.125], [3.0, 2.0, 0.5, 0.25], [3.0, 2.0, 1.0, 0.25], [3.0, 3.0, 1.0, 0.25], [4.0, 4.0, 1.0, 0.25], [4.0, 4.0, 2.0, 0.25], [5.0, 5.0, 2.0, 0.5]]
+[build2] calibrated 85.3s
+[build2] encoded 201.1s
+[build2] assembled 201.8s; x2 bound 4.882e-4; escapes: det norms 1468, |y| 5771, kappa 15242, tan 38255
+built v2 (16-bit tables, profile /tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_mix/prof_qmix.npy) 1000000 rows, 1000 clusters in 220.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 41.0, 58.8, 68.0, 74.8, 82.0, 95.3, 111.5, 129.7, 147.5, 164.5, 181.0, 214.6, 247.1, 282.5]
+bytesq v2 item (200 queries): bytes read per item [2.22, 5.31, 18.76, 60.21]; touched [0.13, 0.224, 0.47, 0.842]
+bytesq v2 text (369 queries): bytes read per item [17.82, 26.69, 56.36, 114.85]; touched [0.75, 0.828, 0.943, 0.996]

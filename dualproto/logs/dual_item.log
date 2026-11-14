@@ -1,0 +1,8 @@
+[     3s] Sigma_Q item largest eigenvalue share 0.10316465370624339 condition 870.5538554005527
+[     3s] group 0 items 8821 cond(VQ8) 10.0 sum mean-square z / sum sqrt gamma 1.0002578047091253 max ratio z ms / sqrt gamma 1.3970666876941729 r2 0.2282181705260094
+[    14s] group 16 items 9363 cond(VQ8) 10.4 sum mean-square z / sum sqrt gamma 1.0001425409260263 max ratio z ms / sqrt gamma 1.697097616739331 r2 0.2631365394978439
+[    24s] group 32 items 6501 cond(VQ8) 13.8 sum mean-square z / sum sqrt gamma 1.0003503270985057 max ratio z ms / sqrt gamma 1.7366043660893917 r2 0.22608483718877526
+[    35s] group 48 items 2391 cond(VQ8) 15.1 sum mean-square z / sum sqrt gamma 1.0004565380879038 max ratio z ms / sqrt gamma 2.095899517862958 r2 0.18078555844463895
+[    44s] bases done; largest condition number 208.5748784363447
+[    48s] zero-bit Cauchy-Schwarz slack E sum sqrt(lam q), item offsets: PCA 0.17093807166053265 dual 0.2009789502353651 | text offsets: PCA 0.28693981685587766 dual 0.28663475730028876
+[    48s] written /tmp/claude-0/-home-user-mosaica/8c244050-1af9-5b77-a4e8-97638e77c857/scratchpad/vc/proto/rustdata/dual_item

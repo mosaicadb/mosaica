@@ -1,0 +1,13 @@
+[     6s] covariances done
+[   216s] item_rand_proj {'item near4 proj (held-out)': np.float64(0.1488), 'item rand proj (held-out)': np.float64(0.2129), 'text test near50 proj': np.float64(0.2283), 'text test rand proj': np.float64(0.2448)}
+[   312s] item_near4_proj {'item near4 proj (held-out)': np.float64(0.1438), 'item rand proj (held-out)': np.float64(0.2369), 'text test near50 proj': np.float64(0.2264), 'text test rand proj': np.float64(0.25)}
+[   409s] item_near4_raw {'item near4 proj (held-out)': np.float64(0.1444), 'item rand proj (held-out)': np.float64(0.2404), 'text test near50 proj': np.float64(0.2282), 'text test rand proj': np.float64(0.2552)}
+[   505s] mix_rand_proj {'item near4 proj (held-out)': np.float64(0.1508), 'item rand proj (held-out)': np.float64(0.2192), 'text test near50 proj': np.float64(0.211), 'text test rand proj': np.float64(0.2229)}
+
+slack (smaller is better), rows = basis fit, columns = offset population
+                    item near4 proj (held-out)   item rand proj (held-out)       text test near50 proj         text test rand proj
+PCA                                     0.1521                      0.2609                      0.2315                      0.2621
+item_rand_proj                          0.1488                      0.2129                      0.2283                      0.2448
+item_near4_proj                         0.1438                      0.2369                      0.2264                      0.2500
+item_near4_raw                          0.1444                      0.2404                      0.2282                      0.2552
+mix_rand_proj                           0.1508                      0.2192                      0.2110                      0.2229

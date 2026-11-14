@@ -1,0 +1,27 @@
+[     5s] groups [4, 1, 60, 39, 37, 47, 14, 44, 16, 62, 57, 42] items 220263
+[    72s] group 4 done
+[   126s] group 1 done
+[   163s] group 60 done
+[   189s] group 39 done
+[   212s] group 37 done
+[   233s] group 47 done
+[   244s] group 14 done
+[   252s] group 44 done
+[   260s] group 16 done
+[   266s] group 62 done
+[   272s] group 57 done
+[   275s] group 42 done
+
+basis    budget(B) clip  clip-rate%   mean h item   mean h text   undecided@1% item%  text%  violations
+dual          4   False     2.115       0.17044       0.21033        36.496   75.202  0
+dual          4   True      2.115       0.17275       0.21318        37.194   75.560  0
+dual          8   False     2.313       0.14210       0.18197        27.659   69.624  0
+dual          8   True      2.313       0.14560       0.18646        28.834   70.362  0
+dual         16   False     2.309       0.10964       0.14794        17.726   59.517  0
+dual         16   True      2.309       0.11404       0.15390        19.262   61.011  0
+dual         32   False     2.291       0.07601       0.10985         9.188   42.601  0
+dual         32   True      2.291       0.08090       0.11694        10.717   45.416  0
+dual         48   False     2.206       0.05732       0.08711         5.746   30.611  0
+dual         48   True      2.206       0.06224       0.09459         7.077   34.159  0
+dual         96   False     1.996       0.03034       0.05083         2.443   12.644  0
+dual         96   True      1.996       0.03462       0.05802         3.221   16.253  0
