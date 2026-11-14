@@ -33,6 +33,7 @@ pub struct Ctx2 {
     pub plan: Plan,
     pub approx: Approx,
     pub dial: Option<Dial>,
+    pub pseudo: Vec<(usize, Vec<f32>, Vec<u32>)>,
 }
 
 pub fn args() -> Vec<String> {
@@ -260,7 +261,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     out!("[approx] f = {} from {} pseudo-queries in {:.1}s; mean items scanned at recall 0.95 by f: {:?}", approx.f, pseudo.len(), t.s(), fres.iter().map(|x| (x.0, x.1.round())).collect::<Vec<_>>());
     let dial = if args().iter().any(|a| a == "--fit-dial") || arg_str("--dial", "").contains("fit") {
         let t = Timer::new();
-        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999]);
+        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999], 10, None);
         out!("[approx] dial fitted in {:.1}s: eps {:?}, pseudo-query recall {:?}, fits {:?}", t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>(), d.fits);
         for (e, f) in d.eps.iter().zip(&d.factors) {
             out!("[approx] eps {e}: factors by level {:?}", f.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
@@ -269,7 +270,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     } else {
         None
     };
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial };
+    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial, pseudo };
     out!("[fit] {}", c.p.fit);
     out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -1200,11 +1201,17 @@ pub fn dbcmp(c: &Ctx2) {
     out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));
 }
 
-/// Top-k on the threshold-db queries, unfiltered, one thread: for every `--step`-th query and each k in `--ks`, the
-/// exact k-NN path (knn2) and the approximate mode (knn2_dial) at the cheapest setting reaching each mean recall in
-/// `--targets`. Recall is |returned ∩ first k of `--order`| / k. The approximate ladder doubles the cluster count up to
-/// every cluster, with the dial off and fitted for 0.99; each dial's first rung reaching a target is timed at `--reps`
-/// and the faster of the two is kept. Rows go to RESULTS/liminal_topk.csv; param is "nprobe:dial".
+/// Top-k on the threshold-db queries, one thread: for every `--step`-th query, each visible set in `--vis-sets`
+/// (`all`, or a file of sorted int32 entity ids) and each k in `--ks`, the exact k-NN path (knn2, unless `--no-exact`)
+/// and the approximate mode at the cheapest setting reaching each mean recall in `--targets`. Recall is |returned ∩
+/// the first k visible entries of `--order`| / k. The approximate ladder doubles the cluster count up to every cluster
+/// for each dial; each dial's first rung reaching a target is timed at `--reps` and the fastest is kept.
+/// `--approx-mode new` (knn2_fast) walks the dial off and the dials fitted for this k at each eps in `--dial-eps` on
+/// the pseudo-queries; `old` (knn2_dial) the dial off and the setup's dial fitted for 0.99. With `--params FILE` (a
+/// liminal_topk.csv), the approximate mode runs only at the settings listed there and is not timed.
+/// Rows go to RESULTS/liminal_topk.csv (all) or liminal_topk_<set>.csv, param "nprobe:dial"; per query, the items
+/// touched, entering each level, full vectors read and bytes read of the chosen settings go to
+/// RESULTS/liminal_topk_stats.csv.
 pub fn dbtopk(c: &Ctx2) {
     let ix = &c.ix;
     let order = read_npy(&arg_str("--order", ""));
@@ -1215,72 +1222,153 @@ pub fn dbtopk(c: &Ctx2) {
     let step = arg_usize("--step", 10);
     let ks: Vec<usize> = arg_str("--ks", "1,10,100,1000").split(',').map(|x| x.parse().unwrap()).collect();
     let targets: Vec<f64> = arg_str("--targets", "0.8,0.99").split(',').map(|x| x.parse().unwrap()).collect();
+    let fast = match arg_str("--approx-mode", "new").as_str() {
+        "new" => true,
+        "old" => false,
+        m => panic!("--approx-mode {m}: write new or old"),
+    };
+    let eps_list: Vec<f64> = arg_str("--dial-eps", "0.001,0.01,0.03,0.1").split(',').map(|x| x.parse().unwrap()).collect();
+    let fixed: Option<Vec<(String, usize, String)>> = Some(arg_str("--params", "")).filter(|f| !f.is_empty()).map(|f| {
+        std::fs::read_to_string(&f).unwrap().lines().skip(1).filter_map(|l| {
+            let v: Vec<&str> = l.split(',').collect();
+            (v[0] == "liminal_approx").then(|| (v[1].to_string(), v[2].parse().unwrap(), v[4].to_string()))
+        }).collect()
+    });
     let k_cl = ix.k();
-    let dial99: Vec<f32> = c.dial.as_ref().expect("dbtopk needs --fit-dial").for_target(0.99).to_vec();
+    let nl = ix.meta.nl();
     let pl = pool(1);
-    let path = format!("{}/liminal_topk.csv", res_dir());
-    let fresh = !std::path::Path::new(&path).exists();
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
-    if fresh {
-        writeln!(f, "method,target,k,query,param,median_ms,recall").unwrap();
-    }
-    type Row = (usize, f64, f64);
-    for &k in &ks {
-        assert!(k <= ncol);
-        let exact: Vec<(usize, std::collections::HashSet<u32>)> = (0..qs.len()).step_by(step)
-            .map(|qi| (qi, order[qi * ncol..qi * ncol + k].iter().map(|&x| x as u32).collect())).collect();
-        let eval = |run: &(dyn Fn(&[f32]) -> Vec<u32> + Sync), r: usize| -> Vec<Row> {
-            exact.iter().map(|(qi, es)| {
-                let mut ts = Vec::new();
-                let mut got = Vec::new();
-                for _ in 0..r {
-                    let t = Timer::new();
-                    got = pl.install(|| run(&qs[*qi]));
-                    ts.push(t.ms());
-                }
-                (*qi, median(&ts), got.iter().filter(|x| es.contains(x)).count() as f64 / k as f64)
-            }).collect()
-        };
-        let summ = |r: &[Row]| (median(&r.iter().map(|x| x.1).collect::<Vec<_>>()), mean(&r.iter().map(|x| x.2).collect::<Vec<_>>()));
-        let mut emit = |method: &str, target: &str, param: &str, r: &[Row]| {
-            let (ms, rec) = summ(r);
-            out!("dbtopk {method} {target} k {k}: {param}: median {ms:.3} ms, mean recall {rec:.4}");
-            for &(qi, ms, rec) in r {
-                writeln!(f, "{method},{target},{k},{qi},{param},{ms:.4},{rec:.5}").unwrap();
-            }
-        };
-        let r = eval(&|q| knn2(ix, q, k, None, c.plan).ents.iter().map(|x| x.1).collect(), reps);
-        emit("liminal_exact", "exact", "-", &r);
-        let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).collect();
-        ladder.push(k_cl);
-        let mut best: Vec<Option<(f64, String, Vec<Row>)>> = vec![None; targets.len()];
-        for (dname, dial) in [("off", None), ("fit0.99", Some(&dial99[..]))] {
-            let run = |np: usize| move |q: &[f32]| knn2_dial(ix, &c.approx, q, k, None, np, dial, false, c.plan).ents.iter().map(|x| x.1).collect::<Vec<u32>>();
-            let mut done = vec![false; targets.len()];
-            for &np in &ladder {
-                let (ms1, rec1) = summ(&eval(&run(np), 1));
-                out!("dbtopk ladder k {k}: nprobe {np} dial {dname}: median {ms1:.3} ms, mean recall {rec1:.4}");
-                let mut timed: Option<Vec<Row>> = None;
-                for (ti, &tg) in targets.iter().enumerate() {
-                    if done[ti] || rec1 < tg {
-                        continue;
-                    }
-                    done[ti] = true;
-                    let r = timed.get_or_insert_with(|| eval(&run(np), reps)).clone();
-                    let (ms, rec) = summ(&r);
-                    if rec >= tg && best[ti].as_ref().map_or(true, |b| ms < b.0) {
-                        best[ti] = Some((ms, format!("{np}:{dname}"), r));
-                    }
-                }
-                if done.iter().all(|&d| d) {
-                    break;
-                }
-            }
+    let open = |name: &str, head: &str| {
+        let path = format!("{}/{name}", res_dir());
+        let fresh = !std::path::Path::new(&path).exists();
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+        if fresh {
+            writeln!(f, "{head}").unwrap();
         }
-        for (ti, b) in best.iter().enumerate() {
-            match b {
-                Some((_, p, r)) => emit("liminal_approx", &targets[ti].to_string(), p, r),
-                None => out!("dbtopk approx {} k {k}: not reached", targets[ti]),
+        f
+    };
+    let mut fs = open("liminal_topk_stats.csv", &format!("method,target,k,vis,query,param,recall,touched,full_reads,bytes,{}",
+        (0..nl).map(|l| format!("enter{l}")).collect::<Vec<_>>().join(",")));
+    for vspec in arg_str("--vis-sets", "all").split(',') {
+        let (vname, bm) = if vspec == "all" { ("all".to_string(), None) } else {
+            let ids: Vec<u32> = read_npy(vspec).i32s().iter().map(|&x| x as u32).collect();
+            (std::path::Path::new(vspec).file_stem().unwrap().to_string_lossy().to_string(), Some(RoaringBitmap::from_sorted_iter(ids).unwrap()))
+        };
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        let vis = vis.as_ref();
+        let mut f = open(&if vname == "all" { "liminal_topk.csv".to_string() } else { format!("liminal_topk_{vname}.csv") }, "method,target,k,query,param,median_ms,recall");
+        type Row = (usize, f64, f64);
+        for &k in &ks {
+            let exact: Vec<(usize, std::collections::HashSet<u32>)> = (0..qs.len()).step_by(step).map(|qi| {
+                let e: std::collections::HashSet<u32> = order[qi * ncol..(qi + 1) * ncol].iter().map(|&x| x as u32)
+                    .filter(|&x| bm.as_ref().map_or(true, |b| b.contains(x))).take(k).collect();
+                assert_eq!(e.len(), k, "--order holds fewer than k visible entries for query {qi}");
+                (qi, e)
+            }).collect();
+            let eval = |run: &(dyn Fn(&[f32]) -> KnnOut2 + Sync), r: usize| -> Vec<Row> {
+                exact.iter().map(|(qi, es)| {
+                    let mut ts = Vec::new();
+                    let mut got = Vec::new();
+                    for _ in 0..r {
+                        let t = Timer::new();
+                        got = pl.install(|| run(&qs[*qi])).ents;
+                        ts.push(t.ms());
+                    }
+                    (*qi, median(&ts), got.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64)
+                }).collect()
+            };
+            let summ = |r: &[Row]| (median(&r.iter().map(|x| x.1).collect::<Vec<_>>()), mean(&r.iter().map(|x| x.2).collect::<Vec<_>>()));
+            let mut emit = |method: &str, target: &str, param: &str, r: &[Row]| {
+                let (ms, rec) = summ(r);
+                out!("dbtopk {vname} {method} {target} k {k}: {param}: median {ms:.3} ms, mean recall {rec:.4}");
+                for &(qi, ms, rec) in r {
+                    writeln!(f, "{method},{target},{k},{qi},{param},{ms:.4},{rec:.5}").unwrap();
+                }
+            };
+            if !args().iter().any(|a| a == "--no-exact") {
+                let r = eval(&|q| knn2(ix, q, k, vis, c.plan), reps);
+                emit("liminal_exact", "exact", "-", &r);
+            }
+            // the dials of the ladder, by name
+            let dials: Vec<(String, Option<Vec<f32>>)> = if fast {
+                let t = Timer::new();
+                // the fit's queries: the setup's pseudo-queries, or with --dial-from queries the queries that are not timed
+                let held: Vec<(usize, Vec<f32>, Vec<u32>)> = (0..qs.len()).filter(|qi| qi % step != 0).map(|qi| (usize::MAX, qs[qi].clone(), Vec::new())).collect();
+                let fq = if arg_str("--dial-from", "pseudo") == "queries" { &held[..] } else { &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))] };
+                let d = Dial::fit(ix, fq, c.plan, &targets, k, Some(&c.approx));
+                out!("[dial k {k}] fitted on {} queries in {:.1}s: eps {:?}, their recall@{k} over every cluster {:?}", fq.len(), t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>());
+                for (e, fa) in d.eps.iter().zip(&d.factors) {
+                    out!("[dial k {k}] eps {e}: factors by level {:?}", fa.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
+                }
+                std::iter::once(("off".to_string(), None)).chain(eps_list.iter().map(|&e| (format!("e{e}"), Some(d.for_eps(e).to_vec())))).collect()
+            } else {
+                vec![("off".into(), None), ("fit0.99".into(), Some(c.dial.as_ref().expect("--approx-mode old needs --fit-dial").for_target(0.99).to_vec()))]
+            };
+            let run = |np: usize, dial: Option<&[f32]>, q: &[f32]| if fast {
+                knn2_fast(ix, &c.approx, q, k, vis, np, dial, c.plan)
+            } else {
+                knn2_dial(ix, &c.approx, q, k, vis, np, dial, false, c.plan)
+            };
+            let dial_of = |name: &str| dials.iter().find(|d| d.0 == name).unwrap_or_else(|| panic!("no dial {name}")).1.as_deref();
+            // per target: (param, rows timed or None)
+            let mut chosen: Vec<Option<(String, Option<Vec<Row>>)>> = vec![None; targets.len()];
+            if let Some(fx) = &fixed {
+                for (ti, &tg) in targets.iter().enumerate() {
+                    chosen[ti] = fx.iter().find(|x| x.1 == k && x.0.parse::<f64>().ok() == Some(tg)).map(|x| (x.2.clone(), None));
+                }
+            } else {
+                let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).collect();
+                ladder.push(k_cl);
+                let mut best: Vec<Option<(f64, String, Vec<Row>)>> = vec![None; targets.len()];
+                for (dname, dial) in &dials {
+                    let mut done = vec![false; targets.len()];
+                    for &np in &ladder {
+                        let (ms1, rec1) = summ(&eval(&|q| run(np, dial.as_deref(), q), 1));
+                        out!("dbtopk {vname} ladder k {k}: nprobe {np} dial {dname}: median {ms1:.3} ms, mean recall {rec1:.4}");
+                        let mut timed: Option<Vec<Row>> = None;
+                        for (ti, &tg) in targets.iter().enumerate() {
+                            if done[ti] || rec1 < tg {
+                                continue;
+                            }
+                            done[ti] = true;
+                            let r = timed.get_or_insert_with(|| eval(&|q| run(np, dial.as_deref(), q), reps)).clone();
+                            let (ms, rec) = summ(&r);
+                            if rec >= tg && best[ti].as_ref().map_or(true, |b| ms < b.0) {
+                                best[ti] = Some((ms, format!("{np}:{dname}"), r));
+                            }
+                        }
+                        if done.iter().all(|&d| d) {
+                            break;
+                        }
+                    }
+                }
+                for (ti, b) in best.into_iter().enumerate() {
+                    chosen[ti] = b.map(|(_, p, r)| (p, Some(r)));
+                }
+            }
+            for (ti, ch) in chosen.iter().enumerate() {
+                let Some((param, rows)) = ch else {
+                    out!("dbtopk {vname} approx {} k {k}: not reached", targets[ti]);
+                    continue;
+                };
+                if let Some(r) = rows {
+                    emit("liminal_approx", &targets[ti].to_string(), param, r);
+                }
+                let (np, dname) = param.split_once(':').unwrap();
+                let (np, dial): (usize, Option<&[f32]>) = (np.parse().unwrap(), dial_of(dname));
+                let mut tot = vec![0f64; 4 + nl];
+                for (qi, es) in &exact {
+                    let o = pl.install(|| run(np, dial, &qs[*qi]));
+                    let rec = o.ents.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64;
+                    let bytes = bytes_read2(ix, &o.st) * ix.nrows as f64;
+                    let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
+                    writeln!(fs, "liminal_approx_{},{},{k},{vname},{qi},{param},{}", if fast { "new" } else { "old" }, targets[ti],
+                        v.iter().map(|x| format!("{x:.4}")).collect::<Vec<_>>().join(",")).unwrap();
+                    for (a, b) in tot.iter_mut().zip(&v) {
+                        *a += b / exact.len() as f64;
+                    }
+                }
+                out!("dbtopk {vname} stats {} k {k} {param}: recall {:.4} touched {:.0} full {:.0} bytes {:.0}; entering by level {:?}", targets[ti], tot[0], tot[1], tot[2], tot[3],
+                    tot[4..].iter().map(|x| x.round()).collect::<Vec<_>>());
             }
         }
     }
