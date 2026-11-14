@@ -1286,8 +1286,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         sets.sort();
         sets.dedup();
         let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
-        let l1 = p.meta.csg * p.meta.csg / 2.0;
-        let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { (p.meta.csg, tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
+        // one event per (item, level), on the side that would make the item's decision wrong: delta = eps / (N L)
+        let l1 = p.meta.csg * p.meta.csg / 2.0 - 2f64.ln();
+        let vals: HashMap<Vec<usize>, (f64, tail::Source)> = sets.par_iter().map(|s| (s.clone(), if plain { ((2.0 * l1).sqrt(), tail::Source::SubGaussian) } else { tail::level_constant(s, l1, &p.meta.certs) })).collect();
         for gp in groups.iter_mut() {
             for lr in 0..gp.rates.len() {
                 gp.csgl[lr] = vals[&set(gp, lr)].0 as f32;

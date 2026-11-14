@@ -3032,47 +3032,106 @@ pub fn knn2d(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, 
         cands.push((r, lb as f64, ub as f64, next, false));
     }
     let ncand = cands.len();
+    let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |r, lv| row_interval2(ix, &pr, r as usize, lv, &mut st), |r| exact_value2(ix, &pr, r as usize))
+        .into_iter().map(|(v, r)| (v, ix.row_ent[r as usize])).collect();
+    fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
+    fin.truncate(kk);
+    let t_sel = tm.ms() - t_seed - t_sweep;
+    KnnOut2 { ents: fin, st, cands: ncand, t_seed, t_sweep, t_sel }
+}
+
+/// The k best of `cands` (row, lower bound, upper bound, next level, exact), refining intervals a level at a time:
+/// `refine(row, level)` is the row's interval at that level, its exact score (lower = upper) at level `nl`. A candidate
+/// is dropped when at least k other candidates have a lower bound above its upper bound, and certified when at most
+/// k - 1 others have an upper bound at or above its lower bound; an exact score replaces the interval. Intervals are
+/// intersected across levels. Returns the survivors with their exact scores, or +inf where certified without one; the
+/// caller keeps the k largest. The answer is exact when every upper bound of the true k best holds and every lower bound of every
+/// other candidate holds, whatever the other sides do; the candidates must contain the k best.
+pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: usize, mut refine: impl FnMut(u32, usize) -> (f64, f64), mut exact: impl FnMut(u32) -> f64) -> Vec<(f64, u32)> {
+    let desc = |v: &mut Vec<f64>| v.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    // the candidate's own bound is left out of each count
+    let certified = |c: &(u32, f64, f64, usize, bool), ubs: &[f64]| ubs.partition_point(|&u| u >= c.1) - ((c.2 >= c.1) as usize) < kk;
     loop {
         if cands.len() <= kk {
             break;
         }
         let mut lbs: Vec<f64> = cands.iter().map(|c| c.1).collect();
-        lbs.sort_by(|a, b| b.partial_cmp(a).unwrap());
-        let tau = lbs[kk - 1];
-        cands.retain(|c| c.2 >= tau);
+        desc(&mut lbs);
+        cands.retain(|c| lbs.partition_point(|&l| l > c.2) - ((c.1 > c.2) as usize) < kk);
         if cands.len() <= kk {
             break;
         }
         let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
-        ubs.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        desc(&mut ubs);
         let mut refined = 0;
-        for i in 0..cands.len() {
-            let c = cands[i];
-            if c.4 {
-                continue;
-            }
-            if ubs.partition_point(|&u| u >= c.1) <= kk {
+        for c in cands.iter_mut() {
+            if c.4 || certified(c, &ubs) {
                 continue;
             }
             refined += 1;
-            let (l, h) = row_interval2(ix, &pr, c.0 as usize, c.3, &mut st);
-            cands[i] = (c.0, l.max(c.1), h.min(c.2), c.3 + 1, c.3 >= nl);
+            let (l, h) = refine(c.0, c.3);
+            *c = if c.3 >= nl { (c.0, l, h, c.3 + 1, true) } else { (c.0, l.max(c.1), h.min(c.2), c.3 + 1, false) };
         }
         if refined == 0 {
             break;
         }
     }
     let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
-    ubs.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    let mut fin: Vec<(f64, u32)> = cands.iter().map(|c| {
-        let cert = !c.4 && ubs.partition_point(|&u| u >= c.1) <= kk;
-        let v = if c.4 { c.1 } else if cert { f64::INFINITY } else { exact_value2(ix, &pr, c.0 as usize) };
-        (v, ix.row_ent[c.0 as usize])
-    }).collect();
-    fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
-    fin.truncate(kk);
-    let t_sel = tm.ms() - t_seed - t_sweep;
-    KnnOut2 { ents: fin, st, cands: ncand, t_seed, t_sweep, t_sel }
+    desc(&mut ubs);
+    cands.iter().map(|c| {
+        let v = if c.4 { c.1 } else if certified(c, &ubs) { f64::INFINITY } else { exact(c.0) };
+        (v, c.0)
+    }).collect()
+}
+
+#[cfg(test)]
+mod knn_tests {
+    use super::select_knn;
+    use rand::{Rng, SeedableRng};
+    use rand_distr::{Distribution, StandardNormal};
+
+    /// reports/bounds3/knn_onesided.py: random scores, L levels of intervals of half-width 0.6 x 0.45^l around a
+    /// shifted centre; with `harmful_only` the true k best have valid upper bounds and invalid lower bounds as often as
+    /// not, and every other item the reverse. Returns the number of wrong answers.
+    fn wrong_answers(harmful_only: bool, trials: usize, seed: u64) -> usize {
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(seed);
+        let mut bad = 0;
+        for _ in 0..trials {
+            let n = rng.gen_range(8..40usize);
+            let k = rng.gen_range(1..6usize);
+            let l = rng.gen_range(1..5usize);
+            let s: Vec<f64> = (0..n).map(|_| StandardNormal.sample(&mut rng)).collect();
+            let mut ord: Vec<usize> = (0..n).collect();
+            ord.sort_by(|&a, &b| s[b].partial_cmp(&s[a]).unwrap());
+            let mut top: Vec<u32> = ord[..k].iter().map(|&i| i as u32).collect();
+            top.sort();
+            let iv: Vec<Vec<(f64, f64)>> = (0..n).map(|i| (0..l).map(|lv| {
+                let h = 0.6 * 0.45f64.powi(lv as i32);
+                let e = if !harmful_only {
+                    rng.gen_range(-h..h)
+                } else if top.contains(&(i as u32)) {
+                    rng.gen_range(-h..3.0 * h)
+                } else {
+                    rng.gen_range(-3.0 * h..h)
+                };
+                (s[i] + e - h, s[i] + e + h)
+            }).collect()).collect();
+            let cands = (0..n).map(|i| (i as u32, iv[i][0].0, iv[i][0].1, 1, false)).collect();
+            let refine = |r: u32, lv: usize| if lv >= l { (s[r as usize], s[r as usize]) } else { iv[r as usize][lv] };
+            let mut fin = select_knn(cands, k, l, refine, |r| s[r as usize]);
+            fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            let mut got: Vec<u32> = fin[..k.min(fin.len())].iter().map(|x| x.1).collect();
+            got.sort();
+            bad += (got != top) as usize;
+        }
+        bad
+    }
+
+    #[test]
+    fn exact_when_only_the_harmful_side_of_each_interval_holds() {
+        assert_eq!(wrong_answers(false, 4000, 1), 0);
+        assert_eq!(wrong_answers(true, 4000, 2), 0);
+    }
 }
 
 // ---------------- synthetic items (scale test) ----------------
