@@ -1,0 +1,3 @@
+(1) largest ln T(a) - ln T(a with one scale raised) over 300 cases: 0.00e+00 (must not be positive beyond rounding)
+(2) stop-loss of X against that of s U_D at 16 (shares, t): violations 0; largest ln ratio -0.0018 (must be <= 0)
+(3) upper end violated in 0 of 200000 random cases

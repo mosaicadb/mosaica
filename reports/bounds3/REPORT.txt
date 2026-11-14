@@ -1,0 +1,376 @@
+CONFIDENCE CONSTANTS, THIRD PASS: THE BLOCK ROTATIONS
+2026-11-14. Tags: [proved] [proved here, unrefereed] [sketched: gap named] [refuted] [measured] [computed]
+[computed] marks a number obtained by floating-point evaluation of a proved inequality. Where a discretisation is
+used it errs on the safe side and I say so; the arithmetic is not interval-verified.
+
+Everything is in /tmp/claude-1000/-home-joe-code-tessera/44285a24-9b9a-44a0-8e3a-604c4b51c0e9/scratchpad/bounds3/
+(file list in section 9). No repository was edited. I ran the 50k verify binary once (bin/p1c, cores 0-3, under a
+minute, foreground) to regenerate the study dump after the original was removed from the scratchpad; I deleted my
+copy when the measurements were saved. Nothing is running.
+
+Setting for every number unless stated: eps = 1e-9, L = 4 randomised levels, blocks as tools/fit.py lays them out
+(n = 768: 96 / 128 / 256 / 288 positions, so d = 95 / 127 / 255 / 287), half-widths in units of the error's standard
+deviation ("sd"). "Two-sided" is the code's budget, delta = eps / (2 N L) per side; "one-sided" is eps / (N L).
+
+
+0. SHORT ANSWER
+
+1. The four-block constant is 9.086 only because Chernoff's bound drops a factor of about 1 / (c sqrt(2 pi)). The
+   exact law gives 8.766 as the largest quantile over all block shares (n = 768, N = 1e9, two-sided), and I certify
+   8.774 by a grid computation whose every approximation is on the safe side. With the harmful side only it is 8.695,
+   certified 8.704. The one-block constant goes 7.413 -> 7.373. [proved here, unrefereed] + [computed]
+2. Rotating four blocks separately costs nothing against one rotation of all dimensions: 8.7659 against 8.7653 for
+   one coordinate of a sphere in 767 dimensions. The second pass argued that block rotations give up part of the
+   exact-tail gain; for this layout that is refuted. The committed 9.09 is Chernoff's loss, not the blocks'.
+   [computed]
+3. There is a closed form with a pen-and-paper proof (convex order against one large sphere): 8.885 two-sided, 8.815
+   one-sided. It is the safe fallback for block layouts that have no certificate. [proved here, unrefereed]
+4. One constant per block instead of one per level costs nothing per item and gives typical items 8.53 / 8.59 / 8.62
+   at the 96 / 160 / 256 B levels in place of 8.704. Three such sets are certified. [proved here] + [computed]
+5. The harmful-side budget is sound for threshold queries as coded. It is NOT sound for the k-NN selection loop as
+   coded: I first "proved" that it was, then a simulation with intervals valid on the harmful side only returned 554
+   wrong answers in 4,000. With two counts changed to exclude the candidate itself it is sound (0 in 4,000, and a
+   proof). The other agent's remark in REPORT_BOUNDS.md that k-NN's bound would double is right for today's code.
+6. The union over levels cannot be shortened. One item's errors at successive levels correlate 0.45-0.47 [measured];
+   then both bounds fail together with probability at most e^-15 delta, so the union bound over levels is exact to
+   one part in a million. A maximal inequality would start to pay only when adjacent levels' errors correlate
+   above 0.9, which needs more than about twenty levels over this range. Splitting eps unevenly over levels is
+   sound and worth under half a percent of bytes. [proved here] [measured]
+7. Theorem B's self-normalised interval, written for several blocks, narrows the first two randomised levels by 4%
+   and the last by nothing: 0.6% of bytes, no exact reads. [proved here] [measured]
+8. For per-item decisions the exact quantile of the item's own error law, with eps split over levels, is the least
+   any rule can use; the all-items count cannot be avoided in the worst case. [sketched: gap named in R9] So what is
+   left after items 1 and 4 is about 2% of width.
+9. Measured on the 50k dump against the committed constants (7.413 / 9.086): the recommended constants (7.373 /
+   8.704) cut exact reads 4.1% and bytes 3.0%; with per-block constants 5.2% and 3.9%; the best sound combination
+   I found 7% and 4.8%; the unattainable single-item constant 32% and 24%. Exact reads move 10.8% per unit of c,
+   linearly. So the earlier finding stands: the constant is a weak lever, and it is now nearly used up.
+10. Two things outside the brief matter as much (section 7): the stored scale is 2.45% too large (probably the
+   15-value tan table), worth 2.4% of exact reads; and the constant is computed for N = 1e9 on a 1M index, worth
+   8.5% of exact reads at 1M and nothing at 1e9.
+
+
+1. WHAT THE CODE DOES (c25333fa9) AND NOTATION
+
+In a coded block j the estimate's error is A_j <u_j, P_j Delta_j>, which equals A_j |Delta_j,perp| U_j with U_j one
+coordinate of a uniform unit vector in R^(d_j), d_j = nb_j - 1, independent across blocks and independent of the
+item's rotated vectors (Lemma 8 as refereed; one Haar rotation per block). The code uses a_j = A_j |Delta_j| with A_j
+decoded from rounded-up scalars, sd^2 = sum_j a_j^2 / d_j, and the half-width c sd plus deterministic terms. c is
+7.413 where one block is coded (exact tail) and 9.086 where four are (Chernoff with the exact moment generating
+function, minimum over lambda of the maximum over shares). The budget is delta = eps / (2 N L) per side with N = 1e9.
+
+T(a; x) = P[sum_j a_j U_j >= x].  H_delta(a) = the x with T(a; x) = delta (the exact half-width).
+Shares w_j = a_j^2 / (d_j sd^2).  c(w) = H_delta(a) / sd.  c* = the largest c(w) over all shares.
+
+
+2. RESULTS
+
+R1. Scales may be rounded up. [proved here, unrefereed]
+Statement. Let U_1..U_J be independent, each with a density symmetric about 0 and non-increasing on [0, inf). For
+x > 0, T(a; x) is non-decreasing in every a_j >= 0.
+Proof. Fix j and let W = sum_{i != j} a_i U_i. If W = 0 then T = P[U_j >= x / a_j]. Otherwise W has a density f_W that
+is symmetric and unimodal (a convolution of symmetric unimodal densities is). By the symmetry of U_j,
+T = E[ (G(x - a_j |U_j|) + G(x + a_j |U_j|)) / 2 ] with G(y) = P[W >= y]. For fixed u >= 0 the derivative in a_j of
+G(x - a_j u) + G(x + a_j u) is u (f_W(x - a_j u) - f_W(x + a_j u)) >= 0, because |x - a_j u| <= x + a_j u. QED
+It applies: the coordinate's density is proportional to (1 - s^2)^((d-3)/2), unimodal for d >= 3; blocks have d >= 15.
+Checked numerically on 300 random cases (checks.py).
+
+R2. The exact half-width per item. [proved here, unrefereed; rests on Lemma 8 as refereed]
+Statement. For an item, a level and its coded blocks, let abar_j >= A_j |Delta_j,perp| and h >= 0 be functions of the
+item's rotated vectors, its stored scalars and the query, with T(abar; h) <= delta. Then P[error >= h] <= delta and
+P[error <= -h] <= delta. In particular h = H_delta(abar) is valid, and no function of abar alone can be smaller.
+Proof. Given the rotated vectors the error is sum_j a_j U_j with a_j = A_j |Delta_j,perp| <= abar_j and the U_j as in
+section 1, so P[error >= h | rotated vectors] = T(a; h) <= T(abar; h) <= delta by R1. Integrate. QED
+Consequences. (i) Scalars rounded up on any grid are covered, including grids calibrated on rotated items: the
+inclusion of events is pointwise. (ii) Any upper bound of H_delta is a valid half-width, and the minimum of several
+upper bounds of H_delta is still ONE event per (item, level), since each is at least H_delta.
+
+R3. The worst-case constant over block shares. [reduction proved here, unrefereed; numbers computed]
+Statement. h = c* sd is valid for every item, with c* = sup over shares of c(w).
+Value. The supremum sits at w_j = (d_j + 2) / sum_i (d_i + 2) to three digits (the shares that bring the fourth
+cumulant closest to zero) in all twelve configurations, and c* is below the exact tail of one sphere coordinate in
+D' = sum_j (d_j + 2) - 2 dimensions by 0.00002 to 0.0006. I use D' as a predictor, not as a theorem.
+Certificate (cert2.py). Three steps, each an inequality in the safe direction:
+ (i)  By R1 shares may be rounded up. At grid step h = 1/K every share vector lies in a cell whose corner g has
+      sum_j g_j = 1 + (J - 1) h, so sup_w T(a(w); X) <= max over corners. Cells whose corner fails are split in 8
+      and re-tested at K -> 2K (64 up to 4096); the certificate holds when no cell fails.
+ (ii) a_j U_j <= Y_j = eta ceil(a_j U_j / eta), so the tail is at most that of the lattice sum (eta = 0.001 sd).
+ (iii) The lattice tail is an exact finite sum, evaluated through the discrete Fourier transform of the tilted
+      probabilities; the frequencies left out are bounded by the block with the smallest remainder (every other
+      factor has modulus at most 1). Margins: 1e-6 relative, 1e-11 absolute; pmf by 8-point Gauss-Legendre per cell.
+ Cross-checks [computed]: the lattice bound lies between the exact tail at X and at X - 4 eta in 10 of 10 cases; the
+ inversion integral used for "exact" values reproduces the incomplete beta tail to 6 digits at d = 95..767 and agrees
+ with a Monte Carlo of 4e6 draws at tails 2e-2..2e-5 within 1.6 standard errors; the certificate's worst corner was
+ recomputed with all frequencies and matched to 5 decimals; a rerun of the main case with half the lattice step,
+ twice the window and twice the frequencies certifies 8.7005 where the standard run certifies 8.704 (cert_fine.log);
+ and at a grid too coarse to succeed (K = 512, X = 8.783 two-sided) it fails, as the exact value says it must.
+ What a referee should check: the cell cover and its refinement (cert2.py, 60 lines), and that floating point cannot
+ move a tail by more than the margins. The slack of the certificate is 0.008-0.009 (grid 1.5 c / K, lattice 3 eta).
+Numbers: section 3. At n = 768, N = 1e9: 8.766 exact, 8.774 certified two-sided; 8.695 and 8.704 one-sided.
+Two and three blocks (95, 127) and (95, 127, 255), one-sided: 8.198 and 8.568 exact, 8.207 and 8.577 certified.
+
+R4. A closed form (convex order against one large sphere). [proved here, unrefereed]
+Statement. Let D = sum_j d_j, m_j = E sqrt(Beta(d_j / 2, (D - d_j) / 2)) = Gamma(d_j/2 + 1/2) Gamma(D/2) /
+(Gamma(d_j/2) Gamma(D/2 + 1/2)), and s^2 = sum_j a_j^2 / m_j^2. Then for every x,
+   T(a; x) <= inf over t < x of E (s U_D - t)_+ / (x - t),
+with U_D one coordinate of a uniform unit vector in R^D and
+   E (U_D - t)_+ = C_D (1 - t^2)^((D-1)/2) / (D - 1) - t P[U_D >= t],  C_D = Gamma(D/2) / (sqrt(pi) Gamma((D-1)/2)).
+Since s <= theta sqrt(D) sd with theta^2 = max_j d_j / (D m_j^2) (1.0023 at n = 768), this is one constant.
+Proof. Let g be standard Gaussian in R^D with blocks g_j; omega_j = g_j / |g_j| are independent, uniform on their
+spheres, and independent of the norms |g_j|. u = g / |g| is uniform on the unit sphere of R^D and
+rho_j = |g_j| / |g| is a function of the norms, so rho is independent of the omegas, and rho_j^2 is Beta(d_j / 2,
+(D - d_j) / 2). For b with block norms beta_j, <b, u> = sum_j beta_j rho_j U_j with U_j coordinates of the omega_j,
+and <b, u> has the law of |b| U_D. For convex f, Jensen given the U_j gives E f(sum beta_j rho_j U_j) >=
+E f(sum beta_j m_j U_j). With beta_j = a_j / m_j: E f(sum a_j U_j) <= E f(s U_D). Apply it to f(y) = (y - t)_+ and
+Markov's inequality 1{X >= x} <= (X - t)_+ / (x - t). QED
+Numbers (section 3): 8.885 two-sided, 8.815 one-sided at n = 768, N = 1e9. It keeps 63% of the gap between 9.086 and
+8.766 and needs only one-dimensional numerics. The stop-loss inequality was checked numerically (checks.py).
+The plain statement "four blocks are no worse than one sphere in D = sum d_j dimensions" is false by 0.0015. [refuted]
+
+R5. One constant per block. [proved here given a certificate; numbers computed]
+Statement. If kappa in R_+^J satisfies H_delta(a)^2 <= sum_j kappa_j a_j^2 / d_j for every a, then
+h = sqrt(sum_j kappa_j abar_j^2 / d_j) is a valid half-width (R2), and so is the smaller of it and c* sd.
+Where kappa comes from. F(v) = H_delta(sqrt(v_1 d_1), ..)^2 is homogeneous of degree one, so its tangent plane at a
+share vector w0 is grad F(w0) . v, and kappa = grad F(w0) touches F at w0. c* itself is the plane at the worst shares.
+F is concave as far as I can measure (400 random segments of the simplex, faces included, all second differences
+negative; 27,000 random points all below three tangent planes), which would make every tangent plane valid, but I
+have no proof. [measured; conjecture] So each plane is certified by the same grid computation, run on the ellipsoid
+sum_j kappa_j a_j^2 / d_j = const (plane_cert.py).
+Certified (n = 768, N = 1e9, one-sided), sqrt(kappa_j) for blocks 0..3, anchored at the dump's mean shares:
+   96 B  level, shares (.27 .41 .31 .01):  8.426  8.323  8.860  9.316   -> 8.533 sd at the anchor
+   160 B level, shares (.27 .25 .45 .04):  8.379  8.610  8.660  9.217   -> 8.592
+   256 B level, shares (.10 .16 .63 .11):  8.861  8.789  8.449  9.079   -> 8.617
+Cost: the variance term already carries a factor 1 / (nb_j - 1) per block; kappa_j goes into it and the constant
+leaves the final multiply. A level whose blocks did not rise needs four multiply-adds in place of four adds.
+The anchor only decides how tight the plane is, never whether it is valid, so the design's own model shares will do.
+A pointwise rule from the fourth cumulant alone, c(w) <= the sphere tail at 1 / sum_j w_j^2 / (d_j + 2) - 2
+dimensions, is false by up to 0.13. [refuted]
+
+R6. Harmful side only, with the block laws. [thresholds: proved; k-NN as coded: refuted; k-NN changed: proved here]
+Thresholds. A match is lost only if one of its upper bounds fails, a non-match admitted only if one of its lower
+bounds fails, and each decision uses that level's interval alone. So delta = eps / (N L) per event (T1 of the second
+pass), and every constant above is taken at twice the tail: 7.413 -> 7.373, 8.774 -> 8.704. Sound as coded.
+k-NN as coded (knn2d). Not sound. The loop intersects an item's intervals across levels and counts the candidate
+itself: tau is the k-th largest lower bound over all candidates, and a candidate is certified when at most k upper
+bounds reach its lower bound. If the harmless side of an item fails, its intersected interval can invert
+(lower > upper), and then a true neighbour can exclude itself and a non-neighbour can certify itself.
+knn_onesided.py transcribes the loop: with intervals valid on both sides 0 wrong in 4,000; valid on the harmful side
+only, 554 wrong in 4,000. With today's loop the one-sided constants give k-NN a bound of 2 eps.
+k-NN with two counts changed. Drop a candidate when at least k OTHER candidates have a lower bound above its upper
+bound; certify it when at most k - 1 OTHER candidates have an upper bound at or above its lower bound; store an
+exact score without clamping it to earlier bounds.
+Proof. Assume every upper bound of the true top k holds and every lower bound of every other item holds (N L
+one-sided events). A top-k item x is never dropped: a candidate z with lower bound above upper(x) >= s(x) cannot be
+outside the top k (its lower bound is at most s(z) <= s(x)), and there are at most k - 1 others inside. An item y
+outside is never certified: the k top-k items are all candidates and each has upper >= its score >= s(y) >=
+lower(y); an item tied with the k-th score is covered because the count uses >=. The sweep at tau_1 drops only on
+upper < tau_1 <= s_k. So the survivors scored exactly contain the top k, and certified items are in it. QED
+Same script: 0 wrong in 4,000 on the harmful side only.
+
+R7. The union over levels. [proved here: the pair bound; measured: the correlations; refuted: a saving]
+Statement. For one item let F_l = {error_l > h_l}. Then P[F_l and F_m] <= P[Z >= 2] with
+Z = error_l / h_l + error_m / h_m, which is again a sum of independent scaled sphere coordinates (one per block), of
+variance 1/c_l^2 + 1/c_m^2 + 2 rho / (c_l c_m), rho the correlation of the two errors given the codes.
+Proof. On both events Z >= 2; error_l and error_m are linear in the same uniform vectors. QED
+For one block coded at both levels, Z >= 2 has exactly the probability of U >= s* sqrt(2 / (1 + rho)).
+Measured correlation of one item's errors (level_corr.py, 0.9-1.9M pairs): 0.454 (96 B, 160 B), 0.470 (160 B,
+256 B), 0.224 (96 B, 256 B); the ratio of the two sds is 0.43, 0.40, 0.17, as nested refinement predicts.
+Then [computed] P[both fail] / delta <= e^-31 (one block) and e^-15.6 (four blocks, worst shares) at rho = 0.47;
+e^-10.7 at 0.6; e^-4.7 at 0.8. The first level (block 0 alone) against the second (four blocks, block 0 unchanged)
+by direct integration: 7e-10 to 7e-7 for block 0 holding 22-55% of the second level's variance (overlap01.py).
+So P[some level fails] >= (L - 1e-6) delta when each level runs at delta: the factor L is real, and no maximal
+inequality can remove it for intervals of this form. Pairs overlap by more than 10% only above rho = 0.9 (e^-2.2),
+which takes more than about twenty levels over this range of sds; the old fourteen-level schedule (rho about 0.85
+if it follows the sd ratio as here) was not there either. In the Brownian picture (error_l ~ B(sd_l^2), boundary
+c sqrt(time)) even continuous monitoring counts as about c^2 ln(sd_first / sd_last), some 140 tests.
+[the Brownian count: sketched]
+Conditioning on an earlier level does not help either: the items that sit at level l+1's boundary are exactly those
+whose level-l estimate was rho c sds from t, where the joint event is no rarer than the single one. [refuted]
+Split. Any fixed weights pi_l with sum 1 are sound. Constants by weight (n = 768, N = 1e9, one-sided): four blocks
+8.551 (all), 8.589 (0.7), 8.695 (0.25), 8.789 (0.1), 8.899 (1/30); one block 7.291, 7.312, 7.373, 7.426, 7.487.
+The best weights are proportional to (items undecided after the level) x (cost of what they read next): from the
+verify counts about 0.14 / 0.14 / 0.10 / 0.63 by bytes and roughly 0.4 / 0.25 / 0.1 / 0.25 by the plan's time
+constants, where a full vector costs only 4-14 level steps. Measured: section 4, rows L. Over the other n and N
+the four-block shifts are -0.10 to -0.12 for a level given 0.7 of eps and +0.09 to +0.11 for one given 0.1.
+L itself: 8.666 / 8.695 / 8.718 for L = 3 / 4 / 5 (fit.py's schedule has five levels at n = 1536: add 0.024).
+
+R8. Theorem B for several blocks. [proved here, unrefereed]
+Statement. With t_j the true block scores, S = sum t_j, E the estimate, R_j = |y_j| |Delta_j|, V = sum_j a_j^2 / d_j,
+W = sum_j d_j R_j^2 / a_j^2 (which is sum_j d_j / tan^2(phi_j), free of the query) and k = c^2 / W with c >= c*:
+on the event {S - E <= c x true sd}, S <= (E + sqrt(c^2 V (1 + k) - k E^2)) / (1 + k) if E^2 <= V W, and
+S <= sum_j R_j otherwise. The lower end is the mirror image.
+Proof. The true variance is V - sum_j t_j^2 / W_j with W_j = d_j R_j^2 / a_j^2, and sum_j t_j^2 / W_j >= S^2 / W by
+Cauchy-Schwarz. If S > E, squaring gives a quadratic in S whose larger root is the bound. If S <= E the bound is at
+least E exactly when E^2 <= V W; otherwise use |S| <= sum R_j <= sqrt(V W). QED (200,000 random cases, checks.py.)
+It needs c*, not the item's own constant (the true shares are unknown), and it is a different event from the plain
+interval, so taking the smaller of the two costs a second event. At E = 0 it is the plain width over sqrt(1 + k):
+k = 0.092 / 0.079 / 0.012 / 0.0008 at the four levels [measured], because the finely coded blocks dominate W.
+
+R9. What no per-item rule can beat. [sketched: gap named]
+Claim. If every decision at a randomised level is a function of that item alone, and the answer must be exact with
+probability 1 - eps on every corpus of N items, then the half-widths satisfy sum over levels of T(a_l; h_l) <=
+(eps / N)(1 + o(1)) for every scale vector that occurs: the item's own exact quantile with eps split over levels
+(R2 + R7) cannot be undercut, and N cannot be replaced by anything smaller.
+Sketch. Take N items at the threshold, half just above and half just below. An item at margin zero is wrongly decided
+at level l with probability T(a_l; h_l) on its harmful side, the levels' events are disjoint up to e^-15 (R7), and if
+the items' events are nearly independent the probability of some error is the sum.
+Gap. N items whose failure events overlap negligibly under the index's shared rotations. They are independent across
+groups; within a group I rely on the second pass's measurement (pair dependence 0.00 / 0.02 / 0.09 at residual
+cosine 0 / 0.3 / 0.6) rather than a construction.
+Consequence. The "union only over levels an item reaches" idea of REPORT_BOUNDS.md cannot lower the default constant:
+an item at the threshold reaches every level.
+
+R10. Refuted on the way (beyond those named above).
+- Adding block-wise bounds, eps split over blocks: 15.9 sd at the worst shares against 8.70. Never below H_delta.
+- Bernstein-type bounds from |U| <= 1: dominated by Chernoff with the exact moment generating function, which is
+  dominated by the exact tail.
+- Jensen against the large sphere or against a Gaussian with constant 1: the tail is convex along the total variance
+  and concave across shares, so Jensen does not apply; hence the factor of the stop-loss bound in R4.
+
+
+3. CONSTANTS (eps = 1e-9, L = 4; half-width in sd)  [computed; certified rows by cert2.py]
+
+                                               n = 512              n = 768              n = 1536
+  block dimensions d                           63 79 175 191        95 127 255 287       191 255 511 575
+                                               N=1e6    N=1e9       N=1e6    N=1e9       N=1e6    N=1e9
+  sub-Gaussian, two-sided (before c25333fa9)   8.558    9.330       8.558    9.330       8.558    9.330
+  committed: one block (the first), two-sided  6.469    6.786       6.976    7.413       7.549    8.142
+  committed: four blocks, Chernoff, two-sided  8.275    8.962       8.372    9.086       8.470    9.214
+  R4 closed form, four blocks, two-sided       8.078    8.781       8.156    8.885       8.234    8.990
+  R3 exact worst case, four blocks, two-sided  7.945    8.658       8.027    8.766       8.110    8.876
+     certified                                 7.954    8.666       8.036    8.774       8.119    8.885
+  R6 one block, one-sided                      6.432    6.758       6.927    7.373       7.485    8.087
+  R6 + Chernoff, four blocks, one-sided        8.201    8.897       8.295    9.018       8.391    9.142
+  R6 + R4 closed form, one-sided               8.003    8.714       8.078    8.815       8.154    8.918
+  R6 + R3 exact worst case, one-sided          7.869    8.590       7.949    8.695       8.029    8.803
+     certified  (RECOMMENDED)                  7.878    8.598       7.957    8.704       8.038    8.811
+  R3 two / three blocks exact, one-sided       7.29/7.73 7.84/8.40  7.57/7.85 8.20/8.57  7.83/7.98 8.54/8.74
+  R5 per-block constants, typical item         -        -           -        8.53-8.62   -        -
+  R2 item's own exact constant, mean by level  -        -           -        8.48/8.52/8.56  -    -
+  R7 last level with 0.7 of eps, exact         -        -           -        8.589       -        -
+  for reference: Gaussian quantile / single-item x L (not attainable): 8.912 / 6.15 at n = 768, N = 1e9, one-sided
+
+Per level at n = 768, N = 1e9 (the 50k and 1M BioCLIP indexes):
+  56 B, block 0 coded:    9.330 before, 7.413 committed, 7.373 recommended
+  96 / 160 / 256 B, four: 9.330 before, 9.086 committed, 8.704 recommended, 8.53 / 8.59 / 8.62 with R5
+
+
+4. MEASURED EFFECT  [measured: final_sim.py on the regenerated 50k dump, 10 item and 10 text queries x 7 answer
+sizes, 9.7M records; records exist while the 9.33 bound keeps an item, so every row is replayed exactly]
+Against the committed constants (B). Bytes are from the first randomised level on, full vector 1,536 B.
+
+                                                                 item queries              text queries
+                                                              exact reads   bytes       exact reads   bytes
+  A  9.330 everywhere (before c25333fa9)                         +2.6%      +2.4%          +2.6%      +2.2%
+  S  harmful side only, committed method (7.373 / 9.018)         -0.8%      -0.6%          -0.7%      -0.6%
+  C  exact worst case, two-sided, certified (7.413 / 8.774)      -3.4%      -2.4%          -3.4%      -2.5%
+  C1 closed form R4, one-sided (7.373 / 8.815)                   -3.0%      -2.1%          -2.9%      -2.2%
+  D  exact worst case, one-sided, certified (7.373 / 8.704)      -4.1%      -3.0%          -4.1%      -3.1%
+  P  D + certified per-block constants (R5)                      -5.3%      -3.9%          -5.0%      -3.9%
+  E  D + each item's own exact constant (ideal per item)         -5.9%      -4.4%          -5.5%      -4.2%
+  L  D + eps split 0.1 / 0.1 / 0.1 / 0.7                         -5.3%      -3.4%          -5.3%      -3.5%
+  EL E + that split (best sound combination found)               -7.1%      -4.8%          -6.6%      -4.7%
+  T  D + Theorem B's interval (R8)                               -4.2%      -3.6%          -4.2%      -3.6%
+  X  single-item constant 5.67 / 6.15 (not sound)               -31.8%     -23.5%         -31.9%     -24.4%
+  N  D at the index's own size, N = 1e6 (6.927 / 7.957)         -12.3%      -8.9%         -12.3%      -9.3%
+  R  D with the stored scale's rounding removed (not available)  -6.4%      -4.7%          -6.4%      -4.8%
+
+No wrong decision in any row. Exact reads move 10.8% per unit of c in rows A, C and D alike: linear, as before.
+By answer size D is -2.5% to -6.0% exact reads (no trend) and -1.4% to -3.2% bytes (more at larger answers).
+Against 9.33 everywhere, D is -6.6% exact reads and -5.2% bytes. REPORT_BOUNDS.md saw the step A -> B (2.6% of exact
+reads at 50k) come out as 1-2% of time at 1M; D is one and a half such steps, so I would expect 2-3% of time at
+1M. That is an extrapolation; I timed nothing.
+The per-item constants in rows E and EL come from an interpolated table (error up to 0.01 near faces of the simplex).
+Row P's three sets are anchored at this dump's own mean shares, pooled over item and text queries.
+
+
+5. RECOMMENDATION, RANKED
+
+1. Use the exact worst-case constant where several blocks are coded: 8.774 on today's two-sided budget (8.704
+   one-sided) at n = 768, N = 1e9, L = 4; other layouts in section 3, any layout from cert2.py in under a minute
+   (three for n = 1536). In tail.rs: a table keyed by (block dimensions, ln delta) for certified layouts, otherwise
+   the smaller of the present Chernoff value and the R4 closed form. Nothing changes per item.
+   Relies on: Lemma 8's conditions as refereed (each item's code from its own rotated vector, scalars rounded up,
+   the floating-point repairs), independent Haar rotations per block, d_j >= 3; referee conditions (c) the bound
+   bounds the exact-read score and (d) one event per level, both unchanged; (f) filter independent of the rotation.
+   It does not touch (a) or (b). Condition (e) belongs to the k x L union only: the all-items union is larger
+   precisely because it counts the events of bounds that admit or raise tau.
+2. Harmful side only for threshold queries (7.373 / 8.704). Free. Relies on (b) strict ties, (c), (d), (f), and on
+   the mixed rule: in on lower >= t, out on upper < t, each from that level's interval alone. For k-NN either change
+   the two counts in knn2d (R6; then also (a) distinct entities) or keep the two-sided constants for k-NN. The
+   constants are per (group, level) arrays, so two sets are cheap; one set with today's loop means 2 eps for k-NN.
+   This is a change in what a user can get, so it is the owner's call:
+     a. one-sided for thresholds and k-NN, with the knn2d change;
+     b. one-sided for thresholds, two-sided for k-NN (two constant sets);
+     c. stay two-sided everywhere (costs 0.07 in c, 0.8% of exact reads).
+3. Optional: per-block constants (R5), one set per (group, level) from the design's model shares, capped by item 1.
+   Another 1% of exact reads and of bytes at no per-item cost, but each set needs its certificate until F's
+   concavity is proved. Worth doing only if a certificate step at build is acceptable.
+4. Not worth building: the eps split over levels (under 0.5% of bytes; 1.2% of exact reads at the price of more
+   level-2 to level-4 entries), Theorem B (0.6% of bytes for a square root and a division per item per level), per-
+   item tables of the exact constant (0.6% beyond item 3).
+The rate design uses the constant too; changing CSG globally moves the rates, so fix the design's constant or
+re-measure.
+
+
+6. NOT FOR THE DEFAULT PATH (count-based; reported separately as asked)
+
+- The set that reaches a randomised level is seed-free (Proposition 12 of the first pass), so c may follow its
+  size N0: minus ln(N / N0) / c, that is 0.26 at N0 = N / 10 and 0.53 at N / 100. Text queries have N0 at 64-99% of
+  N: nothing. Item queries at tight thresholds would gain 3-6%.
+- T3 (cap grid on the answer) and T4 (band rule) of the second pass carry over with the block laws: their proofs
+  use only each item's own law, which is still symmetric and log-concave. Their constants are the second pass's to
+  within 0.01, because the four-block worst case equals the single-sphere tail to 0.001 (short answer, item 2).
+
+
+7. TWO OBSERVATIONS OUTSIDE THE CONSTANT
+
+- The stored scale is too large by 2.45% (rms; 2.3-2.6% by level). [measured: scale_check.py, mean of
+  (truth - estimate)^2 / sd^2 = 0.953 +- 0.001 on 0.9M items that reach the level whatever their earlier errors.]
+  The likely source is tan(phi), rounded up to one of 15 calibrated values per (group, level, block); |y| sits on
+  a much finer grid. I did not separate the two. The rounding is worth 0.21 in c and 2.4% of exact reads (row R
+  against row D): two thirds of recommendation 1 and more than 2 and 3 together. A finer tan code costs bits; I
+  did not price it. The same data show kurtosis 2.988, the value the block law predicts
+  (3 - 6 sum_j w_j^2 / (d_j + 2)).
+- Nothing stored depends on c; it is applied at query time. The constant is computed for N = 1e9 on indexes of 1M.
+  For the index's own size it would be 6.927 / 7.957 (row N: -12% exact reads, -9% bytes at 50k). That changes what
+  the guarantee promises at 1M, not any proof, and it gives nothing at 1e9. Owner's decision; if taken, round N up
+  to a power of two (at most +0.08 in c) and drop cached results when that power changes, so that every decision
+  inside one result was made at one constant.
+
+
+8. LIMITS AND WHAT TO REFEREE
+
+- The certified numbers rest on floating point. The inequalities are one-directional and carry margins, but nobody
+  has bounded the rounding formally. R4 is the fallback that needs none of it.
+- R5's concavity is measured, not proved; only the three listed planes are certified.
+- R6's k-NN proof is for the changed loop as I wrote it in knn_onesided.py, not for a patch of knn2d that exists.
+- R9 is a sketch. If it is wrong, the default constant could be lower than I say; nothing built on it is unsafe.
+- Measurements are one 50k index, 20 queries, n = 768. Other n are constants only.
+- delta is 2.5e-19 per event, about 2^-62. Haar is a model of a rotation drawn from a 64-bit seed, as the referee
+  already noted; the constants do not change that.
+- My first argument for one-sided k-NN was wrong and only the simulation caught it. Treat every "proved here" above
+  as unrefereed.
+
+
+9. FILES (all in the bounds3 folder)
+
+  law.py, ctable.py     exact law: inversion integral, beta tail, vectorised quantiles
+  consts.py, consts.json   section 3's rows except the certified ones
+  cert.py, cert2.py, certs.py, certs.log   the grid certificate, its batch and log (twelve configurations);
+                        one layout: python3 cert2.py 95,127,255,287 -42.832826 8.704  (dims, ln delta, X)
+  plane_cert.py, plane_cert.log   certificates of the three per-block constant sets
+  final_sim.py, final_sim.log   section 4
+  dump_stats.py, level_corr.py, scale_check.py (+ .log)   shares, level correlations, the 2.45%
+  knn_onesided.py (+ .log)   the k-NN loop under one-sided validity, as coded and changed
+  checks.py, mc_check.py, misc_numbers.py, overlap01.py (+ .log)   checks of R1, R4, R8; Monte Carlo of the law;
+                        small numbers; the first two levels' overlap
+  supc.py, deff_test.py, envelope.py, concav_test.py, planes_sim.py, mktable.py, ctab_40.npz, acc_check.py,
+  dump_sim.py, sim_n6.py, run_cert1.py   exploration and earlier forms of the scripts above
+  certs_all.json, cert_fine.log   the certified values; the main certificate rerun on a finer lattice and grid
+  study_res.out   output of the verify run that regenerated the dump
+To regenerate the dump (1.9 GB, under a minute):
+  VEXACT_DUMP=dump.bin taskset -c 0-3 /home/joe/code/vexact-bounds-target/bin/p1c --v2 --int --no-approx
+    --index /home/joe/code/vexact-rand-data/c50k_r4 --queries /home/joe/code/vexact-data/bioclip2-text/text_q.npy
+    --item-queries /home/joe/code/vexact-combined-data/c50k/item_q.npy --results study_res --gtab --flags repack
+    --vcheck 10 --vfilt 1 verify oracle --vitem 10 --vtext 10

@@ -1,0 +1,6 @@
+level 1 mean shares: w0 [0.266 0.411 0.312 0.011] c(w0) 8.5228 kappa [70.8336 69.1177 78.3224 86.5918] (sqrt [8.4163 8.3137 8.85   9.3055]); inflation 1 + e = 1.00116: certified True (level K 2048, max ln tail -42.84516 vs -42.83283) [21s]
+   certified per-block constants sqrt(kappa_j) (1 + e): [8.4261 8.3234 8.8603 9.3163]; at the anchor the half-width is 8.5327 sd (worst-case constant 8.704)
+level 2 mean shares: w0 [0.273 0.246 0.445 0.036] c(w0) 8.5824 kappa [70.0366 73.9541 74.8185 84.7525] (sqrt [8.3688 8.5997 8.6498 9.2061]); inflation 1 + e = 1.00116: certified True (level K 2048, max ln tail -42.84499 vs -42.83283) [23s]
+   certified per-block constants sqrt(kappa_j) (1 + e): [8.3785 8.6097 8.6598 9.2168]; at the anchor the half-width is 8.5924 sd (worst-case constant 8.704)
+level 3 mean shares: w0 [0.097 0.158 0.632 0.113] c(w0) 8.6067 kappa [78.3414 77.0688 71.2125 82.242 ] (sqrt [8.8511 8.7789 8.4388 9.0687]); inflation 1 + e = 1.00116: certified True (level K 2048, max ln tail -42.84490 vs -42.83283) [24s]
+   certified per-block constants sqrt(kappa_j) (1 + e): [8.8614 8.7891 8.4486 9.0793]; at the anchor the half-width is 8.6167 sd (worst-case constant 8.704)

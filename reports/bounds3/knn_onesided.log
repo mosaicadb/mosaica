@@ -1,0 +1,4 @@
+intervals valid on: two-sided           rule: as coded    wrong answers 0 of 4000
+intervals valid on: two-sided           rule: others only  wrong answers 0 of 4000
+intervals valid on: harmful side only   rule: as coded    wrong answers 554 of 4000
+intervals valid on: harmful side only   rule: others only  wrong answers 0 of 4000
