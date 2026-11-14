@@ -1199,3 +1199,89 @@ pub fn dbcmp(c: &Ctx2) {
     let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));
 }
+
+/// Top-k on the threshold-db queries, unfiltered, one thread: for every `--step`-th query and each k in `--ks`, the
+/// exact k-NN path (knn2) and the approximate mode (knn2_dial) at the cheapest setting reaching each mean recall in
+/// `--targets`. Recall is |returned ∩ first k of `--order`| / k. The approximate ladder doubles the cluster count up to
+/// every cluster, with the dial off and fitted for 0.99; each dial's first rung reaching a target is timed at `--reps`
+/// and the faster of the two is kept. Rows go to RESULTS/liminal_topk.csv; param is "nprobe:dial".
+pub fn dbtopk(c: &Ctx2) {
+    let ix = &c.ix;
+    let order = read_npy(&arg_str("--order", ""));
+    let ncol = order.shape[1];
+    let order = order.i32s();
+    let qs = &c.texts;
+    let reps = arg_usize("--reps", 5);
+    let step = arg_usize("--step", 10);
+    let ks: Vec<usize> = arg_str("--ks", "1,10,100,1000").split(',').map(|x| x.parse().unwrap()).collect();
+    let targets: Vec<f64> = arg_str("--targets", "0.8,0.99").split(',').map(|x| x.parse().unwrap()).collect();
+    let k_cl = ix.k();
+    let dial99: Vec<f32> = c.dial.as_ref().expect("dbtopk needs --fit-dial").for_target(0.99).to_vec();
+    let pl = pool(1);
+    let path = format!("{}/liminal_topk.csv", res_dir());
+    let fresh = !std::path::Path::new(&path).exists();
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path).unwrap();
+    if fresh {
+        writeln!(f, "method,target,k,query,param,median_ms,recall").unwrap();
+    }
+    type Row = (usize, f64, f64);
+    for &k in &ks {
+        assert!(k <= ncol);
+        let exact: Vec<(usize, std::collections::HashSet<u32>)> = (0..qs.len()).step_by(step)
+            .map(|qi| (qi, order[qi * ncol..qi * ncol + k].iter().map(|&x| x as u32).collect())).collect();
+        let eval = |run: &(dyn Fn(&[f32]) -> Vec<u32> + Sync), r: usize| -> Vec<Row> {
+            exact.iter().map(|(qi, es)| {
+                let mut ts = Vec::new();
+                let mut got = Vec::new();
+                for _ in 0..r {
+                    let t = Timer::new();
+                    got = pl.install(|| run(&qs[*qi]));
+                    ts.push(t.ms());
+                }
+                (*qi, median(&ts), got.iter().filter(|x| es.contains(x)).count() as f64 / k as f64)
+            }).collect()
+        };
+        let summ = |r: &[Row]| (median(&r.iter().map(|x| x.1).collect::<Vec<_>>()), mean(&r.iter().map(|x| x.2).collect::<Vec<_>>()));
+        let mut emit = |method: &str, target: &str, param: &str, r: &[Row]| {
+            let (ms, rec) = summ(r);
+            out!("dbtopk {method} {target} k {k}: {param}: median {ms:.3} ms, mean recall {rec:.4}");
+            for &(qi, ms, rec) in r {
+                writeln!(f, "{method},{target},{k},{qi},{param},{ms:.4},{rec:.5}").unwrap();
+            }
+        };
+        let r = eval(&|q| knn2(ix, q, k, None, c.plan).ents.iter().map(|x| x.1).collect(), reps);
+        emit("liminal_exact", "exact", "-", &r);
+        let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).collect();
+        ladder.push(k_cl);
+        let mut best: Vec<Option<(f64, String, Vec<Row>)>> = vec![None; targets.len()];
+        for (dname, dial) in [("off", None), ("fit0.99", Some(&dial99[..]))] {
+            let run = |np: usize| move |q: &[f32]| knn2_dial(ix, &c.approx, q, k, None, np, dial, false, c.plan).ents.iter().map(|x| x.1).collect::<Vec<u32>>();
+            let mut done = vec![false; targets.len()];
+            for &np in &ladder {
+                let (ms1, rec1) = summ(&eval(&run(np), 1));
+                out!("dbtopk ladder k {k}: nprobe {np} dial {dname}: median {ms1:.3} ms, mean recall {rec1:.4}");
+                let mut timed: Option<Vec<Row>> = None;
+                for (ti, &tg) in targets.iter().enumerate() {
+                    if done[ti] || rec1 < tg {
+                        continue;
+                    }
+                    done[ti] = true;
+                    let r = timed.get_or_insert_with(|| eval(&run(np), reps)).clone();
+                    let (ms, rec) = summ(&r);
+                    if rec >= tg && best[ti].as_ref().map_or(true, |b| ms < b.0) {
+                        best[ti] = Some((ms, format!("{np}:{dname}"), r));
+                    }
+                }
+                if done.iter().all(|&d| d) {
+                    break;
+                }
+            }
+        }
+        for (ti, b) in best.iter().enumerate() {
+            match b {
+                Some((_, p, r)) => emit("liminal_approx", &targets[ti].to_string(), p, r),
+                None => out!("dbtopk approx {} k {k}: not reached", targets[ti]),
+            }
+        }
+    }
+}

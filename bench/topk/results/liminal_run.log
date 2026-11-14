@@ -1,0 +1,103 @@
+==== run at 1794685017: ["/home/joe/code/vexact-topk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "results", "--core", "4", "--pin", "4", "--fit-dial", "dbtopk", "--order", "/home/joe/code/vexact-data/bioclip2-1m/prep/order.npy", "--ks", "1,10,100,1000", "--targets", "0.8,0.99", "--step", "10", "--reps", "5"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.6s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 14.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 85.0s
+[build2] encoded 205.5s
+[build2] assembled 210.3s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.09, 0.08, 0.08, 0.08, 0.11, 0.11, 0.07, 0.12, 0.16, 0.19] (timed in 0.1s)
+[plan] calibrated in 3.5s
+[plan] full_us=0.18330654080927758 item_us0=0.010826994819534426 item_us1=0.043307979278137704 cl_us0=2.165398963906885 cl_us1=10.826994819534425 grp_us=75.78896373674098 scan_us=0.16310209202635864 cut_us=1.83341925 seed_us=878.4943125000001 scan_lo=2 scan_hi=2 
+[approx] f = 0.2 from 1000 pseudo-queries in 92.1s; mean items scanned at recall 0.95 by f: [(0.0, 9942.0), (0.1, 6940.0), (0.2, 5230.0), (0.35, 9713.0), (0.5, 23897.0), (0.75, 34860.0)]
+[approx] dial fitted in 21.4s: eps [0.0, 1e-5, 0.0001, 0.001, 0.003, 0.01, 0.03, 0.1, 0.2], pseudo-query recall [1.0, 1.0, 1.0, 0.9985, 0.9935, 0.9835, 0.961, 0.914, 0.8505], fits [(0.9, 7), (0.95, 6), (0.99, 4), (0.999, 2)]
+[approx] eps 0: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+[approx] eps 0.00001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.72, 0.437, 0.453, 0.389]
+[approx] eps 0.0001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.551, 0.386, 0.386, 0.373]
+[approx] eps 0.001: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.298, 0.326, 0.318, 0.317]
+[approx] eps 0.003: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.247, 0.289, 0.284, 0.285]
+[approx] eps 0.01: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.206, 0.244, 0.242, 0.244]
+[approx] eps 0.03: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.168, 0.199, 0.197, 0.197]
+[approx] eps 0.1: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.123, 0.136, 0.135, 0.136]
+[approx] eps 0.2: factors by level [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.091, 0.09, 0.09, 0.09]
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 113.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+dbtopk liminal_exact exact k 1: -: median 25.034 ms, mean recall 1.0000
+dbtopk ladder k 1: nprobe 1 dial off: median 0.441 ms, mean recall 0.4667
+dbtopk ladder k 1: nprobe 2 dial off: median 0.534 ms, mean recall 0.6000
+dbtopk ladder k 1: nprobe 4 dial off: median 0.703 ms, mean recall 0.7333
+dbtopk ladder k 1: nprobe 8 dial off: median 1.464 ms, mean recall 0.7333
+dbtopk ladder k 1: nprobe 16 dial off: median 2.022 ms, mean recall 0.8000
+dbtopk ladder k 1: nprobe 32 dial off: median 2.749 ms, mean recall 0.9333
+dbtopk ladder k 1: nprobe 64 dial off: median 4.302 ms, mean recall 1.0000
+dbtopk ladder k 1: nprobe 1 dial fit0.99: median 0.440 ms, mean recall 0.4667
+dbtopk ladder k 1: nprobe 2 dial fit0.99: median 0.504 ms, mean recall 0.6000
+dbtopk ladder k 1: nprobe 4 dial fit0.99: median 0.746 ms, mean recall 0.7333
+dbtopk ladder k 1: nprobe 8 dial fit0.99: median 1.278 ms, mean recall 0.6000
+dbtopk ladder k 1: nprobe 16 dial fit0.99: median 1.666 ms, mean recall 0.6667
+dbtopk ladder k 1: nprobe 32 dial fit0.99: median 2.393 ms, mean recall 0.8000
+dbtopk ladder k 1: nprobe 64 dial fit0.99: median 3.916 ms, mean recall 0.8667
+dbtopk ladder k 1: nprobe 128 dial fit0.99: median 6.458 ms, mean recall 0.8667
+dbtopk ladder k 1: nprobe 256 dial fit0.99: median 11.122 ms, mean recall 0.8667
+dbtopk ladder k 1: nprobe 512 dial fit0.99: median 19.627 ms, mean recall 0.8667
+dbtopk ladder k 1: nprobe 1000 dial fit0.99: median 34.881 ms, mean recall 0.8667
+dbtopk liminal_approx 0.8 k 1: 16:off: median 2.058 ms, mean recall 0.8000
+dbtopk liminal_approx 0.99 k 1: 64:off: median 4.290 ms, mean recall 1.0000
+dbtopk liminal_exact exact k 10: -: median 27.816 ms, mean recall 1.0000
+dbtopk ladder k 10: nprobe 1 dial off: median 0.454 ms, mean recall 0.4733
+dbtopk ladder k 10: nprobe 2 dial off: median 0.504 ms, mean recall 0.6000
+dbtopk ladder k 10: nprobe 4 dial off: median 0.731 ms, mean recall 0.7800
+dbtopk ladder k 10: nprobe 8 dial off: median 1.649 ms, mean recall 0.8600
+dbtopk ladder k 10: nprobe 16 dial off: median 2.684 ms, mean recall 0.9133
+dbtopk ladder k 10: nprobe 32 dial off: median 3.117 ms, mean recall 0.9467
+dbtopk ladder k 10: nprobe 64 dial off: median 4.921 ms, mean recall 0.9800
+dbtopk ladder k 10: nprobe 128 dial off: median 8.053 ms, mean recall 1.0000
+dbtopk ladder k 10: nprobe 1 dial fit0.99: median 0.488 ms, mean recall 0.4733
+dbtopk ladder k 10: nprobe 2 dial fit0.99: median 0.505 ms, mean recall 0.6000
+dbtopk ladder k 10: nprobe 4 dial fit0.99: median 0.753 ms, mean recall 0.7800
+dbtopk ladder k 10: nprobe 8 dial fit0.99: median 1.458 ms, mean recall 0.8600
+dbtopk ladder k 10: nprobe 16 dial fit0.99: median 1.938 ms, mean recall 0.9133
+dbtopk ladder k 10: nprobe 32 dial fit0.99: median 3.268 ms, mean recall 0.9467
+dbtopk ladder k 10: nprobe 64 dial fit0.99: median 4.148 ms, mean recall 0.9800
+dbtopk ladder k 10: nprobe 128 dial fit0.99: median 6.968 ms, mean recall 1.0000
+dbtopk liminal_approx 0.8 k 10: 8:fit0.99: median 1.332 ms, mean recall 0.8600
+dbtopk liminal_approx 0.99 k 10: 128:fit0.99: median 6.860 ms, mean recall 1.0000
+dbtopk liminal_exact exact k 100: -: median 33.088 ms, mean recall 0.9987
+dbtopk ladder k 100: nprobe 1 dial off: median 0.590 ms, mean recall 0.3727
+dbtopk ladder k 100: nprobe 2 dial off: median 0.788 ms, mean recall 0.5253
+dbtopk ladder k 100: nprobe 4 dial off: median 1.085 ms, mean recall 0.6753
+dbtopk ladder k 100: nprobe 8 dial off: median 2.568 ms, mean recall 0.7893
+dbtopk ladder k 100: nprobe 16 dial off: median 3.663 ms, mean recall 0.8747
+dbtopk ladder k 100: nprobe 32 dial off: median 4.932 ms, mean recall 0.9293
+dbtopk ladder k 100: nprobe 64 dial off: median 7.765 ms, mean recall 0.9647
+dbtopk ladder k 100: nprobe 128 dial off: median 11.009 ms, mean recall 0.9913
+dbtopk ladder k 100: nprobe 1 dial fit0.99: median 0.573 ms, mean recall 0.3727
+dbtopk ladder k 100: nprobe 2 dial fit0.99: median 0.643 ms, mean recall 0.5253
+dbtopk ladder k 100: nprobe 4 dial fit0.99: median 0.904 ms, mean recall 0.6753
+dbtopk ladder k 100: nprobe 8 dial fit0.99: median 2.561 ms, mean recall 0.7893
+dbtopk ladder k 100: nprobe 16 dial fit0.99: median 3.458 ms, mean recall 0.8747
+dbtopk ladder k 100: nprobe 32 dial fit0.99: median 5.146 ms, mean recall 0.9293
+dbtopk ladder k 100: nprobe 64 dial fit0.99: median 6.326 ms, mean recall 0.9647
+dbtopk ladder k 100: nprobe 128 dial fit0.99: median 9.373 ms, mean recall 0.9913
+dbtopk liminal_approx 0.8 k 100: 16:fit0.99: median 3.353 ms, mean recall 0.8747
+dbtopk liminal_approx 0.99 k 100: 128:fit0.99: median 9.184 ms, mean recall 0.9913
+dbtopk liminal_exact exact k 1000: -: median 83.706 ms, mean recall 0.9992
+dbtopk ladder k 1000: nprobe 1 dial off: median 1.634 ms, mean recall 0.2623
+dbtopk ladder k 1000: nprobe 2 dial off: median 1.799 ms, mean recall 0.3899
+dbtopk ladder k 1000: nprobe 4 dial off: median 2.208 ms, mean recall 0.5301
+dbtopk ladder k 1000: nprobe 8 dial off: median 15.887 ms, mean recall 0.6808
+dbtopk ladder k 1000: nprobe 16 dial off: median 23.987 ms, mean recall 0.8077
+dbtopk ladder k 1000: nprobe 32 dial off: median 35.302 ms, mean recall 0.8921
+dbtopk ladder k 1000: nprobe 64 dial off: median 51.159 ms, mean recall 0.9497
+dbtopk ladder k 1000: nprobe 128 dial off: median 57.749 ms, mean recall 0.9854
+dbtopk ladder k 1000: nprobe 256 dial off: median 71.633 ms, mean recall 0.9966
+dbtopk ladder k 1000: nprobe 1 dial fit0.99: median 1.568 ms, mean recall 0.2623
+dbtopk ladder k 1000: nprobe 2 dial fit0.99: median 1.689 ms, mean recall 0.3899
+dbtopk ladder k 1000: nprobe 4 dial fit0.99: median 2.062 ms, mean recall 0.5300
+dbtopk ladder k 1000: nprobe 8 dial fit0.99: median 14.590 ms, mean recall 0.6807
+dbtopk ladder k 1000: nprobe 16 dial fit0.99: median 23.087 ms, mean recall 0.8077
+dbtopk ladder k 1000: nprobe 32 dial fit0.99: median 31.463 ms, mean recall 0.8920
+dbtopk ladder k 1000: nprobe 64 dial fit0.99: median 44.571 ms, mean recall 0.9495
+dbtopk ladder k 1000: nprobe 128 dial fit0.99: median 53.957 ms, mean recall 0.9853
+dbtopk ladder k 1000: nprobe 256 dial fit0.99: median 67.839 ms, mean recall 0.9964
+dbtopk liminal_approx 0.8 k 1000: 16:fit0.99: median 22.367 ms, mean recall 0.8077
+dbtopk liminal_approx 0.99 k 1000: 256:fit0.99: median 68.359 ms, mean recall 0.9964

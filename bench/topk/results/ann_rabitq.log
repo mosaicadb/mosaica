@@ -1,0 +1,57 @@
+Loading IVF...
+	Loading meta data...
+FhtKacRotator is selected
+rabitq: loaded in 5 s
+rabitq k 1 ladder: param 1, mean recall 0.4667, median 0.32 ms
+rabitq k 1 ladder: param 2, mean recall 0.4667, median 0.31 ms
+rabitq k 1 ladder: param 4, mean recall 0.6000, median 0.31 ms
+rabitq k 1 ladder: param 8, mean recall 0.8667, median 0.32 ms
+rabitq k 1 target 0.8: param 8, median 0.308 ms, mean recall 0.8667
+rabitq k 1 ladder: param 16, mean recall 0.9333, median 0.34 ms
+rabitq k 1 ladder: param 32, mean recall 0.9333, median 0.36 ms
+rabitq k 1 ladder: param 64, mean recall 0.9333, median 0.42 ms
+rabitq k 1 ladder: param 128, mean recall 1.0000, median 0.54 ms
+rabitq k 1 target 0.99: param 128, median 0.530 ms, mean recall 1.0000
+rabitq k 10 ladder: param 1, mean recall 0.4133, median 0.46 ms
+rabitq k 10 ladder: param 2, mean recall 0.5400, median 0.43 ms
+rabitq k 10 ladder: param 4, mean recall 0.6133, median 0.44 ms
+rabitq k 10 ladder: param 8, mean recall 0.7533, median 0.43 ms
+rabitq k 10 ladder: param 16, mean recall 0.8467, median 0.47 ms
+rabitq k 10 target 0.8: param 16, median 0.369 ms, mean recall 0.8467
+rabitq k 10 ladder: param 32, mean recall 0.8933, median 0.54 ms
+rabitq k 10 ladder: param 64, mean recall 0.9467, median 0.64 ms
+rabitq k 10 ladder: param 128, mean recall 0.9800, median 0.82 ms
+rabitq k 10 ladder: param 256, mean recall 0.9867, median 1.19 ms
+rabitq k 10 ladder: param 512, mean recall 0.9867, median 1.45 ms
+rabitq k 10 ladder: param 1024, mean recall 0.9867, median 2.77 ms
+rabitq k 10 ladder: param 2048, mean recall 0.9867, median 5.16 ms
+rabitq k 10 ladder: param 4096, mean recall 0.9867, median 10.74 ms
+rabitq k 10 target 0.99: NOT reached; last rung 4096, median 9.801 ms, mean recall 0.9867
+rabitq k 100 ladder: param 1, mean recall 0.2287, median 0.38 ms
+rabitq k 100 ladder: param 2, mean recall 0.3440, median 0.35 ms
+rabitq k 100 ladder: param 4, mean recall 0.4620, median 0.38 ms
+rabitq k 100 ladder: param 8, mean recall 0.5800, median 0.41 ms
+rabitq k 100 ladder: param 16, mean recall 0.7320, median 0.45 ms
+rabitq k 100 ladder: param 32, mean recall 0.8067, median 0.48 ms
+rabitq k 100 target 0.8: param 32, median 0.431 ms, mean recall 0.8067
+rabitq k 100 ladder: param 64, mean recall 0.8947, median 0.59 ms
+rabitq k 100 ladder: param 128, mean recall 0.9527, median 0.73 ms
+rabitq k 100 ladder: param 256, mean recall 0.9760, median 1.09 ms
+rabitq k 100 ladder: param 512, mean recall 0.9893, median 1.65 ms
+rabitq k 100 ladder: param 1024, mean recall 0.9920, median 2.79 ms
+rabitq k 100 target 0.99: param 1024, median 2.883 ms, mean recall 0.9920
+rabitq k 1000 ladder: param 1, mean recall 0.1086, median 0.34 ms
+rabitq k 1000 ladder: param 2, mean recall 0.1814, median 0.37 ms
+rabitq k 1000 ladder: param 4, mean recall 0.2867, median 0.45 ms
+rabitq k 1000 ladder: param 8, mean recall 0.4033, median 0.59 ms
+rabitq k 1000 ladder: param 16, mean recall 0.5587, median 0.91 ms
+rabitq k 1000 ladder: param 32, mean recall 0.6683, median 1.34 ms
+rabitq k 1000 ladder: param 64, mean recall 0.8068, median 1.45 ms
+rabitq k 1000 target 0.8: param 64, median 1.143 ms, mean recall 0.8068
+rabitq k 1000 ladder: param 128, mean recall 0.9038, median 1.52 ms
+rabitq k 1000 ladder: param 256, mean recall 0.9575, median 2.03 ms
+rabitq k 1000 ladder: param 512, mean recall 0.9881, median 2.83 ms
+rabitq k 1000 ladder: param 1024, mean recall 0.9927, median 3.86 ms
+rabitq k 1000 target 0.99: param 1024, median 4.073 ms, mean recall 0.9927
+Allocating memory for IVF...
+Index loaded

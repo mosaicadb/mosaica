@@ -1,0 +1,60 @@
+hnsw_sq16: loaded in 9 s
+hnsw_sq16 k 1 ladder: param 1, mean recall 0.0667, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 2, mean recall 0.1333, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 3, mean recall 0.1333, median 0.07 ms
+hnsw_sq16 k 1 ladder: param 4, mean recall 0.2000, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 6, mean recall 0.2667, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 8, mean recall 0.3333, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 12, mean recall 0.4000, median 0.06 ms
+hnsw_sq16 k 1 ladder: param 16, mean recall 0.4000, median 0.08 ms
+hnsw_sq16 k 1 ladder: param 24, mean recall 0.4000, median 0.11 ms
+hnsw_sq16 k 1 ladder: param 32, mean recall 0.5333, median 0.15 ms
+hnsw_sq16 k 1 ladder: param 64, mean recall 0.6000, median 0.25 ms
+hnsw_sq16 k 1 ladder: param 128, mean recall 0.6667, median 0.47 ms
+hnsw_sq16 k 1 ladder: param 256, mean recall 0.7333, median 0.70 ms
+hnsw_sq16 k 1 ladder: param 512, mean recall 0.7333, median 1.64 ms
+hnsw_sq16 k 1 ladder: param 1024, mean recall 0.7333, median 2.54 ms
+hnsw_sq16 k 1 target 0.8: NOT reached; last rung 1024, median 1.518 ms, mean recall 0.7333
+hnsw_sq16 k 1 target 0.99: NOT reached; last rung 1024, median 1.518 ms, mean recall 0.7333
+hnsw_sq16 k 10 ladder: param 10, mean recall 0.3933, median 0.10 ms
+hnsw_sq16 k 10 ladder: param 15, mean recall 0.4600, median 0.10 ms
+hnsw_sq16 k 10 ladder: param 20, mean recall 0.5067, median 0.11 ms
+hnsw_sq16 k 10 ladder: param 30, mean recall 0.5467, median 0.18 ms
+hnsw_sq16 k 10 ladder: param 40, mean recall 0.6533, median 0.19 ms
+hnsw_sq16 k 10 ladder: param 60, mean recall 0.6933, median 0.26 ms
+hnsw_sq16 k 10 ladder: param 80, mean recall 0.7667, median 0.30 ms
+hnsw_sq16 k 10 ladder: param 120, mean recall 0.8333, median 0.36 ms
+hnsw_sq16 k 10 target 0.8: param 120, median 0.139 ms, mean recall 0.8333
+hnsw_sq16 k 10 ladder: param 160, mean recall 0.8467, median 0.43 ms
+hnsw_sq16 k 10 ladder: param 240, mean recall 0.9067, median 0.69 ms
+hnsw_sq16 k 10 ladder: param 320, mean recall 0.9200, median 0.87 ms
+hnsw_sq16 k 10 ladder: param 640, mean recall 0.9400, median 1.46 ms
+hnsw_sq16 k 10 ladder: param 1280, mean recall 0.9533, median 2.51 ms
+hnsw_sq16 k 10 ladder: param 2560, mean recall 0.9600, median 5.01 ms
+hnsw_sq16 k 10 ladder: param 5120, mean recall 0.9800, median 11.60 ms
+hnsw_sq16 k 10 ladder: param 10240, mean recall 0.9800, median 33.86 ms
+hnsw_sq16 k 10 target 0.99: NOT reached; last rung 10240, median 39.499 ms, mean recall 0.9800
+hnsw_sq16 k 100 ladder: param 100, mean recall 0.6840, median 0.41 ms
+hnsw_sq16 k 100 ladder: param 150, mean recall 0.8120, median 0.48 ms
+hnsw_sq16 k 100 target 0.8: param 150, median 0.200 ms, mean recall 0.8120
+hnsw_sq16 k 100 ladder: param 200, mean recall 0.8653, median 0.59 ms
+hnsw_sq16 k 100 ladder: param 300, mean recall 0.9087, median 0.85 ms
+hnsw_sq16 k 100 ladder: param 400, mean recall 0.9273, median 0.96 ms
+hnsw_sq16 k 100 ladder: param 600, mean recall 0.9427, median 1.20 ms
+hnsw_sq16 k 100 ladder: param 800, mean recall 0.9500, median 1.46 ms
+hnsw_sq16 k 100 ladder: param 1200, mean recall 0.9640, median 2.52 ms
+hnsw_sq16 k 100 ladder: param 1600, mean recall 0.9707, median 3.23 ms
+hnsw_sq16 k 100 ladder: param 2400, mean recall 0.9793, median 4.80 ms
+hnsw_sq16 k 100 ladder: param 3200, mean recall 0.9860, median 6.28 ms
+hnsw_sq16 k 100 ladder: param 6400, mean recall 0.9907, median 18.79 ms
+hnsw_sq16 k 100 target 0.99: param 6400, median 18.438 ms, mean recall 0.9907
+hnsw_sq16 k 1000 ladder: param 1000, mean recall 0.8995, median 2.34 ms
+hnsw_sq16 k 1000 target 0.8: param 1000, median 1.586 ms, mean recall 0.8995
+hnsw_sq16 k 1000 ladder: param 1500, mean recall 0.9335, median 2.98 ms
+hnsw_sq16 k 1000 ladder: param 2000, mean recall 0.9521, median 3.56 ms
+hnsw_sq16 k 1000 ladder: param 3000, mean recall 0.9703, median 6.15 ms
+hnsw_sq16 k 1000 ladder: param 4000, mean recall 0.9777, median 9.12 ms
+hnsw_sq16 k 1000 ladder: param 6000, mean recall 0.9858, median 15.74 ms
+hnsw_sq16 k 1000 ladder: param 8000, mean recall 0.9895, median 23.35 ms
+hnsw_sq16 k 1000 ladder: param 12000, mean recall 0.9935, median 52.70 ms
+hnsw_sq16 k 1000 target 0.99: param 12000, median 44.175 ms, mean recall 0.9935
