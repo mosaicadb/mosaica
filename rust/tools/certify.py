@@ -14,8 +14,9 @@
 #      tilted probabilities; the frequencies left out are bounded by the block with the smallest remainder.
 # Margins REL (relative) and ABS (absolute) cover quadrature and rounding.
 #
-# usage: python3 -I certify.py INDEX [--lnd LN_DELTA] [--time-cap SECONDS]
-#   The default budget is the one the Rust build uses, 2 exp(-L1) with L1 from meta.json.
+# usage: python3 -I certify.py INDEX [--n-guarantee N] [--lnd LN_DELTA] [--time-cap SECONDS]
+#   The default budget is the one the Rust build uses: delta = EPS / (N L), N the index's item count rounded up to a
+#   power of two, L the number of randomised levels.
 import argparse, itertools, json, math, os, sys, time
 import numpy as np
 from scipy.special import betaincinv, gammaln
@@ -159,9 +160,11 @@ def block_dims(meta):
     return [b[j + 1] - b[j] - 1 for j in range(len(b) - 1)]
 
 
-def ln_delta(meta):
-    """ln of the per-event probability the Rust build uses: one side of the design's, 2 exp(-L1)."""
-    return -meta["L1"] + math.log(2)
+def ln_delta(meta, n_guarantee=None):
+    """ln of the per-event probability the Rust build uses: EPS / (N L), with N the item count rounded up to a power
+    of two unless given. Each N needs its own certificate (one at a smaller ln delta also serves)."""
+    N = n_guarantee or 2 ** math.ceil(math.log2(max(meta["N"], 1)))
+    return -math.log(N * len(meta["RLV"]) / meta.get("EPS", 1e-9))
 
 
 def add_certificate(out, lnd, time_cap, log=print):
@@ -185,11 +188,12 @@ def add_certificate(out, lnd, time_cap, log=print):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("index")
+    ap.add_argument("--n-guarantee", type=float, default=None, help="N in the budget (default: items rounded up to a power of two)")
     ap.add_argument("--lnd", type=float, default=None, help="ln delta, in place of the budget")
     ap.add_argument("--time-cap", type=float, default=600)
     a = ap.parse_args()
     meta = json.load(open(os.path.join(a.index, "meta.json")))
-    lnd = a.lnd if a.lnd is not None else ln_delta(meta)
+    lnd = a.lnd if a.lnd is not None else ln_delta(meta, a.n_guarantee)
     X = add_certificate(a.index, lnd, a.time_cap)
     print(json.dumps(dict(ds=block_dims(meta), lnd=lnd, X=X)))
 

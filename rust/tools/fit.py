@@ -246,6 +246,7 @@ def main():
                    cond_max=float(cond.max()))
 
     rlv, bounds = schedule(n0, n)
+    # the rate design's constant (two-sided, N = 1e9); the query-time constants follow the index size (src/v2/tail.rs)
     L1 = math.log(2 * NTARGET * len(rlv) / EPS)
     tree_edges = np.zeros((9, 256))
     tree_cent = np.zeros((9, 256))

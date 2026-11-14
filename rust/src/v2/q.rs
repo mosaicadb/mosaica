@@ -2145,6 +2145,7 @@ pub struct ThrOut2 {
     pub flat_clusters: u64,
     pub flat_items: u64,
     pub scanned: bool, // the visible set was scanned directly
+    pub npow: u32,     // the index's guarantee N, as 2^npow (Meta2::npow)
 }
 
 const SCAN_ROWS: usize = 1024;
@@ -2489,10 +2490,12 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
 }
 
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
-    match plan2(ix, pr, t, o, 0.0) {
+    let mut out = match plan2(ix, pr, t, o, 0.0) {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
         Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, first_decide, cut_cyc),
-    }
+    };
+    out.npow = ix.meta.npow;
+    out
 }
 
 /// The threshold query over the clusters as planned.
@@ -2666,6 +2669,7 @@ pub struct KnnOut2 {
     pub t_seed: f64,
     pub t_sweep: f64,
     pub t_sel: f64,
+    pub npow: u32, // the index's guarantee N, as 2^npow (Meta2::npow)
 }
 
 /// Interval of one row at a level (from scratch), or exact at level nl.
@@ -2928,7 +2932,7 @@ pub fn knn2_approx(ix: &Index2, ap: Option<&Approx>, q: &[f32], kk: usize, vis: 
     let mut fin: Vec<(f64, u32)> = iv[..take].iter().map(|x| (exact_value2(ix, &pr, x.0 as usize), ix.row_ent[x.0 as usize])).collect();
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
-    KnnOut2 { ents: fin, st, cands: iv.len(), t_seed: tm.ms(), t_sweep: 0.0, t_sel: 0.0 }
+    KnnOut2 { ents: fin, st, cands: iv.len(), t_seed: tm.ms(), t_sweep: 0.0, t_sel: 0.0, npow: ix.meta.npow }
 }
 
 /// A first k-th best score: the visible items of the 64 clusters with the largest bound, taken by centre score until
@@ -2995,7 +2999,7 @@ pub fn knn2d(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, 
         let ents = scan_knn(ix, &q16, &q32, qn, kk, vis);
         let mut st = st;
         st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
-        KnnOut2 { ents, st, cands: 0, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0 }
+        KnnOut2 { ents, st, cands: 0, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
     if let Some(v) = vis {
         if stored && plan.scan_first(v, plan.seed_us) {
@@ -3037,7 +3041,7 @@ pub fn knn2d(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan, 
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
     let t_sel = tm.ms() - t_seed - t_sweep;
-    KnnOut2 { ents: fin, st, cands: ncand, t_seed, t_sweep, t_sel }
+    KnnOut2 { ents: fin, st, cands: ncand, t_seed, t_sweep, t_sel, npow: ix.meta.npow }
 }
 
 /// The k best of `cands` (row, lower bound, upper bound, next level, exact), refining intervals a level at a time:

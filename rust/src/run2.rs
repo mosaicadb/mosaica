@@ -167,6 +167,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let t = Timer::new();
     let mut p = load_params(dir);
     // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
+    if let Some(v) = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()) {
+        let _ = crate::v2::NGUAR.set(v.parse().expect("--nguar N (items the guarantee covers)"));
+    }
     if args().iter().any(|a| a == "--csg-plain") {
         crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
     }
@@ -452,8 +455,8 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         }
         println!("verify2 filtered 1/{den}: {} visible, wrong in/out {wi}/{wo}, k-NN mismatches {kb}", vis.rows.len());
     }
-    out!("VERIFY2 {} queries x {} answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (c = {:.2}); k-NN mismatches {} of {} (three plans each){}",
-        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.meta.csg, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
+    out!("VERIFY2 {} queries x {} answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (group 0's constants by level {:?}, N = 2^{}); k-NN mismatches {} of {} (three plans each){}",
+        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.groups[0].csgl, ix.meta.npow, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
     out!("VERIFY2 checker: {} deterministic decisions checked against the f64 certificate, {} not implied; {} lanes outside it; entering each level (unfiltered, both plans): {:?}; decided in/out {:?} / {:?}",
         tot.imp_checked, tot.imp_fail, tot.cert_viol, tot.enter, tot.dec_in, tot.dec_out);
     let sc = scale_check(ix);
