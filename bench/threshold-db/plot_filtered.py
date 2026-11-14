@@ -96,11 +96,11 @@ def draw(panels, title, xlabel, path):
                 ax.plot([x], [y], "o", ms=5.5, mec=colour, mfc=colour if ok else "white", mew=1.6, alpha=0.55 if scan else 1, zorder=5)
                 # the recall of a hollow point, unless it repeats the last one shown or the line-end name gives it
                 if not ok and x != xs[-1] and (shown is None or abs(r - shown) > 0.02):
-                    ax.annotate(f"{r:.3f}", (x, y), xytext=(0, 7 if x == xs[0] else -14), textcoords="offset points", fontsize=7.5, color=colour, ha="center")
+                    ax.annotate(f"{r:.3f}", (x, y), xytext=(0, 7 if x == xs[0] or key == "faiss HNSW-SQfp16" else -14), textcoords="offset points", fontsize=7.5, color=colour, ha="center")
                     shown = r
             name = key if exact or rs[-1] >= 0.99 else f"{key} (recall {rs[-1]:.3f})"
             if xs[-1] < 75 and not exact:
-                name += ", then over 5 s"
+                name += ", none further"
             ends.append([ys[-1], xs[-1], name, colour])
         ends.sort()
         ly = [np.log10(e[0]) for e in ends]
@@ -127,7 +127,7 @@ def draw(panels, title, xlabel, path):
     fig.text(0.05, 0.885, "Median time, 1 thread, to return the whole set of matching ids (approximate methods: top-m with m the exact "
              "answer size). Solid lines are exact. Dashed lines are approximate methods\nat their fastest setting with mean "
              "recall ≥ 0.99; hollow points could not reach 0.99 within 5 s per query and show the recall reached. A line that "
-             "stops early had no setting within 5 s beyond it.", fontsize=9, color=MUTED)
+             "stops early has no point further on: over 5 s per query, or not run (see the report).", fontsize=9, color=MUTED)
     fig.tight_layout(rect=(0.02, 0.02, 0.99, 0.87))
     fig.savefig(path, dpi=130, facecolor="white")
     plt.close(fig)

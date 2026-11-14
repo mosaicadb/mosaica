@@ -1,0 +1,38 @@
+acorn: loaded in 0 s; RSS 0.04 GiB; the index adds 0.00 GiB resident
+acorn: loaded 999950 rows in 3.1 s; M 32 gamma 12 M_beta 32; peak RSS 3.23 GiB
+acorn ladder gen_50 share 0: rung 1, mean recall 0.5575, median 0.8 ms
+acorn ladder gen_50 share 0: rung 1.5, mean recall 0.7047, median 1.1 ms
+acorn ladder gen_50 share 0: rung 2, mean recall 0.7822, median 1.4 ms
+acorn ladder gen_50 share 0: rung 3, mean recall 0.8531, median 1.9 ms
+acorn ladder gen_50 share 0: rung 4, mean recall 0.8880, median 2.6 ms
+acorn ladder gen_50 share 0: rung 6, mean recall 0.9201, median 3.9 ms
+acorn ladder gen_50 share 0: rung 8, mean recall 0.9277, median 4.1 ms
+acorn ladder gen_50 share 0: rung 12, mean recall 0.9539, median 5.9 ms
+acorn ladder gen_50 share 0: rung 16, mean recall 0.9702, median 7.3 ms
+acorn ladder gen_50 share 0: rung 24, mean recall 0.9819, median 12.7 ms
+acorn ladder gen_50 share 0: rung 32, mean recall 0.9852, median 14.0 ms
+acorn ladder gen_50 share 0: rung 64, mean recall 0.9958, median 27.8 ms
+acorn default gen_50 share 0: param x1, median 0.49 ms, mean recall 0.5575, non-matches 336 over 11 queries
+acorn tight gen_50 share 0: param x64, median 30.79 ms, mean recall 0.9958, non-matches 3 over 11 queries
+acorn ladder gen_50 share 1: rung 1, mean recall 0.8410, median 4.8 ms
+acorn ladder gen_50 share 1: rung 1.5, mean recall 0.8951, median 7.8 ms
+acorn ladder gen_50 share 1: rung 2, mean recall 0.9147, median 8.6 ms
+acorn ladder gen_50 share 1: rung 3, mean recall 0.9332, median 11.9 ms
+acorn ladder gen_50 share 1: rung 4, mean recall 0.9422, median 20.5 ms
+acorn ladder gen_50 share 1: rung 6, mean recall 0.9744, median 26.5 ms
+acorn ladder gen_50 share 1: rung 8, mean recall 0.9910, median 33.6 ms
+acorn default gen_50 share 1: param x1, median 4.98 ms, mean recall 0.8410, non-matches 846 over 12 queries
+acorn tight gen_50 share 1: param x8, median 36.24 ms, mean recall 0.9910, non-matches 62 over 12 queries
+acorn ladder gen_50 share 2: rung 1, mean recall 0.8907, median 42.8 ms
+acorn ladder gen_50 share 2: rung 1.5, mean recall 0.9087, median 89.9 ms
+acorn ladder gen_50 share 2: rung 2, mean recall 0.9162, median 163.9 ms
+acorn ladder gen_50 share 2: rung 3, mean recall 0.9221, median 285.2 ms
+acorn ladder gen_50 share 2: rung 4, mean recall 0.9246, median 466.6 ms
+acorn ladder gen_50 share 2: rung 6, mean recall 0.9267, median 936.7 ms
+acorn ladder gen_50 share 2: rung 8, mean recall 0.9275, median 1763.8 ms
+acorn ladder gen_50 share 2: rung 12, mean recall 0.9280, median 4334.6 ms
+acorn ladder gen_50 share 2: rung 16, mean recall 0.9282, median 8638.9 ms
+acorn default gen_50 share 2: param x1, median 73.96 ms, mean recall 0.8907, non-matches 2925 over 14 queries
+acorn tight gen_50 share 2: timed at one repetition
+acorn tight gen_50 share 2: param x12, median 4334.56 ms, mean recall 0.9280, non-matches 44 over 14 queries
+peak RSS 0.05 GiB

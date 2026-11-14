@@ -231,6 +231,8 @@ for vis in a.vis.split(","):
                     continue
                 if probe and len(res) == 3 and min(x[2] for x in res) > 2 * a.cap_ms:
                     return None  # three queries each over twice the cap: the rung is over the cap
+                if probe and sum(x[2] for x in res) > 3 * a.cap_ms * len(qis):
+                    return None  # its queries so far took longer than three times the cap times the query count
                 p = mult if IVF or EXACT or a.method == "rabitq" else int(np.ceil(m * mult))
                 ts = []
                 for _ in range(a.reps if timed else 1):
@@ -270,7 +272,7 @@ for vis in a.vis.split(","):
             for mult in ladder:
                 r = evaluate(mult, False, probe=True)
                 if r is None:
-                    print(f"{a.method} ladder {vis} share {si}: rung {mult}, over the cap on its first three queries", flush=True)
+                    print(f"{a.method} ladder {vis} share {si}: rung {mult}, over the cap (three queries each over twice the cap, or all together over three times the cap times the query count)", flush=True)
                     break
                 rec, ms = np.mean([x[3] for x in r]), np.median([x[2] for x in r])
                 print(f"{a.method} ladder {vis} share {si}: rung {mult}, mean recall {rec:.4f}, median {ms:.1f} ms", flush=True)
@@ -288,8 +290,8 @@ for vis in a.vis.split(","):
         for setting, mult in (("default", 1), ("tight", tight)):
             if setting not in a.settings.split(",") or mult is None:
                 continue
-            if setting == "tight" and not a.tight and np.median([x[2] for x in tight_r]) > a.slow_ms:
-                r = tight_r  # slower than --slow-ms per query: the ladder's one repetition is the timing
+            if setting == "tight" and not a.tight and (np.median([x[2] for x in tight_r]) > a.slow_ms or sum(x[2] for x in tight_r) > 60_000):
+                r = tight_r  # slower than --slow-ms per query, or a minute in all: the ladder's one repetition is the timing
                 print(f"{a.method} tight {vis} share {si}: timed at one repetition", flush=True)
             else:
                 r = evaluate(mult, True)
