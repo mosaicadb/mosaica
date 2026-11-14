@@ -7,6 +7,8 @@
 
 **Interactive maps of billions of points.**
 
+*Try the demo: [demo.mosaicadb.com](https://demo.mosaicadb.com/)*
+
 Mosaica is a database for serving interactive maps over billions of spatial data points with granular access control on every point. It takes records with a position, such as locations in geo datasets, specimens in a biodiversity archive or millions of papers laid out by their embeddings, and it serves a map that users can pan, zoom, filter and search, in a browser or a notebook.
 
 <picture>
