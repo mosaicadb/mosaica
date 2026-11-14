@@ -1,0 +1,12 @@
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.7s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1483.6 MiB, anon 1478.3, file 1.5, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 430.3 MiB, anon 427.7, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+dbcmp all: 999950 visible
+[disk] index vis all: wall 107.7s, cpu user 48.4s sys 25.1s, waiting for reads 37.7s; 1822078 reads of 195004 MiB
+dbcmp index threads 1 vis all: 105 timings, median 150.511 ms; read 194183 MiB from storage in 107.7s; full vectors resident 233.4 MiB; cgroup current 740.0 MiB, anon 498.3, file 233.4, max 775946240; events low 0 high 0 max 1329 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 1.4s, cpu user 1.2s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 2.234 ms; read 0 MiB from storage in 1.4s; full vectors resident 48.3 MiB; cgroup current 554.8 MiB, anon 498.3, file 48.3, max 775946240; events low 0 high 0 max 1330 oom 0 oom_kill 0 oom_group_kill 0

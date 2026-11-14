@@ -1,0 +1,215 @@
+==== run at 1794692282: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.4s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 14.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 84.3s
+[build2] encoded 204.0s
+[build2] assembled 206.2s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.07, 0.07, 0.07, 0.08, 0.12, 0.1, 0.06, 0.13, 0.19, 0.24] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.5s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1483.1 MiB, anon 1478.3, file 0.6, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 431.2 MiB, anon 427.7, file 0.1, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.1s: io_us=9.106 io_gbps=2.807, so rows up to 25561 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 72.9s, cpu user 34.5s sys 19.9s, waiting for reads 23.5s; 2675465 reads of 170610 MiB
+dbcmp index threads 1 vis all: 105 timings, median 110.749 ms; read 168752 MiB from storage in 72.9s; full vectors resident 233.8 MiB; cgroup current 739.9 MiB, anon 500.5, file 233.8, max 775946240; events low 0 high 0 max 3721 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 6.9s, cpu user 0.5s sys 5.7s, waiting for reads 5.9s; 4951800 reads of 9305 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 12.938 ms; read 1380 MiB from storage in 6.9s; full vectors resident 46.4 MiB; cgroup current 552.2 MiB, anon 500.5, file 46.4, max 775946240; events low 0 high 0 max 3721 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794692799: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.2s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 15.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 88.3s
+[build2] encoded 210.6s
+[build2] assembled 211.9s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.07, 0.07, 0.08, 0.07, 0.1, 0.1, 0.07, 0.12, 0.15, 0.19] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.5s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.5s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1483.3 MiB, anon 1479.0, file 0.3, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 437.3 MiB, anon 434.9, file 0.1, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.1s: io_us=8.843 io_gbps=2.024, so rows up to 17895 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 75.3s, cpu user 35.0s sys 23.0s, waiting for reads 24.5s; 3687816 reads of 147792 MiB
+dbcmp index threads 1 vis all: 105 timings, median 108.368 ms; read 144668 MiB from storage in 75.3s; full vectors resident 232.2 MiB; cgroup current 740.0 MiB, anon 499.4, file 232.2, max 775946240; events low 0 high 0 max 7282 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 3.2s, cpu user 1.1s sys 1.8s, waiting for reads 1.9s; 1512525 reads of 2940 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 5.849 ms; read 518 MiB from storage in 3.2s; full vectors resident 47.6 MiB; cgroup current 554.1 MiB, anon 499.4, file 47.6, max 775946240; events low 0 high 0 max 7282 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794693692: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.8s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 15.9s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 87.0s
+[build2] encoded 209.7s
+[build2] assembled 210.8s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.08, 0.08, 0.08, 0.08, 0.11, 0.1, 0.08, 0.12, 0.16, 0.2] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.7s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1483.6 MiB, anon 1478.3, file 1.5, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 430.3 MiB, anon 427.7, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.1s: io_us=15.689 io_gbps=2.535, so rows up to 39765 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 107.7s, cpu user 48.4s sys 25.1s, waiting for reads 37.7s; 1822078 reads of 195004 MiB
+dbcmp index threads 1 vis all: 105 timings, median 150.511 ms; read 194183 MiB from storage in 107.7s; full vectors resident 233.4 MiB; cgroup current 740.0 MiB, anon 498.3, file 233.4, max 775946240; events low 0 high 0 max 1329 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 1.4s, cpu user 1.2s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 2.234 ms; read 0 MiB from storage in 1.4s; full vectors resident 48.3 MiB; cgroup current 554.8 MiB, anon 498.3, file 48.3, max 775946240; events low 0 high 0 max 1330 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794694119: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_all_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--sets", "all", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold", "--read-modes", "uring,mmap"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.1s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 17.5s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 89.8s
+[build2] encoded 216.7s
+[build2] assembled 218.3s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.1, 0.1, 0.1, 0.09, 0.11, 0.1, 0.06, 0.11, 0.15, 0.18] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.9s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1483.1 MiB, anon 1479.0, file 0.1, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 429.3 MiB, anon 426.7, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.3s: io_us=11.645 io_gbps=2.264, so rows up to 26365 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index@uring vis all: wall 82.1s, cpu user 40.9s sys 22.5s, waiting for reads 23.2s; 2447992 reads of 173980 MiB
+dbcmp index@uring threads 1 vis all: 105 timings, median 116.337 ms; read 172427 MiB from storage in 82.1s; full vectors resident 234.8 MiB; cgroup current 739.9 MiB, anon 496.7, file 234.8, max 775946240; events low 0 high 0 max 3124 oom 0 oom_kill 0 oom_group_kill 0
+[disk] index@mmap vis all: wall 203.1s, cpu user 43.2s sys 109.4s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index@mmap threads 1 vis all: 105 timings, median 73.228 ms; read 89552 MiB from storage in 203.1s; full vectors resident 234.8 MiB; cgroup current 739.9 MiB, anon 496.7, file 234.8, max 775946240; events low 0 high 0 max 552551 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794694697: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--rlv", "56,96,160,256,384", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r384_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.8s (sub-Gaussian c = 9.354): [([95], 7.426), ([95, 127, 255], 8.954), ([95, 127, 255, 287], 9.108)]
+[build2] plans 16.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25], [8.0, 6.0, 4.0, 0.5]]
+[build2] calibrated 129.6s
+[build2] encoded 322.5s
+[build2] assembled 323.8s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 14599, tan 31856
+[repack] occupancy thresholds by level [0.09, 0.09, 0.08, 0.07, 0.11, 0.11, 0.08, 0.12, 0.16, 0.19, 0.21] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.7s
+[mem] total 506.3: lcode 360.6, groups.v8t 36.0, lscal 25.6, ctab 24.6, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.7, esc 1.3, rots 1.3, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.7s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.0, 400.6]
+[cap] before: cgroup current 1834.1 MiB, anon 1829.5, file 0.0, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 629.3 MiB, anon 626.2, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.3s: io_us=10.947 io_gbps=3.133, so rows up to 34299 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 61.5s, cpu user 36.3s sys 17.3s, waiting for reads 11.1s; 2171173 reads of 107444 MiB
+dbcmp index threads 1 vis all: 105 timings, median 88.718 ms; read 106232 MiB from storage in 61.5s; full vectors resident 38.2 MiB; cgroup current 739.8 MiB, anon 692.7, file 38.2, max 775946240; events low 0 high 0 max 6963 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 61.0s, cpu user 5.1s sys 45.6s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 117.215 ms; read 25345 MiB from storage in 61.0s; full vectors resident 38.9 MiB; cgroup current 740.0 MiB, anon 692.7, file 38.9, max 775946240; events low 0 high 0 max 198260 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794695394: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--rlv", "56,96,160,256,384", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r384_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.1s (sub-Gaussian c = 9.354): [([95], 7.426), ([95, 127, 255], 8.954), ([95, 127, 255, 287], 9.108)]
+[build2] plans 18.3s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25], [8.0, 6.0, 4.0, 0.5]]
+[build2] calibrated 129.9s
+[build2] encoded 323.5s
+[build2] assembled 325.1s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 14599, tan 31856
+[repack] occupancy thresholds by level [0.08, 0.07, 0.07, 0.08, 0.09, 0.1, 0.07, 0.11, 0.14, 0.18, 0.19] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.9s
+[mem] total 506.3: lcode 360.6, groups.v8t 36.0, lscal 25.6, ctab 24.6, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.7, esc 1.3, rots 1.3, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.9s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.0, 400.6]
+[cap] before: cgroup current 1834.4 MiB, anon 1829.5, file 0.1, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 629.7 MiB, anon 626.2, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.2s: io_us=11.842 io_gbps=2.871, so rows up to 34003 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 77.1s, cpu user 37.2s sys 29.7s, waiting for reads 12.8s; 2167450 reads of 107435 MiB
+dbcmp index threads 1 vis all: 105 timings, median 120.992 ms; read 105992 MiB from storage in 77.1s; full vectors resident 77.6 MiB; cgroup current 732.8 MiB, anon 646.1, file 77.6, max 775946240; events low 0 high 0 max 5726 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 1.1s, cpu user 0.9s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 1.882 ms; read 0 MiB from storage in 1.1s; full vectors resident 48.3 MiB; cgroup current 699.2 MiB, anon 642.6, file 48.3, max 775946240; events low 0 high 0 max 5726 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794695997: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 6.3s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 17.4s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 91.3s
+[build2] encoded 219.3s
+[build2] assembled 221.0s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.09, 0.08, 0.09, 0.09, 0.12, 0.12, 0.08, 0.11, 0.14, 0.18] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 2.6s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 2.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1480.4 MiB, anon 1475.9, file 0.2, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 426.6 MiB, anon 423.5, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.3s: io_us=12.424 io_gbps=1.838, so rows up to 22840 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 106.1s, cpu user 39.9s sys 61.9s, waiting for reads 10.5s; 2918234 reads of 162415 MiB
+dbcmp index threads 1 vis all: 105 timings, median 160.016 ms; read 160249 MiB from storage in 106.1s; full vectors resident 280.0 MiB; cgroup current 731.4 MiB, anon 442.5, file 280.0, max 775946240; events low 0 high 0 max 3687 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 1.1s, cpu user 1.0s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 1.895 ms; read 0 MiB from storage in 1.1s; full vectors resident 48.3 MiB; cgroup current 494.8 MiB, anon 438.5, file 48.3, max 775946240; events low 0 high 0 max 3687 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794696749: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r4_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.8s (sub-Gaussian c = 9.330): [([95], 7.413), ([95, 127, 255], 8.933), ([95, 127, 255, 287], 9.086)]
+[build2] plans 15.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 87.6s
+[build2] encoded 209.3s
+[build2] assembled 210.5s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.11, 0.08, 0.08, 0.08, 0.11, 0.11, 0.07, 0.12, 0.17, 0.21] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.8s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.8s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1482.2 MiB, anon 1478.3, file 0.0, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 430.6 MiB, anon 427.7, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.2s: io_us=10.012 io_gbps=2.913, so rows up to 29164 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 83.1s, cpu user 34.3s sys 20.7s, waiting for reads 31.9s; 2329957 reads of 177269 MiB
+dbcmp index threads 1 vis all: 105 timings, median 123.428 ms; read 175843 MiB from storage in 83.1s; full vectors resident 261.6 MiB; cgroup current 735.1 MiB, anon 465.0, file 261.6, max 775946240; events low 0 high 0 max 2343 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 0.9s, cpu user 0.8s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 1.719 ms; read 0 MiB from storage in 0.9s; full vectors resident 48.3 MiB; cgroup current 505.4 MiB, anon 449.0, file 48.3, max 775946240; events low 0 high 0 max 2343 oom 0 oom_kill 0 oom_group_kill 0
+==== run at 1794697119: ["/home/joe/code/vexact-disk-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--rlv", "56,96,160,256,384", "--plan-file", "/home/joe/code/vexact-benchup/bench/threshold-db/results/ours/plan.txt", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-1m/prep/queries.npy", "--results", "../results/disk", "dbcmp", "--thr", "/home/joe/code/vexact-data/bioclip2-1m/prep/thresholds.npy", "--tag", "r384_index_1t", "--full-file", "/home/joe/code/vexact-disk-data/full.f16", "--cap", "775946240", "--full-advice", "random", "--willneed", "--vis", "/home/joe/code/vexact-data/bioclip2-1m/prep/vis_1.npy", "--step", "10", "--reps", "5", "--threads", "1", "--what", "index", "--cold"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] randomised constants 5.5s (sub-Gaussian c = 9.354): [([95], 7.426), ([95, 127, 255], 8.954), ([95, 127, 255, 287], 9.108)]
+[build2] plans 15.8s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25], [8.0, 6.0, 4.0, 0.5]]
+[build2] calibrated 128.6s
+[build2] encoded 328.7s
+[build2] assembled 330.0s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 14599, tan 31856
+[repack] occupancy thresholds by level [0.08, 0.08, 0.08, 0.08, 0.11, 0.14, 0.08, 0.17, 0.2, 0.28, 0.25] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 io_us=5.7 io_gbps=3.3 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.6s
+[mem] total 506.3: lcode 360.6, groups.v8t 36.0, lscal 25.6, ctab 24.6, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.7, esc 1.3, rots 1.3, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 276.0, 400.6]
+[cap] before: cgroup current 1834.3 MiB, anon 1829.5, file 0.1, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 629.7 MiB, anon 626.2, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+[plan] disk timed in 0.2s: io_us=10.978 io_gbps=2.752, so rows up to 30211 bytes apart are read together
+dbcmp all: 999950 visible
+[disk] index vis all: wall 74.1s, cpu user 41.7s sys 19.7s, waiting for reads 16.4s; 2458686 reads of 98132 MiB
+dbcmp index threads 1 vis all: 105 timings, median 100.362 ms; read 96465 MiB from storage in 74.1s; full vectors resident 66.6 MiB; cgroup current 739.9 MiB, anon 664.5, file 66.6, max 775946240; events low 0 high 0 max 7483 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index vis vis_1: wall 1.3s, cpu user 1.2s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index threads 1 vis vis_1: 105 timings, median 2.371 ms; read 0 MiB from storage in 1.3s; full vectors resident 48.3 MiB; cgroup current 705.4 MiB, anon 648.6, file 48.3, max 775946240; events low 0 high 0 max 7483 oom 0 oom_kill 0 oom_group_kill 0
