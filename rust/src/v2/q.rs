@@ -1367,6 +1367,9 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         if ek | et != 0 {
                             let (mut rk, mut rt) = (arr(kap), arr(th));
                             for i in 0..16 {
+                                if (ek | et) >> i & 1 == 0 {
+                                    continue;
+                                }
                                 let row = (c.r0 + sv.idx[o + i] as usize) as u32;
                                 if ek >> i & 1 == 1 {
                                     rk[i] = ix.esc[&(l as u8, 8 + j as u8, row)];
