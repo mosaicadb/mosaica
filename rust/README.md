@@ -34,9 +34,11 @@ blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deter
 24 / 32 B; the randomised ones at 56, 96, 160 and 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16
 vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every
 other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
-derived from these in Rust when the index is opened (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
-(about 11 s at 1.2M items on 12 cores); the codes are not stored. `testdata/make_synth.py` fits the small index the
-tests use.
+derived from these in Rust when the index is built (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
+(about 11 s at 1.2M items on 12 cores). The encoded index is saved beside the fit, in `INDEX/encoded-KEY/`
+(`src/v2/store.rs`; KEY covers the fit, the profile, the identity of the vectors file and every option that changes the
+build), with the f16 vectors in index row order; opening it maps the codes, keys and vectors and encodes nothing.
+`testdata/make_synth.py` fits the small index the tests use.
 
 ## Run
 
@@ -51,6 +53,10 @@ $B dbtopk --order ORDER.npy                       # exact and approximate top-k 
 $B --scale 10 --nq 20                             # 10M synthetic items in the int8 bases
 $B --clusters 40 verify                           # quick development check
 ```
+
+The runs open the index saved for the fit and the build options given (`v2::open`), and stop with a message when there
+is none: `--rebuild` encodes it and saves it first (`v2::rebuild`), `--in-memory` encodes it without saving it
+(`v2::build`), and `--hash` logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`).
 
 The defaults are the measured configuration: integer deterministic levels, tables combined from the group's and the
 centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;

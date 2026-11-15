@@ -18,7 +18,7 @@ fn fixture() -> &'static Fixture {
     static F: OnceLock<Fixture> = OnceLock::new();
     F.get_or_init(|| {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-        let (_, ix) = open(dir, &BuildOptions::default(), &mut |_| {});
+        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {});
         let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10));
 
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
@@ -197,5 +197,114 @@ fn approximate_knn_over_every_cluster_without_a_dial_is_exact_up_to_f32() {
                 assert!(out.ents.iter().all(|x| bm.as_ref().map_or(true, |b| b.contains(x.1))), "approximate k-NN returned an invisible item, set {sname}, query {qi}, k {k}");
             }
         }
+    }
+}
+
+/// A saved index, opened, is the index that was built: the same codes, scalars, keys, plans, per-cluster records,
+/// tables and vectors, and every query path gives the same answers doing the same work. An open with other options
+/// is refused, and nothing is written into the fitted directory.
+#[test]
+fn a_saved_index_opens_as_the_index_it_saves() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = std::env::temp_dir().join(format!("vexact-e2e-{}-{}", std::process::id(), crate::util::now_s() as u64));
+    let edir = tmp.join("encoded");
+    std::fs::create_dir_all(&tmp).unwrap();
+    let edir = edir.to_str().unwrap();
+    let o = BuildOptions::default();
+    let before: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+    let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let after: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(before, after, "a build saved elsewhere wrote into the fitted directory");
+    assert_eq!(built.code_hash(), fixture().ix.code_hash(), "the saved build encodes as the build in memory does");
+    assert_eq!(opened.code_hash(), built.code_hash());
+    same_index(&built, &opened);
+    // the repack thresholds are timed at each open; give the opened index the built one's so the work compares exactly
+    opened.repack = built.repack.clone();
+    let f = fixture();
+    for (qi, q) in f.queries.iter().enumerate() {
+        let (pa, pb) = (prep2(&built, q), prep2(&opened, q));
+        for (sname, bm) in &f.sets {
+            let (va, vb) = (bm.as_ref().map(|b| Vis2::new(&built, b)), bm.as_ref().map(|b| Vis2::new(&opened, b)));
+            let t = truth(&built, q, bm.as_ref());
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let a = threshold2(&built, &pa, th, &Opts2 { vis: va.as_ref(), verify: false, want_iv: false, plan });
+                    let b = threshold2(&opened, &pb, th, &Opts2 { vis: vb.as_ref(), verify: false, want_iv: false, plan });
+                    assert_eq!(a.rows, b.rows, "threshold rows, plan {pname}, set {sname}, query {qi}, t {th}");
+                    same_work(&a.st, &b.st, &format!("threshold, plan {pname}, set {sname}, query {qi}, t {th}"));
+                }
+            }
+            for k in [1, 10, 100] {
+                for (pname, plan) in plans() {
+                    let (a, b) = (knn2(&built, q, k, va.as_ref(), plan), knn2(&opened, q, k, vb.as_ref(), plan));
+                    assert_eq!(a.ents, b.ents, "k-NN, plan {pname}, set {sname}, query {qi}, k {k}");
+                    same_work(&a.st, &b.st, &format!("k-NN, plan {pname}, set {sname}, query {qi}, k {k}"));
+                }
+            }
+        }
+    }
+    // other options, or another file format, are refused
+    let other = BuildOptions { cal_per_group: 4, ..BuildOptions::default() };
+    assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "an index opened under options it was not built with");
+    let json = format!("{edir}/index.json");
+    let text = std::fs::read_to_string(&json).unwrap();
+    std::fs::write(&json, text.replace(&format!("\"format\": {}", store::STORE_FORMAT), "\"format\": 1")).unwrap();
+    assert!(open_at(dir, edir, &o, &mut |_| {}).is_err(), "an index of another format opened");
+    drop(opened);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+fn same_work(a: &crate::kernel::Stats, b: &crate::kernel::Stats, what: &str) {
+    assert_eq!((&a.enter, &a.dec_in, &a.dec_out, &a.blocks), (&b.enter, &b.dec_in, &b.dec_out, &b.blocks), "levels: {what}");
+    assert_eq!((a.touched, a.full_reads, a.clusters_open, a.clusters_in, a.clusters_out, a.range_in, a.range_out), (b.touched, b.full_reads, b.clusters_open, b.clusters_in, b.clusters_out, b.range_in, b.range_out), "items and clusters: {what}");
+}
+
+/// Everything two indexes hold, compared bit for bit (floats by their bits).
+fn same_index(a: &Index2, b: &Index2) {
+    let f32b = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let f64b = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!((a.n(), a.k(), a.nrows, a.nent, a.nanch, a.x2.to_bits()), (b.n(), b.k(), b.nrows, b.nent, b.nanch, b.x2.to_bits()));
+    assert_eq!((&a.meta.dlv, &a.meta.rlv, a.meta.npow), (&b.meta.dlv, &b.meta.rlv, b.meta.npow));
+    assert_eq!((&a.lcode.iter().map(|x| &x[..]).collect::<Vec<_>>(), &a.lscal.iter().map(|x| &x[..]).collect::<Vec<_>>()), (&b.lcode.iter().map(|x| &x[..]).collect::<Vec<_>>(), &b.lscal.iter().map(|x| &x[..]).collect::<Vec<_>>()));
+    assert_eq!((&a.ahat[..], &a.row_ent[..], &a.ent_row[..], &a.nukey[..]), (&b.ahat[..], &b.row_ent[..], &b.ent_row[..], &b.nukey[..]));
+    assert_eq!((&a.coff, &a.soff, &a.vrow), (&b.coff, &b.soff, &b.vrow));
+    let esc = |x: &Index2| {
+        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (*k, v.to_bits())).collect();
+        e.sort_unstable();
+        e
+    };
+    assert_eq!(esc(a), esc(b));
+    assert_eq!((f64b(&a.centres64), f64b(&a.anchors), f32b(&a.hi), f32b(&a.lo)), (f64b(&b.centres64), f64b(&b.anchors), f32b(&b.hi), f32b(&b.lo)));
+    assert_eq!(a.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>(), b.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>());
+    assert_eq!((a.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&a.etab.lo), f32b(&a.etab.hi)), (b.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&b.etab.lo), f32b(&b.etab.hi)));
+    for (x, y) in a.cl.iter().zip(&b.cl) {
+        assert_eq!((x.g, x.r0, x.r1, x.nblk, x.mn32.to_bits()), (y.g, y.r0, y.r1, y.nblk, y.mn32.to_bits()));
+        assert_eq!(f64b(&[x.mn, x.btot, x.mvn, x.rmax, x.numax, x.bmin, x.bmax]), f64b(&[y.mn, y.btot, y.mvn, y.rmax, y.numax, y.bmin, y.bmax]));
+        assert_eq!((f64b(&x.bm), f64b(&x.b2), f32b(&x.l1m)), (f64b(&y.bm), f64b(&y.b2), f32b(&y.l1m)));
+        assert_eq!((f64b(&x.mhat), f32b(&x.mv32), f32b(&x.wmr)), (f64b(&y.mhat), f32b(&y.mv32), f32b(&y.wmr)));
+    }
+    for (x, y) in a.ctab.iter().flatten().zip(b.ctab.iter().flatten()) {
+        assert_eq!((&x.th, &x.tmax, f32b(&x.step), f64b(&x.off), f64b(&x.err)), (&y.th, &y.tmax, f32b(&y.step), f64b(&y.off), f64b(&y.err)));
+    }
+    for (x, y) in a.groups.iter().zip(b.groups.iter()) {
+        assert_eq!((f32b(&x.sig), x.lamsum.to_bits(), x.d.iter().map(|d| f32b(d)).collect::<Vec<_>>(), f32b(&x.pconst), x.kmin), (f32b(&y.sig), y.lamsum.to_bits(), y.d.iter().map(|d| f32b(d)).collect::<Vec<_>>(), f32b(&y.pconst), y.kmin));
+        assert_eq!((x.ntab.iter().map(|t| f32b(t)).collect::<Vec<_>>(), f32b(&x.dt), &x.ridx, x.nb, x.boff, f32b(&x.ypredw)), (y.ntab.iter().map(|t| f32b(t)).collect::<Vec<_>>(), f32b(&y.dt), &y.ridx, y.nb, y.boff, f32b(&y.ypredw)));
+        assert_eq!((x.ytab.iter().map(|t| f32b(t)).collect::<Vec<_>>(), f32b(&x.csgl), x.yhl.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>()), (y.ytab.iter().map(|t| f32b(t)).collect::<Vec<_>>(), f32b(&y.csgl), y.yhl.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>()));
+        assert_eq!((x.rates.iter().map(|r| f64b(r)).collect::<Vec<_>>(), &x.thchg, x.ttab.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>()), (y.rates.iter().map(|r| f64b(r)).collect::<Vec<_>>(), &y.thchg, y.ttab.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>()));
+        assert_eq!((x.ktab.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>(), x.khl.iter().flatten().flatten().map(|t| f32b(t)).collect::<Vec<_>>()), (y.ktab.iter().flatten().map(|t| f32b(t)).collect::<Vec<_>>(), y.khl.iter().flatten().flatten().map(|t| f32b(t)).collect::<Vec<_>>()));
+        assert_eq!((x.kstep.iter().map(|r| f64b(r)).collect::<Vec<_>>(), &x.kbits, &x.rrow, f64b(&x.ystep), &x.rdepth), (y.kstep.iter().map(|r| f64b(r)).collect::<Vec<_>>(), &y.kbits, &y.rrow, f64b(&y.ystep), &y.rdepth));
+        assert_eq!((x.e_inv.to_bits(), &x.v8t, f64b(&x.vsc), x.vinv.len(), x.vq.len()), (y.e_inv.to_bits(), &y.v8t, f64b(&y.vsc), y.vinv.len(), y.vq.len()));
+        assert_eq!(x.levels.len(), y.levels.len());
+        for (lx, ly) in x.levels.iter().zip(&y.levels) {
+            assert_eq!((lx.units, lx.srows, lx.parts.len()), (ly.units, ly.srows, ly.parts.len()));
+            for (px, py) in lx.parts.iter().zip(&ly.parts) {
+                assert_eq!((px.j, &px.ufields, format!("{:?}", px.fields)), (py.j, &py.ufields, format!("{:?}", py.fields)));
+            }
+        }
+    }
+    let (Full2::Real { rows: ra }, Full2::Real { rows: rb }) = (&a.full, &b.full) else { panic!("an index without stored vectors") };
+    for r in 0..a.nrows {
+        assert_eq!(ra.row(r, a.n()), rb.row(r, b.n()), "row {r}'s stored vector");
     }
 }

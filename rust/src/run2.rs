@@ -49,9 +49,9 @@ const VALUE_FLAGS: &[&str] = &[
     "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
-    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--int", "--no-all",
-    "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--skip-all", "--sweep",
-    "--v2", "--willneed",
+    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int",
+    "--no-all", "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--rebuild",
+    "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
     "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
@@ -201,9 +201,24 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         ..BuildOptions::default()
     };
     let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));
+    // the index saved beside the fit (DIR/encoded-KEY, KEY covering the fit and every option that changes the build),
+    // opened without encoding; --rebuild encodes it and saves it first; --in-memory encodes it and saves nothing
     let topen = Timer::new();
-    let (mut p, mut ix) = open(dir, &bo, &mut |s| out!("{s}"));
+    let mut lg = |s: String| out!("{s}");
+    let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
+        build(dir, &bo, &mut lg)
+    } else if args().iter().any(|a| a == "--rebuild") {
+        rebuild(dir, &bo, &mut lg)
+    } else {
+        open(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    };
     let built_s = topen.s();
+    if args().iter().any(|a| a == "--hash") {
+        out!("[index] code hash {:016x}", ix.code_hash());
+    }
     let xs = RealSource::open(&p.xs_path);
     let n = p.meta.n;
     let mut ent_xs = vec![u32::MAX; p.perm.len()];

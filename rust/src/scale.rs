@@ -25,8 +25,7 @@ pub fn run2(scale: usize, nq: usize) {
     // a real build supplies the int8 bases, residual norms and centres
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
-        let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: std::sync::Arc::new(f.map), off: f.off, rows: Default::default() }, &BuildOptions::default(), None, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { rows: Default::default() }, &BuildOptions::default(), None, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];

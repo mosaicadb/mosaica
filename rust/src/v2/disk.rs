@@ -31,7 +31,8 @@ impl Default for ReadPolicy {
 /// The stored f16 vectors in index row order: in memory (the build's copy) or a mapped file.
 pub enum Rows {
     Mem(super::F16Rows),
-    // rfd: read with pread, no readahead; dfd: the same file opened with O_DIRECT
+    // rfd: read with pread, no readahead; dfd: the same file opened with O_DIRECT (plainly where the file system does
+    // not support it)
     Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File, policy: ReadPolicy },
 }
 
@@ -69,24 +70,41 @@ impl Rows {
             f.sync_all().unwrap();
             *v = Default::default();
         }
-        let file = std::fs::File::open(path).unwrap();
-        let map = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let len = std::fs::metadata(path).unwrap_or_else(|e| panic!("{path}: {e}")).len() as usize / 2;
+        *self = Rows::open(path, len, advice).unwrap_or_else(|e| panic!("{e}"));
+        self.evict();
+    }
+
+    /// Maps the rows in the existing file `path` (at least `len` f16 values, headerless, as `to_file` and a saved index
+    /// write them) with `advice` (normal, random or sequential), for the mapping, the reader and the planner as rows
+    /// written by `to_file`, under the default read policy (read through the mapping).
+    pub fn open(path: &str, len: usize, advice: &str) -> Result<Rows, String> {
+        let file = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
+        let flen = file.metadata().map_err(|e| format!("cannot read {path}: {e}"))?.len() as usize;
+        if flen < 2 * len {
+            return Err(format!("{path} holds {flen} bytes, fewer than the {} of its rows", 2 * len));
+        }
         let a = match advice {
             "normal" => libc::MADV_NORMAL,
             "random" => libc::MADV_RANDOM,
             "sequential" => libc::MADV_SEQUENTIAL,
             _ => panic!("--full-advice is normal, random or sequential"),
         };
+        // an empty file cannot be mapped; map a page of zeros in its place
+        let map = if flen == 0 {
+            memmap2::MmapOptions::new().len(4096).map_anon().and_then(|m| m.make_read_only())
+        } else {
+            unsafe { memmap2::Mmap::map(&file) }
+        }.map_err(|e| format!("cannot map {path}: {e}"))?;
         unsafe {
             assert_eq!(libc::madvise(map.as_ptr() as *mut libc::c_void, map.len(), a), 0);
         }
-        let rfd = std::fs::File::open(path).unwrap();
+        let rfd = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
         unsafe {
             libc::posix_fadvise(rfd.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
         }
-        let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).unwrap();
-        *self = Rows::Map { map, file, rfd, dfd, policy: ReadPolicy::default() };
-        self.evict();
+        let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).or_else(|_| std::fs::File::open(path)).map_err(|e| format!("cannot open {path}: {e}"))?;
+        Ok(Rows::Map { map, file, rfd, dfd, policy: ReadPolicy::default() })
     }
 
     /// Drops the mapped rows from this process and from the page cache.
