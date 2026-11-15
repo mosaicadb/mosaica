@@ -2,6 +2,7 @@
 # clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
 # build (`vexact --v2 --index OUTDIR`) encodes every item from these.
 # usage: python3 fit.py VECTORS.npy OUTDIR [--basis pca|dual] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
+#   [--per-cluster M]
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i.
 #   --basis pca (default): each group's PCA basis of the residuals and the data-only profile H25.
 #   --basis dual: the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
@@ -118,6 +119,7 @@ def main():
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
     ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
+    ap.add_argument("--per-cluster", type=int, default=PER_CLUSTER, help="items per cluster (small fits for tests)")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
@@ -137,7 +139,7 @@ def main():
     nzero = int((np.abs(Xu).sum(1) == 0).sum())
     log(f"N {N} n {n0} (padded to {n}); zero vectors {nzero}")
 
-    K = max(1, round(N / PER_CLUSTER))
+    K = max(1, round(N / a.per_cluster))
     sub = Xu[rng.choice(N, min(N, 200_000), replace=False)]
     C = kmeans(sub, K, rng)
     del sub

@@ -15,6 +15,8 @@
 //! q.r = (V_q^T q).z + q.eps with |eps| <= e_inv |r|, and V_q^T q is computed exactly in integers.
 pub mod col;
 pub mod disk;
+#[cfg(test)]
+mod e2e;
 pub mod kern;
 pub mod q;
 pub mod setup;
