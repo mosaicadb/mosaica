@@ -1343,29 +1343,30 @@ pub fn dbcmp(c: &Ctx2) {
                     })
                 };
                 let answers = |wi: usize| !matches!(whats[wi].split(':').next().unwrap(), "prep" | "anc");
-                if cold {
-                    // the first query at each answer size, after the full vectors are dropped from the page cache
-                    let qi = 0;
-                    for wi in 0..whats.len() {
-                        for si in 0..ns {
-                            if let Some(r) = fullrows {
-                                r.evict();
-                            }
-                            let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                            let t = Timer::new();
-                            let (ans, fr, _) = run(wi, &qs[qi], thr[qi * ns + si]);
-                            let ms = t.ms();
-                            let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                            if answers(wi) {
-                                check((vi, qi, si), &labels[wi], &ans, th, vname);
-                            }
-                            lines.push(format!("{},{th},{vname},{si},{qi},{ms:.4},{ms:.4},{},{fr},{:.1},{},{:.2},cold", labels[wi], ans.len(), (io1 - io0) as f64 / 1024.0, mf1 - mf0, (c1.1 - c0.1) * 1e3));
-                        }
-                    }
-                }
                 let mut dumpf: Vec<_> = labels.iter().map(|l| (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{}_{vname}.bin", l.replace([':', '@', '='], "_"))).unwrap()))).collect();
                 let mut nscan = vec![0usize; whats.len()];
                 for pass in &passes {
+                    if cold {
+                        // the first query at each answer size, after the full vectors are dropped from the page cache, just before
+                        // the variants of this pass run warm
+                        let qi = 0;
+                        for &wi in pass {
+                            for si in 0..ns {
+                                if let Some(r) = fullrows {
+                                    r.evict();
+                                }
+                                let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                                let t = Timer::new();
+                                let (ans, fr, _) = run(wi, &qs[qi], thr[qi * ns + si]);
+                                let ms = t.ms();
+                                let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                                if answers(wi) {
+                                    check((vi, qi, si), &labels[wi], &ans, th, vname);
+                                }
+                                lines.push(format!("{},{th},{vname},{si},{qi},{ms:.4},{ms:.4},{},{fr},{:.1},{},{:.2},cold", labels[wi], ans.len(), (io1 - io0) as f64 / 1024.0, mf1 - mf0, (c1.1 - c0.1) * 1e3));
+                            }
+                        }
+                    }
                     let (bio0, bt0, cpu0, w0, nr0, nb0) = (disk::io_read_bytes(), Timer::new(), disk::cpu_s(), disk::WAIT_NS.load(Relaxed), disk::NREADS.load(Relaxed), disk::NBYTES.load(Relaxed));
                     for (qi, q) in qs.iter().enumerate() {
                         if qi % step != 0 {
