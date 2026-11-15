@@ -26,8 +26,8 @@ fn pool(t: usize) -> rayon::ThreadPool {
 pub struct Ctx2 {
     pub p: Params,
     pub ix: Index2,
-    pub xs: RealSource,
-    pub ent_xs: Vec<u32>,
+    pub row_ent: Vec<i64>, // index row -> entity
+    pub ent_xs: Vec<u32>,  // entity -> index row
     pub items: Vec<Vec<f32>>,
     pub texts: Vec<Vec<f32>>,
     pub plan: Plan,
@@ -219,15 +219,14 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if args().iter().any(|a| a == "--hash") {
         out!("[index] code hash {:016x}", ix.code_hash());
     }
-    let xs = RealSource::open(&p.xs_path);
+    // the experiments read the index's vectors (in index row order), not the fit's Xs.npy
     let n = p.meta.n;
-    let mut ent_xs = vec![u32::MAX; p.perm.len()];
-    for (r, &e) in p.perm.iter().enumerate() {
-        ent_xs[e as usize] = r as u32;
-    }
-    // item queries: held-out rows from --item-queries, else stored rows listed by the fit
+    let ent_xs = ix.ent_row.to_vec();
+    let row_ent: Vec<i64> = ix.row_ent.iter().map(|&e| e as i64).collect();
+    // item queries: held-out rows from --item-queries, else rows of the fit listed by it (Xs.npy rows, read from the
+    // index through the fit's row-to-entity map)
     let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
-        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect()
+        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| ix.full_row_f16(ix.row_of_ent(p.perm[r as usize] as u32)).iter().map(|&h| f16_to_f32(h)).collect()).collect()
     } else {
         load_queries_from(&arg_str("--item-queries", ""), n)
     };
@@ -259,9 +258,14 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
-        let same = |a: &str, b: &str| std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok() == Some(x));
-        if same(&ff, &p.xs_path) {
-            eprintln!("--full-file {ff} is the fitted vector file {}, which is mapped while the copy is written; give a path of its own", p.xs_path);
+        // the copy is written from the index's vectors, which a saved index maps from its own file
+        let own = match &ix.full {
+            Full2::Real { rows, .. } => rows.file_path(),
+            _ => None,
+        };
+        let ffc = std::fs::canonicalize(&ff).ok();
+        if ffc.is_some() && (own == ffc || std::fs::canonicalize(&p.xs_path).ok() == ffc) {
+            eprintln!("--full-file {ff} is the index's vector file, which is mapped while the copy is written, or the fit's; give a path of its own");
             std::process::exit(2);
         }
         let t = Timer::new();
@@ -292,7 +296,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, pseudo };
+    let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
     }
@@ -319,15 +323,18 @@ impl Ctx2 {
             ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
             ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
             ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
-            ("nukey", b(&ix.nukey)), ("ent_xs", b(&self.ent_xs)),
+            ("nukey", b(&ix.nukey)), ("ent_xs+row_ent", b(&self.ent_xs) + b(&self.row_ent)),
             ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
         ];
         parts.sort_by_key(|x| std::cmp::Reverse(x.1));
         let tot: usize = parts.iter().map(|x| x.1).sum();
         format!("total {:.1}: {}", tot as f64 / 1048576.0, parts.iter().map(|(k, v)| format!("{k} {:.1}", *v as f64 / 1048576.0)).collect::<Vec<_>>().join(", "))
     }
+    /// Flat scans over the index's vectors in index row order.
     pub fn flat(&self) -> Flat<'_> {
-        Flat { map: &self.xs.map, off: self.xs.off, n: self.p.meta.n, nrows: self.p.cstart[self.p.meta.k], ent: &self.p.perm }
+        let Full2::Real { rows, .. } = &self.ix.full else { panic!("a synthetic index has no vectors to scan") };
+        let n = self.p.meta.n;
+        Flat { map: rows.as_bytes(self.ix.nrows * n), off: 0, n, nrows: self.ix.nrows, ent: &self.row_ent }
     }
 }
 

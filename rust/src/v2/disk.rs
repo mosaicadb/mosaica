@@ -56,11 +56,14 @@ impl Rows {
         }
     }
 
-    /// Writes the in-memory rows to `path`, syncs, drops the copy and maps the file with `advice` (normal, random or
-    /// sequential).
+    /// Writes the rows to `path` (from memory, or from the file they are mapped from), syncs, drops the copy and maps
+    /// the file with `advice` (normal, random or sequential).
     pub fn to_file(&mut self, path: &str, advice: &str) {
-        if let Rows::Mem(v) = self {
-            let bytes = unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2) };
+        {
+            let bytes = match self {
+                Rows::Mem(v) => unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2) },
+                Rows::Map { map, .. } => &map[..],
+            };
             let mut f = std::io::BufWriter::with_capacity(64 << 20, std::fs::File::create(path).unwrap_or_else(|e| panic!("{path}: {e}")));
             f.write_all(bytes).unwrap();
             let f = f.into_inner().unwrap();
@@ -68,7 +71,6 @@ impl Rows {
             let len = f.metadata().unwrap().len();
             f.set_len((len + 4095) & !4095).unwrap();
             f.sync_all().unwrap();
-            *v = Default::default();
         }
         let len = std::fs::metadata(path).unwrap_or_else(|e| panic!("{path}: {e}")).len() as usize / 2;
         *self = Rows::open(path, len, advice).unwrap_or_else(|e| panic!("{e}"));
@@ -105,6 +107,23 @@ impl Rows {
         }
         let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).or_else(|_| std::fs::File::open(path)).map_err(|e| format!("cannot open {path}: {e}"))?;
         Ok(Rows::Map { map, file, rfd, dfd, policy: ReadPolicy::default() })
+    }
+
+    /// The first `len` f16 values of the rows as bytes.
+    pub fn as_bytes(&self, len: usize) -> &[u8] {
+        let b: &[u8] = match self {
+            Rows::Mem(v) => unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2) },
+            Rows::Map { map, .. } => map,
+        };
+        &b[..2 * len]
+    }
+
+    /// The file the rows are mapped from, when they are on file.
+    pub fn file_path(&self) -> Option<std::path::PathBuf> {
+        match self {
+            Rows::Map { file, .. } => std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())).ok(),
+            Rows::Mem(_) => None,
+        }
     }
 
     /// Drops the mapped rows from this process and from the page cache.
