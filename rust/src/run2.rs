@@ -35,6 +35,50 @@ pub struct Ctx2 {
     pub pseudo: Vec<(usize, Vec<f32>, Vec<u32>)>,
 }
 
+/// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
+/// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
+const VALUE_FLAGS: &[&str] = &[
+    "--b", "--bfracs", "--c", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--cmp-vis", "--cmp-what", "--core", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min",
+    "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
+    "--groups", "--index", "--index-b", "--index-c", "--item-queries", "--k", "--knn", "--ks",
+    "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
+    "--order", "--params", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
+    "--pseudo-dial", "--queries", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
+    "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--thr", "--threads",
+    "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
+];
+const BOOL_FLAGS: &[&str] = &[
+    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--int", "--no-all",
+    "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--skip-all", "--sweep",
+    "--v2", "--willneed",
+];
+const MODES: &[&str] = &[
+    "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
+    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+];
+
+/// Exits with a message naming any argument that is not a mode, a flag or a flag's value.
+pub fn check_args() {
+    let a = args();
+    let (mut bad, mut i) = (Vec::new(), 1);
+    while i < a.len() {
+        let x = a[i].as_str();
+        if VALUE_FLAGS.contains(&x) {
+            i += 2;
+            continue;
+        }
+        if !BOOL_FLAGS.contains(&x) && !MODES.contains(&x) {
+            bad.push(x.to_string());
+        }
+        i += 1;
+    }
+    if !bad.is_empty() {
+        eprintln!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}");
+        std::process::exit(2);
+    }
+}
+
 pub fn args() -> Vec<String> {
     std::env::args().collect()
 }

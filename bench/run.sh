@@ -10,7 +10,8 @@ DATA=${DATA:-/home/joe/code/vexact-data}
 D=$DATA/$NAME
 PY="$HERE/.venv/bin/python3 -I"
 B=${CARGO_TARGET_DIR:?set CARGO_TARGET_DIR}/release/vexact
-APPROX=${APPROX:-1:100:5,2:100:5,4:100:5,8:100:5,16:100:5,32:100:5,64:100:5,128:100:5,256:100:5,1:1000:5,2:1000:5,4:1000:5,8:1000:5,16:1000:5,32:1000:5,64:1000:5,128:1000:5,256:1000:5}
+# the approximate mode's settings, np:eps (clusters probed : the dial's miss rate per level, 0 off)
+DIAL=${DIAL:-1:0,2:0,4:0,8:0,16:0,32:0,64:0,128:0,256:0,8:0.01,16:0.01,32:0.01,64:0.01,128:0.01}
 
 mkdir -p "$D"
 [ -f "$D/$NAME.hdf5" ] || curl -sSfL -o "$D/$NAME.hdf5" "https://ann-benchmarks.com/$NAME.hdf5"
@@ -21,7 +22,7 @@ mkdir -p "$D"
 F=$(ls "$D"/filters/vis_*.npy | tr '\n' ',' | sed 's/,$//')
 R=$D/results
 $B --v2 --index "$D/index" --queries "$D/test.npy" --results "$R" --filters "$F" ann-truth
-$B --v2 --index "$D/index" --queries "$D/test.npy" --results "$R" --filters "$F" --name "$NAME" --core "$CORE" --reps 2 --flat --approx "$APPROX" ann
+$B --v2 --index "$D/index" --queries "$D/test.npy" --results "$R" --filters "$F" --name "$NAME" --core "$CORE" --reps 2 --flat --dial "$DIAL" ann
 $PY "$HERE/score.py" "$D" "$R"
 
 for lib in hnswlib faiss-hnsw faiss-ivfpqfs; do

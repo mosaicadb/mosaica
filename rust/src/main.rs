@@ -5,6 +5,7 @@ mod scale;
 use vexact::{derive, index, kernel, query, util, v2};
 
 fn main() {
+    run2::check_args();
     let args: Vec<String> = std::env::args().collect();
     let get = |k: &str, d: usize| -> usize { args.iter().position(|a| a == k).map(|i| args[i + 1].parse().unwrap()).unwrap_or(d) };
     let has = |k: &str| args.iter().any(|a| a == k);
