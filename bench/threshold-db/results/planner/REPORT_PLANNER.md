@@ -3,12 +3,13 @@
 The question was whether LIMINAL's exact threshold query can be made never slower than its own plain f16 scan under a
 visible set, and faster where it can. With the visible set compacted per session (codes and f16 vectors copied into a
 block of their own), the planned query beats the plain scan at every answer share of the random 1%, 10% and 50% sets,
-by 2–2.5× at 1% and by up to 2.4× at 50%. It does not yet hold everywhere: inside 19 genera (1%) it is 1.2–1.6× slower
-than the plain scan, and at the largest answers under 241 and 964 genera it is 5–14% slower. Without compaction the
+by 2–2.5× at 1% and by up to 2.4× at 50%. It does not yet hold everywhere: inside 19 genera (1%) it is 1.28–1.96× slower
+than the plain scan, under 241 genera it is slower from the 10% share (by 16–19% at 50–75%), and under 964 genera it
+is 12–14% slower at the 50% and 75% shares. Without compaction the
 planner fixes the random 1% case and nothing else.
 
-All answers were byte-identical to the plain scan's in every 1M run (1,575 compared per run, every variant), and the
-50k exact check is clean.
+All answers were byte-identical to the plain scan's in every 1M run (1,575 compared in each of the final runs, every
+variant), and the 50k exact check is clean.
 
 ## What changed
 
@@ -132,17 +133,19 @@ scans the compacted vectors. Bold marks where the planned, compacted query beats
 - **Compacting the vectors is what wins.** A compacted session's scan streams its rows in order, and the index's
   candidates become contiguous ranges in dense blocks. With codes and vectors compacted, the planned query beats the
   plain scan at every share of every random set: 0.44–0.62 against 1.07–1.25 ms at 1%, 9.7–10.4 against 11.5–12.5 ms
-  at 10%, and 20–46 against 47–52 ms at 50%. Under genera it wins up to answers of 10% of the corpus at 10% visible
-  (5.0–7.7 against 7.3–7.5 ms) and up to 30% at 50% visible (17–38 against 36–40 ms).
+  at 10%, and 20–46 against 47–52 ms at 50%. Under genera it wins up to the 1% share at 10% visible
+  (5.0–6.2 against 7.3–7.4 ms; the 10% share loses, 7.67 against 7.50) and up to the 30% share at 50% visible (17–38
+  against 36–40 ms).
 - **Compacting the codes alone helps the index path but not the scan.** The rows' vectors are still read from the
   parent, scattered, so wherever the planner scans it costs what the uncompacted scan costs (1.1 ms at random 1%,
   13.8 ms at 10%).
 - **Where it still loses.**
-  - *19 genera.* The planned query takes 0.65–0.98 ms against 0.44–0.66 ms. The planner runs the index on 345 of 525
+  - *19 genera.* The planned query takes 0.65–0.98 ms against 0.44–0.66 ms, 1.28–1.96× slower share by share. The planner runs the index on 345 of 525
     runs, and the model favours it because `cscan_us` (0.10 µs per row, timed on a 1.5 GB scan) overstates a 15 MB
     scan, which runs at 0.06–0.08 µs per row when warm.
-  - *Large answers under genera.* At 50–75% answers the planned query is 5–14% behind the plain scan (9.7 against
-    8.3 ms at 10% visible, 46.8 against 41.7 ms at 50%).
+  - *Large answers under genera.* Under 241 genera the planned query is 2% behind the plain scan at the 10% share, 6% at
+    30% and 16–19% at 50–75% (9.7 against 8.3 ms, 17%); under 964 genera it is 12–14% behind at 50–75% (46.8 against
+    41.7 ms).
   - *The plain scan against the compacted scan.* Under genera the plain scan beats the compacted scan, 36–42 against
     44–47 ms at 50% and 7.3–8.3 against 8.9–9.3 ms at 10%. The plain scan reads the vector file in its stored order,
     where 98% of a genus set's rows are adjacent, so it streams too. Both are contiguous and both use the same kernel,
@@ -184,13 +187,13 @@ Codes and vectors at 50% visible cost half of what the whole index holds (1.8 Gi
 
 ## Correctness
 
-- **50k exact check** (`check.sh`, after the last change): 0 wrong, 0 violations in 30.5 million interval checks, 0 not
+- **50k exact check** (`check.sh`, after the last change): 0 wrong, 0 violations in 27.5 million interval checks, 0 not
   implied, k-NN 400/400, oracle 0 wrong. The filtered part of `verify2` now also runs every threshold check on the
   index compacted to each visible set, with and without its vectors, under all three plans, and found none wrong. The
-  interval-check count fell from 42.2 to 30.5 million because the planner now sends more filtered clusters to full
+  interval-check count fell from 42.2 to 27.5 million because the planner now sends more filtered clusters to full
   vectors, where intervals are not checked.
-- **1M:** every variant's answer equalled the plain scan's on every query and share (1,575 per run) in every run in
-  `runs/`.
+- **1M:** every variant's answer equalled the plain scan's on every query and share in every run in `runs/` (1,575
+  comparisons in each of the final runs, `s5g` and `s6r`; fewer in the runs with fewer variants or sets).
 
 ## Files
 

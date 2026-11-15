@@ -764,11 +764,11 @@ impl Vis2 {
     pub fn new(ix: &Index2, bm: &RoaringBitmap) -> Vis2 {
         let mut bits = vec![0u64; (ix.nrows + 64) / 64 + 1];
         for e in bm.iter() {
-            let r = ix.ent_row[e as usize] as usize;
+            let r = ix.row_of_ent(e);
             bits[r / 64] |= 1 << (r % 64);
         }
         let cl_cnt = ix.cl.iter().map(|c| count_bits(&bits, c.r0, c.r1) as u32).collect();
-        let mut rows: Vec<u32> = bm.iter().map(|e| ix.ent_row[e as usize]).collect();
+        let mut rows: Vec<u32> = bm.iter().map(|e| ix.row_of_ent(e) as u32).collect();
         rows.sort_unstable();
         Vis2 { bits, cl_cnt, rows }
     }
@@ -840,9 +840,10 @@ fn count_bits(bits: &[u64], a: usize, b: usize) -> usize {
 pub fn full_err2(ix: &Index2, pr: &Prep2) -> f64 {
     full_err_qn(ix, pr.qn)
 }
-/// Bound on |f32 product - exact product| of a stored vector and a query of norm qn.
+/// Bound on |f32 product - exact product| of a stored vector and a query of norm qn (the dimensions past the last
+/// multiple of 16 are added one at a time).
 pub fn full_err_qn(ix: &Index2, qn: f64) -> f64 {
-    ((ix.n() / 16 + 6) as f64) * U * qn * ix.x2.sqrt() * 1.01 + 1e-12
+    ((ix.n() / 16 + 6 + ix.n() % 16) as f64) * U * qn * ix.x2.sqrt() * 1.01 + 1e-12
 }
 pub fn exact_value2(ix: &Index2, pr: &Prep2, row: usize) -> f64 {
     match &ix.full {
@@ -2059,6 +2060,7 @@ impl Plan {
     /// `cpu`: the CPU to pin the timing thread to.
     pub fn calibrate(ix: &Index2, base: Plan, nq: usize, cpu: Option<usize>) -> Plan {
         assert!(nq >= 1, "calibration needs at least one pseudo-query; pass --calib 1 or more, or --plan-file");
+        assert!(!ix.compacted(), "calibrate the plan on the index a session was compacted from, not on the compacted index");
         let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
         pool.install(|| {
             if let Some(c) = cpu {
@@ -2681,6 +2683,9 @@ pub fn plan2_prev(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> 
         setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
     }
     let pre_of = |ci: usize| -> Pre {
+        if ix.cl[ci].r1 == ix.cl[ci].r0 {
+            return Pre::Skip;
+        }
         if let Some(v) = o.vis {
             if v.cl_cnt[ci] == 0 {
                 return Pre::Skip;
@@ -3139,15 +3144,15 @@ impl Approx {
         out
     }
     /// As `order`, from q.m of every cluster.
-    pub fn order_qm(&self, qm: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
-        let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0))
+    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+        let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
             .map(|ci| (qm[ci] + self.f * self.rad[ci], ci)).collect();
         keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
         keys.into_iter().map(|x| x.1).collect()
     }
     /// Clusters holding a visible item, by descending q.m + f r.
     pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
-        let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(true, |v| v.cl_cnt[ci] > 0))
+        let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
             .map(|ci| (dot64(q64, ix.centres_f64(ci)) + self.f * self.rad[ci], ci)).collect();
         keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
         keys.into_iter().map(|x| x.1).collect()
@@ -3184,7 +3189,7 @@ impl Approx {
                 }
                 let mut found = vec![0f64; k + 1];
                 for &e in gt {
-                    found[rank[row_cl[ix.ent_row[e as usize] as usize] as usize] + 1] += 1.0 / gt.len() as f64;
+                    found[rank[row_cl[ix.row_of_ent(e)] as usize] + 1] += 1.0 / gt.len() as f64;
                 }
                 let mut items = vec![0f64; k + 1];
                 for p in 1..=k {
@@ -3346,6 +3351,7 @@ pub fn knn2_dial(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
     let mut order = ap.order(ix, &q64, vis);
     order.truncate(nprobe);
+    assert!(!(soar && ix.compacted()), "the second assignment (SOAR) holds rows of the full index; query it there with the session's visible set, not on a compacted index");
     let sub = Vis2::restrict(ix, vis, &order, if soar { Some(&ap.second) } else { None });
     knn2d(ix, q, kk, Some(&sub), plan, dial)
 }
@@ -3421,7 +3427,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
         pr.dial = d.to_vec();
     }
     let mut st = Stats::new(nl);
-    let mut order = ap.order_qm(&qm, vis);
+    let mut order = ap.order_qm(ix, &qm, vis);
     order.truncate(nprobe);
     st.cyc[P_PLAN] += tick() - t0;
     let mut top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };

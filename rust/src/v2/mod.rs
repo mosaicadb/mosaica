@@ -1074,6 +1074,16 @@ impl Index2 {
         self.lcode.iter().chain(&self.lscal).map(|v| v.len()).sum::<usize>() + self.ahat.len() * 2 + self.row_ent.len() * 4
             + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.len() * 24 + self.cl.len() * std::mem::size_of::<Cl2>() + full
     }
+    /// The row of entity e. A compacted index has no entity-to-row map (it would cost 4 bytes per entity of the
+    /// parent): map an entity through the index it was compacted from, then to the compacted row by the row list.
+    pub fn row_of_ent(&self, e: u32) -> usize {
+        assert!(!self.ent_row.is_empty() || self.nrows == 0, "this index is compacted to a visible set and has no entity-to-row map; map entity ids through the index it was compacted from");
+        self.ent_row[e as usize] as usize
+    }
+    /// Whether this index was compacted to a visible set (Index2::compact).
+    pub fn compacted(&self) -> bool {
+        self.ent_row.is_empty()
+    }
     pub fn full_row_f64(&self, row: usize, out: &mut [f64]) {
         match &self.full {
             Full2::Real { .. } => {

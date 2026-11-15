@@ -415,7 +415,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         let fk = fl.knn(&pr.q16, &pr.q32, 10, err, None, &c.ent_xs);
         for plan in [modes[0], modes[1], Plan { mode: PlanMode::Flat, ..c.plan }] {
             let kn = knn2(ix, q, 10, None, plan);
-            let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+            let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.row_of_ent(x.1))).collect();
             sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
             let sb: Vec<f64> = fk.iter().map(|x| x.0).collect();
             if sa != sb {
@@ -465,7 +465,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
                     wo += b;
                 }
                 let kn = knn2(ix, q, 10, Some(&vis), plan);
-                let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+                let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.row_of_ent(x.1))).collect();
                 sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
                 if sa != want {
                     kb += 1;
