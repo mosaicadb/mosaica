@@ -101,8 +101,14 @@ keep or drop the norm sort. The order the reviews suggest, each step keeping dbc
    dead items; 16.4k lines to 11k. `Mode2::Sweep` and the dump stay (study tools). Runs that used the removed flags
    cannot be repeated as written: results/planner/run.sh's `index:prev` and breakdown2 `--variants`. Still owed on the
    owner's machine: the 50k check and dbcmp answer dumps compared with those from before the deletions.
-3. Split library and binary; options instead of globals and environment variables; an `open` that returns a queryable
-   index (today only `run2::setup2_at` does).
+3. [x] The crate is a library (lib.rs: the index) and a binary (main.rs: run2, ann, scale). `v2::open(dir,
+   &BuildOptions, log)` builds a queryable index; `BuildOptions` holds what the build's globals and environment
+   variables held (the guarantee's N, the plain constant, the design constants, the calibration sample) and the
+   build choices setup2_at applied to the parameters (profile, cluster subset, level schedule, norm sort). The disk
+   globals are the `ReadPolicy` of the vectors on file. The binary's verify, dbcmp (every variant; vectors on file
+   read through io_uring, the mapping and O_DIRECT) and dbtopk run on testdata/synth4k with every answer equal. Left
+   for step 5: `PROF`, `ERRS` (which `Dial::fit` sets around a parallel loop, so it is unsafe beside other queries)
+   and `DUMP`; and the process-wide read counters.
 4. Split `Plan` into a cost model, tuning whose defaults are the measured system (`--int --gtab --flags repack`), and
    query arguments.
 5. Move verification, profiling and dumps out of the level loop; split q.rs; one owner of full-vector scoring.
