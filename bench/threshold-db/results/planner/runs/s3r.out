@@ -1,0 +1,43 @@
+==== run at 1794703582: ["/home/joe/code/vexact-planner-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-filter-data/prep/queries.npy", "--results", "/home/joe/code/vexact-planner/bench/threshold-db/results/planner/runs", "--core", "4", "--pin", "4", "--calib", "16", "dbcmp", "--thr", "/home/joe/code/vexact-filter-data/prep/thresholds.npy", "--cmp-vis", "/home/joe/code/vexact-filter-data/prep/vis_1.npy,/home/joe/code/vexact-filter-data/prep/vis_10.npy,/home/joe/code/vexact-filter-data/prep/vis_50.npy", "--skip-all", "--threads", "1", "--step", "10", "--reps", "5", "--tag", "s3r", "--cmp-what", "flat,index:prev,index,cvscan,cindex,cvindex"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 999950 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 7.9s (sub-Gaussian c = 8.482): [([95], 6.931, ExactTail), ([95, 127, 255], 7.981, ConvexOrder), ([95, 127, 255, 287], 8.083, ConvexOrder)]
+[build2] plans 16.6s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 97.9s
+[build2] encoded 211.2s
+[build2] assembled 212.4s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.08, 0.08, 0.08, 0.08, 0.11, 0.11, 0.08, 0.12, 0.16, 0.2] (timed in 0.1s)
+[plan] calibrated in 2.3s
+[plan] full_us=0.11576725756210055 item_us0=0.008787233255482335 item_us1=0.03514893302192934 cl_us0=1.757446651096467 cl_us1=8.787233255482334 grp_us=61.51063278837635 scan_us=0.13421047610285292 cscan_us=0.0967591003300165 anc_us=262.826125 vis_mul=0.8737993036011289 cut_us=1.6006007812500005 seed_us=595.379375 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+dbcmp vis_1: 10000 visible; into row order once per session 0.42 ms
+dbcmp vis_1: compacted (codes) in 11.97 ms, 9.1 MB of its own
+dbcmp vis_1: compacted (codes and vectors) in 20.26 ms, 24.4 MB of its own
+dbcmp flat threads 1 vis vis_1: 105 timings, median 1.021 ms; 0 of 525 runs scanned
+dbcmp index:prev threads 1 vis vis_1: 105 timings, median 0.932 ms; 525 of 525 runs scanned
+dbcmp index threads 1 vis vis_1: 105 timings, median 0.764 ms; 525 of 525 runs scanned
+dbcmp cvscan threads 1 vis vis_1: 105 timings, median 0.479 ms; 0 of 525 runs scanned
+dbcmp cindex threads 1 vis vis_1: 105 timings, median 1.142 ms; 525 of 525 runs scanned
+dbcmp cvindex threads 1 vis vis_1: 105 timings, median 0.478 ms; 525 of 525 runs scanned
+dbcmp vis_10: 99995 visible; into row order once per session 2.34 ms
+dbcmp vis_10: compacted (codes) in 36.55 ms, 33.1 MB of its own
+dbcmp vis_10: compacted (codes and vectors) in 116.10 ms, 186.3 MB of its own
+dbcmp flat threads 1 vis vis_10: 105 timings, median 12.055 ms; 0 of 525 runs scanned
+dbcmp index:prev threads 1 vis vis_10: 105 timings, median 17.136 ms; 0 of 525 runs scanned
+dbcmp index threads 1 vis vis_10: 105 timings, median 17.298 ms; 0 of 525 runs scanned
+dbcmp cvscan threads 1 vis vis_10: 105 timings, median 8.953 ms; 0 of 525 runs scanned
+dbcmp cindex threads 1 vis vis_10: 105 timings, median 13.238 ms; 435 of 525 runs scanned
+dbcmp cvindex threads 1 vis vis_10: 105 timings, median 9.414 ms; 435 of 525 runs scanned
+dbcmp vis_50: 499975 visible; into row order once per session 10.46 ms
+dbcmp vis_50: compacted (codes) in 161.59 ms, 147.0 MB of its own
+dbcmp vis_50: compacted (codes and vectors) in 714.79 ms, 913.0 MB of its own
+dbcmp flat threads 1 vis vis_50: 105 timings, median 54.601 ms; 0 of 525 runs scanned
+dbcmp index:prev threads 1 vis vis_50: 105 timings, median 52.428 ms; 0 of 525 runs scanned
+dbcmp index threads 1 vis vis_50: 105 timings, median 52.778 ms; 0 of 525 runs scanned
+dbcmp cvscan threads 1 vis vis_50: 105 timings, median 44.309 ms; 0 of 525 runs scanned
+dbcmp cindex threads 1 vis vis_50: 105 timings, median 36.405 ms; 0 of 525 runs scanned
+dbcmp cvindex threads 1 vis vis_50: 105 timings, median 34.609 ms; 0 of 525 runs scanned
+dbcmp answers: 1575 compared with the first variant's, all identical
+dbcmp resident after the queries: VmRSS:	 6278408 kB, RssAnon:	 3273204 kB, RssFile:	 3005204 kB

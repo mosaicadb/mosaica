@@ -126,7 +126,7 @@ fn exactness(c: &Ctx2, k: usize, ids: &[i32], tag: &str) -> (i64, i64) {
         }
         wset += 1;
         let pr = prep2(&c.ix, q);
-        let mut s: Vec<f64> = ids[i * k..(i + 1) * k].iter().filter(|&&e| e >= 0).map(|&e| exact_value2(&c.ix, &pr, c.ix.ent_row[e as usize] as usize)).collect();
+        let mut s: Vec<f64> = ids[i * k..(i + 1) * k].iter().filter(|&&e| e >= 0).map(|&e| exact_value2(&c.ix, &pr, c.ix.row_of_ent(e as u32))).collect();
         let mut t: Vec<f64> = tsc[i * k..(i + 1) * k].iter().copied().filter(|x| x.is_finite()).collect();
         s.sort_by(|x, y| y.partial_cmp(x).unwrap());
         t.sort_by(|x, y| y.partial_cmp(x).unwrap());

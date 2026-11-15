@@ -124,6 +124,9 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                 p.collazy = true;
             }
             "nopscan" => p.pscan = false,
+            "direct" => p.direct = true,
+            "nodirect" => p.direct = false,
+            "prev" => p.prev = true,
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
             "nobail" => p.bail = 0.0,
@@ -209,7 +212,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let xs = RealSource::open(&p.xs_path);
     let src = Real2 { src: RealSource::open(&p.xs_path) };
     let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: f2.map, off: f2.off, rows: crate::v2::disk::Rows::Mem(Vec::new()) };
+    let full = Full2::Real { map: std::sync::Arc::new(f2.map), off: f2.off, rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
@@ -283,7 +286,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         let t = Timer::new();
         if let Full2::Real { rows, .. } = &mut ix.full {
-            rows.to_file(&ff, &arg_str("--full-advice", "random"));
+            std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"));
         }
         crate::v2::disk::WILLNEED.store(args().iter().any(|a| a == "--willneed"), std::sync::atomic::Ordering::Relaxed);
         // `--full-read uring` (the default) reads the rows the index path leaves with pread through io_uring; `mmap`
@@ -333,7 +336,7 @@ impl Ctx2 {
             ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
             ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
             ("nukey", b(&ix.nukey)), ("ent_xs", b(&self.ent_xs)),
-            ("full rows in memory", match &ix.full { Full2::Real { rows: crate::v2::disk::Rows::Mem(v), .. } => b(v), _ => 0 }),
+            ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
         ];
         parts.sort_by_key(|x| std::cmp::Reverse(x.1));
         let tot: usize = parts.iter().map(|x| x.1).sum();
@@ -465,7 +468,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         let fk = fl.knn(&pr.q16, &pr.q32, 10, err, None, &c.ent_xs);
         for plan in [modes[0], modes[1], Plan { mode: PlanMode::Flat, ..c.plan }] {
             let kn = knn2(ix, q, 10, None, plan);
-            let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+            let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.row_of_ent(x.1))).collect();
             sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
             let sb: Vec<f64> = fk.iter().map(|x| x.0).collect();
             if sa != sb {
@@ -490,6 +493,8 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         ents.sort_unstable();
         let bm = RoaringBitmap::from_sorted_iter(ents).unwrap();
         let vis = Vis2::new(ix, &bm);
+        // the index compacted to the visible rows, with and without its own vectors
+        let subs = [ix.compact(&vis.rows, true), ix.compact(&vis.rows, false)];
         for (qi, (_, q)) in qs.iter().step_by((qs.len() / nf.max(1)).max(1)).take(nf).enumerate() {
             let pr = prep2(ix, q);
             let mut ex: Vec<(f64, u32)> = vis.rows.par_iter().map(|&r| (exact_to_f64(exact_dot(&pr.q16, ix.full_row_f16(r as usize))), r)).collect();
@@ -503,8 +508,17 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
                 let (a, b) = sym_diff(&to_bitmap2(ix, &r.rows), &truth);
                 wi += a;
                 wo += b;
+                for sub in &subs {
+                    let r = threshold2(sub, &prep2(sub, q), t, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                    let (a, b) = sym_diff(&to_bitmap2(sub, &r.rows), &truth);
+                    if a + b > 0 {
+                        out!("compacted index wrong q{qi} visible 1/{den} {:?}: in {a} out {b}", plan.mode);
+                    }
+                    wi += a;
+                    wo += b;
+                }
                 let kn = knn2(ix, q, 10, Some(&vis), plan);
-                let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
+                let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.row_of_ent(x.1))).collect();
                 sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
                 if sa != want {
                     kb += 1;
@@ -515,7 +529,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         println!("verify2 filtered 1/{den}: {} visible, wrong in/out {wi}/{wo}, k-NN mismatches {kb}", vis.rows.len());
     }
     out!("VERIFY2 {} queries x {} answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (group 0's constants by level {:?}, N = 2^{}); k-NN mismatches {} of {} (three plans each){}",
-        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.groups[0].csgl, ix.meta.npow, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
+        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.groups[0].csgl, ix.meta.npow, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold (also on the index compacted to the set, with and without its vectors) and k-NN, included in the counts"));
     out!("VERIFY2 checker: {} deterministic decisions checked against the f64 certificate, {} not implied; {} lanes outside it; entering each level (unfiltered, both plans): {:?}; decided in/out {:?} / {:?}",
         tot.imp_checked, tot.imp_fail, tot.cert_viol, tot.enter, tot.dec_in, tot.dec_out);
     let sc = scale_check(ix);
@@ -619,7 +633,7 @@ fn raw_read_ms(ix: &Index2) -> f64 {
     use core::arch::x86_64::*;
     let t = Timer::new();
     let mut acc = unsafe { _mm256_setzero_si256() };
-    for gp in &ix.groups {
+    for gp in ix.groups.iter() {
         let p = gp.v8t.as_ptr();
         let mut i = 0;
         while i + 32 <= gp.v8t.len() {
@@ -644,7 +658,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             let mut qv = vec![0f64; n];
             median(&(0..10).map(|_| {
                 let t = Timer::new();
-                for gp in &ix.groups {
+                for gp in ix.groups.iter() {
                     f(&gp.v8t, &gp.vsc, &mut qv);
                     std::hint::black_box(&qv);
                 }
@@ -1182,15 +1196,22 @@ pub fn scanbench(c: &Ctx2, nq: usize) {
     std::fs::write(format!("{}/scanbench.csv", res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
-
 /// Threshold queries at explicit thresholds (`--thr FILE`, Q x S f64, one row per `--queries` row), unfiltered and
-/// within each visible set (`--cmp-vis` or `--vis A.npy,B.npy`, entity ids; `--skip-all` leaves out the unfiltered run), timed whole: query preparation, the query, and the
-/// answer as a bitmap of entity ids. `index` is the planner's path; `flat` scans every stored f16 vector (the visible
-/// ones only, under a visible set). Every `--step`-th query runs, `--reps` times, on each of `--threads` (1,4); the
-/// per-query median and minimum go to RESULTS/dbcmp_<--tag>.csv. With `--dump DIR`, the 1-thread answers go to DIR/<what>_<vis>.bin as
-/// (query, share, count, ids...) u32 records.
+/// within each visible set (`--cmp-vis` or `--vis A.npy,B.npy`, entity ids; `--skip-all` leaves out the unfiltered run,
+/// `--sets` keeps only the named sets), timed whole: query preparation, the query, and the answer as a bitmap of entity
+/// ids. The variants (`--cmp-what` or `--what`, default index,flat): `index[:FLAGS]` is the planner's path, `idx[:FLAGS]`
+/// (or `forced`) the index path on every cluster, `scan` LIMINAL's own scan, `cindex`, `cvindex`, `cscan` and `cvscan`
+/// the same on the session's index compacted to its codes (c) or its codes and vectors (cv), `prep` and `anc` the
+/// preparation alone and with the anchor search, and `flat` every stored f16 vector (the visible ones only; read from
+/// --full-file when there is one). Every variant's answer must equal the first's. Every `--step`-th query runs, `--reps`
+/// times, on each of `--threads` (1,4) and each of `--read-modes`, the variants interleaved per query and share, or one
+/// after another with `--cmp-order variant`. `--cap BYTES` caps the process's memory after the sessions are set up, and
+/// `--cold` first times query 0 at each share with the full vectors evicted. The per-query median and minimum, with full
+/// vectors read, storage read, major faults and system time, go to RESULTS/dbcmp_<--tag>.csv. With `--dump DIR`, the
+/// 1-thread answers go to DIR/<what>_<vis>.bin as (query, share, count, ids...) u32 records.
 pub fn dbcmp(c: &Ctx2) {
     use crate::v2::disk;
+    use std::sync::atomic::Ordering::Relaxed;
     let ix = &c.ix;
     let fl = c.flat();
     let thr = read_npy(&arg_str("--thr", ""));
@@ -1201,17 +1222,23 @@ pub fn dbcmp(c: &Ctx2) {
     let reps = arg_usize("--reps", 5);
     let step = arg_usize("--step", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
-    let whats: Vec<String> = arg_str("--what", "index,flat").split(',').map(|x| x.to_string()).collect();
+    let whats: Vec<String> = Some(arg_str("--cmp-what", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--what", "index,flat")).split(',').map(|w| w.to_string()).collect();
+    // `query` runs the variants interleaved per query and share; `variant` runs each over every query before the next
+    let by_variant = match arg_str("--cmp-order", "query").as_str() {
+        "query" => false,
+        "variant" => true,
+        o => panic!("--cmp-order is query or variant, not {o:?}"),
+    };
     let dump = arg_str("--dump", "");
     // how full vectors on file are read, each mode in turn (`--read-modes uring,mmap:...`; the label gains @mode when
     // there are several)
-    let modes: Vec<String> = arg_str("--read-modes", if disk::URING.load(std::sync::atomic::Ordering::Relaxed) { "uring" } else { "mmap" }).split(',').map(|x| x.to_string()).collect();
-    let (qd0, dm0, dc0) = (disk::QD.load(std::sync::atomic::Ordering::Relaxed), disk::DIRECT_MIN.load(std::sync::atomic::Ordering::Relaxed), disk::DONTCACHE_MIN.load(std::sync::atomic::Ordering::Relaxed));
+    let modes: Vec<String> = arg_str("--read-modes", if disk::URING.load(Relaxed) { "uring" } else { "mmap" }).split(',').map(|x| x.to_string()).collect();
+    let (qd0, dm0, dc0) = (disk::QD.load(Relaxed), disk::DIRECT_MIN.load(Relaxed), disk::DONTCACHE_MIN.load(Relaxed));
     // under a cap the full vectors come from --full-file, and `flat` scans them there in row order
     let on_file = !arg_str("--full-file", "").is_empty();
     let cold = args().iter().any(|a| a == "--cold");
     let fullrows = match &ix.full {
-        Full2::Real { rows, .. } => Some(rows),
+        Full2::Real { rows, .. } => Some(&**rows),
         _ => None,
     };
     let mut sets: Vec<(String, Option<RoaringBitmap>)> = if args().iter().any(|a| a == "--skip-all") { vec![] } else { vec![("all".into(), None)] };
@@ -1223,7 +1250,38 @@ pub fn dbcmp(c: &Ctx2) {
         let name = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().to_string();
         sets.push((name, Some(RoaringBitmap::from_sorted_iter(ids).unwrap())));
     }
-    let vis_all: Vec<Option<Vis2>> = sets.iter().map(|(_, bm)| bm.as_ref().map(|b| Vis2::new(ix, b))).collect();
+    let only = arg_str("--sets", "");
+    let wanted = |vname: &str| only.is_empty() || only.split(',').any(|x| x == vname);
+    // every session's visible set and compacted indexes are made before a cap is set
+    let mut sessions = Vec::new();
+    for (vname, bm) in &sets {
+        if !wanted(vname) {
+            sessions.push(None);
+            continue;
+        }
+        let t = Timer::new();
+        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+        out!("dbcmp {vname}: {} visible; into row order once per session {:.2} ms", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()), t.ms());
+        // the session's index compacted to its visible rows: codes only (c), and codes and vectors (cv)
+        let rows_all: Vec<u32>;
+        let vrows = match &vis {
+            Some(v) => &v.rows,
+            None => {
+                rows_all = (0..ix.nrows as u32).collect();
+                &rows_all
+            }
+        };
+        let mut compacted: [Option<Index2>; 2] = [None, None];
+        for (i, pre) in ["c", "cv"].iter().enumerate() {
+            if whats.iter().any(|w| w.split(':').next().unwrap().strip_suffix("index").or_else(|| w.split(':').next().unwrap().strip_suffix("scan")) == Some(*pre)) {
+                let t = Timer::new();
+                let sub = ix.compact(vrows, i == 1);
+                out!("dbcmp {vname}: compacted ({}) in {:.2} ms, {:.1} MB of its own", if i == 1 { "codes and vectors" } else { "codes" }, t.ms(), sub.own_bytes() as f64 / 1e6);
+                compacted[i] = Some(sub);
+            }
+        }
+        sessions.push(Some((vis, compacted)));
+    }
     let cap = arg_usize("--cap", 0);
     if cap > 0 {
         out!("[cap] before: {}", disk::cg_report());
@@ -1242,123 +1300,177 @@ pub fn dbcmp(c: &Ctx2) {
         out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
     }
     let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count,full_reads,disk_kb,majflt,sys_ms,kind".to_string()];
-    let only = arg_str("--sets", "");
-    for (vi, (vname, bm)) in sets.iter().enumerate() {
-        if !only.is_empty() && !only.split(',').any(|x| x == vname) {
-            continue;
+    // every variant's answer must equal the first variant's, bit for bit, in every read mode and at every thread count
+    let mut first: std::collections::HashMap<(usize, usize, usize), RoaringBitmap> = Default::default();
+    let mut ncheck = 0usize;
+    let mut check = |key: (usize, usize, usize), what: &str, ans: &RoaringBitmap, th: usize, vname: &str| match first.entry(key) {
+        std::collections::hash_map::Entry::Vacant(e) => {
+            e.insert(ans.clone());
         }
-        let vis = vis_all[vi].as_ref();
-        out!("dbcmp {vname}: {} visible", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()));
+        std::collections::hash_map::Entry::Occupied(e) => {
+            assert!(*e.get() == *ans, "{what} at {th} threads disagrees with the first variant on {vname}, query {}, share {}", key.1, key.2);
+            ncheck += 1;
+        }
+    };
+    let passes: Vec<Vec<usize>> = if by_variant { (0..whats.len()).map(|w| vec![w]).collect() } else { vec![(0..whats.len()).collect()] };
+    for (vi, (vname, bm)) in sets.iter().enumerate() {
+        let Some((vis, compacted)) = &sessions[vi] else { continue };
+        let vis = vis.as_ref();
         for &th in &threads {
             let pl = pool(th);
             for mode in &modes {
-            let mut plan = plan0;
-            disk::URING.store(false, std::sync::atomic::Ordering::Relaxed);
-            disk::QD.store(qd0, std::sync::atomic::Ordering::Relaxed);
-            disk::DIRECT_MIN.store(dm0, std::sync::atomic::Ordering::Relaxed);
-            disk::DONTCACHE_MIN.store(dc0, std::sync::atomic::Ordering::Relaxed);
-            let bytes = |v: &str| if v == "none" { usize::MAX } else { v.parse().unwrap() };
-            for kv in mode.split(':') {
-                match kv.split_once('=') {
-                    None if kv == "mmap" => plan.disk = false,
-                    None if kv == "uring" => {
-                        disk::URING.store(true, std::sync::atomic::Ordering::Relaxed);
-                        plan.disk = true;
-                    }
-                    Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
-                    Some(("direct", v)) => disk::DIRECT_MIN.store(bytes(v), std::sync::atomic::Ordering::Relaxed),
-                    Some(("dontcache", v)) => disk::DONTCACHE_MIN.store(bytes(v), std::sync::atomic::Ordering::Relaxed),
-                    Some(("plan", "disk")) => plan.disk = true,
-                    Some(("plan", "mem")) => plan.disk = false,
-                    Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
-                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES|none, :dontcache=BYTES|none and :plan=disk or mem"),
-                }
-            }
-            // each mode starts from an empty cache, so that one mode's cached rows do not serve the next
-            if modes.len() > 1 {
-                if let Some(r) = fullrows {
-                    r.evict();
-                }
-            }
-            for what0 in whats.iter().map(|s| s.as_str()) {
-                let what = what0;
-                let label = if modes.len() > 1 { format!("{what0}@{mode}") } else { what0.to_string() };
-                let run = |q: &Vec<f32>, t0: f64| -> (RoaringBitmap, u64) {
-                    pl.install(|| match what {
-                        "index" | "forced" => {
-                            let pr = prep2(ix, q);
-                            let plan = if what == "forced" { Plan { mode: PlanMode::Index, ..plan } } else { plan };
-                            let r = threshold2(ix, &pr, t0, &Opts2 { vis, verify: false, want_iv: false, plan });
-                            (to_bitmap2(ix, &r.rows), r.st.full_reads)
+                let mut plan = plan0;
+                disk::URING.store(false, Relaxed);
+                disk::QD.store(qd0, Relaxed);
+                disk::DIRECT_MIN.store(dm0, Relaxed);
+                disk::DONTCACHE_MIN.store(dc0, Relaxed);
+                let bytes = |v: &str| if v == "none" { usize::MAX } else { v.parse().unwrap() };
+                for kv in mode.split(':') {
+                    match kv.split_once('=') {
+                        None if kv == "mmap" => plan.disk = false,
+                        None if kv == "uring" => {
+                            disk::URING.store(true, Relaxed);
+                            plan.disk = true;
                         }
-                        _ if on_file => {
+                        Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), Relaxed),
+                        Some(("direct", v)) => disk::DIRECT_MIN.store(bytes(v), Relaxed),
+                        Some(("dontcache", v)) => disk::DONTCACHE_MIN.store(bytes(v), Relaxed),
+                        Some(("plan", "disk")) => plan.disk = true,
+                        Some(("plan", "mem")) => plan.disk = false,
+                        Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
+                        _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES|none, :dontcache=BYTES|none and :plan=disk or mem"),
+                    }
+                }
+                // each mode starts from an empty cache, so that one mode's cached rows do not serve the next
+                if modes.len() > 1 {
+                    if let Some(r) = fullrows {
+                        r.evict();
+                    }
+                }
+                let labels: Vec<String> = whats.iter().map(|w| if modes.len() > 1 { format!("{w}@{mode}") } else { w.clone() }).collect();
+                // one run of variant `wi`: its answer, the full vectors it read, and whether the planner scanned
+                let run = |wi: usize, q: &Vec<f32>, t0: f64| -> (RoaringBitmap, u64, bool) {
+                    let (kind, flags) = whats[wi].split_once(':').unwrap_or((whats[wi].as_str(), ""));
+                    pl.install(|| match kind {
+                        "index" | "idx" | "forced" => {
+                            let plan = plan_flags(plan, flags);
+                            let plan = if kind == "index" { plan } else { Plan { mode: PlanMode::Index, ..plan } };
+                            let pr = prep2(ix, q);
+                            let r = threshold2(ix, &pr, t0, &Opts2 { vis, verify: false, want_iv: false, plan });
+                            (to_bitmap2(ix, &r.rows), r.st.full_reads, r.scanned)
+                        }
+                        "scan" => {
+                            let pr = prep2(ix, q);
+                            let r = scan_visible(ix, &pr, t0, vis, false, false);
+                            (to_bitmap2(ix, &r.rows), r.st.full_reads, false)
+                        }
+                        "cindex" | "cvindex" | "cscan" | "cvscan" => {
+                            let sub = compacted[kind.starts_with("cv") as usize].as_ref().unwrap();
+                            let pr = prep2(sub, q);
+                            if kind.ends_with("scan") {
+                                let r = scan_visible(sub, &pr, t0, None, false, false);
+                                (to_bitmap2(sub, &r.rows), r.st.full_reads, false)
+                            } else {
+                                let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(plan, flags) });
+                                (to_bitmap2(sub, &r.rows), r.st.full_reads, r.scanned)
+                            }
+                        }
+                        // timing only: the query's preparation, and with the anchor search
+                        "prep" | "anc" => {
+                            let pr = prep2(ix, q);
+                            if kind == "anc" {
+                                std::hint::black_box(pr.anc(ix));
+                            }
+                            (RoaringBitmap::new(), 0, false)
+                        }
+                        "flat" if on_file => {
                             let pr = prep2(ix, q);
                             let r = scan_visible(ix, &pr, t0, vis, false, plan.pscan);
-                            (to_bitmap2(ix, &r.rows), r.st.full_reads)
+                            (to_bitmap2(ix, &r.rows), r.st.full_reads, false)
                         }
-                        _ => {
+                        "flat" => {
                             let (q16, q32, qn) = crate::v2::q::query_f16(q);
                             let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
                             e.sort_unstable();
                             let n = e.len() as u64;
-                            (RoaringBitmap::from_sorted_iter(e).unwrap(), n)
+                            (RoaringBitmap::from_sorted_iter(e).unwrap(), n, false)
                         }
+                        k => panic!("unknown --cmp-what variant {k:?}; use flat, scan, index[:FLAGS], idx[:FLAGS] (or forced), cindex[:FLAGS], cvindex[:FLAGS], cscan, cvscan, prep or anc"),
                     })
                 };
+                let answers = |wi: usize| !matches!(whats[wi].split(':').next().unwrap(), "prep" | "anc");
                 if cold {
                     // the first query at each answer size, after the full vectors are dropped from the page cache
                     let qi = 0;
-                    for si in 0..ns {
-                        if let Some(r) = fullrows {
-                            r.evict();
+                    for wi in 0..whats.len() {
+                        for si in 0..ns {
+                            if let Some(r) = fullrows {
+                                r.evict();
+                            }
+                            let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                            let t = Timer::new();
+                            let (ans, fr, _) = run(wi, &qs[qi], thr[qi * ns + si]);
+                            let ms = t.ms();
+                            let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                            if answers(wi) {
+                                check((vi, qi, si), &labels[wi], &ans, th, vname);
+                            }
+                            lines.push(format!("{},{th},{vname},{si},{qi},{ms:.4},{ms:.4},{},{fr},{:.1},{},{:.2},cold", labels[wi], ans.len(), (io1 - io0) as f64 / 1024.0, mf1 - mf0, (c1.1 - c0.1) * 1e3));
                         }
-                        let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                        let t = Timer::new();
-                        let (ans, fr) = run(&qs[qi], thr[qi * ns + si]);
-                        let ms = t.ms();
-                        let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                        lines.push(format!("{label},{th},{vname},{si},{qi},{ms:.4},{ms:.4},{},{fr},{:.1},{},{:.2},cold", ans.len(), (io1 - io0) as f64 / 1024.0, mf1 - mf0, (c1.1 - c0.1) * 1e3));
                     }
                 }
-                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{}_{vname}.bin", label.replace([':', '@', '='], "_"))).unwrap()));
-                let (bio0, bt0, cpu0, w0, nr0, nb0) = (disk::io_read_bytes(), Timer::new(), disk::cpu_s(), disk::WAIT_NS.load(std::sync::atomic::Ordering::Relaxed), disk::NREADS.load(std::sync::atomic::Ordering::Relaxed), disk::NBYTES.load(std::sync::atomic::Ordering::Relaxed));
-                for (qi, q) in qs.iter().enumerate() {
-                    if qi % step != 0 {
-                        continue;
-                    }
-                    for si in 0..ns {
-                        let t0 = thr[qi * ns + si];
-                        let mut ts = Vec::new();
-                        let mut ans = RoaringBitmap::new();
-                        let mut fr = 0;
-                        let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                        for _ in 0..reps {
-                            let t = Timer::new();
-                            (ans, fr) = run(q, t0);
-                            ts.push(t.ms());
+                let mut dumpf: Vec<_> = labels.iter().map(|l| (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{}_{vname}.bin", l.replace([':', '@', '='], "_"))).unwrap()))).collect();
+                let mut nscan = vec![0usize; whats.len()];
+                for pass in &passes {
+                    let (bio0, bt0, cpu0, w0, nr0, nb0) = (disk::io_read_bytes(), Timer::new(), disk::cpu_s(), disk::WAIT_NS.load(Relaxed), disk::NREADS.load(Relaxed), disk::NBYTES.load(Relaxed));
+                    for (qi, q) in qs.iter().enumerate() {
+                        if qi % step != 0 {
+                            continue;
                         }
-                        let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
-                        if let Some(w) = dumpf.as_mut() {
-                            for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
-                                w.write_all(&x.to_le_bytes()).unwrap();
+                        for si in 0..ns {
+                            let t0 = thr[qi * ns + si];
+                            for &wi in pass {
+                                let mut ts = Vec::new();
+                                let (mut ans, mut fr) = (RoaringBitmap::new(), 0);
+                                let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                                for _ in 0..reps {
+                                    let t = Timer::new();
+                                    let scanned;
+                                    (ans, fr, scanned) = run(wi, q, t0);
+                                    ts.push(t.ms());
+                                    nscan[wi] += scanned as usize;
+                                }
+                                let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                                if answers(wi) {
+                                    check((vi, qi, si), &labels[wi], &ans, th, vname);
+                                }
+                                if let Some(w) = dumpf[wi].as_mut() {
+                                    for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
+                                        w.write_all(&x.to_le_bytes()).unwrap();
+                                    }
+                                }
+                                let mn = ts.iter().cloned().fold(f64::MAX, f64::min);
+                                lines.push(format!("{},{th},{vname},{si},{qi},{:.4},{mn:.4},{},{fr},{:.1},{:.1},{:.2},warm", labels[wi], median(&ts), ans.len(), (io1 - io0) as f64 / 1024.0 / reps as f64, (mf1 - mf0) as f64 / reps as f64, (c1.1 - c0.1) * 1e3 / reps as f64));
                             }
                         }
-                        let mn = ts.iter().cloned().fold(f64::MAX, f64::min);
-                        lines.push(format!("{label},{th},{vname},{si},{qi},{:.4},{mn:.4},{},{fr},{:.1},{:.1},{:.2},warm", median(&ts), ans.len(), (io1 - io0) as f64 / 1024.0 / reps as f64, (mf1 - mf0) as f64 / reps as f64, (c1.1 - c0.1) * 1e3 / reps as f64));
                     }
+                    let res = fullrows.map_or(0, |r| r.resident());
+                    let cpu1 = disk::cpu_s();
+                    let ld = |a: &std::sync::atomic::AtomicU64, b: u64| a.load(Relaxed) - b;
+                    let names: Vec<&str> = pass.iter().map(|&wi| labels[wi].as_str()).collect();
+                    out!("[disk] {} vis {vname}: wall {:.1}s, cpu user {:.1}s sys {:.1}s, waiting for reads {:.1}s; {} reads of {:.0} MiB", names.join(","), bt0.s(), cpu1.0 - cpu0.0, cpu1.1 - cpu0.1, ld(&disk::WAIT_NS, w0) as f64 * 1e-9, ld(&disk::NREADS, nr0), ld(&disk::NBYTES, nb0) as f64 / (1 << 20) as f64);
+                    for &wi in pass {
+                        let label = &labels[wi];
+                        let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{label},{th},{vname},")) && l.ends_with(",warm")).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
+                        out!("dbcmp {label} threads {th} vis {vname}: {} timings, median {:.3} ms; {} of {} runs scanned; read {:.0} MiB from storage in {:.1}s; full vectors resident {:.1} MiB; {}", mine.len(), median(&mine), nscan[wi], mine.len() * reps,
+                            (disk::io_read_bytes() - bio0) as f64 / (1 << 20) as f64, bt0.s(), res as f64 / (1 << 20) as f64, disk::cg_report());
+                    }
+                    std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
                 }
-                let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{label},{th},{vname},")) && l.ends_with(",warm")).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
-                let res = fullrows.map_or(0, |r| r.resident());
-                let cpu1 = disk::cpu_s();
-                let ld = |a: &std::sync::atomic::AtomicU64, b: u64| a.load(std::sync::atomic::Ordering::Relaxed) - b;
-                out!("[disk] {label} vis {vname}: wall {:.1}s, cpu user {:.1}s sys {:.1}s, waiting for reads {:.1}s; {} reads of {:.0} MiB", bt0.s(), cpu1.0 - cpu0.0, cpu1.1 - cpu0.1, ld(&disk::WAIT_NS, w0) as f64 * 1e-9, ld(&disk::NREADS, nr0), ld(&disk::NBYTES, nb0) as f64 / (1 << 20) as f64);
-                out!("dbcmp {label} threads {th} vis {vname}: {} timings, median {:.3} ms; read {:.0} MiB from storage in {:.1}s; full vectors resident {:.1} MiB; {}", mine.len(), median(&mine),
-                    (disk::io_read_bytes() - bio0) as f64 / (1 << 20) as f64, bt0.s(), res as f64 / (1 << 20) as f64, disk::cg_report());
-                std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
-            }
             }
         }
     }
+    out!("dbcmp answers: {ncheck} compared with the first variant's, all identical");
     std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
     let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));

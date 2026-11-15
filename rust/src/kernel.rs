@@ -608,7 +608,15 @@ pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
         }
         i += 16;
     }
-    [_mm512_reduce_add_ps(s[0]), _mm512_reduce_add_ps(s[1]), _mm512_reduce_add_ps(s[2]), _mm512_reduce_add_ps(s[3])]
+    let mut r = [_mm512_reduce_add_ps(s[0]), _mm512_reduce_add_ps(s[1]), _mm512_reduce_add_ps(s[2]), _mm512_reduce_add_ps(s[3])];
+    // the dimensions past the last multiple of 16, as dot_f16 takes them
+    while i < n {
+        for k in 0..4 {
+            r[k] += crate::util::f16_to_f32(x[k][i]) * q[i];
+        }
+        i += 1;
+    }
+    r
 }
 
 /// int8 x int16 dot via vpmaddwd.
@@ -683,7 +691,15 @@ pub unsafe fn dot_f16_x4(q: &[f32], x: [&[u16]; 4]) -> [f32; 4] {
         }
         i += 16;
     }
-    core::array::from_fn(|r| hsum_ps(_mm256_add_ps(s[r][0], s[r][1])))
+    let mut r: [f32; 4] = core::array::from_fn(|r| hsum_ps(_mm256_add_ps(s[r][0], s[r][1])));
+    // the dimensions past the last multiple of 16, as dot_f16 takes them
+    while i < n {
+        for k in 0..4 {
+            r[k] += crate::util::f16_to_f32(x[k][i]) * q[i];
+        }
+        i += 1;
+    }
+    r
 }
 
 /// int8 x int16 dot via vpmaddwd.

@@ -10,10 +10,19 @@ names the branch or report that holds its evidence.
   on the owner's machine before this counts as checked: the 50k check (rust/results/const/check.sh), one `dbcmp`
   threshold run and one approximate `dbtopk` run on the 1M index, and one capped `--full-file` run through
   bench/threshold-db/capped/run_ours.sh at a single answer share, whose answers must match the uncapped dumps.
-- **research/scan-planner** (b79dbc8d5; independent review passed, its fixes are in): the planner chooses a whole-query scan, direct
-  scoring of a cluster's visible rows, or the index per cluster, and a session can compact its visible set's codes and
-  f16 vectors into one block. Merge once the review passes. Its filtered rows are being remeasured on a quiet machine
-  for the plots on research/plots-refresh.
+- [x] **research/scan-planner, merged** (b79dbc8d5, with the review's fixes). The release build passes and
+  `cargo test --release` gives 15 passed and 1 ignored; the same checks as above are still owed on the owner's machine,
+  with `dbcmp --cmp-what flat,index,scan,cindex,cvindex` under a visible set as the smoke run. Its filtered rows are being
+  remeasured on a quiet machine for the plots on research/plots-refresh. What the merge changed or revealed:
+  - Full vectors are `Arc<disk::Rows>`, with `Rows::Mem` holding the aligned `F16Rows`, so compaction's sharing and the
+    file under a cap both hold. A compacted index that shares its parent's vectors through `vrow` reads them through the
+    mapping, never the io_uring reader (`Index2::own_rows`), so under a cap only codes-and-vectors compaction gets the
+    reader.
+  - `plan2` had no disk costs (only `plan2_prev` did); it now prices on-file rows the way `plan2_prev` does, estimating
+    an unsampled cluster's candidate span as d of its rows. Unmeasured: run the capped comparison with the new planner.
+  - `dbcmp` interleaves its variants per query by default; capped runs pass `--cmp-order variant` (run_ours.sh) to
+    keep REPORT_CAPPED's order.
+  - No tests cover the planner's choices, `Index2::compact` or `F16Rows`.
 
 ## Exact path
 

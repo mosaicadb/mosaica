@@ -11,9 +11,15 @@ pub static WILLNEED: AtomicBool = AtomicBool::new(false);
 
 /// The stored f16 vectors in index row order: in memory (the build's copy) or a mapped file.
 pub enum Rows {
-    Mem(Vec<u16>),
+    Mem(super::F16Rows),
     // rfd: read with pread, no readahead; dfd: the same file opened with O_DIRECT
     Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File },
+}
+
+impl Default for Rows {
+    fn default() -> Rows {
+        Rows::Mem(Default::default())
+    }
 }
 
 impl Rows {
@@ -42,7 +48,7 @@ impl Rows {
             let len = f.metadata().unwrap().len();
             f.set_len((len + 4095) & !4095).unwrap();
             f.sync_all().unwrap();
-            *v = Vec::new();
+            *v = Default::default();
         }
         let file = std::fs::File::open(path).unwrap();
         let map = unsafe { memmap2::Mmap::map(&file).unwrap() };

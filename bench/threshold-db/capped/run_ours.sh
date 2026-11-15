@@ -16,5 +16,5 @@ RLVARG=""; [ -n "${RLV:-}" ] && RLVARG="--rlv $RLV"
 RAYON_NUM_THREADS=${THREADS:-4} systemd-run --user --scope --collect -q -p MemoryMax=9G -p MemorySwapMax=0 -- \
     taskset -c ${CORES:-8-11} $BIN --v2 --int --gtab --flags repack --no-approx $RLVARG --plan-file $PLAN \
     --index $IDX --queries $D/queries.npy --results "$RES" dbcmp --thr $D/thresholds.npy --tag "$TAG" \
-    --full-file "$FULL" --cap "$CAP" --full-advice ${ADVICE:-random} ${WILLNEED---willneed} $EXTRA 2>&1 \
+    --full-file "$FULL" --cap "$CAP" --cmp-order variant --full-advice ${ADVICE:-random} ${WILLNEED---willneed} $EXTRA 2>&1 \
     | grep -E "^dbcmp|^\[mem|^\[cap|^\[disk|built v2|panic|error"
