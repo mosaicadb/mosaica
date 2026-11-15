@@ -44,6 +44,8 @@ pub const QUANTUM: usize = 16;
 /// Calibration: items per group, and the most clusters of a group they are spread over.
 pub const CAL_ITEMS: usize = 8192;
 pub const CAL_CLUSTERS: usize = 256;
+/// The most clusters a build takes without the fit's anchors.npy (it would then build a K x K support table).
+pub const KK_MAX: usize = 4096;
 
 // ---------------- the deterministic code ----------------
 
@@ -1546,6 +1548,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
+    // Without anchors.npy the table is K x K (K^2 x 8 bytes, and nc x K f32 per cluster in flight): refused past
+    // KK_MAX clusters, where a fixed set of anchors (`vexact anchors`) keeps it K x A.
+    if !nusort && matches!(full, Full2::Real { .. }) && p.anchors.is_empty() && k > KK_MAX {
+        panic!("the fit has {k} clusters and no anchors.npy: a K x K support table would take {:.1} GB. Write its anchors with: vexact anchors FITDIR [--anchors A] [--text-anchors PROMPTS.npy]", (k * k * 8) as f64 / 1e9);
+    }
     let rows = src.rows(p);
     let Plans { meta, rots, codes, et, mut groups } = plans(p, prof, rows, true, log);
     let nguar = NGUAR.get().copied().unwrap_or_else(|| (meta.npow as f64).exp2());

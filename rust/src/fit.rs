@@ -560,24 +560,35 @@ pub fn main(args: &[String]) {
 /// query's bound uses its nearest anchor, so what sets its cost is how densely the anchors cover the directions
 /// queries come from, not K: a fixed A keeps the table K x A at any N.
 pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> usize {
-    let p = crate::index::load_params(dir);
-    let (n, k) = (p.meta.n, p.meta.k);
+    let (n, k, centres) = crate::index::load_centres(dir);
+    let text = text.map(|path| {
+        let (v, w) = read_npy(path).rows_f32(path);
+        assert!(w <= n, "{path} has rows of {w} dimensions, more than the fit's {n}");
+        (v, w)
+    });
+    let out = anchors_of(&centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed);
+    let a = out.len() / n;
+    save(dir, "anchors", "<f8", &[a, n], &out);
+    a
+}
+
+/// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,
+/// zero-padded to n). `image` = 0, or `ntext` = 0 or no prompts, leaves out that set; at least one anchor must remain.
+fn anchors_of(centres: &[f32], n: usize, k: usize, image: usize, text: Option<(&[f32], usize)>, ntext: usize, seed: u64) -> Vec<f64> {
     let unit64 = |v: &[f32]| -> Vec<f64> {
         let nr = v.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt().max(1e-300);
         v.iter().map(|&x| x as f64 / nr).collect()
     };
-    let dirs: Vec<f32> = (0..k).flat_map(|c| unit64(&p.centres[c * n..(c + 1) * n]).into_iter().map(|x| x as f32)).collect();
+    let dirs: Vec<f32> = (0..k).flat_map(|c| unit64(&centres[c * n..(c + 1) * n]).into_iter().map(|x| x as f32)).collect();
     let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0xa4c4);
-    let mut out: Vec<f64> = if image >= k {
-        (0..k).flat_map(|c| unit64(&p.centres[c * n..(c + 1) * n])).collect()
+    let mut out: Vec<f64> = if image == 0 {
+        Vec::new()
+    } else if image >= k {
+        (0..k).flat_map(|c| unit64(&centres[c * n..(c + 1) * n])).collect()
     } else {
         kmeans(&dirs, n, image, &mut rng, 25).chunks(n).flat_map(unit64).collect()
     };
-    if let Some(path) = text {
-        let t = read_npy(path);
-        let w = t.shape[1];
-        assert!(w <= n, "{path} has rows of {w} dimensions, more than the fit's {n}");
-        let v: Vec<f32> = if t.descr.contains("f8") { t.f64s().into_iter().map(|x| x as f32).collect() } else { t.f32s() };
+    if let Some((v, w)) = text.filter(|(v, _)| !v.is_empty() && ntext > 0) {
         let rows: Vec<f32> = v.chunks(w).flat_map(|r| {
             let mut x = r.to_vec();
             x.resize(n, 0.0);
@@ -586,11 +597,9 @@ pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, 
         let m = rows.len() / n;
         out.extend(kmeans(&rows, n, ntext.min(m), &mut rng, 25).chunks(n).flat_map(unit64));
     }
-    let a = out.len() / n;
-    save(dir, "anchors", "<f8", &[a, n], &out);
-    a
+    assert!(!out.is_empty(), "no support-table anchors: --anchors 0 needs --text-anchors PROMPTS.npy and --text-count > 0");
+    out
 }
-
 /// `vexact anchors FITDIR [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]`
 pub fn anchors_cmd(args: &[String]) {
     let Some(dir) = args.get(2).filter(|a| !a.starts_with("--")) else {
@@ -602,4 +611,59 @@ pub fn anchors_cmd(args: &[String]) {
     let seed: u64 = arg(args, "--seed").map_or(20261112, |s| s.parse().expect("--seed S"));
     let a = write_anchors(dir, image, arg(args, "--text-anchors").as_deref(), ntext, seed);
     println!("{a} anchors written to {dir}/anchors.npy");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_rows(m: usize, n: usize, seed: u64) -> Vec<f32> {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        (0..m).flat_map(|_| {
+            let v: Vec<f32> = (0..n).map(|_| rng.gen::<f32>() - 0.5).collect();
+            let nr = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
+            v.into_iter().map(move |x| x / nr)
+        }).collect()
+    }
+
+    /// Either set of anchors can be left out with a count of 0; with both left out there are none, which is refused.
+    #[test]
+    fn anchor_sets_can_be_empty_but_not_both() {
+        let (n, k) = (8, 20);
+        let c = unit_rows(k, n, 1);
+        let t = unit_rows(30, 6, 2);
+        let a = |image, text: Option<(&[f32], usize)>, nt| anchors_of(&c, n, k, image, text, nt, 3).len() / n;
+        assert_eq!(a(0, Some((&t, 6)), 5), 5);
+        assert_eq!(a(4, Some((&t, 6)), 0), 4);
+        assert_eq!(a(4, None, 5), 4);
+        assert_eq!(a(50, Some((&t, 6)), 100), k + 30);
+        assert_eq!(a(4, Some((&t[..0], 6)), 5), 4);
+        let all = anchors_of(&c, n, k, 4, Some((&t, 6)), 5, 3);
+        crate::index::check_anchors(&all, n).unwrap();
+        assert!(std::panic::catch_unwind(|| anchors_of(&c, n, k, 0, Some((&t, 6)), 0, 3)).is_err());
+        assert!(std::panic::catch_unwind(|| anchors_of(&c, n, k, 0, None, 5, 3)).is_err());
+        assert!(crate::index::check_anchors(&[1.0, 1e-5], 2).is_err());
+        assert!(crate::index::check_anchors(&[0.6, 0.8, 1.0], 2).is_err());
+    }
+
+    /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.
+    #[test]
+    fn prompt_files_of_any_float_width() {
+        let dir = std::env::temp_dir().join(format!("vexact-anch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v: Vec<f32> = vec![0.5, -0.25, 1.0, 0.125, -2.0, 0.75];
+        let p = |s: &str| dir.join(s).to_str().unwrap().to_string();
+        write_npy(&p("a2.npy"), "<f2", &[2, 3], &v.iter().flat_map(|&x| f32_to_f16(x).to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("a4.npy"), "<f4", &[2, 3], &v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("a8.npy"), "<f8", &[2, 3], &v.iter().flat_map(|&x| (x as f64).to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("i4.npy"), "<i4", &[2, 3], &[0u8; 24]);
+        write_npy(&p("f1d.npy"), "<f4", &[6], &v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+        for f in ["a2.npy", "a4.npy", "a8.npy"] {
+            assert_eq!(read_npy(&p(f)).rows_f32(f), (v.clone(), 3), "{f}");
+        }
+        for f in ["i4.npy", "f1d.npy"] {
+            assert!(std::panic::catch_unwind(|| read_npy(&p(f)).rows_f32(f)).is_err(), "{f}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

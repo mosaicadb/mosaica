@@ -304,6 +304,11 @@ pub fn open(p: &Params, prof: &[f64], dir: &str, split: bool, log: &mut dyn FnMu
     let (ek, ev): (Arr<u64>, Arr<f32>) = (Arr::map(&f("esc_key.bin")), Arr::map(&f("esc_val.bin")));
     let esc = ek.iter().zip(ev.iter()).map(|(&k, &v)| (((k >> 40) as u8, (k >> 32) as u8, k as u32), v)).collect();
     let anchors: Vec<f64> = Arr::<f64>::map(&f("anchors.bin")).to_vec();
+    let nanch = us("nanch");
+    let (hi, lo): (Arr<f32>, Arr<f32>) = (Arr::load(&f("hi.bin")), Arr::load(&f("lo.bin")));
+    assert!(hi.len() == nanch * k && lo.len() == nanch * k,
+        "{dir}: hi.bin / lo.bin hold {} / {} bounds, not {nanch} anchors x {k} clusters; rebuild the index", hi.len(), lo.len());
+    assert_eq!(anchors.len(), nanch * n, "{dir}/anchors.bin does not hold {nanch} anchors of {n}; rebuild the index");
     let ix = Index2 {
         col: None,
         nukey: Arr::load(&f("nukey.bin")),
@@ -316,10 +321,10 @@ pub fn open(p: &Params, prof: &[f64], dir: &str, split: bool, log: &mut dyn FnMu
         cl,
         centres64: p.centres[..k * n].iter().map(|&x| x as f64).collect(),
         rots,
-        nanch: us("nanch"),
+        nanch,
         anchors,
-        hi: Arr::load(&f("hi.bin")),
-        lo: Arr::load(&f("lo.bin")),
+        hi,
+        lo,
         ahat: Arr::load(&f("ahat.bin")),
         row_ent: Arr::load(&f("row_ent.bin")),
         ent_row: Arr::load(&f("ent_row.bin")),
@@ -341,8 +346,8 @@ pub fn open(p: &Params, prof: &[f64], dir: &str, split: bool, log: &mut dyn FnMu
 }
 
 /// The key of the index `p` and `prof` build under the current options: a saved index is opened in place of a build
-/// only when its key is this one. `extra` names any other option that changes what is built.
-pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
+/// only when its key is this one. `nusort`: the norm-sorted build (no support table, so the anchors are not in its key).
+pub fn build_key(p: &Params, prof: &[f64], nusort: bool) -> String {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let f64s = |v: &[f64], h: &mut std::collections::hash_map::DefaultHasher| v.iter().for_each(|x| x.to_bits().hash(h));
@@ -359,7 +364,10 @@ pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
     if let Some(r2) = &p.r2 {
         f64s(r2, &mut h);
     }
-    f64s(&p.anchors, &mut h);
+    if !nusort {
+        // the norm sort builds no support table (an empty set of anchors hashes to nothing, so keys are unchanged)
+        f64s(&p.anchors, &mut h);
+    }
     f64s(prof, &mut h);
     // the vectors: the identity of the files they come from, not their contents
     for f in [p.xs_path.clone(), if p.partition.is_empty() { String::new() } else { format!("{}/manifest.json", p.partition) }] {
@@ -372,7 +380,7 @@ pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
     let nguar = NGUAR.get().map(|x| x.to_bits());
     let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
     let design: Option<Vec<u64>> = DESIGN_C.get().map(|v| v.iter().map(|x| x.to_bits()).collect());
-    (cal, nguar, plain, design, extra).hash(&mut h);
+    (cal, nguar, plain, design, format!("nusort {nusort}")).hash(&mut h);
     format!("{:016x}", h.finish())
 }
 

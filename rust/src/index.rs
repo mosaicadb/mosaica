@@ -81,22 +81,64 @@ pub struct Params {
     pub partition: String, // the partition the fit read its vectors from (empty for a fit with an Xs.npy)
 }
 
-pub fn load_params(dir: &str) -> Params {
+/// The fit's meta.json, after checking that this build reads its format.
+fn load_meta(dir: &str) -> serde_json::Value {
     let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/meta.json")).unwrap()).unwrap();
     let fmt = meta["format"].as_u64().unwrap_or(1);
     if fmt != FIT_FORMAT {
         eprintln!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py.");
         std::process::exit(2);
     }
+    meta
+}
+
+/// The fit's stored centres (K x n, int8 * scale as f32 values) with n and K, from meta.json, mq8.npy and msc.npy only.
+pub fn load_centres(dir: &str) -> (usize, usize, Vec<f32>) {
+    let meta = load_meta(dir);
+    let (n, k) = (meta["n"].as_u64().unwrap() as usize, meta["K"].as_u64().unwrap() as usize);
+    let mq8 = read_npy(&format!("{dir}/mq8.npy")).i8s();
+    let msc = read_npy(&format!("{dir}/msc.npy")).f64s();
+    assert!(mq8.len() == k * n && msc.len() == k, "{dir}: mq8.npy / msc.npy do not hold {k} centres of {n}; refit");
+    (n, k, (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect())
+}
+
+/// The fit's support-table anchors (`anchors.npy`), checked: at least one row, rows of n, each of unit norm within
+/// 1e-12. Empty when the fit has none.
+pub fn load_anchors(dir: &str, n: usize) -> Vec<f64> {
+    let path = format!("{dir}/anchors.npy");
+    if !std::path::Path::new(&path).exists() {
+        return Vec::new();
+    }
+    let a = read_npy(&path);
+    assert_eq!(a.descr, "<f8", "{path}: expected <f8, found {}; rerun vexact anchors {dir}", a.descr);
+    assert!(a.shape.len() == 2 && a.shape[0] >= 1 && a.shape[1] == n,
+        "{path} has shape {:?}, expected (A >= 1, {n}); rerun vexact anchors {dir}", a.shape);
+    let v = a.f64s();
+    check_anchors(&v, n).unwrap_or_else(|e| panic!("{path}: {e}; rerun vexact anchors {dir}"));
+    v
+}
+
+/// Anchors are unit rows of n: every row's norm within 1e-12 of 1.
+pub fn check_anchors(v: &[f64], n: usize) -> Result<(), String> {
+    if n == 0 || v.len() % n != 0 {
+        return Err(format!("{} values are not rows of {n}", v.len()));
+    }
+    for (i, r) in v.chunks(n).enumerate() {
+        let nr = r.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if !((nr - 1.0).abs() <= 1e-12) {
+            return Err(format!("anchor {i} has norm {nr}, not 1 within 1e-12"));
+        }
+    }
+    Ok(())
+}
+
+pub fn load_params(dir: &str) -> Params {
+    let meta = load_meta(dir);
     let us = |k: &str| meta[k].as_u64().unwrap() as usize;
     let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
     let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
     let opt = |k: &str| std::path::Path::new(&format!("{dir}/{k}.npy")).exists().then(|| r(k));
-    let mq8 = r("mq8").i8s();
-    let msc = r("msc").f64s();
-    let n = us("n");
-    let k = us("K");
-    let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
+    let (n, k, centres) = load_centres(dir);
     let xs = meta["xs"].as_str().unwrap_or("");
     Params {
         meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
@@ -123,7 +165,7 @@ pub fn load_params(dir: &str) -> Params {
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
-        anchors: opt("anchors").map_or(Vec::new(), |a| a.f64s()),
+        anchors: load_anchors(dir, n),
         xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
         partition: meta["partition"].as_str().unwrap_or("").to_string(),
     }

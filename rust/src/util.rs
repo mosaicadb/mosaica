@@ -90,6 +90,18 @@ impl Npy {
     pub fn len(&self) -> usize {
         self.shape.iter().product()
     }
+    /// A 2-D array of little-endian floats (f2, f4 or f8) as f32 values, row-major, with its row width. Panics with
+    /// `what` (the file's name) on any other type or shape.
+    pub fn rows_f32(&self, what: &str) -> (Vec<f32>, usize) {
+        assert_eq!(self.shape.len(), 2, "{what}: expected a 2-D array (rows x dimensions), found shape {:?}", self.shape);
+        let v: Vec<f32> = match self.descr.as_str() {
+            "<f8" => self.f64s().into_iter().map(|x| x as f32).collect(),
+            "<f4" => self.f32s(),
+            "<f2" => self.u16s().into_iter().map(f16_to_f32).collect(),
+            d => panic!("{what}: expected little-endian floats (<f2, <f4 or <f8), found {d}"),
+        };
+        (v, self.shape[1])
+    }
 }
 
 pub fn f16_to_f32(h: u16) -> f32 {

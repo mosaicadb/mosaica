@@ -113,7 +113,6 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
             ba = a;
         }
     }
-    let _ = n;
     let rho = (qn * qn - best * best).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
     Prep2 { q16, q32, q64, qn, qhi, qlo, anchor: ba, beta: best, rho, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
 }

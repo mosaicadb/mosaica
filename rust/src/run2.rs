@@ -77,15 +77,7 @@ pub fn load_queries(n: usize) -> Vec<Vec<f32>> {
 
 /// Rows of an npy file (f16, f32 or f64; original dimension), zero-padded to n and normalised.
 pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
-    let a = read_npy(path);
-    let n0 = a.shape[1];
-    let v: Vec<f32> = if a.descr.contains("f8") {
-        a.f64s().iter().map(|&x| x as f32).collect()
-    } else if a.descr.contains("f2") {
-        a.u16s().iter().map(|&h| f16_to_f32(h)).collect()
-    } else {
-        a.f32s()
-    };
+    let (v, n0) = read_npy(path).rows_f32(path);
     v.chunks(n0).map(|r| {
         let nn = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
         let mut q = vec![0f32; n];
@@ -106,7 +98,7 @@ pub fn setup2(tag: &str) -> Ctx2 {
 /// a scratch directory, sealed with its key and moved into place (`--rebuild` builds it again; `--in-memory`, or the
 /// columnar store, builds it on the heap and saves nothing).
 pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: bool, build_col: bool, lg: &mut dyn FnMut(String)) -> Index2 {
-    let key = crate::v2::store::build_key(p, prof, &format!("nusort {nusort}"));
+    let key = crate::v2::store::build_key(p, prof, nusort);
     let edir = format!("{dir}/encoded-{key}");
     let in_memory = build_col || args().iter().any(|a| a == "--in-memory");
     let saved = !in_memory && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
@@ -132,9 +124,23 @@ pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: b
             let _ = std::fs::remove_dir_all(&edir);
             std::fs::rename(d, &edir).unwrap_or_else(|e| panic!("cannot move {d} to {edir}: {e}"));
             out!("[build2] saved to {edir}");
+            for s in stale_indexes(dir, &edir) {
+                out!("[build2] {dir}/{s} is a stale index (another key: an older build, fit or options); not deleted");
+            }
         }
         ix
     }
+}
+
+/// The `encoded-*` directories in the fit directory `dir` other than `edir` (the one just sealed), by name.
+fn stale_indexes(dir: &str, edir: &str) -> Vec<String> {
+    let keep = std::path::Path::new(edir).file_name().map(|s| s.to_string_lossy().to_string());
+    let mut v: Vec<String> = std::fs::read_dir(dir).map_or(Vec::new(), |rd| rd.filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map_or(false, |t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|s| s.starts_with("encoded-") && Some(s) != keep.as_ref()).collect());
+    v.sort();
+    v
 }
 
 /// `vexact build FITDIR`: build and save the fit's index, and nothing else.
@@ -1172,4 +1178,20 @@ pub fn scanbench(c: &Ctx2, nq: usize) {
         }
     }
     std::fs::write(format!("{}/scanbench.csv", res_dir()), lines.join("\n") + "\n").unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    /// The other encoded-* directories of a fit are named as stale; the one just sealed, files and other names are not.
+    #[test]
+    fn stale_indexes_are_the_other_encoded_dirs() {
+        let dir = std::env::temp_dir().join(format!("vexact-stale-{}", std::process::id()));
+        let d = dir.to_str().unwrap();
+        for s in ["encoded-aaaa", "encoded-bbbb", "encoded-cccc.tmp", "results"] {
+            std::fs::create_dir_all(dir.join(s)).unwrap();
+        }
+        std::fs::write(dir.join("encoded-file"), b"").unwrap();
+        assert_eq!(super::stale_indexes(d, &format!("{d}/encoded-bbbb")), ["encoded-aaaa", "encoded-cccc.tmp"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }
