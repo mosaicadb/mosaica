@@ -1876,7 +1876,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: false, gtab: false, repack: false, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
     }
 }
 impl Plan {

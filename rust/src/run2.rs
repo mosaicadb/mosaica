@@ -175,8 +175,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let texts = load_queries(n);
     let plan = Plan {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
-        int_det: args().iter().any(|a| a == "--int"),
-        gtab: args().iter().any(|a| a == "--gtab"),
         ..Plan::default()
     };
     let plan = plan_flags(plan, flags);

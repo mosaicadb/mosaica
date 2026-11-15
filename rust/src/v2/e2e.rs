@@ -67,20 +67,21 @@ fn answer(t: &[(f64, u32)], th: f64) -> RoaringBitmap {
     t.iter().filter(|x| x.0 >= th).map(|x| x.1).collect()
 }
 
-/// The default and the measured plans, each left to choose and forced; and costs under which, at this index's size, the
-/// planner mixes scans, cuts, direct scoring, full vectors and the index path (the default costs only scan or cut).
+/// The default plan and the float path (no integer levels, cluster tables, fixed repack), each left to choose and
+/// forced; and costs under which, at this index's size, the planner mixes scans, cuts, direct scoring, full vectors and
+/// the index path (the default costs only scan or cut).
 fn plans() -> Vec<(&'static str, Plan)> {
-    let measured = Plan { int_det: true, gtab: true, repack: true, ..Plan::default() };
+    let float = Plan { int_det: false, gtab: false, repack: false, ..Plan::default() };
     let mixed = Plan { full_us: 3.0, scan_us: 3.0, cscan_us: 3.0, cut_us: 20.0, dir_us: 0.0, ..Plan::default() };
     vec![
         ("mixed costs", mixed),
-        ("mixed costs, measured", Plan { int_det: true, gtab: true, repack: true, ..mixed }),
+        ("mixed costs, float path", Plan { int_det: false, gtab: false, repack: false, ..mixed }),
         ("default", Plan::default()),
         ("default, index path", Plan { mode: PlanMode::Index, ..Plan::default() }),
         ("default, full vectors", Plan { mode: PlanMode::Flat, ..Plan::default() }),
         ("no direct scoring", Plan { direct: false, ..Plan::default() }),
-        ("measured", measured),
-        ("measured, index path", Plan { mode: PlanMode::Index, ..measured }),
+        ("float path", float),
+        ("float path, index path", Plan { mode: PlanMode::Index, ..float }),
     ]
 }
 
