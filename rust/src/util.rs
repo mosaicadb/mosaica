@@ -77,9 +77,6 @@ impl Npy {
     pub fn i8s(&self) -> Vec<i8> {
         self.data.iter().map(|&b| b as i8).collect()
     }
-    pub fn u8s(&self) -> Vec<u8> {
-        self.data.clone()
-    }
 }
 
 pub fn f16_to_f32(h: u16) -> f32 {
@@ -265,24 +262,6 @@ pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
     let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
     while i < n {
         r += a[i] * b[i];
-        i += 1;
-    }
-    r
-}
-/// f32 x f64 dot product, f64 accumulation, eight partial sums.
-pub fn dot32_64(a: &[f32], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let mut s = [0f64; 8];
-    let mut i = 0;
-    while i + 8 <= n {
-        for k in 0..8 {
-            s[k] += a[i + k] as f64 * b[i + k];
-        }
-        i += 8;
-    }
-    let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
-    while i < n {
-        r += a[i] as f64 * b[i];
         i += 1;
     }
     r

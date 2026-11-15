@@ -281,7 +281,7 @@ impl Ctx2 {
         }
         let (p, ix) = (&self.p, &self.ix);
         let mut parts: Vec<(&str, usize)> = vec![
-            ("p.v", b(&p.v)), ("p.centres", b(&p.centres)), ("p.perm", b(&p.perm)), ("p.dl+dt+frb", b(&p.dl) + b(&p.dt) + b(&p.frb)),
+            ("p.v", b(&p.v)), ("p.centres", b(&p.centres)), ("p.perm", b(&p.perm)),
             ("lcode", ix.lcode.iter().map(|x| b(x)).sum()), ("lscal", ix.lscal.iter().map(|x| b(x)).sum()),
             ("coff+soff", ix.coff.iter().chain(&ix.soff).map(|x| b(x)).sum()),
             ("groups.v8t", ix.groups.iter().map(|g| b(&g.v8t)).sum()), ("groups.vinv+vq", ix.groups.iter().map(|g| b(&g.vinv) + b(&g.vq)).sum()),
