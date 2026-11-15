@@ -5,7 +5,7 @@ use super::q::*;
 use super::*;
 use rand::{Rng, SeedableRng};
 use roaring::RoaringBitmap;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 struct Fixture {
     ix: Index2,
@@ -18,14 +18,7 @@ fn fixture() -> &'static Fixture {
     static F: OnceLock<Fixture> = OnceLock::new();
     F.get_or_init(|| {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-        let p = crate::index::load_params(dir);
-        let prof = crate::derive::load_profile(&format!("{dir}/profile.npy"));
-        let src = Real2 { src: crate::index::RealSource::open(&p.xs_path) };
-        let f = crate::index::RealSource::open(&p.xs_path);
-        let full = Full2::Real { map: Arc::new(f.map), off: f.off, rows: Default::default() };
-        let mut ix = build2(&p, &prof, &src, full, false, &mut |_| {});
-        ix.repack = calibrate_repack(&ix);
-        build_table2(&mut ix, p.meta.k);
+        let (_, ix) = open(dir, &BuildOptions::default(), &mut |_| {});
         let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10));
 
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);

@@ -143,61 +143,24 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), args());
-    let kk = arg_usize("--clusters", 100000);
-    let prof_path = if dir == data_dir() { arg_str("--profile", &format!("{dir}/profile.npy")) } else { format!("{dir}/profile.npy") };
-    let mut p = load_params(dir);
-    // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
-    if let Some(v) = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()) {
-        let nv: f64 = v.parse().expect("--nguar N (items the guarantee covers)");
-        if !(nv > 0.0) {
-            eprintln!("--nguar {v} is not a positive number of items; give the number of rows the guarantee should cover, or leave it out to use the row count");
-            std::process::exit(2);
-        }
-        let _ = crate::v2::NGUAR.set(nv);
-    }
-    if args().iter().any(|a| a == "--csg-plain") {
-        crate::v2::CSG_PLAIN.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-    let rlv = arg_str("--rlv", "");
-    let design_exact = args().iter().any(|a| a == "--design-exact");
-    if !rlv.is_empty() {
-        let new: Vec<usize> = rlv.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect();
-        assert!(new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "--rlv must rise from above the last deterministic level");
-        let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
-        p.meta.csg = (2.0 * l1).sqrt();
-        p.meta.rlv = new;
-    }
-    if design_exact {
-        let b = &p.meta.bounds;
-        let l1 = p.meta.csg * p.meta.csg / 2.0;
-        let cs: Vec<f64> = (0..1u32 << (b.len() - 1)).into_par_iter().map(|set| {
-            let ds: Vec<usize> = (0..b.len() - 1).filter(|&j| set >> j & 1 == 1).map(|j| b[j + 1] - b[j] - 1).collect();
-            crate::v2::tail::level_constant(&ds, l1, &[]).0
-        }).collect();
-        out!("[design] constants by coded set {:?}", cs.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>());
-        let _ = crate::v2::DESIGN_C.set(cs);
-    }
-    if kk < p.meta.k {
-        let n = p.meta.n;
-        p.meta.k = kk;
-        p.cstart.truncate(kk + 1);
-        p.grp.truncate(kk);
-        p.centres.truncate(kk * n);
-    }
-    let prof = crate::derive::load_profile(&prof_path);
+    let profile = (dir == data_dir()).then(|| arg_str("--profile", "")).filter(|v| !v.is_empty());
+    let nguar = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()).map(|v| v.parse::<f64>().expect("--nguar N (items the guarantee covers)"));
+    let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
+    let bo = BuildOptions {
+        profile,
+        clusters: Some(arg_usize("--clusters", 100000)),
+        rlv,
+        design_exact: args().iter().any(|a| a == "--design-exact"),
+        nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
+        nguar,
+        csg_plain: args().iter().any(|a| a == "--csg-plain"),
+        ..BuildOptions::default()
+    };
+    let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));
+    let topen = Timer::new();
+    let (mut p, mut ix) = open(dir, &bo, &mut |s| out!("{s}"));
+    let built_s = topen.s();
     let xs = RealSource::open(&p.xs_path);
-    let src = Real2 { src: RealSource::open(&p.xs_path) };
-    let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: std::sync::Arc::new(f2.map), off: f2.off, rows: Default::default() };
-    let mut lg = |s: String| out!("[build2] {s}");
-    let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
-    let mut ix = build2(&p, &prof, &src, full, nusort, &mut lg);
-    let tr = Timer::new();
-    ix.repack = calibrate_repack(&ix);
-    out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
-    if !nusort {
-        build_table2(&mut ix, p.meta.k);
-    }
     let n = p.meta.n;
     let mut ent_xs = vec![u32::MAX; p.perm.len()];
     for (r, &e) in p.perm.iter().enumerate() {
@@ -268,7 +231,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         out!("[mem] {}", c.mem_report());
     }
     out!("[fit] {}", c.p.fit);
-    out!("built v2 (index format {}, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, prof_path, c.ix.nrows, c.ix.k(), t.s(),
+    out!("built v2 (index format {}, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, prof_path, c.ix.nrows, c.ix.k(), built_s,
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c
 }

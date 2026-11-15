@@ -21,13 +21,32 @@ pub mod q;
 pub mod setup;
 pub mod tail;
 
-/// Keep the sub-Gaussian constant at every randomised level (`--csg-plain`) instead of the exact-law constants of `tail`.
-pub static CSG_PLAIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// N in the randomised levels' budget (`--nguar N`) in place of the item count rounded up to a power of two.
-pub static NGUAR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-/// Design the randomised rates with the constants of `tail` for each set of coded blocks (`--design-exact`), indexed
-/// by the set's bits.
-pub static DESIGN_C: std::sync::OnceLock<Vec<f64>> = std::sync::OnceLock::new();
+/// How an index is built from a fitted directory. The default is the build SYSTEM.md describes.
+#[derive(Clone, Debug)]
+pub struct BuildOptions {
+    /// The query profile, in place of the directory's profile.npy.
+    pub profile: Option<String>,
+    /// Build only the first this many clusters (a quick check on a subset).
+    pub clusters: Option<usize>,
+    /// Another randomised level schedule (cumulative bytes, rising from above the last deterministic level); the union
+    /// bound's constant follows the number of levels.
+    pub rlv: Option<Vec<usize>>,
+    /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
+    pub design_exact: bool,
+    /// Sort each cluster's rows by their residual norm (the norm sort) instead of by key.
+    pub nusort: bool,
+    /// N in the randomised levels' budget, in place of the row count rounded up to a power of two.
+    pub nguar: Option<f64>,
+    /// Keep the sub-Gaussian constant at every randomised level instead of the exact-law constants of `tail`.
+    pub csg_plain: bool,
+    /// Clusters of each group the encoder's calibration samples.
+    pub cal_per_group: usize,
+}
+impl Default for BuildOptions {
+    fn default() -> BuildOptions {
+        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_per_group: 8 }
+    }
+}
 
 use crate::derive;
 use crate::index::{item_scale, Params, DA, SEED};
@@ -508,7 +527,7 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
 }
 
 impl GroupPlan2 {
-    fn new_inner(p: &Params, prof: &[f64], g: usize, dt_: &DetTab, et: &mut ExpTab, tof: &dyn Fn(f64) -> f64) -> GroupPlan2 {
+    fn new(p: &Params, prof: &[f64], g: usize, dt_: &DetTab, et: &mut ExpTab, tof: &dyn Fn(f64) -> f64, design_c: Option<&[f64]>) -> GroupPlan2 {
         let m = &p.meta;
         let n = m.n;
         let lam = &p.lam[g * n..(g + 1) * n];
@@ -548,7 +567,7 @@ impl GroupPlan2 {
         boff[J] = n;
         let sj: Vec<f64> = (0..J).map(|j| order[boff[j]..boff[j + 1]].iter().map(|&c| ai[c]).sum()).collect();
         let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[NDL - 1])).collect();
-        let rv = match DESIGN_C.get() {
+        let rv = match design_c {
             Some(cs) => derive::design_by(&sj, &nb, &budgets, &|set| cs[set as usize], tof, QUANTUM),
             None => derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM),
         };
@@ -1455,15 +1474,16 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
 
 /// Build the fast-scan index. `prof` is the G x n profile.
 /// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &BuildOptions, design_c: Option<&[f64]>, log: &mut dyn FnMut(String)) -> Index2 {
+    let nusort = o.nusort;
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
-    // the guarantee's N: the item count rounded up to a power of two, or --nguar
+    // the guarantee's N: the item count rounded up to a power of two, or as given
     let rows = src.rows(p);
-    let nguar = NGUAR.get().copied().unwrap_or_else(|| (rows.max(1) as f64).log2().ceil().exp2());
+    let nguar = o.nguar.unwrap_or_else(|| (rows.max(1) as f64).log2().ceil().exp2());
     if nguar < rows as f64 {
-        log(format!("--nguar {nguar} is below the {rows} rows built: the guarantee covers only {nguar} rows"));
+        log(format!("the guarantee's N, {nguar}, is below the {rows} rows built: the guarantee covers only {nguar} rows"));
     }
     let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32 };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
@@ -1476,7 +1496,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: 
     let mut et = ExpTab::default();
     let mut groups: Vec<GroupPlan2> = Vec::new();
     for g in 0..p.meta.g {
-        groups.push(GroupPlan2::new_light(p, prof, g, &codes, &mut et, &tof));
+        groups.push(GroupPlan2::new(p, prof, g, &codes, &mut et, &tof, design_c));
     }
     groups.par_iter_mut().enumerate().for_each(|(g, gp)| {
         let (v8t, vsc, vinv, vq, e) = quant_basis(&p.v[g * n * n..(g + 1) * n * n], n);
@@ -1493,7 +1513,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: 
         let mut sets: Vec<Vec<usize>> = groups.iter().flat_map(|gp| (0..gp.rates.len()).map(move |lr| set(gp, lr))).collect();
         sets.sort();
         sets.dedup();
-        let plain = CSG_PLAIN.load(std::sync::atomic::Ordering::Relaxed);
+        let plain = o.csg_plain;
         // one event per (item, level), on the side that would make the item's decision wrong: delta = eps / (N L)
         let l1 = (nguar * meta.rlv.len() as f64 / p.meta.eps).ln();
         log(format!("query budget: N = {nguar:.0} (2^{}; {} items), L = {}, eps = {:e}, one side per event: ln(1/delta) = {l1:.4}", meta.npow, rows, meta.rlv.len(), p.meta.eps));
@@ -1513,12 +1533,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: 
     }).collect();
     let mn32: Vec<f32> = (0..k).map(|c| p.centres[c * n..(c + 1) * n].iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt() as f32).collect();
     let nr = meta.rlv.len();
-    // calibration on every 8th cluster of each group
+    // calibration on o.cal_per_group clusters of each group
     let mut calc = Vec::new();
     for g in 0..p.meta.g {
         let ks: Vec<usize> = (0..k).filter(|&c| p.grp[c] == g).collect();
-        let per: usize = std::env::var("VEXACT_CAL_PER_GROUP").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
-        calc.extend(ks.iter().step_by((ks.len() / per).max(1)));
+        calc.extend(ks.iter().step_by((ks.len() / o.cal_per_group.max(1)).max(1)));
     }
     let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&c| {
         let g = p.grp[c];
@@ -1706,11 +1725,49 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: 
     ix
 }
 
-impl GroupPlan2 {
-    /// The plan without the basis inverse (filled in by the caller).
-    pub fn new_light(p: &Params, prof: &[f64], g: usize, codes: &DetTab, et: &mut ExpTab, tof: &dyn Fn(f64) -> f64) -> GroupPlan2 {
-        GroupPlan2::new_inner(p, prof, g, codes, et, tof)
+
+/// The fitted directory `dir` built into a queryable index (codes, repack thresholds and, without the norm sort, the
+/// support table), with the parameters it was built from.
+pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+    let mut p = crate::index::load_params(dir);
+    if let Some(nv) = o.nguar {
+        assert!(nv > 0.0, "the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count");
     }
+    if let Some(new) = &o.rlv {
+        assert!(!new.is_empty() && new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "the randomised levels {new:?} must rise from above the last deterministic level, {}", p.meta.dlv.last().unwrap());
+        let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
+        p.meta.csg = (2.0 * l1).sqrt();
+        p.meta.rlv = new.clone();
+    }
+    let design_c: Option<Vec<f64>> = o.design_exact.then(|| {
+        let b = &p.meta.bounds;
+        let l1 = p.meta.csg * p.meta.csg / 2.0;
+        let cs: Vec<f64> = (0..1u32 << (b.len() - 1)).into_par_iter().map(|set| {
+            let ds: Vec<usize> = (0..b.len() - 1).filter(|&j| set >> j & 1 == 1).map(|j| b[j + 1] - b[j] - 1).collect();
+            tail::level_constant(&ds, l1, &[]).0
+        }).collect();
+        log(format!("[design] constants by coded set {:?}", cs.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>()));
+        cs
+    });
+    if let Some(kk) = o.clusters.filter(|&kk| kk < p.meta.k) {
+        let n = p.meta.n;
+        p.meta.k = kk;
+        p.cstart.truncate(kk + 1);
+        p.grp.truncate(kk);
+        p.centres.truncate(kk * n);
+    }
+    let prof = derive::load_profile(o.profile.as_deref().unwrap_or(&format!("{dir}/profile.npy")));
+    let src = Real2 { src: crate::index::RealSource::open(&p.xs_path) };
+    let f = crate::index::RealSource::open(&p.xs_path);
+    let full = Full2::Real { map: Arc::new(f.map), off: f.off, rows: Default::default() };
+    let mut ix = build2(&p, &prof, &src, full, o, design_c.as_deref(), &mut |s| log(format!("[build2] {s}")));
+    let t = Timer::new();
+    ix.repack = q::calibrate_repack(&ix);
+    log(format!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), t.s()));
+    if !o.nusort {
+        build_table2(&mut ix, p.meta.k);
+    }
+    (p, ix)
 }
 
 /// Support table over cluster-centre anchors (data only): exact max/min of p.x per cluster, rounded outward.
