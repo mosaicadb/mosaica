@@ -117,8 +117,6 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
-            f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
-            "nobail" => p.bail = 0.0,
             "noscanband" => {
                 p.scan_lo = 2.0;
                 p.scan_hi = 2.0;
@@ -128,15 +126,6 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                 let (a, b) = f[9..].split_once(':').expect("scanband=LO:HI");
                 p.scan_lo = a.parse().expect("scanband=LO:HI");
                 p.scan_hi = b.parse().expect("scanband=LO:HI");
-            }
-            f if f.starts_with("rdec=") => {
-                p.rdec = if &f[5..] == "all" { u32::MAX } else {
-                    f[5..].split('.').map(|x| {
-                        let l = x.parse::<u32>().expect("rdec=LEVEL.LEVEL... (randomised level indices from 0)");
-                        assert!(l < 32, "rdec names randomised level {l}; it can name levels 0 to 31 only, so use rdec=all for an index with more");
-                        1u32 << l
-                    }).fold(0, |a, b| a | b)
-                };
             }
             f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
             f if f.starts_with("repackx=") => {
@@ -225,10 +214,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let texts = load_queries(n);
     let plan = Plan {
         mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
-        alpha0: args().iter().any(|a| a == "--alpha0"),
         int_det: args().iter().any(|a| a == "--int"),
         gtab: args().iter().any(|a| a == "--gtab"),
-        jump_level: arg_usize("--jump", 0),
         ..Plan::default()
     };
     let plan = plan_flags(plan, flags);
@@ -547,7 +534,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
         for ci in 0..ix.k() {
             let (mut a, mut b, mut iv) = (Vec::new(), Vec::new(), Vec::new());
             let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: if sweep { None } else { Some(&mut iv) } };
-            unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nl - 1), 0, false, &mut sv, &mut st, &mut out) };
+            unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nl - 1), false, &mut sv, &mut st, &mut out) };
         }
         for l in 0..nl {
             decided[l] = st.dec_in[l] + st.dec_out[l];
@@ -568,7 +555,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
                 iv.clear();
                 let (mut a, mut b) = (Vec::new(), Vec::new());
                 let mut out = RunOut { rows_in: &mut a, pend: &mut b, iv: if sweep { None } else { Some(&mut iv) } };
-                unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nlv - 1), 0, false, &mut sv, &mut st, &mut out) };
+                unsafe { run_cluster(ix, ci, &pr, pr.gq[ix.cl[ci].g].get().unwrap(), &mut cqs[ci], &cands[ci], t, mode(nlv - 1), false, &mut sv, &mut st, &mut out) };
             }
             let ghz = (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / (tm.s() * 1e9);
             cum.push(tm.s() * 1e9 / (ix.nrows * passes) as f64);
@@ -801,7 +788,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
 }
 
 /// Where the time of a threshold query goes (item and text queries at 1% and 5%; 1 and 4 threads), for the plan as
-/// given and, with `--variants`, the earlier plan variants.
+/// given.
 pub fn breakdown2(c: &Ctx2, nq: usize) {
     use std::sync::atomic::Ordering;
     let ix = &c.ix;
@@ -818,11 +805,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
     let names = ["anchor", "cut", "basis", "rotations", "cluster setup", "tables", "re-pack", "level decode", "bounds+decisions", "full vectors", "candidate init", "result bitmap", "column order",
                  "compaction", "level setup", "group post", "level other", "cluster other", "merge", "query other", "unattributed"];
     let mut lines = vec!["variant,class,answer_frac,threads,wall_ms,prof_wall_ms,cpu_ms_total,".to_string() + &names.join(",") + ",bytes_read,full_reads,wrong"];
-    let variants: &[(&str, bool, usize)] = if args().iter().any(|a| a == "--variants") {
-        &[("levels", false, 0usize), ("shared_tables", true, 0), ("single_pass_64B", false, 9), ("single_pass_96B", false, 12), ("single_pass_128B", false, 14), ("shared+single_96B", true, 12)]
-    } else {
-        &[("levels", false, 0usize)]
-    };
+    let variants: &[&str] = &["levels"];
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
     let qs: Vec<Vec<f32>> = qs.iter().take(nq).cloned().collect();
     let bfracs: Vec<f64> = arg_str("--bfracs", "0.01,0.1").split(',').map(|s| s.parse().unwrap()).collect();
@@ -838,8 +821,8 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
             let pr = prep2(ix, q);
             fl.threshold(&pr.q16, &pr.q32, t, full_err2(ix, &pr), None, &c.ent_xs)
         }).collect();
-        for &(vname, alpha0, jump) in variants {
-            let plan = Plan { alpha0, jump_level: jump, jump_d: 0.8, ..c.plan };
+        for &vname in variants {
+            let plan = c.plan;
             for &th in &bthreads {
                 let pl = pool(th);
                 let ms = |c: u64| c as f64 / hz * 1e3 / qs.len() as f64;

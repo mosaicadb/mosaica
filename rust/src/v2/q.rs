@@ -68,7 +68,6 @@ pub struct GQ2 {
     pub l1det: f64,        // |wq| sums (weight rounding bound)
     pub l1j: [f64; J],
     pub cyc: (u64, u64),   // basis product, the rest of the group setup (rotations included when done per group)
-    pub glut: Vec<OnceLock<LevelLut>>, // tables shared by the group's clusters (alpha = 0)
     pub gtab: Vec<OnceLock<GTab>>,     // f32 tables of wq per level, combined per cluster with the centre's
 }
 
@@ -335,7 +334,7 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     for c in 0..n {
         wq[c] = (qv[c] * gp.sig[c] as f64) as f32;
     }
-    // cq[l] = sum qv^2 D_l^2 in four partial sums (any order is within the 1e-12 cq slack of cluster_q2a), with
+    // cq[l] = sum qv^2 D_l^2 in four partial sums (any order is within the 1e-12 cq slack of cluster_q2w), with
     // qvd2 = qv D_l^2 in the same pass
     let mut cq = [0f64; NDL];
     let mut qvd2 = vec![0f32; NDL * n];
@@ -379,7 +378,7 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     }
     let l1det = wq[..n].iter().map(|x| x.abs() as f64).sum();
     let t3 = tick();
-    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0, t3 - t1), glut: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect(), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
+    GQ2 { qv, qvd2, qdt2, wq, cq, qvt_pos, a2, l1det, l1j, cyc: (t1 - t0, t3 - t1), gtab: (0..ix.meta.nl()).map(|_| OnceLock::new()).collect() }
 }
 
 /// Set up several groups at once: exact basis products in parallel, then one product per randomised block with the
@@ -453,11 +452,8 @@ pub struct CQ2 {
     pub ewj: [f32; J], // per block (times kappa)
     pub w: Vec<f32>,
     pub luts: Vec<Option<LevelLut>>,
-    pub shared: bool, // tables from the group (alpha = 0)
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
-    pub bail: f32,    // a threshold query sends its survivors to full vectors before a level of more than bail x live units (0: never)
-    pub rdec: u32,    // threshold queries decide at randomised level lr only if bit lr is set (the others only read)
     pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
     pub int: Option<IntDet>,
 }
@@ -477,7 +473,6 @@ impl CQ2 {
     /// With combined tables (set `gtab` first), the common step comes from the units' range bounds: the group's sum
     /// and largest plus |alpha| times the centre's.
     pub fn enable_int(&mut self, ix: &Index2, ci: usize, gq: &GQ2) {
-        assert!(!self.shared, "the integer levels need the cluster's own tables");
         let gp = &ix.groups[ix.cl[ci].g];
         let sigma = if self.gtab {
             let ts: Vec<&GTab> = (0..NDL).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
@@ -521,17 +516,12 @@ pub unsafe fn dot32(a: &[f32], b: &[f32]) -> f64 {
 }
 
 pub fn cluster_q2(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64) -> CQ2 {
-    cluster_q2a(ix, ci, gq, pr, qm, false)
+    cluster_q2w(ix, ci, gq, pr, qm, true)
 }
 
-/// alpha0: no multiple of the centre is taken out of the query, so every cluster of a group shares its tables.
-pub fn cluster_q2a(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0: bool) -> CQ2 {
-    cluster_q2w(ix, ci, gq, pr, qm, alpha0, true)
-}
-
-/// As cluster_q2a; without `want_w` the combined weights w are left empty (tables combined from the group's and the
+/// As cluster_q2; without `want_w` the combined weights w are left empty (tables combined from the group's and the
 /// centre's, `gtab`, never read them).
-pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0: bool, want_w: bool) -> CQ2 {
+pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w: bool) -> CQ2 {
     let c = &ix.cl[ci];
     let n = ix.n();
     let gp = &ix.groups[c.g];
@@ -541,7 +531,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     for j in 0..J {
         ab[j] = unsafe { dot32(&c.mv32, &gq.qdt2[j * n..(j + 1) * n]) };
     }
-    let alr = if alpha0 { 0.0 } else { (ab.iter().sum::<f64>() / c.btot) as f32 };
+    let alr = (ab.iter().sum::<f64>() / c.btot) as f32;
     let a = alr as f64;
     let mut dwa = [0f32; NDL];
     for l in 0..NDL {
@@ -567,7 +557,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, alpha0
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), shared: alpha0, gtab: false, repack: 0.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -1049,7 +1039,7 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
 /// Run the index path for candidates `cands` (local item indices, ascending) of one cluster. Decisions in Thr mode;
 /// in Interval(L) mode every candidate's interval at level L goes to out.iv.
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut) {
+pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut) {
     let ti = tick();
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
@@ -1155,10 +1145,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             break;
         }
         let lp = &gp.levels[l];
-        // few survivors left: their full vectors cost less than this level's table
-        if cq.bail > 0.0 && mode == Mode2::Thr && l > 0 && cq.luts[l].is_none() && (lp.units as f32) > cq.bail * live as f32 {
-            break;
-        }
         let tl1 = tick();
         if intm && l == NDL {
             // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
@@ -1178,13 +1164,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         let tt = tick();
         st.cyc[P_LVSETUP] += tt - tl1;
-        let lut: &LevelLut = if cq.shared {
-            gq.glut[l].get_or_init(|| {
-                let mut lut = LevelLut::default();
-                build_lut(&gq.wq, lp, &ix.etab, ix.split, None, &mut lut);
-                lut
-            })
-        } else {
+        let lut: &LevelLut = {
             if cq.luts[l].is_none() {
                 st.cyc[C_TABLES] += 1;
                 st.cyc[C_UNITS] += lp.units as u64;
@@ -1204,25 +1184,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         };
         st.cyc[P_TABLES] += tick() - tt;
         let tls = tick();
-        let skip = l < first_decide && !verify && mode == Mode2::Thr;
-        // a randomised level that only reads: its bounds are not computed (verify: computed and checked, not used)
-        let nodec = l >= NDL && mode == Mode2::Thr && !rdec_has(cq.rdec, l - NDL);
-        let skipb = skip || (nodec && !verify);
-        // blocks whose kappa this level stores and a later rise replaces before the next level that decides: unused
-        let mut kap_unused = 0u32;
-        if nodec && !verify && l >= NDL {
-            let lr = l - NDL;
-            let nd = (lr + 1..nl - NDL).find(|&x| rdec_has(cq.rdec, x));
-            for &j in &gp.thchg[lr] {
-                let again = match nd {
-                    None => true,
-                    Some(d) => (lr + 1..=d).any(|x| gp.thchg[x].contains(&j)),
-                };
-                if again {
-                    kap_unused |= 1 << j;
-                }
-            }
-        }
         for pl in &lut.parts {
             match pl.j {
                 None => edet += pl.err,
@@ -1371,19 +1332,17 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
             if intm && l < NDL {
                 let rt = cq.int.as_ref().unwrap().rt[l].as_ref().unwrap();
-                let (inm, outm) = int_level(cp, lut, sp, rt, sv.ist.as_mut_ptr().add(ip(k0, 0)), !skip);
+                let (inm, outm) = int_level(cp, lut, sp, rt, sv.ist.as_mut_ptr().add(ip(k0, 0)), true);
                 let t2 = tick();
                 st.cyc[P_DECODE] += t2 - t1;
                 let (inm, outm) = (inm & act, outm & act);
-                if verify && !skip {
+                if verify {
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, act, inm, outm, st);
                 }
-                let k = if skip || sweep { act } else { act & !(inm | outm) };
-                if !skip {
-                    st.dec_in[l] += inm.count_ones() as u64;
-                    st.dec_out[l] += outm.count_ones() as u64;
-                }
-                if !skip && !sweep && inm != 0 {
+                let k = if sweep { act } else { act & !(inm | outm) };
+                st.dec_in[l] += inm.count_ones() as u64;
+                st.dec_out[l] += outm.count_ones() as u64;
+                if !sweep && inm != 0 {
                     for h in 0..2 {
                         let m = (inm >> (16 * h)) as u16;
                         if m != 0 {
@@ -1449,9 +1408,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         }
                     }
                     for (slot, &j) in gp.thchg[lr].iter().enumerate() {
-                        if kap_unused >> j & 1 == 1 {
-                            continue;
-                        }
                         let row = gp.rrow[lr][slot];
                         let kb = gp.kbits[lr][j] as usize;
                         let (a0, a1) = row_nibbles(sp.add(row * 16));
@@ -1518,10 +1474,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
                     let adet = _mm512_add_ps(ld(&sv.adet, o), pv[0][h]);
                     _mm512_storeu_ps(sv.adet.as_mut_ptr().add(o), adet);
-                    if skip {
-                        keep[h] = hm;
-                        continue;
-                    }
                     let (n0, n1) = row_nibbles(sp);
                     let code = if h == 0 { n0 } else { n1 };
                     let ntab = _mm512_loadu_ps(gp.ntab[l].as_ptr());
@@ -1565,10 +1517,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     } else {
                         (ld(&sv.c0, o), ld(&sv.h0, o))
                     };
-                    if skipb {
-                        keep[h] = hm;
-                        continue;
-                    }
                     let mut e = c0;
                     let mut hpar = h0;
                     let mut var = _mm512_setzero_ps();
@@ -1663,10 +1611,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                             }
                         }
                     }
-                    continue;
-                }
-                if nodec {
-                    keep[h] = hm;
                     continue;
                 }
                 let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, _mm512_set1_ps(tin)) & hm;
@@ -1800,10 +1744,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         st.cyc[P_COMPACT] += tick() - tc;
         st.lcyc[l] += _rdtsc() - tl0;
-        // single-pass rule: decide once at first_decide, the rest go to their full vectors
-        if mode == Mode2::Thr && first_decide > 0 && l == first_decide {
-            break;
-        }
         let _ = nr;
     }
     let mut np = 0;
@@ -1923,15 +1863,10 @@ pub struct Plan {
     pub direct: bool,      // a cluster may be scored from its visible rows' vectors without a cut
     pub cut_us: f64,       // cluster cut and sorted range, per cluster holding a visible item
     pub seed_us: f64,      // the k-NN seed (query setup, probing, first full vectors), per query
-    pub alpha0: bool,      // tables shared per group (no centre multiple taken out of the query)
-    pub jump_level: usize, // when most items stay undecided (d > jump_d): no decisions before this level
-    pub jump_d: f64,
     pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
-    pub bail: f32,         // threshold queries: survivors go to full vectors before a level whose table has more than bail units per survivor (0: off)
-    pub rdec: u32,         // threshold queries decide at randomised level lr only when bit lr is set
     pub tol: f64,          // the tolerance d: an item whose lower bound reaches t - d is taken in (0: exact)
     pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
     pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
@@ -1943,7 +1878,7 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: false, gtab: false, repack: false, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
     }
 }
 impl Plan {
@@ -2065,7 +2000,7 @@ impl Plan {
                         let pre: Vec<Pre> = (0..ix.k()).map(|ci| if v.cl_cnt[ci] > 0 { Pre::Direct } else { Pre::Skip }).collect();
                         let o = Opts2 { vis, verify: false, want_iv: false, plan: base };
                         let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t10, &o, &pre, &vec![false; ix.k()], 0, 0).rows.len());
+                        std::hint::black_box(run_planned(ix, &pr, t10, &o, &pre, &vec![false; ix.k()], 0).rows.len());
                         dir_t += tm.ms() * 1e3;
                         dir_n += v.cl_cnt.iter().filter(|&&x| x > 0).count() as f64;
                         dir_rows += nvis as f64;
@@ -2079,10 +2014,10 @@ impl Plan {
                     for (t, mode) in [(t10, PlanMode::Flat), (t10, PlanMode::Index), (t30, PlanMode::Index)] {
                         let o = Opts2 { vis, verify: false, want_iv: true, plan: Plan { mode, ..base } };
                         let tm = Timer::new();
-                        let Planned::Run { pre, use_idx, first_decide, cut_cyc } = plan2(ix, &pr, t, &o) else { unreachable!() };
+                        let Planned::Run { pre, use_idx, cut_cyc } = plan2(ix, &pr, t, &o) else { unreachable!() };
                         let tc = tm.ms() * 1e3;
                         let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t, &o, &pre, &use_idx, first_decide, cut_cyc).rows.len());
+                        std::hint::black_box(run_planned(ix, &pr, t, &o, &pre, &use_idx, cut_cyc).rows.len());
                         let tr = tm.ms() * 1e3;
                         let (mut ncand, mut nv) = (0usize, 0usize);
                         let mut groups = vec![false; ix.groups.len()];
@@ -2459,7 +2394,7 @@ pub enum Pre {
 /// vectors after the cut.
 pub enum Planned {
     Scan,
-    Run { pre: Vec<Pre>, use_idx: Vec<bool>, first_decide: usize, cut_cyc: u64 },
+    Run { pre: Vec<Pre>, use_idx: Vec<bool>, cut_cyc: u64 },
 }
 
 fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) -> Vec<u32> {
@@ -2468,12 +2403,6 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
         None => ((d0 - c.r0) as u32..(d1 - c.r0) as u32).collect(),
         Some(v) => (d0..d1).filter(|&r| v.has(r)).map(|r| (r - c.r0) as u32).collect(),
     }
-}
-
-/// Whether a decision mask (Plan::rdec) decides at randomised level lr; all ones decides at every level.
-#[inline(always)]
-fn rdec_has(rdec: u32, lr: usize) -> bool {
-    rdec == u32::MAX || (lr < 32 && rdec >> lr & 1 == 1)
 }
 
 /// Rows sampled to estimate a threshold query's answer share.
@@ -2686,7 +2615,6 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     if !sampled && in_band(d) {
         return Planned::Scan;
     }
-    let first_decide = if auto && pl.jump_level > 0 && d > pl.jump_d { pl.jump_level } else { 0 };
     let mut grp_gain = vec![0f64; ix.groups.len()];
     let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
@@ -2720,25 +2648,22 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
             return Planned::Scan;
         }
     }
-    Planned::Run { pre, use_idx, first_decide, cut_cyc }
+    Planned::Run { pre, use_idx, cut_cyc }
 }
 
 pub fn threshold2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> ThrOut2 {
     match plan2(ix, pr, t, o) {
         Planned::Scan => scan_visible(ix, pr, t, o.vis, o.want_iv, o.plan.pscan),
-        Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, first_decide, cut_cyc),
+        Planned::Run { pre, use_idx, cut_cyc } => run_planned(ix, pr, t, o, &pre, &use_idx, cut_cyc),
     }
 }
 
 /// A cluster's per-query setup for a threshold query under plan `pl`, on the integer deterministic levels when `int`.
 pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: Plan, int: bool) -> CQ2 {
-    let gt = pl.gtab && !pl.alpha0;
-    let mut cq = cluster_q2w(ix, ci, gq, pr, qm, pl.alpha0, !gt);
+    let gt = pl.gtab;
+    let mut cq = cluster_q2w(ix, ci, gq, pr, qm, !gt);
     cq.gtab = gt;
     cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
-    cq.bail = pl.bail;
-    assert!(pl.rdec == u32::MAX || ix.meta.rlv.len() <= 32, "rdec can name 32 randomised levels and this index has {}; use rdec=all", ix.meta.rlv.len());
-    cq.rdec = pl.rdec;
     cq.tol = pl.tol;
     if int {
         cq.enable_int(ix, ci, gq);
@@ -2747,7 +2672,7 @@ pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: P
 }
 
 /// The threshold query over the clusters as planned.
-pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], first_decide: usize, cut_cyc: u64) -> ThrOut2 {
+pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_idx: &[bool], cut_cyc: u64) -> ThrOut2 {
     let nl = ix.meta.nl();
     let k = ix.k();
     let rr = ix.x2.sqrt();
@@ -2863,7 +2788,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
-                            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
+                            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, o.verify, &mut sv, &mut acc.st, &mut out) };
                             sv.recycle(&mut cq);
                             acc.iv.extend(ivv);
                         } else {
@@ -2961,7 +2886,7 @@ pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut
     let (mut rin, mut pend) = (Vec::new(), Vec::new());
     let mut sv = State::default();
     let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
-    unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &[(row - c.r0) as u32], f64::NAN, Mode2::Interval(level), 0, false, &mut sv, st, &mut out) };
+    unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &[(row - c.r0) as u32], f64::NAN, Mode2::Interval(level), false, &mut sv, st, &mut out) };
     (iv[0].1 as f64, iv[0].2 as f64)
 }
 
@@ -2991,7 +2916,7 @@ pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, 
         let mut cq = cluster_q2(ix, ci, gq, pr, qm);
         let (mut rin, mut pend) = (Vec::new(), Vec::new());
         let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
-        unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(level), 0, false, &mut sv, st, &mut out) };
+        unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, f64::NAN, Mode2::Interval(level), false, &mut sv, st, &mut out) };
         if nvis >= budget {
             break;
         }
@@ -3341,7 +3266,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
                 let mut cq = open_cluster(ix, ci, gq, &pr, qm, plan, plan.int_det);
                 st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut rows_in, pend: &mut pend, iv: None };
-                unsafe { run_cluster(ix, ci, &pr, gq, &mut cq, &cands, t, Mode2::Thr, 0, false, &mut sv, &mut st, &mut out) };
+                unsafe { run_cluster(ix, ci, &pr, gq, &mut cq, &cands, t, Mode2::Thr, false, &mut sv, &mut st, &mut out) };
                 sv.recycle(&mut cq);
             } else {
                 pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
@@ -3387,7 +3312,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
     let sw = match plan2(ix, &pr, tau1, &o) {
         Planned::Scan if stored => return scan(st, t_seed),
         Planned::Scan => scan_visible(ix, &pr, tau1, vis, true, plan.pscan),
-        Planned::Run { pre, use_idx, first_decide, cut_cyc } => run_planned(ix, &pr, tau1, &o, &pre, &use_idx, first_decide, cut_cyc),
+        Planned::Run { pre, use_idx, cut_cyc } => run_planned(ix, &pr, tau1, &o, &pre, &use_idx, cut_cyc),
     };
     st.add(&sw.st);
     let t_sweep = tm.ms() - t_seed;
