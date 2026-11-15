@@ -101,7 +101,7 @@ Mean items scanned to reach mean recall 0.8 / 0.9 / 0.99, assuming a perfect re-
 - The radius bonus matters as much as the split: without it the 16-way split gains nothing at 0.99 (75,524 items at k = 10). A sub-cluster's radius is √(1 − |centre|²) for unit vectors, so it needs no extra pass.
 - **Two-level probing** keeps centre scoring cheap. Ranking the 1,000 parents and then the sub-centres of the best 256 (5,096 centres scored) gives the same items as ranking all 16,000. The best 128 parents reach 0.99 for k ≤ 100 but need 58,000 items at k = 100 in place of 37,000. 64 parents cannot reach 0.99.
 - A sub-centre can be stored as one more coded row of its parent and scored by the same fast-scan kernel, so 16 of them cost about what 16 items cost: about 0.7 MB at 37 B each [speculative]. Storing int8 sub-centres instead is 12 MB.
-- **Cost to the layout.** Rows inside a cluster are sorted by key today, and sub-clusters need rows sorted by (sub-cluster, key). The exact path's one sorted range per cluster becomes up to 16. This is the one place the idea touches the exact path, and it needs a ruling.
+- **Cost to the layout.** Rows inside a cluster are sorted by key today, and sub-clusters need rows sorted by (sub-cluster, key). The exact path's one sorted range per cluster becomes up to 16. This is the one place the idea touches the exact path; see the ruling below, which keeps the exact layout.
 - Text queries set the 0.99 figure: at k = 10 they need 30,947 items against 3,680 for image queries.
 - At 0.99 a query still opens 87–228 parents and 20–40 groups, the same as today, so sub-clusters cut item work and not setup.
 
@@ -136,7 +136,32 @@ Even with idea 1, levels 0–3 are four passes at 7.8 ns per item each, and they
 
 ## Recommended first step
 
-Ideas 1 and 2 together, on the existing 1,000 clusters: fit and apply the dial at levels 0–5, score survivors exactly into a heap, and drop the seed and the restricted visible set. Nothing stored changes, the exact path is untouched, and the existing `dbtopk` ladder tests it. Expected at recall 0.99 [estimated]: k = 10 and 100 from 6.9 and 9.2 ms to about 3.5 ms; k = 1,000 from 68 ms to 8–12 ms. Idea 3 comes next and needs the row-order ruling.
+Ideas 1 and 2 together, on the existing 1,000 clusters: fit and apply the dial at levels 0–5, score survivors exactly into a heap, and drop the seed and the restricted visible set. Nothing stored changes, the exact path is untouched, and the existing `dbtopk` ladder tests it. Expected at recall 0.99 [estimated]: k = 10 and 100 from 6.9 and 9.2 ms to about 3.5 ms; k = 1,000 from 68 ms to 8–12 ms. Idea 3 comes next, with the row order ruled below.
+
+## Ruling on row order (15 November 2026)
+
+Rows stay sorted by key inside each cluster, and the exact path is unchanged. Sub-clusters belong to the approximate
+mode: each cluster stores the local positions of its rows grouped by sub-cluster (u16, 2 B per item for clusters under
+65,536 rows), with each sub-cluster's start, centre and radius. The approximate mode takes the probed sub-clusters of
+a cluster as one sorted list of positions and gathers those rows, so setup and tables are still paid once per cluster.
+Sub-clusters need not be balanced, since nothing has to align to blocks.
+
+- **The exact path would not gain from sub-clusters.** A K-way partition lowers the half-width floor by at most
+  K^(−1/k) (`groups/REPORT.md`, Proposition 1), and the measured member radius falls as K^(−0.053): 16 sub-clusters
+  narrow the member side by 14% and 64 by 20%, and the query side not at all. A hierarchy over centres read 129% of
+  the leaf centres for text (`sublinear/REPORT.md` 5.6). [proved and measured]
+- **Ordering rows by sub-cluster would cost the exact path.** One range search per sub-list in every opened cluster,
+  and the first level loses in-place block reads when the candidates are sparse: about 1–5% of query time at 1M.
+  [estimated from the profiled breakdown in `rust/REPORT_CLUSTERSIZE.md`]
+- **Gathering costs the approximate mode little.** It reads far fewer rows: 25,889–76,158 at recall 0.99 for k = 10 to
+  1,000 in this report's 16-way simulation, and 5,000–16,000 on the scaling run's queries at 1M. At most 2–3 ns more
+  per gathered row, that is 0.05–0.2 ms, a few per cent of the combined estimates below. Deeper levels are read for
+  scattered survivors in either layout. [estimated]
+- **With sub-clusters of about 62 items, the items scanned no longer depend on cluster size**: within ±25% between
+  1,000 and 4,000 items per cluster at 1M, against 1.5–4.5 times more items without them. So the exact path can set the cluster size
+  (`rust/REPORT_CLUSTERSIZE.md`). [measured counts, scaling run; report to follow]
+
+Not yet measured: the approximate mode's time with gathered sub-clusters.
 
 ## What a combined mode could reach [estimated]
 
