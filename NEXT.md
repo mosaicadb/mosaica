@@ -128,7 +128,13 @@ keep or drop the norm sort. The order the reviews suggest, each step keeping dbc
 4. Split `Plan` into a cost model, tuning whose defaults are the measured system (`--int --gtab --flags repack`), and
    query arguments. [x] The defaults: `Plan::default()` now has the integer levels, combined tables and repack on;
    `--int`, `--gtab` and `--flags repack` restate them, and `--flags noint,nogtab,norepack` gives the float path. A
-   flagless run on the 50k index answers byte for byte as the flagged one, on the integer path. Still to do: the split.
+   flagless run on the 50k index answers byte for byte as the flagged one, on the integer path. [x] `Plan::disk` is
+   gone: the read policy of the vectors on file says whether the planner prices their reads (`priced`, on with
+   io_uring; dbcmp's `:plan=disk|mem` set it). [x] `Plan::calibrate` times the index path on the integer levels without
+   collecting intervals, as queries run it; on the shared cloud machine the fitted index-path factor moved from
+   0.34-0.40 to 0.43-0.44, within its run-to-run spread, so time it on the owner's machine and refit plan files.
+   Still to do, with step 6 (it rewrites the same call sites): the split into a cost model, tuning and per-query
+   arguments (`tol`, the forced path).
 5. Move verification, profiling and dumps out of the level loop; split q.rs; one owner of full-vector scoring.
 6. One `threshold` and one `knn`, each with a path (scan, exact, approximate) and one planner.
 7. The correctness findings: a visible set naming an unknown entity panics; k-NN returns certified items with +inf
