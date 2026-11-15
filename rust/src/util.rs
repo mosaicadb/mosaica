@@ -327,3 +327,24 @@ pub fn pin(cpu: usize) {
     mask[cpu / 64] = 1 << (cpu % 64);
     assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
 }
+
+/// The process's anonymous resident memory in MB (`RssAnon`; 0 where /proc is absent): the memory a build holds that
+/// the kernel cannot drop, unlike the mapped files it reads and writes.
+pub fn anon_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("RssAnon:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).map_or(0.0, |kb| kb / 1024.0)
+}
+
+/// Fix glibc's mmap threshold at `bytes` (its default rises to 32 MB as large blocks are freed). A build encodes
+/// cluster after cluster in buffers of a few MB; above the risen threshold glibc keeps the freed ones in its arenas,
+/// which grew the 4M-row build by 38 bytes a row. Not called on the query path.
+pub fn fix_mmap_threshold(bytes: i32) {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn mallopt(param: i32, value: i32) -> i32;
+        }
+        const M_MMAP_THRESHOLD: i32 = -3;
+        unsafe { mallopt(M_MMAP_THRESHOLD, bytes) };
+    }
+    let _ = bytes;
+}

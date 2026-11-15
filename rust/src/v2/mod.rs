@@ -1648,7 +1648,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
         }
         groups[g].set_calibration(CalIn { kmin, y0, ys, tq, k0, ks: ksv, kb: kbv });
     }
-    log(format!("calibrated {:.1}s", t.s()));
+    log(format!("calibrated {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let nl = meta.nl();
     let build_col = groups[0].col.is_some();
     let real = matches!(full, Full2::Real { .. });
@@ -1718,7 +1718,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
         }
         Done { esc: cc.esc, x2max: it.x2max, numax, col: build_col.then_some((cc.ccode, cc.cnrm)) }
     }).collect();
-    log(format!("encoded {:.1}s", t.s()));
+    log(format!("encoded {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
     let ah_all = ahat.get();
     let cl: Vec<Cl2> = (0..k).into_par_iter().map(|c| {
@@ -1838,7 +1838,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
     for (key, _) in ix.esc.iter() {
         ek[match key.1 { 0 => 0, 1..=7 => 1, 8..=15 => 2, _ => 3 }] += 1;
     }
-    log(format!("assembled {:.1}s; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
+    log(format!("assembled {:.1}s; anon {:.0} MB; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), crate::util::anon_mb(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
     ix
 }
 

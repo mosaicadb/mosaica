@@ -129,6 +129,7 @@ pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: b
         };
         if !nusort {
             build_table2(&mut ix, p.meta.k);
+            out!("[build2] support table; anon {:.0} MB", crate::util::anon_mb());
         }
         if let Some(d) = out {
             crate::v2::store::seal(&ix, d, &key);
@@ -142,9 +143,11 @@ pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: b
 
 /// `vexact build FITDIR`: build and save the fit's index, and nothing else.
 pub fn build_cmd(dir: &str) {
+    crate::util::fix_mmap_threshold(1 << 20);
     let t = Timer::new();
     let p = load_params(dir);
     let prof = crate::derive::load_profile(&format!("{dir}/profile.npy"));
+    out!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb());
     let ix = open_or_build(dir, &p, &prof, true, false, false, &mut |s| out!("[build2] {s}"));
     out!("{} rows, {} clusters in {:.1}s", ix.nrows, ix.k(), t.s());
 }
