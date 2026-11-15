@@ -1409,6 +1409,11 @@ pub fn dbtopk(c: &Ctx2) {
 /// last rung within the cap. A tight rung slower than `--slow-ms` (1000) per query keeps its ladder timing. Each set
 /// name in `--sets` other than `all` is the file stem of one of the `--vis` files. One thread, pinned by `--pin`. Rows
 /// are appended to RESULTS/liminal_approx.csv as each setting finishes, in ann.csv's columns; param is "nprobe:dial".
+/// `--approx-mode old` is the above. `new` (the default) asks knn2_fast instead, has no default setting, and walks the
+/// ladder for the dial off and for the dials fitted for k = the share's answer size over the whole corpus (the query's
+/// threshold) at each eps in `--dial-eps`, on the pseudo-queries or, with `--dial-from queries`, on the queries that
+/// are not timed (k capped at `--dial-k-max`); the first rung of each dial reaching 0.99 is timed and the fastest kept. Short of 0.99, in either
+/// mode, tight is the fastest rung with the best recall seen within the cap.
 pub fn dbknn(c: &Ctx2) {
     let ix = &c.ix;
     let order = read_npy(&arg_str("--order", ""));
@@ -1420,7 +1425,17 @@ pub fn dbknn(c: &Ctx2) {
     let reps = arg_usize("--reps", 5);
     let step = arg_usize("--step", 10);
     let k_cl = ix.k();
-    let dial99: Vec<f32> = c.dial.as_ref().expect("dbknn needs --fit-dial").for_target(0.99).to_vec();
+    let fast = match arg_str("--approx-mode", "new").as_str() {
+        "new" => true,
+        "old" => false,
+        m => panic!("--approx-mode {m}: write new or old"),
+    };
+    let dial99: Vec<f32> = if fast { Vec::new() } else { c.dial.as_ref().expect("--approx-mode old needs --fit-dial").for_target(0.99).to_vec() };
+    let eps_list: Vec<f64> = arg_str("--dial-eps", "0.001,0.01,0.03,0.1").split(',').map(|x| x.parse().unwrap()).collect();
+    let held: Vec<(usize, Vec<f32>, Vec<u32>)> = (0..qs.len()).filter(|qi| qi % step != 0).map(|qi| (usize::MAX, qs[qi].clone(), Vec::new())).collect();
+    let fq = if arg_str("--dial-from", "pseudo") == "queries" { &held[..] } else { &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))] };
+    // the new mode's dials by fitted k, fitted once and shared by every visible set
+    let mut fitted: std::collections::HashMap<usize, Vec<(String, Option<Vec<f32>>)>> = std::collections::HashMap::new();
     let pl = pool(1);
     for spec in arg_str("--sets", "all:0,1,2,3").split(';') {
         let (vname, shares) = spec.split_once(':').unwrap();
@@ -1458,7 +1473,11 @@ pub fn dbknn(c: &Ctx2) {
                     let mut got = Vec::new();
                     for _ in 0..r {
                         let t = Timer::new();
-                        let out = pl.install(|| knn2_dial(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, false, c.plan));
+                        let out = pl.install(|| if fast {
+                            knn2_fast(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, c.plan)
+                        } else {
+                            knn2_dial(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, false, c.plan)
+                        });
                         got = out.ents.iter().map(|x| x.1).collect::<Vec<u32>>();
                         ts.push(t.ms());
                     }
@@ -1483,15 +1502,34 @@ pub fn dbknn(c: &Ctx2) {
                     writeln!(f, "liminal,{setting},{vname},{si},{qi},{np}:{dname},{ms:.4},{rec:.5},{ret},{bad},{m}").unwrap();
                 }
             };
-            if !arg_str("--skip-default", "").split(',').any(|x| x == format!("{vname}:{si}")) {
+            if !fast && !arg_str("--skip-default", "").split(',').any(|x| x == format!("{vname}:{si}")) {
                 let r = eval(k_cl, Some(&dial99), reps);
                 emit("default", k_cl, "fit0.99", &r);
             }
             let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).filter(|&p| p >= arg_usize("--ladder-from", 1)).collect();
             ladder.push(k_cl);
             let mut best: Option<(f64, usize, &str, Vec<(usize, f64, f64, usize, usize, usize)>)> = None;
-            let dials: Vec<(&str, Option<&[f32]>)> = if arg_str("--tight-dials", "fit").contains("off") { vec![("off", None), ("fit0.99", Some(&dial99[..]))] } else { vec![("fit0.99", Some(&dial99[..]))] };
+            // the fit's verified threshold queries cost too much past a few thousand items, so larger k share the dial of `--dial-k-max`
+            let kf = k.min(arg_usize("--dial-k-max", usize::MAX));
+            if fast && !fitted.contains_key(&kf) {
+                let k = kf;
+                let t = Timer::new();
+                let d = Dial::fit(ix, fq, c.plan, &[], k, Some(&c.approx));
+                out!("[dial k {k}] fitted on {} queries in {:.1}s", fq.len(), t.s());
+                for &e in &eps_list {
+                    out!("[dial k {k}] eps {e}: factors by level {:?}", d.for_eps(e).iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
+                }
+                fitted.insert(k, std::iter::once(("off".to_string(), None)).chain(eps_list.iter().map(|&e| (format!("e{e}"), Some(d.for_eps(e).to_vec())))).collect());
+            }
+            let dials: Vec<(&str, Option<&[f32]>)> = if fast {
+                fitted[&kf].iter().map(|(n, d)| (n.as_str(), d.as_deref())).collect()
+            } else if arg_str("--tight-dials", "fit").contains("off") {
+                vec![("off", None), ("fit0.99", Some(&dial99[..]))]
+            } else {
+                vec![("fit0.99", Some(&dial99[..]))]
+            };
             for (dname, dial) in dials {
+                // the first rung reaching 0.99, else the fastest with the best recall seen
                 let mut within: Option<(usize, Vec<(usize, f64, f64, usize, usize, usize)>)> = None;
                 for &np in &ladder {
                     let r1 = eval_p(np, dial, 1, true);
@@ -1504,8 +1542,14 @@ pub fn dbknn(c: &Ctx2) {
                     if ms > cap {
                         break;
                     }
-                    within = Some((np, r1));
-                    if rec >= 0.99 || np == k_cl {
+                    let better = within.as_ref().map_or(true, |w| {
+                        let (wms, wrec) = summ(&w.1);
+                        rec > wrec || (rec == wrec && ms < wms)
+                    });
+                    if better {
+                        within = Some((np, r1));
+                    }
+                    if rec >= 0.99 {
                         break;
                     }
                 }
@@ -1517,9 +1561,10 @@ pub fn dbknn(c: &Ctx2) {
                         eval(np, dial, reps)
                     };
                     let (ms, rec) = summ(&r);
-                    let ms = if rec >= 0.99 { ms } else { ms + 1e12 }; // a dial reaching 0.99 wins over one that does not
-                    if best.as_ref().map_or(true, |b| ms < b.0) {
-                        best = Some((ms, np, dname, r));
+                    // a dial reaching 0.99 wins over one that does not; short of it, the best recall wins
+                    let key = if rec >= 0.99 { ms } else { 1e12 * (2.0 - rec) + ms };
+                    if best.as_ref().map_or(true, |b| key < b.0) {
+                        best = Some((key, np, dname, r));
                     }
                 }
             }
