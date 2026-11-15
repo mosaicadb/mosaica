@@ -19,9 +19,10 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "combined"))
 from core import kmeans, TREE, GTREE  # noqa: E402
 
-# Design constants (not fitted): items per cluster, the guarantee's N and epsilon, the deterministic level ends, the
-# randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25 hedge weight.
-PER_CLUSTER = 1000
+# Design constants (not fitted): the sizes items per cluster is chosen from, the guarantee's N and epsilon, the
+# deterministic level ends, the randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25
+# hedge weight.
+PER_CLUSTER = (2000, 4000, 8000)
 NTARGET, EPS = 1e9, 1e-9
 DLV = [4, 8, 12, 16, 24, 32]
 RLV_BASE = [56, 96, 160, 256]
@@ -153,6 +154,13 @@ def sigma_q(Xu, Mh, cnt, n, sample):
     return S + RIDGE * np.trace(S) / n * np.eye(n)
 
 
+def per_cluster(N):
+    """Items per cluster for N items: 2,000 x sqrt(N / 1M), rounded in log2 to PER_CLUSTER. That is 2,000 up to 2M
+    items, 4,000 up to 8M and 8,000 above."""
+    want = math.log2(2000 * math.sqrt(N / 1e6))
+    return min(PER_CLUSTER, key=lambda s: abs(math.log2(s) - want))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vectors")
@@ -162,9 +170,10 @@ def main():
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
     ap.add_argument("--rows", default="", help="a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...")
-    ap.add_argument("--per-cluster", type=int, default=PER_CLUSTER, help="items per cluster on average")
+    ap.add_argument("--per-cluster", type=int, default=0,
+                    help="items per cluster on average; 0: 2,000 up to 2M items, 4,000 up to 8M, 8,000 above")
     ap.add_argument("--groups", type=int, default=0,
-                    help="groups of clusters (at most the cluster count); 0: min(64, K / 8, N / (20 n))")
+                    help="groups of clusters (at most the cluster count); 0: min(64, K, N / (20 n))")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
@@ -182,7 +191,9 @@ def main():
     nzero = sum(int((np.abs(Xu[i:i + 100_000]).sum(1) == 0).sum()) for i in range(0, N, 100_000))
     log(f"N {N} n {n0} (padded to {n}); zero vectors {nzero}")
 
-    K = max(1, round(N / a.per_cluster))
+    pc = a.per_cluster or per_cluster(N)
+    K = max(1, round(N / pc))
+    log(f"{pc} items per cluster: {K} clusters")
     sub = Xu[rng.choice(N, min(N, 200_000), replace=False)]
     C = kmeans(sub, K, rng)
     del sub
@@ -204,8 +215,8 @@ def main():
     mn = np.linalg.norm(Mq, axis=1)
     Mh = Mq / np.where(mn > 0, mn, 1)[:, None]
 
-    # groups: enough items per group for a basis (20 n), at most 64 groups and 8 clusters per group on average
-    G = int(max(1, min(64, K // 8, N // (20 * n0)))) if a.groups <= 0 else min(a.groups, K)
+    # groups: enough items per group for a basis (20 n), at most 64
+    G = int(max(1, min(64, K, N // (20 * n0)))) if a.groups <= 0 else min(a.groups, K)
     grp = (Mh @ kmeans(Mh.astype(np.float32).copy(), G, rng, 20).T).argmax(1)
     gk = np.unique(grp)
     gmap = -np.ones(G, np.int64)

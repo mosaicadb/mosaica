@@ -59,6 +59,8 @@ It rests on two well-measured N (R1M and R3M), with every size timed at both. If
 
 At 3M the same constant costs 16–51% on exact k-NN against 4,000 (measured), so a constant does not serve both.
 
+**Adopted** as `fit.py`'s default on `research/levels-clusters`: 2,000 items per cluster up to 2M items, 4,000 up to 8M, 8,000 above, with up to 64 groups (no longer limited to K / 8). The default fit at 1M reproduces the swept 2,000 fit exactly. At 50k it makes 25 clusters in 3 groups and passes the 50k check (verify and the float64 oracle, 0 wrong). Above 3M the rule is an extrapolation.
+
 **The sub-clustered approximate mode.** With sub-clusters of about 62 items, items scanned are close to independent of the parent size (measured). So coarser parents do not harm that mode if it uses fixed-size sub-clusters.
 
 ## Why the 5M point was replaced
