@@ -76,7 +76,7 @@ names the branch or report that holds its evidence.
 - [x] **The column-layout code is deleted** (rust/REPORT3.md on research/colorder keeps the record). Still to do:
   delete the side branches and worktrees.
 
-- **`dot_f16_x4` drops dimensions past the last multiple of 16** (kernel.rs:599, :671), and no error bound covers them:
+- **`dot_f16_x4` dropped dimensions past the last multiple of 16**, and no error bound covered them:
   a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Fixed on research/scan-planner
   (b79dbc8d5) and merged; `dot_i8` still has no tail (harmless while n % 32 == 0).
 
@@ -89,6 +89,19 @@ names the branch or report that holds its evidence.
   the approximate mode's order and return every visible item in them scoring at least t, decided exactly, so the answer
   holds no false positives and misses only items in clusters not probed. There is no entry point for it yet; dbknn
   measures the approximate mode as top-m instead.
+- **The caller asks for a recall target, not for `nprobe` and a dial** (ruled). Today the approximate mode takes two
+  internal knobs, the clusters probed and the dial (per-level factors on the upper half-widths, fitted for a miss rate
+  eps), and only the benchmarks' ladder turns a recall target into them. Design, with step 6's API:
+  `knn(q, k, Path::Approx { recall })` and `threshold(q, t, Path::Approx { recall })`. At open, or at the first
+  approximate query, the index fits a table from (k band, recall target) to the cheapest (nprobe, eps) on
+  pseudo-queries (the ladder's search, at k = 1, 10, 100 and 1,000, interpolated); a query looks its setting up and
+  reports the setting it ran. Benchmarks keep explicit nprobe and eps in the binary; the library offers only the
+  target. Present it as what it is: an expected recall on corpus-like queries, not a guarantee (`tol` is the
+  guarantee), and an approximate answer never holds a wrong item, because the dial cuts only upper bounds.
+- **The dial on the integer levels.** At levels 0-5 the integer path scales only the code term of the upper half-width
+  (the table error is unscaled and the fixed term takes the largest factor), while the float path scales all of it and
+  `Dial::fit` assumes that. Every measured approximate row ran with `--int`, so the reports already reflect it. Decide
+  by recall per unit of time, as an internal choice under the recall target above.
 
 - **The three steps in reports/annideas/NEXT.md:** cheaper group setup, sub-clusters (row order ruled: rows stay sorted
   by key and the approximate mode gathers each sub-cluster's rows; reports/annideas/REPORT.md), and a fused fast-scan
@@ -97,6 +110,22 @@ names the branch or report that holds its evidence.
   three times once answers pass about 10% of the visible set; the planner should switch.
 - **Fit the dial above k = 1,000.** Larger answers currently reuse the k = 1,000 dial.
 - **Low finding from the merge review:** ties between equal scores can differ from the exact path's order.
+
+## Costs the planner gets wrong (the planner chooses; answers do not change)
+
+From the second review (review/REVIEW_2026-11-15_merges.md):
+- **Calibration matches threshold queries but not exact k-NN.** `Plan::calibrate` times the integer path, but `knn2`
+  runs the interval path (`want_iv: true`), so k-NN's index path is underpriced. Fit a second factor for the interval
+  path, with the `Plan` split of step 6.
+- **The index path's survivor reads are never priced on file** (no disk term in `index_us`), while the full-vector
+  path's are, so the index path looks cheaper than it is at large answers under a cap.
+- Reads priced as sequential where execution faults pages: direct scoring, filtered scans, `knn2`'s scan; codes-only
+  compaction's faults are not priced; pricing ignores what is cached; `answer_share`'s 256-row sample is not priced;
+  `scan_band` is timed with the constants from before calibration; `--plan-default` and the scale run price the
+  integer path with float-path constants. Plan files fitted before 0f93ea3 should be refitted.
+- **A capped rerun is not REPORT_CAPPED's run:** reads through io_uring are priced, the per-cluster planner runs with
+  constants missing from results/ours/plan.txt (they fall back to `Plan::default()`), and every session's compacted
+  copies are built before the cap. Refit the plan file before comparing.
 
 ## Code review
 

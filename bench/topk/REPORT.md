@@ -22,8 +22,8 @@
   nprobe doubling from 1 to all 1,000 clusters, for each of five dials (off, and the dials fitted for this k at miss
   rates 0.001, 0.01, 0.03 and 0.1 per level). The fastest first rung reaching a target is kept; the param column is
   `nprobe:dial`. The dials are fitted on the 135 queries that are not timed. **LIMINAL approximate, before** is
-  `knn2_dial`, the mode `dbknn` uses in the threshold-db work, with the dial off and fitted for 0.99; its rows are the
-  ones committed with this report.
+  `knn2_dial`, the mode `dbknn` then used in the threshold-db work, with the dial off and fitted for 0.99; its rows are
+  the ones committed with this report. That mode is retired; reproducing its rows needs a binary from before 9657681.
 - **Libraries.** rabitqlib 0.2.0 (IVF4096, 7 bits, `high_accuracy`), faiss 1.16.0 `IndexHNSWSQ` QT_fp16 (M 16,
   efConstruction 200) and `IndexIVFScalarQuantizer` IVF4096 QT_fp16, as top-k `search`. These reuse the indexes in
   `vexact-benchup-data/ann`. **hnswlib, faiss HNSW f32 and faiss IVF4096 f32 are missing** because their index files
@@ -191,14 +191,14 @@ waited for the cores to be idle before starting, but not during it.
 ```bash
 P=<venv as in ../threshold-db/REPORT.md>; D=/home/joe/code/vexact-data/bioclip2-1m; I=/home/joe/code/vexact-benchup-data/index_r4
 A=/home/joe/code/vexact-benchup-data/ann; V="vexact --v2 --int --gtab --flags repack --index $I --queries $D/prep/queries.npy"
-# exact and the old approximate mode (the committed rows)
+# exact and the old approximate mode (the committed rows; the old mode needs a binary from before 9657681)
 taskset -c 4-5 $V --results results --core 4 --pin 4 --fit-dial dbtopk --order $D/prep/order.npy --ks 1,10,100,1000 \
   --targets 0.8,0.99 --step 10 --reps 5 --approx-mode old
 # the best-first mode, unfiltered and at 1% visible (one run per k list, each under ten minutes)
 taskset -c 4-7 $V --results R --plan-file results/plan.txt --core 4 --pin 4 --pseudo 300 dbtopk --order $D/prep/order.npy \
   --ks 1,10 --targets 0.8,0.99 --step 10 --reps 5 --no-exact --dial-from queries --dial-eps 0.001,0.01,0.03,0.1 \
   [--vis-sets $D/prep/vis_1.npy]
-# old-mode counts at the committed settings: ... --approx-mode old --fit-dial --no-exact --params results/liminal_topk.csv
+# old-mode counts at the committed settings (a binary from before 9657681): ... --approx-mode old --fit-dial --no-exact --params results/liminal_topk.csv
 taskset -c 6 $P -I ann_topk.py rabitq|hnsw_sq16|ivf_sq16 $D/prep $A results/ann_METHOD.csv
 $P -I plot.py results
 ```

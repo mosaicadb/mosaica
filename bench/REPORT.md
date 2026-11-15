@@ -145,4 +145,5 @@ Stage 1's filtered hnswlib figures (17 and 3 QPS at 1% and 0.1% on glove) timed 
   them, every query met hubs at distance 1 and recall was 0.02. hnswlib and IVF-PQ keep them.
 - Baseline builds are those of stage 1 (8 threads); only the queries were re-run.
 - Opening our index on one CPU (as `remeasure.sh` does) takes 1-3 minutes: encoding, the planner calibration, the
-  pseudo-query fit of f, and with `--soar` / `--fit-dial` the second assignment and the dial fit.
+  pseudo-query fit of f, and with `--dial` settings the dial fit for the run's k. (`--soar` and `--fit-dial`, the old
+  mode's second assignment and dial, are retired; their rows need a binary from before 9657681.)

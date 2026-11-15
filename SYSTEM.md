@@ -346,7 +346,7 @@ of the visible rows (`pscan`) is built and off by default.
 cores and leaves the process at 6.2 GiB. Not built: writing the encoded index to disk and opening it from there.
 
 **One unexplained crash.** One run segfaulted in the timing loop for OOD queries with a fifth randomised level at 384 B
-and the `bail` option, both off by default. Seven reruns of that configuration, three with guard pages and bounds
+and the `bail` option (since deleted with the other rejected switches). Seven reruns of that configuration, three with guard pages and bounds
 assertions, and an AddressSanitizer build at 50k and 1M were clean. The cause is unknown and may be hardware.
 
 **Not measured.** This version has not been measured on real data above 1M rows (a synthetic 10M run stopped during its
@@ -355,8 +355,10 @@ progress), or behind a cache. The time gain of the constants work is unresolved,
 ±5% noise of runs on a shared machine. There is no write path: inserts, deletes and suppressions are designed in
 `DESIGN.md` section 4 and not built.
 
-**Built and off.** Several paths are built and off by default, among them the norm sort of `DESIGN.md` section 9 and the
-columnar store, which `rust/REPORT3.md` (branch `research/colorder`) rejected at 1–27% more bytes and 10–25% more time.
+**Built and off.** Several paths are built and off by default, among them the norm sort of `DESIGN.md` section 9. The
+columnar store, which `rust/REPORT3.md` (branch `research/colorder`) rejected at 1–27% more bytes and 10–25% more time,
+is deleted. The integer deterministic levels, tables combined from the group's and the centre's, and the per-level
+repack thresholds are on by default (`--flags noint,nogtab,norepack` turns them off).
 The tolerance is the one option that moves cost much: d = 0.01 halves the bytes and saves 17–19% of the time at 50%
 answers, while small answers barely move, because their cost lies in items far below the threshold.
 

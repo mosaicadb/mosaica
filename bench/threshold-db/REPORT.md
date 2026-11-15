@@ -585,7 +585,7 @@ RAYON_NUM_THREADS=2 taskset -c 10,11 vexact --v2 --int --gtab --flags repack --i
   --results results/approx --plan-file results/ours/plan.txt --core 10 --pin 10 --pseudo 300 dbknn --order $D/prep/order.npy \
   --vis $D/prep/vis_1.npy --sets "all:0,1;vis_1:0,1,2" --step 10 --reps 5 --dial-from queries \
   --dial-eps 0.001,0.01,0.03,0.1 --dial-k-max 1000 [--ladder-from 64|256]     # LIMINAL approximate (15 Nov); one run per set of points
-# the old mode: ... --fit-dial dbknn --approx-mode old ... --sets "all:0,1,2;vis_1:0,...,6" [--ladder-from 32] [--skip-default all:2]
+# the old mode (a binary from before 9657681): ... --fit-dial dbknn --approx-mode old ... --sets "all:0,1,2;vis_1:0,...,6" [--ladder-from 32] [--skip-default all:2]
 python3 -I summarise.py results/summary.md results/ours/dbcmp_r4_1t.csv results/ours/dbcmp_r4_4t.csv results/clickhouse.csv
 python3 -I plot.py results $D/prep
 ```

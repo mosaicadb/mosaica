@@ -52,6 +52,10 @@ $B --scale 10 --nq 20                             # 10M synthetic items in the i
 $B --clusters 40 verify                           # quick development check
 ```
 
+The defaults are the measured configuration: integer deterministic levels, tables combined from the group's and the
+centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;
+`--flags noint,nogtab,norepack` gives the float path). The binary refuses an argument it does not know.
+
 `--plan auto|index|flat` sets the planner, for threshold queries and exact k-NN alike. Its cost model (`Plan`,
 `src/v2/q.rs`) is re-timed when the index opens, on one thread, from 16 stored rows used as queries (`Plan::calibrate`,
 about 1 s; `--calib N` rows, `--plan-default` keeps the BioCLIP constants of `Plan::default`). k-NN goes straight to a
