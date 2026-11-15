@@ -145,7 +145,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     out!("==== run at {:.0}: {:?}", now_s(), args());
     let kk = arg_usize("--clusters", 100000);
     let prof_path = if dir == data_dir() { arg_str("--profile", &format!("{dir}/profile.npy")) } else { format!("{dir}/profile.npy") };
-    let split = !args().iter().any(|a| a == "--u8");
     let t = Timer::new();
     let mut p = load_params(dir);
     // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
@@ -193,7 +192,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let full = Full2::Real { map: std::sync::Arc::new(f2.map), off: f2.off, rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
-    let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
+    let mut ix = build2(&p, &prof, &src, full, nusort, &mut lg);
     let tr = Timer::new();
     ix.repack = calibrate_repack(&ix);
     out!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), tr.s());
@@ -270,7 +269,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         out!("[mem] {}", c.mem_report());
     }
     out!("[fit] {}", c.p.fit);
-    out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
+    out!("built v2 (index format {}, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c
 }
@@ -576,7 +575,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
             lines.push(line);
         }
     }
-    let tag = format!("{}{}{}", if ix.split { "" } else { "_u8" }, if sweep { "_sweep" } else { "" }, if c.plan.int_det { "_int" } else { "" });
+    let tag = format!("{}{}", if sweep { "_sweep" } else { "" }, if c.plan.int_det { "_int" } else { "" });
     std::fs::write(format!("{}/levels2{tag}.csv", crate::run2::res_dir()), lines.join("\n") + "\n").unwrap();
 }
 
@@ -671,7 +670,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
                 let gp = &ix.groups[ix.cl[ci].g];
                 for l in 0..ix.meta.nl() {
                     let mut lut = crate::v2::kern::LevelLut::default();
-                    unsafe { crate::v2::kern::build_lut(&cq.w, &gp.levels[l], &ix.etab, ix.split, None, &mut lut) };
+                    unsafe { crate::v2::kern::build_lut(&cq.w, &gp.levels[l], &ix.etab, None, &mut lut) };
                     cq.luts[l] = Some(lut);
                 }
             }
@@ -683,7 +682,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             let mut nu = 0;
             for _ in 0..200 {
                 for l in 0..ix.meta.nl() {
-                    unsafe { crate::v2::kern::build_lut(&cqs[0].w, &gp.levels[l], &ix.etab, ix.split, None, &mut lut) };
+                    unsafe { crate::v2::kern::build_lut(&cqs[0].w, &gp.levels[l], &ix.etab, None, &mut lut) };
                     nu += gp.levels[l].units;
                 }
             }

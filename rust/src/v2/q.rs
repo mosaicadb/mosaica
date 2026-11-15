@@ -1176,7 +1176,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let gt = gq.gtab[l].get_or_init(|| group_tab(&gq.wq, lp, &ix.etab));
                     combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
                 } else {
-                    build_lut(&cq.w, lp, &ix.etab, ix.split, step, &mut lut);
+                    build_lut(&cq.w, lp, &ix.etab, step, &mut lut);
                 }
                 cq.luts[l] = Some(lut);
             }
@@ -1358,12 +1358,10 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             // part values
             let mut pv: [[__m512; 2]; J + 1] = [[_mm512_setzero_ps(); 2]; J + 1];
             for pl in &lut.parts {
-                let (mut s0, mut s1) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
-                if ix.split {
-                    let (l0, l1) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
-                    s0 = _mm512_fmadd_ps(s0, _mm512_set1_ps(256.0), l0);
-                    s1 = _mm512_fmadd_ps(s1, _mm512_set1_ps(256.0), l1);
-                }
+                let (h0, h1) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
+                let (l0, l1) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
+                let s0 = _mm512_fmadd_ps(h0, _mm512_set1_ps(256.0), l0);
+                let s1 = _mm512_fmadd_ps(h1, _mm512_set1_ps(256.0), l1);
                 let k = match pl.j {
                     None => 0,
                     Some(j) => 1 + j,

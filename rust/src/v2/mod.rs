@@ -896,7 +896,6 @@ pub struct Index2 {
     pub x2: f64,
     pub full: Full2,
     pub nrows: usize,
-    pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
     pub ctab: Arc<Vec<Vec<kern::CTab>>>, // per cluster, per level: the centre's tables (query-independent)
     pub repack: Vec<f32>,
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
@@ -1062,7 +1061,6 @@ impl Index2 {
             x2: self.x2,
             full,
             nrows: rows.len(),
-            split: self.split,
             ctab: self.ctab.clone(),
             repack: self.repack.clone(),
             vrow,
@@ -1466,7 +1464,7 @@ pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
 
 /// Build the fast-scan index. `prof` is the G x n profile.
 /// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: usize, split: bool, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: bool, log: &mut dyn FnMut(String)) -> Index2 {
     let t = Timer::new();
     let n = p.meta.n;
     let k = p.meta.k;
@@ -1708,7 +1706,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         x2,
         full,
         nrows,
-        split,
     };
     let mut ek = [0usize; 4];
     for (key, _) in ix.esc.iter() {

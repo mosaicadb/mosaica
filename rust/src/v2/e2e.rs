@@ -23,7 +23,7 @@ fn fixture() -> &'static Fixture {
         let src = Real2 { src: crate::index::RealSource::open(&p.xs_path) };
         let f = crate::index::RealSource::open(&p.xs_path);
         let full = Full2::Real { map: Arc::new(f.map), off: f.off, rows: Default::default() };
-        let mut ix = build2(&p, &prof, &src, full, p.meta.k, true, false, &mut |_| {});
+        let mut ix = build2(&p, &prof, &src, full, false, &mut |_| {});
         ix.repack = calibrate_repack(&ix);
         build_table2(&mut ix, p.meta.k);
         let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10));

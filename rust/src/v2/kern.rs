@@ -23,24 +23,21 @@ pub struct PartLut {
 pub struct LevelLut {
     pub parts: Vec<PartLut>,
     pub hi: Vec<u8>, // per group 64 bytes: lane j = unit 4g + j, 16 entries
-    pub lo: Vec<u8>, // low bytes of 16-bit tables (split)
+    pub lo: Vec<u8>, // low bytes of the 16-bit tables
     pub qsum: f64,   // with a common step: a bound on the sum over units of the largest entry
 }
 
 /// Build the level's tables from the cluster's combined weights w (det by coordinate, rand by n + position).
 #[target_feature(enable = "avx2,fma")]
-/// With `step`, every part uses that table step (the integer deterministic levels, split only).
-pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, step: Option<f32>, out: &mut LevelLut) {
-    assert!(step.is_none() || split, "the integer levels need 16-bit tables");
-    let qmax: f32 = if split { 65535.0 } else { 255.0 };
+/// With `step`, every part uses that table step (the integer deterministic levels).
+pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, step: Option<f32>, out: &mut LevelLut) {
+    let qmax: f32 = 65535.0;
     out.qsum = 0.0;
     out.parts.clear();
     out.hi.clear();
     out.lo.clear();
     out.hi.resize(lp.units * 16, 0);
-    if split {
-        out.lo.resize(lp.units * 16, 0);
-    }
+    out.lo.resize(lp.units * 16, 0);
     let mut g0 = 0;
     let mut tabs: Vec<__m512> = Vec::new();
     for part in &lp.parts {
@@ -85,12 +82,8 @@ pub unsafe fn build_lut(w: &[f32], lp: &LevelPlan, et: &ExpTab, split: bool, ste
         for (u, t) in tabs.iter().enumerate() {
             let q = _mm512_min_epi32(_mm512_max_epi32(_mm512_cvtps_epi32(_mm512_mul_ps(*t, inv)), _mm512_setzero_si512()), _mm512_set1_epi32(qmax as i32));
             let gl = (g0 + u / 4) * 64 + (u % 4) * 16;
-            if split {
-                _mm_storeu_si128(out.hi.as_mut_ptr().add(gl) as *mut _, _mm512_cvtepi32_epi8(_mm512_srli_epi32(q, 8)));
-                _mm_storeu_si128(out.lo.as_mut_ptr().add(gl) as *mut _, _mm512_cvtepi32_epi8(_mm512_and_si512(q, _mm512_set1_epi32(255))));
-            } else {
-                _mm_storeu_si128(out.hi.as_mut_ptr().add(gl) as *mut _, _mm512_cvtepi32_epi8(q));
-            }
+            _mm_storeu_si128(out.hi.as_mut_ptr().add(gl) as *mut _, _mm512_cvtepi32_epi8(_mm512_srli_epi32(q, 8)));
+            _mm_storeu_si128(out.lo.as_mut_ptr().add(gl) as *mut _, _mm512_cvtepi32_epi8(_mm512_and_si512(q, _mm512_set1_epi32(255))));
         }
         // rounding to the grid (half a step per unit), the f32 error of weights, products, sums, the shift by the
         // minimum and the product with 1/scale (all relative to sum |w| max|exp| per unit), and of off + scale * S
@@ -732,7 +725,7 @@ pub unsafe fn group_tab(w: &[f32], lp: &LevelPlan, et: &ExpTab) -> GTab {
 /// The centre's tables of one (cluster, level) from its weights wm, as build_lut quantises them (16-bit).
 pub fn centre_tab(wm: &[f32], lp: &LevelPlan, et: &ExpTab) -> CTab {
     let mut lut = LevelLut::default();
-    unsafe { build_lut(wm, lp, et, true, None, &mut lut) };
+    unsafe { build_lut(wm, lp, et, None, &mut lut) };
     let mut c = CTab::default();
     for pl in &lut.parts {
         c.step.push(pl.scale);

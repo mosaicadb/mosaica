@@ -227,12 +227,11 @@ pub fn run2(scale: usize, nq: usize) {
     let n = p.meta.n;
     let k = p.meta.k;
     let prof = crate::derive::load_profile(&format!("{}/profile.npy", crate::run2::data_dir()));
-    let split = !std::env::args().any(|a| a == "--u8");
     // a real build supplies the int8 bases, residual norms and centres
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
         let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: std::sync::Arc::new(f.map), off: f.off, rows: Default::default() }, 1, split, false, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { map: std::sync::Arc::new(f.map), off: f.off, rows: Default::default() }, false, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];
@@ -292,7 +291,7 @@ pub fn run2(scale: usize, nq: usize) {
     let sy_full = mk();
     drop(mk);
     drop(real);
-    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), 1, split, false, &mut |s| log(format!("[synth2] {s}")));
+    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), false, &mut |s| log(format!("[synth2] {s}")));
     // support table for synthetic items: p.x = p.m + (V_q^T p).z
     let nanch = 1000.min(k);
     let mut anchors = vec![0f64; nanch * n];
