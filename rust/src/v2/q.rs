@@ -2009,7 +2009,7 @@ impl Plan {
                         *sc.select_nth_unstable_by(m, |a, b| b.partial_cmp(a).unwrap()).1 as f64
                     };
                     for (t, mode) in [(t10, PlanMode::Flat), (t10, PlanMode::Index), (t30, PlanMode::Index)] {
-                        let o = Opts2 { vis, verify: false, want_iv: true, plan: Plan { mode, ..base } };
+                        let o = Opts2 { vis, verify: false, want_iv: false, plan: Plan { mode, ..base } };
                         let tm = Timer::new();
                         let Planned::Run { pre, use_idx, cut_cyc } = plan2(ix, &pr, t, &o) else { unreachable!() };
                         let tc = tm.ms() * 1e3;
