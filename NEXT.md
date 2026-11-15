@@ -56,8 +56,8 @@ names the branch or report that holds its evidence.
   page cache, so a warm repeat at 1% answers costs 65 ms against 48–50 through the mapping. RWF_DONTCACHE was tried and
   lost (REPORT_DISK.md on research/disk-reads).
 - **Bring DESIGN.md up to date with the code** (anchors, constants, level schedule); SYSTEM.md is current.
-- **Delete the column-layout code** (rust/src/v2/col.rs and its hooks; off by default and slower, rust/REPORT3.md on
-  research/colorder keeps the record), then delete the side branches and worktrees.
+- [x] **The column-layout code is deleted** (rust/REPORT3.md on research/colorder keeps the record). Still to do:
+  delete the side branches and worktrees.
 
 - **`dot_f16_x4` drops dimensions past the last multiple of 16** (kernel.rs:599, :671), and no error bound covers them:
   a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Fixed on research/scan-planner
@@ -96,9 +96,11 @@ keep or drop the norm sort. The order the reviews suggest, each step keeping dbc
    cut, so a cost set that makes the planner mix every path (direct scoring included) is tested too. Planted bugs it
    catches: the planner skipping clusters not certainly in, visible counts one short, the exact fallback dropped. Still
    to do on the owner's machine: a 50k run comparing dbcmp answer dumps (`--dump`) before and after each step.
-2. Delete the first-generation index (index.rs, query.rs, most of kernel.rs; it needs AVX-512 to run at all), moving
-   the items v2 borrows, the column layout, `plan2_prev`, and the switches the reports rejected (`jump`, `alpha0`,
-   `--u8`, `bail`, `rdec`, `Mode2::Sweep`).
+2. [x] Deleted: the first-generation index (index.rs, query.rs and kernel.rs keep only what the current index uses),
+   the column layout, `plan2_prev`, the switches the reports rejected (`jump`, `alpha0`, `--u8`, `bail`, `rdec`) and the
+   dead items; 16.4k lines to 11k. `Mode2::Sweep` and the dump stay (study tools). Runs that used the removed flags
+   cannot be repeated as written: results/planner/run.sh's `index:prev` and breakdown2 `--variants`. Still owed on the
+   owner's machine: the 50k check and dbcmp answer dumps compared with those from before the deletions.
 3. Split library and binary; options instead of globals and environment variables; an `open` that returns a queryable
    index (today only `run2::setup2_at` does).
 4. Split `Plan` into a cost model, tuning whose defaults are the measured system (`--int --gtab --flags repack`), and
