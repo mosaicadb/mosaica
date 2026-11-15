@@ -1,4 +1,5 @@
 mod ann;
+mod bucket;
 mod derive;
 mod fit;
 mod index;
@@ -743,6 +744,14 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|s| s.as_str()) == Some("fit") {
         fit::main(&args);
+        return;
+    }
+    if args.get(1).map(|s| s.as_str()) == Some("build") {
+        let Some(dir) = args.get(2) else {
+            eprintln!("usage: vexact build FITDIR");
+            std::process::exit(2);
+        };
+        run2::build_cmd(dir);
         return;
     }
     let get = |k: &str, d: usize| -> usize { args.iter().position(|a| a == k).map(|i| args[i + 1].parse().unwrap()).unwrap_or(d) };

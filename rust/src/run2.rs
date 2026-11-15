@@ -102,6 +102,53 @@ pub fn setup2(tag: &str) -> Ctx2 {
     setup2_at(tag, &data_dir(), &arg_str("--flags", ""))
 }
 
+/// The encoded index of the fit in `dir`: opened from `dir/encoded-KEY` when it is there with this key, else built into
+/// a scratch directory, sealed with its key and moved into place (`--rebuild` builds it again; `--in-memory`, or the
+/// columnar store, builds it on the heap and saves nothing).
+pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: bool, build_col: bool, lg: &mut dyn FnMut(String)) -> Index2 {
+    let key = crate::v2::store::build_key(p, prof, &format!("nusort {nusort}"));
+    let edir = format!("{dir}/encoded-{key}");
+    let in_memory = build_col || args().iter().any(|a| a == "--in-memory");
+    let saved = !in_memory && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
+    if saved {
+        crate::v2::store::open(p, prof, &edir, split, lg)
+    } else {
+        // built into a scratch directory, sealed with its key, then moved into place
+        let tmp = format!("{edir}.tmp");
+        let out = (!in_memory).then_some(tmp.as_str());
+        if let Some(d) = out {
+            let _ = std::fs::remove_dir_all(d);
+            std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("cannot create {d}: {e}"));
+        }
+        let full = Full2::Real { rows: Default::default() };
+        // the fit's rows: its Xs.npy (tools/fit.py), else its partition
+        let mut ix = if p.xs_path.is_empty() {
+            build2(p, prof, &Real2 { src: crate::bucket::Buckets::open(&p.partition, dir) }, full, split, nusort, out, lg)
+        } else {
+            build2(p, prof, &Real2 { src: RealSource::open(&p.xs_path) }, full, split, nusort, out, lg)
+        };
+        if !nusort {
+            build_table2(&mut ix, p.meta.k);
+        }
+        if let Some(d) = out {
+            crate::v2::store::seal(&ix, d, &key);
+            let _ = std::fs::remove_dir_all(&edir);
+            std::fs::rename(d, &edir).unwrap_or_else(|e| panic!("cannot move {d} to {edir}: {e}"));
+            out!("[build2] saved to {edir}");
+        }
+        ix
+    }
+}
+
+/// `vexact build FITDIR`: build and save the fit's index, and nothing else.
+pub fn build_cmd(dir: &str) {
+    let t = Timer::new();
+    let p = load_params(dir);
+    let prof = crate::derive::load_profile(&format!("{dir}/profile.npy"));
+    let ix = open_or_build(dir, &p, &prof, true, false, false, &mut |s| out!("[build2] {s}"));
+    out!("{} rows, {} clusters in {:.1}s", ix.nrows, ix.k(), t.s());
+}
+
 /// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...).
 pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
     for f in flags.split(',').map(|f| f.trim()).filter(|f| !f.is_empty()) {
@@ -210,43 +257,11 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
         BUILD_COL.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    // the encoded index is saved beside the fit, keyed by everything that changes it, and opened in place of a build
-    // (--rebuild builds it again; --in-memory, or the columnar store, builds it on the heap and saves nothing)
     let build_col = BUILD_COL.load(std::sync::atomic::Ordering::Relaxed);
     if args().iter().any(|a| a == "--resident") {
         crate::v2::store::RESIDENT.store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    let key = crate::v2::store::build_key(&p, &prof, &format!("nusort {nusort}"));
-    let edir = format!("{dir}/encoded-{key}");
-    let in_memory = build_col || args().iter().any(|a| a == "--in-memory");
-    let saved = !in_memory && !args().iter().any(|a| a == "--rebuild") && crate::v2::store::saved_key(&edir).as_deref() == Some(key.as_str());
-    let mut ix = if saved {
-        crate::v2::store::open(&p, &prof, &edir, split, &mut lg)
-    } else {
-        // built into a scratch directory, sealed with its key, then moved into place
-        let tmp = format!("{edir}.tmp");
-        let out = (!in_memory).then_some(tmp.as_str());
-        if let Some(d) = out {
-            let _ = std::fs::remove_dir_all(d);
-            std::fs::create_dir_all(d).unwrap_or_else(|e| panic!("cannot create {d}: {e}"));
-        }
-        let full = Full2::Real { rows: Default::default() };
-        let mut ix = if p.xs_path.is_empty() {
-            panic!("{dir} has no Xs.npy; build its index with `vexact build {dir}`")
-        } else {
-            build2(&p, &prof, &Real2 { src: RealSource::open(&p.xs_path) }, full, split, nusort, out, &mut lg)
-        };
-        if !nusort {
-            build_table2(&mut ix, p.meta.k);
-        }
-        if let Some(d) = out {
-            crate::v2::store::seal(&ix, d, &key);
-            let _ = std::fs::remove_dir_all(&edir);
-            std::fs::rename(d, &edir).unwrap_or_else(|e| panic!("cannot move {d} to {edir}: {e}"));
-            out!("[build2] saved to {edir}");
-        }
-        ix
-    };
+    let mut ix = open_or_build(dir, &p, &prof, split, nusort, build_col, &mut lg);
     if args().iter().any(|a| a == "--hash") {
         out!("[build2] code hash {:016x}", ix.code_hash());
     }

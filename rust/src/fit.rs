@@ -1,9 +1,9 @@
-//! The fit: from a file of vectors and a clustering of it (`tools/cluster.py`), the parameters the build reads,
-//! written as the directory `tools/fit.py` writes. Every pass over the vectors goes cluster by cluster or in chunks;
-//! nothing holds the corpus as one array.
+//! The fit: from a partition of the vectors (`tools/partition.py`), the parameters the build reads, written as the
+//! directory `tools/fit.py` writes, without its copy of the vectors: the build reads them from the partition in the
+//! fit's row order (`ord{c}.u32`, `cellstart.npy`). Every pass goes cell by cell or cluster by cluster; nothing holds
+//! the vectors in memory.
 //!
-//! usage: vexact fit VECTORS.npy OUTDIR --clustering DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S]
-//!        [--cert-time SECONDS]
+//! usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]
 
 use crate::util::*;
 use faer::linalg::solvers::DenseSolveCore;
@@ -25,51 +25,6 @@ const BLOCK_FRACS: [f64; 3] = [0.125, 0.29167, 0.625];
 const HEDGE: f64 = 0.25;
 const FORMAT: u64 = 2;
 const RIDGE: f64 = 0.1;
-
-/// Vectors in an .npy file of f16, f32 or f64, read a row at a time as unit vectors padded with zeros to `n`.
-struct Vecs {
-    map: memmap2::Mmap,
-    off: usize,
-    rows: usize,
-    n0: usize,
-    n: usize,
-    width: usize,
-}
-
-impl Vecs {
-    fn open(path: &str) -> Vecs {
-        let f = std::fs::File::open(path).unwrap_or_else(|e| panic!("cannot open {path}: {e}"));
-        let map = unsafe { memmap2::Mmap::map(&f).unwrap() };
-        let (hdr, off) = npy_header(&map);
-        let width = match field(&hdr, "descr").as_str() {
-            "<f2" => 2,
-            "<f4" => 4,
-            "<f8" => 8,
-            d => panic!("{path} holds {d}; write the vectors as little-endian float16, float32 or float64"),
-        };
-        assert!(hdr.contains("'fortran_order': False"), "{path} is in Fortran order; save it in C order (np.ascontiguousarray)");
-        let sh = npy_shape(&hdr);
-        assert!(sh.len() == 2, "{path} has shape {sh:?}; give an N x n matrix");
-        Vecs { map, off, rows: sh[0], n0: sh[1], n: sh[1].div_ceil(32) * 32, width }
-    }
-    /// Row r as a unit vector (zero stays zero), in f32 as tools/fit.py normalises, padded to n.
-    fn unit(&self, r: usize, out: &mut [f32]) {
-        let b = &self.map[self.off + r * self.n0 * self.width..self.off + (r + 1) * self.n0 * self.width];
-        for (k, o) in out[..self.n0].iter_mut().enumerate() {
-            let c = &b[k * self.width..(k + 1) * self.width];
-            *o = match self.width {
-                2 => f16_to_f32(u16::from_le_bytes([c[0], c[1]])),
-                4 => f32::from_le_bytes(c.try_into().unwrap()),
-                _ => f64::from_le_bytes(c.try_into().unwrap()) as f32,
-            };
-        }
-        out[self.n0..].iter_mut().for_each(|x| *x = 0.0);
-        let nr = out.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt() as f32;
-        if nr > 0.0 {
-            out.iter_mut().for_each(|x| *x /= nr);
-        }
-    }
-}
 
 fn arg(args: &[String], key: &str) -> Option<String> {
     args.iter().position(|a| a == key).map(|i| args.get(i + 1).unwrap_or_else(|| panic!("{key} needs a value")).clone())
@@ -248,15 +203,12 @@ fn log(t: &Timer, s: String) {
 pub fn main(args: &[String]) {
     let t = Timer::new();
     let pos: Vec<&String> = args.iter().skip(2).take_while(|a| !a.starts_with("--")).collect();
-    if pos.len() != 2 {
-        eprintln!("usage: vexact fit VECTORS.npy OUTDIR --clustering DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]");
+    let pdir = arg(args, "--partition");
+    let (Some(out), Some(pdir), 1) = (pos.first(), pdir, pos.len()) else {
+        eprintln!("usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]; DIR is the output of: python3 -I tools/partition.py VECTORS.npy DIR");
         std::process::exit(2);
-    }
-    let (vpath, out) = (pos[0].as_str(), pos[1].as_str());
-    let cdir = arg(args, "--clustering").unwrap_or_else(|| {
-        eprintln!("give --clustering DIR, the output of: python3 -I tools/cluster.py {vpath} DIR");
-        std::process::exit(2);
-    });
+    };
+    let out = out.as_str();
     let basis = arg(args, "--basis").unwrap_or("pca".into());
     assert!(basis == "pca" || basis == "dual", "--basis is pca or dual, not {basis}");
     let sample = arg(args, "--query-sample");
@@ -269,56 +221,72 @@ pub fn main(args: &[String]) {
     std::fs::create_dir_all(out).unwrap_or_else(|e| panic!("cannot create {out}: {e}"));
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
-    let x = Vecs::open(vpath);
-    let (nrow, n0, n) = (x.rows, x.n0, x.n);
+    let part = crate::bucket::Partition::open(&pdir);
+    let (nrow, n0, n) = (part.rows, part.n_orig, part.n);
     if n0 < 50 {
-        eprintln!("{vpath} has {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more.");
+        eprintln!("the vectors have {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more.");
         std::process::exit(2);
     }
-    let araw = read_npy(&format!("{cdir}/assign.npy"));
-    let assign: Vec<usize> = if araw.data.len() == nrow * 4 { araw.u32s() } else if araw.data.len() == nrow * 8 { araw.i64s().iter().map(|&a| a as u32).collect() } else {
-        panic!("{cdir}/assign.npy does not hold one uint32 or int64 per row of {vpath} ({nrow} rows); rerun tools/cluster.py on these vectors")
-    }.into_iter().map(|a| a as usize).collect();
-    log(&t, format!("N {nrow} n {n0} (padded to {n}); clustering from {cdir}"));
+    let ncell = part.cells.len();
+    log(&t, format!("N {nrow} n {n0} (padded to {n}); {} fine centres in {ncell} cell(s) from {pdir}", part.k));
 
-    // clusters: the non-empty ones, rows listed by cluster
-    let kraw = assign.iter().max().map_or(0, |&a| a + 1);
-    let mut cnt0 = vec![0usize; kraw];
-    assign.iter().for_each(|&a| cnt0[a] += 1);
-    let keep: Vec<usize> = (0..kraw).filter(|&c| cnt0[c] > 0).collect();
+    // pass 1, cell by cell: each cell's rows listed by fine cluster (the fit's row order: clusters in partition order,
+    // rows of a cluster in cell order), and every cluster's exact mean, stored int8 with one scale
+    let mut cnt0 = vec![0usize; part.k];
+    let mut mean0: Vec<(Vec<i8>, f64)> = vec![(Vec::new(), 1.0); part.k];
+    let mut cellstart = vec![0i64; ncell + 1];
+    let perm_path = format!("{out}/perm.npy");
+    let mut perm_w = std::io::BufWriter::with_capacity(1 << 22, std::fs::File::create(&perm_path).unwrap_or_else(|e| panic!("cannot create {perm_path}: {e}")));
+    perm_w.write_all(&npy_header_bytes("<i8", &[nrow])).unwrap();
+    for (c, cell) in part.cells.iter().enumerate() {
+        let mut loc: Vec<(u32, u32)> = (0..cell.rows()).filter_map(|i| {
+            let k = cell.cluster(i);
+            (part.cluster_cell[k as usize] as usize == c).then_some((k, i as u32))
+        }).collect();
+        loc.sort_unstable();
+        let ord: Vec<u32> = loc.iter().map(|x| x.1).collect();
+        std::fs::write(format!("{out}/ord{c}.u32"), unsafe { std::slice::from_raw_parts(ord.as_ptr() as *const u8, ord.len() * 4) }).unwrap();
+        let ids: Vec<u8> = loc.iter().flat_map(|x| (cell.id(x.1 as usize) as i64).to_le_bytes()).collect();
+        perm_w.write_all(&ids).unwrap();
+        cellstart[c + 1] = cellstart[c] + loc.len() as i64;
+        let mut runs = Vec::new();
+        let mut s = 0;
+        while s < loc.len() {
+            let e = s + loc[s..].partition_point(|x| x.0 == loc[s].0);
+            runs.push((loc[s].0 as usize, s, e));
+            s = e;
+        }
+        let means: Vec<(usize, usize, (Vec<i8>, f64))> = runs.par_iter().map(|&(k, s, e)| {
+            let mut sum = vec![0f64; n];
+            for &(_, i) in &loc[s..e] {
+                sum.iter_mut().zip(cell.vector(n, i as usize)).for_each(|(a, &h)| *a += f16_to_f32(h) as f64);
+            }
+            let mean: Vec<f64> = sum.iter().map(|v| v / (e - s) as f64).collect();
+            let mut sc = mean.iter().fold(0f64, |a, v| a.max(v.abs())) / 127.0;
+            if sc == 0.0 {
+                sc = 1.0;
+            }
+            (k, e - s, (mean.iter().map(|v| (v / sc).round_ties_even() as i8).collect(), sc))
+        }).collect();
+        for (k, m, q) in means {
+            cnt0[k] = m;
+            mean0[k] = q;
+        }
+    }
+    perm_w.flush().unwrap();
+    assert_eq!(cellstart[ncell] as usize, nrow, "the partition in {pdir} places {} rows in its cells' clusters, not its {nrow} rows; rerun tools/partition.py", cellstart[ncell]);
+    save(out, "cellstart", "<i8", &[ncell + 1], &cellstart);
+    let keep: Vec<usize> = (0..part.k).filter(|&c| cnt0[c] > 0).collect();
     let k = keep.len();
-    let mut remap = vec![usize::MAX; kraw];
-    keep.iter().enumerate().for_each(|(i, &c)| remap[c] = i);
-    let cl: Vec<usize> = assign.iter().map(|&a| remap[a]).collect();
-    drop(assign);
     let cnt: Vec<usize> = keep.iter().map(|&c| cnt0[c]).collect();
-    let mut start = vec![0usize; k + 1];
+    let mut cstart = vec![0i64; k + 1];
     for c in 0..k {
-        start[c + 1] = start[c] + cnt[c];
+        cstart[c + 1] = cstart[c] + cnt[c] as i64;
     }
-    let mut byc = vec![0u32; nrow];
-    let mut fill = start.clone();
-    for (r, &c) in cl.iter().enumerate() {
-        byc[fill[c]] = r as u32;
-        fill[c] += 1;
-    }
-
-    // exact means of the unit vectors, stored int8 with one scale per cluster
-    let means: Vec<(Vec<i8>, f64)> = (0..k).into_par_iter().map(|c| {
-        let mut sum = vec![0f64; n];
-        let mut u = vec![0f32; n];
-        for &r in &byc[start[c]..start[c + 1]] {
-            x.unit(r as usize, &mut u);
-            sum.iter_mut().zip(&u).for_each(|(s, &v)| *s += v as f64);
-        }
-        let mean: Vec<f64> = sum.iter().map(|s| s / cnt[c] as f64).collect();
-        let mut sc = mean.iter().fold(0f64, |a, v| a.max(v.abs())) / 127.0;
-        if sc == 0.0 {
-            sc = 1.0;
-        }
-        (mean.iter().map(|v| (v / sc).round_ties_even() as i8).collect(), sc)
-    }).collect();
-    let mq: Vec<f32> = means.iter().flat_map(|(q, sc)| q.iter().map(move |&v| (v as f64 * sc) as f32)).collect();
+    let mq8: Vec<i8> = keep.iter().flat_map(|&c| mean0[c].0.iter().copied()).collect();
+    let msc: Vec<f64> = keep.iter().map(|&c| mean0[c].1).collect();
+    drop(mean0);
+    let mq: Vec<f32> = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
     let mh: Vec<f32> = mq.chunks(n).flat_map(|m| {
         let nr = m.iter().map(|&v| v * v).sum::<f32>().sqrt();
         m.iter().map(move |&v| if nr > 0.0 { v / nr } else { v })
@@ -328,86 +296,51 @@ pub fn main(args: &[String]) {
     let g0 = 1.max(64.min(k / 8).min(nrow / (20 * n0)));
     let gc = kmeans(&mh, n, g0, &mut rng, 20);
     let graw = argmax_rows(&mh, &gc, n);
-    let mut gmap = vec![usize::MAX; g0];
     let mut gk: Vec<usize> = graw.clone();
     gk.sort();
     gk.dedup();
+    let mut gmap = vec![usize::MAX; g0];
     gk.iter().enumerate().for_each(|(i, &g)| gmap[g] = i);
     let ng = gk.len();
-    let grp_old: Vec<usize> = graw.iter().map(|&g| gmap[g]).collect();
+    let grp: Vec<usize> = graw.iter().map(|&g| gmap[g]).collect();
     log(&t, format!("K {k} clusters (sizes {}..{}), G {ng} groups", cnt.iter().min().unwrap(), cnt.iter().max().unwrap()));
 
-    // clusters in (group, cluster) order, rows in source order within a cluster
-    let mut corder: Vec<usize> = (0..k).collect();
-    corder.sort_by_key(|&c| (grp_old[c], c));
-    let grp: Vec<usize> = corder.iter().map(|&c| grp_old[c]).collect();
-    let mut cstart = vec![0i64; k + 1];
-    let mut perm: Vec<i64> = Vec::with_capacity(nrow);
-    for (i, &c) in corder.iter().enumerate() {
-        perm.extend(byc[start[c]..start[c + 1]].iter().map(|&r| r as i64));
-        cstart[i + 1] = perm.len() as i64;
-    }
-    drop(byc);
-    let mq8: Vec<i8> = corder.iter().flat_map(|&c| means[c].0.iter().copied()).collect();
-    let msc: Vec<f64> = corder.iter().map(|&c| means[c].1).collect();
-    let mq: Vec<f32> = corder.iter().flat_map(|&c| mq[c * n..(c + 1) * n].iter().copied()).collect();
-    let mh: Vec<f32> = corder.iter().flat_map(|&c| mh[c * n..(c + 1) * n].iter().copied()).collect();
-    let cnt: Vec<usize> = corder.iter().map(|&c| cnt[c]).collect();
-    drop(means);
-
-    // the vectors in that order, f16
-    {
-        let path = format!("{out}/Xs.npy");
-        let mut w = std::io::BufWriter::with_capacity(1 << 24, std::fs::File::create(&path).unwrap_or_else(|e| panic!("cannot create {path}: {e}")));
-        w.write_all(&npy_header_bytes("<f2", &[nrow, n])).unwrap();
-        for blk in perm.chunks(1 << 16) {
-            let h: Vec<u8> = blk.par_iter().flat_map_iter(|&r| {
-                let mut u = vec![0f32; n];
-                x.unit(r as usize, &mut u);
-                u.into_iter().flat_map(|v| f32_to_f16(v).to_le_bytes())
-            }).collect();
-            w.write_all(&h).unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
-        }
-        w.flush().unwrap();
-    }
-    save(out, "perm", "<i8", &[nrow], &perm);
-    log(&t, format!("wrote Xs.npy and perm.npy"));
-
-    // per group: residual covariance and mean |r|^2, residuals r = x - (stored centre)
-    let gstart: Vec<usize> = (0..=ng).map(|g| grp.partition_point(|&x| x < g)).collect();
-    let covs: Vec<(Vec<f64>, f64)> = (0..ng).into_par_iter().map(|g| {
-        let mut cv = vec![0f64; n * n];
+    // pass 2: per group, residual covariance and mean |r|^2, residuals r = x - (stored centre), rows read through the
+    // fit's row order
+    let rows = crate::bucket::Buckets::open(&pdir, out);
+    use crate::bucket::Rows;
+    let acc: Vec<std::sync::Mutex<(Vec<f64>, f64)>> = (0..ng).map(|_| std::sync::Mutex::new((vec![0f64; n * n], 0f64))).collect();
+    (0..k).into_par_iter().for_each(|c| {
+        let (r0, r1) = (cstart[c] as usize, cstart[c + 1] as usize);
+        let m = &mq[c * n..(c + 1) * n];
+        let mut rm = vec![0f64; (r1 - r0) * n];
         let mut r2 = 0f64;
-        let mut u = vec![0f32; n];
-        for c in gstart[g]..gstart[g + 1] {
-            let (r0, r1) = (cstart[c] as usize, cstart[c + 1] as usize);
-            let m = &mq[c * n..(c + 1) * n];
-            let mut rm = vec![0f64; (r1 - r0) * n];
-            for (i, &src) in perm[r0..r1].iter().enumerate() {
-                x.unit(src as usize, &mut u);
-                for t in 0..n {
-                    let v = u[t] as f64 - m[t] as f64;
-                    rm[i * n + t] = v;
-                    r2 += v * v;
-                }
+        for (i, r) in (r0..r1).enumerate() {
+            for (t, &h) in rows.row(r).iter().enumerate() {
+                let v = f16_to_f32(h) as f64 - m[t] as f64;
+                rm[i * n + t] = v;
+                r2 += v * v;
             }
-            unsafe { matrixmultiply::dgemm(n, r1 - r0, n, 1.0, rm.as_ptr(), 1, n as isize, rm.as_ptr(), n as isize, 1, 1.0, cv.as_mut_ptr(), n as isize, 1) };
         }
-        let rows = (cstart[gstart[g + 1]] - cstart[gstart[g]]).max(1) as f64;
-        cv.iter_mut().for_each(|v| *v /= rows);
-        (cv, r2 / rows)
+        let mut cv = vec![0f64; n * n];
+        unsafe { matrixmultiply::dgemm(n, r1 - r0, n, 1.0, rm.as_ptr(), 1, n as isize, rm.as_ptr(), n as isize, 1, 0.0, cv.as_mut_ptr(), n as isize, 1) };
+        let mut a = acc[grp[c]].lock().unwrap();
+        a.0.iter_mut().zip(&cv).for_each(|(x, y)| *x += y);
+        a.1 += r2;
+    });
+    let gsize: Vec<f64> = (0..ng).map(|g| (0..k).filter(|&c| grp[c] == g).map(|c| cnt[c]).sum::<usize>().max(1) as f64).collect();
+    let covs: Vec<(Vec<f64>, f64)> = acc.into_iter().enumerate().map(|(g, m)| {
+        let (mut cv, r2) = m.into_inner().unwrap();
+        cv.iter_mut().for_each(|v| *v /= gsize[g]);
+        (cv, r2 / gsize[g])
     }).collect();
     let r2: Vec<f64> = covs.iter().map(|c| c.1).collect();
 
-    // rows of the vectors in index order, sampled
+    // rows of the fit, sampled, as unit f32
     let sample_rows = |rng: &mut ChaCha8Rng, m: usize| -> Vec<f32> {
         let mut idx = rand::seq::index::sample(rng, nrow, m.min(nrow)).into_vec();
         idx.sort();
-        let mut v = vec![0f32; idx.len() * n];
-        for (i, &r) in idx.iter().enumerate() {
-            x.unit(perm[r] as usize, &mut v[i * n..(i + 1) * n]);
-        }
-        v
+        idx.iter().flat_map(|&r| rows.row(r).iter().map(|&h| f16_to_f32(h))).collect()
     };
 
     let mut lam = vec![0f64; ng * n];
@@ -502,7 +435,7 @@ pub fn main(args: &[String]) {
         }
     }
     drop(covs);
-    log(&t, format!("bases done ({basis}); group sizes {}..{}", (0..ng).map(|g| cstart[gstart[g + 1]] - cstart[gstart[g]]).min().unwrap(), (0..ng).map(|g| cstart[gstart[g + 1]] - cstart[gstart[g]]).max().unwrap()));
+    log(&t, format!("bases done ({basis}); group sizes {}..{}", gsize.iter().cloned().fold(f64::INFINITY, f64::min), gsize.iter().cloned().fold(0.0, f64::max)));
 
     // profile: corpus items as pseudo-queries against their 4 nearest centres (by q.m with the stored centres), the mean
     // square of (q - m) in each group's coordinates; groups with 50 pairs or fewer take lam
@@ -579,9 +512,8 @@ pub fn main(args: &[String]) {
     save(out, "qi", "<i8", &[qi.len()], &qi);
     let meta = serde_json::json!({
         "N": nrow, "n": n, "n_orig": n0, "K": k, "G": ng, "metric": "angular", "DLV": DLV, "RLV": rlv, "BOUNDS": bounds,
-        "CSG": (2.0 * l1).sqrt(), "L1": l1, "EPS": EPS, "xs": "Xs.npy",
-        "source": std::fs::canonicalize(vpath).map_or(vpath.to_string(), |p| p.display().to_string()),
-        "clustering": std::fs::canonicalize(&cdir).map_or(cdir.clone(), |p| p.display().to_string()),
+        "CSG": (2.0 * l1).sqrt(), "L1": l1, "EPS": EPS,
+        "partition": std::fs::canonicalize(&pdir).map_or(pdir.clone(), |p| p.display().to_string()),
         "format": FORMAT, "fit": fitj,
     });
     std::fs::write(format!("{out}/meta.json"), serde_json::to_string_pretty(&meta).unwrap()).unwrap();

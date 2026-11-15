@@ -1116,10 +1116,11 @@ pub trait Source2: Sync {
     }
 }
 
-pub struct Real2 {
-    pub src: crate::index::RealSource,
+/// The items of a fit whose rows are read through `Rows`: its Xs.npy (`RealSource`), or its partition (`Buckets`).
+pub struct Real2<R: crate::bucket::Rows> {
+    pub src: R,
 }
-impl Source2 for Real2 {
+impl<R: crate::bucket::Rows> Source2 for Real2<R> {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
         self.rows_of(c, p.cstart[c]..p.cstart[c + 1], p, gp, mhat)
     }
@@ -1128,10 +1129,10 @@ impl Source2 for Real2 {
         self.rows_of(c, spread(p.cstart[c + 1] - r0, k).into_iter().map(|i| r0 + i), p, gp, mhat)
     }
 }
-impl Real2 {
+impl<R: crate::bucket::Rows> Real2<R> {
     /// The items of cluster c at the given rows, in key order.
     fn rows_of(&self, c: usize, rows: impl Iterator<Item = usize>, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
-        let n = self.src.n;
+        let n = self.src.n();
         let m = &p.centres[c * n..(c + 1) * n];
         let mut key: Vec<(i16, usize)> = rows.map(|r| {
             let x = self.src.row(r);

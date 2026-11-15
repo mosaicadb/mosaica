@@ -19,23 +19,30 @@ cargo build --release
 
 ## Inputs
 
-`vexact fit` fits the build parameters to any file of vectors, from the data alone (no example queries, no text
-anchors), and writes an index directory. The clustering comes first, from faiss:
+The build reads a partition of the vectors and a fit of the parameters to it, then encodes the index:
 
 ```bash
-python3 -I tools/cluster.py VECTORS.npy CLUSTERING [--cells C]      # N x n floats; row i is entity i
+python3 -I tools/partition.py VECTORS.npy PARTITION [--cells C] [--cross T]   # N x n floats; row i is entity i
 ```
 
 ```bash
-$CARGO_TARGET_DIR/release/vexact fit VECTORS.npy INDEX --clustering CLUSTERING [--basis pca|dual] [--query-sample Q.npy]
+$CARGO_TARGET_DIR/release/vexact fit INDEX --partition PARTITION [--basis pca|dual] [--query-sample Q.npy]
 ```
 
-`tools/cluster.py` trains spherical k-means to about 1,000 items per cluster from 200 sampled rows per centre and
-assigns every row to its nearest centre (`assign.npy`); `--cells C` trains in two levels, C coarse cells with fine
-centres per cell, still assigning over all centres. The fit takes the clusters' exact means as the stored centres,
-passes over the vectors cluster by cluster, and runs `tools/certify.py` for the randomised constant (`--cert-time`,
-600 s by default). `tools/fit.py` does the same in numpy with its own k-means, holding the corpus in memory, and
-writes the same directory. `tools/synth_vectors.py` writes the synthetic set `REPORT_BUILD.md` measures.
+```bash
+$CARGO_TARGET_DIR/release/vexact build INDEX
+```
+
+`tools/partition.py` (faiss) splits the vectors into C coarse cells (one by default), writes each cell's unit vectors
+as f16 files, trains fine centres per cell to about 1,000 items per cluster from 200 sampled rows per centre, and
+assigns every row to its nearest fine centre among those of its cell's T nearest cells (`--cross`, one by default); a
+row whose centre lies in another cell moves there. The fit makes two passes over the cells: each cluster's exact
+mean as its stored centre, then the groups and each group's residual covariance; it runs `tools/certify.py` for the
+randomised constant (`--cert-time`, 600 s by default) and writes the fit's row order in place of a copy of the
+vectors. `vexact build` encodes cluster by cluster straight into `INDEX/encoded-KEY/`; the first experiment run on a
+fit builds it too. Neither step holds the vectors in memory. `tools/fit.py` does the fit in numpy, holding the corpus
+in memory and writing an `Xs.npy`; its directories build and run the same way. `tools/synth_vectors.py` writes the
+synthetic set `REPORT_BUILD.md` measures.
 
 The fit normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
 centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the
