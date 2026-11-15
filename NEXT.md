@@ -36,7 +36,8 @@ names the branch or report that holds its evidence.
   code is on research/levels-clusters, on research/combined at d443f66; it needs rebasing onto this branch (q.rs and
   fit.py conflict). At 500k, 1M and 3M (rust/REPORT_SCALING.md), 1,000 items per cluster was never the best; on the
   uniform samples the best was 2,000 at 1M and 4,000 at 3M (where 2,000 ties on thresholds and is 16–51% slower on
-  exact k-NN). fit.py's size should grow with N, for example 2,000 × √(N / 1M) on a 2,000 / 4,000 / 8,000 grid.
+  exact k-NN). fit.py's default on that branch now grows with N: 2,000 items per cluster up to 2M, 4,000 up to 8M,
+  8,000 above, with up to 64 groups.
 - **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
   be stored.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the
