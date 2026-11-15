@@ -1,4 +1,4 @@
-# The build: a faster encoder, a saved index, the fit in Rust, and the partitioned build
+# The build: a faster encoder, a saved index, the fit in Rust, the partitioned build, the K × A table
 
 2026-11-15. Steps 1 to 3 (first sections) are from the 60,000-row synthetic set; the partitioned build (step 4, from
 "The partitioned build" on) was measured on 1M BioCLIP-2 rows and on 1M and 4M synthetic rows.
@@ -194,10 +194,71 @@ table 8 TB. The table goes with step 2. `perm` and the per-cluster records need 
 build and at open, which is the "per-cluster records mapped" item below. The support table is also most of the 4M
 build's time (from 59 s to 149 s).
 
+## The support table against a fixed set of anchors (step 5)
+
+The support table held each cluster's largest and smallest x · a against one anchor per cluster: K² entries, built
+in a pass of N·K·n over the vectors after encoding (90 of 149 s and 240 MB of the 4M build; 8 TB at 1B). A query
+bounds a cluster with the anchor nearest the query, and the bound holds for any anchor, so the anchors need not be
+the clusters. The table is now K × A against the fit's `anchors.npy`, computed while each cluster is encoded (the
+cluster's f16 rows are in hand), written through the store and mapped at open.
+
+### Which anchors (1M BioCLIP-2, `tools/near_table.py`)
+
+Before building it, `tools/near_table.py` measured candidate tables on the 1M `fit.py` index with the query's bound
+arithmetic (200 item queries, 200 text queries; no violations). Items touched relative to the K × K table:
+
+| Table | item 0.01% | 0.1% | 1% | t = 0.9 | text 0.01% | 0.1% | 1% |
+|---|---|---|---|---|---|---|---|
+| no table | 1.011 | 1.006 | 1.003 | 1.096 | 1.107 | 1.069 | 1.021 |
+| each anchor's 64 nearest clusters, a cell bound beyond | 1.011 | 1.006 | 1.003 | 1.094 | 1.094 | 1.062 | 1.020 |
+| 32 coarse anchors (k-means of the centre directions) | 1.007 | 1.004 | 1.002 | 1.054 | 1.027 | 1.016 | 1.005 |
+| 128 coarse | 1.005 | 1.003 | 1.001 | 1.045 | 1.015 | 1.010 | 1.004 |
+| 512 coarse | 1.002 | 1.001 | 1.001 | 1.012 | 1.010 | 1.006 | 1.002 |
+| 512 coarse + 256 text | 1.002 | 1.001 | 1.001 | 1.012 | 0.767 | 0.836 | 0.939 |
+| K + 256 text | 1.000 | 1.000 | 1.000 | 1.000 | 0.767 | 0.836 | 0.939 |
+
+A sparse table of each anchor's nearest clusters does no better than no table: the clusters a query cannot skip are
+the far ones, which the lists leave out. What sets the cost is how near the best anchor is to the query, not how many
+clusters each anchor covers, so a dense table against fewer anchors keeps almost all of the K × K table's effect, and
+anchors placed where queries fall (k-means of embedded training prompts) cut text queries' items touched by a quarter.
+The text figure is optimistic: the training and test prompts come from the research branch's prompt sets and may
+share templates. Item thresholds (t = 0.9) lose 1.2% at 512 coarse anchors.
+
+`vexact fit` writes `anchors.npy`: all K centre directions when `--anchors` (1,024 by default) is at least K, else
+k-means of them, plus `--text-count` (256) k-means centres of the prompts given with `--text-anchors`; `vexact anchors`
+rewrites it for an existing fit. Without `anchors.npy` the table is the K × K one, byte-identical to before (code hash
+`b8bdd054938fe563`). The table is computed in f32 and each extreme recomputed in f64 over the items within twice the
+f32 error bound of the f32 extreme, so it equals the f64 table (`hi.bin`, `lo.bin` byte-identical at 768 and 1,256
+anchors).
+
+### 1M BioCLIP-2, against the K × K table of the same fit
+
+`pyA`: 512 coarse + 256 text anchors (what the default gives at 1B scale); `pyB`: K + 256 text (the default at 1M).
+Bytes read per item (`bytesq`, 200 queries):
+
+| | item 0.01% | 0.1% | 1% | 10% | text 0.01% | 0.1% | 1% | 10% |
+|---|---|---|---|---|---|---|---|---|
+| K × K | 24.80 | 36.75 | 60.56 | 129.92 | 19.13 | 28.77 | 62.68 | 197.36 |
+| `pyA` | 24.82 | 36.76 | 60.57 | 129.92 | 17.90 | 27.82 | 62.28 | 197.35 |
+| `pyB` | 24.80 | 36.75 | 60.56 | 129.92 | 17.93 | 27.85 | 62.32 | 197.35 |
+
+Text items touched at 0.01%: 0.679 (K × K), 0.521 (`pyA`), 0.527 (`pyB`). `verify` (80 queries, 7 answer sizes):
+no wrong answers, no interval violations, on both. `e2e`, three rounds, median time against K × K: at one thread
+0.95–1.06 (`pyA`) and 0.93–1.03 (`pyB`) across the rows; at four threads up to 1.12 (`pyA`, item, 30% answer) with
+identical bytes read, where `pyA`'s own rounds ranged 31.8–39.1 ms: this container's four-thread timings move by
+that much between rounds. The bytes are the parity measure here; the timings show no regression beyond that noise.
+
+Build: the table costs part of the encoding pass, rising with A; at 1,256 anchors the f32 table took encoding from
+about 49 to 44 s against the f64 one (two alternating rounds each). This container's speed moved by about 30% over
+the day (the same `pyfit` build took 68 s in the morning and 89 s in the afternoon), so only same-session comparisons
+are given.
+
+### Bounded memory with the K × A table
+
+(The 1M and 4M synthetic runs are being repeated; figures to follow.)
+
 ## Not done, and not measured
 
-- The replacement for the K×K support table (step 2 of the plan): it sets both the time and the memory of a large
-  build now, and a 1B index cannot be built with it.
 - `perm` and per-cluster records (`Cl2`, the centre tables) mapped rather than read onto the heap, at build and open.
 - int8 q·m.
 - The item-bytes gap of about 1% at small answers between the Rust fit and `fit.py` at 1M BioCLIP-2.
@@ -212,6 +273,8 @@ python3 -I tools/partition.py DATA/x.npy DATA/part [--cells C] [--cross T]
 $CARGO_TARGET_DIR/release/vexact fit DATA/rfit --partition DATA/part --basis dual --cert-time 60
 $CARGO_TARGET_DIR/release/vexact build DATA/rfit
 python3 -I tools/fit.py DATA/x.npy DATA/pyfit --basis dual --cert-time 60
+$CARGO_TARGET_DIR/release/vexact anchors DATA/pyfit [--anchors 512] [--text-anchors DATA/text_train.npy]
+python3 -I tools/near_table.py DATA/pyfit DATA/heldout.npy DATA/q.npy --nq 200 --text-train DATA/text_train.npy
 $CARGO_TARGET_DIR/release/vexact --v2 --index DATA/rfit --queries DATA/q.npy --item-queries DATA/heldout.npy bytesq verify
 $CARGO_TARGET_DIR/release/vexact --v2 --index DATA/rfit --queries DATA/q.npy --plan-default [--resident] --tag _X e2e --nq 50 --nflat 5
 ```
