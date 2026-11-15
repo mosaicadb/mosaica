@@ -1,0 +1,26 @@
+flat: loaded in 3 s; RSS 5.76 GiB; the index adds 5.72 GiB resident
+flat: compacted copy of gen_1 in 46 ms
+flat compacted gen_1 share 0 threads 1: median 0.87 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 1 threads 1: median 0.84 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 2 threads 1: median 0.85 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 3 threads 1: median 0.96 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 4 threads 1: median 1.06 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 5 threads 1: median 1.13 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_1 share 6 threads 1: median 1.14 ms, mean recall 1.00000, non-matches 0
+flat: compacted copy of gen_10 in 454 ms
+flat compacted gen_10 share 0 threads 1: median 10.02 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_10 share 1 threads 1: median 10.01 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_10 share 2 threads 1: median 10.28 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_10 share 3 threads 1: median 10.14 ms, mean recall 0.99999, non-matches 0
+flat compacted gen_10 share 4 threads 1: median 10.71 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_10 share 5 threads 1: median 10.82 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_10 share 6 threads 1: median 10.20 ms, mean recall 1.00000, non-matches 0
+flat: compacted copy of gen_50 in 4887 ms
+flat compacted gen_50 share 0 threads 1: median 57.72 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_50 share 1 threads 1: median 58.43 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_50 share 2 threads 1: median 57.56 ms, mean recall 0.99999, non-matches 0
+flat compacted gen_50 share 3 threads 1: median 57.54 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_50 share 4 threads 1: median 58.94 ms, mean recall 1.00000, non-matches 0
+flat compacted gen_50 share 5 threads 1: median 63.48 ms, mean recall 1.00000, non-matches 2
+flat compacted gen_50 share 6 threads 1: median 72.63 ms, mean recall 1.00000, non-matches 1
+peak RSS 8.65 GiB

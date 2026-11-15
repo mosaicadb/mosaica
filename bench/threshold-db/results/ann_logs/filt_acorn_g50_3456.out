@@ -1,0 +1,10 @@
+acorn: loaded in 0 s; RSS 0.04 GiB; the index adds 0.00 GiB resident
+acorn: loaded 999950 rows in 3.2 s; M 32 gamma 12 M_beta 32; peak RSS 3.23 GiB
+acorn ladder gen_50 share 3: rung 1, mean recall 0.9884, median 2607.6 ms
+acorn ladder gen_50 share 3: rung 1.5, mean recall 0.9966, median 6226.8 ms
+acorn tight gen_50 share 3: timed at one repetition
+acorn tight gen_50 share 3: param x1, median 2607.61 ms, mean recall 0.9884, non-matches 8793 over 15 queries
+acorn ladder gen_50 share 4: rung 1, over the cap (three queries each over twice the cap, or all together over three times the cap times the query count)
+acorn tight gen_50 share 4: no rung within the cap
+acorn ladder gen_50 share 5: rung 1, over the cap (three queries each over twice the cap, or all together over three times the cap times the query count)
+acorn tight gen_50 share 5: no rung within the cap

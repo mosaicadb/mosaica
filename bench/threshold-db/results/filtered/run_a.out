@@ -1,0 +1,48 @@
+==== run at 1794687597: ["/home/joe/code/vexact-filter-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-filter-data/prep/queries.npy", "--results", "results/filtered", "--core", "11", "--pin", "11", "--plan-file", "results/ours/plan.txt", "--fit-dial", "dbcmp", "dbknn", "--thr", "/home/joe/code/vexact-filter-data/prep/thresholds.npy", "--cmp-vis", "/home/joe/code/vexact-filter-data/prep/gen_1.npy,/home/joe/code/vexact-filter-data/prep/gen_10.npy,/home/joe/code/vexact-filter-data/prep/gen_50.npy", "--skip-all", "--threads", "1", "--step", "10", "--reps", "5", "--tag", "filt_1t", "--order", "/home/joe/code/vexact-filter-data/prep/order.npy", "--vis", "/home/joe/code/vexact-filter-data/prep/vis_10.npy", "--sets", "vis_10:0,1,2,3", "--skip-default", "vis_10:0,vis_10:1,vis_10:2,vis_10:3", "--ladder-from", "16"]
+[build2] plans 12.0s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 39.3s
+[build2] encoded 85.4s
+[build2] assembled 86.0s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.08, 0.08, 0.08, 0.08, 0.11, 0.11, 0.08, 0.12, 0.16, 0.2] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 
+[approx] f = 0.2 from 1000 pseudo-queries in 26.6s; mean items scanned at recall 0.95 by f: [(0.0, 9942.0), (0.1, 6940.0), (0.2, 5230.0), (0.35, 9713.0), (0.5, 23897.0), (0.75, 34860.0)]
+[approx] dial fitted in 10.7s: eps [0.0, 1e-5, 0.0001, 0.001, 0.003, 0.01, 0.03, 0.1, 0.2], pseudo-query recall [1.0, 1.0, 1.0, 0.9985, 0.9935, 0.9835, 0.961, 0.914, 0.8505], fits [(0.9, 7), (0.95, 6), (0.99, 4), (0.999, 2)]
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 37.3s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+dbcmp gen_1: 10154 visible; into row order once per session 0.18 ms
+dbcmp index threads 1 vis gen_1: 105 timings, median 0.903 ms
+dbcmp flat threads 1 vis gen_1: 105 timings, median 0.395 ms
+dbcmp gen_10: 95180 visible; into row order once per session 1.78 ms
+dbcmp index threads 1 vis gen_10: 105 timings, median 8.933 ms
+dbcmp flat threads 1 vis gen_10: 105 timings, median 7.415 ms
+dbcmp gen_50: 494151 visible; into row order once per session 9.13 ms
+dbcmp index threads 1 vis gen_50: 105 timings, median 30.904 ms
+dbcmp flat threads 1 vis gen_50: 105 timings, median 40.300 ms
+dbcmp resident after the queries: VmRSS:	 6102512 kB, RssAnon:	 3289992 kB, RssFile:	 2812520 kB
+dbknn ladder vis_10 share 0: nprobe 16 dial fit0.99: median 0.539 ms, mean recall 0.8992
+dbknn ladder vis_10 share 0: nprobe 32 dial fit0.99: median 0.640 ms, mean recall 0.9410
+dbknn ladder vis_10 share 0: nprobe 64 dial fit0.99: median 1.200 ms, mean recall 0.9465
+dbknn ladder vis_10 share 0: nprobe 128 dial fit0.99: median 3.523 ms, mean recall 0.9917
+dbknn tight vis_10 share 0: nprobe 128 dial fit0.99: median 2.903 ms, mean recall 0.9917
+dbknn ladder vis_10 share 1: nprobe 16 dial fit0.99: median 0.739 ms, mean recall 0.8025
+dbknn ladder vis_10 share 1: nprobe 32 dial fit0.99: median 0.842 ms, mean recall 0.8891
+dbknn ladder vis_10 share 1: nprobe 64 dial fit0.99: median 1.181 ms, mean recall 0.9406
+dbknn ladder vis_10 share 1: nprobe 128 dial fit0.99: median 3.521 ms, mean recall 0.9858
+dbknn ladder vis_10 share 1: nprobe 256 dial fit0.99: median 4.958 ms, mean recall 0.9968
+dbknn tight vis_10 share 1: nprobe 256 dial fit0.99: median 4.845 ms, mean recall 0.9968
+dbknn ladder vis_10 share 2: nprobe 16 dial fit0.99: median 2.172 ms, mean recall 0.5758
+dbknn ladder vis_10 share 2: nprobe 32 dial fit0.99: median 2.233 ms, mean recall 0.7232
+dbknn ladder vis_10 share 2: nprobe 64 dial fit0.99: median 2.775 ms, mean recall 0.8582
+dbknn ladder vis_10 share 2: nprobe 128 dial fit0.99: median 7.444 ms, mean recall 0.9434
+dbknn ladder vis_10 share 2: nprobe 256 dial fit0.99: median 9.055 ms, mean recall 0.9848
+dbknn ladder vis_10 share 2: nprobe 512 dial fit0.99: median 12.624 ms, mean recall 0.9977
+dbknn tight vis_10 share 2: nprobe 512 dial fit0.99: median 15.386 ms, mean recall 0.9977
+dbknn ladder vis_10 share 3: nprobe 16 dial fit0.99: median 2.584 ms, mean recall 0.1335
+dbknn ladder vis_10 share 3: nprobe 32 dial fit0.99: median 4.591 ms, mean recall 0.2336
+dbknn ladder vis_10 share 3: nprobe 64 dial fit0.99: median 9.235 ms, mean recall 0.4195
+dbknn ladder vis_10 share 3: nprobe 128 dial fit0.99: median 476.062 ms, mean recall 0.6601
+dbknn ladder vis_10 share 3: nprobe 256 dial fit0.99: median 1080.305 ms, mean recall 0.8594
+dbknn ladder vis_10 share 3: nprobe 512 dial fit0.99: median 2044.415 ms, mean recall 0.9735
+dbknn ladder vis_10 share 3: nprobe 1000 dial fit0.99: median 3981.640 ms, mean recall 0.9997
+dbknn tight vis_10 share 3: timed at one repetition
+dbknn tight vis_10 share 3: nprobe 1000 dial fit0.99: median 3981.640 ms, mean recall 0.9997

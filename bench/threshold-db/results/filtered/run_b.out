@@ -1,0 +1,13 @@
+==== run at 1794687961: ["/home/joe/code/vexact-filter-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-filter-data/prep/queries.npy", "--results", "results/filtered", "--core", "11", "--pin", "11", "--plan-file", "results/ours/plan.txt", "--fit-dial", "dbknn", "--step", "10", "--reps", "5", "--order", "/home/joe/code/vexact-filter-data/prep/order.npy", "--vis", "/home/joe/code/vexact-filter-data/prep/vis_10.npy", "--sets", "vis_10:4,5,6", "--skip-default", "vis_10:4,vis_10:5,vis_10:6", "--ladder-from", "512"]
+dbknn ladder vis_10 share 4: nprobe 512 dial fit0.99: median 2093.284 ms, mean recall 0.8482
+dbknn ladder vis_10 share 4: nprobe 1000 dial fit0.99: median 4621.905 ms, mean recall 0.9998
+dbknn tight vis_10 share 4: timed at one repetition
+dbknn tight vis_10 share 4: nprobe 1000 dial fit0.99: median 4621.905 ms, mean recall 0.9998
+dbknn ladder vis_10 share 5: nprobe 512 dial fit0.99: median 10.209 ms, mean recall 0.7267
+dbknn ladder vis_10 share 5: nprobe 1000 dial fit0.99: median 4726.539 ms, mean recall 0.9998
+dbknn tight vis_10 share 5: timed at one repetition
+dbknn tight vis_10 share 5: nprobe 1000 dial fit0.99: median 4726.539 ms, mean recall 0.9998
+dbknn ladder vis_10 share 6: nprobe 512 dial fit0.99: median 9.873 ms, mean recall 0.5733
+dbknn ladder vis_10 share 6: nprobe 1000 dial fit0.99: median 4648.592 ms, mean recall 0.9999
+dbknn tight vis_10 share 6: timed at one repetition
+dbknn tight vis_10 share 6: nprobe 1000 dial fit0.99: median 4648.592 ms, mean recall 0.9999

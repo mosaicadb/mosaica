@@ -1,0 +1,20 @@
+==== run at 1794692688: ["/home/joe/code/vexact-filter-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-filter-data/prep/queries.npy", "--results", "results/filtered", "--core", "10", "--pin", "10", "--plan-file", "results/ours/plan.txt", "--fit-dial", "dbknn", "--step", "10", "--reps", "5", "--order", "/home/joe/code/vexact-filter-data/prep/order.npy", "--vis", "/home/joe/code/vexact-filter-data/prep/vis_50.npy", "--sets", "vis_50:0,1,2", "--skip-default", "vis_50:0,vis_50:1,vis_50:2", "--ladder-from", "16"]
+dbknn ladder vis_50 share 0: nprobe 16 dial fit0.99: median 2.029 ms, mean recall 0.8841
+dbknn ladder vis_50 share 0: nprobe 32 dial fit0.99: median 2.946 ms, mean recall 0.9316
+dbknn ladder vis_50 share 0: nprobe 64 dial fit0.99: median 5.281 ms, mean recall 0.9727
+dbknn ladder vis_50 share 0: nprobe 128 dial fit0.99: median 7.255 ms, mean recall 0.9938
+dbknn tight vis_50 share 0: nprobe 128 dial fit0.99: median 7.362 ms, mean recall 0.9938
+dbknn ladder vis_50 share 1: nprobe 16 dial fit0.99: median 4.118 ms, mean recall 0.8060
+dbknn ladder vis_50 share 1: nprobe 32 dial fit0.99: median 5.617 ms, mean recall 0.8901
+dbknn ladder vis_50 share 1: nprobe 64 dial fit0.99: median 11.138 ms, mean recall 0.9481
+dbknn ladder vis_50 share 1: nprobe 128 dial fit0.99: median 16.914 ms, mean recall 0.9858
+dbknn ladder vis_50 share 1: nprobe 256 dial fit0.99: median 21.015 ms, mean recall 0.9961
+dbknn tight vis_50 share 1: nprobe 256 dial fit0.99: median 21.560 ms, mean recall 0.9961
+dbknn ladder vis_50 share 2: nprobe 16 dial fit0.99: median 418.847 ms, mean recall 0.5753
+dbknn ladder vis_50 share 2: nprobe 32 dial fit0.99: median 822.087 ms, mean recall 0.7221
+dbknn ladder vis_50 share 2: nprobe 64 dial fit0.99: median 1503.977 ms, mean recall 0.8580
+dbknn ladder vis_50 share 2: nprobe 128 dial fit0.99: median 2582.635 ms, mean recall 0.9437
+dbknn ladder vis_50 share 2: nprobe 256 dial fit0.99: median 4507.835 ms, mean recall 0.9853
+dbknn ladder vis_50 share 2: nprobe 512 dial fit0.99: median 8634.242 ms, mean recall 0.9979
+dbknn tight vis_50 share 2: timed at one repetition
+dbknn tight vis_50 share 2: nprobe 256 dial fit0.99: median 4507.835 ms, mean recall 0.9853

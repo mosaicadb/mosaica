@@ -2944,8 +2944,9 @@ impl Dial {
         let factors: Vec<Vec<f32>> = eps.iter().map(|&e| by_level.iter().map(|v| {
             if e == 0.0 || v.is_empty() { 1.0 } else { v[(((1.0 - e) * v.len() as f64) as usize).min(v.len() - 1)].clamp(0.0, 1.0) }
         }).collect()).collect();
+        // recall over every cluster, per eps, only when a target is to be fitted
         let mut recall = Vec::new();
-        for f in &factors {
+        for f in factors.iter().filter(|_| !targets.is_empty()) {
             let rec: f64 = pseudo.par_iter().zip(&per).map(|((row, q, _), (_, gt))| {
                 let me = ix.row_ent.get(*row).copied().unwrap_or(u32::MAX);
                 let out = match fast {

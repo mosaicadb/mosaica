@@ -1,0 +1,6 @@
+acorn: loaded in 0 s; RSS 0.04 GiB; the index adds 0.00 GiB resident
+acorn: loaded 999950 rows in 2.3 s; M 32 gamma 12 M_beta 32; peak RSS 3.23 GiB
+acorn tight vis_1 share 0: param x512, median 1.50 ms, mean recall 0.8889, non-matches 1 over 9 queries
+acorn tight vis_1 share 1: param x256, median 18.25 ms, mean recall 0.8968, non-matches 15 over 15 queries
+acorn tight vis_1 share 2: param x128, median 76.51 ms, mean recall 0.8778, non-matches 187 over 15 queries
+peak RSS 0.04 GiB

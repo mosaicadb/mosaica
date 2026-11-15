@@ -1,0 +1,15 @@
+hnsw_sq16: loaded in 2 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 ladder gen_1 share 3: rung 8, mean recall 0.3753, median 25.0 ms
+hnsw_sq16 ladder gen_1 share 3: rung 12, mean recall 0.4239, median 38.3 ms
+hnsw_sq16 ladder gen_1 share 3: rung 16, mean recall 0.4532, median 60.4 ms
+hnsw_sq16 ladder gen_1 share 3: rung 24, mean recall 0.5166, median 114.7 ms
+hnsw_sq16 ladder gen_1 share 3: rung 32, mean recall 0.5593, median 215.5 ms
+hnsw_sq16 ladder gen_1 share 3: rung 64, mean recall 0.6543, median 661.0 ms
+hnsw_sq16 ladder gen_1 share 3: rung 128, mean recall 0.7192, median 2550.7 ms
+hnsw_sq16 ladder gen_1 share 3: rung 256, over the cap (three queries each over twice the cap, or all together over three times the cap times the query count)
+hnsw_sq16 tight gen_1 share 3: timed at one repetition
+hnsw_sq16 tight gen_1 share 3: param x128, median 2550.71 ms, mean recall 0.7192, non-matches 222 over 14 queries
+hnsw_sq16 ladder gen_1 share 4: rung 8, mean recall 0.3318, median 72.2 ms
+hnsw_sq16 ladder gen_1 share 4: rung 12, mean recall 0.3751, median 138.1 ms
+hnsw_sq16 ladder gen_1 share 4: rung 16, mean recall 0.4149, median 296.2 ms
+hnsw_sq16 ladder gen_1 share 4: rung 24, mean recall 0.4765, median 508.9 ms

@@ -1,0 +1,11 @@
+acorn: loaded in 0 s; RSS 0.04 GiB; the index adds 0.00 GiB resident
+acorn: loaded 999950 rows in 4.2 s; M 32 gamma 12 M_beta 32; peak RSS 3.23 GiB
+acorn ladder gen_10 share 4: rung 1, mean recall 0.9928, median 829.1 ms
+acorn tight gen_10 share 4: param x1, median 676.86 ms, mean recall 0.9928, non-matches 2943 over 15 queries
+acorn ladder gen_10 share 5: rung 1, mean recall 0.9967, median 1540.9 ms
+acorn tight gen_10 share 5: timed at one repetition
+acorn tight gen_10 share 5: param x1, median 1540.89 ms, mean recall 0.9967, non-matches 2247 over 15 queries
+acorn ladder gen_10 share 6: rung 1, mean recall 0.9988, median 4322.2 ms
+acorn tight gen_10 share 6: timed at one repetition
+acorn tight gen_10 share 6: param x1, median 4322.22 ms, mean recall 0.9988, non-matches 1225 over 15 queries
+peak RSS 0.09 GiB

@@ -1,0 +1,17 @@
+dbknn ladder gen_10 share 3: nprobe 128 dial fit0.99: median 752.458 ms, mean recall 0.7744
+dbknn ladder gen_10 share 3: nprobe 256 dial fit0.99: median 1647.128 ms, mean recall 0.9268
+dbknn ladder gen_10 share 3: nprobe 512 dial fit0.99: median 4173.468 ms, mean recall 0.9995
+dbknn tight gen_10 share 3: timed at one repetition
+dbknn tight gen_10 share 3: nprobe 512 dial fit0.99: median 4173.468 ms, mean recall 0.9995
+dbknn ladder gen_10 share 4: nprobe 128 dial fit0.99: median 6.563 ms, mean recall 0.5480
+dbknn ladder gen_10 share 4: nprobe 256 dial fit0.99: median 1208.671 ms, mean recall 0.7626
+dbknn ladder gen_10 share 4: nprobe 512 dial fit0.99: median 4752.654 ms, mean recall 0.9998
+dbknn tight gen_10 share 4: timed at one repetition
+dbknn tight gen_10 share 4: nprobe 512 dial fit0.99: median 4752.654 ms, mean recall 0.9998
+dbknn ladder gen_10 share 5: nprobe 128 dial fit0.99: median 6.308 ms, mean recall 0.4257
+dbknn ladder gen_10 share 5: nprobe 256 dial fit0.99: median 8.453 ms, mean recall 0.6302
+dbknn ladder gen_10 share 5: nprobe 512 dial fit0.99: median 4658.770 ms, mean recall 0.9998
+dbknn tight gen_10 share 5: timed at one repetition
+dbknn tight gen_10 share 5: nprobe 512 dial fit0.99: median 4658.770 ms, mean recall 0.9998
+dbknn ladder gen_10 share 6: nprobe 128 dial fit0.99: median 6.410 ms, mean recall 0.3007
+dbknn ladder gen_10 share 6: nprobe 256 dial fit0.99: median 8.291 ms, mean recall 0.4845

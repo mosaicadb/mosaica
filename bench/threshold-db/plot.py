@@ -1,6 +1,6 @@
 # Latency against answer size, log-log, one line per system: unfiltered and 1% visible, at 1 thread and at 4.
 # usage: python3 -I plot.py RESULTS_DIR PREP_DIR
-# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, ours/dbcmp_r4_4t.csv, clickhouse.csv, ann.csv} and, for
+# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, ours/dbcmp_r4_4t.csv, clickhouse.csv, ann.csv, approx/liminal_approx.csv} and, for
 # comparison, the index rows of ours/dbcmp_main.csv (the index as measured on 13 Nov); writes RESULTS_DIR/plot_data.csv and
 # RESULTS_DIR/latency_{1,4}t.png. Every system on the queries with index divisible by 10; x is the
 # median exact answer size over those queries, y the median over them of each query's median time.
@@ -29,10 +29,9 @@ def exact_size(vis, si, qi):
     return size_cache[(si, qi)]
 
 
-LABEL = {"index": "ours: index", "flat": "ours: f16 scan", "clickhouse_t32_dot": "ClickHouse Float32",
+LABEL = {"index": "LIMINAL", "flat": "LIMINAL f16 scan", "clickhouse_t32_dot": "ClickHouse Float32",
          "clickhouse_tbf_dot": "ClickHouse BFloat16", "duckdb_t32_dot": "DuckDB FLOAT[768]",
-         "duckdb_t32_dot+mat": "DuckDB FLOAT[768]", "old_index": "ours: index (13 Nov)"}
-OLD = "ours: index (13 Nov)"
+         "duckdb_t32_dot+mat": "DuckDB FLOAT[768]", "old_index": "LIMINAL (13 Nov)"}
 pts = defaultdict(list)  # (label, exact, threads, vis, si) -> [(ms, recall)]
 for f in ("ours/dbcmp_main.csv", "ours/dbcmp_r4_1t.csv", "ours/dbcmp_r4_4t.csv", "clickhouse.csv"):
     if not os.path.exists(f"{res}/{f}"):
@@ -58,9 +57,15 @@ ANN = {("hnswlib", "default"): "hnswlib top-m, ef = m", ("hnswlib", "tight"): "h
        ("sq16", "compacted"): "faiss SQfp16 flat range, compacted visible copy",
        ("hnsw_sq16", "default"): "faiss HNSW-SQfp16 top-m, ef = m", ("hnsw_sq16", "tight"): "faiss HNSW-SQfp16 top-m, tight ef",
        ("ivf_sq16", "default"): "faiss IVF4096-SQfp16 range, nprobe 1",
-       ("ivf_sq16", "tight"): "faiss IVF4096-SQfp16 range, tight nprobe"}
-if os.path.exists(f"{res}/ann.csv"):
-    for r in csv.DictReader(open(f"{res}/ann.csv")):
+       ("ivf_sq16", "tight"): "faiss IVF4096-SQfp16 range, tight nprobe",
+       ("liminal", "default"): "LIMINAL approximate top-m, default", ("liminal", "tight"): "LIMINAL approximate top-m, tight"}
+for f in ("ann.csv", "approx/liminal_approx.csv"):
+    if not os.path.exists(f"{res}/{f}"):
+        continue
+    for r in csv.DictReader(open(f"{res}/{f}")):
+        # the filtered sweep's sets and systems (ACORN) are plot_filtered.py's
+        if (r["method"], r["setting"]) not in ANN or r["vis"] not in ("all", "vis_1"):
+            continue
         exact = r["method"] in ("flat", "panorama", "sq16")
         th = int(r["param"]) if exact else 1
         pts[(ANN[(r["method"], r["setting"])], exact, th, r["vis"], int(r["share_index"]))].append(
@@ -83,8 +88,9 @@ with open(f"{res}/plot_data.csv", "w", newline="") as f:
 SHARES = [0.01, 0.1, 1, 10, 30, 50, 75]
 NVIS = {"all": 999_950, "vis_1": 9_999.5}
 SERIES = [  # (label in plot_data, name on the chart, colour, exact, panels)
-    ("ours: index", "ours: index", "#2a78d6", True, ("all", "vis_1")),
-    ("ours: f16 scan", "ours: f16 scan", "#2a78d6", True, ("all", "vis_1")),
+    ("LIMINAL", "LIMINAL", "#2a78d6", True, ("all", "vis_1")),
+    ("LIMINAL f16 scan", "LIMINAL f16 scan", "#2a78d6", True, ("all", "vis_1")),
+    ("LIMINAL approximate top-m, tight", "LIMINAL approximate", "#e34948", False, ("all", "vis_1")),
     ("faiss Panorama flat range", "faiss Panorama", "#6250d6", True, ("all", "vis_1")),
     ("faiss IndexFlatIP range", "faiss flat", "#1baf7a", True, ("all",)),
     ("faiss IndexFlatIP range, compacted visible copy", "faiss flat, compacted copy", "#1baf7a", True, ("vis_1",)),
@@ -117,14 +123,18 @@ def draw(th, path):
             xs = [share(x, vis) for x, _, _ in pts]
             ys = [y for _, y, _ in pts]
             rs = [r for _, _, r in pts]
-            scan = key == "ours: f16 scan"
-            lw = 2.8 if key == "ours: index" else 1.8
-            ax.plot(xs, ys, linestyle="-" if exact else (0, (5, 3)), color=colour, lw=lw, alpha=0.55 if scan else 1, zorder=4 if key.startswith("ours") else 3)
+            scan = key == "LIMINAL f16 scan"
+            lw = 2.8 if key == "LIMINAL" else 1.8
+            ax.plot(xs, ys, linestyle="-" if exact else (0, (5, 3)), color=colour, lw=lw, alpha=0.55 if scan else 1, zorder=4 if key.startswith("LIMINAL") else 3)
             for x, y, r in zip(xs, ys, rs):
                 ok = exact or r >= 0.99
                 ax.plot([x], [y], "o", ms=5.5, mec=colour, mfc=colour if ok else "white", mew=1.6, alpha=0.55 if scan else 1, zorder=5)
                 if not ok and x != xs[-1] and x != 50:
-                    ax.annotate(f"recall {r:.3f}", (x, y), xytext=(7, -12), textcoords="offset points", fontsize=8, color=MUTED)
+                    # moved where the default spot falls on another series' point or line
+                    off = {("RaBitQ", 0.01): (14, -46), ("hnswlib", 0.01): (7, -20), ("faiss HNSW", 10): (8, 4)}.get((name, x), (7, -12))
+                    who = f"{name}: " if (name, x) in (("RaBitQ", 0.01), ("hnswlib", 0.01)) else ""
+                    ax.annotate(f"{who}recall {r:.3f}", (x, y), xytext=off, textcoords="offset points", fontsize=8, color=MUTED,
+                                arrowprops=dict(arrowstyle="-", color="#c9c8c2", lw=0.8, shrinkA=0, shrinkB=4) if off[1] < -20 else None)
             ends.append([ys[-1], xs[-1], name if exact or rs[-1] >= 0.99 else f"{name} (recall {rs[-1]:.2f})"])
         # names at the line ends, nudged apart in log space
         ends.sort()

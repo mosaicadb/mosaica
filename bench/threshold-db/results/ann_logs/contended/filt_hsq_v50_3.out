@@ -1,0 +1,8 @@
+hnsw_sq16: loaded in 4 s; RSS 1.61 GiB; the index adds 1.57 GiB resident
+hnsw_sq16 ladder vis_50 share 3: rung 1, mean recall 0.8257, median 814.7 ms
+hnsw_sq16 ladder vis_50 share 3: rung 1.5, mean recall 0.9408, median 1531.3 ms
+hnsw_sq16 ladder vis_50 share 3: rung 2, mean recall 0.9765, median 2563.8 ms
+hnsw_sq16 ladder vis_50 share 3: rung 3, mean recall 0.9922, median 5005.1 ms
+hnsw_sq16 tight vis_50 share 3: timed at one repetition
+hnsw_sq16 tight vis_50 share 3: param x2, median 2563.84 ms, mean recall 0.9765, non-matches 17592 over 15 queries
+peak RSS 1.62 GiB
