@@ -1,0 +1,5 @@
+[     9s] N 999000 n 768 (padded to 768); zero vectors 0
+[   101s] K 125 clusters (sizes 1158..32429), G 64 groups (sizes 1924..49797, clusters per group 1..5)
+[   344s] bases done (dual); group sizes 1924 .. 49797
+[   345s] saved {'N': 999000, 'n': 768, 'n_orig': 768, 'K': 125, 'G': 64, 'metric': 'angular', 'DLV': [4, 8, 12, 16, 24, 32], 'RLV': [56, 96, 160, 256], 'BOUNDS': [0, 96, 224, 480, 768], 'CSG': 9.330163258547264, 'L1': 43.525973215572655, 'xs': 'Xs.npy', 'source': '/tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c1m_x.npy', 'format': 2, 'fit': {'basis': 'dual', 'profile': 'qi', 'ridge': 0.1, 'sigma_q': 'corpus items', 'cond_max': 18.714585461168486}}
+peak RSS 3.74 GiB (exit 0)

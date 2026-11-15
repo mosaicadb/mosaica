@@ -1,0 +1,13 @@
+m1_8000 done 453.09914350509644
+truth /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/sc/truth_k500.npy 27.816121339797974
+k500_1000 done 171.96638131141663
+k500_2000 done 218.417160987854
+k500_4000 done 275.40088081359863
+r1m_1000 1000 64 {'cluster_min': 87, 'cluster_max': 4679, 'group_min': 417, 'group_max': 38554, 'cpg_min': 1, 'cpg_max': 50, 'groups_below_768': 1} 196.9324083369142
+r1m_2000 500 64 {'cluster_min': 316, 'cluster_max': 9180, 'group_min': 780, 'group_max': 48653, 'cpg_min': 1, 'cpg_max': 22, 'groups_below_768': 0} 64.4299908264283
+k500_8000 done 199.73654985427856
+PROBES1_DONE
+r1m_8000 125 64 {'cluster_min': 1751, 'cluster_max': 30736, 'group_min': 2879, 'group_max': 84920, 'cpg_min': 1, 'cpg_max': 9, 'groups_below_768': 0} 19.19313464587287
+r1m_4000 250 64 {'cluster_min': 620, 'cluster_max': 19420, 'group_min': 780, 'group_max': 57326, 'cpg_min': 1, 'cpg_max': 11, 'groups_below_768': 0} 59.409426058993375
+R1M_FITS_DONE
+PHASE1_DONE

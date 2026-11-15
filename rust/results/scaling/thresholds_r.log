@@ -1,0 +1,16 @@
+R1M 1000000
+R3M 3000000
+5M 5000000
+1M row groups 999000
+R1M vs R3M item: 0.01% median 0.0004 max 0.0030; 0.1% median 0.0003 max 0.0023; 1% median 0.0001 max 0.0010; 10% median 0.0000 max 0.0001; 50% median 0.0000 max 0.0002; 75% median 0.0000 max 0.0002
+R1M vs R3M text: 0.01% median 0.0006 max 0.0024; 0.1% median 0.0006 max 0.0013; 1% median 0.0001 max 0.0003; 10% median 0.0000 max 0.0001; 50% median 0.0000 max 0.0001; 75% median 0.0000 max 0.0001
+R1M vs 5M item: 0.01% median 0.0007 max 0.0076; 0.1% median 0.0003 max 0.0036; 1% median 0.0002 max 0.0011; 10% median 0.0000 max 0.0002; 50% median 0.0000 max 0.0002; 75% median 0.0000 max 0.0002
+R1M vs 5M text: 0.01% median 0.0007 max 0.0022; 0.1% median 0.0006 max 0.0015; 1% median 0.0002 max 0.0003; 10% median 0.0000 max 0.0001; 50% median 0.0000 max 0.0001; 75% median 0.0000 max 0.0001
+R1M vs 1M row groups item: 0.01% median 0.0177 max 0.1039; 0.1% median 0.0193 max 0.1175; 1% median 0.0405 max 0.1101; 10% median 0.0088 max 0.0172; 50% median 0.0024 max 0.0133; 75% median 0.0032 max 0.0096
+R1M vs 1M row groups text: 0.01% median 0.0222 max 0.0363; 0.1% median 0.0466 max 0.0858; 1% median 0.0108 max 0.0233; 10% median 0.0028 max 0.0080; 50% median 0.0011 max 0.0074; 75% median 0.0011 max 0.0054
+R3M vs 5M item: 0.01% median 0.0002 max 0.0058; 0.1% median 0.0002 max 0.0014; 1% median 0.0001 max 0.0003; 10% median 0.0000 max 0.0001; 50% median 0.0000 max 0.0001; 75% median 0.0000 max 0.0001
+R3M vs 5M text: 0.01% median 0.0002 max 0.0010; 0.1% median 0.0001 max 0.0005; 1% median 0.0000 max 0.0001; 10% median 0.0000 max 0.0001; 50% median 0.0000 max 0.0000; 75% median 0.0000 max 0.0000
+R3M vs 1M row groups item: 0.01% median 0.0175 max 0.1021; 0.1% median 0.0189 max 0.1154; 1% median 0.0408 max 0.1104; 10% median 0.0088 max 0.0173; 50% median 0.0023 max 0.0133; 75% median 0.0032 max 0.0096
+R3M vs 1M row groups text: 0.01% median 0.0237 max 0.0362; 0.1% median 0.0460 max 0.0861; 1% median 0.0106 max 0.0235; 10% median 0.0028 max 0.0080; 50% median 0.0010 max 0.0074; 75% median 0.0011 max 0.0054
+5M vs 1M row groups item: 0.01% median 0.0171 max 0.0963; 0.1% median 0.0189 max 0.1158; 1% median 0.0409 max 0.1104; 10% median 0.0088 max 0.0173; 50% median 0.0023 max 0.0134; 75% median 0.0032 max 0.0095
+5M vs 1M row groups text: 0.01% median 0.0234 max 0.0365; 0.1% median 0.0459 max 0.0861; 1% median 0.0106 max 0.0236; 10% median 0.0028 max 0.0080; 50% median 0.0010 max 0.0074; 75% median 0.0011 max 0.0054

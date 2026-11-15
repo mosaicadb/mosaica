@@ -48,7 +48,8 @@ names the branch or report that holds its evidence.
 - **Two deterministic levels and larger clusters.** Levels at 16 and 32 B (rust/REPORT_DETLEVELS.md) and about 4,000
   items per cluster (rust/REPORT_CLUSTERSIZE.md) are 18–33% faster for text and 10–23% for items at 1M together. The
   code is on research/levels-clusters, on research/combined at d443f66; it needs rebasing onto this branch (q.rs and
-  fit.py conflict). A scaling run at 500k, 1M and 3M is deciding whether the cluster size should depend on N.
+  fit.py conflict). At 500k, 1M and 3M (rust/REPORT_SCALING.md), 1,000 items per cluster was never the best; on the
+  uniform samples the best was 2,000 at 1M and 4,000 at 3M. Time 2,000 at 3M before fit.py's rule depends on N.
 - **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
   be stored.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the

@@ -1,0 +1,81 @@
+22:41:45 start t_m1_1000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 684712167 (det violations 0, rand violations 0); largest randomised error 5.41 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 133156316 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [413010540, 317377239, 279854224, 220851845, 129650
+peak RSS 5.96 GiB (exit 0)
+22:51:18 end t_m1_1000_1
+22:51:18 start t_m1_2000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 703769352 (det violations 0, rand violations 0); largest randomised error 5.24 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 139617149 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [425914444, 324065719, 286297295, 227190960, 134204
+peak RSS 6.14 GiB (exit 0)
+23:01:07 end t_m1_2000_1
+23:01:07 start t_m1_4000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 702596754 (det violations 0, rand violations 0); largest randomised error 5.27 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 149388889 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [435787789, 323937376, 286398900, 226084314, 134643
+peak RSS 6.23 GiB (exit 0)
+23:10:52 end t_m1_4000_1
+23:10:52 start t_m1_8000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 705866151 (det violations 0, rand violations 0); largest randomised error 5.26 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 160800017 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [449633132, 325753044, 288833115, 226486198, 136151
+peak RSS 6.38 GiB (exit 0)
+23:20:50 end t_m1_8000_1
+23:20:50 start t_m1_8000_2
+exit 0
+peak RSS 6.46 GiB (exit 0)
+23:27:14 end t_m1_8000_2
+23:27:14 start t_m1_4000_2
+exit 0
+peak RSS 6.22 GiB (exit 0)
+23:33:26 end t_m1_4000_2
+23:33:26 start t_m1_2000_2
+exit 0
+peak RSS 6.12 GiB (exit 0)
+23:39:36 end t_m1_2000_2
+23:39:36 start t_m1_1000_2
+exit 0
+peak RSS 5.96 GiB (exit 0)
+23:45:41 end t_m1_1000_2
+23:45:41 start t_k500_1000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 347518891 (det violations 0, rand violations 0); largest randomised error 4.97 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 69382404 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [211242709, 160628396, 141860305, 112036624, 6615651
+peak RSS 3.42 GiB (exit 0)
+23:50:40 end t_k500_1000_1
+23:50:40 start t_k500_2000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 351647655 (det violations 0, rand violations 0); largest randomised error 5.38 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 73501453 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [216646941, 161818088, 143145488, 112888408, 6723675
+peak RSS 3.54 GiB (exit 0)
+23:55:35 end t_k500_2000_1
+23:55:35 start t_k500_4000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 354675521 (det violations 0, rand violations 0); largest randomised error 5.21 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 77719373 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [222475813, 163326820, 144756440, 113956224, 6852330
+peak RSS 3.55 GiB (exit 0)
+00:00:35 end t_k500_4000_1
+00:00:35 start t_k500_8000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 354131430 (det violations 0, rand violations 0); largest randomised error 5.04 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 86418703 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [231747334, 163643336, 145328631, 113548322, 6822681
+peak RSS 3.77 GiB (exit 0)
+00:05:47 end t_k500_8000_1
+00:05:47 start t_k500_8000_2
+exit 0
+peak RSS 3.76 GiB (exit 0)
+00:09:11 end t_k500_8000_2
+00:09:11 start t_k500_4000_2
+exit 0
+peak RSS 3.54 GiB (exit 0)
+00:12:36 end t_k500_4000_2
+00:12:36 start t_k500_2000_2
+exit 0
+peak RSS 3.49 GiB (exit 0)
+00:16:02 end t_k500_2000_2
+00:16:02 start t_k500_1000_2
+exit 0
+peak RSS 3.42 GiB (exit 0)
+00:19:24 end t_k500_1000_2
+STAGE_AB_DONE
