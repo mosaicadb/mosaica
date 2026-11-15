@@ -31,6 +31,10 @@ names the branch or report that holds its evidence.
     22 ms and 24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB,
     38 ms and 33 MB, 162 ms and 147 MB). The suggestion is codes and vectors up to about 10% visible, codes alone above.
   - **The uncompacted index path over sparse clusters** costs more than the model predicts (22 ms forced at random 1%).
+- **Two deterministic levels and larger clusters.** Levels at 16 and 32 B (rust/REPORT_DETLEVELS.md) and about 4,000
+  items per cluster (rust/REPORT_CLUSTERSIZE.md) are 18–33% faster for text and 10–23% for items at 1M together. The
+  code is on research/levels-clusters, on research/combined at d443f66; it needs rebasing onto this branch (q.rs and
+  fit.py conflict). A scaling run at 500k, 1M and 3M is deciding whether the cluster size should depend on N.
 - **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
   be stored.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the
@@ -42,8 +46,9 @@ names the branch or report that holds its evidence.
 
 ## Approximate path
 
-- **The three steps in reports/annideas/NEXT.md:** cheaper group setup, sub-clusters (needs a ruling on row order inside
-  clusters, which touches the exact path's layout), and a fused fast-scan pass over levels 0–3.
+- **The three steps in reports/annideas/NEXT.md:** cheaper group setup, sub-clusters (row order ruled: rows stay sorted
+  by key and the approximate mode gathers each sub-cluster's rows; reports/annideas/REPORT.md), and a fused fast-scan
+  pass over levels 0–3.
 - **Hand over to the exact path at large answers.** Under filters the approximate mode loses to the exact index by up to
   three times once answers pass about 10% of the visible set; the planner should switch.
 - **Fit the dial above k = 1,000.** Larger answers currently reuse the k = 1,000 dial.
