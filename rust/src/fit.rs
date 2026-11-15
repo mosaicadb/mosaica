@@ -1,6 +1,6 @@
 //! The fit: from a partition of the vectors (`tools/partition.py`), the parameters the build reads, written as the
 //! directory `tools/fit.py` writes, without its copy of the vectors: the build reads them from the partition in the
-//! fit's row order (`ord{c}.u32`, `cellstart.npy`). Every pass goes cell by cell or cluster by cluster; nothing holds
+//! fit's row order (`ord{c}.u32`, `clcell.npy`, `clpos.npy`). Every pass goes cell by cell or cluster by cluster; nothing holds
 //! the vectors in memory.
 //!
 //! usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]
@@ -230,14 +230,12 @@ pub fn main(args: &[String]) {
     let ncell = part.cells.len();
     log(&t, format!("N {nrow} n {n0} (padded to {n}); {} fine centres in {ncell} cell(s) from {pdir}", part.k));
 
-    // pass 1, cell by cell: each cell's rows listed by fine cluster (the fit's row order: clusters in partition order,
-    // rows of a cluster in cell order), and every cluster's exact mean, stored int8 with one scale
+    // pass 1, cell by cell: each cell's rows listed by fine cluster (`ord{c}.u32`, a cluster's rows in cell order), and
+    // every cluster's exact mean, stored int8 with one scale
     let mut cnt0 = vec![0usize; part.k];
+    let mut pos0 = vec![0usize; part.k];
     let mut mean0: Vec<(Vec<i8>, f64)> = vec![(Vec::new(), 1.0); part.k];
-    let mut cellstart = vec![0i64; ncell + 1];
-    let perm_path = format!("{out}/perm.npy");
-    let mut perm_w = std::io::BufWriter::with_capacity(1 << 22, std::fs::File::create(&perm_path).unwrap_or_else(|e| panic!("cannot create {perm_path}: {e}")));
-    perm_w.write_all(&npy_header_bytes("<i8", &[nrow])).unwrap();
+    let mut placed = 0usize;
     for (c, cell) in part.cells.iter().enumerate() {
         let mut loc: Vec<(u32, u32)> = (0..cell.rows()).filter_map(|i| {
             let k = cell.cluster(i);
@@ -246,9 +244,7 @@ pub fn main(args: &[String]) {
         loc.sort_unstable();
         let ord: Vec<u32> = loc.iter().map(|x| x.1).collect();
         std::fs::write(format!("{out}/ord{c}.u32"), unsafe { std::slice::from_raw_parts(ord.as_ptr() as *const u8, ord.len() * 4) }).unwrap();
-        let ids: Vec<u8> = loc.iter().flat_map(|x| (cell.id(x.1 as usize) as i64).to_le_bytes()).collect();
-        perm_w.write_all(&ids).unwrap();
-        cellstart[c + 1] = cellstart[c] + loc.len() as i64;
+        placed += loc.len();
         let mut runs = Vec::new();
         let mut s = 0;
         while s < loc.len() {
@@ -268,21 +264,13 @@ pub fn main(args: &[String]) {
             }
             (k, e - s, (mean.iter().map(|v| (v / sc).round_ties_even() as i8).collect(), sc))
         }).collect();
-        for (k, m, q) in means {
-            cnt0[k] = m;
-            mean0[k] = q;
+        for (i, (k, m, q)) in means.into_iter().enumerate() {
+            (cnt0[k], pos0[k], mean0[k]) = (m, runs[i].1, q);
         }
     }
-    perm_w.flush().unwrap();
-    assert_eq!(cellstart[ncell] as usize, nrow, "the partition in {pdir} places {} rows in its cells' clusters, not its {nrow} rows; rerun tools/partition.py", cellstart[ncell]);
-    save(out, "cellstart", "<i8", &[ncell + 1], &cellstart);
+    assert_eq!(placed, nrow, "the partition in {pdir} places {placed} rows in its cells' clusters, not its {nrow} rows; rerun tools/partition.py");
     let keep: Vec<usize> = (0..part.k).filter(|&c| cnt0[c] > 0).collect();
     let k = keep.len();
-    let cnt: Vec<usize> = keep.iter().map(|&c| cnt0[c]).collect();
-    let mut cstart = vec![0i64; k + 1];
-    for c in 0..k {
-        cstart[c + 1] = cstart[c] + cnt[c] as i64;
-    }
     let mq8: Vec<i8> = keep.iter().flat_map(|&c| mean0[c].0.iter().copied()).collect();
     let msc: Vec<f64> = keep.iter().map(|&c| mean0[c].1).collect();
     drop(mean0);
@@ -303,12 +291,41 @@ pub fn main(args: &[String]) {
     gk.iter().enumerate().for_each(|(i, &g)| gmap[g] = i);
     let ng = gk.len();
     let grp: Vec<usize> = graw.iter().map(|&g| gmap[g]).collect();
+
+    // clusters numbered group by group (a query visits clusters in this order and builds each one's tables from its
+    // group's), rows of a cluster in cell order; the fit's rows are found through each cluster's cell and position
+    let mut order: Vec<usize> = (0..k).collect();
+    order.sort_by_key(|&i| (grp[i], i));
+    let grp: Vec<usize> = order.iter().map(|&i| grp[i]).collect();
+    let mq8: Vec<i8> = order.iter().flat_map(|&i| mq8[i * n..(i + 1) * n].iter().copied()).collect();
+    let msc: Vec<f64> = order.iter().map(|&i| msc[i]).collect();
+    let mq: Vec<f32> = order.iter().flat_map(|&i| mq[i * n..(i + 1) * n].iter().copied()).collect();
+    let mh: Vec<f32> = order.iter().flat_map(|&i| mh[i * n..(i + 1) * n].iter().copied()).collect();
+    let fine: Vec<usize> = order.iter().map(|&i| keep[i]).collect();
+    let cnt: Vec<usize> = fine.iter().map(|&f| cnt0[f]).collect();
+    let mut cstart = vec![0i64; k + 1];
+    for c in 0..k {
+        cstart[c + 1] = cstart[c] + cnt[c] as i64;
+    }
+    save(out, "cstart", "<i8", &[k + 1], &cstart);
+    save(out, "clcell", "<i8", &[k], &fine.iter().map(|&f| part.cluster_cell[f] as i64).collect::<Vec<_>>());
+    save(out, "clpos", "<i8", &[k], &fine.iter().map(|&f| pos0[f] as i64).collect::<Vec<_>>());
     log(&t, format!("K {k} clusters (sizes {}..{}), G {ng} groups", cnt.iter().min().unwrap(), cnt.iter().max().unwrap()));
 
     // pass 2: per group, residual covariance and mean |r|^2, residuals r = x - (stored centre), rows read through the
     // fit's row order
     let rows = crate::bucket::Buckets::open(&pdir, out);
     use crate::bucket::Rows;
+    {
+        let path = format!("{out}/perm.npy");
+        let mut w = std::io::BufWriter::with_capacity(1 << 22, std::fs::File::create(&path).unwrap_or_else(|e| panic!("cannot create {path}: {e}")));
+        w.write_all(&npy_header_bytes("<i8", &[nrow])).unwrap();
+        for r0 in (0..nrow).step_by(1 << 20) {
+            let b: Vec<u8> = (r0..nrow.min(r0 + (1 << 20))).flat_map(|r| (rows.id(r) as i64).to_le_bytes()).collect();
+            w.write_all(&b).unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
+        }
+        w.flush().unwrap();
+    }
     let acc: Vec<std::sync::Mutex<(Vec<f64>, f64)>> = (0..ng).map(|_| std::sync::Mutex::new((vec![0f64; n * n], 0f64))).collect();
     (0..k).into_par_iter().for_each(|c| {
         let (r0, r1) = (cstart[c] as usize, cstart[c + 1] as usize);
@@ -495,8 +512,6 @@ pub fn main(args: &[String]) {
     let tt: serde_json::Value = serde_json::from_str(include_str!("tree_tables.json")).unwrap();
     let tab = |key: &str| -> Vec<f64> { tt[key].as_array().unwrap().iter().flat_map(|r| r.as_array().unwrap().iter().map(|x| x.as_f64().unwrap())).collect() };
     let gtree: Vec<f64> = tt["gtree"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
-    let cstart_i: Vec<i64> = cstart.clone();
-    save(out, "cstart", "<i8", &[k + 1], &cstart_i);
     save(out, "grp", "<i8", &[k], &grp.iter().map(|&g| g as i64).collect::<Vec<_>>());
     save(out, "mq8", "|i1", &[k, n], &mq8);
     save(out, "msc", "<f8", &[k], &msc);

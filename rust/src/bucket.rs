@@ -87,23 +87,38 @@ impl Partition {
     }
 }
 
-/// A fit's rows read from its partition: fit row r is local row `ord[c][r - cellstart[c]]` of cell c.
+/// A fit's rows read from its partition: row i of the fit's cluster c is local row `ord[cell][pos + i]` of its cell,
+/// with `cell` and `pos` the cluster's (`clcell.npy`, `clpos.npy`).
 pub struct Buckets {
     pub part: Partition,
-    cellstart: Vec<usize>,
+    cstart: Vec<usize>,
+    clcell: Vec<usize>,
+    clpos: Vec<usize>,
     ord: Vec<Option<memmap2::Mmap>>,
 }
 
 impl Buckets {
     pub fn open(partition: &str, fit: &str) -> Buckets {
         let part = Partition::open(partition);
-        let cellstart: Vec<usize> = read_npy(&format!("{fit}/cellstart.npy")).i64s().iter().map(|&x| x as usize).collect();
-        assert_eq!(cellstart.len(), part.cells.len() + 1, "{fit} was fitted to another partition than {partition}; refit it");
+        let r = |name: &str| -> Vec<usize> { read_npy(&format!("{fit}/{name}.npy")).i64s().iter().map(|&x| x as usize).collect() };
+        let (cstart, clcell, clpos) = (r("cstart"), r("clcell"), r("clpos"));
         let ord: Vec<Option<memmap2::Mmap>> = (0..part.cells.len()).map(|c| map(&format!("{fit}/ord{c}.u32"))).collect();
-        for c in 0..part.cells.len() {
-            assert_eq!(words::<u32>(&ord[c]).len(), cellstart[c + 1] - cellstart[c], "{fit}/ord{c}.u32 does not list the fit's rows of cell {c}; refit it");
+        for c in 0..clcell.len() {
+            let (cell, end) = (clcell[c], clpos[c] + cstart[c + 1] - cstart[c]);
+            assert!(cell < part.cells.len() && end <= words::<u32>(&ord[cell]).len(), "{fit} lists rows of cluster {c} that {partition} does not hold; refit it");
         }
-        Buckets { part, cellstart, ord }
+        Buckets { part, cstart, clcell, clpos, ord }
+    }
+    /// The cell and local row of fit row r.
+    fn local(&self, r: usize) -> (usize, usize) {
+        let c = self.cstart.partition_point(|&s| s <= r) - 1;
+        let cell = self.clcell[c];
+        (cell, words::<u32>(&self.ord[cell])[self.clpos[c] + r - self.cstart[c]] as usize)
+    }
+    /// The source row (entity) of fit row r.
+    pub fn id(&self, r: usize) -> u64 {
+        let (cell, i) = self.local(r);
+        self.part.cells[cell].id(i)
     }
 }
 
@@ -112,8 +127,7 @@ impl Rows for Buckets {
         self.part.n
     }
     fn row(&self, r: usize) -> &[u16] {
-        let c = self.cellstart.partition_point(|&s| s <= r) - 1;
-        let i = words::<u32>(&self.ord[c])[r - self.cellstart[c]] as usize;
-        self.part.cells[c].vector(self.part.n, i)
+        let (cell, i) = self.local(r);
+        self.part.cells[cell].vector(self.part.n, i)
     }
 }
