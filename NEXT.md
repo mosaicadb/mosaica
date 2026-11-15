@@ -5,6 +5,21 @@ names the branch or report that holds its evidence.
 
 ## Merges owed onto this branch
 
+- **Checks run in the cloud session on fresh data (15 November).** Not the owner's c50k, c1m or text prompts, which
+  were not reachable: BioCLIP-2 image embeddings fetched from imageomics/TreeOfLife-200M-Embeddings (a seeded sample of
+  whole row groups), fitted by tools/fit.py, queries held-out images. With the binary at e9b6f29:
+  - 50k (50 clusters): verify with 200 item and 200 held-out queries: 0 wrong-in and wrong-out, 0 deterministic and 0
+    randomised violations, 0 decisions not implied, k-NN 0 mismatches of 400; bench/oracle_thr.py: 0 wrong, k-NN 0 of
+    80 differ.
+  - Answers before and after: dbcmp dumps on the 50k index (40 queries, five shares, unfiltered and three visible sets)
+    from 546375a (before the merges), fe1b413 (after them, before the deletions) and e9b6f29 are byte-identical for
+    every variant each binary has (40 files).
+  - 1M (1,000 clusters, 64 groups): dbcmp flat, index, idx, scan, cindex and cvindex, unfiltered and 1% visible, all
+    500 answers identical; dbtopk exact recall 1.0 at k 10 and 100, the approximate mode reaching 0.9 and 0.99;
+    dbcmp with --full-file read through io_uring and the mapping, answers byte-identical to the in-memory dumps.
+  - Not run: the capped run. The session has no systemd user bus and only cgroup v1, so neither `systemd-run --user`
+    nor the binary's own cap works there. It and the 50k check on the owner's c50k with text queries remain owed.
+
 - [x] **Benchmark branches, merged.** research/plots-refresh (with research/filter-sweep) and research/disk-reads (with
   research/bench-capped). The release build passes, and `cargo test --release` gives 15 passed and 1 ignored. Still to do
   on the owner's machine before this counts as checked: the 50k check (rust/results/const/check.sh), one `dbcmp`
