@@ -1688,6 +1688,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
     let anchors: Vec<f64> = if nusort || !real { Vec::new() } else if p.anchors.is_empty() { mhats.concat() } else { p.anchors.clone() };
     assert_eq!(anchors.len() % n, 0, "the fit's anchors.npy has rows of another width than n = {n}; rerun vexact anchors");
     let nanch = anchors.len() / n;
+    let anchors32: Vec<f32> = anchors.iter().map(|&v| v as f32).collect();
     let (thi, tlo) = (store::Out::<f32>::new(dir, "hi.bin", nanch * k), store::Out::<f32>::new(dir, "lo.bin", nanch * k));
     // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid, and
     // the columnar store's codes and norms
@@ -1722,16 +1723,30 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
             vecs.put(r0 * n, &it.x16);
             if nanch > 0 {
                 let nc = sizes[c];
-                let x: Vec<f64> = it.x16.iter().map(|&h| f16_to_f32(h) as f64).collect();
-                let mut px = vec![0f64; nc * nanch];
+                // x . a in f32 (the f16 rows are exact in f32), then each extreme exactly in f64 over the items whose
+                // f32 value lies within twice the f32 error bound of the f32 extreme: the true extreme is among them.
+                // Bound: |fl32(x . a) - x . a| <= ((n + 2) u) sum |x_i a_i| <= ((n + 2) u) |x| (|a| = 1, a rounded to f32).
+                let x: Vec<f32> = it.x16.iter().map(|&h| f16_to_f32(h)).collect();
+                let xn = x.chunks(n).map(|r| r.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>().sqrt()).fold(0.0, f64::max);
+                let m2 = 2.0 * (n as f64 + 4.0) * 2f64.powi(-24) * xn * (1.0 + 1e-6);
+                let mut px = vec![0f32; nc * nanch];
                 unsafe {
-                    matrixmultiply::dgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
+                    matrixmultiply::sgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors32.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
                 }
+                let exact = |i: usize, a: usize| -> f64 {
+                    x[i * n..(i + 1) * n].iter().zip(&anchors[a * n..(a + 1) * n]).map(|(&u, &v)| u as f64 * v).sum()
+                };
                 for a in 0..nanch {
+                    let (mut fx, mut fi) = (f32::NEG_INFINITY, f32::INFINITY);
+                    for i in 0..nc {
+                        fx = fx.max(px[i * nanch + a]);
+                        fi = fi.min(px[i * nanch + a]);
+                    }
                     let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
                     for i in 0..nc {
-                        mx = mx.max(px[i * nanch + a]);
-                        mi = mi.min(px[i * nanch + a]);
+                        let v = px[i * nanch + a] as f64;
+                        if v >= fx as f64 - m2 { mx = mx.max(exact(i, a)); }
+                        if v <= fi as f64 + m2 { mi = mi.min(exact(i, a)); }
                     }
                     thi.put(a * k + c, &[(((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32]);
                     tlo.put(a * k + c, &[(((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32]);
