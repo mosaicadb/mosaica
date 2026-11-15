@@ -1731,7 +1731,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
                 let m2 = 2.0 * (n as f64 + 4.0) * 2f64.powi(-24) * xn * (1.0 + 1e-6);
                 let mut px = vec![0f32; nc * nanch];
                 unsafe {
-                    matrixmultiply::sgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors32.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
+                    matrixmultiply::sgemm(nanch, n, nc, 1.0, anchors32.as_ptr(), n as isize, 1, x.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nc as isize, 1);
                 }
                 let exact = |i: usize, a: usize| -> f64 {
                     x[i * n..(i + 1) * n].iter().zip(&anchors[a * n..(a + 1) * n]).map(|(&u, &v)| u as f64 * v).sum()
@@ -1739,12 +1739,12 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
                 for a in 0..nanch {
                     let (mut fx, mut fi) = (f32::NEG_INFINITY, f32::INFINITY);
                     for i in 0..nc {
-                        fx = fx.max(px[i * nanch + a]);
-                        fi = fi.min(px[i * nanch + a]);
+                        fx = fx.max(px[a * nc + i]);
+                        fi = fi.min(px[a * nc + i]);
                     }
                     let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
                     for i in 0..nc {
-                        let v = px[i * nanch + a] as f64;
+                        let v = px[a * nc + i] as f64;
                         if v >= fx as f64 - m2 { mx = mx.max(exact(i, a)); }
                         if v <= fi as f64 + m2 { mi = mi.min(exact(i, a)); }
                     }

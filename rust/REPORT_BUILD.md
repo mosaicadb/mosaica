@@ -249,13 +249,29 @@ identical bytes read, where `pyA`'s own rounds ranged 31.8–39.1 ms: this conta
 that much between rounds. The bytes are the parity measure here; the timings show no regression beyond that noise.
 
 Build: the table costs part of the encoding pass, rising with A; at 1,256 anchors the f32 table took encoding from
-about 49 to 44 s against the f64 one (two alternating rounds each). This container's speed moved by about 30% over
+about 49 to 44 s against the f64 one (two alternating rounds each), before the anchor-major layout below. This container's speed moved by about 30% over
 the day (the same `pyfit` build took 68 s in the morning and 89 s in the afternoon), so only same-session comparisons
 are given.
 
 ### Bounded memory with the K × A table
 
-(The 1M and 4M synthetic runs are being repeated; figures to follow.)
+The 4M synthetic build of "Bounded memory" above (256 dimensions, K = 3,999, the default 1,024 coarse anchors), the
+K × K build of before this step against this one, alternating on the same fit and partition, in one session:
+
+| | Calibrated | Encoded | Support table | Total | Peak anonymous memory |
+|---|---|---|---|---|---|
+| K × K, separate pass (2 rounds) | 30, 27 s | +48, +44 s | +109 s | 189, 183 s | 667, 714 MB |
+| K × A in the encoding pass, anchor-major f32 (2 rounds) | 25, 25 s | +58, +61 s (table included) | — | 90, 93 s | — |
+| K × A, first layout (2 rounds) | 27, 26 s | +77, +73 s (table included) | — | 107, 105 s | 455, 461 MB |
+
+The code hash is the same in all (`6a2af64cdcfa8b43`). The table adds about 15 s to encoding at 4M rows and 1,024
+anchors (about 70 GFLOP/s of f32 multiply on the 4 cores); it grows as N·A·n, linear in N, against N·K·n before. The
+anonymous memory of the phases is now: fit loaded 52 MB, calibrated 329, encoded 338, assembled 376 at 4M (319 MB peak
+at 1M, unchanged); the K² heap of the table phase (+120 MB kept, +300 MB peak) is gone. What still grows with N is
+`perm` and the per-cluster records (the assembled phase), which step 5's Part C maps.
+
+This container ran about 2.5 times slower in the afternoon than in the morning (`partition.py` at 4M: 53 s, then 145
+s), so the times in this section are only comparable with each other.
 
 ## Not done, and not measured
 
