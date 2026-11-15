@@ -2210,6 +2210,7 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
     let parts: Vec<ThrOut2> = if let Some(fr) = fr {
         let decide = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
             let b = rd.pop().unwrap();
+            assert!(ix.vrow.is_empty(), "a reader batch holds file rows, which are answer rows only on an index that reads its own vectors (Index2::own_rows)");
             decide_full_from(ix, pr, t, &b.rows, want_exact, acc, |k| b.row(k, ix.n()));
             rd.recycle(b);
         };
@@ -2686,6 +2687,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
     // with a reader, the rows of a cluster that need full vectors are read while the next clusters run their index path
     let decide_batch = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
         let b = rd.pop().unwrap();
+        assert!(ix.vrow.is_empty(), "a reader batch holds file rows, which are answer rows only on an index that reads its own vectors (Index2::own_rows)");
         let tf = tick();
         decide_full_from(ix, pr, t, &b.rows, o.want_iv, acc, |k| b.row(k, ix.n()));
         acc.st.cyc[P_FULL] += tick() - tf;
