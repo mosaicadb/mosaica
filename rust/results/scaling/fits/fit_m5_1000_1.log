@@ -1,0 +1,2 @@
+[    55s] N 5000000 n 768 (padded to 768); zero vectors 0
+[   525s] K 5000 clusters (sizes 1..7283), G 64 groups (sizes 10136..301843, clusters per group 13..213)

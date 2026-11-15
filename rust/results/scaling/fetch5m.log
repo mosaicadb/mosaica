@@ -1,0 +1,23 @@
+0 train-00038-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 6
+1 train-00049-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+2 train-00059-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 6
+3 train-00071-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+4 train-00074-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+5 train-00088-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 4
+'[Errno 104] Connection reset by peer' thrown while requesting GET https://huggingface.co/datasets/imageomics/TreeOfLife-200M-Embeddings/resolve/main/bioclip-2_float16/train-00092-of-00666.parquet
+Retrying in 1s [Retry 1/5].
+6 train-00092-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 6
+7 train-00096-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 2
+8 train-00154-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+9 train-00219-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 3
+10 train-00246-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 4
+11 train-00331-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 3
+12 train-00374-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 3
+13 train-00404-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 2
+14 train-00428-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 0
+15 train-00444-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+16 train-00519-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 2
+17 train-00548-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 4
+18 train-00564-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 1
+19 train-00596-of-00666.parquet rows 350000 row groups 7 taken 200000 outside group 5
+done 5000000

@@ -68,6 +68,53 @@ def schedule(n0, n):
     return rlv, bounds
 
 
+class Subset:
+    """Rows `rows` of a (memory-mapped) array, indexed like an array of those rows."""
+
+    def __init__(self, X, rows):
+        self.X, self.rows = X, np.asarray(rows, np.int64)
+        self.shape = (len(self.rows), X.shape[1])
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            k = np.arange(*k.indices(len(self)))
+        r = self.rows[np.asarray(k)]
+        o = np.argsort(r, kind="stable")
+        out = np.empty((len(r), self.shape[1]), self.X.dtype)
+        out[o] = self.X[r[o]]
+        return out
+
+
+class Rows:
+    """The unit vectors, zero-padded to n, read from the source file on demand (row order `order` when given), so no
+    full float32 copy is held: R[i:j] and R[index array] give float32 rows, the same values as normalising the whole
+    file at once."""
+
+    def __init__(self, X, n, order=None):
+        self.X, self.n, self.order = X, n, order
+
+    def __len__(self):
+        return len(self.X)
+
+    def permuted(self, order):
+        return Rows(self.X, self.n, order)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            k = np.arange(*k.indices(len(self)))
+        k = np.asarray(k)
+        if self.order is not None:
+            k = self.order[k]
+        x = np.asarray(self.X[k], np.float32)
+        nr = np.linalg.norm(x, axis=1, keepdims=True)
+        out = np.zeros((len(x), self.n), np.float32)
+        out[:, :x.shape[1]] = np.where(nr > 0, x / np.where(nr > 0, nr, 1), 0)
+        return out
+
+
 def int8_basis(v):
     """The int8 basis the Rust build makes from V (f32, columns): one scale per column, max |v| / 127."""
     v = v.astype(np.float64)
@@ -114,6 +161,7 @@ def main():
     ap.add_argument("--seed", type=int, default=20261112)
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
+    ap.add_argument("--rows", default="", help="a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...")
     ap.add_argument("--per-cluster", type=int, default=PER_CLUSTER, help="items per cluster on average")
     ap.add_argument("--groups", type=int, default=0,
                     help="groups of clusters (at most the cluster count); 0: min(64, K / 8, N / (20 n))")
@@ -123,17 +171,15 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     X = np.load(a.vectors, mmap_mode="r")
+    if a.rows:
+        X = Subset(X, np.load(a.rows))
     N, n0 = X.shape
     if n0 < 50:
         sys.exit(f"{a.vectors} has {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, "
                  f"which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more.")
     n = (n0 + 31) // 32 * 32
-    Xu = np.zeros((N, n), np.float32)
-    for i in range(0, N, 100_000):
-        x = np.asarray(X[i:i + 100_000], np.float32)
-        nr = np.linalg.norm(x, axis=1, keepdims=True)
-        Xu[i:i + len(x), :n0] = np.where(nr > 0, x / np.where(nr > 0, nr, 1), 0)
-    nzero = int((np.abs(Xu).sum(1) == 0).sum())
+    Xu = Rows(X, n)
+    nzero = sum(int((np.abs(Xu[i:i + 100_000]).sum(1) == 0).sum()) for i in range(0, N, 100_000))
     log(f"N {N} n {n0} (padded to {n}); zero vectors {nzero}")
 
     K = max(1, round(N / a.per_cluster))
@@ -148,7 +194,8 @@ def main():
     K = len(keep)
     cnt = np.bincount(assign, minlength=K)
     Msum = np.zeros((K, n))
-    np.add.at(Msum, assign, Xu)
+    for i in range(0, N, 100_000):
+        np.add.at(Msum, assign[i:i + 100_000], Xu[i:i + 100_000])
     Mean = Msum / cnt[:, None]
     msc = np.abs(Mean).max(1) / 127
     msc[msc == 0] = 1.0
@@ -177,8 +224,12 @@ def main():
     assign = newid[assign]
     mq8, msc, Mq, grp, cnt = mq8[first], msc[first], Mq[first], grp[first], cnt[first]
     cstart = np.r_[0, np.cumsum(cnt)]
-    Xu = Xu[order]
-    np.save(os.path.join(a.out, "Xs.npy"), Xu.astype(np.float16))
+    Xu = Xu.permuted(order)
+    xs = np.lib.format.open_memmap(os.path.join(a.out, "Xs.npy"), mode="w+", dtype=np.float16, shape=(N, n))
+    for i in range(0, N, 100_000):
+        xs[i:i + 100_000] = Xu[i:i + 100_000].astype(np.float16)
+    xs.flush()
+    del xs
     np.save(os.path.join(a.out, "perm.npy"), order.astype(np.int64))
 
     lam = np.zeros((G, n))
@@ -269,6 +320,8 @@ def main():
     meta = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(K), G=int(G), metric=a.metric, DLV=DLV, RLV=rlv, BOUNDS=bounds,
                 CSG=math.sqrt(2 * L1), L1=L1, xs="Xs.npy", source=os.path.abspath(a.vectors),
                 format=FORMAT, fit=fit)
+    if a.rows:
+        meta["rows"] = os.path.abspath(a.rows)
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("saved", meta)

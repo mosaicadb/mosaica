@@ -1,0 +1,50 @@
+{
+ "N": 499495,
+ "n": 768,
+ "n_orig": 768,
+ "K": 250,
+ "G": 64,
+ "metric": "angular",
+ "DLV": [
+  4,
+  8,
+  12,
+  16,
+  24,
+  32
+ ],
+ "RLV": [
+  56,
+  96,
+  160,
+  256
+ ],
+ "BOUNDS": [
+  0,
+  96,
+  224,
+  480,
+  768
+ ],
+ "CSG": 9.330163258547264,
+ "L1": 43.525973215572655,
+ "xs": "Xs.npy",
+ "source": "/tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c500k_x.npy",
+ "format": 2,
+ "fit": {
+  "basis": "dual",
+  "profile": "qi",
+  "ridge": 0.1,
+  "sigma_q": "corpus items",
+  "cond_max": 126.21506882917703
+ },
+ "stats": {
+  "cluster_min": 305,
+  "cluster_max": 9881,
+  "group_min": 669,
+  "group_max": 24961,
+  "cpg_min": 1,
+  "cpg_max": 15,
+  "groups_below_768": 1
+ }
+}

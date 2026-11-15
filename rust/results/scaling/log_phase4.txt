@@ -1,0 +1,27 @@
+best coarse size at R3M: 4000
+/dev/vda        252G   32G  7.0G  83% /
+Mem:              15           0          14           0           0          15
+03:38:47 start t_r3m_4000_2
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 2460088726 (det violations 0, rand violations 0); largest randomised error 5.55 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filt
+VERIFY2 checker: 434188734 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [1438980360, 1142717923, 1004791626, 790522667, 463
+peak RSS 16.53 GiB (exit 0)
+04:03:55 end t_r3m_4000_2
+STAGE_C_DONE r3m 2 4000
+/dev/vda        252G   32G  7.0G  83% /
+Mem:              15           0           9           0           5          14
+04:03:55 start t_r3m_1000_2
+exit 0
+peak RSS 15.81 GiB (exit 0)
+04:19:15 end t_r3m_1000_2
+STAGE_C_DONE r3m 2 1000
+TIMING_DONE
+truth /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/sc/truth_r1m.npy 30.10501217842102
+r1m_1000 done 93.64219617843628
+r1m_4000 done 207.98290824890137
+r1m_8000 done 253.7364981174469
+r1m_2000 done 139.6589961051941
+truth /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/sc/truth_r3m.npy 34.793408155441284
+r3m_1000 done 279.87114429473877
+r3m_4000 done 621.1723256111145
+PHASE4_DONE

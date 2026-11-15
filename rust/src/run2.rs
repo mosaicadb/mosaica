@@ -707,7 +707,9 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             let sc = fl.scores(&pr.q32);
             thresholds_for(&fl, &pr.q16, &sc, full_err2(&c0.ix, &pr), &sizes)
         }).collect();
-        let ncell = sizes_f.len() + if arg_usize("--knn", 1) > 0 { 1 } else { 0 }; // the last cell is k-NN
+        // the last cells are exact k-NN, one per k of `--knn-k` (default 10)
+        let knn_ks: Vec<usize> = if arg_usize("--knn", 1) > 0 { arg_str("--knn-k", "10").split(',').map(|x| x.parse().expect("--knn-k K,K,...")).collect() } else { Vec::new() };
+        let ncell = sizes_f.len() + knn_ks.len();
         let run_cell = |c: &Ctx2, plan: Plan, cell: usize, qi: usize| -> Stats {
             let ix = &c.ix;
             if cell < sizes_f.len() {
@@ -717,7 +719,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                 std::hint::black_box(to_bitmap2(ix, &r.rows));
                 r.st
             } else {
-                knn2(ix, &qs[qi], 10, None, plan).st
+                knn2(ix, &qs[qi], knn_ks[cell - sizes_f.len()], None, plan).st
             }
         };
         let k = qs.len() as f64;
@@ -754,11 +756,11 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                     out!("e2e2 colhw {vname} {cls} {}: per check mean fixed / rho5 / unread / |est-t|: {}", sizes_f.get(cell).map_or(0.0, |x| *x), hwacc.iter().filter(|x| x[0] > 0.0).map(|x| format!("{:.4}/{:.4}/{:.4}/{:.4}", x[1] / x[0], x[2] / x[0], x[3] / x[0], x[4] / x[0])).collect::<Vec<_>>().join(" "));
                 }
                 if !colst[0].is_empty() {
-                    out!("e2e2 colchecks {vname} {cls} {}: entering {:?} decided {:?}; block norms read {:.4}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() },
+                    out!("e2e2 colchecks {vname} {cls} {}: entering {:?} decided {:?}; block norms read {:.4}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { format!("knn{}", knn_ks[cell - sizes_f.len()]) },
                         colst[0].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[1].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[2][0] / k / nrows as f64);
                 }
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
-                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
+                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { format!("knn{}", knn_ks[cell - sizes_f.len()]) }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }
         }
         for &th in &threads {
@@ -782,7 +784,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             for (vi, &(vname, _, _)) in vs.iter().enumerate() {
                 for cell in 0..ncell {
                     let v = &per[vi][cell];
-                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr", sizes_f[cell]) } else { ("index2_knn10", 0.0) };
+                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr".to_string(), sizes_f[cell]) } else { let kk = knn_ks[cell - sizes_f.len()]; (format!("index2_knn{kk}"), kk as f64) };
                     let line = format!("{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", vname, cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[vi][cell]);
                     out!("e2e2 {line}");
                     lines.push(line);
@@ -841,7 +843,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let mut cnt = [0f64; 4];
                 let mut rkap = 0f64;
                 // per query: clusters on the index path, on full vectors, items entering the first level, item-levels
-                let mut opened = [0f64; 4];
+                let mut opened = [0f64; 6];
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -891,6 +893,8 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     opened[1] += r.flat_clusters as f64 / nq;
                     opened[2] += r.st.enter[0] as f64 / nq;
                     opened[3] += r.st.enter[..r.st.enter.len() - 1].iter().sum::<u64>() as f64 / nq;
+                    opened[4] += r.st.groups as f64 / nq;
+                    opened[5] += r.st.full_reads as f64 / nq;
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
                     let (a, b) = sym_diff(&bm, &truths[qi]);
@@ -903,7 +907,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 out!("breakdown2 {line}");
                 out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
-                out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels", opened[0], opened[1], opened[2], opened[3]);
+                out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels, {:.1} groups, {:.0} full reads", opened[0], opened[1], opened[2], opened[3], opened[4], opened[5]);
                 lines.push(line);
             }
         }

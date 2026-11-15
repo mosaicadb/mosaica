@@ -1,0 +1,332 @@
+{
+ "name": "k500_8000",
+ "N": 499495,
+ "K": 62,
+ "G": 62,
+ "a": {
+  "img k10 r0.8": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k10 r0.9": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k10 r0.99": {
+   "items": 22672.32,
+   "parents": 2,
+   "groups": 2.0
+  },
+  "img k100 r0.8": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k100 r0.9": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k100 r0.99": {
+   "items": 22672.32,
+   "parents": 2,
+   "groups": 2.0
+  },
+  "img k1000 r0.8": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k1000 r0.9": {
+   "items": 16293.92,
+   "parents": 1
+  },
+  "img k1000 r0.99": {
+   "items": 22672.32,
+   "parents": 2,
+   "groups": 2.0
+  },
+  "txt k10 r0.8": {
+   "items": 11242.35,
+   "parents": 1
+  },
+  "txt k10 r0.9": {
+   "items": 19605.86,
+   "parents": 2
+  },
+  "txt k10 r0.99": {
+   "items": 27351.34,
+   "parents": 3,
+   "groups": 3.0
+  },
+  "txt k100 r0.8": {
+   "items": 11242.35,
+   "parents": 1
+  },
+  "txt k100 r0.9": {
+   "items": 19605.86,
+   "parents": 2
+  },
+  "txt k100 r0.99": {
+   "items": 27351.34,
+   "parents": 3,
+   "groups": 3.0
+  },
+  "txt k1000 r0.8": {
+   "items": 11242.35,
+   "parents": 1
+  },
+  "txt k1000 r0.9": {
+   "items": 19605.86,
+   "parents": 2
+  },
+  "txt k1000 r0.99": {
+   "items": 35252.49,
+   "parents": 4,
+   "groups": 4.0
+  }
+ },
+ "b": {
+  "subs": 8054,
+  "img k10 r0.8": {
+   "items": 647.9,
+   "P": 4,
+   "sub_probes": 7,
+   "centres_scored": 698.42
+  },
+  "img k10 r0.9": {
+   "items": 1068.48,
+   "P": 4,
+   "sub_probes": 12,
+   "centres_scored": 698.42
+  },
+  "img k100 r0.8": {
+   "items": 1068.48,
+   "P": 4,
+   "sub_probes": 12,
+   "centres_scored": 698.42
+  },
+  "img k100 r0.9": {
+   "items": 1903.58,
+   "P": 4,
+   "sub_probes": 22,
+   "centres_scored": 698.42
+  },
+  "img k1000 r0.8": {
+   "items": 2370.04,
+   "P": 4,
+   "sub_probes": 28,
+   "centres_scored": 698.42
+  },
+  "img k1000 r0.9": {
+   "items": 3685.82,
+   "P": 16,
+   "sub_probes": 45,
+   "centres_scored": 2187.326666666667
+  },
+  "txt k10 r0.8": {
+   "items": 421.39,
+   "P": 8,
+   "sub_probes": 7,
+   "centres_scored": 1233.7733333333333
+  },
+  "txt k100 r0.8": {
+   "items": 712.12,
+   "P": 8,
+   "sub_probes": 12,
+   "centres_scored": 1233.7733333333333
+  },
+  "txt k1000 r0.8": {
+   "items": 2377.95,
+   "P": 16,
+   "sub_probes": 41,
+   "centres_scored": 2187.326666666667
+  },
+  "img k10 r0.99": {
+   "items": 2991.56,
+   "P": 4,
+   "sub_probes": 36,
+   "centres_scored": 698.42,
+   "parents": 1.28,
+   "groups": 1.28
+  },
+  "img k100 r0.99": {
+   "items": 5609.02,
+   "P": 32,
+   "sub_probes": 71,
+   "centres_scored": 4126.833333333334,
+   "parents": 1.72,
+   "groups": 1.72
+  },
+  "img k1000 r0.99": {
+   "items": 8835.64,
+   "P": 32,
+   "sub_probes": 119,
+   "centres_scored": 4126.833333333334,
+   "parents": 2.32,
+   "groups": 2.32
+  },
+  "txt k10 r0.9": {
+   "items": 826.29,
+   "P": 16,
+   "sub_probes": 14,
+   "centres_scored": 2187.326666666667
+  },
+  "txt k100 r0.9": {
+   "items": 1394.97,
+   "P": 16,
+   "sub_probes": 24,
+   "centres_scored": 2187.326666666667
+  },
+  "txt k1000 r0.9": {
+   "items": 4046.17,
+   "P": 32,
+   "sub_probes": 70,
+   "centres_scored": 4126.833333333334
+  },
+  "txt k10 r0.99": {
+   "items": 4671.06,
+   "P": 32,
+   "sub_probes": 81,
+   "centres_scored": 4126.833333333334,
+   "parents": 5.33,
+   "groups": 5.33
+  },
+  "txt k100 r0.99": {
+   "items": 5994.4,
+   "P": 32,
+   "sub_probes": 104,
+   "centres_scored": 4126.833333333334,
+   "parents": 6.88,
+   "groups": 6.88
+  },
+  "txt k1000 r0.99": {
+   "items": 11772.55,
+   "P": 32,
+   "sub_probes": 206,
+   "centres_scored": 4126.833333333334,
+   "parents": 11.92,
+   "groups": 11.92
+  }
+ },
+ "c": {
+  "subs": 2002,
+  "img k10 r0.8": {
+   "items": 1014.24,
+   "P": 4,
+   "sub_probes": 3,
+   "centres_scored": 219.79333333333332
+  },
+  "img k10 r0.9": {
+   "items": 1686.5,
+   "P": 1,
+   "sub_probes": 5,
+   "centres_scored": 113.78
+  },
+  "img k100 r0.8": {
+   "items": 1686.5,
+   "P": 1,
+   "sub_probes": 5,
+   "centres_scored": 113.78
+  },
+  "img k100 r0.9": {
+   "items": 2625.6,
+   "P": 4,
+   "sub_probes": 8,
+   "centres_scored": 219.79333333333332
+  },
+  "img k1000 r0.8": {
+   "items": 2938.9,
+   "P": 8,
+   "sub_probes": 9,
+   "centres_scored": 352.64666666666665
+  },
+  "img k1000 r0.9": {
+   "items": 4735.94,
+   "P": 4,
+   "sub_probes": 15,
+   "centres_scored": 219.79333333333332
+  },
+  "txt k10 r0.8": {
+   "items": 894.55,
+   "P": 2,
+   "sub_probes": 4,
+   "centres_scored": 144.59333333333333
+  },
+  "txt k100 r0.8": {
+   "items": 1117.6,
+   "P": 4,
+   "sub_probes": 5,
+   "centres_scored": 219.79333333333332
+  },
+  "txt k1000 r0.8": {
+   "items": 3138.82,
+   "P": 16,
+   "sub_probes": 14,
+   "centres_scored": 589.9533333333334
+  },
+  "img k10 r0.99": {
+   "items": 4744.8,
+   "P": 2,
+   "sub_probes": 15,
+   "centres_scored": 144.59333333333333,
+   "parents": 1.24,
+   "groups": 1.24
+  },
+  "img k100 r0.99": {
+   "items": 7606.92,
+   "P": 4,
+   "sub_probes": 25,
+   "centres_scored": 219.79333333333332,
+   "parents": 1.44,
+   "groups": 1.44
+  },
+  "img k1000 r0.99": {
+   "items": 10634.74,
+   "P": 32,
+   "sub_probes": 37,
+   "centres_scored": 1072.2066666666667,
+   "parents": 1.88,
+   "groups": 1.88
+  },
+  "txt k10 r0.9": {
+   "items": 1549.65,
+   "P": 4,
+   "sub_probes": 7,
+   "centres_scored": 219.79333333333332
+  },
+  "txt k100 r0.9": {
+   "items": 2468.37,
+   "P": 4,
+   "sub_probes": 11,
+   "centres_scored": 219.79333333333332
+  },
+  "txt k1000 r0.9": {
+   "items": 5682.83,
+   "P": 32,
+   "sub_probes": 25,
+   "centres_scored": 1072.2066666666667
+  },
+  "txt k10 r0.99": {
+   "items": 6202.81,
+   "P": 4,
+   "sub_probes": 27,
+   "centres_scored": 219.79333333333332,
+   "parents": 3.0,
+   "groups": 3.0
+  },
+  "txt k100 r0.99": {
+   "items": 8023.44,
+   "P": 8,
+   "sub_probes": 35,
+   "centres_scored": 352.64666666666665,
+   "parents": 4.38,
+   "groups": 4.38
+  },
+  "txt k1000 r0.99": {
+   "items": 15893.21,
+   "P": 32,
+   "sub_probes": 69,
+   "centres_scored": 1072.2066666666667,
+   "parents": 9.12,
+   "groups": 9.12
+  }
+ }
+}
