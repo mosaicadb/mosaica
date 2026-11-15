@@ -1,0 +1,30 @@
+==== run at 1794699800: ["/home/joe/code/vexact-planner-target/release/vexact", "--v2", "--int", "--gtab", "--flags", "repack", "--no-approx", "--index", "/home/joe/code/vexact-benchup-data/index_r4", "--queries", "/home/joe/code/vexact-filter-data/prep/queries.npy", "--results", "/home/joe/code/vexact-planner/bench/threshold-db/results/planner/runs", "--core", "4", "--pin", "4", "--plan-file", "/home/joe/code/vexact-planner/bench/threshold-db/results/planner/plan_r4.txt", "dbcmp", "--thr", "/home/joe/code/vexact-filter-data/prep/thresholds.npy", "--cmp-vis", "/home/joe/code/vexact-filter-data/prep/vis_1.npy,/home/joe/code/vexact-filter-data/prep/vis_10.npy,/home/joe/code/vexact-filter-data/prep/vis_50.npy", "--skip-all", "--threads", "1", "--step", "10", "--reps", "5", "--tag", "base_r", "--cmp-what", "flat,index,idx,scan"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 1048576 (2^20; 999950 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 35.9725
+[build2] randomised constants 10.3s (sub-Gaussian c = 8.482): [([95], 6.931, ExactTail), ([95, 127, 255], 7.981, ConvexOrder), ([95, 127, 255, 287], 8.083, ConvexOrder)]
+[build2] plans 19.1s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [3.0, 1.0, 0.25, 0.0], [4.0, 3.0, 1.0, 0.0], [7.0, 4.0, 2.0, 0.25]]
+[build2] calibrated 99.8s
+[build2] encoded 215.8s
+[build2] assembled 216.8s; x2 bound 4.872e-4; escapes: det norms 3696, |y| 8708, kappa 10762, tan 24119
+[repack] occupancy thresholds by level [0.07, 0.07, 0.07, 0.07, 0.1, 0.09, 0.06, 0.1, 0.14, 0.17] (timed in 0.1s)
+[plan] full_us=0.13864607841626672 item_us0=0.00987437096885492 item_us1=0.03949748387541968 cl_us0=1.9748741937709842 cl_us1=9.87437096885492 grp_us=69.12059678198445 scan_us=0.11212293811958639 cut_us=1.5842075624999998 seed_us=718.2714375 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":16.9710254636224,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+dbcmp vis_1: 10000 visible; into row order once per session 0.46 ms
+dbcmp flat threads 1 vis vis_1: 105 timings, median 1.550 ms; 0 of 525 runs scanned
+dbcmp index threads 1 vis vis_1: 105 timings, median 1.645 ms; 525 of 525 runs scanned
+dbcmp idx threads 1 vis vis_1: 105 timings, median 22.357 ms; 0 of 525 runs scanned
+dbcmp scan threads 1 vis vis_1: 105 timings, median 2.050 ms; 0 of 525 runs scanned
+dbcmp vis_10: 99995 visible; into row order once per session 2.26 ms
+dbcmp flat threads 1 vis vis_10: 105 timings, median 14.617 ms; 0 of 525 runs scanned
+dbcmp index threads 1 vis vis_10: 105 timings, median 15.836 ms; 430 of 525 runs scanned
+dbcmp idx threads 1 vis vis_10: 105 timings, median 41.820 ms; 0 of 525 runs scanned
+dbcmp scan threads 1 vis vis_10: 105 timings, median 15.230 ms; 0 of 525 runs scanned
+dbcmp vis_50: 499975 visible; into row order once per session 11.10 ms
+dbcmp flat threads 1 vis vis_50: 105 timings, median 58.513 ms; 0 of 525 runs scanned
+dbcmp index threads 1 vis vis_50: 105 timings, median 54.065 ms; 0 of 525 runs scanned
+dbcmp idx threads 1 vis vis_50: 105 timings, median 58.535 ms; 0 of 525 runs scanned
+dbcmp scan threads 1 vis vis_50: 105 timings, median 65.379 ms; 0 of 525 runs scanned
+dbcmp answers: 945 compared with the first variant's, all identical
+dbcmp resident after the queries: VmRSS:	 6179436 kB, RssAnon:	 3174348 kB, RssFile:	 3005088 kB

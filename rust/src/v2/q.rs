@@ -2468,8 +2468,9 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
     let scan_cost = nvis as f64 * row_us;
     // a live cluster that the support table leaves open costs at least the cheaper of its cut and scoring its rows
     let floor = |ci: usize| pl.cut_us.min(if pl.direct { nvis_cl(ci) as f64 * row_us + pl.dir_us } else { f64::INFINITY });
-    // before the anchors are read: no cluster is expected to be decided by the support table
-    if auto && scan_cost <= pl.anc_us + fixed_us + live.iter().map(|&ci| floor(ci)).sum::<f64>() {
+    // before the anchors are read: when the scan costs no more than cutting every live cluster, or than the anchor
+    // search with each live cluster at the cheaper of its cut and its rows (no cluster decided by the support table)
+    if auto && (scan_cost <= live.len() as f64 * pl.cut_us + fixed_us || scan_cost <= pl.anc_us + fixed_us + live.iter().map(|&ci| floor(ci)).sum::<f64>()) {
         return Planned::Scan;
     }
     let tc0 = tick();

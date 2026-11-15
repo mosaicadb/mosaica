@@ -1,0 +1,30 @@
+==== run at 1794706556: ["/home/joe/code/vexact-planner-target/release/vexact", "--v2", "--int", "--no-approx", "--index", "/home/joe/code/vexact-const-data/c50k_r4", "--queries", "/home/joe/code/vexact-data/bioclip2-text/text_q.npy", "--item-queries", "/home/joe/code/vexact-combined-data/c50k/item_q.npy", "--results", "/home/joe/code/vexact-planner-target/res/final2", "--gtab", "--flags", "repack", "verify", "oracle", "--vitem", "200", "--vtext", "200"]
+[build2] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[build2] query budget: N = 65536 (2^16; 49500 items), L = 4, eps = 1e-9, one side per event: ln(1/delta) = 33.1999
+[build2] randomised constants 7.8s (sub-Gaussian c = 8.149): [([95], 6.724, ExactTail), ([95, 127, 255, 287], 7.639, Certificate)]
+[build2] plans 9.2s; residual-stage distortion / tree [[1.11, 1.676, 3.358, 8.495], [1.197, 2.032, 4.817, 14.279], [1.483, 3.073, 8.217, 26.487]]; largest inverse defect 1.03e-12; rates g0 [[2.0, 0.0, 0.0, 0.0], [2.0, 1.0, 0.5, 0.125], [3.0, 3.0, 1.0, 0.25], [6.0, 4.0, 2.0, 0.5]]
+[build2] calibrated 13.8s
+[build2] encoded 19.1s
+[build2] assembled 19.2s; x2 bound 2.290e-4; escapes: det norms 276, |y| 153, kappa 517, tan 1191
+[repack] occupancy thresholds by level [0.07, 0.07, 0.07, 0.07, 0.09, 0.1, 0.06, 0.1, 0.14, 0.17] (timed in 0.1s)
+[plan] calibrated in 0.4s
+[plan] full_us=0.11183602138720063 item_us0=0.006568539445950379 item_us1=0.026274157783801516 cl_us0=1.3137078891900758 cl_us1=6.568539445950378 grp_us=45.97977612165265 scan_us=0.1440735074325416 cscan_us=0.11760091287878788 anc_us=13.6789375 dir_us=0 item_us2=0.21034873603069357 cut_us=2.206323125 seed_us=327.14743749999997 scan_lo=2 scan_hi=2 
+[approx] f = 0 from 0 pseudo-queries in 0.0s; mean items scanned at recall 0.95 by f: []
+[fit] {"basis":"dual","cond_max":9.236085911594888,"profile":"qi","ridge":0.1,"sigma_q":"corpus items"}
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-const-data/c50k_r4/profile.npy) 49500 rows, 50 clusters in 0.0s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 107.5, 175.2, 276.3]
+verify2 0/400 0s wrong in/out 0/0 det 0 rand 0 checked 500914 maxsd 3.91
+verify2 50/400 6s wrong in/out 0/0 det 0 rand 0 checked 10573722 maxsd 4.91
+verify2 100/400 10s wrong in/out 0/0 det 0 rand 0 checked 10573722 maxsd 4.91
+verify2 150/400 13s wrong in/out 0/0 det 0 rand 0 checked 10573722 maxsd 4.91
+verify2 200/400 17s wrong in/out 0/0 det 0 rand 0 checked 11392242 maxsd 5.47
+verify2 250/400 24s wrong in/out 0/0 det 0 rand 0 checked 30544674 maxsd 5.47
+verify2 300/400 29s wrong in/out 0/0 det 0 rand 0 checked 30544674 maxsd 5.47
+verify2 350/400 33s wrong in/out 0/0 det 0 rand 0 checked 30544674 maxsd 5.47
+verify2 filtered 1/1000: 49 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/100: 496 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/10: 4950 visible, wrong in/out 0/0, k-NN mismatches 0
+verify2 filtered 1/2: 24751 visible, wrong in/out 0/0, k-NN mismatches 0
+VERIFY2 400 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 30544674 (det violations 0, rand violations 0); largest randomised error 5.47 sd (group 0's constants by level [6.7241254, 7.6390076, 7.6390076, 7.6390076], N = 2^16); k-NN mismatches 0 of 400 (three plans each); filtered: 40 queries x 4 visible sets x 3 plans, threshold (also on the index compacted to the set, with and without its vectors) and k-NN, included in the counts
+VERIFY2 checker: 9856948 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [186603340, 162036177, 152885285, 146134722, 140567020, 131359056, 123762843, 96039427, 44865182, 20570304, 8774707]; decided in/out [1698574, 883017, 655477, 548344, 915497, 763283, 3145670, 9851073, 8576063, 5123149, 0] / [22868589, 8267875, 6095086, 5019358, 8292467, 6832930, 24577746, 41323172, 15718815, 6672448, 0]
+VERIFY2 item scale against f64: 49500 rows, 0 beyond tolerance; largest |s^2 E|r|^2 - |r|^2| / E|r|^2 = 1.63e-3; the build's divisor over E|r|^2 per group 1.00000 to 1.00000
+oracle dump: 40 queries, 360 results, 773 visible entities, to /home/joe/code/vexact-planner-target/res/final2/oracle
