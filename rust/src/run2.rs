@@ -214,6 +214,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         let fr = arg_str("--full-read", "uring");
         assert!(fr == "uring" || fr == "mmap", "--full-read is uring or mmap");
         pol.uring.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
+        // reads through the reader are priced by the planner
+        pol.priced.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
         // extents of at least --direct-min bytes are read with O_DIRECT, past the page cache (0: every read; none:
         // never)
         let dm = arg_str("--direct-min", "8192");
@@ -226,8 +228,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
-    // full vectors read through the reader: the planner counts their reads
-    let plan = Plan { disk: matches!(&ix.full, Full2::Real { rows, .. } if rows.uring()), ..plan };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
@@ -1193,7 +1193,7 @@ pub fn dbcmp(c: &Ctx2) {
     // with full vectors read through the reader, the planner's disk constants are timed here under the cap
     // (`--no-calib-disk`: as in the plan; `:plan=mem` in a read mode: reads not counted)
     let mut plan0 = c.plan;
-    if plan0.disk && !args().iter().any(|a| a == "--no-calib-disk") {
+    if pol.priced.load(Relaxed) && !args().iter().any(|a| a == "--no-calib-disk") {
         let t = Timer::new();
         plan0 = Plan::calibrate_disk(ix, plan0);
         out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
@@ -1220,22 +1220,23 @@ pub fn dbcmp(c: &Ctx2) {
             for mode in &modes {
                 let mut plan = plan0;
                 pol.uring.store(false, Relaxed);
+                pol.priced.store(false, Relaxed);
                 pol.qd.store(qd0, Relaxed);
                 pol.direct_min.store(dm0, Relaxed);
                 pol.dontcache_min.store(dc0, Relaxed);
                 let bytes = |v: &str| if v == "none" { usize::MAX } else { v.parse().unwrap() };
                 for kv in mode.split(':') {
                     match kv.split_once('=') {
-                        None if kv == "mmap" => plan.disk = false,
+                        None if kv == "mmap" => pol.priced.store(false, Relaxed),
                         None if kv == "uring" => {
                             pol.uring.store(true, Relaxed);
-                            plan.disk = true;
+                            pol.priced.store(true, Relaxed);
                         }
                         Some(("qd", v)) => pol.qd.store(v.parse().unwrap(), Relaxed),
                         Some(("direct", v)) => pol.direct_min.store(bytes(v), Relaxed),
                         Some(("dontcache", v)) => pol.dontcache_min.store(bytes(v), Relaxed),
-                        Some(("plan", "disk")) => plan.disk = true,
-                        Some(("plan", "mem")) => plan.disk = false,
+                        Some(("plan", "disk")) => pol.priced.store(true, Relaxed),
+                        Some(("plan", "mem")) => pol.priced.store(false, Relaxed),
                         Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
                         _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES|none, :dontcache=BYTES|none and :plan=disk or mem"),
                     }

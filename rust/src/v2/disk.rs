@@ -19,10 +19,12 @@ pub struct ReadPolicy {
     pub dontcache_min: AtomicUsize,
     /// Reads a `Reader` keeps in flight (at most RING / 2).
     pub qd: AtomicUsize,
+    /// The planner prices the reads of these rows (io_us, io_gbps in the plan).
+    pub priced: AtomicBool,
 }
 impl Default for ReadPolicy {
     fn default() -> ReadPolicy {
-        ReadPolicy { uring: AtomicBool::new(false), willneed: AtomicBool::new(false), direct_min: AtomicUsize::new(usize::MAX), dontcache_min: AtomicUsize::new(usize::MAX), qd: AtomicUsize::new(64) }
+        ReadPolicy { uring: AtomicBool::new(false), willneed: AtomicBool::new(false), direct_min: AtomicUsize::new(usize::MAX), dontcache_min: AtomicUsize::new(usize::MAX), qd: AtomicUsize::new(64), priced: AtomicBool::new(false) }
     }
 }
 
@@ -129,6 +131,11 @@ impl Rows {
     /// Whether the rows are on file and read through io_uring.
     pub fn uring(&self) -> bool {
         self.policy().is_some_and(|p| p.uring.load(Ordering::Relaxed))
+    }
+
+    /// Whether the rows are on file and the planner prices their reads.
+    pub fn priced(&self) -> bool {
+        self.policy().is_some_and(|p| p.priced.load(Ordering::Relaxed))
     }
 
     /// Whether the rows are on file and their pages are requested ahead of reading.

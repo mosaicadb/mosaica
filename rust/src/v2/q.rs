@@ -1872,11 +1872,10 @@ pub struct Plan {
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
     pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
-    pub disk: bool,        // the planner adds the cost of reading full vectors from disk (io_us, io_gbps)
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3 }
     }
 }
 impl Plan {
@@ -1921,10 +1920,10 @@ impl Plan {
         (self.io_us * self.io_gbps * 1e3) as usize
     }
 
-    /// Modelled cost of reading `ncand` full vectors (of `rb` bytes) lying in a span of `span` rows: one read each, or
-    /// the span in one sequential read when that is cheaper; 0 unless `disk`.
+    /// Modelled cost of reading `ncand` full vectors (of `rb` bytes) lying in a span of `span` rows from file: one read
+    /// each, or the span in one sequential read when that is cheaper.
     pub fn disk_us(&self, ncand: usize, span: usize, rb: usize) -> f64 {
-        if !self.disk || ncand == 0 {
+        if ncand == 0 {
             return 0.0;
         }
         (ncand as f64 * self.io_us).min(self.io_us + (span * rb) as f64 / (self.io_gbps * 1e3))
@@ -2436,9 +2435,10 @@ pub fn answer_share(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ns: usi
 pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     let k = ix.k();
     let rr = ix.x2.sqrt();
-    // reads are priced only where this index's own row ids address vectors on file (not a compacted copy in memory,
-    // nor a parent's rows reached through vrow)
-    let pl = Plan { disk: o.plan.disk && matches!(ix.own_rows(), Some(super::disk::Rows::Map { .. })), ..o.plan };
+    // reads are priced only where this index's own row ids address vectors on file whose policy prices them (not a
+    // compacted copy in memory, nor a parent's rows reached through vrow)
+    let pl = o.plan;
+    let disk = ix.own_rows().is_some_and(|r| r.priced());
     let auto = matches!(pl.mode, PlanMode::Auto);
     let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
@@ -2446,7 +2446,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     // a row scored by a scan, or directly in its cluster: scattered under a visible set, in order without one; with
     // the vectors on file, reading it too, in order
     let rb = 2 * ix.n();
-    let row_us = pl.scan_cost_us(o.vis.is_some()) + if pl.disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
+    let row_us = pl.scan_cost_us(o.vis.is_some()) + if disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
     let scan_cost = nvis as f64 * row_us;
     // a live cluster that the support table leaves open costs at least the cheaper of its cut and scoring its rows
     let floor = |ci: usize| pl.cut_us.min(if pl.direct { nvis_cl(ci) as f64 * row_us + pl.dir_us } else { f64::INFINITY });
@@ -2545,7 +2545,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     // a candidate's vector read: scattered over the index under a visible set, like a scan's
     let full_us = if o.vis.is_some() { pl.full_us.max(pl.scan_us) } else { pl.full_us };
     // nc candidates' full vectors, lying in a span of `span` rows (their reads too, on file)
-    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + pl.disk_us(nc, span, rb);
+    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + if disk { pl.disk_us(nc, span, rb) } else { 0.0 };
     // a cluster's candidates at share d lie in about d of its rows
     let span_d = |ci: usize, d: f64| (d * (ix.cl[ci].r1 - ix.cl[ci].r0) as f64).ceil() as usize;
     // a cluster scored directly: when its rows cost no more than its cut and the candidates the cut would leave
