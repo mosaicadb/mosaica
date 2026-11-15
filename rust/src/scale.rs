@@ -289,7 +289,6 @@ pub fn run2(scale: usize, nq: usize) {
     let texts = crate::run2::load_queries(n);
     let real_mhat: Vec<Vec<f64>> = real.cl.iter().map(|c| c.mhat.to_vec()).collect();
     let sy_full = mk();
-    drop(mk);
     drop(real);
     let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), false, &mut |s| log(format!("[synth2] {s}")));
     // support table for synthetic items: p.x = p.m + (V_q^T p).z

@@ -145,7 +145,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     out!("==== run at {:.0}: {:?}", now_s(), args());
     let kk = arg_usize("--clusters", 100000);
     let prof_path = if dir == data_dir() { arg_str("--profile", &format!("{dir}/profile.npy")) } else { format!("{dir}/profile.npy") };
-    let t = Timer::new();
     let mut p = load_params(dir);
     // another randomised level schedule (cumulative bytes): the union bound's constant follows the number of levels
     if let Some(v) = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()) {

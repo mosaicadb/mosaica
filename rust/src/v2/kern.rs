@@ -479,13 +479,6 @@ pub fn rtab(rin: &[Option<f64>; 16], rout: &[Option<f64>; 16]) -> RTab {
     r
 }
 
-/// A threshold in fine steps, clamped to [TMIN, TMAX], as (high word, low byte).
-#[inline(always)]
-pub fn split_t(v: f64) -> (i16, i16) {
-    let v = v.clamp(TMIN as f64, TMAX as f64) as i64;
-    ((v >> 8) as i16, (v & 255) as i16)
-}
-
 /// The integer state of the slots is stored by block of 32: six rows of 32 words, Hs, Ls, TinH, TinL, ToutH, ToutL.
 pub const IROWS: usize = 6;
 /// Position of field f of slot k in the integer state.

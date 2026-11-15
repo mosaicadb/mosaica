@@ -80,9 +80,6 @@ impl Npy {
     pub fn u8s(&self) -> Vec<u8> {
         self.data.clone()
     }
-    pub fn len(&self) -> usize {
-        self.shape.iter().product()
-    }
 }
 
 pub fn f16_to_f32(h: u16) -> f32 {

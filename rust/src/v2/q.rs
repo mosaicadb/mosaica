@@ -2860,7 +2860,6 @@ pub fn to_bitmap2(ix: &Index2, rows: &[u32]) -> RoaringBitmap {
 pub struct KnnOut2 {
     pub ents: Vec<(f64, u32)>,
     pub st: Stats,
-    pub cands: usize,
     pub t_seed: f64,
     pub t_sweep: f64,
     pub t_sel: f64,
@@ -3190,7 +3189,6 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let (mut rows_in, mut pend) = (Vec::new(), Vec::new());
     let stored = matches!(ix.full, Full2::Real { .. });
     assert!(stored, "knn2_fast scores from stored vectors");
-    let mut ncand = 0;
     // visible rows of clusters too small for the index path, scored together in row order
     let mut flat: Vec<u32> = Vec::new();
     let flush = |flat: &mut Vec<u32>, top: &mut TopK, st: &mut Stats| {
@@ -3213,7 +3211,6 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
                 None => flat.extend(c.r0 as u32..c.r1 as u32),
                 Some(_) => flat.extend_from_slice(vis_rows(c.r0, c.r1)),
             }
-            ncand += nv;
             st.touched += nv as u64;
             if flat.len() >= 256 || !top.full() {
                 flush(&mut flat, &mut top, &mut st);
@@ -3245,7 +3242,6 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
             let first = cands.split_off(cands.len() - (kk - top.h.len()));
             let rows: Vec<u32> = first.iter().map(|&i| (c.r0 + i as usize) as u32).collect();
             st.touched += rows.len() as u64;
-            ncand += rows.len();
             top.score(ix, &pr, &rows, &mut st);
         }
         let t = top.kth();
@@ -3270,7 +3266,6 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
                 pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
             }
         }
-        ncand += rows_in.len() + pend.len();
         let tf = tick();
         top.score(ix, &pr, &rows_in, &mut st);
         top.score(ix, &pr, &pend, &mut st);
@@ -3280,7 +3275,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     st.cyc[P_QUERY] += tick() - t0;
     let mut ents: Vec<(f64, u32)> = top.h.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
     ents.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
-    KnnOut2 { ents, st, cands: ncand, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
+    KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
 }
 
 /// Exact k-NN. The planner may send the query to a scan of the visible set before anything else (a small visible
@@ -3295,7 +3290,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let ents = scan_knn(ix, &q16, &q32, qn, kk, vis);
         let mut st = st;
         st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
-        KnnOut2 { ents, st, cands: 0, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
+        KnnOut2 { ents, st, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
     if let Some(v) = vis {
         if stored && plan.scan_first(v, plan.seed_us) {
@@ -3328,13 +3323,12 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let next = if lv >= 254 { 0usize } else { lv as usize + 1 };
         cands.push((r, lb as f64, ub as f64, next, false));
     }
-    let ncand = cands.len();
     let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |r, lv| row_interval2(ix, &pr, r as usize, lv, &mut st), |r| exact_value2(ix, &pr, r as usize))
         .into_iter().map(|(v, r)| (v, ix.row_ent[r as usize])).collect();
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
     let t_sel = tm.ms() - t_seed - t_sweep;
-    KnnOut2 { ents: fin, st, cands: ncand, t_seed, t_sweep, t_sel, npow: ix.meta.npow }
+    KnnOut2 { ents: fin, st, t_seed, t_sweep, t_sel, npow: ix.meta.npow }
 }
 
 /// The k best of `cands` (row, lower bound, upper bound, next level, exact), refining intervals a level at a time:

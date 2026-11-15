@@ -181,7 +181,7 @@ pub fn run(c: &Ctx2, k: usize) {
                 let ents = scan_knn(&c.ix, &q16, &q32, qn, k, vis.as_ref());
                 let mut st = crate::kernel::Stats::new(c.ix.meta.nl());
                 st.full_reads = vis.as_ref().map_or(c.ix.nrows, |v| v.rows.len()) as u64;
-                KnnOut2 { ents, st, cands: 0, t_seed: 0.0, t_sweep: 0.0, t_sel: 0.0, npow: c.ix.meta.npow }
+                KnnOut2 { ents, st, t_seed: 0.0, t_sweep: 0.0, t_sel: 0.0, npow: c.ix.meta.npow }
             })));
         }
         if want("approx") && (bm.is_none() || args().iter().any(|a| a == "--approx-filtered")) {

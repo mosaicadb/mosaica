@@ -295,8 +295,8 @@ impl ExpTab {
 }
 #[derive(Clone, Copy, Debug)]
 pub enum FK {
-    Tree { from: u8, to: u8 },
-    Resid { j: u8, r: u8 },
+    Tree { to: u8 },
+    Resid,
     Rand { d: u8 },
 }
 
@@ -371,7 +371,6 @@ pub struct LevelPlan {
 pub struct GroupPlan2 {
     pub sig: Vec<f32>,
     pub lamsum: f32,
-    pub states: Vec<Vec<(u8, u8)>>, // per det level, per coordinate: (tree depth, residual stages)
     pub d: Vec<Vec<f32>>,
     pub pconst: [f32; NDL],
     pub kmin: [i32; NDL],
@@ -572,14 +571,14 @@ impl GroupPlan2 {
                     for i in 0..1usize << to {
                         exp[i] = dt_.cent[to as usize][i] - dt_.cent[from as usize][i >> (to - from)];
                     }
-                    (Field { widx: c as u16, nb: to, unit: 0, off: 0, kind: FK::Tree { from, to }, eid: 0 }, exp)
+                    (Field { widx: c as u16, nb: to, unit: 0, off: 0, kind: FK::Tree { to }, eid: 0 }, exp)
                 }
                 Move::Resid { c, j, r } => {
                     let dl = dt_.delta[j as usize][r as usize];
                     let mut exp = [0f32; 16];
                     exp[0] = -dl;
                     exp[1] = dl;
-                    (Field { widx: c as u16, nb: 1, unit: 0, off: 0, kind: FK::Resid { j, r }, eid: 0 }, exp)
+                    (Field { widx: c as u16, nb: 1, unit: 0, off: 0, kind: FK::Resid, eid: 0 }, exp)
                 }
             }).collect();
             let (fields, vals): (Vec<Field>, Vec<[f32; 16]>) = fv.into_iter().unzip();
@@ -623,7 +622,6 @@ impl GroupPlan2 {
         let mut gp = GroupPlan2 {
             sig,
             lamsum,
-            states,
             d,
             pconst,
             kmin: [0; NDL],
@@ -795,7 +793,6 @@ pub struct Meta2 {
     pub n: usize,
     pub dlv: Vec<usize>,
     pub rlv: Vec<usize>,
-    pub csg: f64,
     /// The randomised levels' constants are for an index of 2^npow items (all rows, whatever any viewer sees, rounded
     /// up, unless `--nguar` gave N). Every result carries it; a result cache must not mix constants inside one result
     /// and must drop its results when npow rises (a fall is safe). The budget is one-sided, so a result is valid for
@@ -829,7 +826,6 @@ pub struct Cl2 {
     pub btot: f64,
     pub mvn: f64,
     pub rmax: f64,
-    pub smax: f32,
     pub numax: f64,      // norm sort: the largest |z|, the grid of the stored codes (nu = numax code / 65535)
     pub bmin: f64,       // norm sort: bounds of m.r over the cluster
     pub bmax: f64,
@@ -1442,7 +1438,6 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
         }
     }
     let mn32 = mn as f32;
-    let smax = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).fold(0f32, f32::max);
     let rmax = it.ah.iter().map(|&a| {
         let al = a as f64 / 32767.0 - DA;
         (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
@@ -1455,11 +1450,7 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
-}
-
-pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
-    quantile(v, q)
+    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
 }
 
 /// Build the fast-scan index. `prof` is the G x n profile.
@@ -1474,7 +1465,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nusort: 
     if nguar < rows as f64 {
         log(format!("--nguar {nguar} is below the {rows} rows built: the guarantee covers only {nguar} rows"));
     }
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), csg: p.meta.csg, npow: nguar.log2().ceil() as u32 };
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32 };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
