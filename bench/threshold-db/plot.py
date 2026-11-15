@@ -63,6 +63,9 @@ for f in ("ann.csv", "approx/liminal_approx.csv"):
     if not os.path.exists(f"{res}/{f}"):
         continue
     for r in csv.DictReader(open(f"{res}/{f}")):
+        # the filtered sweep's sets and systems (ACORN) are plot_filtered.py's
+        if (r["method"], r["setting"]) not in ANN or r["vis"] not in ("all", "vis_1"):
+            continue
         exact = r["method"] in ("flat", "panorama", "sq16")
         th = int(r["param"]) if exact else 1
         pts[(ANN[(r["method"], r["setting"])], exact, th, r["vis"], int(r["share_index"]))].append(

@@ -16,6 +16,11 @@ This is the 14 Nov update of the 13 Nov report. The LIMINAL rows were re-measure
 rows were extended to larger answers, and half-precision faiss variants were added. The ClickHouse rows and the other
 existing rows are as measured on 13 Nov.
 
+**15 Nov: LIMINAL approximate is the new mode.** Its rows, here and in the filtered section, were re-measured on 15 Nov
+with the best-first approximate k-NN mode (`knn2_fast`, described in `../topk/REPORT.md`) in place of `knn2_dial`.
+Every other row is as committed. The rows of the old mode are kept in `results/approx/liminal_approx_old_mode.csv`
+and `results/filtered/liminal_approx_old_mode.csv`, and the tables show them as "old mode".
+
 ## The question
 
 The query is: given a unit query q and a threshold t, return the ids of every item with q·x ≥ t, together with
@@ -95,14 +100,21 @@ covers the whole query, from the call to holding the full id set, so returning 7
   - The bound is a probabilistic heuristic, not a certificate.
   - faiss 1.16's RaBitQ indexes re-rank only by a fixed factor (IndexRefine), so they were not used.
   - rabitqlib has no filter, so RaBitQ ran unfiltered only.
-- **LIMINAL approximate.** The index's approximate k-NN mode (`knn2_dial`, timed by the `dbknn` mode in
-  `rust/src/run2.rs`), run as top-m with m the exact answer size, like hnswlib. It probes clusters in order of
-  q·m + f·r, the centre score plus f times the cluster's RMS radius (f = 0.2, fitted on 1,000 corpus pseudo-queries),
-  and runs the exact k-NN over the visible items of the probed clusters, with each code level's upper interval
-  half-widths cut by a dial fitted on 200 pseudo-queries for a target recall. It reads only visible rows, so it runs
-  filtered. "Default" is every cluster (all 1,000) with the dial fitted for recall 0.99, so only the dial
-  approximates. "Tight" is the smallest cluster count on a doubling ladder with that dial and mean recall ≥ 0.99.
-  Recall is ann.py's, |returned ∩ exact| / m.
+- **LIMINAL approximate (15 Nov).** The index's best-first approximate k-NN mode (`knn2_fast`, timed by the `dbknn`
+  mode in `rust/src/run2.rs`), run as top-m with m the exact answer size, like hnswlib. It probes clusters in order of
+  q·m + f·r, the centre score plus f times the cluster's RMS radius (f = 0.2, fitted on 300 corpus pseudo-queries).
+  Each probed cluster runs as a threshold query at the running m-th best score, every code level dropping an item once
+  its estimate plus a dial factor times the half-width falls below that score, and the survivors are scored from
+  their stored vectors into a heap of the m best. It reads only visible rows, so it runs filtered. The dials are fitted
+  on the 135 queries that are not timed, for k = the answer size over the whole corpus at that threshold, capped at
+  1,000 (the fit runs a verified threshold query per query, which took over 6 minutes at k = 10k). "Tight" walks the
+  doubling cluster ladder for the dial off and the dials at miss rates 0.001, 0.01, 0.03 and 0.1, and keeps the
+  fastest first rung reaching mean recall 0.99; its setting is `clusters:dial`. There is no "default" setting in this
+  mode. Recall is ann.py's, |returned ∩ exact| / m.
+- **LIMINAL approximate, old mode (14 Nov).** `knn2_dial`: the same cluster order, then the exact k-NN over the visible
+  items of the probed clusters, with the randomised levels' upper half-widths cut by a dial fitted on 200
+  pseudo-queries for recall 0.99. "Default" was every cluster with that dial; "tight" the smallest cluster count on
+  the doubling ladder with that dial and mean recall ≥ 0.99.
 - **Panorama PR.** [faiss PR 4970](https://github.com/facebookresearch/faiss/pull/4970) (head fa834bf3ea04) was not
   built. It adds `IndexIVFPQPanorama`, which is approximate because it uses PQ codes.
 - **Rebuilt indexes.** The 13 Nov ANN index files had been deleted, so IVF, RaBitQ, hnswlib and faiss HNSW were
@@ -121,12 +133,13 @@ covers the whole query, from the call to holding the full id set, so returning 7
   than 5 s. If 0.99 is not reached within that, the tight point is the last rung within the cap, and its recall is
   labelled. The 13 Nov points capped ef at 200k instead.
 - **Tuning.** The tight settings were tuned on the timed queries themselves, so they are optimistic.
-- **LIMINAL approximate** was measured on 14 Nov in three runs (`results/approx/`; flags were added to the mode between them, the query path did not change). Its ladder
-  started at 32 clusters unfiltered, 16 at 1% visible and 256 for the 1% visible 7.5k point and the unfiltered 10k
-  point, each below a rung with recall under 0.99 where it was walked. At 10k items unfiltered, 256 clusters took
-  8.7 s per query (one repetition) for recall 0.986, past the 5 s cap, so there is no tight point; the default took
-  over 3.5 s per query and did not finish within the run's 10 minutes, and 100k items was not run. At 1% visible
-  every default point has mean recall 1.0000 or 0.9999.
+- **LIMINAL approximate** was measured on 15 Nov in three runs on cores 10–11, the query thread pinned to core 10,
+  with the plan constants of `results/ours/plan.txt` (`results/approx/run2_new_mode.log` has every rung). The ladder
+  started at 1 cluster unfiltered at 100 and 1k items and at 1% visible up to 100 items, at 64 unfiltered at 10k and at
+  256 at 1% visible from 1k items; each starting rung was below 0.99 for every dial. Every point reached 0.99, and
+  100k items was not run, as before.
+- **LIMINAL approximate, old mode** was measured on 14 Nov. At 10k items unfiltered, 256 clusters took 8.7 s per query
+  for recall 0.986, past the cap, so it had no tight point; the default took over 3.5 s per query.
 - **Recall cases that need a note:**
   - Unfiltered at 100 items, hnswlib and f32 HNSW stopped at 32 m on 13 Nov, at recall 0.985–0.987. HNSW-SQfp16,
     on the new ladder, reached 0.991 at 64 m (16 ms).
@@ -170,8 +183,9 @@ SQfp16 rows. `r` is mean recall, shown where it is below 1.
 | faiss IVF4096-SQfp16 range, nprobe 1 | f16 | 0.26 r .23 / 0.26 r .11 / 0.27 r .02 / 0.31 r .002 | 0.25 r .22 / 0.29 r .08 / 0.28 r .02 / 0.26 r .002 / 0.34 r .001 / 0.29 r .0004 / 0.27 r .0003 |
 | faiss IVF4096-SQfp16 range, tight | f16 | 13.9 r .997 / 14.7 r .992 / 27.0 r .992 / 138 (all clusters) | 0.32 / 3.9 / 2.0 r .991 / 8.0 / 10.3 / 10.4 / 8.5 (all clusters from 1k) |
 | RaBitQ 7-bit, all clusters | 7-bit + extended code | 11.6 r .989 / 12.7 r .994 / 23.9 r .996 / 378 r .997 | – |
-| LIMINAL approximate, default (all clusters, dial for 0.99) | f16 | 42.5 r .9987 / 86.0 r .9990 / over 3.5 s (not finished) / not run | 1.66 / 1.56 / 1.88 / 3.35 / 6.50 / 10.1 / 16.1 |
-| LIMINAL approximate, tight | f16 | 9.3 r .991 (128 clusters) / 66.9 r .996 (256) / 8,710 r .986 at 256 clusters, one repetition (not timed) / not run | 0.34 (32 clusters) / 0.61 (256) / 0.79 r .9987 (512) / 3.61 / 6.83 / 9.85 / 15.8 (all clusters from 1k) |
+| LIMINAL approximate, tight (15 Nov) | f16 | 6.12 r .991 (128 clusters) / 11.3 r .995 (256) / 27.5 r .998 (512) / not run | 0.37 (32 clusters) / 0.53 (256) / 1.00 r .9987 (512) / 1.89 / 2.17 / 2.22 / 2.87 (all clusters from 1k) |
+| LIMINAL approximate, old mode, default (all clusters, dial for 0.99) | f16 | 42.5 r .9987 / 86.0 r .9990 / over 3.5 s (not finished) / not run | 1.66 / 1.56 / 1.88 / 3.35 / 6.50 / 10.1 / 16.1 |
+| LIMINAL approximate, old mode, tight | f16 | 9.3 r .991 (128 clusters) / 66.9 r .996 (256) / 8,710 r .986 at 256 clusters, one repetition (not timed) / not run | 0.34 (32 clusters) / 0.61 (256) / 0.79 r .9987 (512) / 3.61 / 6.83 / 9.85 / 15.8 (all clusters from 1k) |
 
 The CSVs are in `results/`. `summary.md` has p90s and the 10% and 50% visible sets for LIMINAL, and `results/ann_logs/`
 has every ladder walked for the new points.
@@ -264,11 +278,14 @@ Against the approximate methods:
   are faster than the exact index at 100 and 1k items, and level with it at 10k (26–41 ms against 44 ms).
 - **Unfiltered, at 100k items** (10%), the exact index (62 ms) is faster than every approximate method at recall
   0.99: IVF 113 ms (only with every cluster, so exact), hnswlib 224 ms, RaBitQ 378 ms and faiss HNSW 4.5 s.
-- **LIMINAL approximate.** Unfiltered at 100 items, its tight setting (128 of 1,000 clusters) takes 9.3 ms, against
-  30 ms for the exact index and 5–13 ms for the other approximate methods. From 1k items on it is slower than the
-  exact threshold query, because a top-m selection over m items costs more than the threshold test: 67 ms at 1k, and at
-  10k it cannot reach 0.99 within 5 s per query (256 clusters take 8.7 s for recall 0.986). At 1% visible it is the fastest method up to 100 items (0.34–0.79 ms
-  against 1.1–1.2 ms for the exact index), and from 1k items it needs every cluster and takes 3.6–16 ms.
+- **LIMINAL approximate (the new mode, 15 Nov).** Unfiltered it is now level with the fastest approximate methods
+  and faster than the exact index at every size measured: 6.1 ms at 100 items (128 of 1,000 clusters), against 30 ms
+  for the exact index and 5–16 ms for the others; 11.3 ms at 1k (IVF, RaBitQ and hnswlib 12.6–12.9 ms); and 27.5 ms
+  at 10k (IVF 26 ms, RaBitQ 24 ms, hnswlib 41 ms, the exact index 44 ms). The old mode took 67 ms at 1k and could not
+  reach 0.99 within 5 s at 10k. At 1% visible it is the fastest method at 11 items (0.53 ms), and at 100 items
+  (1.0 ms) it is level with the compacted faiss copy and behind the f16 scan (0.75 ms). From 1k items it needs every
+  cluster and takes 1.9–2.9 ms, against 3.6–16 ms for the old mode, 7–10 ms for IVF and 1.1–1.3 ms for the exact
+  index.
 - **At 1% visible**, the approximate libraries do not help. IVF needs every cluster from 1k items on (7–10 ms, 6–8× the
   index). HNSW collapses: 3.2 s for recall 0.989 at 1k items, and at 3k–7.5k items it cannot pass 0.66 recall within
   5 s per query.
@@ -311,8 +328,12 @@ figure is at 1 thread, with the queries, thresholds and answer shares of the 1% 
   the memory-mapped f32 corpus.
 - **faiss HNSW-SQfp16 and IVF4096-SQfp16.** These are the existing half-precision index files, filtered with an
   `IDSelectorBitmap`, at the tight setting.
-- **LIMINAL approximate** (`dbknn`). It runs at the tight setting: the fewest clusters on the doubling ladder that give
-  recall ≥ 0.99 with the dial fitted for 0.99.
+- **LIMINAL approximate** (`dbknn`). Re-measured on 15 Nov in the new mode (`knn2_fast`), at the tight setting
+  described in the first section: the fastest first rung on the doubling cluster ladder reaching recall 0.99, over
+  the dial off and four fitted dials. The 75% point under the random 50% set and the 1%–75% points under the 50%
+  genus set, which the old mode could not reach within the cap, were run too; 75% under the 10% genus set was not.
+  The ladder started at 16 clusters, except at 0.01% under 19 genera, where 16 already reached 0.99 and it was walked
+  from 1. The 14–15 Nov rows of the old mode are shown as "old mode".
 - **ACORN-γ.** This is the authors' implementation, described below. It runs at the tight setting, and at ef = m as
   its default point.
 - **The tight rule.**
@@ -383,7 +404,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 1.30 | 1.11 | 1.11 | 1.09 | 1.19 | 1.25 | 1.33 |
 | LIMINAL f16 scan | 0.79 | 0.75 | 0.75 | 0.75 | 0.85 | 0.84 | 0.86 |
 | faiss flat, compacted copy | 1.02 | 1.02 | 1.01 | 0.95 | 0.95 | 1.01 | 0.99 |
-| LIMINAL approximate | 0.34 | 0.61 | 0.79 | 3.61 | 6.83 | 9.85 | 15.8 |
+| LIMINAL approximate | 0.37 | 0.53 | 1.00 | 1.89 | 2.17 | 2.22 | 2.87 |
+| LIMINAL approximate, old mode | 0.34 | 0.61 | 0.79 | 3.61 | 6.83 | 9.85 | 15.8 |
 | faiss IVF4096-SQfp16 | 0.32 | 3.87 | 2.03 | 8.03 | 10.3 | 10.4 | 8.52 |
 | faiss HNSW-SQfp16 | 0.47 | 33.5 | 584 | 3371 r .989 | 1916 r .657 | 2924 r .528 | 2886 r .374 |
 | ACORN-γ | 1.50 r .889 | 18.2 r .897 | 76.5 r .878 | 84.1 r .877 | 71.8 r .883 | 70.1 r .884 | 74.1 r .879 |
@@ -396,7 +418,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 11.4 | 11.3 | 12.0 | 11.9 | 11.8 | 12.2 | 12.2 |
 | LIMINAL f16 scan | 11.6 | 11.7 | 11.8 | 12.1 | 12.7 | 12.5 | 12.8 |
 | faiss flat, compacted copy | 9.02 | 9.12 | 8.90 | 9.12 | 9.05 | 9.10 | 9.25 |
-| LIMINAL approximate | 2.90 | 4.84 | 15.4 | 3982 | 4622 | 4727 | 4649 |
+| LIMINAL approximate | 2.52 | 4.34 | 10.0 | 23.0 | 29.6 | 32.4 | 31.4 |
+| LIMINAL approximate, old mode | 2.90 | 4.84 | 15.4 | 3982 | 4622 | 4727 | 4649 |
 | faiss IVF4096-SQfp16 | 3.21 | 5.81 | 6.38 | 31.2 | 29.7 | 31.0 | 29.8 |
 | faiss HNSW-SQfp16 | 250 | 49.0 | 234 | 4793 | 2916 r .749 | 4346 r .614 | 4416 r .441 |
 | ACORN-γ | 6.39 | 17.6 | 34.4 | 194 | 704 | 2039 | 4502 |
@@ -409,7 +432,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 31.1 | 36.9 | 45.6 | 60.1 | 72.7 | 75.9 | 70.5 |
 | LIMINAL f16 scan | 49.1 | 49.4 | 51.0 | 50.0 | 51.9 | 53.3 | 53.9 |
 | faiss flat, compacted copy | 57.7 | 59.0 | 53.7 | 49.5 | 49.3 | 49.9 | 52.9 |
-| LIMINAL approximate | 7.36 | 21.6 | 4508 r .985 | 2840 r .659 | 18.2 r .579 | 36.0 r .728 | – |
+| LIMINAL approximate | 5.37 | 9.20 | 22.8 | 56.2 | 104 | 114 | 124 |
+| LIMINAL approximate, old mode | 7.36 | 21.6 | 4508 r .985 | 2840 r .659 | 18.2 r .579 | 36.0 r .728 | – |
 | faiss IVF4096-SQfp16 | 4.24 | 8.10 | 19.2 | 80.0 | 85.6 | 85.1 | 93.4 |
 | faiss HNSW-SQfp16 | 18.2 | 47.4 | 227 | 4602 | 4774 r .835 | – | – |
 | ACORN-γ | 9.93 | 29.6 | 101 | 2289 | – | – | – |
@@ -422,7 +446,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 0.92 | 0.86 | 0.92 | 0.90 | 0.90 | 0.91 | 1.00 |
 | LIMINAL f16 scan | 0.36 | 0.37 | 0.38 | 0.38 | 0.38 | 0.42 | 0.43 |
 | faiss flat, compacted copy | 0.88 | 0.84 | 0.85 | 0.96 | 1.06 | 1.13 | 1.14 |
-| LIMINAL approximate | 0.22 | 0.35 | 0.44 | 2.05 | 493 | 512 | 536 |
+| LIMINAL approximate | 0.56 | 0.72 | 0.72 | 0.90 | 1.28 | 1.37 | 1.75 |
+| LIMINAL approximate, old mode | 0.22 | 0.35 | 0.44 | 2.05 | 493 | 512 | 536 |
 | faiss IVF4096-SQfp16 | 0.28 | 1.06 | 1.39 | 4.95 | 5.49 | 7.24 | 5.08 |
 | faiss HNSW-SQfp16 | 11.6 | 6.96 r .964 | 85.7 r .829 | 2551 r .719 | – | – | – |
 | ACORN-γ | 32.2 | 4.89 r .864 | 60.2 r .972 | 55.5 r .860 | 62.0 r .957 | 61.8 r .976 | 65.4 r .979 |
@@ -435,7 +460,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 6.96 | 7.23 | 8.24 | 9.71 | 10.9 | 11.6 | 11.4 |
 | LIMINAL f16 scan | 7.12 | 7.13 | 7.26 | 7.31 | 7.67 | 7.91 | 8.16 |
 | faiss flat, compacted copy | 10.0 | 10.0 | 10.3 | 10.1 | 10.7 | 10.8 | 10.2 |
-| LIMINAL approximate | 5.75 | 5.86 | 10.1 | 4173 | 4753 | 4659 | – |
+| LIMINAL approximate | 2.86 | 2.73 | 4.12 | 9.66 | 12.5 | 15.9 | – |
+| LIMINAL approximate, old mode | 5.75 | 5.86 | 10.1 | 4173 | 4753 | 4659 | – |
 | faiss IVF4096-SQfp16 | 3.26 | 2.77 | 4.83 | 10.6 | 10.6 | 10.9 | 11.5 |
 | faiss HNSW-SQfp16 | 4.00 | 381 r .919 | – | – | – | – | – |
 | ACORN-γ | 21.3 | 240 | 2532 | 293 | 677 | 1541 | 4322 |
@@ -448,7 +474,8 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 | LIMINAL | 21.4 | 23.6 | 27.6 | 36.6 | 43.3 | 44.4 | 42.5 |
 | LIMINAL f16 scan | 37.7 | 37.8 | 37.9 | 39.4 | 40.7 | 41.5 | 42.9 |
 | faiss flat, compacted copy | 57.7 | 58.4 | 57.6 | 57.5 | 58.9 | 63.5 | 72.6 |
-| LIMINAL approximate | 10.9 | 26.1 | – | – | – | – | – |
+| LIMINAL approximate | 7.22 | 7.95 | 15.2 | 44.9 | 69.6 | 89.2 | 100 |
+| LIMINAL approximate, old mode | 10.9 | 26.1 | – | – | – | – | – |
 | faiss IVF4096-SQfp16 | 3.90 | 8.92 | 8.96 | 16.2 | 37.2 | 37.0 | 39.5 |
 | faiss HNSW-SQfp16 | 249 | 392 | – | – | – | – | – |
 | ACORN-γ | 30.8 | 36.2 | 4335 r .928 | 2608 r .988 | – | – | – |
@@ -458,8 +485,9 @@ Points not run, for time:
 - HNSW under the genus sets from 10% of the corpus at 1% visible, and from 1% at 10% and 50%. HNSW had already passed
   the cap at the matching random sets, and a single rung under a genus set ran for over 8 minutes.
 - ACORN at 75% under the 50% sets. 30% and 50% were over the cap.
-- LIMINAL approximate at 75% under the random 50% set, at 75% under the 10% genus set, and from 1% under the 50% genus
-  set. At those sizes 1,000 clusters exceed the cap.
+- LIMINAL approximate at 75% under the 10% genus set (not in this pass's scope). The old mode was not run at 75% under
+  the random 50% set, at 75% under the 10% genus set, or from 1% under the 50% genus set, where 1,000 clusters
+  exceeded the cap.
 
 ### Clusters touched
 
@@ -501,11 +529,17 @@ sixth to four fifths of the clusters, because the clusters follow the taxonomy.
   10% of the corpus on it needs every list, and becomes as slow as or slower than the exact index: 30 ms against
   12 ms at 10% random, and 80–93 ms against 60–76 ms at 50% random. Under genera with every list it is level with the
   index (10.6–11.5 ms against 9.7–11.6 ms at 10%, and 37–40 ms against 43–44 ms at 50%).
-- LIMINAL approximate is the fastest of all at 1% visible up to about 1k items (0.2–0.8 ms). It is competitive up to
-  1% of the corpus at 10% visible and up to 0.1% at 50% (3–26 ms). Past about 5k items it jumps to seconds: 4–4.7 s at 10k–75k items at 10%
-  visible, and 0.5 s from 1.8k items under 19 genera. At 10% visible the time jumps from 9 ms at 64 clusters to
-  476 ms at 128 clusters for a 50× smaller step in work. That cliff is in the top-m code, not in the data, and worth a
-  look.
+- LIMINAL approximate, in the new mode (15 Nov), reaches recall 0.99 at every point, and its jump to seconds is gone:
+  the old mode took 4–4.7 s from 10k items at 10% visible and 0.5 s from 1.8k items under 19 genera.
+  - For answers up to 0.1% of the corpus it is the fastest or level with IVF at 10% visible (2.5–4.3 ms against
+    3.2–5.8 ms, random or genus). At 50% it is behind IVF at 0.01% (5.4–7.2 ms against 3.9–4.2 ms) and level with
+    it at 0.1% (8.0–9.2 ms against 8.1–8.9 ms). Under the 1% sets it loses to IVF at 0.01% (0.37–0.56 ms against
+    0.28–0.32 ms).
+  - Under genus sets from 0.1% of the corpus up, it beats IVF at 1% visible (0.7–1.7 ms against 1.1–7.2 ms) and at 10%
+    up to 10% of the corpus (4.1–9.7 ms against 4.8–10.6 ms), and loses to it beyond.
+  - For large answers it pays for selecting the m best, and is slower than the exact index: 23–32 ms against 12 ms
+    from 10% of the corpus at random 10%, 104–124 ms against 71–76 ms from 30% at random 50%, and 70–100 ms against
+    43–44 ms under 964 genera. At 1% visible from 1k items it takes 1.9–2.9 ms, about twice the exact index.
 - HNSW-SQfp16 with a selector is never competitive. It takes 50–250 ms for tiny answers at 10%, seconds from 10k
   items, and recall 0.37–0.83 where its time hits the cap. Under genus sets a few queries per rung take minutes.
 - ACORN-γ (γ = 12) does what it is built for at 10% and 50% visible.
@@ -519,8 +553,9 @@ sixth to four fifths of the clusters, because the clusters follow the taxonomy.
 **So:** LIMINAL's exact index is not the fastest way to answer a filtered threshold query at 1% or 10% visible. A
 plain scan of the visible rows is as fast or faster, and IVF at recall 0.99 is faster for small answers. LIMINAL wins
 at 50% visible for answers up to 1% of the corpus, and, under realistic (genus) filters at 50%, it is ahead of or
-level with the other exact methods at every answer size. Against every approximate method, it wins once answers pass a few thousand items. There the
-graph methods (HNSW, ACORN) and LIMINAL's own top-m mode take seconds, and IVF must probe every list. Realistic
+level with the other exact methods at every answer size. Against every approximate method, it wins once answers pass
+a few thousand items. There the graph methods (HNSW, ACORN) take seconds, IVF must probe every list, and LIMINAL's own
+top-m mode, which since 15 Nov stays within about 3× of the exact index, pays for selecting the m best. Realistic
 filters help the index, because they touch fewer clusters (159 of 1,000 for 19 genera). They help the scans as much,
 because those read only visible rows, which are contiguous under a genus set. And they hurt the graph methods, whose
 recall and outlier times get worse.
@@ -546,9 +581,11 @@ python3 -I dbrun.py clickhouse $D/prep results/clickhouse.csv --table t32|tbf --
 taskset -c 9-11 python3 -I ann.py build ivf|rabitq|hnswlib|faiss_hnsw|sq16|ivf_sq16|hnsw_sq16|panorama $D/prep $A --threads 3
 taskset -c 10 python3 -I ann.py query METHOD $D/prep $A results/ann.csv [--vis all|vis_1] [--shares 3,4,5,6] \
   [--settings default,tight|ladder] [--ladder-from X] [--tight X] [--cap-ms 5000]
-taskset -c 10,11 vexact --v2 --int --gtab --flags repack --index $I --queries $D/prep/queries.npy --results results/approx \
-  --core 10 --pin 10 --fit-dial dbknn --order $D/prep/order.npy --vis $D/prep/vis_1.npy --sets "all:0,1,2;vis_1:0,1,2,3,4,5,6" \
-  [--ladder-from 32] [--skip-default all:2] --step 10 --reps 5        # LIMINAL approximate
+RAYON_NUM_THREADS=2 taskset -c 10,11 vexact --v2 --int --gtab --flags repack --index $I --queries $D/prep/queries.npy \
+  --results results/approx --plan-file results/ours/plan.txt --core 10 --pin 10 --pseudo 300 dbknn --order $D/prep/order.npy \
+  --vis $D/prep/vis_1.npy --sets "all:0,1;vis_1:0,1,2" --step 10 --reps 5 --dial-from queries \
+  --dial-eps 0.001,0.01,0.03,0.1 --dial-k-max 1000 [--ladder-from 64|256]     # LIMINAL approximate (15 Nov); one run per set of points
+# the old mode: ... --fit-dial dbknn --approx-mode old ... --sets "all:0,1,2;vis_1:0,...,6" [--ladder-from 32] [--skip-default all:2]
 python3 -I summarise.py results/summary.md results/ours/dbcmp_r4_1t.csv results/ours/dbcmp_r4_4t.csv results/clickhouse.csv
 python3 -I plot.py results $D/prep
 ```
@@ -567,7 +604,9 @@ taskset -c 10 python3 -I ann.py query flat|ivf_sq16|hnsw_sq16 P $A results/ann.c
 # ACORN: cmake -DFAISS_OPT_LEVEL=avx2 -DCMAKE_SKIP_INSTALL_RULES=ON ... ; make faiss_avx2 (after acorn.patch); g++ acorn_bench.cpp
 OMP_NUM_THREADS=4 acorn_bench build P/corpus32.npy acorn.index 32 12 32 FROM TO          # pieces 0..350k..550k..800k..N
 OMP_NUM_THREADS=1 taskset -c 11 python3 -I ann.py query acorn P ACORN_DIR results/ann.csv --acorn-bin acorn_bench --vis ... --settings default,tight
-taskset -c 10,11 vexact ... --plan-file results/ours/plan.txt --fit-dial dbcmp dbknn --cmp-vis P/gen_1.npy,... --skip-all --threads 1 \
-  --tag filt_1t --vis P/vis_10.npy,... --sets "vis_10:0,1,2" --skip-default vis_10:0,... --ladder-from 16 --results results/filtered
+taskset -c 10,11 vexact ... --plan-file results/ours/plan.txt dbcmp --cmp-vis P/gen_1.npy,... --skip-all --threads 1 \
+  --tag filt_1t --results results/filtered
+taskset -c 10,11 vexact ... (as the LIMINAL approximate line above) --results results/filtered --vis P/vis_10.npy,...,P/gen_50.npy \
+  --sets "vis_10:0,...,6" --ladder-from 16          # one run per visible set
 python3 -I plot_filtered.py results P; python3 -I table_filtered.py results
 ```
