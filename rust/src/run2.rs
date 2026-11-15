@@ -244,6 +244,11 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
+        let same = |a: &str, b: &str| std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok() == Some(x));
+        if same(&ff, &p.xs_path) {
+            eprintln!("--full-file {ff} is the fitted vector file {}, which is mapped while the copy is written; give a path of its own", p.xs_path);
+            std::process::exit(2);
+        }
         let t = Timer::new();
         if let Full2::Real { rows, .. } = &mut ix.full {
             std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"));
