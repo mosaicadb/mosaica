@@ -1,13 +1,8 @@
 mod ann;
-mod derive;
-mod index;
-mod kernel;
-mod query;
 mod run2;
 mod scale;
-mod simd;
-mod v2;
-mod util;
+
+use vexact::{derive, index, kernel, query, util, v2};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
