@@ -88,8 +88,14 @@ performance, correctness) at da91da6, from reading only. Ruled: keep the AVX-512
 retire the old approximate mode (done); approximate threshold as above; compaction codes-only by default. Still to rule:
 keep or drop the norm sort. The order the reviews suggest, each step keeping dbcmp's answers bit for bit:
 
-1. A synthetic end-to-end test (about 2k rows: threshold and k-NN, scan and exact, with and without a visible set and
-   compaction, against brute force), and a 50k run comparing dbcmp answer dumps before and after each step.
+1. [x] A synthetic end-to-end test: rust/src/v2/e2e.rs on rust/testdata/synth4k (4,000 items, 64 dimensions, 32
+   clusters, fitted by tools/fit.py `--per-cluster 125`; testdata/make_synth.py regenerates it byte for byte). Threshold,
+   scan, exact k-NN and the approximate mode over every cluster, against brute force over the exact products, unfiltered
+   and under four visible sets (random 10%, whole clusters, three items, empty), on the index and on both compactions,
+   under the default and measured plans, each left to choose and forced. At this size the default costs only scan or
+   cut, so a cost set that makes the planner mix every path (direct scoring included) is tested too. Planted bugs it
+   catches: the planner skipping clusters not certainly in, visible counts one short, the exact fallback dropped. Still
+   to do on the owner's machine: a 50k run comparing dbcmp answer dumps (`--dump`) before and after each step.
 2. Delete the first-generation index (index.rs, query.rs, most of kernel.rs; it needs AVX-512 to run at all), moving
    the items v2 borrows, the column layout, `plan2_prev`, and the switches the reports rejected (`jump`, `alpha0`,
    `--u8`, `bail`, `rdec`, `Mode2::Sweep`).
