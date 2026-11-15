@@ -1,0 +1,13 @@
+breakdown2 tables levels item 0.0001: per query 1522 (cluster, level) tables, 64661 units, 517.5 survivors per table, 376 tables for at most 8
+breakdown2 counts levels item 0.0001: per query 553.9 clusters on the index path, 125.8 on full vectors, 616767 items entering the first level, 787846 item-levels, 29.3 groups, 2790 full reads
+breakdown2 tables levels item 0.01: per query 4930 (cluster, level) tables, 305954 units, 825.0 survivors per table, 731 tables for at most 8
+breakdown2 counts levels item 0.01: per query 1120.8 clusters on the index path, 50.9 on full vectors, 1975575 items entering the first level, 4067186 item-levels, 50.1 groups, 8930 full reads
+breakdown2 tables levels item 0.5: per query 8841 (cluster, level) tables, 740009 units, 1350.9 survivors per table, 152 tables for at most 8
+breakdown2 counts levels item 0.5: per query 1484.9 clusters on the index path, 7.0 on full vectors, 2902948 items entering the first level, 11942942 item-levels, 64.0 groups, 224889 full reads
+breakdown2 tables levels text 0.0001: per query 5512 (cluster, level) tables, 263351 units, 643.4 survivors per table, 932 tables for at most 8
+breakdown2 counts levels text 0.0001: per query 1464.2 clusters on the index path, 35.2 on full vectors, 2342186 items entering the first level, 3546458 item-levels, 63.8 groups, 1714 full reads
+breakdown2 tables levels text 0.01: per query 8407 (cluster, level) tables, 654038 units, 1034.1 survivors per table, 744 tables for at most 8
+breakdown2 counts levels text 0.01: per query 1499.0 clusters on the index path, 1.0 on full vectors, 2964730 items entering the first level, 8693616 item-levels, 64.0 groups, 27501 full reads
+breakdown2 tables levels text 0.5: per query 8985 (cluster, level) tables, 756755 units, 1633.2 survivors per table, 19 tables for at most 8
+breakdown2 counts levels text 0.5: per query 1499.0 clusters on the index path, 1.0 on full vectors, 2999778 items entering the first level, 14674745 item-levels, 64.0 groups, 391466 full reads
+peak RSS 15.97 GiB (exit 0)

@@ -36,9 +36,11 @@ Every number is marked **measured**, or **inferred** / **modelled**.
 | 500k row groups | 2,000–8,000; the margins are within noise |
 | 1M row groups | 4,000, for both classes |
 | R1M | 2,000 for items; text split between 2,000 and 8,000 |
-| R3M | 4,000 for items at small answers and text at middle answers; 8,000 at the ends; within 1–4% of each other on text |
+| R3M | 4,000 for exact k-NN (16–51% faster than 2,000); on threshold queries 2,000 and 4,000 tie (geometric mean −1%), with 2,000 faster on selective item queries and 8,000 at large item answers |
 
-2,000 was not timed at R3M. So the step from 2,000 at R1M to 4,000 at R3M is not established.
+2,000 at R3M was timed in a later session, against 4,000 refitted (bit-identical) and timed again in that session as a control; see "R3M at 2,000". The step from 2,000 at R1M to 4,000 at R3M is measured where the sizes differ most:
+- exact k-NN: 2,000 was 21–32% faster than 4,000 on item k-NN at R1M, and is 48–51% slower at R3M;
+- the penalty of 4,000 on selective item queries shrinks: against 2,000 at item 0.01%, +58% at R1M and +22% at R3M.
 
 **What changes with N at a fixed size (measured over two-point pairs):**
 - For item queries at small answers, the touched share and the share of clusters opened fall with N. The log-log slope is −0.2 to −0.5.
@@ -51,9 +53,11 @@ So the small-answer penalty of large clusters for item queries shrinks as N grow
 - 3,500 → 4,000 at 3M;
 - 6,300 → 8,000 at 10M.
 
-It rests on two well-measured N (R1M and R3M) with one gap (2,000 at R3M untimed). If one constant has to ship now, 2,000 is the safer choice (inferred):
+It rests on two well-measured N (R1M and R3M), with every size timed at both. If one constant has to ship now, 2,000 is the safer choice for corpora near 1M (inferred):
 - it was more than 10% worse than 1,000 in only two cells: row-group 1M item 1% (+14%, slower in both repeats) and row-group 1M item k-NN k = 100 (+13%, one process);
 - 4,000 was 44% worse on R1M item 0.01%.
+
+At 3M the same constant costs 16–51% on exact k-NN against 4,000 (measured), so a constant does not serve both.
 
 **The sub-clustered approximate mode.** With sub-clusters of about 62 items, items scanned are close to independent of the parent size (measured). So coarser parents do not harm that mode if it uses fixed-size sub-clusters.
 
@@ -143,6 +147,7 @@ Fit peak memory at 1M, including the file cache, fell to 3.76 GiB.
 | R3M | 1,000 | 3,000 | 64 | **1**..5,081 | **96**..160,105 | 1..129 | 1 | **1,612** |
 | | 4,000 | 750 | 64 | 310..16,875 | 3,876..152,100 | 2..29 | 0 | 14 |
 | | 8,000 | 375 | 64 | 1,480..42,772 | 1,480..133,092 | 1..18 | 0 | 18 |
+| | 2,000 (later session) | 1,500 | 64 | 88..10,405 | 2,266..156,735 | 1..66 | 0 | 17 |
 
 The R3M 1,000 fit has a one-item cluster and a 96-item group, with basis condition 1,612. This affects efficiency, not soundness. It may slightly handicap 1,000 at R3M (inferred).
 
@@ -153,6 +158,7 @@ The R3M 1,000 fit has a one-item cluster and a 96-item group, with basis conditi
 - **Verify** (`--vitem 20 --vtext 20`) runs first, in the first pass only.
 - **500k, row-group 1M and R1M:** every fit forward, then reverse.
 - **R3M:** 1,000 / 4,000 / 8,000 once each, then the second repeats of 4,000 (verify first) and 1,000 on the same kept indices. A refit with the same seed is bit-identical, so no refit was done.
+- **R3M at 2,000** was added later, after a container restart: fit, then 2,000 (verify first), 4,000, 4,000, 2,000, each a separate process, with 4,000 refitted for the control (`perm`, `cstart` and `grp` identical to the first fit). It is kept out of the main tables, which compare runs of one session; `cmp_r3m_session.py` compares it.
 - **The best coarse size at R3M** was taken as the lower geometric mean over the twelve threshold cells: 4,000.
 - **k-NN for the row-group fits:** one separate process each.
 - **Item queries:** corpus items at every N.
@@ -245,10 +251,10 @@ Bytes per item, the full-vector share, the touched share and the entry shares of
 | | item | 4,000, +27% | 4,000, +11% | 4,000, +2% | 8,000, +1% | 4,000, +0% | 4,000, +1% |
 | R1M | text | 2,000, +6% | 2,000, +0% | 8,000, +2% | 8,000, +0% | 2,000, +2% | 2,000, +2% |
 | | item | 2,000, +10% | 2,000, +8% | 2,000, +11% | 2,000, +2% | 2,000, +6% | 2,000, +3% |
-| R3M (no 2,000) | text | 8,000, +3% | 8,000, +1% | 4,000, +2% | 4,000, +1% | 4,000, +1% | 8,000, +4% |
+| R3M (1,000 / 4,000 / 8,000) | text | 8,000, +3% | 8,000, +1% | 4,000, +2% | 4,000, +1% | 4,000, +1% | 8,000, +4% |
 | | item | 4,000, +15% | 4,000, +4% | 4,000, +2% | 8,000, +5% | 8,000, +10% | 8,000, +9% |
 
-Most text margins between coarse sizes are within noise. 1,000 is never the best, though in a few cells it is within noise of the best (500k item 0.1%: 3.1 against 3.1 ms).
+For 2,000 at R3M, see "R3M at 2,000". Most text margins between coarse sizes are within noise. 1,000 is never the best, though in a few cells it is within noise of the best (500k item 0.1%: 3.1 against 3.1 ms).
 
 ### The three tests
 
@@ -261,7 +267,7 @@ The best size moves from "anything 2,000–8,000" at 500k to 4,000 at 1M.
 **2. Density, wide population, R1M → R3M (measured).**
 - At 1,000: text grows as N^0.72 at 0.01% and N^1.04 at 50%; item as N^0.67 at 0.01% and N^1.03 at 50%.
 - At 4,000: text N^0.72 at 0.01% and N^1.01 at 50%.
-- The best size moves from 2,000 to 4,000, but 2,000 was not timed at R3M.
+- The best size moves from 2,000 to 4,000 for exact k-NN; on threshold queries 2,000 and 4,000 tie at R3M ("R3M at 2,000").
 - **Measured at R3M against R1M:** the penalty of 4,000 on small item answers disappears (+44% → −13% at item 0.01%), and 8,000 improves for items (+108% → +13% at 0.01%).
 
 **3. Diversity at fixed N, row-group 1M against R1M, at 1,000 per cluster.** Only the text queries are shared, so this compares text times.
@@ -350,7 +356,38 @@ Each cell is ms, then the change against 1,000 at the same N.
 | | 4,000 | 7.98, −40% | 11.24, −35% | 44.56, −27% | 52.87, −24% |
 | | 8,000 (one run) | 9.91, −26% | 14.71, −15% | 47.34, −23% | 54.42, −21% |
 
-The row-group k-NN figures are single processes; R1M and R3M at 1,000 and 4,000 have two repeats. k-NN follows the threshold pattern: 8,000 hurts item k-NN at R1M, and 4,000 is the best at R3M.
+The row-group k-NN figures are single processes; R1M and R3M at 1,000 and 4,000 have two repeats. k-NN follows the threshold pattern: 8,000 hurts item k-NN at R1M, and 4,000 is the best at R3M, including against 2,000 ("R3M at 2,000").
+
+## R3M at 2,000 (measured)
+
+This was timed in a later session, after a container restart, as four processes in the order 2,000 (verify first), 4,000, 4,000, 2,000. 4,000 was refitted with the same seed (bit-identical) and timed again as the control. That session's 4,000 was 1–13% faster than the first session's in 15 of 16 cells (about 5% at the median), so 2,000 is compared only with it. Each cell is the mean of two processes; `tables.md` has both.
+
+| Cell | 4,000 | 2,000 | 2,000 against 4,000 |
+|---|---|---|---|
+| item 0.01% | 13.2 | 10.8 | **−18%** |
+| item 0.1% | 29.9 | 26.1 | **−12%** |
+| item 1% | 75.5 | 72.7 | −4% |
+| item 10% | 198.2 | 198.6 | +0% |
+| item 50% | 277.5 | 283.7 | +2% |
+| item 75% | 249.6 | 249.4 | −0% |
+| item k-NN k = 10 | 7.7 | 11.7 | **+51%** |
+| item k-NN k = 100 | 11.6 | 17.2 | **+48%** |
+| text 0.01% | 56.6 | 59.8 | +6% |
+| text 0.1% | 90.7 | 91.4 | +1% |
+| text 1% | 142.2 | 136.2 | −4% |
+| text 10% | 237.8 | 228.9 | −4% |
+| text 50% | 315.5 | 363.5 | **+15%** |
+| text 75% | 301.7 | 326.5 | +8% |
+| text k-NN k = 10 | 44.3 | 51.4 | **+16%** |
+| text k-NN k = 100 | 48.3 | 56.1 | **+16%** |
+
+Geometric means of 2,000 against 4,000: threshold cells −1.2% (item −5.6%, text +3.4%); exact k-NN +31.7%.
+
+**Noise.** The control's two processes differ by up to 20% (item 75%), and by 11–17% on text 1–75%. The cells in bold have both 2,000 processes on the same side of both 4,000 processes; the others overlap.
+
+**Counts per query (first process of each).** 2,000 opens about twice the clusters (text 0.01%: 1,464 against 744; item 0.01%: 554 against 339) and sends more of them to full vectors (item 0.01%: 126 against 63). On selective item queries the finer clusters exclude more: 617k items enter the first level against 774k. At text and larger answers the items entering differ by at most 6%, so the extra clusters are cost with no saving.
+
+**Not profiled:** why exact k-NN is slower at 2,000. The breakdown covers threshold cells only.
 
 ## Approximate-mode probe counts (pure counting; measured)
 
@@ -360,7 +397,7 @@ The row-group k-NN figures are single processes; R1M and R3M at 1,000 and 4,000 
 - **Two-level probing:** the top P parents are opened, then only their sub-centres are ranked. For each target, the P with the fewest items scanned is reported.
 - **Queries:** 50 item queries and 100 text queries.
 - **Truth:** the exact top 1,000 per query at that N.
-- **Fits counted:** all 500k, row-group 1M and R1M fits, and R3M at 1,000 and 4,000.
+- **Fits counted:** all 500k, row-group 1M and R1M fits, and R3M at 1,000, 2,000 and 4,000.
 
 **Items scanned at mean recall 0.99, k = 10**, schemes (a) parents only / (b) sub-clusters of about 62 / (c) sub-clusters of about 250:
 
@@ -374,6 +411,7 @@ The row-group k-NN figures are single processes; R1M and R3M at 1,000 and 4,000 
 | R1M, 4,000 | 23,014 / 2,331 / 5,091 | 19,338 / 3,253 / 5,898 |
 | R1M, 8,000 | 50,983 / 2,789 / 6,425 | 35,365 / 3,332 / 7,506 |
 | R3M, 1,000 | 15,000 / 3,635 / 6,524 | 18,753 / 6,745 / 10,286 |
+| R3M, 2,000 | 23,558 / 4,530 / 6,807 | 31,527 / 8,804 / 18,381 |
 | R3M, 4,000 | 28,429 / 4,438 / 7,357 | 36,416 / 7,225 / 18,079 |
 
 Recall 0.8 and 0.9, k = 100 and 1,000, the 500k fits, parents and groups opened, and centres scored are in `tables.md`.
@@ -411,10 +449,10 @@ The candidate rule is items per cluster ≈ 2,000 × √(N / 1M), on the 2,000 /
 
 Evidence for it:
 - R1M: 2,000 is best;
-- R3M: 4,000 is best among 1,000 / 4,000 / 8,000;
+- R3M: 4,000 is best among 1,000 / 4,000 / 8,000, and against 2,000 it ties on threshold queries and is 16–51% faster on exact k-NN;
 - the row-group 1M: 4,000 is best, and 2,000 is within 10–12%.
 
-Evidence against it: 2,000 untimed at R3M, and the population effect at fixed N (row groups 4,000, R1M 2,000) as large as the N effect.
+Evidence against it: two values of N on one population, and the population effect at fixed N (row groups 4,000, R1M 2,000) as large as the N effect. Which size is best at 3M also depends on the workload: 2,000 for selective item thresholds, 4,000 for exact k-NN.
 
 If the approximate mode uses sub-clusters of a fixed size, the parent size can follow the exact path's needs without harming it (measured).
 
@@ -422,10 +460,9 @@ If the approximate mode uses sub-clusters of a fixed size, the parent size can f
 
 - **5M:** replaced by R3M, for the distribution and memory reasons above.
 - **The six-level reference run at the top N.**
-- **R3M at 2,000.** It was cut for time, and it is the most important gap.
 - **Repeats at R3M:** 8,000 has one run only, and 1,000 and 4,000 have two.
 - **Verify:**
-  - every 500k, row-group 1M and R1M fit, and R3M at 4,000: 0 wrong in, 0 wrong out, 0 violations, 0 decisions not implied, k-NN 0 mismatches of 40 (measured);
+  - every 500k, row-group 1M and R1M fit, and R3M at 2,000 and 4,000: 0 wrong in, 0 wrong out, 0 violations, 0 decisions not implied, k-NN 0 mismatches of 40 (measured);
   - R3M at 1,000 and 8,000: not run.
 - **Probe counts at R3M 8,000.**
 - **The planner:** not retuned for larger clusters. It sends fewer clusters straight to full vectors as clusters grow: 108 → 11 flat clusters at 1M text 0.01%, going from 1,000 to 4,000 per cluster.
