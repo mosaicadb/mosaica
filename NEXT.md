@@ -35,8 +35,10 @@ rust/REPORT_CONSOLIDATION.md records what was checked; these were not.
   code is on research/levels-clusters, on research/combined at d443f66; it needs rebasing onto this branch (q.rs and
   fit.py conflict). At 500k, 1M and 3M (rust/REPORT_SCALING.md), 1,000 items per cluster was never the best; on the
   uniform samples the best was 2,000 at 1M and 4,000 at 3M (where 2,000 ties on thresholds and is 16–51% slower on
-  exact k-NN). fit.py's default on that branch now grows with N: 2,000 items per cluster up to 2M, 4,000 up to 8M,
-  8,000 above, with up to 64 groups.
+  exact k-NN). fit.py's default on that branch now grows with N: 2,000 items per cluster up to 2M, doubling for each
+  4x N with no cap (64,000 at 1B), with up to 64 groups. Before relying on it above 32M: time 16,000 per cluster
+  there, give the approximate mode u32 positions for clusters of 65,536 rows or more, and grow fit.py's k-means sample
+  with K.
 - **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
   be stored.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the
