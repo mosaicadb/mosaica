@@ -83,7 +83,7 @@ Bytes read per item (item queries at answers of 0.01%, 0.1%, 1% and 10%; text th
 
 The Rust fit with flat clustering is within the spread of clustering seeds of `fit.py`. Two-level training costs a
 small amount every time: about 1% of the bytes at small item answers and 0.3–0.8% for text, outside the flat seeds'
-range, and five global refinement steps on the sample do not remove it. At 60k rows; at 1M BioCLIP-2 (below) cells
+range, and five global refinement steps on the sample do not remove it. That was at 60k rows: at 1M BioCLIP-2 (below) cells
 cost nothing measurable, and are the default for large N.
 
 ## The partitioned build (step 4)
