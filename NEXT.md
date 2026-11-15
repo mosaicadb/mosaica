@@ -40,9 +40,10 @@ names the branch or report that holds its evidence.
   - **The plain scan beats the compacted scan by about 20% under genus sets,** unexplained: both read contiguous rows
     with the same kernel.
   - **The largest answers under 241 and 964 genera:** 241 genera is 16–19% behind the scan at the 50% and 75% shares.
-  - **A session switch for compaction.** It is opt-in through `Index2::compact` with no session-level setting. It costs
-    22 ms and 24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB,
-    38 ms and 33 MB, 162 ms and 147 MB). The suggestion is codes and vectors up to about 10% visible, codes alone above.
+  - **A session switch for compaction.** It is opt-in through `Index2::compact` with no session-level setting. Ruled:
+    a session compacts its codes by default, and codes and vectors is an option the caller states. It costs 22 ms and
+    24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB, 38 ms and
+    33 MB, 162 ms and 147 MB).
   - **The uncompacted index path over sparse clusters** costs more than the model predicts (22 ms forced at random 1%).
 - **Two deterministic levels and larger clusters.** Levels at 16 and 32 B (rust/REPORT_DETLEVELS.md) and about 4,000
   items per cluster (rust/REPORT_CLUSTERSIZE.md) are 18–33% faster for text and 10–23% for items at 1M together. The
@@ -59,9 +60,17 @@ names the branch or report that holds its evidence.
 
 - **`dot_f16_x4` drops dimensions past the last multiple of 16** (kernel.rs:599, :671), and no error bound covers them:
   a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Fixed on research/scan-planner
-  (b79dbc8d5): the tail is added and counted in the error bound; it lands with that merge.
+  (b79dbc8d5) and merged; `dot_i8` still has no tail (harmless while n % 32 == 0).
 
 ## Approximate path
+
+- [x] **The old approximate mode is retired** (`knn2_dial`, `knn2_approx`, SOAR, the old dial fit, `--approx-mode`,
+  `--fit-dial`, `--soar`). `knn2_fast` is the approximate mode; `ann` runs it as `--dial np:eps`. Rows measured with the
+  old mode can no longer be reproduced.
+- **Approximate threshold, as IVF range search means it** (faiss `range_search`): probe the `nprobe` best clusters in
+  the approximate mode's order and return every visible item in them scoring at least t, decided exactly, so the answer
+  holds no false positives and misses only items in clusters not probed. There is no entry point for it yet; dbknn
+  measures the approximate mode as top-m instead.
 
 - **The three steps in reports/annideas/NEXT.md:** cheaper group setup, sub-clusters (row order ruled: rows stay sorted
   by key and the approximate mode gathers each sub-cluster's rows; reports/annideas/REPORT.md), and a fused fast-scan
@@ -70,6 +79,30 @@ names the branch or report that holds its evidence.
   three times once answers pass about 10% of the visible set; the planner should switch.
 - **Fit the dial above k = 1,000.** Larger answers currently reuse the k = 1,000 dial.
 - **Low finding from the merge review:** ties between equal scores can differ from the exact path's order.
+
+## Code review
+
+review/CODE_REVIEW.md holds four independent reviews of the whole implementation (architecture, duplication,
+performance, correctness) at da91da6, from reading only. Ruled: keep the AVX-512 kernels and the synthetic scale path;
+retire the old approximate mode (done); approximate threshold as above; compaction codes-only by default. Still to rule:
+keep or drop the norm sort. The order the reviews suggest, each step keeping dbcmp's answers bit for bit:
+
+1. A synthetic end-to-end test (about 2k rows: threshold and k-NN, scan and exact, with and without a visible set and
+   compaction, against brute force), and a 50k run comparing dbcmp answer dumps before and after each step.
+2. Delete the first-generation index (index.rs, query.rs, most of kernel.rs; it needs AVX-512 to run at all), moving
+   the items v2 borrows, the column layout, `plan2_prev`, and the switches the reports rejected (`jump`, `alpha0`,
+   `--u8`, `bail`, `rdec`, `Mode2::Sweep`).
+3. Split library and binary; options instead of globals and environment variables; an `open` that returns a queryable
+   index (today only `run2::setup2_at` does).
+4. Split `Plan` into a cost model, tuning whose defaults are the measured system (`--int --gtab --flags repack`), and
+   query arguments.
+5. Move verification, profiling and dumps out of the level loop; split q.rs; one owner of full-vector scoring.
+6. One `threshold` and one `knn`, each with a path (scan, exact, approximate) and one planner.
+7. The correctness findings: a visible set naming an unknown entity panics; k-NN returns certified items with +inf
+   scores in entity order; k = 0 panics; a non-power-of-two `--nguar` overstates `npow`.
+8. The performance findings, measured one at a time: k-NN selection rebuilds a cluster's tables per refined row;
+   sparse-cluster gathers and the full vectors the index path reads are unpriced; the scan constant is timed out of
+   cache; the K x K support table cannot reach a billion items.
 
 ## Benchmarks
 

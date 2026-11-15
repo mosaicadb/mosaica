@@ -32,7 +32,6 @@ pub struct Ctx2 {
     pub texts: Vec<Vec<f32>>,
     pub plan: Plan,
     pub approx: Approx,
-    pub dial: Option<Dial>,
     pub pseudo: Vec<(usize, Vec<f32>, Vec<u32>)>,
 }
 
@@ -263,24 +262,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
     let pseudo = pseudo_queries(&ix, if args().iter().any(|a| a == "--no-approx") { 0 } else { arg_usize("--pseudo", 1000) }, 10);
-    let (mut approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new(), second: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
-    if args().iter().any(|a| a == "--soar") {
-        let t = Timer::new();
-        approx.second = Approx::second_assignment(&ix);
-        out!("[approx] second assignment in {:.1}s", t.s());
-    }
+    let (approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
     out!("[approx] f = {} from {} pseudo-queries in {:.1}s; mean items scanned at recall 0.95 by f: {:?}", approx.f, pseudo.len(), t.s(), fres.iter().map(|x| (x.0, x.1.round())).collect::<Vec<_>>());
-    let dial = if args().iter().any(|a| a == "--fit-dial") || arg_str("--dial", "").contains("fit") {
-        let t = Timer::new();
-        let d = Dial::fit(&ix, &pseudo[..pseudo.len().min(arg_usize("--pseudo-dial", 200))], plan, &[0.9, 0.95, 0.99, 0.999], 10, None);
-        out!("[approx] dial fitted in {:.1}s: eps {:?}, pseudo-query recall {:?}, fits {:?}", t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>(), d.fits);
-        for (e, f) in d.eps.iter().zip(&d.factors) {
-            out!("[approx] eps {e}: factors by level {:?}", f.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
-        }
-        Some(d)
-    } else {
-        None
-    };
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
@@ -308,7 +291,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     }
     // full vectors read through the reader: the planner counts their reads
     let plan = Plan { disk: !ff.is_empty() && crate::v2::disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..plan };
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial, pseudo };
+    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
     }
@@ -1481,8 +1464,8 @@ pub fn dbcmp(c: &Ctx2) {
 /// and the approximate mode at the cheapest setting reaching each mean recall in `--targets`. Recall is |returned ∩
 /// the first k visible entries of `--order`| / k. The approximate ladder doubles the cluster count up to every cluster
 /// for each dial; each dial's first rung reaching a target is timed at `--reps` and the fastest is kept.
-/// `--approx-mode new` (knn2_fast) walks the dial off and the dials fitted for this k at each eps in `--dial-eps` on
-/// the pseudo-queries; `old` (knn2_dial) the dial off and the setup's dial fitted for 0.99. With `--params FILE` (a
+/// The approximate mode (knn2_fast) walks the dial off and the dials fitted for this k at each eps in `--dial-eps` on
+/// the pseudo-queries. With `--params FILE` (a
 /// liminal_topk.csv), the approximate mode runs only at the settings listed there and is not timed.
 /// Rows go to RESULTS/liminal_topk.csv (all) or liminal_topk_<set>.csv, param "nprobe:dial"; per query, the items
 /// touched, entering each level, full vectors read and bytes read of the chosen settings go to
@@ -1497,11 +1480,6 @@ pub fn dbtopk(c: &Ctx2) {
     let step = arg_usize("--step", 10);
     let ks: Vec<usize> = arg_str("--ks", "1,10,100,1000").split(',').map(|x| x.parse().unwrap()).collect();
     let targets: Vec<f64> = arg_str("--targets", "0.8,0.99").split(',').map(|x| x.parse().unwrap()).collect();
-    let fast = match arg_str("--approx-mode", "new").as_str() {
-        "new" => true,
-        "old" => false,
-        m => panic!("--approx-mode {m}: write new or old"),
-    };
     let eps_list: Vec<f64> = arg_str("--dial-eps", "0.001,0.01,0.03,0.1").split(',').map(|x| x.parse().unwrap()).collect();
     let fixed: Option<Vec<(String, usize, String)>> = Some(arg_str("--params", "")).filter(|f| !f.is_empty()).map(|f| {
         std::fs::read_to_string(&f).unwrap().lines().skip(1).filter_map(|l| {
@@ -1564,25 +1542,19 @@ pub fn dbtopk(c: &Ctx2) {
                 emit("liminal_exact", "exact", "-", &r);
             }
             // the dials of the ladder, by name
-            let dials: Vec<(String, Option<Vec<f32>>)> = if fast {
+            let dials: Vec<(String, Option<Vec<f32>>)> = {
                 let t = Timer::new();
                 // the fit's queries: the setup's pseudo-queries, or with --dial-from queries the queries that are not timed
                 let held: Vec<(usize, Vec<f32>, Vec<u32>)> = (0..qs.len()).filter(|qi| qi % step != 0).map(|qi| (usize::MAX, qs[qi].clone(), Vec::new())).collect();
                 let fq = if arg_str("--dial-from", "pseudo") == "queries" { &held[..] } else { &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))] };
-                let d = Dial::fit(ix, fq, c.plan, &targets, k, Some(&c.approx));
+                let d = Dial::fit(ix, fq, c.plan, true, k, &c.approx);
                 out!("[dial k {k}] fitted on {} queries in {:.1}s: eps {:?}, their recall@{k} over every cluster {:?}", fq.len(), t.s(), d.eps, d.recall.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>());
                 for (e, fa) in d.eps.iter().zip(&d.factors) {
                     out!("[dial k {k}] eps {e}: factors by level {:?}", fa.iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
                 }
                 std::iter::once(("off".to_string(), None)).chain(eps_list.iter().map(|&e| (format!("e{e}"), Some(d.for_eps(e).to_vec())))).collect()
-            } else {
-                vec![("off".into(), None), ("fit0.99".into(), Some(c.dial.as_ref().expect("--approx-mode old needs --fit-dial").for_target(0.99).to_vec()))]
             };
-            let run = |np: usize, dial: Option<&[f32]>, q: &[f32]| if fast {
-                knn2_fast(ix, &c.approx, q, k, vis, np, dial, c.plan)
-            } else {
-                knn2_dial(ix, &c.approx, q, k, vis, np, dial, false, c.plan)
-            };
+            let run = |np: usize, dial: Option<&[f32]>, q: &[f32]| knn2_fast(ix, &c.approx, q, k, vis, np, dial, c.plan);
             let dial_of = |name: &str| dials.iter().find(|d| d.0 == name).unwrap_or_else(|| panic!("no dial {name}")).1.as_deref();
             // per target: (param, rows timed or None)
             let mut chosen: Vec<Option<(String, Option<Vec<Row>>)>> = vec![None; targets.len()];
@@ -1631,8 +1603,8 @@ pub fn dbtopk(c: &Ctx2) {
                 let (np, dname) = param.split_once(':').unwrap();
                 let (np, dial): (usize, Option<&[f32]>) = (np.parse().unwrap(), dial_of(dname));
                 let mut tot = vec![0f64; 6 + nl];
-                // with VEXACT_PROF, the share of the query's cycles by phase (knn2_fast only)
-                let prof = std::env::var("VEXACT_PROF").is_ok() && fast;
+                // with VEXACT_PROF, the share of the query's cycles by phase
+                let prof = std::env::var("VEXACT_PROF").is_ok();
                 let mut cyc = [0f64; 32];
                 for (qi, es) in &exact {
                     PROF.store(prof, std::sync::atomic::Ordering::Relaxed);
@@ -1644,7 +1616,7 @@ pub fn dbtopk(c: &Ctx2) {
                     let rec = o.ents.iter().filter(|x| es.contains(&x.1)).count() as f64 / k as f64;
                     let bytes = bytes_read2(ix, &o.st) * ix.nrows as f64;
                     let v: Vec<f64> = [rec, o.st.touched as f64, o.st.full_reads as f64, bytes, o.st.groups as f64, o.st.clusters_open as f64].into_iter().chain(o.st.enter[..nl].iter().map(|&x| x as f64)).collect();
-                    writeln!(fs, "liminal_approx_{},{},{k},{vname},{qi},{param},{}", if fast { "new" } else { "old" }, targets[ti],
+                    writeln!(fs, "liminal_approx_new,{},{k},{vname},{qi},{param},{}", targets[ti],
                         v.iter().map(|x| format!("{x:.4}")).collect::<Vec<_>>().join(",")).unwrap();
                     for (a, b) in tot.iter_mut().zip(&v) {
                         *a += b / exact.len() as f64;
@@ -1667,19 +1639,15 @@ pub fn dbtopk(c: &Ctx2) {
 
 /// The approximate mode as top-m on the threshold-db queries, in ann.py's form: for every `--step`-th query and each
 /// share in `--shares`, m is the size of the exact answer (the first k of `--order`, within the visible set), the query
-/// asks knn2_dial for the m best, and recall is |returned ∩ exact| / m. Settings: `default` is every cluster with the
-/// dial fitted for target recall 0.99; `tight` is the fastest of the smallest cluster counts on a doubling ladder
-/// that reaches mean recall 0.99 with the fitted dial (also with the dial off when `--tight-dials off` is given; walked
-/// at one repetition from `--ladder-from`, the winner timed at `--reps`). The ladder stops at the first rung whose median
-/// query exceeds `--cap-ms` (5000), or whose first query of each kind each exceed twice that; short of 0.99, tight is the
-/// last rung within the cap. A tight rung slower than `--slow-ms` (1000) per query keeps its ladder timing. Each set
-/// name in `--sets` other than `all` is the file stem of one of the `--vis` files. One thread, pinned by `--pin`. Rows
-/// are appended to RESULTS/liminal_approx.csv as each setting finishes, in ann.csv's columns; param is "nprobe:dial".
-/// `--approx-mode old` is the above. `new` (the default) asks knn2_fast instead, has no default setting, and walks the
-/// ladder for the dial off and for the dials fitted for k = the share's answer size over the whole corpus (the query's
-/// threshold) at each eps in `--dial-eps`, on the pseudo-queries or, with `--dial-from queries`, on the queries that
-/// are not timed (k capped at `--dial-k-max`); the first rung of each dial reaching 0.99 is timed and the fastest kept. Short of 0.99, in either
-/// mode, tight is the fastest rung with the best recall seen within the cap.
+/// asks knn2_fast for the m best, and recall is |returned ∩ exact| / m. `tight` walks a doubling ladder of cluster
+/// counts (from `--ladder-from`, at one repetition) for the dial off and for the dials fitted for k = the share's answer
+/// size over the whole corpus at each eps in `--dial-eps`, on the pseudo-queries or, with `--dial-from queries`, on the
+/// queries that are not timed (k capped at `--dial-k-max`); the first rung of each dial reaching mean recall 0.99 is
+/// timed at `--reps` and the fastest kept, and short of 0.99, the fastest rung with the best recall seen within the cap.
+/// The ladder stops at the first rung whose median query exceeds `--cap-ms` (5000), or whose first query of each kind
+/// each exceed twice that. A tight rung slower than `--slow-ms` (1000) per query keeps its ladder timing. Each set name
+/// in `--sets` other than `all` is the file stem of one of the `--vis` files. One thread, pinned by `--pin`. Rows are
+/// appended to RESULTS/liminal_approx.csv as each setting finishes, in ann.csv's columns; param is "nprobe:dial".
 pub fn dbknn(c: &Ctx2) {
     let ix = &c.ix;
     let order = read_npy(&arg_str("--order", ""));
@@ -1691,16 +1659,10 @@ pub fn dbknn(c: &Ctx2) {
     let reps = arg_usize("--reps", 5);
     let step = arg_usize("--step", 10);
     let k_cl = ix.k();
-    let fast = match arg_str("--approx-mode", "new").as_str() {
-        "new" => true,
-        "old" => false,
-        m => panic!("--approx-mode {m}: write new or old"),
-    };
-    let dial99: Vec<f32> = if fast { Vec::new() } else { c.dial.as_ref().expect("--approx-mode old needs --fit-dial").for_target(0.99).to_vec() };
     let eps_list: Vec<f64> = arg_str("--dial-eps", "0.001,0.01,0.03,0.1").split(',').map(|x| x.parse().unwrap()).collect();
     let held: Vec<(usize, Vec<f32>, Vec<u32>)> = (0..qs.len()).filter(|qi| qi % step != 0).map(|qi| (usize::MAX, qs[qi].clone(), Vec::new())).collect();
     let fq = if arg_str("--dial-from", "pseudo") == "queries" { &held[..] } else { &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))] };
-    // the new mode's dials by fitted k, fitted once and shared by every visible set
+    // the dials by fitted k, fitted once and shared by every visible set
     let mut fitted: std::collections::HashMap<usize, Vec<(String, Option<Vec<f32>>)>> = std::collections::HashMap::new();
     let pl = pool(1);
     for spec in arg_str("--sets", "all:0,1,2,3").split(';') {
@@ -1739,11 +1701,7 @@ pub fn dbknn(c: &Ctx2) {
                     let mut got = Vec::new();
                     for _ in 0..r {
                         let t = Timer::new();
-                        let out = pl.install(|| if fast {
-                            knn2_fast(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, c.plan)
-                        } else {
-                            knn2_dial(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, false, c.plan)
-                        });
+                        let out = pl.install(|| knn2_fast(ix, &c.approx, &qs[*qi], m, vis.as_ref(), np, dial, c.plan));
                         got = out.ents.iter().map(|x| x.1).collect::<Vec<u32>>();
                         ts.push(t.ms());
                     }
@@ -1768,32 +1726,22 @@ pub fn dbknn(c: &Ctx2) {
                     writeln!(f, "liminal,{setting},{vname},{si},{qi},{np}:{dname},{ms:.4},{rec:.5},{ret},{bad},{m}").unwrap();
                 }
             };
-            if !fast && !arg_str("--skip-default", "").split(',').any(|x| x == format!("{vname}:{si}")) {
-                let r = eval(k_cl, Some(&dial99), reps);
-                emit("default", k_cl, "fit0.99", &r);
-            }
             let mut ladder: Vec<usize> = (0..).map(|i| 1usize << i).take_while(|&p| p < k_cl).filter(|&p| p >= arg_usize("--ladder-from", 1)).collect();
             ladder.push(k_cl);
             let mut best: Option<(f64, usize, &str, Vec<(usize, f64, f64, usize, usize, usize)>)> = None;
             // the fit's verified threshold queries cost too much past a few thousand items, so larger k share the dial of `--dial-k-max`
             let kf = k.min(arg_usize("--dial-k-max", usize::MAX));
-            if fast && !fitted.contains_key(&kf) {
+            if !fitted.contains_key(&kf) {
                 let k = kf;
                 let t = Timer::new();
-                let d = Dial::fit(ix, fq, c.plan, &[], k, Some(&c.approx));
+                let d = Dial::fit(ix, fq, c.plan, false, k, &c.approx);
                 out!("[dial k {k}] fitted on {} queries in {:.1}s", fq.len(), t.s());
                 for &e in &eps_list {
                     out!("[dial k {k}] eps {e}: factors by level {:?}", d.for_eps(e).iter().map(|x| (x * 1e3).round() / 1e3).collect::<Vec<_>>());
                 }
                 fitted.insert(k, std::iter::once(("off".to_string(), None)).chain(eps_list.iter().map(|&e| (format!("e{e}"), Some(d.for_eps(e).to_vec())))).collect());
             }
-            let dials: Vec<(&str, Option<&[f32]>)> = if fast {
-                fitted[&kf].iter().map(|(n, d)| (n.as_str(), d.as_deref())).collect()
-            } else if arg_str("--tight-dials", "fit").contains("off") {
-                vec![("off", None), ("fit0.99", Some(&dial99[..]))]
-            } else {
-                vec![("fit0.99", Some(&dial99[..]))]
-            };
+            let dials: Vec<(&str, Option<&[f32]>)> = fitted[&kf].iter().map(|(n, d)| (n.as_str(), d.as_deref())).collect();
             for (dname, dial) in dials {
                 // the first rung reaching 0.99, else the fastest with the best recall seen
                 let mut within: Option<(usize, Vec<(usize, f64, f64, usize, usize, usize)>)> = None;

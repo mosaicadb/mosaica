@@ -4,14 +4,12 @@
 //!
 //! `ann-truth`: brute force over the stored values for every query and filter (all threads), saved beside the results.
 //! `ann`: the timed runs (one thread, pinned to `--core N` when given). Filters are `--filters a.npy,b.npy` (sorted
-//! entity ids); the unfiltered run is tagged `all`. The approximate grid is `--approx c:r:l,...` (clusters probed,
-//! re-ranked items, level of the interval scores); `--flat` adds brute force over the same stored values and visible
+//! entity ids); the unfiltered run is tagged `all`. `--flat` adds brute force over the same stored values and visible
 //! rows on the same thread.
 //! `--nq N` times the first N queries, `--methods exact,flat,approx` picks the methods, `--no-all` skips the unfiltered run, `--prof` prints the mean ms per phase.
-//! `--dial np:d,...` adds the approximate mode with the dial (method `approx`, unfiltered unless `--approx-filtered`): exact k-NN over the first np clusters by
-//! the fitted bound, each level's item half-widths cut to its (1 - d) error quantile (`fitT`: the d fitted for target
-//! recall T; needs `--fit-dial` unless a fit is named); `--dial-plan` its plan. `np:d:soar` adds the second
-//! assignment (needs `--soar`).
+//! `--dial np:eps,...` runs the approximate mode (knn2_fast, method `approx`, unfiltered unless `--approx-filtered`)
+//! over the first np clusters with the dial fitted for this k at miss rate eps on the pseudo-queries (`--pseudo-dial`
+//! of them; eps 0: the dial off).
 use crate::query::Flat;
 use crate::run2::*;
 use crate::util::*;
@@ -150,10 +148,17 @@ pub fn run(c: &Ctx2, k: usize) {
     };
     let name = arg_str("--name", "data");
     let reps = arg_usize("--reps", 2);
-    let approx: Vec<(usize, usize, usize)> = arg_str("--approx", "").split(',').filter(|s| !s.is_empty()).map(|s| {
-        let v: Vec<usize> = s.split(':').map(|x| x.parse().unwrap()).collect();
-        (v[0], v[1], v[2])
+    // the approximate settings, (np, eps), and their dials fitted for this k
+    let specs: Vec<(usize, f64)> = arg_str("--dial", "").split(',').filter(|s| !s.is_empty()).map(|s| {
+        let (np, e) = s.split_once(':').expect("--dial takes np:eps");
+        (np.parse().unwrap(), e.parse().unwrap())
     }).collect();
+    let fitted = (!specs.is_empty() && specs.iter().any(|x| x.1 > 0.0)).then(|| {
+        let t = Timer::new();
+        let d = Dial::fit(&c.ix, &c.pseudo[..c.pseudo.len().min(arg_usize("--pseudo-dial", 200))], c.plan, false, k, &c.approx);
+        println!("[dial k {k}] fitted in {:.1}s", t.s());
+        d
+    });
     let csv = format!("{dir}/ours.csv");
     let fresh = !std::path::Path::new(&csv).exists();
     let mut out = std::fs::OpenOptions::new().create(true).append(true).open(&csv).unwrap();
@@ -180,35 +185,11 @@ pub fn run(c: &Ctx2, k: usize) {
             })));
         }
         if want("approx") && (bm.is_none() || args().iter().any(|a| a == "--approx-filtered")) {
-            // --order centre: clusters by centre direction instead of the fitted bound
-            let ap = if arg_str("--order", "bound") == "centre" { None } else { Some(&c.approx) };
-            for &(np, rr, lv) in &approx {
-                let v = vis.as_ref();
-                cfgs.push(("approx".into(), format!("nprobe={np} rerank={rr} level={lv}"), Box::new(move |q: &[f32]| knn2_approx(&c.ix, ap, q, k, v, np, rr, lv))));
+            for &(np, e) in &specs {
+                let dial: Option<Vec<f32>> = (e > 0.0).then(|| fitted.as_ref().unwrap().for_eps(e).to_vec());
+                let (v, plan) = (vis.as_ref(), c.plan);
+                cfgs.push(("approx".into(), format!("nprobe={np} eps={e}"), Box::new(move |q: &[f32]| knn2_fast(&c.ix, &c.approx, q, k, v, np, dial.as_deref(), plan))));
             }
-        }
-        // approximate mode with the dial: --dial np:d,... where d is eps (the dial's miss rate per level) or fitT (the
-        // eps fitted for target recall T)
-        let dial_here = bm.is_none() || args().iter().any(|a| a == "--approx-filtered");
-        for spec in arg_str("--dial", "").split(',').filter(|s| !s.is_empty() && dial_here) {
-            let (spec, soar) = match spec.strip_suffix(":soar") {
-                Some(s) => (s, true),
-                None => (spec, false),
-            };
-            let (np, d) = spec.split_once(':').unwrap();
-            let np: usize = np.parse().unwrap();
-            let dl = c.dial.as_ref();
-            let factors: Option<Vec<f32>> = match d.strip_prefix("fit") {
-                Some(t) => Some(dl.expect("--fit-dial").for_target(t.parse().unwrap()).to_vec()),
-                None if d == "0" => None,
-                None => {
-                    let e: f64 = d.parse().unwrap();
-                    let dl = dl.expect("--fit-dial");
-                    Some(dl.factors[dl.eps.iter().position(|&x| (x - e).abs() < 1e-12).expect("eps not on the grid")].clone())
-                }
-            };
-            let (v, plan) = (vis.as_ref(), Plan { mode: match arg_str("--dial-plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto }, ..c.plan });
-            cfgs.push(("approx".into(), format!("nprobe={np} eps={d}{}", if soar { " soar" } else { "" }), Box::new(move |q: &[f32]| knn2_dial(&c.ix, &c.approx, q, k, v, np, factors.as_deref(), soar, plan))));
         }
         for (method, params, f) in &cfgs {
             let r = timed(c, k, reps, nq, f.as_ref());

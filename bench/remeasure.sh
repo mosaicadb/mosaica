@@ -20,9 +20,9 @@ for d in glove-100-angular nytimes-256-angular; do
   D=$DATA/$d; R=$D/results2; BL=$D/baselines
   F=$(ls "$D"/filters/vis_*.npy | tr '\n' ',' | sed 's/,$//')
   if [ $d = glove-100-angular ]; then
-    G=8:0,16:0,32:0,64:0,128:0,256:0,512:0,128:0.01,256:0.01,16:0:soar,32:0:soar,64:0:soar,128:0:soar
+    G=8:0,16:0,32:0,64:0,128:0,256:0,512:0,128:0.01,256:0.01
   else
-    G=2:0,4:0,8:0,16:0,32:0,64:0,128:0,32:0.01,64:0.01,8:0:soar,16:0:soar,32:0:soar,64:0:soar
+    G=2:0,4:0,8:0,16:0,32:0,64:0,128:0,32:0.01,64:0.01
   fi
   O="--v2 --index $D/index --queries $D/test.npy --results $R --name $d --core $CORE --reps 2"
   piece truth $d taskset -c 0-7 $B --v2 --index $D/index --queries $D/test.npy --results $R --filters "$F" ann-truth
@@ -31,7 +31,7 @@ for d in glove-100-angular nytimes-256-angular; do
   piece exact_all $d taskset -c $CORE $B $O $P --methods exact ann
   piece flat_all $d taskset -c $CORE $B $O $P --flat --methods flat ann
   piece filtered $d taskset -c $CORE $B $O $P --filters "$F" --no-all --flat --methods exact,flat ann
-  piece approx $d taskset -c $CORE $B $O $P --fit-dial --soar --dial $G --methods none ann
+  piece approx $d taskset -c $CORE $B $O $P --dial $G --methods approx ann
   piece score $d $PY "$HERE/score.py" "$D" "$R"
   piece oracle $d taskset -c 0-7 $PY "$HERE/oracle.py" "$D" "$R"
   piece flat_b $d taskset -c $CORE $PY "$HERE/baselines.py" query "$D" "$BL" faiss-flat --reps 2
