@@ -59,7 +59,12 @@ It rests on two well-measured N (R1M and R3M), with every size timed at both. If
 
 At 3M the same constant costs 16–51% on exact k-NN against 4,000 (measured), so a constant does not serve both.
 
-**Adopted** as `fit.py`'s default on `research/levels-clusters`: 2,000 items per cluster up to 2M items, 4,000 up to 8M, 8,000 above, with up to 64 groups (no longer limited to K / 8). The default fit at 1M reproduces the swept 2,000 fit exactly. At 50k it makes 25 clusters in 3 groups and passes the 50k check (verify and the float64 oracle, 0 wrong). Above 3M the rule is an extrapolation.
+**Adopted** as `fit.py`'s default on `research/levels-clusters`: 2,000 items per cluster up to 2M items, doubling for each 4× N with no cap (4,000 up to 8M, 8,000 up to 32M, 16,000 up to 128M, 64,000 at 1B), with up to 64 groups (no longer limited to K / 8). The default fit at 1M reproduces the swept 2,000 fit exactly. At 50k it makes 25 clusters in 3 groups and passes the 50k check (verify and the float64 oracle, 0 wrong).
+
+Above 3M the rule is an extrapolation. A cap at 8,000 would make the cluster count grow in proportion to N above 8M, which brings back the per-cluster cost the larger clusters remove; at 1B it would be 125,000 clusters against about 15,600 (inferred). Before relying on the rule above 32M:
+- time 16,000 per cluster near 32M, the first size not measured at a matching N (at 1M it was 1.4–2.4× slower on small item answers);
+- the approximate mode's u16 row positions cover clusters under 65,536 rows; the largest cluster is 4–5× the mean, so from 16,000 per cluster some clusters need u32;
+- `fit.py` fits centres on a 200,000-item sample, which is thin once K reaches thousands (about 13 items per centre at 1B); it should grow with K.
 
 **The sub-clustered approximate mode.** With sub-clusters of about 62 items, items scanned are close to independent of the parent size (measured). So coarser parents do not harm that mode if it uses fixed-size sub-clusters.
 
