@@ -2572,7 +2572,9 @@ pub fn answer_share(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ns: usi
 pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Planned {
     let k = ix.k();
     let rr = ix.x2.sqrt();
-    let pl = o.plan;
+    // reads are priced only where this index's own row ids address vectors on file (not a compacted copy in memory,
+    // nor a parent's rows reached through vrow)
+    let pl = Plan { disk: o.plan.disk && matches!(ix.own_rows(), Some(super::disk::Rows::Map { .. })), ..o.plan };
     let auto = matches!(pl.mode, PlanMode::Auto);
     let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();

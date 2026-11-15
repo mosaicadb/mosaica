@@ -15,11 +15,14 @@ names the branch or report that holds its evidence.
   with `dbcmp --cmp-what flat,index,scan,cindex,cvindex` under a visible set as the smoke run. Its filtered rows are being
   remeasured on a quiet machine for the plots on research/plots-refresh. What the merge changed or revealed:
   - Full vectors are `Arc<disk::Rows>`, with `Rows::Mem` holding the aligned `F16Rows`, so compaction's sharing and the
-    file under a cap both hold. A compacted index that shares its parent's vectors through `vrow` reads them through the
-    mapping, never the io_uring reader (`Index2::own_rows`), so under a cap only codes-and-vectors compaction gets the
-    reader.
+    file under a cap both hold. No compacted index uses the io_uring reader: codes-and-vectors compaction copies the
+    vectors into memory (which a cap cannot evict, so compacting a large set under 776 MB can be killed), and
+    codes-only compaction reads its parent's rows through `vrow` and the mapping (`Index2::own_rows`).
   - `plan2` had no disk costs (only `plan2_prev` did); it now prices on-file rows the way `plan2_prev` does, estimating
-    an unsampled cluster's candidate span as d of its rows. Unmeasured: run the capped comparison with the new planner.
+    an unsampled cluster's candidate span as d of its rows, and only on an index whose own rows are on file. Still
+    mispriced: `Pre::Direct` and the filtered scan read through the mapping (scattered faults) but are priced as
+    sequential reads, and codes-only compaction's faults are not priced. capped/run_ours.sh's plan.txt has none of
+    plan2's constants. Unmeasured: run the capped comparison with the new planner.
   - `dbcmp` interleaves its variants per query by default; capped runs pass `--cmp-order variant` (run_ours.sh) to
     keep REPORT_CAPPED's order.
   - No tests cover the planner's choices, `Index2::compact` or `F16Rows`.
