@@ -55,7 +55,8 @@ the anchor nearest to it. The anchors are all K centre directions when `--anchor
 else `--anchors` k-means centres of them, plus `--text-count` k-means centres of the embedded training prompts given
 with `--text-anchors` (`fit` takes the same three flags). The table is K × A, computed while encoding; any anchors
 give correct bounds, and only the bytes a query reads depend on them. A directory without `anchors.npy` builds the
-K × K table of one anchor per cluster.
+K × K table of one anchor per cluster, up to K = 4,096 (beyond that the build refuses and asks for `vexact anchors`).
+Prompts may be f16, f32 or f64 rows; `--anchors 0` or `--text-count 0` leaves that set out.
 
 The fit normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
 centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the

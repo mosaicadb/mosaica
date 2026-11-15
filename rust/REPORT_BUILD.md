@@ -216,24 +216,44 @@ arithmetic (200 item queries, 200 text queries; no violations). Items touched re
 | 512 coarse | 1.002 | 1.001 | 1.001 | 1.012 | 1.010 | 1.006 | 1.002 |
 | 512 coarse + 256 text | 1.002 | 1.001 | 1.001 | 1.012 | 0.767 | 0.836 | 0.939 |
 | K + 256 text | 1.000 | 1.000 | 1.000 | 1.000 | 0.767 | 0.836 | 0.939 |
+| 512 coarse + 256 text, genus held out | 1.002 | 1.001 | 1.001 | 1.012 | 0.968 | 0.980 | 0.992 |
+| K + 256 text, genus held out | 1.000 | 1.000 | 1.000 | 1.000 | 0.962 | 0.976 | 0.990 |
+| 512 coarse + 256 text, genus and higher taxa held out | 1.002 | 1.001 | 1.001 | 1.012 | 0.963 | 0.976 | 0.989 |
+| K + 256 text, genus and higher taxa held out | 1.000 | 1.000 | 1.000 | 1.000 | 0.957 | 0.972 | 0.988 |
 
 A sparse table of each anchor's nearest clusters does no better than no table: the clusters a query cannot skip are
 the far ones, which the lists leave out. What sets the cost is how near the best anchor is to the query, not how many
-clusters each anchor covers, so a dense table against fewer anchors keeps almost all of the K × K table's effect, and
-anchors placed where queries fall (k-means of embedded training prompts) cut text queries' items touched by a quarter.
-The text figure is optimistic: the training and test prompts come from the research branch's prompt sets and may
-share templates. Item thresholds (t = 0.9) lose 1.2% at 512 coarse anchors.
+clusters each anchor covers, so a dense table against fewer anchors keeps almost all of the K × K table's effect.
+Item thresholds (t = 0.9) lose 1.2% at 512 coarse anchors.
+
+Text anchors (k-means of embedded training prompts) cut text queries' items touched by a quarter in the first rows,
+but that figure is mostly overlap between training and test prompts, and is only an upper bound. Both sets
+(`agent2/text_train.json`, 2,206 prompts; `agent2/text_q.json`, 369) are drawn from the same prompt kinds and
+templates, and 57 of the test prompts' 61 genus words (93%) occur in training prompts. With the text anchors fitted
+only on the 1,610 training prompts that contain no test genus word ("genus held out"), the gain is 3–4% at an answer
+of 0.01% and about 1% at 1%. That is the gain to expect for queries about taxa the prompts did not cover. Also
+leaving out the 28 test family, order and class names (1,498 prompts kept; this drops every full-lineage prompt)
+gives about the same: 0.963 and 0.957 at 0.01%. Item queries are unchanged. No bound was violated in any run.
 
 `vexact fit` writes `anchors.npy`: all K centre directions when `--anchors` (1,024 by default) is at least K, else
 k-means of them, plus `--text-count` (256) k-means centres of the prompts given with `--text-anchors`; `vexact anchors`
 rewrites it for an existing fit. Without `anchors.npy` the table is the K × K one, byte-identical to before (code hash
-`b8bdd054938fe563`). The table is computed in f32 and each extreme recomputed in f64 over the items within twice the
+`b8bdd054938fe563`), up to K = 4,096: beyond that the build refuses (K² · 8 bytes of table) and asks for `vexact
+anchors`. `anchors.npy` is checked on load (rows of n, at least one, unit within 1e-12); prompts may be f16, f32 or f64;
+`--anchors 0` or `--text-count 0` leaves that set out. The table is computed in f32 and each extreme recomputed in f64 over the items within twice the
 f32 error bound of the f32 extreme, so it equals the f64 table (`hi.bin`, `lo.bin` byte-identical at 768 and 1,256
 anchors).
 
+This parity rests on a dataset where the table barely matters for item queries: with no table at all, items touched
+rise only 1.1% at an item answer of 0.01% on 1M BioCLIP-2. On the index of review/REPORT.md §1.3 (`e1_anchors.py`, a
+different 1M index) the anchor count mattered a lot (items touched at 0.01%: 12.9 with 1,000 anchors, 19.9 with 16,
+27.6 with no table), so these figures do not show that 512 or 1,024 coarse anchors are enough there or at 10⁹. That
+index's data is not in this container, so `near_table.py` was not run on it.
+
 ### 1M BioCLIP-2, against the K × K table of the same fit
 
-`pyA`: 512 coarse + 256 text anchors (what the default gives at 1B scale); `pyB`: K + 256 text (the default at 1M).
+`pyA`: 512 coarse + 256 text anchors (half the default's 1,024 coarse anchors, so more pessimistic than the default
+at any K above 1,024); `pyB`: K + 256 text (what the default gives at 1M, where K = 1,000 is below 1,024).
 Bytes read per item (`bytesq`, 200 queries):
 
 | | item 0.01% | 0.1% | 1% | 10% | text 0.01% | 0.1% | 1% | 10% |
@@ -242,11 +262,16 @@ Bytes read per item (`bytesq`, 200 queries):
 | `pyA` | 24.82 | 36.76 | 60.57 | 129.92 | 17.90 | 27.82 | 62.28 | 197.35 |
 | `pyB` | 24.80 | 36.75 | 60.56 | 129.92 | 17.93 | 27.85 | 62.32 | 197.35 |
 
-Text items touched at 0.01%: 0.679 (K × K), 0.521 (`pyA`), 0.527 (`pyB`). `verify` (80 queries, 7 answer sizes):
+Text items touched at 0.01%: 0.679 (K × K), 0.521 (`pyA`), 0.527 (`pyB`). `pyA` and `pyB` were built with text
+anchors from all 2,206 training prompts, so their text gains are the upper bound above, not the genus-held-out
+figure. `verify` (80 queries, 7 answer sizes):
 no wrong answers, no interval violations, on both. `e2e`, three rounds, median time against K × K: at one thread
 0.95–1.06 (`pyA`) and 0.93–1.03 (`pyB`) across the rows; at four threads up to 1.12 (`pyA`, item, 30% answer) with
 identical bytes read, where `pyA`'s own rounds ranged 31.8–39.1 ms: this container's four-thread timings move by
-that much between rounds. The bytes are the parity measure here; the timings show no regression beyond that noise.
+that much between rounds. The bytes are the parity measure here. The timings do not establish parity at four threads:
+the rounds always ran `pyfit`, `pyA`, `pyB` in that order, and `pyA` was slower than K × K in 7 of 8 item rows at four
+threads (mean ratio 1.054), which is order effect or a real cost, not shown to be noise. An alternated rerun (ABBA,
+five or more rounds) is still to do.
 
 Build: the table costs part of the encoding pass, rising with A; at 1,256 anchors the f32 table took encoding from
 about 49 to 44 s against the f64 one (two alternating rounds each), before the anchor-major layout below. This container's speed moved by about 30% over
@@ -261,10 +286,12 @@ K × K build of before this step against this one, alternating on the same fit a
 | | Calibrated | Encoded | Support table | Total | Peak anonymous memory |
 |---|---|---|---|---|---|
 | K × K, separate pass (2 rounds) | 30, 27 s | +48, +44 s | +109 s | 189, 183 s | 667, 714 MB |
-| K × A in the encoding pass, anchor-major f32 (2 rounds) | 25, 25 s | +58, +61 s (table included) | — | 90, 93 s | — |
+| K × A in the encoding pass, anchor-major f32 (2 rounds, later session) | 25, 25 s | +58, +61 s (table included) | — | 90, 93 s | — |
 | K × A, first layout (2 rounds) | 27, 26 s | +77, +73 s (table included) | — | 107, 105 s | 455, 461 MB |
 
-The code hash is the same in all (`6a2af64cdcfa8b43`). The table adds about 15 s to encoding at 4M rows and 1,024
+The anchor-major rounds were run in a later session than the other two rows, alternated with the first layout's
+build rather than with the K × K one; across sessions this container's speed moves by up to 2.5 times (below), so
+compare them with the K × K row loosely. The code hash is the same in all (`6a2af64cdcfa8b43`). The table adds about 15 s to encoding at 4M rows and 1,024
 anchors (about 70 GFLOP/s of f32 multiply on the 4 cores); it grows as N·A·n, linear in N, against N·K·n before. The
 anonymous memory of the phases is now: fit loaded 52 MB, calibrated 329, encoded 338, assembled 376 at 4M (319 MB peak
 at 1M, unchanged); the K² heap of the table phase (+120 MB kept, +300 MB peak) is gone. What still grows with N is
@@ -291,6 +318,8 @@ $CARGO_TARGET_DIR/release/vexact build DATA/rfit
 python3 -I tools/fit.py DATA/x.npy DATA/pyfit --basis dual --cert-time 60
 $CARGO_TARGET_DIR/release/vexact anchors DATA/pyfit [--anchors 512] [--text-anchors DATA/text_train.npy]
 python3 -I tools/near_table.py DATA/pyfit DATA/heldout.npy DATA/q.npy --nq 200 --text-train DATA/text_train.npy
+# genus held out: text_train.npy's rows (agent2/text_train.json order) whose prompt has no genus word of a test prompt
+# (first word of a species- or genus-rank name in agent2/text_q.json); then --text-train with that subset
 $CARGO_TARGET_DIR/release/vexact --v2 --index DATA/rfit --queries DATA/q.npy --item-queries DATA/heldout.npy bytesq verify
 $CARGO_TARGET_DIR/release/vexact --v2 --index DATA/rfit --queries DATA/q.npy --plan-default [--resident] --tag _X e2e --nq 50 --nflat 5
 ```
