@@ -324,14 +324,14 @@ pub fn run2(scale: usize, nq: usize) {
         }
         (hi, lo)
     }).collect();
-    ix.hi = vec![0f32; nanch * k];
-    ix.lo = vec![0f32; nanch * k];
+    let (mut hi, mut lo) = (vec![0f32; nanch * k], vec![0f32; nanch * k]);
     for c in 0..k {
         for a in 0..nanch {
-            ix.hi[a * k + c] = cols[c].0[a];
-            ix.lo[a * k + c] = cols[c].1[a];
+            hi[a * k + c] = cols[c].0[a];
+            lo[a * k + c] = cols[c].1[a];
         }
     }
+    (ix.hi, ix.lo) = (hi.into(), lo.into());
     ix.anchors = anchors;
     ix.nanch = nanch;
     log(format!("synthetic v2 index: {} rows built in {:.0}s; x2 bound {:.3e}; stored B/item {:?}", ix.nrows, t.s(), ix.x2 - 1.0, ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()));

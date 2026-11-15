@@ -952,8 +952,8 @@ pub struct Index2 {
     pub centres64: Vec<f64>,
     pub rots: Vec<Vec<f64>>,
     pub anchors: Vec<f64>,
-    pub hi: Vec<f32>,
-    pub lo: Vec<f32>,
+    pub hi: Arr<f32>, // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward
+    pub lo: Arr<f32>,
     pub nanch: usize,
     pub ahat: Arr<i16>,
     pub row_ent: Arr<u32>,
@@ -1682,6 +1682,13 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
     let nukey = store::Out::<u16>::new(dir, "nukey.bin", if nusort { nrows } else { 0 });
     let vecs = store::Out::<u16>::new(dir, "vectors.bin", if real { nrows * n } else { 0 });
     let ext = store::Out::<u32>::new(None, "", if real { 0 } else { nrows });
+    // the support table: every cluster's extremes against every anchor, from its rows as they are encoded. The fit's
+    // anchors (`anchors.npy`), else one per cluster, its centre's direction. None for the norm sort, and none for a
+    // synthetic source (scale.rs builds its own).
+    let anchors: Vec<f64> = if nusort || !real { Vec::new() } else if p.anchors.is_empty() { mhats.concat() } else { p.anchors.clone() };
+    assert_eq!(anchors.len() % n, 0, "the fit's anchors.npy has rows of another width than n = {n}; rerun vexact anchors");
+    let nanch = anchors.len() / n;
+    let (thi, tlo) = (store::Out::<f32>::new(dir, "hi.bin", nanch * k), store::Out::<f32>::new(dir, "lo.bin", nanch * k));
     // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid, and
     // the columnar store's codes and norms
     struct Done {
@@ -1713,12 +1720,29 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
         if real {
             assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
             vecs.put(r0 * n, &it.x16);
+            if nanch > 0 {
+                let nc = sizes[c];
+                let x: Vec<f64> = it.x16.iter().map(|&h| f16_to_f32(h) as f64).collect();
+                let mut px = vec![0f64; nc * nanch];
+                unsafe {
+                    matrixmultiply::dgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
+                }
+                for a in 0..nanch {
+                    let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
+                    for i in 0..nc {
+                        mx = mx.max(px[i * nanch + a]);
+                        mi = mi.min(px[i * nanch + a]);
+                    }
+                    thi.put(a * k + c, &[(((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32]);
+                    tlo.put(a * k + c, &[(((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32]);
+                }
+            }
         } else {
             ext.put(r0, &it.ext);
         }
         Done { esc: cc.esc, x2max: it.x2max, numax, col: build_col.then_some((cc.ccode, cc.cnrm)) }
     }).collect();
-    log(format!("encoded {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
+    log(format!("encoded {:.1}s, support table of {nanch} anchors with it; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
     let ah_all = ahat.get();
     let cl: Vec<Cl2> = (0..k).into_par_iter().map(|c| {
@@ -1814,10 +1838,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, split: b
         cl,
         centres64: p.centres[..k * n].iter().map(|&x| x as f64).collect(),
         rots,
-        anchors: Vec::new(),
-        hi: Vec::new(),
-        lo: Vec::new(),
-        nanch: 0,
+        anchors,
+        hi: thi.finish(),
+        lo: tlo.finish(),
+        nanch,
         ahat: ahat.finish(),
         row_ent,
         ent_row: ent_row.finish(),
@@ -1849,48 +1873,3 @@ impl GroupPlan2 {
     }
 }
 
-/// Support table over cluster-centre anchors (data only): exact max/min of p.x per cluster, rounded outward.
-pub fn build_table2(ix: &mut Index2, nanch: usize) {
-    let n = ix.n();
-    let k = ix.k();
-    let step = k as f64 / nanch as f64;
-    let mut anchors = vec![0f64; nanch * n];
-    for a in 0..nanch {
-        let c = (a as f64 * step) as usize;
-        anchors[a * n..(a + 1) * n].copy_from_slice(&ix.cl[c].mhat);
-    }
-    let cols: Vec<(Vec<f32>, Vec<f32>)> = (0..k).into_par_iter().map(|c| {
-        let cl = &ix.cl[c];
-        let nc = cl.r1 - cl.r0;
-        let mut x = vec![0f64; nc * n];
-        for i in 0..nc {
-            ix.full_row_f64(cl.r0 + i, &mut x[i * n..(i + 1) * n]);
-        }
-        let mut px = vec![0f64; nc * nanch];
-        unsafe {
-            matrixmultiply::dgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
-        }
-        let mut hi = vec![0f32; nanch];
-        let mut lo = vec![0f32; nanch];
-        for a in 0..nanch {
-            let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
-            for i in 0..nc {
-                mx = mx.max(px[i * nanch + a]);
-                mi = mi.min(px[i * nanch + a]);
-            }
-            hi[a] = (((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32;
-            lo[a] = (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32;
-        }
-        (hi, lo)
-    }).collect();
-    ix.hi = vec![0f32; nanch * k];
-    ix.lo = vec![0f32; nanch * k];
-    for c in 0..k {
-        for a in 0..nanch {
-            ix.hi[a * k + c] = cols[c].0[a];
-            ix.lo[a * k + c] = cols[c].1[a];
-        }
-    }
-    ix.anchors = anchors;
-    ix.nanch = nanch;
-}

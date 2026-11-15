@@ -74,6 +74,9 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
+    /// The support table's anchors (A x n, unit; `anchors.npy`, written by `vexact anchors`); empty: one anchor per
+    /// cluster, its centre's direction.
+    pub anchors: Vec<f64>,
     pub xs_path: String,   // the vectors in cluster order (fits with an Xs.npy; empty otherwise)
     pub partition: String, // the partition the fit read its vectors from (empty for a fit with an Xs.npy)
 }
@@ -120,6 +123,7 @@ pub fn load_params(dir: &str) -> Params {
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
+        anchors: opt("anchors").map_or(Vec::new(), |a| a.f64s()),
         xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
         partition: meta["partition"].as_str().unwrap_or("").to_string(),
     }

@@ -122,15 +122,11 @@ pub fn open_or_build(dir: &str, p: &Params, prof: &[f64], split: bool, nusort: b
         }
         let full = Full2::Real { rows: Default::default() };
         // the fit's rows: its Xs.npy (tools/fit.py), else its partition
-        let mut ix = if p.xs_path.is_empty() {
+        let ix = if p.xs_path.is_empty() {
             build2(p, prof, &Real2 { src: crate::bucket::Buckets::open(&p.partition, dir) }, full, split, nusort, out, lg)
         } else {
             build2(p, prof, &Real2 { src: RealSource::open(&p.xs_path) }, full, split, nusort, out, lg)
         };
-        if !nusort {
-            build_table2(&mut ix, p.meta.k);
-            out!("[build2] support table; anon {:.0} MB", crate::util::anon_mb());
-        }
         if let Some(d) = out {
             crate::v2::store::seal(&ix, d, &key);
             let _ = std::fs::remove_dir_all(&edir);

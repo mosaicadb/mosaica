@@ -746,6 +746,10 @@ fn main() {
         fit::main(&args);
         return;
     }
+    if args.get(1).map(|s| s.as_str()) == Some("anchors") {
+        fit::anchors_cmd(&args);
+        return;
+    }
     if args.get(1).map(|s| s.as_str()) == Some("build") {
         let Some(dir) = args.get(2) else {
             eprintln!("usage: vexact build FITDIR");

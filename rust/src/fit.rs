@@ -4,6 +4,8 @@
 //! the vectors in memory.
 //!
 //! usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]
+//!        [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]
+//!        vexact anchors FITDIR [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]
 
 use crate::util::*;
 use faer::linalg::solvers::DenseSolveCore;
@@ -205,7 +207,7 @@ pub fn main(args: &[String]) {
     let pos: Vec<&String> = args.iter().skip(2).take_while(|a| !a.starts_with("--")).collect();
     let pdir = arg(args, "--partition");
     let (Some(out), Some(pdir), 1) = (pos.first(), pdir, pos.len()) else {
-        eprintln!("usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS]; DIR is the output of: python3 -I tools/partition.py VECTORS.npy DIR");
+        eprintln!("usage: vexact fit OUTDIR --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time SECONDS] [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]; DIR is the output of: python3 -I tools/partition.py VECTORS.npy DIR");
         std::process::exit(2);
     };
     let out = out.as_str();
@@ -532,7 +534,10 @@ pub fn main(args: &[String]) {
         "format": FORMAT, "fit": fitj,
     });
     std::fs::write(format!("{out}/meta.json"), serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-    log(&t, format!("saved {out}"));
+    let image: usize = arg(args, "--anchors").map_or(1024, |s| s.parse().expect("--anchors A"));
+    let ntext: usize = arg(args, "--text-count").map_or(256, |s| s.parse().expect("--text-count N"));
+    let na = write_anchors(out, image, arg(args, "--text-anchors").as_deref(), ntext, seed);
+    log(&t, format!("saved {out}; {na} support-table anchors"));
 
     // the randomised levels' certified constant, by tools/certify.py within --cert-time (0 skips it: the build then
     // uses the closed-form bounds, which are larger)
@@ -547,4 +552,54 @@ pub fn main(args: &[String]) {
             }
         }
     }
+}
+
+/// The support table's anchors for the fit in `dir`, written to `dir/anchors.npy` (A x n, unit, f64): the directions
+/// of all K centres when `image` >= K (one anchor per cluster), else `image` anchors by spherical k-means on the centre
+/// directions; then, from `text` (training prompts, rows of n_orig or n), `ntext` more by k-means on the prompts. A
+/// query's bound uses its nearest anchor, so what sets its cost is how densely the anchors cover the directions
+/// queries come from, not K: a fixed A keeps the table K x A at any N.
+pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> usize {
+    let p = crate::index::load_params(dir);
+    let (n, k) = (p.meta.n, p.meta.k);
+    let unit64 = |v: &[f32]| -> Vec<f64> {
+        let nr = v.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt().max(1e-300);
+        v.iter().map(|&x| x as f64 / nr).collect()
+    };
+    let dirs: Vec<f32> = (0..k).flat_map(|c| unit64(&p.centres[c * n..(c + 1) * n]).into_iter().map(|x| x as f32)).collect();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0xa4c4);
+    let mut out: Vec<f64> = if image >= k {
+        (0..k).flat_map(|c| unit64(&p.centres[c * n..(c + 1) * n])).collect()
+    } else {
+        kmeans(&dirs, n, image, &mut rng, 25).chunks(n).flat_map(unit64).collect()
+    };
+    if let Some(path) = text {
+        let t = read_npy(path);
+        let w = t.shape[1];
+        assert!(w <= n, "{path} has rows of {w} dimensions, more than the fit's {n}");
+        let v: Vec<f32> = if t.descr.contains("f8") { t.f64s().into_iter().map(|x| x as f32).collect() } else { t.f32s() };
+        let rows: Vec<f32> = v.chunks(w).flat_map(|r| {
+            let mut x = r.to_vec();
+            x.resize(n, 0.0);
+            unit64(&x).into_iter().map(|y| y as f32)
+        }).collect();
+        let m = rows.len() / n;
+        out.extend(kmeans(&rows, n, ntext.min(m), &mut rng, 25).chunks(n).flat_map(unit64));
+    }
+    let a = out.len() / n;
+    save(dir, "anchors", "<f8", &[a, n], &out);
+    a
+}
+
+/// `vexact anchors FITDIR [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]`
+pub fn anchors_cmd(args: &[String]) {
+    let Some(dir) = args.get(2).filter(|a| !a.starts_with("--")) else {
+        eprintln!("usage: vexact anchors FITDIR [--anchors A (default 1024)] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]");
+        std::process::exit(2);
+    };
+    let image: usize = arg(args, "--anchors").map_or(1024, |s| s.parse().expect("--anchors A"));
+    let ntext: usize = arg(args, "--text-count").map_or(256, |s| s.parse().expect("--text-count N"));
+    let seed: u64 = arg(args, "--seed").map_or(20261112, |s| s.parse().expect("--seed S"));
+    let a = write_anchors(dir, image, arg(args, "--text-anchors").as_deref(), ntext, seed);
+    println!("{a} anchors written to {dir}/anchors.npy");
 }

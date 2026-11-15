@@ -266,18 +266,12 @@ pub fn save_rest(ix: &Index2, dir: &str) {
         put_cluster(&mut w, c, t);
     }
     write_file(&f("clusters.bin"), &w.0);
-    for name in ["anchors.bin", "hi.bin", "lo.bin"] {
-        write_file::<u8>(&f(name), &[]);
-    }
+    write_file(&f("anchors.bin"), &ix.anchors);
     index_json(ix, dir, None);
 }
 
-/// Finish the index in `dir`: write its support table and give `index.json` the key it answers to.
+/// Finish the index in `dir`: give `index.json` the key it answers to.
 pub fn seal(ix: &Index2, dir: &str, key: &str) {
-    let f = |name: &str| format!("{dir}/{name}");
-    write_file(&f("anchors.bin"), &ix.anchors);
-    write_file(&f("hi.bin"), &ix.hi);
-    write_file(&f("lo.bin"), &ix.lo);
     index_json(ix, dir, Some(key));
 }
 
@@ -324,8 +318,8 @@ pub fn open(p: &Params, prof: &[f64], dir: &str, split: bool, log: &mut dyn FnMu
         rots,
         nanch: us("nanch"),
         anchors,
-        hi: Arr::<f32>::map(&f("hi.bin")).to_vec(),
-        lo: Arr::<f32>::map(&f("lo.bin")).to_vec(),
+        hi: Arr::load(&f("hi.bin")),
+        lo: Arr::load(&f("lo.bin")),
         ahat: Arr::load(&f("ahat.bin")),
         row_ent: Arr::load(&f("row_ent.bin")),
         ent_row: Arr::load(&f("ent_row.bin")),
@@ -365,6 +359,7 @@ pub fn build_key(p: &Params, prof: &[f64], extra: &str) -> String {
     if let Some(r2) = &p.r2 {
         f64s(r2, &mut h);
     }
+    f64s(&p.anchors, &mut h);
     f64s(prof, &mut h);
     // the vectors: the identity of the files they come from, not their contents
     for f in [p.xs_path.clone(), if p.partition.is_empty() { String::new() } else { format!("{}/manifest.json", p.partition) }] {
