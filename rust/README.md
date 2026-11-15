@@ -33,6 +33,12 @@ $CARGO_TARGET_DIR/release/vexact fit INDEX --partition PARTITION [--basis pca|du
 $CARGO_TARGET_DIR/release/vexact build INDEX
 ```
 
+The fit also writes the support table's anchors (`anchors.npy`); `vexact anchors` writes them again for an existing fit:
+
+```bash
+$CARGO_TARGET_DIR/release/vexact anchors INDEX [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]
+```
+
 `tools/partition.py` (faiss) splits the vectors into C coarse cells (one by default), writes each cell's unit vectors
 as f16 files, trains fine centres per cell to about 1,000 items per cluster from 200 sampled rows per centre, and
 assigns every row to its nearest fine centre among those of its cell's T nearest cells (`--cross`, one by default); a
@@ -43,6 +49,13 @@ vectors. `vexact build` encodes cluster by cluster straight into `INDEX/encoded-
 fit builds it too. Neither step holds the vectors in memory. `tools/fit.py` does the fit in numpy, holding the corpus
 in memory and writing an `Xs.npy`; its directories build and run the same way. `tools/synth_vectors.py` writes the
 synthetic set `REPORT_BUILD.md` measures.
+
+The support table holds each cluster's largest and smallest x · a for each of A anchors; a query bounds a cluster with
+the anchor nearest to it. The anchors are all K centre directions when `--anchors` (1,024 by default) is at least K,
+else `--anchors` k-means centres of them, plus `--text-count` k-means centres of the embedded training prompts given
+with `--text-anchors` (`fit` takes the same three flags). The table is K × A, computed while encoding; any anchors
+give correct bounds, and only the bytes a query reads depend on them. A directory without `anchors.npy` builds the
+K × K table of one anchor per cluster.
 
 The fit normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
 centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the
