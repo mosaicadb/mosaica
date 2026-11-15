@@ -1,7 +1,7 @@
 # Latency against answer size within a visible set, 1 thread, one panel per visible set: random sets (1%, 10%, 50%)
 # in one figure and sets of whole genera (about 1%, 10%, 50%) in another.
 # usage: python3 -I plot_filtered.py RESULTS_DIR PREP_DIR
-# Reads RESULTS_DIR/{ours/dbcmp_r4_1t.csv, filtered/dbcmp_filt_1t.csv, ann.csv, approx/liminal_approx.csv,
+# Reads RESULTS_DIR/{filtered/dbcmp_planner_1t.csv, ann.csv, approx/liminal_approx.csv,
 # filtered/liminal_approx.csv}; writes RESULTS_DIR/filtered/plot_data.csv and RESULTS_DIR/latency_{filtered,correlated}_1t.png.
 # Every system on the queries with index divisible by 10 whose exact answer within the set is not empty (an empty
 # answer has no top-m to ask for); x is the threshold's share of the corpus, y the median over those queries of each
@@ -32,8 +32,8 @@ for v in SETS:
             size[(v, si, qi)] = int(cs[k - 1])
 
 pts = defaultdict(list)  # (system, vis, si) -> [(ms, recall, qi)]
-LIM = {"index": "LIMINAL", "flat": "LIMINAL f16 scan"}
-for f in ("ours/dbcmp_r4_1t.csv", "filtered/dbcmp_filt_1t.csv"):
+LIM = {"index": "LIMINAL", "cvindex": "LIMINAL, compacted", "flat": "LIMINAL f16 scan"}
+for f in ("filtered/dbcmp_planner_1t.csv",):
     for r in csv.DictReader(open(f"{res}/{f}")):
         qi = int(r["query"])
         if r["threads"] == "1" and r["vis"] in SETS and qi % 10 == 0:
@@ -65,7 +65,8 @@ with open(f"{res}/filtered/plot_data.csv", "w", newline="") as f:
 # exact methods solid, approximate (at mean recall >= 0.99) dashed, hollow where 0.99 was not reached within 5 s
 SERIES = [  # (label, colour, exact)
     ("LIMINAL", "#2a78d6", True),
-    ("LIMINAL f16 scan", "#2a78d6", True),
+    ("LIMINAL, compacted", "#86b6ec", True),
+    ("LIMINAL f16 scan", "#123e7a", True),
     ("LIMINAL approximate", "#e34948", False),
     ("faiss flat, compacted copy", "#1baf7a", True),
     ("faiss HNSW-SQfp16", "#eb6834", False),
@@ -88,12 +89,12 @@ def draw(panels, title, xlabel, path):
                 continue
             xs, ys, rs = zip(*p)
             scan = key == "LIMINAL f16 scan"
-            ax.plot(xs, ys, linestyle="-" if exact else (0, (5, 3)), color=colour, lw=2.8 if key == "LIMINAL" else 1.8,
-                    alpha=0.55 if scan else 1, zorder=4 if key.startswith("LIMINAL") else 3)
+            ax.plot(xs, ys, linestyle="-" if exact else (0, (5, 3)), color=colour, lw=2.8 if key in ("LIMINAL", "LIMINAL, compacted") else 1.4 if scan else 1.8,
+                    zorder=4 if key.startswith("LIMINAL") else 3)
             shown = None
             for x, y, r in zip(xs, ys, rs):
                 ok = exact or r >= 0.99
-                ax.plot([x], [y], "o", ms=5.5, mec=colour, mfc=colour if ok else "white", mew=1.6, alpha=0.55 if scan else 1, zorder=5)
+                ax.plot([x], [y], "s" if scan else "o", ms=4.5 if scan else 5.5, mec=colour, mfc=colour if ok else "white", mew=1.6, zorder=5)
                 # the recall of a hollow point, unless it repeats the last one shown or the line-end name gives it
                 if not ok and x != xs[-1] and (shown is None or abs(r - shown) > 0.02):
                     ax.annotate(f"{r:.3f}", (x, y), xytext=(0, 7 if x == xs[0] or key == "faiss HNSW-SQfp16" else -14), textcoords="offset points", fontsize=7.5, color=colour, ha="center")

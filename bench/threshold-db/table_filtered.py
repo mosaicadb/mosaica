@@ -5,7 +5,7 @@ import csv, sys
 from collections import defaultdict
 
 res = sys.argv[1]
-SYS = ["LIMINAL", "LIMINAL f16 scan", "faiss flat, compacted copy", "LIMINAL approximate", "faiss IVF4096-SQfp16",
+SYS = ["LIMINAL", "LIMINAL, compacted", "LIMINAL f16 scan", "faiss flat, compacted copy", "LIMINAL approximate", "faiss IVF4096-SQfp16",
        "faiss HNSW-SQfp16", "ACORN-γ", "ACORN-γ, ef = m"]
 cell, size = {}, defaultdict(dict)
 for r in csv.DictReader(open(f"{res}/filtered/plot_data.csv")):

@@ -21,6 +21,11 @@ with the best-first approximate k-NN mode (`knn2_fast`, described in `../topk/RE
 Every other row is as committed. The rows of the old mode are kept in `results/approx/liminal_approx_old_mode.csv`
 and `results/filtered/liminal_approx_old_mode.csv`, and the tables show them as "old mode".
 
+**15 Nov, later: LIMINAL's exact filtered rows use the new planner.** In the filtered section, the LIMINAL and LIMINAL
+f16 scan rows were re-measured with the threshold planner and per-session compaction of branch `research/scan-planner`
+(844dfb52a), which is not merged yet, and a "LIMINAL, compacted" row was added. Every other row there is as committed.
+The 1% visible panel of the first two plots still shows the 13–14 Nov LIMINAL rows.
+
 ## The question
 
 The query is: given a unit query q and a threshold t, return the ids of every item with q·x ≥ t, together with
@@ -320,8 +325,25 @@ figure is at 1 thread, with the queries, thresholds and answer shares of the 1% 
   - Under a genus set the answer size varies widely from query to query. That figure's x axis is therefore the
     threshold's share of the whole corpus, not of the visible set.
   - A query whose answer within the set is empty is left out for every system, because top-m has no m there.
-- **LIMINAL index and the LIMINAL f16 scan** (`dbcmp`). The random 10% and 50% rows are the committed 14 Nov rows; the
-  genus rows are new.
+- **LIMINAL, LIMINAL compacted and the LIMINAL f16 scan** (`dbcmp`), re-measured on 15 Nov with the binary of branch
+  `research/scan-planner` at 844dfb52a, which is not merged yet. Its report is
+  `results/planner/REPORT_PLANNER.md` on that branch.
+  - **LIMINAL** is the exact index with the new threshold planner, which is the default there. Per cluster it skips,
+    takes in, scores the visible rows directly, or cuts and runs the index, and it scans the whole visible set
+    when the cost model says the scan is cheaper. It is queried with the visible set over the full index.
+  - **LIMINAL, compacted** is the same planner on the index compacted to the session's visible rows
+    (`Index2::compact` with codes and f16 vectors). Each cluster keeps its visible rows, with their codes and vectors
+    copied into blocks of their own, and everything else is shared with the full index. It is queried with no visible
+    set. Building it is done once per session and is not in the query times; its cost is in the table below.
+  - **LIMINAL f16 scan** reads the visible rows' f16 vectors from the full index, as before.
+  - The three ran interleaved per query and share, each five times in a row, so that they share the machine's state,
+    and every answer was checked against the scan's: all 630 answers of each visible set were identical. Each visible
+    set ran on its own, one thread pinned to core 10 and the index opened on cores 10–11, only when no other benchmark
+    or build had run for a minute, and each run's log of processes over 20% CPU shows only the benchmark itself
+    (`results/filtered/planner/`). The plan constants were timed at open once (`results/filtered/planner/plan.txt`)
+    and used for all six sets. Two earlier attempts overlapped another agent's runs and builds and were discarded.
+  - The rows of the previous planner and the scan as measured on 14–15 Nov are kept in the tables, marked with their
+    dates.
 - **faiss flat over a compacted copy** (IndexFlatIP, f32, range search). The visible rows are copied into a new flat
   index once per visible set, and each query then scans only them. That is the pre-filter-then-scan baseline. Making
   the copy is not in the query times. It took 30–46 ms at 1%, 0.22–0.45 s at 10% and 1.7–4.9 s at 50%, fancy-indexing
@@ -401,8 +423,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 1.30 | 1.11 | 1.11 | 1.09 | 1.19 | 1.25 | 1.33 |
-| LIMINAL f16 scan | 0.79 | 0.75 | 0.75 | 0.75 | 0.85 | 0.84 | 0.86 |
+| LIMINAL | 0.88 | 0.81 | 0.84 | 0.86 | 1.00 | 0.97 | 1.04 |
+| LIMINAL, compacted | 0.50 | 0.50 | 0.50 | 0.51 | 0.52 | 0.55 | 0.59 |
+| LIMINAL f16 scan | 0.92 | 0.94 | 0.95 | 0.95 | 0.99 | 1.04 | 1.05 |
+| LIMINAL, previous planner, 14–15 Nov | 1.30 | 1.11 | 1.11 | 1.09 | 1.19 | 1.25 | 1.33 |
+| LIMINAL f16 scan, 14–15 Nov | 0.79 | 0.75 | 0.75 | 0.75 | 0.85 | 0.84 | 0.86 |
 | faiss flat, compacted copy | 1.02 | 1.02 | 1.01 | 0.95 | 0.95 | 1.01 | 0.99 |
 | LIMINAL approximate | 0.37 | 0.53 | 1.00 | 1.89 | 2.17 | 2.22 | 2.87 |
 | LIMINAL approximate, old mode | 0.34 | 0.61 | 0.79 | 3.61 | 6.83 | 9.85 | 15.8 |
@@ -415,8 +440,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 11.4 | 11.3 | 12.0 | 11.9 | 11.8 | 12.2 | 12.2 |
-| LIMINAL f16 scan | 11.6 | 11.7 | 11.8 | 12.1 | 12.7 | 12.5 | 12.8 |
+| LIMINAL | 13.7 | 13.6 | 13.5 | 13.7 | 13.9 | 14.1 | 14.1 |
+| LIMINAL, compacted | 9.76 | 9.85 | 10.1 | 10.2 | 10.3 | 10.3 | 10.3 |
+| LIMINAL f16 scan | 11.4 | 11.4 | 11.5 | 11.6 | 11.7 | 12.1 | 12.2 |
+| LIMINAL, previous planner, 14–15 Nov | 11.4 | 11.3 | 12.0 | 11.9 | 11.8 | 12.2 | 12.2 |
+| LIMINAL f16 scan, 14–15 Nov | 11.6 | 11.7 | 11.8 | 12.1 | 12.7 | 12.5 | 12.8 |
 | faiss flat, compacted copy | 9.02 | 9.12 | 8.90 | 9.12 | 9.05 | 9.10 | 9.25 |
 | LIMINAL approximate | 2.52 | 4.34 | 10.0 | 23.0 | 29.6 | 32.4 | 31.4 |
 | LIMINAL approximate, old mode | 2.90 | 4.84 | 15.4 | 3982 | 4622 | 4727 | 4649 |
@@ -429,8 +457,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 31.1 | 36.9 | 45.6 | 60.1 | 72.7 | 75.9 | 70.5 |
-| LIMINAL f16 scan | 49.1 | 49.4 | 51.0 | 50.0 | 51.9 | 53.3 | 53.9 |
+| LIMINAL | 31.2 | 34.7 | 43.6 | 58.6 | 67.7 | 68.5 | 61.5 |
+| LIMINAL, compacted | 21.5 | 23.8 | 29.6 | 38.8 | 47.1 | 47.5 | 47.9 |
+| LIMINAL f16 scan | 48.5 | 48.7 | 48.7 | 49.5 | 50.7 | 51.7 | 52.5 |
+| LIMINAL, previous planner, 14–15 Nov | 31.1 | 36.9 | 45.6 | 60.1 | 72.7 | 75.9 | 70.5 |
+| LIMINAL f16 scan, 14–15 Nov | 49.1 | 49.4 | 51.0 | 50.0 | 51.9 | 53.3 | 53.9 |
 | faiss flat, compacted copy | 57.7 | 59.0 | 53.7 | 49.5 | 49.3 | 49.9 | 52.9 |
 | LIMINAL approximate | 5.37 | 9.20 | 22.8 | 56.2 | 104 | 114 | 124 |
 | LIMINAL approximate, old mode | 7.36 | 21.6 | 4508 r .985 | 2840 r .659 | 18.2 r .579 | 36.0 r .728 | – |
@@ -443,8 +474,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 0.92 | 0.86 | 0.92 | 0.90 | 0.90 | 0.91 | 1.00 |
-| LIMINAL f16 scan | 0.36 | 0.37 | 0.38 | 0.38 | 0.38 | 0.42 | 0.43 |
+| LIMINAL | 0.94 | 0.94 | 1.05 | 1.10 | 1.20 | 1.30 | 1.07 |
+| LIMINAL, compacted | 0.74 | 0.72 | 0.72 | 0.79 | 0.78 | 0.74 | 0.70 |
+| LIMINAL f16 scan | 0.44 | 0.43 | 0.49 | 0.48 | 0.50 | 0.56 | 0.57 |
+| LIMINAL, previous planner, 14–15 Nov | 0.92 | 0.86 | 0.92 | 0.90 | 0.90 | 0.91 | 1.00 |
+| LIMINAL f16 scan, 14–15 Nov | 0.36 | 0.37 | 0.38 | 0.38 | 0.38 | 0.42 | 0.43 |
 | faiss flat, compacted copy | 0.88 | 0.84 | 0.85 | 0.96 | 1.06 | 1.13 | 1.14 |
 | LIMINAL approximate | 0.56 | 0.72 | 0.72 | 0.90 | 1.28 | 1.37 | 1.75 |
 | LIMINAL approximate, old mode | 0.22 | 0.35 | 0.44 | 2.05 | 493 | 512 | 536 |
@@ -457,8 +491,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 6.96 | 7.23 | 8.24 | 9.71 | 10.9 | 11.6 | 11.4 |
-| LIMINAL f16 scan | 7.12 | 7.13 | 7.26 | 7.31 | 7.67 | 7.91 | 8.16 |
+| LIMINAL | 6.96 | 7.29 | 8.11 | 9.69 | 10.1 | 10.5 | 10.6 |
+| LIMINAL, compacted | 4.98 | 5.24 | 5.82 | 7.26 | 9.27 | 9.59 | 9.60 |
+| LIMINAL f16 scan | 7.09 | 7.12 | 7.27 | 7.46 | 7.63 | 7.79 | 8.11 |
+| LIMINAL, previous planner, 14–15 Nov | 6.96 | 7.23 | 8.24 | 9.71 | 10.9 | 11.6 | 11.4 |
+| LIMINAL f16 scan, 14–15 Nov | 7.12 | 7.13 | 7.26 | 7.31 | 7.67 | 7.91 | 8.16 |
 | faiss flat, compacted copy | 10.0 | 10.0 | 10.3 | 10.1 | 10.7 | 10.8 | 10.2 |
 | LIMINAL approximate | 2.86 | 2.73 | 4.12 | 9.66 | 12.5 | 15.9 | – |
 | LIMINAL approximate, old mode | 5.75 | 5.86 | 10.1 | 4173 | 4753 | 4659 | – |
@@ -471,8 +508,11 @@ over the queries with a non-empty answer. A dash marks a point with no setting w
 
 | system | 0.01% | 0.1% | 1% | 10% | 30% | 50% | 75% |
 |---|---|---|---|---|---|---|---|
-| LIMINAL | 21.4 | 23.6 | 27.6 | 36.6 | 43.3 | 44.4 | 42.5 |
-| LIMINAL f16 scan | 37.7 | 37.8 | 37.9 | 39.4 | 40.7 | 41.5 | 42.9 |
+| LIMINAL | 20.9 | 22.9 | 27.9 | 36.8 | 44.1 | 45.1 | 50.3 |
+| LIMINAL, compacted | 16.6 | 19.1 | 22.9 | 31.4 | 38.3 | 46.1 | 46.3 |
+| LIMINAL f16 scan | 35.9 | 35.7 | 36.1 | 37.2 | 38.6 | 39.8 | 40.8 |
+| LIMINAL, previous planner, 14–15 Nov | 21.4 | 23.6 | 27.6 | 36.6 | 43.3 | 44.4 | 42.5 |
+| LIMINAL f16 scan, 14–15 Nov | 37.7 | 37.8 | 37.9 | 39.4 | 40.7 | 41.5 | 42.9 |
 | faiss flat, compacted copy | 57.7 | 58.4 | 57.6 | 57.5 | 58.9 | 63.5 | 72.6 |
 | LIMINAL approximate | 7.22 | 7.95 | 15.2 | 44.9 | 69.6 | 89.2 | 100 |
 | LIMINAL approximate, old mode | 10.9 | 26.1 | – | – | – | – | – |
@@ -488,6 +528,35 @@ Points not run, for time:
 - LIMINAL approximate at 75% under the 10% genus set (not in this pass's scope). The old mode was not run at 75% under
   the random 50% set, at 75% under the 10% genus set, or from 1% under the 50% genus set, where 1,000 clusters
   exceeded the cap.
+
+### Cost of compaction
+
+Built once per visible set from the session's row list, by the index's pool on cores 10–11, in the same runs. Memory
+is what the compacted index holds of its own: codes and scalars padded to blocks of 32 per cluster, keys, entity ids,
+escapes and 1,536 B of f16 vector per row. Everything else is shared with the full index (1.8 GiB). Putting the
+visible set into row order first takes 0.2–9 ms more.
+
+| visible set | rows | build | memory |
+|---|---|---|---|
+| random 1% | 10,000 | 21 ms | 24.4 MB |
+| random 10% | 99,995 | 119 ms | 186 MB |
+| random 50% | 499,975 | 576 ms | 913 MB |
+| 19 genera (1%) | 10,154 | 15 ms | 19.7 MB |
+| 241 genera (10%) | 95,180 | 109 ms | 176 MB |
+| 964 genera (50%) | 494,151 | 558 ms | 902 MB |
+
+The discarded runs gave 11–21 ms, 95–125 ms and 531–858 ms for the same sets. The faiss compacted copy, for
+comparison, took 30–46 ms, 0.22–0.45 s and 1.7–4.9 s to build and holds 3,072 B of f32 per row.
+
+### Interleaving and the 1% sets
+
+Timed one variant per run instead of interleaved, all three are 13–35% faster at the 1% sets (medians over every query
+and share, `results/filtered/planner/alone/`): at random 1%, LIMINAL compacted 0.42 against 0.53 ms, the scan 0.66
+against 1.00 ms and LIMINAL 0.73 against 0.90 ms; under 19 genera 0.63 against 0.72, 0.33 against 0.50 and 0.87 against
+1.05 ms. Each variant's five repetitions run in a row, so the cause is not a cold first run alone; it is not
+established. The order of the three is the same either way, and the 10% and 50% sets match the earlier, non-interleaved
+scan rows to within 5%. The competitors at 1% were timed one method per run, so at 1% the plotted LIMINAL rows are
+13–35% slower than the same code timed the competitors' way, the scan most. The plots show the interleaved rows.
 
 ### Clusters touched
 
@@ -508,22 +577,32 @@ sixth to four fifths of the clusters, because the clusters follow the taxonomy.
 
 ### Conclusion
 
-**Against exact methods, LIMINAL wins at 50% and loses below it.**
-- At 1% visible (random or genus), the plain scan of the visible rows is faster than the index: 0.75–0.86 ms against
-  1.1–1.3 ms random, and 0.37–0.43 ms against 0.86–1.0 ms under 19 genera. faiss flat over a compacted copy is level
-  with the index there.
-- At 10% visible, the index is level with its own f16 scan at random (11–12 ms) and slower under genera (7–12 ms
-  against 7.1–8.2 ms). The compacted faiss copy is faster at random (9 ms) and slower under genera (10 ms).
-- At 50% visible, the index is fastest of the exact methods for answers up to about 1% of the corpus: 31–46 ms random
-  against 49–51 ms for the scan and 54–59 ms for the compacted copy, and 21–28 ms under genera against 38 and 58 ms.
-  At random it falls behind the scans for large answers (60–76 ms against about 50 ms). Under genera it stays level
-  with or ahead of them (37–44 ms against 39–43 ms, and 58–73 ms for the copy).
-- The scans pay nothing for the visible set beyond reading it. The index's per-cluster work is spent on a random set
-  that touches every cluster. A genus set touches fewer clusters (159–824), which is why the index gains under
-  genera at 50%.
-- The compacted copy costs 0.2–5 s to build per visible set, outside the times above.
+**Against exact methods, compacted LIMINAL is the fastest at random 1% and 50%, second to faiss's compacted copy at
+random 10%, and behind the plain scan under 19 genera and for the largest answers under the larger genus sets.** These are the rows of 15 Nov, with the new
+planner.
+- *Random sets.* LIMINAL compacted beats its own f16 scan at every share: 0.50–0.59 against 0.92–1.05 ms at 1%
+  visible, 9.8–10.3 against 11.4–12.2 ms at 10%, and 22–48 against 49–52 ms at 50%. faiss flat over a compacted copy
+  is the only exact method ahead of it anywhere: at random 10% it takes 8.9–9.3 ms, about 10% less.
+- *Genus sets.* Under 19 genera the plain scan wins at every share (0.43–0.57 ms against 0.70–0.79 ms compacted). The
+  scan reads 10k rows that lie in long runs of the vector file, and the planner sends many clusters to the index,
+  because its cost model overstates a scan this small (the planner branch's report measured this). Under 241 genera
+  compacted LIMINAL wins up to answers of 10% of the corpus (5.0–7.3 against 7.1–7.5 ms, level at 10%) and loses from
+  30% (9.3–9.6 against 7.6–8.1 ms). Under 964 genera it wins up to 10% (17–31 against 36–37 ms), is level at 30% (38.3
+  against 38.6 ms), and loses at 50–75% (46 against 40–41 ms). The faiss compacted copy is slower than both at every
+  genus share.
+- This confirms the planner branch's own result on a quiet machine: compacted LIMINAL beats the plain scan everywhere
+  except 19 genera and the largest answers under 241 and 964 genera. Under 241 genera "largest" begins at 30%.
+- *Uncompacted*, the new planner is level with the scan at random 1% (0.81–1.04 against 0.92–1.05 ms) and ahead of it
+  at random 50% up to answers of 1% (31–44 against 49 ms) and under 964 genera up to 1% (21–28 against 36 ms). It is
+  level with it at 0.01% under 241 genera and at 10% under 964 genera, and behind it everywhere else, by 15–20% at
+  random 10% (13.5–14.1 ms) and by about 2× under 19 genera. At random 10% it is also slower than the 14 Nov rows of
+  the previous planner (11.3–12.2 ms), which were level with the scan.
+- Compaction costs 15–21 ms and 20–24 MB per session at 1% visible, 0.11–0.12 s and 176–186 MB at 10%, and
+  0.56–0.58 s and 0.9 GB at 50%. The compacted faiss copy took 0.03–4.9 s.
 
 **Against approximate methods, LIMINAL's exact index loses for small answers and wins for large ones.**
+- These comparisons were written for the 14 Nov exact rows; the 15 Nov rows are in the tables and the summary
+  below.
 - faiss IVF4096-SQfp16 at recall ≥ 0.99 is the fastest method for answers up to about 1% of the corpus at every
   selectivity. Random: 0.3–4 ms at 1%, 3–6 ms at 10%, 4–19 ms at 50%. Genus: 0.3–1.4, 2.8–4.8 and 3.9–9 ms. From
   10% of the corpus on it needs every list, and becomes as slow as or slower than the exact index: 30 ms against
@@ -537,9 +616,10 @@ sixth to four fifths of the clusters, because the clusters follow the taxonomy.
     0.28–0.32 ms).
   - Under genus sets from 0.1% of the corpus up, it beats IVF at 1% visible (0.7–1.7 ms against 1.1–7.2 ms) and at 10%
     up to 10% of the corpus (4.1–9.7 ms against 4.8–10.6 ms), and loses to it beyond.
-  - For large answers it pays for selecting the m best, and is slower than the exact index: 23–32 ms against 12 ms
-    from 10% of the corpus at random 10%, 104–124 ms against 71–76 ms from 30% at random 50%, and 70–100 ms against
-    43–44 ms under 964 genera. At 1% visible from 1k items it takes 1.9–2.9 ms, about twice the exact index.
+  - For large answers it pays for selecting the m best, and is slower than compacted LIMINAL: 23–32 ms against
+    10.2–10.3 ms from 10% of the corpus at random 10%, 104–124 ms against 47–48 ms from 30% at random 50%, and
+    70–100 ms against 38–46 ms under 964 genera. At random 1% from 1k items it takes 1.9–2.9 ms, 4–5× compacted
+    LIMINAL.
 - HNSW-SQfp16 with a selector is never competitive. It takes 50–250 ms for tiny answers at 10%, seconds from 10k
   items, and recall 0.37–0.83 where its time hits the cap. Under genus sets a few queries per rung take minutes.
 - ACORN-γ (γ = 12) does what it is built for at 10% and 50% visible.
@@ -550,15 +630,19 @@ sixth to four fifths of the clusters, because the clusters follow the taxonomy.
     items and 0.3 s at 10k.
   - It never beats IVF, and never beats the exact index once answers pass about 1k items.
 
-**So:** LIMINAL's exact index is not the fastest way to answer a filtered threshold query at 1% or 10% visible. A
-plain scan of the visible rows is as fast or faster, and IVF at recall 0.99 is faster for small answers. LIMINAL wins
-at 50% visible for answers up to 1% of the corpus, and, under realistic (genus) filters at 50%, it is ahead of or
-level with the other exact methods at every answer size. Against every approximate method, it wins once answers pass
-a few thousand items. There the graph methods (HNSW, ACORN) take seconds, IVF must probe every list, and LIMINAL's own
-top-m mode, which since 15 Nov stays within about 3× of the exact index, pays for selecting the m best. Realistic
-filters help the index, because they touch fewer clusters (159 of 1,000 for 19 genera). They help the scans as much,
-because those read only visible rows, which are contiguous under a genus set. And they hurt the graph methods, whose
-recall and outlier times get worse.
+**So (15 Nov, with the planner branch):** with the visible set compacted per session, LIMINAL is the fastest exact
+method at random 1% and 50% at every answer size, and at random 10% it is second to faiss's compacted copy by about 10%.
+Under genus sets it is the fastest exact method for answers up to 10% of the corpus at 10% and 50% visible, and the
+plain scan of the visible rows wins under 19 genera and for the largest genus answers. Against approximate methods at
+recall 0.99, compacted LIMINAL wins once answers pass about 1% of the corpus at random sets: from 1k items at random 1%
+(0.50 ms against 1.0 ms for LIMINAL approximate and 2.0 ms for IVF), and from 10% of the corpus at random 10% and 50%.
+IVF and LIMINAL approximate remain faster for small answers at 10% and 50% visible (2.5–23 ms against 10–30 ms up to 1%
+of the corpus), and at 0.01% of the corpus at 1% visible. Under 964 genera IVF is ahead of every LIMINAL row at every
+share (3.9–40 ms against 17–46 ms), and under 241 genera it is ahead up to 1% of the corpus. The graph methods are not
+competitive at any share. None of this is merged: the planner and the compaction live on `research/scan-planner`, and
+the switch that would turn compaction on per session is not built. Realistic filters help every exact method, because
+they touch fewer clusters and their rows lie in runs; they hurt the graph methods, whose recall and outlier times get
+worse.
 
 ## Reproducing
 
@@ -604,8 +688,11 @@ taskset -c 10 python3 -I ann.py query flat|ivf_sq16|hnsw_sq16 P $A results/ann.c
 # ACORN: cmake -DFAISS_OPT_LEVEL=avx2 -DCMAKE_SKIP_INSTALL_RULES=ON ... ; make faiss_avx2 (after acorn.patch); g++ acorn_bench.cpp
 OMP_NUM_THREADS=4 acorn_bench build P/corpus32.npy acorn.index 32 12 32 FROM TO          # pieces 0..350k..550k..800k..N
 OMP_NUM_THREADS=1 taskset -c 11 python3 -I ann.py query acorn P ACORN_DIR results/ann.csv --acorn-bin acorn_bench --vis ... --settings default,tight
-taskset -c 10,11 vexact ... --plan-file results/ours/plan.txt dbcmp --cmp-vis P/gen_1.npy,... --skip-all --threads 1 \
-  --tag filt_1t --results results/filtered
+# LIMINAL exact rows (15 Nov, binary of research/scan-planner at 844dfb52a): one run per visible set, each waiting for a
+# quiet minute; run.sh calls vexact ... --core 10 --pin 10 --plan-file plan.txt dbcmp --cmp-vis P/SET.npy --skip-all \
+#   --threads 1 --step 10 --reps 5 --cmp-what flat,index,cvindex; plan.txt was timed by one run with --calib 16
+bash results/filtered/planner/one.sh vis_1     # ... vis_10 vis_50 gen_1 gen_10 gen_50; then concatenate the CSVs
+#   into results/filtered/dbcmp_planner_1t.csv
 taskset -c 10,11 vexact ... (as the LIMINAL approximate line above) --results results/filtered --vis P/vis_10.npy,...,P/gen_50.npy \
   --sets "vis_10:0,...,6" --ladder-from 16          # one run per visible set
 python3 -I plot_filtered.py results P; python3 -I table_filtered.py results
