@@ -113,15 +113,6 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "repack" => p.repack = true,
             "norepack" => p.repack = false,
             "pscan" => p.pscan = true,
-            "col" => p.col = true,
-            "colq" => {
-                p.col = true;
-                p.colq = true;
-            }
-            "collazy" => {
-                p.col = true;
-                p.collazy = true;
-            }
             "nopscan" => p.pscan = false,
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
@@ -214,9 +205,6 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let full = Full2::Real { map: std::sync::Arc::new(f2.map), off: f2.off, rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
-    if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
-        BUILD_COL.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
     let mut ix = build2(&p, &prof, &src, full, p.meta.k, split, nusort, &mut lg);
     let tr = Timer::new();
     ix.repack = calibrate_repack(&ix);
@@ -341,7 +329,7 @@ pub fn bytes_read2(ix: &Index2, st: &Stats) -> f64 {
     for l in 0..ix.meta.nl() {
         b += st.enter[l] as f64 * (sb[l] - if l == 0 { 0.0 } else { sb[l - 1] });
     }
-    (b + st.col_bytes + st.full_reads as f64 * 2.0 * ix.n() as f64) / ix.nrows as f64
+    (b + st.full_reads as f64 * 2.0 * ix.n() as f64) / ix.nrows as f64
 }
 
 /// Bytes read per item (of N) and items touched, by class and answer size; no timing.
@@ -767,21 +755,8 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             for cell in 0..ncell {
                 let (mut br, mut tch, mut fr) = (0.0, 0.0, 0.0);
                 let mut enter = vec![0f64; nl + 1];
-                let mut colst: [Vec<f64>; 3] = [Vec::new(), Vec::new(), vec![0.0]];
-                let mut hwacc: Vec<[f64; 5]> = Vec::new();
                 for qi in 0..qs.len() {
                     let st = pl.install(|| run_cell(c, plan, cell, qi));
-                    if colst[0].len() < st.col_enter.len() {
-                        colst[0].resize(st.col_enter.len(), 0.0);
-                        colst[1].resize(st.col_enter.len(), 0.0);
-                    }
-                    for (i, (a, b)) in st.col_enter.iter().zip(&st.col_dec).enumerate() {
-                        colst[0][i] += *a as f64;
-                        colst[1][i] += *b as f64;
-                    }
-                    colst[2][0] += st.col_nread as f64;
-                    if hwacc.len() < st.col_hw.len() { hwacc.resize(st.col_hw.len(), [0.0; 5]); }
-                    for (a, b) in hwacc.iter_mut().zip(&st.col_hw) { for i in 0..5 { a[i] += b[i]; } }
                     br += bytes_read2(&c.ix, &st);
                     tch += st.touched as f64;
                     fr += st.full_reads as f64;
@@ -790,13 +765,6 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                     }
                 }
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
-                if !hwacc.is_empty() {
-                    out!("e2e2 colhw {vname} {cls} {}: per check mean fixed / rho5 / unread / |est-t|: {}", sizes_f.get(cell).map_or(0.0, |x| *x), hwacc.iter().filter(|x| x[0] > 0.0).map(|x| format!("{:.4}/{:.4}/{:.4}/{:.4}", x[1] / x[0], x[2] / x[0], x[3] / x[0], x[4] / x[0])).collect::<Vec<_>>().join(" "));
-                }
-                if !colst[0].is_empty() {
-                    out!("e2e2 colchecks {vname} {cls} {}: entering {:?} decided {:?}; block norms read {:.4}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() },
-                        colst[0].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[1].iter().map(|x| (x / k / nrows as f64 * 1e4).round() / 1e4).collect::<Vec<_>>(), colst[2][0] / k / nrows as f64);
-                }
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
                 out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }

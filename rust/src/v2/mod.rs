@@ -13,7 +13,6 @@
 //!
 //! The basis of each group is stored in int8 (one scale per basis vector). The encoder codes z = V_q^-1 r, so
 //! q.r = (V_q^T q).z + q.eps with |eps| <= e_inv |r|, and V_q^T q is computed exactly in integers.
-pub mod col;
 pub mod disk;
 #[cfg(test)]
 mod e2e;
@@ -403,7 +402,6 @@ pub struct GroupPlan2 {
     pub v8t: Vec<i8>,  // row c = basis vector c (int8)
     pub vsc: Vec<f64>, // scale of basis vector c
     pub vinv: Vec<f64>, // V_q^-1 (build only)
-    pub col: Option<col::ColPlan>, // the columnar store's plan (built with BUILD_COL)
     pub vq: Vec<f64>,   // V_q row-major n x n (build only)
 }
 
@@ -622,9 +620,7 @@ impl GroupPlan2 {
             levels.push(LevelPlan { parts, units, srows: 0 });
         }
         let (v8t, vsc, vinv, vq, e_inv) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), 0.0);
-        let colp = if BUILD_COL.load(std::sync::atomic::Ordering::Relaxed) { Some(col::col_plan(n, lam, pq, &states[NDL - 1], &levels, &d[NDL - 1], et, dt_)) } else { None };
         let mut gp = GroupPlan2 {
-            col: colp,
             sig,
             lamsum,
             states,
@@ -903,7 +899,6 @@ pub struct Index2 {
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
     pub ctab: Arc<Vec<Vec<kern::CTab>>>, // per cluster, per level: the centre's tables (query-independent)
     pub repack: Vec<f32>,
-    pub col: Option<col::ColStore>,
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
     pub nent: usize,     // entity ids are below this
     pub nukey: Vec<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
@@ -912,9 +907,6 @@ pub struct Index2 {
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
 /// directory.
 pub const INDEX_FORMAT: u32 = 3;
-
-/// Build the columnar store of the deterministic code as well (index::col).
-pub static BUILD_COL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl Cl2 {
     /// The centre's weights, as the query side combines them: det by coordinate mv sig (f32), rand by position.
@@ -1073,7 +1065,6 @@ impl Index2 {
             split: self.split,
             ctab: self.ctab.clone(),
             repack: self.repack.clone(),
-            col: None,
             vrow,
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Vec::new() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
@@ -1191,8 +1182,6 @@ struct Calib {
 }
 
 pub struct ClusterCode2 {
-    ccode: Vec<u8>,       // columnar rows (empty without the columnar store)
-    cnrm: Vec<f64>,       // per item: the single norm, then each block's
     codes: Vec<Vec<u8>>,
     scal: Vec<Vec<u8>>,
     esc: Vec<(u8, u8, u32, f32)>, // (level, slot, local row, value)
@@ -1239,20 +1228,10 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let svec: Vec<f32> = it.ah.iter().map(|&a| item_scale(a, mn32, gp.lamsum)).collect();
     let mut wmat = vec![0f64; nc * n];
     let mut val = vec![0f64; n];
-    let cp = if calib { None } else { gp.col.as_ref() };
-    let ncr = cp.map_or(0, |p| p.nrows());
-    let ncn = cp.map_or(0, |p| p.nb + 1);
-    let mut ccode = vec![0u8; ncr * nblk * 16];
-    let mut cnrm = vec![0f64; nc * ncn];
-    let (mut tid, mut sb, mut sc) = (vec![0u8; n], vec![0u8; n], vec![0u8; n]);
     for i in 0..nc {
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
         val.iter_mut().for_each(|v| *v = 0.0);
-        if cp.is_some() {
-            sb.iter_mut().for_each(|v| *v = 0);
-            sc.iter_mut().for_each(|v| *v = 0);
-        }
         for l in 0..NDL {
             let lp = &gp.levels[l];
             for f in &lp.parts[0].fields {
@@ -1262,15 +1241,6 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                     FK::Tree { to, .. } => codes.index(to as usize, u),
                     _ => (u - val[c] >= 0.0) as usize,
                 };
-                if cp.is_some() {
-                    match f.kind {
-                        FK::Tree { .. } => tid[c] = code as u8,
-                        _ => {
-                            sb[c] |= (code as u8) << sc[c];
-                            sc[c] += 1;
-                        }
-                    }
-                }
                 val[c] += et.e[f.eid as usize][code << f.off] as f64;
                 setnib(&mut lc[l], lp.units, i, f.unit as usize, (code << f.off) as u8);
             }
@@ -1310,25 +1280,6 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
             let k = gp.ridx[pp] as usize;
             let e = z[k] - s * gp.sig[k] as f64 * val[k];
             wmat[i * n + pp] = e / gp.dt[k] as f64;
-        }
-        if let Some(cp) = cp {
-            let mut nb2 = [0f64; col::MAXB];
-            for (k, cc) in cp.coords.iter().enumerate() {
-                let c = cc.c as usize;
-                let v = cp.value(k, tid[c], sb[c]);
-                assert!((v - val[c]).abs() <= 1e-12 * (1.0 + val[c].abs()), "the columnar code of coordinate {c} decodes to {v}, the stream's to {}", val[c]);
-                col::setnib_col(&mut ccode, nblk, i, cc.tree.0 as usize, tid[c] << cc.tree.1);
-                for (q, &(row, off)) in cc.stages.iter().enumerate() {
-                    col::setnib_col(&mut ccode, nblk, i, row as usize, ((sb[c] >> q) & 1) << off);
-                }
-                let u = z[c] / (gp.sig[c] as f64 * s) / cc.h;
-                nb2[cc.blk as usize] += u * u;
-            }
-            let tot: f64 = nb2.iter().sum();
-            cnrm[i * ncn] = tot.sqrt() * (1.0 + 1e-9);
-            for b in 0..cp.nb {
-                cnrm[i * ncn + 1 + b] = nb2[b].sqrt() * (1.0 + 1e-9);
-            }
         }
     }
     let mut ymat = vec![0f64; nc * n];
@@ -1456,7 +1407,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     }
     let mut it = it;
     it.z = Vec::new();
-    ClusterCode2 { ccode, cnrm, codes: lc, scal: ls, esc, items: it, calib: cal }
+    ClusterCode2 { codes: lc, scal: ls, esc, items: it, calib: cal }
 }
 
 /// Query-independent per-cluster data.
@@ -1664,39 +1615,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         info
     }).collect();
     let nl = meta.nl();
-    // the columnar store's norm grids per group, from every item of the group
-    let build_col = groups[0].col.is_some();
-    if build_col {
-        for g in 0..groups.len() {
-            let nn = groups[g].col.as_ref().unwrap().nb + 1;
-            let mut vals = vec![Vec::new(); nn];
-            for (c, cc) in ccodes.iter().enumerate() {
-                if p.grp[c] != g {
-                    continue;
-                }
-                for (i, x) in cc.cnrm.iter().enumerate() {
-                    vals[i % nn].push(*x);
-                }
-            }
-            groups[g].col.as_mut().unwrap().set_grids(&vals);
-        }
-    }
-    if build_col {
-        let cps: Vec<&col::ColPlan> = groups.iter().map(|g| g.col.as_ref().unwrap()).collect();
-        let nd: Vec<usize> = cps.iter().map(|c| c.coords.len()).collect();
-        let nr: Vec<usize> = cps.iter().map(|c| c.rows.len()).collect();
-        let nu: Vec<usize> = cps.iter().map(|c| c.units.len()).collect();
-        log(format!("columnar store: units per group mean {:.1}", nu.iter().sum::<usize>() as f64 / nu.len() as f64));
-        let mut hist = [0usize; 9];
-        for c in &cps {
-            for cc in &c.coords {
-                hist[(cc.j + cc.r) as usize] += 1;
-            }
-        }
-        log(format!("columnar store: coded coordinates per group {}..{} (mean {:.0}), rows {}..{} (mean {:.0}, {:.1} B); bits per coordinate (count over groups, 0..8) {:?}; blocks {:?} of group 0",
-            nd.iter().min().unwrap(), nd.iter().max().unwrap(), nd.iter().sum::<usize>() as f64 / nd.len() as f64, nr.iter().min().unwrap(), nr.iter().max().unwrap(), nr.iter().sum::<usize>() as f64 / nr.len() as f64, nr.iter().sum::<usize>() as f64 / nr.len() as f64 / 2.0, hist, cps[0].bstart));
-    }
-    let mut cst = col::ColStore::default();
     let mut row0 = 0;
     let mut cl = Vec::with_capacity(k);
     let (mut ahat, mut row_ent, mut xs_row, mut nukey) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -1718,21 +1636,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         for &(l, slot, i, v) in &cc.esc {
             esc.insert((l, slot, (row0 + i as usize) as u32), v);
         }
-        if build_col {
-            let cp = groups[info.g].col.as_ref().unwrap();
-            let nn = cp.nb + 1;
-            let nblk = (nc + BLK - 1) / BLK;
-            cst.coff.push(cst.code.len());
-            cst.code.extend_from_slice(&cc.ccode);
-            cst.noff.push(cst.nrm.len());
-            let base = cst.nrm.len();
-            cst.nrm.resize(base + nn * nblk * BLK, 0);
-            for i in 0..nc {
-                for q in 0..nn {
-                    cst.nrm[base + q * nblk * BLK + i] = cp.nu_code(q, cc.cnrm[i * nn + q]);
-                }
-            }
-        }
         ahat.extend_from_slice(&cc.items.ah);
         // codes rounded up on the cluster's grid: nondecreasing in sort order
         nukey.extend(cc.items.nu.iter().map(|&v| ((v / info.numax * 65535.0).ceil() as u32).min(65535) as u16));
@@ -1747,8 +1650,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         lcode[l].extend_from_slice(&[0u8; 128]);
         lscal[l].extend_from_slice(&[0u8; 128]);
     }
-    cst.code.extend_from_slice(&[0u8; 128]);
-    cst.nrm.extend_from_slice(&[0u8; 128]);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
         gp.vq = Vec::new();
@@ -1780,7 +1681,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let ix = Index2 {
-        col: if build_col { Some(cst) } else { None },
         nukey,
         repack: vec![0.6; meta.nl()],
         ctab: Arc::new(ctab),

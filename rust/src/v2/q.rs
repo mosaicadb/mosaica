@@ -24,7 +24,6 @@ pub const P_BOUNDS: usize = 8;
 pub const P_FULL: usize = 9;
 pub const P_INIT: usize = 10;
 pub const P_PLAN: usize = 11;
-pub const P_SEL: usize = 12;
 /// Enclosing totals, from which the breakdown derives the time between the phases above: all of run_cluster, all of
 /// one cluster's work in run_planned, all of a query (set by the caller), and the merge of the clusters' outputs.
 pub const P_RUNCL: usize = 13;
@@ -861,8 +860,6 @@ pub struct State {
     pub a64: Vec<f64>,     // verify: the real deterministic table sum
     pub tmp: Vec<u8>,
     pub stmp: Vec<u8>,
-    pub colq: super::col::ColQ,
-    pub cslots: Vec<super::col::ColSlot>,
     pub luts: Vec<LevelLut>, // tables of finished clusters, their storage reused by the next
 }
 impl State {
@@ -1053,14 +1050,6 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
 /// in Interval(L) mode every candidate's interval at level L goes to out.iv.
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut) {
-    run_cluster_from(ix, ci, pr, gq, cq, cands, t, mode, first_decide, verify, sv, st, out, None)
-}
-
-/// As run_cluster; with `resume = Some((nsurv, edet, a0))` (a0: slots held in place from item a0, holes u32::MAX) the deterministic part is already done (the columnar path): the
-/// state holds nsurv compacted survivors with idx, s, mr, adet (and truth in verify mode) set, edet bounds the error of
-/// adet, and the walk starts at the first randomised level.
-#[target_feature(enable = "avx2,fma")]
-pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut CQ2, cands: &[u32], t: f64, mode: Mode2, first_decide: usize, verify: bool, sv: &mut State, st: &mut Stats, out: &mut RunOut, resume: Option<(usize, f32, Option<u32>)>) {
     let ti = tick();
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
@@ -1071,15 +1060,11 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     // blocks and need no re-packing; sparse ones are compacted
     let rp = cq.repack;
     let occ = |l: usize| if rp > 0.0 { (ix.repack[l] * rp).min(0.95) } else { 0.6 };
-    let (a0, span) = if let Some((ns, _, a)) = resume { (a.unwrap_or(0), ns) } else {
-        let a0 = cands[0] / 32 * 32;
-        (a0, ((cands[cands.len() - 1] + 1 - a0) as usize + BLK - 1) / BLK * BLK)
-    };
-    let mut aligned = match resume { Some((_, _, a)) => a.is_some(), None => cands.len() as f32 >= span as f32 * occ(0) };
+    let a0 = cands[0] / 32 * 32;
+    let span = ((cands[cands.len() - 1] + 1 - a0) as usize + BLK - 1) / BLK * BLK;
+    let mut aligned = cands.len() as f32 >= span as f32 * occ(0);
     let mut nsurv;
-    if let Some((ns, _, _)) = resume {
-        nsurv = ns;
-    } else if aligned {
+    if aligned {
         sv.reset(span);
         sv.idx[..span].fill(u32::MAX);
         for &i in cands {
@@ -1092,37 +1077,35 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
         nsurv = cands.len();
     }
     let mut xbuf = vec![0f64; if verify { n } else { 0 }];
-    if resume.is_none() {
-        // item scale and m.r from the stored key, with the encoder's f32 operations
-        let ahp = ix.ahat.as_ptr().add(c.r0) as *const i32;
-        let mn = _mm512_set1_ps(c.mn32);
-        let one_mn2 = _mm512_set1_ps(1.0f32 + c.mn32 * c.mn32);
-        let two_mn = _mm512_set1_ps(2.0f32 * c.mn32);
-        let mn2 = _mm512_set1_ps(c.mn32 * c.mn32);
-        let mut k = 0;
-        while k < nsurv {
-            let m0: u16 = if nsurv - k >= 16 { 0xffff } else { ((1u32 << (nsurv - k)) - 1) as u16 };
-            let iv0 = _mm512_maskz_loadu_epi32(m0, sv.idx.as_ptr().add(k) as *const _);
-            let m = m0 & !_mm512_cmpeq_epi32_mask(iv0, _mm512_set1_epi32(-1));
-            let iv = _mm512_maskz_mov_epi32(m, iv0);
-            // 16-bit keys read as the low half of a 32-bit gather at a 2-byte stride (the key array is padded); slots
-            // held in place are items a0 + k.., read in one load
-            let r = c.r0 + a0 as usize + k;
-            let raw = if aligned && r + 16 <= ix.ahat.len() {
-                _mm512_maskz_mov_epi32(m, _mm512_cvtepi16_epi32(_mm256_loadu_si256(ix.ahat.as_ptr().add(r) as *const _)))
-            } else {
-                _mm512_mask_i32gather_epi32::<2>(_mm512_setzero_si512(), m, iv, ahp as *const _)
-            };
-            let ah = _mm512_srai_epi32(_mm512_slli_epi32(raw, 16), 16);
-            let a = _mm512_div_ps(_mm512_cvtepi32_ps(ah), _mm512_set1_ps(32767.0));
-            let s2 = _mm512_sub_ps(one_mn2, _mm512_mul_ps(two_mn, a));
-            let sc = _mm512_sqrt_ps(_mm512_div_ps(_mm512_max_ps(s2, _mm512_set1_ps(1e-12)), _mm512_set1_ps(gp.lamsum)));
-            _mm512_storeu_ps(sv.s.as_mut_ptr().add(k), sc);
-            _mm512_storeu_ps(sv.mr.as_mut_ptr().add(k), _mm512_sub_ps(_mm512_mul_ps(mn, a), mn2));
-            k += 16;
-        }
+    // item scale and m.r from the stored key, with the encoder's f32 operations
+    let ahp = ix.ahat.as_ptr().add(c.r0) as *const i32;
+    let mn = _mm512_set1_ps(c.mn32);
+    let one_mn2 = _mm512_set1_ps(1.0f32 + c.mn32 * c.mn32);
+    let two_mn = _mm512_set1_ps(2.0f32 * c.mn32);
+    let mn2 = _mm512_set1_ps(c.mn32 * c.mn32);
+    let mut k = 0;
+    while k < nsurv {
+        let m0: u16 = if nsurv - k >= 16 { 0xffff } else { ((1u32 << (nsurv - k)) - 1) as u16 };
+        let iv0 = _mm512_maskz_loadu_epi32(m0, sv.idx.as_ptr().add(k) as *const _);
+        let m = m0 & !_mm512_cmpeq_epi32_mask(iv0, _mm512_set1_epi32(-1));
+        let iv = _mm512_maskz_mov_epi32(m, iv0);
+        // 16-bit keys read as the low half of a 32-bit gather at a 2-byte stride (the key array is padded); slots
+        // held in place are items a0 + k.., read in one load
+        let r = c.r0 + a0 as usize + k;
+        let raw = if aligned && r + 16 <= ix.ahat.len() {
+            _mm512_maskz_mov_epi32(m, _mm512_cvtepi16_epi32(_mm256_loadu_si256(ix.ahat.as_ptr().add(r) as *const _)))
+        } else {
+            _mm512_mask_i32gather_epi32::<2>(_mm512_setzero_si512(), m, iv, ahp as *const _)
+        };
+        let ah = _mm512_srai_epi32(_mm512_slli_epi32(raw, 16), 16);
+        let a = _mm512_div_ps(_mm512_cvtepi32_ps(ah), _mm512_set1_ps(32767.0));
+        let s2 = _mm512_sub_ps(one_mn2, _mm512_mul_ps(two_mn, a));
+        let sc = _mm512_sqrt_ps(_mm512_div_ps(_mm512_max_ps(s2, _mm512_set1_ps(1e-12)), _mm512_set1_ps(gp.lamsum)));
+        _mm512_storeu_ps(sv.s.as_mut_ptr().add(k), sc);
+        _mm512_storeu_ps(sv.mr.as_mut_ptr().add(k), _mm512_sub_ps(_mm512_mul_ps(mn, a), mn2));
+        k += 16;
     }
-    if verify && resume.is_none() {
+    if verify {
         for k in 0..nsurv {
             let i = sv.idx[k];
             if i == u32::MAX {
@@ -1139,7 +1122,7 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
             };
         }
     }
-    let intm = resume.is_none() && cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
+    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
     if intm {
         // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
         // only lowers Tout
@@ -1162,12 +1145,12 @@ pub unsafe fn run_cluster_from(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq:
     let one6 = _mm512_set1_ps(1.0 + 1e-6);
     let u16x = _mm512_set1_ps((16.0 * U) as f32);
     let mut dmxj = [0f32; J]; // relative rounding bound of each block's latest kappa
-    let mut edet = resume.map_or(0f32, |r| r.1); // cumulative table error of the deterministic part
+    let mut edet = 0f32; // cumulative table error of the deterministic part
     let mut ej = [0f32; J];
     let mut g = Gather::new();
     // survivors entering the level (slots held in place may be holes)
-    let mut live = if resume.is_some() { nsurv } else { cands.len() };
-    for l in if resume.is_some() { NDL } else { 0 }..nl {
+    let mut live = cands.len();
+    for l in 0..nl {
         if nsurv == 0 {
             break;
         }
@@ -1955,16 +1938,13 @@ pub struct Plan {
     pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
     pub scan_cal: bool,    // Plan::calibrate also times the scan band (about 9 s at 1M; off: the band is left as given)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
-    pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
-    pub colq: bool,        // in an order chosen per (query, cluster)
-    pub collazy: bool,     // with the single stored norm first, block norms only for the items it leaves undecided
     pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
     pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
     pub disk: bool,        // the planner adds the cost of reading full vectors from disk (io_us, io_gbps)
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, prev: false, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false, io_us: 5.7, io_gbps: 3.3, disk: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, prev: false, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, disk: false }
     }
 }
 impl Plan {
@@ -3038,16 +3018,11 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.idx_clusters += 1;
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
-                            let colp = pl.col && !o.want_iv && ix.col.is_some();
-                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det && !o.want_iv && !colp);
+                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det && !o.want_iv);
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
-                            if colp {
-                                unsafe { super::col::run_col(ix, ci, pr, gq, &mut cq, &cands, t, pl.colq, pl.collazy, o.verify, &mut sv, &mut acc.st, &mut out) };
-                            } else {
-                                unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
-                            }
+                            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, first_decide, o.verify, &mut sv, &mut acc.st, &mut out) };
                             sv.recycle(&mut cq);
                             acc.iv.extend(ivv);
                         } else {

@@ -34,11 +34,6 @@ pub struct Stats {
     pub imp_fail: u64,    // of which the f64 certificate does not imply the decision
     pub cert_viol: u64,   // lanes whose exact score lies outside the f64 certificate
     pub cyc: [u64; 32], // time-stamp-counter cycles by phase (v2 breakdown), then counts (v2::q::C_*)
-    pub col_bytes: f64,     // bytes read on the columnar path (key, scalars, rows)
-    pub col_enter: Vec<u64>, // items entering each check of the columnar path
-    pub col_dec: Vec<u64>,   // and decided there
-    pub col_nread: u64,      // items that read their block norms
-    pub col_hw: Vec<[f64; 5]>, // diagnostics per check (VEXACT_COLDBG): lanes, fixed part, rho5 part, unread part, |est - t|
     pub lcyc: Vec<u64>, // time-stamp-counter cycles of each level's blocks, tables not included
     pub errs: Vec<(u8, f32)>, // (level, |true - estimate| / half-width), when v2::q::ERRS is set
 }
@@ -79,24 +74,6 @@ impl Stats {
         self.cert_viol += o.cert_viol;
         for k in 0..self.cyc.len() {
             self.cyc[k] += o.cyc[k];
-        }
-        self.col_bytes += o.col_bytes;
-        self.col_nread += o.col_nread;
-        if self.col_enter.len() < o.col_enter.len() {
-            self.col_enter.resize(o.col_enter.len(), 0);
-            self.col_dec.resize(o.col_enter.len(), 0);
-        }
-        if self.col_hw.len() < o.col_hw.len() {
-            self.col_hw.resize(o.col_hw.len(), [0.0; 5]);
-        }
-        for (a, b) in self.col_hw.iter_mut().zip(&o.col_hw) {
-            for i in 0..5 {
-                a[i] += b[i];
-            }
-        }
-        for (k, (a, b)) in o.col_enter.iter().zip(&o.col_dec).enumerate() {
-            self.col_enter[k] += a;
-            self.col_dec[k] += b;
         }
         for (a, b) in self.lcyc.iter_mut().zip(&o.lcyc) {
             *a += b;
