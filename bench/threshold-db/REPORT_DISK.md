@@ -149,17 +149,50 @@ Three changes stopped the reader from losing the cache's help:
 - The reader keeps up to 16 MiB of free buffers in power-of-two sizes, so that later batches reuse them. Keeping only
   4 MiB raised system time from 22 to 62 s per run, because each fresh page under the cap costs a reclaim.
 
+### Uncached buffered reads for merged spans (RWF_DONTCACHE): not the default
+
+`--dontcache-min BYTES` (and `:dontcache=BYTES` in `--read-modes`) reads extents of at least that many bytes, below
+`--direct-min`, as buffered reads with RWF_DONTCACHE set per read through io_uring; shorter extents stay ordinary
+buffered reads. The aim was the cache's reuse for small reads and O_DIRECT's low cost for merged spans. The kernel
+(6.18) and ext4 honour the flag: a 64 MiB `preadv2` with it, and 64 io_uring reads of 256 KiB with it, left none of
+their pages resident (`mincore`), where plain reads left them all, and io_uring did not return EOPNOTSUPP. Pages
+already cached stay cached and serve such a read.
+
+Under the cap it costs the kernel nearly as much as plain buffered reads, because each page is still put into the
+cache and then removed. Each cell is warm median ms / cold ms / system ms per warm query / MB from storage per warm
+query, all 1M visible, default schedule. The DONTCACHE rows each ran in one process with the O_DIRECT row (`splitA`,
+`splitB`), plain buffered on its own (`splitC`); the O_DIRECT row reran in `splitB` at 34 / 38 / 68 / 181 / 370 /
+317 ms.
+
+| | 0.01% | 0.1% | 1% | 10% | 50% | 75% |
+|---|---|---|---|---|---|---|
+| **O_DIRECT from 8 KiB (default)** | 31.0 / 17 / 0.0 / 2.0 | 36.0 / 19 / 2.4 / 8.2 | 66.0 / 36 / 9.8 / 70 | 175 / 119 / 42 / 408 | 335 / 173 / 83 / 877 | 312 / 191 / 70 / 771 |
+| DONTCACHE from 8 KiB | 34.1 / 13 / 1.6 / 1.4 | 42.7 / 18 / 5.7 / 6.7 | 93.4 / 38 / 42 / 52 | 280 / 145 / 210 / 326 | 560 / 255 / 468 / 703 | 497 / 282 / 416 / 630 |
+| DONTCACHE from 32 KiB | 33.2 / 16 / 1.6 / 1.3 | 44.4 / 25 / 4.2 / 5.8 | 88.5 / 43 / 37 / 45 | 293 / 163 / 213 / 308 | 583 / 261 / 456 / 692 | 524 / 297 / 413 / 618 |
+| DONTCACHE from 128 KiB | 30.5 / 16 / 0.8 / 0.4 | 40.7 / 17 / 4.9 / 3.5 | 68.9 / 37 / 28 / 23 | 232 / 139 / 174 / 229 | 523 / 219 / 447 / 664 | 431 / 254 / 341 / 541 |
+| buffered | 33.4 / 17 / 0.8 / 0.2 | 43.4 / 19 / 3.3 / 1.1 | 54.0 / 40 / 13 / 9.0 | 326 / 142 / 243 / 309 | 662 / 228 / 547 / 773 | 600 / 248 / 498 / 667 |
+
+DONTCACHE reads fewer bytes from storage than O_DIRECT, since cached pages serve it, but at 10–75% answers it took
+four to six times the system time and 1.3–1.7 times the wall time. At small answers it gained nothing: only plain
+buffered reads keep a 1% answer's merged spans for the next repetition (54 against 66 ms), at twice the time at
+10–75%. At 1% visible every mode took 1.7–2.2 ms warm with nothing read from storage, as the visible rows stay cached.
+O_DIRECT from 8 KiB stays the default; `--dontcache-min` defaults to `none`. The answers of DONTCACHE from 8 and
+128 KiB were byte-identical to the uncapped dumps, unfiltered and at 1% visible. The CSVs and logs are in
+[results/split/](results/split/).
+
 ## What is on by default
 
 With `--full-file` (vectors on file):
 
 - `--full-read uring`: the reader with 64 reads in flight. `--full-read mmap` restores the mapping.
 - `--direct-min 8192`: O_DIRECT for reads of 8 KiB or more. `none` turns it off; `0` uses it for every read.
+- `--dontcache-min none`: no RWF_DONTCACHE reads. A byte count reads extents of at least that size, below
+  `--direct-min`, as buffered reads that do not stay cached.
 - The planner counts disk reads in every command, with `io_us` and `io_gbps` timed at the start of `dbcmp` under the
   cap. `--no-calib-disk` takes them from the plan file instead (default 5.7 µs and 3.3 GB/s, the disk benchmark's).
 - An unfiltered scan reads through the reader; a filtered scan uses `madvise(WILLNEED)` on the mapping.
 
-`--read-modes` times several of these in one run (`uring`, `mmap`, `:qd=N`, `:gap=BYTES`, `:direct=BYTES`,
+`--read-modes` times several of these in one run (`uring`, `mmap`, `:qd=N`, `:gap=BYTES`, `:direct=BYTES|none`, `:dontcache=BYTES|none`,
 `:plan=disk|mem`), each from an emptied cache. Nothing changes for an index whose vectors are in memory.
 
 ## The next bottleneck

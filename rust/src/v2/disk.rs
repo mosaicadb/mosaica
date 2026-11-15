@@ -203,6 +203,10 @@ pub fn cpu_s() -> (f64, f64) {
 
 /// Extents of at least this many bytes are read with O_DIRECT, past the page cache (`--direct-min`; usize::MAX: never).
 pub static DIRECT_MIN: AtomicUsize = AtomicUsize::new(usize::MAX);
+/// Extents of at least this many bytes, and below `DIRECT_MIN`, are buffered reads with RWF_DONTCACHE: pages already
+/// cached serve them, and pages read in are dropped once copied (`--dontcache-min`; usize::MAX: never).
+pub static DONTCACHE_MIN: AtomicUsize = AtomicUsize::new(usize::MAX);
+const RWF_DONTCACHE: i32 = 0x80;
 
 /// Reads kept in flight by a `Reader` (at most RING / 2).
 pub static QD: AtomicUsize = AtomicUsize::new(64);
@@ -215,13 +219,21 @@ const PIECE: usize = 256 << 10;
 const BUDGET: usize = 8 << 20;
 const KEEP: usize = 16 << 20;
 
+/// How an extent is read.
+#[derive(Clone, Copy, PartialEq)]
+enum Via {
+    Cached,
+    Direct,
+    DontCache,
+}
+
 /// One batch of rows read into a buffer: `rows` ascending, `at[k]` the byte offset of row k in `buf`.
 pub struct Batch<T> {
     pub tag: T,
     pub rows: Vec<u32>,
     at: Vec<u32>,
     buf: memmap2::MmapMut,
-    ext: Vec<(u64, u32, u32, u32, bool)>, // file offset, length, offset in buf, bytes done, direct
+    ext: Vec<(u64, u32, u32, u32, Via)>, // file offset, length, offset in buf, bytes done, how
     left: usize,
 }
 
@@ -247,6 +259,7 @@ pub struct Reader<T> {
     fd: i32,
     dfd: i32, // the file opened with O_DIRECT
     dmin: usize,
+    dcmin: usize,
     rb: usize,
     gap: usize,
     q: std::collections::VecDeque<Batch<T>>,
@@ -270,7 +283,7 @@ impl<T> Reader<T> {
             return None;
         }
         let (ring, free) = THREAD_RING.with(|r| r.borrow_mut().take()).unwrap_or_else(|| (io_uring::IoUring::new(RING).expect("io_uring"), Vec::new()));
-        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: DIRECT_MIN.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: QD.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
+        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: DIRECT_MIN.load(Ordering::Relaxed), dcmin: DONTCACHE_MIN.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: QD.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
     }
 
     /// Whether the caller should take a batch before pushing another: reads are waiting for a free slot, or the
@@ -284,7 +297,7 @@ impl<T> Reader<T> {
     }
 
     /// Plans the reads of `rows` (any order; the batch holds them ascending) and starts them. An extent of at least
-    /// `dmin` bytes is read with O_DIRECT, widened to whole pages.
+    /// `dmin` bytes is read with O_DIRECT, widened to whole pages; one of at least `dcmin` with RWF_DONTCACHE.
     pub fn push(&mut self, tag: T, mut rows: Vec<u32>) {
         rows.sort_unstable();
         let rb = self.rb as u64;
@@ -304,12 +317,14 @@ impl<T> Reader<T> {
         let mut ext = Vec::with_capacity(sp.len());
         let mut tot = 0usize;
         for &(a, e) in &sp {
-            let direct = (e - a) as usize >= self.dmin;
+            let len = (e - a) as usize;
+            let via = if len >= self.dmin { Via::Direct } else if len >= self.dcmin { Via::DontCache } else { Via::Cached };
+            let direct = via == Via::Direct;
             let (a, e) = if direct { (a & !4095, (e + 4095) & !4095) } else { (a, e) };
             if direct {
                 tot = (tot + 4095) & !4095;
             }
-            ext.push((a, (e - a) as u32, tot as u32, 0u32, direct));
+            ext.push((a, (e - a) as u32, tot as u32, 0u32, via));
             tot += (e - a) as usize;
         }
         for k in 0..rows.len() {
@@ -353,10 +368,11 @@ impl<T> Reader<T> {
                 x
             };
             let b = &self.q[(seq - self.seq0) as usize];
-            let (off, len, bo, done, direct) = b.ext[i];
-            let fd = if direct { self.dfd } else { self.fd };
+            let (off, len, bo, done, via) = b.ext[i];
+            let fd = if via == Via::Direct { self.dfd } else { self.fd };
             let e = io_uring::opcode::Read::new(io_uring::types::Fd(fd), unsafe { b.buf.as_ptr().add((bo + done) as usize) as *mut u8 }, len - done)
                 .offset(off + done as u64)
+                .rw_flags(if via == Via::DontCache { RWF_DONTCACHE } else { 0 })
                 .build()
                 .user_data(seq << 24 | i as u64);
             unsafe { self.ring.submission().push(&e) }.expect("the ring holds twice qd entries");
