@@ -206,26 +206,30 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         if let Full2::Real { rows, .. } = &mut ix.full {
             std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"));
         }
-        crate::v2::disk::WILLNEED.store(args().iter().any(|a| a == "--willneed"), std::sync::atomic::Ordering::Relaxed);
+        let pol = match &ix.full {
+            Full2::Real { rows, .. } => rows.policy().expect("the full vectors were just written to a file"),
+            _ => panic!("--full-file needs stored vectors; a synthetic index has none"),
+        };
+        pol.willneed.store(args().iter().any(|a| a == "--willneed"), std::sync::atomic::Ordering::Relaxed);
         // `--full-read uring` (the default) reads the rows the index path leaves with pread through io_uring; `mmap`
         // reads them through the mapping
         let fr = arg_str("--full-read", "uring");
         assert!(fr == "uring" || fr == "mmap", "--full-read is uring or mmap");
-        crate::v2::disk::URING.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
+        pol.uring.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
         // extents of at least --direct-min bytes are read with O_DIRECT, past the page cache (0: every read; none:
         // never)
         let dm = arg_str("--direct-min", "8192");
-        crate::v2::disk::DIRECT_MIN.store(if dm == "none" { usize::MAX } else { dm.parse().expect("--direct-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
+        pol.direct_min.store(if dm == "none" { usize::MAX } else { dm.parse().expect("--direct-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
         // extents of at least --dontcache-min bytes and below --direct-min are buffered reads that do not stay cached
         let dc = arg_str("--dontcache-min", "none");
-        crate::v2::disk::DONTCACHE_MIN.store(if dc == "none" { usize::MAX } else { dc.parse().expect("--dontcache-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
+        pol.dontcache_min.store(if dc == "none" { usize::MAX } else { dc.parse().expect("--dontcache-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
         out!("[disk] full vectors written to {ff} and mapped ({}, willneed {}, read {fr}) in {:.1}s", arg_str("--full-advice", "random"), args().iter().any(|a| a == "--willneed"), t.s());
     }
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
     // full vectors read through the reader: the planner counts their reads
-    let plan = Plan { disk: !ff.is_empty() && crate::v2::disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..plan };
+    let plan = Plan { disk: matches!(&ix.full, Full2::Real { rows, .. } if rows.uring()), ..plan };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
@@ -1126,8 +1130,6 @@ pub fn dbcmp(c: &Ctx2) {
     let dump = arg_str("--dump", "");
     // how full vectors on file are read, each mode in turn (`--read-modes uring,mmap:...`; the label gains @mode when
     // there are several)
-    let modes: Vec<String> = arg_str("--read-modes", if disk::URING.load(Relaxed) { "uring" } else { "mmap" }).split(',').map(|x| x.to_string()).collect();
-    let (qd0, dm0, dc0) = (disk::QD.load(Relaxed), disk::DIRECT_MIN.load(Relaxed), disk::DONTCACHE_MIN.load(Relaxed));
     // under a cap the full vectors come from --full-file, and `flat` scans them there in row order
     let on_file = !arg_str("--full-file", "").is_empty();
     let cold = args().iter().any(|a| a == "--cold");
@@ -1135,6 +1137,11 @@ pub fn dbcmp(c: &Ctx2) {
         Full2::Real { rows, .. } => Some(&**rows),
         _ => None,
     };
+    // the read policy of the vectors on file (in memory, one that nothing reads)
+    let mem_policy = disk::ReadPolicy::default();
+    let pol = fullrows.and_then(|r| r.policy()).unwrap_or(&mem_policy);
+    let modes: Vec<String> = arg_str("--read-modes", if pol.uring.load(Relaxed) { "uring" } else { "mmap" }).split(',').map(|x| x.to_string()).collect();
+    let (qd0, dm0, dc0) = (pol.qd.load(Relaxed), pol.direct_min.load(Relaxed), pol.dontcache_min.load(Relaxed));
     let mut sets: Vec<(String, Option<RoaringBitmap>)> = if args().iter().any(|a| a == "--skip-all") { vec![] } else { vec![("all".into(), None)] };
     let vf = Some(arg_str("--cmp-vis", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--vis", ""));
     for f in vf.split(',').filter(|f| !f.is_empty()) {
@@ -1214,21 +1221,21 @@ pub fn dbcmp(c: &Ctx2) {
             let pl = pool(th);
             for mode in &modes {
                 let mut plan = plan0;
-                disk::URING.store(false, Relaxed);
-                disk::QD.store(qd0, Relaxed);
-                disk::DIRECT_MIN.store(dm0, Relaxed);
-                disk::DONTCACHE_MIN.store(dc0, Relaxed);
+                pol.uring.store(false, Relaxed);
+                pol.qd.store(qd0, Relaxed);
+                pol.direct_min.store(dm0, Relaxed);
+                pol.dontcache_min.store(dc0, Relaxed);
                 let bytes = |v: &str| if v == "none" { usize::MAX } else { v.parse().unwrap() };
                 for kv in mode.split(':') {
                     match kv.split_once('=') {
                         None if kv == "mmap" => plan.disk = false,
                         None if kv == "uring" => {
-                            disk::URING.store(true, Relaxed);
+                            pol.uring.store(true, Relaxed);
                             plan.disk = true;
                         }
-                        Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), Relaxed),
-                        Some(("direct", v)) => disk::DIRECT_MIN.store(bytes(v), Relaxed),
-                        Some(("dontcache", v)) => disk::DONTCACHE_MIN.store(bytes(v), Relaxed),
+                        Some(("qd", v)) => pol.qd.store(v.parse().unwrap(), Relaxed),
+                        Some(("direct", v)) => pol.direct_min.store(bytes(v), Relaxed),
+                        Some(("dontcache", v)) => pol.dontcache_min.store(bytes(v), Relaxed),
                         Some(("plan", "disk")) => plan.disk = true,
                         Some(("plan", "mem")) => plan.disk = false,
                         Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),

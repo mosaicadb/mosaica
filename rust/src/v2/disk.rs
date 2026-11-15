@@ -6,14 +6,31 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// Before deciding a list of rows from full vectors, ask the kernel to start reading their pages (`--willneed`).
-pub static WILLNEED: AtomicBool = AtomicBool::new(false);
+/// How the rows on file are read. A benchmark may change it between runs, so the fields are atomic.
+pub struct ReadPolicy {
+    /// Read the rows the index path leaves with pread through io_uring, not by faults on the mapping.
+    pub uring: AtomicBool,
+    /// Before deciding a list of rows from full vectors, ask the kernel to start reading their pages.
+    pub willneed: AtomicBool,
+    /// Extents of at least this many bytes are read with O_DIRECT, past the page cache (usize::MAX: never).
+    pub direct_min: AtomicUsize,
+    /// Extents of at least this many bytes, and below `direct_min`, are buffered reads with RWF_DONTCACHE: pages
+    /// already cached serve them, and pages read in are dropped once copied (usize::MAX: never).
+    pub dontcache_min: AtomicUsize,
+    /// Reads a `Reader` keeps in flight (at most RING / 2).
+    pub qd: AtomicUsize,
+}
+impl Default for ReadPolicy {
+    fn default() -> ReadPolicy {
+        ReadPolicy { uring: AtomicBool::new(false), willneed: AtomicBool::new(false), direct_min: AtomicUsize::new(usize::MAX), dontcache_min: AtomicUsize::new(usize::MAX), qd: AtomicUsize::new(64) }
+    }
+}
 
 /// The stored f16 vectors in index row order: in memory (the build's copy) or a mapped file.
 pub enum Rows {
     Mem(super::F16Rows),
     // rfd: read with pread, no readahead; dfd: the same file opened with O_DIRECT
-    Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File },
+    Map { map: memmap2::Mmap, file: std::fs::File, rfd: std::fs::File, dfd: std::fs::File, policy: ReadPolicy },
 }
 
 impl Default for Rows {
@@ -66,7 +83,7 @@ impl Rows {
             libc::posix_fadvise(rfd.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
         }
         let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).unwrap();
-        *self = Rows::Map { map, file, rfd, dfd };
+        *self = Rows::Map { map, file, rfd, dfd, policy: ReadPolicy::default() };
         self.evict();
     }
 
@@ -101,10 +118,28 @@ impl Rows {
         })
     }
 
-    /// Starts reading the pages of `rows` (rows of `n` f16 each) without waiting, when `--willneed` is on.
+    /// How the rows are read, when they are on file.
+    pub fn policy(&self) -> Option<&ReadPolicy> {
+        match self {
+            Rows::Map { policy, .. } => Some(policy),
+            Rows::Mem(_) => None,
+        }
+    }
+
+    /// Whether the rows are on file and read through io_uring.
+    pub fn uring(&self) -> bool {
+        self.policy().is_some_and(|p| p.uring.load(Ordering::Relaxed))
+    }
+
+    /// Whether the rows are on file and their pages are requested ahead of reading.
+    pub fn willneed_on(&self) -> bool {
+        self.policy().is_some_and(|p| p.willneed.load(Ordering::Relaxed))
+    }
+
+    /// Starts reading the pages of `rows` (rows of `n` f16 each) without waiting, when the policy asks for it.
     #[inline]
     pub fn willneed(&self, rows: &[u32], n: usize) {
-        if !WILLNEED.load(Ordering::Relaxed) {
+        if !self.willneed_on() {
             return;
         }
         if let Rows::Map { map, .. } = self {
@@ -192,8 +227,6 @@ pub fn cap_self(cap: u64) -> String {
     cg_report()
 }
 
-/// Read full vectors with pread through io_uring instead of faults on the mapping (`--full-read uring`).
-pub static URING: AtomicBool = AtomicBool::new(false);
 /// Nanoseconds readers spent waiting for reads, reads issued and bytes read, over the process (diagnostics).
 pub static WAIT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub static NREADS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -207,15 +240,8 @@ pub fn cpu_s() -> (f64, f64) {
     (s(ru.ru_utime), s(ru.ru_stime))
 }
 
-/// Extents of at least this many bytes are read with O_DIRECT, past the page cache (`--direct-min`; usize::MAX: never).
-pub static DIRECT_MIN: AtomicUsize = AtomicUsize::new(usize::MAX);
-/// Extents of at least this many bytes, and below `DIRECT_MIN`, are buffered reads with RWF_DONTCACHE: pages already
-/// cached serve them, and pages read in are dropped once copied (`--dontcache-min`; usize::MAX: never).
-pub static DONTCACHE_MIN: AtomicUsize = AtomicUsize::new(usize::MAX);
 const RWF_DONTCACHE: i32 = 0x80;
 
-/// Reads kept in flight by a `Reader` (at most RING / 2).
-pub static QD: AtomicUsize = AtomicUsize::new(64);
 const RING: u32 = 256;
 /// Longest single read; a longer extent is split so that its pieces are read in parallel.
 const PIECE: usize = 256 << 10;
@@ -257,7 +283,7 @@ thread_local! {
 }
 
 /// Batches of rows read with many reads in flight: `push` plans a batch's reads and queues them, `pop` returns the
-/// oldest batch once its reads are done, and up to `QD` reads of the queued batches are in flight meanwhile. Rows within
+/// oldest batch once its reads are done, and up to the policy's `qd` reads of the queued batches are in flight meanwhile. Rows within
 /// `gap` bytes of each other are read with one read, gap included. Reads are buffered (through the page cache), so a
 /// cached row costs a copy and the cache is charged to the cgroup as with the mapping.
 pub struct Reader<T> {
@@ -282,14 +308,14 @@ pub struct Reader<T> {
 
 impl<T> Reader<T> {
     /// A reader of `rows` (rows of `n` f16) merging rows `gap` bytes apart, on this thread's ring; None in memory or
-    /// without `--full-read uring`.
+    /// unless the policy reads through io_uring.
     pub fn new(rows: &Rows, n: usize, gap: usize) -> Option<Reader<T>> {
-        let Rows::Map { rfd, dfd, .. } = rows else { return None };
-        if !URING.load(Ordering::Relaxed) {
+        let Rows::Map { rfd, dfd, policy, .. } = rows else { return None };
+        if !policy.uring.load(Ordering::Relaxed) {
             return None;
         }
         let (ring, free) = THREAD_RING.with(|r| r.borrow_mut().take()).unwrap_or_else(|| (io_uring::IoUring::new(RING).expect("io_uring"), Vec::new()));
-        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: DIRECT_MIN.load(Ordering::Relaxed), dcmin: DONTCACHE_MIN.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: QD.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
+        Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: policy.direct_min.load(Ordering::Relaxed), dcmin: policy.dontcache_min.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: policy.qd.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
     }
 
     /// Whether the caller should take a batch before pushing another: reads are waiting for a free slot, or the

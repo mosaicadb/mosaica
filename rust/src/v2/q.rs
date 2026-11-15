@@ -2205,7 +2205,7 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
     // every row's full vector on file: read through io_uring, each thread's chunks read while it decides the earlier
     // ones (a filtered scan's scattered rows are read faster by madvise(WILLNEED) on the mapping, and stay cached)
     let fr = match ix.own_rows() {
-        Some(fr @ super::disk::Rows::Map { .. }) if vis.is_none() && !packed && super::disk::URING.load(std::sync::atomic::Ordering::Relaxed) => Some(fr),
+        Some(fr @ super::disk::Rows::Map { .. }) if vis.is_none() && !packed && fr.uring() => Some(fr),
         _ => None,
     };
     let parts: Vec<ThrOut2> = if let Some(fr) = fr {
@@ -2239,9 +2239,9 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
         (0..nch).into_par_iter().map(|ch| {
             let mut acc = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
             let mut rows = Vec::with_capacity(4096);
-            // with --willneed, reading runs SCAN_AHEAD chunks ahead of the scan
+            // with willneed in the read policy, reading runs SCAN_AHEAD chunks ahead of the scan
             if let Some(fr) = ix.own_rows() {
-                if super::disk::WILLNEED.load(std::sync::atomic::Ordering::Relaxed) {
+                if fr.willneed_on() {
                     let lo = if ch == 0 { 1 } else { ch + SCAN_AHEAD };
                     for c2 in lo..=(ch + SCAN_AHEAD).min(nch - 1) {
                         scan_rows(ix, vis, c2, &mut rows);
