@@ -9,13 +9,28 @@ names the branch or report that holds its evidence.
   merged reads, O_DIRECT from 8 KiB under the cap), research/filter-sweep and research/plots-refresh (filtered and
   genus-filter sweeps with ACORN, plots with the new approximate mode). Each is pushed and reviewed by its own runs;
   merge them here with a build and the 50k check.
-- **research/scan-planner** (in progress): the planner chooses index or scan per query and per cluster, and a session
-  can compact its visible set's codes (and optionally vectors) into one block. Review, then merge.
+- **research/scan-planner** (844dfb52a, under independent review): the planner chooses a whole-query scan, direct
+  scoring of a cluster's visible rows, or the index per cluster, and a session can compact its visible set's codes and
+  f16 vectors into one block. Merge once the review passes. Its filtered rows are being remeasured on a quiet machine
+  for the plots on research/plots-refresh.
 
 ## Exact path
 
-- **Never slower than a plain scan under a filter.** The scan-planner work above. The filter sweep showed the index
-  losing to a plain scan of the visible rows at 1% and 10% random and at 1% genus visible.
+- **Never slower than a plain scan under a filter: mostly done.** The scan-planner work above
+  (bench/threshold-db/results/planner/REPORT_PLANNER.md on that branch; times from a loaded machine, interleaved). With
+  the visible set compacted per session (codes and vectors), the planned query beats LIMINAL's own scan at every answer
+  share under random 1%, 10% and 50% visible (0.44–0.62 against 1.07–1.25 ms; 9.7–10.4 against 11.5–12.5 ms; 20–46
+  against 47–52 ms), and under 241 and 964 genera up to answers of 10% and 30%. Uncompacted, the planner alone fixes only
+  random 1%. Answers equal the scan's bit for bit. Still open:
+  - **Small, cache-warm genus sets** (19 genera, 1%): 0.65–0.98 ms against 0.44–0.66 for the plain scan. The cost model
+    prices a cached scan at 0.10 µs per row against 0.06–0.08 actual, so it picks the index on 345 of 525 runs.
+  - **The plain scan beats the compacted scan by about 20% under genus sets,** unexplained: both read contiguous rows
+    with the same kernel.
+  - **The largest answers under 241 and 964 genera,** 5–14% behind the scan.
+  - **A session switch for compaction.** It is opt-in through `Index2::compact` with no session-level setting. It costs
+    22 ms and 24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB,
+    38 ms and 33 MB, 162 ms and 147 MB). The suggestion is codes and vectors up to about 10% visible, codes alone above.
+  - **The uncompacted index path over sparse clusters** costs more than the model predicts (22 ms forced at random 1%).
 - **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
   be stored.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the
