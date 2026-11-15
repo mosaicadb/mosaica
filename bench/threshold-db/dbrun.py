@@ -21,6 +21,10 @@ ap.add_argument("--shares", default="0,1,2,3,4")
 ap.add_argument("--dump", default="")
 ap.add_argument("--db", default="")
 ap.add_argument("--url", default="127.0.0.1:18123")
+ap.add_argument("--memory-limit", default="12GB", help="DuckDB's memory_limit")
+ap.add_argument("--cold", action="store_true", help="first, each share's first query once after the page cache is "
+                "dropped: --evict-cmd for ClickHouse; for DuckDB a new connection and this cgroup's memory.reclaim")
+ap.add_argument("--evict-cmd", default="")
 a = ap.parse_args()
 
 Q = np.load(f"{a.prep}/queries.npy")
@@ -74,7 +78,7 @@ if a.system == "clickhouse":
         pass
 else:
     import duckdb
-    con = duckdb.connect(a.db, read_only=True, config={"memory_limit": "12GB"})
+    con = duckdb.connect(a.db, read_only=True, config={"memory_limit": a.memory_limit})
 
     def run(q, th):
         return con.execute(q).fetchnumpy()["id"].astype(np.uint32)
@@ -82,7 +86,25 @@ else:
     def set_threads(th):
         con.execute(f"SET threads = {th}")
 
-HEADER = "what,threads,vis,share_index,query,median_ms,min_ms,count"
+HEADER = "what,threads,vis,share_index,query,median_ms,min_ms,count" + (",kind" if a.cold else "")
+
+
+def evict(th):
+    """Drops the data from the page cache before a cold query (and DuckDB's buffer pool, by reconnecting)."""
+    global con
+    if a.evict_cmd:
+        import subprocess
+        subprocess.run(a.evict_cmd, shell=True, check=True)
+    if a.system == "duckdb":
+        con.close()
+        cg = "/sys/fs/cgroup" + open("/proc/self/cgroup").read().strip().split("::", 1)[1]
+        try:
+            with open(f"{cg}/memory.reclaim", "w") as f:
+                f.write(str(16 << 30))
+        except OSError:
+            pass
+        con = duckdb.connect(a.db, read_only=True, config={"memory_limit": a.memory_limit})
+        set_threads(th)
 what = f"{a.system}_{a.table}_{a.form}"
 shares = [int(s) for s in a.shares.split(",")]
 t_start = time.time()
@@ -91,6 +113,12 @@ for vis in a.vis.split(","):
         set_threads(th)
         dump = open(f"{a.dump}/{what}_{vis}.bin", "wb") if a.dump and th == 1 else None
         rows, meds = [], []
+        for si in shares if a.cold else []:
+            evict(th)
+            t0 = time.perf_counter()
+            ids = run(sql(0, si, vis), th)
+            ms = (time.perf_counter() - t0) * 1e3
+            rows.append(f"{what},{th},{vis},{si},0,{ms:.4f},{ms:.4f},{len(ids)},cold")
         for qi in range(0, len(Q), a.step):
             for si in shares:
                 s = sql(qi, si, vis)
@@ -103,7 +131,7 @@ for vis in a.vis.split(","):
                 if dump:
                     dump.write(np.array([qi, si, len(ids)], "<u4").tobytes() + ids.astype("<u4").tobytes())
                 meds.append(float(np.median(ts)))
-                rows.append(f"{what},{th},{vis},{si},{qi},{np.median(ts):.4f},{min(ts):.4f},{len(ids)}")
+                rows.append(f"{what},{th},{vis},{si},{qi},{np.median(ts):.4f},{min(ts):.4f},{len(ids)}" + (",warm" if a.cold else ""))
         if dump:
             dump.close()
         new = not os.path.exists(a.out) or os.path.getsize(a.out) == 0

@@ -14,6 +14,7 @@
 //! The basis of each group is stored in int8 (one scale per basis vector). The encoder codes z = V_q^-1 r, so
 //! q.r = (V_q^T q).z + q.eps with |eps| <= e_inv |r|, and V_q^T q is computed exactly in integers.
 pub mod col;
+pub mod disk;
 pub mod kern;
 pub mod q;
 pub mod setup;
@@ -836,7 +837,7 @@ pub struct Cl2 {
 /// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
 /// rows in order reads memory in order.
 pub enum Full2 {
-    Real { map: memmap2::Mmap, off: usize, rows: Vec<u16> },
+    Real { map: memmap2::Mmap, off: usize, rows: disk::Rows },
     Synth(q::Synth2),
 }
 
@@ -914,12 +915,16 @@ impl Index2 {
         let n = self.n();
         &self.centres64[ci * n..(ci + 1) * n]
     }
+    /// Whether the stored vectors of `rows` are most likely in memory (always, unless they are on file).
+    pub fn full_cached(&self, rows: &[u32]) -> bool {
+        match &self.full {
+            Full2::Real { rows: fr, .. } => fr.cached(rows, self.n()),
+            Full2::Synth(_) => true,
+        }
+    }
     pub fn full_row_f16(&self, row: usize) -> &[u16] {
         match &self.full {
-            Full2::Real { rows, .. } => {
-                let n = self.n();
-                &rows[row * n..(row + 1) * n]
-            }
+            Full2::Real { rows, .. } => rows.row(row, self.n()),
             Full2::Synth(_) => panic!("synthetic rows have no stored f16 vector"),
         }
     }
@@ -1586,8 +1591,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     match &mut full {
         Full2::Real { map, off, rows } => {
             let src = unsafe { std::slice::from_raw_parts(map[*off..].as_ptr() as *const u16, (map.len() - *off) / 2) };
-            *rows = vec![0u16; nrows * n];
-            rows.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+            let mut v = vec![0u16; nrows * n];
+            v.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+            *rows = disk::Rows::Mem(v);
         }
         Full2::Synth(sy) => {
             sy.ext = xs_row;

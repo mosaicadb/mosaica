@@ -1,0 +1,20 @@
+[disk] full vectors written to /home/joe/code/vexact-disk-data/full.f16 and mapped (random, willneed true, read uring) in 1.6s
+[mem] total 377.1: lcode 244.9, groups.v8t 36.0, lscal 20.5, ctab 16.7, cl 11.7, anchors+ahat 7.8, hi+lo 7.6, p.perm 7.6, row_ent+ent_row 7.6, centres64 5.9, ent_xs 3.8, p.centres 2.9, groups.tables 1.4, rots 1.3, esc 1.1, coff+soff 0.2, p.v 0.0, p.dl+dt+frb 0.0, groups.vinv+vq 0.0, nukey 0.0, full rows in memory 0.0
+built v2 (index format 3, 16-bit tables, profile /home/joe/code/vexact-benchup-data/index_r4/profile.npy) 999950 rows, 1000 clusters in 1.6s; stored bytes/item cumulative by level: [6.5, 11.0, 15.5, 20.0, 28.5, 37.0, 66.5, 106.9, 176.8, 275.9]
+[cap] before: cgroup current 1479.7 MiB, anon 1475.9, file 0.0, max 9663676416; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] capped at 775946240 bytes: cgroup current 426.3 MiB, anon 423.5, file 0.0, max 775946240; events low 0 high 0 max 0 oom 0 oom_kill 0 oom_group_kill 0
+[cap] full vectors resident after eviction: 0.0 MiB
+dbcmp all: 999950 visible
+[disk] index@uring vis all: wall 85.3s, cpu user 35.0s sys 20.0s, waiting for reads 34.9s; 1989174 reads of 188387 MiB
+dbcmp index@uring threads 1 vis all: 105 timings, median 136.504 ms; read 187361 MiB from storage in 85.3s; full vectors resident 266.7 MiB; cgroup current 735.0 MiB, anon 459.9, file 266.7, max 775946240; events low 0 high 0 max 1434 oom 0 oom_kill 0 oom_group_kill 0
+[disk] index@uring:direct=none:dontcache=8192 vis all: wall 134.4s, cpu user 34.0s sys 102.4s, waiting for reads 2.0s; 1986824 reads of 183127 MiB
+dbcmp index@uring:direct=none:dontcache=8192 threads 1 vis all: 105 timings, median 208.931 ms; read 154457 MiB from storage in 134.4s; full vectors resident 265.8 MiB; cgroup current 734.3 MiB, anon 459.9, file 265.8, max 775946240; events low 0 high 0 max 3099 oom 0 oom_kill 0 oom_group_kill 0
+[disk] index@uring:direct=none:dontcache=32768 vis all: wall 133.3s, cpu user 36.0s sys 99.0s, waiting for reads 3.1s; 1914153 reads of 182531 MiB
+dbcmp index@uring:direct=none:dontcache=32768 threads 1 vis all: 105 timings, median 195.940 ms; read 147632 MiB from storage in 133.3s; full vectors resident 266.0 MiB; cgroup current 734.5 MiB, anon 459.9, file 266.0, max 775946240; events low 0 high 0 max 10723 oom 0 oom_kill 0 oom_group_kill 0
+dbcmp vis_1: 10000 visible
+[disk] index@uring vis vis_1: wall 1.1s, cpu user 1.0s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index@uring threads 1 vis vis_1: 105 timings, median 2.006 ms; read 0 MiB from storage in 1.1s; full vectors resident 48.3 MiB; cgroup current 501.1 MiB, anon 444.8, file 48.4, max 775946240; events low 0 high 0 max 10723 oom 0 oom_kill 0 oom_group_kill 0
+[disk] index@uring:direct=none:dontcache=8192 vis vis_1: wall 1.1s, cpu user 1.0s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index@uring:direct=none:dontcache=8192 threads 1 vis vis_1: 105 timings, median 2.004 ms; read 0 MiB from storage in 1.1s; full vectors resident 48.3 MiB; cgroup current 501.2 MiB, anon 444.8, file 48.4, max 775946240; events low 0 high 0 max 10723 oom 0 oom_kill 0 oom_group_kill 0
+[disk] index@uring:direct=none:dontcache=32768 vis vis_1: wall 1.1s, cpu user 1.0s sys 0.1s, waiting for reads 0.0s; 0 reads of 0 MiB
+dbcmp index@uring:direct=none:dontcache=32768 threads 1 vis vis_1: 105 timings, median 1.986 ms; read 0 MiB from storage in 1.1s; full vectors resident 48.3 MiB; cgroup current 501.1 MiB, anon 444.8, file 48.4, max 775946240; events low 0 high 0 max 10723 oom 0 oom_kill 0 oom_group_kill 0

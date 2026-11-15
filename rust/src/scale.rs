@@ -232,7 +232,7 @@ pub fn run2(scale: usize, nq: usize) {
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
         let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: f.map, off: f.off, rows: Vec::new() }, 1, split, false, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { map: f.map, off: f.off, rows: crate::v2::disk::Rows::Mem(Vec::new()) }, 1, split, false, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];

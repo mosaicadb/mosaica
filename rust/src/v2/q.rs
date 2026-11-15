@@ -1961,17 +1961,20 @@ pub struct Plan {
     pub col: bool,         // threshold queries decide the deterministic part on the columnar store (fixed order)
     pub colq: bool,        // in an order chosen per (query, cluster)
     pub collazy: bool,     // with the single stored norm first, block norms only for the items it leaves undecided
+    pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
+    pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
+    pub disk: bool,        // the planner adds the cost of reading full vectors from disk (io_us, io_gbps)
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cut_us: 2.5, seed_us: 300.0, alpha0: false, jump_level: 0, jump_d: 0.8, int_det: false, gtab: false, repack: false, repack_mul: 1.0, bail: 0.0, rdec: u32::MAX, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, col: false, colq: false, collazy: false, io_us: 5.7, io_gbps: 3.3, disk: false }
     }
 }
 impl Plan {
     /// The timed constants as `name=value` lines.
     pub fn to_kv(&self) -> String {
-        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\n",
-                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi)
+        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\nio_us={}\nio_gbps={}\n",
+                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi, self.io_us, self.io_gbps)
     }
     /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
     pub fn from_kv(base: Plan, text: &str) -> Plan {
@@ -1991,10 +1994,27 @@ impl Plan {
                 "seed_us" => &mut p.seed_us,
                 "scan_lo" => &mut p.scan_lo,
                 "scan_hi" => &mut p.scan_hi,
+                "io_us" => &mut p.io_us,
+                "io_gbps" => &mut p.io_gbps,
                 k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
             } = v;
         }
         p
+    }
+
+    /// Full vectors on disk: rows this many bytes apart or closer are read with one read, the gap included, because
+    /// reading the gap costs less than another read.
+    pub fn io_gap(&self) -> usize {
+        (self.io_us * self.io_gbps * 1e3) as usize
+    }
+
+    /// Modelled cost of reading `ncand` full vectors (of `rb` bytes) lying in a span of `span` rows: one read each, or
+    /// the span in one sequential read when that is cheaper; 0 unless `disk`.
+    pub fn disk_us(&self, ncand: usize, span: usize, rb: usize) -> f64 {
+        if !self.disk || ncand == 0 {
+            return 0.0;
+        }
+        (ncand as f64 * self.io_us).min(self.io_us + (span * rb) as f64 / (self.io_gbps * 1e3))
     }
 
     /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
@@ -2099,6 +2119,36 @@ impl Plan {
         })
     }
 
+    /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
+    /// from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest of three
+    /// timings. The file's pages are dropped from the cache before each and after. Unchanged in memory or without
+    /// `--full-read uring`.
+    pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
+        let Full2::Real { rows, .. } = &ix.full else { return base };
+        let n = ix.n();
+        let time1 = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
+            rows.evict();
+            let mut rd = super::disk::Reader::<()>::new(rows, n, gap)?;
+            let tm = Timer::new();
+            rd.push((), sel);
+            let b = rd.pop().unwrap();
+            let el = tm.ms() * 1e3;
+            std::hint::black_box(b.row(0, n)[0]);
+            rd.recycle(b);
+            Some((el, rd.bytes))
+        };
+        let time = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
+            (0..3).map(|_| time1(sel.clone(), gap)).try_fold((f64::MAX, 0), |a, x| x.map(|x| if x.0 < a.0 { x } else { a }))
+        };
+        const NR: usize = 4096;
+        let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
+        let Some((t_rand, _)) = time(spread, 0) else { return base };
+        let nseq = ((32usize << 20) / (2 * n)).min(ix.nrows);
+        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2).unwrap();
+        rows.evict();
+        Plan { io_us: t_rand / NR as f64, io_gbps: bytes as f64 / t_seq / 1e3, ..base }
+    }
+
     /// The answer shares at which a scan of every row beats the index path, timed on `nq` stored rows as queries at
     /// thresholds of 5 to 99% answers: (lo, hi) spans the shares where the index was slower, extended halfway to the
     /// neighbouring shares; (2, 2) when it never was.
@@ -2168,6 +2218,8 @@ pub struct ThrOut2 {
 }
 
 const SCAN_ROWS: usize = 1024;
+/// Scan chunks whose full vectors are requested ahead of the one being scanned (`--willneed`).
+const SCAN_AHEAD: usize = 4;
 
 /// Number of scan chunks over the visible rows (all rows when vis is None), SCAN_ROWS each.
 fn scan_chunks(ix: &Index2, vis: Option<&Vis2>) -> usize {
@@ -2187,18 +2239,65 @@ fn scan_rows(ix: &Index2, vis: Option<&Vis2>, ch: usize, out: &mut Vec<u32>) {
 /// threshold.
 pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_exact: bool, packed: bool) -> ThrOut2 {
     let nl = ix.meta.nl();
-    let parts: Vec<ThrOut2> = (0..scan_chunks(ix, vis)).into_par_iter().map(|ch| {
-        let mut acc = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
-        let mut rows = Vec::with_capacity(4096);
-        scan_rows(ix, vis, ch, &mut rows);
-        if packed && vis.is_some() {
-            decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
-        } else {
-            decide_full(ix, pr, t, &rows, want_exact, &mut acc);
-        }
-        acc
-    }).collect();
-    let mut out = ThrOut2 { st: Stats::new(nl), scanned: true, npow: ix.meta.npow, ..Default::default() };
+    let nch = scan_chunks(ix, vis);
+    // every row's full vector on file: read through io_uring, each thread's chunks read while it decides the earlier
+    // ones (a filtered scan's scattered rows are read faster by madvise(WILLNEED) on the mapping, and stay cached)
+    let fr = match &ix.full {
+        Full2::Real { rows: fr @ super::disk::Rows::Map { .. }, .. } if vis.is_none() && !packed && super::disk::URING.load(std::sync::atomic::Ordering::Relaxed) => Some(fr),
+        _ => None,
+    };
+    let parts: Vec<ThrOut2> = if let Some(fr) = fr {
+        let decide = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
+            let b = rd.pop().unwrap();
+            decide_full_from(ix, pr, t, &b.rows, want_exact, acc, |k| b.row(k, ix.n()));
+            rd.recycle(b);
+        };
+        (0..nch).into_par_iter().fold(
+            || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), 0).unwrap()),
+            |(mut acc, mut rd), ch| {
+                let mut rows = Vec::new();
+                scan_rows(ix, vis, ch, &mut rows);
+                if fr.cached(&rows, ix.n()) {
+                    decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+                } else {
+                    rd.push((), rows);
+                    while rd.full() {
+                        decide(&mut acc, &mut rd);
+                    }
+                }
+                (acc, rd)
+            },
+        ).map(|(mut acc, mut rd)| {
+            while !rd.is_empty() {
+                decide(&mut acc, &mut rd);
+            }
+            acc
+        }).collect()
+    } else {
+        (0..nch).into_par_iter().map(|ch| {
+            let mut acc = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
+            let mut rows = Vec::with_capacity(4096);
+            // with --willneed, reading runs SCAN_AHEAD chunks ahead of the scan
+            if let Full2::Real { rows: fr, .. } = &ix.full {
+                if super::disk::WILLNEED.load(std::sync::atomic::Ordering::Relaxed) {
+                    let lo = if ch == 0 { 1 } else { ch + SCAN_AHEAD };
+                    for c2 in lo..=(ch + SCAN_AHEAD).min(nch - 1) {
+                        scan_rows(ix, vis, c2, &mut rows);
+                        fr.willneed(&rows, ix.n());
+                        rows.clear();
+                    }
+                }
+            }
+            scan_rows(ix, vis, ch, &mut rows);
+            if packed && vis.is_some() {
+                decide_full_packed(ix, pr, t, &rows, want_exact, &mut acc);
+            } else {
+                decide_full(ix, pr, t, &rows, want_exact, &mut acc);
+            }
+            acc
+        }).collect()
+    };
+    let mut out = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, scanned: true, ..Default::default() };
     for p in parts {
         out.rows.extend(p.rows);
         out.st.add(&p.st);
@@ -2216,34 +2315,12 @@ pub fn scan_knn(ix: &Index2, q16: &[u16], q32: &[f32], qn: f64, kk: usize, vis: 
 
 /// Exact decisions from full vectors (four rows per pass of the query; exact integer products only near t).
 pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2) {
-    let mut k4 = 0;
-    if let Full2::Real { .. } = &ix.full {
-        let e = full_err2(ix, pr);
-        while k4 + 4 <= pend.len() {
-            let rr = [pend[k4], pend[k4 + 1], pend[k4 + 2], pend[k4 + 3]];
-            let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, rr.map(|r| ix.full_row_f16(r as usize))) };
-            for q in 0..4 {
-                acc.st.full_reads += 1;
-                let s = sc[q] as f64;
-                let inn = if s >= t + e {
-                    true
-                } else if s < t - e {
-                    false
-                } else {
-                    acc.st.exact_fallbacks += 1;
-                    exact_ge(exact_dot(&pr.q16, ix.full_row_f16(rr[q] as usize)), t)
-                };
-                if inn {
-                    acc.rows.push(rr[q]);
-                    if want_exact {
-                        acc.exact.push((rr[q], exact_value2(ix, pr, rr[q] as usize)));
-                    }
-                }
-            }
-            k4 += 4;
-        }
+    if let Full2::Real { rows, .. } = &ix.full {
+        rows.willneed(pend, ix.n());
+        decide_full_from(ix, pr, t, pend, want_exact, acc, |k| ix.full_row_f16(pend[k] as usize));
+        return;
     }
-    for &r in &pend[k4..] {
+    for &r in pend {
         if exact_ge2(ix, pr, r as usize, t, &mut acc.st) {
             acc.rows.push(r);
             if want_exact {
@@ -2253,12 +2330,45 @@ pub fn decide_full(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bo
     }
 }
 
+/// decide_full over stored vectors given by `get(k)` for row `pend[k]`.
+pub fn decide_full_from<'a>(ix: &Index2, pr: &Prep2, t: f64, pend: &[u32], want_exact: bool, acc: &mut ThrOut2, get: impl Fn(usize) -> &'a [u16]) {
+    let e = full_err2(ix, pr);
+    let mut k = 0;
+    while k < pend.len() {
+        let m = (pend.len() - k).min(4);
+        let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, core::array::from_fn(|q| get(k + q.min(m - 1)))) };
+        for q in 0..m {
+            acc.st.full_reads += 1;
+            let s = sc[q] as f64;
+            let x = get(k + q);
+            let inn = if s >= t + e {
+                true
+            } else if s < t - e {
+                false
+            } else {
+                acc.st.exact_fallbacks += 1;
+                exact_ge(exact_dot(&pr.q16, x), t)
+            };
+            if inn {
+                acc.rows.push(pend[k + q]);
+                if want_exact {
+                    acc.exact.push((pend[k + q], exact_to_f64(exact_dot(&pr.q16, x))));
+                }
+            }
+        }
+        k += m;
+    }
+}
+
 /// decide_full over scattered rows by blocks of 32: each block's vectors are copied into a contiguous buffer (the next
 /// block's rows prefetched meanwhile) and scored there.
 pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_exact: bool, acc: &mut ThrOut2) {
     const B: usize = 32;
     let n = ix.n();
     let e = full_err2(ix, pr);
+    if let Full2::Real { rows: fr, .. } = &ix.full {
+        fr.willneed(rows, n);
+    }
     let mut buf = vec![0u16; B * n];
     let pf = |r: u32| unsafe {
         let p = ix.full_row_f16(r as usize).as_ptr() as *const i8;
@@ -2378,6 +2488,9 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
         gs.dedup();
         setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
     }
+    // on disk a full vector costs its read too; a scan reads the file sequentially
+    let rb = 2 * ix.n();
+    let scan_row_us = pl.scan_us + if pl.disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
     let pre_of = |ci: usize| -> Pre {
         if let Some(v) = o.vis {
             if v.cl_cnt[ci] == 0 {
@@ -2449,12 +2562,12 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
             return Planned::Scan;
         }
         let cost_s: f64 = live.iter().step_by(SAMPLE).map(|&ci| match pre[ci] {
-            Some(Pre::Open { ncand, .. }) if ncand > 0 => (ncand as f64 * pl.full_us).min(pl.index_us(ncand, d)),
+            Some(Pre::Open { ncand, d0, d1, .. }) if ncand > 0 => (ncand as f64 * pl.full_us + pl.disk_us(ncand, d1 - d0, rb)).min(pl.index_us(ncand, d)),
             _ => 0.0,
         }).sum();
         let nvis = o.vis.map_or(ix.nrows, |v| v.rows.len());
         let rest = live.len() - (live.len() + SAMPLE - 1) / SAMPLE;
-        if nvis as f64 * pl.scan_us < rest as f64 * pl.cut_us + cost_s * nvis as f64 / nv_s.max(1) as f64 {
+        if nvis as f64 * scan_row_us < rest as f64 * pl.cut_us + cost_s * nvis as f64 / nv_s.max(1) as f64 {
             return Planned::Scan;
         }
     }
@@ -2476,12 +2589,15 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
     }
     let first_decide = if matches!(pl.mode, PlanMode::Auto) && pl.jump_level > 0 && d > pl.jump_d { pl.jump_level } else { 0 };
     let mut grp_gain = vec![0f64; ix.groups.len()];
+    let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
-        if let Pre::Open { ncand, .. } = p {
+        if let Pre::Open { ncand, d0, d1, .. } = p {
             if *ncand == 0 {
                 continue;
             }
-            let gain = *ncand as f64 * pl.full_us - pl.index_us(*ncand, d);
+            let full = *ncand as f64 * pl.full_us + pl.disk_us(*ncand, d1 - d0, rb);
+            full_all += full;
+            let gain = full - pl.index_us(*ncand, d);
             use_idx[ci] = match pl.mode {
                 PlanMode::Index => true,
                 PlanMode::Flat => false,
@@ -2501,7 +2617,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, fixed_us: f64) -> Plann
         // what remains costs every candidate's full vector less the kept gains; a plain scan may be cheaper
         let nvis = o.vis.map_or(ix.nrows, |v| v.cl_cnt.iter().map(|&x| x as usize).sum());
         let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
-        if ncand_all as f64 * pl.full_us - gains > nvis as f64 * pl.scan_us {
+        if full_all - gains > nvis as f64 * scan_row_us {
             return Planned::Scan;
         }
     }
@@ -2544,9 +2660,21 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         need.dedup();
         setup_groups(ix, pr, &need, &mut gst);
     }
+    let reader = || match &ix.full {
+        Full2::Real { rows, .. } => super::disk::Reader::<()>::new(rows, ix.n(), pl.io_gap()),
+        _ => None,
+    };
+    // with a reader, the rows of a cluster that need full vectors are read while the next clusters run their index path
+    let decide_batch = |acc: &mut ThrOut2, rd: &mut super::disk::Reader<()>| {
+        let b = rd.pop().unwrap();
+        let tf = tick();
+        decide_full_from(ix, pr, t, &b.rows, o.want_iv, acc, |k| b.row(k, ix.n()));
+        acc.st.cyc[P_FULL] += tick() - tf;
+        rd.recycle(b);
+    };
     let parts: Vec<ThrOut2> = (0..k).into_par_iter().fold(
-        || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, State::default()),
-        |(mut acc, mut sv), ci| {
+        || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, State::default(), reader()),
+        |(mut acc, mut sv, mut rd), ci| {
             let tcl = tick();
             let c = &ix.cl[ci];
             let push = |acc: &mut ThrOut2, r0: usize, r1: usize, iv: Option<(f64, f64)>| {
@@ -2640,16 +2768,34 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.flat_items += cands.len() as u64;
                             pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
                         }
-                        let tf = tick();
-                        decide_full(ix, pr, t, &pend, o.want_iv, &mut acc);
-                        acc.st.cyc[P_FULL] += tick() - tf;
+                        // rows already in the page cache are decided from the mapping, without reads
+                        match rd.as_mut() {
+                            Some(r) if !pend.is_empty() && !ix.full_cached(&pend) => {
+                                r.push((), pend);
+                                while r.full() {
+                                    decide_batch(&mut acc, r);
+                                }
+                            }
+                            _ => {
+                                let tf = tick();
+                                decide_full(ix, pr, t, &pend, o.want_iv, &mut acc);
+                                acc.st.cyc[P_FULL] += tick() - tf;
+                            }
+                        }
                     }
                 }
             }
             acc.st.cyc[P_CLUSTER] += tick() - tcl;
-            (acc, sv)
+            (acc, sv, rd)
         },
-    ).map(|x| x.0).collect();
+    ).map(|(mut acc, _, rd)| {
+        if let Some(mut r) = rd {
+            while !r.is_empty() {
+                decide_batch(&mut acc, &mut r);
+            }
+        }
+        acc
+    }).collect();
     let tm = tick();
     let mut out = ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() };
     out.st.cyc[P_CUT] += cut_cyc;

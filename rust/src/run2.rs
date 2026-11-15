@@ -209,7 +209,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let xs = RealSource::open(&p.xs_path);
     let src = Real2 { src: RealSource::open(&p.xs_path) };
     let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
+    let full = Full2::Real { map: f2.map, off: f2.off, rows: crate::v2::disk::Rows::Mem(Vec::new()) };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
@@ -278,7 +278,37 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     } else {
         None
     };
+    // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
+    let ff = arg_str("--full-file", "");
+    if !ff.is_empty() {
+        let t = Timer::new();
+        if let Full2::Real { rows, .. } = &mut ix.full {
+            rows.to_file(&ff, &arg_str("--full-advice", "random"));
+        }
+        crate::v2::disk::WILLNEED.store(args().iter().any(|a| a == "--willneed"), std::sync::atomic::Ordering::Relaxed);
+        // `--full-read uring` (the default) reads the rows the index path leaves with pread through io_uring; `mmap`
+        // reads them through the mapping
+        let fr = arg_str("--full-read", "uring");
+        assert!(fr == "uring" || fr == "mmap", "--full-read is uring or mmap");
+        crate::v2::disk::URING.store(fr == "uring", std::sync::atomic::Ordering::Relaxed);
+        // extents of at least --direct-min bytes are read with O_DIRECT, past the page cache (0: every read; none:
+        // never)
+        let dm = arg_str("--direct-min", "8192");
+        crate::v2::disk::DIRECT_MIN.store(if dm == "none" { usize::MAX } else { dm.parse().expect("--direct-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
+        // extents of at least --dontcache-min bytes and below --direct-min are buffered reads that do not stay cached
+        let dc = arg_str("--dontcache-min", "none");
+        crate::v2::disk::DONTCACHE_MIN.store(if dc == "none" { usize::MAX } else { dc.parse().expect("--dontcache-min is a byte count or none") }, std::sync::atomic::Ordering::Relaxed);
+        out!("[disk] full vectors written to {ff} and mapped ({}, willneed {}, read {fr}) in {:.1}s", arg_str("--full-advice", "random"), args().iter().any(|a| a == "--willneed"), t.s());
+    }
+    if !ff.is_empty() {
+        p.v = Vec::new(); // the f32 bases are needed only by the build
+    }
+    // full vectors read through the reader: the planner counts their reads
+    let plan = Plan { disk: !ff.is_empty() && crate::v2::disk::URING.load(std::sync::atomic::Ordering::Relaxed), ..plan };
     let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, dial, pseudo };
+    if !ff.is_empty() {
+        out!("[mem] {}", c.mem_report());
+    }
     out!("[fit] {}", c.p.fit);
     out!("built v2 (index format {}, {} tables, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, if split { "16-bit" } else { "8-bit" }, prof_path, c.ix.nrows, c.ix.k(), t.s(),
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
@@ -286,6 +316,29 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
 }
 
 impl Ctx2 {
+    /// MiB held by the large parts of the parameters and the index.
+    pub fn mem_report(&self) -> String {
+        fn b<T>(v: &[T]) -> usize {
+            std::mem::size_of_val(v)
+        }
+        let (p, ix) = (&self.p, &self.ix);
+        let mut parts: Vec<(&str, usize)> = vec![
+            ("p.v", b(&p.v)), ("p.centres", b(&p.centres)), ("p.perm", b(&p.perm)), ("p.dl+dt+frb", b(&p.dl) + b(&p.dt) + b(&p.frb)),
+            ("lcode", ix.lcode.iter().map(|x| b(x)).sum()), ("lscal", ix.lscal.iter().map(|x| b(x)).sum()),
+            ("coff+soff", ix.coff.iter().chain(&ix.soff).map(|x| b(x)).sum()),
+            ("groups.v8t", ix.groups.iter().map(|g| b(&g.v8t)).sum()), ("groups.vinv+vq", ix.groups.iter().map(|g| b(&g.vinv) + b(&g.vq)).sum()),
+            ("groups.tables", ix.groups.iter().map(|g| b(&g.ytab) + b(&g.ktab) + b(&g.ttab) + b(&g.khl)).sum()),
+            ("ctab", ix.ctab.iter().flatten().map(|t| b(&t.th) + b(&t.tmax) + b(&t.step) + b(&t.off) + b(&t.err)).sum()),
+            ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
+            ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
+            ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
+            ("nukey", b(&ix.nukey)), ("ent_xs", b(&self.ent_xs)),
+            ("full rows in memory", match &ix.full { Full2::Real { rows: crate::v2::disk::Rows::Mem(v), .. } => b(v), _ => 0 }),
+        ];
+        parts.sort_by_key(|x| std::cmp::Reverse(x.1));
+        let tot: usize = parts.iter().map(|x| x.1).sum();
+        format!("total {:.1}: {}", tot as f64 / 1048576.0, parts.iter().map(|(k, v)| format!("{k} {:.1}", *v as f64 / 1048576.0)).collect::<Vec<_>>().join(", "))
+    }
     pub fn flat(&self) -> Flat<'_> {
         Flat { map: &self.xs.map, off: self.xs.off, n: self.p.meta.n, nrows: self.p.cstart[self.p.meta.k], ent: &self.p.perm }
     }
@@ -1137,6 +1190,7 @@ pub fn scanbench(c: &Ctx2, nq: usize) {
 /// per-query median and minimum go to RESULTS/dbcmp_<--tag>.csv. With `--dump DIR`, the 1-thread answers go to DIR/<what>_<vis>.bin as
 /// (query, share, count, ids...) u32 records.
 pub fn dbcmp(c: &Ctx2) {
+    use crate::v2::disk;
     let ix = &c.ix;
     let fl = c.flat();
     let thr = read_npy(&arg_str("--thr", ""));
@@ -1147,7 +1201,19 @@ pub fn dbcmp(c: &Ctx2) {
     let reps = arg_usize("--reps", 5);
     let step = arg_usize("--step", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
+    let whats: Vec<String> = arg_str("--what", "index,flat").split(',').map(|x| x.to_string()).collect();
     let dump = arg_str("--dump", "");
+    // how full vectors on file are read, each mode in turn (`--read-modes uring,mmap:...`; the label gains @mode when
+    // there are several)
+    let modes: Vec<String> = arg_str("--read-modes", if disk::URING.load(std::sync::atomic::Ordering::Relaxed) { "uring" } else { "mmap" }).split(',').map(|x| x.to_string()).collect();
+    let (qd0, dm0, dc0) = (disk::QD.load(std::sync::atomic::Ordering::Relaxed), disk::DIRECT_MIN.load(std::sync::atomic::Ordering::Relaxed), disk::DONTCACHE_MIN.load(std::sync::atomic::Ordering::Relaxed));
+    // under a cap the full vectors come from --full-file, and `flat` scans them there in row order
+    let on_file = !arg_str("--full-file", "").is_empty();
+    let cold = args().iter().any(|a| a == "--cold");
+    let fullrows = match &ix.full {
+        Full2::Real { rows, .. } => Some(rows),
+        _ => None,
+    };
     let mut sets: Vec<(String, Option<RoaringBitmap>)> = if args().iter().any(|a| a == "--skip-all") { vec![] } else { vec![("all".into(), None)] };
     let vf = Some(arg_str("--cmp-vis", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--vis", ""));
     for f in vf.split(',').filter(|f| !f.is_empty()) {
@@ -1157,15 +1223,105 @@ pub fn dbcmp(c: &Ctx2) {
         let name = std::path::Path::new(f).file_stem().unwrap().to_string_lossy().to_string();
         sets.push((name, Some(RoaringBitmap::from_sorted_iter(ids).unwrap())));
     }
-    let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count".to_string()];
-    for (vname, bm) in &sets {
+    let vis_all: Vec<Option<Vis2>> = sets.iter().map(|(_, bm)| bm.as_ref().map(|b| Vis2::new(ix, b))).collect();
+    let cap = arg_usize("--cap", 0);
+    if cap > 0 {
+        out!("[cap] before: {}", disk::cg_report());
+        out!("[cap] capped at {cap} bytes: {}", disk::cap_self(cap as u64));
+        if let Some(r) = fullrows {
+            r.evict();
+            out!("[cap] full vectors resident after eviction: {:.1} MiB", r.resident() as f64 / (1 << 20) as f64);
+        }
+    }
+    // with full vectors read through the reader, the planner's disk constants are timed here under the cap
+    // (`--no-calib-disk`: as in the plan; `:plan=mem` in a read mode: reads not counted)
+    let mut plan0 = c.plan;
+    if plan0.disk && !args().iter().any(|a| a == "--no-calib-disk") {
         let t = Timer::new();
-        let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-        out!("dbcmp {vname}: {} visible; into row order once per session {:.2} ms", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()), t.ms());
+        plan0 = Plan::calibrate_disk(ix, plan0);
+        out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
+    }
+    let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count,full_reads,disk_kb,majflt,sys_ms,kind".to_string()];
+    let only = arg_str("--sets", "");
+    for (vi, (vname, bm)) in sets.iter().enumerate() {
+        if !only.is_empty() && !only.split(',').any(|x| x == vname) {
+            continue;
+        }
+        let vis = vis_all[vi].as_ref();
+        out!("dbcmp {vname}: {} visible", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()));
         for &th in &threads {
             let pl = pool(th);
-            for what in ["index", "flat"] {
-                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{what}_{vname}.bin")).unwrap()));
+            for mode in &modes {
+            let mut plan = plan0;
+            disk::URING.store(false, std::sync::atomic::Ordering::Relaxed);
+            disk::QD.store(qd0, std::sync::atomic::Ordering::Relaxed);
+            disk::DIRECT_MIN.store(dm0, std::sync::atomic::Ordering::Relaxed);
+            disk::DONTCACHE_MIN.store(dc0, std::sync::atomic::Ordering::Relaxed);
+            let bytes = |v: &str| if v == "none" { usize::MAX } else { v.parse().unwrap() };
+            for kv in mode.split(':') {
+                match kv.split_once('=') {
+                    None if kv == "mmap" => plan.disk = false,
+                    None if kv == "uring" => {
+                        disk::URING.store(true, std::sync::atomic::Ordering::Relaxed);
+                        plan.disk = true;
+                    }
+                    Some(("qd", v)) => disk::QD.store(v.parse().unwrap(), std::sync::atomic::Ordering::Relaxed),
+                    Some(("direct", v)) => disk::DIRECT_MIN.store(bytes(v), std::sync::atomic::Ordering::Relaxed),
+                    Some(("dontcache", v)) => disk::DONTCACHE_MIN.store(bytes(v), std::sync::atomic::Ordering::Relaxed),
+                    Some(("plan", "disk")) => plan.disk = true,
+                    Some(("plan", "mem")) => plan.disk = false,
+                    Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
+                    _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES|none, :dontcache=BYTES|none and :plan=disk or mem"),
+                }
+            }
+            // each mode starts from an empty cache, so that one mode's cached rows do not serve the next
+            if modes.len() > 1 {
+                if let Some(r) = fullrows {
+                    r.evict();
+                }
+            }
+            for what0 in whats.iter().map(|s| s.as_str()) {
+                let what = what0;
+                let label = if modes.len() > 1 { format!("{what0}@{mode}") } else { what0.to_string() };
+                let run = |q: &Vec<f32>, t0: f64| -> (RoaringBitmap, u64) {
+                    pl.install(|| match what {
+                        "index" | "forced" => {
+                            let pr = prep2(ix, q);
+                            let plan = if what == "forced" { Plan { mode: PlanMode::Index, ..plan } } else { plan };
+                            let r = threshold2(ix, &pr, t0, &Opts2 { vis, verify: false, want_iv: false, plan });
+                            (to_bitmap2(ix, &r.rows), r.st.full_reads)
+                        }
+                        _ if on_file => {
+                            let pr = prep2(ix, q);
+                            let r = scan_visible(ix, &pr, t0, vis, false, plan.pscan);
+                            (to_bitmap2(ix, &r.rows), r.st.full_reads)
+                        }
+                        _ => {
+                            let (q16, q32, qn) = crate::v2::q::query_f16(q);
+                            let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
+                            e.sort_unstable();
+                            let n = e.len() as u64;
+                            (RoaringBitmap::from_sorted_iter(e).unwrap(), n)
+                        }
+                    })
+                };
+                if cold {
+                    // the first query at each answer size, after the full vectors are dropped from the page cache
+                    let qi = 0;
+                    for si in 0..ns {
+                        if let Some(r) = fullrows {
+                            r.evict();
+                        }
+                        let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                        let t = Timer::new();
+                        let (ans, fr) = run(&qs[qi], thr[qi * ns + si]);
+                        let ms = t.ms();
+                        let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
+                        lines.push(format!("{label},{th},{vname},{si},{qi},{ms:.4},{ms:.4},{},{fr},{:.1},{},{:.2},cold", ans.len(), (io1 - io0) as f64 / 1024.0, mf1 - mf0, (c1.1 - c0.1) * 1e3));
+                    }
+                }
+                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{}_{vname}.bin", label.replace([':', '@', '='], "_"))).unwrap()));
+                let (bio0, bt0, cpu0, w0, nr0, nb0) = (disk::io_read_bytes(), Timer::new(), disk::cpu_s(), disk::WAIT_NS.load(std::sync::atomic::Ordering::Relaxed), disk::NREADS.load(std::sync::atomic::Ordering::Relaxed), disk::NBYTES.load(std::sync::atomic::Ordering::Relaxed));
                 for (qi, q) in qs.iter().enumerate() {
                     if qi % step != 0 {
                         continue;
@@ -1174,34 +1330,32 @@ pub fn dbcmp(c: &Ctx2) {
                         let t0 = thr[qi * ns + si];
                         let mut ts = Vec::new();
                         let mut ans = RoaringBitmap::new();
+                        let mut fr = 0;
+                        let (io0, mf0, c0) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
                         for _ in 0..reps {
                             let t = Timer::new();
-                            ans = pl.install(|| match what {
-                                "index" => {
-                                    let pr = prep2(ix, q);
-                                    let r = threshold2(ix, &pr, t0, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan: c.plan });
-                                    to_bitmap2(ix, &r.rows)
-                                }
-                                _ => {
-                                    let (q16, q32, qn) = crate::v2::q::query_f16(q);
-                                    let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
-                                    e.sort_unstable();
-                                    RoaringBitmap::from_sorted_iter(e).unwrap()
-                                }
-                            });
+                            (ans, fr) = run(q, t0);
                             ts.push(t.ms());
                         }
+                        let (io1, mf1, c1) = (disk::io_read_bytes(), disk::major_faults(), disk::cpu_s());
                         if let Some(w) = dumpf.as_mut() {
                             for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
                                 w.write_all(&x.to_le_bytes()).unwrap();
                             }
                         }
                         let mn = ts.iter().cloned().fold(f64::MAX, f64::min);
-                        lines.push(format!("{what},{th},{vname},{si},{qi},{:.4},{:.4},{}", median(&ts), mn, ans.len()));
+                        lines.push(format!("{label},{th},{vname},{si},{qi},{:.4},{mn:.4},{},{fr},{:.1},{:.1},{:.2},warm", median(&ts), ans.len(), (io1 - io0) as f64 / 1024.0 / reps as f64, (mf1 - mf0) as f64 / reps as f64, (c1.1 - c0.1) * 1e3 / reps as f64));
                     }
                 }
-                let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{what},{th},{vname},"))).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
-                out!("dbcmp {what} threads {th} vis {vname}: {} timings, median {:.3} ms", mine.len(), median(&mine));
+                let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{label},{th},{vname},")) && l.ends_with(",warm")).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
+                let res = fullrows.map_or(0, |r| r.resident());
+                let cpu1 = disk::cpu_s();
+                let ld = |a: &std::sync::atomic::AtomicU64, b: u64| a.load(std::sync::atomic::Ordering::Relaxed) - b;
+                out!("[disk] {label} vis {vname}: wall {:.1}s, cpu user {:.1}s sys {:.1}s, waiting for reads {:.1}s; {} reads of {:.0} MiB", bt0.s(), cpu1.0 - cpu0.0, cpu1.1 - cpu0.1, ld(&disk::WAIT_NS, w0) as f64 * 1e-9, ld(&disk::NREADS, nr0), ld(&disk::NBYTES, nb0) as f64 / (1 << 20) as f64);
+                out!("dbcmp {label} threads {th} vis {vname}: {} timings, median {:.3} ms; read {:.0} MiB from storage in {:.1}s; full vectors resident {:.1} MiB; {}", mine.len(), median(&mine),
+                    (disk::io_read_bytes() - bio0) as f64 / (1 << 20) as f64, bt0.s(), res as f64 / (1 << 20) as f64, disk::cg_report());
+                std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
+            }
             }
         }
     }
