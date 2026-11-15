@@ -211,31 +211,109 @@ fn index_json(ix: &Index2, dir: &str, key: Option<&str>) {
     std::fs::write(&path, serde_json::to_string_pretty(&meta).unwrap()).unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
 }
 
-/// The f16 vectors of `rows` (rows of `n`) written to `path` and padded to whole pages.
-fn write_vectors(path: &str, rows: &disk::Rows, nrows: usize, n: usize) {
-    let mut f = std::io::BufWriter::with_capacity(64 << 20, std::fs::File::create(path).unwrap_or_else(|e| panic!("cannot create {path}: {e}")));
-    for r in 0..nrows {
-        f.write_all(bytes(rows.row(r, n))).unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
-    }
-    let f = f.into_inner().unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
-    f.set_len(((nrows * n * 2 + 4095) & !4095) as u64).unwrap_or_else(|e| panic!("cannot size {path}: {e}"));
+/// The file `dir/name` created at `bytes` bytes and mapped for writing (None when empty, which cannot be mapped).
+fn create_mapped(dir: &str, name: &str, bytes: usize) -> (String, Option<memmap2::MmapMut>) {
+    let path = format!("{dir}/{name}");
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap_or_else(|e| panic!("cannot create {path}: {e}"));
+    f.set_len(bytes as u64).unwrap_or_else(|e| panic!("cannot size {path}: {e}"));
+    let map = (bytes > 0).then(|| unsafe { memmap2::MmapMut::map_mut(&f).unwrap_or_else(|e| panic!("cannot map {path}: {e}")) });
+    (path, map)
 }
 
-/// Write `ix` (a built index of real vectors, with its support table) into the empty directory `dir`, answering to
-/// `key`. `index.json` is written last, so a directory with one is complete.
-pub fn save(ix: &Index2, dir: &str, key: &str) {
-    let Full2::Real { rows } = &ix.full else { panic!("a synthetic index has no stored vectors and cannot be saved") };
-    assert!(!ix.compacted() && ix.vrow.is_empty(), "a compacted index is not saved; save the index it was compacted from");
-    let f = |name: &str| format!("{dir}/{name}");
-    for (l, (c, s)) in ix.lcode.iter().zip(&ix.lscal).enumerate() {
-        write_file(&f(&format!("code{l}.bin")), c);
-        write_file(&f(&format!("scal{l}.bin")), s);
+/// A per-row array the build writes: on the heap, or one of a saved index's files created at full size and written
+/// through a writable map. Clusters write disjoint ranges of it from several threads at once.
+pub struct Out<T: Plain> {
+    heap: Vec<T>,
+    map: Option<memmap2::MmapMut>,
+    path: Option<String>,
+    ptr: *mut T,
+    len: usize,
+}
+unsafe impl<T: Plain> Send for Out<T> {}
+unsafe impl<T: Plain> Sync for Out<T> {}
+
+impl<T: Plain> Out<T> {
+    /// `len` zeros, on the heap without `dir`, else in the file `dir/name`.
+    pub fn new(dir: Option<&str>, name: &str, len: usize) -> Out<T> {
+        let Some(dir) = dir else {
+            let mut heap = vec![unsafe { std::mem::zeroed::<T>() }; len];
+            let ptr = heap.as_mut_ptr();
+            return Out { heap, map: None, path: None, ptr, len };
+        };
+        let (path, mut map) = create_mapped(dir, name, len * std::mem::size_of::<T>());
+        let ptr = map.as_mut().map_or(std::ptr::NonNull::dangling().as_ptr(), |m| m.as_mut_ptr() as *mut T);
+        Out { heap: Vec::new(), map, path: Some(path), ptr, len }
     }
-    write_file(&f("ahat.bin"), &ix.ahat);
-    write_file(&f("row_ent.bin"), &ix.row_ent);
-    write_file(&f("ent_row.bin"), &ix.ent_row);
-    write_file(&f("nukey.bin"), &ix.nukey);
-    write_vectors(&f("vectors.bin"), rows, ix.nrows, ix.n());
+    /// Write `v` at `off`. Callers on different threads write disjoint ranges.
+    pub fn put(&self, off: usize, v: &[T]) {
+        assert!(off + v.len() <= self.len, "a write of {} at {off} runs past an array of {}", v.len(), self.len);
+        unsafe { std::ptr::copy_nonoverlapping(v.as_ptr(), self.ptr.add(off), v.len()) };
+    }
+    /// What has been written so far.
+    pub fn get(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+    /// The finished array: the heap vector, or the file flushed and mapped as an opened index maps it.
+    pub fn finish(self) -> Arr<T> {
+        match self.path {
+            Some(path) => {
+                if let Some(m) = self.map {
+                    m.flush().unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
+                }
+                Arr::map(&path).unwrap_or_else(|e| panic!("{e}"))
+            }
+            None => self.heap.into(),
+        }
+    }
+}
+
+/// The f16 vectors the build writes, in index row order: on the heap starting on a cache line (as `F16Rows`), or the
+/// saved index's `vectors.bin`, padded to whole pages and written through a writable map.
+pub struct OutRows {
+    mem: F16Rows,
+    map: Option<memmap2::MmapMut>,
+    path: Option<String>,
+    ptr: *mut u16,
+    len: usize,
+}
+unsafe impl Send for OutRows {}
+unsafe impl Sync for OutRows {}
+
+impl OutRows {
+    /// `len` zero values, on the heap without `dir`, else in the file `dir/name`.
+    pub fn new(dir: Option<&str>, name: &str, len: usize) -> OutRows {
+        let Some(dir) = dir else {
+            let mut mem = F16Rows::zeroed(len);
+            let ptr = mem.as_mut_ptr();
+            return OutRows { mem, map: None, path: None, ptr, len };
+        };
+        let (path, mut map) = create_mapped(dir, name, (len * 2 + 4095) & !4095);
+        let ptr = map.as_mut().map_or(std::ptr::NonNull::dangling().as_ptr(), |m| m.as_mut_ptr() as *mut u16);
+        OutRows { mem: F16Rows::default(), map, path: Some(path), ptr, len }
+    }
+    /// Write `v` at `off`. Callers on different threads write disjoint ranges.
+    pub fn put(&self, off: usize, v: &[u16]) {
+        assert!(off + v.len() <= self.len, "a write of {} at {off} runs past an array of {}", v.len(), self.len);
+        unsafe { std::ptr::copy_nonoverlapping(v.as_ptr(), self.ptr.add(off), v.len()) };
+    }
+    /// The finished rows: the heap copy, or the file flushed and opened as an opened index opens it.
+    pub fn finish(self) -> disk::Rows {
+        match self.path {
+            Some(path) => {
+                if let Some(m) = self.map {
+                    m.flush().unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
+                }
+                disk::Rows::open(&path, self.len, "normal").unwrap_or_else(|e| panic!("{e}"))
+            }
+            None => disk::Rows::Mem(self.mem),
+        }
+    }
+}
+
+/// Write the parts of `ix` the build does not write row by row: offsets, escapes, per-cluster records and
+/// `index.json` without a key, so that `dir` is not taken for a finished index.
+pub fn save_rest(ix: &Index2, dir: &str) {
+    let f = |name: &str| format!("{dir}/{name}");
     let offs: Vec<u64> = ix.coff.iter().chain(&ix.soff).flatten().map(|&o| o as u64).collect();
     write_file(&f("offsets.bin"), &offs);
     let mut esc: Vec<(u64, f32)> = ix.esc.iter().map(|(&(l, s, r), &v)| (((l as u64) << 40) | ((s as u64) << 32) | r as u64, v)).collect();
@@ -247,6 +325,13 @@ pub fn save(ix: &Index2, dir: &str, key: &str) {
         put_cluster(&mut w, c, t);
     }
     write_file(&f("clusters.bin"), &w.0);
+    index_json(ix, dir, None);
+}
+
+/// Finish the index built into `dir`: write its support table and give `index.json` the key it answers to (written
+/// last, so a directory whose `index.json` has a key is complete).
+pub fn seal(ix: &Index2, dir: &str, key: &str) {
+    let f = |name: &str| format!("{dir}/{name}");
     write_file(&f("anchors.bin"), &ix.anchors);
     write_file(&f("hi.bin"), &ix.hi);
     write_file(&f("lo.bin"), &ix.lo);
@@ -391,6 +476,44 @@ pub fn build_key(p: &Params, prof: &[f64], o: &BuildOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file-backed output array holds what a heap one holds, read back as an opened index reads it.
+    #[test]
+    fn output_arrays_on_disk_hold_what_the_heap_holds() {
+        let dir = std::env::temp_dir().join(format!("vexact-out-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_str().unwrap();
+        let (heap, file) = (Out::<u32>::new(None, "", 1000), Out::<u32>::new(Some(d), "a.bin", 1000));
+        let v: Vec<u32> = (0..300).map(|i| i * 7 + 1).collect();
+        for o in [&heap, &file] {
+            o.put(0, &v[..100]);
+            o.put(700, &v[100..]);
+        }
+        let (a, b) = (heap.finish(), file.finish());
+        assert_eq!(&a[..], &b[..]);
+        assert_eq!(&b[700..900], &v[100..]);
+        assert!(b[100..700].iter().chain(&b[900..]).all(|&x| x == 0));
+        // the vectors: on the heap and on file padded to whole pages, the same rows
+        let (heap, file) = (OutRows::new(None, "", 1000), OutRows::new(Some(d), "v.bin", 1000));
+        let w: Vec<u16> = (0..500).map(|i| i * 3 + 1).collect();
+        for o in [&heap, &file] {
+            o.put(250, &w);
+        }
+        assert_eq!(std::fs::metadata(dir.join("v.bin")).unwrap().len(), 4096);
+        let (a, b) = (heap.finish(), file.finish());
+        assert!(matches!(a, disk::Rows::Mem(_)) && matches!(b, disk::Rows::Map { .. }));
+        for r in 0..4 {
+            assert_eq!(a.row(r, 250), b.row(r, 250));
+        }
+        assert_eq!(b.row(1, 250), &w[..250]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "runs past")]
+    fn output_arrays_refuse_writes_past_their_end() {
+        Out::<u8>::new(None, "", 10).put(8, &[1, 2, 3]);
+    }
 
     /// The calibration an opened index sets its grids from is the build's, bit for bit.
     #[test]

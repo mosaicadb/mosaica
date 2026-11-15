@@ -218,6 +218,8 @@ fn a_saved_index_opens_as_the_index_it_saves() {
     assert_eq!(before, after, "a build saved elsewhere wrote into the fitted directory");
     assert_eq!(built.code_hash(), fixture().ix.code_hash(), "the saved build encodes as the build in memory does");
     assert_eq!(opened.code_hash(), built.code_hash());
+    // built into files, it holds what the build on the heap holds; opened, what it was built with
+    same_index(&fixture().ix, &built);
     same_index(&built, &opened);
     // the repack thresholds are timed at each open; give the opened index the built one's so the work compares exactly
     opened.repack = built.repack.clone();
