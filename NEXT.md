@@ -9,7 +9,7 @@ names the branch or report that holds its evidence.
   merged reads, O_DIRECT from 8 KiB under the cap), research/filter-sweep and research/plots-refresh (filtered and
   genus-filter sweeps with ACORN, plots with the new approximate mode). Each is pushed and reviewed by its own runs;
   merge them here with a build and the 50k check.
-- **research/scan-planner** (844dfb52a; independent review passed on correctness, small fixes in progress): the planner chooses a whole-query scan, direct
+- **research/scan-planner** (b79dbc8d5; independent review passed, its fixes are in): the planner chooses a whole-query scan, direct
   scoring of a cluster's visible rows, or the index per cluster, and a session can compact its visible set's codes and
   f16 vectors into one block. Merge once the review passes. Its filtered rows are being remeasured on a quiet machine
   for the plots on research/plots-refresh.
@@ -45,8 +45,8 @@ names the branch or report that holds its evidence.
   research/colorder keeps the record), then delete the side branches and worktrees.
 
 - **`dot_f16_x4` drops dimensions past the last multiple of 16** (kernel.rs:599, :671), and no error bound covers them:
-  a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Being fixed on
-  research/scan-planner by handling the tail or refusing such n at build.
+  a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Fixed on research/scan-planner
+  (b79dbc8d5): the tail is added and counted in the error bound; it lands with that merge.
 
 ## Approximate path
 
