@@ -116,7 +116,6 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "nopscan" => p.pscan = false,
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
-            "prev" => p.prev = true,
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
             "nobail" => p.bail = 0.0,
