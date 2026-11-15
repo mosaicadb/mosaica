@@ -1,0 +1,40 @@
+/dev/vda        252G   23G   16G  59% /
+Mem:              15           0          15           0           0          15
+11:13:47 fit r3m_2000
+r3m_2000 1500 64 {'cluster_min': 88, 'cluster_max': 10405, 'group_min': 2266, 'group_max': 156735, 'cpg_min': 1, 'cpg_max': 66, 'groups_below_768': 0} 16.81446230918759
+11:24:36 start t_r3m_2000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 2410970177 (det violations 0, rand violations 0); largest randomised error 5.48 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filt
+VERIFY2 checker: 421085944 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [1407689465, 1124446465, 986603521, 777136412, 4492
+peak RSS 16.13 GiB (exit 0)
+11:47:53 end t_r3m_2000_1
+STAGE_C_DONE r3m 1 2000
+/dev/vda        252G   28G   12G  71% /
+Mem:              15           0           9           0           5          15
+11:47:53 fit r3m_4000
+r3m_4000 750 64 {'cluster_min': 310, 'cluster_max': 16875, 'group_min': 3876, 'group_max': 152100, 'cpg_min': 2, 'cpg_max': 29, 'groups_below_768': 0} 13.890779865374212
+11:54:01 start t_r3m_4000_3
+exit 0
+peak RSS 16.31 GiB (exit 0)
+12:08:01 end t_r3m_4000_3
+STAGE_C_DONE r3m 3 4000
+/dev/vda        252G   32G  6.9G  83% /
+Mem:              15           0           9           0           5          15
+12:08:01 start t_r3m_4000_4
+exit 0
+peak RSS 16.55 GiB (exit 0)
+12:22:45 end t_r3m_4000_4
+STAGE_C_DONE r3m 4 4000
+/dev/vda        252G   32G  6.9G  83% /
+Mem:              15           0           9           0           5          15
+12:22:45 start t_r3m_2000_2
+exit 0
+peak RSS 15.97 GiB (exit 0)
+12:36:20 end t_r3m_2000_2
+STAGE_C_DONE r3m 2 2000
+refit 4000 perm.npy identical
+refit 4000 cstart.npy identical
+refit 4000 grp.npy identical
+TIMING_DONE
+r3m_2000 done 443.87171959877014
+PHASE6_DONE

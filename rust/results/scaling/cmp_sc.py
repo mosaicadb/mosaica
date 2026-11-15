@@ -17,6 +17,7 @@ for d in sorted(glob.glob(f"{R}/knn_*_*")):                          # the separ
 e2e = collections.defaultdict(list); bd = collections.defaultdict(list); cnt = collections.defaultdict(list); rss = {}
 for d in sorted(x for x in glob.glob(f"{R}/t_*_*_[12]") if os.path.exists(f"{x}/breakdown2.csv")):
     _, nn, size, rep = os.path.basename(d).split("_"); key = (nn, int(size))
+    if (nn, size) == ("r3m", "2000"): continue  # timed in a later session (about 5% faster); cmp_r3m_session.py compares it
     for r in csv.DictReader(open(f"{d}/e2e2.csv")):
         if r["threads"] == "1" and r["what"] == "index2_thr": e2e[key + (r["class"], float(r["answer_frac"]))].append(r)
         if r["threads"] == "1" and r["what"].startswith("index2_knn"): knn[key + (r["class"], int(float(r["answer_frac"])))].append(r)
