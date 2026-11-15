@@ -1,0 +1,9 @@
+500k 499495
+1M 999000
+5M 5000000
+500k vs 1M item: 0.01% median 0.0004 max 0.0039; 0.1% median 0.0002 max 0.0010; 1% median 0.0001 max 0.0026; 10% median 0.0001 max 0.0002; 50% median 0.0000 max 0.0001; 75% median 0.0000 max 0.0001
+500k vs 1M text: 0.01% median 0.0005 max 0.0047; 0.1% median 0.0001 max 0.0008; 1% median 0.0001 max 0.0005; 10% median 0.0001 max 0.0001; 50% median 0.0000 max 0.0001; 75% median 0.0000 max 0.0001
+500k vs 5M item: 0.01% median 0.0094 max 0.0376; 0.1% median 0.0155 max 0.1712; 1% median 0.0042 max 0.1236; 10% median 0.0081 max 0.0252; 50% median 0.0036 max 0.0115; 75% median 0.0047 max 0.0081
+500k vs 5M text: 0.01% median 0.0225 max 0.0370; 0.1% median 0.0458 max 0.0864; 1% median 0.0107 max 0.0235; 10% median 0.0027 max 0.0079; 50% median 0.0010 max 0.0074; 75% median 0.0011 max 0.0054
+1M vs 5M item: 0.01% median 0.0102 max 0.0381; 0.1% median 0.0154 max 0.1721; 1% median 0.0041 max 0.1251; 10% median 0.0081 max 0.0250; 50% median 0.0036 max 0.0114; 75% median 0.0047 max 0.0081
+1M vs 5M text: 0.01% median 0.0234 max 0.0365; 0.1% median 0.0459 max 0.0861; 1% median 0.0106 max 0.0236; 10% median 0.0028 max 0.0080; 50% median 0.0010 max 0.0074; 75% median 0.0011 max 0.0054

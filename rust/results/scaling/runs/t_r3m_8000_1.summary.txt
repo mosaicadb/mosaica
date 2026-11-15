@@ -1,0 +1,13 @@
+breakdown2 tables levels item 0.0001: per query 630 (cluster, level) tables, 27406 units, 1956.8 survivors per table, 141 tables for at most 8
+breakdown2 counts levels item 0.0001: per query 214.9 clusters on the index path, 33.8 on full vectors, 1004095 items entering the first level, 1233048 item-levels, 37.1 groups, 2088 full reads
+breakdown2 tables levels item 0.01: per query 1405 (cluster, level) tables, 93964 units, 3219.9 survivors per table, 163 tables for at most 8
+breakdown2 counts levels item 0.01: per query 298.4 clusters on the index path, 10.2 on full vectors, 2154349 items entering the first level, 4522639 item-levels, 51.8 groups, 8913 full reads
+breakdown2 tables levels item 0.5: per query 2240 (cluster, level) tables, 188836 units, 5454.4 survivors per table, 9 tables for at most 8
+breakdown2 counts levels item 0.5: per query 374.0 clusters on the index path, 0.5 on full vectors, 2927117 items entering the first level, 12218768 item-levels, 64.0 groups, 237210 full reads
+breakdown2 tables levels text 0.0001: per query 1552 (cluster, level) tables, 81353 units, 2630.5 survivors per table, 182 tables for at most 8
+breakdown2 counts levels text 0.0001: per query 372.8 clusters on the index path, 2.1 on full vectors, 2585083 items entering the first level, 4082745 item-levels, 62.6 groups, 1013 full reads
+breakdown2 tables levels text 0.01: per query 2193 (cluster, level) tables, 179289 units, 4163.9 survivors per table, 117 tables for at most 8
+breakdown2 counts levels text 0.01: per query 375.0 clusters on the index path, 0.0 on full vectors, 2992600 items entering the first level, 9129446 item-levels, 64.0 groups, 30173 full reads
+breakdown2 tables levels text 0.5: per query 2250 (cluster, level) tables, 189977 units, 6606.7 survivors per table, 1 tables for at most 8
+breakdown2 counts levels text 0.5: per query 375.0 clusters on the index path, 0.0 on full vectors, 3000000 items entering the first level, 14864356 item-levels, 64.0 groups, 419666 full reads
+peak RSS 16.82 GiB (exit 0)

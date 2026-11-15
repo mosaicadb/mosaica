@@ -1,0 +1,67 @@
+01:23:24 start t_r1m_1000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 809104149 (det violations 0, rand violations 0); largest randomised error 5.24 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 139949751 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [470924079, 376902623, 330974328, 260477090, 151780
+peak RSS 5.94 GiB (exit 0)
+01:33:21 end t_r1m_1000_1
+01:33:21 start t_r1m_2000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 826595139 (det violations 0, rand violations 0); largest randomised error 5.19 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 145033631 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [482628360, 383484110, 337594729, 265640737, 156645
+peak RSS 6.14 GiB (exit 0)
+01:43:06 end t_r1m_2000_1
+01:43:06 start t_r1m_4000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 844259149 (det violations 0, rand violations 0); largest randomised error 5.41 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 149988546 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [494741879, 389828087, 344753333, 270251526, 160781
+peak RSS 6.19 GiB (exit 0)
+01:52:58 end t_r1m_4000_1
+01:52:58 start t_r1m_8000_1
+exit 0
+VERIFY2 40 queries x 7 answer sizes: wrong-in 0 wrong-out 0; interval checks 861640301 (det violations 0, rand violations 0); largest randomised error 5.49 sd (c = 9.33); k-NN mismatches 0 of 40 (three plans each); filte
+VERIFY2 checker: 159031224 deterministic decisions checked against the f64 certificate, 0 not implied; 0 lanes outside it; entering each level (unfiltered, both plans): [510018277, 395456129, 350987053, 275083180, 165279
+peak RSS 6.10 GiB (exit 0)
+02:02:51 end t_r1m_8000_1
+02:02:51 start t_r1m_8000_2
+exit 0
+peak RSS 6.33 GiB (exit 0)
+02:09:43 end t_r1m_8000_2
+02:09:43 start t_r1m_4000_2
+exit 0
+peak RSS 6.20 GiB (exit 0)
+02:16:25 end t_r1m_4000_2
+02:16:25 start t_r1m_2000_2
+exit 0
+peak RSS 6.15 GiB (exit 0)
+02:22:47 end t_r1m_2000_2
+02:22:47 start t_r1m_1000_2
+exit 0
+peak RSS 5.95 GiB (exit 0)
+02:29:04 end t_r1m_1000_2
+R1M_DONE
+/dev/vda        252G   23G   16G  59% /
+Mem:              15           0          11           0           3          15
+02:29:05 fit r3m_1000
+r3m_1000 3000 64 {'cluster_min': 1, 'cluster_max': 5081, 'group_min': 96, 'group_max': 160105, 'cpg_min': 1, 'cpg_max': 129, 'groups_below_768': 1} 1611.9239431111982
+02:37:27 start t_r3m_1000_1
+exit 0
+peak RSS 15.85 GiB (exit 0)
+02:51:37 end t_r3m_1000_1
+/dev/vda        252G   28G   12G  71% /
+Mem:              15           0           9           0           6          15
+02:51:37 fit r3m_4000
+r3m_4000 750 64 {'cluster_min': 310, 'cluster_max': 16875, 'group_min': 3876, 'group_max': 152100, 'cpg_min': 2, 'cpg_max': 29, 'groups_below_768': 0} 13.890779865374212
+02:59:28 start t_r3m_4000_1
+exit 0
+peak RSS 16.34 GiB (exit 0)
+03:13:55 end t_r3m_4000_1
+/dev/vda        252G   32G  7.0G  82% /
+Mem:              15           0           9           0           5          15
+03:13:55 fit r3m_8000
+r3m_8000 375 64 {'cluster_min': 1480, 'cluster_max': 42772, 'group_min': 1480, 'group_max': 133092, 'cpg_min': 1, 'cpg_max': 18, 'groups_below_768': 0} 18.039643318955747
+03:22:41 start t_r3m_8000_1
+exit 0
+peak RSS 16.82 GiB (exit 0)
+03:38:43 end t_r3m_8000_1
+STAGE_C_DONE r3m 1 1000 4000 8000
+PHASE23_DONE

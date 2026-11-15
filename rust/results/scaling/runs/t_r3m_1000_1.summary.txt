@@ -1,0 +1,13 @@
+breakdown2 tables levels item 0.0001: per query 2382 (cluster, level) tables, 98965 units, 269.9 survivors per table, 612 tables for at most 8
+breakdown2 counts levels item 0.0001: per query 900.9 clusters on the index path, 320.8 on full vectors, 485497 items entering the first level, 642778 item-levels, 25.9 groups, 5190 full reads
+breakdown2 tables levels item 0.01: per query 9052 (cluster, level) tables, 542344 units, 428.7 survivors per table, 1517 tables for at most 8
+breakdown2 counts levels item 0.01: per query 2125.2 clusters on the index path, 149.5 on full vectors, 1890198 items entering the first level, 3880620 item-levels, 47.9 groups, 12511 full reads
+breakdown2 tables levels item 0.5: per query 17227 (cluster, level) tables, 1434355 units, 686.5 survivors per table, 449 tables for at most 8
+breakdown2 counts levels item 0.5: per query 2902.7 clusters on the index path, 67.4 on full vectors, 2881590 items entering the first level, 11825785 item-levels, 63.0 groups, 224440 full reads
+breakdown2 tables levels text 0.0001: per query 9982 (cluster, level) tables, 457001 units, 334.0 survivors per table, 1959 tables for at most 8
+breakdown2 counts levels text 0.0001: per query 2802.5 clusters on the index path, 177.5 on full vectors, 2211945 items entering the first level, 3333625 item-levels, 62.9 groups, 6425 full reads
+breakdown2 tables levels text 0.01: per query 16068 (cluster, level) tables, 1210877 units, 529.0 survivors per table, 1742 tables for at most 8
+breakdown2 counts levels text 0.01: per query 2945.1 clusters on the index path, 53.4 on full vectors, 2944594 items entering the first level, 8500276 item-levels, 63.0 groups, 31185 full reads
+breakdown2 tables levels text 0.5: per query 17650 (cluster, level) tables, 1482427 units, 825.9 survivors per table, 71 tables for at most 8
+breakdown2 counts levels text 0.5: per query 2946.0 clusters on the index path, 53.3 on full vectors, 2996341 items entering the first level, 14578105 item-levels, 63.0 groups, 385232 full reads
+peak RSS 15.85 GiB (exit 0)

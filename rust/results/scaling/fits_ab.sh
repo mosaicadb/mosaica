@@ -1,0 +1,7 @@
+# Stage A (1M) and B (500k) fits, two at a time; --groups 64 everywhere (capped at K).
+f() { python3 -I /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/scripts/peakrss.py python3 -I /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv/rust/tools/fit.py $1 /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/sc/$2 --basis dual --per-cluster $3 --groups 64 > /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/sc/fit_$2.log 2>&1; }
+f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c1m_x.npy m1_2000 2000 & f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c1m_x.npy m1_4000 4000; wait
+f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c1m_x.npy m1_8000 8000 & f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c500k_x.npy k500_1000 1000; wait
+f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c500k_x.npy k500_2000 2000 & f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c500k_x.npy k500_4000 4000; wait
+f /tmp/claude-0/-home-user-mosaica/19e29d74-5f90-522f-b0ad-14eb025bda2b/scratchpad/detlv-data/c500k_x.npy k500_8000 8000
+echo FITS_AB_DONE

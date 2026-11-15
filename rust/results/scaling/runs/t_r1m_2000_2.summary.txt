@@ -1,0 +1,25 @@
+breakdown2 tables levels item 0.0001: per query 642 (cluster, level) tables, 27531 units, 524.4 survivors per table, 166 tables for at most 8
+breakdown2 counts levels item 0.0001: per query 223.9 clusters on the index path, 67.6 on full vectors, 269192 items entering the first level, 336626 item-levels, 30.6 groups, 2513 full reads
+breakdown2 tables levels item 0.001: per query 1074 (cluster, level) tables, 53248 units, 627.8 survivors per table, 245 tables for at most 8
+breakdown2 counts levels item 0.001: per query 320.3 clusters on the index path, 34.6 on full vectors, 445500 items entering the first level, 674343 item-levels, 41.5 groups, 2530 full reads
+breakdown2 tables levels item 0.01: per query 1741 (cluster, level) tables, 111581 units, 837.7 survivors per table, 242 tables for at most 8
+breakdown2 counts levels item 0.01: per query 380.6 clusters on the index path, 19.0 on full vectors, 696297 items entering the first level, 1458100 item-levels, 49.0 groups, 4129 full reads
+breakdown2 tables levels item 0.1: per query 2706 (cluster, level) tables, 216791 units, 1178.4 survivors per table, 174 tables for at most 8
+breakdown2 counts levels item 0.1: per query 479.7 clusters on the index path, 8.1 on full vectors, 954913 items entering the first level, 3188930 item-levels, 62.2 groups, 31249 full reads
+breakdown2 tables levels item 0.5: per query 2973 (cluster, level) tables, 250092 units, 1361.6 survivors per table, 39 tables for at most 8
+breakdown2 counts levels item 0.5: per query 497.2 clusters on the index path, 1.8 on full vectors, 973070 items entering the first level, 4047462 item-levels, 62.9 groups, 78802 full reads
+breakdown2 tables levels item 0.75: per query 2939 (cluster, level) tables, 246161 units, 1298.0 survivors per table, 51 tables for at most 8
+breakdown2 counts levels item 0.75: per query 494.0 clusters on the index path, 3.2 on full vectors, 947031 items entering the first level, 3814884 item-levels, 62.7 groups, 67723 full reads
+breakdown2 tables levels text 0.0001: per query 1948 (cluster, level) tables, 95609 units, 663.7 survivors per table, 298 tables for at most 8
+breakdown2 counts levels text 0.0001: per query 496.2 clusters on the index path, 3.8 on full vectors, 841095 items entering the first level, 1293152 item-levels, 62.9 groups, 813 full reads
+breakdown2 tables levels text 0.001: per query 2470 (cluster, level) tables, 162635 units, 847.6 survivors per table, 317 tables for at most 8
+breakdown2 counts levels text 0.001: per query 498.9 clusters on the index path, 1.1 on full vectors, 955099 items entering the first level, 2093755 item-levels, 63.0 groups, 1649 full reads
+breakdown2 tables levels text 0.01: per query 2861 (cluster, level) tables, 228317 units, 1044.4 survivors per table, 230 tables for at most 8
+breakdown2 counts levels text 0.01: per query 499.0 clusters on the index path, 1.0 on full vectors, 995002 items entering the first level, 2987877 item-levels, 63.0 groups, 10263 full reads
+breakdown2 tables levels text 0.1: per query 2990 (cluster, level) tables, 251966 units, 1376.0 survivors per table, 36 tables for at most 8
+breakdown2 counts levels text 0.1: per query 499.0 clusters on the index path, 1.0 on full vectors, 999220 items entering the first level, 4113470 item-levels, 63.0 groups, 61985 full reads
+breakdown2 tables levels text 0.5: per query 2993 (cluster, level) tables, 252692 units, 1646.6 survivors per table, 3 tables for at most 8
+breakdown2 counts levels text 0.5: per query 499.0 clusters on the index path, 1.0 on full vectors, 999220 items entering the first level, 4928907 item-levels, 63.0 groups, 136370 full reads
+breakdown2 tables levels text 0.75: per query 2990 (cluster, level) tables, 252056 units, 1582.9 survivors per table, 15 tables for at most 8
+breakdown2 counts levels text 0.75: per query 499.0 clusters on the index path, 1.0 on full vectors, 999195 items entering the first level, 4732668 item-levels, 63.0 groups, 108007 full reads
+peak RSS 6.15 GiB (exit 0)

@@ -1,0 +1,332 @@
+{
+ "name": "k500_2000",
+ "N": 499495,
+ "K": 250,
+ "G": 64,
+ "a": {
+  "img k10 r0.8": {
+   "items": 4038.88,
+   "parents": 1
+  },
+  "img k10 r0.9": {
+   "items": 7593.46,
+   "parents": 2
+  },
+  "img k10 r0.99": {
+   "items": 10919.06,
+   "parents": 3,
+   "groups": 1.56
+  },
+  "img k100 r0.8": {
+   "items": 7593.46,
+   "parents": 2
+  },
+  "img k100 r0.9": {
+   "items": 7593.46,
+   "parents": 2
+  },
+  "img k100 r0.99": {
+   "items": 13103.08,
+   "parents": 4,
+   "groups": 1.98
+  },
+  "img k1000 r0.8": {
+   "items": 7593.46,
+   "parents": 2
+  },
+  "img k1000 r0.9": {
+   "items": 10919.06,
+   "parents": 3
+  },
+  "img k1000 r0.99": {
+   "items": 15363.1,
+   "parents": 5,
+   "groups": 2.42
+  },
+  "txt k10 r0.8": {
+   "items": 4120.39,
+   "parents": 2
+  },
+  "txt k10 r0.9": {
+   "items": 8266.23,
+   "parents": 4
+  },
+  "txt k10 r0.99": {
+   "items": 16886.74,
+   "parents": 9,
+   "groups": 4.47
+  },
+  "txt k100 r0.8": {
+   "items": 6157.37,
+   "parents": 3
+  },
+  "txt k100 r0.9": {
+   "items": 8266.23,
+   "parents": 4
+  },
+  "txt k100 r0.99": {
+   "items": 16886.74,
+   "parents": 9,
+   "groups": 4.47
+  },
+  "txt k1000 r0.8": {
+   "items": 6157.37,
+   "parents": 3
+  },
+  "txt k1000 r0.9": {
+   "items": 10136.9,
+   "parents": 5
+  },
+  "txt k1000 r0.99": {
+   "items": 22165.66,
+   "parents": 12,
+   "groups": 5.56
+  }
+ },
+ "b": {
+  "subs": 8052,
+  "img k10 r0.8": {
+   "items": 436.62,
+   "P": 16,
+   "sub_probes": 5,
+   "centres_scored": 779.7
+  },
+  "img k10 r0.9": {
+   "items": 932.06,
+   "P": 16,
+   "sub_probes": 11,
+   "centres_scored": 779.7
+  },
+  "img k100 r0.8": {
+   "items": 1006.94,
+   "P": 16,
+   "sub_probes": 12,
+   "centres_scored": 779.7
+  },
+  "img k100 r0.9": {
+   "items": 1872.82,
+   "P": 16,
+   "sub_probes": 24,
+   "centres_scored": 779.7
+  },
+  "img k1000 r0.8": {
+   "items": 2458.54,
+   "P": 16,
+   "sub_probes": 32,
+   "centres_scored": 779.7
+  },
+  "txt k10 r0.8": {
+   "items": 403.96,
+   "P": 32,
+   "sub_probes": 7,
+   "centres_scored": 1246.1533333333332
+  },
+  "img k10 r0.99": {
+   "items": 3007.86,
+   "P": 16,
+   "sub_probes": 40,
+   "centres_scored": 779.7,
+   "parents": 3.22,
+   "groups": 1.66
+  },
+  "img k100 r0.99": {
+   "items": 5501.26,
+   "P": 64,
+   "sub_probes": 77,
+   "centres_scored": 2164.56,
+   "parents": 4.96,
+   "groups": 2.46
+  },
+  "img k1000 r0.9": {
+   "items": 3800.12,
+   "P": 64,
+   "sub_probes": 52,
+   "centres_scored": 2164.56
+  },
+  "txt k10 r0.9": {
+   "items": 889.37,
+   "P": 64,
+   "sub_probes": 15,
+   "centres_scored": 2164.56
+  },
+  "txt k100 r0.8": {
+   "items": 718.86,
+   "P": 16,
+   "sub_probes": 12,
+   "centres_scored": 779.7
+  },
+  "txt k100 r0.9": {
+   "items": 1253.76,
+   "P": 64,
+   "sub_probes": 21,
+   "centres_scored": 2164.56
+  },
+  "txt k1000 r0.8": {
+   "items": 2365.1,
+   "P": 64,
+   "sub_probes": 40,
+   "centres_scored": 2164.56
+  },
+  "img k1000 r0.99": {
+   "items": 8283.66,
+   "P": 128,
+   "sub_probes": 120,
+   "centres_scored": 4028.0933333333332,
+   "parents": 6.8,
+   "groups": 3.26
+  },
+  "txt k1000 r0.9": {
+   "items": 4021.76,
+   "P": 64,
+   "sub_probes": 67,
+   "centres_scored": 2164.56
+  },
+  "txt k10 r0.99": {
+   "items": 3840.45,
+   "P": 64,
+   "sub_probes": 64,
+   "centres_scored": 2164.56,
+   "parents": 9.07,
+   "groups": 4.85
+  },
+  "txt k100 r0.99": {
+   "items": 5558.51,
+   "P": 128,
+   "sub_probes": 93,
+   "centres_scored": 4028.0933333333332,
+   "parents": 12.22,
+   "groups": 5.91
+  },
+  "txt k1000 r0.99": {
+   "items": 11435.04,
+   "P": 128,
+   "sub_probes": 193,
+   "centres_scored": 4028.0933333333332,
+   "parents": 22.99,
+   "groups": 10.22
+  }
+ },
+ "c": {
+  "subs": 2003,
+  "img k10 r0.8": {
+   "items": 1218.4,
+   "P": 8,
+   "sub_probes": 4,
+   "centres_scored": 318.18
+  },
+  "img k10 r0.9": {
+   "items": 2334.7,
+   "P": 8,
+   "sub_probes": 8,
+   "centres_scored": 318.18
+  },
+  "img k100 r0.8": {
+   "items": 1773.7,
+   "P": 8,
+   "sub_probes": 6,
+   "centres_scored": 318.18
+  },
+  "img k100 r0.9": {
+   "items": 2883.26,
+   "P": 8,
+   "sub_probes": 10,
+   "centres_scored": 318.18
+  },
+  "img k1000 r0.8": {
+   "items": 3142.18,
+   "P": 8,
+   "sub_probes": 11,
+   "centres_scored": 318.18
+  },
+  "txt k10 r0.8": {
+   "items": 904.26,
+   "P": 16,
+   "sub_probes": 4,
+   "centres_scored": 381.96000000000004
+  },
+  "img k10 r0.99": {
+   "items": 6035.5,
+   "P": 64,
+   "sub_probes": 22,
+   "centres_scored": 726.2,
+   "parents": 3.82,
+   "groups": 2.06
+  },
+  "img k100 r0.99": {
+   "items": 8274.02,
+   "P": 16,
+   "sub_probes": 31,
+   "centres_scored": 381.96000000000004,
+   "parents": 4.96,
+   "groups": 2.52
+  },
+  "img k1000 r0.9": {
+   "items": 5024.08,
+   "P": 32,
+   "sub_probes": 18,
+   "centres_scored": 497.98
+  },
+  "txt k10 r0.9": {
+   "items": 1546.46,
+   "P": 16,
+   "sub_probes": 7,
+   "centres_scored": 381.96000000000004
+  },
+  "txt k100 r0.8": {
+   "items": 1325.81,
+   "P": 16,
+   "sub_probes": 6,
+   "centres_scored": 381.96000000000004
+  },
+  "txt k100 r0.9": {
+   "items": 2199.14,
+   "P": 16,
+   "sub_probes": 10,
+   "centres_scored": 381.96000000000004
+  },
+  "txt k1000 r0.8": {
+   "items": 3160.44,
+   "P": 64,
+   "sub_probes": 14,
+   "centres_scored": 726.2
+  },
+  "img k1000 r0.99": {
+   "items": 10569.34,
+   "P": 64,
+   "sub_probes": 40,
+   "centres_scored": 726.2,
+   "parents": 6.24,
+   "groups": 3.12
+  },
+  "txt k1000 r0.9": {
+   "items": 5416.85,
+   "P": 64,
+   "sub_probes": 23,
+   "centres_scored": 726.2
+  },
+  "txt k10 r0.99": {
+   "items": 6942.07,
+   "P": 64,
+   "sub_probes": 29,
+   "centres_scored": 726.2,
+   "parents": 8.42,
+   "groups": 4.51
+  },
+  "txt k100 r0.99": {
+   "items": 8003.08,
+   "P": 64,
+   "sub_probes": 33,
+   "centres_scored": 726.2,
+   "parents": 9.47,
+   "groups": 4.92
+  },
+  "txt k1000 r0.99": {
+   "items": 14689.79,
+   "P": 128,
+   "sub_probes": 59,
+   "centres_scored": 1190.2933333333333,
+   "parents": 16.49,
+   "groups": 7.69
+  }
+ }
+}
