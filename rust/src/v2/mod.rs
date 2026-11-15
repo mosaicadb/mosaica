@@ -32,6 +32,7 @@ use crate::index::{item_scale, Params, DA, SEED};
 use crate::util::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub const NDL: usize = 6;
 pub const J: usize = 4;
@@ -790,6 +791,7 @@ pub fn eta_steps(steps: f64) -> f64 {
 
 // ---------------- the index ----------------
 
+#[derive(Clone)]
 pub struct Meta2 {
     pub n: usize,
     pub dlv: Vec<usize>,
@@ -811,6 +813,7 @@ impl Meta2 {
     }
 }
 
+#[derive(Clone)]
 pub struct Cl2 {
     pub g: usize,
     pub r0: usize,
@@ -818,9 +821,9 @@ pub struct Cl2 {
     pub nblk: usize,
     pub mn: f64,
     pub mn32: f32,
-    pub mhat: Vec<f64>,
-    pub mv32: Vec<f32>, // V_q^T m
-    pub wmr: Vec<f32>,  // R_j (mv*dt) by position
+    pub mhat: Arc<Vec<f64>>,
+    pub mv32: Arc<Vec<f32>>, // V_q^T m
+    pub wmr: Arc<Vec<f32>>,  // R_j (mv*dt) by position
     pub bm: [f64; NDL],
     pub b2: [f64; J],
     pub l1m: [f32; J + 1], // |wm| sums: det, then per block
@@ -833,24 +836,55 @@ pub struct Cl2 {
     pub bmax: f64,
 }
 
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+struct Line([u16; 32]);
+
+/// f16 values starting on a cache line, so that rows of a multiple of 32 values each start on one (a row that does not
+/// costs a scan about a third more).
+#[derive(Default)]
+pub struct F16Rows {
+    lines: Vec<Line>,
+    len: usize,
+}
+impl F16Rows {
+    pub fn zeroed(len: usize) -> F16Rows {
+        F16Rows { lines: vec![Line([0; 32]); (len + 31) / 32], len }
+    }
+}
+impl std::ops::Deref for F16Rows {
+    type Target = [u16];
+    fn deref(&self) -> &[u16] {
+        unsafe { std::slice::from_raw_parts(self.lines.as_ptr() as *const u16, self.len) }
+    }
+}
+impl std::ops::DerefMut for F16Rows {
+    fn deref_mut(&mut self) -> &mut [u16] {
+        unsafe { std::slice::from_raw_parts_mut(self.lines.as_mut_ptr() as *mut u16, self.len) }
+    }
+}
+
 /// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
-/// rows in order reads memory in order.
+/// rows in order reads memory in order. A compacted index shares its parent's copy (through `Index2::vrow`) or holds
+/// its own.
 pub enum Full2 {
-    Real { map: memmap2::Mmap, off: usize, rows: Vec<u16> },
+    Real { map: Arc<memmap2::Mmap>, off: usize, rows: Arc<F16Rows> },
     Synth(q::Synth2),
 }
 
+/// The query-independent parts that do not depend on which rows a cluster holds are shared (Arc) with the indexes
+/// compacted from this one (`Index2::compact`).
 pub struct Index2 {
     pub meta: Meta2,
-    pub groups: Vec<GroupPlan2>,
-    pub codes: DetTab,
-    pub etab: ExpTab,
+    pub groups: Arc<Vec<GroupPlan2>>,
+    pub codes: Arc<DetTab>,
+    pub etab: Arc<ExpTab>,
     pub cl: Vec<Cl2>,
-    pub centres64: Vec<f64>,
-    pub rots: Vec<Vec<f64>>,
-    pub anchors: Vec<f64>,
-    pub hi: Vec<f32>,
-    pub lo: Vec<f32>,
+    pub centres64: Arc<Vec<f64>>,
+    pub rots: Arc<Vec<Vec<f64>>>,
+    pub anchors: Arc<Vec<f64>>,
+    pub hi: Arc<Vec<f32>>,
+    pub lo: Arc<Vec<f32>>,
     pub nanch: usize,
     pub ahat: Vec<i16>,
     pub row_ent: Vec<u32>,
@@ -864,9 +898,11 @@ pub struct Index2 {
     pub full: Full2,
     pub nrows: usize,
     pub split: bool, // 16-bit tables (two shuffles) instead of 8-bit
-    pub ctab: Vec<Vec<kern::CTab>>, // per cluster, per level: the centre's tables (query-independent)
+    pub ctab: Arc<Vec<Vec<kern::CTab>>>, // per cluster, per level: the centre's tables (query-independent)
     pub repack: Vec<f32>,
     pub col: Option<col::ColStore>,
+    pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
+    pub nent: usize,     // entity ids are below this
     pub nukey: Vec<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
 }
 
@@ -918,10 +954,125 @@ impl Index2 {
         match &self.full {
             Full2::Real { rows, .. } => {
                 let n = self.n();
+                let row = if self.vrow.is_empty() { row } else { self.vrow[row] as usize };
                 &rows[row * n..(row + 1) * n]
             }
             Full2::Synth(_) => panic!("synthetic rows have no stored f16 vector"),
         }
+    }
+    /// The index restricted to the rows `rows` (ascending; the visible rows of a session): each cluster keeps those of
+    /// its rows, in their order, with their keys, codes, scalars and escapes copied into blocks of their own, and with
+    /// `vectors` their f16 vectors too (without, a row reads its parent's vector). Everything that does not depend on
+    /// which rows a cluster holds is shared, and every bound a cluster stores holds for any subset of its rows, so each
+    /// row is decided as it is in the parent. Row i of the result is row rows[i] of this index.
+    pub fn compact(&self, rows: &[u32], vectors: bool) -> Index2 {
+        assert!(rows.windows(2).all(|w| w[0] < w[1]), "compact needs ascending rows");
+        let Full2::Real { map, off, rows: frows } = &self.full else { panic!("a synthetic index cannot be compacted") };
+        let nl = self.meta.nl();
+        let n = self.n();
+        let k = self.k();
+        let start: Vec<usize> = (0..=k).map(|ci| rows.partition_point(|&r| (r as usize) < if ci < k { self.cl[ci].r0 } else { self.nrows })).collect();
+        let cl: Vec<Cl2> = (0..k).map(|ci| {
+            let mut c = self.cl[ci].clone();
+            c.r0 = start[ci];
+            c.r1 = start[ci + 1];
+            c.nblk = (c.r1 - c.r0 + BLK - 1) / BLK;
+            c
+        }).collect();
+        // one level's nibble rows of a cluster: item i of the source to item j of the copy
+        let copy = |src: &[u8], dst: &mut [u8], nr: usize, i: usize, j: usize| {
+            let (sb, sl, db, dl) = (i / BLK * nr * 16 + i % 16, i % BLK >= 16, j / BLK * nr * 16 + j % 16, j % BLK >= 16);
+            for r in 0..nr {
+                let v = src[sb + r * 16];
+                let v = if sl { v >> 4 } else { v & 15 };
+                dst[db + r * 16] |= if dl { v << 4 } else { v };
+            }
+        };
+        let per: Vec<Vec<(Vec<u8>, Vec<u8>)>> = (0..k).into_par_iter().map(|ci| {
+            let (c, d) = (&self.cl[ci], &cl[ci]);
+            let gp = &self.groups[c.g];
+            (0..nl).map(|l| {
+                let (u, sr) = (gp.levels[l].units, gp.levels[l].srows);
+                let mut lc = vec![0u8; d.nblk * u * 16];
+                let mut ls = vec![0u8; d.nblk * sr * 16];
+                let (cs, ss) = (&self.lcode[l][self.coff[l][ci]..], &self.lscal[l][self.soff[l][ci]..]);
+                for (j, &r) in rows[d.r0..d.r1].iter().enumerate() {
+                    let i = r as usize - c.r0;
+                    copy(cs, &mut lc, u, i, j);
+                    copy(ss, &mut ls, sr, i, j);
+                }
+                (lc, ls)
+            }).collect()
+        }).collect();
+        let (mut lcode, mut lscal, mut coff, mut soff) = (vec![Vec::new(); nl], vec![Vec::new(); nl], vec![Vec::new(); nl], vec![Vec::new(); nl]);
+        for l in 0..nl {
+            for ci in 0..k {
+                coff[l].push(lcode[l].len());
+                lcode[l].extend_from_slice(&per[ci][l].0);
+                soff[l].push(lscal[l].len());
+                lscal[l].extend_from_slice(&per[ci][l].1);
+            }
+            lcode[l].extend_from_slice(&[0u8; 128]);
+            lscal[l].extend_from_slice(&[0u8; 128]);
+        }
+        drop(per);
+        let mut ahat: Vec<i16> = rows.iter().map(|&r| self.ahat[r as usize]).collect();
+        ahat.extend_from_slice(&[0i16; 32]);
+        let mut esc = HashMap::new();
+        for (&(l, slot, r), &v) in &self.esc {
+            if let Ok(i) = rows.binary_search(&r) {
+                esc.insert((l, slot, i as u32), v);
+            }
+        }
+        let (full, vrow) = if vectors {
+            let mut v = F16Rows::zeroed(rows.len() * n);
+            v.par_chunks_mut(n).zip(rows.par_iter()).for_each(|(d, &r)| d.copy_from_slice(self.full_row_f16(r as usize)));
+            (Full2::Real { map: map.clone(), off: *off, rows: Arc::new(v) }, Vec::new())
+        } else {
+            let vr = rows.iter().map(|&r| if self.vrow.is_empty() { r } else { self.vrow[r as usize] }).collect();
+            (Full2::Real { map: map.clone(), off: *off, rows: frows.clone() }, vr)
+        };
+        Index2 {
+            meta: self.meta.clone(),
+            groups: self.groups.clone(),
+            codes: self.codes.clone(),
+            etab: self.etab.clone(),
+            cl,
+            centres64: self.centres64.clone(),
+            rots: self.rots.clone(),
+            anchors: self.anchors.clone(),
+            hi: self.hi.clone(),
+            lo: self.lo.clone(),
+            nanch: self.nanch,
+            ahat,
+            row_ent: rows.iter().map(|&r| self.row_ent[r as usize]).collect(),
+            ent_row: Vec::new(),
+            lcode,
+            lscal,
+            coff,
+            soff,
+            esc,
+            x2: self.x2,
+            full,
+            nrows: rows.len(),
+            split: self.split,
+            ctab: self.ctab.clone(),
+            repack: self.repack.clone(),
+            col: None,
+            vrow,
+            nent: self.nent,
+            nukey: if self.nukey.is_empty() { Vec::new() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
+        }
+    }
+    /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
+    /// shares with the index it was compacted from.
+    pub fn own_bytes(&self) -> usize {
+        let full = match &self.full {
+            Full2::Real { rows, .. } if self.vrow.is_empty() => rows.len() * 2,
+            _ => 0,
+        };
+        self.lcode.iter().chain(&self.lscal).map(|v| v.len()).sum::<usize>() + self.ahat.len() * 2 + self.row_ent.len() * 4
+            + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.len() * 24 + self.cl.len() * std::mem::size_of::<Cl2>() + full
     }
     pub fn full_row_f64(&self, row: usize, out: &mut [f64]) {
         match &self.full {
@@ -1327,7 +1478,7 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
     }
     let mv32: Vec<f32> = mv.iter().map(|&x| x as f32).collect();
     let wmr = wm[n..].to_vec();
-    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat, mv32, wmr, bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
+    Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, smax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
 }
 
 pub fn calib_quantile(v: &mut Vec<f64>, q: f64) -> f64 {
@@ -1586,8 +1737,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
     match &mut full {
         Full2::Real { map, off, rows } => {
             let src = unsafe { std::slice::from_raw_parts(map[*off..].as_ptr() as *const u16, (map.len() - *off) / 2) };
-            *rows = vec![0u16; nrows * n];
-            rows.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+            let mut v = F16Rows::zeroed(nrows * n);
+            v.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
+            *rows = Arc::new(v);
         }
         Full2::Synth(sy) => {
             sy.ext = xs_row;
@@ -1603,17 +1755,19 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, nanch: u
         col: if build_col { Some(cst) } else { None },
         nukey,
         repack: vec![0.6; meta.nl()],
-        ctab,
+        ctab: Arc::new(ctab),
         meta,
-        groups,
-        codes,
-        etab: et,
+        groups: Arc::new(groups),
+        codes: Arc::new(codes),
+        etab: Arc::new(et),
         cl,
-        centres64: p.centres[..k * n].iter().map(|&x| x as f64).collect(),
-        rots,
-        anchors: Vec::new(),
-        hi: Vec::new(),
-        lo: Vec::new(),
+        centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
+        rots: Arc::new(rots),
+        anchors: Arc::new(Vec::new()),
+        hi: Arc::new(Vec::new()),
+        lo: Arc::new(Vec::new()),
+        vrow: Vec::new(),
+        nent: maxent + 1,
         nanch: 0,
         ahat,
         row_ent,
@@ -1677,14 +1831,16 @@ pub fn build_table2(ix: &mut Index2, nanch: usize) {
         }
         (hi, lo)
     }).collect();
-    ix.hi = vec![0f32; nanch * k];
-    ix.lo = vec![0f32; nanch * k];
+    let mut hi = vec![0f32; nanch * k];
+    let mut lo = vec![0f32; nanch * k];
     for c in 0..k {
         for a in 0..nanch {
-            ix.hi[a * k + c] = cols[c].0[a];
-            ix.lo[a * k + c] = cols[c].1[a];
+            hi[a * k + c] = cols[c].0[a];
+            lo[a * k + c] = cols[c].1[a];
         }
     }
-    ix.anchors = anchors;
+    ix.hi = Arc::new(hi);
+    ix.lo = Arc::new(lo);
+    ix.anchors = Arc::new(anchors);
     ix.nanch = nanch;
 }

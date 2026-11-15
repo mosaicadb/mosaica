@@ -124,6 +124,9 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                 p.collazy = true;
             }
             "nopscan" => p.pscan = false,
+            "direct" => p.direct = true,
+            "nodirect" => p.direct = false,
+            "prev" => p.prev = true,
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("bail=") => p.bail = f[5..].parse().expect("bail=UNITS_PER_SURVIVOR"),
             "nobail" => p.bail = 0.0,
@@ -209,7 +212,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let xs = RealSource::open(&p.xs_path);
     let src = Real2 { src: RealSource::open(&p.xs_path) };
     let f2 = RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: f2.map, off: f2.off, rows: Vec::new() };
+    let full = Full2::Real { map: std::sync::Arc::new(f2.map), off: f2.off, rows: Default::default() };
     let mut lg = |s: String| out!("[build2] {s}");
     let nusort = flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort"));
     if flags.split(',').any(|f| f.starts_with("col")) || arg_str("--flags", "").split(',').any(|f| f.starts_with("col")) || args().iter().any(|a| a == "--colstore") {
@@ -437,6 +440,8 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         ents.sort_unstable();
         let bm = RoaringBitmap::from_sorted_iter(ents).unwrap();
         let vis = Vis2::new(ix, &bm);
+        // the index compacted to the visible rows, with and without its own vectors
+        let subs = [ix.compact(&vis.rows, true), ix.compact(&vis.rows, false)];
         for (qi, (_, q)) in qs.iter().step_by((qs.len() / nf.max(1)).max(1)).take(nf).enumerate() {
             let pr = prep2(ix, q);
             let mut ex: Vec<(f64, u32)> = vis.rows.par_iter().map(|&r| (exact_to_f64(exact_dot(&pr.q16, ix.full_row_f16(r as usize))), r)).collect();
@@ -450,6 +455,15 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
                 let (a, b) = sym_diff(&to_bitmap2(ix, &r.rows), &truth);
                 wi += a;
                 wo += b;
+                for sub in &subs {
+                    let r = threshold2(sub, &prep2(sub, q), t, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                    let (a, b) = sym_diff(&to_bitmap2(sub, &r.rows), &truth);
+                    if a + b > 0 {
+                        out!("compacted index wrong q{qi} visible 1/{den} {:?}: in {a} out {b}", plan.mode);
+                    }
+                    wi += a;
+                    wo += b;
+                }
                 let kn = knn2(ix, q, 10, Some(&vis), plan);
                 let mut sa: Vec<f64> = kn.ents.iter().map(|x| exact_value2(ix, &pr, ix.ent_row[x.1 as usize] as usize)).collect();
                 sa.sort_by(|x, y| y.partial_cmp(x).unwrap());
@@ -462,7 +476,7 @@ pub fn verify2(c: &Ctx2, nitem: usize, ntext: usize, ncheck: usize) {
         println!("verify2 filtered 1/{den}: {} visible, wrong in/out {wi}/{wo}, k-NN mismatches {kb}", vis.rows.len());
     }
     out!("VERIFY2 {} queries x {} answer sizes: wrong-in {} wrong-out {}; interval checks {} (det violations {}, rand violations {}); largest randomised error {:.2} sd (group 0's constants by level {:?}, N = 2^{}); k-NN mismatches {} of {} (three plans each){}",
-        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.groups[0].csgl, ix.meta.npow, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold and k-NN, included in the counts"));
+        qs.len(), SIZES.len(), wi, wo, tot.checked, tot.viol_det, tot.viol_rand, tot.max_sd, ix.groups[0].csgl, ix.meta.npow, kb, qs.len(), format!("; filtered: {nf} queries x 4 visible sets x 3 plans, threshold (also on the index compacted to the set, with and without its vectors) and k-NN, included in the counts"));
     out!("VERIFY2 checker: {} deterministic decisions checked against the f64 certificate, {} not implied; {} lanes outside it; entering each level (unfiltered, both plans): {:?}; decided in/out {:?} / {:?}",
         tot.imp_checked, tot.imp_fail, tot.cert_viol, tot.enter, tot.dec_in, tot.dec_out);
     let sc = scale_check(ix);
@@ -566,7 +580,7 @@ fn raw_read_ms(ix: &Index2) -> f64 {
     use core::arch::x86_64::*;
     let t = Timer::new();
     let mut acc = unsafe { _mm256_setzero_si256() };
-    for gp in &ix.groups {
+    for gp in ix.groups.iter() {
         let p = gp.v8t.as_ptr();
         let mut i = 0;
         while i + 32 <= gp.v8t.len() {
@@ -591,7 +605,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             let mut qv = vec![0f64; n];
             median(&(0..10).map(|_| {
                 let t = Timer::new();
-                for gp in &ix.groups {
+                for gp in ix.groups.iter() {
                     f(&gp.v8t, &gp.vsc, &mut qv);
                     std::hint::black_box(&qv);
                 }
@@ -1148,8 +1162,9 @@ pub fn dbcmp(c: &Ctx2) {
     let step = arg_usize("--step", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
     let dump = arg_str("--dump", "");
-    let mut sets: Vec<(String, Option<RoaringBitmap>)> = vec![("all".into(), None)];
-    for f in arg_str("--vis", "").split(',').filter(|f| !f.is_empty()) {
+    let mut sets: Vec<(String, Option<RoaringBitmap>)> = if args().iter().any(|a| a == "--skip-all") { vec![] } else { vec![("all".into(), None)] };
+    let vf = Some(arg_str("--cmp-vis", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--vis", ""));
+    for f in vf.split(',').filter(|f| !f.is_empty()) {
         let a = read_npy(f);
         assert_eq!(a.descr, "<i4", "{f}: --vis files hold sorted int32 entity ids");
         let ids: Vec<u32> = a.data.chunks(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
@@ -1157,40 +1172,103 @@ pub fn dbcmp(c: &Ctx2) {
         sets.push((name, Some(RoaringBitmap::from_sorted_iter(ids).unwrap())));
     }
     let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count".to_string()];
-    for (vname, bm) in &sets {
+    // every variant's answer must equal the first variant's, bit for bit
+    let mut first: std::collections::HashMap<(usize, usize, usize), RoaringBitmap> = Default::default();
+    let mut ncheck = 0usize;
+    for (vi, (vname, bm)) in sets.iter().enumerate() {
         let t = Timer::new();
         let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
         out!("dbcmp {vname}: {} visible; into row order once per session {:.2} ms", bm.as_ref().map_or(ix.nrows as u64, |b| b.len()), t.ms());
+        let whats: Vec<String> = arg_str("--cmp-what", "index,flat").split(',').map(|w| w.to_string()).collect();
+        // the session's index compacted to its visible rows: codes only (c), and codes and vectors (cv)
+        let rows_all: Vec<u32>;
+        let vrows = match &vis {
+            Some(v) => &v.rows,
+            None => {
+                rows_all = (0..ix.nrows as u32).collect();
+                &rows_all
+            }
+        };
+        let mut compacted: [Option<Index2>; 2] = [None, None];
+        for (i, pre) in ["c", "cv"].iter().enumerate() {
+            if whats.iter().any(|w| w.split(':').next().unwrap().strip_suffix("index").or_else(|| w.split(':').next().unwrap().strip_suffix("scan")) == Some(*pre)) {
+                let t = Timer::new();
+                let sub = ix.compact(vrows, i == 1);
+                out!("dbcmp {vname}: compacted ({}) in {:.2} ms, {:.1} MB of its own", if i == 1 { "codes and vectors" } else { "codes" }, t.ms(), sub.own_bytes() as f64 / 1e6);
+                compacted[i] = Some(sub);
+            }
+        }
         for &th in &threads {
             let pl = pool(th);
-            for what in ["index", "flat"] {
-                let mut dumpf = (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{what}_{vname}.bin")).unwrap()));
-                for (qi, q) in qs.iter().enumerate() {
-                    if qi % step != 0 {
-                        continue;
-                    }
-                    for si in 0..ns {
-                        let t0 = thr[qi * ns + si];
+            let mut nscan = vec![0usize; whats.len()];
+            let mut dumpf: Vec<_> = whats.iter().map(|what| (!dump.is_empty() && th == 1).then(|| std::io::BufWriter::new(std::fs::File::create(format!("{dump}/{what}_{vname}.bin")).unwrap()))).collect();
+            for (qi, q) in qs.iter().enumerate() {
+                if qi % step != 0 {
+                    continue;
+                }
+                for si in 0..ns {
+                    let t0 = thr[qi * ns + si];
+                    // the variants interleaved per query and share, each run --reps times in a row
+                    for (wi, what) in whats.iter().enumerate() {
+                        let (kind, flags) = what.split_once(':').unwrap_or((what.as_str(), ""));
                         let mut ts = Vec::new();
                         let mut ans = RoaringBitmap::new();
                         for _ in 0..reps {
                             let t = Timer::new();
-                            ans = pl.install(|| match what {
-                                "index" => {
+                            ans = pl.install(|| match kind {
+                                "index" | "idx" => {
+                                    let plan = plan_flags(c.plan, flags);
+                                    let plan = if kind == "idx" { Plan { mode: PlanMode::Index, ..plan } } else { plan };
                                     let pr = prep2(ix, q);
-                                    let r = threshold2(ix, &pr, t0, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan: c.plan });
+                                    let r = threshold2(ix, &pr, t0, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+                                    nscan[wi] += r.scanned as usize;
                                     to_bitmap2(ix, &r.rows)
                                 }
-                                _ => {
+                                "scan" => {
+                                    let pr = prep2(ix, q);
+                                    to_bitmap2(ix, &scan_visible(ix, &pr, t0, vis.as_ref(), false, false).rows)
+                                }
+                                "cindex" | "cvindex" | "cscan" | "cvscan" => {
+                                    let sub = compacted[kind.starts_with("cv") as usize].as_ref().unwrap();
+                                    let pr = prep2(sub, q);
+                                    if kind.ends_with("scan") {
+                                        to_bitmap2(sub, &scan_visible(sub, &pr, t0, None, false, false).rows)
+                                    } else {
+                                        let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(c.plan, flags) });
+                                        nscan[wi] += r.scanned as usize;
+                                        to_bitmap2(sub, &r.rows)
+                                    }
+                                }
+                                // timing only: the query's preparation, and with the anchor search
+                                "prep" | "anc" => {
+                                    let pr = prep2(ix, q);
+                                    if kind == "anc" {
+                                        std::hint::black_box(pr.anc(ix));
+                                    }
+                                    RoaringBitmap::new()
+                                }
+                                "flat" => {
                                     let (q16, q32, qn) = crate::v2::q::query_f16(q);
                                     let mut e = fl.threshold(&q16, &q32, t0, full_err_qn(ix, qn), bm.as_ref(), &c.ent_xs);
                                     e.sort_unstable();
                                     RoaringBitmap::from_sorted_iter(e).unwrap()
                                 }
+                                k => panic!("unknown --cmp-what variant {k:?}; use flat, scan, index[:FLAGS], idx[:FLAGS], cindex[:FLAGS], cvindex[:FLAGS], cscan, cvscan, prep or anc"),
                             });
                             ts.push(t.ms());
                         }
-                        if let Some(w) = dumpf.as_mut() {
+                        if !matches!(kind, "prep" | "anc") {
+                            match first.entry((vi, qi, si)) {
+                                std::collections::hash_map::Entry::Vacant(e) => {
+                                    e.insert(ans.clone());
+                                }
+                                std::collections::hash_map::Entry::Occupied(e) => {
+                                    assert!(*e.get() == ans, "{what} at {th} threads disagrees with the first variant on {vname}, query {qi}, share {si}");
+                                    ncheck += 1;
+                                }
+                            }
+                        }
+                        if let Some(w) = dumpf[wi].as_mut() {
                             for x in [qi as u32, si as u32, ans.len() as u32].into_iter().chain(ans.iter()) {
                                 w.write_all(&x.to_le_bytes()).unwrap();
                             }
@@ -1199,11 +1277,14 @@ pub fn dbcmp(c: &Ctx2) {
                         lines.push(format!("{what},{th},{vname},{si},{qi},{:.4},{:.4},{}", median(&ts), mn, ans.len()));
                     }
                 }
+            }
+            for (wi, what) in whats.iter().enumerate() {
                 let mine: Vec<f64> = lines.iter().filter(|l| l.starts_with(&format!("{what},{th},{vname},"))).map(|l| l.split(',').nth(5).unwrap().parse().unwrap()).collect();
-                out!("dbcmp {what} threads {th} vis {vname}: {} timings, median {:.3} ms", mine.len(), median(&mine));
+                out!("dbcmp {what} threads {th} vis {vname}: {} timings, median {:.3} ms; {} of {} runs scanned", mine.len(), median(&mine), nscan[wi], mine.len() * reps);
             }
         }
     }
+    out!("dbcmp answers: {ncheck} compared with the first variant's, all identical");
     std::fs::write(format!("{}/dbcmp_{}.csv", res_dir(), arg_str("--tag", "run")), lines.join("\n") + "\n").unwrap();
     let st = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
     out!("dbcmp resident after the queries: {}", st.lines().filter(|l| l.starts_with("VmRSS") || l.starts_with("RssFile") || l.starts_with("RssAnon")).collect::<Vec<_>>().join(", "));

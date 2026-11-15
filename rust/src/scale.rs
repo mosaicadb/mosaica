@@ -232,7 +232,7 @@ pub fn run2(scale: usize, nq: usize) {
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
         let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: f.map, off: f.off, rows: Vec::new() }, 1, split, false, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { map: std::sync::Arc::new(f.map), off: f.off, rows: Default::default() }, 1, split, false, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];
@@ -288,7 +288,7 @@ pub fn run2(scale: usize, nq: usize) {
     };
     let sy_src = mk();
     let texts = crate::run2::load_queries(n);
-    let real_mhat: Vec<Vec<f64>> = real.cl.iter().map(|c| c.mhat.clone()).collect();
+    let real_mhat: Vec<Vec<f64>> = real.cl.iter().map(|c| c.mhat.to_vec()).collect();
     let sy_full = mk();
     drop(mk);
     drop(real);
@@ -325,15 +325,17 @@ pub fn run2(scale: usize, nq: usize) {
         }
         (hi, lo)
     }).collect();
-    ix.hi = vec![0f32; nanch * k];
-    ix.lo = vec![0f32; nanch * k];
+    let mut hi = vec![0f32; nanch * k];
+    let mut lo = vec![0f32; nanch * k];
     for c in 0..k {
         for a in 0..nanch {
-            ix.hi[a * k + c] = cols[c].0[a];
-            ix.lo[a * k + c] = cols[c].1[a];
+            hi[a * k + c] = cols[c].0[a];
+            lo[a * k + c] = cols[c].1[a];
         }
     }
-    ix.anchors = anchors;
+    ix.hi = std::sync::Arc::new(hi);
+    ix.lo = std::sync::Arc::new(lo);
+    ix.anchors = std::sync::Arc::new(anchors);
     ix.nanch = nanch;
     log(format!("synthetic v2 index: {} rows built in {:.0}s; x2 bound {:.3e}; stored B/item {:?}", ix.nrows, t.s(), ix.x2 - 1.0, ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()));
     let mut qs: Vec<(&str, Vec<f32>)> = Vec::new();
