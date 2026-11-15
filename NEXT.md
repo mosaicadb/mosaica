@@ -10,7 +10,7 @@ names the branch or report that holds its evidence.
   on the owner's machine before this counts as checked: the 50k check (rust/results/const/check.sh), one `dbcmp`
   threshold run and one approximate `dbtopk` run on the 1M index, and one capped `--full-file` run through
   bench/threshold-db/capped/run_ours.sh at a single answer share, whose answers must match the uncapped dumps.
-- **research/scan-planner** (844dfb52a, under independent review): the planner chooses a whole-query scan, direct
+- **research/scan-planner** (b79dbc8d5; independent review passed, its fixes are in): the planner chooses a whole-query scan, direct
   scoring of a cluster's visible rows, or the index per cluster, and a session can compact its visible set's codes and
   f16 vectors into one block. Merge once the review passes. Its filtered rows are being remeasured on a quiet machine
   for the plots on research/plots-refresh.
@@ -21,13 +21,13 @@ names the branch or report that holds its evidence.
   (bench/threshold-db/results/planner/REPORT_PLANNER.md on that branch; times from a loaded machine, interleaved). With
   the visible set compacted per session (codes and vectors), the planned query beats LIMINAL's own scan at every answer
   share under random 1%, 10% and 50% visible (0.44–0.62 against 1.07–1.25 ms; 9.7–10.4 against 11.5–12.5 ms; 20–46
-  against 47–52 ms), and under 241 and 964 genera up to answers of 10% and 30%. Uncompacted, the planner alone fixes only
+  against 47–52 ms), and under 241 genera up to answers of 1% and 964 genera up to 30%. Uncompacted, the planner alone fixes only
   random 1%. Answers equal the scan's bit for bit. Still open:
-  - **Small, cache-warm genus sets** (19 genera, 1%): 0.65–0.98 ms against 0.44–0.66 for the plain scan. The cost model
+  - **Small, cache-warm genus sets** (19 genera, 1%): 1.28–1.96 times slower than the plain scan (0.65–0.98 against 0.44–0.66 ms). The cost model
     prices a cached scan at 0.10 µs per row against 0.06–0.08 actual, so it picks the index on 345 of 525 runs.
   - **The plain scan beats the compacted scan by about 20% under genus sets,** unexplained: both read contiguous rows
     with the same kernel.
-  - **The largest answers under 241 and 964 genera,** 5–14% behind the scan.
+  - **The largest answers under 241 and 964 genera:** 241 genera is 16–19% behind the scan at the 50% and 75% shares.
   - **A session switch for compaction.** It is opt-in through `Index2::compact` with no session-level setting. It costs
     22 ms and 24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB,
     38 ms and 33 MB, 162 ms and 147 MB). The suggestion is codes and vectors up to about 10% visible, codes alone above.
@@ -45,6 +45,10 @@ names the branch or report that holds its evidence.
 - **Delete the column-layout code** (rust/src/v2/col.rs and its hooks; off by default and slower, rust/REPORT3.md on
   research/colorder keeps the record), then delete the side branches and worktrees.
 
+- **`dot_f16_x4` drops dimensions past the last multiple of 16** (kernel.rs:599, :671), and no error bound covers them:
+  a soundness bug in the scan and direct scoring for any n that is not a multiple of 16 (768 is). Fixed on research/scan-planner
+  (b79dbc8d5): the tail is added and counted in the error bound; it lands with that merge.
+
 ## Approximate path
 
 - **The three steps in reports/annideas/NEXT.md:** cheaper group setup, sub-clusters (row order ruled: rows stay sorted
@@ -53,8 +57,7 @@ names the branch or report that holds its evidence.
 - **Hand over to the exact path at large answers.** Under filters the approximate mode loses to the exact index by up to
   three times once answers pass about 10% of the visible set; the planner should switch.
 - **Fit the dial above k = 1,000.** Larger answers currently reuse the k = 1,000 dial.
-- **Low findings from the merge review:** ties between equal scores can differ from the exact path's order, and
-  `dot_f16_x4` ignores dimensions past the last multiple of 16 (harmless at 768; nothing checks it).
+- **Low finding from the merge review:** ties between equal scores can differ from the exact path's order.
 
 ## Benchmarks
 
