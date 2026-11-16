@@ -44,7 +44,8 @@ pub struct ReadPolicy {
     pub dontcache_min: AtomicUsize,
     /// Reads a `Reader` keeps in flight (at most RING / 2).
     pub qd: AtomicUsize,
-    /// The planner prices the reads of these rows (io_us, io_gbps in the plan).
+    /// The planner prices the reads of these rows (io_us, io_gbps in the plan: from `q::disk_constants` or a plan
+    /// file, else `Plan::default`'s placeholders). Unset, the rows count as in memory, resident or not.
     pub priced: AtomicBool,
 }
 impl Default for ReadPolicy {
@@ -392,6 +393,11 @@ thread_local! {
     static THREAD_RING: std::cell::RefCell<Option<(io_uring::IoUring, Vec<memmap2::MmapMut>)>> = const { std::cell::RefCell::new(None) };
 }
 
+/// Whether this process can set up an io_uring (the kernel has it and allows it).
+pub fn uring_available() -> bool {
+    io_uring::IoUring::new(8).is_ok()
+}
+
 /// Batches of rows read with many reads in flight: `push` plans a batch's reads and queues them, `pop` returns the
 /// oldest batch once its reads are done, and up to the policy's `qd` reads of the queued batches are in flight meanwhile. Rows within
 /// `gap` bytes of each other are read with one read, gap included. Reads are buffered (through the page cache), so a
@@ -417,14 +423,19 @@ pub struct Reader<T> {
 }
 
 impl<T> Reader<T> {
-    /// A reader of `rows` (rows of `n` f16) merging rows `gap` bytes apart, on this thread's ring; None in memory or
-    /// unless the policy reads through io_uring.
+    /// A reader of `rows` (rows of `n` f16) merging rows `gap` bytes apart, on this thread's ring; None in memory,
+    /// unless the policy reads through io_uring, or when no io_uring can be set up here (`uring_available`).
     pub fn new(rows: &Rows, n: usize, gap: usize) -> Option<Reader<T>> {
         let Rows::Map { rfd, dfd, policy, .. } = rows else { return None };
         if !policy.uring.load(Ordering::Relaxed) {
             return None;
         }
-        let (ring, free) = THREAD_RING.with(|r| r.borrow_mut().take()).unwrap_or_else(|| (io_uring::IoUring::new(RING).expect("io_uring"), Vec::new()));
+        // a ring of this thread's, else a new one; None where io_uring cannot be set up (an old kernel, or one that
+        // forbids it), and the caller reads through the mapping
+        let (ring, free) = match THREAD_RING.with(|r| r.borrow_mut().take()) {
+            Some(x) => x,
+            None => (io_uring::IoUring::new(RING).ok()?, Vec::new()),
+        };
         Some(Reader { ring: std::mem::ManuallyDrop::new(ring), fd: rfd.as_raw_fd(), dfd: dfd.as_raw_fd(), dmin: policy.direct_min.load(Ordering::Relaxed), dcmin: policy.dontcache_min.load(Ordering::Relaxed), rb: 2 * n, gap, q: Default::default(), seq0: 0, next: (0, 0), retry: Vec::new(), inflight: 0, qd: policy.qd.load(Ordering::Relaxed).clamp(1, RING as usize / 2), held: 0, free, reads: 0, bytes: 0 })
     }
 

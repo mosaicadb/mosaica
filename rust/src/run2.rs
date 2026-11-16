@@ -199,8 +199,9 @@ pub fn setup2(tag: &str) -> Ctx2 {
     setup2_at(tag, &data_dir(), &arg_str("--flags", ""))
 }
 
-/// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...).
-pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
+/// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...); an
+/// error names a flag that is not one or a value that does not parse.
+pub fn plan_flags(mut p: Plan, flags: &str) -> Result<Plan, String> {
     for f in flags.split(',').map(|f| f.trim()).filter(|f| !f.is_empty()) {
         match f {
             "int" => p.int_det = true,
@@ -220,29 +221,51 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "mode=index" => p.mode = PlanMode::Index,
             "mode=flat" => p.mode = PlanMode::Flat,
             "mode=scan" => p.mode = PlanMode::Scan,
-            // the rule's rows in memory (Plan::r_rows, r_seed)
-            f if f.starts_with("r=") => p.r_rows = f[2..].parse().expect("r=ROWS"),
-            f if f.starts_with("rseed=") => p.r_seed = f[6..].parse().expect("rseed=ROWS"),
+            // the rule's rows in memory (Plan::r_rows, r_kappa, r_seed), as a plan file gives them
+            f if f.starts_with("r=") => p = Plan::from_kv(p, &format!("r_rows={}", &f[2..]))?,
+            f if f.starts_with("rk=") => p = Plan::from_kv(p, &format!("r_kappa={}", &f[3..]))?,
+            f if f.starts_with("rseed=") => p = Plan::from_kv(p, &format!("r_seed={}", &f[6..]))?,
             // the planner's constants from a file of name=value lines (as RESULTS/plan.txt), for a variant
-            f if f.starts_with("pf=") => p = plan_file(p, &f[3..]),
-            f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
+            f if f.starts_with("pf=") => p = read_plan_file(p, &f[3..])?.0,
+            f if f.starts_with("tol=") => p.tol = f[4..].parse().ok().filter(|x: &f64| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("{f}: tol=SCORE (the tolerance d, in score units, at least 0)"))?,
             f if f.starts_with("repackx=") => {
                 p.repack = true;
-                p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
+                p.repack_mul = f[8..].parse().ok().filter(|x: &f32| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("{f}: repackx=FACTOR (a number of at least 0)"))?;
             }
-            _ => panic!("unknown plan flag {f:?}"),
+            _ => return Err(format!("unknown plan flag {f:?}")),
         }
     }
-    p
+    Ok(p)
 }
 
-/// `p` with the constants of the file `f` (name=value lines, as `Plan::to_kv` writes them); a file that cannot be read
-/// or holds another name stops the run.
-pub fn plan_file(p: Plan, f: &str) -> Plan {
-    std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}")).and_then(|t| Plan::from_kv(p, &t).map_err(|e| format!("{f}: {e}"))).unwrap_or_else(|e| {
-        eprintln!("{e}");
-        std::process::exit(2);
-    })
+/// `p` with the constants of the file `f` (name=value lines, as `Plan::to_kv` writes them), and whether the file gives
+/// both disk constants (so that none need be timed).
+pub fn read_plan_file(p: Plan, f: &str) -> Result<(Plan, bool), String> {
+    let t = std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}"))?;
+    Ok((Plan::from_kv(p, &t).map_err(|e| format!("{f}: {e}"))?, Plan::kv_gives_disk(&t)))
+}
+
+/// `plan` with `--plan-file`'s constants, and where `priced` (the vectors' reads are priced) the disk constants from the
+/// cache of `dir` (or timed, `disk_constants`) unless the file gives both, so that nothing is timed or evicted then;
+/// the file's constants take precedence. A plan file that cannot be read or holds another name stops the run.
+pub fn plan_with_file(ix: &Index2, plan: Plan, priced: bool, dir: &str) -> Plan {
+    let file = arg_str("--plan-file", "");
+    let (fp, gives_disk) = if file.is_empty() { (plan, false) } else { read_plan_file(plan, &file).unwrap_or_else(|e| exit2(&e)) };
+    if !priced {
+        return fp;
+    }
+    if gives_disk {
+        out!("[plan] disk constants io_us={} io_gbps={} from {file}; not timed", fp.io_us, fp.io_gbps);
+        return fp;
+    }
+    let timed = disk_constants(ix, plan, dir, &mut |s| out!("{s}"));
+    if file.is_empty() { timed } else { read_plan_file(timed, &file).unwrap_or_else(|e| exit2(&e)).0 }
+}
+
+/// Prints `e` and stops the run with status 2.
+fn exit2(e: &str) -> ! {
+    eprintln!("{e}");
+    std::process::exit(2);
 }
 
 /// The deterministic levels that decide, as `--ddec` and the flag `ddec=` give them: LEVEL.LEVEL... from 0, all or
@@ -267,7 +290,7 @@ pub fn shared_plan(base: Plan, ix: &Index2, flags: &str) -> Result<Plan, String>
     if let Some(f) = flags.split(',').map(|f| f.trim()).find(|f| f.starts_with("dlv=") || *f == "nusort") {
         return Err(format!("the flag {f} changes what is built: give this variant its own index (--index-X DIR) for it"));
     }
-    let p = plan_flags(base, flags);
+    let p = plan_flags(base, flags)?;
     p.check(ix)?;
     Ok(p)
 }
@@ -377,7 +400,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     };
     // nothing is timed here: in memory the planner needs no timed constant; the disk constants are read from the
     // index directory's cache (or timed once) where the vectors' reads are priced, below
-    let plan = plan_flags(plan, flags);
+    let plan = plan_flags(plan, flags).unwrap_or_else(|e| exit2(&e));
     if let Err(e) = plan.check(&ix) {
         eprintln!("{e}");
         std::process::exit(2);
@@ -424,14 +447,11 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
-    // the planner's disk constants where reads are priced (cached in the index directory, keyed by the CPU and the
-    // vectors' device), then --plan-file's (name=value lines: r_rows, r_seed, io_us, io_gbps); the constants used are
-    // written to RESULTS/plan.txt
-    let plan = if ix.own_rows().is_some_and(|r| r.priced()) { disk_constants(&ix, plan, dir, &mut |s| out!("{s}")) } else { plan };
-    let plan = match arg_str("--plan-file", "") {
-        f if f.is_empty() => plan,
-        f => plan_file(plan, &f),
-    };
+    // --plan-file's constants (name=value lines: r_rows, r_kappa, r_seed, io_us, io_gbps), and where reads are priced
+    // the planner's disk constants unless the file gives them (cached in the index directory, keyed by the machine,
+    // the vectors' device and the read policy; `disk_key`); the constants used are written to RESULTS/plan.txt
+    let priced = ix.own_rows().is_some_and(|r| r.priced());
+    let plan = plan_with_file(&ix, plan, priced, dir);
     out!("[plan] {}", plan.to_kv().replace('\n', " "));
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, pseudo };
@@ -1370,6 +1390,12 @@ pub fn dbcmp(c: &Ctx2) {
     let step = arg_usize("--step", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
     let whats: Vec<String> = Some(arg_str("--cmp-what", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--what", "index,flat")).split(',').map(|w| w.to_string()).collect();
+    // every variant's plan flags are checked before anything runs
+    for w in &whats {
+        if let Err(e) = plan_flags(c.plan, w.split_once(':').map_or("", |x| x.1)) {
+            exit2(&format!("--what {w}: {e}"));
+        }
+    }
     // `query` runs the variants interleaved per query and share; `variant` runs each over every query before the next
     let by_variant = match arg_str("--cmp-order", "query").as_str() {
         "query" => false,
@@ -1444,11 +1470,7 @@ pub fn dbcmp(c: &Ctx2) {
     // the planner's disk constants: the setup's where it priced reads; else, when a read mode prices them, from the
     // index directory's cache (timed once per machine and device; `:plan=mem` in a read mode: reads not counted)
     let plan0 = if !pol.priced.load(Relaxed) && modes.iter().any(|m| m.split(':').any(|kv| kv == "uring" || kv == "plan=disk")) {
-        let p = disk_constants(ix, c.plan, &data_dir(), &mut |s| out!("{s}"));
-        match arg_str("--plan-file", "") {
-            f if f.is_empty() => p,
-            f => plan_file(p, &f),
-        }
+        plan_with_file(ix, c.plan, true, &data_dir())
     } else {
         c.plan
     };
@@ -1507,7 +1529,7 @@ pub fn dbcmp(c: &Ctx2) {
                     let (kind, flags) = whats[wi].split_once(':').unwrap_or((whats[wi].as_str(), ""));
                     pl.install(|| match kind {
                         "index" | "idx" | "forced" => {
-                            let plan = plan_flags(plan, flags);
+                            let plan = plan_flags(plan, flags).expect("checked before the runs");
                             let plan = if kind == "index" { plan } else { Plan { mode: PlanMode::Index, ..plan } };
                             let pr = prep2(ix, q);
                             let r = threshold2(ix, &pr, t0, &Opts2 { vis, verify: false, want_iv: false, plan });
@@ -1525,7 +1547,7 @@ pub fn dbcmp(c: &Ctx2) {
                                 let r = scan_visible(sub, &pr, t0, None, false, false);
                                 (to_bitmap2(sub, &r.rows), r.st.full_reads, false)
                             } else {
-                                let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(plan, flags) });
+                                let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(plan, flags).expect("checked before the runs") });
                                 (to_bitmap2(sub, &r.rows), r.st.full_reads, r.scanned)
                             }
                         }

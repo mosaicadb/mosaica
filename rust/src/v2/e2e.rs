@@ -70,14 +70,17 @@ fn answer(t: &[(f64, u32)], th: f64) -> RoaringBitmap {
 /// The default plan and the float path (no integer levels, cluster tables, fixed repack), each left to choose and
 /// forced; and the rule's rows at the extremes and either side of synth4k's random 10% set (about 12.5 visible rows
 /// per cluster), so that visible sets are scanned, scored directly per cluster and run on the index path in turn.
+/// (synth4k's clusters hold about 125 rows, above the default rule's 84 rows without a visible set.)
 fn plans() -> Vec<(&'static str, Plan)> {
     let float = Plan { int_det: false, gtab: false, repack: false, ..Plan::default() };
+    let rows = |r_rows: usize| Plan { r_rows, r_kappa: 0.0, ..Plan::default() };
     vec![
-        ("rows 0: never a scan or direct scoring", Plan { r_rows: 0, ..Plan::default() }),
-        ("rows 12: index path and direct scoring", Plan { r_rows: 12, ..Plan::default() }),
-        ("rows 13: scan, direct and index mixed", Plan { r_rows: 13, ..Plan::default() }),
-        ("rows 13, float path", Plan { r_rows: 13, int_det: false, gtab: false, repack: false, ..Plan::default() }),
-        ("rows unbounded: every visible set scanned", Plan { r_rows: usize::MAX, ..Plan::default() }),
+        ("rows 0: never a scan or direct scoring", rows(0)),
+        ("rows 12: index path and direct scoring", rows(12)),
+        ("rows 13: scan, direct and index mixed", rows(13)),
+        ("rows 13, float path", Plan { int_det: false, gtab: false, repack: false, ..rows(13) }),
+        ("rows 4 + 0.05 per row: by cluster size", Plan { r_rows: 4, r_kappa: 0.05, ..Plan::default() }),
+        ("rows unbounded: every visible set scanned", rows(usize::MAX)),
         ("default", Plan::default()),
         ("default, index path", Plan { mode: PlanMode::Index, ..Plan::default() }),
         ("default, full vectors", Plan { mode: PlanMode::Flat, ..Plan::default() }),
@@ -1151,13 +1154,16 @@ fn the_fit_is_the_same_on_one_thread_and_on_four() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
-/// In memory and without a visible set the planner never scans: every cluster the support table leaves open is cut and
-/// run on the index path (none scored directly, none from full vectors), whatever the threshold and the rule's rows.
+/// In memory and without a visible set, on clusters larger than the rule's rows (every cluster holds more than
+/// `Plan::direct_max` of its own rows) the planner never scans: every cluster the support table leaves open is cut and
+/// run on the index path (none scored directly, none from full vectors), whatever the threshold. On clusters within
+/// the rule it scores them directly or scans, as under a visible set.
 #[test]
-fn unfiltered_in_memory_plans_never_scan() {
+fn unfiltered_in_memory_plans_follow_the_rows_rule() {
     let f = fixture();
     let ix = &f.ix;
     let sub = ix.compact(&(0..ix.nrows as u32).collect::<Vec<_>>(), true);
+    let smin = ix.cl.iter().map(|c| c.r1 - c.r0).filter(|&s| s > 0).min().unwrap();
     for (iname, ix) in [("index", ix), ("compacted", &sub)] {
         for (qi, q) in f.queries.iter().enumerate() {
             let pr = prep2(ix, q);
@@ -1165,9 +1171,12 @@ fn unfiltered_in_memory_plans_never_scan() {
             let mut ths = thresholds(&t);
             ths.extend([f64::NEG_INFINITY, -1e9, t.last().unwrap().0 - 1e-6]);
             for th in ths {
-                for r_rows in [0, R_ROWS, usize::MAX] {
-                    let o = Opts2 { vis: None, verify: false, want_iv: false, plan: Plan { r_rows, r_seed: usize::MAX, ..Plan::default() } };
-                    let Planned::Run { pre, use_idx, .. } = plan2(ix, &pr, th, &o) else { panic!("{iname}: unfiltered query {qi} at t {th} (rows {r_rows}) planned as a scan") };
+                // below every cluster's rows: R0 alone, and R0 with kappa
+                for (r_rows, r_kappa) in [(0, 0.0), (smin - 1, 0.0), (smin / 2, 0.4)] {
+                    let plan = Plan { r_rows, r_kappa, r_seed: 0, ..Plan::default() };
+                    assert!(ix.cl.iter().all(|c| c.r1 == c.r0 || plan.direct_max(c.r1 - c.r0) < c.r1 - c.r0));
+                    let o = Opts2 { vis: None, verify: false, want_iv: false, plan };
+                    let Planned::Run { pre, use_idx, .. } = plan2(ix, &pr, th, &o) else { panic!("{iname}: unfiltered query {qi} at t {th} (rows {r_rows} + {r_kappa} S) planned as a scan") };
                     for (ci, p) in pre.iter().enumerate() {
                         match p {
                             Pre::Direct => panic!("{iname}: cluster {ci} scored directly without a visible set"),
@@ -1176,34 +1185,86 @@ fn unfiltered_in_memory_plans_never_scan() {
                         }
                     }
                 }
+                // the smallest cluster within the rule: scored directly unless the support table decides it
+                let plan = Plan { r_rows: smin, r_kappa: 0.0, ..Plan::default() };
+                let Planned::Run { pre, .. } = plan2(ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan }) else { panic!("{iname}: scanned with one cluster within the rule") };
+                for (ci, p) in pre.iter().enumerate() {
+                    let s = ix.cl[ci].r1 - ix.cl[ci].r0;
+                    assert!(matches!(p, Pre::Skip | Pre::In) || matches!(p, Pre::Direct) == (s <= smin), "{iname}: cluster {ci} of {s} rows, rule {smin}");
+                }
             }
+            let plan = Plan { r_rows: smin - 1, r_kappa: 0.0, r_seed: 0, ..Plan::default() };
             for k in [1, 10, 100] {
-                assert!(knn2(ix, q, k, None, Plan::default()).st.full_reads < ix.nrows as u64, "{iname}: unfiltered k-NN scanned");
+                assert!(knn2(ix, q, k, None, plan).st.full_reads < ix.nrows as u64, "{iname}: unfiltered k-NN scanned");
             }
         }
     }
 }
 
-/// The filtered rule at its boundaries: a visible set of exactly R rows in each of its clusters is scanned, one more
-/// row is not; then a cluster holding R visible rows is scored directly (unless the support table decides it) and one
-/// holding R + 1 is cut. Exact k-NN scans first at R rows per cluster plus the seed's rows, not one row more.
+/// An index compacted to a small visible set is queried without one, and each of its clusters holds only the set's
+/// rows: the rule in rows scans it, as it would scan the set on the full index; and scores directly the clusters of
+/// at most R0 rows when the whole is above the rule.
+#[test]
+fn a_small_compacted_index_scans() {
+    let f = fixture();
+    let ix = &f.ix;
+    let (_, random) = &f.sets[1];
+    let vis = Vis2::new(ix, random.as_ref().unwrap());
+    for vectors in [false, true] {
+        let sub = ix.compact(&vis.rows, vectors);
+        assert!(sub.compacted());
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(&sub, q);
+            let t = truth(ix, q, random.as_ref());
+            for th in thresholds(&t) {
+                let o = |plan| Opts2 { vis: None, verify: false, want_iv: false, plan };
+                assert!(matches!(plan2(&sub, &pr, th, &o(Plan::default())), Planned::Scan), "compacted (vectors {vectors}) query {qi} at t {th} not scanned");
+                // the same decision as under the visible set on the full index
+                let full = plan2(ix, &prep2(ix, q), th, &Opts2 { vis: Some(&vis), ..o(Plan::default()) });
+                assert!(matches!(full, Planned::Scan));
+                let r = threshold2(&sub, &pr, th, &o(Plan::default()));
+                assert_eq!(to_bitmap2(&sub, &r.rows), answer(&t, th), "compacted (vectors {vectors}) query {qi} at t {th}");
+                // R0 = 12, below the set's 12.5 rows a cluster: clusters of at most 12 rows scored directly, the rest
+                // cut
+                let plan = Plan { r_rows: 12, r_kappa: 0.0, ..Plan::default() };
+                let Planned::Run { pre, .. } = plan2(&sub, &pr, th, &o(plan)) else { panic!("compacted at rows 12 scanned") };
+                for (ci, p) in pre.iter().enumerate() {
+                    let s = sub.cl[ci].r1 - sub.cl[ci].r0;
+                    assert!(matches!(p, Pre::Skip | Pre::In) || matches!(p, Pre::Direct) == (s <= 12), "cluster {ci} of {s} rows");
+                }
+            }
+            for k in [1, 10] {
+                let out = knn2(&sub, q, k, None, Plan::default());
+                assert_eq!(out.st.full_reads, sub.nrows as u64, "compacted k-NN not scanned first");
+                assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, k));
+            }
+        }
+    }
+}
+
+/// The filtered rule at its boundaries, R0 + kappa * S rows per cluster: a visible set holding exactly that many rows
+/// in each of its clusters is scanned, one more row is not; then a cluster holding that many visible rows is scored
+/// directly (unless the support table decides it) and one holding one more is cut. Exact k-NN scans first at those
+/// rows plus the seed's rows, not one row more.
 #[test]
 fn filtered_rule_at_its_boundaries() {
     let f = fixture();
     let ix = &f.ix;
-    let r = 5usize;
-    let plan = Plan { r_rows: r, r_seed: 7, ..Plan::default() };
-    // R rows of each of the first 20 clusters, and one more row of cluster 3
+    let plan = Plan { r_rows: 3, r_kappa: 0.02, r_seed: 7, ..Plan::default() };
+    let lim = |ci: usize| plan.direct_max(ix.cl[ci].r1 - ix.cl[ci].r0);
+    assert!((0..20).any(|ci| lim(ci) != lim(0)), "the clusters' rules do not differ by size");
+    let tot: usize = (0..20).map(lim).sum();
+    // the rule's rows of each of the first 20 clusters, and one more row of cluster 3
     let ents = |extra: usize| -> RoaringBitmap {
-        let mut b: RoaringBitmap = (0..20).flat_map(|ci| ix.cl[ci].r0..ix.cl[ci].r0 + r).map(|row| ix.row_ent[row]).collect();
-        for row in ix.cl[3].r0 + r..ix.cl[3].r0 + r + extra {
+        let mut b: RoaringBitmap = (0..20).flat_map(|ci| ix.cl[ci].r0..ix.cl[ci].r0 + lim(ci)).map(|row| ix.row_ent[row]).collect();
+        for row in ix.cl[3].r0 + lim(3)..ix.cl[3].r0 + lim(3) + extra {
             b.insert(ix.row_ent[row]);
         }
         b
     };
     let at = Vis2::new(ix, &ents(0));
     let over = Vis2::new(ix, &ents(1));
-    assert_eq!((at.rows.len(), over.rows.len()), (20 * r, 20 * r + 1));
+    assert_eq!((at.rows.len(), over.rows.len()), (tot, tot + 1));
     let mut ndirect = 0;
     for (qi, q) in f.queries.iter().enumerate() {
         let pr = prep2(ix, q);
@@ -1211,13 +1272,13 @@ fn filtered_rule_at_its_boundaries() {
         for th in thresholds(&t) {
             let o = |vis| Opts2 { vis: Some(vis), verify: false, want_iv: false, plan };
             assert!(matches!(plan2(ix, &pr, th, &o(&at)), Planned::Scan), "query {qi}, t {th}: {} rows in 20 clusters not scanned", at.rows.len());
-            let Planned::Run { pre, .. } = plan2(ix, &pr, th, &o(&over)) else { panic!("query {qi}, t {th}: R x clusters + 1 rows scanned") };
+            let Planned::Run { pre, .. } = plan2(ix, &pr, th, &o(&over)) else { panic!("query {qi}, t {th}: the rule's rows + 1 scanned") };
             for (ci, p) in pre.iter().enumerate() {
                 match (ci, p) {
                     (_, Pre::Skip | Pre::In) => {}
-                    (3, p) => assert!(matches!(p, Pre::Open { .. }), "query {qi}: cluster 3, with R + 1 visible rows, not cut"),
+                    (3, p) => assert!(matches!(p, Pre::Open { .. }), "query {qi}: cluster 3, with its rule's rows + 1 visible, not cut"),
                     (ci, p) if ci < 20 => {
-                        assert!(matches!(p, Pre::Direct), "query {qi}: cluster {ci}, with R visible rows, not scored directly");
+                        assert!(matches!(p, Pre::Direct), "query {qi}: cluster {ci}, with its rule's rows visible, not scored directly");
                         ndirect += 1;
                     }
                     (ci, _) => panic!("query {qi}: cluster {ci}, with no visible row, not skipped"),
@@ -1231,18 +1292,58 @@ fn filtered_rule_at_its_boundaries() {
         }
     }
     assert!(ndirect > 0, "no cluster was left to the rule by the support table");
-    // k-NN: R rows per cluster plus the seed's rows scan first
-    let seed_at: RoaringBitmap = (0..20).flat_map(|ci| ix.cl[ci].r0..ix.cl[ci].r0 + r).chain(ix.cl[3].r0 + r..ix.cl[3].r0 + r + 7).map(|row| ix.row_ent[row]).collect();
-    let seed_over: RoaringBitmap = seed_at.iter().chain([ix.row_ent[ix.cl[4].r0 + r]]).collect();
-    assert!(plan.scan_first(&Vis2::new(ix, &seed_at)));
-    assert!(!plan.scan_first(&Vis2::new(ix, &seed_over)));
-    assert!(!Plan { mode: PlanMode::Index, ..plan }.scan_first(&Vis2::new(ix, &seed_at)));
-    assert!(Plan { mode: PlanMode::Scan, ..plan }.scan_first(&Vis2::new(ix, &seed_over)));
+    // k-NN: the rule's rows plus the seed's rows scan first
+    let seed_at: RoaringBitmap = (0..20).flat_map(|ci| ix.cl[ci].r0..ix.cl[ci].r0 + lim(ci)).chain(ix.cl[3].r0 + lim(3)..ix.cl[3].r0 + lim(3) + 7).map(|row| ix.row_ent[row]).collect();
+    let seed_over: RoaringBitmap = seed_at.iter().chain([ix.row_ent[ix.cl[4].r0 + lim(4)]]).collect();
+    assert!(plan.scan_first(ix, Some(&Vis2::new(ix, &seed_at))));
+    assert!(!plan.scan_first(ix, Some(&Vis2::new(ix, &seed_over))));
+    assert!(!Plan { mode: PlanMode::Index, ..plan }.scan_first(ix, Some(&Vis2::new(ix, &seed_at))));
+    assert!(Plan { mode: PlanMode::Scan, ..plan }.scan_first(ix, Some(&Vis2::new(ix, &seed_over))));
 }
 
-/// The disk constants are timed once per machine and device and cached: reused while the key is the cache's, timed
-/// again when it differs or the cache is not one; then on a saved index whose vectors are on file, the cache is
-/// created at the first call and read at the second.
+/// Under the norm sort, with a visible set, clusters scored directly, cut and run on the index path, and the whole
+/// query scanned, answer as brute force does (threshold and exact k-NN).
+#[test]
+fn norm_sort_under_a_visible_set_with_direct_scoring() {
+    let f = fixture();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, ix) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert!(!ix.nukey.is_empty());
+    let ix = &ix;
+    let mut ndirect = 0;
+    for (sname, bm) in &f.sets[1..] {
+        let vis = Vis2::new(ix, bm.as_ref().unwrap());
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(ix, q);
+            let t = truth(ix, q, bm.as_ref());
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let o = Opts2 { vis: Some(&vis), verify: false, want_iv: false, plan };
+                    if let Planned::Run { pre, .. } = plan2(ix, &pr, th, &o) {
+                        ndirect += pre.iter().filter(|p| matches!(p, Pre::Direct)).count();
+                    }
+                    let r = threshold2(ix, &pr, th, &o);
+                    assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "norm sort, plan {pname}, set {sname}, query {qi}, t {th}");
+                }
+            }
+            for k in [1, 10] {
+                if k > t.len() {
+                    continue;
+                }
+                for (pname, plan) in plans() {
+                    let out = knn2(ix, q, k, Some(&vis), plan);
+                    assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, k), "norm sort k-NN, plan {pname}, set {sname}, query {qi}, k {k}");
+                }
+            }
+        }
+    }
+    assert!(ndirect > 0, "no cluster was scored directly under the norm sort");
+}
+
+/// The disk constants are timed once per machine, device and read policy and cached: reused while the key is the
+/// cache's, timed again when it differs or the cache is not one; then on a saved index whose vectors are on file, the
+/// cache is created at the first call and read at the second (where io_uring can be set up, which the timing reads
+/// through).
 #[test]
 fn disk_constants_are_cached_by_machine_and_device() {
     let d = tmp_dir("disk");
@@ -1255,7 +1356,7 @@ fn disk_constants_are_cached_by_machine_and_device() {
     assert!(why.starts_with("read from"), "{why}");
     let (got, why) = cached_disk_constants(&path, "cpu A; device 259:0", || Some((7.0, 3.0)));
     assert_eq!(got, Some((7.0, 3.0)));
-    assert!(why.starts_with("timed again: ") && why.contains("another machine or device"), "{why}");
+    assert!(why.starts_with("timed again: ") && why.contains("another machine, device or read policy"), "{why}");
     let (got, _) = cached_disk_constants(&path, "cpu A; device 259:0", || panic!("timed again under the same key"));
     assert_eq!(got, Some((7.0, 3.0)));
     std::fs::write(&path, "io_us=nan\n").unwrap();
@@ -1264,6 +1365,8 @@ fn disk_constants_are_cached_by_machine_and_device() {
     assert!(why.contains("not a cache"), "{why}");
     let (got, why) = cached_disk_constants(&d.join("absent").join(DISK_CACHE), "k", || None);
     assert_eq!(got, None, "{why}");
+    // a temporary file of the writes is never left behind
+    assert!(std::fs::read_dir(&d).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
 
     // a saved index, its vectors mapped from its own file
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
@@ -1272,22 +1375,131 @@ fn disk_constants_are_cached_by_machine_and_device() {
     let o = BuildOptions::default();
     rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
     let (_, ix) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
-    let Some(rows @ disk::Rows::Map { file, .. }) = ix.own_rows() else { panic!("an opened index's vectors are not on file") };
-    let key = disk_key(file).unwrap();
-    assert!(key.starts_with("cpu ") && key.contains("; device "), "{key}");
+    let Some(rows @ disk::Rows::Map { file, policy, .. }) = ix.own_rows() else { panic!("an opened index's vectors are not on file") };
+    let key = disk_key(file, policy).unwrap();
+    assert!(key.starts_with(&format!("v{DISK_KEY_VERSION}; machine ")) && key.contains("; cpu ") && key.contains("; device ") && key.contains("; fs ") && key.contains("; read qd "), "{key}");
+    assert!(!key.contains('\n'), "{key}");
     assert!(!rows.priced() && !rows.uring());
+    if !disk::uring_available() {
+        eprintln!("disk_constants_are_cached_by_machine_and_device: no io_uring here; the timing on a saved index is not tested");
+        drop(ix);
+        std::fs::remove_dir_all(&d).unwrap();
+        return;
+    }
     let cdir = d.join("cache");
     std::fs::create_dir_all(&cdir).unwrap();
     let cdir = cdir.to_str().unwrap();
     let mut logs = Vec::new();
-    let p1 = disk_constants(&ix, Plan::default(), cdir, &mut |s| logs.push(s));
+    let p1 = disk_constants_in(&ix, Plan::default(), cdir, None, &mut |s| logs.push(s));
     assert!(logs[0].contains("timed: no cache"), "{}", logs[0]);
     assert!(p1.io_us > 0.0 && p1.io_gbps > 0.0 && (p1.io_us, p1.io_gbps) != (5.7, 3.3), "{}", logs[0]);
     assert!(!rows.uring(), "the timing left the rows read through io_uring");
     assert!(std::fs::read_to_string(format!("{cdir}/{DISK_CACHE}")).unwrap().starts_with(&format!("key={key}\n")));
-    let p2 = disk_constants(&ix, Plan::default(), cdir, &mut |s| logs.push(s));
+    let p2 = disk_constants_in(&ix, Plan::default(), cdir, None, &mut |s| logs.push(s));
     assert!(logs[1].contains("read from"), "{}", logs[1]);
     assert_eq!((p1.io_us, p1.io_gbps), (p2.io_us, p2.io_gbps));
+
+    // an index directory that cannot be written (here a path under a file): the per-user cache, never an error
+    let ro = d.join("not-a-dir");
+    std::fs::write(&ro, "").unwrap();
+    let ro = ro.join("index");
+    let user = d.join("user");
+    let p3 = disk_constants_in(&ix, Plan::default(), ro.to_str().unwrap(), Some(&user), &mut |s| logs.push(s));
+    assert!(logs[2].contains("timed: no cache") && logs[2].contains(user.to_str().unwrap()) && logs[2].contains("saved under key"), "{}", logs[2]);
+    assert!(p3.io_us > 0.0 && p3.io_gbps > 0.0);
+    let p4 = disk_constants_in(&ix, Plan::default(), ro.to_str().unwrap(), Some(&user), &mut |s| logs.push(s));
+    assert!(logs[3].contains("read from") && logs[3].contains(user.to_str().unwrap()), "{}", logs[3]);
+    assert_eq!((p3.io_us, p3.io_gbps), (p4.io_us, p4.io_gbps));
+    // and with no per-user cache either, timed and not saved
+    let p5 = disk_constants_in(&ix, Plan::default(), ro.to_str().unwrap(), None, &mut |s| logs.push(s));
+    assert!(logs[4].contains("not saved") && p5.io_us > 0.0, "{}", logs[4]);
     drop(ix);
     std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// The cache's place: the index directory, or where that cannot be written and holds no cache under the key, the
+/// per-user directory, in a file named by the key.
+#[test]
+fn a_read_only_index_directory_caches_disk_constants_per_user() {
+    let d = tmp_dir("diskro");
+    let user = d.join("user");
+    let w = d.join("index");
+    std::fs::create_dir_all(&w).unwrap();
+    assert_eq!(disk_cache_path(w.to_str().unwrap(), "k1", Some(&user)), w.join(DISK_CACHE));
+    let f = d.join("file");
+    std::fs::write(&f, "").unwrap();
+    let ro = f.join("index");
+    let (a, b) = (disk_cache_path(ro.to_str().unwrap(), "k1", Some(&user)), disk_cache_path(ro.to_str().unwrap(), "k2", Some(&user)));
+    assert!(a.starts_with(&user) && b.starts_with(&user) && a != b, "{a:?} {b:?}");
+    assert_eq!(disk_cache_path(ro.to_str().unwrap(), "k1", None), ro.join(DISK_CACHE));
+    // the per-user file caches as the index directory's does
+    let (got, why) = cached_disk_constants(&a, "k1", || Some((4.0, 2.5)));
+    assert!(got == Some((4.0, 2.5)) && why.contains("saved"), "{why}");
+    let (got, why) = cached_disk_constants(&a, "k1", || panic!("timed again under the same key"));
+    assert!(got == Some((4.0, 2.5)) && why.starts_with("read from"), "{why}");
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// Opens that find no cache at once time once: the others wait for the lock and read what it saved; no temporary
+/// file is left.
+#[test]
+fn concurrent_disk_constant_writers_time_once() {
+    let d = tmp_dir("diskcc");
+    let path = d.join(DISK_CACHE);
+    let timed = std::sync::atomic::AtomicUsize::new(0);
+    let got: Vec<(Option<(f64, f64)>, String)> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..6).map(|_| s.spawn(|| cached_disk_constants(&path, "key", || {
+            timed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            Some((3.0, 1.5))
+        }))).collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert_eq!(timed.load(std::sync::atomic::Ordering::SeqCst), 1, "{got:?}");
+    assert!(got.iter().all(|g| g.0 == Some((3.0, 1.5))), "{got:?}");
+    assert_eq!(got.iter().filter(|g| g.1.contains("saved by another open")).count(), 5, "{got:?}");
+    assert!(std::fs::read_dir(&d).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// The key changes with the read policy the timing reads with (reads in flight, the O_DIRECT and RWF_DONTCACHE
+/// thresholds), and not otherwise between two calls.
+#[test]
+fn another_read_policy_is_another_disk_key() {
+    let d = tmp_dir("diskkey");
+    let f = d.join("v.bin");
+    std::fs::write(&f, [0u8; 4096]).unwrap();
+    let file = std::fs::File::open(&f).unwrap();
+    let pol = disk::ReadPolicy::default();
+    let k0 = disk_key(&file, &pol).unwrap();
+    assert_eq!(k0, disk_key(&file, &pol).unwrap());
+    use std::sync::atomic::Ordering::Relaxed;
+    pol.qd.store(32, Relaxed);
+    let k1 = disk_key(&file, &pol).unwrap();
+    pol.direct_min.store(8192, Relaxed);
+    let k2 = disk_key(&file, &pol).unwrap();
+    pol.dontcache_min.store(4096, Relaxed);
+    let k3 = disk_key(&file, &pol).unwrap();
+    let ks = [&k0, &k1, &k2, &k3];
+    for i in 0..4 {
+        for j in i + 1..4 {
+            assert_ne!(ks[i], ks[j]);
+        }
+    }
+    std::fs::remove_dir_all(&d).unwrap();
+}
+
+/// A plan file's values out of range are errors that name them, not silent truncations: fractional rows, a zero or
+/// negative disk constant, a negative kappa; and the disk constants count as given only when both are.
+#[test]
+fn plan_files_refuse_values_out_of_range() {
+    let b = Plan::default();
+    let p = Plan::from_kv(b, "r_rows=120\nr_kappa=0.05\nr_seed=5000\nio_us=4.5\nio_gbps=2\n").unwrap();
+    assert_eq!((p.r_rows, p.r_kappa, p.r_seed, p.io_us, p.io_gbps), (120, 0.05, 5000, 4.5, 2.0));
+    assert_eq!(Plan::from_kv(b, &p.to_kv()).unwrap().to_kv(), p.to_kv());
+    for (bad, says) in [("r_rows=12.7", "whole number"), ("r_seed=-1", "whole number"), ("io_gbps=0", "above 0"), ("io_us=0", "above 0"), ("io_us=nan", "above 0"), ("r_kappa=-0.1", "at least 0"), ("cscan_us=0.2", "not a plan constant"), ("r_rows", "not name=value")] {
+        let e = Plan::from_kv(b, bad).unwrap_err();
+        assert!(e.contains(says), "{bad}: {e}");
+    }
+    assert!(Plan::kv_gives_disk("io_us=4\nio_gbps=2\n") && !Plan::kv_gives_disk("io_us=4\nr_rows=3\n"));
 }
