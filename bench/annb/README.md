@@ -48,8 +48,10 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
   planner's constants timed on one thread, and the approximate mode's cluster order fitted on 1,000 pseudo-queries).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.
-- **vexact-approx**: `knn2_fast` over the first `nprobe` clusters (1 to 512), with the dial off (`eps` 0) or fitted for
-  a miss rate of 0.01 per level. The dial for k = 10 is fitted in `set_query_arguments`, outside the timed queries.
+- **vexact-approx**: `knn2_fast` over the first `nprobe` clusters (1 to 512), with the dial off (`eps` 0). A dial
+  (`eps` > 0) is fitted for k = 10 in `set_query_arguments`, outside the timed queries. The grid leaves it out: under the
+  planner the probed clusters are scanned in full, so on glove-25 `eps` 0.01 gave the same recall and time as 0 at
+  every `nprobe`.
 - Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured
   here, but `bench/run.sh` times from Rust and is the better tool above about 10,000 QPS.
 
