@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
 use vexact::v2::q::{knn2, knn2_fast, pseudo_queries, Approx, Dial, KnnOut2, Plan, PlanMode, Vis2};
-use vexact::v2::{open, BuildOptions, Index2};
+use vexact::v2::{open, rebuild, BuildOptions, Index2};
 
 #[pyclass(module = "vexact_py")]
 struct Index {
@@ -23,28 +23,33 @@ struct Index {
 
 #[pymethods]
 impl Index {
-    /// Build the index from a fitted directory, time the planner's constants on one thread (pinned to `core` when
-    /// given), and fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. `plan` is "auto" (the
-    /// planner decides), "index" (full vectors and scans priced out, so every cluster takes the index path, in the
-    /// approximate mode too) or "flat" (the planner's flat mode).
+    /// Encode the fitted directory `dir` (from `rust/tools/fit.py`) and save the index beside it, where `v2::open` finds
+    /// it, or open the one already saved there for the same fit and options (`v2::open`, which maps it and encodes
+    /// nothing). Then fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. Queries run on one
+    /// thread, pinned to `core` when given.
+    /// `plan`: "auto" (the planner: in memory, the support table and the rule in rows; nothing is timed), "index" (every
+    /// cluster the support table leaves open on the index path), "flat" (decided from full vectors) or "scan".
+    /// `dlv`: the deterministic levels' cumulative bytes, in place of the fit's (a build input, e.g. [16, 32]).
+    /// `ddec`: the deterministic levels that decide in threshold queries, as a bit mask (None: all).
     #[new]
-    #[pyo3(signature = (dir, core=None, pseudo=1000, calib=16, plan="auto"))]
-    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, calib: usize, plan: &str) -> PyResult<Index> {
-        let force = match plan {
-            "auto" | "index" | "flat" => plan.to_string(),
-            _ => return Err(PyValueError::new_err(format!("plan is auto, index or flat, not {plan:?}"))),
+    #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None))]
+    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>) -> PyResult<Index> {
+        let mode = match plan {
+            "auto" => PlanMode::Auto,
+            "index" => PlanMode::Index,
+            "flat" => PlanMode::Flat,
+            "scan" => PlanMode::Scan,
+            _ => return Err(PyValueError::new_err(format!("plan is auto, index, flat or scan, not {plan:?}"))),
         };
         py.detach(|| {
-            let (p, ix) = open(&dir, &BuildOptions::default(), &mut |s| eprintln!("{s}"));
-            let mut plan = Plan::calibrate(&ix, Plan::default(), calib, core);
-            match force.as_str() {
-                "index" => {
-                    plan.mode = PlanMode::Index;
-                    (plan.full_us, plan.scan_us, plan.cscan_us) = (1e3, 1e3, 1e3);
-                }
-                "flat" => plan.mode = PlanMode::Flat,
-                _ => {}
-            }
+            let o = BuildOptions { dlv, ..BuildOptions::default() };
+            let mut log = |s: String| eprintln!("{s}");
+            let (p, ix) = match open(&dir, &o, &mut log) {
+                Ok(x) => x,
+                Err(_) => rebuild(&dir, &o, &mut log).map_err(PyValueError::new_err)?,
+            };
+            let plan = Plan { mode, ddec, ..Plan::default() };
+            plan.check(&ix).map_err(PyValueError::new_err)?;
             let pseudo = pseudo_queries(&ix, pseudo, 10);
             let approx = if pseudo.is_empty() { Approx { f: 0.0, rad: Vec::new() } } else { Approx::fit(&ix, &pseudo).0 };
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -154,7 +159,7 @@ impl Index {
         Ok(out.iter().map(|e| ids(py, e, k)).collect())
     }
 
-    /// The planner's constants, one `name=value` per line.
+    /// The planner's constants, one `name=value` per line (the rule in rows; the disk constants are unused in memory).
     #[getter]
     fn plan(&self) -> String {
         self.plan.to_kv()

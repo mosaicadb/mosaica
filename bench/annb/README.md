@@ -38,7 +38,9 @@ about 6 GB of download and 20 GB of memory to build, and the brute-force ground 
 `install.sh` copies `rust/` from the revision named `PIN` in the script, not from the working tree, so the
 benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
 `PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings use only `v2::open`,
-`Plan::calibrate`, `pseudo_queries`, `Approx::fit`, `Dial::fit`, `Vis2::new`, `knn2` and `knn2_fast`.
+`v2::rebuild`, `BuildOptions`, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`,
+`Vis2::new`, `knn2` and `knn2_fast`. The pin is a merge of `research/exact-vector-search` (saved index, planner without
+timing, levels-clusters options off by default) with this branch's AVX-512 basis products and integer levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
 
@@ -46,7 +48,10 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
 
 - **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures; `fit.py`
   defaults to pca, which the build argument `basis: pca` selects), then `vexact_py.Index` on its output (encoding, the
-  planner's constants timed on one thread, and the approximate mode's cluster order fitted on 1,000 pseudo-queries).
+  approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings encode the fit and save the index beside
+it (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
+mapped from its files, as `v2::open` gives it. The planner times nothing: in memory it is the support table and the rule
+in rows (`Plan::default`).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.
 - **vexact-approx**: `knn2_fast` over the first `nprobe` clusters (1 to 512), with the dial off (`eps` 0) or fitted
@@ -54,6 +59,9 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
   outside the timed queries. At 64 dimensions (glove-25) the dial changes nothing, because reading a probed cluster's
   full vectors is cheaper than its codes. At 384 dimensions (VIBE's yahoo-minilm-384, k = 100) `eps` 0.03 is 1.46 times
   faster at nprobe 64 and 1.6 times at nprobe 128, for recall 0.001–0.002 lower.
+- **vexact-approx-lc**: as vexact-approx on research/levels-clusters' candidate builds (REPORT_BUILD.md, "the
+  levels-clusters defaults"): A, clusters by N (build argument `clusters: by-n`, `fit.py --per-cluster by-n --groups
+  by-n`); B, two deterministic levels (`dlv: "16.32"`); C, both. Not in `run.sh`'s default list; add it with `ALGOS`.
 - Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured
   here, but `bench/run.sh` times from Rust and is the better tool above about 10,000 QPS.
 

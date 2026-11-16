@@ -5,7 +5,7 @@
 #   benchmarked until the pin moves; the bindings (vexact-py) and the algorithm files come from this working tree.
 #   The image is built with -C target-cpu=native: build it on the machine that runs the benchmark.
 set -euo pipefail
-PIN=979c6135e1a845c6e9e632d50c8ba0da93a2ed1b
+PIN=0bd114ade77bbc50944be2069888a18c3c5534af
 AB=$(cd "$1" && pwd)
 REV=${2:-$PIN}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -15,7 +15,7 @@ ALG=$AB/ann_benchmarks/algorithms/vexact
 rm -rf "$ALG"
 mkdir -p "$ALG/src/bench/annb"
 cp "$HERE"/vexact/{__init__.py,module.py,config.yml,Dockerfile} "$ALG/"
-git -C "$ROOT" archive "$REV" rust/src rust/tools rust/Cargo.toml rust/Cargo.lock combined/core.py | tar -x -C "$ALG/src"
+git -C "$ROOT" archive "$REV" rust/build.rs rust/src rust/tools rust/Cargo.toml rust/Cargo.lock combined/core.py | tar -x -C "$ALG/src"
 cp -r "$HERE/vexact-py" "$ALG/src/bench/annb/"
 echo "$REV" > "$ALG/src/REV"
 cd "$AB"

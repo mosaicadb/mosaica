@@ -6,7 +6,13 @@
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
 # The build parameter `order` (corpus, the default, or queries) is what the approximate mode's cluster order and dials are
 # fitted on: corpus pseudo-queries, or with `queries` 1,000 of the query sample and their true neighbours (fit_ood only).
+# The build parameters `clusters` and `dlv` are research/levels-clusters' options (REPORT_BUILD.md, "the levels-clusters
+# defaults"): `clusters` 1000 (the default, 1,000 items per cluster) or by-n (fit.py --per-cluster by-n --groups by-n),
+# and `dlv` the deterministic levels' cumulative bytes, fit (the default: the fit's) or e.g. "16.32".
+# fit() encodes the index and saves it in the work directory (v2::rebuild); the directory is removed at exit.
+import atexit
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,17 +33,28 @@ def save_padded(path, X, d):
     np.save(path, Xp)
 
 
+# VIBE passes the build arguments as values in the order of config.yml's args; these follow basis
+BUILD_ARGS = ("order", "clusters", "dlv")
+
+
 class Vexact(BaseANN):
-    def __init__(self, metric, method_param=None, order=None):
+    def __init__(self, metric, method_param=None, *rest):
         if metric not in ("angular", "cosine", "normalized"):
             raise ValueError(f"vexact supports cosine similarity only (angular, cosine, normalized), not {metric}")
         # ANN-Benchmarks passes the build arguments as a dict, VIBE as values in order
         self.basis = method_param.get("basis", "dual") if isinstance(method_param, dict) else method_param or "dual"
         if self.basis not in ("pca", "dual"):
             raise ValueError(f"basis is pca or dual, not {self.basis}")
-        self.order = (method_param.get("order") if isinstance(method_param, dict) else order) or "corpus"
+        a = method_param if isinstance(method_param, dict) else dict(zip(BUILD_ARGS, rest))
+        self.order = a.get("order") or "corpus"
         if self.order not in ("corpus", "queries"):
             raise ValueError(f"order is corpus or queries, not {self.order}")
+        self.clusters = str(a.get("clusters") or "1000")
+        if not (self.clusters == "by-n" or self.clusters.isdigit()):
+            raise ValueError(f"clusters is a number of items per cluster or by-n, not {self.clusters}")
+        dlv = str(a.get("dlv") or "fit")
+        self.dlv = [] if dlv == "fit" else [int(x) for x in dlv.replace(",", ".").split(".")]
+        self.tag = f"basis={self.basis}, order={self.order}, clusters={self.clusters}, dlv={'.'.join(map(str, self.dlv)) or 'fit'}"
         self.index = None
 
     def fit(self, X):
@@ -55,11 +72,14 @@ class Vexact(BaseANN):
 
     def build(self, X, sample):
         work = tempfile.mkdtemp(prefix="vexact-", dir=os.environ.get("VEXACT_WORK"))
+        atexit.register(shutil.rmtree, work, ignore_errors=True)
         d = max(X.shape[1], MIN_DIM)
         self.qbuf = np.zeros(d, np.float32)
         train = os.path.join(work, "train.npy")
         args = [sys.executable, os.path.join(SRC, "rust", "tools", "fit.py"), train, os.path.join(work, "index"),
-                "--metric", "angular", "--basis", self.basis]
+                "--metric", "angular", "--basis", self.basis, "--per-cluster", self.clusters]
+        if self.clusters == "by-n":
+            args += ["--groups", "by-n"]
         save_padded(train, X, d)
         if sample is not None:
             args += ["--query-sample", os.path.join(work, "sample.npy")]
@@ -68,7 +88,7 @@ class Vexact(BaseANN):
         for f in ("train.npy", "sample.npy"):
             if os.path.exists(os.path.join(work, f)):
                 os.remove(os.path.join(work, f))
-        self.index = vexact_py.Index(os.path.join(work, "index"))
+        self.index = vexact_py.Index(os.path.join(work, "index"), dlv=self.dlv or None)
         self.sampled = sample is not None
 
     def q(self, v):
@@ -77,20 +97,20 @@ class Vexact(BaseANN):
 
 
 class VexactExact(Vexact):
-    def __init__(self, metric, method_param=None, order=None):
-        super().__init__(metric, method_param, order)
-        self.name = f"vexact-exact (basis={self.basis}, order={self.order})"
+    def __init__(self, metric, method_param=None, *rest):
+        super().__init__(metric, method_param, *rest)
+        self.name = f"vexact-exact ({self.tag})"
 
     def set_query_arguments(self, mode="exact"):
-        self.name = f"vexact-exact (basis={self.basis}, query sample={self.sampled}, order={self.order}, mode={mode})"
+        self.name = f"vexact-exact ({self.tag}, query sample={self.sampled}, mode={mode})"
 
     def query(self, v, n):
         return self.index.knn(self.q(v), n)
 
 
 class VexactApprox(Vexact):
-    def __init__(self, metric, method_param=None, order=None):
-        super().__init__(metric, method_param, order)
+    def __init__(self, metric, method_param=None, *rest):
+        super().__init__(metric, method_param, *rest)
         self.nprobe, self.eps = 1, 0.0
 
     def set_query_arguments(self, nprobe, eps):
@@ -99,7 +119,7 @@ class VexactApprox(Vexact):
             # the dial is fitted per k; ANN-Benchmarks asks for 10 neighbours and VIBE for 100
             self.index.fit_dial(10)
             self.index.fit_dial(100)
-        self.name = f"vexact-approx (basis={self.basis}, query sample={self.sampled}, order={self.order}, nprobe={nprobe}, eps={eps})"
+        self.name = f"vexact-approx ({self.tag}, query sample={self.sampled}, nprobe={nprobe}, eps={eps})"
 
     def query(self, v, n):
         return self.index.knn_approx(self.q(v), n, self.nprobe, self.eps)

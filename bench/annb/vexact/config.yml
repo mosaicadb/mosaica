@@ -19,3 +19,20 @@ float:
       approx:
         args: [{basis: dual}]
         query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+  # research/levels-clusters' candidates (REPORT_BUILD.md): A clusters by N, B two deterministic levels, C both
+  - base_args: ['@metric']
+    constructor: VexactApprox
+    disabled: false
+    docker_tag: ann-benchmarks-vexact
+    module: ann_benchmarks.algorithms.vexact
+    name: vexact-approx-lc
+    run_groups:
+      A:
+        args: [{basis: dual, clusters: by-n}]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+      B:
+        args: [{basis: dual, dlv: "16.32"}]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+      C:
+        args: [{basis: dual, clusters: by-n, dlv: "16.32"}]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]

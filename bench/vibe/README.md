@@ -9,7 +9,9 @@ The adapter is the same as for ANN-Benchmarks: `bench/annb/vexact/module.py` ove
 scripts.
 
 - `vexact/image.def`: builds the bindings on VIBE's base image. `install.sh` fills in the path of the sources.
-- `vexact/config.yml`: `vexact-exact` and `vexact-approx` (nprobe 1 to 512) for the `cosine` and `normalized` datasets.
+- `vexact/config.yml`: `vexact-exact` and `vexact-approx` (nprobe 1 to 512) for the `cosine` and `normalized` datasets;
+  also `vexact-approx-lc` (the levels-clusters candidates A, B and C, as in `bench/annb/README.md`) and
+  `vexact-approx-queries` (below), which `run.sh` runs only when named in `ALGOS`.
 - `install.sh`: copies the algorithm into a checkout, with `rust/` taken from the revision pinned in
   `bench/annb/install.sh`, and builds `images/vexact.sif`.
 - `run.sh`: every algorithm on every dataset, then VIBE's result export.
