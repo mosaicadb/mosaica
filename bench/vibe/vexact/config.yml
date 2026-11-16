@@ -3,23 +3,27 @@ float:
   - base_args: ['@metric']
     constructor: VexactExact
     disabled: false
+    ood: true
     singularity_image: vexact
     module: vibe.algorithms.vexact
     name: vexact-exact
     run_groups:
       exact:
-        args: {}
+        args:
+          basis: [pca, dual]
         query_args:
           mode: [exact]
   - base_args: ['@metric']
     constructor: VexactApprox
     disabled: false
+    ood: true
     singularity_image: vexact
     module: vibe.algorithms.vexact
     name: vexact-approx
     run_groups:
       approx:
-        args: {}
+        args:
+          basis: [pca, dual]
         query_args:
           nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
           eps: [0, 0.01, 0.03]
