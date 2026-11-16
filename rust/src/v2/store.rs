@@ -899,7 +899,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     h.pod(prof);
     h.str(&p.xs_name);
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
-    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_per_group]);
+    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items]);
     match o.nguar {
         Some(x) => h.pod(&[1.0, x]),
         None => h.u64(0),

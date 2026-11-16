@@ -249,7 +249,7 @@ fn a_saved_index_opens_as_the_index_it_saves() {
         }
     }
     // other options, or another file format, are refused
-    let other = BuildOptions { cal_per_group: 4, ..BuildOptions::default() };
+    let other = BuildOptions { cal_items: 4096, ..BuildOptions::default() };
     assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "an index opened under options it was not built with");
     let json = format!("{edir}/index.json");
     let text = std::fs::read_to_string(&json).unwrap();

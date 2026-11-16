@@ -40,15 +40,15 @@ pub struct BuildOptions {
     pub nguar: Option<f64>,
     /// Keep the sub-Gaussian constant at every randomised level instead of the exact-law constants of `tail`.
     pub csg_plain: bool,
-    /// Clusters of each group the encoder's calibration samples.
-    pub cal_per_group: usize,
+    /// Items of each group the encoder's calibration samples, spread evenly over up to CAL_CLUSTERS of its clusters.
+    pub cal_items: usize,
     /// Open only (not part of the key): open a saved index although the fit's vectors file has changed length or
     /// modification time since it was built (the index holds its own vectors); a warning instead of an error.
     pub keep_index: bool,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_per_group: 8, keep_index: false }
+        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, keep_index: false }
     }
 }
 
@@ -66,6 +66,9 @@ pub const BLK: usize = 32;
 pub const LAMS: [f64; 6] = [2.0, 2.3, 2.6, 3.0, 3.5, 4.2];
 pub const OFF: [i32; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 18];
 pub const QUANTUM: usize = 16;
+/// Calibration: items per group (BuildOptions::cal_items' default), and the most clusters of a group they are spread over.
+pub const CAL_ITEMS: usize = 8192;
+pub const CAL_CLUSTERS: usize = 256;
 
 // ---------------- the deterministic code ----------------
 
@@ -1273,8 +1276,30 @@ impl Items2 {
     }
 }
 
+/// min(k, len) indices spread evenly over 0..len.
+fn spread(len: usize, k: usize) -> Vec<usize> {
+    let k = k.min(len);
+    (0..k).map(|i| i * len / k).collect()
+}
+
 pub trait Source2: Sync {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2;
+    /// About `k` of cluster c's items, spread over it, for calibration, in key order and without f16 vectors. Each
+    /// item's data is what `items` gives it.
+    fn sample(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64], k: usize) -> Items2 {
+        let it = self.items(c, p, gp, mhat);
+        let n = it.z.len() / it.ah.len().max(1);
+        let keep = spread(it.ah.len(), k);
+        Items2 {
+            ah: keep.iter().map(|&i| it.ah[i]).collect(),
+            z: keep.iter().flat_map(|&i| it.z[i * n..(i + 1) * n].iter().copied()).collect(),
+            ent: keep.iter().map(|&i| it.ent[i]).collect(),
+            ext: keep.iter().map(|&i| it.ext[i]).collect(),
+            x2max: it.x2max,
+            nu: Vec::new(),
+            x16: Vec::new(),
+        }
+    }
     /// The number of items of cluster c (what `items` returns for it).
     fn size(&self, c: usize, p: &Params) -> usize {
         p.cstart[c + 1] - p.cstart[c]
@@ -1290,16 +1315,25 @@ pub struct Real2 {
 }
 impl Source2 for Real2 {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
+        self.rows_of(c, p.cstart[c]..p.cstart[c + 1], p, gp, mhat, true)
+    }
+    fn sample(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64], k: usize) -> Items2 {
+        let r0 = p.cstart[c];
+        self.rows_of(c, spread(p.cstart[c + 1] - r0, k).into_iter().map(|i| r0 + i), p, gp, mhat, false)
+    }
+}
+impl Real2 {
+    /// The items of cluster c at the given rows, in key order; with `x16`, their f16 vectors too.
+    fn rows_of(&self, c: usize, rows: impl Iterator<Item = usize>, p: &Params, gp: &GroupPlan2, mhat: &[f64], x16: bool) -> Items2 {
         let n = self.src.n;
-        let (r0, r1) = (p.cstart[c], p.cstart[c + 1]);
         let m = &p.centres[c * n..(c + 1) * n];
-        let mut key: Vec<(i16, usize)> = (r0..r1).map(|r| {
+        let mut key: Vec<(i16, usize)> = rows.map(|r| {
             let x = self.src.row(r);
             let a: f64 = x.iter().zip(mhat).map(|(&h, &mh)| f16_to_f32(h) as f64 * mh).sum();
             ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, r)
         }).collect();
         key.sort();
-        let nc = r1 - r0;
+        let nc = key.len();
         let mut rmat = vec![0f64; nc * n];
         let mut x2max = 0f64;
         for (i, &(_, r)) in key.iter().enumerate() {
@@ -1317,7 +1351,7 @@ impl Source2 for Real2 {
         unsafe {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
-        let x16 = key.iter().flat_map(|k| self.src.row(k.1).iter().copied()).collect();
+        let x16 = if x16 { key.iter().flat_map(|k| self.src.row(k.1).iter().copied()).collect() } else { Vec::new() };
         Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new(), x16 }
     }
 }
@@ -1696,17 +1730,21 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     }).collect();
     let mn32: Vec<f32> = (0..k).map(|c| p.centres[c * n..(c + 1) * n].iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt() as f32).collect();
     let nr = meta.rlv.len();
-    // calibration on o.cal_per_group clusters of each group
+    // calibration on about o.cal_items items of each group, spread over up to CAL_CLUSTERS of its clusters
     let mut calc = Vec::new();
     for g in 0..p.meta.g {
         let ks: Vec<usize> = (0..k).filter(|&c| p.grp[c] == g).collect();
-        calc.extend(ks.iter().step_by((ks.len() / o.cal_per_group.max(1)).max(1)));
+        let step = ks.len().div_ceil(CAL_CLUSTERS).max(1);
+        let chosen: Vec<usize> = ks.iter().copied().step_by(step).collect();
+        let per = o.cal_items.max(1).div_ceil(chosen.len().max(1));
+        calc.extend(chosen.into_iter().map(|c| (c, per)));
     }
-    let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&c| {
+    let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&(c, per)| {
         let g = p.grp[c];
-        let it = src.items(c, p, &groups[g], &mhats[c]);
+        let it = src.sample(c, p, &groups[g], &mhats[c], per);
         (g, encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], true).calib.unwrap())
     }).collect();
+    log(format!("calibration sample {} items from {} clusters", cals.iter().map(|c| c.1.ypool[0].len()).sum::<usize>(), calc.len()));
     for g in 0..p.meta.g {
         let mine: Vec<&Calib> = cals.iter().filter(|x| x.0 == g).map(|x| &x.1).collect();
         if mine.is_empty() {
