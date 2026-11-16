@@ -62,7 +62,9 @@ class VexactApprox(Vexact):
     def set_query_arguments(self, nprobe, eps):
         self.nprobe, self.eps = nprobe, eps
         if eps > 0:
+            # the dial is fitted per k; ANN-Benchmarks asks for 10 neighbours and VIBE for 100
             self.index.fit_dial(10)
+            self.index.fit_dial(100)
         self.name = f"vexact-approx (nprobe={nprobe}, eps={eps})"
 
     def query(self, v, n):
