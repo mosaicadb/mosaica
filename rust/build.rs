@@ -1,12 +1,15 @@
-//! The library's source fingerprint: a fixed hash of every `.rs` file under `src/` that the library compiles (all but
-//! the binary's `main.rs`, `run2.rs`, `ann.rs` and `scale.rs`), by sorted path and contents. A saved index's key includes it, so an
-//! edit to the encoder (or to anything else in the library) makes a saved index stale instead of serving old codes.
-//! Any library edit invalidates saved indexes, which is the safe direction.
+//! The library's source fingerprint: a fixed hash of `Cargo.lock` (the dependencies' versions) and of every `.rs` file
+//! under `src/` that the library compiles outside its tests, by sorted path and contents. Left out: the binary's own
+//! modules (`main.rs`, `run2.rs`, `ann.rs`, `scale.rs`) and `v2/e2e.rs`, which is compiled only for tests; test modules
+//! inside library files stay in (comments too: stripping them would be fragile). A saved index's key includes it, so
+//! an edit to the encoder (or to anything else in the library) makes a saved index stale instead of serving old
+//! codes. Any library edit invalidates saved indexes, which is the safe direction.
 
 use std::path::{Path, PathBuf};
 
 // the binary's own modules (declared in main.rs), which do not change what the library builds
-const BINARY_ONLY: [&str; 4] = ["main.rs", "run2.rs", "ann.rs", "scale.rs"];
+// and the test-only end-to-end module (`#[cfg(test)] mod e2e;` in v2/mod.rs)
+const LEFT_OUT: [&str; 5] = ["main.rs", "run2.rs", "ann.rs", "scale.rs", "v2/e2e.rs"];
 
 fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     for e in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("cannot list {}: {e}", dir.display())) {
@@ -45,14 +48,18 @@ fn main() {
     let src = root.join("src");
     let mut files = Vec::new();
     walk(&src, &mut files);
-    let mut rel: Vec<(String, PathBuf)> = files.into_iter().map(|p| (p.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/"), p)).filter(|(r, _)| !BINARY_ONLY.contains(&r.as_str())).collect();
+    let mut rel: Vec<(String, PathBuf)> = files.into_iter().map(|p| (p.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/"), p)).filter(|(r, _)| !LEFT_OUT.contains(&r.as_str())).collect();
     rel.sort();
     let mut h = Fx(0);
+    let lock = root.join("Cargo.lock");
+    h.bytes(b"Cargo.lock");
+    h.bytes(&std::fs::read(&lock).unwrap_or_default());
     for (r, p) in &rel {
         h.bytes(r.as_bytes());
         h.bytes(&std::fs::read(p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display())));
     }
     println!("cargo:rustc-env=VEXACT_LIB_FINGERPRINT={:016x}", h.0);
     println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=Cargo.lock");
     println!("cargo:rerun-if-changed=build.rs");
 }

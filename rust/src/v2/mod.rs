@@ -42,10 +42,13 @@ pub struct BuildOptions {
     pub csg_plain: bool,
     /// Clusters of each group the encoder's calibration samples.
     pub cal_per_group: usize,
+    /// Open only (not part of the key): open a saved index although the fit's vectors file has changed length or
+    /// modification time since it was built (the index holds its own vectors); a warning instead of an error.
+    pub keep_index: bool,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_per_group: 8 }
+        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_per_group: 8, keep_index: false }
     }
 }
 
@@ -1988,7 +1991,6 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Param
     let (p, prof) = prepare(dir, o);
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, None, log);
-    log(format!("[build2] store hash {:016x}", ix.store_hash()));
     set_repack(&mut ix, log);
     (p, ix)
 }
@@ -2018,37 +2020,52 @@ fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(
 }
 
 /// Encode the fitted directory `dir` with `o` and save the index where `open` finds it (`saved_dir`), replacing any
-/// index saved there; returns it, with the parameters it was built from.
-pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+/// index saved there; returns it, with the parameters it was built from. An error when the fit's vectors cannot be
+/// read.
+pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     rebuild_in(dir, None, o, log)
 }
 
 /// As `rebuild`, saved in `edir`. The rebuild holds `encoded.lock` beside `edir` for its whole run (a second rebuild
-/// there waits), writes into a scratch directory of its own beside `edir` and swaps it into place once complete and
-/// synced (`store::install`).
-pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+/// there waits, and if the first just saved the index it was going to build, opens that instead of encoding again),
+/// writes into a scratch directory of its own beside `edir` and swaps it into place once complete and synced
+/// (`store::install`).
+pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     rebuild_in(dir, Some(edir), o, log)
 }
 
-fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let (p, prof) = prepare(dir, o);
+    let xs = store::XsId::of(&p.xs_path).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
     let parent = store::parent_of(edir);
-    std::fs::create_dir_all(&parent).unwrap_or_else(|e| panic!("cannot create {parent}: {e}"));
-    let lock = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
-    store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
+    std::fs::create_dir_all(&parent).map_err(|e| format!("cannot create {parent}: {e}"))?;
+    let (lock, waited) = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
     let design_c = design_constants(&p, o, log);
+    if let Some(since) = waited {
+        // the rebuild we waited for may have just saved this very index
+        let fresh = std::fs::metadata(format!("{edir}/index.json")).and_then(|m| m.modified()).is_ok_and(|m| m >= since);
+        if fresh {
+            if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
+                drop(lock);
+                log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));
+                set_repack(&mut ix, log);
+                return Ok((p, ix));
+            }
+        }
+    }
+    store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
     // built into the files of a scratch directory of this rebuild's own, sealed with its key, then moved into place
     let tmp = store::scratch_dir(edir);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, Some(&tmp), log);
-    let h = store::seal(&ix, &tmp, &key);
-    store::install(&tmp, edir);
+    let h = store::seal(&ix, &tmp, &key, Some(xs));
+    store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
-    (p, ix)
+    Ok((p, ix))
 }
 
 /// Support table over cluster-centre anchors (data only): exact max/min of p.x per cluster, rounded outward.

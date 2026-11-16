@@ -49,7 +49,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
-    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int",
+    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int", "--keep-index",
     "--no-all", "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--rebuild",
     "--skip-all", "--sweep", "--v2", "--willneed",
 ];
@@ -198,6 +198,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
         nguar,
         csg_plain: args().iter().any(|a| a == "--csg-plain"),
+        keep_index: args().iter().any(|a| a == "--keep-index"),
         ..BuildOptions::default()
     };
     let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));
@@ -208,7 +209,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
         build(dir, &bo, &mut lg)
     } else if args().iter().any(|a| a == "--rebuild") {
-        rebuild(dir, &bo, &mut lg)
+        rebuild(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
     } else {
         open(dir, &bo, &mut lg).unwrap_or_else(|e| {
             eprintln!("{e}");
@@ -219,6 +223,13 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if args().iter().any(|a| a == "--hash") {
         out!("[index] code hash {:016x}", ix.code_hash());
         out!("[index] store hash {:016x}", ix.store_hash());
+    }
+    if args().iter().any(|a| a == "--hash" || a == "verify") {
+        if let Err(e) = ix.check_maps() {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+        out!("[index] row and entity maps checked");
     }
     // the experiments read the index's vectors (in index row order), not the fit's Xs.npy
     let n = p.meta.n;

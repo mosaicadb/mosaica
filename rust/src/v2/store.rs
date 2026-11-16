@@ -78,6 +78,27 @@ impl Fx {
     pub fn str(&mut self, s: &str) {
         self.bytes(s.as_bytes());
     }
+    /// A long byte string, hashed in parallel and deterministically: its length, then the hash of each fixed 4 MiB
+    /// chunk (each by `bytes` from a fresh state), in order. Short strings are hashed as `bytes` hashes them.
+    pub fn big(&mut self, b: &[u8]) {
+        use rayon::prelude::*;
+        const CH: usize = 4 << 20;
+        if b.len() <= CH {
+            return self.bytes(b);
+        }
+        self.u64(u64::MAX);
+        self.u64(b.len() as u64);
+        let hs: Vec<u64> = b.par_chunks(CH).map(|c| {
+            let mut h = Fx::default();
+            h.bytes(c);
+            h.finish()
+        }).collect();
+        hs.into_iter().for_each(|x| self.u64(x));
+    }
+    /// `big` over numeric values as their bytes.
+    pub fn big_pod<T: Copy>(&mut self, v: &[T]) {
+        self.big(pod(v));
+    }
     pub fn usizes(&mut self, v: &[usize]) {
         self.u64(v.len() as u64);
         v.iter().for_each(|&x| self.u64(x as u64));
@@ -286,16 +307,51 @@ fn cal_from(v: &serde_json::Value) -> Result<CalIn, String> {
     Ok(c)
 }
 
+/// The identity of the fit's vectors file, not its contents (at a billion items it is terabytes): length,
+/// modification and status-change times (seconds and nanoseconds), device and inode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct XsId {
+    pub len: u64,
+    pub mtime: (i64, i64),
+    pub ctime: (i64, i64),
+    pub dev: u64,
+    pub ino: u64,
+}
+impl XsId {
+    pub fn of(path: &str) -> Result<XsId, String> {
+        use std::os::unix::fs::MetadataExt;
+        let md = std::fs::metadata(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+        Ok(XsId { len: md.len(), mtime: (md.mtime(), md.mtime_nsec()), ctime: (md.ctime(), md.ctime_nsec()), dev: md.dev(), ino: md.ino() })
+    }
+    fn json(&self) -> serde_json::Value {
+        serde_json::json!({ "len": self.len, "mtime": [self.mtime.0, self.mtime.1], "ctime": [self.ctime.0, self.ctime.1], "dev": self.dev, "ino": self.ino })
+    }
+    fn from_json(v: &serde_json::Value) -> Option<XsId> {
+        let pair = |x: &serde_json::Value| Some((x[0].as_i64()?, x[1].as_i64()?));
+        Some(XsId { len: v["len"].as_u64()?, mtime: pair(&v["mtime"])?, ctime: pair(&v["ctime"])?, dev: v["dev"].as_u64()?, ino: v["ino"].as_u64()? })
+    }
+}
+
+/// What a sealed index records besides its arrays: the key, the hashes of what it holds and of what an open derives
+/// again, and the identity of the vectors file it was built from.
+pub struct Seal<'a> {
+    pub key: &'a str,
+    pub store_hash: u64,
+    pub plan_hash: u64,
+    pub xs: Option<XsId>,
+}
+
 /// `index.json`, written to a new file and renamed into place (it is written twice: without a key while the build
-/// runs, then with its key and hash when the index is complete).
-fn index_json(ix: &Index2, dir: &str, key: Option<&str>, store_hash: Option<u64>) {
+/// runs, then with its key and hashes when the index is complete).
+fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
     let groups: Vec<serde_json::Value> = ix.groups.iter().map(|g| serde_json::json!({
         "e_inv": g.e_inv, "csgl": g.csgl, "cal": g.cal.as_ref().map(cal_json),
     })).collect();
     let meta = serde_json::json!({
-        "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": key, "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
+        "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
         "npow": ix.meta.npow, "x2": ix.x2, "nanch": ix.nanch, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
-        "store_hash": store_hash.map(|h| format!("{h:016x}")),
+        "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
+        "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "groups": groups,
     });
     let (tmp, path) = (format!("{dir}/index.json.tmp"), format!("{dir}/index.json"));
@@ -451,19 +507,19 @@ pub fn save_rest(ix: &Index2, dir: &str) {
         put_cluster(&mut w, c, t);
     }
     write_file(&f("clusters.bin"), &w.0);
-    index_json(ix, dir, None, None);
+    index_json(ix, dir, None);
 }
 
-/// Finish the index built into `dir`: write its support table, give `index.json` the key it answers to and the
-/// index's `store_hash` (written last, so a directory whose `index.json` has a key is complete), and sync the
-/// directory. Returns the store hash.
-pub fn seal(ix: &Index2, dir: &str, key: &str) -> u64 {
+/// Finish the index built into `dir`: write its support table, give `index.json` the key it answers to, the index's
+/// `store_hash` and `plan_hash` and the identity `xs` of the vectors file it was built from (written last, so a
+/// directory whose `index.json` has a key is complete), and sync the directory. Returns the store hash.
+pub fn seal(ix: &Index2, dir: &str, key: &str, xs: Option<XsId>) -> u64 {
     let f = |name: &str| format!("{dir}/{name}");
     write_file(&f("anchors.bin"), &ix.anchors);
     write_file(&f("hi.bin"), &ix.hi);
     write_file(&f("lo.bin"), &ix.lo);
     let h = ix.store_hash();
-    index_json(ix, dir, Some(key), Some(h));
+    index_json(ix, dir, Some(&Seal { key, store_hash: h, plan_hash: ix.plan_hash(), xs }));
     sync_dir(dir);
     h
 }
@@ -480,31 +536,57 @@ pub fn parent_of(edir: &str) -> String {
     }
 }
 
-/// An exclusive lock on `encoded.lock` in the directory that holds the saved indexes, held by a rebuild for its whole
-/// run: a second rebuild there waits for the first (and says so). Released when dropped.
+/// A lock on a file beside the saved indexes, released when dropped. Two are used:
+/// - `encoded.lock`, exclusive, held by a rebuild for its whole run: a second rebuild there waits for the first (and
+///   says so);
+/// - `encoded.install.lock`, held exclusively by `install` only while it swaps an index into place and removes the old
+///   one, and shared by `open` only while it opens and maps its files: an open never sees a directory being replaced
+///   or removed, and never waits behind an encode.
 pub struct Lock(#[allow(dead_code)] std::fs::File);
 impl Lock {
-    pub fn take(parent: &str, log: &mut dyn FnMut(String)) -> Lock {
-        let path = format!("{parent}/encoded.lock");
-        let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&path).unwrap_or_else(|e| panic!("cannot open the lock file {path}: {e}"));
-        unsafe {
-            if libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) != 0 {
-                let e = std::io::Error::last_os_error();
-                if e.raw_os_error() != Some(libc::EWOULDBLOCK) {
-                    panic!("cannot lock {path}: {e}");
-                }
-                log(format!("waiting for another rebuild in {parent} (it holds {path})"));
-                let t = Timer::new();
-                while libc::flock(f.as_raw_fd(), libc::LOCK_EX) != 0 {
-                    let e = std::io::Error::last_os_error();
-                    if e.raw_os_error() != Some(libc::EINTR) {
-                        panic!("cannot lock {path}: {e}");
-                    }
-                }
-                log(format!("the other rebuild finished; waited {:.1}s", t.s()));
+    fn file(path: &str) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)
+    }
+    fn flock(f: &std::fs::File, op: i32) -> std::io::Result<()> {
+        loop {
+            if unsafe { libc::flock(f.as_raw_fd(), op) } == 0 {
+                return Ok(());
+            }
+            let e = std::io::Error::last_os_error();
+            if e.raw_os_error() != Some(libc::EINTR) {
+                return Err(e);
             }
         }
-        Lock(f)
+    }
+    /// The rebuild lock of `parent`. Returns, with the lock, when this rebuild started waiting for another one (None
+    /// when the lock was free).
+    pub fn take(parent: &str, log: &mut dyn FnMut(String)) -> (Lock, Option<std::time::SystemTime>) {
+        let path = format!("{parent}/encoded.lock");
+        let f = Lock::file(&path).unwrap_or_else(|e| panic!("cannot open the lock file {path}: {e}"));
+        let mut waited = None;
+        if let Err(e) = Lock::flock(&f, libc::LOCK_EX | libc::LOCK_NB) {
+            if e.raw_os_error() != Some(libc::EWOULDBLOCK) {
+                panic!("cannot lock {path}: {e}");
+            }
+            waited = Some(std::time::SystemTime::now());
+            log(format!("waiting for another rebuild in {parent} (it holds {path})"));
+            let t = Timer::new();
+            Lock::flock(&f, libc::LOCK_EX).unwrap_or_else(|e| panic!("cannot lock {path}: {e}"));
+            log(format!("the other rebuild finished; waited {:.1}s", t.s()));
+        }
+        (Lock(f), waited)
+    }
+    /// The install lock of `parent`, exclusive (to install) or shared (to open). An open in a directory where the lock
+    /// file cannot be created (read-only) goes ahead without it: nothing can install there either.
+    pub fn install(parent: &str, exclusive: bool) -> Result<Option<Lock>, String> {
+        let path = format!("{parent}/encoded.install.lock");
+        let f = match Lock::file(&path) {
+            Ok(f) => f,
+            Err(e) if !exclusive && matches!(e.raw_os_error(), Some(libc::EROFS) | Some(libc::EACCES) | Some(libc::EPERM)) => return Ok(None),
+            Err(e) => return Err(format!("cannot open the lock file {path}: {e}")),
+        };
+        Lock::flock(&f, if exclusive { libc::LOCK_EX } else { libc::LOCK_SH }).map_err(|e| format!("cannot lock {path}: {e}"))?;
+        Ok(Some(Lock(f)))
     }
 }
 
@@ -515,12 +597,13 @@ pub fn scratch_dir(edir: &str) -> String {
     tmp
 }
 
-/// Put the complete, synced index directory `tmp` in place as `edir`, replacing any index there: an atomic exchange
-/// of the two directories where the file system has one (an open sees the old index or the new one, whole), else
-/// the old one is renamed aside first (an open meanwhile finds no index and says to rebuild). The old directory is
-/// removed afterwards; indexes already open keep the files they mapped.
-pub fn install(tmp: &str, edir: &str) {
+/// Put the complete, synced index directory `tmp` in place as `edir`, replacing any index there, under the install
+/// lock (so no open is reading meanwhile): an atomic exchange of the two directories where the file system has one,
+/// else the old one is renamed aside first. The old directory is removed afterwards; if that fails (a busy NFS file,
+/// say) it is left with a warning, and `log_stale` reports it later. Indexes already open keep the files they mapped.
+pub fn install(tmp: &str, edir: &str, log: &mut dyn FnMut(String)) {
     let parent = parent_of(edir);
+    let _lock = Lock::install(&parent, true).unwrap_or_else(|e| panic!("{e}"));
     let c = |s: &str| std::ffi::CString::new(s).unwrap();
     let old = if std::path::Path::new(edir).exists() {
         let r = unsafe { libc::renameat2(libc::AT_FDCWD, c(tmp).as_ptr(), libc::AT_FDCWD, c(edir).as_ptr(), libc::RENAME_EXCHANGE) };
@@ -539,7 +622,9 @@ pub fn install(tmp: &str, edir: &str) {
     };
     sync_dir(&parent);
     if let Some(o) = old {
-        std::fs::remove_dir_all(&o).unwrap_or_else(|e| panic!("cannot remove the replaced index {o}: {e}"));
+        if let Err(e) = std::fs::remove_dir_all(&o) {
+            log(format!("WARNING: cannot remove the replaced index {o} ({e}); it is left in place, remove it by hand"));
+        }
     }
 }
 
@@ -563,17 +648,25 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
 
 /// Open the index saved in `dir` for the fit `p`, profile `prof` and options `o` (with `design_c` derived from them),
 /// which must be the ones it was built from: its `index.json` must hold `key` (`build_key`). Nothing is encoded: the
-/// per-row arrays and the vectors are mapped, the plans are derived from the fit as the build derives them, and the
-/// calibration, constants, basis defects, per-cluster records and support table are read. Every file is read through
-/// one descriptor of `dir`, so all come from the same build even if a rebuild replaces `dir` meanwhile. A missing,
-/// stale or damaged index is an error that says to rebuild. The repack thresholds are left at their default.
+/// per-row arrays and the vectors are mapped, the plans are derived from the fit as the build derives them (and must
+/// hash as they did at the build, `plan_hash`), and the calibration, constants, basis defects, per-cluster records and
+/// support table are read. Every file is read through one descriptor of `dir`, under the shared install lock, so all
+/// come from one complete build. Every check is over clusters, levels and tables, never over rows (`check_maps` checks
+/// the row maps, with `--hash` and `verify`). A missing, stale or damaged index is an error that says to rebuild.
+///
+/// The fit's vectors file is not read (the index holds its own vectors); its identity is compared with the one the
+/// index was built from (`XsId`): another length or modification time is an error unless `o.keep_index`, which turns
+/// it into a warning; another status-change time, device or inode only (chmod, a copy with its times, a restore, a
+/// hard link) is a warning; a missing file is a warning. The repack thresholds are left at their default.
 pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>, key: &str, dir: &str, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
     let t = Timer::new();
     let missing = |e: String| format!("no index of this fit and these options is saved in {dir} ({e}); build it with --rebuild (v2::rebuild)");
+    let _lock = Lock::install(&parent_of(dir), false)?;
     let dfd = std::fs::File::open(dir).map_err(|e| missing(e.to_string()))?;
     let base = format!("/proc/self/fd/{}", dfd.as_raw_fd());
     let f = |name: &str| format!("{base}/{name}");
     let ours = |e: String| e.replace(&base, dir);
+    let damaged = |what: &str| format!("{dir}: {what}; rebuild the index");
     let text = std::fs::read_to_string(f("index.json")).map_err(|e| missing(e.to_string()))?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{dir}/index.json: {e}; rebuild the index"))?;
     if v["format"].as_u64() != Some(STORE_FORMAT) {
@@ -583,6 +676,33 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         Some(k) if k == key => {}
         Some(k) => return Err(format!("the index in {dir} was built from another fit, other options or another version of the library (key {k}, these give {key}); rebuild it")),
         None => return Err(format!("{dir} holds an unfinished index (no key); rebuild it")),
+    }
+    // the vectors file it was built from
+    match (XsId::from_json(&v["xs"]), XsId::of(&p.xs_path)) {
+        (_, Err(e)) => log(format!("WARNING: the fit's vectors file is missing or unreadable ({e}); the index holds its own vectors, opening it")),
+        (None, Ok(_)) => log(format!("WARNING: {dir}/index.json does not record the vectors file it was built from; opening it")),
+        (Some(was), Ok(now)) if was != now => {
+            if was.len != now.len || was.mtime != now.mtime {
+                let what = format!("{} changed since this index was built (length {} -> {}, modified {:?} -> {:?})", p.xs_path, was.len, now.len, was.mtime, now.mtime);
+                if !o.keep_index {
+                    return Err(format!("{what}; --rebuild, or --keep-index to use the index as built"));
+                }
+                log(format!("WARNING: {what}; --keep-index: using the index as built, with the vectors it holds"));
+            } else {
+                let mut which = Vec::new();
+                if was.ctime != now.ctime {
+                    which.push("status-change time (ctime)");
+                }
+                if was.dev != now.dev {
+                    which.push("device");
+                }
+                if was.ino != now.ino {
+                    which.push("inode");
+                }
+                log(format!("WARNING: {}: same length and modification time as when this index was built, but another {} (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index, which serves the vectors it was built from", p.xs_path, which.join(", ")));
+            }
+        }
+        _ => {}
     }
     let us = |k: &str| v[k].as_u64().map(|x| x as usize).ok_or(format!("{dir}/index.json has no {k}; rebuild the index"));
     let (n, k, nrows, nanch, nent) = (us("n")?, us("k")?, us("nrows")?, us("nanch")?, us("nent")?);
@@ -610,16 +730,27 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         }
     }
     let nl = meta.nl();
+    if groups.iter().any(|g| g.levels.len() != nl) {
+        return Err(damaged("a group's plan has another level count"));
+    }
     let cbuf = std::fs::read(f("clusters.bin")).map_err(|e| format!("cannot read {dir}/clusters.bin: {e}; rebuild the index"))?;
     let mut r = Rd(&cbuf);
     let (cl, ctab): (Vec<Cl2>, Vec<Vec<kern::CTab>>) = (0..k).map(|_| get_cluster(&mut r)).collect::<Result<Vec<_>, String>>().map_err(|e| format!("{dir}/{e}"))?.into_iter().unzip();
     if !r.0.is_empty() {
         return Err(format!("{dir}/clusters.bin has data past its {k} clusters; rebuild the index"));
     }
+    // every length a query reads unchecked: per cluster, its rows, its centre's vectors and each level's centre table
     for (c, (x, t)) in cl.iter().zip(&ctab).enumerate() {
         let r0 = if c == 0 { 0 } else { cl[c - 1].r1 };
-        if x.g >= groups.len() || x.r0 != r0 || x.r1 < x.r0 || x.nblk != (x.r1 - x.r0).div_ceil(BLK) || t.len() != nl || x.mhat.len() != n {
-            return Err(format!("{dir}/clusters.bin: cluster {c}'s record does not fit the index; rebuild it"));
+        if x.g >= groups.len() || x.r0 != r0 || x.r1 < x.r0 || x.nblk != (x.r1 - x.r0).div_ceil(BLK) || t.len() != nl || x.mhat.len() != n || x.mv32.len() != n || x.wmr.len() != n {
+            return Err(damaged(&format!("cluster {c}'s record does not fit the index")));
+        }
+        for (l, (ct, lp)) in t.iter().zip(&groups[x.g].levels).enumerate() {
+            let units: usize = lp.parts.iter().map(|pt| pt.units() / 4 * 4).sum();
+            let np = lp.parts.len();
+            if ct.th.len() != units || ct.tmax.len() != units || ct.step.len() != np || ct.off.len() != np || ct.err.len() != np {
+                return Err(damaged(&format!("cluster {c}'s centre table at level {l} does not fit the plan")));
+            }
         }
     }
     let offs: Arr<u64> = Arr::map(&f("offsets.bin")).map_err(ours)?;
@@ -631,6 +762,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     if ek.len() != ev.len() {
         return Err(format!("{dir}: esc_key.bin and esc_val.bin differ in length; rebuild the index"));
     }
+    // O(escapes), not O(clusters): the in-memory escape map queries look up (a few per hundred rows)
     let esc = ek.iter().zip(ev.iter()).map(|(&k, &v)| (((k >> 40) as u8, (k >> 32) as u8, k as u32), v)).collect();
     let anchors: Vec<f64> = Arr::<f64>::map(&f("anchors.bin")).map_err(ours)?.to_vec();
     let (hi, lo): (Vec<f32>, Vec<f32>) = (Arr::<f32>::map(&f("hi.bin")).map_err(ours)?.to_vec(), Arr::<f32>::map(&f("lo.bin")).map_err(ours)?.to_vec());
@@ -644,17 +776,16 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         // each cluster's blocks lie inside its level's arrays, which end in 128 bytes of slack
         for (c, x) in cl.iter().enumerate() {
             let lp = &groups[x.g].levels[l];
-            if coff[l][c] + x.nblk * lp.units * 16 + 128 > lcode[l].len() || soff[l][c] + x.nblk * lp.srows * 16 + 128 > lscal[l].len() {
-                return Err(format!("{dir}: level {l}'s codes or scalars are shorter than its offsets; rebuild the index"));
+            let end = |o: usize, rows: usize| x.nblk.checked_mul(rows).and_then(|b| b.checked_mul(16)).and_then(|b| b.checked_add(o)).and_then(|b| b.checked_add(128));
+            let fits = |o: usize, rows: usize, len: usize| end(o, rows).is_some_and(|e| e <= len);
+            if !fits(coff[l][c], lp.units, lcode[l].len()) || !fits(soff[l][c], lp.srows, lscal[l].len()) {
+                return Err(damaged(&format!("level {l}'s codes or scalars are shorter than its offsets")));
             }
         }
     }
     let (ahat, row_ent, ent_row, nukey) = (Arr::map(&f("ahat.bin")).map_err(ours)?, Arr::map(&f("row_ent.bin")).map_err(ours)?, Arr::map(&f("ent_row.bin")).map_err(ours)?, Arr::map(&f("nukey.bin")).map_err(ours)?);
     if ahat.len() != nrows + 32 || row_ent.len() != nrows || ent_row.len() != nent || !(nukey.is_empty() || nukey.len() == nrows) || cl.last().map_or(0, |c| c.r1) != nrows {
-        return Err(format!("{dir}: the row arrays do not hold {nrows} rows; rebuild the index"));
-    }
-    if row_ent.iter().any(|&e| e as usize >= nent) || ent_row.iter().any(|&r| r != u32::MAX && r as usize >= nrows) {
-        return Err(format!("{dir}: the row and entity maps point outside the index; rebuild it"));
+        return Err(damaged(&format!("the row arrays do not hold {nrows} rows")));
     }
     if nukey.is_empty() == o.nusort {
         return Err(format!("{dir} was built {} the norm sort, the options ask {}; rebuild it", if o.nusort { "without" } else { "with" }, if o.nusort { "for it" } else { "for none" }));
@@ -689,30 +820,30 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         vrow: Vec::new(),
         nent,
     };
-    log(format!("opened {dir} in {:.1}s: {nrows} rows, {k} clusters; when built: code hash {}, store hash {}", t.s(), v["code_hash"].as_str().unwrap_or("?"), v["store_hash"].as_str().unwrap_or("?")));
+    // what this open derived again (plans, codebooks, rotations, centres; with this library and its dependencies) must
+    // be what the build derived
+    let ph = format!("{:016x}", ix.plan_hash());
+    match v["plan_hash"].as_str() {
+        Some(h) if h == ph => {}
+        h => return Err(format!("{dir}: the plans this build derives (hash {ph}) are not the ones the index was built with ({}); rebuild the index", h.unwrap_or("none recorded"))),
+    }
+    log(format!("opened {dir} in {:.3}s: {nrows} rows, {k} clusters; when built: code hash {}, store hash {}", t.s(), v["code_hash"].as_str().unwrap_or("?"), v["store_hash"].as_str().unwrap_or("?")));
     Ok(ix)
 }
 
 /// The key of the index the fit `p` (with the options applied), the profile `prof` and the options `o` build: a saved
-/// index is opened only when its key is this one. It covers every input of the build: the fit's parameters, the
-/// profile, the identity of the vectors file, the options that change what is built, the formats of the encoding and
-/// of the files, and the library's source fingerprint (`LIB_FINGERPRINT`: any edit to the library makes saved indexes
-/// stale). It is a fixed hash (`Fx`), the same on every Rust release, and does not depend on how the fitted
-/// directory's path is spelled or where the directory is.
-///
-/// The vectors file (meta.json's `xs`) is identified, not read (at a billion items it is terabytes): by its name as
-/// meta.json gives it, its length, its modification and status-change times (to the nanosecond), its device and its
-/// inode. Writing the file in place changes its status-change time (ctime), which `touch` and `cp -p` cannot set back;
-/// a copied or moved-across-file-systems file has another inode, so it needs a rebuild (the safe direction). What is
-/// assumed: nobody rewrites the file in place and restores its ctime, which only setting the system clock back as
-/// root can do.
+/// index is opened only when its key is this one. It covers what the build reads besides the vectors: the fit's
+/// parameters, the profile, the name of the vectors file as meta.json gives it (relative to the fitted directory
+/// unless absolute), the options that change what is built, the formats of the encoding and of the files, and the
+/// library's source fingerprint (`LIB_FINGERPRINT`). It is a fixed hash (`Fx`), the same on every Rust release, and
+/// does not depend on how the fitted directory's path is spelled or where the directory is. The vectors file's
+/// identity is not in the key: an index holds its own vectors, and `open` compares the identity recorded at the build.
 pub fn build_key(p: &Params, prof: &[f64], o: &BuildOptions) -> String {
     build_key_with(p, prof, o, LIB_FINGERPRINT)
 }
 
 /// `build_key` with the library fingerprint `lib`.
 pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> String {
-    use std::os::unix::fs::MetadataExt;
     let mut h = Fx::default();
     h.str("vexact saved index key");
     h.u64(STORE_FORMAT);
@@ -746,11 +877,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
         None => h.u64(0),
     }
     h.pod(prof);
-    let md = std::fs::metadata(&p.xs_path).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.xs_path));
     h.str(&p.xs_name);
-    for x in [md.len(), md.mtime() as u64, md.mtime_nsec() as u64, md.ctime() as u64, md.ctime_nsec() as u64, md.dev(), md.ino()] {
-        h.u64(x);
-    }
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
     h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_per_group]);
     match o.nguar {
@@ -761,41 +888,16 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
 }
 
 impl Index2 {
-    /// A fixed hash (`Fx`) of everything the index holds and a query reads: the sizes, every per-row array (codes,
-    /// scalars, keys, row and entity maps, norm keys, compaction's row map), the offsets and escapes, every
-    /// per-cluster record and centre table, the plans and calibrated tables of every group, the deterministic and
-    /// expanded codebooks, centres, rotations, the support table and the stored vectors. Only the repack thresholds,
-    /// which are timed at each open, are left out. A built index and the same index opened hash alike.
-    pub fn store_hash(&self) -> u64 {
+    /// A fixed hash (`Fx`) of what an open derives again instead of reading: the meta, the plans and calibrated
+    /// tables of every group, the deterministic and expanded codebooks, the rotations and the centres. The build
+    /// records it and an open must derive the same (another library or dependency version could derive others).
+    /// The repack thresholds are timed, not derived, and left out.
+    pub fn plan_hash(&self) -> u64 {
         let mut h = Fx::default();
-        h.str("vexact index");
-        h.usizes(&[self.n(), self.k(), self.nrows, self.nent, self.nanch, self.meta.npow as usize]);
-        h.pod(&[self.x2]);
+        h.str("vexact plans");
+        h.usizes(&[self.n(), self.k(), self.meta.npow as usize]);
         h.usizes(&self.meta.dlv);
         h.usizes(&self.meta.rlv);
-        for v in self.lcode.iter().chain(&self.lscal) {
-            h.bytes(v);
-        }
-        h.pod(&self.ahat);
-        h.pod(&self.row_ent);
-        h.pod(&self.ent_row);
-        h.pod(&self.nukey);
-        h.pod(&self.vrow);
-        for o in self.coff.iter().chain(&self.soff) {
-            h.usizes(o);
-        }
-        let mut e: Vec<(u8, u8, u32, u32)> = self.esc.iter().map(|(k, v)| (k.0, k.1, k.2, v.to_bits())).collect();
-        e.sort_unstable();
-        h.u64(e.len() as u64);
-        for (a, b, c, d) in e {
-            h.u64(((a as u64) << 40) | ((b as u64) << 32) | c as u64);
-            h.u64(d as u64);
-        }
-        for (c, t) in self.cl.iter().zip(self.ctab.iter()) {
-            let mut w = Wr::default();
-            put_cluster(&mut w, c, t);
-            h.bytes(&w.0);
-        }
         for g in self.groups.iter() {
             h.pod(&g.sig);
             h.pod(&[g.lamsum]);
@@ -844,24 +946,72 @@ impl Index2 {
         h.pod(&self.etab.hi);
         h.pod(&self.centres64);
         self.rots.iter().for_each(|r| h.pod(r));
-        h.pod(&self.anchors);
-        h.pod(&self.hi);
-        h.pod(&self.lo);
+        h.finish()
+    }
+
+    /// A fixed hash (`Fx`) of everything the index holds and a query reads: `plan_hash`, the sizes and `x2`, every
+    /// per-row array (codes, scalars, keys, row and entity maps, norm keys, compaction's row map), the offsets and
+    /// escapes, every per-cluster record and centre table, the support table and the stored vectors. Only the repack
+    /// thresholds, which are timed, are left out. The large arrays are hashed in parallel in fixed chunks (`Fx::big`),
+    /// so the value does not depend on the thread count. A built index and the same index opened hash alike.
+    pub fn store_hash(&self) -> u64 {
+        let mut h = Fx::default();
+        h.str("vexact index");
+        h.u64(self.plan_hash());
+        h.usizes(&[self.n(), self.k(), self.nrows, self.nent, self.nanch]);
+        h.pod(&[self.x2]);
+        for v in self.lcode.iter().chain(&self.lscal) {
+            h.big(v);
+        }
+        h.big_pod(&self.ahat[..]);
+        h.big_pod(&self.row_ent[..]);
+        h.big_pod(&self.ent_row[..]);
+        h.big_pod(&self.nukey[..]);
+        h.big_pod(&self.vrow[..]);
+        for o in self.coff.iter().chain(&self.soff) {
+            h.usizes(o);
+        }
+        let mut e: Vec<(u8, u8, u32, u32)> = self.esc.iter().map(|(k, v)| (k.0, k.1, k.2, v.to_bits())).collect();
+        e.sort_unstable();
+        let e: Vec<u64> = e.into_iter().flat_map(|(a, b, c, d)| [((a as u64) << 40) | ((b as u64) << 32) | c as u64, d as u64]).collect();
+        h.big_pod(&e);
+        for (c, t) in self.cl.iter().zip(self.ctab.iter()) {
+            let mut w = Wr::default();
+            put_cluster(&mut w, c, t);
+            h.bytes(&w.0);
+        }
+        h.pod(&self.anchors[..]);
+        h.pod(&self.hi[..]);
+        h.pod(&self.lo[..]);
         match &self.full {
-            Full2::Real { rows } if self.vrow.is_empty() => h.bytes(rows.as_bytes(self.nrows * self.n())),
+            Full2::Real { rows } if self.vrow.is_empty() => h.big(rows.as_bytes(self.nrows * self.n())),
             // a compaction without its own vectors reads its parent's (hashed with the parent)
             Full2::Real { .. } => h.u64(0),
             Full2::Synth(s) => {
-                h.pod(&s.ext);
-                h.pod(&s.row_cl);
+                h.big_pod(&s.ext);
+                h.big_pod(&s.row_cl);
             }
         }
         h.finish()
     }
+
+    /// The row and entity maps checked against each other and the index's size: O(rows), so not part of `open`; run
+    /// with `--hash` and `verify`.
+    pub fn check_maps(&self) -> Result<(), String> {
+        if self.row_ent.iter().any(|&e| e as usize >= self.nent) {
+            return Err("an entity id in row_ent is out of range; rebuild the index".into());
+        }
+        for (e, &r) in self.ent_row.iter().enumerate() {
+            if r != u32::MAX && (r as usize >= self.nrows || self.row_ent[r as usize] as usize != e) {
+                return Err(format!("ent_row and row_ent disagree at entity {e}; rebuild the index"));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
 
@@ -957,9 +1107,8 @@ mod tests {
         unsafe { Out::<u8>::new(None, "", 10).put(8, &[1, 2, 3]) };
     }
 
-    /// The key does not depend on how the fitted directory's path is spelled or where the directory is; it changes
-    /// when the vectors file is rewritten in place even with its length and modification time kept, and with the
-    /// library's fingerprint.
+    /// The key does not depend on how the fitted directory's path is spelled or where the directory is, nor on the
+    /// vectors file's identity (`open` checks that); it changes with the library's fingerprint.
     #[test]
     fn the_key_follows_the_fit_and_the_library_not_the_path() {
         let root = tmpdir("key");
@@ -1001,7 +1150,7 @@ mod tests {
         }
         let md2 = std::fs::metadata(&xs).unwrap();
         assert_eq!((md2.len(), md2.modified().unwrap()), (len, mtime));
-        assert_ne!(key(bs), k0, "the vectors file was rewritten in place with its length and mtime kept");
+        assert_eq!(key(bs), k0, "the vectors file's identity is not part of the key");
         // the library's fingerprint
         let (p, prof) = prepare(bs, &o);
         assert_eq!(build_key(&p, &prof, &o), build_key_with(&p, &prof, &o, LIB_FINGERPRINT));

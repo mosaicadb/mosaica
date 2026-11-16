@@ -212,7 +212,7 @@ fn a_saved_index_opens_as_the_index_it_saves() {
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
     let before: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
-    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
     let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
     let after: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(before, after, "a build saved elsewhere wrote into the fitted directory");
@@ -280,7 +280,7 @@ fn saved_indexes_under_other_options_open_as_built() {
         let edir = tmp.join(name.replace([' ', ','], "_"));
         let edir = edir.to_str().unwrap();
         let (_, mem) = build(dir, &o, &mut |_| {});
-        let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+        let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
         let (_, opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
         same_index(&mem, &built);
         same_index(&built, &opened);
@@ -300,7 +300,7 @@ fn compactions_of_an_opened_index_answer_as_the_built_ones() {
     let edir = tmp.join("encoded");
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
-    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
     let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
     opened.repack = built.repack.clone();
     let f = fixture();
@@ -332,32 +332,188 @@ fn compactions_of_an_opened_index_answer_as_the_built_ones() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
-/// Two rebuilds of the same index at once: the second waits for the first (the lock), both finish, and what is
-/// saved is the index a single build makes, with no scratch directory left behind.
+/// The rebuild lock serialises rebuilds: a rebuild started while the lock is held says it waits and does not finish
+/// until the lock is released. Two rebuilds started together: exactly one waits, and it opens the index the other
+/// just saved instead of encoding again; what is saved is the index a single build makes, with nothing left behind.
 #[test]
-fn concurrent_rebuilds_leave_one_clean_index() {
+fn concurrent_rebuilds_are_serialised() {
+    use std::sync::{mpsc, Arc as A, Barrier};
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let tmp = tmp_dir("concurrent");
-    let edir = tmp.join("encoded-x");
-    let edir = edir.to_str().unwrap().to_string();
+    let edir = tmp.join("encoded-x").to_str().unwrap().to_string();
     let o = BuildOptions::default();
+    let want = fixture().ix.store_hash();
+    // the lock held here: a rebuild waits
+    let (held, _) = store::Lock::take(tmp.to_str().unwrap(), &mut |_| {});
+    let (tx, rx) = mpsc::channel::<String>();
+    let h = {
+        let (edir, o) = (edir.clone(), o.clone());
+        std::thread::spawn(move || rebuild_at(dir, &edir, &o, &mut |l| { let _ = tx.send(l); }).map(|(_, ix)| ix.store_hash()))
+    };
+    let t0 = std::time::Instant::now();
+    loop {
+        let l = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the rebuild never said it waits");
+        if l.contains("waiting for another rebuild") {
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!h.is_finished(), "the rebuild finished while the lock was held");
+    assert!(!std::path::Path::new(&edir).exists());
+    drop(held);
+    assert_eq!(h.join().unwrap().unwrap(), want);
+    assert!(t0.elapsed().as_millis() >= 300);
+    // two rebuilds at once
+    std::fs::remove_dir_all(&edir).unwrap();
+    let bar = A::new(Barrier::new(2));
     let logs: Vec<Vec<String>> = std::thread::scope(|s| {
-        let hs: Vec<_> = (0..2).map(|_| s.spawn(|| {
-            let mut log = Vec::new();
-            let (_, ix) = rebuild_at(dir, &edir, &o, &mut |l| log.push(l));
-            assert_eq!(ix.store_hash(), fixture().ix.store_hash());
-            log
-        })).collect();
+        let hs: Vec<_> = (0..2).map(|_| {
+            let (bar, edir, o) = (bar.clone(), &edir, &o);
+            s.spawn(move || {
+                let mut log = Vec::new();
+                bar.wait();
+                let (_, ix) = rebuild_at(dir, edir, o, &mut |l| log.push(l)).unwrap();
+                assert_eq!(ix.store_hash(), want);
+                log
+            })
+        }).collect();
         hs.into_iter().map(|h| h.join().unwrap()).collect()
     });
-    let waited = logs.iter().flatten().filter(|l| l.contains("waiting for another rebuild")).count();
-    assert!(waited <= 1, "{logs:?}");
+    let count = |pat: &str| logs.iter().flatten().filter(|l| l.contains(pat)).count();
+    assert_eq!(count("waiting for another rebuild"), 1, "{logs:?}");
+    assert_eq!(count("another rebuild just produced this index"), 1, "{logs:?}");
+    assert_eq!(count("saved to"), 1, "{logs:?}");
     let (_, opened) = open_at(dir, &edir, &o, &mut |_| {}).unwrap();
-    assert_eq!(opened.store_hash(), fixture().ix.store_hash(), "the saved index is the one a single build makes");
+    assert_eq!(opened.store_hash(), want, "the saved index is the one a single build makes");
     let mut left: Vec<String> = std::fs::read_dir(&tmp).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
     left.sort();
-    assert_eq!(left, ["encoded-x", "encoded.lock"], "scratch directories left behind");
+    assert_eq!(left, ["encoded-x", "encoded.install.lock", "encoded.lock"], "scratch directories left behind");
     drop(opened);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// Opens in a loop while another thread rebuilds and installs the same index again and again: every open succeeds
+/// (the install lock keeps it from seeing a directory being swapped or removed) and holds the index.
+#[test]
+fn opens_during_installs_always_succeed() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("install");
+    let edir = tmp.join("encoded-y").to_str().unwrap().to_string();
+    let o = BuildOptions::default();
+    let want = fixture().ix.store_hash();
+    rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    let done = AtomicBool::new(false);
+    let opens = std::thread::scope(|s| {
+        let r = s.spawn(|| {
+            for _ in 0..4 {
+                rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+            }
+            done.store(true, Ordering::Relaxed);
+        });
+        let mut opens = 0;
+        while !done.load(Ordering::Relaxed) {
+            let (_, ix) = open_at(dir, &edir, &o, &mut |_| {}).unwrap_or_else(|e| panic!("an open during an install failed: {e}"));
+            assert_eq!(ix.store_hash(), want);
+            opens += 1;
+        }
+        r.join().unwrap();
+        opens
+    });
+    assert!(opens > 0);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// The fit's vectors file is checked against the identity recorded at the build: rows swapped in place with the
+/// length and modification time kept (only the ctime changes) is a warning that names the ctime, and the index opens
+/// serving the vectors it was built from; another modification time or length is an error unless --keep-index; a
+/// missing file is a warning. A damaged file is an error that says to rebuild.
+#[test]
+fn the_vectors_file_is_checked_at_open() {
+    use std::io::{Seek, SeekFrom, Write};
+    let tmp = tmp_dir("xs");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let edir = tmp.join("encoded-z").to_str().unwrap().to_string();
+    let o = BuildOptions::default();
+    let (_, built) = rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    let want = built.store_hash();
+    drop(built);
+    let opened = |o: &BuildOptions| -> (Result<u64, String>, Vec<String>) {
+        let mut log = Vec::new();
+        let r = open_at(dir, &edir, o, &mut |l| log.push(l)).map(|(_, ix)| ix.store_hash());
+        (r, log)
+    };
+    let warned = |log: &[String], pat: &str| log.iter().any(|l| l.contains("WARNING") && l.contains(pat));
+    let (r, log) = opened(&o);
+    assert_eq!(r.unwrap(), want);
+    assert!(!log.iter().any(|l| l.contains("WARNING")), "{log:?}");
+    // rows swapped in place, length and mtime kept (as touch -r does)
+    let xs = fit.join("Xs.npy");
+    let md = std::fs::metadata(&xs).unwrap();
+    let mtime = md.modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let mut buf = std::fs::read(&xs).unwrap();
+    let (row, end) = (64 * 4, buf.len());
+    let (x, y) = buf[end - 2 * row..].split_at_mut(row);
+    x.swap_with_slice(y);
+    let mut f = std::fs::OpenOptions::new().write(true).open(&xs).unwrap();
+    f.seek(SeekFrom::Start((end - 2 * row) as u64)).unwrap();
+    f.write_all(&buf[end - 2 * row..]).unwrap();
+    f.set_modified(mtime).unwrap();
+    drop(f);
+    let (r, log) = opened(&o);
+    assert_eq!(r.unwrap(), want, "the index serves the vectors it was built from");
+    assert!(warned(&log, "ctime"), "{log:?}");
+    // another modification time: an error, unless --keep-index
+    std::fs::File::options().write(true).open(&xs).unwrap().set_modified(mtime + std::time::Duration::from_secs(1)).unwrap();
+    let (r, _) = opened(&o);
+    assert!(r.unwrap_err().contains("--keep-index"));
+    let keep = BuildOptions { keep_index: true, ..o.clone() };
+    let (r, log) = opened(&keep);
+    assert_eq!(r.unwrap(), want);
+    assert!(warned(&log, "changed since this index was built"), "{log:?}");
+    // missing: a warning
+    std::fs::remove_file(&xs).unwrap();
+    let (r, log) = opened(&o);
+    assert_eq!(r.unwrap(), want);
+    assert!(warned(&log, "missing"), "{log:?}");
+    // a rebuild without the vectors is an error, not a panic
+    assert!(rebuild_at(dir, &edir, &o, &mut |_| {}).is_err());
+    // damaged files: errors that say to rebuild
+    let damage = |name: &str, f: &dyn Fn(&mut Vec<u8>)| {
+        let p = format!("{edir}/{name}");
+        let orig = std::fs::read(&p).unwrap();
+        let mut b = orig.clone();
+        f(&mut b);
+        std::fs::write(&p, &b).unwrap();
+        let (r, _) = opened(&o);
+        std::fs::write(&p, &orig).unwrap();
+        r
+    };
+    for (name, what) in [("offsets.bin", "an offset near u64::MAX"), ("clusters.bin", "a record cut short"), ("clusters.bin", "a centre table's length")] {
+        let r = damage(name, &|b: &mut Vec<u8>| match what {
+            "an offset near u64::MAX" => b[8..16].copy_from_slice(&(u64::MAX - 8).to_le_bytes()),
+            "a record cut short" => b.truncate(b.len() - 3),
+            // the first cluster's record: 4 u64, 7 f64, an f32, bm, b2, l1m, mhat, mv32, wmr, then the table count and
+            // the first table's th length
+            _ => {
+                let mut o = 4 * 8 + 7 * 8 + 4;
+                for el in [8, 8, 4, 8, 4, 4] {
+                    let len = u64::from_le_bytes(b[o..o + 8].try_into().unwrap()) as usize;
+                    o += 8 + len * el;
+                }
+                o += 8;
+                let th = u64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+                b[o..o + 8].copy_from_slice(&(th - 1).to_le_bytes());
+                b.splice(o + 8..o + 8 + 32 * th as usize, std::iter::repeat_n(0u8, 32 * (th as usize - 1)));
+            }
+        });
+        assert!(r.as_ref().is_err_and(|e| e.contains("rebuild")), "{what}: {r:?}");
+    }
+    let (r, _) = opened(&o);
+    assert_eq!(r.unwrap(), want);
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 

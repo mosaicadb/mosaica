@@ -6,7 +6,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-/// The files this process maps (device and inode of each, from /proc/self/maps).
+/// The files this process maps (device and inode of each, from /proc/self/maps). On btrfs subvolumes and overlayfs the
+/// device /proc/self/maps shows can differ from the one stat reports for the same file, so a match may be missed
+/// there; it is a second line of defence (to_file never writes the file it replaces in any case).
 pub fn mapped_files() -> std::collections::HashSet<(u64, u64)> {
     let mut out = std::collections::HashSet::new();
     for line in std::fs::read_to_string("/proc/self/maps").unwrap_or_default().lines() {
