@@ -1,0 +1,23 @@
+[package]
+name = "vexact-py"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+name = "vexact_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+vexact = { path = "../../../rust" }
+pyo3 = { version = "0.30", features = ["extension-module", "abi3-py310"] }
+numpy = "0.30"
+rayon = "1.10"
+roaring = "0.10"
+
+[profile.release]
+debug = 0
+codegen-units = 4
+lto = "thin"

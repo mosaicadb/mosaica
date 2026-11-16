@@ -1,0 +1,59 @@
+# The index in ANN-Benchmarks
+
+This folder adds the fast-scan index (`rust/`) to [ANN-Benchmarks](https://github.com/erikbern/ann-benchmarks) as the
+algorithm `vexact`. It then runs the index against the harness's own builds of hnswlib, faiss, ScaNN, glass, PyNNDescent,
+DiskANN and BLAS brute force on the harness's datasets. `bench/run.sh` remains the place for filtered runs and for
+checks against the oracle. This folder covers only the unfiltered protocol, run by the harness itself.
+
+- `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `set_visible`,
+  `fit_dial`. They depend on `rust/` by path and need no change to it.
+- `vexact/`: the algorithm folder the harness loads: `module.py`, `config.yml`, `Dockerfile`.
+- `install.sh`: copies the algorithm folder into a checkout, with `rust/` and `combined/core.py` taken from a pinned
+  revision, and builds the `ann-benchmarks-vexact` image.
+- `run.sh`: every algorithm on every dataset, then a plot per dataset and `results/export.csv`.
+- `diskann.patch`: the harness's DiskANN image does not build as published; this patch is applied to the checkout.
+
+## Running it
+
+```bash
+git clone https://github.com/erikbern/ann-benchmarks.git ~/ann-benchmarks
+cd ~/ann-benchmarks && git checkout 2e081ad    # the revision these files were checked against
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+git apply /path/to/mosaica/bench/annb/diskann.patch
+for a in hnswlib faiss faiss_hnsw scann glass pynndescent bruteforce diskann; do .venv/bin/python install.py --algorithm $a; done
+bash /path/to/mosaica/bench/annb/install.sh ~/ann-benchmarks
+PYTHON=~/ann-benchmarks/.venv/bin/python bash /path/to/mosaica/bench/annb/run.sh ~/ann-benchmarks
+```
+
+`run.sh` takes dataset names after the checkout to run fewer, and reads `ALGOS`, `RUNS` (default 2) and `TIMEOUT`
+(seconds per algorithm instance, default 4 hours) from the environment. Results already present are kept.
+
+The default datasets are glove-25, glove-100, nytimes-256, coco-t2i-512 (CLIP text queries against image embeddings)
+and dbpedia-openai-1000k (1M OpenAI embeddings, 1,536 dimensions). All are angular: the index supports no other metric
+yet. coco and dbpedia are not hosted at ann-benchmarks.com, and the checkout builds them on first use. dbpedia needs
+about 6 GB of download and 20 GB of memory to build, and the brute-force ground truth takes a while.
+
+## The pinned revision
+
+`install.sh` copies `rust/` from the revision named `PIN` in the script, not from the working tree, so the
+benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
+`PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings use only `v2::open`,
+`Plan::calibrate`, `pseudo_queries`, `Approx::fit`, `Dial::fit`, `Vis2::new`, `knn2` and `knn2_fast`.
+
+The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
+
+## How the index is run
+
+- **Build** (`fit`): `rust/tools/fit.py` on the training vectors, then `vexact_py.Index` on its output (encoding, the
+  planner's constants timed on one thread, and the approximate mode's cluster order fitted on 1,000 pseudo-queries).
+  The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
+- **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.
+- **vexact-approx**: `knn2_fast` over the first `nprobe` clusters (1 to 512), with the dial off (`eps` 0) or fitted for
+  a miss rate of 0.01 per level. The dial for k = 10 is fitted in `set_query_arguments`, outside the timed queries.
+- Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured
+  here, but `bench/run.sh` times from Rust and is the better tool above about 10,000 QPS.
+
+## Deviations from the harness
+
+- Vectors narrower than 64 dimensions (glove-25) are padded with zero columns to 64, which leaves every cosine
+  unchanged. The index's randomised levels need at least 50 dimensions.

@@ -1,0 +1,21 @@
+float:
+  angular:
+  - base_args: ['@metric']
+    constructor: VexactExact
+    disabled: false
+    docker_tag: ann-benchmarks-vexact
+    module: ann_benchmarks.algorithms.vexact
+    name: vexact-exact
+    run_groups:
+      exact:
+        args: [{}]
+  - base_args: ['@metric']
+    constructor: VexactApprox
+    disabled: false
+    docker_tag: ann-benchmarks-vexact
+    module: ann_benchmarks.algorithms.vexact
+    name: vexact-approx
+    run_groups:
+      approx:
+        args: [{}]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01]]
