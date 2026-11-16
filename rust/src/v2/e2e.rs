@@ -782,3 +782,92 @@ fn a_changed_partition_is_refused_at_the_build() {
     assert!(e.contains("perm.npy"), "{e}");
     std::fs::remove_dir_all(&tmp).unwrap();
 }
+
+/// The support table's bounds (f32 products, extremes rechecked in f64) against brute force in f64: rows of large norm
+/// with near ties (copies differing in one coordinate by one f16 step), anchors on no grid, n odd and above 768. Each
+/// bound is the brute-force extreme rounded outward to 2^-15 (bit for bit), so it holds (hi >= max, lo <= min) and is
+/// tight (within 2^-15 and the 1e-9 margin).
+#[test]
+fn support_bounds_equal_brute_force_in_f64() {
+    use crate::util::{f16_to_f32, f32_to_f16};
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(11);
+    for &(n, nc, na, scale) in &[(769usize, 300usize, 37usize, 40.0f32), (771, 64, 5, 1.0), (1025, 120, 16, 200.0)] {
+        let base: Vec<u16> = (0..n).map(|_| f32_to_f16((rng.gen::<f32>() - 0.5) * scale)).collect();
+        let mut x16: Vec<u16> = Vec::new();
+        for i in 0..nc {
+            let row: Vec<u16> = if i % 3 == 0 {
+                // a near tie with the base row: one coordinate moved by one f16 step
+                let mut r = base.clone();
+                let j = (i * 7919) % n;
+                r[j] = if i % 2 == 0 { r[j].wrapping_add(1) } else { r[j].wrapping_sub(1) };
+                r
+            } else {
+                (0..n).map(|_| f32_to_f16((rng.gen::<f32>() - 0.5) * scale)).collect()
+            };
+            x16.extend(row);
+        }
+        let mut anchors = Vec::new();
+        for _ in 0..na {
+            let v: Vec<f64> = (0..n).map(|_| rng.gen::<f64>() - 0.5 + 1e-3 * std::f64::consts::PI).collect();
+            let nr = v.iter().map(|x| x * x).sum::<f64>().sqrt();
+            anchors.extend(v.into_iter().map(|x| x / nr));
+        }
+        // one anchor along the base row, where the near ties are the extremes
+        let b: Vec<f64> = base.iter().map(|&h| f16_to_f32(h) as f64).collect();
+        let nr = b.iter().map(|x| x * x).sum::<f64>().sqrt();
+        anchors.extend(b.iter().map(|x| x / nr));
+        let na = na + 1;
+        let a32: Vec<f32> = anchors.iter().map(|&v| v as f32).collect();
+        let (hi, lo) = support_bounds(&x16, n, &anchors, &a32);
+        for a in 0..na {
+            let vals: Vec<f64> = (0..nc).map(|i| x16[i * n..(i + 1) * n].iter().zip(&anchors[a * n..(a + 1) * n]).map(|(&h, &v)| f16_to_f32(h) as f64 * v).sum()).collect();
+            let (mx, mi) = vals.iter().fold((f64::NEG_INFINITY, f64::INFINITY), |(x, y), &v| (x.max(v), y.min(v)));
+            let (h, l) = (hi[a] as f64, lo[a] as f64);
+            assert!(h >= mx && l <= mi, "n {n}, anchor {a}: bounds [{l}, {h}] do not hold [{mi}, {mx}]");
+            // within 2^-15 (or, past 256 in magnitude, the f32 step) of the extreme, plus the 1e-9 margin
+            let step = |v: f64| 2f64.powi(-15).max((v.abs() as f32).next_up() as f64 - v.abs() as f32 as f64);
+            assert!(h - mx <= step(h) * 2.0 + 1e-9 && mi - l <= step(l) * 2.0 + 1e-9, "n {n}, anchor {a}: [{l}, {h}] not tight about [{mi}, {mx}]");
+            assert_eq!((hi[a], lo[a]), (bound_up(mx), bound_down(mi)), "n {n}, anchor {a}");
+            if mx.abs() < 255.0 && mi.abs() < 255.0 {
+                // where 2^-15 multiples are f32 values, the plain rounding of UP's build_table2
+                assert_eq!((hi[a], lo[a]), ((((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32, (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32), "n {n}, anchor {a}");
+            }
+        }
+    }
+}
+
+/// The calibration and the encoding give the same index on one thread as on several (code and store hashes), with the
+/// default sample and with a sample smaller than the data (spread over the clusters).
+#[test]
+fn the_build_is_the_same_on_one_thread_and_on_four() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    for o in [BuildOptions::default(), BuildOptions { cal_items: 1000, ..BuildOptions::default() }] {
+        let at = |t: usize| {
+            let pool = rayon::ThreadPoolBuilder::new().num_threads(t).build().unwrap();
+            pool.install(|| {
+                let (_, ix) = build(dir, &o, &mut |_| {}).unwrap();
+                (ix.code_hash(), ix.store_hash())
+            })
+        };
+        assert_eq!(at(1), at(4), "cal_items {}", o.cal_items);
+    }
+}
+
+/// The Rust fit writes the same files on one thread as on four (its sums run in a fixed order).
+#[test]
+fn the_fit_is_the_same_on_one_thread_and_on_four() {
+    let tmp = tmp_dir("fitthreads");
+    let (part, _) = synth_partition(&tmp.join("part"));
+    let fit_at = |t: usize| -> std::path::PathBuf {
+        let out = tmp.join(format!("fit{t}"));
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(t).build().unwrap();
+        let o = crate::fit::FitOptions { basis: "dual".into(), cert_time: 0.0, ..crate::fit::FitOptions::default() };
+        pool.install(|| crate::fit::fit(out.to_str().unwrap(), &part, &o, &mut |_| {})).unwrap();
+        out
+    };
+    let (a, b) = (fit_at(1), fit_at(4));
+    for f in ["V.npy", "lam.npy", "r2.npy", "profile.npy", "mq8.npy", "msc.npy", "grp.npy", "cstart.npy", "perm.npy", "meta.json"] {
+        assert_eq!(std::fs::read(a.join(f)).unwrap(), std::fs::read(b.join(f)).unwrap(), "{f}");
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}

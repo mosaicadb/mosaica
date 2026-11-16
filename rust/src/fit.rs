@@ -358,28 +358,28 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         }
         w.flush().map_err(werr)?;
     }
-    let acc: Vec<std::sync::Mutex<(Vec<f64>, f64)>> = (0..ng).map(|_| std::sync::Mutex::new((vec![0f64; n * n], 0f64))).collect();
-    (0..k).into_par_iter().for_each(|c| {
-        let (r0, r1) = (cstart[c] as usize, cstart[c + 1] as usize);
-        let m = &mq[c * n..(c + 1) * n];
-        let mut rm = vec![0f64; (r1 - r0) * n];
-        let mut r2 = 0f64;
-        for (i, r) in (r0..r1).enumerate() {
-            for (t, &h) in rows.row(r).iter().enumerate() {
-                let v = f16_to_f32(h) as f64 - m[t] as f64;
-                rm[i * n + t] = v;
-                r2 += v * v;
+    // each group's sums over its clusters in cluster order (groups in parallel), so the fit does not depend on the
+    // thread count or on scheduling
+    let acc: Vec<(Vec<f64>, f64)> = (0..ng).into_par_iter().map(|g| {
+        let (mut cvg, mut r2g) = (vec![0f64; n * n], 0f64);
+        for c in (0..k).filter(|&c| grp[c] == g) {
+            let (r0, r1) = (cstart[c] as usize, cstart[c + 1] as usize);
+            let m = &mq[c * n..(c + 1) * n];
+            let mut rm = vec![0f64; (r1 - r0) * n];
+            for (i, r) in (r0..r1).enumerate() {
+                for (t, &h) in rows.row(r).iter().enumerate() {
+                    let v = f16_to_f32(h) as f64 - m[t] as f64;
+                    rm[i * n + t] = v;
+                    r2g += v * v;
+                }
             }
+            // SAFETY: rm is (r1 - r0) x n and cvg n x n, row-major, with the strides given; cvg += rm^T rm
+            unsafe { matrixmultiply::dgemm(n, r1 - r0, n, 1.0, rm.as_ptr(), 1, n as isize, rm.as_ptr(), n as isize, 1, 1.0, cvg.as_mut_ptr(), n as isize, 1) };
         }
-        let mut cv = vec![0f64; n * n];
-        unsafe { matrixmultiply::dgemm(n, r1 - r0, n, 1.0, rm.as_ptr(), 1, n as isize, rm.as_ptr(), n as isize, 1, 0.0, cv.as_mut_ptr(), n as isize, 1) };
-        let mut a = acc[grp[c]].lock().unwrap();
-        a.0.iter_mut().zip(&cv).for_each(|(x, y)| *x += y);
-        a.1 += r2;
-    });
+        (cvg, r2g)
+    }).collect();
     let gsize: Vec<f64> = (0..ng).map(|g| (0..k).filter(|&c| grp[c] == g).map(|c| cnt[c]).sum::<usize>().max(1) as f64).collect();
-    let covs: Vec<(Vec<f64>, f64)> = acc.into_iter().enumerate().map(|(g, m)| {
-        let (mut cv, r2) = m.into_inner().unwrap();
+    let covs: Vec<(Vec<f64>, f64)> = acc.into_iter().enumerate().map(|(g, (mut cv, r2))| {
         cv.iter_mut().for_each(|v| *v /= gsize[g]);
         (cv, r2 / gsize[g])
     }).collect();
