@@ -1032,8 +1032,11 @@ impl Cl2 {
 }
 
 impl Index2 {
-    /// A hash of everything the encoder stores: codes, scalars, keys, row order and escapes. Two builds with the same
-    /// hash answer every query identically.
+    /// A hash of what the encoder writes per row: the codes and scalars of every level, the 16-bit keys (`ahat`), the
+    /// row-to-entity map (`row_ent`, which fixes the row order) and the escapes. It does not cover the norm keys
+    /// (`nukey`), the entity-to-row map (`ent_row`), the stored vectors, the `x2` bound, the per-cluster records and
+    /// centre tables, the plans or the calibration; `store_hash` covers everything. It uses `DefaultHasher`, whose values
+    /// may change between Rust releases; it is kept as it is because reference hashes were recorded with it.
     pub fn code_hash(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1781,7 +1784,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     // array's end stay inside it
     let lcode: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("code{l}.bin"), ctot[l] + 128)).collect();
     let lscal: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("scal{l}.bin"), stot[l] + 128)).collect();
-    let ahat = store::Out::<i16>::new(dir, "ahat.bin", nrows + 32);
+    let mut ahat = store::Out::<i16>::new(dir, "ahat.bin", nrows + 32);
     let row_ent = store::Out::<u32>::new(dir, "row_ent.bin", nrows);
     let nukey = store::Out::<u16>::new(dir, "nukey.bin", if nusort { nrows } else { 0 });
     let vecs = store::OutRows::new(dir, "vectors.bin", if real { nrows * n } else { 0 });
@@ -1799,24 +1802,30 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         assert_eq!(it.ah.len(), sizes[c], "cluster {c} gave {} items where the source gave its size as {}", it.ah.len(), sizes[c]);
         let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false);
         let r0 = row0[c];
+        // SAFETY (each put below): cluster c writes only its own ranges, fixed above from the sizes before encoding
+        // (rows row0[c]..row0[c + 1], level bytes coff/soff[l][c] for its blocks), so concurrent writes are disjoint
         for l in 0..nl {
-            lcode[l].put(coff[l][c], &cc.codes[l]);
-            lscal[l].put(soff[l][c], &cc.scal[l]);
+            unsafe {
+                lcode[l].put(coff[l][c], &cc.codes[l]);
+                lscal[l].put(soff[l][c], &cc.scal[l]);
+            }
         }
         let it = &cc.items;
-        ahat.put(r0, &it.ah);
-        row_ent.put(r0, &it.ent);
+        unsafe {
+            ahat.put(r0, &it.ah);
+            row_ent.put(r0, &it.ent);
+        }
         let numax = if nusort { (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30) } else { 0.0 };
         if nusort {
             // codes rounded up on the cluster's grid: nondecreasing in sort order
             let key: Vec<u16> = it.nu.iter().map(|&v| ((v / numax * 65535.0).ceil() as u32).min(65535) as u16).collect();
-            nukey.put(r0, &key);
+            unsafe { nukey.put(r0, &key) };
         }
         if real {
             assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
-            vecs.put(r0 * n, &it.x16);
+            unsafe { vecs.put(r0 * n, &it.x16) };
         } else {
-            ext.put(r0, &it.ext);
+            unsafe { ext.put(r0, &it.ext) };
         }
         Done { esc: cc.esc, x2max: it.x2max, numax }
     }).collect();
@@ -1850,12 +1859,12 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     }
     let row_ent = row_ent.finish();
     let maxent = row_ent.iter().copied().max().unwrap_or(0) as usize;
-    let ent_row = store::Out::<u32>::new(dir, "ent_row.bin", maxent + 1);
-    ent_row.put(0, &vec![u32::MAX; maxent + 1]);
+    let mut ent_row = store::Out::<u32>::new(dir, "ent_row.bin", maxent + 1);
+    ent_row.put_mut(0, &vec![u32::MAX; maxent + 1]);
     for (r, &e) in row_ent.iter().enumerate() {
         // k-NN counts rows, which is exact only with one row per entity
         assert!(ent_row.get()[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
-        ent_row.put(e as usize, &[r as u32]);
+        ent_row.put_mut(e as usize, &[r as u32]);
     }
     let full = match full {
         Full2::Real { .. } => Full2::Real { rows: Arc::new(vecs.finish()) },
@@ -1979,6 +1988,7 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Param
     let (p, prof) = prepare(dir, o);
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, None, log);
+    log(format!("[build2] store hash {:016x}", ix.store_hash()));
     set_repack(&mut ix, log);
     (p, ix)
 }
@@ -2000,13 +2010,9 @@ fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
-    match store::saved_key(edir) {
-        Some(k) if k == key => {}
-        Some(k) => return Err(format!("the index in {edir} was built from another fit or other options (key {k}, these give {key}); rebuild it")),
-        None => return Err(format!("no index of this fit and these options is saved in {edir}; build it with --rebuild (v2::rebuild)")),
-    }
+    store::log_stale(&store::parent_of(edir), edir, &mut |s| log(format!("[open] {s}")));
     let design_c = design_constants(&p, o, log);
-    let mut ix = store::open(&p, &prof, o, design_c.as_deref(), edir, &mut |s| log(format!("[open] {s}")))?;
+    let mut ix = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}")))?;
     set_repack(&mut ix, log);
     Ok((p, ix))
 }
@@ -2017,7 +2023,9 @@ pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Par
     rebuild_in(dir, None, o, log)
 }
 
-/// As `rebuild`, saved in `edir`: written into the scratch directory `edir.tmp`, which replaces `edir` once complete.
+/// As `rebuild`, saved in `edir`. The rebuild holds `encoded.lock` beside `edir` for its whole run (a second rebuild
+/// there waits), writes into a scratch directory of its own beside `edir` and swaps it into place once complete and
+/// synced (`store::install`).
 pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
     rebuild_in(dir, Some(edir), o, log)
 }
@@ -2027,16 +2035,18 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
+    let parent = store::parent_of(edir);
+    std::fs::create_dir_all(&parent).unwrap_or_else(|e| panic!("cannot create {parent}: {e}"));
+    let lock = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
+    store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
     let design_c = design_constants(&p, o, log);
-    // built into the files of a scratch directory, sealed with its key, then moved into place
-    let tmp = format!("{edir}.tmp");
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap_or_else(|e| panic!("cannot create {tmp}: {e}"));
+    // built into the files of a scratch directory of this rebuild's own, sealed with its key, then moved into place
+    let tmp = store::scratch_dir(edir);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, Some(&tmp), log);
-    store::seal(&ix, &tmp, &key);
-    let _ = std::fs::remove_dir_all(edir);
-    std::fs::rename(&tmp, edir).unwrap_or_else(|e| panic!("cannot move {tmp} to {edir}: {e}"));
-    log(format!("[build2] saved to {edir}"));
+    let h = store::seal(&ix, &tmp, &key);
+    store::install(&tmp, edir);
+    drop(lock);
+    log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
     (p, ix)
 }

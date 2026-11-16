@@ -218,6 +218,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let built_s = topen.s();
     if args().iter().any(|a| a == "--hash") {
         out!("[index] code hash {:016x}", ix.code_hash());
+        out!("[index] store hash {:016x}", ix.store_hash());
     }
     // the experiments read the index's vectors (in index row order), not the fit's Xs.npy
     let n = p.meta.n;
@@ -258,19 +259,16 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
-        // the copy is written from the index's vectors, which a saved index maps from its own file
-        let own = match &ix.full {
-            Full2::Real { rows, .. } => rows.file_path(),
-            _ => None,
-        };
-        let ffc = std::fs::canonicalize(&ff).ok();
-        if ffc.is_some() && (own == ffc || std::fs::canonicalize(&p.xs_path).ok() == ffc) {
-            eprintln!("--full-file {ff} is the index's vector file, which is mapped while the copy is written, or the fit's; give a path of its own");
-            std::process::exit(2);
-        }
+        // the copy is written from the index's vectors, which a saved index maps from its own file; to_file refuses
+        // a path inside a saved index, the fit's vectors and any file this process maps, and never truncates the file
+        // it replaces
         let t = Timer::new();
         if let Full2::Real { rows, .. } = &mut ix.full {
-            std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"));
+            let r = std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"), &[&p.xs_path]);
+            if let Err(e) = r {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
         }
         let pol = match &ix.full {
             Full2::Real { rows, .. } => rows.policy().expect("the full vectors were just written to a file"),

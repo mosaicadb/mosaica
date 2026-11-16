@@ -6,6 +6,29 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+/// The files this process maps (device and inode of each, from /proc/self/maps).
+pub fn mapped_files() -> std::collections::HashSet<(u64, u64)> {
+    let mut out = std::collections::HashSet::new();
+    for line in std::fs::read_to_string("/proc/self/maps").unwrap_or_default().lines() {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 6 {
+            continue;
+        }
+        let (Some((ma, mi)), Ok(ino)) = (f[3].split_once(':'), f[4].parse::<u64>()) else { continue };
+        let (Ok(ma), Ok(mi)) = (u64::from_str_radix(ma, 16), u64::from_str_radix(mi, 16)) else { continue };
+        if ino != 0 {
+            // dev_t as glibc encodes it (what MetadataExt::dev returns)
+            out.insert((((ma & 0xfff) << 8) | ((ma & !0xfff) << 32) | (mi & 0xff) | ((mi & !0xff) << 12), ino));
+        }
+    }
+    out
+}
+
+/// fsync a directory, so that the entries created or renamed in it are durable.
+pub fn sync_dir(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
+}
+
 /// How the rows on file are read. A benchmark may change it between runs, so the fields are atomic.
 pub struct ReadPolicy {
     /// Read the rows the index path leaves with pread through io_uring, not by faults on the mapping.
@@ -57,24 +80,55 @@ impl Rows {
     }
 
     /// Writes the rows to `path` (from memory, or from the file they are mapped from), syncs, drops the copy and maps
-    /// the file with `advice` (normal, random or sequential).
-    pub fn to_file(&mut self, path: &str, advice: &str) {
-        {
+    /// the file with `advice` (normal, random or sequential). The rows go to a new file beside `path` that is renamed
+    /// over it once complete, so a file `path` named before (or another name of it, a hard link) is never truncated
+    /// or written. Refused: a `path` inside a saved index (a directory named `encoded-*`), and a `path` that is the
+    /// file of any of `avoid` or of any file this process maps (the index's own vectors) under another name.
+    pub fn to_file(&mut self, path: &str, advice: &str, avoid: &[&str]) -> Result<(), String> {
+        use std::os::unix::fs::MetadataExt;
+        let p = std::path::Path::new(path);
+        let name = p.file_name().ok_or(format!("--full-file {path} names no file"))?.to_string_lossy().to_string();
+        let parent = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+        let cparent = std::fs::canonicalize(parent).map_err(|e| format!("--full-file {path}: cannot resolve its directory: {e}"))?;
+        if cparent.components().any(|c| c.as_os_str().to_string_lossy().starts_with("encoded-")) {
+            return Err(format!("--full-file {path} is inside a saved index ({}); give a path outside every encoded-* directory", cparent.display()));
+        }
+        if let Ok(md) = std::fs::metadata(path) {
+            let id = (md.dev(), md.ino());
+            for a in avoid {
+                if std::fs::metadata(a).is_ok_and(|m| (m.dev(), m.ino()) == id) {
+                    return Err(format!("--full-file {path} is {a} (the same file); give a path of its own"));
+                }
+            }
+            if mapped_files().contains(&id) {
+                return Err(format!("--full-file {path} is a file this process maps (a saved index's vectors, under this or another name); give a path of its own"));
+            }
+        }
+        let tmp = cparent.join(format!(".{name}.tmp-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())));
+        let f = {
             let bytes = match self {
                 Rows::Mem(v) => unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, v.len() * 2) },
                 Rows::Map { map, .. } => &map[..],
             };
-            let mut f = std::io::BufWriter::with_capacity(64 << 20, std::fs::File::create(path).unwrap_or_else(|e| panic!("{path}: {e}")));
-            f.write_all(bytes).unwrap();
-            let f = f.into_inner().unwrap();
+            let file = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&tmp).map_err(|e| format!("cannot create {}: {e}", tmp.display()))?;
+            let mut f = std::io::BufWriter::with_capacity(64 << 20, file);
+            f.write_all(bytes).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+            let f = f.into_inner().map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
             // whole pages, so that O_DIRECT reads of the last rows are not short
-            let len = f.metadata().unwrap().len();
-            f.set_len((len + 4095) & !4095).unwrap();
-            f.sync_all().unwrap();
-        }
-        let len = std::fs::metadata(path).unwrap_or_else(|e| panic!("{path}: {e}")).len() as usize / 2;
-        *self = Rows::open(path, len, advice).unwrap_or_else(|e| panic!("{e}"));
+            let len = f.metadata().map_err(|e| format!("{}: {e}", tmp.display()))?.len();
+            f.set_len((len + 4095) & !4095).map_err(|e| format!("{}: {e}", tmp.display()))?;
+            f.sync_all().map_err(|e| format!("cannot sync {}: {e}", tmp.display()))?;
+            f
+        };
+        std::fs::rename(&tmp, path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("cannot move {} to {path}: {e}", tmp.display())
+        })?;
+        sync_dir(&cparent).map_err(|e| format!("cannot sync {}: {e}", cparent.display()))?;
+        let len = f.metadata().map_err(|e| format!("{path}: {e}"))?.len() as usize / 2;
+        *self = Rows::from_file(f, path, len, advice)?;
         self.evict();
+        Ok(())
     }
 
     /// Maps the rows in the existing file `path` (at least `len` f16 values, headerless, as `to_file` and a saved index
@@ -82,6 +136,13 @@ impl Rows {
     /// written by `to_file`, under the default read policy (read through the mapping).
     pub fn open(path: &str, len: usize, advice: &str) -> Result<Rows, String> {
         let file = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
+        Rows::from_file(file, path, len, advice)
+    }
+
+    /// As `open`, the rows in the open file `file` (named `path` in messages). The reader's descriptors are opened on
+    /// that same file through /proc/self/fd, never by its name, so they read what `file` holds even if the name has
+    /// since moved to another file.
+    pub fn from_file(file: std::fs::File, path: &str, len: usize, advice: &str) -> Result<Rows, String> {
         let flen = file.metadata().map_err(|e| format!("cannot read {path}: {e}"))?.len() as usize;
         if flen < 2 * len {
             return Err(format!("{path} holds {flen} bytes, fewer than the {} of its rows", 2 * len));
@@ -90,7 +151,7 @@ impl Rows {
             "normal" => libc::MADV_NORMAL,
             "random" => libc::MADV_RANDOM,
             "sequential" => libc::MADV_SEQUENTIAL,
-            _ => panic!("--full-advice is normal, random or sequential"),
+            _ => return Err(format!("--full-advice is normal, random or sequential, not {advice}")),
         };
         // an empty file cannot be mapped; map a page of zeros in its place
         let map = if flen == 0 {
@@ -99,13 +160,16 @@ impl Rows {
             unsafe { memmap2::Mmap::map(&file) }
         }.map_err(|e| format!("cannot map {path}: {e}"))?;
         unsafe {
-            assert_eq!(libc::madvise(map.as_ptr() as *mut libc::c_void, map.len(), a), 0);
+            if libc::madvise(map.as_ptr() as *mut libc::c_void, map.len(), a) != 0 {
+                return Err(format!("cannot advise the mapping of {path}: {}", std::io::Error::last_os_error()));
+            }
         }
-        let rfd = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
+        let same = format!("/proc/self/fd/{}", file.as_raw_fd());
+        let rfd = std::fs::File::open(&same).map_err(|e| format!("cannot open {path} again: {e}"))?;
         unsafe {
             libc::posix_fadvise(rfd.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM);
         }
-        let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(path).or_else(|_| std::fs::File::open(path)).map_err(|e| format!("cannot open {path}: {e}"))?;
+        let dfd = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_DIRECT).open(&same).or_else(|_| std::fs::File::open(&same)).map_err(|e| format!("cannot open {path} again: {e}"))?;
         Ok(Rows::Map { map, file, rfd, dfd, policy: ReadPolicy::default() })
     }
 

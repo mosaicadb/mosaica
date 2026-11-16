@@ -46,6 +46,7 @@ pub struct Params {
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
     pub xs_path: String,
+    pub xs_name: String, // the vectors file as meta.json names it (relative to the fitted directory unless absolute)
 }
 
 pub fn load_params(dir: &str) -> Params {
@@ -86,6 +87,7 @@ pub fn load_params(dir: &str) -> Params {
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
         xs_path: if xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
+        xs_name: xs.to_string(),
     }
 }
 

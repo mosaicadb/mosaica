@@ -218,6 +218,8 @@ fn a_saved_index_opens_as_the_index_it_saves() {
     assert_eq!(before, after, "a build saved elsewhere wrote into the fitted directory");
     assert_eq!(built.code_hash(), fixture().ix.code_hash(), "the saved build encodes as the build in memory does");
     assert_eq!(opened.code_hash(), built.code_hash());
+    assert_eq!(built.store_hash(), fixture().ix.store_hash(), "the saved build holds what the build in memory holds");
+    assert_eq!(opened.store_hash(), built.store_hash(), "the opened index holds what was built");
     // built into files, it holds what the build on the heap holds; opened, what it was built with
     same_index(&fixture().ix, &built);
     same_index(&built, &opened);
@@ -253,6 +255,108 @@ fn a_saved_index_opens_as_the_index_it_saves() {
     let text = std::fs::read_to_string(&json).unwrap();
     std::fs::write(&json, text.replace(&format!("\"format\": {}", store::STORE_FORMAT), "\"format\": 1")).unwrap();
     assert!(open_at(dir, edir, &o, &mut |_| {}).is_err(), "an index of another format opened");
+    drop(opened);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+fn tmp_dir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("vexact-e2e-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+/// Under other options (the norm sort, the plain constant with another N, fewer clusters with another randomised
+/// schedule), a saved index opens as the index it saves, and as the build in memory. (Exact-law design constants,
+/// `design_exact`, are not built here: `tail::convex_order` fails on synth4k's 15-dimensional blocks, in memory too.)
+#[test]
+fn saved_indexes_under_other_options_open_as_built() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("opts");
+    for (name, o) in [
+        ("nusort", BuildOptions { nusort: true, ..BuildOptions::default() }),
+        ("csg_plain, nguar 2^20", BuildOptions { csg_plain: true, nguar: Some(1048576.0), ..BuildOptions::default() }),
+        ("clusters 20, rlv 40,56", BuildOptions { clusters: Some(20), rlv: Some(vec![40, 56]), ..BuildOptions::default() }),
+    ] {
+        let edir = tmp.join(name.replace([' ', ','], "_"));
+        let edir = edir.to_str().unwrap();
+        let (_, mem) = build(dir, &o, &mut |_| {});
+        let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+        let (_, opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+        same_index(&mem, &built);
+        same_index(&built, &opened);
+        assert_eq!(mem.code_hash(), opened.code_hash(), "{name}");
+        assert_eq!((mem.store_hash(), built.store_hash()), (opened.store_hash(), opened.store_hash()), "{name}");
+        assert_ne!(opened.store_hash(), fixture().ix.store_hash(), "{name} built the default index");
+        assert!(open_at(dir, edir, &BuildOptions::default(), &mut |_| {}).is_err(), "{name} opened under the default options");
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// A compaction of an opened index is the compaction of the built one: the same rows, and the same answers.
+#[test]
+fn compactions_of_an_opened_index_answer_as_the_built_ones() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("compact");
+    let edir = tmp.join("encoded");
+    let edir = edir.to_str().unwrap();
+    let o = BuildOptions::default();
+    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {});
+    let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    opened.repack = built.repack.clone();
+    let f = fixture();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(11);
+    let rows: Vec<u32> = (0..built.nrows as u32).filter(|_| rng.gen::<f64>() < 0.3).collect();
+    for vectors in [false, true] {
+        let (a, b) = (built.compact(&rows, vectors), opened.compact(&rows, vectors));
+        assert_eq!(a.store_hash(), b.store_hash(), "compacted, vectors {vectors}");
+        for (qi, q) in f.queries.iter().enumerate() {
+            let (pa, pb) = (prep2(&a, q), prep2(&b, q));
+            let t = truth(&a, q, None);
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let x = threshold2(&a, &pa, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                    let y = threshold2(&b, &pb, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                    assert_eq!(x.rows, y.rows, "compacted (vectors {vectors}) threshold, plan {pname}, query {qi}, t {th}");
+                    same_work(&x.st, &y.st, &format!("compacted (vectors {vectors}) threshold, plan {pname}, query {qi}, t {th}"));
+                }
+            }
+            for k in [1, 10, 100] {
+                for (pname, plan) in plans() {
+                    let (x, y) = (knn2(&a, q, k, None, plan), knn2(&b, q, k, None, plan));
+                    assert_eq!(x.ents, y.ents, "compacted (vectors {vectors}) k-NN, plan {pname}, query {qi}, k {k}");
+                }
+            }
+        }
+    }
+    drop((built, opened));
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// Two rebuilds of the same index at once: the second waits for the first (the lock), both finish, and what is
+/// saved is the index a single build makes, with no scratch directory left behind.
+#[test]
+fn concurrent_rebuilds_leave_one_clean_index() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("concurrent");
+    let edir = tmp.join("encoded-x");
+    let edir = edir.to_str().unwrap().to_string();
+    let o = BuildOptions::default();
+    let logs: Vec<Vec<String>> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..2).map(|_| s.spawn(|| {
+            let mut log = Vec::new();
+            let (_, ix) = rebuild_at(dir, &edir, &o, &mut |l| log.push(l));
+            assert_eq!(ix.store_hash(), fixture().ix.store_hash());
+            log
+        })).collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let waited = logs.iter().flatten().filter(|l| l.contains("waiting for another rebuild")).count();
+    assert!(waited <= 1, "{logs:?}");
+    let (_, opened) = open_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    assert_eq!(opened.store_hash(), fixture().ix.store_hash(), "the saved index is the one a single build makes");
+    let mut left: Vec<String> = std::fs::read_dir(&tmp).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    left.sort();
+    assert_eq!(left, ["encoded-x", "encoded.lock"], "scratch directories left behind");
     drop(opened);
     std::fs::remove_dir_all(&tmp).unwrap();
 }

@@ -36,8 +36,12 @@ vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24
 other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
 derived from these in Rust when the index is built (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
 (about 11 s at 1.2M items on 12 cores). The encoded index is saved beside the fit, in `INDEX/encoded-KEY/`
-(`src/v2/store.rs`; KEY covers the fit, the profile, the identity of the vectors file and every option that changes the
-build), with the f16 vectors in index row order; opening it maps the codes, keys and vectors and encodes nothing.
+(`src/v2/store.rs`; KEY covers the fit, the profile, the identity of the vectors file (name, length, modification and
+status-change times, device and inode, not its contents), every option that changes the build and a fingerprint of the
+library's sources, so any library edit makes saved indexes stale; it does not depend on how the directory's path is
+spelled), with the f16 vectors in index row order; opening it maps the codes, keys and vectors and encodes nothing.
+Other `encoded-*` directories there are logged as stale with their sizes, never removed. A rebuild holds
+`INDEX/encoded.lock` (a second one waits), writes and syncs a scratch directory of its own and swaps it into place.
 `testdata/make_synth.py` fits the small index the tests use.
 
 ## Run
@@ -56,7 +60,9 @@ $B --clusters 40 verify                           # quick development check
 
 The runs open the index saved for the fit and the build options given (`v2::open`), and stop with a message when there
 is none: `--rebuild` encodes it and saves it first (`v2::rebuild`), `--in-memory` encodes it without saving it
-(`v2::build`), and `--hash` logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`).
+(`v2::build`), and `--hash` logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`) and
+the hash of everything the index holds, vectors included (`Index2::store_hash`, also logged by every rebuild and recorded
+in `index.json`).
 
 The defaults are the measured configuration: integer deterministic levels, tables combined from the group's and the
 centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;
