@@ -600,7 +600,7 @@ of 1, 2, 5, 10, 20, 30, 40 and 50% (`dbcmp --what idx,scan --step 8 --reps 3`, m
 The crossover in visible rows a cluster is a line in S: 72 + 0.246·S on one thread and 78 + 0.305·S on four, each
 within 6 rows of its three points; a constant R would be off by 4× at 4,000 rows a cluster and 13× at 16,000. R0 = 64
 and κ = 0.24 sit just below both lines, toward the index path (304 rows at 1,000 a cluster, the old R = 300; 1,024 at
-4,000; 3,935 at 16,129). (The crossover is the share where the index / scan ratio crosses 1, interpolated in log
+4,000; 3,934 at 16,129). (The crossover is the share where the index / scan ratio crosses 1, interpolated in log
 share; the clusters are of unequal size, and a random set gives each the same share.) Raw logs: `plan3c/sweep3/`.
 
 **Compacted sessions (measured).** `dbcmp`'s `cindex`/`cvindex` query the index compacted to the session's visible
@@ -653,9 +653,11 @@ index path, which runs the same code in both; 4 rounds, binaries and variant ord
 | k-NN 100 | 51.7 / 50.4 (1.024) | 20.1 / 20.5 (0.995) | 33.6 / 32.4 (1.010) | 11.6 / 11.7 (0.949) |
 
 Mean 0.984 over the 36 cells, 0.878–1.055; the largest (item k-NN 10, one thread) has rounds 0.98–1.07 against
-0.93–1.00, within the spread. The new planner runs every open cluster on the index path; M sent 7–17 a query to full
+0.93–1.00, within the spread. (These tables are of the first version, R = 300; the rows rule by cluster size below now also
+scores clusters of 84 rows or fewer directly, about 2 a query on this index.) That version ran every open cluster on
+the index path; M sent 7–17 a query to full
 vectors or direct scoring for item queries, 7–100 for text (the most at 0.01% and at k-NN). Unfiltered on these
-clusters the new planner and its forced index path are the same code (the support table, then the index path on
+clusters that version and its forced index path were the same code (the support table, then the index path on
 every open cluster), so the new / forced-index ratio is 1 by construction and says nothing on its own; the evidence
 that the new planner is no slower than M is that M was within noise of the old binary's own forced index path
 (M ≈ I_old, the bracketed ratios, and the first table's M against I).
