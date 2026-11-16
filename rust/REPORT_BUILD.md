@@ -385,13 +385,19 @@ Raw logs: the session's `rb/b3/m/` (`build_*`, `bytesq_*`, `verify_*`, `open_*`,
 
 | | fit | clusters (K) | groups | deterministic levels |
 |---|---|---|---|---|
-| base | `pyfit` (the default fit) | 1,000 per cluster (1,000) | 64 | 4, 8, 12, 16, 24, 32 (NDL 6) |
-| A | `fitA`: `fit.py --per-cluster by-n --groups by-n` | 2,000 per cluster (500; sizes 45..8,947) | 64 | NDL 6 |
+| base | `pyfit`: `fit.py --basis dual`, the default cluster and group rules | 1,000 per cluster (1,000) | 64 | 4, 8, 12, 16, 24, 32 (NDL 6) |
+| A | `fitA`: `fit.py --basis dual --per-cluster by-n --groups by-n` | 2,000 per cluster (500; sizes 45..8,947) | 64 | NDL 6 |
 | B | `pyfit`, `--dlv 16,32` | 1,000 | 64 | 16, 32 |
 | C | `fitA`, `--dlv 16,32` | 2,000 (500) | 64 | 16, 32 |
 
-Setup: the cd1278d binary, 4 threads (`RAYON_NUM_THREADS=4`), `--plan-default --no-approx`, 200 text and 200 held-out
-item queries for `bytesq` and `verify`.
+Both fits use the dual basis (`fit.py`'s default is `pca`); they differ only in the cluster and group rules. The
+group rule changes nothing at this N or at 1B: at 1M with K = 500, by-k8 gives 62 groups and by-n 64; at 1B (64,000
+per cluster, K = 15,625) both give 64. So A tests the cluster size essentially alone.
+
+Setup: the cd1278d binary, 4 threads (`RAYON_NUM_THREADS=4`), 200 text and 200 held-out item queries for `bytesq` and
+`verify`. The builds, opens, `verify` and `e2e` ran with `--plan-default --no-approx`; the `bytesq` runs had neither,
+which is harmless there (`bytesq` forces the index path, so neither the plan's constants nor the approximation
+enter).
 
 ### Build, open, verify (measured)
 
@@ -400,10 +406,12 @@ item queries for `bytesq` and `verify`.
 | base | 75.8 s | 1,121 MB | 0.79–0.85 s | 237–264 MB | 276.0 |
 | A | 74.1 s | 1,200 MB | 0.80–0.83 s | 213–228 MB | 276.5 |
 | B | 77.0 s | 1,081 MB | 0.79–0.82 s | 235–262 MB | 274.0 |
-| C | 75.2 s | 1,226 MB | 0.76–0.79 s | 213–239 MB | 274.5 |
+| C | 75.2 s | 1,226 MB | 0.76–0.79 s | 224–239 MB | 274.5 |
 
-Build and open cost the same within noise; the coarser fit holds 7–8% more at the build's peak and about 10% less at
-open. `verify` (200 queries × 7 answer sizes, filtered sets, k-NN) is clean on all four: 0 wrong in or out, 0
+Build and open cost the same within noise. At the build's peak the coarser fit holds more: A 7.0% more than base
+(1,200 against 1,121 MB), C 13.4% more than B (1,226 against 1,081 MB). At open it holds less: A 213–228 MB against
+base's 237–264, C 224–239 against B's 235–262 (peak anonymous memory of the process; the `[open]` line's anonymous
+figure after the open is 214 and 213 MB for A and C, 237 and 235 MB for base and B). `verify` (200 queries × 7 answer sizes, filtered sets, k-NN) is clean on all four: 0 wrong in or out, 0
 deterministic and 0 randomised interval violations, 0 k-NN mismatches of 200.
 
 ### Bytes read per item on the index path (`bytesq`, measured; change against base)
@@ -436,26 +444,29 @@ median in the same round: the mean, and min..max over rounds. Text rows:
 | 4, top-100 | 13.25 | 0.94 (0.83..1.01) | 0.86 (0.78..0.98) | 0.77 (0.72..0.85) |
 
 - **Text, small answers:** C is 14–28% faster at 0.01%, 0.1% and both k-NN cells, on 1 and 4 threads; A and B each
-  about half of that. But C reads 20–31% more bytes per item at 0.01–0.1% on the index path (7% at 1%), and B 13–20%.
-- **Text at 1% and above, and every item row, do not tell the indexes apart.** Every ratio there is 0.97–1.03 and the
-  base takes 180–190 ms (1 thread) for each: the planner scans every full vector in those cells (1,536 B per item,
-  `full_reads_per_item` 1.0), on all four indexes. That is a planner calibration issue, not these options; see below.
+  about half of that. But C reads 20–31% more bytes per text query item at 0.01–0.1% on the index path (7% at 1%), and
+  B 13–20%; for item queries C reads 15–27% more and B 10–20% (`bytesq` above).
+- **Text at 1% and above, and every item row, do not tell the indexes apart.** The mean ratios there are 0.969–1.038
+  (single rounds 0.93..1.09), and the base takes 183–190 ms (1 thread) for each threshold cell and 174.7 / 177.0 ms for
+  item top-10 / top-100: the planner scans every full vector in those cells (1,536 B per item, `full_reads_per_item`
+  1.0), on all four indexes. That is a planner calibration issue, not these options; see below.
 - **A against levels-clusters.** `REPORT_SCALING.md`'s −5…−12% for 2,000 per cluster at 1M is time, not bytes. Coarser
   clusters cut less: more items enter the levels (touched .731 against .679 at text 0.01%), so bytes go up (+2–9%),
   while the per-cluster work (cut, tables, setup) falls with K, so time goes down. `REPORT_CLUSTERSIZE.md` shows the
   same at 4,000 per cluster (text 1%: 71.6 B against 67.9). Where this run can compare times (text ≤0.1% and k-NN,
-  on the index path), A is 17% faster at 0.01% and 10–15% at k-NN; at 0.1% it is only 2–4% faster, against −12% there.
+  on the index path), A is 16–17% faster at 0.01% and, on 1 thread, 10–15% at k-NN (4 threads: 9.5% at top-10, 5.7%
+at top-100); at 0.1% it is only 2–4% faster, against −12% there.
   That gap is not explained: those runs used other fixed plan constants and a pinned core, and this cell's spread
   (0.93..1.04) is about as wide as the gap.
 
 ### Why item queries are a full scan in `e2e` (measured, pre-existing)
 
-`e2e` runs each query as planned (`run2.rs:874`); `bytesq` forces the index path (`PlanMode::Index`, `run2.rs:469`),
+`e2e` runs each query as planned (`run2.rs:898`); `bytesq` forces the index path (`PlanMode::Index`, `run2.rs:493`),
 so the two count different paths. With `--plan-default`, the planner prices the index path above a scan whenever most
 of a cluster's rows remain candidates after the cut, as for these held-out items (d about 0.93): per cluster of 1,000
 rows, scoring its rows directly costs `nv·cscan_us + dir_us` = 101 µs, the cut plus the index path 2.5 + 930·(0.02 +
-0.08·0.93) + 4 + 20·0.93 = 113 µs (`q.rs:2586`), so the estimate (about 101 ms) is not below the scan's `nrows·cscan_us`
-= 100 ms (`q.rs:2466–2467`) and the query scans (`q.rs:2596`). On this machine the constants are off by about 2× in
+0.08·0.93) + 4 + 20·0.93 = 113 µs (`q.rs:2599`), so the estimate (about 101 ms) is not below the scan's `nrows·cscan_us`
+= 100 ms (`q.rs:2479–2480`) and the query scans (`q.rs:2609`). On this machine the constants are off by about 2× in
 both directions: the scan takes 0.19 µs a row (`--plan-default`'s `cscan_us` is 0.10) and the index path about 0.045
 µs a candidate. Checked with 10 queries on base: item 0.01% planned 191 ms at 1,536 B/item, forced index 41 ms at 21
 B/item; text 1% 197 ms against 60 ms. With constants calibrated on this index (no `--plan-default`: `cscan_us` 0.20,
@@ -473,19 +484,24 @@ f32 copy of the rows are what needs bounding (in blocks of rows) before that rul
 
 ### The per-variant flags
 
-`dlv=B.B…` and `ddec=L.L…|all|none` set the levels of each `e2e` index (`--flags` for the first, `--b`/`--c`/`--d`
+`dlv=B.B…` and `ddec=L.L…|all|none` set the levels of each `e2e` variant (`--flags` for the first, `--b`/`--c`/`--d`
 for the others; `--dlv`/`--ddec` apply only to the first). `dlv` is a build input and in the index's key, so each
-schedule is its own saved index (about 1.8 GB at 1M). Since 4142b9c, `ddec` is an open-time choice: it is not in the
-key, `index.json` or `plan_hash`, and one saved index opens under any `ddec`. Before that commit each `ddec` needed
-its own copy.
+schedule is its own saved index (about 1.8 GB at 1M), and a variant with `dlv=` needs its own `--index-X`. `ddec` is
+a per-query plan setting (`Plan::ddec`; `--ddec`, as `BuildOptions::ddec`, sets the index's default): it is not in
+the key, `index.json` or `plan_hash`, and one opened index serves variants with different `ddec` (`--b ddec=…` with no
+`--index-b`). A `ddec` naming a level the index does not have is refused when the plan meets the index; `dlv=` or
+`nusort` on a variant that shares the first index is an error (they were silently dropped before). Before 4142b9c each
+`ddec` needed its own copy of the index.
 
 ### Options
 
 1. **Keep every default off** (base). Fewest bytes; text 0.01% is the slowest of the four.
-2. **A: cluster size by N.** Text 0.01% −17%, k-NN −10 to −15%; +2–9% bytes on the index path; build and open unchanged.
+2. **A: cluster size by N.** Text 0.01% −17%, k-NN −10 to −15% on 1 thread (4 threads: top-10 −9.5%, top-100
+   −5.7%); +2–9% bytes on the index path; build time and open time unchanged, build peak +7%.
    At 1B it needs the encoder's per-cluster memory bounded first (above).
-3. **B: two deterministic levels (16, 32).** Text −10 to −19% at small answers; +13–20% bytes at 0.01–0.1%.
-4. **C: both.** The fastest (text 14–28% at small answers); +20–31% bytes at 0.01–0.1%. This conflicts most with the
-   rule that queries stay cheap in bytes read.
+3. **B: two deterministic levels (16, 32).** Text −10 to −19% at small answers; bytes at 0.01–0.1% +13–20% for text
+   queries, +10–20% for item queries.
+4. **C: both.** The fastest (text 14–28% at small answers); bytes at 0.01–0.1% +20–31% for text queries, +15–27% for
+   item queries; build peak +13% against B. This conflicts most with the rule that queries stay cheap in bytes read.
 5. **Decide after the planner.** Fix or recalibrate the plan constants first and rerun `e2e`, so that items and text
    at ≥1% are measured on the index path. Until then, those rows give no evidence for any option.
