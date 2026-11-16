@@ -381,7 +381,9 @@ and the fit); the support table is mapped at open rather than read.
 
 `research/levels-clusters` was brought forward with every default off (cd1278d; 4142b9c makes `ddec` an open-time
 option). Nothing is decided here: below are the measurements of the four candidate configurations and the options.
-Raw logs: the session's `rb/b3/m/` (`build_*`, `bytesq_*`, `verify_*`, `open_*`, `e2e/r1..r6`, `e2e_ratios.txt`).
+Raw logs: the session's `rb/b3/m/` (`build_*`, `bytesq_*`, `verify_*`, `open_*`, `e2e/r1..r6`, `e2e_ratios.txt`);
+the index-path times, encoded again with the planner without timing: `b3t/` (`build_*`, `bytesq_*`, `verify_*`,
+`e2e/r1..r3`, `table.txt`, `meas.sh`).
 
 | | fit | clusters (K) | groups | deterministic levels |
 |---|---|---|---|---|
@@ -397,7 +399,7 @@ per cluster, K = 15,625) both give 64. So A tests the cluster size essentially a
 Setup: the cd1278d binary, 4 threads (`RAYON_NUM_THREADS=4`), 200 text and 200 held-out item queries for `bytesq` and
 `verify`. The builds, opens, `verify` and `e2e` ran with `--plan-default --no-approx`; the `bytesq` runs had neither,
 which is harmless there (`bytesq` forces the index path, so neither the plan's constants nor the approximation
-enter).
+enter). The `e2e` times below are from the 3762490 binary (the planner without timing), not cd1278d.
 
 ### Build, open, verify (measured)
 
@@ -425,57 +427,83 @@ deterministic and 0 randomised interval violations, 0 k-NN mismatches of 200.
 
 Touched share (items entering the first level), text 0.01%: base and B .679, A and C .731; item 0.01%: .945 and .963.
 
-### End-to-end time (measured)
+### End-to-end time on the index path (measured, the planner without timing)
 
-Six rounds, the four indexes in one process per round, the order rotated per round (`--index`, `--index-b/c/d`; B
-and C get their levels with the per-variant flag `dlv=16.32`). Rounds 1–3 cover every answer size, rounds 4–6 only
-0.01%, 0.1%, 1% and the top-10 / top-100 k-NN; 50 queries, 3 runs. The ratio is the variant's median over the base's
-median in the same round: the mean, and min..max over rounds. Text rows:
+Re-timed with the planner of "The planner without timing" below (the f47dbe9 library, unchanged at 3762490;
+`--no-approx`, no plan constants to give). The library changed, so each index was encoded again (the same fits and
+options); the code hashes are those of batch 3 (base `b8bdd054938fe563`, A `08e9fb204de3da37`, B `c8779c606204880b`,
+C `771eaba1d111dca4`), the store hashes too, and `bytesq` gives the bytes above to the digit. `verify` (200 queries ×
+7 answer sizes, filtered sets, k-NN; this planner) is clean again on all four: 0 wrong in or out, 0 interval
+violations, 0 k-NN mismatches of 200. Three rounds, the four indexes in one process per round, the order rotated per
+round (`--index`, `--index-b/c/d`, `dlv=16.32` for B and C); answers 0.01%, 0.1%, 1% and the top-10 / top-100 k-NN;
+1 and 4 threads; 50 text and 50 held-out item queries, 3 runs. Every query of every index ran on the index path (no
+scan; 1 or 2 clusters a query scored directly, the rest cut). Base's median in ms (mean over rounds); for A, B and C the ratio of the variant's
+median to the base's in the same round: the mean, and min..max over the 3 rounds.
 
-| threads, cell | base ms | A | B | C |
+| class, threads, cell | base ms | A | B | C |
 |---|---|---|---|---|
-| 1, 0.01% | 34.87 | 0.83 (0.75..0.94) | 0.86 (0.77..0.95) | 0.72 (0.68..0.77) |
-| 1, 0.1% | 44.71 | 0.98 (0.93..1.04) | 0.90 (0.86..0.95) | 0.86 (0.84..0.90) |
-| 1, top-10 | 29.43 | 0.90 (0.86..0.95) | 0.86 (0.75..0.94) | 0.73 (0.69..0.78) |
-| 1, top-100 | 35.82 | 0.85 (0.74..0.96) | 0.81 (0.68..0.94) | 0.72 (0.61..0.78) |
-| 4, 0.01% | 11.29 | 0.84 (0.75..0.90) | 0.86 (0.81..0.91) | 0.74 (0.69..0.81) |
-| 4, 0.1% | 14.83 | 0.96 (0.89..1.01) | 0.89 (0.81..0.97) | 0.86 (0.79..0.95) |
-| 4, top-10 | 10.24 | 0.91 (0.86..0.94) | 0.87 (0.77..0.94) | 0.80 (0.73..0.85) |
-| 4, top-100 | 13.25 | 0.94 (0.83..1.01) | 0.86 (0.78..0.98) | 0.77 (0.72..0.85) |
+| item, 1, 0.01% | 45.79 | 0.91 (0.91..0.92) | 0.85 (0.84..0.86) | 0.75 (0.73..0.76) |
+| item, 1, 0.1% | 52.93 | 0.89 (0.88..0.90) | 0.86 (0.85..0.88) | 0.76 (0.75..0.77) |
+| item, 1, 1% | 60.76 | 0.90 (0.89..0.91) | 0.86 (0.85..0.87) | 0.80 (0.79..0.81) |
+| item, 1, top-10 | 40.23 | 0.94 (0.91..0.99) | 0.79 (0.78..0.82) | 0.72 (0.70..0.74) |
+| item, 1, top-100 | 52.57 | 0.95 (0.93..0.98) | 0.80 (0.79..0.81) | 0.73 (0.72..0.74) |
+| item, 4, 0.01% | 13.88 | 0.88 (0.86..0.89) | 0.85 (0.85..0.86) | 0.75 (0.74..0.76) |
+| item, 4, 0.1% | 15.65 | 0.89 (0.86..0.92) | 0.87 (0.85..0.88) | 0.77 (0.74..0.79) |
+| item, 4, 1% | 18.95 | 0.85 (0.83..0.87) | 0.85 (0.83..0.88) | 0.77 (0.75..0.79) |
+| item, 4, top-10 | 13.16 | 0.93 (0.90..0.96) | 0.80 (0.78..0.82) | 0.73 (0.71..0.76) |
+| item, 4, top-100 | 21.13 | 0.90 (0.88..0.93) | 0.78 (0.75..0.80) | 0.70 (0.68..0.73) |
+| text, 1, 0.01% | 33.41 | 0.87 (0.84..0.90) | 0.82 (0.81..0.83) | 0.71 (0.70..0.73) |
+| text, 1, 0.1% | 38.89 | 0.89 (0.88..0.91) | 0.86 (0.86..0.87) | 0.75 (0.73..0.78) |
+| text, 1, 1% | 57.42 | 0.90 (0.89..0.91) | 0.88 (0.87..0.88) | 0.79 (0.78..0.81) |
+| text, 1, top-10 | 29.57 | 0.86 (0.86..0.86) | 0.85 (0.82..0.88) | 0.71 (0.70..0.72) |
+| text, 1, top-100 | 32.64 | 0.92 (0.87..0.96) | 0.84 (0.83..0.87) | 0.74 (0.73..0.75) |
+| text, 4, 0.01% | 10.46 | 0.82 (0.76..0.85) | 0.88 (0.84..0.90) | 0.71 (0.68..0.73) |
+| text, 4, 0.1% | 12.07 | 0.87 (0.83..0.89) | 0.85 (0.81..0.87) | 0.73 (0.71..0.75) |
+| text, 4, 1% | 17.44 | 0.92 (0.91..0.94) | 0.89 (0.87..0.92) | 0.82 (0.80..0.85) |
+| text, 4, top-10 | 9.53 | 0.92 (0.88..0.99) | 0.88 (0.84..0.95) | 0.74 (0.72..0.77) |
+| text, 4, top-100 | 11.94 | 1.00 (0.99..1.01) | 0.87 (0.79..0.92) | 0.81 (0.79..0.83) |
 
-- **Text, small answers:** C is 14–28% faster at 0.01%, 0.1% and both k-NN cells, on 1 and 4 threads; A and B each
-  about half of that. But C reads 20–31% more bytes per text query item at 0.01–0.1% on the index path (7% at 1%), and
-  B 13–20%; for item queries C reads 15–27% more and B 10–20% (`bytesq` above).
-- **Text at 1% and above, and every item row, do not tell the indexes apart.** The mean ratios there are 0.969–1.038
-  (single rounds 0.93..1.09), and the base takes 183–190 ms (1 thread) for each threshold cell and 174.7 / 177.0 ms for
-  item top-10 / top-100: the planner scans every full vector in those cells (1,536 B per item, `full_reads_per_item`
-  1.0), on all four indexes. That is a planner calibration issue, not these options; see below.
-- **A against levels-clusters.** `REPORT_SCALING.md`'s −5…−12% for 2,000 per cluster at 1M is time, not bytes. Coarser
-  clusters cut less: more items enter the levels (touched .731 against .679 at text 0.01%), so bytes go up (+2–9%),
+Bytes read per item on the path taken (`e2e`, 50 queries; change against base):
+
+| | base | A | B | C |
+|---|---|---|---|---|
+| item 0.01% | 27.18 | 29.30 +8% | 31.96 +18% | 33.88 +25% |
+| item 0.1% | 39.58 | 41.94 +6% | 43.10 +9% | 45.22 +14% |
+| item 1% | 64.13 | 66.92 +4% | 66.22 +3% | 68.81 +7% |
+| item top-10 | 25.18 | 27.63 +10% | 27.88 +11% | 28.93 +15% |
+| item top-100 | 42.06 | 45.15 +7% | 42.74 +2% | 44.95 +7% |
+| text 0.01% | 16.33 | 17.97 +10% | 20.42 +25% | 22.43 +37% |
+| text 0.1% | 25.15 | 27.04 +8% | 29.06 +16% | 31.16 +24% |
+| text 1% | 58.59 | 60.94 +4% | 61.19 +4% | 63.51 +8% |
+| text top-10 | 15.63 | 17.81 +14% | 18.15 +16% | 20.43 +31% |
+| text top-100 | 21.39 | 24.01 +12% | 23.97 +12% | 26.30 +23% |
+
+- **C is the fastest in every cell, then B, then A, base last.** C is 17–30% faster than base (ratios 0.70–0.83; no
+  round above 0.85), B 11–22% (0.78–0.89), A 5–18% (0.82–0.95), and A ties base at text top-100 on 4 threads (1.00,
+  0.99..1.01). A round's ratio lies within 0.08 of the mean. Of the 60 cell-rounds, C beats B in 59 and A and base
+  in all; B beats A in 53 (A is ahead at text 0.01% on 4 threads in every round, 0.82 against 0.88). Items and text
+  gain alike, 1 and 4 threads alike. The two options compose about multiplicatively: C is within 0.04 of A × B in 18
+  of 20 cells (text k-NN on 4 threads: C 0.06 better).
+- **Bytes go the other way, in the same order.** C reads 7–37% more than base on the path taken, B 2–25%, A 4–14%;
+  the gap is widest at 0.01% and text k-NN (C: +37% and +31%) and closes to +3–8% at 1%, as the time gain does
+  (C 0.71–0.75 at 0.01%, 0.77–0.82 at 1%).
+- **Superseded:** the batch 3 `e2e` (`rb/b3/m/e2e`, `--plan-default`) ran item queries and text at 1% or more as a
+  scan of all 1M full vectors on every index (about 180 ms on 1 thread; ratios 0.97–1.04), so it could not tell the
+  indexes apart there; its text rows at ≤0.1% and k-NN were on the index path and agree with the above (C 0.72–0.86).
+  Item queries now separate the variants as text does.
+- **A against levels-clusters.** `REPORT_SCALING.md`'s −5…−12% for 2,000 per cluster at 1M is time, not bytes.
+  Coarser clusters cut less: more items enter the levels (touched .731 against .679 at text 0.01%), so bytes go up,
   while the per-cluster work (cut, tables, setup) falls with K, so time goes down. `REPORT_CLUSTERSIZE.md` shows the
-  same at 4,000 per cluster (text 1%: 71.6 B against 67.9). Where this run can compare times (text ≤0.1% and k-NN,
-  on the index path), A is 16–17% faster at 0.01% and, on 1 thread, 10–15% at k-NN (4 threads: 9.5% at top-10, 5.7%
-at top-100); at 0.1% it is only 2–4% faster, against −12% there.
-  That gap is not explained: those runs used other fixed plan constants and a pinned core, and this cell's spread
-  (0.93..1.04) is about as wide as the gap.
+  same at 4,000 per cluster (text 1%: 71.6 B against 67.9). Here A is 5–18% faster (a tie at text top-100 on 4
+  threads); the batch 3 gap at text 0.1% (0.98 there, against −12%) does not recur (0.89 and 0.87).
 
-### Why item queries are a full scan in `e2e` (measured, pre-existing)
+### Why item queries were a full scan in the batch 3 `e2e` (superseded)
 
-`e2e` runs each query as planned (`run2.rs:898`); `bytesq` forces the index path (`PlanMode::Index`, `run2.rs:493`),
-so the two count different paths. With `--plan-default`, the planner prices the index path above a scan whenever most
-of a cluster's rows remain candidates after the cut, as for these held-out items (d about 0.93): per cluster of 1,000
-rows, scoring its rows directly costs `nv·cscan_us + dir_us` = 101 µs, the cut plus the index path 2.5 + 930·(0.02 +
-0.08·0.93) + 4 + 20·0.93 = 113 µs (`q.rs:2599`), so the estimate (about 101 ms) is not below the scan's `nrows·cscan_us`
-= 100 ms (`q.rs:2479–2480`) and the query scans (`q.rs:2609`). On this machine the constants are off by about 2× in
-both directions: the scan takes 0.19 µs a row (`--plan-default`'s `cscan_us` is 0.10) and the index path about 0.045
-µs a candidate. Checked with 10 queries on base: item 0.01% planned 191 ms at 1,536 B/item, forced index 41 ms at 21
-B/item; text 1% 197 ms against 60 ms. With constants calibrated on this index (no `--plan-default`: `cscan_us` 0.20,
-`item_us1` 0.053) the planner picks the index path: item 0.01% 39 ms, text 1% 61 ms. The upstream reference binary
-behaves identically (same bytes, same times), so it predates this branch.
-
-To compare the indexes on item queries and large text answers, rerun `e2e` with `--plan index`, with calibrated
-constants, or with corrected `--plan-default` constants. (Since "The planner without timing" below, the planner runs
-these on the index path and `--plan-default` no longer exists.)
+With `--plan-default` the old planner priced the index path above a scan whenever most of a cluster's rows remained
+candidates after the cut, as for these held-out items, from microsecond constants that were off by about 2× in both
+directions on this machine (a scan 0.19 µs a row against 0.10 assumed; the index path about 0.045 µs a candidate).
+Checked then on base with 10 queries: item 0.01% planned 191 ms, forced index path 41 ms; text 1% 197 against 60 ms.
+The planner without timing (below) takes the index path in all these cells (above).
 
 ### Memory at 1B (estimated, not measured)
 
@@ -496,16 +524,15 @@ the key, `index.json` or `plan_hash`, and one opened index serves variants with 
 
 ### Options
 
-1. **Keep every default off** (base). Fewest bytes; text 0.01% is the slowest of the four.
-2. **A: cluster size by N.** Text 0.01% −17%, k-NN −10 to −15% on 1 thread (4 threads: top-10 −9.5%, top-100
-   −5.7%); +2–9% bytes on the index path; build time and open time unchanged, build peak +7%.
-   At 1B it needs the encoder's per-cluster memory bounded first (above).
-3. **B: two deterministic levels (16, 32).** Text −10 to −19% at small answers; bytes at 0.01–0.1% +13–20% for text
-   queries, +10–20% for item queries.
-4. **C: both.** The fastest (text 14–28% at small answers); bytes at 0.01–0.1% +20–31% for text queries, +15–27% for
-   item queries; build peak +13% against B. This conflicts most with the rule that queries stay cheap in bytes read.
-5. **Decide after the planner.** Fix or recalibrate the plan constants first and rerun `e2e`, so that items and text
-   at ≥1% are measured on the index path. Until then, those rows give no evidence for any option.
+1. **Keep every default off** (base). Fewest bytes; the slowest of the four in every cell measured.
+2. **A: cluster size by N.** 5–18% faster (item and text, 1 and 4 threads; text top-100 on 4 threads a tie); +4–14%
+   bytes on the path taken; build time and open time unchanged, build peak +7%. At 1B it needs the encoder's
+   per-cluster memory bounded first (above).
+3. **B: two deterministic levels (16, 32).** 11–22% faster; +2–25% bytes (+25% at text 0.01%, +18% at item 0.01%).
+4. **C: both.** The fastest everywhere, 17–30%; +7–37% bytes (+37% at text 0.01%, +31% at text top-10, +25% at item
+   0.01%); build peak +13% against B. This conflicts most with the rule that queries stay cheap in bytes read.
+
+These rest on the index-path times above; the batch 3 `e2e` table (old planner) is superseded.
 
 ## The planner without timing (1M BioCLIP-2, 2026-11-16)
 
