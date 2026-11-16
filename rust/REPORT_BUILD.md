@@ -1,10 +1,10 @@
 # The build: a faster encoder, a saved index, the fit in Rust, the partitioned build, the K × A table
 
 > Brought forward with the rebase onto `research/exact-vector-search` (2026-11-16). The figures below were measured on
-> the pre-rebase branch; the rebased branch's gates are in "Rebased" at the end. The commands there are interim forms,
-> until the API is redesigned: `vexact --index FIT fit --partition PART [...]` for `vexact fit FIT --partition PART`,
-> `vexact --v2 --index FIT --rebuild` for `vexact build FIT`, `vexact --index FIT anchors [...]` for `vexact anchors
-> FIT`; `VEXACT_CAL_ITEMS` is `BuildOptions::cal_items`. A fit whose anchors would be exactly its K centres (A >= K and
+> the pre-rebase branch; the rebased branch's gates are in "Rebased" at the end. The commands in this report are the
+> forms before the API ("The API", below): `vexact fit`, `vexact build` and `vexact anchors` are gone, made by `create`
+> (partition, fit, anchors, encoding) and `--rebuild` with build flags (`--anchors`, `--text-anchors`, `--text-count`);
+> `VEXACT_CAL_ITEMS` is `BuildOptions::cal_items` (`--cal-items`). A fit whose anchors would be exactly its K centres (A >= K and
 > no prompts) now gets no `anchors.npy`, and the planner's centre-anchor shortcuts follow the index's recorded flag
 > (`anc_centres`), not the anchor count.
 
@@ -325,6 +325,9 @@ s), so the times in this section are only comparable with each other.
 
 ## Commands
 
+As run then (the forms before the API; now `create` runs the partition, the fit and the build, and `--rebuild
+--anchors ...` writes the anchors):
+
 ```bash
 python3 -I tools/synth_vectors.py DATA
 python3 -I tools/partition.py DATA/x.npy DATA/part [--cells C] [--cross T]
@@ -341,6 +344,37 @@ $CARGO_TARGET_DIR/release/vexact --v2 --index DATA/rfit --queries DATA/q.npy --p
 
 `--rebuild` builds the index again in place of opening the saved one, and `--hash` logs the code hash. The cells can
 be deleted after the build. The 1M BioCLIP-2 runs used `--cells 32 --cross {1,2,32}` and `--nq 200` for `bytesq`.
+
+## The API (2026-11-16)
+
+The owner questioned what `fit`, `build` and `anchors` were for. They were stages of making one index (the partition
+in Python, the fit, the encoding) and one input of the build changed for an experiment, and an open silently built
+when the saved index was missing or stale. Now (README, "Making an index"):
+
+- `v2::create(vectors, dir, &BuildOptions, log)`: the whole pipeline into a new directory: `tools/partition.py` into
+  `dir/partition`, the fit (`fit::fit`, with the anchors), the encoding, the index sealed into `dir/encoded`.
+  `vexact --vectors V --index DIR create [build flags]`.
+- `v2::open(dir, &OpenOptions, log)`: maps `dir/encoded`; never encodes. The index records the build options that
+  decide the encoding (index.json "options"); the open derives the key from the fit and those options, and a missing
+  or stale index (another fit, or another version of the library) is an error that says to rebuild. Still O(clusters):
+  the fit's parameters and the per-cluster records are read, the rows mapped. `vexact --v2 --index DIR MODE`.
+- `v2::rebuild(dir, &BuildOptions, log)`: re-encodes the fit in `dir` (a `create`d one, or a `tools/fit.py` fit),
+  writing the anchors first when given. `vexact --v2 --index DIR --rebuild [build flags] [MODE]`.
+- `BuildOptions` holds the cluster size (`per_cluster`), groups, basis, query sample, seed, certification time, the
+  anchors (image count, text prompts, text count), the level schedules (`dlv`, `rlv`), the calibration items and the
+  other encoding options. `OpenOptions` holds only what an open may choose without changing what is stored: which
+  deterministic levels decide (`ddec`, formerly a build option outside the key) and `keep_index`.
+- `open_at` and `rebuild_at` are folded: one directory holds one index (`DIR/encoded`), so variants of one fit are
+  directories of their own (`cp -al` of the fit). Only the tests save beside a read-only fit (`open_in`, `rebuild_in`,
+  crate-private), and e2e's variant flags `dlv=` and `nusort` are refused (another build is another index directory).
+- Every flag is in the binary's registry; a build flag where nothing is built, a fit flag given to a rebuild, `--vectors`
+  without `create`, positional arguments and the removed commands are refused with what to use instead.
+
+Code hashes through the new commands are unchanged (synth4k `7ac80b6c54101fa9`, 60k `c44827e2e155e64f`, 1M `pyfit`
+`b8bdd054938fe563`; each also opened again, 0.1 to 0.4 s), and `create` at the defaults then (1,000 per cluster, by-k8, pca, six levels) from the 1M BioCLIP-2
+vectors (353 s on 4 threads: partition, fit with the certificate, encoding) gives code hash `db6ca06f69bb8c74`, the
+hash the steps before the API give from the same partition (`fit --partition` and a build of the earlier binary), with
+the fit's files byte-identical.
 
 ## Rebased (2026-11-16)
 

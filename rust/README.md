@@ -18,31 +18,59 @@ cargo build --release
 cargo test --release      # includes the end-to-end test on testdata/synth4k
 ```
 
-## Inputs
+## Making an index
 
-`tools/fit.py` fits the build parameters to any file of vectors, from the data alone (no example queries, no text
-anchors), and writes an index directory:
+An index is a directory. `create` makes one from a file of vectors, the whole pipeline in one step: it partitions the
+vectors into `DIR/partition` (`tools/partition.py`, with python3, numpy and faiss), fits the build parameters into `DIR`
+(`src/fit.rs`, with the support table's anchors), encodes every item and saves the index in `DIR/encoded`:
+
+```bash
+V="$CARGO_TARGET_DIR/release/vexact"
+$V --vectors VECTORS.npy --index DIR create [build flags]      # N x n0 floats; row i is entity i; DIR new or empty
+$V --v2 --index DIR MODE...                                    # opens the saved index (never encodes) and runs MODE
+$V --v2 --index DIR --rebuild [build flags] [MODE...]          # re-encodes the fit in DIR and saves it, then runs MODE
+```
+
+In the library these are `v2::create(vectors, dir, &BuildOptions, log)`, `v2::open(dir, &OpenOptions, log)` and
+`v2::rebuild(dir, &BuildOptions, log)`; `v2::build` encodes in memory and saves nothing (`--in-memory`).
+
+The build flags are the fields of `v2::BuildOptions`. The partition and the fit, given to `create` only (a rebuild
+re-encodes the fit as it is): `--per-cluster M|by-n` (items per cluster; default 1,000), `--groups by-k8|by-n|G`,
+`--basis pca|dual`, `--query-sample QUERIES.npy`, `--cert-time SECONDS`. The support table's anchors, to `create` or a
+rebuild (which writes them into the fit first): `--anchors A` (from the centres; default 1,024), `--text-anchors
+PROMPTS.npy`, `--text-count C`. The encoding: `--dlv B,B,...` (the deterministic levels), `--rlv B,B,...`,
+`--profile P.npy`, `--cal-items N`, `--nguar N`, `--nusort`, `--design-exact`, `--csg-plain`, `--clusters K` (the first K
+clusters only), and `--seed S` for all of them. A build flag where nothing is built is refused, as is any argument the
+binary does not know (there are no positional arguments).
+
+`v2::OpenOptions` holds what an open may choose without changing what is stored: `--ddec LEVELS` (the deterministic
+levels that decide threshold queries) and `--keep-index` (open although the fit's vectors file, perm.npy or partition
+changed since the build).
+
+The saved index records the build options it was built with, and its key covers the fit, the profile, those options,
+the formats and a fingerprint of the library's sources (`src/v2/store.rs`, `build_key`; it does not depend on how the
+directory's path is spelled). An open reads the fit's parameters and the index's per-cluster records, maps the codes,
+keys and vectors, and encodes nothing; a missing index, or a stale one (the fit changed, or any library edit), is an
+error that says to rebuild. One directory holds one index: to compare build options on one fit, hard-link the fit into
+a second directory (`cp -al DIR DIR2`) and rebuild that one. Other `encoded*` directories there (an earlier version's
+`encoded-KEY`, an interrupted rebuild's scratch directory) are logged with their sizes, never removed. A rebuild holds
+`DIR/encoded.lock` (a second one waits), writes and syncs a scratch directory of its own and swaps it into place.
+
+`tools/fit.py` also fits a file of vectors, from the data alone, into an index directory that `--rebuild` then encodes
+(it keeps an f16 copy of the vectors in cluster order, `Xs.npy`):
 
 ```bash
 python3 -I tools/fit.py VECTORS.npy INDEX [--metric angular] [--per-cluster M]   # N x n floats; row i is entity i
 ```
 
-It normalises (angular), zero-pads to a multiple of 32 dimensions, clusters with about 1,000 items per cluster (8-bit
-centres), groups the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a PCA basis of the
-residuals per group, and writes the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
-blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deterministic levels end at 4 / 8 / 12 / 16 /
-24 / 32 B; the randomised ones at 56, 96, 160 and 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16
-vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every
-other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
-derived from these in Rust when the index is built (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
-(about 11 s at 1.2M items on 12 cores). The encoded index is saved beside the fit, in `INDEX/encoded-KEY/`
-(`src/v2/store.rs`; KEY covers the fit, the profile, the identity of the vectors file (name, length, modification and
-status-change times, device and inode, not its contents), every option that changes the build and a fingerprint of the
-library's sources, so any library edit makes saved indexes stale; it does not depend on how the directory's path is
-spelled), with the f16 vectors in index row order; opening it maps the codes, keys and vectors and encodes nothing.
-Other `encoded-*` directories there are logged as stale with their sizes, never removed. A rebuild holds
-`INDEX/encoded.lock` (a second one waits), writes and syncs a scratch directory of its own and swaps it into place.
-`testdata/make_synth.py` fits the small index the tests use.
+Both normalise (angular), zero-pad to a multiple of 32 dimensions, cluster (about 1,000 items per cluster by default,
+8-bit centres), group the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a basis of
+the residuals per group, and write the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
+blocks (`meta.json`). The deterministic levels end at 4 / 8 / 12 / 16 / 24 / 32 B; the randomised ones at 56, 96, 160 and
+256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16 vector and 8 bits per dimension; the four
+randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every other build parameter (bit allocation,
+certificate weights, whitening, block membership and rates, scalar grids) is derived from these in Rust when the index
+is built (`src/derive.rs`, `src/v2/mod.rs`). `testdata/make_synth.py` fits the small index the tests use.
 
 ## Run
 
@@ -55,14 +83,14 @@ $B bytesq                                         # bytes read per item only
 $B dbcmp --thr THRESHOLDS.npy                     # threshold queries against flat scans (see run2::dbcmp)
 $B dbtopk --order ORDER.npy                       # exact and approximate top-k (see run2::dbtopk)
 $B --scale 10 --nq 20                             # 10M synthetic items in the int8 bases
-$B --clusters 40 verify                           # quick development check
+$B --in-memory --clusters 40 verify               # quick development check
 ```
 
-The runs open the index saved for the fit and the build options given (`v2::open`), and stop with a message when there
-is none: `--rebuild` encodes it and saves it first (`v2::rebuild`), `--in-memory` encodes it without saving it
-(`v2::build`), and `--hash` logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`) and
-the hash of everything the index holds, vectors included (`Index2::store_hash`, also logged by every rebuild and recorded
-in `index.json`).
+The runs open the saved index (`v2::open`) and stop with a message when there is none or it is stale: `--rebuild`
+encodes it and saves it first (`v2::rebuild`), `--in-memory` encodes it without saving it (`v2::build`), and `--hash`
+logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`) and the hash of everything the
+index holds, vectors included (`Index2::store_hash`, also logged by every rebuild and recorded in `index.json`). `e2e`'s
+further variants (`--index-b DIR`, ...) open their own saved indexes.
 
 The defaults are the measured configuration: integer deterministic levels, tables combined from the group's and the
 centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;
@@ -74,9 +102,10 @@ other cluster runs on the index path. Under a visible set one constant in rows d
 scanned when it holds at most that many rows per cluster holding one; otherwise a cluster holding at most that many is
 scored directly and the rest run on the index path; exact k-NN also counts its seed as `r_seed` rows (6,000). With the
 full vectors on file and read through io_uring (`--full-file`), a cost model prices the reads, from disk constants timed
-once per machine and device and cached in the index directory (`disk-constants.txt`); `--plan-file` gives those
+once per machine and device and cached in the index directory (`disk-constants.txt`; in the per-user cache,
+`~/.cache/vexact`, when the index directory cannot be written); `--plan-file` gives those
 constants (`r_rows`, `r_seed`, `io_us`, `io_gbps` as name=value lines) instead. Full vectors are held in index row
-order, so a scan reads memory in order. Each run rebuilds the index (about 100 s at 1M on 4 cores) and appends to
+order, so a scan reads memory in order. A rebuild takes about 100 s at 1M on 4 cores. Each run appends to
 `results/run2.log`; tables go to `results/*.csv`.
 
 ## Layout
@@ -92,4 +121,5 @@ order, so a scan reads memory in order. Each run rebuilds the index (about 100 s
   `src/util.rs` — .npy reader, exact similarity on f16 integers, reproducible Haar rotations; `src/simd.rs` — the AVX2
   forms of 16-lane operations.
 - `src/run2.rs`, `src/ann.rs`, `src/scale.rs`, `src/main.rs` — the experiments and the command line.
-- `tools/fit.py` — fits the build parameters to a file of vectors.
+- `src/fit.rs`, `src/bucket.rs` — the fit of a partition, and the partition's cells read in the fit's row order.
+- `tools/partition.py` — the partition `create` runs; `tools/fit.py` — fits the build parameters to a file of vectors.
