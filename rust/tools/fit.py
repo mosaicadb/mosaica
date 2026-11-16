@@ -2,8 +2,12 @@
 # clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
 # build (`vexact --v2 --index OUTDIR`) encodes every item from these.
 # usage: python3 fit.py VECTORS.npy OUTDIR [--basis pca|dual] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
-#   [--per-cluster M]
-#   VECTORS.npy: N x n, float16/32/64; row i is entity i.
+#   [--per-cluster M|by-n] [--groups by-k8|by-n|G] [--rows ROWS.npy]
+#   VECTORS.npy: N x n, float16/32/64; row i is entity i. The vectors are read from it as needed (no float32 copy).
+#   --per-cluster: items per cluster on average, 1,000 by default; by-n: 2,000 up to 2M items, doubling for each 4x N
+#     (4,000 up to 8M, 8,000 up to 32M, ...; research/levels-clusters' rule, `per_cluster`).
+#   --groups: by-k8 (default): min(64, K / 8, N / (20 n)); by-n: min(64, K, N / (20 n)) (levels-clusters' rule); or G.
+#   --rows: a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...
 #   --basis pca (default): each group's PCA basis of the residuals and the data-only profile H25.
 #   --basis dual: the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
 #     covariance of query offsets q - (q.m^) m^ from clusters drawn by size, 40 per pseudo-query, with a ridge of 0.1
@@ -22,8 +26,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from core import kmeans, TREE, GTREE  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import certify  # noqa: E402
+from rules import per_cluster, groups_for  # noqa: E402,F401 (tools/rules.py, shared with partition.py)
 
-# Design constants (not fitted): items per cluster, the guarantee's N and epsilon, the deterministic level ends, the
+# Design constants (not fitted): items per cluster (the default; `per_cluster` gives the rule by N), the guarantee's N and epsilon, the deterministic level ends, the
 # randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25 hedge weight.
 PER_CLUSTER = 1000
 NTARGET, EPS = 1e9, 1e-9
@@ -70,6 +75,53 @@ def schedule(n0, n):
         bounds[j] = max(bounds[j], bounds[j - 1] + 16)
     assert bounds[-2] <= n - 16, f"n = {n} is too small for four randomised blocks"
     return rlv, bounds
+
+
+class Subset:
+    """Rows `rows` of a (memory-mapped) array, indexed like an array of those rows."""
+
+    def __init__(self, X, rows):
+        self.X, self.rows = X, np.asarray(rows, np.int64)
+        self.shape = (len(self.rows), X.shape[1])
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            k = np.arange(*k.indices(len(self)))
+        r = self.rows[np.asarray(k)]
+        o = np.argsort(r, kind="stable")
+        out = np.empty((len(r), self.shape[1]), self.X.dtype)
+        out[o] = self.X[r[o]]
+        return out
+
+
+class Rows:
+    """The unit vectors, zero-padded to n, read from the source file on demand (row order `order` when given), so no
+    full float32 copy is held: R[i:j] and R[index array] give float32 rows, the same values as normalising the whole
+    file at once."""
+
+    def __init__(self, X, n, order=None):
+        self.X, self.n, self.order = X, n, order
+
+    def __len__(self):
+        return len(self.X)
+
+    def permuted(self, order):
+        return Rows(self.X, self.n, order)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            k = np.arange(*k.indices(len(self)))
+        k = np.asarray(k)
+        if self.order is not None:
+            k = self.order[k]
+        x = np.asarray(self.X[k], np.float32)
+        nr = np.linalg.norm(x, axis=1, keepdims=True)
+        out = np.zeros((len(x), self.n), np.float32)
+        out[:, :x.shape[1]] = np.where(nr > 0, x / np.where(nr > 0, nr, 1), 0)
+        return out
 
 
 def int8_basis(v):
@@ -119,27 +171,34 @@ def main():
     ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
     ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
-    ap.add_argument("--per-cluster", type=int, default=PER_CLUSTER, help="items per cluster (small fits for tests)")
+    ap.add_argument("--per-cluster", default=str(PER_CLUSTER),
+                    help="items per cluster on average (default 1000), or by-n: 2,000 up to 2M items, doubling for each 4x")
+    ap.add_argument("--groups", default="by-k8", help="by-k8 (default): min(64, K / 8, N / (20 n)); by-n: min(64, K, N / (20 n)); or G")
+    ap.add_argument("--rows", default="", help="a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
         sys.exit("--query-sample shapes Sigma_Q, which only the dual basis uses; add --basis dual")
+    if not (a.per_cluster == "by-n" or (a.per_cluster.isdigit() and int(a.per_cluster) > 0)):
+        sys.exit(f"--per-cluster is a positive number or by-n, not {a.per_cluster}")
+    if not (a.groups in ("by-k8", "by-n") or (a.groups.isdigit() and int(a.groups) > 0)):
+        sys.exit(f"--groups is by-k8, by-n or a positive number, not {a.groups}")
     os.makedirs(a.out, exist_ok=True)
     rng = np.random.default_rng(a.seed)
     X = np.load(a.vectors, mmap_mode="r")
+    if a.rows:
+        X = Subset(X, np.load(a.rows))
     N, n0 = X.shape
     if n0 < 50:
         sys.exit(f"{a.vectors} has {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, "
                  f"which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more.")
     n = (n0 + 31) // 32 * 32
-    Xu = np.zeros((N, n), np.float32)
-    for i in range(0, N, 100_000):
-        x = np.asarray(X[i:i + 100_000], np.float32)
-        nr = np.linalg.norm(x, axis=1, keepdims=True)
-        Xu[i:i + len(x), :n0] = np.where(nr > 0, x / np.where(nr > 0, nr, 1), 0)
-    nzero = int((np.abs(Xu).sum(1) == 0).sum())
+    Xu = Rows(X, n)
+    nzero = sum(int((np.abs(Xu[i:i + 100_000]).sum(1) == 0).sum()) for i in range(0, N, 100_000))
     log(f"N {N} n {n0} (padded to {n}); zero vectors {nzero}")
 
-    K = max(1, round(N / a.per_cluster))
+    pc = per_cluster(N) if a.per_cluster == "by-n" else int(a.per_cluster)
+    K = max(1, round(N / pc))
+    log(f"{pc} items per cluster ({a.per_cluster}): {K} clusters")
     sub = Xu[rng.choice(N, min(N, 200_000), replace=False)]
     C = kmeans(sub, K, rng)
     del sub
@@ -151,7 +210,8 @@ def main():
     K = len(keep)
     cnt = np.bincount(assign, minlength=K)
     Msum = np.zeros((K, n))
-    np.add.at(Msum, assign, Xu)
+    for i in range(0, N, 100_000):
+        np.add.at(Msum, assign[i:i + 100_000], Xu[i:i + 100_000])
     Mean = Msum / cnt[:, None]
     msc = np.abs(Mean).max(1) / 127
     msc[msc == 0] = 1.0
@@ -160,15 +220,17 @@ def main():
     mn = np.linalg.norm(Mq, axis=1)
     Mh = Mq / np.where(mn > 0, mn, 1)[:, None]
 
-    # groups: enough items per group for a basis (20 n), at most 64 groups and 8 clusters per group on average
-    G = int(max(1, min(64, K // 8, N // (20 * n0))))
+    G = groups_for(a.groups, N, K, n0)
     grp = (Mh @ kmeans(Mh.astype(np.float32).copy(), G, rng, 20).T).argmax(1)
     gk = np.unique(grp)
     gmap = -np.ones(G, np.int64)
     gmap[gk] = np.arange(len(gk))
     grp = gmap[grp]
     G = len(gk)
-    log(f"K {K} clusters (sizes {cnt.min()}..{cnt.max()}), G {G} groups")
+    gsz = np.bincount(grp[assign], minlength=G)
+    cpg = np.bincount(grp, minlength=G)
+    log(f"K {K} clusters (sizes {cnt.min()}..{cnt.max()}), G {G} groups ({a.groups}; sizes {gsz.min()}..{gsz.max()}, "
+        f"clusters per group {cpg.min()}..{cpg.max()})")
 
     # rows in (group, cluster) order; clusters renumbered so they are contiguous
     order = np.lexsort((assign, grp[assign]))
@@ -179,8 +241,12 @@ def main():
     assign = newid[assign]
     mq8, msc, Mq, grp, cnt = mq8[first], msc[first], Mq[first], grp[first], cnt[first]
     cstart = np.r_[0, np.cumsum(cnt)]
-    Xu = Xu[order]
-    np.save(os.path.join(a.out, "Xs.npy"), Xu.astype(np.float16))
+    Xu = Xu.permuted(order)
+    xs = np.lib.format.open_memmap(os.path.join(a.out, "Xs.npy"), mode="w+", dtype=np.float16, shape=(N, n))
+    for i in range(0, N, 100_000):
+        xs[i:i + 100_000] = Xu[i:i + 100_000].astype(np.float16)
+    xs.flush()
+    del xs
     np.save(os.path.join(a.out, "perm.npy"), order.astype(np.int64))
 
     lam = np.zeros((G, n))
@@ -272,6 +338,11 @@ def main():
     meta = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(K), G=int(G), metric=a.metric, DLV=DLV, RLV=rlv, BOUNDS=bounds,
                 CSG=math.sqrt(2 * L1), L1=L1, EPS=EPS, xs="Xs.npy", source=os.path.abspath(a.vectors),
                 format=FORMAT, fit=fit)
+    # recorded only when not the default, so a default fit's meta.json is as before
+    if a.per_cluster != str(PER_CLUSTER) or a.groups != "by-k8":
+        meta["clusters"] = dict(per_cluster=a.per_cluster, groups=a.groups)
+    if a.rows:
+        meta["rows"] = os.path.abspath(a.rows)
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("saved", meta)

@@ -18,15 +18,17 @@ pub fn run2(scale: usize, nq: usize) {
     use crate::v2::*;
     let t = Timer::new();
     log(format!("==== v2 scale run x{scale} at {:.0}", now_s()));
-    let p = load_params(&crate::run2::data_dir());
+    let p = load_params(&crate::run2::data_dir()).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
     let n = p.meta.n;
     let k = p.meta.k;
     let prof = crate::derive::load_profile(&format!("{}/profile.npy", crate::run2::data_dir()));
     // a real build supplies the int8 bases, residual norms and centres
     let real = {
         let src = Real2 { src: RealSource::open(&p.xs_path) };
-        let f = RealSource::open(&p.xs_path);
-        build2(&p, &prof, &src, Full2::Real { map: std::sync::Arc::new(f.map), off: f.off, rows: Default::default() }, &BuildOptions::default(), None, &mut |s| log(format!("[real] {s}")))
+        build2(&p, &prof, &src, Full2::Real { rows: Default::default() }, &BuildOptions::default(), None, None, &mut |s| log(format!("[real] {s}")))
     };
     let vq: Vec<Vec<f64>> = real.groups.iter().map(|g| {
         let mut v = vec![0f64; n * n];
@@ -85,7 +87,7 @@ pub fn run2(scale: usize, nq: usize) {
     let real_mhat: Vec<Vec<f64>> = real.cl.iter().map(|c| c.mhat.to_vec()).collect();
     let sy_full = mk();
     drop(real);
-    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), &BuildOptions::default(), None, &mut |s| log(format!("[synth2] {s}")));
+    let mut ix = build2(&p, &prof, &SynthSrc { sy: &sy_src }, Full2::Synth(sy_full), &BuildOptions::default(), None, None, &mut |s| log(format!("[synth2] {s}")));
     // support table for synthetic items: p.x = p.m + (V_q^T p).z
     let nanch = 1000.min(k);
     let mut anchors = vec![0f64; nanch * n];
@@ -126,9 +128,11 @@ pub fn run2(scale: usize, nq: usize) {
             lo[a * k + c] = cols[c].1[a];
         }
     }
-    ix.hi = std::sync::Arc::new(hi);
-    ix.lo = std::sync::Arc::new(lo);
+    ix.hi = std::sync::Arc::new(hi.into());
+    ix.lo = std::sync::Arc::new(lo.into());
     ix.anchors = std::sync::Arc::new(anchors);
+    // anchor a is cluster a's centre direction only when there is one anchor per cluster
+    ix.anc_centres = nanch == k;
     ix.nanch = nanch;
     log(format!("synthetic v2 index: {} rows built in {:.0}s; x2 bound {:.3e}; stored B/item {:?}", ix.nrows, t.s(), ix.x2 - 1.0, ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()));
     let mut qs: Vec<(&str, Vec<f32>)> = Vec::new();

@@ -26,8 +26,8 @@ fn pool(t: usize) -> rayon::ThreadPool {
 pub struct Ctx2 {
     pub p: Params,
     pub ix: Index2,
-    pub xs: RealSource,
-    pub ent_xs: Vec<u32>,
+    pub row_ent: Vec<i64>, // index row -> entity
+    pub ent_xs: Vec<u32>,  // entity -> index row
     pub items: Vec<Vec<f32>>,
     pub texts: Vec<Vec<f32>>,
     pub plan: Plan,
@@ -38,24 +38,24 @@ pub struct Ctx2 {
 /// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
 /// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--b", "--bfracs", "--c", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
-    "--cmp-vis", "--cmp-what", "--core", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min",
+    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
-    "--groups", "--index", "--index-b", "--index-c", "--item-queries", "--k", "--knn", "--ks",
+    "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
     "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
-    "--order", "--params", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
-    "--pseudo-dial", "--queries", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
-    "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--thr", "--threads",
+    "--order", "--params", "--partition", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
+    "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
+    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads",
     "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
-    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--int", "--no-all",
-    "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--skip-all", "--sweep",
-    "--v2", "--willneed",
+    "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int", "--keep-index",
+    "--no-all", "--no-approx", "--no-exact", "--nusort", "--prof", "--rebuild",
+    "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
-    "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+    "anchors", "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
+    "filter", "fit", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
 ];
 
 /// Exits with a message naming any argument that is not a mode, a flag or a flag's value.
@@ -77,6 +77,23 @@ pub fn check_args() {
         eprintln!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}");
         std::process::exit(2);
     }
+}
+
+/// Whether `m` is given as a mode (not as a flag's value, such as a directory named like a mode).
+pub fn has_mode(m: &str) -> bool {
+    let a = args();
+    let mut i = 1;
+    while i < a.len() {
+        if VALUE_FLAGS.contains(&a[i].as_str()) {
+            i += 2;
+            continue;
+        }
+        if a[i] == m {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 pub fn args() -> Vec<String> {
@@ -121,15 +138,7 @@ pub fn load_queries(n: usize) -> Vec<Vec<f32>> {
 
 /// Rows of an npy file (f16, f32 or f64; original dimension), zero-padded to n and normalised.
 pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
-    let a = read_npy(path);
-    let n0 = a.shape[1];
-    let v: Vec<f32> = if a.descr.contains("f8") {
-        a.f64s().iter().map(|&x| x as f32).collect()
-    } else if a.descr.contains("f2") {
-        a.u16s().iter().map(|&h| f16_to_f32(h)).collect()
-    } else {
-        a.f32s()
-    };
+    let (v, n0) = read_npy(path).rows_f32(path).unwrap_or_else(|e| panic!("{e}"));
     v.chunks(n0).map(|r| {
         let nn = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
         let mut q = vec![0f32; n];
@@ -142,12 +151,57 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
     }).collect()
 }
 
+/// `vexact --index OUT fit --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time
+/// SECONDS] [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]`: fit the partition DIR (`python3 -I tools/partition.py VECTORS.npy DIR`) into OUT; `--v2 --index OUT
+/// --rebuild` then builds its index.
+pub fn fit_cmd() {
+    let part = arg_str("--partition", "");
+    if part.is_empty() {
+        eprintln!("fit needs --partition DIR, the output of: python3 -I tools/partition.py VECTORS.npy DIR");
+        std::process::exit(2);
+    }
+    let d = crate::vexact_fit::FitOptions::default();
+    let o = crate::vexact_fit::FitOptions {
+        basis: arg_str("--basis", &d.basis),
+        query_sample: Some(arg_str("--query-sample", "")).filter(|s| !s.is_empty()),
+        seed: arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N"),
+        cert_time: arg_str("--cert-time", &d.cert_time.to_string()).parse().expect("--cert-time SECONDS"),
+        image: arg_usize("--anchors", d.image),
+        text_anchors: Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty()),
+        text_count: arg_usize("--text-count", d.text_count),
+        groups: crate::vexact_fit::Groups::parse(&arg_str("--groups", "by-k8")).unwrap_or_else(|e| {
+            eprintln!("--groups: {e}");
+            std::process::exit(2);
+        }),
+    };
+    if let Err(e) = crate::vexact_fit::fit(&data_dir(), &part, &o, &mut |s| println!("{s}")) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
+}
+
+/// `vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]`: write the
+/// support table's anchors of an existing fit (fit::write_anchors); `--v2 --index FITDIR --rebuild` then builds with them.
+pub fn anchors_cmd() {
+    let d = crate::vexact_fit::FitOptions::default();
+    let text = Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty());
+    let seed: u64 = arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N");
+    match crate::vexact_fit::write_anchors(&data_dir(), arg_usize("--anchors", d.image), text.as_deref(), arg_usize("--text-count", d.text_count), seed) {
+        Ok(s) => println!("{s}"),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    }
+}
+
 pub fn setup2(tag: &str) -> Ctx2 {
     setup2_at(tag, &data_dir(), &arg_str("--flags", ""))
 }
 
-/// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...).
-pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
+/// The plan's switches from the command line, then from `flags` (comma-separated: int, noint, gtab, nogtab, ...); an
+/// error names a flag that is not one or a value that does not parse.
+pub fn plan_flags(mut p: Plan, flags: &str) -> Result<Plan, String> {
     for f in flags.split(',').map(|f| f.trim()).filter(|f| !f.is_empty()) {
         match f {
             "int" => p.int_det = true,
@@ -158,28 +212,87 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "norepack" => p.repack = false,
             "pscan" => p.pscan = true,
             "nopscan" => p.pscan = false,
-            "direct" => p.direct = true,
-            "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
-            "noscanband" => {
-                p.scan_lo = 2.0;
-                p.scan_hi = 2.0;
-            }
-            "scanband=auto" => p.scan_cal = true,
-            f if f.starts_with("scanband=") => {
-                let (a, b) = f[9..].split_once(':').expect("scanband=LO:HI");
-                p.scan_lo = a.parse().expect("scanband=LO:HI");
-                p.scan_hi = b.parse().expect("scanband=LO:HI");
-            }
-            f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
+            f if f.starts_with("dlv=") => {} // a build option (in the index's key), read by setup2_at
+            f if f.starts_with("ddec=") => p.ddec = Some(parse_ddec(&f[5..])), // per query: checked by Plan::check
+            // the planner's mode for a variant (as --plan for the first): auto, index (every open cluster on the index
+            // path), flat (every candidate from its full vector) or scan (every query scans the visible set)
+            "mode=auto" => p.mode = PlanMode::Auto,
+            "mode=index" => p.mode = PlanMode::Index,
+            "mode=flat" => p.mode = PlanMode::Flat,
+            "mode=scan" => p.mode = PlanMode::Scan,
+            // the rule's rows in memory (Plan::r_rows, r_kappa, r_seed), as a plan file gives them
+            f if f.starts_with("r=") => p = Plan::from_kv(p, &format!("r_rows={}", &f[2..]))?,
+            f if f.starts_with("rk=") => p = Plan::from_kv(p, &format!("r_kappa={}", &f[3..]))?,
+            f if f.starts_with("rseed=") => p = Plan::from_kv(p, &format!("r_seed={}", &f[6..]))?,
+            // the planner's constants from a file of name=value lines (as RESULTS/plan.txt), for a variant
+            f if f.starts_with("pf=") => p = read_plan_file(p, &f[3..])?.0,
+            f if f.starts_with("tol=") => p.tol = f[4..].parse().ok().filter(|x: &f64| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("{f}: tol=SCORE (the tolerance d, in score units, at least 0)"))?,
             f if f.starts_with("repackx=") => {
                 p.repack = true;
-                p.repack_mul = f[8..].parse().expect("repackx=FACTOR");
+                p.repack_mul = f[8..].parse().ok().filter(|x: &f32| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("{f}: repackx=FACTOR (a number of at least 0)"))?;
             }
-            _ => panic!("unknown plan flag {f:?}"),
+            _ => return Err(format!("unknown plan flag {f:?}")),
         }
     }
-    p
+    Ok(p)
+}
+
+/// `p` with the constants of the file `f` (name=value lines, as `Plan::to_kv` writes them), and whether the file gives
+/// both disk constants (so that none need be timed).
+pub fn read_plan_file(p: Plan, f: &str) -> Result<(Plan, bool), String> {
+    let t = std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}"))?;
+    Ok((Plan::from_kv(p, &t).map_err(|e| format!("{f}: {e}"))?, Plan::kv_gives_disk(&t)))
+}
+
+/// `plan` with `--plan-file`'s constants, and where `priced` (the vectors' reads are priced) the disk constants from the
+/// cache of `dir` (or timed, `disk_constants`) unless the file gives both, so that nothing is timed or evicted then;
+/// the file's constants take precedence. A plan file that cannot be read or holds another name stops the run.
+pub fn plan_with_file(ix: &Index2, plan: Plan, priced: bool, dir: &str) -> Plan {
+    let file = arg_str("--plan-file", "");
+    let (fp, gives_disk) = if file.is_empty() { (plan, false) } else { read_plan_file(plan, &file).unwrap_or_else(|e| exit2(&e)) };
+    if !priced {
+        return fp;
+    }
+    if gives_disk {
+        out!("[plan] disk constants io_us={} io_gbps={} from {file}; not timed", fp.io_us, fp.io_gbps);
+        return fp;
+    }
+    let timed = disk_constants(ix, plan, dir, &mut |s| out!("{s}"));
+    if file.is_empty() { timed } else { read_plan_file(timed, &file).unwrap_or_else(|e| exit2(&e)).0 }
+}
+
+/// Prints `e` and stops the run with status 2.
+fn exit2(e: &str) -> ! {
+    eprintln!("{e}");
+    std::process::exit(2);
+}
+
+/// The deterministic levels that decide, as `--ddec` and the flag `ddec=` give them: LEVEL.LEVEL... from 0, all or
+/// none, as a bit set (u32::MAX: all).
+pub fn parse_ddec(v: &str) -> u32 {
+    match v {
+        "all" => u32::MAX,
+        "none" => 0,
+        v => v.split('.').map(|x| match x.parse::<u32>() {
+            Ok(l) if l < 32 => 1u32 << l,
+            _ => {
+                eprintln!("--ddec LEVEL.LEVEL... (deterministic levels from 0 that decide), all or none; not {v}");
+                std::process::exit(2);
+            }
+        }).fold(0, |a, b| a | b),
+    }
+}
+
+/// A variant's plan on another variant's opened index (`e2e`'s `--b` without `--index-b`): `base` changed by `flags`,
+/// checked against `ix`. A build option among the flags (`dlv=`, `nusort`) needs another index, so it is an error.
+pub fn shared_plan(base: Plan, ix: &Index2, flags: &str) -> Result<Plan, String> {
+    if let Some(f) = flags.split(',').map(|f| f.trim()).find(|f| f.starts_with("dlv=") || *f == "nusort") {
+        return Err(format!("the flag {f} changes what is built: give this variant its own index (--index-X DIR) for it"));
+    }
+    let p = plan_flags(base, flags)?;
+    p.check(ix)?;
+    Ok(p)
 }
 
 /// The index of `dir` with the plan of the command line changed by `flags` (for a second variant, `--b`).
@@ -190,53 +303,108 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let profile = (dir == data_dir()).then(|| arg_str("--profile", "")).filter(|v| !v.is_empty());
     let nguar = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()).map(|v| v.parse::<f64>().expect("--nguar N (items the guarantee covers)"));
     let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
+    // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels):
+    // a build option, in the index's key. And the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none):
+    // a query-time option: the index's default, set when it is built or opened (any value opens the same saved index),
+    // and the flag ddec=... also sets it in the plan (q::Plan::ddec), so a variant sharing this index can choose another.
+    // From --dlv and --ddec for the first index, from the flags dlv=B.B... and ddec=... for any (they take precedence)
+    let flag = |name: &str| flags.split(',').map(|f| f.trim()).find_map(|f| f.strip_prefix(name).map(|v| v.to_string()));
+    let main = dir == data_dir();
+    let dlv_s = flag("dlv=").map(|v| v.replace('.', ",")).or_else(|| main.then(|| arg_str("--dlv", ""))).unwrap_or_default();
+    let dlv = Some(dlv_s.clone()).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().unwrap_or_else(|_| {
+        eprintln!("--dlv BYTES,BYTES,... (cumulative bytes of the deterministic levels; dlv=B.B... as a flag), not {v}");
+        std::process::exit(2);
+    })).collect());
+    let ddec = parse_ddec(&flag("ddec=").or_else(|| main.then(|| arg_str("--ddec", "all"))).unwrap_or("all".into()));
     let bo = BuildOptions {
         profile,
         clusters: Some(arg_usize("--clusters", 100000)),
         rlv,
+        dlv,
+        ddec,
         design_exact: args().iter().any(|a| a == "--design-exact"),
         nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
         nguar,
         csg_plain: args().iter().any(|a| a == "--csg-plain"),
+        keep_index: args().iter().any(|a| a == "--keep-index"),
+        // glibc's mmap threshold fixed for the build, as `vexact build` did: only in a run that builds and then runs no
+        // experiment (the setting stays for the rest of the process)
+        tune_malloc: !MODES.iter().any(|m| has_mode(m)),
         ..BuildOptions::default()
     };
     let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));
+    // the index saved beside the fit (DIR/encoded-KEY, KEY covering the fit and every option that changes the build),
+    // opened without encoding; --rebuild encodes it and saves it first; --in-memory encodes it and saves nothing
     let topen = Timer::new();
-    let (mut p, mut ix) = open(dir, &bo, &mut |s| out!("{s}"));
+    let mut lg = |s: String| out!("{s}");
+    let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
+        build(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    } else if args().iter().any(|a| a == "--rebuild") {
+        rebuild(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    } else {
+        open(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
+    };
     let built_s = topen.s();
-    let xs = RealSource::open(&p.xs_path);
-    let n = p.meta.n;
-    let mut ent_xs = vec![u32::MAX; p.perm.len()];
-    for (r, &e) in p.perm.iter().enumerate() {
-        ent_xs[e as usize] = r as u32;
+    if args().iter().any(|a| a == "--hash") {
+        out!("[index] code hash {:016x}", ix.code_hash());
+        out!("[index] store hash {:016x}", ix.store_hash());
     }
-    // item queries: held-out rows from --item-queries, else stored rows listed by the fit
+    if args().iter().any(|a| a == "--hash") || has_mode("verify") {
+        if let Err(e) = ix.check_maps() {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+        out!("[index] row and entity maps checked");
+    }
+    // the experiments read the index's vectors (in index row order), not the fit's Xs.npy
+    let n = p.meta.n;
+    let ent_xs = ix.ent_row.to_vec();
+    let row_ent: Vec<i64> = ix.row_ent.iter().map(|&e| e as i64).collect();
+    // item queries: held-out rows from --item-queries, else rows of the fit listed by it (Xs.npy rows, read from the
+    // index through the fit's row-to-entity map)
     let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
-        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| xs.row(r as usize).iter().map(|&h| f16_to_f32(h)).collect()).collect()
+        // the fit's perm.npy, which an open does not read (a build has read it), checked against the hash the saved
+        // index recorded
+        if p.perm.is_empty() {
+            saved_dir(dir, &bo).and_then(|edir| load_perm_checked(&mut p, &edir)).unwrap_or_else(|e| {
+                eprintln!("{e} (item queries from the fit's qi.npy need it; or give --item-queries)");
+                std::process::exit(2);
+            });
+        }
+        p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| ix.full_row_f16(ix.row_of_ent(p.perm[r as usize] as u32)).iter().map(|&h| f16_to_f32(h)).collect()).collect()
     } else {
         load_queries_from(&arg_str("--item-queries", ""), n)
     };
     let texts = load_queries(n);
     let plan = Plan {
-        mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
+        mode: match arg_str("--plan", "auto").as_str() {
+            "auto" => PlanMode::Auto,
+            "index" => PlanMode::Index,
+            "flat" => PlanMode::Flat,
+            "scan" => PlanMode::Scan,
+            m => {
+                eprintln!("--plan is auto, index, flat or scan, not {m}");
+                std::process::exit(2);
+            }
+        },
         ..Plan::default()
     };
-    let plan = plan_flags(plan, flags);
-    // the cost model: from --plan-file, the BioCLIP constants (--plan-default), or re-timed on this index (pinned to
-    // --core when given); the constants used are written to RESULTS/plan.txt
-    let plan = if let Some(f) = Some(arg_str("--plan-file", "")).filter(|f| !f.is_empty()) {
-        Plan::from_kv(plan, &std::fs::read_to_string(&f).unwrap_or_else(|e| panic!("cannot read {f}: {e}")))
-    } else if args().iter().any(|a| a == "--plan-default") {
-        plan
-    } else {
-        let t = Timer::new();
-        let pc = Plan::calibrate(&ix, plan, arg_usize("--calib", 16), arg_str("--core", "").parse().ok());
-        out!("[plan] calibrated in {:.1}s", t.s());
-        pc
-    };
-    let plan = plan_flags(plan, flags); // flags win over timed or filed constants (scanband)
-    out!("[plan] {}", plan.to_kv().replace('\n', " "));
-    std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
+    // nothing is timed here: in memory the planner needs no timed constant; the disk constants are read from the
+    // index directory's cache (or timed once) where the vectors' reads are priced, below
+    let plan = plan_flags(plan, flags).unwrap_or_else(|e| exit2(&e));
+    if let Err(e) = plan.check(&ix) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
     let t = Timer::new();
     let pseudo = pseudo_queries(&ix, if args().iter().any(|a| a == "--no-approx") { 0 } else { arg_usize("--pseudo", 1000) }, 10);
     let (approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
@@ -244,14 +412,16 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
     if !ff.is_empty() {
-        let same = |a: &str, b: &str| std::fs::canonicalize(a).ok().is_some_and(|x| std::fs::canonicalize(b).ok() == Some(x));
-        if same(&ff, &p.xs_path) {
-            eprintln!("--full-file {ff} is the fitted vector file {}, which is mapped while the copy is written; give a path of its own", p.xs_path);
-            std::process::exit(2);
-        }
+        // the copy is written from the index's vectors, which a saved index maps from its own file; to_file refuses
+        // a path inside a saved index, the fit's vectors and any file this process maps, and never truncates the file
+        // it replaces
         let t = Timer::new();
         if let Full2::Real { rows, .. } = &mut ix.full {
-            std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"));
+            let r = std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"), &p.vector_files().iter().map(|s| s.as_str()).collect::<Vec<_>>());
+            if let Err(e) = r {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
         }
         let pol = match &ix.full {
             Full2::Real { rows, .. } => rows.policy().expect("the full vectors were just written to a file"),
@@ -277,7 +447,14 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
-    let c = Ctx2 { p, ix, xs, ent_xs, items, texts, plan, approx, pseudo };
+    // --plan-file's constants (name=value lines: r_rows, r_kappa, r_seed, io_us, io_gbps), and where reads are priced
+    // the planner's disk constants unless the file gives them (cached in the index directory, keyed by the machine,
+    // the vectors' device and the read policy; `disk_key`); the constants used are written to RESULTS/plan.txt
+    let priced = ix.own_rows().is_some_and(|r| r.priced());
+    let plan = plan_with_file(&ix, plan, priced, dir);
+    out!("[plan] {}", plan.to_kv().replace('\n', " "));
+    std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
+    let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
     }
@@ -304,15 +481,18 @@ impl Ctx2 {
             ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
             ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
             ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
-            ("nukey", b(&ix.nukey)), ("ent_xs", b(&self.ent_xs)),
+            ("nukey", b(&ix.nukey)), ("ent_xs+row_ent", b(&self.ent_xs) + b(&self.row_ent)),
             ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
         ];
         parts.sort_by_key(|x| std::cmp::Reverse(x.1));
         let tot: usize = parts.iter().map(|x| x.1).sum();
         format!("total {:.1}: {}", tot as f64 / 1048576.0, parts.iter().map(|(k, v)| format!("{k} {:.1}", *v as f64 / 1048576.0)).collect::<Vec<_>>().join(", "))
     }
+    /// Flat scans over the index's vectors in index row order.
     pub fn flat(&self) -> Flat<'_> {
-        Flat { map: &self.xs.map, off: self.xs.off, n: self.p.meta.n, nrows: self.p.cstart[self.p.meta.k], ent: &self.p.perm }
+        let Full2::Real { rows, .. } = &self.ix.full else { panic!("a synthetic index has no vectors to scan") };
+        let n = self.p.meta.n;
+        Flat { map: rows.as_bytes(self.ix.nrows * n), off: 0, n, nrows: self.ix.nrows, ent: &self.row_ent }
     }
 }
 
@@ -733,7 +913,17 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             let sc = fl.scores(&pr.q32);
             thresholds_for(&fl, &pr.q16, &sc, full_err2(&c0.ix, &pr), &sizes)
         }).collect();
-        let ncell = sizes_f.len() + if arg_usize("--knn", 1) > 0 { 1 } else { 0 }; // the last cell is k-NN
+        // the last cells are exact k-NN, one per k of `--knn-k` (default 10)
+        let knn_ks: Vec<usize> = if arg_usize("--knn", 1) > 0 {
+            arg_str("--knn-k", "10").split(',').map(|x| x.parse().ok().filter(|&k| k > 0).unwrap_or_else(|| {
+                eprintln!("--knn-k K,K,... (each at least 1), not {x}");
+                std::process::exit(2);
+            })).collect()
+        } else {
+            Vec::new()
+        };
+        let ncell = sizes_f.len() + knn_ks.len();
+        let cell_name = |cell: usize| if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { format!("knn{}", knn_ks[cell - sizes_f.len()]) };
         let run_cell = |c: &Ctx2, plan: Plan, cell: usize, qi: usize| -> Stats {
             let ix = &c.ix;
             if cell < sizes_f.len() {
@@ -743,7 +933,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                 std::hint::black_box(to_bitmap2(ix, &r.rows));
                 r.st
             } else {
-                knn2(ix, &qs[qi], 10, None, plan).st
+                knn2(ix, &qs[qi], knn_ks[cell - sizes_f.len()], None, plan).st
             }
         };
         let k = qs.len() as f64;
@@ -762,9 +952,30 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                         *e += *x as f64;
                     }
                 }
+                // the planner's choice per query (untimed, one thread): a scan of the visible set, or per query the clusters
+                // scored directly, run on the index path and decided from full vectors
+                let (mut nscan, mut ndir, mut nidx, mut nfull) = (0usize, 0usize, 0usize, 0usize);
+                for qi in 0..qs.len() {
+                    let pr = prep2(&c.ix, &qs[qi]);
+                    let t = if cell < sizes_f.len() { ths[qi][cell] } else { let mut st = Stats::new(nl); seed2(&c.ix, &pr, knn_ks[cell - sizes_f.len()], None, &mut st) };
+                    let o = Opts2 { vis: None, verify: false, want_iv: cell >= sizes_f.len(), plan };
+                    match pl.install(|| plan2(&c.ix, &pr, t, &o)) {
+                        Planned::Scan => nscan += 1,
+                        Planned::Run { pre, use_idx, .. } => {
+                            for (ci, p) in pre.iter().enumerate() {
+                                match p {
+                                    Pre::Direct => ndir += 1,
+                                    Pre::Open { ncand, .. } if *ncand > 0 => if use_idx[ci] { nidx += 1 } else { nfull += 1 },
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                out!("e2e2 path {vname} {cls} {}: scan {nscan}/{}, per query clusters direct {:.1} index {:.1} full {:.1}", cell_name(cell), qs.len(), ndir as f64 / k, nidx as f64 / k, nfull as f64 / k);
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
-                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
+                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", cell_name(cell), br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }
         }
         for &th in &threads {
@@ -788,7 +999,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             for (vi, &(vname, _, _)) in vs.iter().enumerate() {
                 for cell in 0..ncell {
                     let v = &per[vi][cell];
-                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr", sizes_f[cell]) } else { ("index2_knn10", 0.0) };
+                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr".to_string(), sizes_f[cell]) } else { let kk = knn_ks[cell - sizes_f.len()]; (format!("index2_knn{kk}"), if kk == 10 { 0.0 } else { kk as f64 }) };
                     let line = format!("{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", vname, cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[vi][cell]);
                     out!("e2e2 {line}");
                     lines.push(line);
@@ -842,6 +1053,9 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let mut parts = [0f64; 21];
                 let mut cnt = [0f64; 4];
                 let mut rkap = 0f64;
+                // per query: clusters on the index path, on full vectors, items entering the first level, item-levels,
+                // groups, full reads
+                let mut opened = [0f64; 6];
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -886,6 +1100,13 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                         cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
                     rkap += ms(cy[P_RKAP]);
+                    let nqf = qs.len() as f64;
+                    opened[0] += r.idx_clusters as f64 / nqf;
+                    opened[1] += r.flat_clusters as f64 / nqf;
+                    opened[2] += r.st.enter[0] as f64 / nqf;
+                    opened[3] += r.st.enter[..r.st.enter.len() - 1].iter().sum::<u64>() as f64 / nqf;
+                    opened[4] += r.st.groups as f64 / nqf;
+                    opened[5] += r.st.full_reads as f64 / nqf;
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
                     let (a, b) = sym_diff(&bm, &truths[qi]);
@@ -898,6 +1119,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 out!("breakdown2 {line}");
                 out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
+                out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels, {:.1} groups, {:.0} full reads", opened[0], opened[1], opened[2], opened[3], opened[4], opened[5]);
                 lines.push(line);
             }
         }
@@ -1168,6 +1390,12 @@ pub fn dbcmp(c: &Ctx2) {
     let step = arg_usize("--step", 5);
     let threads: Vec<usize> = arg_str("--threads", "1,4").split(',').map(|x| x.parse().unwrap()).collect();
     let whats: Vec<String> = Some(arg_str("--cmp-what", "")).filter(|v| !v.is_empty()).unwrap_or_else(|| arg_str("--what", "index,flat")).split(',').map(|w| w.to_string()).collect();
+    // every variant's plan flags are checked before anything runs
+    for w in &whats {
+        if let Err(e) = plan_flags(c.plan, w.split_once(':').map_or("", |x| x.1)) {
+            exit2(&format!("--what {w}: {e}"));
+        }
+    }
     // `query` runs the variants interleaved per query and share; `variant` runs each over every query before the next
     let by_variant = match arg_str("--cmp-order", "query").as_str() {
         "query" => false,
@@ -1239,14 +1467,13 @@ pub fn dbcmp(c: &Ctx2) {
             out!("[cap] full vectors resident after eviction: {:.1} MiB", r.resident() as f64 / (1 << 20) as f64);
         }
     }
-    // with full vectors read through the reader, the planner's disk constants are timed here under the cap
-    // (`--no-calib-disk`: as in the plan; `:plan=mem` in a read mode: reads not counted)
-    let mut plan0 = c.plan;
-    if pol.priced.load(Relaxed) && !args().iter().any(|a| a == "--no-calib-disk") {
-        let t = Timer::new();
-        plan0 = Plan::calibrate_disk(ix, plan0);
-        out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
-    }
+    // the planner's disk constants: the setup's where it priced reads; else, when a read mode prices them, from the
+    // index directory's cache (timed once per machine and device; `:plan=mem` in a read mode: reads not counted)
+    let plan0 = if !pol.priced.load(Relaxed) && modes.iter().any(|m| m.split(':').any(|kv| kv == "uring" || kv == "plan=disk")) {
+        plan_with_file(ix, c.plan, true, &data_dir())
+    } else {
+        c.plan
+    };
     let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count,full_reads,disk_kb,majflt,sys_ms,kind".to_string()];
     // every variant's answer must equal the first variant's, bit for bit, in every read mode and at every thread count
     let mut first: std::collections::HashMap<(usize, usize, usize), RoaringBitmap> = Default::default();
@@ -1302,7 +1529,7 @@ pub fn dbcmp(c: &Ctx2) {
                     let (kind, flags) = whats[wi].split_once(':').unwrap_or((whats[wi].as_str(), ""));
                     pl.install(|| match kind {
                         "index" | "idx" | "forced" => {
-                            let plan = plan_flags(plan, flags);
+                            let plan = plan_flags(plan, flags).expect("checked before the runs");
                             let plan = if kind == "index" { plan } else { Plan { mode: PlanMode::Index, ..plan } };
                             let pr = prep2(ix, q);
                             let r = threshold2(ix, &pr, t0, &Opts2 { vis, verify: false, want_iv: false, plan });
@@ -1320,7 +1547,7 @@ pub fn dbcmp(c: &Ctx2) {
                                 let r = scan_visible(sub, &pr, t0, None, false, false);
                                 (to_bitmap2(sub, &r.rows), r.st.full_reads, false)
                             } else {
-                                let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(plan, flags) });
+                                let r = threshold2(sub, &pr, t0, &Opts2 { vis: None, verify: false, want_iv: false, plan: plan_flags(plan, flags).expect("checked before the runs") });
                                 (to_bitmap2(sub, &r.rows), r.st.full_reads, r.scanned)
                             }
                         }
@@ -1753,6 +1980,30 @@ pub fn dbknn(c: &Ctx2) {
                 Some((_, np, dname, r)) => emit("tight", np, dname, &r),
                 None => out!("dbknn tight {vname} share {si}: no rung within the cap"),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `e2e`'s per-variant flags on a variant that shares the first index: `ddec=` sets the variant's plan (checked
+    /// against the index), a build option (`dlv=`, `nusort`) is an error instead of being dropped.
+    #[test]
+    fn e2e_variant_flags_on_a_shared_index() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+        let base = Plan::default();
+        assert_eq!(shared_plan(base, &ix, "ddec=0.5").unwrap().ddec, Some(0b100001));
+        let p = shared_plan(base, &ix, "nogtab, ddec=none").unwrap();
+        assert_eq!((p.ddec, p.gtab), (Some(0), false));
+        assert_eq!(shared_plan(base, &ix, "ddec=all").unwrap().ddec, Some(u32::MAX));
+        assert_eq!(shared_plan(base, &ix, "noint").unwrap().ddec, None, "no ddec= keeps the index's choice");
+        assert_eq!(shared_plan(Plan { ddec: Some(0b10), ..base }, &ix, "noint").unwrap().ddec, Some(0b10), "the first variant's choice carries over");
+        assert!(shared_plan(base, &ix, "ddec=6").is_err(), "a level beyond the index's six");
+        for f in ["dlv=16.32", "noint,dlv=16.32", "nusort"] {
+            assert!(shared_plan(base, &ix, f).is_err(), "{f} on a shared index");
         }
     }
 }

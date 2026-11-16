@@ -19,6 +19,7 @@ mod e2e;
 pub mod kern;
 pub mod q;
 pub mod setup;
+pub mod store;
 pub mod tail;
 
 /// How an index is built from a fitted directory. The default is the build SYSTEM.md describes.
@@ -31,6 +32,17 @@ pub struct BuildOptions {
     /// Another randomised level schedule (cumulative bytes, rising from above the last deterministic level); the union
     /// bound's constant follows the number of levels.
     pub rlv: Option<Vec<usize>>,
+    /// Another deterministic level schedule (cumulative bytes, rising, below the first randomised level), in place of
+    /// the fit's DLV; its length is the index's number of deterministic levels (1 to NDL_MAX). The randomised levels'
+    /// budgets start after its last level, and no constant changes (research/levels-clusters' `--dlv`, as a build
+    /// option: the codes are built for it).
+    pub dlv: Option<Vec<usize>>,
+    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: at every level, the
+    /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
+    /// does not depend on it. Nothing stored changes, so it is a query-time option: not in the key, not in what an
+    /// index stores or `plan_hash`; a build and an open set it on the index in memory (`Meta2::ddec`), and one saved
+    /// index opens under any value. It is the index's default: a query's plan overrides it (`q::Plan::ddec`).
+    pub ddec: u32,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
     /// Sort each cluster's rows by their residual norm (the norm sort) instead of by key.
@@ -39,12 +51,21 @@ pub struct BuildOptions {
     pub nguar: Option<f64>,
     /// Keep the sub-Gaussian constant at every randomised level instead of the exact-law constants of `tail`.
     pub csg_plain: bool,
-    /// Clusters of each group the encoder's calibration samples.
-    pub cal_per_group: usize,
+    /// Items of each group the encoder's calibration samples, spread evenly over up to CAL_CLUSTERS of its clusters.
+    pub cal_items: usize,
+    /// Fix glibc's mmap threshold at 1 MB for the rest of the process when a build starts (util::fix_mmap_threshold),
+    /// which keeps a large build's memory from growing with its row count (38 bytes a row at 4M rows otherwise). The
+    /// setting is process-wide and is never undone, so the default is false: set it only in a process that does
+    /// nothing but build (the vexact binary does, for a rebuild run with no experiment). Not part of the key: it does
+    /// not change what is built.
+    pub tune_malloc: bool,
+    /// Open only (not part of the key): open a saved index although the fit's vectors file has changed length or
+    /// modification time since it was built (the index holds its own vectors); a warning instead of an error.
+    pub keep_index: bool,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_per_group: 8 }
+        BuildOptions { profile: None, clusters: None, rlv: None, dlv: None, ddec: u32::MAX, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, tune_malloc: false, keep_index: false }
     }
 }
 
@@ -54,13 +75,21 @@ use crate::util::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
+pub use store::Arr;
 
-pub const NDL: usize = 6;
+/// The most deterministic levels an index can have. An index has `Meta2::ndl` of them: the fit's DLV, or
+/// `BuildOptions::dlv`; the per-level arrays below are this long, of which the first ndl are used.
+pub const NDL_MAX: usize = 6;
 pub const J: usize = 4;
 pub const BLK: usize = 32;
 pub const LAMS: [f64; 6] = [2.0, 2.3, 2.6, 3.0, 3.5, 4.2];
 pub const OFF: [i32; 15] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 18];
 pub const QUANTUM: usize = 16;
+/// Calibration: items per group (BuildOptions::cal_items' default), and the most clusters of a group they are spread over.
+pub const CAL_ITEMS: usize = 8192;
+pub const CAL_CLUSTERS: usize = 256;
+/// The most clusters a build takes without the fit's anchors.npy (it would then build a K x K support table).
+pub const KK_MAX: usize = 4096;
 
 // ---------------- the deterministic code ----------------
 
@@ -191,51 +220,79 @@ pub fn det_alloc_tree(lam: &[f64], q: &[f64], t: &DetTab, dlv: &[usize]) -> (Vec
 
 // ---------------- the randomised code ----------------
 
-/// Greedy nested binary expansion of v (already divided by lambda rms) to `depth` bits; bit d set: t_d = +1.
-#[inline]
-pub fn rand_encode(v: f64, depth: usize) -> u8 {
-    let mut c = 0.0;
-    let mut p = 0u8;
-    for d in 0..depth {
-        let dl = 0.5f64.powi(d as i32 + 1);
-        if v - c >= 0.0 {
-            p |= 1 << d;
-            c += dl;
-        } else {
-            c -= dl;
+/// The randomised code's tables: `VALUE[depth][code]` is the decoded value of a code's first `depth` bits, and
+/// `CODE[depth][cell]` the code of the greedy expansion that ends in `cell` (cells numbered from -1 upwards, each
+/// 2^(1 - depth) wide; the expansion's first step is the cell index's top bit and the code's bit 0).
+static RAND_TABLES: std::sync::LazyLock<([[f64; 256]; 9], [[u8; 256]; 9])> = std::sync::LazyLock::new(|| {
+    let mut value = [[0f64; 256]; 9];
+    let mut code = [[0u8; 256]; 9];
+    for d in 0..9 {
+        for p in 0..256usize {
+            value[d][p] = (0..d).map(|b| if p >> b & 1 == 1 { 0.5f64.powi(b as i32 + 1) } else { -0.5f64.powi(b as i32 + 1) }).sum();
+        }
+        for cell in 0..1usize << d {
+            code[d][cell] = if d == 0 { 0 } else { (cell as u8).reverse_bits() >> (8 - d) };
         }
     }
-    p
+    (value, code)
+});
+
+/// Greedy nested binary expansion of v (already divided by lambda rms) to `depth` bits; bit d set: t_d = +1. The
+/// expansion's decisions compare v with dyadic points exactly, so it is the cell of v on the grid of step 2^(1 - depth).
+#[inline]
+pub fn rand_encode(v: f64, depth: usize) -> u8 {
+    if depth == 0 {
+        return 0;
+    }
+    let half = (1u32 << (depth - 1)) as f64;
+    let cell = ((v * half).floor() + half).clamp(0.0, 2.0 * half - 1.0) as usize;
+    RAND_TABLES.1[depth][cell]
 }
 #[inline]
 pub fn rand_value(p: u8, depth: usize) -> f64 {
-    (0..depth).map(|d| if p >> d & 1 == 1 { 0.5f64.powi(d as i32 + 1) } else { -0.5f64.powi(d as i32 + 1) }).sum()
+    RAND_TABLES.0[depth][p as usize & ((1usize << depth) - 1)]
 }
 
+/// The most rises a block can have: one per randomised level.
+pub const MAX_RISES: usize = 16;
+
 /// Encode a block: positions to their final depth `maxd`, with the encoder scale (in units of the rms) chosen per block
-/// from LAMS to minimise the sum over the block's rises of log tan^2 (any scale is sound: kappa is stored).
-pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8]) {
+/// from LAMS to minimise the sum over the block's rises of log tan^2 (any scale is sound: kappa is stored). Writes the
+/// chosen code to `out` and, per rise, the decoded estimate's dot product with y and squared norm to `dc`.
+pub fn rand_choose(y: &[f64], maxd: &[usize], rises: &[&[u8]], out: &mut [u8], tmp: &mut [u8], dc: &mut [(f64, f64)]) {
     let m = y.len();
+    let nr = rises.len();
+    assert!(nr <= MAX_RISES, "a block rises at {nr} levels; at most {MAX_RISES} are supported");
     let yn2: f64 = y.iter().map(|v| v * v).sum();
     let rms = (yn2 / m as f64).sqrt().max(1e-300);
     let mut best = f64::INFINITY;
+    let value = &RAND_TABLES.0;
     for &lam in LAMS.iter() {
         for p in 0..m {
             tmp[p] = rand_encode(y[p] / (lam * rms), maxd[p]);
         }
-        let mut obj = 0.0;
-        for r in rises {
-            let (mut dot, mut cn) = (0.0, 0.0);
-            for p in 0..m {
-                let v = rand_value(tmp[p], r[p] as usize);
-                dot += v * y[p];
-                cn += v * v;
+        // every rise's sums in one pass over the positions, each summed in position order
+        let mut dot = [0f64; MAX_RISES];
+        let mut cn = [0f64; MAX_RISES];
+        for p in 0..m {
+            let (t, yp) = (tmp[p] as usize, y[p]);
+            for k in 0..nr {
+                let d = rises[k][p] as usize;
+                let v = value[d][t & ((1 << d) - 1)];
+                dot[k] += v * yp;
+                cn[k] += v * v;
             }
-            obj += ((cn * yn2 - dot * dot).max(1e-300) / (dot * dot).max(1e-300)).ln();
+        }
+        let mut obj = 0.0;
+        for k in 0..nr {
+            obj += ((cn[k] * yn2 - dot[k] * dot[k]).max(1e-300) / (dot[k] * dot[k]).max(1e-300)).ln();
         }
         if obj < best {
             best = obj;
             out[..m].copy_from_slice(&tmp[..m]);
+            for k in 0..nr {
+                dc[k] = (dot[k], cn[k]);
+            }
         }
     }
 }
@@ -260,7 +317,8 @@ pub fn rand_tan2() -> [f64; 9] {
             let rises: Vec<&[u8]> = deps.iter().map(|v| v.as_slice()).collect();
             let mut pat = vec![0u8; m];
             let mut tmp = vec![0u8; m];
-            rand_choose(&y, &maxd, &rises, &mut pat, &mut tmp);
+            let mut dc = [(0f64, 0f64); MAX_RISES];
+            rand_choose(&y, &maxd, &rises, &mut pat, &mut tmp, &mut dc);
             pats.push(pat);
         }
         for b in 1..9 {
@@ -376,6 +434,9 @@ impl Part {
         }
         let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
         // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        // whole groups of 4 units: the centre tables (kern::centre_tab) hold units / 4 * 4 per part, the queries read
+        // all of them (total % 16 == 0 and 4 bits per unit already imply it)
+        assert!(ufields.len() % 4 == 0, "a part of {} units, not a multiple of 4", ufields.len());
         assert!(ufields.len() <= 257, "a part of {} units can overflow its 16-bit table sums; split it into parts of at most 257 units", ufields.len());
         Part { j, fields, ufields }
     }
@@ -391,9 +452,9 @@ pub struct GroupPlan2 {
     pub sig: Vec<f32>,
     pub lamsum: f32,
     pub d: Vec<Vec<f32>>,
-    pub pconst: [f32; NDL],
-    pub kmin: [i32; NDL],
-    pub ntab: [[f32; 16]; NDL],
+    pub pconst: [f32; NDL_MAX],
+    pub kmin: [i32; NDL_MAX],
+    pub ntab: [[f32; 16]; NDL_MAX],
     pub dt: Vec<f32>,
     pub ridx: Vec<u16>,
     pub nb: [usize; J],
@@ -421,6 +482,20 @@ pub struct GroupPlan2 {
     pub vsc: Vec<f64>, // scale of basis vector c
     pub vinv: Vec<f64>, // V_q^-1 (build only)
     pub vq: Vec<f64>,   // V_q row-major n x n (build only)
+    pub cal: Option<CalIn>, // the calibration the scalar grids were set from (none for a group with no items)
+}
+
+/// The scalar grids' calibration: the deterministic norm codes' offsets, the |y| grids (start and steps per octave in
+/// log2), the tan(phi) levels, and the kappa grids (start, steps per octave, bits) per randomised level and block.
+#[derive(Clone, Debug)]
+pub struct CalIn {
+    pub kmin: [i32; NDL_MAX],
+    pub y0: [f64; J],
+    pub ys: [f64; J],
+    pub tq: Vec<[[f32; 15]; J]>,
+    pub k0: Vec<[f64; J]>,
+    pub ks: Vec<[f64; J]>,
+    pub kb: Vec<[u8; J]>,
 }
 
 fn rate_depth(r: f64, k: usize, nb: usize) -> u8 {
@@ -464,9 +539,8 @@ fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
     (0..n * n).map(|i| m[(i / n) * w + n + i % n]).collect()
 }
 
-/// int8 basis: one scale per basis vector (column), and its inverse by Newton-Schulz, started from the transpose when
-/// the basis is near orthogonal and from a Gauss-Jordan inverse otherwise (the dual basis).
-fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f64) {
+/// The int8 basis: one scale per basis vector (column); row c of `v8t` is basis vector c in int8, `vsc[c]` its scale.
+pub fn int8_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>) {
     let mut vsc = vec![0f64; n];
     let mut v8t = vec![0i8; n * n];
     for c in 0..n {
@@ -476,6 +550,13 @@ fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f
             v8t[c * n + i] = (v[i * n + c] as f64 / vsc[c]).round().clamp(-127.0, 127.0) as i8;
         }
     }
+    (v8t, vsc)
+}
+
+/// The int8 basis and its inverse by Newton-Schulz, started from the transpose when the basis is near orthogonal and
+/// from a Gauss-Jordan inverse otherwise (the dual basis); also the basis as f64 and a bound on the inverse's defect.
+fn quant_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>, Vec<f64>, Vec<f64>, f64) {
+    let (v8t, vsc) = int8_basis(v, n);
     let mut vq = vec![0f64; n * n];
     for i in 0..n {
         for c in 0..n {
@@ -537,13 +618,14 @@ impl GroupPlan2 {
         // orthogonal basis
         let lamsum = p.r2.as_ref().map_or(lam.iter().sum::<f64>(), |r| r[g]) as f32;
         let (moves, states) = det_alloc_tree(lam, pq, dt_, &m.dlv);
+        let ndl = m.dlv.len();
         let gc = |l: usize, c: usize| -> f64 {
             let s = states[l][c];
             dt_.d[s.0 as usize][s.1 as usize]
         };
-        let d: Vec<Vec<f32>> = (0..NDL).map(|l| (0..n).map(|c| (((lam[c] * gc(l, c) + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect()).collect();
-        let mut pconst = [0f32; NDL];
-        for l in 0..NDL {
+        let d: Vec<Vec<f32>> = (0..ndl).map(|l| (0..n).map(|c| (((lam[c] * gc(l, c) + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect()).collect();
+        let mut pconst = [0f32; NDL_MAX];
+        for l in 0..ndl {
             let mut s = 0.0;
             for c in 0..n {
                 let dd = d[l][c] as f64;
@@ -552,7 +634,7 @@ impl GroupPlan2 {
             pconst[l] = (s / lamsum as f64).sqrt() as f32;
         }
         // randomised design on the fitted final distortion
-        let lres: Vec<f64> = (0..n).map(|c| lam[c] * gc(NDL - 1, c)).collect();
+        let lres: Vec<f64> = (0..n).map(|c| lam[c] * gc(ndl - 1, c)).collect();
         let dt: Vec<f32> = (0..n).map(|c| (((lres[c] + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect();
         let ai: Vec<f64> = (0..n).map(|c| (lres[c] * pq[c]).sqrt()).collect();
         let mut order: Vec<usize> = (0..n).collect();
@@ -566,7 +648,7 @@ impl GroupPlan2 {
         }
         boff[J] = n;
         let sj: Vec<f64> = (0..J).map(|j| order[boff[j]..boff[j + 1]].iter().map(|&c| ai[c]).sum()).collect();
-        let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[NDL - 1])).collect();
+        let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[ndl - 1])).collect();
         let rv = match design_c {
             Some(cs) => derive::design_by(&sj, &nb, &budgets, &|set| cs[set as usize], tof, QUANTUM),
             None => derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM),
@@ -583,7 +665,7 @@ impl GroupPlan2 {
         }
         // levels: deterministic parts
         let mut levels = Vec::new();
-        for l in 0..NDL {
+        for l in 0..ndl {
             let fv: Vec<(Field, [f32; 16])> = moves[l].iter().map(|mv| match *mv {
                 Move::Tree { c, from, to } => {
                     let mut exp = [0f32; 16];
@@ -643,8 +725,8 @@ impl GroupPlan2 {
             lamsum,
             d,
             pconst,
-            kmin: [0; NDL],
-            ntab: [[0.0; 16]; NDL],
+            kmin: [0; NDL_MAX],
+            ntab: [[0.0; 16]; NDL_MAX],
             dt,
             ridx,
             nb,
@@ -669,6 +751,7 @@ impl GroupPlan2 {
             vsc,
             vinv,
             vq,
+            cal: None,
         };
         gp.set_rows();
         gp
@@ -677,6 +760,7 @@ impl GroupPlan2 {
     /// and tan(phi) (1 row).
     pub fn set_rows(&mut self) {
         let nr = self.rates.len();
+        let ndl = self.levels.len() - nr;
         self.rrow = vec![Vec::new(); nr];
         for lr in 0..nr {
             let mut r = if lr == 0 { 2 * J } else { 0 };
@@ -684,14 +768,16 @@ impl GroupPlan2 {
                 self.rrow[lr].push(r);
                 r += self.kbits[lr][j] as usize / 4 + 1;
             }
-            self.levels[NDL + lr].srows = r;
+            self.levels[ndl + lr].srows = r;
         }
     }
     /// Scalar code tables from calibration: deterministic norms (offset), |y| and kappa (geometric grids with an
     /// origin and a step per octave), tan(phi) (15 values, rounded up to).
-    pub fn set_calibration(&mut self, kmin: [i32; NDL], y0: [f64; J], ys: [f64; J], tq: Vec<[[f32; 15]; J]>, k0: Vec<[f64; J]>, ks: Vec<[f64; J]>, kb: Vec<[u8; J]>) {
+    pub fn set_calibration(&mut self, cal: CalIn) {
+        let CalIn { kmin, y0, ys, tq, k0, ks, kb } = cal.clone();
+        self.cal = Some(cal);
         self.kmin = kmin;
-        for l in 0..NDL {
+        for l in 0..self.levels.len() - self.rates.len() {
             for c in 0..15 {
                 self.ntab[l][c] = 2f64.powf((OFF[c] + kmin[l]) as f64 / 16.0) as f32;
             }
@@ -783,6 +869,51 @@ pub fn roundup_levels(v: &mut Vec<f64>, k: usize, top: f64) -> Vec<f64> {
 }
 
 #[cfg(test)]
+mod rand_code_tests {
+    use super::*;
+
+    /// The greedy expansion and its decoder as first written: one decision per bit against the running estimate.
+    fn greedy(v: f64, depth: usize) -> u8 {
+        let (mut c, mut p) = (0.0, 0u8);
+        for d in 0..depth {
+            let dl = 0.5f64.powi(d as i32 + 1);
+            if v - c >= 0.0 {
+                p |= 1 << d;
+                c += dl;
+            } else {
+                c -= dl;
+            }
+        }
+        p
+    }
+    fn value(p: u8, depth: usize) -> f64 {
+        (0..depth).map(|d| if p >> d & 1 == 1 { 0.5f64.powi(d as i32 + 1) } else { -0.5f64.powi(d as i32 + 1) }).sum()
+    }
+
+    #[test]
+    fn tables_match_the_greedy_expansion() {
+        let mut vs: Vec<f64> = (-3000..=3000).map(|i| i as f64 / 1024.0).collect();
+        // every cell edge at every depth, and the values either side of it
+        for d in 1..=8 {
+            for k in -(1i64 << d)..=(1i64 << d) {
+                let e = k as f64 / (1u64 << (d - 1)) as f64;
+                vs.extend([e, e.next_down(), e.next_up()]);
+            }
+        }
+        vs.extend([f64::INFINITY, f64::NEG_INFINITY, f64::NAN, 1e300, -1e300, 0.0, -0.0]);
+        for &v in &vs {
+            for d in 0..=8 {
+                let p = greedy(v, d);
+                assert_eq!(rand_encode(v, d), p, "v {v} depth {d}");
+                for e in 0..=d {
+                    assert_eq!(rand_value(p, e).to_bits(), value(p, e).to_bits(), "prefix {e} of v {v} depth {d}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod roundup_tests {
     use super::*;
     #[test]
@@ -818,13 +949,22 @@ pub struct Meta2 {
     /// its own (query, threshold) or its own k-NN query only: reusing an item's intervals for another threshold, or a
     /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
     pub npow: u32,
+    /// Threshold queries decide at deterministic level l only when bit l is set (`BuildOptions::ddec`, set when the
+    /// index is built or opened; not stored), unless the query's plan gives its own (`q::Plan::ddec`); a level that
+    /// does not decide still reads its codes and advances the sums.
+    pub ddec: u32,
 }
 impl Meta2 {
+    /// The number of deterministic levels (at most NDL_MAX).
+    #[inline]
+    pub fn ndl(&self) -> usize {
+        self.dlv.len()
+    }
     pub fn nl(&self) -> usize {
-        NDL + self.rlv.len()
+        self.dlv.len() + self.rlv.len()
     }
     pub fn level_bytes(&self, l: usize) -> usize {
-        if l < NDL { self.dlv[l] } else { self.rlv[l - NDL] }
+        if l < self.ndl() { self.dlv[l] } else { self.rlv[l - self.ndl()] }
     }
 }
 
@@ -839,7 +979,7 @@ pub struct Cl2 {
     pub mhat: Arc<Vec<f64>>,
     pub mv32: Arc<Vec<f32>>, // V_q^T m
     pub wmr: Arc<Vec<f32>>,  // R_j (mv*dt) by position
-    pub bm: [f64; NDL],
+    pub bm: [f64; NDL_MAX],
     pub b2: [f64; J],
     pub l1m: [f32; J + 1], // |wm| sums: det, then per block
     pub btot: f64,
@@ -878,11 +1018,11 @@ impl std::ops::DerefMut for F16Rows {
     }
 }
 
-/// Full vectors: `Real` maps the f16 file and holds a copy in index row order (filled by the build), so a scan of the
-/// rows in order reads memory in order. A compacted index shares its parent's copy (through `Index2::vrow`) or holds
+/// Full vectors: `Real` holds them in index row order (a copy the build fills, or the saved index's file), so a scan of
+/// the rows in order reads memory in order. A compacted index shares its parent's copy (through `Index2::vrow`) or holds
 /// its own.
 pub enum Full2 {
-    Real { map: Arc<memmap2::Mmap>, off: usize, rows: Arc<disk::Rows> },
+    Real { rows: Arc<disk::Rows> },
     Synth(q::Synth2),
 }
 
@@ -897,14 +1037,21 @@ pub struct Index2 {
     pub centres64: Arc<Vec<f64>>,
     pub rots: Arc<Vec<Vec<f64>>>,
     pub anchors: Arc<Vec<f64>>,
-    pub hi: Arc<Vec<f32>>,
-    pub lo: Arc<Vec<f32>>,
+    // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward; on the heap after a
+    // build, mapped from hi.bin and lo.bin after an open (so an open reads none of it)
+    pub hi: Arc<Arr<f32>>,
+    pub lo: Arc<Arr<f32>>,
     pub nanch: usize,
-    pub ahat: Vec<i16>,
-    pub row_ent: Vec<u32>,
-    pub ent_row: Vec<u32>,
-    pub lcode: Vec<Vec<u8>>, // per level: code rows, clusters concatenated
-    pub lscal: Vec<Vec<u8>>, // per level: scalar rows
+    /// Anchor a is cluster a's centre direction, one per cluster (the support table built without the fit's
+    /// anchors.npy): the planner may then find a query's anchor among the clusters it visits, or from its q.m. With
+    /// other anchors their count can equal K by coincidence, so this is recorded, not inferred from the count.
+    pub anc_centres: bool,
+    // the per-row arrays: on the heap after a build, mapped from the files of a saved index after an open
+    pub ahat: Arr<i16>,
+    pub row_ent: Arr<u32>,
+    pub ent_row: Arr<u32>,
+    pub lcode: Vec<Arr<u8>>, // per level: code rows, clusters concatenated
+    pub lscal: Vec<Arr<u8>>, // per level: scalar rows
     pub coff: Vec<Vec<usize>>, // per level per cluster: byte offset into lcode
     pub soff: Vec<Vec<usize>>,
     pub esc: HashMap<(u8, u8, u32), f32>, // (level, slot, row) -> value: det norm (slot 0), yh (1 + j), kappa (8 + j), tan (16 + j)
@@ -915,7 +1062,7 @@ pub struct Index2 {
     pub repack: Vec<f32>,
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
     pub nent: usize,     // entity ids are below this
-    pub nukey: Vec<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
+    pub nukey: Arr<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
 }
 
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
@@ -932,6 +1079,28 @@ impl Cl2 {
 }
 
 impl Index2 {
+    /// A hash of what the encoder writes per row: the codes and scalars of every level, the 16-bit keys (`ahat`), the
+    /// row-to-entity map (`row_ent`, which fixes the row order) and the escapes. It does not cover the norm keys
+    /// (`nukey`), the entity-to-row map (`ent_row`), the stored vectors, the `x2` bound, the per-cluster records and
+    /// centre tables, the plans or the calibration; `store_hash` covers everything. It uses `DefaultHasher`, whose values
+    /// may change between Rust releases; it is kept as it is because reference hashes were recorded with it.
+    pub fn code_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        // hashed as the build's vectors were before the arrays could be mapped: lengths, then elements
+        for v in [&self.lcode, &self.lscal] {
+            v.len().hash(&mut h);
+            for a in v {
+                a[..].hash(&mut h);
+            }
+        }
+        self.ahat[..].hash(&mut h);
+        self.row_ent[..].hash(&mut h);
+        let mut e: Vec<(u8, u8, u32, u32)> = self.esc.iter().map(|(k, v)| (k.0, k.1, k.2, v.to_bits())).collect();
+        e.sort_unstable();
+        e.hash(&mut h);
+        h.finish()
+    }
     pub fn n(&self) -> usize {
         self.meta.n
     }
@@ -988,7 +1157,7 @@ impl Index2 {
     /// row is decided as it is in the parent. Row i of the result is row rows[i] of this index.
     pub fn compact(&self, rows: &[u32], vectors: bool) -> Index2 {
         assert!(rows.windows(2).all(|w| w[0] < w[1]), "compact needs ascending rows");
-        let Full2::Real { map, off, rows: frows } = &self.full else { panic!("a synthetic index cannot be compacted") };
+        let Full2::Real { rows: frows } = &self.full else { panic!("a synthetic index cannot be compacted") };
         let nl = self.meta.nl();
         let n = self.n();
         let k = self.k();
@@ -1048,10 +1217,10 @@ impl Index2 {
         let (full, vrow) = if vectors {
             let mut v = F16Rows::zeroed(rows.len() * n);
             v.par_chunks_mut(n).zip(rows.par_iter()).for_each(|(d, &r)| d.copy_from_slice(self.full_row_f16(r as usize)));
-            (Full2::Real { map: map.clone(), off: *off, rows: Arc::new(disk::Rows::Mem(v)) }, Vec::new())
+            (Full2::Real { rows: Arc::new(disk::Rows::Mem(v)) }, Vec::new())
         } else {
             let vr = rows.iter().map(|&r| if self.vrow.is_empty() { r } else { self.vrow[r as usize] }).collect();
-            (Full2::Real { map: map.clone(), off: *off, rows: frows.clone() }, vr)
+            (Full2::Real { rows: frows.clone() }, vr)
         };
         Index2 {
             meta: self.meta.clone(),
@@ -1065,11 +1234,12 @@ impl Index2 {
             hi: self.hi.clone(),
             lo: self.lo.clone(),
             nanch: self.nanch,
-            ahat,
+            anc_centres: self.anc_centres,
+            ahat: ahat.into(),
             row_ent: rows.iter().map(|&r| self.row_ent[r as usize]).collect(),
-            ent_row: Vec::new(),
-            lcode,
-            lscal,
+            ent_row: Arr::default(),
+            lcode: lcode.into_iter().map(Arr::from).collect(),
+            lscal: lscal.into_iter().map(Arr::from).collect(),
             coff,
             soff,
             esc,
@@ -1080,7 +1250,7 @@ impl Index2 {
             repack: self.repack.clone(),
             vrow,
             nent: self.nent,
-            nukey: if self.nukey.is_empty() { Vec::new() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
+            nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -1126,6 +1296,7 @@ pub struct Items2 {
     pub ext: Vec<u32>,
     pub x2max: f64, // largest |x|^2 - 1 (the bounds need |x| from above only)
     pub nu: Vec<f64>, // with the norm sort: |z|, the residual's norm in the metric, rounded up
+    pub x16: Vec<u16>, // the f16 vectors in the same order (empty for a source without stored vectors)
 }
 
 impl Items2 {
@@ -1139,33 +1310,70 @@ impl Items2 {
         for (i, &k) in o.iter().enumerate() {
             z[i * n..(i + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
         }
-        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect() }
+        let x16 = if self.x16.is_empty() { Vec::new() } else { o.iter().flat_map(|&k| self.x16[k * n..(k + 1) * n].iter().copied()).collect() };
+        Items2 { ah: o.iter().map(|&k| self.ah[k]).collect(), z, ent: o.iter().map(|&k| self.ent[k]).collect(), ext: o.iter().map(|&k| self.ext[k]).collect(), x2max: self.x2max, nu: o.iter().map(|&k| nu[k]).collect(), x16 }
     }
+}
+
+/// min(k, len) indices spread evenly over 0..len.
+fn spread(len: usize, k: usize) -> Vec<usize> {
+    let k = k.min(len);
+    (0..k).map(|i| i * len / k).collect()
 }
 
 pub trait Source2: Sync {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2;
+    /// About `k` of cluster c's items, spread over it, for calibration, in key order and without f16 vectors. Each
+    /// item's data is what `items` gives it.
+    fn sample(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64], k: usize) -> Items2 {
+        let it = self.items(c, p, gp, mhat);
+        let n = it.z.len() / it.ah.len().max(1);
+        let keep = spread(it.ah.len(), k);
+        Items2 {
+            ah: keep.iter().map(|&i| it.ah[i]).collect(),
+            z: keep.iter().flat_map(|&i| it.z[i * n..(i + 1) * n].iter().copied()).collect(),
+            ent: keep.iter().map(|&i| it.ent[i]).collect(),
+            ext: keep.iter().map(|&i| it.ext[i]).collect(),
+            x2max: it.x2max,
+            nu: Vec::new(),
+            x16: Vec::new(),
+        }
+    }
+    /// The number of items of cluster c (what `items` returns for it).
+    fn size(&self, c: usize, p: &Params) -> usize {
+        p.cstart[c + 1] - p.cstart[c]
+    }
     /// The number of rows the build encodes from this source.
     fn rows(&self, p: &Params) -> usize {
         p.cstart[p.meta.k]
     }
 }
 
-pub struct Real2 {
-    pub src: crate::index::RealSource,
+/// The items of a fit whose rows are read through `FitRows`: its Xs.npy (`RealSource`), or its partition (`Buckets`).
+pub struct Real2<R: crate::bucket::FitRows> {
+    pub src: R,
 }
-impl Source2 for Real2 {
+impl<R: crate::bucket::FitRows> Source2 for Real2<R> {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
-        let n = self.src.n;
-        let (r0, r1) = (p.cstart[c], p.cstart[c + 1]);
+        self.rows_of(c, p.cstart[c]..p.cstart[c + 1], p, gp, mhat, true)
+    }
+    fn sample(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64], k: usize) -> Items2 {
+        let r0 = p.cstart[c];
+        self.rows_of(c, spread(p.cstart[c + 1] - r0, k).into_iter().map(|i| r0 + i), p, gp, mhat, false)
+    }
+}
+impl<R: crate::bucket::FitRows> Real2<R> {
+    /// The items of cluster c at the given rows, in key order; with `x16`, their f16 vectors too.
+    fn rows_of(&self, c: usize, rows: impl Iterator<Item = usize>, p: &Params, gp: &GroupPlan2, mhat: &[f64], x16: bool) -> Items2 {
+        let n = self.src.n();
         let m = &p.centres[c * n..(c + 1) * n];
-        let mut key: Vec<(i16, usize)> = (r0..r1).map(|r| {
+        let mut key: Vec<(i16, usize)> = rows.map(|r| {
             let x = self.src.row(r);
             let a: f64 = x.iter().zip(mhat).map(|(&h, &mh)| f16_to_f32(h) as f64 * mh).sum();
             ((a.clamp(-1.0, 1.0) * 32767.0).round() as i16, r)
         }).collect();
         key.sort();
-        let nc = r1 - r0;
+        let nc = key.len();
         let mut rmat = vec![0f64; nc * n];
         let mut x2max = 0f64;
         for (i, &(_, r)) in key.iter().enumerate() {
@@ -1183,7 +1391,8 @@ impl Source2 for Real2 {
         unsafe {
             matrixmultiply::dgemm(nc, n, n, 1.0, rmat.as_ptr(), n as isize, 1, gp.vinv.as_ptr(), 1, n as isize, 0.0, z.as_mut_ptr(), n as isize, 1);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new() }
+        let x16 = if x16 { key.iter().flat_map(|k| self.src.row(k.1).iter().copied()).collect() } else { Vec::new() };
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z, ent: key.iter().map(|k| p.perm[k.1] as u32).collect(), ext: key.iter().map(|k| k.1 as u32).collect(), x2max, nu: Vec::new(), x16 }
     }
 }
 
@@ -1229,11 +1438,12 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let nblk = (nc + BLK - 1) / BLK;
     let nl = meta.nl();
     let nr = meta.rlv.len();
+    let ndl = meta.ndl();
     let mut lc: Vec<Vec<u8>> = (0..nl).map(|l| vec![0u8; nblk * gp.levels[l].units * 16]).collect();
     let mut ls: Vec<Vec<u8>> = (0..nl).map(|l| vec![0u8; nblk * gp.levels[l].srows * 16]).collect();
     let mut esc = Vec::new();
     let mut cal = if calib {
-        Some(Calib { kpool: vec![Vec::new(); NDL], ypool: vec![Vec::new(); J], tpool: vec![vec![Vec::new(); J]; nr], kapool: vec![vec![Vec::new(); J]; nr] })
+        Some(Calib { kpool: vec![Vec::new(); ndl], ypool: vec![Vec::new(); J], tpool: vec![vec![Vec::new(); J]; nr], kapool: vec![vec![Vec::new(); J]; nr] })
     } else {
         None
     };
@@ -1245,7 +1455,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
         val.iter_mut().for_each(|v| *v = 0.0);
-        for l in 0..NDL {
+        for l in 0..ndl {
             let lp = &gp.levels[l];
             for f in &lp.parts[0].fields {
                 let c = f.widx as usize;
@@ -1307,6 +1517,12 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let maxd: Vec<usize> = (0..n).map(|pp| gp.rdepth.iter().map(|r| r[pp] as usize).max().unwrap_or(0)).collect();
     let mut rp = vec![0u8; n];
     let mut rtmp = vec![0u8; n];
+    // per block: the randomised levels at which it rises, and their depths over the block
+    let rise_lr: Vec<Vec<usize>> = (0..J).map(|j| (0..nr).filter(|&lr| gp.thchg[lr].contains(&j)).collect()).collect();
+    let rises: Vec<Vec<&[u8]>> = (0..J).map(|j| rise_lr[j].iter().map(|&lr| &gp.rdepth[lr][gp.boff[j]..gp.boff[j + 1]]).collect()).collect();
+    // per (block, randomised level): the chosen code's dot product with y and squared norm
+    let mut rdc = vec![(0f64, 0f64); J * nr];
+    let mut dc = [(0f64, 0f64); MAX_RISES];
     for i in 0..nc {
         let s = svec[i];
         let y = &ymat[i * n..(i + 1) * n];
@@ -1315,8 +1531,10 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
         for j in 0..J {
             yn[j] = y[gp.boff[j]..gp.boff[j + 1]].iter().map(|v| v * v).sum::<f64>().sqrt();
             let (b0, b1) = (gp.boff[j], gp.boff[j + 1]);
-            let rises: Vec<&[u8]> = gp.thchg.iter().enumerate().filter(|(_, ch)| ch.contains(&j)).map(|(lr, _)| &gp.rdepth[lr][b0..b1]).collect();
-            rand_choose(&y[b0..b1], &maxd[b0..b1], &rises, &mut rp[b0..b1], &mut rtmp);
+            rand_choose(&y[b0..b1], &maxd[b0..b1], &rises[j], &mut rp[b0..b1], &mut rtmp, &mut dc);
+            for (k, &lr) in rise_lr[j].iter().enumerate() {
+                rdc[j * nr + lr] = dc[k];
+            }
             let pr = gp.ypredw[j] * s;
             let need = yn[j] * (1.0 + 1e-7);
             if let Some(cal) = cal.as_mut() {
@@ -1330,22 +1548,22 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                 code += 1;
             }
             if code <= 254 {
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j, (code & 15) as u8);
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j + 1, (code >> 4) as u8);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j, (code & 15) as u8);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j + 1, (code >> 4) as u8);
                 yhv[j] = (pr * gp.ytab[j][code as usize]) as f64;
             } else {
                 let mut v = roundup_abs(need + 1e-30, 4096.0, -60.0) as f32;
                 while (v as f64) < need {
                     v *= 1.0 + 2e-7;
                 }
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j, 15);
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j + 1, 15);
-                esc.push((NDL as u8, 1 + j as u8, i as u32, v));
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j, 15);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j + 1, 15);
+                esc.push((ndl as u8, 1 + j as u8, i as u32, v));
                 yhv[j] = v as f64;
             }
         }
         for lr in 0..nr {
-            let l = NDL + lr;
+            let l = ndl + lr;
             let lp = &gp.levels[l];
             let mut ubase = 0;
             for part in &lp.parts {
@@ -1360,12 +1578,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                 ubase += part.units();
             }
             for (slot, &j) in gp.thchg[lr].iter().enumerate() {
-                let (mut dot, mut cn) = (0.0, 0.0);
-                for pp in gp.boff[j]..gp.boff[j + 1] {
-                    let v = rand_value(rp[pp], gp.rdepth[lr][pp] as usize);
-                    dot += v * y[pp];
-                    cn += v * v;
-                }
+                let (dot, cn) = rdc[j * nr + lr];
                 let cosf = (dot / (cn.sqrt() * yn[j] + 1e-300)).clamp(1e-9, 1.0);
                 let tanf = (1.0 - cosf * cosf).max(0.0).sqrt() / cosf;
                 let kappa = yn[j] * yn[j] / dot.max(1e-300);
@@ -1424,7 +1637,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
 }
 
 /// Query-independent per-cluster data.
-fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: f64, n: usize) -> Cl2 {
+fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f64, n: usize) -> Cl2 {
     let mn = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
     assert!(mn > 0.0, "a cluster centre is zero (its items cancel out or are all zero); refit with more clusters or drop the zero vectors");
     let mhat: Vec<f64> = m.iter().map(|&x| x as f64 / mn).collect();
@@ -1449,19 +1662,19 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
         }
         b2[j] = (gp.boff[j]..gp.boff[j + 1]).map(|pp| mvt_pos[pp].powi(2)).sum();
     }
-    let mut bm = [0f64; NDL];
-    for l in 0..NDL {
+    let mut bm = [0f64; NDL_MAX];
+    for l in 0..gp.d.len() {
         for c in 0..n {
             let dd = gp.d[l][c] as f64;
             bm[l] += mv[c] * mv[c] * dd * dd;
         }
     }
     let mn32 = mn as f32;
-    let rmax = it.ah.iter().map(|&a| {
+    let rmax = ah.iter().map(|&a| {
         let al = a as f64 / 32767.0 - DA;
         (x2 + mn * mn - 2.0 * mn * al).max(0.0).sqrt()
     }).fold(0f64, f64::max);
-    let nc = it.ah.len();
+    let nc = ah.len();
     let mut l1m = [0f32; J + 1];
     l1m[0] = (wm[..n].iter().map(|x| x.abs() as f64).sum::<f64>() * 1.001) as f32;
     for j in 0..J {
@@ -1472,20 +1685,27 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], it: &Items2, x2: 
     Cl2 { g: 0, r0: 0, r1: nc, nblk: (nc + BLK - 1) / BLK, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot: b2.iter().sum(), mvn: mv.iter().map(|x| x * x).sum::<f64>().sqrt(), rmax, numax: 0.0, bmin: 0.0, bmax: 0.0 }
 }
 
-/// Build the fast-scan index. `prof` is the G x n profile.
-/// With `nusort`, each cluster is sorted by the residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
-pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &BuildOptions, design_c: Option<&[f64]>, log: &mut dyn FnMut(String)) -> Index2 {
-    let nusort = o.nusort;
-    let t = Timer::new();
+/// What the build and the opening of a saved index both derive from the fit: the level metadata, the rotations, the
+/// code tables and every group's plan with its int8 basis, for an index of `rows` rows. With `inverse` (the build) also
+/// each basis's inverse and its defect; an open reads the defect from the saved index instead.
+pub struct Plans {
+    pub meta: Meta2,
+    pub rots: Vec<Vec<f64>>,
+    pub codes: DetTab,
+    pub et: ExpTab,
+    pub groups: Vec<GroupPlan2>,
+    /// the guarantee's N
+    pub nguar: f64,
+}
+
+pub fn plans(p: &Params, prof: &[f64], rows: usize, o: &BuildOptions, design_c: Option<&[f64]>, inverse: bool, log: &mut dyn FnMut(String)) -> Plans {
     let n = p.meta.n;
-    let k = p.meta.k;
     // the guarantee's N: the item count rounded up to a power of two, or as given
-    let rows = src.rows(p);
     let nguar = o.nguar.unwrap_or_else(|| (rows.max(1) as f64).log2().ceil().exp2());
     if nguar < rows as f64 {
         log(format!("the guarantee's N, {nguar}, is below the {rows} rows built: the guarantee covers only {nguar} rows"));
     }
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32 };
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32, ddec: o.ddec };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
@@ -1499,13 +1719,85 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         groups.push(GroupPlan2::new(p, prof, g, &codes, &mut et, &tof, design_c));
     }
     groups.par_iter_mut().enumerate().for_each(|(g, gp)| {
-        let (v8t, vsc, vinv, vq, e) = quant_basis(&p.v[g * n * n..(g + 1) * n * n], n);
-        gp.v8t = v8t;
-        gp.vsc = vsc;
-        gp.vinv = vinv;
-        gp.vq = vq;
-        gp.e_inv = e;
+        let v = &p.v[g * n * n..(g + 1) * n * n];
+        if inverse {
+            let (v8t, vsc, vinv, vq, e) = quant_basis(v, n);
+            gp.v8t = v8t;
+            gp.vsc = vsc;
+            gp.vinv = vinv;
+            gp.vq = vq;
+            gp.e_inv = e;
+        } else {
+            (gp.v8t, gp.vsc) = int8_basis(v, n);
+        }
     });
+    Plans { meta, rots, codes, et, groups, nguar }
+}
+
+/// Build the fast-scan index from `src`: in memory, or, with `dir`, straight into the files of a saved index there
+/// (sealed afterwards by `store::seal`). `prof` is the G x n profile. With `nusort`, each cluster is sorted by the
+/// residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
+/// A cluster's support-table bounds against every anchor: its largest and smallest x . a over its rows `x16` (f16, n
+/// each), rounded outward to 2^-15, exactly as from x . a in f64. The products are taken in f32 (the f16 rows are exact
+/// in f32), anchor by anchor over the rows (`px[a * nc + i]`); each extreme is then recomputed in f64 over the rows
+/// whose f32 value lies within m2 of the f32 extreme, twice the f32 error bound, so the true extreme is among them.
+/// Bound: |fl32(x . a32) - x . a| <= (n + 4) 2^-24 |x| for unit a (the products' rounding, the sum's, and a rounded to
+/// f32), with |x| the cluster's largest row norm.
+fn support_bounds(x16: &[u16], n: usize, anchors: &[f64], anchors32: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let nanch = anchors.len() / n;
+    let nc = x16.len() / n;
+    let x: Vec<f32> = x16.iter().map(|&h| f16_to_f32(h)).collect();
+    let xn = x.chunks(n).map(|r| r.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>().sqrt()).fold(0.0, f64::max);
+    let m2 = 2.0 * (n as f64 + 4.0) * 2f64.powi(-24) * xn * (1.0 + 1e-6);
+    let mut px = vec![0f32; nc * nanch];
+    // SAFETY: anchors32 is nanch x n, x is nc x n and px nanch x nc, all row-major with the strides given
+    unsafe {
+        matrixmultiply::sgemm(nanch, n, nc, 1.0, anchors32.as_ptr(), n as isize, 1, x.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nc as isize, 1);
+    }
+    let exact = |i: usize, a: usize| -> f64 { x[i * n..(i + 1) * n].iter().zip(&anchors[a * n..(a + 1) * n]).map(|(&u, &v)| u as f64 * v).sum() };
+    let (mut hi, mut lo) = (vec![0f32; nanch], vec![0f32; nanch]);
+    for a in 0..nanch {
+        let row = &px[a * nc..(a + 1) * nc];
+        let (fx, fi) = row.iter().fold((f32::NEG_INFINITY, f32::INFINITY), |(x, i), &v| (x.max(v), i.min(v)));
+        let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
+        for (i, &v) in row.iter().enumerate() {
+            let v = v as f64;
+            if v >= fx as f64 - m2 {
+                mx = mx.max(exact(i, a));
+            }
+            if v <= fi as f64 + m2 {
+                mi = mi.min(exact(i, a));
+            }
+        }
+        hi[a] = bound_up(mx);
+        lo[a] = bound_down(mi);
+    }
+    (hi, lo)
+}
+
+/// An upper bound stored in the support table: v + 1e-9 rounded up to 2^-15, as an f32 not below it. Below 256 in
+/// magnitude every multiple of 2^-15 is an f32, so this is the plain cast there (unit vectors give |x . a| <= ~1);
+/// beyond, the cast can round down, and the f32 above is taken.
+pub(crate) fn bound_up(v: f64) -> f32 {
+    let g = ((v + 1e-9) * 32768.0).ceil() / 32768.0;
+    let h = g as f32;
+    if (h as f64) < g { h.next_up() } else { h }
+}
+
+/// The lower bound of `bound_up`: v - 1e-9 rounded down to 2^-15, as an f32 not above it.
+pub(crate) fn bound_down(v: f64) -> f32 {
+    let g = ((v - 1e-9) * 32768.0).floor() / 32768.0;
+    let l = g as f32;
+    if (l as f64) > g { l.next_down() } else { l }
+}
+
+pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &BuildOptions, design_c: Option<&[f64]>, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Index2 {
+    let nusort = o.nusort;
+    let t = Timer::new();
+    let n = p.meta.n;
+    let k = p.meta.k;
+    let rows = src.rows(p);
+    let Plans { meta, rots, codes, et, mut groups, nguar } = plans(p, prof, rows, o, design_c, true, log);
     {
         // the randomised levels' constants, one per distinct set of coded blocks
         let tc = Timer::new();
@@ -1533,24 +1825,28 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     }).collect();
     let mn32: Vec<f32> = (0..k).map(|c| p.centres[c * n..(c + 1) * n].iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt() as f32).collect();
     let nr = meta.rlv.len();
-    // calibration on o.cal_per_group clusters of each group
+    // calibration on about o.cal_items items of each group, spread over up to CAL_CLUSTERS of its clusters
     let mut calc = Vec::new();
     for g in 0..p.meta.g {
         let ks: Vec<usize> = (0..k).filter(|&c| p.grp[c] == g).collect();
-        calc.extend(ks.iter().step_by((ks.len() / o.cal_per_group.max(1)).max(1)));
+        let step = ks.len().div_ceil(CAL_CLUSTERS).max(1);
+        let chosen: Vec<usize> = ks.iter().copied().step_by(step).collect();
+        let per = o.cal_items.max(1).div_ceil(chosen.len().max(1));
+        calc.extend(chosen.into_iter().map(|c| (c, per)));
     }
-    let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&c| {
+    let cals: Vec<(usize, Calib)> = calc.par_iter().map(|&(c, per)| {
         let g = p.grp[c];
-        let it = src.items(c, p, &groups[g], &mhats[c]);
+        let it = src.sample(c, p, &groups[g], &mhats[c], per);
         (g, encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], true).calib.unwrap())
     }).collect();
+    log(format!("calibration sample {} items from {} clusters", cals.iter().map(|c| c.1.ypool[0].len()).sum::<usize>(), calc.len()));
     for g in 0..p.meta.g {
         let mine: Vec<&Calib> = cals.iter().filter(|x| x.0 == g).map(|x| &x.1).collect();
         if mine.is_empty() {
             continue;
         }
         let pool = |f: &dyn Fn(&Calib) -> &Vec<f64>| -> Vec<f64> { mine.iter().flat_map(|c| f(c).iter().copied()).collect() };
-        let kmin: [i32; NDL] = core::array::from_fn(|l| quantile(&mut pool(&|c| &c.kpool[l]), 0.003).floor() as i32);
+        let kmin: [i32; NDL_MAX] = core::array::from_fn(|l| if l < meta.ndl() { quantile(&mut pool(&|c| &c.kpool[l]), 0.003).floor() as i32 } else { 0 });
         // a geometric grid covering [q_lo, q_hi] of log2 values with at most 254 steps, at most `smax` per octave
         let grid = |v: &mut Vec<f64>, smax: f64| -> (f64, f64) {
             if v.is_empty() {
@@ -1598,98 +1894,151 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 }
             }
         }
-        groups[g].set_calibration(kmin, y0, ys, tq, k0, ksv, kbv);
+        groups[g].set_calibration(CalIn { kmin, y0, ys, tq, k0, ks: ksv, kb: kbv });
     }
-    log(format!("calibrated {:.1}s", t.s()));
-    let ccodes: Vec<ClusterCode2> = (0..k).into_par_iter().map(|c| {
-        let g = p.grp[c];
-        let it = src.items(c, p, &groups[g], &mhats[c]);
+    log(format!("calibrated {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
+    let nl = meta.nl();
+    let real = matches!(full, Full2::Real { .. });
+    if let Some(d) = dir {
+        assert!(real, "a synthetic index has no stored vectors and is built in memory only, not in {d}");
+    }
+    // every cluster's place in every array, from its size and its group's plan, before anything is encoded
+    let sizes: Vec<usize> = (0..k).map(|c| src.size(c, p)).collect();
+    let mut row0 = vec![0usize; k + 1];
+    for c in 0..k {
+        row0[c + 1] = row0[c] + sizes[c];
+    }
+    let nrows = row0[k];
+    let (mut coff, mut soff) = (vec![vec![0usize; k]; nl], vec![vec![0usize; k]; nl]);
+    let (mut ctot, mut stot) = (vec![0usize; nl], vec![0usize; nl]);
+    for l in 0..nl {
+        for c in 0..k {
+            let (nb, lp) = (sizes[c].div_ceil(BLK), &groups[p.grp[c]].levels[l]);
+            (coff[l][c], soff[l][c]) = (ctot[l], stot[l]);
+            ctot[l] += nb * lp.units * 16;
+            stot[l] += nb * lp.srows * 16;
+        }
+    }
+    // 128 bytes of slack after each level and 32 keys after the last row, so masked and full vector loads past an
+    // array's end stay inside it
+    let lcode: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("code{l}.bin"), ctot[l] + 128)).collect();
+    let lscal: Vec<store::Out<u8>> = (0..nl).map(|l| store::Out::new(dir, &format!("scal{l}.bin"), stot[l] + 128)).collect();
+    let mut ahat = store::Out::<i16>::new(dir, "ahat.bin", nrows + 32);
+    let row_ent = store::Out::<u32>::new(dir, "row_ent.bin", nrows);
+    let nukey = store::Out::<u16>::new(dir, "nukey.bin", if nusort { nrows } else { 0 });
+    let vecs = store::OutRows::new(dir, "vectors.bin", if real { nrows * n } else { 0 });
+    let ext = store::Out::<u32>::new(None, "", if real { 0 } else { nrows });
+    // the support table: every cluster's extremes of x . a against every anchor a, from its f16 rows as they are
+    // encoded; against the fit's anchors (`anchors.npy`), else one per cluster, its centre's direction. None for the
+    // norm sort, and none for a synthetic source (scale.rs builds its own).
+    let anc_centres = !nusort && real && p.anchors.is_empty();
+    let anchors: Vec<f64> = if nusort || !real { Vec::new() } else if p.anchors.is_empty() { mhats.concat() } else { p.anchors.clone() };
+    assert_eq!(anchors.len() % n, 0, "the fit's anchors have rows of another width than n = {n}");
+    let nanch = anchors.len() / n;
+    let anchors32: Vec<f32> = anchors.iter().map(|&v| v as f32).collect();
+    let (thi, tlo) = (store::Out::<f32>::new(dir, "hi.bin", nanch * k), store::Out::<f32>::new(dir, "lo.bin", nanch * k));
+    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1 and the norm sort's grid
+    struct Done {
+        esc: Vec<(u8, u8, u32, f32)>,
+        x2max: f64,
+        numax: f64,
+    }
+    let done: Vec<Done> = (0..k).into_par_iter().map(|c| {
+        let gp = &groups[p.grp[c]];
+        let it = src.items(c, p, gp, &mhats[c]);
         let it = if nusort { it.sort_by_nu(n) } else { it };
-        encode_cluster(it, &groups[g], &codes, &et, &meta, &rots, mn32[c], false)
+        assert_eq!(it.ah.len(), sizes[c], "cluster {c} gave {} items where the source gave its size as {}", it.ah.len(), sizes[c]);
+        let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false);
+        let r0 = row0[c];
+        // SAFETY (each put below): cluster c writes only its own ranges, fixed above from the sizes before encoding
+        // (rows row0[c]..row0[c + 1], level bytes coff/soff[l][c] for its blocks), so concurrent writes are disjoint
+        for l in 0..nl {
+            unsafe {
+                lcode[l].put(coff[l][c], &cc.codes[l]);
+                lscal[l].put(soff[l][c], &cc.scal[l]);
+            }
+        }
+        let it = &cc.items;
+        unsafe {
+            ahat.put(r0, &it.ah);
+            row_ent.put(r0, &it.ent);
+        }
+        let numax = if nusort { (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30) } else { 0.0 };
+        if nusort {
+            // codes rounded up on the cluster's grid: nondecreasing in sort order
+            let key: Vec<u16> = it.nu.iter().map(|&v| ((v / numax * 65535.0).ceil() as u32).min(65535) as u16).collect();
+            unsafe { nukey.put(r0, &key) };
+        }
+        if real {
+            assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
+            unsafe { vecs.put(r0 * n, &it.x16) };
+            if nanch > 0 {
+                let (hi, lo) = support_bounds(&it.x16, n, &anchors, &anchors32);
+                // SAFETY: cluster c writes only entries [a * k + c], disjoint from every other cluster's
+                for a in 0..nanch {
+                    unsafe {
+                        thi.put(a * k + c, &hi[a..a + 1]);
+                        tlo.put(a * k + c, &lo[a..a + 1]);
+                    }
+                }
+            }
+        } else {
+            unsafe { ext.put(r0, &it.ext) };
+        }
+        Done { esc: cc.esc, x2max: it.x2max, numax }
     }).collect();
-    log(format!("encoded {:.1}s", t.s()));
-    let x2 = 1.0 + ccodes.iter().map(|c| c.items.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
-    let infos: Vec<Cl2> = ccodes.par_iter().enumerate().map(|(c, cc)| {
-        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, &cc.items, x2, n);
-        info.g = p.grp[c];
+    log(format!("encoded {:.1}s, support table of {nanch} anchors with it; anon {:.0} MB", t.s(), crate::util::anon_mb()));
+    let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
+    // the per-cluster records, from the written keys
+    let ah_all = ahat.get();
+    let cl: Vec<Cl2> = (0..k).into_par_iter().map(|c| {
+        let ah = &ah_all[row0[c]..row0[c + 1]];
+        let mut info = cluster_info(&groups[p.grp[c]], &p.centres[c * n..(c + 1) * n], &rots, ah, x2, n);
+        (info.g, info.r0, info.r1) = (p.grp[c], row0[c], row0[c + 1]);
         if nusort {
             // m.r = mn a - mn^2 from the key, within mn DA
-            let it = &cc.items;
-            info.numax = (it.nu.iter().cloned().fold(0.0, f64::max) * (1.0 + 1e-12)).max(1e-30);
+            info.numax = done[c].numax;
             let mr = |a: i16| info.mn * (a as f64 / 32767.0) - info.mn * info.mn;
-            info.bmax = it.ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
-            info.bmin = it.ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
+            info.bmax = ah.iter().map(|&a| mr(a)).fold(f64::NEG_INFINITY, f64::max) + info.mn * DA + 1e-12;
+            info.bmin = ah.iter().map(|&a| mr(a)).fold(f64::INFINITY, f64::min) - info.mn * DA - 1e-12;
         }
         info
     }).collect();
-    let nl = meta.nl();
-    let mut row0 = 0;
-    let mut cl = Vec::with_capacity(k);
-    let (mut ahat, mut row_ent, mut xs_row, mut nukey) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let mut lcode: Vec<Vec<u8>> = vec![Vec::new(); nl];
-    let mut lscal: Vec<Vec<u8>> = vec![Vec::new(); nl];
-    let mut coff: Vec<Vec<usize>> = vec![Vec::new(); nl];
-    let mut soff: Vec<Vec<usize>> = vec![Vec::new(); nl];
     let mut esc = HashMap::new();
-    for (cc, mut info) in ccodes.into_iter().zip(infos) {
-        let nc = cc.items.ah.len();
-        info.r0 = row0;
-        info.r1 = row0 + nc;
-        for l in 0..nl {
-            coff[l].push(lcode[l].len());
-            lcode[l].extend_from_slice(&cc.codes[l]);
-            soff[l].push(lscal[l].len());
-            lscal[l].extend_from_slice(&cc.scal[l]);
+    for (c, d) in done.iter().enumerate() {
+        for &(l, slot, i, v) in &d.esc {
+            esc.insert((l, slot, (row0[c] + i as usize) as u32), v);
         }
-        for &(l, slot, i, v) in &cc.esc {
-            esc.insert((l, slot, (row0 + i as usize) as u32), v);
-        }
-        ahat.extend_from_slice(&cc.items.ah);
-        // codes rounded up on the cluster's grid: nondecreasing in sort order
-        nukey.extend(cc.items.nu.iter().map(|&v| ((v / info.numax * 65535.0).ceil() as u32).min(65535) as u16));
-        row_ent.extend_from_slice(&cc.items.ent);
-        xs_row.extend_from_slice(&cc.items.ext);
-        row0 += nc;
-        cl.push(info);
     }
-    ahat.extend_from_slice(&[0i16; 32]);
-    // 64 bytes of slack so masked and full vector loads past a level's end stay inside the allocation
-    for l in 0..nl {
-        lcode[l].extend_from_slice(&[0u8; 128]);
-        lscal[l].extend_from_slice(&[0u8; 128]);
-    }
+    drop(done);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
         gp.vq = Vec::new();
     }
-    let nrows = row0;
+    let row_ent = row_ent.finish();
     let maxent = row_ent.iter().copied().max().unwrap_or(0) as usize;
-    let mut ent_row = vec![u32::MAX; maxent + 1];
+    let mut ent_row = store::Out::<u32>::new(dir, "ent_row.bin", maxent + 1);
+    ent_row.put_mut(0, &vec![u32::MAX; maxent + 1]);
     for (r, &e) in row_ent.iter().enumerate() {
         // k-NN counts rows, which is exact only with one row per entity
-        assert!(ent_row[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
-        ent_row[e as usize] = r as u32;
+        assert!(ent_row.get()[e as usize] == u32::MAX, "entity {e} has two rows; the index needs one row per entity");
+        ent_row.put_mut(e as usize, &[r as u32]);
     }
-    let mut full = full;
-    match &mut full {
-        Full2::Real { map, off, rows } => {
-            let src = unsafe { std::slice::from_raw_parts(map[*off..].as_ptr() as *const u16, (map.len() - *off) / 2) };
-            let mut v = F16Rows::zeroed(nrows * n);
-            v.par_chunks_mut(n).zip(xs_row.par_iter()).for_each(|(d, &r)| d.copy_from_slice(&src[r as usize * n..(r as usize + 1) * n]));
-            *rows = Arc::new(disk::Rows::Mem(v));
+    let full = match full {
+        Full2::Real { .. } => Full2::Real { rows: Arc::new(vecs.finish()) },
+        Full2::Synth(mut sy) => {
+            sy.ext = ext.finish().to_vec();
+            sy.row_cl = (0..k).flat_map(|c| std::iter::repeat(c as u32).take(sizes[c])).collect();
+            Full2::Synth(sy)
         }
-        Full2::Synth(sy) => {
-            sy.ext = xs_row;
-            sy.row_cl = cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
-        }
-    }
+    };
     let ctab: Vec<Vec<kern::CTab>> = cl.par_iter().map(|c| {
         let gp = &groups[c.g];
         let wm = c.wm(gp);
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let ix = Index2 {
-        nukey,
+        nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
         ctab: Arc::new(ctab),
         meta,
@@ -1699,17 +2048,18 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         cl,
         centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
         rots: Arc::new(rots),
-        anchors: Arc::new(Vec::new()),
-        hi: Arc::new(Vec::new()),
-        lo: Arc::new(Vec::new()),
+        anchors: Arc::new(anchors),
+        hi: Arc::new(thi.finish()),
+        lo: Arc::new(tlo.finish()),
         vrow: Vec::new(),
         nent: maxent + 1,
-        nanch: 0,
-        ahat,
+        nanch,
+        anc_centres,
+        ahat: ahat.finish(),
         row_ent,
-        ent_row,
-        lcode,
-        lscal,
+        ent_row: ent_row.finish(),
+        lcode: lcode.into_iter().map(|o| o.finish()).collect(),
+        lscal: lscal.into_iter().map(|o| o.finish()).collect(),
         coff,
         soff,
         esc,
@@ -1717,29 +2067,68 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         full,
         nrows,
     };
+    if let Some(d) = dir {
+        store::save_rest(&ix, d);
+    }
     let mut ek = [0usize; 4];
     for (key, _) in ix.esc.iter() {
         ek[match key.1 { 0 => 0, 1..=7 => 1, 8..=15 => 2, _ => 3 }] += 1;
     }
-    log(format!("assembled {:.1}s; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}", t.s(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3]));
+    log(format!("assembled {:.1}s; anon {:.0} MB; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), crate::util::anon_mb(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
     ix
 }
 
 
-/// The fitted directory `dir` built into a queryable index (codes, repack thresholds and, without the norm sort, the
-/// support table), with the parameters it was built from.
-pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
-    let mut p = crate::index::load_params(dir);
+/// The fit in `dir` with the options `o` applied, and the profile: the inputs of a build, and of the key of the index
+/// they build.
+pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String> {
+    let mut p = crate::index::load_params(dir)?;
+    p.anchors = crate::index::load_anchors(dir, p.meta.n, p.meta.k, &p.centres)?;
     if let Some(nv) = o.nguar {
-        assert!(nv > 0.0, "the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count");
+        if !(nv > 0.0) {
+            return Err(format!("the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count"));
+        }
+    }
+    if let Some(new) = &o.dlv {
+        let first_r = o.rlv.as_ref().unwrap_or(&p.meta.rlv).first().copied().unwrap_or(usize::MAX);
+        if new.is_empty() || new.len() > NDL_MAX || new[0] == 0 || !new.windows(2).all(|w| w[0] < w[1]) || new[new.len() - 1] >= first_r || new[new.len() - 1] > p.meta.n {
+            return Err(format!("the deterministic levels {new:?} must be 1 to {NDL_MAX} rising byte counts, from 1, below the first randomised level ({first_r}) and at most one byte per dimension ({})", p.meta.n));
+        }
+        p.meta.dlv = new.clone();
+    }
+    if p.meta.dlv.is_empty() || p.meta.dlv.len() > NDL_MAX {
+        return Err(format!("the fit's deterministic levels {:?} are not 1 to {NDL_MAX} levels; give others with BuildOptions::dlv (--dlv)", p.meta.dlv));
+    }
+    if o.ddec != u32::MAX && o.ddec >> p.meta.dlv.len() != 0 {
+        return Err(format!("ddec {:#b} names a deterministic level beyond this index's {} (levels 0 to {})", o.ddec, p.meta.dlv.len(), p.meta.dlv.len() - 1));
     }
     if let Some(new) = &o.rlv {
-        assert!(!new.is_empty() && new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "the randomised levels {new:?} must rise from above the last deterministic level, {}", p.meta.dlv.last().unwrap());
+        let top = p.meta.dlv.last().copied().unwrap_or(0);
+        if new.is_empty() || !new.windows(2).all(|w| w[0] < w[1]) || new[0] <= top {
+            return Err(format!("the randomised levels {new:?} must rise from above the last deterministic level, {top}"));
+        }
         let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
         p.meta.csg = (2.0 * l1).sqrt();
         p.meta.rlv = new.clone();
     }
-    let design_c: Option<Vec<f64>> = o.design_exact.then(|| {
+    if let Some(kk) = o.clusters.filter(|&kk| kk < p.meta.k) {
+        let n = p.meta.n;
+        p.meta.k = kk;
+        p.cstart.truncate(kk + 1);
+        p.grp.truncate(kk);
+        p.centres.truncate(kk * n);
+    }
+    let ppath = o.profile.clone().unwrap_or(format!("{dir}/profile.npy"));
+    let prof = crate::util::try_read_npy(&ppath)?.f64s();
+    if Some(prof.len()) != p.meta.g.checked_mul(p.meta.n) {
+        return Err(format!("{ppath} does not hold a profile of {} groups by {} dimensions", p.meta.g, p.meta.n));
+    }
+    Ok((p, prof))
+}
+
+/// The randomised levels' design constants by coded set when `o` designs the rates with the exact-law constants.
+pub fn design_constants(p: &Params, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Option<Vec<f64>> {
+    o.design_exact.then(|| {
         let b = &p.meta.bounds;
         let l1 = p.meta.csg * p.meta.csg / 2.0;
         let cs: Vec<f64> = (0..1u32 << (b.len() - 1)).into_par_iter().map(|set| {
@@ -1748,72 +2137,194 @@ pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params
         }).collect();
         log(format!("[design] constants by coded set {:?}", cs.iter().map(|x| (x * 1000.0).round() / 1000.0).collect::<Vec<_>>()));
         cs
-    });
-    if let Some(kk) = o.clusters.filter(|&kk| kk < p.meta.k) {
-        let n = p.meta.n;
-        p.meta.k = kk;
-        p.cstart.truncate(kk + 1);
-        p.grp.truncate(kk);
-        p.centres.truncate(kk * n);
-    }
-    let prof = derive::load_profile(o.profile.as_deref().unwrap_or(&format!("{dir}/profile.npy")));
-    let src = Real2 { src: crate::index::RealSource::open(&p.xs_path) };
-    let f = crate::index::RealSource::open(&p.xs_path);
-    let full = Full2::Real { map: Arc::new(f.map), off: f.off, rows: Default::default() };
-    let mut ix = build2(&p, &prof, &src, full, o, design_c.as_deref(), &mut |s| log(format!("[build2] {s}")));
-    let t = Timer::new();
-    ix.repack = q::calibrate_repack(&ix);
-    log(format!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), t.s()));
-    if !o.nusort {
-        build_table2(&mut ix, p.meta.k);
-    }
-    (p, ix)
+    })
 }
 
-/// Support table over cluster-centre anchors (data only): exact max/min of p.x per cluster, rounded outward.
-pub fn build_table2(ix: &mut Index2, nanch: usize) {
-    let n = ix.n();
-    let k = ix.k();
-    let step = k as f64 / nanch as f64;
-    let mut anchors = vec![0f64; nanch * n];
-    for a in 0..nanch {
-        let c = (a as f64 * step) as usize;
-        anchors[a * n..(a + 1) * n].copy_from_slice(&ix.cl[c].mhat);
+/// Where the index of the fit in `dir` built with `o` is saved: `dir/encoded-KEY`, KEY its `store::build_key`.
+pub fn saved_dir(dir: &str, o: &BuildOptions) -> Result<String, String> {
+    let (p, prof) = prepare(dir, o)?;
+    Ok(format!("{dir}/encoded-{}", store::build_key(&p, &prof, o)))
+}
+
+/// Encode the fit in `p` (from `prepare`): the codes and, without the norm sort, the support table, in memory or, with
+/// `dir`, into the files of a saved index there (not yet sealed).
+/// The fit's rows come from its Xs.npy (tools/fit.py), else from its partition through the fit's row order (`fit_dir`,
+/// fit::fit); an error when the partition does not hold them.
+fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, fit_dir: &str, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
+    // without anchors.npy the table is K x K (K^2 x 8 bytes, and nc x K f32 per cluster in flight): refused past
+    // KK_MAX clusters, where a fixed set of anchors (fit::write_anchors) keeps it K x A
+    if !o.nusort && p.anchors.is_empty() && p.meta.k > KK_MAX {
+        return Err(format!("the fit has {} clusters and no anchors.npy: a K x K support table would take {:.1} GB. Write its anchors (fit::write_anchors; vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy])", p.meta.k, (p.meta.k * p.meta.k * 8) as f64 / 1e9));
     }
-    let cols: Vec<(Vec<f32>, Vec<f32>)> = (0..k).into_par_iter().map(|c| {
-        let cl = &ix.cl[c];
-        let nc = cl.r1 - cl.r0;
-        let mut x = vec![0f64; nc * n];
-        for i in 0..nc {
-            ix.full_row_f64(cl.r0 + i, &mut x[i * n..(i + 1) * n]);
+    let full = Full2::Real { rows: Default::default() };
+    let mut lg = |s| log(format!("[build2] {s}"));
+    let rows = p.cstart[p.meta.k];
+    let ix = if p.xs_path.is_empty() {
+        // the partition must be the one fitted (a partition written again into its directory is another), hold rows
+        // of the fit's width, and give every fit row the entity the fit's perm.npy lists for it
+        let now = crate::bucket::partition_id(&p.partition).map_err(|e| format!("{e}; then refit (vexact --index {fit_dir} fit --partition {}) before building", p.partition))?;
+        if now != p.partition_id {
+            return Err(format!("the partition {} changed since the fit (identity {} when fitted, {now} now); refit it (vexact --index {fit_dir} fit --partition {}) before building", p.partition, if p.partition_id.is_empty() { "unrecorded" } else { &p.partition_id }, p.partition));
         }
-        let mut px = vec![0f64; nc * nanch];
-        unsafe {
-            matrixmultiply::dgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
-        }
-        let mut hi = vec![0f32; nanch];
-        let mut lo = vec![0f32; nanch];
-        for a in 0..nanch {
-            let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
-            for i in 0..nc {
-                mx = mx.max(px[i * nanch + a]);
-                mi = mi.min(px[i * nanch + a]);
+        // the same content: a manifest copied, moved or chmodded since the fit is only worth a warning
+        if let (Some(was), Ok(id)) = (p.partition_file, store::XsId::of(&format!("{}/manifest.json", p.partition))) {
+            if was != id {
+                lg(format!("WARNING: the partition {} holds what was fitted, but its manifest.json is another file than at the fit (modified {:?} -> {:?}, ctime {:?} -> {:?}, device {} -> {}, inode {} -> {}: a copy, a move or a chmod); building from it", p.partition, was.mtime, id.mtime, was.ctime, id.ctime, was.dev, id.dev, was.ino, id.ino));
             }
-            hi[a] = (((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32;
-            lo[a] = (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32;
         }
-        (hi, lo)
-    }).collect();
-    let mut hi = vec![0f32; nanch * k];
-    let mut lo = vec![0f32; nanch * k];
-    for c in 0..k {
-        for a in 0..nanch {
-            hi[a * k + c] = cols[c].0[a];
-            lo[a * k + c] = cols[c].1[a];
+        let src = crate::bucket::Buckets::open(&p.partition, fit_dir)?;
+        if src.part.n != p.meta.n {
+            return Err(format!("the partition {} holds vectors of {} dimensions, the fit {}; refit it", p.partition, src.part.n, p.meta.n));
+        }
+        if src.rows() < rows {
+            return Err(format!("the partition {} lists {} rows, the fit {rows}; refit it", p.partition, src.rows()));
+        }
+        if let Some(r) = (0..rows).into_par_iter().find_first(|&r| src.id(r) != p.perm[r] as u64) {
+            return Err(format!("fit row {r} is entity {} in the partition {} but {} in the fit's perm.npy; refit it", src.id(r), p.partition, p.perm[r]));
+        }
+        build2(p, prof, &Real2 { src }, full, o, design_c, dir, &mut lg)
+    } else {
+        let src = crate::index::RealSource::try_open(&p.xs_path)?;
+        if src.n != p.meta.n || src.map.len().saturating_sub(src.off) / 2 / src.n.max(1) < rows {
+            return Err(format!("{} does not hold the fit's {rows} rows of {} dimensions; refit it", p.xs_path, p.meta.n));
+        }
+        build2(p, prof, &Real2 { src }, full, o, design_c, dir, &mut lg)
+    };
+    Ok(ix)
+}
+
+/// The repack thresholds, timed on this machine (they choose how the query side packs slots, not what it reads).
+fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
+    let t = Timer::new();
+    ix.repack = q::calibrate_repack(ix);
+    log(format!("[repack] occupancy thresholds by level {:?} (timed in {:.1}s)", ix.repack.iter().map(|x| (x * 100.0).round() / 100.0).collect::<Vec<_>>(), t.s()));
+}
+
+/// The fitted directory `dir` built into a queryable index in memory (codes, repack thresholds and, without the norm
+/// sort, the support table), with the parameters it was built from. Nothing is saved.
+pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    if o.tune_malloc {
+        crate::util::fix_mmap_threshold(1 << 20);
+    }
+    let (mut p, prof) = prepare(dir, o)?;
+    p.load_perm()?;
+    let design_c = design_constants(&p, o, log);
+    let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log)?;
+    set_repack(&mut ix, log);
+    Ok((p, ix))
+}
+
+/// The index of the fitted directory `dir` built with `o`, opened from where it is saved (`saved_dir`) without encoding
+/// anything, with the parameters it was built from. A missing index, or one built from another fit or other options,
+/// is an error that says to rebuild it (`rebuild`).
+pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    open_in(dir, None, o, log)
+}
+
+/// As `open`, the index saved in `edir` (wherever `rebuild_at` saved it).
+pub fn open_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    open_in(dir, Some(edir), o, log)
+}
+
+/// The fit's perm.npy (fit row -> entity) read into `p.perm` for a caller that needs the fit's rows after an open (which
+/// reads none), checked against the hash the index saved in `edir` recorded when it was built (index.json "perm"):
+/// O(rows), never part of an open. An error, and `p.perm` left empty, when they differ.
+pub fn load_perm_checked(p: &mut Params, edir: &str) -> Result<(), String> {
+    let json = format!("{edir}/index.json");
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("cannot read {json}: {e}"))?).map_err(|e| format!("{json}: {e}"))?;
+    let want = v["perm"]["hash"].as_str().ok_or(format!("{json} records no hash of the fit's perm.npy; rebuild the index"))?.to_string();
+    p.load_perm()?;
+    let got = format!("{:016x}", store::perm_hash(&p.perm));
+    if got != want {
+        p.perm = Vec::new();
+        return Err(format!("{}: its entities (hash {got}) are not those the index in {edir} was built from ({want}); refit and --rebuild", p.perm_path));
+    }
+    Ok(())
+}
+
+fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    let t = Timer::new();
+    let (p, prof) = prepare(dir, o)?;
+    let t_fit = t.s();
+    let key = store::build_key(&p, &prof, o);
+    let t_key = t.s();
+    let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
+    let edir = edir.as_str();
+    store::log_stale(&store::parent_of(edir), edir, &mut |s| log(format!("[open] {s}")));
+    let design_c = design_constants(&p, o, log);
+    let t_map = t.s();
+    let mut ix = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}")))?;
+    let t_open = t.s();
+    set_repack(&mut ix, log);
+    log(format!("[open] {:.3}s in all: fit read {t_fit:.3}s, key {:.3}s, index opened {:.3}s, repack timed {:.3}s; anon {:.0} MB", t.s(), t_key - t_fit, t_open - t_map, t.s() - t_open, crate::util::anon_mb()));
+    Ok((p, ix))
+}
+
+/// Encode the fitted directory `dir` with `o` and save the index where `open` finds it (`saved_dir`), replacing any
+/// index saved there; returns it, with the parameters it was built from. An error when the fit's vectors cannot be
+/// read.
+pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    rebuild_in(dir, None, o, log)
+}
+
+/// As `rebuild`, saved in `edir`. The rebuild holds `encoded.lock` beside `edir` for its whole run (a second rebuild
+/// there waits, and if the first just saved the index it was going to build, opens that instead of encoding again),
+/// writes into a scratch directory of its own beside `edir` and swaps it into place once complete and synced
+/// (`store::install`).
+pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    rebuild_in(dir, Some(edir), o, log)
+}
+
+fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    if o.tune_malloc {
+        crate::util::fix_mmap_threshold(1 << 20);
+    }
+    let (mut p, prof) = prepare(dir, o)?;
+    // perm.npy's identity before its rows are read, as the vectors file's
+    let perm_id = store::XsId::of(&p.perm_path).map_err(|e| format!("{e}; a rebuild reads the fit's perm.npy"))?;
+    p.load_perm()?;
+    let perm = Some((store::perm_hash(&p.perm), perm_id));
+    log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
+    let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
+    let key = store::build_key(&p, &prof, o);
+    let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
+    let edir = edir.as_str();
+    let parent = store::parent_of(edir);
+    std::fs::create_dir_all(&parent).map_err(|e| format!("cannot create {parent}: {e}"))?;
+    // the saved index's index.json before waiting (none, or its device, inode and modification time)
+    let ident = || {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(format!("{edir}/index.json")).ok().map(|m| (m.dev(), m.ino(), m.mtime(), m.mtime_nsec()))
+    };
+    let before = ident();
+    let (lock, _) = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
+    let design_c = design_constants(&p, o, log);
+    {
+        // another rebuild may have saved an index here meanwhile: if it is this one (it opens with this key), use it
+        let now = ident();
+        if now.is_some() && now != before {
+            if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
+                drop(lock);
+                log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));
+                set_repack(&mut ix, log);
+                return Ok((p, ix));
+            }
         }
     }
-    ix.hi = Arc::new(hi);
-    ix.lo = Arc::new(lo);
-    ix.anchors = Arc::new(anchors);
-    ix.nanch = nanch;
+    store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
+    // built into the files of a scratch directory of this rebuild's own, sealed with its key, then moved into place
+    let tmp = store::scratch_dir(edir);
+    let mut ix = match encode(&p, &prof, design_c.as_deref(), o, dir, Some(&tmp), log) {
+        Ok(ix) => ix,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+    };
+    let h = store::seal(&ix, &tmp, &key, Some(xs), perm);
+    store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
+    drop(lock);
+    log(format!("[build2] saved to {edir}; store hash {h:016x}"));
+    set_repack(&mut ix, log);
+    Ok((p, ix))
 }

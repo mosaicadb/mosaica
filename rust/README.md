@@ -34,9 +34,15 @@ blocks (`meta.json`), and the f16 vectors in cluster order (`Xs.npy`). The deter
 24 / 32 B; the randomised ones at 56, 96, 160 and 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16
 vector and 8 bits per dimension; the four randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every
 other build parameter (bit allocation, certificate weights, whitening, block membership and rates, scalar grids) is
-derived from these in Rust when the index is opened (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
-(about 11 s at 1.2M items on 12 cores); the codes are not stored. `testdata/make_synth.py` fits the small index the
-tests use.
+derived from these in Rust when the index is built (`src/derive.rs`, `src/v2/mod.rs`), and every item is encoded then
+(about 11 s at 1.2M items on 12 cores). The encoded index is saved beside the fit, in `INDEX/encoded-KEY/`
+(`src/v2/store.rs`; KEY covers the fit, the profile, the identity of the vectors file (name, length, modification and
+status-change times, device and inode, not its contents), every option that changes the build and a fingerprint of the
+library's sources, so any library edit makes saved indexes stale; it does not depend on how the directory's path is
+spelled), with the f16 vectors in index row order; opening it maps the codes, keys and vectors and encodes nothing.
+Other `encoded-*` directories there are logged as stale with their sizes, never removed. A rebuild holds
+`INDEX/encoded.lock` (a second one waits), writes and syncs a scratch directory of its own and swaps it into place.
+`testdata/make_synth.py` fits the small index the tests use.
 
 ## Run
 
@@ -52,17 +58,26 @@ $B --scale 10 --nq 20                             # 10M synthetic items in the i
 $B --clusters 40 verify                           # quick development check
 ```
 
+The runs open the index saved for the fit and the build options given (`v2::open`), and stop with a message when there
+is none: `--rebuild` encodes it and saves it first (`v2::rebuild`), `--in-memory` encodes it without saving it
+(`v2::build`), and `--hash` logs the hash of the codes, scalars, keys, row order and escapes (`Index2::code_hash`) and
+the hash of everything the index holds, vectors included (`Index2::store_hash`, also logged by every rebuild and recorded
+in `index.json`).
+
 The defaults are the measured configuration: integer deterministic levels, tables combined from the group's and the
 centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;
 `--flags noint,nogtab,norepack` gives the float path). The binary refuses an argument it does not know.
 
-`--plan auto|index|flat` sets the planner, for threshold queries and exact k-NN alike. Its cost model (`Plan`,
-`src/v2/q.rs`) is re-timed when the index opens, on one thread, from 16 stored rows used as queries (`Plan::calibrate`,
-about 1 s; `--calib N` rows, `--plan-default` keeps the BioCLIP constants of `Plan::default`). k-NN goes straight to a
-scan of the visible set when that costs less than cutting the clusters that hold it plus the seed; otherwise after the
-seed it cuts a sample of the clusters and scans if the sample says nothing will prune, and only then cuts the rest. Full
-vectors are held in index row order, so a scan reads memory in order. Each run rebuilds the index (about 100 s at 1M on
-4 cores) and appends to `results/run2.log`; tables go to `results/*.csv`.
+`--plan auto|index|flat|scan` sets the planner, for threshold queries and exact k-NN alike (`src/v2/q.rs`, `plan2`).
+Nothing is timed when the index opens. In memory and unfiltered, the support table decides the clusters it can and every
+other cluster runs on the index path. Under a visible set one constant in rows decides (`Plan::r_rows`, 300): the set is
+scanned when it holds at most that many rows per cluster holding one; otherwise a cluster holding at most that many is
+scored directly and the rest run on the index path; exact k-NN also counts its seed as `r_seed` rows (6,000). With the
+full vectors on file and read through io_uring (`--full-file`), a cost model prices the reads, from disk constants timed
+once per machine and device and cached in the index directory (`disk-constants.txt`); `--plan-file` gives those
+constants (`r_rows`, `r_seed`, `io_us`, `io_gbps` as name=value lines) instead. Full vectors are held in index row
+order, so a scan reads memory in order. Each run rebuilds the index (about 100 s at 1M on 4 cores) and appends to
+`results/run2.log`; tables go to `results/*.csv`.
 
 ## Layout
 

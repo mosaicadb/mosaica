@@ -1,7 +1,5 @@
 //! Small shared pieces: .npy reading, f16 helpers, exact similarity, a reproducible Haar rotation generator.
 use half::f16;
-use std::fs::File;
-use std::io::Read;
 use std::time::Instant;
 
 pub struct Npy {
@@ -11,17 +9,49 @@ pub struct Npy {
 }
 
 pub fn read_npy(path: &str) -> Npy {
-    let mut f = File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).unwrap();
-    let (hdr, off) = npy_header(&buf);
-    let descr = field(&hdr, "descr");
-    assert!(!hdr.contains("'fortran_order': True"), "{path}: fortran order");
-    Npy { shape: npy_shape(&hdr), descr, data: buf[off..].to_vec() }
+    try_read_npy(path).unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// Write a little-endian .npy file (`descr` as numpy writes it, e.g. "<i4", "<f8").
-pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
+/// An .npy file read whole, its header checked (magic, version, length, a C-ordered array with a type and a shape);
+/// an error naming the file otherwise.
+pub fn try_read_npy(path: &str) -> Result<Npy, String> {
+    let buf = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let bad = |what: &str| format!("{path}: not a readable .npy file ({what})");
+    if buf.len() < 10 || &buf[..6] != b"\x93NUMPY" {
+        return Err(bad("no .npy magic"));
+    }
+    let (hl, start): (usize, usize) = match buf[6] {
+        1 => (u16::from_le_bytes([buf[8], buf[9]]) as usize, 10),
+        2 | 3 if buf.len() >= 12 => (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12),
+        _ => return Err(bad("unknown version")),
+    };
+    let off = start.checked_add(hl).filter(|&e| e <= buf.len()).ok_or_else(|| bad("header past the end"))?;
+    let hdr = String::from_utf8_lossy(&buf[start..off]).to_string();
+    if hdr.contains("'fortran_order': True") {
+        return Err(bad("Fortran order"));
+    }
+    let descr = try_field(&hdr, "descr").ok_or_else(|| bad("no descr"))?;
+    let shape = try_shape(&hdr).ok_or_else(|| bad("no shape"))?;
+    Ok(Npy { shape, descr, data: buf[off..].to_vec() })
+}
+
+fn try_field(hdr: &str, key: &str) -> Option<String> {
+    let i = hdr.find(&format!("'{key}'"))?;
+    let rest = hdr.get(i + key.len() + 3..)?;
+    let a = rest.find('\'')?;
+    let b = rest[a + 1..].find('\'')?;
+    Some(rest[a + 1..a + 1 + b].to_string())
+}
+
+fn try_shape(hdr: &str) -> Option<Vec<usize>> {
+    let i = hdr.find("'shape'")?;
+    let a = hdr[i..].find('(')? + i;
+    let b = hdr[a..].find(')')? + a;
+    Some(hdr[a + 1..b].split(',').filter_map(|s| s.trim().parse().ok()).collect())
+}
+
+/// The bytes of an .npy header (version 1) for C-ordered data of type `descr` and shape `shape`.
+pub fn npy_header_bytes(descr: &str, shape: &[usize]) -> Vec<u8> {
     let dims: Vec<String> = shape.iter().map(|d| d.to_string()).collect();
     let tuple = if dims.len() == 1 { format!("({},)", dims[0]) } else { format!("({})", dims.join(", ")) };
     let mut hdr = format!("{{'descr': '{descr}', 'fortran_order': False, 'shape': {tuple}, }}");
@@ -32,6 +62,12 @@ pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
     let mut out = b"\x93NUMPY\x01\x00".to_vec();
     out.extend_from_slice(&(hdr.len() as u16).to_le_bytes());
     out.extend_from_slice(hdr.as_bytes());
+    out
+}
+
+/// Write a little-endian .npy file (`descr` as numpy writes it, e.g. "<i4", "<f8").
+pub fn write_npy(path: &str, descr: &str, shape: &[usize], data: &[u8]) {
+    let mut out = npy_header_bytes(descr, shape);
     out.extend_from_slice(data);
     std::fs::write(path, out).unwrap_or_else(|e| panic!("{path}: {e}"));
 }
@@ -44,14 +80,6 @@ pub fn npy_header(buf: &[u8]) -> (String, usize) {
         (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12)
     };
     (String::from_utf8_lossy(&buf[start..start + hl]).to_string(), start + hl)
-}
-
-fn field(hdr: &str, key: &str) -> String {
-    let i = hdr.find(&format!("'{key}'")).unwrap();
-    let rest = &hdr[i + key.len() + 3..];
-    let a = rest.find('\'').unwrap();
-    let b = rest[a + 1..].find('\'').unwrap();
-    rest[a + 1..a + 1 + b].to_string()
 }
 
 pub fn npy_shape(hdr: &str) -> Vec<usize> {
@@ -74,6 +102,21 @@ impl Npy {
     conv!(i64s, i64, 8);
     conv!(i32s, i32, 4);
     conv!(u16s, u16, 2);
+    conv!(u32s, u32, 4);
+    /// A 2-D array of little-endian floats (f2, f4 or f8) as f32 values, row-major, with its row width; an error
+    /// naming `what` (the file) on any other type or shape.
+    pub fn rows_f32(&self, what: &str) -> Result<(Vec<f32>, usize), String> {
+        if self.shape.len() != 2 {
+            return Err(format!("{what}: expected a 2-D array (rows x dimensions), found shape {:?}", self.shape));
+        }
+        let v: Vec<f32> = match self.descr.as_str() {
+            "<f8" => self.f64s().into_iter().map(|x| x as f32).collect(),
+            "<f4" => self.f32s(),
+            "<f2" => self.u16s().into_iter().map(f16_to_f32).collect(),
+            d => return Err(format!("{what}: expected little-endian floats (<f2, <f4 or <f8), found {d}")),
+        };
+        Ok((v, self.shape[1]))
+    }
     pub fn i8s(&self) -> Vec<i8> {
         self.data.iter().map(|&b| b as i8).collect()
     }
@@ -295,4 +338,27 @@ pub fn pin(cpu: usize) {
     let mut mask = [0u64; 16];
     mask[cpu / 64] = 1 << (cpu % 64);
     assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
+}
+
+/// The process's anonymous resident memory in MB (`RssAnon`; 0 where /proc is absent): the memory a build holds that
+/// the kernel cannot drop, unlike the mapped files it reads and writes.
+pub fn anon_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("RssAnon:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).map_or(0.0, |kb| kb / 1024.0)
+}
+
+/// Fix glibc's mmap threshold at `bytes` for the rest of the process (no effect off glibc). Its default rises to 32 MB
+/// as large blocks are freed; a build encodes cluster after cluster in buffers of a few MB, and above the risen
+/// threshold glibc keeps the freed ones in its arenas, which grew a 4M-row build by 38 bytes a row. The setting is
+/// process-wide and stays, so only a process that does nothing but build should set it (`BuildOptions::tune_malloc`).
+pub fn fix_mmap_threshold(bytes: i32) {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn mallopt(param: i32, value: i32) -> i32;
+        }
+        const M_MMAP_THRESHOLD: i32 = -3;
+        // SAFETY: mallopt only sets glibc's allocator parameters; it takes no pointers
+        unsafe { mallopt(M_MMAP_THRESHOLD, bytes) };
+    }
+    let _ = bytes;
 }

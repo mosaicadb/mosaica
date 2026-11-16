@@ -59,10 +59,10 @@ pub fn tick() -> u64 {
 
 pub struct GQ2 {
     pub qv: Vec<f64>,      // V_q^T q, exact up to one rounding
-    pub qvd2: Vec<f32>,    // NDL x n: qv * D_l^2
+    pub qvd2: Vec<f32>,    // ndl x n: qv * D_l^2
     pub qdt2: Vec<f32>,    // J x n: qv * dt^2 on the coordinates of block j, else 0
     pub wq: Vec<f32>,      // det: qv*sig by coordinate; rand: R_j (qv*dt) by position
-    pub cq: [f64; NDL],    // sum qv^2 D_l^2
+    pub cq: [f64; NDL_MAX],    // sum qv^2 D_l^2
     pub qvt_pos: Vec<f64>, // qv*dt in position order
     pub a2: [f64; J],
     pub l1det: f64,        // |wq| sums (weight rounding bound)
@@ -97,7 +97,7 @@ impl Prep2 {
     pub fn anc(&self, ix: &Index2) -> Anc {
         self.anc_among(ix, None)
     }
-    /// The nearest anchor; on the first call with `among` (clusters, when every cluster's centre is an anchor), the
+    /// The nearest anchor; on the first call with `among` (clusters, when anchor a is cluster a's centre: anc_centres), the
     /// nearest of those clusters' anchors. Any anchor gives sound bounds, and a query over a few clusters needs the
     /// one nearest to them.
     pub fn anc_among(&self, ix: &Index2, among: Option<&[usize]>) -> Anc {
@@ -105,7 +105,7 @@ impl Prep2 {
             let n = ix.n();
             let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
             let all: Vec<usize>;
-            let cand = match among.filter(|_| ix.nanch == ix.k()) {
+            let cand = match among.filter(|_| ix.anc_centres) {
                 Some(c) if !c.is_empty() => c,
                 _ => {
                     all = (0..ix.nanch).collect();
@@ -140,7 +140,7 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     prep2_qm(ix, q, None)
 }
 
-/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (one per cluster): the
+/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (`anc_centres`): the
 /// anchor is the cluster with the largest q.m / |m|, and only its product is taken again.
 pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
     let n = ix.n();
@@ -150,7 +150,7 @@ pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
     let anc = OnceLock::new();
-    if let Some(qm) = qm.filter(|_| ix.nanch == ix.k() && ix.nanch > 0) {
+    if let Some(qm) = qm.filter(|_| ix.anc_centres && ix.nanch == ix.k() && ix.nanch > 0) {
         let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
         for (c, &v) in qm.iter().enumerate() {
             if v / ix.cl[c].mn > best {
@@ -311,9 +311,10 @@ pub fn group_q2r(ix: &Index2, g: usize, pr: &Prep2, rot: bool) -> GQ2 {
     }
     // cq[l] = sum qv^2 D_l^2 in four partial sums (any order is within the 1e-12 cq slack of cluster_q2w), with
     // qvd2 = qv D_l^2 in the same pass
-    let mut cq = [0f64; NDL];
-    let mut qvd2 = vec![0f32; NDL * n];
-    for l in 0..NDL {
+    let ndl = ix.meta.ndl();
+    let mut cq = [0f64; NDL_MAX];
+    let mut qvd2 = vec![0f32; ndl * n];
+    for l in 0..ndl {
         let d = &gp.d[l];
         let mut acc = [0f64; 4];
         for c4 in (0..n).step_by(4) {
@@ -420,7 +421,7 @@ pub fn get_gq2<'a>(ix: &Index2, pr: &'a Prep2, g: usize, st: &mut Stats) -> &'a 
 pub struct CQ2 {
     pub qm: f32,
     pub alr: f32,
-    pub dwa: [f32; NDL],
+    pub dwa: [f32; NDL_MAX],
     pub nd: [f32; J],
     pub fixed: f32,
     pub ewdet: f32, // weight-rounding bound, det (times s)
@@ -430,6 +431,7 @@ pub struct CQ2 {
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
+    pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
 }
 
@@ -438,9 +440,9 @@ pub struct CQ2 {
 pub struct IntDet {
     pub sigma: f32,
     pub rt: Vec<Option<RTab>>,
-    pub b: [f64; NDL],
-    pub e: [f64; NDL],
-    pub q: [f64; NDL], // bound on the largest Theta through each level
+    pub b: [f64; NDL_MAX],
+    pub e: [f64; NDL_MAX],
+    pub q: [f64; NDL_MAX], // bound on the largest Theta through each level
 }
 
 impl CQ2 {
@@ -449,16 +451,17 @@ impl CQ2 {
     /// and largest plus |alpha| times the centre's.
     pub fn enable_int(&mut self, ix: &Index2, ci: usize, gq: &GQ2) {
         let gp = &ix.groups[ix.cl[ci].g];
+        let ndl = ix.meta.ndl();
         let sigma = if self.gtab {
-            let ts: Vec<&GTab> = (0..NDL).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
-            let (s, m) = unsafe { det_spans(&ts, &ix.ctab[ci][..NDL], &gp.levels[..NDL], self.alr) };
-            let units: usize = gp.levels[..NDL].iter().map(|l| l.units).sum();
+            let ts: Vec<&GTab> = (0..ndl).map(|l| gq.gtab[l].get_or_init(|| unsafe { group_tab(&gq.wq, &gp.levels[l], &ix.etab) })).collect();
+            let (s, m) = unsafe { det_spans(&ts, &ix.ctab[ci][..ndl], &gp.levels[..ndl], self.alr) };
+            let units: usize = gp.levels[..ndl].iter().map(|l| l.units).sum();
             let budget = (256 * IHMAX - 3 * units as i64) as f64;
             ((s * (1.0 + 1.0 / 512.0) / budget).max(m * (1.0 + 1.0 / 512.0) / 65533.0) as f32).max(1e-30)
         } else {
-            int_sigma(&self.w, &gp.levels[..NDL], &ix.etab)
+            int_sigma(&self.w, &gp.levels[..ndl], &ix.etab)
         };
-        self.int = Some(IntDet { sigma, rt: vec![None; NDL], b: [0.0; NDL], e: [0.0; NDL], q: [0.0; NDL] });
+        self.int = Some(IntDet { sigma, rt: vec![None; ndl], b: [0.0; NDL_MAX], e: [0.0; NDL_MAX], q: [0.0; NDL_MAX] });
     }
 }
 
@@ -508,8 +511,9 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     }
     let alr = (ab.iter().sum::<f64>() / c.btot) as f32;
     let a = alr as f64;
-    let mut dwa = [0f32; NDL];
-    for l in 0..NDL {
+    let ndl = ix.meta.ndl();
+    let mut dwa = [0f32; NDL_MAX];
+    for l in 0..ndl {
         let aqm = unsafe { dot32(&c.mv32, &gq.qvd2[l * n..(l + 1) * n]) };
         let dw2 = gq.cq[l] - 2.0 * a * aqm + a * a * c.bm[l] + 2.0 * a.abs() * e * (c.bm[l] * gq.cq[l]).sqrt();
         dwa[l] = ((dw2.max(0.0) + 1e-12 * gq.cq[l]).sqrt() * (1.0 + 1e-7)) as f32;
@@ -532,7 +536,7 @@ pub fn cluster_q2w(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, want_w
     // |v_c| < 3.5 for a deterministic coordinate (outer tree centroid plus residual stages)
     let ewdet = (12.0 * U * (gq.l1det + a.abs() * c.l1m[0] as f64) + 1e-30) as f32;
     let fixed = a.abs() * c.mn * DA + gp.e_inv * (pr.qn + a.abs() * c.mn) * c.rmax + 4e-6;
-    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, int: None }
+    CQ2 { qm: qm as f32, alr, dwa, nd, fixed: fixed as f32, ewdet, ewj, w, luts: (0..ix.meta.nl()).map(|_| None).collect(), gtab: false, repack: 0.0, tol: 0.0, ddec: ix.meta.ddec, int: None }
 }
 
 // ---------------- cut and range (as the tree index) ----------------
@@ -739,6 +743,28 @@ impl Vis2 {
     #[inline]
     pub fn has(&self, r: usize) -> bool {
         self.bits[r / 64] >> (r % 64) & 1 == 1
+    }
+    /// Calls `f` with every visible row of [a, b), ascending, a word of the bit set at a time: the cost follows the
+    /// visible rows and the words, not every row of the range.
+    #[inline]
+    pub fn each(&self, a: usize, b: usize, mut f: impl FnMut(usize)) {
+        if a >= b {
+            return;
+        }
+        let (wa, wb) = (a / 64, (b - 1) / 64);
+        for w in wa..=wb {
+            let mut x = self.bits[w];
+            if w == wa {
+                x &= !0u64 << (a % 64);
+            }
+            if w == wb {
+                x &= !0u64 >> (63 - (b - 1) % 64);
+            }
+            while x != 0 {
+                f(w * 64 + x.trailing_zeros() as usize);
+                x &= x - 1;
+            }
+        }
     }
 }
 fn count_bits(bits: &[u64], a: usize, b: usize) -> usize {
@@ -1019,8 +1045,9 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
     let nl = ix.meta.nl();
+    let ndl = ix.meta.ndl();
     let n = ix.n();
-    let nr = nl - NDL;
+    let nr = nl - ndl;
     // dense candidates keep their item positions (slot k = item a0 + k, holes for the rest), so blocks are source
     // blocks and need no re-packing; sparse ones are compacted
     let rp = cq.repack;
@@ -1091,7 +1118,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
     if intm {
         // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
         // only lowers Tout
-        let dmax = pr.dial[..NDL].iter().fold(0f32, |a, &d| a.max(d)) as f64;
+        let dmax = pr.dial[..ndl].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
         int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
@@ -1120,11 +1147,15 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             break;
         }
         let lp = &gp.levels[l];
+        // a deterministic level that does not decide (Meta2::ddec): its sums advance and nothing is decided, so every
+        // live slot is kept (verify: its bounds are computed and checked, not used); a later level's bound does not
+        // depend on whether an earlier one decided
+        let dnodec = l < ndl && mode == Mode2::Thr && cq.ddec >> l & 1 == 0;
         let tl1 = tick();
-        if intm && l == NDL {
+        if intm && l == ndl {
             // into the randomised levels: the deterministic sum as a float, within e plus its rounding to f32
             let id = cq.int.as_ref().unwrap();
-            let (b, sg) = (id.b[NDL - 1], id.sigma as f64);
+            let (b, sg) = (id.b[ndl - 1], id.sigma as f64);
             // four slots at a time (the rows of a block of 32 are contiguous; the state is padded to whole blocks)
             let (vb, vs, v256) = (_mm256_set1_pd(b), _mm256_set1_pd(sg), _mm256_set1_pd(256.0));
             let mut k = 0;
@@ -1135,7 +1166,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 _mm_storeu_ps(sv.adet.as_mut_ptr().add(k), _mm256_cvtpd_ps(v));
                 k += 4;
             }
-            edet = ((id.e[NDL - 1] + (b.abs() + sg * THETA_MAX as f64) * 2f64.powi(-23)) * (1.0 + 1e-6)) as f32;
+            edet = ((id.e[ndl - 1] + (b.abs() + sg * THETA_MAX as f64) * 2f64.powi(-23)) * (1.0 + 1e-6)) as f32;
         }
         let tt = tick();
         st.cyc[P_LVSETUP] += tt - tl1;
@@ -1146,7 +1177,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 st.cyc[C_TSURV] += live as u64;
                 st.cyc[C_TSMALL] += (live <= 8) as u64;
                 let mut lut = sv.lut();
-                let step = if intm && l < NDL { Some(cq.int.as_ref().unwrap().sigma) } else { None };
+                let step = if intm && l < ndl { Some(cq.int.as_ref().unwrap().sigma) } else { None };
                 if cq.gtab {
                     let gt = gq.gtab[l].get_or_init(|| group_tab(&gq.wq, lp, &ix.etab));
                     combine_lut(gt, &ix.ctab[ci][l], lp, cq.alr, step, &mut lut);
@@ -1165,7 +1196,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 Some(j) => ej[j] += pl.err,
             }
         }
-        if intm && l < NDL {
+        if intm && l < ndl {
             let id = cq.int.as_mut().unwrap();
             let (b0, e0) = if l > 0 { (id.b[l - 1], id.e[l - 1]) } else { (0.0, 0.0) };
             id.q[l] = (if l > 0 { id.q[l - 1] } else { 0.0 }) + lut.qsum;
@@ -1187,7 +1218,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         // verify: the level's tables in f64 from the same weights, unit by unit in row order
         let mut tab64: Vec<[f64; 16]> = Vec::new();
-        let w64: Vec<f64> = if verify && l < NDL {
+        let w64: Vec<f64> = if verify && l < ndl {
             if cq.gtab {
                 let wm = c.wm(gp);
                 gq.wq.iter().zip(&wm).map(|(&q, &m)| q as f64 - cq.alr as f64 * m as f64).collect()
@@ -1197,7 +1228,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         } else {
             Vec::new()
         };
-        if verify && l < NDL {
+        if verify && l < ndl {
             for part in &lp.parts {
                 for fs in &part.ufields {
                     let mut tv = [0f64; 16];
@@ -1226,8 +1257,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         if sv.stmp.len() < srows * 16 + 64 {
             sv.stmp.resize(srows * 16 + 64, 0);
         }
-        let lr = l.wrapping_sub(NDL);
-        if l >= NDL {
+        let lr = l.wrapping_sub(ndl);
+        if l >= ndl {
             for &j in &gp.thchg[lr] {
                 let e = eta_steps(gp.kstep[lr][j]);
                 dmxj[j] = (e / (1.0 - e) + 1e-6) as f32;
@@ -1245,13 +1276,13 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         // (a rise recomputes them before any use); |y| from the first randomised level on
         let last = l + 1 == nl;
         let mut need = RandNeed::default();
-        if l >= NDL && !last {
+        if l >= ndl && !last {
             need.yh = true;
             need.c0 = true;
             for j in 0..J {
-                if gp.rates[l - NDL][j] > 0.0 {
+                if gp.rates[l - ndl][j] > 0.0 {
                     need.aj |= 1 << j;
-                    if !gp.thchg[l + 1 - NDL].contains(&j) {
+                    if !gp.thchg[l + 1 - ndl].contains(&j) {
                         need.kap |= 1 << j;
                     }
                 }
@@ -1298,26 +1329,28 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             let t1 = tick();
             st.cyc[P_REPACK] += t1 - t0;
             let mut keep = [0u16; 2];
-            if verify && l < NDL {
+            if verify && l < ndl {
                 for i in 0..32 {
                     if act >> i & 1 == 1 {
                         sv.a64[k0 + i] += tab64.iter().enumerate().map(|(u, tv)| tv[nib(cp, u, i)]).sum::<f64>();
                     }
                 }
             }
-            if intm && l < NDL {
+            if intm && l < ndl {
                 let rt = cq.int.as_ref().unwrap().rt[l].as_ref().unwrap();
-                let (inm, outm) = int_level(cp, lut, sp, rt, sv.ist.as_mut_ptr().add(ip(k0, 0)), true);
+                let (inm, outm) = int_level(cp, lut, sp, rt, sv.ist.as_mut_ptr().add(ip(k0, 0)), !dnodec || verify);
                 let t2 = tick();
                 st.cyc[P_DECODE] += t2 - t1;
                 let (inm, outm) = (inm & act, outm & act);
                 if verify {
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, act, inm, outm, st);
                 }
-                let k = if sweep { act } else { act & !(inm | outm) };
-                st.dec_in[l] += inm.count_ones() as u64;
-                st.dec_out[l] += outm.count_ones() as u64;
-                if !sweep && inm != 0 {
+                let k = if sweep || dnodec { act } else { act & !(inm | outm) };
+                if !dnodec {
+                    st.dec_in[l] += inm.count_ones() as u64;
+                    st.dec_out[l] += outm.count_ones() as u64;
+                }
+                if !sweep && !dnodec && inm != 0 {
                     for h in 0..2 {
                         let m = (inm >> (16 * h)) as u16;
                         if m != 0 {
@@ -1348,7 +1381,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             st.cyc[P_DECODE] += t2 - t1;
             // the randomised levels' scalars, both halves of the block from each row: |y| at the first, kappa and tan
             // at a block's rise
-            if l >= NDL {
+            if l >= ndl {
                 let tk = tick();
                 let hms = [act as u16, (act >> 16) as u16];
                     if lr == 0 {
@@ -1442,7 +1475,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 }
                 let o = k0 + 16 * h;
                 let (lb, ub, est, hn, sd);
-                if l < NDL {
+                if l < ndl {
                     let s = ld(&sv.s, o);
                     let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
                     let adet = _mm512_add_ps(ld(&sv.adet, o), pv[0][h]);
@@ -1532,9 +1565,9 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         }
                         st.checked += 1;
                         if sc < lbs[i] as f64 - 1e-12 || sc > ubs[i] as f64 + 1e-12 {
-                            if l < NDL { st.viol_det += 1 } else { st.viol_rand += 1 }
+                            if l < ndl { st.viol_det += 1 } else { st.viol_rand += 1 }
                         }
-                        if l >= NDL && sds[i] > 0.0 {
+                        if l >= ndl && sds[i] > 0.0 {
                             let zz = ((sc - es[i] as f64).abs() - hs[i] as f64) / sds[i] as f64;
                             if zz > st.max_sd {
                                 st.max_sd = zz;
@@ -1542,7 +1575,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         }
                     }
                 }
-                if verify && l >= NDL {
+                if verify && l >= ndl {
                     let mut dg = DUMP.lock().unwrap();
                     if let Some(f) = dg.as_mut() {
                         use std::io::Write;
@@ -1588,9 +1621,13 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 }
                 let inm = _mm512_cmp_ps_mask::<_CMP_GE_OQ>(lb, _mm512_set1_ps(tin)) & hm;
                 let outm = _mm512_cmp_ps_mask::<_CMP_LT_OQ>(ub, _mm512_set1_ps(tout)) & hm;
-                if verify && l < NDL {
+                if verify && l < ndl {
                     let sh = 16 * h;
                     check_det(ix, ci, pr, cq, l, t, sv, k0, sp, (hm as u32) << sh, (inm as u32) << sh, (outm as u32) << sh, st);
+                }
+                if dnodec {
+                    keep[h] = hm;
+                    continue;
                 }
                 if sweep {
                     st.dec_in[l] += inm.count_ones() as u64;
@@ -1646,7 +1683,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     continue;
                 }
                 _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, _mm512_loadu_si512(sv.idx.as_ptr().add(o) as *const _)));
-                if l < NDL {
+                if l < ndl {
                     cs(&mut sv.s, w, m, o);
                     cs(&mut sv.mr, w, m, o);
                     compact_det(sv, intm, verify, w, m, o);
@@ -1684,7 +1721,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     let m = !_mm512_cmpeq_epi32_mask(iv, _mm512_set1_epi32(-1));
                     if m != 0 {
                         _mm512_storeu_si512(sv.idx.as_mut_ptr().add(w) as *mut _, _mm512_maskz_compress_epi32(m, iv));
-                        if l < NDL {
+                        if l < ndl {
                             cs(&mut sv.s, w, m, o);
                             cs(&mut sv.mr, w, m, o);
                             compact_det(sv, intm, verify, w, m, o);
@@ -1739,6 +1776,7 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
     let ci = (0..ix.k()).max_by_key(|&c| ix.cl[c].nblk).unwrap();
     let c = &ix.cl[ci];
     let gp = &ix.groups[c.g];
+    let ndl = ix.meta.ndl();
     let nb = c.nblk & !1;
     let mut out = Vec::new();
     let time = |f: &mut dyn FnMut()| -> f64 {
@@ -1790,7 +1828,7 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
             }
         }) / (nb / 2) as f64;
         // the survivors' state: 6 integer rows on the integer deterministic levels, 3 + 4 J float arrays after
-        let narr = if l < NDL { 4 } else { 3 + 4 * J };
+        let narr = if l < ndl { 4 } else { 3 + 4 * J };
         let mut st = vec![vec![0f32; 64 * nb + 32]; narr];
         let t_c = time(&mut || unsafe {
             let mut w = 0;
@@ -1810,83 +1848,153 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum PlanMode {
+    /// The rule (vectors in memory) or the cost model (vectors on file, their reads priced): see `plan2`.
     Auto,
+    /// Every cluster the support table leaves open is cut and run on the index path.
     Index,
+    /// Every cluster the support table leaves open is cut and its candidates decided from their full vectors.
     Flat,
+    /// Every query scans the visible set (every row without one); for experiments.
+    Scan,
 }
 
-/// Cost model of the planner, in microseconds on one thread. d is the fraction of the visible items of opened
-/// clusters that the cut and the sorted range leave undecided, a proxy for how deep candidates will go, known before
-/// any code is read. `Plan::default` holds constants for 1M BioCLIP (n = 768, AVX-512); `Plan::calibrate` times them
-/// on the index at hand.
+/// The planner's rule in memory, in rows: the index path on a cluster of S rows holding v visible rows (all S without a
+/// visible set) costs about A + g * d * S + B * c, c of its candidates after the cut (d * v of them), A the cluster's
+/// setup and cut; scoring its v rows from their vectors costs v rows of a scan. So a cluster is scored directly when
+/// v <= R0 + kappa * S (`r_rows`, `r_kappa`), and the whole query scans when the visible rows number at most the sum of
+/// that over the clusters holding one. Ratios of costs of the same kind (a pass over memory per row), so they do not
+/// move with the machine's speed the way each cost does. The index path's cost grows with S even where few rows are
+/// visible, and not through the candidate lists (built a word of the visible set at a time): most likely because
+/// candidates dense enough are run in place, on whole blocks of the cluster's range with their holes. So kappa does
+/// not vanish. Fitted on 1M BioCLIP-2 refit at 1,000, 4,000 and 16,129 rows a cluster (text queries at five
+/// thresholds, random visible sets of 1-50%): forced index path and forced scan cross at 322, 1,053 and 4,048 visible
+/// rows a cluster on one thread, 388, 1,293 and 5,000 on four, a line of 72 + 0.246 S and 78 + 0.305 S (within 6
+/// rows of each point). R0 = 64 and kappa = 0.24 sit just below both, toward the index path: 304 rows at 1,000 rows a
+/// cluster (the 300 of a rule without kappa). Without a visible set, a cluster is scored directly when it holds at
+/// most 84 rows (64 / 0.76), so the clusters of a full index take the index path and an index compacted to a small
+/// visible set is scanned (REPORT_BUILD, "The planner without timing").
+pub const R_ROWS: usize = 64;
+/// The rule's rows per row of a cluster (kappa above).
+pub const R_KAPPA: f64 = 0.24;
+/// The exact k-NN seed in the same rows, saved when a filtered k-NN scans first: measured 1.18-1.45 ms against 0.19 us
+/// a row on 1M BioCLIP-2 (k 10 and 100), 6,200-7,600 rows; the lower end. The seed is the anchor search over the
+/// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at level 3, and 2k + 8 exact products:
+/// it grows with the number of anchors and with k, not with the clusters' rows. So at large k (beyond the 100
+/// measured) this constant underestimates it, which leans toward the index path (the seed is paid, not saved).
+pub const R_SEED: usize = 6000;
+
+/// The planner's choices. In memory it needs no timed constant: the support table decides what it can, and the rule in
+/// rows (`r_rows`, `r_kappa`: `R_ROWS`) decides between a scan, direct scoring and the index path, with or without a
+/// visible set; on clusters of more than 84 rows and no visible set that is the index path. "In memory" means the
+/// reads are not priced (`disk::ReadPolicy::priced` unset): vectors mapped from a file that are not resident count as
+/// in memory too. With the full vectors on file and their reads priced
+/// (`disk::ReadPolicy::priced`), a cost model in microseconds decides, whose read costs (`io_us`, `io_gbps`) are timed
+/// once per machine and device (`disk_constants`) and whose compute costs are the fixed `COSTS`.
 #[derive(Clone, Copy, Debug)]
 pub struct Plan {
     pub mode: PlanMode,
-    pub full_us: f64,      // exact decision from a full vector, per candidate
-    pub item_us0: f64,     // index path per candidate: item_us0 + item_us1 * d
-    pub item_us1: f64,
-    pub cl_us0: f64,       // index path per cluster (setup and tables): cl_us0 + cl_us1 * d
-    pub cl_us1: f64,
-    pub grp_us: f64,       // index path per group (exact basis product, rotated weights)
-    pub scan_us: f64,      // scan of a visible set's rows, scattered over the index, per visible item
-    pub cscan_us: f64,     // scan of rows in order (every row of an index, or of one compacted to a visible set), per row
-    pub anc_us: f64,       // the search for the query's nearest anchor, per query
-    pub dir_us: f64,       // a cluster scored directly from its visible rows, per cluster (beyond its rows at scan cost)
-    pub item_us2: f64,     // index path per candidate, times the answer's share p of the visible set (candidates go deeper as p grows)
-    pub direct: bool,      // a cluster may be scored from its visible rows' vectors without a cut
-    pub cut_us: f64,       // cluster cut and sorted range, per cluster holding a visible item
-    pub seed_us: f64,      // the k-NN seed (query setup, probing, first full vectors), per query
+    pub r_rows: usize,     // R0: a cluster of S rows is scored directly when it holds at most r_rows + r_kappa * S visible rows (every row without a visible set); the query scans when all of them are
+    pub r_kappa: f64,      // kappa: the rule's rows per row of the cluster
+    pub r_seed: usize,     // exact k-NN: the seed, in rows, that a scan first also saves
     pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub tol: f64,          // the tolerance d: an item whose lower bound reaches t - d is taken in (0: exact)
-    pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
-    pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
-    pub scan_cal: bool,    // Plan::calibrate also times the scan band (about 9 s at 1M; off: the band is left as given)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
-    pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
-    pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
+    // Full vectors on file with their reads priced: one read with QD reads in flight, per read (us), and the bandwidth
+    // of large reads (GB/s). `Plan::default`'s are placeholders from another machine: where reads are priced, take
+    // this machine's from `disk_constants` (or a plan file); `open_at` does not, since pricing is set after the open.
+    pub io_us: f64,
+    pub io_gbps: f64,
+    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: every level); None: the
+    /// index's own choice (`Meta2::ddec`, from `BuildOptions::ddec`). A per-query choice: plans with different values
+    /// run on one opened index. `Plan::check` refuses a level the index does not have.
+    pub ddec: Option<u32>,
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3 }
+        Plan { mode: PlanMode::Auto, r_rows: R_ROWS, r_kappa: R_KAPPA, r_seed: R_SEED, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, pscan: false, io_us: 5.7, io_gbps: 3.3, ddec: None }
     }
 }
-impl Plan {
-    /// The timed constants as `name=value` lines.
-    pub fn to_kv(&self) -> String {
-        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncscan_us={}\nanc_us={}\ndir_us={}\nitem_us2={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\nio_us={}\nio_gbps={}\n",
-                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cscan_us, self.anc_us, self.dir_us, self.item_us2, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi, self.io_us, self.io_gbps)
+
+/// The compute costs of the cost model for vectors on file, and of `knn2_fast`'s choice per cluster, in microseconds on
+/// one thread: fixed, as timed on 1M BioCLIP-2 (n = 768, AVX-512) by the calibration this planner replaced. With the
+/// vectors on file the reads (`Plan::io_us`, `io_gbps`, timed per machine) dominate them.
+#[derive(Clone, Copy, Debug)]
+pub struct Costs {
+    pub full_us: f64,  // exact decision from a full vector, per candidate
+    pub item_us0: f64, // index path per candidate: item_us0 + item_us1 * d
+    pub item_us1: f64,
+    pub cl_us0: f64,   // index path per cluster (setup and tables): cl_us0 + cl_us1 * d
+    pub cl_us1: f64,
+    pub grp_us: f64,   // index path per group (exact basis product, rotated weights)
+    pub scan_us: f64,  // scan of a visible set's rows, scattered over the index, per visible item
+    pub cscan_us: f64, // scan of rows in order (every row of an index), per row
+    pub anc_us: f64,   // the search for the query's nearest anchor, per query
+    pub dir_us: f64,   // a cluster scored directly from its visible rows, per cluster (beyond its rows at scan cost)
+    pub cut_us: f64,   // cluster cut and sorted range, per cluster holding a visible item
+}
+pub const COSTS: Costs = Costs { full_us: 0.19, item_us0: 0.0133, item_us1: 0.053, cl_us0: 2.67, cl_us1: 13.3, grp_us: 93.0, scan_us: 0.19, cscan_us: 0.18, anc_us: 430.0, dir_us: 1.08, cut_us: 2.45 };
+impl Costs {
+    /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included). d is the fraction
+    /// of the visible items of opened clusters that the cut and the sorted range leave undecided.
+    pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
+        ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
     }
-    /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
-    pub fn from_kv(base: Plan, text: &str) -> Plan {
+    /// Modelled cost of a scan, per row: of a visible set's rows (`filtered`), or of every row in order.
+    pub fn scan_cost_us(&self, filtered: bool) -> f64 {
+        if filtered { self.scan_us } else { self.cscan_us }
+    }
+}
+
+impl Plan {
+    /// This plan's choices against the index `ix`: an error when `ddec` names a deterministic level beyond `ix`'s.
+    pub fn check(&self, ix: &Index2) -> Result<(), String> {
+        match self.ddec {
+            Some(d) if d != u32::MAX && d >> ix.meta.ndl() != 0 => {
+                Err(format!("ddec {d:#b} names a deterministic level beyond this index's {} (levels 0 to {})", ix.meta.ndl(), ix.meta.ndl() - 1))
+            }
+            _ => Ok(()),
+        }
+    }
+    /// The planner's constants as `name=value` lines: the rule's rows in memory and the disk constants.
+    pub fn to_kv(&self) -> String {
+        format!("r_rows={}\nr_kappa={}\nr_seed={}\nio_us={}\nio_gbps={}\n", self.r_rows, self.r_kappa, self.r_seed, self.io_us, self.io_gbps)
+    }
+    /// `base` with the constants of `name=value` lines (as `to_kv` writes them); an error names a line that is not one,
+    /// or a value out of its range: rows are whole numbers, `r_kappa` a number of at least 0, the disk constants
+    /// numbers above 0.
+    pub fn from_kv(base: Plan, text: &str) -> Result<Plan, String> {
         let mut p = base;
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
-            let (k, v) = line.split_once('=').unwrap_or_else(|| panic!("plan line {line:?} is not name=value"));
-            let v: f64 = v.trim().parse().unwrap_or_else(|_| panic!("plan value {v:?} is not a number"));
-            *match k.trim() {
-                "full_us" => &mut p.full_us,
-                "item_us0" => &mut p.item_us0,
-                "item_us1" => &mut p.item_us1,
-                "cl_us0" => &mut p.cl_us0,
-                "cl_us1" => &mut p.cl_us1,
-                "grp_us" => &mut p.grp_us,
-                "scan_us" => &mut p.scan_us,
-                "cscan_us" => &mut p.cscan_us,
-                "anc_us" => &mut p.anc_us,
-                "item_us2" => &mut p.item_us2,
-                "dir_us" => &mut p.dir_us,
-                "cut_us" => &mut p.cut_us,
-                "seed_us" => &mut p.seed_us,
-                "scan_lo" => &mut p.scan_lo,
-                "scan_hi" => &mut p.scan_hi,
-                "io_us" => &mut p.io_us,
-                "io_gbps" => &mut p.io_gbps,
-                k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
-            } = v;
+            let (k, v) = line.split_once('=').ok_or_else(|| format!("plan line {line:?} is not name=value"))?;
+            let (k, v) = (k.trim(), v.trim());
+            let rows = || v.parse::<usize>().map_err(|_| format!("{k}={v}: rows are a whole number of at least 0"));
+            let num = |pos: bool| match v.parse::<f64>() {
+                Ok(x) if x.is_finite() && (x > 0.0 || (!pos && x == 0.0)) => Ok(x),
+                _ => Err(format!("{k}={v}: {} a number {}", if k == "r_kappa" { "kappa is" } else { "the disk constant is" }, if pos { "above 0" } else { "of at least 0" })),
+            };
+            match k {
+                "r_rows" => p.r_rows = rows()?,
+                "r_seed" => p.r_seed = rows()?,
+                "r_kappa" => p.r_kappa = num(false)?,
+                "io_us" => p.io_us = num(true)?,
+                "io_gbps" => p.io_gbps = num(true)?,
+                k => return Err(format!("{k}={v} is not a plan constant (r_rows, r_kappa, r_seed, io_us, io_gbps); the planner no longer takes timed compute costs")),
+            }
         }
-        p
+        Ok(p)
+    }
+    /// Whether `name=value` lines (as `to_kv` writes them) give both disk constants, so that none need be timed.
+    pub fn kv_gives_disk(text: &str) -> bool {
+        let has = |name: &str| text.lines().any(|l| l.split_once('=').is_some_and(|(k, _)| k.trim() == name));
+        has("io_us") && has("io_gbps")
+    }
+
+    /// The most visible rows a cluster of `rows` rows may hold and be scored directly (R0 + kappa * S, rounded down).
+    pub fn direct_max(&self, rows: usize) -> usize {
+        self.r_rows.saturating_add((self.r_kappa * rows as f64) as usize)
     }
 
     /// Full vectors on disk: rows this many bytes apart or closer are read with one read, the gap included, because
@@ -1904,163 +2012,14 @@ impl Plan {
         (ncand as f64 * self.io_us).min(self.io_us + (span * rb) as f64 / (self.io_gbps * 1e3))
     }
 
-    /// Modelled cost of a scan, per row: of a visible set's rows (`filtered`), or of every row in order.
-    pub fn scan_cost_us(&self, filtered: bool) -> f64 {
-        if filtered { self.scan_us } else { self.cscan_us }
-    }
-
-    /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
-    pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
-        ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
-    }
-    /// index_us for an answer whose share of the visible set is about p.
-    pub fn index_us_p(&self, ncand: usize, d: f64, p: f64) -> f64 {
-        self.index_us(ncand, d) + ncand as f64 * self.item_us2 * p
-    }
-
-    /// The constants re-timed on this index and machine, on one thread, from corpus pseudo-queries (`nq` stored rows
-    /// spread over the index) at their 10th best score, unfiltered and over a fixed random eighth of the rows: the
-    /// visible scan, the cut, full vectors after the cut, the k-NN seed, and one factor scaling every index-path
-    /// constant (least squares of measured against modelled time). Data only: no example queries.
-    /// `cpu`: the CPU to pin the timing thread to.
-    pub fn calibrate(ix: &Index2, base: Plan, nq: usize, cpu: Option<usize>) -> Plan {
-        assert!(nq >= 1, "calibration needs at least one pseudo-query; pass --calib 1 or more, or --plan-file");
-        assert!(!ix.compacted(), "calibrate the plan on the index a session was compacted from, not on the compacted index");
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-        pool.install(|| {
-            if let Some(c) = cpu {
-                crate::util::pin(c);
-            }
-            let ents: Vec<u32> = (0..ix.nrows).filter(|&r| (r as u64).wrapping_mul(0x9E3779B97F4A7C15) >> 60 < 2).map(|r| ix.row_ent[r]).collect();
-            let mut ents = ents;
-            ents.sort_unstable();
-            let tenth = Vis2::new(ix, &RoaringBitmap::from_sorted_iter(ents).unwrap());
-            let (mut scan_t, mut scan_n, mut cut_t, mut cut_n, mut full_t, mut full_n, mut seed_t) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            let (mut cscan_t, mut cscan_n, mut anc_t) = (0.0, 0.0, 0.0);
-            let (mut dir_t, mut dir_n, mut dir_rows) = (0.0, 0.0, 0.0);
-            // the index path's factor, fitted without a visible set at the 10th best score; then item_us2 on what that
-            // leaves at a 30% answer as well, with and without a visible set: (time, modelled time, candidates x p)
-            let (mut tm_idx, mut mm_idx) = (0.0, 0.0);
-            let mut pts: Vec<(f64, f64, f64)> = Vec::new();
-            for i in 0..nq {
-                let row = (2 * i + 1) * ix.nrows / (2 * nq);
-                let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
-                let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-                let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
-                let pr = prep2(ix, &q);
-                let tm = Timer::new();
-                std::hint::black_box(pr.anc(ix));
-                anc_t += tm.ms() * 1e3;
-                let tm = Timer::new();
-                let mut st = Stats::new(ix.meta.nl());
-                std::hint::black_box(seed2(ix, &prep2(ix, &q), 10, None, &mut st));
-                seed_t += tm.ms() * 1e3;
-                for vis in [None, Some(&tenth)] {
-                    let nvis = vis.map_or(ix.nrows, |v: &Vis2| v.cl_cnt.iter().map(|&x| x as usize).sum());
-                    let tm = Timer::new();
-                    let top = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, 10, vis);
-                    if vis.is_some() {
-                        scan_t += tm.ms() * 1e3;
-                        scan_n += nvis as f64;
-                    } else {
-                        cscan_t += tm.ms() * 1e3;
-                        cscan_n += nvis as f64;
-                    }
-                    let t10 = top.last().map_or(f64::NEG_INFINITY, |x| x.0);
-                    if let Some(v) = vis {
-                        // every live cluster scored directly
-                        let pre: Vec<Pre> = (0..ix.k()).map(|ci| if v.cl_cnt[ci] > 0 { Pre::Direct } else { Pre::Skip }).collect();
-                        let o = Opts2 { vis, verify: false, want_iv: false, plan: base };
-                        let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t10, &o, &pre, &vec![false; ix.k()], 0).rows.len());
-                        dir_t += tm.ms() * 1e3;
-                        dir_n += v.cl_cnt.iter().filter(|&&x| x > 0).count() as f64;
-                        dir_rows += nvis as f64;
-                    }
-                    let t30 = {
-                        let rows: Vec<u32> = vis.map_or_else(|| (0..ix.nrows as u32).collect(), |v| v.rows.clone());
-                        let mut sc: Vec<f32> = rows.iter().map(|&r| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r as usize)) }).collect();
-                        let m = sc.len() * 3 / 10;
-                        *sc.select_nth_unstable_by(m, |a, b| b.partial_cmp(a).unwrap()).1 as f64
-                    };
-                    for (t, mode) in [(t10, PlanMode::Flat), (t10, PlanMode::Index), (t30, PlanMode::Index)] {
-                        let o = Opts2 { vis, verify: false, want_iv: false, plan: Plan { mode, ..base } };
-                        let tm = Timer::new();
-                        let Planned::Run { pre, use_idx, cut_cyc } = plan2(ix, &pr, t, &o) else { unreachable!() };
-                        let tc = tm.ms() * 1e3;
-                        let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t, &o, &pre, &use_idx, cut_cyc).rows.len());
-                        let tr = tm.ms() * 1e3;
-                        let (mut ncand, mut nv) = (0usize, 0usize);
-                        let mut groups = vec![false; ix.groups.len()];
-                        for (ci, p) in pre.iter().enumerate() {
-                            if let Pre::Open { ncand: c, .. } = p {
-                                ncand += c;
-                                nv += vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
-                                if *c > 0 {
-                                    groups[ix.cl[ci].g] = true;
-                                }
-                            }
-                        }
-                        let d = ncand as f64 / nv.max(1) as f64;
-                        let p = answer_share(ix, &pr, t, vis, SHARE_SAMPLE);
-                        match mode {
-                            PlanMode::Flat => {
-                                cut_t += tc;
-                                cut_n += vis.map_or(ix.k(), |v| v.cl_cnt.iter().filter(|&&x| x > 0).count()) as f64;
-                                full_t += tr;
-                                full_n += ncand as f64;
-                            }
-                            _ => {
-                                let mut m = groups.iter().filter(|&&g| g).count() as f64 * base.grp_us;
-                                for p in &pre {
-                                    if let Pre::Open { ncand: c, .. } = p {
-                                        if *c > 0 {
-                                            m += base.index_us(*c, d);
-                                        }
-                                    }
-                                }
-                                if vis.is_none() && t == t10 {
-                                    tm_idx += tr * m;
-                                    mm_idx += m * m;
-                                }
-                                pts.push((tr, m, ncand as f64 * p));
-                            }
-                        }
-                    }
-                }
-            }
-            let s = tm_idx / mm_idx.max(1e-30);
-            let (a, b) = pts.iter().fold((0.0, 0.0), |(a, b), &(tr, m, x)| (a + (tr - s * m) * x, b + x * x));
-            let u2 = (a / b.max(1e-30)).max(0.0);
-            let (scan_lo, scan_hi) = if base.scan_cal { Plan::scan_band(ix, base, nq.min(3)) } else { (base.scan_lo, base.scan_hi) };
-            Plan {
-                scan_lo,
-                scan_hi,
-                scan_us: scan_t / scan_n,
-                cscan_us: cscan_t / cscan_n,
-                anc_us: anc_t / nq as f64,
-                item_us2: u2,
-                dir_us: ((dir_t - dir_rows * scan_t / scan_n) / dir_n.max(1.0)).max(0.0),
-                cut_us: cut_t / cut_n,
-                full_us: full_t / full_n.max(1.0),
-                seed_us: seed_t / nq as f64,
-                item_us0: base.item_us0 * s,
-                item_us1: base.item_us1 * s,
-                cl_us0: base.cl_us0 * s,
-                cl_us1: base.cl_us1 * s,
-                grp_us: base.grp_us * s,
-                ..base
-            }
-        })
-    }
-
-    /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
-    /// from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest of three
-    /// timings. The file's pages are dropped from the cache before each and after. Unchanged in memory or without
-    /// `--full-read uring`.
-    pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
-        let Some(rows) = ix.own_rows() else { return base };
+    /// The disk constants (io_us, io_gbps) timed through the reader on `ix`'s full-vector file, from an empty cache:
+    /// `io_us` from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest
+    /// of three timings. The file's pages are dropped from the cache before each and after (`disk::Rows::evict`), so
+    /// timing leaves the vectors file out of the page cache: the first queries after it read their vectors from the
+    /// device. None in memory, when the rows are not read through io_uring (`disk::ReadPolicy::uring`), or when no
+    /// io_uring can be set up here.
+    pub fn calibrate_disk(ix: &Index2) -> Option<(f64, f64)> {
+        let rows = ix.own_rows()?;
         let n = ix.n();
         let time1 = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
             rows.evict();
@@ -2078,59 +2037,231 @@ impl Plan {
         };
         const NR: usize = 4096;
         let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
-        let Some((t_rand, _)) = time(spread, 0) else { return base };
+        let (t_rand, _) = time(spread, 0)?;
         let nseq = ((32usize << 20) / (2 * n)).min(ix.nrows);
-        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2).unwrap();
+        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2)?;
         rows.evict();
-        Plan { io_us: t_rand / NR as f64, io_gbps: bytes as f64 / t_seq / 1e3, ..base }
+        Some((t_rand / NR as f64, bytes as f64 / t_seq / 1e3))
     }
 
-    /// The answer shares at which a scan of every row beats the index path, timed on `nq` stored rows as queries at
-    /// thresholds of 5 to 99% answers: (lo, hi) spans the shares where the index was slower, extended halfway to the
-    /// neighbouring shares; (2, 2) when it never was.
-    pub fn scan_band(ix: &Index2, base: Plan, nq: usize) -> (f64, f64) {
-        const F: [f64; 10] = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 0.99];
-        let plan = Plan { scan_lo: 2.0, scan_hi: 2.0, ..base };
-        let o = Opts2 { vis: None, verify: false, want_iv: false, plan };
-        let mut slower = [0usize; F.len()];
-        for i in 0..nq.max(1) {
-            let row = (2 * i + 1) * ix.nrows / (2 * nq.max(1)) + 1;
-            let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
-            let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-            let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
-            let pr = prep2(ix, &q);
-            let mut sc: Vec<f32> = (0..ix.nrows).map(|r| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r)) }).collect();
-            sc.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
-            for (k, &f) in F.iter().enumerate() {
-                let t = sc[((ix.nrows as f64 * f) as usize).min(ix.nrows - 1)] as f64;
-                let (mut ti, mut ts) = (f64::MAX, f64::MAX);
-                for _ in 0..2 {
-                    let tm = Timer::new();
-                    std::hint::black_box(threshold2(ix, &pr, t, &o).rows.len());
-                    ti = ti.min(tm.ms());
-                    let tm = Timer::new();
-                    std::hint::black_box(scan_visible(ix, &pr, t, None, false, false).rows.len());
-                    ts = ts.min(tm.ms());
-                }
-                if ti > ts {
-                    slower[k] += 1;
-                }
+    /// Exact k-NN on `ix`, before anything is read: a scan of the visible set (every row without one) when it holds at
+    /// most the rule's rows (`direct_max`) summed over the clusters holding a visible row, plus the seed's `r_seed`
+    /// rows (always under `Scan`, never under `Index` or `Flat`).
+    pub fn scan_first(&self, ix: &Index2, vis: Option<&Vis2>) -> bool {
+        match self.mode {
+            PlanMode::Scan => true,
+            PlanMode::Auto => {
+                let (nvis, lim) = rule_rows(ix, vis, *self);
+                nvis <= lim.saturating_add(self.r_seed)
             }
-        }
-        let sl: Vec<usize> = (0..F.len()).filter(|&k| 2 * slower[k] > nq.max(1)).collect();
-        match (sl.first(), sl.last()) {
-            (Some(&a), Some(&b)) => (if a == 0 { 0.0 } else { (F[a - 1] + F[a]) / 2.0 }, if b + 1 == F.len() { 1.0 } else { (F[b] + F[b + 1]) / 2.0 }),
-            _ => (2.0, 2.0),
+            _ => false,
         }
     }
+}
 
-    /// Before anything is read: a scan of the visible set costs no more than cutting every cluster that holds a
-    /// visible item, plus `fixed_us` of other index-path work that the scan avoids.
-    pub fn scan_first(&self, vis: &Vis2, fixed_us: f64) -> bool {
-        let nvis = vis.rows.len();
-        let nvc = vis.cl_cnt.iter().filter(|&&x| x > 0).count();
-        matches!(self.mode, PlanMode::Auto) && nvis as f64 * self.scan_us <= nvc as f64 * self.cut_us + fixed_us
+/// The rows of the rule in memory on `ix`: the visible rows (every row without a visible set), and the most of them
+/// that the clusters holding one may hold and each be scored directly (`Plan::direct_max`, summed).
+pub fn rule_rows(ix: &Index2, vis: Option<&Vis2>, pl: Plan) -> (usize, usize) {
+    let (mut nvis, mut lim) = (0usize, 0usize);
+    for (ci, c) in ix.cl.iter().enumerate() {
+        let s = c.r1 - c.r0;
+        let v = vis.map_or(s, |v| v.cl_cnt[ci] as usize);
+        if v > 0 {
+            nvis += v;
+            lim = lim.saturating_add(pl.direct_max(s));
+        }
     }
+    (nvis, lim)
+}
+
+/// The disk-constant cache's file in an index directory.
+pub const DISK_CACHE: &str = "disk-constants.txt";
+/// The version of the disk-constant cache's key: changed when the timing or the key changes, so older caches are timed
+/// again.
+pub const DISK_KEY_VERSION: u32 = 2;
+
+/// The key the disk constants are cached under: the key's version; the machine (/etc/machine-id, else the host name);
+/// the CPU (its model name, or on machines whose /proc/cpuinfo has none, such as aarch64, its implementer, part,
+/// variant and revision); the device of the file `file` lies on (major:minor, its name, and the model and serial of
+/// the device, or of the whole disk for a partition, where /sys gives them); the file system's type; and the read
+/// policy the timing reads with (`policy`: reads in flight, the O_DIRECT and RWF_DONTCACHE thresholds). One line.
+pub fn disk_key(file: &std::fs::File, policy: &super::disk::ReadPolicy) -> Result<String, String> {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::io::AsRawFd;
+    use std::sync::atomic::Ordering::Relaxed;
+    let clean = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let read = |p: &str| std::fs::read_to_string(p).ok().map(|s| clean(&s)).filter(|s| !s.is_empty());
+    let machine = read("/etc/machine-id").map(|m| format!("id {m}")).or_else(|| read("/proc/sys/kernel/hostname").map(|h| format!("host {h}"))).unwrap_or_else(|| "unknown".into());
+    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let field = |name: &str| info.lines().find(|l| l.split(':').next().is_some_and(|k| k.trim() == name)).and_then(|l| l.split_once(':')).map(|x| clean(x.1)).filter(|v| !v.is_empty());
+    let cpu = field("model name").or_else(|| {
+        let parts: Vec<String> = ["CPU implementer", "CPU architecture", "CPU variant", "CPU part", "CPU revision"].iter().filter_map(|f| field(f).map(|v| format!("{} {v}", f.trim_start_matches("CPU ")))).collect();
+        (!parts.is_empty()).then(|| parts.join(" "))
+    }).or_else(|| field("Hardware")).or_else(|| field("Processor")).unwrap_or_else(|| "unknown".into());
+    let dev = file.metadata().map_err(|e| format!("the vectors file: {e}"))?.dev();
+    let (maj, min) = (libc::major(dev), libc::minor(dev));
+    let sys = format!("/sys/dev/block/{maj}:{min}");
+    let name = std::fs::read_to_string(format!("{sys}/uevent")).ok().and_then(|s| s.lines().find_map(|l| l.strip_prefix("DEVNAME=").map(|x| x.to_string())));
+    // a partition's model and serial are its disk's
+    let disk = if std::path::Path::new(&format!("{sys}/partition")).exists() {
+        std::fs::canonicalize(&sys).ok().and_then(|p| p.parent().map(|q| q.to_string_lossy().into_owned())).unwrap_or(sys.clone())
+    } else {
+        sys.clone()
+    };
+    let model = read(&format!("{disk}/device/model"));
+    let serial = read(&format!("{disk}/device/serial")).or_else(|| read(&format!("{disk}/serial")));
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    let fs = if unsafe { libc::fstatfs(file.as_raw_fd(), &mut st) } == 0 { format!("{:#x}", st.f_type as u64) } else { "unknown".into() };
+    let lim = |x: usize| if x == usize::MAX { "none".to_string() } else { x.to_string() };
+    Ok(format!(
+        "v{DISK_KEY_VERSION}; machine {machine}; cpu {cpu}; device {maj}:{min}{}{}{}; fs {fs}; read qd {} direct {} dontcache {}",
+        name.map_or(String::new(), |n| format!(" ({n})")),
+        model.map_or(String::new(), |m| format!(" model {m}")),
+        serial.map_or(String::new(), |m| format!(" serial {m}")),
+        policy.qd.load(Relaxed),
+        lim(policy.direct_min.load(Relaxed)),
+        lim(policy.dontcache_min.load(Relaxed)),
+    ))
+}
+
+/// The disk constants cached at `path` under `key`, when it holds them.
+fn read_disk_cache(path: &std::path::Path, key: &str) -> Result<(f64, f64), String> {
+    let Ok(s) = std::fs::read_to_string(path) else { return Err(format!("no cache at {}", path.display())) };
+    let get = |name: &str| s.lines().find_map(|l| l.strip_prefix(name).and_then(|v| v.strip_prefix('='))).map(|v| v.trim().to_string());
+    let parsed = (|| {
+        let (us, gb) = (get("io_us")?.parse::<f64>().ok()?, get("io_gbps")?.parse::<f64>().ok()?);
+        (us.is_finite() && us > 0.0 && gb.is_finite() && gb > 0.0).then_some(())?;
+        Some((get("key")?, us, gb))
+    })();
+    match parsed {
+        Some((k, us, gb)) if k == key => Ok((us, gb)),
+        Some((k, ..)) => Err(format!("{} was for another machine, device or read policy ({k})", path.display())),
+        None => Err(format!("{} is not a cache of disk constants", path.display())),
+    }
+}
+
+/// An exclusive lock (flock) on the file `path`, created if need be, held until the result is dropped; None when the
+/// file cannot be created or locked.
+fn lock_file(path: &std::path::Path) -> Option<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path).ok()?;
+    (unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0).then_some(f)
+}
+
+/// Writes `text` to `path` through a temporary file of a name of its own (the process id and the time in nanoseconds)
+/// in the same directory, synced, then renamed over `path`: a reader sees the old file or the new one, whole.
+fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let name = path.file_name().map_or("cache".into(), |n| n.to_string_lossy().into_owned());
+    let tmp = path.with_file_name(format!(".{name}.{}.{ns}.tmp", std::process::id()));
+    let r = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r
+}
+
+/// The disk constants (io_us, io_gbps) cached at `path` under `key`, else `time()`'s, saved there under `key`; and
+/// how they were found. A cache that is missing, unreadable or under another key is timed again, under an exclusive
+/// lock on `path` with the extension `lock`, so that two opens do not time at once (each would skew the other's
+/// timing): one that waited for the lock reads what the other saved. The cache is written whole (`write_atomic`). One
+/// that cannot be locked or written is reported and the timed constants are used all the same. None when they could
+/// be neither read nor timed.
+pub fn cached_disk_constants(path: &std::path::Path, key: &str, time: impl FnOnce() -> Option<(f64, f64)>) -> (Option<(f64, f64)>, String) {
+    let why = match read_disk_cache(path, key) {
+        Ok(c) => return (Some(c), format!("read from {} (key {key})", path.display())),
+        Err(e) => e,
+    };
+    let lock = lock_file(&path.with_extension("lock"));
+    // another open may have timed them while this one waited for the lock
+    if lock.is_some() {
+        if let Ok(c) = read_disk_cache(path, key) {
+            return (Some(c), format!("read from {} (key {key}), saved by another open while this one waited", path.display()));
+        }
+    }
+    let why = if why.starts_with("no cache") { format!("timed: {why}") } else { format!("timed again: {why}") };
+    let why = if lock.is_none() { format!("{why} (not locked)") } else { why };
+    let Some((us, gb)) = time() else { return (None, format!("{why}; but they cannot be timed here (no io_uring reader)")) };
+    let why = match write_atomic(path, &format!("key={key}\nio_us={us}\nio_gbps={gb}\n")) {
+        Ok(()) => format!("{why}; saved under key {key}"),
+        Err(e) => format!("{why}; not saved ({e})"),
+    };
+    drop(lock);
+    (Some((us, gb)), why)
+}
+
+/// FNV-1a, 64 bits: a hash that is the same in every build, for a cache file's name.
+fn fnv1a64(b: &[u8]) -> u64 {
+    b.iter().fold(0xcbf29ce484222325u64, |h, &x| (h ^ x as u64).wrapping_mul(0x100000001b3))
+}
+
+/// The per-user cache directory for disk constants: $XDG_CACHE_HOME/vexact, else ~/.cache/vexact.
+pub fn user_cache_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()).map(std::path::PathBuf::from).or_else(|| std::env::var_os("HOME").filter(|v| !v.is_empty()).map(|h| std::path::PathBuf::from(h).join(".cache")))?;
+    Some(base.join("vexact"))
+}
+
+/// Where the disk constants under `key` are cached: `DISK_CACHE` in the index directory `dir`, unless it does not hold
+/// them under `key` and `dir` cannot be written (a read-only index); then the per-user directory `user` (when given),
+/// in a file named by the key.
+pub fn disk_cache_path(dir: &str, key: &str, user: Option<&std::path::Path>) -> std::path::PathBuf {
+    let main = std::path::Path::new(dir).join(DISK_CACHE);
+    let writable = || std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(main.with_extension("lock")).is_ok();
+    match user {
+        Some(u) if read_disk_cache(&main, key).is_err() && !writable() => {
+            let _ = std::fs::create_dir_all(u);
+            u.join(format!("disk-constants-{:016x}.txt", fnv1a64(key.as_bytes())))
+        }
+        _ => main,
+    }
+}
+
+/// Restores an atomic flag when dropped (also on a panic).
+struct RestoreFlag<'a>(&'a std::sync::atomic::AtomicBool, bool);
+impl Drop for RestoreFlag<'_> {
+    fn drop(&mut self) {
+        self.0.store(self.1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// `base` with the disk constants of this machine and the device of `ix`'s vectors file: read from `DISK_CACHE` in
+/// `dir` (the index directory), or timed (`Plan::calibrate_disk`, a few seconds, reading through io_uring whatever the
+/// rows' policy, and leaving the vectors file out of the page cache) and saved there when it is missing or its key
+/// differs (`disk_key`). Where `dir` cannot be written (a read-only index), the per-user cache (`user_cache_dir`) is
+/// used instead, under a file named by the key. `base` unchanged when the vectors are not on file or cannot be timed;
+/// never an error. Logged.
+///
+/// A library user who sets `disk::ReadPolicy::priced` calls this (or sets `Plan::io_us` and `io_gbps`): the plan's
+/// own are `Plan::default`'s placeholders.
+pub fn disk_constants(ix: &Index2, base: Plan, dir: &str, log: &mut dyn FnMut(String)) -> Plan {
+    disk_constants_in(ix, base, dir, user_cache_dir().as_deref(), log)
+}
+
+/// `disk_constants` with the per-user cache directory `user` (None: none).
+pub fn disk_constants_in(ix: &Index2, base: Plan, dir: &str, user: Option<&std::path::Path>, log: &mut dyn FnMut(String)) -> Plan {
+    let Some(super::disk::Rows::Map { file, policy, .. }) = ix.own_rows() else { return base };
+    let key = match disk_key(file, policy) {
+        Ok(k) => k,
+        Err(e) => {
+            log(format!("[plan] disk constants not timed ({e}); io_us={} io_gbps={} as given", base.io_us, base.io_gbps));
+            return base;
+        }
+    };
+    let t = Timer::new();
+    let path = disk_cache_path(dir, &key, user);
+    let (got, why) = cached_disk_constants(&path, &key, || {
+        let _restore = RestoreFlag(&policy.uring, policy.uring.swap(true, std::sync::atomic::Ordering::Relaxed));
+        Plan::calibrate_disk(ix)
+    });
+    let p = got.map_or(base, |(io_us, io_gbps)| Plan { io_us, io_gbps, ..base });
+    log(format!("[plan] disk constants io_us={:.3} io_gbps={:.3} (rows up to {} bytes apart read together): {why}, in {:.1}s", p.io_us, p.io_gbps, p.io_gap(), t.s()));
+    p
 }
 
 pub struct Opts2<'a> {
@@ -2190,23 +2321,27 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
             rd.recycle(b);
         };
         (0..nch).into_par_iter().fold(
-            || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), 0).unwrap()),
+            // no reader where io_uring cannot be set up: the rows are read through the mapping
+            || (ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, super::disk::Reader::<()>::new(fr, ix.n(), 0)),
             |(mut acc, mut rd), ch| {
                 let mut rows = Vec::new();
                 scan_rows(ix, vis, ch, &mut rows);
-                if fr.cached(&rows, ix.n()) {
-                    decide_full(ix, pr, t, &rows, want_exact, &mut acc);
-                } else {
-                    rd.push((), rows);
-                    while rd.full() {
-                        decide(&mut acc, &mut rd);
+                match rd.as_mut() {
+                    Some(r) if !fr.cached(&rows, ix.n()) => {
+                        r.push((), rows);
+                        while r.full() {
+                            decide(&mut acc, r);
+                        }
                     }
+                    _ => decide_full(ix, pr, t, &rows, want_exact, &mut acc),
                 }
                 (acc, rd)
             },
-        ).map(|(mut acc, mut rd)| {
-            while !rd.is_empty() {
-                decide(&mut acc, &mut rd);
+        ).map(|(mut acc, rd)| {
+            if let Some(mut rd) = rd {
+                while !rd.is_empty() {
+                    decide(&mut acc, &mut rd);
+                }
             }
             acc
         }).collect()
@@ -2370,65 +2505,147 @@ pub enum Planned {
     Run { pre: Vec<Pre>, use_idx: Vec<bool>, cut_cyc: u64 },
 }
 
+/// The visible rows of [d0, d1) as offsets in cluster `ci`, ascending (from the bit set a word at a time).
 fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) -> Vec<u32> {
     let c = &ix.cl[ci];
     match vis {
         None => ((d0 - c.r0) as u32..(d1 - c.r0) as u32).collect(),
-        Some(v) => (d0..d1).filter(|&r| v.has(r)).map(|r| (r - c.r0) as u32).collect(),
-    }
-}
-
-/// Rows sampled to estimate a threshold query's answer share.
-pub const SHARE_SAMPLE: usize = 256;
-
-/// The share of `ns` visible rows (every row when vis is None), evenly spaced, whose f32 score from the stored vector
-/// is at least t: an estimate of the answer's share of the visible set (planning only).
-pub fn answer_share(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ns: usize) -> f64 {
-    if !matches!(ix.full, Full2::Real { .. }) {
-        return 0.0;
-    }
-    let nvis = vis.map_or(ix.nrows, |v| v.rows.len());
-    let ns = ns.min(nvis);
-    if ns == 0 {
-        return 0.0;
-    }
-    let mut hit = 0usize;
-    for i in 0..ns {
-        let k = (2 * i + 1) * nvis / (2 * ns);
-        let row = vis.map_or(k, |v| v.rows[k] as usize);
-        if unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(row)) } as f64 >= t {
-            hit += 1;
+        Some(v) => {
+            let mut out = Vec::new();
+            v.each(d0, d1, |r| out.push((r - c.r0) as u32));
+            out
         }
     }
-    hit as f64 / ns as f64
 }
 
-/// The planner's choice for a threshold query. Under `Auto`, each cluster holding a visible row is decided by the
-/// support table where it can be (wholly out or wholly in); the rest are either scored directly from their visible rows'
-/// vectors, when a cut would not pay for itself, or cut to their sorted range and run on the index path or on full
-/// vectors; and the whole query scans the visible rows when the cost model says that is cheaper than all of it. Which
-/// path decides a row never changes the answer.
-pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
+/// A cluster decided by the support table alone, from the certified bounds of the query's anchor: wholly below t
+/// (skipped) or wholly above (taken in); None when neither, or under the norm sort, whose cut decides both. A cluster
+/// with no visible row is skipped.
+fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: bool) -> Option<Pre> {
+    if nvis == 0 {
+        return Some(Pre::Skip);
+    }
+    if nusort {
+        return None;
+    }
     let k = ix.k();
     let rr = ix.x2.sqrt();
+    let Anc { a, beta: b, rho } = pr.anc(ix);
+    let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
+    let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
+    if bh + rho * rr < t - 1e-9 {
+        return Some(Pre::Skip);
+    }
+    if bl - rho * rr >= t + 1e-9 {
+        return Some(Pre::In);
+    }
+    None
+}
+
+/// The cluster's cut and sorted range (under the norm sort, its groups set up first).
+fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
+    let c = &ix.cl[ci];
+    let qm = dot64(&pr.q64, ix.centres_f64(ci));
+    let (u0, u1, d0, d1) = if nusort {
+        let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
+        let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
+        if u0 == c.r1 {
+            return Pre::Skip;
+        }
+        if d0 == c.r1 && u0 == c.r0 {
+            return Pre::In;
+        }
+        (u0, u1, d0, d1)
+    } else {
+        sorted_range2(ix, ci, &cut_params2(ix, ci, pr, qm), t)
+    };
+    let ncand = match vis {
+        None => d1 - d0,
+        Some(v) => count_bits(&v.bits, d0, d1),
+    };
+    Pre::Open { qm, u0, u1, d0, d1, ncand }
+}
+
+/// The planner's choice for a threshold query. Which path decides a row never changes the answer.
+///
+/// Vectors in memory (reads not priced), under `Auto`, in rows (`Plan::r_rows` R0 and `r_kappa` kappa; `R_ROWS`), with
+/// or without a visible set (without one, a cluster's visible rows are all its rows): the query scans the visible rows
+/// when they number at most the sum of R0 + kappa * S over the clusters holding one (S a cluster's rows), a test made
+/// first, before the anchors and the support table, since it needs neither. Otherwise each cluster is decided by the
+/// support table where it can be (wholly out or wholly in); one it leaves open is scored directly from its visible
+/// rows when it holds at most R0 + kappa * S of them, else cut to its sorted range and run on the index path. So a
+/// cluster scored directly is one whose index path would cost more than its rows; on clusters of more than 84 rows
+/// (the default R0 / (1 - kappa)) without a visible set every open cluster takes the index path (measured: within noise of the best choice in every
+/// cell, and 1.6-6x faster than a scan; REPORT_BUILD), while an index compacted to a small visible set
+/// (`Index2::compact`) is scanned, as its visible set would be.
+///
+/// Vectors on file whose reads are priced (`disk::ReadPolicy::priced`), under `Auto`: the cost model (`plan2_priced`).
+/// `Index` and `Flat` cut every cluster the support table leaves open (the index path, or full vectors); `Scan` scans.
+pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
+    let pl = o.plan;
+    let auto = match pl.mode {
+        PlanMode::Scan => return Planned::Scan,
+        PlanMode::Auto => true,
+        PlanMode::Index | PlanMode::Flat => false,
+    };
     // reads are priced only where this index's own row ids address vectors on file whose policy prices them (not a
     // compacted copy in memory, nor a parent's rows reached through vrow)
+    if auto && ix.own_rows().is_some_and(|r| r.priced()) {
+        return plan2_priced(ix, pr, t, o);
+    }
+    let k = ix.k();
+    let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+    let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
+    // the whole query scans when every cluster holding a visible row could be scored directly (in sum), before the
+    // anchors are searched or the support table read
+    if auto {
+        let (nvis, lim) = rule_rows(ix, o.vis, pl);
+        if nvis <= lim {
+            return Planned::Scan;
+        }
+    }
+    let tc0 = tick();
+    let nusort = !ix.nukey.is_empty();
+    if nusort {
+        let mut gs: Vec<usize> = live.iter().map(|&ci| ix.cl[ci].g).collect();
+        gs.sort_unstable();
+        gs.dedup();
+        setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
+    }
+    pr.anc_among(ix, Some(&live));
+    let pre: Vec<Pre> = (0..k).into_par_iter().map(|ci| {
+        let nv = nvis_cl(ci);
+        let direct = auto && nv <= pl.direct_max(ix.cl[ci].r1 - ix.cl[ci].r0);
+        support_pre(ix, pr, t, nv, ci, nusort).unwrap_or_else(|| if direct { Pre::Direct } else { cut_pre(ix, pr, t, o.vis, ci, nusort) })
+    }).collect();
+    let cut_cyc = tick() - tc0;
+    let flat = matches!(pl.mode, PlanMode::Flat);
+    let use_idx: Vec<bool> = pre.iter().map(|p| matches!(p, Pre::Open { ncand, .. } if *ncand > 0) && !flat).collect();
+    Planned::Run { pre, use_idx, cut_cyc }
+}
+
+/// The planner with the full vectors on file and their reads priced: a cost model in microseconds, the reads at the
+/// timed `Plan::io_us` and `io_gbps`, the compute at the fixed `COSTS`. Each cluster holding a visible row is decided
+/// by the support table where it can be; the rest are either scored directly from their visible rows' vectors, when a
+/// cut would not pay for itself, or cut to their sorted range and run on the index path or on full vectors; and the
+/// whole query scans the visible rows when the model says that is cheaper than all of it.
+fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
+    let k = ix.k();
     let pl = o.plan;
-    let disk = ix.own_rows().is_some_and(|r| r.priced());
-    let auto = matches!(pl.mode, PlanMode::Auto);
+    let cm = COSTS;
     let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
     let nvis: usize = live.iter().map(|&ci| nvis_cl(ci)).sum();
-    // a row scored by a scan, or directly in its cluster: scattered under a visible set, in order without one; with
-    // the vectors on file, reading it too, in order
+    // a row scored by a scan, or directly in its cluster: scattered under a visible set, in order without one; and its
+    // read, in order
     let rb = 2 * ix.n();
-    let row_us = pl.scan_cost_us(o.vis.is_some()) + if disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
+    let row_us = cm.scan_cost_us(o.vis.is_some()) + rb as f64 / (pl.io_gbps * 1e3);
     let scan_cost = nvis as f64 * row_us;
     // a live cluster that the support table leaves open costs at least the cheaper of its cut and scoring its rows
-    let floor = |ci: usize| pl.cut_us.min(if pl.direct { nvis_cl(ci) as f64 * row_us + pl.dir_us } else { f64::INFINITY });
+    let floor = |ci: usize| cm.cut_us.min(nvis_cl(ci) as f64 * row_us + cm.dir_us);
     // before the anchors are read: when the scan costs no more than cutting every live cluster, or than the anchor
     // search with each live cluster at the cheaper of its cut and its rows (no cluster decided by the support table)
-    if auto && (scan_cost <= live.len() as f64 * pl.cut_us || scan_cost <= pl.anc_us + live.iter().map(|&ci| floor(ci)).sum::<f64>()) {
+    if scan_cost <= live.len() as f64 * cm.cut_us || scan_cost <= cm.anc_us + live.iter().map(|&ci| floor(ci)).sum::<f64>() {
         return Planned::Scan;
     }
     let tc0 = tick();
@@ -2439,65 +2656,18 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         gs.dedup();
         setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
     }
-    // the support table: a cluster wholly below t is skipped and one wholly above taken in, from the certified
-    // bounds alone (None: neither, or the norm sort, whose cut decides both)
-    let support = |ci: usize| -> Option<Pre> {
-        if nvis_cl(ci) == 0 {
-            return Some(Pre::Skip);
-        }
-        if nusort {
-            return None;
-        }
-        let Anc { a, beta: b, rho } = pr.anc(ix);
-        let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
-        let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
-        if bh + rho * rr < t - 1e-9 {
-            return Some(Pre::Skip);
-        }
-        if bl - rho * rr >= t + 1e-9 {
-            return Some(Pre::In);
-        }
-        None
-    };
-    // the cluster's cut and sorted range
-    let cut = |ci: usize| -> Pre {
-        let c = &ix.cl[ci];
-        if nusort {
-            let qm = dot64(&pr.q64, ix.centres_f64(ci));
-            let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
-            let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
-            if u0 == c.r1 {
-                return Pre::Skip;
-            }
-            if d0 == c.r1 && u0 == c.r0 {
-                return Pre::In;
-            }
-            let ncand = match o.vis {
-                None => d1 - d0,
-                Some(v) => count_bits(&v.bits, d0, d1),
-            };
-            return Pre::Open { qm, u0, u1, d0, d1, ncand };
-        }
-        let qm = dot64(&pr.q64, ix.centres_f64(ci));
-        let cu = cut_params2(ix, ci, pr, qm);
-        let (u0, u1, d0, d1) = sorted_range2(ix, ci, &cu, t);
-        let ncand = match o.vis {
-            None => d1 - d0,
-            Some(v) => count_bits(&v.bits, d0, d1),
-        };
-        Pre::Open { qm, u0, u1, d0, d1, ncand }
-    };
+    let cut = |ci: usize| cut_pre(ix, pr, t, o.vis, ci, nusort);
     pr.anc_among(ix, Some(&live));
-    let mut pre: Vec<Option<Pre>> = (0..k).map(|ci| support(ci)).collect();
+    let mut pre: Vec<Option<Pre>> = (0..k).map(|ci| support_pre(ix, pr, t, nvis_cl(ci), ci, nusort)).collect();
     let open: Vec<usize> = live.iter().copied().filter(|&ci| pre[ci].is_none()).collect();
-    if auto && scan_cost <= open.iter().map(|&ci| floor(ci)).sum::<f64>() {
+    if scan_cost <= open.iter().map(|&ci| floor(ci)).sum::<f64>() {
         return Planned::Scan;
     }
     // a sample of one open cluster in SAMPLE is cut first: the share d of their visible rows left as candidates
     // stands in for the rest
     const SAMPLE: usize = 8;
     let (mut nc_s, mut nv_s) = (0usize, 0usize);
-    let sampled = auto && open.len() >= 8 * SAMPLE;
+    let sampled = open.len() >= 8 * SAMPLE;
     if sampled {
         for &ci in open.iter().step_by(SAMPLE) {
             let p = cut(ci);
@@ -2508,33 +2678,21 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
             pre[ci] = Some(p);
         }
     }
-    // when most visible items are candidates (d), an answer share in the scan band (estimated from a sample) scans
-    let in_band = |d: f64| {
-        auto && pl.scan_lo <= 1.0 && d >= 0.25 && {
-            let p = answer_share(ix, pr, t, o.vis, SHARE_SAMPLE);
-            p >= pl.scan_lo && p <= pl.scan_hi
-        }
-    };
-    // the answer's share of the visible set, estimated from a sample: candidates go deeper as it grows
-    let p_ans = if auto && pl.item_us2 > 0.0 { answer_share(ix, pr, t, o.vis, SHARE_SAMPLE) } else { 0.0 };
-    let idx_us = |nc: usize, d: f64| pl.index_us_p(nc, d, p_ans);
+    let idx_us = |nc: usize, d: f64| cm.index_us(nc, d);
     // a candidate's vector read: scattered over the index under a visible set, like a scan's
-    let full_us = if o.vis.is_some() { pl.full_us.max(pl.scan_us) } else { pl.full_us };
-    // nc candidates' full vectors, lying in a span of `span` rows (their reads too, on file)
-    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + if disk { pl.disk_us(nc, span, rb) } else { 0.0 };
+    let full_us = if o.vis.is_some() { cm.full_us.max(cm.scan_us) } else { cm.full_us };
+    // nc candidates' full vectors, lying in a span of `span` rows, and their reads
+    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + pl.disk_us(nc, span, rb);
     // a cluster's candidates at share d lie in about d of its rows
     let span_d = |ci: usize, d: f64| (d * (ix.cl[ci].r1 - ix.cl[ci].r0) as f64).ceil() as usize;
     // a cluster scored directly: when its rows cost no more than its cut and the candidates the cut would leave
     let direct = |ci: usize, d: f64| {
         let nv = nvis_cl(ci) as f64;
         let nc = d * nv;
-        pl.direct && auto && nv * row_us + pl.dir_us <= pl.cut_us + cand_us(nc.round() as usize, span_d(ci, d)).min(idx_us(nc.round() as usize, d))
+        nv * row_us + cm.dir_us <= cm.cut_us + cand_us(nc.round() as usize, span_d(ci, d)).min(idx_us(nc.round() as usize, d))
     };
     if sampled {
         let d = nc_s as f64 / nv_s.max(1) as f64;
-        if in_band(d) {
-            return Planned::Scan;
-        }
         // every open cluster at its cheapest path (direct, or the cut and the cheaper of full vectors and the index,
         // with the setup of each group the index path opens), or at its cheapest without the index path
         let mut groups = vec![false; ix.groups.len()];
@@ -2542,7 +2700,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         for &ci in &open {
             let nv = nvis_cl(ci) as f64;
             let nc = d * nv;
-            let (dir, full, idx) = (if pl.direct { nv * row_us + pl.dir_us } else { f64::INFINITY }, pl.cut_us + cand_us(nc.round() as usize, span_d(ci, d)), pl.cut_us + idx_us(nc.round() as usize, d));
+            let (dir, full, idx) = (nv * row_us + cm.dir_us, cm.cut_us + cand_us(nc.round() as usize, span_d(ci, d)), cm.cut_us + idx_us(nc.round() as usize, d));
             est_flat += dir.min(full);
             if idx < dir.min(full) {
                 est += idx;
@@ -2551,7 +2709,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
                 est += dir.min(full);
             }
         }
-        let est = est_flat.min(est + groups.iter().filter(|&&g| g).count() as f64 * pl.grp_us);
+        let est = est_flat.min(est + groups.iter().filter(|&&g| g).count() as f64 * cm.grp_us);
         if scan_cost <= est {
             return Planned::Scan;
         }
@@ -2560,8 +2718,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
                 pre[ci] = Some(Pre::Direct);
             }
         }
-    }
-    if !sampled {
+    } else {
         // no estimate of d: direct only where the rows cost no more than the cut alone
         for &ci in &open {
             if direct(ci, 0.0) {
@@ -2571,7 +2728,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     }
     let pre: Vec<Pre> = pre.into_par_iter().enumerate().map(|(ci, p)| p.unwrap_or_else(|| cut(ci))).collect();
     let cut_cyc = tick() - tc0;
-    // the planner: per cluster the index path or full vectors, a group's setup only if its clusters' gains pay for it
+    // per cluster the index path or full vectors, a group's setup only if its clusters' gains pay for it
     let mut use_idx = vec![false; k];
     let (mut ncand_all, mut nvis_all, mut ndirect) = (0usize, 0usize, 0usize);
     for (ci, p) in pre.iter().enumerate() {
@@ -2585,10 +2742,6 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         }
     }
     let d = ncand_all as f64 / nvis_all.max(1) as f64;
-    // too few clusters for the sample above: the same check on the whole cut
-    if !sampled && in_band(d) {
-        return Planned::Scan;
-    }
     let mut grp_gain = vec![0f64; ix.groups.len()];
     let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
@@ -2599,28 +2752,22 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
             let full = cand_us(*ncand, d1 - d0);
             full_all += full;
             let gain = full - idx_us(*ncand, d);
-            use_idx[ci] = match pl.mode {
-                PlanMode::Index => true,
-                PlanMode::Flat => false,
-                PlanMode::Auto => gain > 0.0,
-            };
+            use_idx[ci] = gain > 0.0;
             if use_idx[ci] {
                 grp_gain[ix.cl[ci].g] += gain;
             }
         }
     }
-    if auto {
-        for ci in 0..k {
-            if use_idx[ci] && grp_gain[ix.cl[ci].g] < pl.grp_us {
-                use_idx[ci] = false;
-            }
+    for ci in 0..k {
+        if use_idx[ci] && grp_gain[ix.cl[ci].g] < cm.grp_us {
+            use_idx[ci] = false;
         }
-        // what remains costs every candidate's and direct row's full vector less the kept gains; a scan may be cheaper
-        let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
-        let ndc = pre.iter().filter(|p| matches!(p, Pre::Direct)).count();
-        if full_all + ndirect as f64 * row_us + ndc as f64 * pl.dir_us - gains > scan_cost {
-            return Planned::Scan;
-        }
+    }
+    // what remains costs every candidate's and direct row's full vector less the kept gains; a scan may be cheaper
+    let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= cm.grp_us).map(|g| grp_gain[g] - cm.grp_us).sum();
+    let ndc = pre.iter().filter(|p| matches!(p, Pre::Direct)).count();
+    if full_all + ndirect as f64 * row_us + ndc as f64 * cm.dir_us - gains > scan_cost {
+        return Planned::Scan;
     }
     Planned::Run { pre, use_idx, cut_cyc }
 }
@@ -2639,6 +2786,9 @@ pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: P
     cq.gtab = gt;
     cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
     cq.tol = pl.tol;
+    if let Some(d) = pl.ddec {
+        cq.ddec = d;
+    }
     if int {
         cq.enable_int(ix, ci, gq);
     }
@@ -2673,20 +2823,24 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
         |(mut acc, mut sv, mut rd), ci| {
             let tcl = tick();
             let c = &ix.cl[ci];
+            // the visible rows of [r0, r1), ascending
+            let each = |r0: usize, r1: usize, f: &mut dyn FnMut(usize)| match o.vis {
+                None => (r0..r1).for_each(|r| f(r)),
+                Some(v) => v.each(r0, r1, f),
+            };
             let push = |acc: &mut ThrOut2, r0: usize, r1: usize, iv: Option<(f64, f64)>| {
                 if o.vis.is_none() && iv.is_none() {
                     acc.rows.extend(r0 as u32..r1 as u32);
                     return;
                 }
-                for r in r0..r1 {
-                    if o.vis.map_or(true, |v| v.has(r)) {
-                        acc.rows.push(r as u32);
-                        if let Some(x) = iv {
-                            acc.iv.push((r as u32, x.0 as f32, x.1 as f32, 255));
-                        }
+                each(r0, r1, &mut |r| {
+                    acc.rows.push(r as u32);
+                    if let Some(x) = iv {
+                        acc.iv.push((r as u32, x.0 as f32, x.1 as f32, 255));
                     }
-                }
+                });
             };
+            let nvis_in = |r0: usize, r1: usize| o.vis.map_or(r1 - r0, |v| count_bits(&v.bits, r0, r1));
             match pre[ci] {
                 Pre::Skip => {
                     acc.st.clusters_out += 1;
@@ -2699,7 +2853,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                         let qm = dot64(&pr.q64, ix.centres_f64(ci));
                         let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
                         let nn = acc.iv.len();
-                        let cnt = (c.r0..c.r1).filter(|&r| o.vis.map_or(true, |v| v.has(r))).count();
+                        let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
                             x.1 = lb as f32;
                             x.2 = ub as f32;
@@ -2710,7 +2864,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                         let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
                         let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
                         let nn = acc.iv.len();
-                        let cnt = (c.r0..c.r1).filter(|&r| o.vis.map_or(true, |v| v.has(r))).count();
+                        let cnt = nvis_in(c.r0, c.r1);
                         for x in &mut acc.iv[nn - cnt..] {
                             x.1 = (bl - rho * rr) as f32;
                             x.2 = (bh + rho * rr) as f32;
@@ -2737,16 +2891,16 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     if o.want_iv {
                         let nc = if ix.nukey.is_empty() { None } else { Some(NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm)) };
                         let cu = if nc.is_none() { Some(cut_params2(ix, ci, pr, qm)) } else { None };
-                        for r in (u0..d0).chain(d1..u1) {
-                            if o.vis.map_or(true, |v| v.has(r)) {
-                                acc.rows.push(r as u32);
-                                let (lb, ub) = match &nc {
-                                    Some(nc) => nc.bounds(nc.nu_of(ix.nukey[r])),
-                                    None => key_interval2(ix, cu.as_ref().unwrap(), r),
-                                };
-                                acc.iv.push((r as u32, lb as f32, ub as f32, 254));
-                            }
-                        }
+                        let mut take = |r: usize| {
+                            acc.rows.push(r as u32);
+                            let (lb, ub) = match &nc {
+                                Some(nc) => nc.bounds(nc.nu_of(ix.nukey[r])),
+                                None => key_interval2(ix, cu.as_ref().unwrap(), r),
+                            };
+                            acc.iv.push((r as u32, lb as f32, ub as f32, 254));
+                        };
+                        each(u0, d0, &mut take);
+                        each(d1, u1, &mut take);
                     } else {
                         push(&mut acc, u0, d0, None);
                         push(&mut acc, d1, u1, None);
@@ -3142,9 +3296,11 @@ impl TopK {
 /// runs as a threshold query at the running k-th best score: the key range and the levels drop an item once its upper
 /// bound falls below it, each level's half-width scaled by `dial`, and the items left (or taken in by a certified
 /// lower bound) are scored from their stored vectors into the k best. A cluster with too few visible items to pay for
-/// the index path's per-cluster setup, by the plan's costs, has every visible item scored, batched with other such
-/// clusters in row order. No dial and every cluster is exact up to the f32
-/// products.
+/// the index path's per-cluster setup, by the fixed `COSTS` (at most about 129 visible items), has every visible item
+/// scored, batched with other such clusters in row order. That cut-off was about 240 under the timed constants this
+/// replaced, so clusters of 130-240 visible items now take the index path, where `dial` applies: approximate results
+/// with a dial can differ from before (without one they are exact up to the f32 products either way). No dial and every
+/// cluster is exact up to the f32 products.
 pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, dial: Option<&[f32]>, plan: Plan) -> KnnOut2 {
     assert!(kk > 0, "knn2_fast needs k of at least 1");
     let tm = Timer::new();
@@ -3183,7 +3339,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     for ci in order {
         let c = &ix.cl[ci];
         let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
-        if (top.full() && nv as f64 * plan.full_us <= plan.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
+        if (top.full() && nv as f64 * COSTS.full_us <= COSTS.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
             match vis {
                 None => flat.extend(c.r0 as u32..c.r1 as u32),
                 Some(_) => flat.extend_from_slice(vis_rows(c.r0, c.r1)),
@@ -3202,9 +3358,11 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
         let (u0, u1, d0, d1) = if top.full() && ix.nukey.is_empty() { sorted_range2(ix, ci, &cut_params2(ix, ci, &pr, qm), t) } else { (c.r0, c.r1, c.r0, c.r1) };
         // the key alone takes these in
         if u0 < d0 || d1 < u1 {
-            for r in (u0..d0).chain(d1..u1) {
-                if vis.map_or(true, |v| v.has(r)) {
-                    pend.push(r as u32);
+            match vis {
+                None => pend.extend((u0 as u32..d0 as u32).chain(d1 as u32..u1 as u32)),
+                Some(v) => {
+                    v.each(u0, d0, |r| pend.push(r as u32));
+                    v.each(d1, u1, |r| pend.push(r as u32));
                 }
             }
         }
@@ -3230,7 +3388,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
             let d = cands.len() as f64 / nv as f64;
             // the group's setup is left out: charged to the first cluster of each group, it sends that cluster's items
             // to their full vectors, which reads far more and saves no time
-            if top.full() && cands.len() as f64 * plan.full_us > plan.index_us(cands.len(), d) {
+            if top.full() && cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d) {
                 st.clusters_open += 1;
                 let gq = get_gq2(ix, &pr, c.g, &mut st);
                 let tq = tick();
@@ -3255,9 +3413,11 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
 }
 
-/// Exact k-NN. The planner may send the query to a scan of the visible set before anything else (a small visible
-/// set) or after the seed and the cut (nothing prunes); otherwise the threshold query at the seed's k-th score runs
-/// as planned and the selection refines the survivors' intervals until the k best are certain.
+/// Exact k-NN. The planner may send the query to a scan of the visible set (every row without one) before anything
+/// else (at most the rule's rows of the clusters holding one, plus the seed's `r_seed`: `Plan::scan_first`), or after
+/// the seed (`plan2`'s rule at the seed's k-th score); otherwise the threshold query at the seed's k-th score runs as
+/// planned and the selection refines the survivors' intervals until the k best are certain. Unfiltered on clusters of
+/// more than 84 rows (by default) it does not scan; an index compacted to a small visible set does.
 pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
     let tm = Timer::new();
     let nl = ix.meta.nl();
@@ -3269,10 +3429,10 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
         KnnOut2 { ents, st, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
-    if let Some(v) = vis {
-        if stored && plan.scan_first(v, plan.seed_us) {
-            return scan(Stats::new(nl), 0.0);
-        }
+    // the rule in rows before the seed: always under a visible set (as before the rule covered unfiltered queries), and
+    // without one only in memory, where the cost model does not decide
+    if stored && (vis.is_some() || !ix.own_rows().is_some_and(|r| r.priced())) && plan.scan_first(ix, vis) {
+        return scan(Stats::new(nl), 0.0);
     }
     let pr = prep2(ix, q);
     let mut st = Stats::new(nl);
@@ -3477,6 +3637,9 @@ impl<'a> Source2 for SynthSrc<'a> {
     fn rows(&self, _p: &Params) -> usize {
         self.sy.sizes.iter().sum()
     }
+    fn size(&self, c: usize, _p: &Params) -> usize {
+        self.sy.sizes[c]
+    }
     fn items(&self, c: usize, _p: &Params, _gp: &GroupPlan2, _mhat: &[f64]) -> Items2 {
         let n = self.sy.n;
         let nc = self.sy.sizes[c];
@@ -3496,6 +3659,6 @@ impl<'a> Source2 for SynthSrc<'a> {
         for (j, k) in key.iter().enumerate() {
             zs[j * n..(j + 1) * n].copy_from_slice(&z[k.2 * n..(k.2 + 1) * n]);
         }
-        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new() }
+        Items2 { ah: key.iter().map(|k| k.0).collect(), z: zs, ent: key.iter().map(|k| k.1).collect(), ext: key.iter().map(|k| k.1).collect(), x2max, nu: Vec::new(), x16: Vec::new() }
     }
 }
