@@ -474,7 +474,8 @@ B/item; text 1% 197 ms against 60 ms. With constants calibrated on this index (n
 behaves identically (same bytes, same times), so it predates this branch.
 
 To compare the indexes on item queries and large text answers, rerun `e2e` with `--plan index`, with calibrated
-constants, or with corrected `--plan-default` constants.
+constants, or with corrected `--plan-default` constants. (Since "The planner without timing" below, the planner runs
+these on the index path and `--plan-default` no longer exists.)
 
 ### Memory at 1B (estimated, not measured)
 
@@ -505,3 +506,122 @@ the key, `index.json` or `plan_hash`, and one opened index serves variants with 
    item queries; build peak +13% against B. This conflicts most with the rule that queries stay cheap in bytes read.
 5. **Decide after the planner.** Fix or recalibrate the plan constants first and rerun `e2e`, so that items and text
    at ≥1% are measured on the index path. Until then, those rows give no evidence for any option.
+
+## The planner without timing (1M BioCLIP-2, 2026-11-16)
+
+The planner priced every choice in microseconds from constants timed at open (about 10 s at 1M) or, with
+`--plan-default`, taken from another machine, which put item queries and text queries at 1% or more on a 180 ms scan
+(above, "Why item queries are a full scan"). It now times nothing in memory; `--calib` and `--plan-default` are gone.
+
+**Measured first** (the pre-change binary, `pyfit`, 50 text and 50 held-out item queries, `--no-approx`, 3 runs;
+milliseconds as M / I / S / D: timed constants, forced index path, forced whole-query scan, `Plan::default`):
+
+| answer | item, 1 thread | item, 4 threads | text, 1 thread | text, 4 threads |
+|---|---|---|---|---|
+| 0.01% | 39.9 / 42.6 / 177.6 / 177.6 | 12.2 / 11.8 / 48.0 / 48.1 | 29.4 / 29.6 / 177.9 / 35.5 | 9.2 / 7.7 / 48.6 / 10.2 |
+| 0.1% | 49.9 / 49.3 / 177.7 / 181.2 | 13.5 / 13.8 / 47.5 / 48.4 | 37.6 / 37.9 / 183.1 / 46.7 | 9.9 / 10.0 / 47.9 / 14.5 |
+| 1% | 55.1 / 59.4 / 178.5 / 181.2 | 18.3 / 16.9 / 49.1 / 49.5 | 55.2 / 55.2 / 182.2 / 182.4 | 15.7 / 15.2 / 48.8 / 47.6 |
+| 10% | 80.7 / 81.2 / 181.6 / 180.7 | 23.1 / 24.3 / 47.7 / 50.1 | 87.5 / 87.3 / 179.7 / 181.8 | 25.0 / 24.6 / 48.6 / 49.4 |
+| 30% | 100.7 / 99.2 / 181.0 / 184.8 | 29.0 / 28.3 / 48.6 / 50.7 | 109.2 / 106.4 / 182.9 / 187.6 | 31.0 / 30.7 / 49.9 / 50.2 |
+| 50% | 99.7 / 103.6 / 181.7 / 181.8 | 28.2 / 28.8 / 50.1 / 51.4 | 116.2 / 116.1 / 184.9 / 189.4 | 34.4 / 33.4 / 50.3 / 51.9 |
+| 75% | 93.9 / 95.2 / 182.8 / 186.4 | 28.1 / 27.3 / 50.5 / 51.0 | 107.5 / 108.0 / 189.6 / 194.0 | 32.8 / 32.2 / 50.6 / 52.2 |
+| k-NN 10 | 38.0 / 36.7 / 175.1 / 171.3 | 12.0 / 11.4 / 46.9 / 46.4 | 28.7 / 29.3 / 174.3 / 28.3 | 9.0 / 9.1 / 47.3 / 9.3 |
+| k-NN 100 | 49.0 / 47.5 / 173.6 / 174.9 | 19.4 / 19.0 / 48.4 / 50.0 | 32.6 / 30.7 / 173.2 / 33.3 | 11.0 / 10.5 / 48.8 / 13.5 |
+
+The forced index path is within noise of the timed planner in every cell and 1.6–6× faster than a scan; the timed
+planner never beat it beyond noise. Errors in the constants' ratios toward the index path cost nothing; 2× toward a
+scan or full vectors cost up to 80%.
+
+**The rule.** Unfiltered, in memory (`plan2`, `PlanMode::Auto`): the support table skips or takes in what its bounds
+decide, and every other live cluster is cut and run on the index path. No whole-query scan, direct scoring or
+full-vector path, and no sample or answer-share estimate. This needs no timing because nothing is compared: in the
+unfiltered case one path was best or tied everywhere, and its own cost (the cut, the levels, the full vectors of the
+last survivors) is already proportional to what the bounds leave, so there is nothing for a constant to trade.
+
+Under a visible set, one constant in rows, `Plan::r_rows` = R = 300: the set is scanned when it holds at most R rows
+per cluster holding a visible row; otherwise a cluster the support table leaves open is scored directly when it holds
+at most R visible rows, and cut and run on the index path when it holds more. Filtered exact k-NN scans before the
+seed when the set holds at most R rows per such cluster plus `r_seed` = 6,000 rows (the seed: 1.18–1.45 ms against
+0.19 µs a row, so 6,100–7,600; the lower end). Both are ratios of costs of the same kind (a pass over memory per row),
+so they do not move with the machine's speed the way each microsecond cost does.
+
+R is not the cut's cost in rows (2.35–2.48 µs / 0.190–0.195 µs = 12–13): under a visible set the index path on a
+cluster costs much more than its cut. With R = 12, 2–30% visible sets took the index path at 1.3–7.5× a scan's time
+(2%: 32.4 ms against 4.3; 10%: 53.0 against 20.8; 30%: 77.4 against 61.1). R comes from timing the planner at several
+R (text queries at five thresholds, `dbcmp --step 8 --reps 3`, random visible sets, 1,000 rows a cluster; ms):
+
+| threads | visible | forced index | forced scan | R = 150 | R = 200 | R = 250 | R = 300 | R = 400 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 10% | 48.0 | 20.3 | 20.3 | 20.2 | 20.2 | 20.1 | 20.2 |
+| 1 | 20% | 57.1 | 39.8 | 52.4 | 39.8 | 39.7 | 40.0 | 39.7 |
+| 1 | 30% | 68.7 | 59.0 | 69.6 | 66.0 | 65.4 | 59.0 | 59.1 |
+| 1 | 40% | 73.0 | 77.3 | 68.4 | 68.0 | 69.9 | 72.5 | 75.5 |
+| 1 | 50% | 73.8 | 95.3 | 73.7 | 73.1 | 72.5 | 71.8 | 77.6 |
+| 1 | 70% | 73.9 | 132.6 | 71.6 | 72.9 | 73.9 | 73.2 | 76.3 |
+| 4 | 10% | 16.5 | 5.9 | 5.5 | 5.2 | 4.9 | 4.6 | 4.5 |
+| 4 | 20% | 18.0 | 11.1 | 16.4 | 11.1 | 10.9 | 10.9 | 10.7 |
+| 4 | 30% | 21.0 | 16.3 | 20.3 | 19.2 | 19.3 | 16.3 | 16.1 |
+| 4 | 40% | 21.0 | 20.7 | 20.8 | 20.4 | 20.7 | 20.8 | 21.0 |
+| 4 | 50% | 21.7 | 26.1 | 22.4 | 22.2 | 22.3 | 22.1 | 22.6 |
+| 4 | 70% | 24.0 | 38.0 | 22.7 | 23.0 | 23.2 | 23.8 | 25.2 |
+
+The index path per cluster holding a visible row costs about 150 rows of scan at 10 visible rows a cluster, 250 at
+100 and 400 at 500; a whole query's scan and index path cross at 350–400 visible rows a cluster. R = 300 sits below,
+toward the index path; its worst cell is 40% at one thread (+6% against R = 200).
+
+**Speed, unfiltered** (the new binary against the old one with the timed constants `M`, each against its own forced
+index path, which runs the same code in both; 4 rounds, binaries and variant order alternated, `e2e --nq 50 --runs 3
+--knn-k 10,100`; ms as new / M, and in brackets (new / its forced index) ÷ (M / its forced index), mean over rounds):
+
+| answer | item, 1 thread | item, 4 threads | text, 1 thread | text, 4 threads |
+|---|---|---|---|---|
+| 0.01% | 45.6 / 44.5 (1.001) | 12.8 / 14.1 (0.916) | 31.8 / 31.4 (0.992) | 9.8 / 9.7 (0.987) |
+| 0.1% | 51.8 / 50.8 (0.996) | 15.0 / 15.3 (1.035) | 38.2 / 38.4 (0.998) | 11.3 / 11.3 (0.953) |
+| 1% | 60.8 / 61.5 (0.966) | 17.3 / 18.8 (0.944) | 57.9 / 57.2 (0.997) | 16.8 / 17.1 (0.969) |
+| 10% | 85.8 / 84.9 (1.026) | 23.9 / 24.6 (1.002) | 90.7 / 90.1 (1.002) | 26.3 / 26.6 (0.982) |
+| 30% | 102.6 / 102.6 (0.991) | 29.2 / 30.0 (0.995) | 114.2 / 114.4 (0.987) | 33.6 / 33.0 (0.992) |
+| 50% | 104.9 / 107.9 (0.983) | 30.7 / 31.5 (0.978) | 118.8 / 119.3 (1.008) | 35.0 / 35.7 (0.969) |
+| 75% | 97.7 / 99.0 (0.991) | 29.2 / 29.6 (0.985) | 113.4 / 113.8 (0.982) | 34.4 / 34.2 (0.985) |
+| k-NN 10 | 39.2 / 38.1 (1.055) | 11.9 / 12.5 (0.947) | 28.5 / 28.3 (0.955) | 9.3 / 9.2 (0.878) |
+| k-NN 100 | 51.7 / 50.4 (1.024) | 20.1 / 20.5 (0.995) | 33.6 / 32.4 (1.010) | 11.6 / 11.7 (0.949) |
+
+Mean 0.984 over the 36 cells, 0.878–1.055; the largest (item k-NN 10, one thread) has rounds 0.98–1.07 against
+0.93–1.00, within the spread. The new planner runs every open cluster on the index path; M sent 7–17 a query to full
+vectors or direct scoring for item queries, 7–100 for text (the most at 0.01% and at k-NN).
+
+**Speed, filtered** (`dbcmp`, 93 text queries × 5 thresholds, 3 reps, 2 rounds alternating the binaries; medians, ms):
+
+| threads | visible | M | new | forced index | forced scan | new / M |
+|---|---|---|---|---|---|---|
+| 1 | 0.1% | 0.16 | 0.15 | 13.95 | 0.14 | 0.94 |
+| 1 | 1% | 1.60 | 1.46 | 28.91 | 1.51 | 0.91 |
+| 1 | 10% | 19.98 | 19.58 | 46.13 | 19.48 | 0.98 |
+| 1 | 50% | 70.94 | 72.10 | 70.71 | 94.58 | 1.02 |
+| 4 | 0.1% | 0.15 | 0.14 | 4.56 | 0.12 | 0.87 |
+| 4 | 1% | 0.61 | 0.53 | 8.76 | 0.55 | 0.88 |
+| 4 | 10% | 5.96 | 5.07 | 14.60 | 4.95 | 0.85 |
+| 4 | 50% | 22.56 | 21.87 | 21.60 | 25.95 | 0.97 |
+
+The new rule scans at 0.1–10% (M scanned 77% of the 10% runs) and takes the index path at 50%, within 8% of the better
+forced path (the largest gaps at 0.1%, 0.01–0.02 ms). Answers: the `dbcmp` dumps (unfiltered and the four sets, every
+variant) are byte-identical between the binaries and, where one exists (unfiltered and 1%), to the upstream reference
+dump; 1M `verify` is clean; the code hashes are unchanged.
+
+**Vectors on file.** Where reads are priced (`--full-file`, read through io_uring), the old cost model stays
+(`plan2_priced`): its reads at `io_us`/`io_gbps`, timed by `Plan::calibrate_disk` once per machine and cached in the
+index directory (`disk-constants.txt`, keyed by the CPU model and the vectors file's device; timed again when missing
+or under another key, and logged), its compute at fixed constants (`q::COSTS`, the values timed on this machine:
+full vector 0.19 µs, index path 0.0133 + 0.053·d per candidate and 2.67 + 13.3·d per cluster, group 93 µs, scan
+0.19/0.18 µs a row, anchor search 430 µs, direct 1.08 µs, cut 2.45 µs). `knn2_fast` uses the same `COSTS`. Measured
+here: io_us 4.90, io_gbps 2.01 at the first open (0.1 s), read from the cache at the second. `--plan-file` takes
+`r_rows`, `r_seed`, `io_us`, `io_gbps` only.
+
+**Open:** 0.83–0.92 s in all at 1M (wall 0.9 s), against 11.3 s with the timing pass.
+
+**Caveats.** One machine (4 cores, AVX-512) and one corpus (1M BioCLIP-2, 768 dimensions, 1,000 rows a cluster).
+The unfiltered rule should hold wherever the index path beats a scan by this margin; at 1B, clusters hold about
+64,000 items, so cutting and running a cluster costs relatively less, which favours the index path further. R was
+measured at 1,000 rows a cluster: the index path's cost per cluster under a visible set grows with the cluster's
+rows, so at other cluster sizes the crossover may move roughly with the cluster's size; that is not measured. R is
+dimensionless but its value comes from this machine. Raw logs: the session's `plan3b/` (`e2e/`, `e2e_table.md`,
+`fl/`, `fl_table.md`, `sweep/`, `sweep2/`, `ans/`, `disk/`, `open/`).
