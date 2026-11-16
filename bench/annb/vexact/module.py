@@ -47,6 +47,9 @@ class VexactExact(Vexact):
         super().__init__(metric, method_param)
         self.name = "vexact-exact"
 
+    def set_query_arguments(self, mode="exact"):
+        self.name = f"vexact-exact (mode={mode})"
+
     def query(self, v, n):
         return self.index.knn(self.q(v), n)
 

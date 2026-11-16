@@ -9,6 +9,8 @@ float:
     run_groups:
       exact:
         args: {}
+        query_args:
+          mode: [exact]
   - base_args: ['@metric']
     constructor: VexactApprox
     disabled: false
