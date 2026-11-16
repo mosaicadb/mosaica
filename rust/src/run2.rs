@@ -316,17 +316,19 @@ pub fn read_plan_file(p: Plan, f: &str) -> Result<(Plan, bool), String> {
     Ok((Plan::from_kv(p, &t).map_err(|e| format!("{f}: {e}"))?, Plan::kv_gives_disk(&t)))
 }
 
-/// `plan` with `--plan-file`'s constants, and where `priced` (the vectors' reads are priced) the disk constants from the
-/// cache of `dir` (or timed, `disk_constants`) unless the file gives both, so that nothing is timed or evicted then;
-/// the file's constants take precedence. A plan file that cannot be read or holds another name stops the run.
-pub fn plan_with_file(ix: &Index2, plan: Plan, priced: bool, dir: &str) -> Plan {
+/// `plan` (with `flags` applied, `plan_flags`) with `--plan-file`'s constants, and where `priced` (the vectors' reads
+/// are priced) the disk constants from the cache of `dir` (or timed, `disk_constants`) unless the file, or a `pf=`
+/// file among `flags`, gives both, so that nothing is timed or evicted then; the file's constants take precedence. A
+/// plan file that cannot be read or holds another name stops the run.
+pub fn plan_with_file(ix: &Index2, plan: Plan, priced: bool, dir: &str, flags: &str) -> Plan {
     let file = arg_str("--plan-file", "");
     let (fp, gives_disk) = if file.is_empty() { (plan, false) } else { read_plan_file(plan, &file).unwrap_or_else(|e| exit2(&e)) };
     if !priced {
         return fp;
     }
-    if gives_disk {
-        out!("[plan] disk constants io_us={} io_gbps={} from {file}; not timed", fp.io_us, fp.io_gbps);
+    let pf = flags.split(',').filter_map(|f| f.trim().strip_prefix("pf=")).find(|f| std::fs::read_to_string(f).is_ok_and(|t| Plan::kv_gives_disk(&t)));
+    if gives_disk || pf.is_some() {
+        out!("[plan] disk constants io_us={} io_gbps={} from {}; not timed", fp.io_us, fp.io_gbps, if gives_disk { file.as_str() } else { pf.unwrap() });
         return fp;
     }
     let timed = disk_constants(ix, plan, dir, &mut |s| out!("{s}"));
@@ -482,7 +484,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // the planner's disk constants unless the file gives them (cached in the index directory, keyed by the machine,
     // the vectors' device and the read policy; `disk_key`); the constants used are written to RESULTS/plan.txt
     let priced = ix.own_rows().is_some_and(|r| r.priced());
-    let plan = plan_with_file(&ix, plan, priced, dir);
+    let plan = plan_with_file(&ix, plan, priced, dir, flags);
     out!("[plan] {}", plan.to_kv().replace('\n', " "));
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, pseudo };
@@ -1501,7 +1503,7 @@ pub fn dbcmp(c: &Ctx2) {
     // the planner's disk constants: the setup's where it priced reads; else, when a read mode prices them, from the
     // index directory's cache (timed once per machine and device; `:plan=mem` in a read mode: reads not counted)
     let plan0 = if !pol.priced.load(Relaxed) && modes.iter().any(|m| m.split(':').any(|kv| kv == "uring" || kv == "plan=disk")) {
-        plan_with_file(ix, c.plan, true, &data_dir())
+        plan_with_file(ix, c.plan, true, &data_dir(), &arg_str("--flags", ""))
     } else {
         c.plan
     };
@@ -1544,7 +1546,8 @@ pub fn dbcmp(c: &Ctx2) {
                         Some(("dontcache", v)) => pol.dontcache_min.store(bytes(v), Relaxed),
                         Some(("plan", "disk")) => pol.priced.store(true, Relaxed),
                         Some(("plan", "mem")) => pol.priced.store(false, Relaxed),
-                        Some(("gap", v)) => plan.io_us = v.parse::<f64>().unwrap() / (plan.io_gbps * 1e3),
+                        // a gap in bytes, as io_us at this io_gbps, through the plan's own check (a number above 0)
+                        Some(("gap", v)) => plan = Plan::from_kv(plan, &format!("io_us={}", v.parse::<f64>().unwrap_or(f64::NAN) / (plan.io_gbps * 1e3))).unwrap_or_else(|e| exit2(&format!("--read-modes :gap={v}: {e}"))),
                         _ => panic!("--read-modes takes mmap or uring, each optionally with :qd=N, :gap=BYTES, :direct=BYTES|none, :dontcache=BYTES|none and :plan=disk or mem"),
                     }
                 }
@@ -2073,5 +2076,28 @@ mod tests {
         refused("--v2 --index D --rebuild --basis dual", "create's");
         refused("--v2 --index D --rebuild --in-memory", "give one");
         refused("--v2 --index D e2e --nq", "needs a value");
+    }
+
+    /// A variant's `pf=` file that gives both disk constants is used as given: nothing is timed, evicted or cached.
+    #[test]
+    fn disk_constants_from_a_pf_file_are_not_timed() {
+        let tmp = std::env::temp_dir().join(format!("vexact-pf-{}-{}", std::process::id(), now_s() as u64));
+        let fit = tmp.join("fit");
+        std::fs::create_dir_all(&fit).unwrap();
+        let src = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+        for e in std::fs::read_dir(src).unwrap().map(|e| e.unwrap()).filter(|e| e.file_type().unwrap().is_file()) {
+            std::fs::copy(e.path(), fit.join(e.file_name())).unwrap();
+        }
+        let dir = fit.to_str().unwrap();
+        let (_, ix) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+        let pf = tmp.join("plan.txt");
+        std::fs::write(&pf, "io_us=7.25\nio_gbps=1.5\n").unwrap();
+        let flags = format!("noint,pf={}", pf.display());
+        let plan = plan_flags(Plan::default(), &flags).unwrap();
+        let p = plan_with_file(&ix, plan, true, dir, &flags);
+        assert_eq!((p.io_us, p.io_gbps), (7.25, 1.5));
+        assert!(!fit.join(DISK_CACHE).exists(), "the disk constants were timed");
+        drop(ix);
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

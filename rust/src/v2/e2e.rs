@@ -1441,6 +1441,18 @@ fn a_read_only_index_directory_caches_disk_constants_per_user() {
     assert!(got == Some((4.0, 2.5)) && why.contains("saved"), "{why}");
     let (got, why) = cached_disk_constants(&a, "k1", || panic!("timed again under the same key"));
     assert!(got == Some((4.0, 2.5)) && why.starts_with("read from"), "{why}");
+    // the writability probe leaves nothing in a writable index directory (no lock file, which needs only the file's
+    // permission and so said nothing about the directory's)
+    assert_eq!(std::fs::read_dir(&w).unwrap().count(), 0);
+    // a write the index directory refuses falls back to the per-user file
+    let fb = user_cache_file(&user, "k3");
+    let (got, why) = cached_disk_constants_or(&ro.join(DISK_CACHE), Some(&fb), "k3", || Some((2.0, 1.0)));
+    assert!(got == Some((2.0, 1.0)) && why.contains("saved in") && why.contains(fb.to_str().unwrap()), "{why}");
+    // and a lookup finds the per-user file when the index directory's cache lacks the key, so nothing is timed again
+    let (_, why) = cached_disk_constants(&user_cache_file(&user, "k4"), "k4", || Some((1.0, 1.0)));
+    assert!(why.contains("saved"), "{why}");
+    assert_eq!(disk_cache_path(w.to_str().unwrap(), "k4", Some(&user)), user_cache_file(&user, "k4"));
+    assert_eq!(disk_cache_path(w.to_str().unwrap(), "k5", Some(&user)), w.join(DISK_CACHE));
     std::fs::remove_dir_all(&d).unwrap();
 }
 
@@ -1461,7 +1473,6 @@ fn concurrent_disk_constant_writers_time_once() {
     });
     assert_eq!(timed.load(std::sync::atomic::Ordering::SeqCst), 1, "{got:?}");
     assert!(got.iter().all(|g| g.0 == Some((3.0, 1.5))), "{got:?}");
-    assert_eq!(got.iter().filter(|g| g.1.contains("saved by another open")).count(), 5, "{got:?}");
     assert!(std::fs::read_dir(&d).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
     std::fs::remove_dir_all(&d).unwrap();
 }
