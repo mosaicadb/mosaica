@@ -1,0 +1,274 @@
+diff --git a/ann_benchmarks/algorithms/diskann/Dockerfile b/ann_benchmarks/algorithms/diskann/Dockerfile
+index 18c0329..78ec014 100644
+--- a/ann_benchmarks/algorithms/diskann/Dockerfile
++++ b/ann_benchmarks/algorithms/diskann/Dockerfile
+@@ -1,29 +1,4 @@
+ FROM ann-benchmarks
+ 
+-RUN apt-get update
+-RUN apt-get install -y wget git cmake g++ libaio-dev libgoogle-perftools-dev clang-format libboost-dev python3 python3-setuptools python3-pip
+-RUN pip3 install pybind11 numpy
+-
+-RUN cd /tmp && wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+-RUN cd /tmp && apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+-RUN cd /tmp && rm GPG-PUB-KEY-INTEL-SW-PRODUCTS-2019.PUB
+-RUN cd /tmp && sh -c 'echo deb https://apt.repos.intel.com/mkl all main > /etc/apt/sources.list.d/intel-mkl.list'
+-RUN apt-get update
+-RUN apt-get install -y intel-mkl-64bit-2020.0-088
+-
+-RUN update-alternatives --install /usr/lib/x86_64-linux-gnu/libblas.so     libblas.so-x86_64-linux-gnu      /opt/intel/mkl/lib/intel64/libmkl_rt.so 150
+-RUN update-alternatives --install /usr/lib/x86_64-linux-gnu/libblas.so.3   libblas.so.3-x86_64-linux-gnu    /opt/intel/mkl/lib/intel64/libmkl_rt.so 150
+-RUN update-alternatives --install /usr/lib/x86_64-linux-gnu/liblapack.so   liblapack.so-x86_64-linux-gnu    /opt/intel/mkl/lib/intel64/libmkl_rt.so 150
+-RUN update-alternatives --install /usr/lib/x86_64-linux-gnu/liblapack.so.3 liblapack.so.3-x86_64-linux-gnu  /opt/intel/mkl/lib/intel64/libmkl_rt.so 150
+-
+-RUN echo "/opt/intel/lib/intel64"     >  /etc/ld.so.conf.d/mkl.conf
+-RUN echo "/opt/intel/mkl/lib/intel64" >> /etc/ld.so.conf.d/mkl.conf
+-RUN ldconfig
+-RUN echo "MKL_THREADING_LAYER=GNU" >> /etc/environment
+-
+-RUN git clone --single-branch --branch python_bindings https://github.com/microsoft/diskann
+-RUN mkdir -p diskann/build
+-RUN cd diskann/build && cmake -DCMAKE_BUILD_TYPE=Release ..
+-RUN cd diskann/build && make -j
+-RUN cd diskann/python && pip install -e .
+-RUN python3 -c 'import vamanapy'
++RUN pip3 install diskannpy==0.7.0
++RUN python3 -c 'import diskannpy'
+diff --git a/ann_benchmarks/algorithms/diskann/config.yml b/ann_benchmarks/algorithms/diskann/config.yml
+index 0a8be58..8639c35 100644
+--- a/ann_benchmarks/algorithms/diskann/config.yml
++++ b/ann_benchmarks/algorithms/diskann/config.yml
+@@ -27,7 +27,7 @@ float:
+         query_args: [[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]]
+   - base_args: ['@metric']
+     constructor: VamanaPQ
+-    disabled: false
++    disabled: true
+     docker_tag: ann-benchmarks-diskann_pq
+     module: ann_benchmarks.algorithms.diskann
+     name: vamana-pq(diskann)
+@@ -96,7 +96,7 @@ float:
+         query_args: [[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]]
+   - base_args: ['@metric']
+     constructor: VamanaPQ
+-    disabled: false
++    disabled: true
+     docker_tag: ann-benchmarks-diskann_pq
+     module: ann_benchmarks.algorithms.diskann
+     name: vamana-pq(diskann)
+diff --git a/ann_benchmarks/algorithms/diskann/module.py b/ann_benchmarks/algorithms/diskann/module.py
+index 0a54b65..da4c7c6 100644
+--- a/ann_benchmarks/algorithms/diskann/module.py
++++ b/ann_benchmarks/algorithms/diskann/module.py
+@@ -1,9 +1,7 @@
+-import os
+-import struct
+-import time
++import tempfile
+ 
++import diskannpy
+ import numpy as np
+-import vamanapy as vp
+ 
+ from ..base.module import BaseANN
+ 
+@@ -14,178 +12,36 @@ class Vamana(BaseANN):
+         self.l_build = int(param["l_build"])
+         self.max_outdegree = int(param["max_outdegree"])
+         self.alpha = float(param["alpha"])
+-        print("Vamana: L_Build = " + str(self.l_build))
+-        print("Vamana: R = " + str(self.max_outdegree))
+-        print("Vamana: Alpha = " + str(self.alpha))
+-        self.params = vp.Parameters()
+-        self.params.set("L", self.l_build)
+-        self.params.set("R", self.max_outdegree)
+-        self.params.set("C", 750)
+-        self.params.set("alpha", self.alpha)
+-        self.params.set("saturate_graph", False)
+-        self.params.set("num_threads", 1)
+-
+-    def fit(self, X):
+-        def bin_to_float(binary):
+-            return struct.unpack("!f", struct.pack("!I", int(binary, 2)))[0]
+-
+-        print("Vamana: Starting Fit...")
+-        index_dir = "indices"
+-
+-        if not os.path.exists(index_dir):
+-            os.makedirs(index_dir)
+-
+-        data_path = os.path.join(index_dir, "base.bin")
+         self.name = "Vamana-{}-{}-{}".format(self.l_build, self.max_outdegree, self.alpha)
+-        save_path = os.path.join(index_dir, self.name)
+-        print("Vamana: Index Stored At: " + save_path)
+-        shape = [
+-            np.float32(bin_to_float("{:032b}".format(X.shape[0]))),
+-            np.float32(bin_to_float("{:032b}".format(X.shape[1]))),
+-        ]
+-        X = X.flatten()
+-        X = np.insert(X, 0, shape)
+-        X.tofile(data_path)
+-
+-        if not os.path.exists(save_path):
+-            print("Vamana: Creating Index")
+-            s = time.time()
+-            if self.metric == "l2":
+-                index = vp.SinglePrecisionIndex(vp.Metric.FAST_L2, data_path)
+-            elif self.metric == "cosine":
+-                index = vp.SinglePrecisionIndex(vp.Metric.INNER_PRODUCT, data_path)
+-            else:
+-                print("Vamana: Unknown Metric Error!")
+-            index.build(self.params, [])
+-            t = time.time()
+-            print("Vamana: Index Build Time (sec) = " + str(t - s))
+-            index.save(save_path)
+-        if os.path.exists(save_path):
+-            print("Vamana: Loading Index: " + str(save_path))
+-            s = time.time()
+-            if self.metric == "l2":
+-                self.index = vp.SinglePrecisionIndex(vp.Metric.FAST_L2, data_path)
+-            elif self.metric == "cosine":
+-                self.index = vp.SinglePrecisionIndex(vp.Metric.INNER_PRODUCT, data_path)
+-            else:
+-                print("Vamana: Unknown Metric Error!")
+-            self.index.load(file_name=save_path)
+-            print("Vamana: Index Loaded")
+-            self.index.optimize_graph()
+-            print("Vamana: Graph Optimization Completed")
+-            t = time.time()
+-            print("Vamana: Index Load Time (sec) = " + str(t - s))
+-        else:
+-            print("Vamana: Unexpected Index Build Time Error")
+-
+-        print("Vamana: End of Fit")
+-
+-    def set_query_arguments(self, l_search):
+-        print("Vamana: L_Search = " + str(l_search))
+-        self.l_search = l_search
+-
+-    def query(self, v, n):
+-        return self.index.single_numpy_query(v, n, self.l_search)
+-
+-    def batch_query(self, X, n):
+-        self.num_queries = X.shape[0]
+-        self.result = self.index.batch_numpy_query(X, n, self.num_queries, self.l_search)
+-
+-    def get_batch_results(self):
+-        return self.result.reshape((self.num_queries, self.result.shape[0] // self.num_queries))
+-
+-
+-class VamanaPQ(BaseANN):
+-    def __init__(self, metric, param):
+-        self.metric = {"angular": "cosine", "euclidean": "l2"}[metric]
+-        self.l_build = int(param["l_build"])
+-        self.max_outdegree = int(param["max_outdegree"])
+-        self.alpha = float(param["alpha"])
+-        self.chunks = int(param["chunks"])
+-        print("Vamana PQ: L_Build = " + str(self.l_build))
+-        print("Vamana PQ: R = " + str(self.max_outdegree))
+-        print("Vamana PQ: Alpha = " + str(self.alpha))
+-        print("Vamana PQ: Chunks = " + str(self.chunks))
+-        self.params = vp.Parameters()
+-        self.params.set("L", self.l_build)
+-        self.params.set("R", self.max_outdegree)
+-        self.params.set("C", 750)
+-        self.params.set("alpha", self.alpha)
+-        self.params.set("saturate_graph", False)
+-        self.params.set("num_chunks", self.chunks)
+-        self.params.set("num_threads", 1)
+ 
+     def fit(self, X):
+-        def bin_to_float(binary):
+-            return struct.unpack("!f", struct.pack("!I", int(binary, 2)))[0]
+-
+-        print("Vamana PQ: Starting Fit...")
+-        index_dir = "indices"
+-
+-        if self.chunks > X.shape[1]:
+-            raise ValueError
+-
+-        if not os.path.exists(index_dir):
+-            os.makedirs(index_dir)
+-
+-        data_path = os.path.join(index_dir, "base.bin")
+-        pq_path = os.path.join(index_dir, "pq_memory_index")
+-        self.name = "VamanaPQ-{}-{}-{}".format(self.l_build, self.max_outdegree, self.alpha)
+-        save_path = os.path.join(index_dir, self.name)
+-        print("Vamana PQ: Index Stored At: " + save_path)
+-        shape = [
+-            np.float32(bin_to_float("{:032b}".format(X.shape[0]))),
+-            np.float32(bin_to_float("{:032b}".format(X.shape[1]))),
+-        ]
+-        X = X.flatten()
+-        X = np.insert(X, 0, shape)
+-        X.tofile(data_path)
+-
+-        if not os.path.exists(save_path):
+-            print("Vamana PQ: Creating Index")
+-            s = time.time()
+-            if self.metric == "l2":
+-                index = vp.SinglePrecisionIndex(vp.Metric.FAST_L2, data_path)
+-            elif self.metric == "cosine":
+-                index = vp.SinglePrecisionIndex(vp.Metric.INNER_PRODUCT, data_path)
+-            else:
+-                print("Vamana PQ: Unknown Metric Error!")
+-            index.pq_build(data_path, pq_path, self.params)
+-            t = time.time()
+-            print("Vamana PQ: Index Build Time (sec) = " + str(t - s))
+-            index.save(save_path)
+-        if os.path.exists(save_path):
+-            print("Vamana PQ: Loading Index: " + str(save_path))
+-            s = time.time()
+-            if self.metric == "l2":
+-                self.index = vp.SinglePrecisionIndex(vp.Metric.FAST_L2, data_path)
+-            elif self.metric == "cosine":
+-                self.index = vp.SinglePrecisionIndex(vp.Metric.INNER_PRODUCT, data_path)
+-            else:
+-                print("Vamana PQ: Unknown Metric Error!")
+-            self.index.load(file_name=save_path)
+-            print("Vamana PQ: Index Loaded")
+-            self.index.pq_load(pq_prefix_path=pq_path)
+-            print("Vamana PQ: PQ Data Loaded")
+-            self.index.optimize_graph()
+-            print("Vamana PQ: Graph Optimization Completed")
+-            t = time.time()
+-            print("Vamana PQ: Index Load Time (sec) = " + str(t - s))
+-        else:
+-            print("Vamana PQ: Unexpected Index Build Time Error")
+-
+-        print("Vamana PQ: End of Fit")
++        index_dir = tempfile.mkdtemp(prefix="vamana-")
++        diskannpy.build_memory_index(
++            np.ascontiguousarray(X, dtype=np.float32),
++            distance_metric=self.metric,
++            index_directory=index_dir,
++            complexity=self.l_build,
++            graph_degree=self.max_outdegree,
++            num_threads=0,
++            alpha=self.alpha,
++        )
++        self.index = diskannpy.StaticMemoryIndex(
++            index_directory=index_dir,
++            num_threads=0,
++            initial_search_complexity=self.l_build,
++        )
+ 
+     def set_query_arguments(self, l_search):
+-        print("Vamana PQ: L_Search = " + str(l_search))
+         self.l_search = l_search
++        self.name = "Vamana-{}-{}-{}-L{}".format(self.l_build, self.max_outdegree, self.alpha, l_search)
+ 
+     def query(self, v, n):
+-        return self.index.pq_single_numpy_query(v, n, self.l_search)
++        return self.index.search(np.ascontiguousarray(v, dtype=np.float32), n, self.l_search).identifiers
+ 
+     def batch_query(self, X, n):
+-        self.num_queries = X.shape[0]
+-        self.result = self.index.pq_batch_numpy_query(X, n, self.num_queries, self.l_search)
++        self.result = self.index.batch_search(
++            np.ascontiguousarray(X, dtype=np.float32), n, self.l_search, num_threads=0
++        ).identifiers
+ 
+     def get_batch_results(self):
+-        return self.result.reshape((self.num_queries, self.result.shape[0] // self.num_queries))
++        return self.result
