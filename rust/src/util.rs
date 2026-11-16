@@ -303,3 +303,42 @@ pub fn pin(cpu: usize) {
     mask[cpu / 64] = 1 << (cpu % 64);
     assert_eq!(unsafe { sched_setaffinity(0, std::mem::size_of_val(&mask), mask.as_ptr()) }, 0, "cannot pin to CPU {cpu}");
 }
+
+/// The process's anonymous resident memory in MB (`RssAnon`; 0 where /proc is absent): the memory a build holds that
+/// the kernel cannot drop, unlike the mapped files it reads and writes.
+pub fn anon_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("RssAnon:")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).map_or(0.0, |kb| kb / 1024.0)
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn mallopt_set(param: i32, value: i32) {
+    extern "C" {
+        fn mallopt(param: i32, value: i32) -> i32;
+    }
+    // SAFETY: mallopt only sets glibc's allocator parameters; it takes no pointers
+    unsafe { mallopt(param, value) };
+}
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn mallopt_set(_param: i32, _value: i32) {}
+
+/// glibc's mmap threshold held at 1 MB while a build runs (`BuildMalloc::enter`). Its default rises to 32 MB as large
+/// blocks are freed; a build encodes cluster after cluster in buffers of a few MB, and above the risen threshold glibc
+/// keeps the freed ones in its arenas, which grew a 4M-row build by 38 bytes a row. The setting is process-wide, so
+/// when the build ends (the guard is dropped) the thresholds are set where a long build leaves glibc's own: mmap at
+/// 32 MB, trim at 64 MB, and allocations on the query path that follow a build in the same process stay on the heap
+/// as they would have. An open never sets them.
+pub struct BuildMalloc(());
+const M_TRIM_THRESHOLD: i32 = -1;
+const M_MMAP_THRESHOLD: i32 = -3;
+impl BuildMalloc {
+    pub fn enter() -> BuildMalloc {
+        mallopt_set(M_MMAP_THRESHOLD, 1 << 20);
+        BuildMalloc(())
+    }
+}
+impl Drop for BuildMalloc {
+    fn drop(&mut self) {
+        mallopt_set(M_MMAP_THRESHOLD, 32 << 20);
+        mallopt_set(M_TRIM_THRESHOLD, 64 << 20);
+    }
+}

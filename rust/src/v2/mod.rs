@@ -1802,7 +1802,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         }
         groups[g].set_calibration(CalIn { kmin, y0, ys, tq, k0, ks: ksv, kb: kbv });
     }
-    log(format!("calibrated {:.1}s", t.s()));
+    log(format!("calibrated {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let nl = meta.nl();
     let real = matches!(full, Full2::Real { .. });
     if let Some(d) = dir {
@@ -1874,7 +1874,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         }
         Done { esc: cc.esc, x2max: it.x2max, numax }
     }).collect();
-    log(format!("encoded {:.1}s", t.s()));
+    log(format!("encoded {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
     // the per-cluster records, from the written keys
     let ah_all = ahat.get();
@@ -1960,7 +1960,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     for (key, _) in ix.esc.iter() {
         ek[match key.1 { 0 => 0, 1..=7 => 1, 8..=15 => 2, _ => 3 }] += 1;
     }
-    log(format!("assembled {:.1}s; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
+    log(format!("assembled {:.1}s; anon {:.0} MB; x2 bound {:.3e}; escapes: det norms {}, |y| {}, kappa {}, tan {}; code hash {:016x}", t.s(), crate::util::anon_mb(), x2 - 1.0, ek[0], ek[1], ek[2], ek[3], ix.code_hash()));
     ix
 }
 
@@ -2023,6 +2023,7 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     };
     if !o.nusort {
         build_table2(&mut ix, p.meta.k);
+        log(format!("[build2] support table; anon {:.0} MB", crate::util::anon_mb()));
     }
     Ok(ix)
 }
@@ -2037,9 +2038,11 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 /// The fitted directory `dir` built into a queryable index in memory (codes, repack thresholds and, without the norm
 /// sort, the support table), with the parameters it was built from. Nothing is saved.
 pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+    let malloc = crate::util::BuildMalloc::enter();
     let (p, prof) = prepare(dir, o);
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log).unwrap_or_else(|e| panic!("{e}"));
+    drop(malloc);
     set_repack(&mut ix, log);
     (p, ix)
 }
@@ -2084,7 +2087,9 @@ pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(S
 }
 
 fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    let malloc = crate::util::BuildMalloc::enter();
     let (p, prof) = prepare(dir, o);
+    log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
     let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
@@ -2105,6 +2110,7 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
         if now.is_some() && now != before {
             if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
                 drop(lock);
+                drop(malloc);
                 log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));
                 set_repack(&mut ix, log);
                 return Ok((p, ix));
@@ -2124,6 +2130,7 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     let h = store::seal(&ix, &tmp, &key, Some(xs));
     store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);
+    drop(malloc);
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
     Ok((p, ix))
