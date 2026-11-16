@@ -2124,9 +2124,15 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     let ix = if p.xs_path.is_empty() {
         // the partition must be the one fitted (a partition written again into its directory is another), hold rows
         // of the fit's width, and give every fit row the entity the fit's perm.npy lists for it
-        let now = crate::bucket::partition_id(&p.partition)?;
+        let now = crate::bucket::partition_id(&p.partition).map_err(|e| format!("{e}; then refit (vexact --index {fit_dir} fit --partition {}) before building", p.partition))?;
         if now != p.partition_id {
             return Err(format!("the partition {} changed since the fit (identity {} when fitted, {now} now); refit it (vexact --index {fit_dir} fit --partition {}) before building", p.partition, if p.partition_id.is_empty() { "unrecorded" } else { &p.partition_id }, p.partition));
+        }
+        // the same content: a manifest copied, moved or chmodded since the fit is only worth a warning
+        if let (Some(was), Ok(id)) = (p.partition_file, store::XsId::of(&format!("{}/manifest.json", p.partition))) {
+            if was != id {
+                lg(format!("WARNING: the partition {} holds what was fitted, but its manifest.json is another file than at the fit (modified {:?} -> {:?}, ctime {:?} -> {:?}, device {} -> {}, inode {} -> {}: a copy, a move or a chmod); building from it", p.partition, was.mtime, id.mtime, was.ctime, id.ctime, was.dev, id.dev, was.ino, id.ino));
+            }
         }
         let src = crate::bucket::Buckets::open(&p.partition, fit_dir)?;
         if src.part.n != p.meta.n {
@@ -2162,7 +2168,8 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
-    let (p, prof) = prepare(dir, o)?;
+    let (mut p, prof) = prepare(dir, o)?;
+    p.load_perm()?;
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log)?;
     set_repack(&mut ix, log);
@@ -2182,14 +2189,20 @@ pub fn open_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(Stri
 }
 
 fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    let t = Timer::new();
     let (p, prof) = prepare(dir, o)?;
+    let t_fit = t.s();
     let key = store::build_key(&p, &prof, o);
+    let t_key = t.s();
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
     store::log_stale(&store::parent_of(edir), edir, &mut |s| log(format!("[open] {s}")));
     let design_c = design_constants(&p, o, log);
+    let t_map = t.s();
     let mut ix = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}")))?;
+    let t_open = t.s();
     set_repack(&mut ix, log);
+    log(format!("[open] {:.3}s in all: fit read {t_fit:.3}s, key {:.3}s, index opened {:.3}s, repack timed {:.3}s; anon {:.0} MB", t.s(), t_key - t_fit, t_open - t_map, t.s() - t_open, crate::util::anon_mb()));
     Ok((p, ix))
 }
 
@@ -2212,7 +2225,11 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
-    let (p, prof) = prepare(dir, o)?;
+    let (mut p, prof) = prepare(dir, o)?;
+    // perm.npy's identity before its rows are read, as the vectors file's
+    let perm_id = store::XsId::of(&p.perm_path).map_err(|e| format!("{e}; a rebuild reads the fit's perm.npy"))?;
+    p.load_perm()?;
+    let perm = Some((store::perm_hash(&p.perm), perm_id));
     log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
     let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
@@ -2250,7 +2267,7 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
             return Err(e);
         }
     };
-    let h = store::seal(&ix, &tmp, &key, Some(xs));
+    let h = store::seal(&ix, &tmp, &key, Some(xs), perm);
     store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));

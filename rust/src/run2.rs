@@ -279,7 +279,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         out!("[index] code hash {:016x}", ix.code_hash());
         out!("[index] store hash {:016x}", ix.store_hash());
     }
-    if args().iter().any(|a| a == "--hash" || a == "verify") {
+    if args().iter().any(|a| a == "--hash") || has_mode("verify") {
         if let Err(e) = ix.check_maps() {
             eprintln!("{e}");
             std::process::exit(2);
@@ -293,6 +293,13 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // item queries: held-out rows from --item-queries, else rows of the fit listed by it (Xs.npy rows, read from the
     // index through the fit's row-to-entity map)
     let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
+        // the fit's perm.npy, which an open does not read
+        if p.perm.is_empty() {
+            p.load_perm().unwrap_or_else(|e| {
+                eprintln!("{e} (item queries from the fit's qi.npy need it; or give --item-queries)");
+                std::process::exit(2);
+            });
+        }
         p.qi.iter().filter(|&&r| (r as usize) < p.cstart[p.meta.k]).map(|&r| ix.full_row_f16(ix.row_of_ent(p.perm[r as usize] as u32)).iter().map(|&h| f16_to_f32(h)).collect()).collect()
     } else {
         load_queries_from(&arg_str("--item-queries", ""), n)

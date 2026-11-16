@@ -43,7 +43,12 @@ pub struct Params {
     pub tree_edges: Vec<f64>, // 9 x 256
     pub tree_cent: Vec<f64>,
     pub gtree: Vec<f64>,
+    /// Fit row -> entity (perm.npy): empty until `load_perm`, which a build calls. An open never reads it (8 bytes a
+    /// row); the index holds its own row-to-entity map, and the build records perm.npy's hash and identity.
     pub perm: Vec<i64>,
+    pub perm_path: String,
+    /// The fit's rows (its cstart's last entry, before `BuildOptions::clusters` keeps only some clusters).
+    pub fit_rows: usize,
     pub qi: Vec<i64>,
     /// The support table's anchors (A x n, unit; the fit's `anchors.npy`), loaded and checked by `v2::prepare`
     /// (`load_params` leaves them empty). Empty: one anchor per cluster, its centre's direction.
@@ -55,6 +60,9 @@ pub struct Params {
     /// The partition's identity when it was fitted (meta.json "partition_id", fit::partition_id): a hash of its
     /// manifest.json and that file's identity. Empty for a fit with an Xs.npy.
     pub partition_id: String,
+    /// The identity of the partition's manifest.json file when it was fitted (meta.json "partition_file"): a build
+    /// warns when it changed while the content (`partition_id`) did not.
+    pub partition_file: Option<crate::v2::store::XsId>,
 }
 
 impl Params {
@@ -209,7 +217,9 @@ pub fn load_params(dir: &str) -> Result<Params, String> {
         tree_edges: r("tree_edges")?.f64s(),
         tree_cent: r("tree_cent")?.f64s(),
         gtree: r("gtree")?.f64s(),
-        perm: r("perm")?.i64s(),
+        perm: Vec::new(),
+        perm_path: format!("{dir}/perm.npy"),
+        fit_rows: 0,
         qi: r("qi")?.i64s(),
         anchors: Vec::new(),
         xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
@@ -217,16 +227,35 @@ pub fn load_params(dir: &str) -> Result<Params, String> {
         partition: if partition.is_empty() || partition.starts_with('/') { partition.to_string() } else { format!("{dir}/{partition}") },
         partition_name: partition.to_string(),
         partition_id: meta["partition_id"].as_str().unwrap_or("").to_string(),
+        partition_file: crate::v2::store::XsId::from_json(&meta["partition_file"]),
     };
     // the sizes the build and the open index by
-    let rows = p.cstart.last().copied().unwrap_or(0);
     let ok = p.cstart.len() == k + 1 && p.cstart.first() == Some(&0) && p.cstart.windows(2).all(|w| w[0] <= w[1]) && p.grp.len() == k && p.grp.iter().all(|&x| x < g)
-        && Some(p.lam.len()) == g.checked_mul(n) && g.checked_mul(n).and_then(|x| x.checked_mul(n)) == Some(p.v.len()) && p.perm.len() == rows
-        && p.perm.iter().all(|&e| e >= 0 && e <= u32::MAX as i64) && p.r2.as_ref().map_or(true, |r| r.len() == g) && p.tree_edges.len() == p.tree_cent.len();
+        && Some(p.lam.len()) == g.checked_mul(n) && g.checked_mul(n).and_then(|x| x.checked_mul(n)) == Some(p.v.len())
+        && p.r2.as_ref().map_or(true, |r| r.len() == g) && p.tree_edges.len() == p.tree_cent.len();
     if !ok {
-        return Err(format!("{dir}: the fit's arrays (cstart, grp, lam, V, perm, r2, tree tables) do not agree with its {k} clusters, {g} groups and {n} dimensions; refit it"));
+        return Err(format!("{dir}: the fit's arrays (cstart, grp, lam, V, r2, tree tables) do not agree with its {k} clusters, {g} groups and {n} dimensions; refit it"));
     }
-    Ok(p)
+    let fit_rows = p.cstart[k];
+    Ok(Params { fit_rows, ..p })
+}
+
+impl Params {
+    /// Read perm.npy (fit row -> entity) into `perm`, checked: one entity per fit row, each a u32. A build needs it; an
+    /// open does not.
+    pub fn load_perm(&mut self) -> Result<(), String> {
+        let rows = self.fit_rows;
+        let a = try_read_npy(&self.perm_path).map_err(|e| format!("{e}; a build reads the fit's perm.npy"))?;
+        if a.descr != "<i8" || a.shape.len() != 1 || a.shape[0] != rows {
+            return Err(format!("{}: expected {rows} int64 entities (<i8, 1-D), found {} of shape {:?}; refit", self.perm_path, a.descr, a.shape));
+        }
+        let perm = a.i64s();
+        if let Some(i) = perm.iter().position(|&e| !(0..=u32::MAX as i64).contains(&e)) {
+            return Err(format!("{}: fit row {i} is entity {}, outside 0..2^32; refit", self.perm_path, perm[i]));
+        }
+        self.perm = perm;
+        Ok(())
+    }
 }
 
 pub struct RealSource {

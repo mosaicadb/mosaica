@@ -77,16 +77,41 @@ pub struct Partition {
     pub cluster_cell: Vec<u32>,
 }
 
+/// The partition's manifest.json: its bytes and its contents, with every file it lists checked to exist at the length
+/// it lists (an error naming the first that does not).
+fn manifest(dir: &str) -> Result<(Vec<u8>, serde_json::Value), String> {
+    let path = format!("{dir}/manifest.json");
+    let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
+    let m: serde_json::Value = serde_json::from_slice(&b).map_err(|e| format!("{path}: {e}; rerun tools/partition.py"))?;
+    let files = m["files"].as_object().ok_or(format!("{path} does not list the partition's files (an older tools/partition.py wrote it); rerun tools/partition.py"))?;
+    for (name, len) in files {
+        let want = len.as_u64().ok_or(format!("{path}: the length of {name} is not a number; rerun tools/partition.py"))?;
+        if name.is_empty() || name.contains('/') || name.starts_with('.') {
+            return Err(format!("{path} lists the file {name:?}, which is not a name in the partition's directory; rerun tools/partition.py"));
+        }
+        match std::fs::metadata(format!("{dir}/{name}")) {
+            Ok(md) if md.len() == want => {}
+            Ok(md) => return Err(format!("{dir}/{name} is {} bytes, the partition's manifest says {want}: the partition changed after it was written; rerun tools/partition.py", md.len())),
+            Err(e) => return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); rerun tools/partition.py")),
+        }
+    }
+    Ok((b, m))
+}
+
 impl Partition {
+    /// The partition in `dir`: the cell files its manifest lists (with the lengths it lists), mapped. A file the
+    /// manifest does not list is not read (a cell with no moved-in rows has no `in` files).
     pub fn open(dir: &str) -> Result<Partition, String> {
         let path = format!("{dir}/manifest.json");
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
-        let m: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}; rerun tools/partition.py"))?;
+        let (_, m) = manifest(dir)?;
         let us = |k: &str| m[k].as_u64().map(|x| x as usize).ok_or(format!("{path} has no {k}; rerun tools/partition.py"));
         let (n, nc) = (us("n")?, us("cells")?);
         let mut cells = Vec::with_capacity(nc);
         for c in 0..nc {
-            let f = |x: &str| map(&format!("{dir}/cell{c}.{x}"));
+            let f = |x: &str| {
+                let name = format!("cell{c}.{x}");
+                if m["files"].get(&name).is_some() { map(&format!("{dir}/{name}")) } else { Ok(None) }
+            };
             let cell = Cell { vec: f("f16")?, ids: f("ids")?, cl: f("cl")?, in_vec: f("in.f16")?, in_ids: f("in.ids")?, in_cl: f("in.cl")?, own: 0 };
             let own = words::<u64>(&cell.ids).len();
             let nin = words::<u32>(&cell.in_cl).len();
@@ -103,18 +128,18 @@ impl Partition {
     }
 }
 
-/// The identity of the partition in `dir`, which a fit records (meta.json "partition_id") and a build checks: a fixed
-/// hash of its manifest.json (written last by tools/partition.py, with the partition's source, sizes and seed) and of
-/// that file's identity (length, times, device, inode; `v2::store::XsId`). A partition written again into the same
-/// directory, with another seed or other data, has another.
+/// The identity of the partition in `dir`, which a fit records (meta.json "partition_id") and a build and an open
+/// check: a fixed hash of its manifest.json, after checking that every file the manifest lists has the length it
+/// lists. tools/partition.py removes the manifest before it writes anything and writes it last, with the partition's
+/// source, sizes, seed, files and lengths, and the moment and a random token of that run, so a partition written again
+/// into the same directory has another identity. Only the content counts: a copy, a move or a chmod of the partition
+/// keeps it (the fit records the manifest's file identity too, and a build warns when that changed). Reads the
+/// manifest and the lengths of its files: O(cells), never the rows.
 pub fn partition_id(dir: &str) -> Result<String, String> {
-    let path = format!("{dir}/manifest.json");
-    let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
-    let id = crate::v2::store::XsId::of(&path)?;
+    let (b, _) = manifest(dir)?;
     let mut h = crate::v2::store::Fx::default();
-    h.str("vexact partition");
+    h.str("vexact partition 2");
     h.bytes(&b);
-    h.pod(&[id.len, id.mtime.0 as u64, id.mtime.1 as u64, id.ctime.0 as u64, id.ctime.1 as u64, id.dev, id.ino]);
     Ok(format!("{:016x}", h.finish()))
 }
 

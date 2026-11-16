@@ -247,6 +247,8 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let part = crate::bucket::Partition::open(&pdir)?;
+    // the partition's identity (its content) and its manifest's file identity (a build warns when only that changed)
+    let partition_file = crate::v2::store::XsId::of(&format!("{pdir}/manifest.json"))?;
     let partition_id = crate::bucket::partition_id(&pdir)?;
     let (nrow, n0, n) = (part.rows, part.n_orig, part.n);
     if n0 < 50 {
@@ -566,6 +568,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         "CSG": (2.0 * l1).sqrt(), "L1": l1, "EPS": EPS,
         "partition": std::fs::canonicalize(&pdir).map_or(pdir.clone(), |p| p.display().to_string()),
         "partition_id": partition_id,
+        "partition_file": partition_file.json(),
         "format": FORMAT, "fit": fitj,
     });
     let tmp = format!("{meta_path}.tmp");

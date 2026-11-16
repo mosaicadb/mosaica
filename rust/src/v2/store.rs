@@ -323,10 +323,10 @@ impl XsId {
         let md = std::fs::metadata(path).map_err(|e| format!("cannot read {path}: {e}"))?;
         Ok(XsId { len: md.len(), mtime: (md.mtime(), md.mtime_nsec()), ctime: (md.ctime(), md.ctime_nsec()), dev: md.dev(), ino: md.ino() })
     }
-    fn json(&self) -> serde_json::Value {
+    pub fn json(&self) -> serde_json::Value {
         serde_json::json!({ "len": self.len, "mtime": [self.mtime.0, self.mtime.1], "ctime": [self.ctime.0, self.ctime.1], "dev": self.dev, "ino": self.ino })
     }
-    fn from_json(v: &serde_json::Value) -> Option<XsId> {
+    pub fn from_json(v: &serde_json::Value) -> Option<XsId> {
         let pair = |x: &serde_json::Value| Some((x[0].as_i64()?, x[1].as_i64()?));
         Some(XsId { len: v["len"].as_u64()?, mtime: pair(&v["mtime"])?, ctime: pair(&v["ctime"])?, dev: v["dev"].as_u64()?, ino: v["ino"].as_u64()? })
     }
@@ -339,6 +339,16 @@ pub struct Seal<'a> {
     pub store_hash: u64,
     pub plan_hash: u64,
     pub xs: Option<XsId>,
+    /// The fit's perm.npy as the build read it: the hash of its entities (`perm_hash`) and its file's identity.
+    pub perm: Option<(u64, XsId)>,
+}
+
+/// A fixed hash of a fit's perm.npy entities (fit row -> entity), which the build records; parallel in fixed chunks.
+pub fn perm_hash(perm: &[i64]) -> u64 {
+    let mut h = Fx::default();
+    h.str("vexact perm");
+    h.big_pod(perm);
+    h.finish()
 }
 
 /// `index.json`, written to a new file and renamed into place (it is written twice: without a key while the build
@@ -352,6 +362,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
         "npow": ix.meta.npow, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
+        "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
         "groups": groups,
     });
     let (tmp, path) = (format!("{dir}/index.json.tmp"), format!("{dir}/index.json"));
@@ -513,12 +524,12 @@ pub fn save_rest(ix: &Index2, dir: &str) {
 /// Finish the index built into `dir`: write its support table's anchors, give `index.json` the key it answers to, the index's
 /// `store_hash` and `plan_hash` and the identity `xs` of the vectors file it was built from (written last, so a
 /// directory whose `index.json` has a key is complete), and sync the directory. Returns the store hash.
-pub fn seal(ix: &Index2, dir: &str, key: &str, xs: Option<XsId>) -> u64 {
+pub fn seal(ix: &Index2, dir: &str, key: &str, xs: Option<XsId>, perm: Option<(u64, XsId)>) -> u64 {
     let f = |name: &str| format!("{dir}/{name}");
     // (the build wrote the table's bounds, hi.bin and lo.bin, while encoding)
     write_file(&f("anchors.bin"), &ix.anchors);
     let h = ix.store_hash();
-    index_json(ix, dir, Some(&Seal { key, store_hash: h, plan_hash: ix.plan_hash(), xs }));
+    index_json(ix, dir, Some(&Seal { key, store_hash: h, plan_hash: ix.plan_hash(), xs, perm }));
     sync_dir(dir);
     h
 }
@@ -664,10 +675,12 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
 /// come from one complete build. Every check is over clusters, levels and tables, never over rows (`check_maps` checks
 /// the row maps, with `--hash` and `verify`). A missing, stale or damaged index is an error that says to rebuild.
 ///
-/// The fit's vectors file is not read (the index holds its own vectors); its identity is compared with the one the
-/// index was built from (`XsId`): another length or modification time is an error unless `o.keep_index`, which turns
-/// it into a warning; another status-change time, device or inode only (chmod, a copy with its times, a restore, a
-/// hard link) is a warning; a missing file is a warning. The repack thresholds are left at their default.
+/// The fit's vectors file and its perm.npy are not read (the index holds its own vectors and row-to-entity map); their
+/// identities are compared with the ones the index was built from (`XsId`, `check_file`): another length or
+/// modification time is an error unless `o.keep_index`, which turns it into a warning; another status-change time,
+/// device or inode only (chmod, a copy with its times, a restore, a hard link) is a warning; a missing file is a
+/// warning. A partitioned fit's partition is compared by content (`check_partition`, O(cells)). Nothing in an open is
+/// O(rows) except the map of escapes (a few per hundred rows). The repack thresholds are left at their default.
 pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>, key: &str, dir: &str, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
     let t = Timer::new();
     let missing = |e: String| format!("no index of this fit and these options is saved in {dir} ({e}); build it with --rebuild (v2::rebuild)");
@@ -704,34 +717,15 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     let rows = disk::Rows::open(&f("vectors.bin"), nrows.checked_mul(n).ok_or(damaged("nrows x n overflows"))?, "normal").map_err(|e| format!("{}; rebuild the index", ours(e)))?;
     drop(dfd);
     drop(lock);
-    // the vectors file it was built from
-    let xs_path = p.vectors_id_path();
-    match (XsId::from_json(&v["xs"]), XsId::of(&xs_path)) {
-        (_, Err(e)) => log(format!("WARNING: the fit's vectors file is missing or unreadable ({e}); the index holds its own vectors, opening it")),
-        (None, Ok(_)) => log(format!("WARNING: {dir}/index.json does not record the vectors file it was built from; opening it")),
-        (Some(was), Ok(now)) if was != now => {
-            if was.len != now.len || was.mtime != now.mtime {
-                let what = format!("{} changed since this index was built (length {} -> {}, modified {:?} -> {:?})", xs_path, was.len, now.len, was.mtime, now.mtime);
-                if !o.keep_index {
-                    return Err(format!("{what}; --rebuild, or --keep-index to use the index as built"));
-                }
-                log(format!("WARNING: {what}; --keep-index: using the index as built, with the vectors it holds"));
-            } else {
-                let mut which = Vec::new();
-                if was.ctime != now.ctime {
-                    which.push("status-change time (ctime)");
-                }
-                if was.dev != now.dev {
-                    which.push("device");
-                }
-                if was.ino != now.ino {
-                    which.push("inode");
-                }
-                log(format!("WARNING: {}: same length and modification time as when this index was built, but another {} (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index, which serves the vectors it was built from", xs_path, which.join(", ")));
-            }
-        }
-        _ => {}
+    // the fit's vectors (its Xs.npy, or its partition) and its perm.npy, as they were when the index was built: by
+    // identity and the partition's manifest, never by reading them
+    let xs_was = XsId::from_json(&v["xs"]);
+    if p.xs_path.is_empty() {
+        check_partition(p, xs_was, o.keep_index, log)?;
+    } else {
+        check_file("the fit's vectors file", &p.xs_path, xs_was, "the index holds its own vectors", o.keep_index, dir, log)?;
     }
+    check_file("the fit's perm.npy", &p.perm_path, XsId::from_json(&v["perm"]["file"]), "the index holds its own row-to-entity map", o.keep_index, dir, log)?;
     if n != p.meta.n || k != p.meta.k {
         return Err(format!("{dir} was built with {k} clusters of {n} dimensions, the fit has {} of {}; rebuild it", p.meta.k, p.meta.n));
     }
@@ -859,6 +853,77 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     Ok(ix)
 }
 
+/// `path` now against its identity `was` when the index in `dir` was built: another length or modification time is an
+/// error unless `keep` (then a warning); another status-change time, device or inode only (chmod, a copy keeping its
+/// times, a restore, a hard link) is a warning; a missing file, or none recorded, is a warning (`holds` says why the
+/// index does not need it).
+fn check_file(what: &str, path: &str, was: Option<XsId>, holds: &str, keep: bool, dir: &str, log: &mut dyn FnMut(String)) -> Result<(), String> {
+    match (was, XsId::of(path)) {
+        (_, Err(e)) => log(format!("WARNING: {what} is missing or unreadable ({e}); {holds}, opening it")),
+        (None, Ok(_)) => log(format!("WARNING: {dir}/index.json does not record {what} it was built from; opening it")),
+        (Some(was), Ok(now)) if was != now => {
+            if was.len != now.len || was.mtime != now.mtime {
+                let changed = format!("{path} changed since this index was built (length {} -> {}, modified {:?} -> {:?})", was.len, now.len, was.mtime, now.mtime);
+                if !keep {
+                    return Err(format!("{changed}; --rebuild, or --keep-index to use the index as built"));
+                }
+                log(format!("WARNING: {changed}; --keep-index: using the index as built ({holds})"));
+            } else {
+                log(format!("WARNING: {path}: same length and modification time as when this index was built, but another {} (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index ({holds})", id_diff(&was, &now)));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// What differs between two identities of a file with the same length and modification time.
+fn id_diff(was: &XsId, now: &XsId) -> String {
+    let mut which = Vec::new();
+    if was.ctime != now.ctime {
+        which.push("status-change time (ctime)");
+    }
+    if was.dev != now.dev {
+        which.push("device");
+    }
+    if was.ino != now.ino {
+        which.push("inode");
+    }
+    which.join(", ")
+}
+
+/// A partitioned fit's partition against the one fitted (`partition_id`, its manifest's content, and the files'
+/// lengths it lists; O(cells)): another is an error unless `keep` (then a warning); the same content under another
+/// file identity of its manifest than at the build (`was`: a copy, a move, a chmod) is a warning; a missing partition
+/// is a warning (the index holds its own vectors; the cells may be deleted after the build).
+fn check_partition(p: &Params, was: Option<XsId>, keep: bool, log: &mut dyn FnMut(String)) -> Result<(), String> {
+    let man = format!("{}/manifest.json", p.partition);
+    let holds = "the index holds its own vectors";
+    let now = match XsId::of(&man) {
+        Err(e) => {
+            log(format!("WARNING: the fit's partition is missing or unreadable ({e}); {holds}, opening it"));
+            return Ok(());
+        }
+        Ok(now) => now,
+    };
+    match crate::bucket::partition_id(&p.partition) {
+        Ok(id) if id == p.partition_id => {
+            if let Some(was) = was.filter(|w| *w != now) {
+                log(format!("WARNING: the partition {} holds what was fitted, but its manifest.json is another file than when this index was built (length {} -> {}, modified {:?} -> {:?}{}{}: a copy, a move or a chmod); opening the index", p.partition, was.len, now.len, was.mtime, now.mtime, if id_diff(&was, &now).is_empty() { "" } else { ", another " }, id_diff(&was, &now)));
+            }
+            Ok(())
+        }
+        r => {
+            let changed = format!("the partition {} changed since the fit this index was built from ({})", p.partition, match r { Ok(id) => format!("identity {} when fitted, {id} now", p.partition_id), Err(e) => e });
+            if !keep {
+                return Err(format!("{changed}; refit and --rebuild, or --keep-index to use the index as built"));
+            }
+            log(format!("WARNING: {changed}; --keep-index: using the index as built ({holds})"));
+            Ok(())
+        }
+    }
+}
+
 /// The key of the index the fit `p` (with the options applied), the profile `prof` and the options `o` build: a saved
 /// index is opened only when its key is this one. It covers what the build reads besides the vectors: the fit's
 /// parameters, the profile, the name of the vectors file or of the partition as meta.json gives it (relative to the
@@ -890,7 +955,8 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     }
     h.usizes(&p.cstart);
     h.usizes(&p.grp);
-    h.pod(&p.perm);
+    // not perm.npy's rows (8 bytes a row; an open reads none): the build records their hash and the file's identity,
+    // which an open checks as it checks the vectors file's
     h.str(&p.fit);
     h.pod(&p.centres);
     h.pod(&p.v);
@@ -912,6 +978,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     h.pod(prof);
     h.str(&p.xs_name);
     h.str(&p.partition_name);
+    h.str(&p.partition_id);
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
     h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items]);
     match o.nguar {

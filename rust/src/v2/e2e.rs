@@ -474,7 +474,32 @@ fn the_vectors_file_is_checked_at_open() {
     let (r, log) = opened(&keep);
     assert_eq!(r.unwrap(), want);
     assert!(warned(&log, "changed since this index was built"), "{log:?}");
+    // perm.npy is never read by an open: its entities overwritten in place, length and mtime kept, is a warning only
+    // (the index serves its own row-to-entity map); another mtime is an error unless --keep-index
+    let perm = fit.join("perm.npy");
+    let pm = std::fs::metadata(&perm).unwrap().modified().unwrap();
+    let mut pb = std::fs::read(&perm).unwrap();
+    let pl = pb.len();
+    pb[pl - 16..].fill(0xff);
+    std::fs::write(&perm, &pb).unwrap();
+    std::fs::File::options().write(true).open(&perm).unwrap().set_modified(pm).unwrap();
+    let (r, log) = opened(&keep);
+    assert_eq!(r.unwrap(), want);
+    assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("perm.npy") && l.contains("ctime")), "{log:?}");
+    std::fs::File::options().write(true).open(&perm).unwrap().set_modified(pm + std::time::Duration::from_secs(1)).unwrap();
+    let (r, _) = opened(&keep);
+    assert_eq!(r.unwrap(), want);
+    let (r, _) = opened(&BuildOptions { keep_index: false, ..o.clone() });
+    // (the vectors file's mtime is also off: --keep-index is named either way)
+    assert!(r.unwrap_err().contains("--keep-index"));
+    // the build reads it, checked: an entity outside 0..2^32 is an error, not a panic
+    let e = rebuild_at(dir, &tmp.join("encoded-perm").to_string_lossy(), &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("perm.npy") && e.contains("outside"), "{e}");
     // missing: a warning
+    std::fs::remove_file(&perm).unwrap();
+    let (r, log) = opened(&keep);
+    assert_eq!(r.unwrap(), want);
+    assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("perm.npy") && l.contains("missing")), "{log:?}");
     std::fs::remove_file(&xs).unwrap();
     let (r, log) = opened(&o);
     assert_eq!(r.unwrap(), want);
@@ -581,7 +606,8 @@ fn synth_partition(at: &std::path::Path) -> (String, Vec<Vec<u16>>) {
 /// `synth_partition` with a third of cluster `moved`'s rows stored in the other cell.
 fn synth_partition_moving(at: &std::path::Path, moved_cluster: usize) -> (String, Vec<Vec<u16>>) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-    let p = crate::index::load_params(dir).unwrap();
+    let mut p = crate::index::load_params(dir).unwrap();
+    p.load_perm().unwrap();
     let xs = crate::index::RealSource::open(&p.xs_path);
     let (n, k) = (p.meta.n, p.meta.k);
     let mut byent = vec![Vec::new(); p.perm.len()];
@@ -614,7 +640,13 @@ fn synth_partition_moving(at: &std::path::Path, moved_cluster: usize) -> (String
     }
     let cc: Vec<u8> = (0..k).flat_map(|c| (cell_of(c) as u32).to_le_bytes()).collect();
     crate::util::write_npy(at.join("cluster_cell.npy").to_str().unwrap(), "<u4", &[k], &cc);
-    let man = serde_json::json!({"N": p.perm.len(), "n": n, "n_orig": n, "K": k, "cells": 2, "cross": 1, "seed": moved_cluster});
+    // the manifest lists every file with its length, as tools/partition.py's does
+    let mut files = serde_json::Map::new();
+    for e in std::fs::read_dir(at).unwrap() {
+        let e = e.unwrap();
+        files.insert(e.file_name().to_string_lossy().to_string(), e.metadata().unwrap().len().into());
+    }
+    let man = serde_json::json!({"N": p.perm.len(), "n": n, "n_orig": n, "K": k, "cells": 2, "cross": 1, "seed": moved_cluster, "files": files});
     std::fs::write(at.join("manifest.json"), man.to_string()).unwrap();
     (at.to_str().unwrap().to_string(), byent)
 }
@@ -780,6 +812,65 @@ fn a_changed_partition_is_refused_at_the_build() {
     std::fs::write(&ids, b).unwrap();
     let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("perm.npy"), "{e}");
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// A partition is known by its manifest's content and the lengths of the files it lists, not by the manifest file's
+/// identity: a copy of the manifest in place (new mtime, ctime and inode) builds and opens with warnings; a manifest
+/// whose content changed, or a cell file whose length is not the listed one, is refused at the build and at the open
+/// (unless --keep-index); a partition with no listed files (an older partition.py) is refused at the fit.
+#[test]
+fn a_partition_is_known_by_its_content() {
+    let tmp = tmp_dir("partid");
+    let pdir = tmp.join("part");
+    let (part, _) = synth_partition(&pdir);
+    let fit = tmp.join("fit");
+    let fit = fit.to_str().unwrap();
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
+    let o = BuildOptions::default();
+    let edir = tmp.join("encoded-p");
+    let edir = edir.to_str().unwrap();
+    let want = rebuild_at(fit, edir, &o, &mut |_| {}).unwrap().1.store_hash();
+    let man = pdir.join("manifest.json");
+    let text = std::fs::read(&man).unwrap();
+    // the manifest copied in place: another file with the same content
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::remove_file(&man).unwrap();
+    std::fs::write(&man, &text).unwrap();
+    let mut log = Vec::new();
+    let (_, ix) = open_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    assert_eq!(ix.store_hash(), want);
+    assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("holds what was fitted")), "{log:?}");
+    let mut log = Vec::new();
+    let (_, ix) = rebuild_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    assert_eq!(ix.store_hash(), want, "the same partition, copied, builds the same index");
+    assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("holds what was fitted")), "{log:?}");
+    // the content changed (one byte of the seed): refused at the build, and at the open unless --keep-index
+    let mut t2 = String::from_utf8(text.clone()).unwrap();
+    t2 = t2.replace("\"seed\":3", "\"seed\":4");
+    assert_ne!(t2.as_bytes(), &text[..]);
+    std::fs::write(&man, &t2).unwrap();
+    assert!(rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("changed since the fit"));
+    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("--keep-index"));
+    let (_, ix) = open_at(fit, edir, &BuildOptions { keep_index: true, ..o.clone() }, &mut |_| {}).unwrap();
+    assert_eq!(ix.store_hash(), want);
+    // a cell file of another length than listed
+    std::fs::write(&man, &text).unwrap();
+    open_at(fit, edir, &o, &mut |_| {}).unwrap();
+    let cl = pdir.join("cell1.cl");
+    let mut b = std::fs::read(&cl).unwrap();
+    b.extend([0u8; 4]);
+    std::fs::write(&cl, &b).unwrap();
+    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("cell1.cl") && e.contains("bytes"), "{e}");
+    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
+    // no files listed: refused at the fit
+    let mut m: serde_json::Value = serde_json::from_slice(&text).unwrap();
+    m.as_object_mut().unwrap().remove("files");
+    std::fs::write(&man, m.to_string()).unwrap();
+    let e = crate::fit::fit(&tmp.join("fit2").to_string_lossy(), &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("does not list"), "{e}");
+    drop(ix);
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 

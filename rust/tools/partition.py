@@ -10,8 +10,10 @@
 # Writes to OUTDIR, per cell c: cell{c}.f16 (unit rows, float16, zero-padded to n, a multiple of 32), cell{c}.ids
 # (uint64 source rows) and cell{c}.cl (uint32 fine cluster of each row); the rows that moved into cell c from other
 # cells in cell{c}.in.f16, cell{c}.in.ids and cell{c}.in.cl. Also centres.npy (K x n float32, unit fine centres,
-# numbered cell by cell), cluster_cell.npy (K, uint32) and manifest.json.
-import argparse, json, os, time
+# numbered cell by cell), cluster_cell.npy (K, uint32) and manifest.json, written last: it lists every file with its
+# length, the moment of the run and a random token, so a partition written again is another (`bucket::partition_id`).
+# The manifest and the files of any earlier partition in OUTDIR are removed before anything is written.
+import argparse, glob, json, os, time
 import numpy as np
 import faiss
 
@@ -57,6 +59,12 @@ def main():
     ap.add_argument("--seed", type=int, default=20261112)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    # an earlier partition here: its manifest first (until the new one is written last, OUTDIR is no partition, so no
+    # cell can change under a manifest), then its files (a cell it had and this run does not write would be stale)
+    for old in [os.path.join(a.out, "manifest.json")] + sorted(glob.glob(os.path.join(a.out, "cell*.*"))) + \
+            [os.path.join(a.out, x) for x in ("centres.npy", "cluster_cell.npy")]:
+        if os.path.exists(old):
+            os.remove(old)
     X = np.load(a.vectors, mmap_mode="r")
     N, n0 = X.shape
     n = (n0 + 31) // 32 * 32
@@ -136,9 +144,18 @@ def main():
     np.save(f("cluster_cell.npy"), ccell)
     src = os.path.abspath(a.vectors)
     st = os.stat(src)
-    json.dump(dict(N=int(N), n=int(n), n_orig=int(n0), K=int(len(cent)), cells=int(C), cross=int(a.cross),
-                   seed=a.seed, source=src, source_bytes=st.st_size, source_mtime=st.st_mtime,
-                   rows=[int(r) for r in rows], moved=int(moved)), open(f("manifest.json"), "w"), indent=1)
+    names = [f"cell{c}.{x}" for c in range(C) for x in ("f16", "ids", "cl")] + \
+        [f"cell{d}.in.{x}" for d in sorted(outs) for x in ("f16", "ids", "cl")] + ["centres.npy", "cluster_cell.npy"]
+    files = {nm: os.path.getsize(f(nm)) for nm in names}
+    man = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(len(cent)), cells=int(C), cross=int(a.cross),
+               seed=a.seed, source=src, source_bytes=st.st_size, source_mtime=st.st_mtime,
+               rows=[int(r) for r in rows], moved=int(moved), files=files, created=time.time_ns(),
+               token=os.urandom(8).hex())
+    with open(f("manifest.json.tmp"), "w") as fh:
+        json.dump(man, fh, indent=1)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(f("manifest.json.tmp"), f("manifest.json"))
     log(f"wrote {a.out}")
 
 
