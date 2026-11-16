@@ -36,17 +36,18 @@ pub struct Ctx2 {
 }
 
 /// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
-/// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
+/// so that a removed or misspelt flag cannot be ignored silently, and so is a flag given where it would do nothing
+/// (`check_args_of`). (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cal-items", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
     "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
     "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
-    "--order", "--params", "--partition", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
+    "--order", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
     "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads",
-    "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
+    "--vcheck", "--vectors", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
     "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int", "--keep-index",
@@ -54,29 +55,85 @@ const BOOL_FLAGS: &[&str] = &[
     "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
-    "anchors", "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "fit", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+    "ann", "ann-truth", "breakdown", "bytesq", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
+    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
 ];
+/// The flags that make an index (`v2::BuildOptions`): given only where one is made, with `create`, `--rebuild` or
+/// `--in-memory`.
+const BUILD_FLAGS: &[&str] = &[
+    "--per-cluster", "--groups", "--basis", "--query-sample", "--seed", "--cert-time", "--anchors", "--text-anchors", "--text-count",
+    "--profile", "--clusters", "--rlv", "--dlv", "--design-exact", "--nusort", "--nguar", "--csg-plain", "--cal-items",
+];
+/// Of those, the ones that make the partition and the fit: `create` only (a rebuild re-encodes the fit as it is).
+const FIT_FLAGS: &[&str] = &["--per-cluster", "--groups", "--basis", "--query-sample", "--cert-time"];
 
-/// Exits with a message naming any argument that is not a mode, a flag or a flag's value.
+/// Exits with a message naming any argument that `check_args_of` refuses.
 pub fn check_args() {
-    let a = args();
-    let (mut bad, mut i) = (Vec::new(), 1);
+    if let Err(e) = check_args_of(&args()) {
+        exit2(&e);
+    }
+}
+
+/// `a` (the command line, the program first) checked: every argument a mode, a flag or a flag's value (no positional
+/// arguments); `create` alone with `--vectors` and `--index`; build flags only where an index is made; the removed
+/// commands named as such.
+pub fn check_args_of(a: &[String]) -> Result<(), String> {
+    let (mut bad, mut modes, mut flags, mut i) = (Vec::new(), Vec::new(), Vec::new(), 1);
     while i < a.len() {
         let x = a[i].as_str();
         if VALUE_FLAGS.contains(&x) {
+            if i + 1 >= a.len() {
+                return Err(format!("{x} needs a value"));
+            }
+            flags.push(x);
             i += 2;
             continue;
         }
-        if !BOOL_FLAGS.contains(&x) && !MODES.contains(&x) {
+        if BOOL_FLAGS.contains(&x) {
+            flags.push(x);
+        } else if MODES.contains(&x) {
+            modes.push(x);
+        } else {
             bad.push(x.to_string());
         }
         i += 1;
     }
-    if !bad.is_empty() {
-        eprintln!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}");
-        std::process::exit(2);
+    if bad.iter().any(|b| ["fit", "build", "anchors"].contains(&b.as_str())) {
+        return Err(format!("unknown arguments {bad:?}: the fit, build and anchors commands are gone. vexact --vectors VECTORS.npy --index DIR create [build flags] makes an index (partition, fit, anchors, encoding); vexact --v2 --index DIR --rebuild [build flags] re-encodes one (anchors with --anchors, --text-anchors, --text-count)"));
     }
+    if !bad.is_empty() {
+        return Err(format!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}"));
+    }
+    let has = |f: &str| flags.contains(&f);
+    let create = modes.contains(&"create");
+    if create {
+        if modes.len() > 1 || has("--v2") || has("--rebuild") || has("--in-memory") {
+            return Err(format!("create makes an index and does nothing else (not with {:?}); run experiments on it afterwards (vexact --v2 --index DIR MODE)", modes.iter().copied().filter(|m| *m != "create").chain(flags.iter().copied().filter(|f| ["--v2", "--rebuild", "--in-memory"].contains(f))).collect::<Vec<_>>()));
+        }
+        if !has("--vectors") || !has("--index") {
+            return Err("create needs --vectors VECTORS.npy (N x n0, row i is entity i) and --index DIR (a new directory)".into());
+        }
+    } else if has("--vectors") {
+        return Err("--vectors is create's: vexact --vectors VECTORS.npy --index DIR create".into());
+    }
+    if has("--rebuild") && has("--in-memory") {
+        return Err("--rebuild saves the index it encodes, --in-memory saves nothing: give one".into());
+    }
+    // qvbench takes --groups (the groups it times), and nothing else of the build
+    let qv = modes.contains(&"qvbench");
+    let builds = create || has("--rebuild") || has("--in-memory");
+    for f in &flags {
+        if (qv && *f == "--groups") || !BUILD_FLAGS.contains(f) {
+            continue;
+        }
+        if FIT_FLAGS.contains(f) && !create {
+            return Err(format!("{f} makes the partition or the fit, so it is create's (vexact --vectors VECTORS.npy --index DIR create {f} ...); a rebuild re-encodes the fit as it is"));
+        }
+        if !builds {
+            return Err(format!("{f} is a build option: it applies where an index is made (create, --rebuild or --in-memory); an open takes the options the index was built with"));
+        }
+    }
+    Ok(())
 }
 
 /// Whether `m` is given as a mode (not as a flag's value, such as a directory named like a mode).
@@ -108,13 +165,13 @@ pub fn arg_str(k: &str, d: &str) -> String {
     a.iter().position(|x| x == k).map(|i| a[i + 1].clone()).unwrap_or(d.to_string())
 }
 
-/// The index directory written by tools/fit.py (`--index DIR`).
+/// The index directory (`--index DIR`): made by `create`, or a fit (tools/fit.py) with its index saved by `--rebuild`.
 pub fn data_dir() -> String {
     let a = args();
     match a.iter().position(|x| x == "--index") {
         Some(i) => a[i + 1].clone(),
         None => {
-            eprintln!("no index: write --index DIR, a directory made by tools/fit.py");
+            eprintln!("no index: write --index DIR, a directory made by create (vexact --vectors VECTORS.npy --index DIR create) or a fit (tools/fit.py)");
             std::process::exit(2);
         }
     }
@@ -151,48 +208,61 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
     }).collect()
 }
 
-/// `vexact --index OUT fit --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time
-/// SECONDS] [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]`: fit the partition DIR (`python3 -I tools/partition.py VECTORS.npy DIR`) into OUT; `--v2 --index OUT
-/// --rebuild` then builds its index.
-pub fn fit_cmd() {
-    let part = arg_str("--partition", "");
-    if part.is_empty() {
-        eprintln!("fit needs --partition DIR, the output of: python3 -I tools/partition.py VECTORS.npy DIR");
-        std::process::exit(2);
-    }
-    let d = crate::vexact_fit::FitOptions::default();
-    let o = crate::vexact_fit::FitOptions {
+/// A comma-separated list of byte counts from the flag `k` (none when not given).
+fn arg_list(k: &str, what: &str) -> Option<Vec<usize>> {
+    Some(arg_str(k, "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().unwrap_or_else(|_| exit2(&format!("{k} {what}, not {v}")))).collect())
+}
+
+/// The build options of the command line (`v2::BuildOptions`; `check_args_of` allows them only where an index is
+/// made). Anchors are given when any of `--anchors`, `--text-anchors`, `--text-count` is.
+pub fn build_options() -> BuildOptions {
+    let d = BuildOptions::default();
+    let given = |k: &str| args().iter().any(|a| a == k);
+    let parse = |k: &str, what: &str| -> Option<f64> { Some(arg_str(k, "")).filter(|v| !v.is_empty()).map(|v| v.parse().unwrap_or_else(|_| exit2(&format!("{k} {what}, not {v}")))) };
+    let anchors = ["--anchors", "--text-anchors", "--text-count"].iter().any(|k| given(k)).then(|| {
+        let da = Anchors::default();
+        Anchors { image: arg_usize("--anchors", da.image), text: Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty()), text_count: arg_usize("--text-count", da.text_count) }
+    });
+    BuildOptions {
+        per_cluster: if given("--per-cluster") { PerCluster::parse(&arg_str("--per-cluster", "")).unwrap_or_else(|e| exit2(&format!("--per-cluster: {e}"))) } else { d.per_cluster },
+        groups: if given("--groups") { crate::vexact_fit::Groups::parse(&arg_str("--groups", "")).unwrap_or_else(|e| exit2(&format!("--groups: {e}"))) } else { d.groups },
         basis: arg_str("--basis", &d.basis),
         query_sample: Some(arg_str("--query-sample", "")).filter(|s| !s.is_empty()),
-        seed: arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N"),
-        cert_time: arg_str("--cert-time", &d.cert_time.to_string()).parse().expect("--cert-time SECONDS"),
-        image: arg_usize("--anchors", d.image),
-        text_anchors: Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty()),
-        text_count: arg_usize("--text-count", d.text_count),
-        groups: crate::vexact_fit::Groups::parse(&arg_str("--groups", "by-k8")).unwrap_or_else(|e| {
-            eprintln!("--groups: {e}");
-            std::process::exit(2);
-        }),
-    };
-    if let Err(e) = crate::vexact_fit::fit(&data_dir(), &part, &o, &mut |s| println!("{s}")) {
-        eprintln!("{e}");
-        std::process::exit(2);
+        seed: arg_str("--seed", &d.seed.to_string()).parse().unwrap_or_else(|_| exit2("--seed N (a whole number)")),
+        cert_time: parse("--cert-time", "SECONDS").unwrap_or(d.cert_time),
+        anchors,
+        profile: Some(arg_str("--profile", "")).filter(|v| !v.is_empty()),
+        clusters: given("--clusters").then(|| arg_usize("--clusters", 0)),
+        rlv: arg_list("--rlv", "BYTES,BYTES,... (cumulative bytes of the randomised levels)"),
+        dlv: arg_list("--dlv", "BYTES,BYTES,... (cumulative bytes of the deterministic levels)"),
+        design_exact: given("--design-exact"),
+        nusort: given("--nusort"),
+        nguar: parse("--nguar", "N (items the guarantee covers)"),
+        csg_plain: given("--csg-plain"),
+        cal_items: arg_usize("--cal-items", d.cal_items),
+        // glibc's mmap threshold fixed for the build: only in a run that builds and then runs no experiment (the
+        // setting stays for the rest of the process)
+        tune_malloc: !MODES.iter().any(|m| *m != "create" && has_mode(m)),
     }
 }
 
-/// `vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]`: write the
-/// support table's anchors of an existing fit (fit::write_anchors); `--v2 --index FITDIR --rebuild` then builds with them.
-pub fn anchors_cmd() {
-    let d = crate::vexact_fit::FitOptions::default();
-    let text = Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty());
-    let seed: u64 = arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N");
-    match crate::vexact_fit::write_anchors(&data_dir(), arg_usize("--anchors", d.image), text.as_deref(), arg_usize("--text-count", d.text_count), seed) {
-        Ok(s) => println!("{s}"),
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(2);
-        }
+/// The open options of the command line (`v2::OpenOptions`): `--ddec`, `--keep-index`.
+pub fn open_options() -> OpenOptions {
+    OpenOptions { ddec: parse_ddec(&arg_str("--ddec", "all")), keep_index: args().iter().any(|a| a == "--keep-index") }
+}
+
+/// `vexact --vectors VECTORS.npy --index DIR create [build flags] [--hash]`: make the index directory DIR from the
+/// vectors (`v2::create`: partition, fit, anchors, encoding); `vexact --v2 --index DIR MODE` then opens it.
+pub fn create_cmd() {
+    let (vectors, dir) = (arg_str("--vectors", ""), data_dir());
+    let t = Timer::new();
+    let (_, ix) = create(&vectors, &dir, &build_options(), &mut |s| println!("{s}")).unwrap_or_else(|e| exit2(&e));
+    if args().iter().any(|a| a == "--hash") {
+        println!("[index] code hash {:016x}", ix.code_hash());
+        println!("[index] store hash {:016x}", ix.store_hash());
     }
+    println!("created {dir} from {vectors}: {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", ix.nrows, ix.k(), t.s(),
+        ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {
@@ -212,8 +282,9 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Result<Plan, String> {
             "norepack" => p.repack = false,
             "pscan" => p.pscan = true,
             "nopscan" => p.pscan = false,
-            "nusort" => {} // a build option, read by setup2_at
-            f if f.starts_with("dlv=") => {} // a build option (in the index's key), read by setup2_at
+            // build options: an index records what it was built with, so a variant's other build needs its own
+            // index directory, rebuilt with them
+            f if f == "nusort" || f.starts_with("dlv=") => return Err(format!("the flag {f} changes what is built: give this variant an index directory of its own, rebuilt with it (vexact --v2 --index DIR --rebuild {}), and name it with --index-X DIR", if f == "nusort" { "--nusort".to_string() } else { format!("--dlv {}", f[4..].replace('.', ",")) })),
             f if f.starts_with("ddec=") => p.ddec = Some(parse_ddec(&f[5..])), // per query: checked by Plan::check
             // the planner's mode for a variant (as --plan for the first): auto, index (every open cluster on the index
             // path), flat (every candidate from its full vector) or scan (every query scans the visible set)
@@ -287,59 +358,28 @@ pub fn parse_ddec(v: &str) -> u32 {
 /// A variant's plan on another variant's opened index (`e2e`'s `--b` without `--index-b`): `base` changed by `flags`,
 /// checked against `ix`. A build option among the flags (`dlv=`, `nusort`) needs another index, so it is an error.
 pub fn shared_plan(base: Plan, ix: &Index2, flags: &str) -> Result<Plan, String> {
-    if let Some(f) = flags.split(',').map(|f| f.trim()).find(|f| f.starts_with("dlv=") || *f == "nusort") {
-        return Err(format!("the flag {f} changes what is built: give this variant its own index (--index-X DIR) for it"));
-    }
     let p = plan_flags(base, flags)?;
     p.check(ix)?;
     Ok(p)
 }
 
-/// The index of `dir` with the plan of the command line changed by `flags` (for a second variant, `--b`).
+/// The index of `dir` with the plan of the command line changed by `flags` (for a second variant, `--b`). The index
+/// of `--index` is opened (`v2::open`), or with `--rebuild` encoded with the command line's build options and saved
+/// first (`v2::rebuild`), or with `--in-memory` encoded and not saved (`v2::build`); another variant's (`--index-b`)
+/// is opened.
 pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
     let _ = LOG.set(std::sync::Mutex::new(log));
     out!("==== run at {:.0}: {:?}", now_s(), args());
-    let profile = (dir == data_dir()).then(|| arg_str("--profile", "")).filter(|v| !v.is_empty());
-    let nguar = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()).map(|v| v.parse::<f64>().expect("--nguar N (items the guarantee covers)"));
-    let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
-    // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels):
-    // a build option, in the index's key. And the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none):
-    // a query-time option: the index's default, set when it is built or opened (any value opens the same saved index),
-    // and the flag ddec=... also sets it in the plan (q::Plan::ddec), so a variant sharing this index can choose another.
-    // From --dlv and --ddec for the first index, from the flags dlv=B.B... and ddec=... for any (they take precedence)
-    let flag = |name: &str| flags.split(',').map(|f| f.trim()).find_map(|f| f.strip_prefix(name).map(|v| v.to_string()));
     let main = dir == data_dir();
-    let dlv_s = flag("dlv=").map(|v| v.replace('.', ",")).or_else(|| main.then(|| arg_str("--dlv", ""))).unwrap_or_default();
-    let dlv = Some(dlv_s.clone()).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().unwrap_or_else(|_| {
-        eprintln!("--dlv BYTES,BYTES,... (cumulative bytes of the deterministic levels; dlv=B.B... as a flag), not {v}");
-        std::process::exit(2);
-    })).collect());
-    let ddec = parse_ddec(&flag("ddec=").or_else(|| main.then(|| arg_str("--ddec", "all"))).unwrap_or("all".into()));
-    let bo = BuildOptions {
-        profile,
-        clusters: Some(arg_usize("--clusters", 100000)),
-        rlv,
-        dlv,
-        design_exact: args().iter().any(|a| a == "--design-exact"),
-        nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
-        nguar,
-        csg_plain: args().iter().any(|a| a == "--csg-plain"),
-        // glibc's mmap threshold fixed for the build, as `vexact build` did: only in a run that builds and then runs no
-        // experiment (the setting stays for the rest of the process)
-        tune_malloc: !MODES.iter().any(|m| has_mode(m)),
-        ..BuildOptions::default()
-    };
-    let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));
-    // the index saved beside the fit (DIR/encoded-KEY, KEY covering the fit and every option that changes the build),
-    // opened without encoding; --rebuild encodes it and saves it first; --in-memory encodes it and saves nothing
+    let has = |f: &str| main && args().iter().any(|a| a == f);
+    let oo = if main { open_options() } else { OpenOptions::default() };
     let topen = Timer::new();
     let mut lg = |s: String| out!("{s}");
-    let oo = OpenOptions { ddec, keep_index: args().iter().any(|a| a == "--keep-index") };
-    let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
-        build(dir, &bo, &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
-    } else if args().iter().any(|a| a == "--rebuild") {
-        rebuild(dir, &bo, &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
+    let (mut p, mut ix) = if has("--in-memory") {
+        build(dir, &build_options(), &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
+    } else if has("--rebuild") {
+        rebuild(dir, &build_options(), &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
     } else {
         open(dir, &oo, &mut lg)
     }
@@ -450,7 +490,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         out!("[mem] {}", c.mem_report());
     }
     out!("[fit] {}", c.p.fit);
-    out!("built v2 (index format {}, profile {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, prof_path, c.ix.nrows, c.ix.k(), built_s,
+    out!("built v2 (index format {}, {}) {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", INDEX_FORMAT, saved_dir(dir), c.ix.nrows, c.ix.k(), built_s,
         c.ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
     c
 }
@@ -1996,5 +2036,42 @@ mod tests {
         for f in ["dlv=16.32", "noint,dlv=16.32", "nusort"] {
             assert!(shared_plan(base, &ix, f).is_err(), "{f} on a shared index");
         }
+    }
+
+    /// The command line's registry: the removed commands (fit, build, anchors) and positional arguments are refused,
+    /// `create` takes `--vectors` and `--index` and nothing else to do, and build flags are taken only where an index
+    /// is made (the fit's only by `create`).
+    #[test]
+    fn the_command_line_is_checked() {
+        let check = |s: &str| check_args_of(&std::iter::once("vexact").chain(s.split_whitespace()).map(String::from).collect::<Vec<_>>());
+        let ok = |s: &str| assert!(check(s).is_ok(), "{s}: {:?}", check(s));
+        let refused = |s: &str, says: &str| {
+            let e = check(s).unwrap_err();
+            assert!(e.contains(says), "{s}: {e}");
+        };
+        ok("--vectors v.npy --index D create");
+        ok("--vectors v.npy --index D create --per-cluster by-n --groups by-n --dlv 16,32 --anchors 512 --text-anchors t.npy --hash");
+        ok("--v2 --index D e2e --nq 10");
+        ok("--v2 --index D --rebuild --dlv 16,32 --anchors 64");
+        ok("--v2 --index D --in-memory --nusort verify");
+        ok("--v2 --index D --ddec 0.1 --keep-index bytesq");
+        ok("qvbench --groups 8");
+        for gone in ["fit", "build", "anchors"] {
+            refused(&format!("--index D {gone}"), "gone");
+        }
+        refused("--index D fit --partition P", "gone");
+        refused("--v2 --index D verify extra", "unknown arguments");
+        refused("--v2 --index D /some/path e2e", "unknown arguments");
+        refused("--index D create", "--vectors");
+        refused("--vectors v.npy create", "--index");
+        refused("--vectors v.npy --index D create e2e", "does nothing else");
+        refused("--vectors v.npy --index D create --rebuild", "does nothing else");
+        refused("--v2 --vectors v.npy --index D e2e", "create's");
+        refused("--v2 --index D --dlv 16,32 e2e", "build option");
+        refused("--v2 --index D --anchors 64 e2e", "build option");
+        refused("--v2 --index D --rebuild --per-cluster by-n", "create's");
+        refused("--v2 --index D --rebuild --basis dual", "create's");
+        refused("--v2 --index D --rebuild --in-memory", "give one");
+        refused("--v2 --index D e2e --nq", "needs a value");
     }
 }

@@ -1,6 +1,7 @@
 # Fit the build parameters of the fast-scan index (v2) to a file of vectors: clusters with 8-bit centres, groups of
 # clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
-# build (`vexact --v2 --index OUTDIR`) encodes every item from these.
+# build (`vexact --v2 --index OUTDIR --rebuild`, v2::rebuild) encodes every item from these and saves the index in
+# OUTDIR/encoded; `vexact --v2 --index OUTDIR MODE` opens it.
 # usage: python3 fit.py VECTORS.npy OUTDIR [--basis pca|dual] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
 #   [--per-cluster M|by-n] [--groups by-k8|by-n|G] [--rows ROWS.npy]
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i. The vectors are read from it as needed (no float32 copy).

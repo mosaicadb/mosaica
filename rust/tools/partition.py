@@ -1,4 +1,5 @@
-# Partition a file of vectors into cells for the fit and the build (`vexact --index OUT fit --partition DIR`), with faiss:
+# Partition a file of vectors into cells for the fit and the build (`vexact --vectors V --index DIR create` runs it into
+# DIR/partition, then fits and encodes; v2::create), with faiss:
 # coarse cells, fine clusters of about PER_CLUSTER items trained per cell, every row assigned to a fine centre.
 # Nothing holds more than a chunk of the vectors and one cell's training sample at a time.
 # usage: python3 -I partition.py VECTORS.npy OUTDIR [--cells C] [--cross T] [--per-cluster 1000|by-n]
