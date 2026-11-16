@@ -52,6 +52,47 @@ pub unsafe fn qv_exact_r<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f6
     }
 }
 
+/// qv_exact_r in 512-bit registers with VNNI: R rows by 32 coordinates at a time, with the same prefetch schemes.
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vnni")]
+pub unsafe fn qv_exact_v<const R: usize, const PFD: usize>(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
+    assert!(n % 32 == 0 && n % R == 0 && v8t.len() >= n * n && vsc.len() >= n && qhi.len() >= n && qlo.len() >= n && out.len() >= n);
+    assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
+    let base = v8t.as_ptr();
+    let end = base.add(n * n);
+    let mut c = 0;
+    while c < n {
+        let mut ah = [_mm512_setzero_si512(); R];
+        let mut al = [_mm512_setzero_si512(); R];
+        let rows = base.add(c * n);
+        let mut i = 0;
+        while i < n {
+            if PFD > 0 && i % 64 == 0 {
+                for r in 0..R {
+                    let p = if PFD <= 4 { rows.wrapping_add((PFD * R + r) * n + i) } else { rows.wrapping_add(r * n + i + PFD) };
+                    if p < end {
+                        _mm_prefetch::<_MM_HINT_T0>(p as *const i8);
+                    }
+                }
+            }
+            let h = _mm512_loadu_si512(qhi.as_ptr().add(i) as *const _);
+            let l = _mm512_loadu_si512(qlo.as_ptr().add(i) as *const _);
+            for r in 0..R {
+                let x = _mm512_cvtepi8_epi16(_mm256_loadu_si256(rows.add(r * n + i) as *const _));
+                ah[r] = _mm512_dpwssd_epi32(ah[r], x, h);
+                al[r] = _mm512_dpwssd_epi32(al[r], x, l);
+            }
+            i += 32;
+        }
+        for r in 0..R {
+            let h = _mm512_reduce_add_epi32(ah[r]) as i64;
+            let l = _mm512_reduce_add_epi32(al[r]) as i64;
+            *out.get_unchecked_mut(c + r) = vsc[c + r] * ((h * 8192 + l) as f64) * (1.0 / 16777216.0);
+        }
+        c += R;
+    }
+}
+
 /// Times the basis-product kernels on `g` random n x n int8 bases (cold: more bytes than the last-level cache).
 pub fn qvbench(n: usize, g: usize, reps: usize) {
     use crate::util::Timer;
@@ -68,10 +109,19 @@ pub fn qvbench(n: usize, g: usize, reps: usize) {
     let qlo: Vec<i16> = (0..n).map(|_| (rnd() % 8192) as i16).collect();
     let mut out = vec![0f64; n];
     let mut refo = vec![vec![0f64; n]; g];
-    for (gi, b) in bases.iter().enumerate() {
-        unsafe { qv_exact_r::<4, 0>(b, &vsc, n, &qhi, &qlo, &mut refo[gi]) };
+    // passes in the first second or so can run several times slower, whichever kernel makes them
+    let warm = Timer::new();
+    while warm.ms() < 2000.0 {
+        for (gi, b) in bases.iter().enumerate() {
+            unsafe { qv_exact_r::<4, 0>(b, &vsc, n, &qhi, &qlo, &mut refo[gi]) };
+        }
     }
-    let run = |name: &str, f: &dyn Fn(&[i8], &mut [f64])| {
+    // r: rows per step; a variant whose r does not divide n is skipped
+    let run = |name: &str, r: usize, f: &dyn Fn(&[i8], &mut [f64])| {
+        if n % r != 0 {
+            println!("qvbench {name}: skipped (n % {r} != 0)");
+            return;
+        }
         let mut ts = Vec::new();
         let mut o = vec![0f64; n];
         for _ in 0..reps {
@@ -90,17 +140,25 @@ pub fn qvbench(n: usize, g: usize, reps: usize) {
         println!("qvbench {name}: {:.3} ms for {g} groups ({:.1} MB)", ts[ts.len() / 2], (g * n * n) as f64 / 1e6);
     };
     let _ = &mut out;
-    run("q::qv_exact", &|b, o| unsafe { crate::v2::q::qv_exact(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 (the earlier kernel)", &|b, o| unsafe { qv_exact_r::<4, 0>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 pf512", &|b, o| unsafe { qv_exact_r::<4, 512>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 pf1024", &|b, o| unsafe { qv_exact_r::<4, 1024>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r8", &|b, o| unsafe { qv_exact_r::<8, 0>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r8 pf512", &|b, o| unsafe { qv_exact_r::<8, 512>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r8 pf2048", &|b, o| unsafe { qv_exact_r::<8, 2048>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r6 pf1024", &|b, o| unsafe { qv_exact_r::<6, 1024>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 next", &|b, o| unsafe { qv_exact_r::<4, 1>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 next2", &|b, o| unsafe { qv_exact_r::<4, 2>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r4 next3", &|b, o| unsafe { qv_exact_r::<4, 3>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r8 next", &|b, o| unsafe { qv_exact_r::<8, 1>(b, &vsc, n, &qhi, &qlo, o) });
-    run("r2", &|b, o| unsafe { qv_exact_r::<2, 0>(b, &vsc, n, &qhi, &qlo, o) });
+    run("q::qv_exact", 4, &|b, o| unsafe { crate::v2::q::qv_exact(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 (the earlier kernel)", 4, &|b, o| unsafe { qv_exact_r::<4, 0>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 pf512", 4, &|b, o| unsafe { qv_exact_r::<4, 512>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 pf1024", 4, &|b, o| unsafe { qv_exact_r::<4, 1024>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r8", 8, &|b, o| unsafe { qv_exact_r::<8, 0>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r8 pf512", 8, &|b, o| unsafe { qv_exact_r::<8, 512>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r8 pf2048", 8, &|b, o| unsafe { qv_exact_r::<8, 2048>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r6 pf1024", 6, &|b, o| unsafe { qv_exact_r::<6, 1024>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 next", 4, &|b, o| unsafe { qv_exact_r::<4, 1>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 next2", 4, &|b, o| unsafe { qv_exact_r::<4, 2>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r4 next3", 4, &|b, o| unsafe { qv_exact_r::<4, 3>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r8 next", 8, &|b, o| unsafe { qv_exact_r::<8, 1>(b, &vsc, n, &qhi, &qlo, o) });
+    run("r2", 2, &|b, o| unsafe { qv_exact_r::<2, 0>(b, &vsc, n, &qhi, &qlo, o) });
+    #[cfg(target_feature = "avx512f")]
+    {
+        run("v4", 4, &|b, o| unsafe { qv_exact_v::<4, 0>(b, &vsc, n, &qhi, &qlo, o) });
+        run("v4 next", 4, &|b, o| unsafe { qv_exact_v::<4, 1>(b, &vsc, n, &qhi, &qlo, o) });
+        run("v4 next2", 4, &|b, o| unsafe { qv_exact_v::<4, 2>(b, &vsc, n, &qhi, &qlo, o) });
+        run("v8 next", 8, &|b, o| unsafe { qv_exact_v::<8, 1>(b, &vsc, n, &qhi, &qlo, o) });
+        run("v2 next4", 2, &|b, o| unsafe { qv_exact_v::<2, 4>(b, &vsc, n, &qhi, &qlo, o) });
+    }
 }

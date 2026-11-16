@@ -164,35 +164,10 @@ pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
-/// Four basis vectors at a time share the query loads.
+/// Four basis vectors at a time share the query loads; the next four are prefetched meanwhile (setup::qv_exact_v).
 #[cfg(target_feature = "avx512f")]
-#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vnni")]
 pub unsafe fn qv_exact(v8t: &[i8], vsc: &[f64], n: usize, qhi: &[i16], qlo: &[i16], out: &mut [f64]) {
-    assert!(n % 32 == 0 && n % 4 == 0);
-    // each i32 lane sums n/16 products of an int8 and a 13-bit half, up to 128 * 8191 * 2 each
-    assert!(n <= 2048, "the exact basis product sums in i32 and overflows past n = 2048; this index has n = {n}");
-    let mut c = 0;
-    while c < n {
-        let mut ah = [_mm512_setzero_si512(); 4];
-        let mut al = [_mm512_setzero_si512(); 4];
-        let mut i = 0;
-        while i < n {
-            let h = _mm512_loadu_si512(qhi.as_ptr().add(i) as *const _);
-            let l = _mm512_loadu_si512(qlo.as_ptr().add(i) as *const _);
-            for r in 0..4 {
-                let x = _mm512_cvtepi8_epi16(_mm256_loadu_si256(v8t.as_ptr().add((c + r) * n + i) as *const _));
-                ah[r] = _mm512_dpwssd_epi32(ah[r], x, h);
-                al[r] = _mm512_dpwssd_epi32(al[r], x, l);
-            }
-            i += 32;
-        }
-        for r in 0..4 {
-            let h = _mm512_reduce_add_epi32(ah[r]) as i64;
-            let l = _mm512_reduce_add_epi32(al[r]) as i64;
-            out[c + r] = vsc[c + r] * ((h * 8192 + l) as f64) * (1.0 / 16777216.0);
-        }
-        c += 4;
-    }
+    super::setup::qv_exact_v::<4, 1>(v8t, vsc, n, qhi, qlo, out)
 }
 
 /// f64 dot product, two 8-lane accumulators.
