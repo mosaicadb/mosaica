@@ -38,14 +38,14 @@ pub struct Ctx2 {
 /// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
 /// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--b", "--bfracs", "--c", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--b", "--basis", "--bfracs", "--c", "--cert-time", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
     "--cmp-vis", "--cmp-what", "--core", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--item-queries", "--k", "--knn", "--ks",
     "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
-    "--order", "--params", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
-    "--pseudo-dial", "--queries", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
-    "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--thr", "--threads",
+    "--order", "--params", "--partition", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
+    "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
+    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--thr", "--threads",
     "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
@@ -55,7 +55,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 const MODES: &[&str] = &[
     "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+    "filter", "fit", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
 ];
 
 /// Exits with a message naming any argument that is not a mode, a flag or a flag's value.
@@ -140,6 +140,28 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
         }
         q
     }).collect()
+}
+
+/// `vexact --index OUT fit --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time
+/// SECONDS]`: fit the partition DIR (`python3 -I tools/partition.py VECTORS.npy DIR`) into OUT; `--v2 --index OUT
+/// --rebuild` then builds its index.
+pub fn fit_cmd() {
+    let part = arg_str("--partition", "");
+    if part.is_empty() {
+        eprintln!("fit needs --partition DIR, the output of: python3 -I tools/partition.py VECTORS.npy DIR");
+        std::process::exit(2);
+    }
+    let d = crate::vexact_fit::FitOptions::default();
+    let o = crate::vexact_fit::FitOptions {
+        basis: arg_str("--basis", &d.basis),
+        query_sample: Some(arg_str("--query-sample", "")).filter(|s| !s.is_empty()),
+        seed: arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N"),
+        cert_time: arg_str("--cert-time", &d.cert_time.to_string()).parse().expect("--cert-time SECONDS"),
+    };
+    if let Err(e) = crate::vexact_fit::fit(&data_dir(), &part, &o, &mut |s| println!("{s}")) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {
@@ -275,7 +297,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         // it replaces
         let t = Timer::new();
         if let Full2::Real { rows, .. } = &mut ix.full {
-            let r = std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"), &[&p.xs_path]);
+            let r = std::sync::Arc::get_mut(rows).expect("the full vectors are shared before --full-file").to_file(&ff, &arg_str("--full-advice", "random"), &p.vector_files().iter().map(|s| s.as_str()).collect::<Vec<_>>());
             if let Err(e) = r {
                 eprintln!("{e}");
                 std::process::exit(2);

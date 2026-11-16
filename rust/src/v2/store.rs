@@ -705,12 +705,13 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     drop(dfd);
     drop(lock);
     // the vectors file it was built from
-    match (XsId::from_json(&v["xs"]), XsId::of(&p.xs_path)) {
+    let xs_path = p.vectors_id_path();
+    match (XsId::from_json(&v["xs"]), XsId::of(&xs_path)) {
         (_, Err(e)) => log(format!("WARNING: the fit's vectors file is missing or unreadable ({e}); the index holds its own vectors, opening it")),
         (None, Ok(_)) => log(format!("WARNING: {dir}/index.json does not record the vectors file it was built from; opening it")),
         (Some(was), Ok(now)) if was != now => {
             if was.len != now.len || was.mtime != now.mtime {
-                let what = format!("{} changed since this index was built (length {} -> {}, modified {:?} -> {:?})", p.xs_path, was.len, now.len, was.mtime, now.mtime);
+                let what = format!("{} changed since this index was built (length {} -> {}, modified {:?} -> {:?})", xs_path, was.len, now.len, was.mtime, now.mtime);
                 if !o.keep_index {
                     return Err(format!("{what}; --rebuild, or --keep-index to use the index as built"));
                 }
@@ -726,7 +727,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
                 if was.ino != now.ino {
                     which.push("inode");
                 }
-                log(format!("WARNING: {}: same length and modification time as when this index was built, but another {} (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index, which serves the vectors it was built from", p.xs_path, which.join(", ")));
+                log(format!("WARNING: {}: same length and modification time as when this index was built, but another {} (a chmod, a copy keeping its times, a restore, a hard link, or an in-place rewrite with its time set back); opening the index, which serves the vectors it was built from", xs_path, which.join(", ")));
             }
         }
         _ => {}
@@ -853,8 +854,8 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
 
 /// The key of the index the fit `p` (with the options applied), the profile `prof` and the options `o` build: a saved
 /// index is opened only when its key is this one. It covers what the build reads besides the vectors: the fit's
-/// parameters, the profile, the name of the vectors file as meta.json gives it (relative to the fitted directory
-/// unless absolute), the options that change what is built, the formats of the encoding and of the files, and the
+/// parameters, the profile, the name of the vectors file or of the partition as meta.json gives it (relative to the
+/// fitted directory unless absolute), the options that change what is built, the formats of the encoding and of the files, and the
 /// library's source fingerprint (`LIB_FINGERPRINT`). It is a fixed hash (`Fx`), the same on every Rust release, and
 /// does not depend on how the fitted directory's path is spelled or where the directory is. The vectors file's
 /// identity is not in the key: an index holds its own vectors, and `open` compares the identity recorded at the build.
@@ -898,6 +899,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     }
     h.pod(prof);
     h.str(&p.xs_name);
+    h.str(&p.partition_name);
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
     h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items]);
     match o.nguar {

@@ -45,8 +45,27 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
-    pub xs_path: String,
+    pub xs_path: String, // the vectors in cluster order (a fit with an Xs.npy; empty for a partitioned fit)
     pub xs_name: String, // the vectors file as meta.json names it (relative to the fitted directory unless absolute)
+    pub partition: String, // the partition a fit without an Xs.npy reads its vectors from (empty for a fit with one)
+    pub partition_name: String, // the partition as meta.json names it
+}
+
+impl Params {
+    /// The file whose identity stands for the fit's vectors: its Xs.npy, or its partition's manifest.json (written last
+    /// by tools/partition.py, so a new partition is a new file).
+    pub fn vectors_id_path(&self) -> String {
+        if self.xs_path.is_empty() { format!("{}/manifest.json", self.partition) } else { self.xs_path.clone() }
+    }
+    /// The files holding the fit's vectors (the Xs.npy, or the partition's cell files).
+    pub fn vector_files(&self) -> Vec<String> {
+        if !self.xs_path.is_empty() {
+            return vec![self.xs_path.clone()];
+        }
+        std::fs::read_dir(&self.partition).map_or(Vec::new(), |d| {
+            d.filter_map(|e| e.ok()).map(|e| e.path().to_string_lossy().to_string()).filter(|p| p.ends_with(".f16")).collect()
+        })
+    }
 }
 
 pub fn load_params(dir: &str) -> Params {
@@ -65,7 +84,13 @@ pub fn load_params(dir: &str) -> Params {
     let n = us("n");
     let k = us("K");
     let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
-    let xs = meta["xs"].as_str().unwrap();
+    // the vectors: the fit's Xs.npy (tools/fit.py), else the partition it was fitted from (fit::fit)
+    let xs = meta["xs"].as_str().unwrap_or("");
+    let partition = meta["partition"].as_str().unwrap_or("");
+    if xs.is_empty() == partition.is_empty() {
+        eprintln!("{dir}/meta.json names {}; it names either the fit's vectors file (\"xs\") or the partition it was fitted from (\"partition\"). Refit it.", if xs.is_empty() { "neither its vectors file nor a partition" } else { "both a vectors file and a partition" });
+        std::process::exit(2);
+    }
     Params {
         meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
             eps: meta["EPS"].as_f64().unwrap_or(1e-9),
@@ -86,8 +111,10 @@ pub fn load_params(dir: &str) -> Params {
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
-        xs_path: if xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
+        xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
         xs_name: xs.to_string(),
+        partition: if partition.is_empty() || partition.starts_with('/') { partition.to_string() } else { format!("{dir}/{partition}") },
+        partition_name: partition.to_string(),
     }
 }
 

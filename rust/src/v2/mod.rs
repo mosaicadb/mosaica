@@ -519,7 +519,7 @@ fn gauss_jordan_inverse(a: &[f64], n: usize) -> Vec<f64> {
 }
 
 /// The int8 basis: one scale per basis vector (column); row c of `v8t` is basis vector c in int8, `vsc[c]` its scale.
-fn int8_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>) {
+pub fn int8_basis(v: &[f32], n: usize) -> (Vec<i8>, Vec<f64>) {
     let mut vsc = vec![0f64; n];
     let mut v8t = vec![0i8; n * n];
     for c in 0..n {
@@ -1310,10 +1310,11 @@ pub trait Source2: Sync {
     }
 }
 
-pub struct Real2 {
-    pub src: crate::index::RealSource,
+/// The items of a fit whose rows are read through `FitRows`: its Xs.npy (`RealSource`), or its partition (`Buckets`).
+pub struct Real2<R: crate::bucket::FitRows> {
+    pub src: R,
 }
-impl Source2 for Real2 {
+impl<R: crate::bucket::FitRows> Source2 for Real2<R> {
     fn items(&self, c: usize, p: &Params, gp: &GroupPlan2, mhat: &[f64]) -> Items2 {
         self.rows_of(c, p.cstart[c]..p.cstart[c + 1], p, gp, mhat, true)
     }
@@ -1322,10 +1323,10 @@ impl Source2 for Real2 {
         self.rows_of(c, spread(p.cstart[c + 1] - r0, k).into_iter().map(|i| r0 + i), p, gp, mhat, false)
     }
 }
-impl Real2 {
+impl<R: crate::bucket::FitRows> Real2<R> {
     /// The items of cluster c at the given rows, in key order; with `x16`, their f16 vectors too.
     fn rows_of(&self, c: usize, rows: impl Iterator<Item = usize>, p: &Params, gp: &GroupPlan2, mhat: &[f64], x16: bool) -> Items2 {
-        let n = self.src.n;
+        let n = self.src.n();
         let m = &p.centres[c * n..(c + 1) * n];
         let mut key: Vec<(i16, usize)> = rows.map(|r| {
             let x = self.src.row(r);
@@ -2010,13 +2011,20 @@ pub fn saved_dir(dir: &str, o: &BuildOptions) -> String {
 
 /// Encode the fit in `p` (from `prepare`): the codes and, without the norm sort, the support table, in memory or, with
 /// `dir`, into the files of a saved index there (not yet sealed).
-fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Index2 {
-    let src = Real2 { src: crate::index::RealSource::open(&p.xs_path) };
-    let mut ix = build2(p, prof, &src, Full2::Real { rows: Default::default() }, o, design_c, dir, &mut |s| log(format!("[build2] {s}")));
+/// The fit's rows come from its Xs.npy (tools/fit.py), else from its partition through the fit's row order (`fit_dir`,
+/// fit::fit); an error when the partition does not hold them.
+fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, fit_dir: &str, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
+    let full = Full2::Real { rows: Default::default() };
+    let mut lg = |s| log(format!("[build2] {s}"));
+    let mut ix = if p.xs_path.is_empty() {
+        build2(p, prof, &Real2 { src: crate::bucket::Buckets::open(&p.partition, fit_dir)? }, full, o, design_c, dir, &mut lg)
+    } else {
+        build2(p, prof, &Real2 { src: crate::index::RealSource::open(&p.xs_path) }, full, o, design_c, dir, &mut lg)
+    };
     if !o.nusort {
         build_table2(&mut ix, p.meta.k);
     }
-    ix
+    Ok(ix)
 }
 
 /// The repack thresholds, timed on this machine (they choose how the query side packs slots, not what it reads).
@@ -2031,7 +2039,7 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
     let (p, prof) = prepare(dir, o);
     let design_c = design_constants(&p, o, log);
-    let mut ix = encode(&p, &prof, design_c.as_deref(), o, None, log);
+    let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log).unwrap_or_else(|e| panic!("{e}"));
     set_repack(&mut ix, log);
     (p, ix)
 }
@@ -2077,7 +2085,7 @@ pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(S
 
 fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let (p, prof) = prepare(dir, o);
-    let xs = store::XsId::of(&p.xs_path).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
+    let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
@@ -2106,7 +2114,13 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
     // built into the files of a scratch directory of this rebuild's own, sealed with its key, then moved into place
     let tmp = store::scratch_dir(edir);
-    let mut ix = encode(&p, &prof, design_c.as_deref(), o, Some(&tmp), log);
+    let mut ix = match encode(&p, &prof, design_c.as_deref(), o, dir, Some(&tmp), log) {
+        Ok(ix) => ix,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+    };
     let h = store::seal(&ix, &tmp, &key, Some(xs));
     store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);

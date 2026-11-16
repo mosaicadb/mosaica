@@ -18,6 +18,7 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 memmap2 = "0.9"
 libc = "0.2"
 io-uring = "0.7"
+faer = "0.24"
 
 [profile.release]
 debug = 0

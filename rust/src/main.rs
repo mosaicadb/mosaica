@@ -3,6 +3,7 @@ mod run2;
 mod scale;
 
 use vexact::{derive, index, kernel, query, util, v2};
+use vexact::fit as vexact_fit;
 
 fn main() {
     run2::check_args();
@@ -11,6 +12,10 @@ fn main() {
     let has = |k: &str| args.iter().any(|a| a == k);
     if has("qvbench") {
         v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
+        return;
+    }
+    if has("fit") {
+        run2::fit_cmd();
         return;
     }
     if has("--v2") {

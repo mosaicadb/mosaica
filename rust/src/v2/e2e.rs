@@ -570,3 +570,86 @@ fn same_index(a: &Index2, b: &Index2) {
         assert_eq!(ra.row(r, a.n()), rb.row(r, b.n()), "row {r}'s stored vector");
     }
 }
+
+/// synth4k's vectors written as a two-cell partition (as tools/partition.py writes one): clusters 0..16 in cell 0, the
+/// rest in cell 1, and a third of cluster 3's rows stored in cell 1 and moved into cell 0. Returns the partition's
+/// directory and each entity's f16 vector.
+fn synth_partition(at: &std::path::Path) -> (String, Vec<Vec<u16>>) {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let p = crate::index::load_params(dir);
+    let xs = crate::index::RealSource::open(&p.xs_path);
+    let (n, k) = (p.meta.n, p.meta.k);
+    let mut byent = vec![Vec::new(); p.perm.len()];
+    std::fs::create_dir_all(at).unwrap();
+    let mut files: Vec<[Vec<u8>; 6]> = (0..2).map(|_| Default::default()).collect();
+    let cell_of = |c: usize| (c >= k / 2) as usize;
+    for c in 0..k {
+        for r in p.cstart[c]..p.cstart[c + 1] {
+            let x = xs.row(r);
+            let e = p.perm[r] as u64;
+            byent[e as usize] = x.to_vec();
+            let home = cell_of(c);
+            let moved = c == 3 && r % 3 == 0;
+            let stored = if moved { 1 - home } else { home };
+            let bytes: Vec<u8> = x.iter().flat_map(|h| h.to_le_bytes()).collect();
+            files[stored][0].extend(&bytes);
+            files[stored][1].extend(e.to_le_bytes());
+            files[stored][2].extend((c as u32).to_le_bytes());
+            if moved {
+                files[home][3].extend(&bytes);
+                files[home][4].extend(e.to_le_bytes());
+                files[home][5].extend((c as u32).to_le_bytes());
+            }
+        }
+    }
+    for (cell, fs) in files.iter().enumerate() {
+        for (name, b) in ["f16", "ids", "cl", "in.f16", "in.ids", "in.cl"].iter().zip(fs) {
+            std::fs::write(at.join(format!("cell{cell}.{name}")), b).unwrap();
+        }
+    }
+    let cc: Vec<u8> = (0..k).flat_map(|c| (cell_of(c) as u32).to_le_bytes()).collect();
+    crate::util::write_npy(at.join("cluster_cell.npy").to_str().unwrap(), "<u4", &[k], &cc);
+    let man = serde_json::json!({"N": p.perm.len(), "n": n, "n_orig": n, "K": k, "cells": 2, "cross": 1});
+    std::fs::write(at.join("manifest.json"), man.to_string()).unwrap();
+    (at.to_str().unwrap().to_string(), byent)
+}
+
+#[test]
+fn a_partitioned_fit_builds_an_index_of_its_vectors() {
+    let tmp = tmp_dir("part");
+    let (part, byent) = synth_partition(&tmp.join("part"));
+    let fit = tmp.join("fit");
+    let fit = fit.to_str().unwrap();
+    for basis in ["pca", "dual"] {
+        let o = crate::fit::FitOptions { basis: basis.into(), cert_time: 0.0, ..crate::fit::FitOptions::default() };
+        crate::fit::fit(fit, &part, &o, &mut |_| {}).unwrap();
+        let p = crate::index::load_params(fit);
+        assert!(p.xs_path.is_empty() && p.partition == part, "a partitioned fit names its partition, not a vectors file");
+        assert_eq!(p.cstart[p.meta.k], byent.len());
+        // clusters numbered group by group
+        assert!(p.grp.windows(2).all(|w| w[0] <= w[1]), "{basis}: clusters not numbered group by group: {:?}", p.grp);
+        let edir = tmp.join(format!("encoded-{basis}"));
+        let edir = edir.to_str().unwrap();
+        let bo = BuildOptions::default();
+        let (_, built) = rebuild_at(fit, edir, &bo, &mut |_| {}).unwrap();
+        let (_, ix) = open_at(fit, edir, &bo, &mut |_| {}).unwrap();
+        assert_eq!(ix.store_hash(), built.store_hash());
+        ix.check_maps().unwrap();
+        // every entity is stored once, with its own vector
+        assert_eq!(ix.nrows, byent.len());
+        for (e, x) in byent.iter().enumerate() {
+            assert_eq!(ix.full_row_f16(ix.row_of_ent(e as u32)), &x[..], "{basis}: entity {e}");
+        }
+        // and the index answers as brute force does
+        let f = fixture();
+        for q in &f.queries {
+            let pr = prep2(&ix, q);
+            let t = truth(&ix, q, None);
+            for th in thresholds(&t) {
+                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan: Plan::default() });
+                assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "{basis}: threshold {th}");
+            }
+        }
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
