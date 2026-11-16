@@ -18,7 +18,10 @@ pub fn run2(scale: usize, nq: usize) {
     use crate::v2::*;
     let t = Timer::new();
     log(format!("==== v2 scale run x{scale} at {:.0}", now_s()));
-    let p = load_params(&crate::run2::data_dir());
+    let p = load_params(&crate::run2::data_dir()).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
     let n = p.meta.n;
     let k = p.meta.k;
     let prof = crate::derive::load_profile(&format!("{}/profile.npy", crate::run2::data_dir()));

@@ -52,6 +52,9 @@ pub struct Params {
     pub xs_name: String, // the vectors file as meta.json names it (relative to the fitted directory unless absolute)
     pub partition: String, // the partition a fit without an Xs.npy reads its vectors from (empty for a fit with one)
     pub partition_name: String, // the partition as meta.json names it
+    /// The partition's identity when it was fitted (meta.json "partition_id", fit::partition_id): a hash of its
+    /// manifest.json and that file's identity. Empty for a fit with an Xs.npy.
+    pub partition_id: String,
 }
 
 impl Params {
@@ -72,36 +75,69 @@ impl Params {
 }
 
 /// The fit's meta.json, after checking that this build reads its format.
-fn load_meta(dir: &str) -> serde_json::Value {
-    let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/meta.json")).unwrap()).unwrap();
+fn load_meta(dir: &str) -> Result<serde_json::Value, String> {
+    let path = format!("{dir}/meta.json");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {path}: {e}; is {dir} a fitted directory?"))?;
+    let meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}; refit it"))?;
     let fmt = meta["format"].as_u64().unwrap_or(1);
     if fmt != FIT_FORMAT {
-        eprintln!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py.");
-        std::process::exit(2);
+        return Err(format!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py."));
     }
-    meta
+    Ok(meta)
 }
 
 /// The fit's stored centres (K x n, int8 * scale as f32 values) with n and K, from meta.json, mq8.npy and msc.npy only.
 pub fn load_centres(dir: &str) -> Result<(usize, usize, Vec<f32>), String> {
-    let meta = load_meta(dir);
+    let meta = load_meta(dir)?;
     let (n, k) = (meta["n"].as_u64().ok_or(format!("{dir}/meta.json has no n"))? as usize, meta["K"].as_u64().ok_or(format!("{dir}/meta.json has no K"))? as usize);
-    let mq8 = read_npy(&format!("{dir}/mq8.npy")).i8s();
-    let msc = read_npy(&format!("{dir}/msc.npy")).f64s();
+    centres_of(dir, n, k)
+}
+
+fn centres_of(dir: &str, n: usize, k: usize) -> Result<(usize, usize, Vec<f32>), String> {
+    let mq8 = try_read_npy(&format!("{dir}/mq8.npy"))?.i8s();
+    let msc = try_read_npy(&format!("{dir}/msc.npy"))?.f64s();
     if k.checked_mul(n) != Some(mq8.len()) || msc.len() != k {
         return Err(format!("{dir}: mq8.npy / msc.npy do not hold {k} centres of {n}; refit"));
     }
     Ok((n, k, (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect()))
 }
 
+/// A fixed hash of a fit's stored centres (K x n), which `anchors.json` records for the fit its anchors were made for.
+pub fn centres_hash(n: usize, k: usize, centres: &[f32]) -> String {
+    let mut h = crate::v2::store::Fx::default();
+    h.str("vexact centres");
+    h.usizes(&[n, k]);
+    h.pod(&centres[..(k * n).min(centres.len())]);
+    format!("{:016x}", h.finish())
+}
+
+/// A fixed hash of a set of anchors, which `anchors.json` records.
+pub fn anchors_hash(a: &[f64]) -> String {
+    let mut h = crate::v2::store::Fx::default();
+    h.str("vexact anchors");
+    h.pod(a);
+    format!("{:016x}", h.finish())
+}
+
 /// The fit's support-table anchors (`anchors.npy`), checked: <f8, shape (A >= 1, n), each row of unit norm within
-/// 1e-12. Empty when the fit has none.
-pub fn load_anchors(dir: &str, n: usize) -> Result<Vec<f64>, String> {
+/// 1e-12, and made for this fit (its sidecar `anchors.json`, written by `fit::save_anchors`, records the hash of the
+/// centres `centres` (K x n) and of the anchors themselves). An anchors.npy without a sidecar (written before it
+/// existed, or by hand) is refused with what to do. Empty when the fit has none.
+pub fn load_anchors(dir: &str, n: usize, k: usize, centres: &[f32]) -> Result<Vec<f64>, String> {
     let path = format!("{dir}/anchors.npy");
     if !std::path::Path::new(&path).exists() {
         return Ok(Vec::new());
     }
-    let a = read_npy(&path);
+    let again = format!("write them again for this fit (vexact --index {dir} anchors ..., fit::write_anchors), or remove {path} to use one anchor per cluster");
+    let side = format!("{dir}/anchors.json");
+    let sv: serde_json::Value = match std::fs::read_to_string(&side) {
+        Ok(t) => serde_json::from_str(&t).map_err(|e| format!("{side}: {e}; {again}"))?,
+        Err(_) => return Err(format!("{path} has no {side} saying which fit it was made for; {again}")),
+    };
+    if sv["fit"].as_str() != Some(centres_hash(n, k, centres).as_str()) {
+        return Err(format!("{path} was made for another fit (the fit was redone since); {again}"));
+    }
+    let a = try_read_npy(&path)?;
     if a.descr != "<f8" {
         return Err(format!("{path}: expected <f8, found {}; write the fit's anchors again", a.descr));
     }
@@ -110,6 +146,9 @@ pub fn load_anchors(dir: &str, n: usize) -> Result<Vec<f64>, String> {
     }
     let v = a.f64s();
     check_anchors(&v, n).map_err(|e| format!("{path}: {e}; write the fit's anchors again"))?;
+    if sv["anchors"].as_str() != Some(anchors_hash(&v).as_str()) {
+        return Err(format!("{path} is not the file {side} was written with (replaced alone?); {again}"));
+    }
     Ok(v)
 }
 
@@ -127,50 +166,67 @@ pub fn check_anchors(v: &[f64], n: usize) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load_params(dir: &str) -> Params {
-    let meta = load_meta(dir);
-    let us = |k: &str| meta[k].as_u64().unwrap() as usize;
-    let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
-    let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
-    let opt = |k: &str| std::path::Path::new(&format!("{dir}/{k}.npy")).exists().then(|| r(k));
-    let mq8 = r("mq8").i8s();
-    let msc = r("msc").f64s();
-    let n = us("n");
-    let k = us("K");
-    let centres = (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect();
+/// The parameters of the fitted directory `dir`, their sizes checked against each other; an error (naming what to
+/// do) on a missing, unreadable or inconsistent file.
+pub fn load_params(dir: &str) -> Result<Params, String> {
+    let meta = load_meta(dir)?;
+    let us = |k: &str| meta[k].as_u64().map(|x| x as usize).ok_or(format!("{dir}/meta.json has no {k}; refit it"));
+    let vu = |k: &str| -> Result<Vec<usize>, String> {
+        meta[k].as_array().and_then(|a| a.iter().map(|x| x.as_u64().map(|v| v as usize)).collect::<Option<Vec<_>>>()).ok_or(format!("{dir}/meta.json has no list {k}; refit it"))
+    };
+    let r = |k: &str| try_read_npy(&format!("{dir}/{k}.npy"));
+    let n = us("n")?;
+    let k = us("K")?;
+    let g = us("G")?;
+    let (_, _, centres) = centres_of(dir, n, k)?;
     // the vectors: the fit's Xs.npy (tools/fit.py), else the partition it was fitted from (fit::fit)
     let xs = meta["xs"].as_str().unwrap_or("");
     let partition = meta["partition"].as_str().unwrap_or("");
     if xs.is_empty() == partition.is_empty() {
-        eprintln!("{dir}/meta.json names {}; it names either the fit's vectors file (\"xs\") or the partition it was fitted from (\"partition\"). Refit it.", if xs.is_empty() { "neither its vectors file nor a partition" } else { "both a vectors file and a partition" });
-        std::process::exit(2);
+        return Err(format!("{dir}/meta.json names {}; it names either the fit's vectors file (\"xs\") or the partition it was fitted from (\"partition\"). Refit it.", if xs.is_empty() { "neither its vectors file nor a partition" } else { "both a vectors file and a partition" }));
     }
-    Params {
-        meta: Meta { n, k, g: us("G"), dlv: vu("DLV"), rlv: vu("RLV"), bounds: vu("BOUNDS"), csg: meta["CSG"].as_f64().unwrap(),
-            eps: meta["EPS"].as_f64().unwrap_or(1e-9),
-            certs: meta["CERTS"].as_array().map_or(Vec::new(), |a| a.iter().map(|c| crate::v2::tail::Cert {
-                ds: c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect(),
-                lnd: c["lnd"].as_f64().unwrap(),
-                x: c["X"].as_f64().unwrap(),
-            }).collect()) },
-        cstart: r("cstart").i64s().iter().map(|&x| x as usize).collect(),
-        grp: r("grp").i64s().iter().map(|&x| x as usize).collect(),
+    let certs = match meta["CERTS"].as_array() {
+        None => Vec::new(),
+        Some(a) => a.iter().map(|c| -> Option<crate::v2::tail::Cert> {
+            Some(crate::v2::tail::Cert {
+                ds: c["ds"].as_array()?.iter().map(|x| x.as_u64().map(|v| v as usize)).collect::<Option<Vec<_>>>()?,
+                lnd: c["lnd"].as_f64()?,
+                x: c["X"].as_f64()?,
+            })
+        }).collect::<Option<Vec<_>>>().ok_or(format!("{dir}/meta.json: a certificate (CERTS) lacks ds, lnd or X; certify the fit again"))?,
+    };
+    let opt = |name: &str| -> Result<Option<Npy>, String> { if std::path::Path::new(&format!("{dir}/{name}.npy")).exists() { r(name).map(Some) } else { Ok(None) } };
+    let p = Params {
+        meta: Meta { n, k, g, dlv: vu("DLV")?, rlv: vu("RLV")?, bounds: vu("BOUNDS")?, csg: meta["CSG"].as_f64().ok_or(format!("{dir}/meta.json has no CSG; refit it"))?,
+            eps: meta["EPS"].as_f64().unwrap_or(1e-9), certs },
+        cstart: r("cstart")?.i64s().iter().map(|&x| x as usize).collect(),
+        grp: r("grp")?.i64s().iter().map(|&x| x as usize).collect(),
         centres,
-        lam: r("lam").f64s(),
-        v: r("V").f32s(),
-        r2: opt("r2").map(|a| a.f64s()),
+        lam: r("lam")?.f64s(),
+        v: r("V")?.f32s(),
+        r2: opt("r2")?.map(|a| a.f64s()),
         fit: meta["fit"].to_string(),
-        tree_edges: r("tree_edges").f64s(),
-        tree_cent: r("tree_cent").f64s(),
-        gtree: r("gtree").f64s(),
-        perm: r("perm").i64s(),
-        qi: r("qi").i64s(),
+        tree_edges: r("tree_edges")?.f64s(),
+        tree_cent: r("tree_cent")?.f64s(),
+        gtree: r("gtree")?.f64s(),
+        perm: r("perm")?.i64s(),
+        qi: r("qi")?.i64s(),
         anchors: Vec::new(),
         xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
         xs_name: xs.to_string(),
         partition: if partition.is_empty() || partition.starts_with('/') { partition.to_string() } else { format!("{dir}/{partition}") },
         partition_name: partition.to_string(),
+        partition_id: meta["partition_id"].as_str().unwrap_or("").to_string(),
+    };
+    // the sizes the build and the open index by
+    let rows = p.cstart.last().copied().unwrap_or(0);
+    let ok = p.cstart.len() == k + 1 && p.cstart.first() == Some(&0) && p.cstart.windows(2).all(|w| w[0] <= w[1]) && p.grp.len() == k && p.grp.iter().all(|&x| x < g)
+        && Some(p.lam.len()) == g.checked_mul(n) && g.checked_mul(n).and_then(|x| x.checked_mul(n)) == Some(p.v.len()) && p.perm.len() == rows
+        && p.perm.iter().all(|&e| e >= 0 && e <= u32::MAX as i64) && p.r2.as_ref().map_or(true, |r| r.len() == g) && p.tree_edges.len() == p.tree_cent.len();
+    if !ok {
+        return Err(format!("{dir}: the fit's arrays (cstart, grp, lam, V, perm, r2, tree tables) do not agree with its {k} clusters, {g} groups and {n} dimensions; refit it"));
     }
+    Ok(p)
 }
 
 pub struct RealSource {
@@ -180,12 +236,22 @@ pub struct RealSource {
 }
 impl RealSource {
     pub fn open(path: &str) -> RealSource {
-        let f = std::fs::File::open(path).unwrap();
-        let map = unsafe { memmap2::Mmap::map(&f).unwrap() };
+        RealSource::try_open(path).unwrap_or_else(|e| panic!("{e}"))
+    }
+    /// The vectors file mapped, its header checked: f16 rows of n, the data as long as its shape says.
+    pub fn try_open(path: &str) -> Result<RealSource, String> {
+        let f = std::fs::File::open(path).map_err(|e| format!("cannot open {path}: {e}"))?;
+        // SAFETY: the fit's vectors file is only read, and not changed while a build reads it (its identity is checked)
+        let map = unsafe { memmap2::Mmap::map(&f).map_err(|e| format!("cannot map {path}: {e}"))? };
+        if map.len() < 12 || &map[..6] != b"\x93NUMPY" {
+            return Err(format!("{path} is not an .npy file"));
+        }
         let (hdr, off) = npy_header(&map);
         let sh = npy_shape(&hdr);
-        assert!(hdr.contains("<f2"));
-        RealSource { map, off, n: sh[1] }
+        if !hdr.contains("<f2") || sh.len() != 2 || sh[0].checked_mul(sh[1]).and_then(|x| x.checked_mul(2)).and_then(|x| x.checked_add(off)).map_or(true, |e| e > map.len()) {
+            return Err(format!("{path}: expected rows of float16 (<f2, 2-D) as long as its shape; refit"));
+        }
+        Ok(RealSource { map, off, n: sh[1] })
     }
     pub fn row(&self, r: usize) -> &[u16] {
         let n = self.n;

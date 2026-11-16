@@ -2,7 +2,7 @@
 //! vectors zero-padded to n. With a fit's row order (`ord{c}.u32`, `clcell.npy` and `clpos.npy`, written by
 //! `fit::fit`), any fit row is read without holding the vectors in memory.
 
-use crate::util::read_npy;
+use crate::util::try_read_npy;
 
 /// Unit f16 vectors by row, in the order of a fit's `cstart` and `perm`: its Xs.npy (`RealSource`), or its partition
 /// (`Buckets`).
@@ -95,12 +95,27 @@ impl Partition {
             }
             cells.push(Cell { own, ..cell });
         }
-        let cluster_cell: Vec<u32> = read_npy(&format!("{dir}/cluster_cell.npy")).u32s();
+        let cluster_cell: Vec<u32> = try_read_npy(&format!("{dir}/cluster_cell.npy"))?.u32s();
         if cluster_cell.iter().any(|&c| c as usize >= nc) {
             return Err(format!("{dir}/cluster_cell.npy names a cell beyond its {nc}; rerun tools/partition.py"));
         }
         Ok(Partition { n, n_orig: us("n_orig")?, rows: us("N")?, k: cluster_cell.len(), cells, cluster_cell })
     }
+}
+
+/// The identity of the partition in `dir`, which a fit records (meta.json "partition_id") and a build checks: a fixed
+/// hash of its manifest.json (written last by tools/partition.py, with the partition's source, sizes and seed) and of
+/// that file's identity (length, times, device, inode; `v2::store::XsId`). A partition written again into the same
+/// directory, with another seed or other data, has another.
+pub fn partition_id(dir: &str) -> Result<String, String> {
+    let path = format!("{dir}/manifest.json");
+    let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
+    let id = crate::v2::store::XsId::of(&path)?;
+    let mut h = crate::v2::store::Fx::default();
+    h.str("vexact partition");
+    h.bytes(&b);
+    h.pod(&[id.len, id.mtime.0 as u64, id.mtime.1 as u64, id.ctime.0 as u64, id.ctime.1 as u64, id.dev, id.ino]);
+    Ok(format!("{:016x}", h.finish()))
 }
 
 /// A fit's rows read from its partition: row i of the fit's cluster c is local row `ord[cell][pos + i]` of its cell,
@@ -116,8 +131,8 @@ pub struct Buckets {
 impl Buckets {
     pub fn open(partition: &str, fit: &str) -> Result<Buckets, String> {
         let part = Partition::open(partition)?;
-        let r = |name: &str| -> Vec<usize> { read_npy(&format!("{fit}/{name}.npy")).i64s().iter().map(|&x| x as usize).collect() };
-        let (cstart, clcell, clpos) = (r("cstart"), r("clcell"), r("clpos"));
+        let r = |name: &str| -> Result<Vec<usize>, String> { Ok(try_read_npy(&format!("{fit}/{name}.npy"))?.i64s().iter().map(|&x| x as usize).collect()) };
+        let (cstart, clcell, clpos) = (r("cstart")?, r("clcell")?, r("clpos")?);
         let ord: Vec<Option<memmap2::Mmap>> = (0..part.cells.len()).map(|c| map(&format!("{fit}/ord{c}.u32"))).collect::<Result<_, _>>()?;
         let refit = || format!("{fit} lists rows that {partition} does not hold; refit it");
         if cstart.len() != clcell.len() + 1 || clpos.len() != clcell.len() || cstart.first() != Some(&0) || cstart.windows(2).any(|w| w[0] > w[1]) {
@@ -135,6 +150,10 @@ impl Buckets {
             }
         }
         Ok(Buckets { part, cstart, clcell, clpos, ord })
+    }
+    /// The number of fit rows (the fit's cstart's last entry).
+    pub fn rows(&self) -> usize {
+        self.cstart.last().copied().unwrap_or(0)
     }
     /// The cell and local row of fit row r.
     fn local(&self, r: usize) -> (usize, usize) {

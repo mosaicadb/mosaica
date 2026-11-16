@@ -2033,13 +2033,18 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
 /// The fit in `dir` with the options `o` applied, and the profile: the inputs of a build, and of the key of the index
 /// they build.
 pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String> {
-    let mut p = crate::index::load_params(dir);
-    p.anchors = crate::index::load_anchors(dir, p.meta.n)?;
+    let mut p = crate::index::load_params(dir)?;
+    p.anchors = crate::index::load_anchors(dir, p.meta.n, p.meta.k, &p.centres)?;
     if let Some(nv) = o.nguar {
-        assert!(nv > 0.0, "the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count");
+        if !(nv > 0.0) {
+            return Err(format!("the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count"));
+        }
     }
     if let Some(new) = &o.rlv {
-        assert!(!new.is_empty() && new.windows(2).all(|w| w[0] < w[1]) && new[0] > *p.meta.dlv.last().unwrap(), "the randomised levels {new:?} must rise from above the last deterministic level, {}", p.meta.dlv.last().unwrap());
+        let top = p.meta.dlv.last().copied().unwrap_or(0);
+        if new.is_empty() || !new.windows(2).all(|w| w[0] < w[1]) || new[0] <= top {
+            return Err(format!("the randomised levels {new:?} must rise from above the last deterministic level, {top}"));
+        }
         let l1 = p.meta.csg * p.meta.csg / 2.0 + (new.len() as f64 / p.meta.rlv.len() as f64).ln();
         p.meta.csg = (2.0 * l1).sqrt();
         p.meta.rlv = new.clone();
@@ -2051,7 +2056,11 @@ pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String
         p.grp.truncate(kk);
         p.centres.truncate(kk * n);
     }
-    let prof = derive::load_profile(o.profile.as_deref().unwrap_or(&format!("{dir}/profile.npy")));
+    let ppath = o.profile.clone().unwrap_or(format!("{dir}/profile.npy"));
+    let prof = crate::util::try_read_npy(&ppath)?.f64s();
+    if Some(prof.len()) != p.meta.g.checked_mul(p.meta.n) {
+        return Err(format!("{ppath} does not hold a profile of {} groups by {} dimensions", p.meta.g, p.meta.n));
+    }
     Ok((p, prof))
 }
 
@@ -2087,10 +2096,31 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     }
     let full = Full2::Real { rows: Default::default() };
     let mut lg = |s| log(format!("[build2] {s}"));
+    let rows = p.cstart[p.meta.k];
     let ix = if p.xs_path.is_empty() {
-        build2(p, prof, &Real2 { src: crate::bucket::Buckets::open(&p.partition, fit_dir)? }, full, o, design_c, dir, &mut lg)
+        // the partition must be the one fitted (a partition written again into its directory is another), hold rows
+        // of the fit's width, and give every fit row the entity the fit's perm.npy lists for it
+        let now = crate::bucket::partition_id(&p.partition)?;
+        if now != p.partition_id {
+            return Err(format!("the partition {} changed since the fit (identity {} when fitted, {now} now); refit it (vexact --index {fit_dir} fit --partition {}) before building", p.partition, if p.partition_id.is_empty() { "unrecorded" } else { &p.partition_id }, p.partition));
+        }
+        let src = crate::bucket::Buckets::open(&p.partition, fit_dir)?;
+        if src.part.n != p.meta.n {
+            return Err(format!("the partition {} holds vectors of {} dimensions, the fit {}; refit it", p.partition, src.part.n, p.meta.n));
+        }
+        if src.rows() < rows {
+            return Err(format!("the partition {} lists {} rows, the fit {rows}; refit it", p.partition, src.rows()));
+        }
+        if let Some(r) = (0..rows).into_par_iter().find_first(|&r| src.id(r) != p.perm[r] as u64) {
+            return Err(format!("fit row {r} is entity {} in the partition {} but {} in the fit's perm.npy; refit it", src.id(r), p.partition, p.perm[r]));
+        }
+        build2(p, prof, &Real2 { src }, full, o, design_c, dir, &mut lg)
     } else {
-        build2(p, prof, &Real2 { src: crate::index::RealSource::open(&p.xs_path) }, full, o, design_c, dir, &mut lg)
+        let src = crate::index::RealSource::try_open(&p.xs_path)?;
+        if src.n != p.meta.n || src.map.len().saturating_sub(src.off) / 2 / src.n.max(1) < rows {
+            return Err(format!("{} does not hold the fit's {rows} rows of {} dimensions; refit it", p.xs_path, p.meta.n));
+        }
+        build2(p, prof, &Real2 { src }, full, o, design_c, dir, &mut lg)
     };
     Ok(ix)
 }
@@ -2104,14 +2134,14 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 
 /// The fitted directory `dir` built into a queryable index in memory (codes, repack thresholds and, without the norm
 /// sort, the support table), with the parameters it was built from. Nothing is saved.
-pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
+pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let malloc = crate::util::BuildMalloc::enter();
-    let (p, prof) = prepare(dir, o).unwrap_or_else(|e| panic!("{e}"));
+    let (p, prof) = prepare(dir, o)?;
     let design_c = design_constants(&p, o, log);
-    let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log).unwrap_or_else(|e| panic!("{e}"));
+    let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log)?;
     drop(malloc);
     set_repack(&mut ix, log);
-    (p, ix)
+    Ok((p, ix))
 }
 
 /// The index of the fitted directory `dir` built with `o`, opened from where it is saved (`saved_dir`) without encoding

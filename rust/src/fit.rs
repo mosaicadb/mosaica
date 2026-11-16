@@ -46,13 +46,17 @@ impl Default for FitOptions {
     }
 }
 
-fn save<T: Copy>(dir: &str, name: &str, descr: &str, shape: &[usize], v: &[T]) {
+fn save<T: Copy>(dir: &str, name: &str, descr: &str, shape: &[usize], v: &[T]) -> Result<(), String> {
+    // SAFETY: T is a plain number type here (i8, i64, f32, f64); its bytes are its little-endian values
     let b = unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, std::mem::size_of_val(v)) };
-    write_npy(&format!("{dir}/{name}.npy"), descr, shape, b);
+    let path = format!("{dir}/{name}.npy");
+    let mut out = npy_header_bytes(descr, shape);
+    out.extend_from_slice(b);
+    std::fs::write(&path, out).map_err(|e| format!("cannot write {path}: {e}"))
 }
 
 /// Randomised level ends and block bounds, as tools/fit.py `schedule`.
-fn schedule(n0: usize, n: usize) -> (Vec<usize>, Vec<usize>) {
+fn schedule(n0: usize, n: usize) -> Result<(Vec<usize>, Vec<usize>), String> {
     let cap = (0.4 * 2.0 * n0 as f64).min(256.0 * (n0 as f64 / 768.0).max(1.0)).min((DLV[5] + n) as f64);
     let mut rlv: Vec<usize> = RLV_BASE.iter().copied().filter(|&b| b as f64 <= cap).collect();
     if rlv.len() < RLV_BASE.len() {
@@ -84,15 +88,19 @@ fn schedule(n0: usize, n: usize) -> (Vec<usize>, Vec<usize>) {
             rlv.push(b as usize);
         }
     }
-    assert!(!rlv.is_empty(), "empty randomised schedule");
+    if rlv.is_empty() {
+        return Err(format!("no randomised level fits vectors of {n0} dimensions"));
+    }
     let mut bounds = vec![0usize];
     bounds.extend(BLOCK_FRACS.iter().map(|f| (f * n as f64 / 16.0).round_ties_even() as usize * 16));
     bounds.push(n);
     for j in 1..bounds.len() {
         bounds[j] = bounds[j].max(bounds[j - 1] + 16);
     }
-    assert!(bounds[bounds.len() - 2] + 16 <= n, "n = {n} is too small for four randomised blocks");
-    (rlv, bounds)
+    if bounds[bounds.len() - 2] + 16 > n {
+        return Err(format!("n = {n} is too small for four randomised blocks"));
+    }
+    Ok((rlv, bounds))
 }
 
 /// Spherical k-means of the rows of `s` (m x n, unit) to k centres, as combined/core.py `kmeans`.
@@ -142,11 +150,14 @@ fn mat(a: &[f64], n: usize) -> Mat<f64> {
 }
 
 /// Eigenvalues and eigenvectors (columns, row-major n x n) of a symmetric matrix, largest first.
-fn eigh_desc(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
-    let e = mat(a, n).self_adjoint_eigen(Side::Lower).expect("symmetric eigendecomposition failed");
+fn eigh_desc(a: &[f64], n: usize) -> Result<(Vec<f64>, Vec<f64>), String> {
+    if a.iter().any(|x| !x.is_finite()) {
+        return Err("a covariance has a non-finite entry (non-finite vectors?)".into());
+    }
+    let e = mat(a, n).self_adjoint_eigen(Side::Lower).map_err(|e| format!("symmetric eigendecomposition failed: {e:?}"))?;
     let (s, u) = (e.S().column_vector(), e.U());
     let mut o: Vec<usize> = (0..n).collect();
-    o.sort_by(|&x, &y| s[y].partial_cmp(&s[x]).unwrap());
+    o.sort_by(|&x, &y| s[y].total_cmp(&s[x]));
     let vals = o.iter().map(|&i| s[i]).collect();
     let mut vecs = vec![0f64; n * n];
     for (c, &i) in o.iter().enumerate() {
@@ -154,7 +165,7 @@ fn eigh_desc(a: &[f64], n: usize) -> (Vec<f64>, Vec<f64>) {
             vecs[r * n + c] = u[(r, i)];
         }
     }
-    (vals, vecs)
+    Ok((vals, vecs))
 }
 
 fn matmul(a: &[f64], b: &[f64], n: usize) -> Vec<f64> {
@@ -228,9 +239,15 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     }
     let (seed, cert_time) = (o.seed, o.cert_time);
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {out}: {e}"))?;
+    // meta.json is written last: until then the directory is not a fit (an earlier fit's is removed first)
+    let meta_path = format!("{out}/meta.json");
+    if std::path::Path::new(&meta_path).exists() {
+        std::fs::remove_file(&meta_path).map_err(|e| format!("cannot remove {meta_path}: {e}"))?;
+    }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
     let part = crate::bucket::Partition::open(&pdir)?;
+    let partition_id = crate::bucket::partition_id(&pdir)?;
     let (nrow, n0, n) = (part.rows, part.n_orig, part.n);
     if n0 < 50 {
         return Err(format!("the vectors have {n0} dimensions; the randomised levels need at least 50 (the first ends at 40 bytes, which must be within 40% of the f16 vector). Pad the vectors with zero columns to 50 or more."));
@@ -245,13 +262,17 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     let mut mean0: Vec<(Vec<i8>, f64)> = vec![(Vec::new(), 1.0); part.k];
     let mut placed = 0usize;
     for (c, cell) in part.cells.iter().enumerate() {
+        if let Some(i) = (0..cell.rows()).find(|&i| cell.cluster(i) as usize >= part.k) {
+            return Err(format!("{pdir}/cell{c}: row {i} names cluster {}, beyond the partition's {}; rerun tools/partition.py", cell.cluster(i), part.k));
+        }
         let mut loc: Vec<(u32, u32)> = (0..cell.rows()).filter_map(|i| {
             let k = cell.cluster(i);
             (part.cluster_cell[k as usize] as usize == c).then_some((k, i as u32))
         }).collect();
         loc.sort_unstable();
-        let ord: Vec<u32> = loc.iter().map(|x| x.1).collect();
-        std::fs::write(format!("{out}/ord{c}.u32"), unsafe { std::slice::from_raw_parts(ord.as_ptr() as *const u8, ord.len() * 4) }).unwrap();
+        let ord: Vec<u8> = loc.iter().flat_map(|x| x.1.to_le_bytes()).collect();
+        let path = format!("{out}/ord{c}.u32");
+        std::fs::write(&path, ord).map_err(|e| format!("cannot write {path}: {e}"))?;
         placed += loc.len();
         let mut runs = Vec::new();
         let mut s = 0;
@@ -317,10 +338,10 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     for c in 0..k {
         cstart[c + 1] = cstart[c] + cnt[c] as i64;
     }
-    save(out, "cstart", "<i8", &[k + 1], &cstart);
-    save(out, "clcell", "<i8", &[k], &fine.iter().map(|&f| part.cluster_cell[f] as i64).collect::<Vec<_>>());
-    save(out, "clpos", "<i8", &[k], &fine.iter().map(|&f| pos0[f] as i64).collect::<Vec<_>>());
-    log(&t, format!("K {k} clusters (sizes {}..{}), G {ng} groups", cnt.iter().min().unwrap(), cnt.iter().max().unwrap()));
+    save(out, "cstart", "<i8", &[k + 1], &cstart)?;
+    save(out, "clcell", "<i8", &[k], &fine.iter().map(|&f| part.cluster_cell[f] as i64).collect::<Vec<_>>())?;
+    save(out, "clpos", "<i8", &[k], &fine.iter().map(|&f| pos0[f] as i64).collect::<Vec<_>>())?;
+    log(&t, format!("K {k} clusters (sizes {}..{}), G {ng} groups", cnt.iter().min().unwrap_or(&0), cnt.iter().max().unwrap_or(&0)));
 
     // pass 2: per group, residual covariance and mean |r|^2, residuals r = x - (stored centre), rows read through the
     // fit's row order
@@ -328,13 +349,14 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     use crate::bucket::FitRows;
     {
         let path = format!("{out}/perm.npy");
-        let mut w = std::io::BufWriter::with_capacity(1 << 22, std::fs::File::create(&path).unwrap_or_else(|e| panic!("cannot create {path}: {e}")));
-        w.write_all(&npy_header_bytes("<i8", &[nrow])).unwrap();
+        let werr = |e: std::io::Error| format!("cannot write {path}: {e}");
+        let mut w = std::io::BufWriter::with_capacity(1 << 22, std::fs::File::create(&path).map_err(werr)?);
+        w.write_all(&npy_header_bytes("<i8", &[nrow])).map_err(werr)?;
         for r0 in (0..nrow).step_by(1 << 20) {
             let b: Vec<u8> = (r0..nrow.min(r0 + (1 << 20))).flat_map(|r| (rows.id(r) as i64).to_le_bytes()).collect();
-            w.write_all(&b).unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
+            w.write_all(&b).map_err(werr)?;
         }
-        w.flush().unwrap();
+        w.flush().map_err(werr)?;
     }
     let acc: Vec<std::sync::Mutex<(Vec<f64>, f64)>> = (0..ng).map(|_| std::sync::Mutex::new((vec![0f64; n * n], 0f64))).collect();
     (0..k).into_par_iter().for_each(|c| {
@@ -376,7 +398,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     let sigma_q_desc;
     if basis == "pca" {
         sigma_q_desc = String::new();
-        let res: Vec<(Vec<f64>, Vec<f64>)> = covs.par_iter().map(|(cv, _)| eigh_desc(cv, n)).collect();
+        let res: Vec<(Vec<f64>, Vec<f64>)> = covs.par_iter().map(|(cv, _)| eigh_desc(cv, n)).collect::<Result<_, _>>()?;
         for (g, (l, v)) in res.into_iter().enumerate() {
             for c in 0..n {
                 lam[g * n + c] = l[c].max(1e-12);
@@ -386,7 +408,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     } else {
         // Sigma_Q: offsets of 3,000 corpus items (and the queries') from 40 centres each, drawn by cluster size
         let mut rq = ChaCha8Rng::seed_from_u64(3);
-        let w = WeightedIndex::new(&cnt).unwrap();
+        let w = WeightedIndex::new(&cnt).map_err(|e| format!("cluster sizes {e}"))?;
         let qs = sample_rows(&mut rq, 3000);
         let mut sq = offset_cov(&qs, &mh, n, &w, &mut rq);
         sigma_q_desc = match &sample {
@@ -419,7 +441,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         };
         let ridge = RIDGE * trace(&sq, n) / n as f64;
         (0..n).for_each(|i| sq[i * n + i] += ridge);
-        let (lq, uq) = eigh_desc(&sq, n);
+        let (lq, uq) = eigh_desc(&sq, n)?;
         let scaled = |f: &dyn Fn(f64) -> f64| -> Vec<f64> {
             let mut us = uq.clone();
             for r in 0..n {
@@ -436,8 +458,8 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
             matmul(&us, &ut, n)
         };
         let (a, ai) = (scaled(&|l| l.sqrt()), scaled(&|l| 1.0 / l.sqrt()));
-        let res: Vec<(Vec<f32>, Vec<f64>, f64)> = covs.par_iter().map(|(cv, _)| {
-            let (gam, wv) = eigh_desc(&matmul(&matmul(&a, cv, n), &a, n), n);
+        let res: Vec<(Vec<f32>, Vec<f64>, f64)> = covs.par_iter().map(|(cv, _)| -> Result<(Vec<f32>, Vec<f64>, f64), String> {
+            let (gam, wv) = eigh_desc(&matmul(&matmul(&a, cv, n), &a, n), n)?;
             let g0 = gam[0];
             let mut v = matmul(&ai, &wv, n);
             for r in 0..n {
@@ -449,14 +471,14 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
             // the coded coordinates z = V_Q8^-1 r under the build's int8 basis: their mean squares from the covariance
             let vq = int8_basis64(&v32, n);
             let vm = mat(&vq, n);
-            let sv = vm.singular_values().expect("singular values of the int8 basis");
+            let sv = vm.singular_values().map_err(|e| format!("singular values of the int8 basis: {e:?}"))?;
             let cond = sv.iter().cloned().fold(0.0, f64::max) / sv.iter().cloned().fold(f64::INFINITY, f64::min);
             let inv = vm.partial_piv_lu().inverse();
             let invr: Vec<f64> = (0..n * n).map(|i| inv[(i / n, i % n)]).collect();
             let ic = matmul(&invr, cv, n);
             let l: Vec<f64> = (0..n).map(|i| (0..n).map(|j| ic[i * n + j] * invr[i * n + j]).sum::<f64>().max(1e-30)).collect();
-            (v32, l, cond)
-        }).collect();
+            Ok((v32, l, cond))
+        }).collect::<Result<_, _>>()?;
         for (g, (v, l, cond)) in res.into_iter().enumerate() {
             vb[g * n * n..(g + 1) * n * n].copy_from_slice(&v);
             lam[g * n..(g + 1) * n].copy_from_slice(&l);
@@ -477,7 +499,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
             let mut o: Vec<usize> = (0..k).collect();
             let row = &d[i * k..(i + 1) * k];
             let top = 4.min(k);
-            o.select_nth_unstable_by(top - 1, |&a, &b| row[b].partial_cmp(&row[a]).unwrap());
+            o.select_nth_unstable_by(top - 1, |&a, &b| row[b].total_cmp(&row[a]));
             for &c in &o[..top] {
                 pairs[grp[c]].push((i, c));
             }
@@ -518,33 +540,37 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     };
     let _ = pq;
 
-    let (rlv, bounds) = schedule(n0, n);
+    let (rlv, bounds) = schedule(n0, n)?;
     // the rate design's constant (two-sided, N = 1e9); the query-time constants follow the index size (src/v2/tail.rs)
     let l1 = (2.0 * NTARGET * rlv.len() as f64 / EPS).ln();
     let tt: serde_json::Value = serde_json::from_str(include_str!("tree_tables.json")).unwrap();
     let tab = |key: &str| -> Vec<f64> { tt[key].as_array().unwrap().iter().flat_map(|r| r.as_array().unwrap().iter().map(|x| x.as_f64().unwrap())).collect() };
     let gtree: Vec<f64> = tt["gtree"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
-    save(out, "grp", "<i8", &[k], &grp.iter().map(|&g| g as i64).collect::<Vec<_>>());
-    save(out, "mq8", "|i1", &[k, n], &mq8);
-    save(out, "msc", "<f8", &[k], &msc);
-    save(out, "lam", "<f8", &[ng, n], &lam);
-    save(out, "V", "<f4", &[ng, n, n], &vb);
-    save(out, "r2", "<f8", &[ng], &r2);
-    save(out, "profile", "<f8", &[ng, n], &prof);
-    save(out, "tree_edges", "<f8", &[9, 256], &tab("tree_edges"));
-    save(out, "tree_cent", "<f8", &[9, 256], &tab("tree_cent"));
-    save(out, "gtree", "<f8", &[gtree.len()], &gtree);
+    save(out, "grp", "<i8", &[k], &grp.iter().map(|&g| g as i64).collect::<Vec<_>>())?;
+    save(out, "mq8", "|i1", &[k, n], &mq8)?;
+    save(out, "msc", "<f8", &[k], &msc)?;
+    save(out, "lam", "<f8", &[ng, n], &lam)?;
+    save(out, "V", "<f4", &[ng, n, n], &vb)?;
+    save(out, "r2", "<f8", &[ng], &r2)?;
+    save(out, "profile", "<f8", &[ng, n], &prof)?;
+    save(out, "tree_edges", "<f8", &[9, 256], &tab("tree_edges"))?;
+    save(out, "tree_cent", "<f8", &[9, 256], &tab("tree_cent"))?;
+    save(out, "gtree", "<f8", &[gtree.len()], &gtree)?;
     let mut qi = rand::seq::index::sample(&mut rng, nrow, 200.min(nrow)).into_vec().into_iter().map(|r| r as i64).collect::<Vec<_>>();
     qi.sort();
-    save(out, "qi", "<i8", &[qi.len()], &qi);
+    save(out, "qi", "<i8", &[qi.len()], &qi)?;
+    // the anchors from the stored centres (as `load_centres` gives them), then meta.json, last, through a new file
+    let na = anchors_into(out, n, k, &mq, o.image, o.text_anchors.as_deref(), o.text_count, seed)?;
     let meta = serde_json::json!({
         "N": nrow, "n": n, "n_orig": n0, "K": k, "G": ng, "metric": "angular", "DLV": DLV, "RLV": rlv, "BOUNDS": bounds,
         "CSG": (2.0 * l1).sqrt(), "L1": l1, "EPS": EPS,
         "partition": std::fs::canonicalize(&pdir).map_or(pdir.clone(), |p| p.display().to_string()),
+        "partition_id": partition_id,
         "format": FORMAT, "fit": fitj,
     });
-    std::fs::write(format!("{out}/meta.json"), serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-    let na = write_anchors(out, o.image, o.text_anchors.as_deref(), o.text_count, seed)?;
+    let tmp = format!("{meta_path}.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&meta).unwrap()).map_err(|e| format!("cannot write {tmp}: {e}"))?;
+    std::fs::rename(&tmp, &meta_path).map_err(|e| format!("cannot move {tmp} to {meta_path}: {e}"))?;
     log(&t, format!("saved {out}; {na}"));
 
     // the randomised levels' certified constant, by tools/certify.py within cert_time (0 skips it: the build then
@@ -569,9 +595,15 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
 /// direction (and an existing `anchors.npy` is removed). Returns what was written, for the log.
 pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<String, String> {
     let (n, k, centres) = crate::index::load_centres(dir)?;
+    anchors_into(dir, n, k, &centres, image, text, ntext, seed)
+}
+
+/// `write_anchors` for the fit in `dir` with these centres (K x n, as `index::load_centres` gives them).
+#[allow(clippy::too_many_arguments)]
+fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<String, String> {
     let text = match text {
         Some(path) => {
-            let (v, w) = read_npy(path).rows_f32(path)?;
+            let (v, w) = try_read_npy(path)?.rows_f32(path)?;
             if w > n {
                 return Err(format!("{path} has rows of {w} dimensions, more than the fit's {n}"));
             }
@@ -580,18 +612,36 @@ pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, 
         None => None,
     };
     let path = format!("{dir}/anchors.npy");
-    match anchors_of(&centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)? {
+    match anchors_of(centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)? {
         None => {
-            if std::path::Path::new(&path).exists() {
-                std::fs::remove_file(&path).map_err(|e| format!("cannot remove {path}: {e}"))?;
+            for f in [path.clone(), format!("{dir}/anchors.json")] {
+                if std::path::Path::new(&f).exists() {
+                    std::fs::remove_file(&f).map_err(|e| format!("cannot remove {f}: {e}"))?;
+                }
             }
             Ok(format!("no anchors.npy: the support table's anchors are the {k} centres"))
         }
         Some(a) => {
-            save(dir, "anchors", "<f8", &[a.len() / n, n], &a);
+            save_anchors(dir, n, k, centres, &a)?;
             Ok(format!("{} support-table anchors in {path}", a.len() / n))
         }
     }
+}
+
+/// Write `anchors` (A x n, unit) as the fit's `anchors.npy`, with the sidecar `anchors.json` that records the fit they
+/// were made for (`index::centres_hash` of its centres) and their own hash, which the build and the open check
+/// (`index::load_anchors`): a refit, or anchors.npy replaced alone, is refused rather than built with.
+pub fn save_anchors(dir: &str, n: usize, k: usize, centres: &[f32], anchors: &[f64]) -> Result<(), String> {
+    crate::index::check_anchors(anchors, n)?;
+    let side = format!("{dir}/anchors.json");
+    // the sidecar goes first, so a failure between the two leaves anchors.npy unmatched (refused), never matched to the
+    // wrong file
+    if std::path::Path::new(&side).exists() {
+        std::fs::remove_file(&side).map_err(|e| format!("cannot remove {side}: {e}"))?;
+    }
+    save(dir, "anchors", "<f8", &[anchors.len() / n, n], anchors)?;
+    let j = serde_json::json!({"fit": crate::index::centres_hash(n, k, centres), "anchors": crate::index::anchors_hash(anchors)});
+    std::fs::write(&side, j.to_string()).map_err(|e| format!("cannot write {side}: {e}"))
 }
 
 /// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,

@@ -256,7 +256,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let topen = Timer::new();
     let mut lg = |s: String| out!("{s}");
     let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
-        build(dir, &bo, &mut lg)
+        build(dir, &bo, &mut lg).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        })
     } else if args().iter().any(|a| a == "--rebuild") {
         rebuild(dir, &bo, &mut lg).unwrap_or_else(|e| {
             eprintln!("{e}");

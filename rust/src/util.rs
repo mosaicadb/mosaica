@@ -1,7 +1,5 @@
 //! Small shared pieces: .npy reading, f16 helpers, exact similarity, a reproducible Haar rotation generator.
 use half::f16;
-use std::fs::File;
-use std::io::Read;
 use std::time::Instant;
 
 pub struct Npy {
@@ -11,13 +9,45 @@ pub struct Npy {
 }
 
 pub fn read_npy(path: &str) -> Npy {
-    let mut f = File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).unwrap();
-    let (hdr, off) = npy_header(&buf);
-    let descr = field(&hdr, "descr");
-    assert!(!hdr.contains("'fortran_order': True"), "{path}: fortran order");
-    Npy { shape: npy_shape(&hdr), descr, data: buf[off..].to_vec() }
+    try_read_npy(path).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// An .npy file read whole, its header checked (magic, version, length, a C-ordered array with a type and a shape);
+/// an error naming the file otherwise.
+pub fn try_read_npy(path: &str) -> Result<Npy, String> {
+    let buf = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    let bad = |what: &str| format!("{path}: not a readable .npy file ({what})");
+    if buf.len() < 10 || &buf[..6] != b"\x93NUMPY" {
+        return Err(bad("no .npy magic"));
+    }
+    let (hl, start): (usize, usize) = match buf[6] {
+        1 => (u16::from_le_bytes([buf[8], buf[9]]) as usize, 10),
+        2 | 3 if buf.len() >= 12 => (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12),
+        _ => return Err(bad("unknown version")),
+    };
+    let off = start.checked_add(hl).filter(|&e| e <= buf.len()).ok_or_else(|| bad("header past the end"))?;
+    let hdr = String::from_utf8_lossy(&buf[start..off]).to_string();
+    if hdr.contains("'fortran_order': True") {
+        return Err(bad("Fortran order"));
+    }
+    let descr = try_field(&hdr, "descr").ok_or_else(|| bad("no descr"))?;
+    let shape = try_shape(&hdr).ok_or_else(|| bad("no shape"))?;
+    Ok(Npy { shape, descr, data: buf[off..].to_vec() })
+}
+
+fn try_field(hdr: &str, key: &str) -> Option<String> {
+    let i = hdr.find(&format!("'{key}'"))?;
+    let rest = hdr.get(i + key.len() + 3..)?;
+    let a = rest.find('\'')?;
+    let b = rest[a + 1..].find('\'')?;
+    Some(rest[a + 1..a + 1 + b].to_string())
+}
+
+fn try_shape(hdr: &str) -> Option<Vec<usize>> {
+    let i = hdr.find("'shape'")?;
+    let a = hdr[i..].find('(')? + i;
+    let b = hdr[a..].find(')')? + a;
+    Some(hdr[a + 1..b].split(',').filter_map(|s| s.trim().parse().ok()).collect())
 }
 
 /// The bytes of an .npy header (version 1) for C-ordered data of type `descr` and shape `shape`.
@@ -50,14 +80,6 @@ pub fn npy_header(buf: &[u8]) -> (String, usize) {
         (u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as usize, 12)
     };
     (String::from_utf8_lossy(&buf[start..start + hl]).to_string(), start + hl)
-}
-
-fn field(hdr: &str, key: &str) -> String {
-    let i = hdr.find(&format!("'{key}'")).unwrap();
-    let rest = &hdr[i + key.len() + 3..];
-    let a = rest.find('\'').unwrap();
-    let b = rest[a + 1..].find('\'').unwrap();
-    rest[a + 1..a + 1 + b].to_string()
 }
 
 pub fn npy_shape(hdr: &str) -> Vec<usize> {

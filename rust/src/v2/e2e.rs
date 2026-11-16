@@ -18,7 +18,7 @@ fn fixture() -> &'static Fixture {
     static F: OnceLock<Fixture> = OnceLock::new();
     F.get_or_init(|| {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {});
+        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
         let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10));
 
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
@@ -279,7 +279,7 @@ fn saved_indexes_under_other_options_open_as_built() {
     ] {
         let edir = tmp.join(name.replace([' ', ','], "_"));
         let edir = edir.to_str().unwrap();
-        let (_, mem) = build(dir, &o, &mut |_| {});
+        let (_, mem) = build(dir, &o, &mut |_| {}).unwrap();
         let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
         let (_, opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
         same_index(&mem, &built);
@@ -575,8 +575,13 @@ fn same_index(a: &Index2, b: &Index2) {
 /// rest in cell 1, and a third of cluster 3's rows stored in cell 1 and moved into cell 0. Returns the partition's
 /// directory and each entity's f16 vector.
 fn synth_partition(at: &std::path::Path) -> (String, Vec<Vec<u16>>) {
+    synth_partition_moving(at, 3)
+}
+
+/// `synth_partition` with a third of cluster `moved`'s rows stored in the other cell.
+fn synth_partition_moving(at: &std::path::Path, moved_cluster: usize) -> (String, Vec<Vec<u16>>) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-    let p = crate::index::load_params(dir);
+    let p = crate::index::load_params(dir).unwrap();
     let xs = crate::index::RealSource::open(&p.xs_path);
     let (n, k) = (p.meta.n, p.meta.k);
     let mut byent = vec![Vec::new(); p.perm.len()];
@@ -589,7 +594,7 @@ fn synth_partition(at: &std::path::Path) -> (String, Vec<Vec<u16>>) {
             let e = p.perm[r] as u64;
             byent[e as usize] = x.to_vec();
             let home = cell_of(c);
-            let moved = c == 3 && r % 3 == 0;
+            let moved = c == moved_cluster && r % 3 == 0;
             let stored = if moved { 1 - home } else { home };
             let bytes: Vec<u8> = x.iter().flat_map(|h| h.to_le_bytes()).collect();
             files[stored][0].extend(&bytes);
@@ -609,7 +614,7 @@ fn synth_partition(at: &std::path::Path) -> (String, Vec<Vec<u16>>) {
     }
     let cc: Vec<u8> = (0..k).flat_map(|c| (cell_of(c) as u32).to_le_bytes()).collect();
     crate::util::write_npy(at.join("cluster_cell.npy").to_str().unwrap(), "<u4", &[k], &cc);
-    let man = serde_json::json!({"N": p.perm.len(), "n": n, "n_orig": n, "K": k, "cells": 2, "cross": 1});
+    let man = serde_json::json!({"N": p.perm.len(), "n": n, "n_orig": n, "K": k, "cells": 2, "cross": 1, "seed": moved_cluster});
     std::fs::write(at.join("manifest.json"), man.to_string()).unwrap();
     (at.to_str().unwrap().to_string(), byent)
 }
@@ -623,7 +628,7 @@ fn a_partitioned_fit_builds_an_index_of_its_vectors() {
     for basis in ["pca", "dual"] {
         let o = crate::fit::FitOptions { basis: basis.into(), cert_time: 0.0, ..crate::fit::FitOptions::default() };
         crate::fit::fit(fit, &part, &o, &mut |_| {}).unwrap();
-        let p = crate::index::load_params(fit);
+        let p = crate::index::load_params(fit).unwrap();
         assert!(p.xs_path.is_empty() && p.partition == part, "a partitioned fit names its partition, not a vectors file");
         assert_eq!(p.cstart[p.meta.k], byent.len());
         // clusters numbered group by group
@@ -673,7 +678,8 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     // the same as the build in memory, which (as UP's build) takes the centres' directions as the anchors
     assert_eq!((&base.hi[..], &base.lo[..], &base.anchors[..]), (&fixture().ix.hi[..], &fixture().ix.lo[..], &fixture().ix.anchors[..]));
     let rev: Vec<f64> = (0..k).rev().flat_map(|c| base.anchors[c * n..(c + 1) * n].to_vec()).collect();
-    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[k, n], &rev.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+    let (_, _, centres) = crate::index::load_centres(dir).unwrap();
+    crate::fit::save_anchors(dir, n, k, &centres, &rev).unwrap();
     let (_, built) = rebuild_at(dir, er, &o, &mut |_| {}).unwrap();
     let (_, ix) = open_at(dir, er, &o, &mut |_| {}).unwrap();
     assert_eq!(ix.store_hash(), built.store_hash());
@@ -713,14 +719,66 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     assert!(open_at(dir, er, &o, &mut |_| {}).is_err());
     open_at(dir, ec, &o, &mut |_| {}).unwrap();
     // index.json claiming the centres for the reversed anchors is refused at open
-    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[k, n], &rev.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+    crate::fit::save_anchors(dir, n, k, &centres, &rev).unwrap();
     let json = format!("{er}/index.json");
     let text = std::fs::read_to_string(&json).unwrap();
     assert!(text.contains("\"anc_centres\": false"));
     std::fs::write(&json, text.replace("\"anc_centres\": false", "\"anc_centres\": true")).unwrap();
     assert!(open_at(dir, er, &o, &mut |_| {}).is_err(), "an index claiming its anchors are the centres opened against a fit with other anchors");
-    // anchors.npy that are not unit rows are refused
+    // anchors made for another fit, an anchors.npy replaced alone or without its sidecar, and anchors that are not
+    // unit rows are refused, at open and at rebuild
+    let side = fit.join("anchors.json");
+    let sj = std::fs::read_to_string(&side).unwrap();
+    let refused = |what: &str, pat: &str| {
+        let (a, b) = (open_at(dir, er, &o, &mut |_| {}), rebuild_at(dir, er, &o, &mut |_| {}));
+        assert!(a.as_ref().is_err_and(|e| e.contains(pat)) && b.as_ref().is_err_and(|e| e.contains(pat)), "{what}: {:?} {:?}", a.err(), b.err());
+    };
+    let v: serde_json::Value = serde_json::from_str(&sj).unwrap();
+    std::fs::write(&side, sj.replace(v["fit"].as_str().unwrap(), "0123456789abcdef")).unwrap();
+    refused("anchors of another fit", "another fit");
+    std::fs::write(&side, &sj).unwrap();
+    let mut rot = rev.clone();
+    rot.rotate_left(n);
+    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[k, n], &rot.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+    refused("anchors.npy replaced alone", "replaced alone");
+    std::fs::remove_file(&side).unwrap();
+    refused("anchors.npy without anchors.json", "no ");
     crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[1, n], &vec![0u8; n * 8]);
+    assert!(crate::fit::save_anchors(dir, n, k, &centres, &vec![0f64; n]).is_err(), "anchors that are not unit rows saved");
     assert!(open_at(dir, er, &o, &mut |_| {}).is_err() && rebuild_at(dir, er, &o, &mut |_| {}).is_err());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// A partition written again into the fitted one's directory (another assignment, as another seed gives) is refused at
+/// the rebuild; an entity id changed in a cell file (the partition's manifest unchanged) is caught by the build's check
+/// of every row's entity against the fit's perm.npy.
+#[test]
+fn a_changed_partition_is_refused_at_the_build() {
+    let tmp = tmp_dir("repart");
+    let pdir = tmp.join("part");
+    let (part, _) = synth_partition(&pdir);
+    let fit = tmp.join("fit");
+    let fit = fit.to_str().unwrap();
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
+    let o = BuildOptions::default();
+    let edir = tmp.join("encoded-p");
+    let edir = edir.to_str().unwrap();
+    rebuild_at(fit, edir, &o, &mut |_| {}).unwrap();
+    // the same data partitioned again (other rows moved) into the same directory
+    std::fs::remove_dir_all(&pdir).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    synth_partition_moving(&pdir, 5);
+    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("changed since the fit"), "{e}");
+    // a fit of the new partition builds; then one entity id changed in place, the manifest left as it was
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
+    rebuild_at(fit, edir, &o, &mut |_| {}).unwrap();
+    let ids = pdir.join("cell0.ids");
+    let mut b = std::fs::read(&ids).unwrap();
+    let e0 = u64::from_le_bytes(b[..8].try_into().unwrap());
+    b[..8].copy_from_slice(&(e0 ^ 1).to_le_bytes());
+    std::fs::write(&ids, b).unwrap();
+    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("perm.npy"), "{e}");
     std::fs::remove_dir_all(&tmp).unwrap();
 }
