@@ -2415,6 +2415,14 @@ pub fn open(dir: &str, oo: &OpenOptions, log: &mut dyn FnMut(String)) -> Result<
     open_in(dir, &saved_dir(dir), oo, log)
 }
 
+/// The build options the index saved in the index directory `dir` records (those that decide the encoding; the others
+/// at their defaults), for a caller that wants to know whether `rebuild` with its own options would save another index.
+pub fn saved_options(dir: &str) -> Result<BuildOptions, String> {
+    let json = format!("{}/index.json", saved_dir(dir));
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("cannot read {json}: {e}"))?).map_err(|e| format!("{json}: {e}"))?;
+    BuildOptions::from_encoding_json(&v["options"]).map_err(|e| format!("{json}: {e}"))
+}
+
 /// The fit's perm.npy (fit row -> entity) read into `p.perm` for a caller that needs the fit's rows after an open (which
 /// reads none), checked against the hash the index saved in `edir` recorded when it was built (index.json "perm"):
 /// O(rows), never part of an open. An error, and `p.perm` left empty, when they differ.

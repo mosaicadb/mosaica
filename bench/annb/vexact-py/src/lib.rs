@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
 use vexact::v2::q::{knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
-use vexact::v2::{open, rebuild, BuildOptions, Index2};
+use vexact::v2::{open, rebuild, saved_options, BuildOptions, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
 struct Index {
@@ -23,13 +23,13 @@ struct Index {
 
 #[pymethods]
 impl Index {
-    /// Encode the fitted directory `dir` (from `rust/tools/fit.py`) and save the index beside it, where `v2::open` finds
-    /// it, or open the one already saved there for the same fit and options (`v2::open`, which maps it and encodes
-    /// nothing). Then fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. Queries run on one
+    /// Open the index saved in the fitted directory `dir` (from `rust/tools/fit.py`) when it was built with these options
+    /// (`v2::saved_options`) and is not stale (`v2::open`, which maps it and encodes nothing); else encode the fit and
+    /// save the index there (`v2::rebuild`). Then fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. Queries run on one
     /// thread, pinned to `core` when given.
     /// `plan`: "auto" (the planner: in memory, the support table and the rule in rows; nothing is timed), "index" (every
     /// cluster the support table leaves open on the index path), "flat" (decided from full vectors) or "scan".
-    /// `dlv`: the deterministic levels' cumulative bytes, in place of the fit's (a build input, e.g. [16, 32]).
+    /// `dlv`: the deterministic levels' cumulative bytes (a build input, e.g. [16, 32]); None: the fit's.
     /// `ddec`: the deterministic levels that decide in threshold queries, as a bit mask (None: all).
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None))]
@@ -44,9 +44,10 @@ impl Index {
         py.detach(|| {
             let o = BuildOptions { dlv, ..BuildOptions::default() };
             let mut log = |s: String| eprintln!("{s}");
-            let (p, ix) = match open(&dir, &o, &mut log) {
-                Ok(x) => x,
-                Err(_) => rebuild(&dir, &o, &mut log).map_err(PyValueError::new_err)?,
+            let same = saved_options(&dir).is_ok_and(|s| s.encoding_json() == o.encoding_json());
+            let (p, ix) = match same.then(|| open(&dir, &OpenOptions::default(), &mut log)) {
+                Some(Ok(x)) => x,
+                _ => rebuild(&dir, &o, &mut log).map_err(PyValueError::new_err)?,
             };
             let plan = Plan { mode, ddec, ..Plan::default() };
             plan.check(&ix).map_err(PyValueError::new_err)?;

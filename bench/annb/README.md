@@ -38,9 +38,12 @@ about 6 GB of download and 20 GB of memory to build, and the brute-force ground 
 
 `install.sh` copies `rust/` from the revision named `PIN` in the script, not from the working tree, so the
 benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
-`PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings use only `v2::open`,
-`v2::rebuild`, `BuildOptions`, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`,
-`Vis2::new`, `knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`. The pin is a merge of `research/exact-vector-search` (saved index, planner without
+`PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings follow the library's
+`create` / `open` / `rebuild` API (`v2::open` with `OpenOptions`, `v2::saved_options`, `v2::rebuild` with
+`BuildOptions`), which the pinned revision predates: move `PIN` to a revision that has it before installing. They use
+only those, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`, `Vis2::new`,
+`knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`. The pin is a merge of
+`research/exact-vector-search` (saved index, planner without
 timing, levels-clusters options off by default) with this branch's AVX-512 basis products and integer levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
@@ -49,8 +52,8 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
 
 - **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures; `fit.py`
   defaults to pca, which the build argument `basis: pca` selects), then `vexact_py.Index` on its output (encoding, the
-  approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings encode the fit and save the index beside
-it (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
+  approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings open the index saved in the fit when it was built with the same
+options, else encode the fit and save the index there (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
 mapped from its files, as `v2::open` gives it. The planner times nothing: in memory it is the support table and the rule
 in rows (`Plan::default`).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
