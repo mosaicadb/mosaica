@@ -128,8 +128,8 @@ pub fn run2(scale: usize, nq: usize) {
             lo[a * k + c] = cols[c].1[a];
         }
     }
-    ix.hi = std::sync::Arc::new(hi);
-    ix.lo = std::sync::Arc::new(lo);
+    ix.hi = std::sync::Arc::new(hi.into());
+    ix.lo = std::sync::Arc::new(lo.into());
     ix.anchors = std::sync::Arc::new(anchors);
     // anchor a is cluster a's centre direction only when there is one anchor per cluster
     ix.anc_centres = nanch == k;

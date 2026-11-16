@@ -1013,8 +1013,10 @@ pub struct Index2 {
     pub centres64: Arc<Vec<f64>>,
     pub rots: Arc<Vec<Vec<f64>>>,
     pub anchors: Arc<Vec<f64>>,
-    pub hi: Arc<Vec<f32>>, // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward
-    pub lo: Arc<Vec<f32>>,
+    // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward; on the heap after a
+    // build, mapped from hi.bin and lo.bin after an open (so an open reads none of it)
+    pub hi: Arc<Arr<f32>>,
+    pub lo: Arc<Arr<f32>>,
     pub nanch: usize,
     /// Anchor a is cluster a's centre direction, one per cluster (the support table built without the fit's
     /// anchors.npy): the planner may then find a query's anchor among the clusters it visits, or from its q.m. With
@@ -1742,10 +1744,26 @@ fn support_bounds(x16: &[u16], n: usize, anchors: &[f64], anchors32: &[f32]) -> 
                 mi = mi.min(exact(i, a));
             }
         }
-        hi[a] = (((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32;
-        lo[a] = (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32;
+        hi[a] = bound_up(mx);
+        lo[a] = bound_down(mi);
     }
     (hi, lo)
+}
+
+/// An upper bound stored in the support table: v + 1e-9 rounded up to 2^-15, as an f32 not below it. Below 256 in
+/// magnitude every multiple of 2^-15 is an f32, so this is the plain cast there (unit vectors give |x . a| <= ~1);
+/// beyond, the cast can round down, and the f32 above is taken.
+pub(crate) fn bound_up(v: f64) -> f32 {
+    let g = ((v + 1e-9) * 32768.0).ceil() / 32768.0;
+    let h = g as f32;
+    if (h as f64) < g { h.next_up() } else { h }
+}
+
+/// The lower bound of `bound_up`: v - 1e-9 rounded down to 2^-15, as an f32 not above it.
+pub(crate) fn bound_down(v: f64) -> f32 {
+    let g = ((v - 1e-9) * 32768.0).floor() / 32768.0;
+    let l = g as f32;
+    if (l as f64) > g { l.next_down() } else { l }
 }
 
 pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &BuildOptions, design_c: Option<&[f64]>, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Index2 {
@@ -2006,8 +2024,8 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
         rots: Arc::new(rots),
         anchors: Arc::new(anchors),
-        hi: Arc::new(thi.finish().to_vec()),
-        lo: Arc::new(tlo.finish().to_vec()),
+        hi: Arc::new(thi.finish()),
+        lo: Arc::new(tlo.finish()),
         vrow: Vec::new(),
         nent: maxent + 1,
         nanch,

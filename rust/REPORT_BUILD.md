@@ -364,3 +364,8 @@ Bounded memory (synthetic, 256 dimensions, K × K table as UP builds it, 4 threa
 43 s; 4M 695 MB, 157 s (fit loaded 52, calibrated 326, encoded 333, assembled 374, support table 496 MB), against 317
 MB / 34 s and 683 MB / 149 s above, in another session. Code hashes `15cfe6ee75d39ecc` (1M) and `d1dad1a234029a56`
 (4M; the 4M partition of the K × A runs above).
+
+Behaviour changes against UP to know of: a fit with more than 4,096 clusters and no `anchors.npy` is refused by the
+build (`KK_MAX`; UP builds its K × K table at any K: 8 GB at K = 32,000), with what to do (write anchors); an
+`anchors.npy` must carry its sidecar `anchors.json`, which names the fit it was made for (written by `vexact anchors`
+and the fit); the support table is mapped at open rather than read.

@@ -696,7 +696,8 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     let offs: Arr<u64> = Arr::map(&f("offsets.bin")).map_err(ours)?;
     let (ek, ev): (Arr<u64>, Arr<f32>) = (Arr::map(&f("esc_key.bin")).map_err(ours)?, Arr::map(&f("esc_val.bin")).map_err(ours)?);
     let anchors: Vec<f64> = Arr::<f64>::map(&f("anchors.bin")).map_err(ours)?.to_vec();
-    let (hi, lo): (Vec<f32>, Vec<f32>) = (Arr::<f32>::map(&f("hi.bin")).map_err(ours)?.to_vec(), Arr::<f32>::map(&f("lo.bin")).map_err(ours)?.to_vec());
+    // the support table mapped, not read: K x A bounds, of which a query touches its anchor's row
+    let (hi, lo): (Arr<f32>, Arr<f32>) = (Arr::map(&f("hi.bin")).map_err(ours)?, Arr::map(&f("lo.bin")).map_err(ours)?);
     let lcode: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("code{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
     let lscal: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("scal{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
     let (ahat, row_ent, ent_row, nukey): (Arr<i16>, Arr<u32>, Arr<u32>, Arr<u16>) = (Arr::map(&f("ahat.bin")).map_err(ours)?, Arr::map(&f("row_ent.bin")).map_err(ours)?, Arr::map(&f("ent_row.bin")).map_err(ours)?, Arr::map(&f("nukey.bin")).map_err(ours)?);
