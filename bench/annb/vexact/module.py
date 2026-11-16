@@ -1,4 +1,4 @@
-# The fast-scan index (rust/, through bench/annb/vexact-py) as an ANN-Benchmarks algorithm. fit() runs
+# The fast-scan index (rust/, through bench/annb/vexact-py) as an ANN-Benchmarks and VIBE algorithm. fit() runs
 # rust/tools/fit.py on the training vectors and builds the index; queries run one at a time on one thread.
 # VEXACT_SRC is where the image keeps the sources (rust/ and combined/); VEXACT_WORK is where fit() writes.
 import os
@@ -17,9 +17,9 @@ MIN_DIM = 64
 
 
 class Vexact(BaseANN):
-    def __init__(self, metric, method_param):
-        if metric != "angular":
-            raise ValueError(f"vexact supports the angular metric only, not {metric}")
+    def __init__(self, metric, method_param=None):
+        if metric not in ("angular", "cosine", "normalized"):
+            raise ValueError(f"vexact supports cosine similarity only (angular, cosine, normalized), not {metric}")
         self.method_param = method_param
         self.index = None
 
@@ -43,7 +43,7 @@ class Vexact(BaseANN):
 
 
 class VexactExact(Vexact):
-    def __init__(self, metric, method_param):
+    def __init__(self, metric, method_param=None):
         super().__init__(metric, method_param)
         self.name = "vexact-exact"
 
@@ -52,7 +52,7 @@ class VexactExact(Vexact):
 
 
 class VexactApprox(Vexact):
-    def __init__(self, metric, method_param):
+    def __init__(self, metric, method_param=None):
         super().__init__(metric, method_param)
         self.nprobe, self.eps = 1, 0.0
 

@@ -1,0 +1,15 @@
+Bootstrap: localimage
+From: base.sif
+
+%files
+  @SRC@ /home/app/vexact
+
+%post
+  curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.97.0
+  export PATH=/root/.cargo/bin:$PATH
+  pip install --no-cache-dir scipy 'maturin>=1.7,<2'
+  cd /home/app/vexact/bench/annb/vexact-py
+  RUSTFLAGS="-C target-cpu=native" CARGO_TARGET_DIR=/tmp/vexact-target maturin build --release -o /tmp/vexact-wheels
+  pip install --no-cache-dir /tmp/vexact-wheels/*.whl
+  rm -rf /tmp/vexact-target /tmp/vexact-wheels /root/.cargo/registry
+  python -c 'import vexact_py'

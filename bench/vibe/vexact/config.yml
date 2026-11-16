@@ -1,0 +1,24 @@
+float:
+  cosine: &vexact
+  - base_args: ['@metric']
+    constructor: VexactExact
+    disabled: false
+    singularity_image: vexact
+    module: vibe.algorithms.vexact
+    name: vexact-exact
+    run_groups:
+      exact:
+        args: {}
+  - base_args: ['@metric']
+    constructor: VexactApprox
+    disabled: false
+    singularity_image: vexact
+    module: vibe.algorithms.vexact
+    name: vexact-approx
+    run_groups:
+      approx:
+        args: {}
+        query_args:
+          nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+          eps: [0]
+  normalized: *vexact
