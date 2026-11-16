@@ -1,7 +1,8 @@
 # The fast-scan index (rust/, through bench/annb/vexact-py) as an ANN-Benchmarks and VIBE algorithm. fit() runs
 # rust/tools/fit.py on the training vectors and builds the index; queries run one at a time on one thread.
 # VEXACT_SRC is where the image keeps the sources (rust/ and combined/); VEXACT_WORK is where fit() writes.
-# The build parameter `basis` (pca or dual) is fit.py's --basis. With dual on a dataset that supplies a sample of its
+# The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is pca, and the
+# measured index (SYSTEM.md) uses dual. With dual on a dataset that supplies a sample of its
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
 import os
 import subprocess
@@ -29,7 +30,7 @@ class Vexact(BaseANN):
         if metric not in ("angular", "cosine", "normalized"):
             raise ValueError(f"vexact supports cosine similarity only (angular, cosine, normalized), not {metric}")
         # ANN-Benchmarks passes the build arguments as a dict, VIBE as values in order
-        self.basis = method_param.get("basis", "pca") if isinstance(method_param, dict) else method_param or "pca"
+        self.basis = method_param.get("basis", "dual") if isinstance(method_param, dict) else method_param or "dual"
         if self.basis not in ("pca", "dual"):
             raise ValueError(f"basis is pca or dual, not {self.basis}")
         self.index = None

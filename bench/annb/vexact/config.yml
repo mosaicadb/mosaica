@@ -8,7 +8,7 @@ float:
     name: vexact-exact
     run_groups:
       exact:
-        args: [[{basis: pca}, {basis: dual}]]
+        args: [{basis: dual}]
   - base_args: ['@metric']
     constructor: VexactApprox
     disabled: false
@@ -17,5 +17,5 @@ float:
     name: vexact-approx
     run_groups:
       approx:
-        args: [[{basis: pca}, {basis: dual}]]
+        args: [{basis: dual}]
         query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]

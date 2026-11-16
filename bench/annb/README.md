@@ -44,7 +44,8 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
 
 ## How the index is run
 
-- **Build** (`fit`): `rust/tools/fit.py` on the training vectors, then `vexact_py.Index` on its output (encoding, the
+- **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures; `fit.py`
+  defaults to pca, which the build argument `basis: pca` selects), then `vexact_py.Index` on its output (encoding, the
   planner's constants timed on one thread, and the approximate mode's cluster order fitted on 1,000 pseudo-queries).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.

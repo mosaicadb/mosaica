@@ -59,6 +59,6 @@ out-of-distribution queries), `ivf-rabitq(faiss)`, `vamana-lvq(svs)` and `lorann
 
 ## Out-of-distribution datasets
 
-VIBE gives an algorithm marked `ood: true` a sample of the query distribution and its neighbours (`fit_ood`).
-`rust/tools/fit.py --basis dual --query-sample` can fit the index to such a sample. The adapter does not use it yet,
-so on the out-of-distribution datasets the index is fitted to the corpus alone, as it is everywhere else.
+The index is built with `fit.py --basis dual`. VIBE gives an algorithm marked `ood: true` a sample of the query
+distribution (`fit_ood`), and on those datasets the adapter passes it to `fit.py --query-sample`, which fits the
+basis's query side to where the queries point. On the in-distribution datasets the basis is fitted to the corpus alone.
