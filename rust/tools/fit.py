@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from core import kmeans, TREE, GTREE  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import certify  # noqa: E402
+from rules import per_cluster, groups_for  # noqa: E402,F401 (tools/rules.py, shared with partition.py)
 
 # Design constants (not fitted): items per cluster (the default; `per_cluster` gives the rule by N), the guarantee's N and epsilon, the deterministic level ends, the
 # randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25 hedge weight.
@@ -121,23 +122,6 @@ class Rows:
         out = np.zeros((len(x), self.n), np.float32)
         out[:, :x.shape[1]] = np.where(nr > 0, x / np.where(nr > 0, nr, 1), 0)
         return out
-
-
-def per_cluster(N):
-    """Items per cluster for N items by research/levels-clusters' rule: 2,000 x sqrt(N / 1M), rounded in log2 to a
-    power-of-two multiple of 2,000 (ties down), at least 2,000. That is 2,000 up to 2M items, 4,000 up to 8M, 8,000 up
-    to 32M, and double for each further 4x (64,000 at 1B)."""
-    return 2000 * 2 ** max(0, math.ceil(math.log2(N / 1e6) / 2 - 0.5))
-
-
-def groups_for(rule, N, K, n0):
-    """Groups of clusters: by-k8 (enough items per group for a basis, 20 n, at most 64 groups and 8 clusters per group
-    on average), by-n (the same without the 8 clusters per group), or a number (at most K)."""
-    if rule == "by-k8":
-        return int(max(1, min(64, K // 8, N // (20 * n0))))
-    if rule == "by-n":
-        return int(max(1, min(64, K, N // (20 * n0))))
-    return max(1, min(int(rule), K))
 
 
 def int8_basis(v):

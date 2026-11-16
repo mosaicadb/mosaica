@@ -80,10 +80,21 @@ pub struct Partition {
 /// The partition's manifest.json: its bytes and its contents, with every file it lists checked to exist at the length
 /// it lists (an error naming the first that does not).
 fn manifest(dir: &str) -> Result<(Vec<u8>, serde_json::Value), String> {
+    let (b, m, missing) = manifest_missing(dir)?;
+    if let Some((name, e)) = missing.into_iter().next() {
+        return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); rerun tools/partition.py"));
+    }
+    Ok((b, m))
+}
+
+/// As `manifest`, with the listed files that do not exist (each with its error) returned instead of refused; a listed
+/// file of another length, or one that exists but cannot be read, is still an error.
+fn manifest_missing(dir: &str) -> Result<(Vec<u8>, serde_json::Value, Vec<(String, std::io::Error)>), String> {
     let path = format!("{dir}/manifest.json");
     let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
     let m: serde_json::Value = serde_json::from_slice(&b).map_err(|e| format!("{path}: {e}; rerun tools/partition.py"))?;
     let files = m["files"].as_object().ok_or(format!("{path} does not list the partition's files (an older tools/partition.py wrote it); rerun tools/partition.py"))?;
+    let mut missing = Vec::new();
     for (name, len) in files {
         let want = len.as_u64().ok_or(format!("{path}: the length of {name} is not a number; rerun tools/partition.py"))?;
         if name.is_empty() || name.contains('/') || name.starts_with('.') {
@@ -92,10 +103,11 @@ fn manifest(dir: &str) -> Result<(Vec<u8>, serde_json::Value), String> {
         match std::fs::metadata(format!("{dir}/{name}")) {
             Ok(md) if md.len() == want => {}
             Ok(md) => return Err(format!("{dir}/{name} is {} bytes, the partition's manifest says {want}: the partition changed after it was written; rerun tools/partition.py", md.len())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing.push((name.clone(), e)),
             Err(e) => return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); rerun tools/partition.py")),
         }
     }
-    Ok((b, m))
+    Ok((b, m, missing))
 }
 
 impl Partition {
@@ -137,10 +149,22 @@ impl Partition {
 /// manifest and the lengths of its files: O(cells), never the rows.
 pub fn partition_id(dir: &str) -> Result<String, String> {
     let (b, _) = manifest(dir)?;
+    Ok(id_of(&b))
+}
+
+/// As `partition_id`, with the files the manifest lists that do not exist named instead of refused (an open, which
+/// reads no cell, takes their absence like a missing partition's): the identity of the manifest's content, and the
+/// missing files. A listed file of another length is still an error.
+pub fn partition_id_missing(dir: &str) -> Result<(String, Vec<String>), String> {
+    let (b, _, missing) = manifest_missing(dir)?;
+    Ok((id_of(&b), missing.into_iter().map(|(n, _)| n).collect()))
+}
+
+fn id_of(manifest: &[u8]) -> String {
     let mut h = crate::v2::store::Fx::default();
     h.str("vexact partition 2");
-    h.bytes(&b);
-    Ok(format!("{:016x}", h.finish()))
+    h.bytes(manifest);
+    format!("{:016x}", h.finish())
 }
 
 /// A fit's rows read from its partition: row i of the fit's cluster c is local row `ord[cell][pos + i]` of its cell,

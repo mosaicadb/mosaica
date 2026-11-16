@@ -783,6 +783,44 @@ mod tests {
         assert!(Groups::parse("0").is_err() && Groups::parse("k8").is_err());
     }
 
+    /// tools/rules.py's `per_cluster` and `groups_for` (which tools/fit.py and tools/partition.py use) give what
+    /// `per_cluster_by_n` and `Groups::count` give, at the rule's boundaries. Needs python3; skipped with a message
+    /// without it.
+    #[test]
+    fn python_rules_agree() {
+        let tools = concat!(env!("CARGO_MANIFEST_DIR"), "/tools");
+        let ns: [usize; 13] = [1_000, 60_000, 1_000_000, 1_999_999, 2_000_000, 2_000_001, 8_000_000, 8_000_001, 32_000_000, 32_000_001, 128_000_000, 128_000_001, 1_000_000_000];
+        let gs: [(usize, usize, usize); 7] = [(1_000_000, 500, 768), (1_000_000, 1000, 768), (60_000, 30, 768), (60_000, 60, 768), (1_000, 4, 768), (1_000_000_000, 15_625, 768), (4_000, 32, 64)];
+        let script = format!(
+            "import sys\nsys.path.insert(0, {tools:?})\nimport rules\n\
+             for m in ('fit', 'partition'):\n    try:\n        mod = __import__(m)\n    except ImportError as e:\n        print('skip', m, e)\n        continue\n    \
+             assert mod.per_cluster is rules.per_cluster, m\n    print('shared', m)\n\
+             print(*[rules.per_cluster(n) for n in {ns:?}])\n\
+             for r in ('by-k8', 'by-n', '10'):\n    print(*[rules.groups_for(r, N, K, n0) for N, K, n0 in {gs:?}])\n");
+        let out = match std::process::Command::new("python3").arg("-I").arg("-c").arg(&script).output() {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("python_rules_agree skipped: python3 cannot run ({e})");
+                return;
+            }
+        };
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let text = String::from_utf8(out.stdout).unwrap();
+        let mut lines: Vec<&str> = text.lines().collect();
+        for l in lines.iter().filter(|l| l.starts_with("skip ")) {
+            eprintln!("python_rules_agree: {l} (rules.py checked alone)");
+        }
+        lines.retain(|l| !l.starts_with("skip ") && !l.starts_with("shared "));
+        let nums = |l: &str| l.split_whitespace().map(|x| x.parse::<usize>().unwrap()).collect::<Vec<_>>();
+        assert_eq!(nums(lines[0]), ns.iter().map(|&n| per_cluster_by_n(n)).collect::<Vec<_>>());
+        assert_eq!(nums(lines[0])[4..9], [2000, 4000, 4000, 8000, 8000]);
+        assert_eq!(*nums(lines[0]).last().unwrap(), 64000);
+        for (l, g) in lines[1..].iter().zip([Groups::ByK8, Groups::ByN, Groups::Fixed(10)]) {
+            assert_eq!(nums(l), gs.iter().map(|&(n, k, n0)| g.count(n, k, n0)).collect::<Vec<_>>(), "{g:?}");
+        }
+        assert_eq!(lines.len(), 4);
+    }
+
     /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.
     #[test]
     fn prompt_files_of_any_float_width() {

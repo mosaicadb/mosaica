@@ -120,6 +120,13 @@ VECTORS.npy --tools/partition.py (faiss)--> PART/ --vexact fit--> FIT/ --vexact 
 The same fit built into memory and into files gives the same code hash, and the `fit.py` directory of the synthetic set
 still hashes to `c44827e2e155e64f`.
 
+**One-time migration (since 1077831).** A partition is known by its `manifest.json`'s content and the lengths of the
+files it lists (`bucket::partition_id`). A partition written by an older `partition.py` (a manifest without `files`)
+is refused by `vexact fit`, and a fit made from one (its `partition_id` under the old hash) is refused by the build and
+by the open of its saved index, which then opens only with `--keep-index`. Run `tools/partition.py` again, refit and
+`--rebuild`; no conversion tool is provided. Deleting the cells after the build is fine: an open warns that the
+partition, or files its manifest lists, are missing, and opens the index (it holds its own vectors).
+
 ### 1M BioCLIP-2
 
 1,000,000 rows (768 dimensions) from `fetch.py`'s 20 row groups; item queries are 200 rows of a held-out row group, text

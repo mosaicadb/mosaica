@@ -908,8 +908,9 @@ fn id_diff(was: &XsId, now: &XsId) -> String {
 
 /// A partitioned fit's partition against the one fitted (`partition_id`, its manifest's content, and the files'
 /// lengths it lists; O(cells)): another is an error unless `keep` (then a warning); the same content under another
-/// file identity of its manifest than at the build (`was`: a copy, a move, a chmod) is a warning; a missing partition
-/// is a warning (the index holds its own vectors; the cells may be deleted after the build).
+/// file identity of its manifest than at the build (`was`: a copy, a move, a chmod) is a warning; a missing partition,
+/// or the fitted manifest with some of the files it lists deleted, is a warning (the index holds its own vectors; the
+/// cells may be deleted after the build).
 fn check_partition(p: &Params, was: Option<XsId>, keep: bool, log: &mut dyn FnMut(String)) -> Result<(), String> {
     let man = format!("{}/manifest.json", p.partition);
     let holds = "the index holds its own vectors";
@@ -920,15 +921,20 @@ fn check_partition(p: &Params, was: Option<XsId>, keep: bool, log: &mut dyn FnMu
         }
         Ok(now) => now,
     };
-    match crate::bucket::partition_id(&p.partition) {
-        Ok(id) if id == p.partition_id => {
+    match crate::bucket::partition_id_missing(&p.partition) {
+        // the manifest is the fitted one, but cell files it lists are gone: as a missing partition
+        Ok((id, missing)) if id == p.partition_id && !missing.is_empty() => {
+            log(format!("WARNING: the fit's partition {} lacks {} of the files its manifest lists ({}{}); {holds}, opening it", p.partition, missing.len(), missing[..missing.len().min(3)].join(", "), if missing.len() > 3 { ", ..." } else { "" }));
+            Ok(())
+        }
+        Ok((id, _)) if id == p.partition_id => {
             if let Some(was) = was.filter(|w| *w != now) {
                 log(format!("WARNING: the partition {} holds what was fitted, but its manifest.json is another file than when this index was built (length {} -> {}, modified {:?} -> {:?}{}{}: a copy, a move or a chmod); opening the index", p.partition, was.len, now.len, was.mtime, now.mtime, if id_diff(&was, &now).is_empty() { "" } else { ", another " }, id_diff(&was, &now)));
             }
             Ok(())
         }
         r => {
-            let changed = format!("the partition {} changed since the fit this index was built from ({})", p.partition, match r { Ok(id) => format!("identity {} when fitted, {id} now", p.partition_id), Err(e) => e });
+            let changed = format!("the partition {} changed since the fit this index was built from ({})", p.partition, match r { Ok((id, _)) => format!("identity {} when fitted, {id} now", p.partition_id), Err(e) => e });
             if !keep {
                 return Err(format!("{changed}; refit and --rebuild, or --keep-index to use the index as built"));
             }

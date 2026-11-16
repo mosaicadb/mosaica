@@ -456,7 +456,7 @@ pub struct CQ2 {
     pub gtab: bool,   // tables combined from the group's and the centre's
     pub repack: f32,  // compact by the index's per-level occupancy thresholds times this (0: at 0.6)
     pub tol: f64,     // threshold queries take an item in once its lower bound reaches t - tol (0: exact)
-    pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the index's Meta2::ddec)
+    pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
 }
 
@@ -1888,13 +1888,26 @@ pub struct Plan {
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
     pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
+    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: every level); None: the
+    /// index's own choice (`Meta2::ddec`, from `BuildOptions::ddec`). A per-query choice: plans with different values
+    /// run on one opened index. `Plan::check` refuses a level the index does not have.
+    pub ddec: Option<u32>,
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3 }
+        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, ddec: None }
     }
 }
 impl Plan {
+    /// This plan's choices against the index `ix`: an error when `ddec` names a deterministic level beyond `ix`'s.
+    pub fn check(&self, ix: &Index2) -> Result<(), String> {
+        match self.ddec {
+            Some(d) if d != u32::MAX && d >> ix.meta.ndl() != 0 => {
+                Err(format!("ddec {d:#b} names a deterministic level beyond this index's {} (levels 0 to {})", ix.meta.ndl(), ix.meta.ndl() - 1))
+            }
+            _ => Ok(()),
+        }
+    }
     /// The timed constants as `name=value` lines.
     pub fn to_kv(&self) -> String {
         format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncscan_us={}\nanc_us={}\ndir_us={}\nitem_us2={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\nio_us={}\nio_gbps={}\n",
@@ -2680,6 +2693,9 @@ pub fn open_cluster(ix: &Index2, ci: usize, gq: &GQ2, pr: &Prep2, qm: f64, pl: P
     cq.gtab = gt;
     cq.repack = if pl.repack { pl.repack_mul } else { 0.0 };
     cq.tol = pl.tol;
+    if let Some(d) = pl.ddec {
+        cq.ddec = d;
+    }
     if int {
         cq.enable_int(ix, ci, gq);
     }

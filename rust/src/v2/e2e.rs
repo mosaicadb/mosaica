@@ -336,6 +336,56 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     }
 }
 
+/// The default build of synth4k encodes as the reference build does: its code hash (the gates' `--rebuild --hash`
+/// reference since the calibration change; `code_hash` uses std's DefaultHasher, so a Rust release that changes it
+/// changes this value, not the codes) and its store hash (a fixed hash, `Fx`).
+#[test]
+fn synth4k_reference_hashes() {
+    let ix = &fixture().ix;
+    assert_eq!(format!("{:016x}", ix.code_hash()), "7ac80b6c54101fa9");
+    assert_eq!(format!("{:016x}", ix.store_hash()), "3782663ec5d076fd");
+}
+
+/// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
+/// under every choice, a level the plan leaves out decides nothing, the index's own choice applies without one, and a
+/// level the index does not have is refused (`Plan::check`).
+#[test]
+fn deciding_levels_are_chosen_per_query() {
+    let f = fixture();
+    let ix = &f.ix;
+    let ndl = ix.meta.ndl();
+    assert_eq!((ndl, ix.meta.ddec), (6, u32::MAX));
+    for ddec in [None, Some(u32::MAX), Some(0), Some(0b10), Some(0b100001)] {
+        let index = Plan { mode: PlanMode::Index, ddec, ..Plan::default() };
+        assert!(index.check(ix).is_ok(), "ddec {ddec:?}");
+        for (pname, plan) in [("index path", index), ("index path, float", Plan { int_det: false, gtab: false, repack: false, ..index }), ("default", Plan { ddec, ..Plan::default() })] {
+            for (qi, q) in f.queries.iter().enumerate().take(3) {
+                let pr = prep2(ix, q);
+                for (sname, bm) in &f.sets[..2] {
+                    let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                    let t = truth(ix, q, bm.as_ref());
+                    for th in thresholds(&t) {
+                        let r = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+                        assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "ddec {ddec:?}, plan {pname}, set {sname}, query {qi}, t {th}");
+                        if matches!(plan.mode, PlanMode::Index) {
+                            let d = ddec.unwrap_or(ix.meta.ddec);
+                            for l in 0..ndl {
+                                if d >> l & 1 == 0 {
+                                    assert_eq!(r.st.dec_in[l] + r.st.dec_out[l], 0, "ddec {ddec:?}: level {l} decided, plan {pname}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // levels beyond the index's six
+    for bad in [1 << 6, 1 << 31, 0b1000001] {
+        assert!(Plan { ddec: Some(bad), ..Plan::default() }.check(ix).is_err(), "accepted ddec {bad:#b}");
+    }
+}
+
 fn tmp_dir(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("vexact-e2e-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     std::fs::create_dir_all(&d).unwrap();
@@ -764,7 +814,53 @@ fn a_partitioned_fit_builds_an_index_of_its_vectors() {
                 assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "{basis}: threshold {th}");
             }
         }
+        // another deterministic level schedule on the partitioned fit: built from the cells, exact
+        let (_, ix) = build(fit, &BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, &mut |_| {}).unwrap();
+        assert_eq!(ix.meta.ndl(), 2);
+        for q in &f.queries {
+            let pr = prep2(&ix, q);
+            let t = truth(&ix, q, None);
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                    assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "{basis}, dlv 16/32: threshold {th}, plan {pname}");
+                }
+            }
+            let nn = knn2(&ix, q, 10, None, Plan::default());
+            assert_eq!(sub_values(&ix, &nn.ents, q), top_values(&t, 10), "{basis}, dlv 16/32: k-NN");
+        }
     }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// The fit's perm.npy read after an open (`load_perm_checked`, for item queries from the fit's rows) is checked against
+/// the hash the saved index recorded: the fit's own reads, one with two entities swapped is refused.
+#[test]
+fn perm_read_after_an_open_is_checked_against_the_index() {
+    let tmp = tmp_dir("perm");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let o = BuildOptions::default();
+    let edir = tmp.join("encoded-p");
+    let edir = edir.to_str().unwrap();
+    rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let (mut p, _) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    assert!(p.perm.is_empty(), "an open reads no perm.npy");
+    load_perm_checked(&mut p, edir).unwrap();
+    assert_eq!(p.perm.len(), p.cstart[p.meta.k]);
+    let (mut p, _) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let path = fit.join("perm.npy");
+    let mut b = std::fs::read(&path).unwrap();
+    let l = b.len();
+    let (x, y) = (b[l - 16..l - 8].to_vec(), b[l - 8..].to_vec());
+    assert_ne!(x, y);
+    b[l - 16..l - 8].copy_from_slice(&y);
+    b[l - 8..].copy_from_slice(&x);
+    std::fs::write(&path, b).unwrap();
+    let e = load_perm_checked(&mut p, edir).unwrap_err();
+    assert!(e.contains("perm.npy") && e.contains("not those"), "{e}");
+    assert!(p.perm.is_empty());
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
@@ -895,7 +991,8 @@ fn a_changed_partition_is_refused_at_the_build() {
 /// A partition is known by its manifest's content and the lengths of the files it lists, not by the manifest file's
 /// identity: a copy of the manifest in place (new mtime, ctime and inode) builds and opens with warnings; a manifest
 /// whose content changed, or a cell file whose length is not the listed one, is refused at the build and at the open
-/// (unless --keep-index); a partition with no listed files (an older partition.py) is refused at the fit.
+/// (unless --keep-index); listed files deleted open with a warning, as a missing partition does; a partition with no
+/// listed files (an older partition.py) is refused at the fit.
 #[test]
 fn a_partition_is_known_by_its_content() {
     let tmp = tmp_dir("partid");
@@ -941,6 +1038,18 @@ fn a_partition_is_known_by_its_content() {
     let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("cell1.cl") && e.contains("bytes"), "{e}");
     assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
+    // listed cell files deleted: still refused while another listed file has another length; alone, a warning at the
+    // open (as a missing partition: the index holds its own vectors) and an error at the rebuild, which reads them
+    std::fs::remove_file(pdir.join("cell0.f16")).unwrap();
+    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
+    b.truncate(b.len() - 4);
+    std::fs::write(&cl, &b).unwrap();
+    std::fs::remove_file(pdir.join("cell1.in.f16")).unwrap();
+    let mut log = Vec::new();
+    let (_, ix) = open_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    assert_eq!(ix.store_hash(), want);
+    assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("lacks 2 of the files") && l.contains("cell0.f16")), "{log:?}");
+    assert!(rebuild_at(fit, edir, &o, &mut |_| {}).is_err());
     // no files listed: refused at the fit
     let mut m: serde_json::Value = serde_json::from_slice(&text).unwrap();
     m.as_object_mut().unwrap().remove("files");

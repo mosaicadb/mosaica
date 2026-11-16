@@ -43,7 +43,8 @@ fn main() {
         if run2::has_mode("e2e") {
             // further variants: another index (--index-b, --index-c, --index-d) and/or plan switches (--b, --c, --d), measured
             // interleaved with the first
-            // (a variant that only changes plan flags shares the first variant's index)
+            // (a variant that only changes plan flags, ddec= among them, shares the first variant's index; dlv= or nusort
+            // there is an error: they need an index of their own)
             let mut extra = Vec::new();
             let mut same = Vec::new();
             for v in ["b", "c", "d"] {
@@ -51,7 +52,10 @@ fn main() {
                 if !ib.is_empty() {
                     extra.push((v, run2::setup2_at("run2", &ib, &bf)));
                 } else if !bf.is_empty() {
-                    same.push((v, run2::plan_flags(c.plan, &bf)));
+                    same.push((v, run2::shared_plan(c.plan, &c.ix, &bf).unwrap_or_else(|e| {
+                        eprintln!("--{v} {bf}: {e}");
+                        std::process::exit(2);
+                    })));
                 }
             }
             let mut vs: Vec<(&str, &run2::Ctx2, v2::q::Plan)> = vec![("a", &c, c.plan)];

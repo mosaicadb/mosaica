@@ -6,7 +6,7 @@
 #   VECTORS.npy: N x n0, float16/32/64; row i is entity i.
 #   --cells C: coarse cells (default 1: one cell, one k-means over a sample of the whole set).
 #   --per-cluster: items per cluster on average (default 1,000), or by-n: research/levels-clusters' rule, 2,000 up to
-#     2M items, doubling for each 4x N (tools/fit.py `per_cluster`).
+#     2M items, doubling for each 4x N (tools/rules.py `per_cluster`, shared with fit.py).
 #   --cross T: each row is assigned to its nearest fine centre among those of its cell's T nearest cells (default 1;
 #     T >= C is exact assignment over all centres). A row whose centre lies in another cell moves to that cell.
 # Writes to OUTDIR, per cell c: cell{c}.f16 (unit rows, float16, zero-padded to n, a multiple of 32), cell{c}.ids
@@ -14,10 +14,18 @@
 # cells in cell{c}.in.f16, cell{c}.in.ids and cell{c}.in.cl. Also centres.npy (K x n float32, unit fine centres,
 # numbered cell by cell), cluster_cell.npy (K, uint32) and manifest.json, written last: it lists every file with its
 # length, the moment of the run and a random token, so a partition written again is another (`bucket::partition_id`).
-# The manifest and the files of any earlier partition in OUTDIR are removed before anything is written.
-import argparse, glob, json, math, os, time
+# Once VECTORS.npy has loaded, the manifest and the files of any earlier partition in OUTDIR (the names above, nothing
+# else) are removed before anything is written.
+# A partition written by an older partition.py (a manifest without "files") is refused by the fit, the build and the
+# open of a fit made from it (its identity, `bucket::partition_id`, is the manifest's content and the listed files'
+# lengths since 1077831): a one-time migration, run partition.py again and refit; an index already built from it keeps
+# opening only with --keep-index.
+import argparse, json, os, re, sys, time
 import numpy as np
 import faiss
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rules import per_cluster  # noqa: E402 (tools/rules.py, shared with fit.py)
 
 T0 = time.time()
 CHUNK = 100_000
@@ -48,6 +56,24 @@ def nearest(C, X):
     return index.search(np.ascontiguousarray(X, np.float32), 1)[1][:, 0]
 
 
+# The names this tool writes in OUTDIR (besides manifest.json): the only ones it removes.
+OWN = re.compile(r"cell\d+\.(in\.)?(f16|ids|cl)|centres\.npy|cluster_cell\.npy|manifest\.json\.tmp")
+
+
+def clear_partition(out, vectors):
+    """Remove an earlier partition in `out`: its manifest first (until the new one is written last, `out` is no
+    partition, so no cell can change under a manifest), then the files of the names this tool writes (a cell it had and
+    this run does not write would be stale). Nothing else, and never the input `vectors`."""
+    keep = os.path.realpath(vectors)
+    man = os.path.join(out, "manifest.json")
+    if os.path.exists(man):
+        os.remove(man)
+    for name in sorted(os.listdir(out)):
+        path = os.path.join(out, name)
+        if OWN.fullmatch(name) and os.path.isfile(path) and os.path.realpath(path) != keep:
+            os.remove(path)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("vectors")
@@ -62,17 +88,15 @@ def main():
     a = ap.parse_args()
     if not (a.per_cluster == "by-n" or (a.per_cluster.isdigit() and int(a.per_cluster) > 0)):
         raise SystemExit(f"--per-cluster is a positive number or by-n, not {a.per_cluster}")
-    os.makedirs(a.out, exist_ok=True)
-    # an earlier partition here: its manifest first (until the new one is written last, OUTDIR is no partition, so no
-    # cell can change under a manifest), then its files (a cell it had and this run does not write would be stale)
-    for old in [os.path.join(a.out, "manifest.json")] + sorted(glob.glob(os.path.join(a.out, "cell*.*"))) + \
-            [os.path.join(a.out, x) for x in ("centres.npy", "cluster_cell.npy")]:
-        if os.path.exists(old):
-            os.remove(old)
+    # the input first: nothing in OUTDIR is touched unless it loads and is a matrix of vectors
     X = np.load(a.vectors, mmap_mode="r")
+    if X.ndim != 2 or X.shape[0] == 0 or X.shape[1] == 0 or X.dtype not in (np.float16, np.float32, np.float64):
+        raise SystemExit(f"{a.vectors}: expected N x n float16/32/64 vectors, found {X.dtype} of shape {X.shape}")
     N, n0 = X.shape
     n = (n0 + 31) // 32 * 32
-    pc = 2000 * 2 ** max(0, math.ceil(math.log2(N / 1e6) / 2 - 0.5)) if a.per_cluster == "by-n" else int(a.per_cluster)
+    pc = per_cluster(N) if a.per_cluster == "by-n" else int(a.per_cluster)
+    os.makedirs(a.out, exist_ok=True)
+    clear_partition(a.out, a.vectors)
     K = max(1, round(N / pc))
     C = max(1, min(a.cells, K))
     rng = np.random.default_rng(a.seed)

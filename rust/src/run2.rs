@@ -214,7 +214,8 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
-            f if f.starts_with("dlv=") || f.starts_with("ddec=") => {} // index options, read by setup2_at
+            f if f.starts_with("dlv=") => {} // a build option (in the index's key), read by setup2_at
+            f if f.starts_with("ddec=") => p.ddec = Some(parse_ddec(&f[5..])), // per query: checked by Plan::check
             "noscanband" => {
                 p.scan_lo = 2.0;
                 p.scan_hi = 2.0;
@@ -236,6 +237,33 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
     p
 }
 
+/// The deterministic levels that decide, as `--ddec` and the flag `ddec=` give them: LEVEL.LEVEL... from 0, all or
+/// none, as a bit set (u32::MAX: all).
+pub fn parse_ddec(v: &str) -> u32 {
+    match v {
+        "all" => u32::MAX,
+        "none" => 0,
+        v => v.split('.').map(|x| match x.parse::<u32>() {
+            Ok(l) if l < 32 => 1u32 << l,
+            _ => {
+                eprintln!("--ddec LEVEL.LEVEL... (deterministic levels from 0 that decide), all or none; not {v}");
+                std::process::exit(2);
+            }
+        }).fold(0, |a, b| a | b),
+    }
+}
+
+/// A variant's plan on another variant's opened index (`e2e`'s `--b` without `--index-b`): `base` changed by `flags`,
+/// checked against `ix`. A build option among the flags (`dlv=`, `nusort`) needs another index, so it is an error.
+pub fn shared_plan(base: Plan, ix: &Index2, flags: &str) -> Result<Plan, String> {
+    if let Some(f) = flags.split(',').map(|f| f.trim()).find(|f| f.starts_with("dlv=") || *f == "nusort") {
+        return Err(format!("the flag {f} changes what is built: give this variant its own index (--index-X DIR) for it"));
+    }
+    let p = plan_flags(base, flags);
+    p.check(ix)?;
+    Ok(p)
+}
+
 /// The index of `dir` with the plan of the command line changed by `flags` (for a second variant, `--b`).
 pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let log = std::fs::OpenOptions::new().create(true).append(true).open(format!("{}/{tag}.log", crate::run2::res_dir())).unwrap();
@@ -246,7 +274,8 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
     // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels):
     // a build option, in the index's key. And the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none):
-    // a query-time option, set when the index is built or opened (any value opens the same saved index).
+    // a query-time option: the index's default, set when it is built or opened (any value opens the same saved index),
+    // and the flag ddec=... also sets it in the plan (q::Plan::ddec), so a variant sharing this index can choose another.
     // From --dlv and --ddec for the first index, from the flags dlv=B.B... and ddec=... for any (they take precedence)
     let flag = |name: &str| flags.split(',').map(|f| f.trim()).find_map(|f| f.strip_prefix(name).map(|v| v.to_string()));
     let main = dir == data_dir();
@@ -255,17 +284,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         eprintln!("--dlv BYTES,BYTES,... (cumulative bytes of the deterministic levels; dlv=B.B... as a flag), not {v}");
         std::process::exit(2);
     })).collect());
-    let ddec = match flag("ddec=").or_else(|| main.then(|| arg_str("--ddec", "all"))).unwrap_or("all".into()).as_str() {
-        "all" => u32::MAX,
-        "none" => 0,
-        v => v.split('.').map(|x| match x.parse::<u32>() {
-            Ok(l) if l < 32 => 1u32 << l,
-            _ => {
-                eprintln!("--ddec LEVEL.LEVEL... (deterministic levels from 0 that decide), all or none; not {v}");
-                std::process::exit(2);
-            }
-        }).fold(0, |a, b| a | b),
-    };
+    let ddec = parse_ddec(&flag("ddec=").or_else(|| main.then(|| arg_str("--ddec", "all"))).unwrap_or("all".into()));
     let bo = BuildOptions {
         profile,
         clusters: Some(arg_usize("--clusters", 100000)),
@@ -322,9 +341,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // item queries: held-out rows from --item-queries, else rows of the fit listed by it (Xs.npy rows, read from the
     // index through the fit's row-to-entity map)
     let items: Vec<Vec<f32>> = if arg_str("--item-queries", "").is_empty() {
-        // the fit's perm.npy, which an open does not read
+        // the fit's perm.npy, which an open does not read (a build has read it), checked against the hash the saved
+        // index recorded
         if p.perm.is_empty() {
-            p.load_perm().unwrap_or_else(|e| {
+            saved_dir(dir, &bo).and_then(|edir| load_perm_checked(&mut p, &edir)).unwrap_or_else(|e| {
                 eprintln!("{e} (item queries from the fit's qi.npy need it; or give --item-queries)");
                 std::process::exit(2);
             });
@@ -352,6 +372,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         pc
     };
     let plan = plan_flags(plan, flags); // flags win over timed or filed constants (scanband)
+    if let Err(e) = plan.check(&ix) {
+        eprintln!("{e}");
+        std::process::exit(2);
+    }
     out!("[plan] {}", plan.to_kv().replace('\n', " "));
     std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
@@ -1896,6 +1920,30 @@ pub fn dbknn(c: &Ctx2) {
                 Some((_, np, dname, r)) => emit("tight", np, dname, &r),
                 None => out!("dbknn tight {vname} share {si}: no rung within the cap"),
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `e2e`'s per-variant flags on a variant that shares the first index: `ddec=` sets the variant's plan (checked
+    /// against the index), a build option (`dlv=`, `nusort`) is an error instead of being dropped.
+    #[test]
+    fn e2e_variant_flags_on_a_shared_index() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+        let base = Plan::default();
+        assert_eq!(shared_plan(base, &ix, "ddec=0.5").unwrap().ddec, Some(0b100001));
+        let p = shared_plan(base, &ix, "nogtab, ddec=none").unwrap();
+        assert_eq!((p.ddec, p.gtab), (Some(0), false));
+        assert_eq!(shared_plan(base, &ix, "ddec=all").unwrap().ddec, Some(u32::MAX));
+        assert_eq!(shared_plan(base, &ix, "noint").unwrap().ddec, None, "no ddec= keeps the index's choice");
+        assert_eq!(shared_plan(Plan { ddec: Some(0b10), ..base }, &ix, "noint").unwrap().ddec, Some(0b10), "the first variant's choice carries over");
+        assert!(shared_plan(base, &ix, "ddec=6").is_err(), "a level beyond the index's six");
+        for f in ["dlv=16.32", "noint,dlv=16.32", "nusort"] {
+            assert!(shared_plan(base, &ix, f).is_err(), "{f} on a shared index");
         }
     }
 }

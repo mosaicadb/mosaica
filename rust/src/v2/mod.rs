@@ -41,7 +41,7 @@ pub struct BuildOptions {
     /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
     /// does not depend on it. Nothing stored changes, so it is a query-time option: not in the key, not in what an
     /// index stores or `plan_hash`; a build and an open set it on the index in memory (`Meta2::ddec`), and one saved
-    /// index opens under any value.
+    /// index opens under any value. It is the index's default: a query's plan overrides it (`q::Plan::ddec`).
     pub ddec: u32,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
@@ -950,7 +950,8 @@ pub struct Meta2 {
     /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
     pub npow: u32,
     /// Threshold queries decide at deterministic level l only when bit l is set (`BuildOptions::ddec`, set when the
-    /// index is built or opened; not stored); a level that does not decide still reads its codes and advances the sums.
+    /// index is built or opened; not stored), unless the query's plan gives its own (`q::Plan::ddec`); a level that
+    /// does not decide still reads its codes and advances the sums.
     pub ddec: u32,
 }
 impl Meta2 {
@@ -2223,6 +2224,22 @@ pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<
 /// As `open`, the index saved in `edir` (wherever `rebuild_at` saved it).
 pub fn open_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     open_in(dir, Some(edir), o, log)
+}
+
+/// The fit's perm.npy (fit row -> entity) read into `p.perm` for a caller that needs the fit's rows after an open (which
+/// reads none), checked against the hash the index saved in `edir` recorded when it was built (index.json "perm"):
+/// O(rows), never part of an open. An error, and `p.perm` left empty, when they differ.
+pub fn load_perm_checked(p: &mut Params, edir: &str) -> Result<(), String> {
+    let json = format!("{edir}/index.json");
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&json).map_err(|e| format!("cannot read {json}: {e}"))?).map_err(|e| format!("{json}: {e}"))?;
+    let want = v["perm"]["hash"].as_str().ok_or(format!("{json} records no hash of the fit's perm.npy; rebuild the index"))?.to_string();
+    p.load_perm()?;
+    let got = format!("{:016x}", store::perm_hash(&p.perm));
+    if got != want {
+        p.perm = Vec::new();
+        return Err(format!("{}: its entities (hash {got}) are not those the index in {edir} was built from ({want}); refit and --rebuild", p.perm_path));
+    }
+    Ok(())
 }
 
 fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
