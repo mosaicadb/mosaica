@@ -81,6 +81,20 @@ impl Npy {
     conv!(i32s, i32, 4);
     conv!(u16s, u16, 2);
     conv!(u32s, u32, 4);
+    /// A 2-D array of little-endian floats (f2, f4 or f8) as f32 values, row-major, with its row width; an error
+    /// naming `what` (the file) on any other type or shape.
+    pub fn rows_f32(&self, what: &str) -> Result<(Vec<f32>, usize), String> {
+        if self.shape.len() != 2 {
+            return Err(format!("{what}: expected a 2-D array (rows x dimensions), found shape {:?}", self.shape));
+        }
+        let v: Vec<f32> = match self.descr.as_str() {
+            "<f8" => self.f64s().into_iter().map(|x| x as f32).collect(),
+            "<f4" => self.f32s(),
+            "<f2" => self.u16s().into_iter().map(f16_to_f32).collect(),
+            d => return Err(format!("{what}: expected little-endian floats (<f2, <f4 or <f8), found {d}")),
+        };
+        Ok((v, self.shape[1]))
+    }
     pub fn i8s(&self) -> Vec<i8> {
         self.data.iter().map(|&b| b as i8).collect()
     }

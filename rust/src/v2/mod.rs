@@ -69,6 +69,8 @@ pub const QUANTUM: usize = 16;
 /// Calibration: items per group (BuildOptions::cal_items' default), and the most clusters of a group they are spread over.
 pub const CAL_ITEMS: usize = 8192;
 pub const CAL_CLUSTERS: usize = 256;
+/// The most clusters a build takes without the fit's anchors.npy (it would then build a K x K support table).
+pub const KK_MAX: usize = 4096;
 
 // ---------------- the deterministic code ----------------
 
@@ -1005,9 +1007,13 @@ pub struct Index2 {
     pub centres64: Arc<Vec<f64>>,
     pub rots: Arc<Vec<Vec<f64>>>,
     pub anchors: Arc<Vec<f64>>,
-    pub hi: Arc<Vec<f32>>,
+    pub hi: Arc<Vec<f32>>, // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward
     pub lo: Arc<Vec<f32>>,
     pub nanch: usize,
+    /// Anchor a is cluster a's centre direction, one per cluster (the support table built without the fit's
+    /// anchors.npy): the planner may then find a query's anchor among the clusters it visits, or from its q.m. With
+    /// other anchors their count can equal K by coincidence, so this is recorded, not inferred from the count.
+    pub anc_centres: bool,
     // the per-row arrays: on the heap after a build, mapped from the files of a saved index after an open
     pub ahat: Arr<i16>,
     pub row_ent: Arr<u32>,
@@ -1196,6 +1202,7 @@ impl Index2 {
             hi: self.hi.clone(),
             lo: self.lo.clone(),
             nanch: self.nanch,
+            anc_centres: self.anc_centres,
             ahat: ahat.into(),
             row_ent: rows.iter().map(|&r| self.row_ent[r as usize]).collect(),
             ent_row: Arr::default(),
@@ -1697,6 +1704,44 @@ pub fn plans(p: &Params, prof: &[f64], rows: usize, o: &BuildOptions, design_c: 
 /// Build the fast-scan index from `src`: in memory, or, with `dir`, straight into the files of a saved index there
 /// (sealed afterwards by `store::seal`). `prof` is the G x n profile. With `nusort`, each cluster is sorted by the
 /// residual's norm in the metric instead of by x.m^ (see Items2::sort_by_nu).
+/// A cluster's support-table bounds against every anchor: its largest and smallest x . a over its rows `x16` (f16, n
+/// each), rounded outward to 2^-15, exactly as from x . a in f64. The products are taken in f32 (the f16 rows are exact
+/// in f32), anchor by anchor over the rows (`px[a * nc + i]`); each extreme is then recomputed in f64 over the rows
+/// whose f32 value lies within m2 of the f32 extreme, twice the f32 error bound, so the true extreme is among them.
+/// Bound: |fl32(x . a32) - x . a| <= (n + 4) 2^-24 |x| for unit a (the products' rounding, the sum's, and a rounded to
+/// f32), with |x| the cluster's largest row norm.
+fn support_bounds(x16: &[u16], n: usize, anchors: &[f64], anchors32: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let nanch = anchors.len() / n;
+    let nc = x16.len() / n;
+    let x: Vec<f32> = x16.iter().map(|&h| f16_to_f32(h)).collect();
+    let xn = x.chunks(n).map(|r| r.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>().sqrt()).fold(0.0, f64::max);
+    let m2 = 2.0 * (n as f64 + 4.0) * 2f64.powi(-24) * xn * (1.0 + 1e-6);
+    let mut px = vec![0f32; nc * nanch];
+    // SAFETY: anchors32 is nanch x n, x is nc x n and px nanch x nc, all row-major with the strides given
+    unsafe {
+        matrixmultiply::sgemm(nanch, n, nc, 1.0, anchors32.as_ptr(), n as isize, 1, x.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nc as isize, 1);
+    }
+    let exact = |i: usize, a: usize| -> f64 { x[i * n..(i + 1) * n].iter().zip(&anchors[a * n..(a + 1) * n]).map(|(&u, &v)| u as f64 * v).sum() };
+    let (mut hi, mut lo) = (vec![0f32; nanch], vec![0f32; nanch]);
+    for a in 0..nanch {
+        let row = &px[a * nc..(a + 1) * nc];
+        let (fx, fi) = row.iter().fold((f32::NEG_INFINITY, f32::INFINITY), |(x, i), &v| (x.max(v), i.min(v)));
+        let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
+        for (i, &v) in row.iter().enumerate() {
+            let v = v as f64;
+            if v >= fx as f64 - m2 {
+                mx = mx.max(exact(i, a));
+            }
+            if v <= fi as f64 + m2 {
+                mi = mi.min(exact(i, a));
+            }
+        }
+        hi[a] = (((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32;
+        lo[a] = (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32;
+    }
+    (hi, lo)
+}
+
 pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &BuildOptions, design_c: Option<&[f64]>, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Index2 {
     let nusort = o.nusort;
     let t = Timer::new();
@@ -1834,6 +1879,15 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let nukey = store::Out::<u16>::new(dir, "nukey.bin", if nusort { nrows } else { 0 });
     let vecs = store::OutRows::new(dir, "vectors.bin", if real { nrows * n } else { 0 });
     let ext = store::Out::<u32>::new(None, "", if real { 0 } else { nrows });
+    // the support table: every cluster's extremes of x . a against every anchor a, from its f16 rows as they are
+    // encoded; against the fit's anchors (`anchors.npy`), else one per cluster, its centre's direction. None for the
+    // norm sort, and none for a synthetic source (scale.rs builds its own).
+    let anc_centres = !nusort && real && p.anchors.is_empty();
+    let anchors: Vec<f64> = if nusort || !real { Vec::new() } else if p.anchors.is_empty() { mhats.concat() } else { p.anchors.clone() };
+    assert_eq!(anchors.len() % n, 0, "the fit's anchors have rows of another width than n = {n}");
+    let nanch = anchors.len() / n;
+    let anchors32: Vec<f32> = anchors.iter().map(|&v| v as f32).collect();
+    let (thi, tlo) = (store::Out::<f32>::new(dir, "hi.bin", nanch * k), store::Out::<f32>::new(dir, "lo.bin", nanch * k));
     // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1 and the norm sort's grid
     struct Done {
         esc: Vec<(u8, u8, u32, f32)>,
@@ -1869,12 +1923,22 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         if real {
             assert_eq!(it.x16.len(), sizes[c] * n, "cluster {c}: the source gave no f16 vectors for a real index");
             unsafe { vecs.put(r0 * n, &it.x16) };
+            if nanch > 0 {
+                let (hi, lo) = support_bounds(&it.x16, n, &anchors, &anchors32);
+                // SAFETY: cluster c writes only entries [a * k + c], disjoint from every other cluster's
+                for a in 0..nanch {
+                    unsafe {
+                        thi.put(a * k + c, &hi[a..a + 1]);
+                        tlo.put(a * k + c, &lo[a..a + 1]);
+                    }
+                }
+            }
         } else {
             unsafe { ext.put(r0, &it.ext) };
         }
         Done { esc: cc.esc, x2max: it.x2max, numax }
     }).collect();
-    log(format!("encoded {:.1}s; anon {:.0} MB", t.s(), crate::util::anon_mb()));
+    log(format!("encoded {:.1}s, support table of {nanch} anchors with it; anon {:.0} MB", t.s(), crate::util::anon_mb()));
     let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
     // the per-cluster records, from the written keys
     let ah_all = ahat.get();
@@ -1935,12 +1999,13 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         cl,
         centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
         rots: Arc::new(rots),
-        anchors: Arc::new(Vec::new()),
-        hi: Arc::new(Vec::new()),
-        lo: Arc::new(Vec::new()),
+        anchors: Arc::new(anchors),
+        hi: Arc::new(thi.finish().to_vec()),
+        lo: Arc::new(tlo.finish().to_vec()),
         vrow: Vec::new(),
         nent: maxent + 1,
-        nanch: 0,
+        nanch,
+        anc_centres,
         ahat: ahat.finish(),
         row_ent,
         ent_row: ent_row.finish(),
@@ -1967,8 +2032,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
 
 /// The fit in `dir` with the options `o` applied, and the profile: the inputs of a build, and of the key of the index
 /// they build.
-pub fn prepare(dir: &str, o: &BuildOptions) -> (Params, Vec<f64>) {
+pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String> {
     let mut p = crate::index::load_params(dir);
+    p.anchors = crate::index::load_anchors(dir, p.meta.n)?;
     if let Some(nv) = o.nguar {
         assert!(nv > 0.0, "the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count");
     }
@@ -1986,7 +2052,7 @@ pub fn prepare(dir: &str, o: &BuildOptions) -> (Params, Vec<f64>) {
         p.centres.truncate(kk * n);
     }
     let prof = derive::load_profile(o.profile.as_deref().unwrap_or(&format!("{dir}/profile.npy")));
-    (p, prof)
+    Ok((p, prof))
 }
 
 /// The randomised levels' design constants by coded set when `o` designs the rates with the exact-law constants.
@@ -2004,9 +2070,9 @@ pub fn design_constants(p: &Params, o: &BuildOptions, log: &mut dyn FnMut(String
 }
 
 /// Where the index of the fit in `dir` built with `o` is saved: `dir/encoded-KEY`, KEY its `store::build_key`.
-pub fn saved_dir(dir: &str, o: &BuildOptions) -> String {
-    let (p, prof) = prepare(dir, o);
-    format!("{dir}/encoded-{}", store::build_key(&p, &prof, o))
+pub fn saved_dir(dir: &str, o: &BuildOptions) -> Result<String, String> {
+    let (p, prof) = prepare(dir, o)?;
+    Ok(format!("{dir}/encoded-{}", store::build_key(&p, &prof, o)))
 }
 
 /// Encode the fit in `p` (from `prepare`): the codes and, without the norm sort, the support table, in memory or, with
@@ -2014,17 +2080,18 @@ pub fn saved_dir(dir: &str, o: &BuildOptions) -> String {
 /// The fit's rows come from its Xs.npy (tools/fit.py), else from its partition through the fit's row order (`fit_dir`,
 /// fit::fit); an error when the partition does not hold them.
 fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, fit_dir: &str, dir: Option<&str>, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
+    // without anchors.npy the table is K x K (K^2 x 8 bytes, and nc x K f32 per cluster in flight): refused past
+    // KK_MAX clusters, where a fixed set of anchors (fit::write_anchors) keeps it K x A
+    if !o.nusort && p.anchors.is_empty() && p.meta.k > KK_MAX {
+        return Err(format!("the fit has {} clusters and no anchors.npy: a K x K support table would take {:.1} GB. Write its anchors (fit::write_anchors; vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy])", p.meta.k, (p.meta.k * p.meta.k * 8) as f64 / 1e9));
+    }
     let full = Full2::Real { rows: Default::default() };
     let mut lg = |s| log(format!("[build2] {s}"));
-    let mut ix = if p.xs_path.is_empty() {
+    let ix = if p.xs_path.is_empty() {
         build2(p, prof, &Real2 { src: crate::bucket::Buckets::open(&p.partition, fit_dir)? }, full, o, design_c, dir, &mut lg)
     } else {
         build2(p, prof, &Real2 { src: crate::index::RealSource::open(&p.xs_path) }, full, o, design_c, dir, &mut lg)
     };
-    if !o.nusort {
-        build_table2(&mut ix, p.meta.k);
-        log(format!("[build2] support table; anon {:.0} MB", crate::util::anon_mb()));
-    }
     Ok(ix)
 }
 
@@ -2039,7 +2106,7 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 /// sort, the support table), with the parameters it was built from. Nothing is saved.
 pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> (Params, Index2) {
     let malloc = crate::util::BuildMalloc::enter();
-    let (p, prof) = prepare(dir, o);
+    let (p, prof) = prepare(dir, o).unwrap_or_else(|e| panic!("{e}"));
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log).unwrap_or_else(|e| panic!("{e}"));
     drop(malloc);
@@ -2060,7 +2127,7 @@ pub fn open_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(Stri
 }
 
 fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    let (p, prof) = prepare(dir, o);
+    let (p, prof) = prepare(dir, o)?;
     let key = store::build_key(&p, &prof, o);
     let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
     let edir = edir.as_str();
@@ -2088,7 +2155,7 @@ pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(S
 
 fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let malloc = crate::util::BuildMalloc::enter();
-    let (p, prof) = prepare(dir, o);
+    let (p, prof) = prepare(dir, o)?;
     log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
     let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
@@ -2134,52 +2201,4 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
     Ok((p, ix))
-}
-
-/// Support table over cluster-centre anchors (data only): exact max/min of p.x per cluster, rounded outward.
-pub fn build_table2(ix: &mut Index2, nanch: usize) {
-    let n = ix.n();
-    let k = ix.k();
-    let step = k as f64 / nanch as f64;
-    let mut anchors = vec![0f64; nanch * n];
-    for a in 0..nanch {
-        let c = (a as f64 * step) as usize;
-        anchors[a * n..(a + 1) * n].copy_from_slice(&ix.cl[c].mhat);
-    }
-    let cols: Vec<(Vec<f32>, Vec<f32>)> = (0..k).into_par_iter().map(|c| {
-        let cl = &ix.cl[c];
-        let nc = cl.r1 - cl.r0;
-        let mut x = vec![0f64; nc * n];
-        for i in 0..nc {
-            ix.full_row_f64(cl.r0 + i, &mut x[i * n..(i + 1) * n]);
-        }
-        let mut px = vec![0f64; nc * nanch];
-        unsafe {
-            matrixmultiply::dgemm(nc, n, nanch, 1.0, x.as_ptr(), n as isize, 1, anchors.as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1);
-        }
-        let mut hi = vec![0f32; nanch];
-        let mut lo = vec![0f32; nanch];
-        for a in 0..nanch {
-            let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
-            for i in 0..nc {
-                mx = mx.max(px[i * nanch + a]);
-                mi = mi.min(px[i * nanch + a]);
-            }
-            hi[a] = (((mx + 1e-9) * 32768.0).ceil() / 32768.0) as f32;
-            lo[a] = (((mi - 1e-9) * 32768.0).floor() / 32768.0) as f32;
-        }
-        (hi, lo)
-    }).collect();
-    let mut hi = vec![0f32; nanch * k];
-    let mut lo = vec![0f32; nanch * k];
-    for c in 0..k {
-        for a in 0..nanch {
-            hi[a * k + c] = cols[c].0[a];
-            lo[a * k + c] = cols[c].1[a];
-        }
-    }
-    ix.hi = Arc::new(hi);
-    ix.lo = Arc::new(lo);
-    ix.anchors = Arc::new(anchors);
-    ix.nanch = nanch;
 }

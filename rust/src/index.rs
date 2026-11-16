@@ -45,6 +45,9 @@ pub struct Params {
     pub gtree: Vec<f64>,
     pub perm: Vec<i64>,
     pub qi: Vec<i64>,
+    /// The support table's anchors (A x n, unit; the fit's `anchors.npy`), loaded and checked by `v2::prepare`
+    /// (`load_params` leaves them empty). Empty: one anchor per cluster, its centre's direction.
+    pub anchors: Vec<f64>,
     pub xs_path: String, // the vectors in cluster order (a fit with an Xs.npy; empty for a partitioned fit)
     pub xs_name: String, // the vectors file as meta.json names it (relative to the fitted directory unless absolute)
     pub partition: String, // the partition a fit without an Xs.npy reads its vectors from (empty for a fit with one)
@@ -68,13 +71,64 @@ impl Params {
     }
 }
 
-pub fn load_params(dir: &str) -> Params {
+/// The fit's meta.json, after checking that this build reads its format.
+fn load_meta(dir: &str) -> serde_json::Value {
     let meta: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{dir}/meta.json")).unwrap()).unwrap();
     let fmt = meta["format"].as_u64().unwrap_or(1);
     if fmt != FIT_FORMAT {
         eprintln!("{dir} was fitted in format {fmt}; this build reads format {FIT_FORMAT}. Refit it with tools/fit.py.");
         std::process::exit(2);
     }
+    meta
+}
+
+/// The fit's stored centres (K x n, int8 * scale as f32 values) with n and K, from meta.json, mq8.npy and msc.npy only.
+pub fn load_centres(dir: &str) -> Result<(usize, usize, Vec<f32>), String> {
+    let meta = load_meta(dir);
+    let (n, k) = (meta["n"].as_u64().ok_or(format!("{dir}/meta.json has no n"))? as usize, meta["K"].as_u64().ok_or(format!("{dir}/meta.json has no K"))? as usize);
+    let mq8 = read_npy(&format!("{dir}/mq8.npy")).i8s();
+    let msc = read_npy(&format!("{dir}/msc.npy")).f64s();
+    if k.checked_mul(n) != Some(mq8.len()) || msc.len() != k {
+        return Err(format!("{dir}: mq8.npy / msc.npy do not hold {k} centres of {n}; refit"));
+    }
+    Ok((n, k, (0..k * n).map(|i| (mq8[i] as f64 * msc[i / n]) as f32).collect()))
+}
+
+/// The fit's support-table anchors (`anchors.npy`), checked: <f8, shape (A >= 1, n), each row of unit norm within
+/// 1e-12. Empty when the fit has none.
+pub fn load_anchors(dir: &str, n: usize) -> Result<Vec<f64>, String> {
+    let path = format!("{dir}/anchors.npy");
+    if !std::path::Path::new(&path).exists() {
+        return Ok(Vec::new());
+    }
+    let a = read_npy(&path);
+    if a.descr != "<f8" {
+        return Err(format!("{path}: expected <f8, found {}; write the fit's anchors again", a.descr));
+    }
+    if a.shape.len() != 2 || a.shape[0] < 1 || a.shape[1] != n {
+        return Err(format!("{path} has shape {:?}, expected (A >= 1, {n}); write the fit's anchors again", a.shape));
+    }
+    let v = a.f64s();
+    check_anchors(&v, n).map_err(|e| format!("{path}: {e}; write the fit's anchors again"))?;
+    Ok(v)
+}
+
+/// Anchors are unit rows of n: every row's norm within 1e-12 of 1.
+pub fn check_anchors(v: &[f64], n: usize) -> Result<(), String> {
+    if n == 0 || v.len() % n != 0 {
+        return Err(format!("{} values are not rows of {n}", v.len()));
+    }
+    for (i, r) in v.chunks(n).enumerate() {
+        let nr = r.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if !((nr - 1.0).abs() <= 1e-12) {
+            return Err(format!("anchor {i} has norm {nr}, not 1 within 1e-12"));
+        }
+    }
+    Ok(())
+}
+
+pub fn load_params(dir: &str) -> Params {
+    let meta = load_meta(dir);
     let us = |k: &str| meta[k].as_u64().unwrap() as usize;
     let vu = |k: &str| meta[k].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect::<Vec<_>>();
     let r = |k: &str| read_npy(&format!("{dir}/{k}.npy"));
@@ -111,6 +165,7 @@ pub fn load_params(dir: &str) -> Params {
         gtree: r("gtree").f64s(),
         perm: r("perm").i64s(),
         qi: r("qi").i64s(),
+        anchors: Vec::new(),
         xs_path: if xs.is_empty() || xs.starts_with('/') { xs.to_string() } else { format!("{dir}/{xs}") },
         xs_name: xs.to_string(),
         partition: if partition.is_empty() || partition.starts_with('/') { partition.to_string() } else { format!("{dir}/{partition}") },

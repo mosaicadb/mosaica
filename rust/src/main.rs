@@ -14,7 +14,11 @@ fn main() {
         v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
         return;
     }
-    if has("fit") {
+    if run2::has_mode("anchors") {
+        run2::anchors_cmd();
+        return;
+    }
+    if run2::has_mode("fit") {
         run2::fit_cmd();
         return;
     }

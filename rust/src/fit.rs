@@ -34,10 +34,15 @@ pub struct FitOptions {
     /// Seconds tools/certify.py may take to certify the randomised levels' constant (0: not certified; the build then
     /// uses the larger closed-form bounds).
     pub cert_time: f64,
+    /// The support table's anchors (`write_anchors`): `image` from the centre directions, `text_count` from the
+    /// prompts in `text_anchors`.
+    pub image: usize,
+    pub text_anchors: Option<String>,
+    pub text_count: usize,
 }
 impl Default for FitOptions {
     fn default() -> FitOptions {
-        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0 }
+        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256 }
     }
 }
 
@@ -539,7 +544,8 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         "format": FORMAT, "fit": fitj,
     });
     std::fs::write(format!("{out}/meta.json"), serde_json::to_string_pretty(&meta).unwrap()).unwrap();
-    log(&t, format!("saved {out}"));
+    let na = write_anchors(out, o.image, o.text_anchors.as_deref(), o.text_count, seed)?;
+    log(&t, format!("saved {out}; {na}"));
 
     // the randomised levels' certified constant, by tools/certify.py within cert_time (0 skips it: the build then
     // uses the closed-form bounds, which are larger)
@@ -552,4 +558,132 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         }
     }
     Ok(())
+}
+
+/// The support table's anchors for the fit in `dir`: the directions of all K centres when `image` >= K (one anchor per
+/// cluster), else `image` anchors by spherical k-means on the centre directions; then, from `text` (training prompts,
+/// rows of n_orig or n, f16, f32 or f64), `ntext` more by k-means on the prompts. A query's bound uses its nearest
+/// anchor, so what sets its cost is how densely the anchors cover the directions queries come from, not K: a fixed A
+/// keeps the table K x A at any N. Written to `dir/anchors.npy` (A x n, unit, f64), except when they are exactly the
+/// centres (`image` >= K and no prompts): then no file, which the build reads as one anchor per cluster, its centre's
+/// direction (and an existing `anchors.npy` is removed). Returns what was written, for the log.
+pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<String, String> {
+    let (n, k, centres) = crate::index::load_centres(dir)?;
+    let text = match text {
+        Some(path) => {
+            let (v, w) = read_npy(path).rows_f32(path)?;
+            if w > n {
+                return Err(format!("{path} has rows of {w} dimensions, more than the fit's {n}"));
+            }
+            Some((v, w))
+        }
+        None => None,
+    };
+    let path = format!("{dir}/anchors.npy");
+    match anchors_of(&centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)? {
+        None => {
+            if std::path::Path::new(&path).exists() {
+                std::fs::remove_file(&path).map_err(|e| format!("cannot remove {path}: {e}"))?;
+            }
+            Ok(format!("no anchors.npy: the support table's anchors are the {k} centres"))
+        }
+        Some(a) => {
+            save(dir, "anchors", "<f8", &[a.len() / n, n], &a);
+            Ok(format!("{} support-table anchors in {path}", a.len() / n))
+        }
+    }
+}
+
+/// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,
+/// zero-padded to n); None when they are exactly the centres. `image` = 0, or `ntext` = 0 or no prompts, leaves out
+/// that set; at least one anchor must remain.
+fn anchors_of(centres: &[f32], n: usize, k: usize, image: usize, text: Option<(&[f32], usize)>, ntext: usize, seed: u64) -> Result<Option<Vec<f64>>, String> {
+    let unit64 = |v: &[f32]| -> Vec<f64> {
+        let nr = v.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt().max(1e-300);
+        v.iter().map(|&x| x as f64 / nr).collect()
+    };
+    let text = text.filter(|(v, _)| !v.is_empty() && ntext > 0);
+    if image >= k && k > 0 && text.is_none() {
+        return Ok(None);
+    }
+    let dirs: Vec<f32> = (0..k).flat_map(|c| unit64(&centres[c * n..(c + 1) * n]).into_iter().map(|x| x as f32)).collect();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0xa4c4);
+    let mut out: Vec<f64> = if image == 0 {
+        Vec::new()
+    } else if image >= k {
+        (0..k).flat_map(|c| unit64(&centres[c * n..(c + 1) * n])).collect()
+    } else {
+        kmeans(&dirs, n, image, &mut rng, 25).chunks(n).flat_map(unit64).collect()
+    };
+    if let Some((v, w)) = text {
+        let rows: Vec<f32> = v.chunks(w).flat_map(|r| {
+            let mut x = r.to_vec();
+            x.resize(n, 0.0);
+            unit64(&x).into_iter().map(|y| y as f32)
+        }).collect();
+        let m = rows.len() / n;
+        out.extend(kmeans(&rows, n, ntext.min(m), &mut rng, 25).chunks(n).flat_map(unit64));
+    }
+    if out.is_empty() {
+        return Err("no support-table anchors: with no anchors from the centres, give prompts and a text count above 0".into());
+    }
+    Ok(Some(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit_rows(m: usize, n: usize, seed: u64) -> Vec<f32> {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        (0..m).flat_map(|_| {
+            let v: Vec<f32> = (0..n).map(|_| rng.gen::<f32>() - 0.5).collect();
+            let nr = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
+            v.into_iter().map(move |x| x / nr)
+        }).collect()
+    }
+
+    /// Either set of anchors can be left out with a count of 0; with both left out there are none, which is refused;
+    /// all K centres and no prompts are the centres themselves (no file).
+    #[test]
+    fn anchor_sets_can_be_empty_but_not_both() {
+        let (n, k) = (8, 20);
+        let c = unit_rows(k, n, 1);
+        let t = unit_rows(30, 6, 2);
+        let a = |image, text: Option<(&[f32], usize)>, nt| anchors_of(&c, n, k, image, text, nt, 3).unwrap().map(|v| v.len() / n);
+        assert_eq!(a(0, Some((&t, 6)), 5), Some(5));
+        assert_eq!(a(4, Some((&t, 6)), 0), Some(4));
+        assert_eq!(a(4, None, 5), Some(4));
+        assert_eq!(a(50, Some((&t, 6)), 100), Some(k + 30));
+        assert_eq!(a(4, Some((&t[..0], 6)), 5), Some(4));
+        assert_eq!(a(k, None, 5), None);
+        assert_eq!(a(50, Some((&t, 6)), 0), None);
+        let all = anchors_of(&c, n, k, 4, Some((&t, 6)), 5, 3).unwrap().unwrap();
+        crate::index::check_anchors(&all, n).unwrap();
+        assert!(anchors_of(&c, n, k, 0, Some((&t, 6)), 0, 3).is_err());
+        assert!(anchors_of(&c, n, k, 0, None, 5, 3).is_err());
+        assert!(crate::index::check_anchors(&[1.0, 1e-5], 2).is_err());
+        assert!(crate::index::check_anchors(&[0.6, 0.8, 1.0], 2).is_err());
+    }
+
+    /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.
+    #[test]
+    fn prompt_files_of_any_float_width() {
+        let dir = std::env::temp_dir().join(format!("vexact-anch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let v: Vec<f32> = vec![0.5, -0.25, 1.0, 0.125, -2.0, 0.75];
+        let p = |s: &str| dir.join(s).to_str().unwrap().to_string();
+        write_npy(&p("a2.npy"), "<f2", &[2, 3], &v.iter().flat_map(|&x| f32_to_f16(x).to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("a4.npy"), "<f4", &[2, 3], &v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("a8.npy"), "<f8", &[2, 3], &v.iter().flat_map(|&x| (x as f64).to_le_bytes()).collect::<Vec<_>>());
+        write_npy(&p("i4.npy"), "<i4", &[2, 3], &[0u8; 24]);
+        write_npy(&p("f1d.npy"), "<f4", &[6], &v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+        for f in ["a2.npy", "a4.npy", "a8.npy"] {
+            assert_eq!(read_npy(&p(f)).rows_f32(f).unwrap(), (v.clone(), 3), "{f}");
+        }
+        for f in ["i4.npy", "f1d.npy"] {
+            assert!(read_npy(&p(f)).rows_f32(f).is_err(), "{f}");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

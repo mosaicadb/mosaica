@@ -128,6 +128,8 @@ pub fn run2(scale: usize, nq: usize) {
     ix.hi = std::sync::Arc::new(hi);
     ix.lo = std::sync::Arc::new(lo);
     ix.anchors = std::sync::Arc::new(anchors);
+    // anchor a is cluster a's centre direction only when there is one anchor per cluster
+    ix.anc_centres = nanch == k;
     ix.nanch = nanch;
     log(format!("synthetic v2 index: {} rows built in {:.0}s; x2 bound {:.3e}; stored B/item {:?}", ix.nrows, t.s(), ix.x2 - 1.0, ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()));
     let mut qs: Vec<(&str, Vec<f32>)> = Vec::new();

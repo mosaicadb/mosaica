@@ -38,14 +38,14 @@ pub struct Ctx2 {
 /// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
 /// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--b", "--basis", "--bfracs", "--c", "--cert-time", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
     "--cmp-vis", "--cmp-what", "--core", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--item-queries", "--k", "--knn", "--ks",
     "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
     "--order", "--params", "--partition", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
-    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--thr", "--threads",
+    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads",
     "--vcheck", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
@@ -54,7 +54,7 @@ const BOOL_FLAGS: &[&str] = &[
     "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
-    "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
+    "anchors", "ann", "ann-truth", "breakdown", "bytesq", "dbcmp", "dbknn", "dbtopk", "e2e",
     "filter", "fit", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
 ];
 
@@ -77,6 +77,23 @@ pub fn check_args() {
         eprintln!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}");
         std::process::exit(2);
     }
+}
+
+/// Whether `m` is given as a mode (not as a flag's value, such as a directory named like a mode).
+pub fn has_mode(m: &str) -> bool {
+    let a = args();
+    let mut i = 1;
+    while i < a.len() {
+        if VALUE_FLAGS.contains(&a[i].as_str()) {
+            i += 2;
+            continue;
+        }
+        if a[i] == m {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 pub fn args() -> Vec<String> {
@@ -121,15 +138,7 @@ pub fn load_queries(n: usize) -> Vec<Vec<f32>> {
 
 /// Rows of an npy file (f16, f32 or f64; original dimension), zero-padded to n and normalised.
 pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
-    let a = read_npy(path);
-    let n0 = a.shape[1];
-    let v: Vec<f32> = if a.descr.contains("f8") {
-        a.f64s().iter().map(|&x| x as f32).collect()
-    } else if a.descr.contains("f2") {
-        a.u16s().iter().map(|&h| f16_to_f32(h)).collect()
-    } else {
-        a.f32s()
-    };
+    let (v, n0) = read_npy(path).rows_f32(path).unwrap_or_else(|e| panic!("{e}"));
     v.chunks(n0).map(|r| {
         let nn = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
         let mut q = vec![0f32; n];
@@ -143,7 +152,7 @@ pub fn load_queries_from(path: &str, n: usize) -> Vec<Vec<f32>> {
 }
 
 /// `vexact --index OUT fit --partition DIR [--basis pca|dual] [--query-sample QUERIES.npy] [--seed S] [--cert-time
-/// SECONDS]`: fit the partition DIR (`python3 -I tools/partition.py VECTORS.npy DIR`) into OUT; `--v2 --index OUT
+/// SECONDS] [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256]`: fit the partition DIR (`python3 -I tools/partition.py VECTORS.npy DIR`) into OUT; `--v2 --index OUT
 /// --rebuild` then builds its index.
 pub fn fit_cmd() {
     let part = arg_str("--partition", "");
@@ -157,10 +166,28 @@ pub fn fit_cmd() {
         query_sample: Some(arg_str("--query-sample", "")).filter(|s| !s.is_empty()),
         seed: arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N"),
         cert_time: arg_str("--cert-time", &d.cert_time.to_string()).parse().expect("--cert-time SECONDS"),
+        image: arg_usize("--anchors", d.image),
+        text_anchors: Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty()),
+        text_count: arg_usize("--text-count", d.text_count),
     };
     if let Err(e) = crate::vexact_fit::fit(&data_dir(), &part, &o, &mut |s| println!("{s}")) {
         eprintln!("{e}");
         std::process::exit(2);
+    }
+}
+
+/// `vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy] [--text-count 256] [--seed S]`: write the
+/// support table's anchors of an existing fit (fit::write_anchors); `--v2 --index FITDIR --rebuild` then builds with them.
+pub fn anchors_cmd() {
+    let d = crate::vexact_fit::FitOptions::default();
+    let text = Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty());
+    let seed: u64 = arg_str("--seed", &d.seed.to_string()).parse().expect("--seed N");
+    match crate::vexact_fit::write_anchors(&data_dir(), arg_usize("--anchors", d.image), text.as_deref(), arg_usize("--text-count", d.text_count), seed) {
+        Ok(s) => println!("{s}"),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
     }
 }
 

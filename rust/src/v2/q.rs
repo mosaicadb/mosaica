@@ -97,7 +97,7 @@ impl Prep2 {
     pub fn anc(&self, ix: &Index2) -> Anc {
         self.anc_among(ix, None)
     }
-    /// The nearest anchor; on the first call with `among` (clusters, when every cluster's centre is an anchor), the
+    /// The nearest anchor; on the first call with `among` (clusters, when anchor a is cluster a's centre: anc_centres), the
     /// nearest of those clusters' anchors. Any anchor gives sound bounds, and a query over a few clusters needs the
     /// one nearest to them.
     pub fn anc_among(&self, ix: &Index2, among: Option<&[usize]>) -> Anc {
@@ -105,7 +105,7 @@ impl Prep2 {
             let n = ix.n();
             let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
             let all: Vec<usize>;
-            let cand = match among.filter(|_| ix.nanch == ix.k()) {
+            let cand = match among.filter(|_| ix.anc_centres) {
                 Some(c) if !c.is_empty() => c,
                 _ => {
                     all = (0..ix.nanch).collect();
@@ -140,7 +140,7 @@ pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
     prep2_qm(ix, q, None)
 }
 
-/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (one per cluster): the
+/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (`anc_centres`): the
 /// anchor is the cluster with the largest q.m / |m|, and only its product is taken again.
 pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
     let n = ix.n();
@@ -150,7 +150,7 @@ pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
     let anc = OnceLock::new();
-    if let Some(qm) = qm.filter(|_| ix.nanch == ix.k() && ix.nanch > 0) {
+    if let Some(qm) = qm.filter(|_| ix.anc_centres && ix.nanch == ix.k() && ix.nanch > 0) {
         let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
         for (c, &v) in qm.iter().enumerate() {
             if v / ix.cl[c].mn > best {

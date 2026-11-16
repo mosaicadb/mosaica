@@ -20,7 +20,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 5;
+pub const STORE_FORMAT: u64 = 6;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -349,7 +349,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
     })).collect();
     let meta = serde_json::json!({
         "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
-        "npow": ix.meta.npow, "x2": ix.x2, "nanch": ix.nanch, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
+        "npow": ix.meta.npow, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "groups": groups,
@@ -510,14 +510,13 @@ pub fn save_rest(ix: &Index2, dir: &str) {
     index_json(ix, dir, None);
 }
 
-/// Finish the index built into `dir`: write its support table, give `index.json` the key it answers to, the index's
+/// Finish the index built into `dir`: write its support table's anchors, give `index.json` the key it answers to, the index's
 /// `store_hash` and `plan_hash` and the identity `xs` of the vectors file it was built from (written last, so a
 /// directory whose `index.json` has a key is complete), and sync the directory. Returns the store hash.
 pub fn seal(ix: &Index2, dir: &str, key: &str, xs: Option<XsId>) -> u64 {
     let f = |name: &str| format!("{dir}/{name}");
+    // (the build wrote the table's bounds, hi.bin and lo.bin, while encoding)
     write_file(&f("anchors.bin"), &ix.anchors);
-    write_file(&f("hi.bin"), &ix.hi);
-    write_file(&f("lo.bin"), &ix.lo);
     let h = ix.store_hash();
     index_json(ix, dir, Some(&Seal { key, store_hash: h, plan_hash: ix.plan_hash(), xs }));
     sync_dir(dir);
@@ -791,8 +790,14 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     }
     // O(escapes), not O(clusters): the in-memory escape map queries look up (a few per hundred rows)
     let esc = ek.iter().zip(ev.iter()).map(|(&k, &v)| (((k >> 40) as u8, (k >> 32) as u8, k as u32), v)).collect();
-    if anchors.len() != nanch * n || hi.len() != nanch * k || lo.len() != nanch * k {
+    if nanch.checked_mul(n) != Some(anchors.len()) || nanch.checked_mul(k) != Some(hi.len()) || nanch.checked_mul(k) != Some(lo.len()) {
         return Err(format!("{dir}: the support table does not hold {nanch} anchors of {n} and their bounds over {k} clusters; rebuild the index"));
+    }
+    // whether anchor a is cluster a's centre direction: what the build did without the fit's anchors.npy (and not
+    // inferred from the count, which other anchors can match by coincidence)
+    let anc_centres = v["anc_centres"].as_bool().ok_or(format!("{dir}/index.json does not say whether its anchors are the centres; rebuild the index"))?;
+    if anc_centres != (!o.nusort && p.anchors.is_empty()) || (anc_centres && nanch != k) {
+        return Err(format!("{dir} was built {} the fit's anchors.npy, the fit now has {}; rebuild it", if anc_centres { "without" } else { "with" }, if p.anchors.is_empty() { "none" } else { "one" }));
     }
     let (coff, soff) = (off(0), off(1));
     for l in 0..nl {
@@ -827,6 +832,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         hi: Arc::new(hi),
         lo: Arc::new(lo),
         nanch,
+        anc_centres,
         ahat,
         row_ent,
         ent_row,
@@ -897,6 +903,11 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
         }
         None => h.u64(0),
     }
+    // the support table's anchors (the norm sort builds none)
+    if !o.nusort {
+        h.u64(p.anchors.len() as u64);
+        h.pod(&p.anchors);
+    }
     h.pod(prof);
     h.str(&p.xs_name);
     h.str(&p.partition_name);
@@ -911,7 +922,8 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
 
 impl Index2 {
     /// A fixed hash (`Fx`) of what an open derives again instead of reading: the meta, the plans and calibrated
-    /// tables of every group, the deterministic and expanded codebooks, the rotations and the centres. The build
+    /// tables of every group, the deterministic and expanded codebooks, the rotations, the centres and whether the
+    /// support table's anchors are the centres (an open derives it from the fit and checks the build's). The build
     /// records it and an open must derive the same (another library or dependency version could derive others).
     /// The repack thresholds are timed, not derived, and left out.
     pub fn plan_hash(&self) -> u64 {
@@ -988,6 +1000,7 @@ impl Index2 {
         h.pod(&self.etab.hi);
         h.pod(&self.centres64);
         self.rots.iter().for_each(|r| h.pod(r));
+        h.u64(self.anc_centres as u64);
         h.finish()
     }
 
@@ -1000,7 +1013,7 @@ impl Index2 {
         let mut h = Fx::default();
         h.str("vexact index");
         h.u64(self.plan_hash());
-        h.usizes(&[self.n(), self.k(), self.nrows, self.nent, self.nanch]);
+        h.usizes(&[self.n(), self.k(), self.nrows, self.nent, self.nanch, self.anc_centres as usize]);
         h.pod(&[self.x2]);
         for v in self.lcode.iter().chain(&self.lscal) {
             h.big(v);
@@ -1158,7 +1171,7 @@ pub(crate) mod tests {
         copy_fit(&a);
         let o = BuildOptions::default();
         let key = |d: &str| {
-            let (p, prof) = prepare(d, &o);
+            let (p, prof) = prepare(d, &o).unwrap();
             build_key(&p, &prof, &o)
         };
         let abs = a.to_str().unwrap().to_string();
@@ -1194,7 +1207,7 @@ pub(crate) mod tests {
         assert_eq!((md2.len(), md2.modified().unwrap()), (len, mtime));
         assert_eq!(key(bs), k0, "the vectors file's identity is not part of the key");
         // the library's fingerprint
-        let (p, prof) = prepare(bs, &o);
+        let (p, prof) = prepare(bs, &o).unwrap();
         assert_eq!(build_key(&p, &prof, &o), build_key_with(&p, &prof, &o, LIB_FINGERPRINT));
         assert_ne!(build_key_with(&p, &prof, &o, "0000000000000000"), build_key_with(&p, &prof, &o, "0000000000000001"));
         assert_eq!(LIB_FINGERPRINT.len(), 16);

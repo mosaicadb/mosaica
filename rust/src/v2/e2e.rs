@@ -526,7 +526,7 @@ fn same_work(a: &crate::kernel::Stats, b: &crate::kernel::Stats, what: &str) {
 fn same_index(a: &Index2, b: &Index2) {
     let f32b = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
     let f64b = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!((a.n(), a.k(), a.nrows, a.nent, a.nanch, a.x2.to_bits()), (b.n(), b.k(), b.nrows, b.nent, b.nanch, b.x2.to_bits()));
+    assert_eq!((a.n(), a.k(), a.nrows, a.nent, a.nanch, a.anc_centres, a.x2.to_bits()), (b.n(), b.k(), b.nrows, b.nent, b.nanch, b.anc_centres, b.x2.to_bits()));
     assert_eq!((&a.meta.dlv, &a.meta.rlv, a.meta.npow), (&b.meta.dlv, &b.meta.rlv, b.meta.npow));
     assert_eq!((&a.lcode.iter().map(|x| &x[..]).collect::<Vec<_>>(), &a.lscal.iter().map(|x| &x[..]).collect::<Vec<_>>()), (&b.lcode.iter().map(|x| &x[..]).collect::<Vec<_>>(), &b.lscal.iter().map(|x| &x[..]).collect::<Vec<_>>()));
     assert_eq!((&a.ahat[..], &a.row_ent[..], &a.ent_row[..], &a.nukey[..]), (&b.ahat[..], &b.row_ent[..], &b.ent_row[..], &b.nukey[..]));
@@ -651,5 +651,76 @@ fn a_partitioned_fit_builds_an_index_of_its_vectors() {
             }
         }
     }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// Anchors whose count equals the number of clusters but that are not the clusters' centres in order (here the centre
+/// directions reversed) build the same table up to the anchors' order, are not taken for the centres (the planner's
+/// shortcuts that read anchor a as cluster a's centre stay off), and answer as brute force does; the flag is checked
+/// at open against the fit.
+#[test]
+fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
+    let tmp = tmp_dir("anc");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let o = BuildOptions::default();
+    let (ec, er) = (tmp.join("encoded-c"), tmp.join("encoded-r"));
+    let (ec, er) = (ec.to_str().unwrap(), er.to_str().unwrap());
+    let (_, base) = rebuild_at(dir, ec, &o, &mut |_| {}).unwrap();
+    let (k, n) = (base.k(), base.n());
+    assert!(base.anc_centres && base.nanch == k, "without anchors.npy, one anchor per cluster, its centre");
+    // the same as the build in memory, which (as UP's build) takes the centres' directions as the anchors
+    assert_eq!((&base.hi[..], &base.lo[..], &base.anchors[..]), (&fixture().ix.hi[..], &fixture().ix.lo[..], &fixture().ix.anchors[..]));
+    let rev: Vec<f64> = (0..k).rev().flat_map(|c| base.anchors[c * n..(c + 1) * n].to_vec()).collect();
+    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[k, n], &rev.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+    let (_, built) = rebuild_at(dir, er, &o, &mut |_| {}).unwrap();
+    let (_, ix) = open_at(dir, er, &o, &mut |_| {}).unwrap();
+    assert_eq!(ix.store_hash(), built.store_hash());
+    assert!(!ix.anc_centres && ix.nanch == k, "anchors counted like the clusters taken for the centres");
+    assert_eq!(ix.code_hash(), base.code_hash(), "the anchors change the table, not the codes");
+    for a in 0..k {
+        for c in 0..k {
+            assert_eq!((ix.hi[a * k + c].to_bits(), ix.lo[a * k + c].to_bits()), (base.hi[(k - 1 - a) * k + c].to_bits(), base.lo[(k - 1 - a) * k + c].to_bits()), "anchor {a}, cluster {c}");
+        }
+    }
+    let f = fixture();
+    for q in &f.queries {
+        let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
+        let best = (0..k).map(|a| (dot64(&q64, &ix.anchors[a * n..(a + 1) * n]), a)).fold((f64::NEG_INFINITY, 0), |b, x| if x.0 > b.0 { x } else { b }).1;
+        // the anchor of a query given q.m of every cluster, and of a query over one cluster: the nearest of all anchors
+        let qm: Vec<f64> = (0..k).map(|c| dot64(&q64, ix.centres_f64(c))).collect();
+        assert_eq!(prep2_qm(&ix, q, Some(&qm)).anc(&ix).a, best);
+        assert_eq!(prep2(&ix, q).anc_among(&ix, Some(&[0])).a, best);
+        // (on the centres' index the shortcuts are taken: one cluster's anchor is its own)
+        assert_eq!(prep2(&base, q).anc_among(&base, Some(&[3])).a, 3);
+        let pr = prep2(&ix, q);
+        let t = truth(&ix, q, None);
+        for th in thresholds(&t) {
+            for (pname, plan) in plans() {
+                let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan });
+                assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "plan {pname}, threshold {th}");
+            }
+        }
+        for (pname, plan) in plans() {
+            let nn = knn2(&ix, q, 10, None, plan);
+            assert_eq!(sub_values(&ix, &nn.ents, q), top_values(&t, 10), "k-NN, plan {pname}");
+        }
+    }
+    drop((built, ix));
+    // the fit's anchors removed: the index built with them is refused, the centres' one opens
+    std::fs::remove_file(fit.join("anchors.npy")).unwrap();
+    assert!(open_at(dir, er, &o, &mut |_| {}).is_err());
+    open_at(dir, ec, &o, &mut |_| {}).unwrap();
+    // index.json claiming the centres for the reversed anchors is refused at open
+    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[k, n], &rev.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<_>>());
+    let json = format!("{er}/index.json");
+    let text = std::fs::read_to_string(&json).unwrap();
+    assert!(text.contains("\"anc_centres\": false"));
+    std::fs::write(&json, text.replace("\"anc_centres\": false", "\"anc_centres\": true")).unwrap();
+    assert!(open_at(dir, er, &o, &mut |_| {}).is_err(), "an index claiming its anchors are the centres opened against a fit with other anchors");
+    // anchors.npy that are not unit rows are refused
+    crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[1, n], &vec![0u8; n * 8]);
+    assert!(open_at(dir, er, &o, &mut |_| {}).is_err() && rebuild_at(dir, er, &o, &mut |_| {}).is_err());
     std::fs::remove_dir_all(&tmp).unwrap();
 }
