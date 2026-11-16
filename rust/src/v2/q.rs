@@ -1904,7 +1904,7 @@ pub struct Plan {
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     // Full vectors on file with their reads priced: one read with QD reads in flight, per read (us), and the bandwidth
     // of large reads (GB/s). `Plan::default`'s are placeholders from another machine: where reads are priced, take
-    // this machine's from `disk_constants` (or a plan file); `open_at` does not, since pricing is set after the open.
+    // this machine's from `disk_constants` (or a plan file); `v2::open` does not, since pricing is set after the open.
     pub io_us: f64,
     pub io_gbps: f64,
     /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: every level); None: the

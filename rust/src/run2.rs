@@ -321,12 +321,10 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         clusters: Some(arg_usize("--clusters", 100000)),
         rlv,
         dlv,
-        ddec,
         design_exact: args().iter().any(|a| a == "--design-exact"),
         nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
         nguar,
         csg_plain: args().iter().any(|a| a == "--csg-plain"),
-        keep_index: args().iter().any(|a| a == "--keep-index"),
         // glibc's mmap threshold fixed for the build, as `vexact build` did: only in a run that builds and then runs no
         // experiment (the setting stays for the rest of the process)
         tune_malloc: !MODES.iter().any(|m| has_mode(m)),
@@ -337,22 +335,15 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     // opened without encoding; --rebuild encodes it and saves it first; --in-memory encodes it and saves nothing
     let topen = Timer::new();
     let mut lg = |s: String| out!("{s}");
+    let oo = OpenOptions { ddec, keep_index: args().iter().any(|a| a == "--keep-index") };
     let (mut p, mut ix) = if args().iter().any(|a| a == "--in-memory") {
-        build(dir, &bo, &mut lg).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        })
+        build(dir, &bo, &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
     } else if args().iter().any(|a| a == "--rebuild") {
-        rebuild(dir, &bo, &mut lg).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        })
+        rebuild(dir, &bo, &mut lg).and_then(|(p, mut ix)| ix.set_ddec(oo.ddec).map(|_| (p, ix)))
     } else {
-        open(dir, &bo, &mut lg).unwrap_or_else(|e| {
-            eprintln!("{e}");
-            std::process::exit(2);
-        })
-    };
+        open(dir, &oo, &mut lg)
+    }
+    .unwrap_or_else(|e| exit2(&e));
     let built_s = topen.s();
     if args().iter().any(|a| a == "--hash") {
         out!("[index] code hash {:016x}", ix.code_hash());
@@ -375,7 +366,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         // the fit's perm.npy, which an open does not read (a build has read it), checked against the hash the saved
         // index recorded
         if p.perm.is_empty() {
-            saved_dir(dir, &bo).and_then(|edir| load_perm_checked(&mut p, &edir)).unwrap_or_else(|e| {
+            load_perm_checked(&mut p, &saved_dir(dir)).unwrap_or_else(|e| {
                 eprintln!("{e} (item queries from the fit's qi.npy need it; or give --item-queries)");
                 std::process::exit(2);
             });

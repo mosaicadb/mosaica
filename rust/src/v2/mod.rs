@@ -22,9 +22,26 @@ pub mod setup;
 pub mod store;
 pub mod tail;
 
-/// How an index is built from a fitted directory. The default is the build SYSTEM.md describes.
+/// How an index is made: the partition and the fit (`create` only), the support table's anchors (`create`, and
+/// `rebuild` when given) and the encoding (`create` and `rebuild`). The default is the build SYSTEM.md describes.
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
+    /// Items per cluster on average, as tools/partition.py's `--per-cluster` (create only).
+    pub per_cluster: PerCluster,
+    /// How the fit groups the clusters (create only).
+    pub groups: crate::fit::Groups,
+    /// The fit's basis, "pca" or "dual" (create only).
+    pub basis: String,
+    /// Queries that shape the dual basis's Sigma_Q with the corpus items (create only).
+    pub query_sample: Option<String>,
+    /// The seed of the partition, the fit and the anchors.
+    pub seed: u64,
+    /// Seconds tools/certify.py may take to certify the randomised levels' constant (create only; 0: not certified,
+    /// the build then uses the larger closed-form bounds).
+    pub cert_time: f64,
+    /// The support table's anchors (`fit::write_anchors`). None: `create` writes the default ones (`Anchors::default`)
+    /// and `rebuild` keeps the fit's anchors.npy as it is; given, `rebuild` writes them into the fit first.
+    pub anchors: Option<Anchors>,
     /// The query profile, in place of the directory's profile.npy.
     pub profile: Option<String>,
     /// Build only the first this many clusters (a quick check on a subset).
@@ -37,12 +54,6 @@ pub struct BuildOptions {
     /// budgets start after its last level, and no constant changes (research/levels-clusters' `--dlv`, as a build
     /// option: the codes are built for it).
     pub dlv: Option<Vec<usize>>,
-    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: at every level, the
-    /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
-    /// does not depend on it. Nothing stored changes, so it is a query-time option: not in the key, not in what an
-    /// index stores or `plan_hash`; a build and an open set it on the index in memory (`Meta2::ddec`), and one saved
-    /// index opens under any value. It is the index's default: a query's plan overrides it (`q::Plan::ddec`).
-    pub ddec: u32,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
     /// Sort each cluster's rows by their residual norm (the norm sort) instead of by key.
@@ -56,16 +67,139 @@ pub struct BuildOptions {
     /// Fix glibc's mmap threshold at 1 MB for the rest of the process when a build starts (util::fix_mmap_threshold),
     /// which keeps a large build's memory from growing with its row count (38 bytes a row at 4M rows otherwise). The
     /// setting is process-wide and is never undone, so the default is false: set it only in a process that does
-    /// nothing but build (the vexact binary does, for a rebuild run with no experiment). Not part of the key: it does
-    /// not change what is built.
+    /// nothing but build (the vexact binary does, for a create or a rebuild run with no experiment). Not part of the
+    /// key: it does not change what is built.
     pub tune_malloc: bool,
-    /// Open only (not part of the key): open a saved index although the fit's vectors file has changed length or
-    /// modification time since it was built (the index holds its own vectors); a warning instead of an error.
-    pub keep_index: bool,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, dlv: None, ddec: u32::MAX, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, tune_malloc: false, keep_index: false }
+        let f = crate::fit::FitOptions::default();
+        BuildOptions {
+            per_cluster: PerCluster::Items(1000),
+            groups: f.groups,
+            basis: f.basis,
+            query_sample: None,
+            seed: f.seed,
+            cert_time: f.cert_time,
+            anchors: None,
+            profile: None,
+            clusters: None,
+            rlv: None,
+            dlv: None,
+            design_exact: false,
+            nusort: false,
+            nguar: None,
+            csg_plain: false,
+            cal_items: CAL_ITEMS,
+            tune_malloc: false,
+        }
+    }
+}
+impl BuildOptions {
+    /// The options that decide what is encoded from a fit (the others make the fit), as a saved index records them in
+    /// its index.json ("options"), from which `open` derives its key again. The profile's path is made absolute.
+    pub fn encoding_json(&self) -> serde_json::Value {
+        let profile = self.profile.as_ref().map(|p| std::fs::canonicalize(p).map_or(p.clone(), |c| c.display().to_string()));
+        serde_json::json!({
+            "profile": profile, "clusters": self.clusters, "rlv": self.rlv, "dlv": self.dlv, "design_exact": self.design_exact,
+            "nusort": self.nusort, "nguar": self.nguar, "csg_plain": self.csg_plain, "cal_items": self.cal_items,
+        })
+    }
+    /// The options `encoding_json` recorded (the others at their defaults).
+    pub fn from_encoding_json(v: &serde_json::Value) -> Result<BuildOptions, String> {
+        use serde_json::Value;
+        if !v.is_object() {
+            return Err("it records no build options".into());
+        }
+        let bad = |k: &str| format!("its recorded build option {k} is {}", v[k]);
+        let us = |x: &Value| x.as_u64().map(|y| y as usize);
+        let list = |k: &str| -> Result<Option<Vec<usize>>, String> {
+            match &v[k] {
+                Value::Null => Ok(None),
+                Value::Array(a) => a.iter().map(us).collect::<Option<Vec<_>>>().map(Some).ok_or(bad(k)),
+                _ => Err(bad(k)),
+            }
+        };
+        let flag = |k: &str| v[k].as_bool().ok_or(bad(k));
+        Ok(BuildOptions {
+            profile: match &v["profile"] {
+                Value::Null => None,
+                x => Some(x.as_str().ok_or(bad("profile"))?.to_string()),
+            },
+            clusters: match &v["clusters"] {
+                Value::Null => None,
+                x => Some(us(x).ok_or(bad("clusters"))?),
+            },
+            rlv: list("rlv")?,
+            dlv: list("dlv")?,
+            design_exact: flag("design_exact")?,
+            nusort: flag("nusort")?,
+            nguar: match &v["nguar"] {
+                Value::Null => None,
+                x => Some(x.as_f64().ok_or(bad("nguar"))?),
+            },
+            csg_plain: flag("csg_plain")?,
+            cal_items: us(&v["cal_items"]).ok_or(bad("cal_items"))?,
+            ..BuildOptions::default()
+        })
+    }
+}
+
+/// Items per cluster on average (tools/partition.py's `--per-cluster`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PerCluster {
+    /// About this many items per cluster.
+    Items(usize),
+    /// research/levels-clusters' rule by N (`fit::per_cluster_by_n`, tools/rules.py `per_cluster`).
+    ByN,
+}
+impl PerCluster {
+    /// A positive number or by-n.
+    pub fn parse(s: &str) -> Result<PerCluster, String> {
+        match s {
+            "by-n" => Ok(PerCluster::ByN),
+            _ => s.parse::<usize>().ok().filter(|&m| m > 0).map(PerCluster::Items).ok_or(format!("the cluster size is a positive number of items or by-n, not {s}")),
+        }
+    }
+    /// As tools/partition.py takes it.
+    pub fn arg(&self) -> String {
+        match self {
+            PerCluster::Items(m) => m.to_string(),
+            PerCluster::ByN => "by-n".into(),
+        }
+    }
+}
+
+/// The support table's anchors (`fit::write_anchors`): `image` from the centre directions, `text_count` from the
+/// prompts in `text` (rows of the vectors' dimension or fewer).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Anchors {
+    pub image: usize,
+    pub text: Option<String>,
+    pub text_count: usize,
+}
+impl Default for Anchors {
+    fn default() -> Anchors {
+        let f = crate::fit::FitOptions::default();
+        Anchors { image: f.image, text: None, text_count: f.text_count }
+    }
+}
+
+/// How a saved index is opened. Nothing here changes what is stored, so none of it is in the key.
+#[derive(Clone, Debug)]
+pub struct OpenOptions {
+    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: at every level, the
+    /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
+    /// does not depend on it. Nothing stored changes, so one saved index opens under any value; it is the index's
+    /// default (`Meta2::ddec`, `Index2::set_ddec`), which a query's plan overrides (`q::Plan::ddec`).
+    pub ddec: u32,
+    /// Open a saved index although the fit's vectors file, perm.npy or partition has changed length or modification
+    /// time since it was built (the index holds its own vectors and row-to-entity map): a warning instead of an error.
+    pub keep_index: bool,
+}
+impl Default for OpenOptions {
+    fn default() -> OpenOptions {
+        OpenOptions { ddec: u32::MAX, keep_index: false }
     }
 }
 
@@ -1079,6 +1213,16 @@ impl Cl2 {
 }
 
 impl Index2 {
+    /// Which deterministic levels decide threshold queries by default (`OpenOptions::ddec`): an error names a level
+    /// this index does not have.
+    pub fn set_ddec(&mut self, ddec: u32) -> Result<(), String> {
+        let ndl = self.meta.ndl() as u32;
+        if ddec != u32::MAX && ddec.checked_shr(ndl).unwrap_or(0) != 0 {
+            return Err(format!("ddec {ddec:#b} names a deterministic level beyond this index's {ndl} (levels 0 to {})", ndl - 1));
+        }
+        self.meta.ddec = ddec;
+        Ok(())
+    }
     /// A hash of what the encoder writes per row: the codes and scalars of every level, the 16-bit keys (`ahat`), the
     /// row-to-entity map (`row_ent`, which fixes the row order) and the escapes. It does not cover the norm keys
     /// (`nukey`), the entity-to-row map (`ent_row`), the stored vectors, the `x2` bound, the per-cluster records and
@@ -1705,7 +1849,7 @@ pub fn plans(p: &Params, prof: &[f64], rows: usize, o: &BuildOptions, design_c: 
     if nguar < rows as f64 {
         log(format!("the guarantee's N, {nguar}, is below the {rows} rows built: the guarantee covers only {nguar} rows"));
     }
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32, ddec: o.ddec };
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32, ddec: u32::MAX };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
@@ -2099,9 +2243,6 @@ pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String
     if p.meta.dlv.is_empty() || p.meta.dlv.len() > NDL_MAX {
         return Err(format!("the fit's deterministic levels {:?} are not 1 to {NDL_MAX} levels; give others with BuildOptions::dlv (--dlv)", p.meta.dlv));
     }
-    if o.ddec != u32::MAX && o.ddec >> p.meta.dlv.len() != 0 {
-        return Err(format!("ddec {:#b} names a deterministic level beyond this index's {} (levels 0 to {})", o.ddec, p.meta.dlv.len(), p.meta.dlv.len() - 1));
-    }
     if let Some(new) = &o.rlv {
         let top = p.meta.dlv.last().copied().unwrap_or(0);
         if new.is_empty() || !new.windows(2).all(|w| w[0] < w[1]) || new[0] <= top {
@@ -2140,10 +2281,12 @@ pub fn design_constants(p: &Params, o: &BuildOptions, log: &mut dyn FnMut(String
     })
 }
 
-/// Where the index of the fit in `dir` built with `o` is saved: `dir/encoded-KEY`, KEY its `store::build_key`.
-pub fn saved_dir(dir: &str, o: &BuildOptions) -> Result<String, String> {
-    let (p, prof) = prepare(dir, o)?;
-    Ok(format!("{dir}/encoded-{}", store::build_key(&p, &prof, o)))
+/// The name of the saved index inside an index directory (`DIR/encoded`).
+pub const ENCODED: &str = "encoded";
+
+/// Where the index of the index directory `dir` is saved: `dir/encoded`.
+pub fn saved_dir(dir: &str) -> String {
+    format!("{dir}/{ENCODED}")
 }
 
 /// Encode the fit in `p` (from `prepare`): the codes and, without the norm sort, the support table, in memory or, with
@@ -2154,7 +2297,7 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     // without anchors.npy the table is K x K (K^2 x 8 bytes, and nc x K f32 per cluster in flight): refused past
     // KK_MAX clusters, where a fixed set of anchors (fit::write_anchors) keeps it K x A
     if !o.nusort && p.anchors.is_empty() && p.meta.k > KK_MAX {
-        return Err(format!("the fit has {} clusters and no anchors.npy: a K x K support table would take {:.1} GB. Write its anchors (fit::write_anchors; vexact --index FITDIR anchors [--anchors A] [--text-anchors PROMPTS.npy])", p.meta.k, (p.meta.k * p.meta.k * 8) as f64 / 1e9));
+        return Err(format!("the fit has {} clusters and no anchors.npy: a K x K support table would take {:.1} GB. Give it anchors (BuildOptions::anchors; vexact --v2 --index DIR --rebuild --anchors A [--text-anchors PROMPTS.npy])", p.meta.k, (p.meta.k * p.meta.k * 8) as f64 / 1e9));
     }
     let full = Full2::Real { rows: Default::default() };
     let mut lg = |s| log(format!("[build2] {s}"));
@@ -2162,9 +2305,9 @@ fn encode(p: &Params, prof: &[f64], design_c: Option<&[f64]>, o: &BuildOptions, 
     let ix = if p.xs_path.is_empty() {
         // the partition must be the one fitted (a partition written again into its directory is another), hold rows
         // of the fit's width, and give every fit row the entity the fit's perm.npy lists for it
-        let now = crate::bucket::partition_id(&p.partition).map_err(|e| format!("{e}; then refit (vexact --index {fit_dir} fit --partition {}) before building", p.partition))?;
+        let now = crate::bucket::partition_id(&p.partition).map_err(|e| format!("{e}; then create the index again (vexact --vectors V --index DIR create) from its vectors"))?;
         if now != p.partition_id {
-            return Err(format!("the partition {} changed since the fit (identity {} when fitted, {now} now); refit it (vexact --index {fit_dir} fit --partition {}) before building", p.partition, if p.partition_id.is_empty() { "unrecorded" } else { &p.partition_id }, p.partition));
+            return Err(format!("the partition {} changed since the fit (identity {} when fitted, {now} now); create the index again from its vectors (vexact --vectors V --index {fit_dir} create)", p.partition, if p.partition_id.is_empty() { "unrecorded" } else { &p.partition_id }));
         }
         // the same content: a manifest copied, moved or chmodded since the fit is only worth a warning
         if let (Some(was), Ok(id)) = (p.partition_file, store::XsId::of(&format!("{}/manifest.json", p.partition))) {
@@ -2201,8 +2344,12 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 }
 
 /// The fitted directory `dir` built into a queryable index in memory (codes, repack thresholds and, without the norm
-/// sort, the support table), with the parameters it was built from. Nothing is saved.
+/// sort, the support table), with the parameters it was built from. Nothing is saved, and nothing is written into the
+/// fit: the anchors are the fit's (`o.anchors` given is an error; `rebuild` writes them).
 pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    if o.anchors.is_some() {
+        return Err("a build in memory writes nothing into the fit, so it takes the fit's anchors; give anchors to a rebuild (v2::rebuild), which writes them".into());
+    }
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
@@ -2214,16 +2361,58 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result
     Ok((p, ix))
 }
 
-/// The index of the fitted directory `dir` built with `o`, opened from where it is saved (`saved_dir`) without encoding
-/// anything, with the parameters it was built from. A missing index, or one built from another fit or other options,
-/// is an error that says to rebuild it (`rebuild`).
-pub fn open(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    open_in(dir, None, o, log)
+/// Make the index directory `dir` from the vectors file `vectors` (N x n0 npy, f16, f32 or f64; row i is entity i):
+/// partition the vectors into `dir/partition` (tools/partition.py, with python3, numpy and faiss), fit them into `dir`
+/// (`fit::fit`, with the support table's anchors), encode the fit and save the index in `dir/encoded` (`rebuild`).
+/// `dir` must be missing or empty. Returns the index, with the parameters it was built from; `open` opens it again.
+pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    match std::fs::read_dir(dir).map(|mut rd| rd.next().is_some()) {
+        Ok(true) => return Err(format!("{dir} is not empty: create makes a new index directory (an existing fit is re-encoded by v2::rebuild, vexact --v2 --index {dir} --rebuild)")),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("cannot read {dir}: {e}")),
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {dir}: {e}"))?;
+    if o.tune_malloc {
+        crate::util::fix_mmap_threshold(1 << 20);
+    }
+    let t = Timer::new();
+    // the partition: tools/partition.py until a partition in Rust exists (as the fit runs tools/certify.py)
+    let part = format!("{dir}/partition");
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/partition.py");
+    let args = ["-I", script, vectors, &part, "--per-cluster", &o.per_cluster.arg(), "--seed", &o.seed.to_string()].map(|s| s.to_string());
+    log(format!("[create] python3 {}", args.join(" ")));
+    match std::process::Command::new("python3").args(&args).status() {
+        Ok(s) if s.success() => {}
+        Ok(s) => return Err(format!("{script} failed on {vectors} ({s}); it needs numpy and faiss for python3")),
+        Err(e) => return Err(format!("cannot run python3 for {script}: {e}")),
+    }
+    log(format!("[create] partitioned in {:.1}s", t.s()));
+    let a = o.anchors.clone().unwrap_or_default();
+    let fo = crate::fit::FitOptions {
+        basis: o.basis.clone(),
+        query_sample: o.query_sample.clone(),
+        seed: o.seed,
+        cert_time: o.cert_time,
+        image: a.image,
+        text_anchors: a.text,
+        text_count: a.text_count,
+        groups: o.groups,
+    };
+    crate::fit::fit(dir, &part, &fo, &mut |s| log(format!("[fit] {s}")))?;
+    log(format!("[create] fitted in {:.1}s", t.s()));
+    // the fit wrote the anchors
+    rebuild(dir, &BuildOptions { anchors: None, ..o.clone() }, log)
 }
 
-/// As `open`, the index saved in `edir` (wherever `rebuild_at` saved it).
-pub fn open_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    open_in(dir, Some(edir), o, log)
+/// The index saved in the index directory `dir` (`dir/encoded`), opened without encoding anything, with the
+/// parameters it was built from. The index records the build options it was built with; the fit and those options
+/// must still give the key it was saved under (`store::build_key`: the fit, the profile, the options and the library's
+/// version). A missing index, or a stale one (another fit or another version of the library), is an error that says
+/// to rebuild it (`rebuild`). An open reads the fit's parameters and the index's per-cluster records, never its rows
+/// (`store::open`).
+pub fn open(dir: &str, oo: &OpenOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    open_in(dir, &saved_dir(dir), oo, log)
 }
 
 /// The fit's perm.npy (fit row -> entity) read into `p.perm` for a caller that needs the fit's rows after an open (which
@@ -2242,40 +2431,46 @@ pub fn load_perm_checked(p: &mut Params, edir: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn open_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+/// `open` of the fit in `dir` from the index saved in `edir` (the tests keep a fit read-only and save beside it).
+pub(crate) fn open_in(dir: &str, edir: &str, oo: &OpenOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let t = Timer::new();
-    let (p, prof) = prepare(dir, o)?;
+    let json = format!("{edir}/index.json");
+    let text = std::fs::read_to_string(&json).map_err(|e| format!("no index is saved in {dir} ({json}: {e}); create it (v2::create; vexact --vectors VECTORS.npy --index {dir} create), or rebuild it from its fit (v2::rebuild; vexact --v2 --index {dir} --rebuild)"))?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{json}: {e}; rebuild the index"))?;
+    let o = BuildOptions::from_encoding_json(&v["options"]).map_err(|e| format!("the index in {edir}: {e}; rebuild it (v2::rebuild; vexact --v2 --index {dir} --rebuild)"))?;
+    let (p, prof) = prepare(dir, &o).map_err(|e| format!("{e} (the fit in {dir} under the options the index in {edir} was built with); rebuild the index (v2::rebuild; vexact --v2 --index {dir} --rebuild)"))?;
     let t_fit = t.s();
-    let key = store::build_key(&p, &prof, o);
+    let key = store::build_key(&p, &prof, &o);
     let t_key = t.s();
-    let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
-    let edir = edir.as_str();
     store::log_stale(&store::parent_of(edir), edir, &mut |s| log(format!("[open] {s}")));
-    let design_c = design_constants(&p, o, log);
+    let design_c = design_constants(&p, &o, log);
     let t_map = t.s();
-    let mut ix = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}")))?;
+    let mut ix = store::open(&p, &prof, &o, oo, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}")))?;
+    ix.set_ddec(oo.ddec)?;
     let t_open = t.s();
     set_repack(&mut ix, log);
     log(format!("[open] {:.3}s in all: fit read {t_fit:.3}s, key {:.3}s, index opened {:.3}s, repack timed {:.3}s; anon {:.0} MB", t.s(), t_key - t_fit, t_open - t_map, t.s() - t_open, crate::util::anon_mb()));
     Ok((p, ix))
 }
 
-/// Encode the fitted directory `dir` with `o` and save the index where `open` finds it (`saved_dir`), replacing any
-/// index saved there; returns it, with the parameters it was built from. An error when the fit's vectors cannot be
-/// read.
+/// Re-encode the fit in the index directory `dir` with `o` and save the index in `dir/encoded`, replacing the one
+/// saved there; returns it, with the parameters it was built from. `o.anchors`, when given, are written into the fit
+/// first (`fit::write_anchors`); the options that make the fit (cluster size, groups, basis, ...) are `create`'s and
+/// are not used here. The rebuild holds `encoded.lock` in `dir` for its whole run (a second rebuild waits, and if the
+/// first just saved the index it was going to build, opens that instead of encoding again), writes into a scratch
+/// directory of its own beside the index and swaps it into place once complete and synced (`store::install`). An
+/// error when the fit's vectors cannot be read.
 pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    rebuild_in(dir, None, o, log)
+    if let Some(a) = &o.anchors {
+        let s = crate::fit::write_anchors(dir, a.image, a.text.as_deref(), a.text_count, o.seed)?;
+        log(format!("[build2] anchors: {s}"));
+    }
+    rebuild_in(dir, &saved_dir(dir), o, log)
 }
 
-/// As `rebuild`, saved in `edir`. The rebuild holds `encoded.lock` beside `edir` for its whole run (a second rebuild
-/// there waits, and if the first just saved the index it was going to build, opens that instead of encoding again),
-/// writes into a scratch directory of its own beside `edir` and swaps it into place once complete and synced
-/// (`store::install`).
-pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    rebuild_in(dir, Some(edir), o, log)
-}
-
-fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+/// `rebuild` of the fit in `dir` into `edir` (the tests keep a fit read-only and save beside it); `o.anchors` is not
+/// read.
+pub(crate) fn rebuild_in(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
@@ -2287,8 +2482,6 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
     let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
     let key = store::build_key(&p, &prof, o);
-    let edir = edir.map_or_else(|| format!("{dir}/encoded-{key}"), |e| e.to_string());
-    let edir = edir.as_str();
     let parent = store::parent_of(edir);
     std::fs::create_dir_all(&parent).map_err(|e| format!("cannot create {parent}: {e}"))?;
     // the saved index's index.json before waiting (none, or its device, inode and modification time)
@@ -2303,7 +2496,7 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
         // another rebuild may have saved an index here meanwhile: if it is this one (it opens with this key), use it
         let now = ident();
         if now.is_some() && now != before {
-            if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
+            if let Ok(mut ix) = store::open(&p, &prof, o, &OpenOptions::default(), design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
                 drop(lock);
                 log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));
                 set_repack(&mut ix, log);
@@ -2312,7 +2505,8 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
         }
     }
     store::log_stale(&parent, edir, &mut |s| log(format!("[build2] {s}")));
-    // built into the files of a scratch directory of this rebuild's own, sealed with its key, then moved into place
+    // built into the files of a scratch directory of this rebuild's own, sealed with its key and options, then moved
+    // into place
     let tmp = store::scratch_dir(edir);
     let mut ix = match encode(&p, &prof, design_c.as_deref(), o, dir, Some(&tmp), log) {
         Ok(ix) => ix,
@@ -2321,7 +2515,7 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
             return Err(e);
         }
     };
-    let h = store::seal(&ix, &tmp, &key, Some(xs), perm);
+    let h = store::seal(&ix, &tmp, &key, &o.encoding_json(), Some(xs), perm);
     store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));

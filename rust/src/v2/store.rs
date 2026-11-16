@@ -5,14 +5,14 @@
 //! `ent_row.bin`, `nukey.bin`, `vectors.bin` (the f16 vectors in index row order, padded to whole 4,096-byte pages so
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
-//! table), and `index.json` (sizes, the per-group calibration, constants and basis defect, and the key of the fit and
-//! options it was built from).
+//! table), and `index.json` (sizes, the per-group calibration, constants and basis defect, the build options that
+//! decide the encoding, and the key of the fit and those options it was built from).
 //!
-//! A rebuild holds an exclusive lock on `encoded.lock` beside the index directory for its whole run, writes into a
-//! scratch directory of its own (`encoded-KEY.tmp-PID-NANOS`), syncs every file and the directory, and then swaps the
-//! complete directory into place (an atomic exchange where the file system has one, else the old directory is renamed
-//! aside first; it is removed afterwards). An open reads every file through one descriptor of the index directory, so
-//! it sees one complete build, never files of two.
+//! A saved index is `DIR/encoded` in its index directory DIR (the fit). A rebuild holds an exclusive lock on
+//! `encoded.lock` beside it for its whole run, writes into a scratch directory of its own (`encoded.tmp-PID-NANOS`),
+//! syncs every file and the directory, and then swaps the complete directory into place (an atomic exchange where the
+//! file system has one, else the old directory is renamed aside first; it is removed afterwards). An open reads
+//! every file through one descriptor of the index directory, so it sees one complete build, never files of two.
 
 use super::*;
 use std::io::Write;
@@ -344,6 +344,8 @@ impl XsId {
 /// again, and the identity of the vectors file it was built from.
 pub struct Seal<'a> {
     pub key: &'a str,
+    /// The build options that decide the encoding (`BuildOptions::encoding_json`), from which an open derives the key.
+    pub options: &'a serde_json::Value,
     pub store_hash: u64,
     pub plan_hash: u64,
     pub xs: Option<XsId>,
@@ -370,7 +372,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
         "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
-        "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
+        "options": seal.map(|s| s.options), "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
         "groups": groups,
     });
     let (tmp, path) = (format!("{dir}/index.json.tmp"), format!("{dir}/index.json"));
@@ -532,12 +534,12 @@ pub fn save_rest(ix: &Index2, dir: &str) {
 /// Finish the index built into `dir`: write its support table's anchors, give `index.json` the key it answers to, the index's
 /// `store_hash` and `plan_hash` and the identity `xs` of the vectors file it was built from (written last, so a
 /// directory whose `index.json` has a key is complete), and sync the directory. Returns the store hash.
-pub fn seal(ix: &Index2, dir: &str, key: &str, xs: Option<XsId>, perm: Option<(u64, XsId)>) -> u64 {
+pub fn seal(ix: &Index2, dir: &str, key: &str, options: &serde_json::Value, xs: Option<XsId>, perm: Option<(u64, XsId)>) -> u64 {
     let f = |name: &str| format!("{dir}/{name}");
     // (the build wrote the table's bounds, hi.bin and lo.bin, while encoding)
     write_file(&f("anchors.bin"), &ix.anchors);
     let h = ix.store_hash();
-    index_json(ix, dir, Some(&Seal { key, store_hash: h, plan_hash: ix.plan_hash(), xs, perm }));
+    index_json(ix, dir, Some(&Seal { key, options, store_hash: h, plan_hash: ix.plan_hash(), xs, perm }));
     sync_dir(dir);
     h
 }
@@ -657,13 +659,13 @@ pub fn install(tmp: &str, edir: &str, log: &mut dyn FnMut(String)) {
     }
 }
 
-/// Log every other `encoded-*` directory in `parent` (other keys' indexes, now stale for this fit and these options,
-/// and rebuilds' scratch directories) with its size. Nothing is removed.
+/// Log every other index directory in `parent` (`encoded-KEY` ones saved by earlier versions, stale now, and rebuilds'
+/// scratch directories) with its size. Nothing is removed.
 pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
     let keep = std::path::Path::new(keep).file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     let Ok(rd) = std::fs::read_dir(parent) else { return };
     let mut found: Vec<(String, u64)> = rd.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.starts_with("encoded-") && *n != keep)
+        .filter(|n| n.starts_with("encoded") && *n != keep)
         .map(|n| {
             let size = std::fs::read_dir(format!("{parent}/{n}")).map_or(0, |d| d.filter_map(|e| e.ok()).filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum());
             (n, size)
@@ -685,13 +687,13 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
 ///
 /// The fit's vectors file and its perm.npy are not read (the index holds its own vectors and row-to-entity map); their
 /// identities are compared with the ones the index was built from (`XsId`, `check_file`): another length or
-/// modification time is an error unless `o.keep_index`, which turns it into a warning; another status-change time,
+/// modification time is an error unless `oo.keep_index`, which turns it into a warning; another status-change time,
 /// device or inode only (chmod, a copy with its times, a restore, a hard link) is a warning; a missing file is a
 /// warning. A partitioned fit's partition is compared by content (`check_partition`, O(cells)). Nothing in an open is
 /// O(rows) except the map of escapes (a few per hundred rows). The repack thresholds are left at their default.
-pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>, key: &str, dir: &str, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
+pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design_c: Option<&[f64]>, key: &str, dir: &str, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
     let t = Timer::new();
-    let missing = |e: String| format!("no index of this fit and these options is saved in {dir} ({e}); build it with --rebuild (v2::rebuild)");
+    let missing = |e: String| format!("no index is saved in {dir} ({e}); rebuild it (v2::rebuild; vexact --v2 --index FITDIR --rebuild)");
     let damaged = |what: &str| format!("{dir}: {what}; rebuild the index");
     let nl = p.meta.dlv.len() + p.meta.rlv.len();
     // every file opened and mapped through one descriptor of `dir`, under the shared install lock (held only for this:
@@ -708,7 +710,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     }
     match v["key"].as_str() {
         Some(k) if k == key => {}
-        Some(k) => return Err(format!("the index in {dir} was built from another fit, other options or another version of the library (key {k}, these give {key}); rebuild it")),
+        Some(k) => return Err(format!("the index in {dir} is stale: it was built from another fit or by another version of the library (key {k}; the fit and the options it records now give {key}); rebuild it (v2::rebuild; vexact --v2 --index FITDIR --rebuild)")),
         None => return Err(format!("{dir} holds an unfinished index (no key); rebuild it")),
     }
     let us = |k: &str| v[k].as_u64().map(|x| x as usize).ok_or(format!("{dir}/index.json has no {k}; rebuild the index"));
@@ -729,11 +731,11 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     // identity and the partition's manifest, never by reading them
     let xs_was = XsId::from_json(&v["xs"]);
     if p.xs_path.is_empty() {
-        check_partition(p, xs_was, o.keep_index, log)?;
+        check_partition(p, xs_was, oo.keep_index, log)?;
     } else {
-        check_file("the fit's vectors file", &p.xs_path, xs_was, "the index holds its own vectors", o.keep_index, dir, log)?;
+        check_file("the fit's vectors file", &p.xs_path, xs_was, "the index holds its own vectors", oo.keep_index, dir, log)?;
     }
-    check_file("the fit's perm.npy", &p.perm_path, XsId::from_json(&v["perm"]["file"]), "the index holds its own row-to-entity map", o.keep_index, dir, log)?;
+    check_file("the fit's perm.npy", &p.perm_path, XsId::from_json(&v["perm"]["file"]), "the index holds its own row-to-entity map", oo.keep_index, dir, log)?;
     if n != p.meta.n || k != p.meta.k {
         return Err(format!("{dir} was built with {k} clusters of {n} dimensions, the fit has {} of {}; rebuild it", p.meta.k, p.meta.n));
     }
