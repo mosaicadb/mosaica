@@ -1851,40 +1851,43 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum PlanMode {
+    /// The rule (vectors in memory) or the cost model (vectors on file, their reads priced): see `plan2`.
     Auto,
+    /// Every cluster the support table leaves open is cut and run on the index path.
     Index,
+    /// Every cluster the support table leaves open is cut and its candidates decided from their full vectors.
     Flat,
+    /// Every query scans the visible set (every row without one); for experiments.
+    Scan,
 }
 
-/// Cost model of the planner, in microseconds on one thread. d is the fraction of the visible items of opened
-/// clusters that the cut and the sorted range leave undecided, a proxy for how deep candidates will go, known before
-/// any code is read. `Plan::default` holds constants for 1M BioCLIP (n = 768, AVX-512); `Plan::calibrate` times them
-/// on the index at hand.
+/// The planner's constant in memory, in rows: under a visible set, the index path on a cluster costs about as much as
+/// scoring this many of its visible rows from their vectors (a scan of the set). A ratio of two costs of the same kind,
+/// so it does not move with the machine's speed the way each cost does. Measured on 1M BioCLIP-2 (1,000 rows per
+/// cluster; text queries at five thresholds, visible sets of 0.1-70%): the index path per cluster holding a visible
+/// row costs 150 rows of scan at 10 visible rows a cluster, 250 at 100 and 400 at 500, and a whole query's scan and
+/// index path cross at 350-400 visible rows a cluster (1 and 4 threads); 300 leans toward the index path
+/// (REPORT_BUILD, "The planner without timing"). The cut alone is 12-13 rows, far below.
+pub const R_ROWS: usize = 300;
+/// The exact k-NN seed (query setup, probing, the first full vectors) in the same rows: measured 1.18-1.45 ms against
+/// 0.19 us a row, 6,100-7,600 rows; the lower end, toward the index path.
+pub const R_SEED: usize = 6000;
+
+/// The planner's choices. In memory it needs no timed constant: unfiltered, the support table decides what it can and
+/// every other cluster runs on the index path; with a visible set, one dimensionless constant (`r_rows`, in rows)
+/// decides between a scan, direct scoring and the index path. With the full vectors on file and their reads priced
+/// (`disk::ReadPolicy::priced`), a cost model in microseconds decides, whose read costs (`io_us`, `io_gbps`) are timed
+/// once per machine and device (`disk_constants`) and whose compute costs are the fixed `COSTS`.
 #[derive(Clone, Copy, Debug)]
 pub struct Plan {
     pub mode: PlanMode,
-    pub full_us: f64,      // exact decision from a full vector, per candidate
-    pub item_us0: f64,     // index path per candidate: item_us0 + item_us1 * d
-    pub item_us1: f64,
-    pub cl_us0: f64,       // index path per cluster (setup and tables): cl_us0 + cl_us1 * d
-    pub cl_us1: f64,
-    pub grp_us: f64,       // index path per group (exact basis product, rotated weights)
-    pub scan_us: f64,      // scan of a visible set's rows, scattered over the index, per visible item
-    pub cscan_us: f64,     // scan of rows in order (every row of an index, or of one compacted to a visible set), per row
-    pub anc_us: f64,       // the search for the query's nearest anchor, per query
-    pub dir_us: f64,       // a cluster scored directly from its visible rows, per cluster (beyond its rows at scan cost)
-    pub item_us2: f64,     // index path per candidate, times the answer's share p of the visible set (candidates go deeper as p grows)
-    pub direct: bool,      // a cluster may be scored from its visible rows' vectors without a cut
-    pub cut_us: f64,       // cluster cut and sorted range, per cluster holding a visible item
-    pub seed_us: f64,      // the k-NN seed (query setup, probing, first full vectors), per query
+    pub r_rows: usize,     // a visible set: scan it when it holds at most r_rows rows per cluster holding one; score a cluster's visible rows directly when it holds at most r_rows
+    pub r_seed: usize,     // exact k-NN under a visible set: the seed, in rows, that a scan first also saves
     pub int_det: bool,     // threshold queries decide the deterministic levels on the integer path
     pub gtab: bool,        // tables per (group, level), combined per cluster with the centre's stored tables
     pub repack: bool,      // per-level occupancy thresholds for compacting survivors held in place (Index2::repack)
     pub repack_mul: f32,   // their factor: the decisions' cost per block, which the timing leaves out, raises them
     pub tol: f64,          // the tolerance d: an item whose lower bound reaches t - d is taken in (0: exact)
-    pub scan_lo: f64,      // a threshold query whose answer share of the visible set, estimated from a sample, is in
-    pub scan_hi: f64,      // [scan_lo, scan_hi] scans the visible set (scan_lo > 1: never)
-    pub scan_cal: bool,    // Plan::calibrate also times the scan band (about 9 s at 1M; off: the band is left as given)
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     pub io_us: f64,        // full vectors on disk: one read with QD reads in flight, per read
     pub io_gbps: f64,      // and the bandwidth of large reads, GB/s
@@ -1895,9 +1898,40 @@ pub struct Plan {
 }
 impl Default for Plan {
     fn default() -> Self {
-        Plan { mode: PlanMode::Auto, full_us: 0.20, item_us0: 0.02, item_us1: 0.08, cl_us0: 4.0, cl_us1: 20.0, grp_us: 140.0, scan_us: 0.20, cscan_us: 0.10, anc_us: 150.0, dir_us: 1.0, item_us2: 0.0, direct: true, cut_us: 2.5, seed_us: 300.0, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, scan_lo: 2.0, scan_hi: 2.0, scan_cal: false, pscan: false, io_us: 5.7, io_gbps: 3.3, ddec: None }
+        Plan { mode: PlanMode::Auto, r_rows: R_ROWS, r_seed: R_SEED, int_det: true, gtab: true, repack: true, repack_mul: 1.0, tol: 0.0, pscan: false, io_us: 5.7, io_gbps: 3.3, ddec: None }
     }
 }
+
+/// The compute costs of the cost model for vectors on file, and of `knn2_fast`'s choice per cluster, in microseconds on
+/// one thread: fixed, as timed on 1M BioCLIP-2 (n = 768, AVX-512) by the calibration this planner replaced. With the
+/// vectors on file the reads (`Plan::io_us`, `io_gbps`, timed per machine) dominate them.
+#[derive(Clone, Copy, Debug)]
+pub struct Costs {
+    pub full_us: f64,  // exact decision from a full vector, per candidate
+    pub item_us0: f64, // index path per candidate: item_us0 + item_us1 * d
+    pub item_us1: f64,
+    pub cl_us0: f64,   // index path per cluster (setup and tables): cl_us0 + cl_us1 * d
+    pub cl_us1: f64,
+    pub grp_us: f64,   // index path per group (exact basis product, rotated weights)
+    pub scan_us: f64,  // scan of a visible set's rows, scattered over the index, per visible item
+    pub cscan_us: f64, // scan of rows in order (every row of an index), per row
+    pub anc_us: f64,   // the search for the query's nearest anchor, per query
+    pub dir_us: f64,   // a cluster scored directly from its visible rows, per cluster (beyond its rows at scan cost)
+    pub cut_us: f64,   // cluster cut and sorted range, per cluster holding a visible item
+}
+pub const COSTS: Costs = Costs { full_us: 0.19, item_us0: 0.0133, item_us1: 0.053, cl_us0: 2.67, cl_us1: 13.3, grp_us: 93.0, scan_us: 0.19, cscan_us: 0.18, anc_us: 430.0, dir_us: 1.08, cut_us: 2.45 };
+impl Costs {
+    /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included). d is the fraction
+    /// of the visible items of opened clusters that the cut and the sorted range leave undecided.
+    pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
+        ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
+    }
+    /// Modelled cost of a scan, per row: of a visible set's rows (`filtered`), or of every row in order.
+    pub fn scan_cost_us(&self, filtered: bool) -> f64 {
+        if filtered { self.scan_us } else { self.cscan_us }
+    }
+}
+
 impl Plan {
     /// This plan's choices against the index `ix`: an error when `ddec` names a deterministic level beyond `ix`'s.
     pub fn check(&self, ix: &Index2) -> Result<(), String> {
@@ -1908,39 +1942,25 @@ impl Plan {
             _ => Ok(()),
         }
     }
-    /// The timed constants as `name=value` lines.
+    /// The planner's constants as `name=value` lines: the rows of the rule in memory and the disk constants.
     pub fn to_kv(&self) -> String {
-        format!("full_us={}\nitem_us0={}\nitem_us1={}\ncl_us0={}\ncl_us1={}\ngrp_us={}\nscan_us={}\ncscan_us={}\nanc_us={}\ndir_us={}\nitem_us2={}\ncut_us={}\nseed_us={}\nscan_lo={}\nscan_hi={}\nio_us={}\nio_gbps={}\n",
-                self.full_us, self.item_us0, self.item_us1, self.cl_us0, self.cl_us1, self.grp_us, self.scan_us, self.cscan_us, self.anc_us, self.dir_us, self.item_us2, self.cut_us, self.seed_us, self.scan_lo, self.scan_hi, self.io_us, self.io_gbps)
+        format!("r_rows={}\nr_seed={}\nio_us={}\nio_gbps={}\n", self.r_rows, self.r_seed, self.io_us, self.io_gbps)
     }
-    /// `base` with the constants of `name=value` lines (as `to_kv` writes them).
-    pub fn from_kv(base: Plan, text: &str) -> Plan {
+    /// `base` with the constants of `name=value` lines (as `to_kv` writes them); an error names a line that is not one.
+    pub fn from_kv(base: Plan, text: &str) -> Result<Plan, String> {
         let mut p = base;
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
-            let (k, v) = line.split_once('=').unwrap_or_else(|| panic!("plan line {line:?} is not name=value"));
-            let v: f64 = v.trim().parse().unwrap_or_else(|_| panic!("plan value {v:?} is not a number"));
-            *match k.trim() {
-                "full_us" => &mut p.full_us,
-                "item_us0" => &mut p.item_us0,
-                "item_us1" => &mut p.item_us1,
-                "cl_us0" => &mut p.cl_us0,
-                "cl_us1" => &mut p.cl_us1,
-                "grp_us" => &mut p.grp_us,
-                "scan_us" => &mut p.scan_us,
-                "cscan_us" => &mut p.cscan_us,
-                "anc_us" => &mut p.anc_us,
-                "item_us2" => &mut p.item_us2,
-                "dir_us" => &mut p.dir_us,
-                "cut_us" => &mut p.cut_us,
-                "seed_us" => &mut p.seed_us,
-                "scan_lo" => &mut p.scan_lo,
-                "scan_hi" => &mut p.scan_hi,
-                "io_us" => &mut p.io_us,
-                "io_gbps" => &mut p.io_gbps,
-                k => panic!("unknown plan constant {k:?}; the names are those of Plan::to_kv"),
-            } = v;
+            let (k, v) = line.split_once('=').ok_or_else(|| format!("plan line {line:?} is not name=value"))?;
+            let v: f64 = v.trim().parse().ok().filter(|x: &f64| x.is_finite() && *x >= 0.0).ok_or_else(|| format!("plan value {v:?} is not a number of at least 0"))?;
+            match k.trim() {
+                "r_rows" => p.r_rows = v as usize,
+                "r_seed" => p.r_seed = v as usize,
+                "io_us" => p.io_us = v,
+                "io_gbps" if v > 0.0 => p.io_gbps = v,
+                k => return Err(format!("{k}={v} is not a plan constant (r_rows, r_seed, io_us, io_gbps); the planner no longer takes timed compute costs")),
+            }
         }
-        p
+        Ok(p)
     }
 
     /// Full vectors on disk: rows this many bytes apart or closer are read with one read, the gap included, because
@@ -1958,163 +1978,12 @@ impl Plan {
         (ncand as f64 * self.io_us).min(self.io_us + (span * rb) as f64 / (self.io_gbps * 1e3))
     }
 
-    /// Modelled cost of a scan, per row: of a visible set's rows (`filtered`), or of every row in order.
-    pub fn scan_cost_us(&self, filtered: bool) -> f64 {
-        if filtered { self.scan_us } else { self.cscan_us }
-    }
-
-    /// Modelled index-path cost of one cluster with `ncand` candidates (group setup not included).
-    pub fn index_us(&self, ncand: usize, d: f64) -> f64 {
-        ncand as f64 * (self.item_us0 + self.item_us1 * d) + self.cl_us0 + self.cl_us1 * d
-    }
-    /// index_us for an answer whose share of the visible set is about p.
-    pub fn index_us_p(&self, ncand: usize, d: f64, p: f64) -> f64 {
-        self.index_us(ncand, d) + ncand as f64 * self.item_us2 * p
-    }
-
-    /// The constants re-timed on this index and machine, on one thread, from corpus pseudo-queries (`nq` stored rows
-    /// spread over the index) at their 10th best score, unfiltered and over a fixed random eighth of the rows: the
-    /// visible scan, the cut, full vectors after the cut, the k-NN seed, and one factor scaling every index-path
-    /// constant (least squares of measured against modelled time). Data only: no example queries.
-    /// `cpu`: the CPU to pin the timing thread to.
-    pub fn calibrate(ix: &Index2, base: Plan, nq: usize, cpu: Option<usize>) -> Plan {
-        assert!(nq >= 1, "calibration needs at least one pseudo-query; pass --calib 1 or more, or --plan-file");
-        assert!(!ix.compacted(), "calibrate the plan on the index a session was compacted from, not on the compacted index");
-        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
-        pool.install(|| {
-            if let Some(c) = cpu {
-                crate::util::pin(c);
-            }
-            let ents: Vec<u32> = (0..ix.nrows).filter(|&r| (r as u64).wrapping_mul(0x9E3779B97F4A7C15) >> 60 < 2).map(|r| ix.row_ent[r]).collect();
-            let mut ents = ents;
-            ents.sort_unstable();
-            let tenth = Vis2::new(ix, &RoaringBitmap::from_sorted_iter(ents).unwrap());
-            let (mut scan_t, mut scan_n, mut cut_t, mut cut_n, mut full_t, mut full_n, mut seed_t) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-            let (mut cscan_t, mut cscan_n, mut anc_t) = (0.0, 0.0, 0.0);
-            let (mut dir_t, mut dir_n, mut dir_rows) = (0.0, 0.0, 0.0);
-            // the index path's factor, fitted without a visible set at the 10th best score; then item_us2 on what that
-            // leaves at a 30% answer as well, with and without a visible set: (time, modelled time, candidates x p)
-            let (mut tm_idx, mut mm_idx) = (0.0, 0.0);
-            let mut pts: Vec<(f64, f64, f64)> = Vec::new();
-            for i in 0..nq {
-                let row = (2 * i + 1) * ix.nrows / (2 * nq);
-                let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
-                let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-                let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
-                let pr = prep2(ix, &q);
-                let tm = Timer::new();
-                std::hint::black_box(pr.anc(ix));
-                anc_t += tm.ms() * 1e3;
-                let tm = Timer::new();
-                let mut st = Stats::new(ix.meta.nl());
-                std::hint::black_box(seed2(ix, &prep2(ix, &q), 10, None, &mut st));
-                seed_t += tm.ms() * 1e3;
-                for vis in [None, Some(&tenth)] {
-                    let nvis = vis.map_or(ix.nrows, |v: &Vis2| v.cl_cnt.iter().map(|&x| x as usize).sum());
-                    let tm = Timer::new();
-                    let top = scan_knn(ix, &pr.q16, &pr.q32, pr.qn, 10, vis);
-                    if vis.is_some() {
-                        scan_t += tm.ms() * 1e3;
-                        scan_n += nvis as f64;
-                    } else {
-                        cscan_t += tm.ms() * 1e3;
-                        cscan_n += nvis as f64;
-                    }
-                    let t10 = top.last().map_or(f64::NEG_INFINITY, |x| x.0);
-                    if let Some(v) = vis {
-                        // every live cluster scored directly
-                        let pre: Vec<Pre> = (0..ix.k()).map(|ci| if v.cl_cnt[ci] > 0 { Pre::Direct } else { Pre::Skip }).collect();
-                        let o = Opts2 { vis, verify: false, want_iv: false, plan: base };
-                        let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t10, &o, &pre, &vec![false; ix.k()], 0).rows.len());
-                        dir_t += tm.ms() * 1e3;
-                        dir_n += v.cl_cnt.iter().filter(|&&x| x > 0).count() as f64;
-                        dir_rows += nvis as f64;
-                    }
-                    let t30 = {
-                        let rows: Vec<u32> = vis.map_or_else(|| (0..ix.nrows as u32).collect(), |v| v.rows.clone());
-                        let mut sc: Vec<f32> = rows.iter().map(|&r| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r as usize)) }).collect();
-                        let m = sc.len() * 3 / 10;
-                        *sc.select_nth_unstable_by(m, |a, b| b.partial_cmp(a).unwrap()).1 as f64
-                    };
-                    for (t, mode) in [(t10, PlanMode::Flat), (t10, PlanMode::Index), (t30, PlanMode::Index)] {
-                        let o = Opts2 { vis, verify: false, want_iv: false, plan: Plan { mode, ..base } };
-                        let tm = Timer::new();
-                        let Planned::Run { pre, use_idx, cut_cyc } = plan2(ix, &pr, t, &o) else { unreachable!() };
-                        let tc = tm.ms() * 1e3;
-                        let tm = Timer::new();
-                        std::hint::black_box(run_planned(ix, &pr, t, &o, &pre, &use_idx, cut_cyc).rows.len());
-                        let tr = tm.ms() * 1e3;
-                        let (mut ncand, mut nv) = (0usize, 0usize);
-                        let mut groups = vec![false; ix.groups.len()];
-                        for (ci, p) in pre.iter().enumerate() {
-                            if let Pre::Open { ncand: c, .. } = p {
-                                ncand += c;
-                                nv += vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
-                                if *c > 0 {
-                                    groups[ix.cl[ci].g] = true;
-                                }
-                            }
-                        }
-                        let d = ncand as f64 / nv.max(1) as f64;
-                        let p = answer_share(ix, &pr, t, vis, SHARE_SAMPLE);
-                        match mode {
-                            PlanMode::Flat => {
-                                cut_t += tc;
-                                cut_n += vis.map_or(ix.k(), |v| v.cl_cnt.iter().filter(|&&x| x > 0).count()) as f64;
-                                full_t += tr;
-                                full_n += ncand as f64;
-                            }
-                            _ => {
-                                let mut m = groups.iter().filter(|&&g| g).count() as f64 * base.grp_us;
-                                for p in &pre {
-                                    if let Pre::Open { ncand: c, .. } = p {
-                                        if *c > 0 {
-                                            m += base.index_us(*c, d);
-                                        }
-                                    }
-                                }
-                                if vis.is_none() && t == t10 {
-                                    tm_idx += tr * m;
-                                    mm_idx += m * m;
-                                }
-                                pts.push((tr, m, ncand as f64 * p));
-                            }
-                        }
-                    }
-                }
-            }
-            let s = tm_idx / mm_idx.max(1e-30);
-            let (a, b) = pts.iter().fold((0.0, 0.0), |(a, b), &(tr, m, x)| (a + (tr - s * m) * x, b + x * x));
-            let u2 = (a / b.max(1e-30)).max(0.0);
-            let (scan_lo, scan_hi) = if base.scan_cal { Plan::scan_band(ix, base, nq.min(3)) } else { (base.scan_lo, base.scan_hi) };
-            Plan {
-                scan_lo,
-                scan_hi,
-                scan_us: scan_t / scan_n,
-                cscan_us: cscan_t / cscan_n,
-                anc_us: anc_t / nq as f64,
-                item_us2: u2,
-                dir_us: ((dir_t - dir_rows * scan_t / scan_n) / dir_n.max(1.0)).max(0.0),
-                cut_us: cut_t / cut_n,
-                full_us: full_t / full_n.max(1.0),
-                seed_us: seed_t / nq as f64,
-                item_us0: base.item_us0 * s,
-                item_us1: base.item_us1 * s,
-                cl_us0: base.cl_us0 * s,
-                cl_us1: base.cl_us1 * s,
-                grp_us: base.grp_us * s,
-                ..base
-            }
-        })
-    }
-
-    /// `base` with the disk constants timed through the reader on the full-vector file, from an empty cache: `io_us`
-    /// from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest of three
-    /// timings. The file's pages are dropped from the cache before each and after. Unchanged in memory or without
-    /// `--full-read uring`.
-    pub fn calibrate_disk(ix: &Index2, base: Plan) -> Plan {
-        let Some(rows) = ix.own_rows() else { return base };
+    /// The disk constants (io_us, io_gbps) timed through the reader on `ix`'s full-vector file, from an empty cache:
+    /// `io_us` from 4,096 single rows spread over the file, `io_gbps` from 32 MiB of consecutive rows, each the fastest
+    /// of three timings. The file's pages are dropped from the cache before each and after. None in memory or when the
+    /// rows are not read through io_uring (`disk::ReadPolicy::uring`).
+    pub fn calibrate_disk(ix: &Index2) -> Option<(f64, f64)> {
+        let rows = ix.own_rows()?;
         let n = ix.n();
         let time1 = |sel: Vec<u32>, gap: usize| -> Option<(f64, u64)> {
             rows.evict();
@@ -2132,59 +2001,91 @@ impl Plan {
         };
         const NR: usize = 4096;
         let spread: Vec<u32> = (0..NR).map(|i| ((i as u64 * 2 + 1) * ix.nrows as u64 / (2 * NR as u64)) as u32).collect();
-        let Some((t_rand, _)) = time(spread, 0) else { return base };
+        let (t_rand, _) = time(spread, 0)?;
         let nseq = ((32usize << 20) / (2 * n)).min(ix.nrows);
-        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2).unwrap();
+        let (t_seq, bytes) = time((0..nseq as u32).collect(), usize::MAX / 2)?;
         rows.evict();
-        Plan { io_us: t_rand / NR as f64, io_gbps: bytes as f64 / t_seq / 1e3, ..base }
+        Some((t_rand / NR as f64, bytes as f64 / t_seq / 1e3))
     }
 
-    /// The answer shares at which a scan of every row beats the index path, timed on `nq` stored rows as queries at
-    /// thresholds of 5 to 99% answers: (lo, hi) spans the shares where the index was slower, extended halfway to the
-    /// neighbouring shares; (2, 2) when it never was.
-    pub fn scan_band(ix: &Index2, base: Plan, nq: usize) -> (f64, f64) {
-        const F: [f64; 10] = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.75, 0.9, 0.99];
-        let plan = Plan { scan_lo: 2.0, scan_hi: 2.0, ..base };
-        let o = Opts2 { vis: None, verify: false, want_iv: false, plan };
-        let mut slower = [0usize; F.len()];
-        for i in 0..nq.max(1) {
-            let row = (2 * i + 1) * ix.nrows / (2 * nq.max(1)) + 1;
-            let q: Vec<f32> = ix.full_row_f16(row).iter().map(|&h| f16_to_f32(h)).collect();
-            let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-            let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
-            let pr = prep2(ix, &q);
-            let mut sc: Vec<f32> = (0..ix.nrows).map(|r| unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r)) }).collect();
-            sc.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
-            for (k, &f) in F.iter().enumerate() {
-                let t = sc[((ix.nrows as f64 * f) as usize).min(ix.nrows - 1)] as f64;
-                let (mut ti, mut ts) = (f64::MAX, f64::MAX);
-                for _ in 0..2 {
-                    let tm = Timer::new();
-                    std::hint::black_box(threshold2(ix, &pr, t, &o).rows.len());
-                    ti = ti.min(tm.ms());
-                    let tm = Timer::new();
-                    std::hint::black_box(scan_visible(ix, &pr, t, None, false, false).rows.len());
-                    ts = ts.min(tm.ms());
-                }
-                if ti > ts {
-                    slower[k] += 1;
-                }
-            }
-        }
-        let sl: Vec<usize> = (0..F.len()).filter(|&k| 2 * slower[k] > nq.max(1)).collect();
-        match (sl.first(), sl.last()) {
-            (Some(&a), Some(&b)) => (if a == 0 { 0.0 } else { (F[a - 1] + F[a]) / 2.0 }, if b + 1 == F.len() { 1.0 } else { (F[b] + F[b + 1]) / 2.0 }),
-            _ => (2.0, 2.0),
-        }
-    }
-
-    /// Before anything is read: a scan of the visible set costs no more than cutting every cluster that holds a
-    /// visible item, plus `fixed_us` of other index-path work that the scan avoids.
-    pub fn scan_first(&self, vis: &Vis2, fixed_us: f64) -> bool {
+    /// Exact k-NN under a visible set, before anything is read: a scan of the visible set when it holds at most
+    /// `r_rows` rows per cluster holding one plus the seed's `r_seed` rows (always under `Scan`, never under `Index` or
+    /// `Flat`).
+    pub fn scan_first(&self, vis: &Vis2) -> bool {
         let nvis = vis.rows.len();
         let nvc = vis.cl_cnt.iter().filter(|&&x| x > 0).count();
-        matches!(self.mode, PlanMode::Auto) && nvis as f64 * self.scan_us <= nvc as f64 * self.cut_us + fixed_us
+        match self.mode {
+            PlanMode::Scan => true,
+            PlanMode::Auto => nvis <= self.r_rows.saturating_mul(nvc).saturating_add(self.r_seed),
+            _ => false,
+        }
     }
+}
+
+/// The disk-constant cache's file in an index directory.
+pub const DISK_CACHE: &str = "disk-constants.txt";
+
+/// The key the disk constants are cached under: the CPU model and the device (major:minor, and its name where
+/// /sys gives one) of the file `file` lies on.
+pub fn disk_key(file: &std::fs::File) -> Result<String, String> {
+    use std::os::unix::fs::MetadataExt;
+    let cpu = std::fs::read_to_string("/proc/cpuinfo").ok().and_then(|s| s.lines().find(|l| l.starts_with("model name")).and_then(|l| l.split_once(':')).map(|x| x.1.trim().to_string())).unwrap_or_else(|| "unknown".into());
+    let dev = file.metadata().map_err(|e| format!("the vectors file: {e}"))?.dev();
+    let (maj, min) = (libc::major(dev), libc::minor(dev));
+    let name = std::fs::read_to_string(format!("/sys/dev/block/{maj}:{min}/uevent")).ok().and_then(|s| s.lines().find_map(|l| l.strip_prefix("DEVNAME=").map(|x| x.to_string())));
+    Ok(format!("cpu {cpu}; device {maj}:{min}{}", name.map_or(String::new(), |n| format!(" ({n})"))))
+}
+
+/// The disk constants (io_us, io_gbps) cached at `path` under `key`, else `time()`'s, saved there under `key`; and
+/// how they were found. A cache that is missing, unreadable or under another key is timed again; one that cannot be
+/// written is reported and the timed constants are used all the same. None when they could be neither read nor timed.
+pub fn cached_disk_constants(path: &std::path::Path, key: &str, time: impl FnOnce() -> Option<(f64, f64)>) -> (Option<(f64, f64)>, String) {
+    let old = std::fs::read_to_string(path).ok();
+    let parse = |s: &str| -> Option<(String, f64, f64)> {
+        let get = |name: &str| s.lines().find_map(|l| l.strip_prefix(name).and_then(|v| v.strip_prefix('='))).map(|v| v.trim().to_string());
+        let (us, gb) = (get("io_us")?.parse::<f64>().ok()?, get("io_gbps")?.parse::<f64>().ok()?);
+        (us.is_finite() && us > 0.0 && gb.is_finite() && gb > 0.0).then_some(())?;
+        Some((get("key")?, us, gb))
+    };
+    let why = match old.as_deref().map(parse) {
+        Some(Some((k, us, gb))) if k == key => return (Some((us, gb)), format!("read from {} (key {key})", path.display())),
+        Some(Some((k, ..))) => format!("timed again: {} was for another machine or device ({k})", path.display()),
+        Some(None) => format!("timed again: {} is not a cache of disk constants", path.display()),
+        None => format!("timed: no cache at {}", path.display()),
+    };
+    let Some((us, gb)) = time() else { return (None, format!("{why}; but they cannot be timed here (no io_uring reader)")) };
+    let tmp = path.with_extension("tmp");
+    let saved = std::fs::write(&tmp, format!("key={key}\nio_us={us}\nio_gbps={gb}\n")).and_then(|_| std::fs::rename(&tmp, path));
+    let why = match saved {
+        Ok(()) => format!("{why}; saved under key {key}"),
+        Err(e) => format!("{why}; not saved ({e})"),
+    };
+    (Some((us, gb)), why)
+}
+
+/// `base` with the disk constants of this machine and the device of `ix`'s vectors file: read from `DISK_CACHE` in
+/// `dir` (the index directory), or timed (`Plan::calibrate_disk`, a few seconds, reading through io_uring whatever the
+/// rows' policy) and saved there when it is missing or its key differs. `base` unchanged when the vectors are not on
+/// file or cannot be timed. Logged.
+pub fn disk_constants(ix: &Index2, base: Plan, dir: &str, log: &mut dyn FnMut(String)) -> Plan {
+    let Some(super::disk::Rows::Map { file, policy, .. }) = ix.own_rows() else { return base };
+    let key = match disk_key(file) {
+        Ok(k) => k,
+        Err(e) => {
+            log(format!("[plan] disk constants not timed ({e}); io_us={} io_gbps={} as given", base.io_us, base.io_gbps));
+            return base;
+        }
+    };
+    let t = Timer::new();
+    let (got, why) = cached_disk_constants(&std::path::Path::new(dir).join(DISK_CACHE), &key, || {
+        let u = policy.uring.swap(true, std::sync::atomic::Ordering::Relaxed);
+        let r = Plan::calibrate_disk(ix);
+        policy.uring.store(u, std::sync::atomic::Ordering::Relaxed);
+        r
+    });
+    let p = got.map_or(base, |(io_us, io_gbps)| Plan { io_us, io_gbps, ..base });
+    log(format!("[plan] disk constants io_us={:.3} io_gbps={:.3} (rows up to {} bytes apart read together): {why}, in {:.1}s", p.io_us, p.io_gbps, p.io_gap(), t.s()));
+    p
 }
 
 pub struct Opts2<'a> {
@@ -2432,57 +2333,86 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
     }
 }
 
-/// Rows sampled to estimate a threshold query's answer share.
-pub const SHARE_SAMPLE: usize = 256;
-
-/// The share of `ns` visible rows (every row when vis is None), evenly spaced, whose f32 score from the stored vector
-/// is at least t: an estimate of the answer's share of the visible set (planning only).
-pub fn answer_share(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ns: usize) -> f64 {
-    if !matches!(ix.full, Full2::Real { .. }) {
-        return 0.0;
+/// A cluster decided by the support table alone, from the certified bounds of the query's anchor: wholly below t
+/// (skipped) or wholly above (taken in); None when neither, or under the norm sort, whose cut decides both. A cluster
+/// with no visible row is skipped.
+fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: bool) -> Option<Pre> {
+    if nvis == 0 {
+        return Some(Pre::Skip);
     }
-    let nvis = vis.map_or(ix.nrows, |v| v.rows.len());
-    let ns = ns.min(nvis);
-    if ns == 0 {
-        return 0.0;
+    if nusort {
+        return None;
     }
-    let mut hit = 0usize;
-    for i in 0..ns {
-        let k = (2 * i + 1) * nvis / (2 * ns);
-        let row = vis.map_or(k, |v| v.rows[k] as usize);
-        if unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(row)) } as f64 >= t {
-            hit += 1;
-        }
-    }
-    hit as f64 / ns as f64
-}
-
-/// The planner's choice for a threshold query. Under `Auto`, each cluster holding a visible row is decided by the
-/// support table where it can be (wholly out or wholly in); the rest are either scored directly from their visible rows'
-/// vectors, when a cut would not pay for itself, or cut to their sorted range and run on the index path or on full
-/// vectors; and the whole query scans the visible rows when the cost model says that is cheaper than all of it. Which
-/// path decides a row never changes the answer.
-pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     let k = ix.k();
     let rr = ix.x2.sqrt();
+    let Anc { a, beta: b, rho } = pr.anc(ix);
+    let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
+    let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
+    if bh + rho * rr < t - 1e-9 {
+        return Some(Pre::Skip);
+    }
+    if bl - rho * rr >= t + 1e-9 {
+        return Some(Pre::In);
+    }
+    None
+}
+
+/// The cluster's cut and sorted range (under the norm sort, its groups set up first).
+fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
+    let c = &ix.cl[ci];
+    let qm = dot64(&pr.q64, ix.centres_f64(ci));
+    let (u0, u1, d0, d1) = if nusort {
+        let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
+        let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
+        if u0 == c.r1 {
+            return Pre::Skip;
+        }
+        if d0 == c.r1 && u0 == c.r0 {
+            return Pre::In;
+        }
+        (u0, u1, d0, d1)
+    } else {
+        sorted_range2(ix, ci, &cut_params2(ix, ci, pr, qm), t)
+    };
+    let ncand = match vis {
+        None => d1 - d0,
+        Some(v) => count_bits(&v.bits, d0, d1),
+    };
+    Pre::Open { qm, u0, u1, d0, d1, ncand }
+}
+
+/// The planner's choice for a threshold query. Which path decides a row never changes the answer.
+///
+/// Vectors in memory, under `Auto`: without a visible set, each cluster is decided by the support table where it can
+/// be (wholly out or wholly in) and every other cluster is cut to its sorted range and run on the index path; no
+/// whole-query scan, no direct scoring, no full-vector path (measured: the index path is within noise of the best
+/// choice in every cell, and 1.6-6x faster than a scan; REPORT_BUILD). With a visible set, in rows (`Plan::r_rows`,
+/// R): the visible set is scanned when it holds at most R rows per cluster holding one (its scan costs no more than
+/// the index path on those clusters); otherwise each cluster the support table leaves open is scored directly when it
+/// holds at most R visible rows, else cut and run on the index path.
+///
+/// Vectors on file whose reads are priced (`disk::ReadPolicy::priced`), under `Auto`: the cost model (`plan2_priced`).
+/// `Index` and `Flat` cut every cluster the support table leaves open (the index path, or full vectors); `Scan` scans.
+pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
+    let pl = o.plan;
+    let auto = match pl.mode {
+        PlanMode::Scan => return Planned::Scan,
+        PlanMode::Auto => true,
+        PlanMode::Index | PlanMode::Flat => false,
+    };
     // reads are priced only where this index's own row ids address vectors on file whose policy prices them (not a
     // compacted copy in memory, nor a parent's rows reached through vrow)
-    let pl = o.plan;
-    let disk = ix.own_rows().is_some_and(|r| r.priced());
-    let auto = matches!(pl.mode, PlanMode::Auto);
+    if auto && ix.own_rows().is_some_and(|r| r.priced()) {
+        return plan2_priced(ix, pr, t, o);
+    }
+    let k = ix.k();
     let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
-    let nvis: usize = live.iter().map(|&ci| nvis_cl(ci)).sum();
-    // a row scored by a scan, or directly in its cluster: scattered under a visible set, in order without one; with
-    // the vectors on file, reading it too, in order
-    let rb = 2 * ix.n();
-    let row_us = pl.scan_cost_us(o.vis.is_some()) + if disk { rb as f64 / (pl.io_gbps * 1e3) } else { 0.0 };
-    let scan_cost = nvis as f64 * row_us;
-    // a live cluster that the support table leaves open costs at least the cheaper of its cut and scoring its rows
-    let floor = |ci: usize| pl.cut_us.min(if pl.direct { nvis_cl(ci) as f64 * row_us + pl.dir_us } else { f64::INFINITY });
-    // before the anchors are read: when the scan costs no more than cutting every live cluster, or than the anchor
-    // search with each live cluster at the cheaper of its cut and its rows (no cluster decided by the support table)
-    if auto && (scan_cost <= live.len() as f64 * pl.cut_us || scan_cost <= pl.anc_us + live.iter().map(|&ci| floor(ci)).sum::<f64>()) {
+    // a visible set: scanned when it holds at most R rows per cluster holding one; else a cluster holding at most R is
+    // scored directly
+    let r = pl.r_rows;
+    let filtered = auto && o.vis.is_some();
+    if filtered && live.iter().map(|&ci| nvis_cl(ci)).sum::<usize>() <= r.saturating_mul(live.len()) {
         return Planned::Scan;
     }
     let tc0 = tick();
@@ -2493,65 +2423,61 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         gs.dedup();
         setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
     }
-    // the support table: a cluster wholly below t is skipped and one wholly above taken in, from the certified
-    // bounds alone (None: neither, or the norm sort, whose cut decides both)
-    let support = |ci: usize| -> Option<Pre> {
-        if nvis_cl(ci) == 0 {
-            return Some(Pre::Skip);
-        }
-        if nusort {
-            return None;
-        }
-        let Anc { a, beta: b, rho } = pr.anc(ix);
-        let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
-        let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
-        if bh + rho * rr < t - 1e-9 {
-            return Some(Pre::Skip);
-        }
-        if bl - rho * rr >= t + 1e-9 {
-            return Some(Pre::In);
-        }
-        None
-    };
-    // the cluster's cut and sorted range
-    let cut = |ci: usize| -> Pre {
-        let c = &ix.cl[ci];
-        if nusort {
-            let qm = dot64(&pr.q64, ix.centres_f64(ci));
-            let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
-            let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
-            if u0 == c.r1 {
-                return Pre::Skip;
-            }
-            if d0 == c.r1 && u0 == c.r0 {
-                return Pre::In;
-            }
-            let ncand = match o.vis {
-                None => d1 - d0,
-                Some(v) => count_bits(&v.bits, d0, d1),
-            };
-            return Pre::Open { qm, u0, u1, d0, d1, ncand };
-        }
-        let qm = dot64(&pr.q64, ix.centres_f64(ci));
-        let cu = cut_params2(ix, ci, pr, qm);
-        let (u0, u1, d0, d1) = sorted_range2(ix, ci, &cu, t);
-        let ncand = match o.vis {
-            None => d1 - d0,
-            Some(v) => count_bits(&v.bits, d0, d1),
-        };
-        Pre::Open { qm, u0, u1, d0, d1, ncand }
-    };
     pr.anc_among(ix, Some(&live));
-    let mut pre: Vec<Option<Pre>> = (0..k).map(|ci| support(ci)).collect();
+    let pre: Vec<Pre> = (0..k).into_par_iter().map(|ci| {
+        let nv = nvis_cl(ci);
+        support_pre(ix, pr, t, nv, ci, nusort).unwrap_or_else(|| if filtered && nv <= r { Pre::Direct } else { cut_pre(ix, pr, t, o.vis, ci, nusort) })
+    }).collect();
+    let cut_cyc = tick() - tc0;
+    let flat = matches!(pl.mode, PlanMode::Flat);
+    let use_idx: Vec<bool> = pre.iter().map(|p| matches!(p, Pre::Open { ncand, .. } if *ncand > 0) && !flat).collect();
+    Planned::Run { pre, use_idx, cut_cyc }
+}
+
+/// The planner with the full vectors on file and their reads priced: a cost model in microseconds, the reads at the
+/// timed `Plan::io_us` and `io_gbps`, the compute at the fixed `COSTS`. Each cluster holding a visible row is decided
+/// by the support table where it can be; the rest are either scored directly from their visible rows' vectors, when a
+/// cut would not pay for itself, or cut to their sorted range and run on the index path or on full vectors; and the
+/// whole query scans the visible rows when the model says that is cheaper than all of it.
+fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
+    let k = ix.k();
+    let pl = o.plan;
+    let cm = COSTS;
+    let nvis_cl = |ci: usize| o.vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+    let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
+    let nvis: usize = live.iter().map(|&ci| nvis_cl(ci)).sum();
+    // a row scored by a scan, or directly in its cluster: scattered under a visible set, in order without one; and its
+    // read, in order
+    let rb = 2 * ix.n();
+    let row_us = cm.scan_cost_us(o.vis.is_some()) + rb as f64 / (pl.io_gbps * 1e3);
+    let scan_cost = nvis as f64 * row_us;
+    // a live cluster that the support table leaves open costs at least the cheaper of its cut and scoring its rows
+    let floor = |ci: usize| cm.cut_us.min(nvis_cl(ci) as f64 * row_us + cm.dir_us);
+    // before the anchors are read: when the scan costs no more than cutting every live cluster, or than the anchor
+    // search with each live cluster at the cheaper of its cut and its rows (no cluster decided by the support table)
+    if scan_cost <= live.len() as f64 * cm.cut_us || scan_cost <= cm.anc_us + live.iter().map(|&ci| floor(ci)).sum::<f64>() {
+        return Planned::Scan;
+    }
+    let tc0 = tick();
+    let nusort = !ix.nukey.is_empty();
+    if nusort {
+        let mut gs: Vec<usize> = live.iter().map(|&ci| ix.cl[ci].g).collect();
+        gs.sort_unstable();
+        gs.dedup();
+        setup_groups(ix, pr, &gs, &mut Stats::new(ix.meta.nl()));
+    }
+    let cut = |ci: usize| cut_pre(ix, pr, t, o.vis, ci, nusort);
+    pr.anc_among(ix, Some(&live));
+    let mut pre: Vec<Option<Pre>> = (0..k).map(|ci| support_pre(ix, pr, t, nvis_cl(ci), ci, nusort)).collect();
     let open: Vec<usize> = live.iter().copied().filter(|&ci| pre[ci].is_none()).collect();
-    if auto && scan_cost <= open.iter().map(|&ci| floor(ci)).sum::<f64>() {
+    if scan_cost <= open.iter().map(|&ci| floor(ci)).sum::<f64>() {
         return Planned::Scan;
     }
     // a sample of one open cluster in SAMPLE is cut first: the share d of their visible rows left as candidates
     // stands in for the rest
     const SAMPLE: usize = 8;
     let (mut nc_s, mut nv_s) = (0usize, 0usize);
-    let sampled = auto && open.len() >= 8 * SAMPLE;
+    let sampled = open.len() >= 8 * SAMPLE;
     if sampled {
         for &ci in open.iter().step_by(SAMPLE) {
             let p = cut(ci);
@@ -2562,33 +2488,21 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
             pre[ci] = Some(p);
         }
     }
-    // when most visible items are candidates (d), an answer share in the scan band (estimated from a sample) scans
-    let in_band = |d: f64| {
-        auto && pl.scan_lo <= 1.0 && d >= 0.25 && {
-            let p = answer_share(ix, pr, t, o.vis, SHARE_SAMPLE);
-            p >= pl.scan_lo && p <= pl.scan_hi
-        }
-    };
-    // the answer's share of the visible set, estimated from a sample: candidates go deeper as it grows
-    let p_ans = if auto && pl.item_us2 > 0.0 { answer_share(ix, pr, t, o.vis, SHARE_SAMPLE) } else { 0.0 };
-    let idx_us = |nc: usize, d: f64| pl.index_us_p(nc, d, p_ans);
+    let idx_us = |nc: usize, d: f64| cm.index_us(nc, d);
     // a candidate's vector read: scattered over the index under a visible set, like a scan's
-    let full_us = if o.vis.is_some() { pl.full_us.max(pl.scan_us) } else { pl.full_us };
-    // nc candidates' full vectors, lying in a span of `span` rows (their reads too, on file)
-    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + if disk { pl.disk_us(nc, span, rb) } else { 0.0 };
+    let full_us = if o.vis.is_some() { cm.full_us.max(cm.scan_us) } else { cm.full_us };
+    // nc candidates' full vectors, lying in a span of `span` rows, and their reads
+    let cand_us = |nc: usize, span: usize| nc as f64 * full_us + pl.disk_us(nc, span, rb);
     // a cluster's candidates at share d lie in about d of its rows
     let span_d = |ci: usize, d: f64| (d * (ix.cl[ci].r1 - ix.cl[ci].r0) as f64).ceil() as usize;
     // a cluster scored directly: when its rows cost no more than its cut and the candidates the cut would leave
     let direct = |ci: usize, d: f64| {
         let nv = nvis_cl(ci) as f64;
         let nc = d * nv;
-        pl.direct && auto && nv * row_us + pl.dir_us <= pl.cut_us + cand_us(nc.round() as usize, span_d(ci, d)).min(idx_us(nc.round() as usize, d))
+        nv * row_us + cm.dir_us <= cm.cut_us + cand_us(nc.round() as usize, span_d(ci, d)).min(idx_us(nc.round() as usize, d))
     };
     if sampled {
         let d = nc_s as f64 / nv_s.max(1) as f64;
-        if in_band(d) {
-            return Planned::Scan;
-        }
         // every open cluster at its cheapest path (direct, or the cut and the cheaper of full vectors and the index,
         // with the setup of each group the index path opens), or at its cheapest without the index path
         let mut groups = vec![false; ix.groups.len()];
@@ -2596,7 +2510,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         for &ci in &open {
             let nv = nvis_cl(ci) as f64;
             let nc = d * nv;
-            let (dir, full, idx) = (if pl.direct { nv * row_us + pl.dir_us } else { f64::INFINITY }, pl.cut_us + cand_us(nc.round() as usize, span_d(ci, d)), pl.cut_us + idx_us(nc.round() as usize, d));
+            let (dir, full, idx) = (nv * row_us + cm.dir_us, cm.cut_us + cand_us(nc.round() as usize, span_d(ci, d)), cm.cut_us + idx_us(nc.round() as usize, d));
             est_flat += dir.min(full);
             if idx < dir.min(full) {
                 est += idx;
@@ -2605,7 +2519,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
                 est += dir.min(full);
             }
         }
-        let est = est_flat.min(est + groups.iter().filter(|&&g| g).count() as f64 * pl.grp_us);
+        let est = est_flat.min(est + groups.iter().filter(|&&g| g).count() as f64 * cm.grp_us);
         if scan_cost <= est {
             return Planned::Scan;
         }
@@ -2614,8 +2528,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
                 pre[ci] = Some(Pre::Direct);
             }
         }
-    }
-    if !sampled {
+    } else {
         // no estimate of d: direct only where the rows cost no more than the cut alone
         for &ci in &open {
             if direct(ci, 0.0) {
@@ -2625,7 +2538,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     }
     let pre: Vec<Pre> = pre.into_par_iter().enumerate().map(|(ci, p)| p.unwrap_or_else(|| cut(ci))).collect();
     let cut_cyc = tick() - tc0;
-    // the planner: per cluster the index path or full vectors, a group's setup only if its clusters' gains pay for it
+    // per cluster the index path or full vectors, a group's setup only if its clusters' gains pay for it
     let mut use_idx = vec![false; k];
     let (mut ncand_all, mut nvis_all, mut ndirect) = (0usize, 0usize, 0usize);
     for (ci, p) in pre.iter().enumerate() {
@@ -2639,10 +2552,6 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         }
     }
     let d = ncand_all as f64 / nvis_all.max(1) as f64;
-    // too few clusters for the sample above: the same check on the whole cut
-    if !sampled && in_band(d) {
-        return Planned::Scan;
-    }
     let mut grp_gain = vec![0f64; ix.groups.len()];
     let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
@@ -2653,28 +2562,22 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
             let full = cand_us(*ncand, d1 - d0);
             full_all += full;
             let gain = full - idx_us(*ncand, d);
-            use_idx[ci] = match pl.mode {
-                PlanMode::Index => true,
-                PlanMode::Flat => false,
-                PlanMode::Auto => gain > 0.0,
-            };
+            use_idx[ci] = gain > 0.0;
             if use_idx[ci] {
                 grp_gain[ix.cl[ci].g] += gain;
             }
         }
     }
-    if auto {
-        for ci in 0..k {
-            if use_idx[ci] && grp_gain[ix.cl[ci].g] < pl.grp_us {
-                use_idx[ci] = false;
-            }
+    for ci in 0..k {
+        if use_idx[ci] && grp_gain[ix.cl[ci].g] < cm.grp_us {
+            use_idx[ci] = false;
         }
-        // what remains costs every candidate's and direct row's full vector less the kept gains; a scan may be cheaper
-        let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= pl.grp_us).map(|g| grp_gain[g] - pl.grp_us).sum();
-        let ndc = pre.iter().filter(|p| matches!(p, Pre::Direct)).count();
-        if full_all + ndirect as f64 * row_us + ndc as f64 * pl.dir_us - gains > scan_cost {
-            return Planned::Scan;
-        }
+    }
+    // what remains costs every candidate's and direct row's full vector less the kept gains; a scan may be cheaper
+    let gains: f64 = (0..ix.groups.len()).filter(|&g| grp_gain[g] >= cm.grp_us).map(|g| grp_gain[g] - cm.grp_us).sum();
+    let ndc = pre.iter().filter(|p| matches!(p, Pre::Direct)).count();
+    if full_all + ndirect as f64 * row_us + ndc as f64 * cm.dir_us - gains > scan_cost {
+        return Planned::Scan;
     }
     Planned::Run { pre, use_idx, cut_cyc }
 }
@@ -3199,7 +3102,7 @@ impl TopK {
 /// runs as a threshold query at the running k-th best score: the key range and the levels drop an item once its upper
 /// bound falls below it, each level's half-width scaled by `dial`, and the items left (or taken in by a certified
 /// lower bound) are scored from their stored vectors into the k best. A cluster with too few visible items to pay for
-/// the index path's per-cluster setup, by the plan's costs, has every visible item scored, batched with other such
+/// the index path's per-cluster setup, by the fixed `COSTS`, has every visible item scored, batched with other such
 /// clusters in row order. No dial and every cluster is exact up to the f32
 /// products.
 pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vis2>, nprobe: usize, dial: Option<&[f32]>, plan: Plan) -> KnnOut2 {
@@ -3240,7 +3143,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     for ci in order {
         let c = &ix.cl[ci];
         let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
-        if (top.full() && nv as f64 * plan.full_us <= plan.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
+        if (top.full() && nv as f64 * COSTS.full_us <= COSTS.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
             match vis {
                 None => flat.extend(c.r0 as u32..c.r1 as u32),
                 Some(_) => flat.extend_from_slice(vis_rows(c.r0, c.r1)),
@@ -3287,7 +3190,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
             let d = cands.len() as f64 / nv as f64;
             // the group's setup is left out: charged to the first cluster of each group, it sends that cluster's items
             // to their full vectors, which reads far more and saves no time
-            if top.full() && cands.len() as f64 * plan.full_us > plan.index_us(cands.len(), d) {
+            if top.full() && cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d) {
                 st.clusters_open += 1;
                 let gq = get_gq2(ix, &pr, c.g, &mut st);
                 let tq = tick();
@@ -3312,9 +3215,10 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
 }
 
-/// Exact k-NN. The planner may send the query to a scan of the visible set before anything else (a small visible
-/// set) or after the seed and the cut (nothing prunes); otherwise the threshold query at the seed's k-th score runs
-/// as planned and the selection refines the survivors' intervals until the k best are certain.
+/// Exact k-NN. Under a visible set the planner may send the query to a scan of it before anything else (at most
+/// `Plan::r_rows` rows per cluster holding one, plus the seed's `r_seed`: `Plan::scan_first`), or after the seed
+/// (`plan2`'s rule at the seed's k-th score); otherwise the threshold query at the seed's k-th score runs as planned and
+/// the selection refines the survivors' intervals until the k best are certain. Unfiltered and in memory it never scans.
 pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
     let tm = Timer::new();
     let nl = ix.meta.nl();
@@ -3327,7 +3231,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         KnnOut2 { ents, st, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
     if let Some(v) = vis {
-        if stored && plan.scan_first(v, plan.seed_us) {
+        if stored && plan.scan_first(v) {
             return scan(Stats::new(nl), 0.0);
         }
     }

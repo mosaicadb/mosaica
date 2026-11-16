@@ -38,7 +38,7 @@ pub struct Ctx2 {
 /// The flags that take a value, the flags that stand alone, and the modes. Anything else on the command line is refused,
 /// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
     "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
@@ -50,7 +50,7 @@ const VALUE_FLAGS: &[&str] = &[
 ];
 const BOOL_FLAGS: &[&str] = &[
     "--approx-filtered", "--cold", "--csg-plain", "--design-exact", "--flat", "--gtab", "--hash", "--in-memory", "--int", "--keep-index",
-    "--no-all", "--no-approx", "--no-calib-disk", "--no-exact", "--nusort", "--plan-default", "--prof", "--rebuild",
+    "--no-all", "--no-approx", "--no-exact", "--nusort", "--prof", "--rebuild",
     "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
@@ -211,31 +211,20 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "norepack" => p.repack = false,
             "pscan" => p.pscan = true,
             "nopscan" => p.pscan = false,
-            "direct" => p.direct = true,
-            "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
             f if f.starts_with("dlv=") => {} // a build option (in the index's key), read by setup2_at
             f if f.starts_with("ddec=") => p.ddec = Some(parse_ddec(&f[5..])), // per query: checked by Plan::check
-            "noscanband" => {
-                p.scan_lo = 2.0;
-                p.scan_hi = 2.0;
-            }
-            "scanband=auto" => p.scan_cal = true,
-            f if f.starts_with("scanband=") => {
-                let (a, b) = f[9..].split_once(':').expect("scanband=LO:HI");
-                p.scan_lo = a.parse().expect("scanband=LO:HI");
-                p.scan_hi = b.parse().expect("scanband=LO:HI");
-            }
             // the planner's mode for a variant (as --plan for the first): auto, index (every open cluster on the index
-            // path) or flat (every candidate from its full vector)
+            // path), flat (every candidate from its full vector) or scan (every query scans the visible set)
             "mode=auto" => p.mode = PlanMode::Auto,
             "mode=index" => p.mode = PlanMode::Index,
             "mode=flat" => p.mode = PlanMode::Flat,
-            // the cost constants of a file of name=value lines (as RESULTS/plan.txt), for a variant
-            f if f.starts_with("pf=") => p = Plan::from_kv(p, &std::fs::read_to_string(&f[3..]).unwrap_or_else(|e| {
-                eprintln!("pf={}: cannot read it: {e}", &f[3..]);
-                std::process::exit(2);
-            })),
+            "mode=scan" => p.mode = PlanMode::Scan,
+            // the rule's rows in memory (Plan::r_rows, r_seed)
+            f if f.starts_with("r=") => p.r_rows = f[2..].parse().expect("r=ROWS"),
+            f if f.starts_with("rseed=") => p.r_seed = f[6..].parse().expect("rseed=ROWS"),
+            // the planner's constants from a file of name=value lines (as RESULTS/plan.txt), for a variant
+            f if f.starts_with("pf=") => p = plan_file(p, &f[3..]),
             f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
             f if f.starts_with("repackx=") => {
                 p.repack = true;
@@ -245,6 +234,15 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
         }
     }
     p
+}
+
+/// `p` with the constants of the file `f` (name=value lines, as `Plan::to_kv` writes them); a file that cannot be read
+/// or holds another name stops the run.
+pub fn plan_file(p: Plan, f: &str) -> Plan {
+    std::fs::read_to_string(f).map_err(|e| format!("cannot read {f}: {e}")).and_then(|t| Plan::from_kv(p, &t).map_err(|e| format!("{f}: {e}"))).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    })
 }
 
 /// The deterministic levels that decide, as `--ddec` and the flag `ddec=` give them: LEVEL.LEVEL... from 0, all or
@@ -365,29 +363,25 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     };
     let texts = load_queries(n);
     let plan = Plan {
-        mode: match arg_str("--plan", "auto").as_str() { "index" => PlanMode::Index, "flat" => PlanMode::Flat, _ => PlanMode::Auto },
+        mode: match arg_str("--plan", "auto").as_str() {
+            "auto" => PlanMode::Auto,
+            "index" => PlanMode::Index,
+            "flat" => PlanMode::Flat,
+            "scan" => PlanMode::Scan,
+            m => {
+                eprintln!("--plan is auto, index, flat or scan, not {m}");
+                std::process::exit(2);
+            }
+        },
         ..Plan::default()
     };
+    // nothing is timed here: in memory the planner needs no timed constant; the disk constants are read from the
+    // index directory's cache (or timed once) where the vectors' reads are priced, below
     let plan = plan_flags(plan, flags);
-    // the cost model: from --plan-file, the BioCLIP constants (--plan-default), or re-timed on this index (pinned to
-    // --core when given); the constants used are written to RESULTS/plan.txt
-    let plan = if let Some(f) = Some(arg_str("--plan-file", "")).filter(|f| !f.is_empty()) {
-        Plan::from_kv(plan, &std::fs::read_to_string(&f).unwrap_or_else(|e| panic!("cannot read {f}: {e}")))
-    } else if args().iter().any(|a| a == "--plan-default") {
-        plan
-    } else {
-        let t = Timer::new();
-        let pc = Plan::calibrate(&ix, plan, arg_usize("--calib", 16), arg_str("--core", "").parse().ok());
-        out!("[plan] calibrated in {:.1}s", t.s());
-        pc
-    };
-    let plan = plan_flags(plan, flags); // flags win over timed or filed constants (scanband)
     if let Err(e) = plan.check(&ix) {
         eprintln!("{e}");
         std::process::exit(2);
     }
-    out!("[plan] {}", plan.to_kv().replace('\n', " "));
-    std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let t = Timer::new();
     let pseudo = pseudo_queries(&ix, if args().iter().any(|a| a == "--no-approx") { 0 } else { arg_usize("--pseudo", 1000) }, 10);
     let (approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
@@ -430,6 +424,16 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     if !ff.is_empty() {
         p.v = Vec::new(); // the f32 bases are needed only by the build
     }
+    // the planner's disk constants where reads are priced (cached in the index directory, keyed by the CPU and the
+    // vectors' device), then --plan-file's (name=value lines: r_rows, r_seed, io_us, io_gbps); the constants used are
+    // written to RESULTS/plan.txt
+    let plan = if ix.own_rows().is_some_and(|r| r.priced()) { disk_constants(&ix, plan, dir, &mut |s| out!("{s}")) } else { plan };
+    let plan = match arg_str("--plan-file", "") {
+        f if f.is_empty() => plan,
+        f => plan_file(plan, &f),
+    };
+    out!("[plan] {}", plan.to_kv().replace('\n', " "));
+    std::fs::write(format!("{}/plan.txt", res_dir()), plan.to_kv()).unwrap();
     let c = Ctx2 { p, ix, row_ent, ent_xs, items, texts, plan, approx, pseudo };
     if !ff.is_empty() {
         out!("[mem] {}", c.mem_report());
@@ -1437,14 +1441,17 @@ pub fn dbcmp(c: &Ctx2) {
             out!("[cap] full vectors resident after eviction: {:.1} MiB", r.resident() as f64 / (1 << 20) as f64);
         }
     }
-    // with full vectors read through the reader, the planner's disk constants are timed here under the cap
-    // (`--no-calib-disk`: as in the plan; `:plan=mem` in a read mode: reads not counted)
-    let mut plan0 = c.plan;
-    if pol.priced.load(Relaxed) && !args().iter().any(|a| a == "--no-calib-disk") {
-        let t = Timer::new();
-        plan0 = Plan::calibrate_disk(ix, plan0);
-        out!("[plan] disk timed in {:.1}s: io_us={:.3} io_gbps={:.3}, so rows up to {} bytes apart are read together", t.s(), plan0.io_us, plan0.io_gbps, plan0.io_gap());
-    }
+    // the planner's disk constants: the setup's where it priced reads; else, when a read mode prices them, from the
+    // index directory's cache (timed once per machine and device; `:plan=mem` in a read mode: reads not counted)
+    let plan0 = if !pol.priced.load(Relaxed) && modes.iter().any(|m| m.split(':').any(|kv| kv == "uring" || kv == "plan=disk")) {
+        let p = disk_constants(ix, c.plan, &data_dir(), &mut |s| out!("{s}"));
+        match arg_str("--plan-file", "") {
+            f if f.is_empty() => p,
+            f => plan_file(p, &f),
+        }
+    } else {
+        c.plan
+    };
     let mut lines = vec!["what,threads,vis,share_index,query,median_ms,min_ms,count,full_reads,disk_kb,majflt,sys_ms,kind".to_string()];
     // every variant's answer must equal the first variant's, bit for bit, in every read mode and at every thread count
     let mut first: std::collections::HashMap<(usize, usize, usize), RoaringBitmap> = Default::default();

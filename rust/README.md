@@ -68,13 +68,16 @@ The defaults are the measured configuration: integer deterministic levels, table
 centre's, and per-level repack thresholds (`--int`, `--gtab` and `--flags repack` restate them;
 `--flags noint,nogtab,norepack` gives the float path). The binary refuses an argument it does not know.
 
-`--plan auto|index|flat` sets the planner, for threshold queries and exact k-NN alike. Its cost model (`Plan`,
-`src/v2/q.rs`) is re-timed when the index opens, on one thread, from 16 stored rows used as queries (`Plan::calibrate`,
-about 1 s; `--calib N` rows, `--plan-default` keeps the BioCLIP constants of `Plan::default`). k-NN goes straight to a
-scan of the visible set when that costs less than cutting the clusters that hold it plus the seed; otherwise after the
-seed it cuts a sample of the clusters and scans if the sample says nothing will prune, and only then cuts the rest. Full
-vectors are held in index row order, so a scan reads memory in order. Each run rebuilds the index (about 100 s at 1M on
-4 cores) and appends to `results/run2.log`; tables go to `results/*.csv`.
+`--plan auto|index|flat|scan` sets the planner, for threshold queries and exact k-NN alike (`src/v2/q.rs`, `plan2`).
+Nothing is timed when the index opens. In memory and unfiltered, the support table decides the clusters it can and every
+other cluster runs on the index path. Under a visible set one constant in rows decides (`Plan::r_rows`, 300): the set is
+scanned when it holds at most that many rows per cluster holding one; otherwise a cluster holding at most that many is
+scored directly and the rest run on the index path; exact k-NN also counts its seed as `r_seed` rows (6,000). With the
+full vectors on file and read through io_uring (`--full-file`), a cost model prices the reads, from disk constants timed
+once per machine and device and cached in the index directory (`disk-constants.txt`); `--plan-file` gives those
+constants (`r_rows`, `r_seed`, `io_us`, `io_gbps` as name=value lines) instead. Full vectors are held in index row
+order, so a scan reads memory in order. Each run rebuilds the index (about 100 s at 1M on 4 cores) and appends to
+`results/run2.log`; tables go to `results/*.csv`.
 
 ## Layout
 
