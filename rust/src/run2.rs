@@ -234,7 +234,8 @@ pub fn build_options() -> BuildOptions {
         profile: Some(arg_str("--profile", "")).filter(|v| !v.is_empty()),
         clusters: given("--clusters").then(|| arg_usize("--clusters", 0)),
         rlv: arg_list("--rlv", "BYTES,BYTES,... (cumulative bytes of the randomised levels)"),
-        dlv: arg_list("--dlv", "BYTES,BYTES,... (cumulative bytes of the deterministic levels)"),
+        // --dlv fit: the fit's own levels
+        dlv: if arg_str("--dlv", "") == "fit" { None } else { arg_list("--dlv", "BYTES,BYTES,... (cumulative bytes of the deterministic levels), or fit").or(d.dlv) },
         design_exact: given("--design-exact"),
         nusort: given("--nusort"),
         nguar: parse("--nguar", "N (items the guarantee covers)"),
@@ -2027,7 +2028,7 @@ mod tests {
     #[test]
     fn e2e_variant_flags_on_a_shared_index() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-        let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+        let (_, ix) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
         let base = Plan::default();
         assert_eq!(shared_plan(base, &ix, "ddec=0.5").unwrap().ddec, Some(0b100001));
         let p = shared_plan(base, &ix, "nogtab, ddec=none").unwrap();

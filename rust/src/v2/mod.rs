@@ -26,11 +26,11 @@ pub mod tail;
 /// `rebuild` when given) and the encoding (`create` and `rebuild`). The default is the build SYSTEM.md describes.
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
-    /// Items per cluster on average, as tools/partition.py's `--per-cluster` (create only).
+    /// Items per cluster on average, as tools/partition.py's `--per-cluster` (create only; the default the rule by N).
     pub per_cluster: PerCluster,
     /// How the fit groups the clusters (create only).
     pub groups: crate::fit::Groups,
-    /// The fit's basis, "pca" or "dual" (create only).
+    /// The fit's basis, "dual" (the default) or "pca" (create only).
     pub basis: String,
     /// Queries that shape the dual basis's Sigma_Q with the corpus items (create only).
     pub query_sample: Option<String>,
@@ -49,10 +49,10 @@ pub struct BuildOptions {
     /// Another randomised level schedule (cumulative bytes, rising from above the last deterministic level); the union
     /// bound's constant follows the number of levels.
     pub rlv: Option<Vec<usize>>,
-    /// Another deterministic level schedule (cumulative bytes, rising, below the first randomised level), in place of
-    /// the fit's DLV; its length is the index's number of deterministic levels (1 to NDL_MAX). The randomised levels'
-    /// budgets start after its last level, and no constant changes (research/levels-clusters' `--dlv`, as a build
-    /// option: the codes are built for it).
+    /// The deterministic level schedule (cumulative bytes, rising, below the first randomised level), in place of the
+    /// fit's DLV (None: the fit's); its length is the index's number of deterministic levels (1 to NDL_MAX). The
+    /// randomised levels' budgets start after its last level, and no constant changes (research/levels-clusters'
+    /// `--dlv`, as a build option: the codes are built for it). The default is `DLV`, two levels at 16 and 32 bytes.
     pub dlv: Option<Vec<usize>>,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
@@ -75,7 +75,7 @@ impl Default for BuildOptions {
     fn default() -> BuildOptions {
         let f = crate::fit::FitOptions::default();
         BuildOptions {
-            per_cluster: PerCluster::Items(1000),
+            per_cluster: PerCluster::ByN,
             groups: f.groups,
             basis: f.basis,
             query_sample: None,
@@ -85,7 +85,7 @@ impl Default for BuildOptions {
             profile: None,
             clusters: None,
             rlv: None,
-            dlv: None,
+            dlv: Some(DLV.to_vec()),
             design_exact: false,
             nusort: false,
             nguar: None,
@@ -211,6 +211,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 pub use store::Arr;
 
+/// The default deterministic levels (`BuildOptions::dlv`): two, ending at 16 and 32 bytes (the owner's choice with
+/// the cluster size by N, REPORT_BUILD's levels-clusters decision). A fit's own DLV (tools/fit.py, `fit::fit`) is the
+/// six levels 4 / 8 / 12 / 16 / 24 / 32 B, which `dlv: None` builds.
+pub const DLV: [usize; 2] = [16, 32];
 /// The most deterministic levels an index can have. An index has `Meta2::ndl` of them: the fit's DLV, or
 /// `BuildOptions::dlv`; the per-level arrays below are this long, of which the first ndl are used.
 pub const NDL_MAX: usize = 6;

@@ -344,13 +344,16 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 }
 
 /// The default build of synth4k encodes as the reference build does: its code hash (the gates' `--rebuild --hash`
-/// reference since the calibration change; `code_hash` uses std's DefaultHasher, so a Rust release that changes it
-/// changes this value, not the codes) and its store hash (a fixed hash, `Fx`).
+/// reference; `code_hash` uses std's DefaultHasher, so a Rust release that changes it changes this value, not the
+/// codes) and its store hash (a fixed hash, `Fx`). The default since the levels-clusters decision has two
+/// deterministic levels (`DLV`); the fit's own six (`dlv: None`, the earlier default) still give the earlier reference.
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x}", ix.code_hash()), "7ac80b6c54101fa9");
-    assert_eq!(format!("{:016x}", ix.store_hash()), "3782663ec5d076fd");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 e9ba6817c35cf8b0");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 3782663ec5d076fd");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -361,8 +364,8 @@ fn deciding_levels_are_chosen_per_query() {
     let f = fixture();
     let ix = &f.ix;
     let ndl = ix.meta.ndl();
-    assert_eq!((ndl, ix.meta.ddec), (6, u32::MAX));
-    for ddec in [None, Some(u32::MAX), Some(0), Some(0b10), Some(0b100001)] {
+    assert_eq!((ndl, ix.meta.ddec), (2, u32::MAX));
+    for ddec in [None, Some(u32::MAX), Some(0), Some(0b10), Some(0b01)] {
         let index = Plan { mode: PlanMode::Index, ddec, ..Plan::default() };
         assert!(index.check(ix).is_ok(), "ddec {ddec:?}");
         for (pname, plan) in [("index path", index), ("index path, float", Plan { int_det: false, gtab: false, repack: false, ..index }), ("default", Plan { ddec, ..Plan::default() })] {
@@ -387,8 +390,8 @@ fn deciding_levels_are_chosen_per_query() {
             }
         }
     }
-    // levels beyond the index's six
-    for bad in [1 << 6, 1 << 31, 0b1000001] {
+    // levels beyond the index's two (the default levels)
+    for bad in [1 << 2, 1 << 31, 0b101] {
         assert!(Plan { ddec: Some(bad), ..Plan::default() }.check(ix).is_err(), "accepted ddec {bad:#b}");
     }
 }
@@ -1645,10 +1648,13 @@ fn create_makes_the_index_the_steps_by_hand_make() {
     let o = BuildOptions { per_cluster: PerCluster::Items(125), cert_time: 0.0, ..BuildOptions::default() };
     let (_, made) = create(vectors, dir, &o, &mut |_| {}).unwrap();
     assert!(create(vectors, dir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("not empty"));
-    let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let (p, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
     same_index(&made, &ix);
     ix.check_maps().unwrap();
     assert_eq!(ix.nrows, 4000);
+    // the defaults: a dual-basis fit, two deterministic levels
+    let fitj: serde_json::Value = serde_json::from_str(&p.fit).unwrap();
+    assert_eq!((fitj["basis"].as_str(), ix.meta.dlv.clone()), (Some("dual"), DLV.to_vec()), "{fitj}");
     for q in &fixture().queries {
         let pr = prep2(&ix, q);
         let t = truth(&ix, q, None);

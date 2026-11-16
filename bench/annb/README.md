@@ -50,8 +50,8 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
 
 ## How the index is run
 
-- **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures; `fit.py`
-  defaults to pca, which the build argument `basis: pca` selects), then `vexact_py.Index` on its output (encoding, the
+- **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures and `fit.py`'s
+  default; the build argument `basis: pca` selects pca), then `vexact_py.Index` on its output (encoding, the
   approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings open the index saved in the fit when it was built with the same
 options, else encode the fit and save the index there (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
 mapped from its files, as `v2::open` gives it. The planner times nothing: in memory it is the support table and the rule

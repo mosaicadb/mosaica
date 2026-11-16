@@ -35,10 +35,12 @@ In the library these are `v2::create(vectors, dir, &BuildOptions, log)`, `v2::op
 `v2::rebuild(dir, &BuildOptions, log)`; `v2::build` encodes in memory and saves nothing (`--in-memory`).
 
 The build flags are the fields of `v2::BuildOptions`. The partition and the fit, given to `create` only (a rebuild
-re-encodes the fit as it is): `--per-cluster M|by-n` (items per cluster; default 1,000), `--groups by-k8|by-n|G`,
-`--basis pca|dual`, `--query-sample QUERIES.npy`, `--cert-time SECONDS`. The support table's anchors, to `create` or a
+re-encodes the fit as it is): `--per-cluster by-n|M` (items per cluster; default by-n, 2,000 up to 2M items, doubling
+for each 4x N), `--groups by-n|by-k8|G` (default by-n), `--basis dual|pca` (default dual), `--query-sample QUERIES.npy`,
+`--cert-time SECONDS`. The support table's anchors, to `create` or a
 rebuild (which writes them into the fit first): `--anchors A` (from the centres; default 1,024), `--text-anchors
-PROMPTS.npy`, `--text-count C`. The encoding: `--dlv B,B,...` (the deterministic levels), `--rlv B,B,...`,
+PROMPTS.npy`, `--text-count C`. The encoding: `--dlv B,B,...|fit` (the deterministic levels; default 16,32, two levels; `fit`: the fit's six,
+4 / 8 / 12 / 16 / 24 / 32 B), `--rlv B,B,...`,
 `--profile P.npy`, `--cal-items N`, `--nguar N`, `--nusort`, `--design-exact`, `--csg-plain`, `--clusters K` (the first K
 clusters only), and `--seed S` for all of them. A build flag where nothing is built is refused, as is any argument the
 binary does not know (there are no positional arguments).
@@ -63,10 +65,12 @@ a second directory (`cp -al DIR DIR2`) and rebuild that one. Other `encoded*` di
 python3 -I tools/fit.py VECTORS.npy INDEX [--metric angular] [--per-cluster M]   # N x n floats; row i is entity i
 ```
 
-Both normalise (angular), zero-pad to a multiple of 32 dimensions, cluster (about 1,000 items per cluster by default,
-8-bit centres), group the clusters (at most 64 groups, 8 clusters and 20 n items per group on average) with a basis of
-the residuals per group, and write the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
-blocks (`meta.json`). The deterministic levels end at 4 / 8 / 12 / 16 / 24 / 32 B; the randomised ones at 56, 96, 160 and
+Both normalise (angular), zero-pad to a multiple of 32 dimensions, cluster (by default 2,000 items per cluster up to 2M
+items, doubling for each 4x N; `--per-cluster M` for about M; 8-bit centres), group the clusters (by default at most 64
+groups and 20 n items per group; `--groups by-k8` also at most 8 clusters per group on average) with a basis per group
+(by default the dual pair of the query and residual covariances; `--basis pca`: the residuals' PCA basis), and write the data-only `H25` profile (`profile.npy`), the level schedule and the randomised
+blocks (`meta.json`). The fit's deterministic levels end at 4 / 8 / 12 / 16 / 24 / 32 B, and the build's default
+replaces them with two, at 16 and 32 B (`BuildOptions::dlv`, `--dlv`); the randomised ones at 56, 96, 160 and
 256 B, extended by steps of 1.6x for n above 768 and capped at 40% of the f16 vector and 8 bits per dimension; the four
 randomised blocks split n at 1/8, 7/24 and 5/8 (multiples of 16). Every other build parameter (bit allocation,
 certificate weights, whitening, block membership and rates, scalar grids) is derived from these in Rust when the index

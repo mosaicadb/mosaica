@@ -413,6 +413,12 @@ and the fit); the support table is mapped at open rather than read.
 
 ## For the owner's decision: the levels-clusters defaults (1M BioCLIP-2, 2026-11-16)
 
+> Decided: the owner chose C, the cluster size by N (with groups by N) and two deterministic levels at 16 and 32 B,
+> and the dual basis, as the defaults of `create`, the Rust fit, `tools/fit.py`, `tools/partition.py` and
+> `BuildOptions` (`--per-cluster 1000 --groups by-k8 --basis pca --dlv fit` give the earlier ones). With them, `pyfit`
+> rebuilds to B's code hash `c8779c606204880b` and `fitA` to C's `771eaba1d111dca4`; the new synth4k reference is
+> `165fef0c0d6b5659` (store `e9ba6817c35cf8b0`), the 60k one `181dbe516f640885`.
+
 `research/levels-clusters` was brought forward with every default off (cd1278d; 4142b9c makes `ddec` an open-time
 option). Nothing is decided here: below are the measurements of the four candidate configurations and the options.
 Raw logs: the session's `rb/b3/m/` (`build_*`, `bytesq_*`, `verify_*`, `open_*`, `e2e/r1..r6`, `e2e_ratios.txt`);

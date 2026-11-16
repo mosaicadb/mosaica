@@ -28,10 +28,10 @@ const RIDGE: f64 = 0.1;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Groups {
     /// min(64, K / 8, N / (20 n)), at least 1: enough items per group for a basis, at most 64 groups and 8 clusters per
-    /// group on average (the default, as tools/fit.py's default).
+    /// group on average (the default before research/levels-clusters' rule).
     ByK8,
     /// min(64, K, N / (20 n)), at least 1: research/levels-clusters' rule, with its cluster size by N
-    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`).
+    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`); the default, as tools/fit.py's.
     ByN,
     /// This many groups, at most K.
     Fixed(usize),
@@ -57,14 +57,14 @@ impl Groups {
 
 /// Items per cluster by research/levels-clusters' rule for N items: 2,000 x sqrt(N / 1M), rounded in log2 to a
 /// power-of-two multiple of 2,000 (ties down), at least 2,000 (2,000 up to 2M items, 4,000 up to 8M, 8,000 up to 32M,
-/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`; the default is 1,000.
+/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`, their default.
 pub fn per_cluster_by_n(nrow: usize) -> usize {
     2000 << ((nrow as f64 / 1e6).log2() / 2.0 - 0.5).ceil().max(0.0) as u32
 }
 
 /// What a fit takes besides the partition.
 pub struct FitOptions {
-    /// "pca" or "dual".
+    /// "dual" (the default) or "pca".
     pub basis: String,
     /// Queries that shape Sigma_Q with the corpus items (the dual basis only).
     pub query_sample: Option<String>,
@@ -77,12 +77,12 @@ pub struct FitOptions {
     pub image: usize,
     pub text_anchors: Option<String>,
     pub text_count: usize,
-    /// How the clusters are grouped (the default `Groups::ByK8`).
+    /// How the clusters are grouped (the default `Groups::ByN`).
     pub groups: Groups,
 }
 impl Default for FitOptions {
     fn default() -> FitOptions {
-        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256, groups: Groups::ByK8 }
+        FitOptions { basis: "dual".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256, groups: Groups::ByN }
     }
 }
 

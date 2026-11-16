@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory() as tmp:
     src = os.path.join(tmp, "synth4k.npy")
     np.save(src, X.astype(np.float32))
     subprocess.run([sys.executable, "-I", os.path.join(HERE, "..", "tools", "fit.py"), src, OUT, "--per-cluster", "125",
-                    "--cert-time", "120"], check=True)
+                    "--basis", "pca", "--groups", "by-k8", "--cert-time", "120"], check=True)
 meta_path = os.path.join(OUT, "meta.json")
 meta = json.load(open(meta_path))
 meta["source"] = "testdata/make_synth.py"

@@ -1,7 +1,7 @@
 # The fast-scan index (rust/, through bench/annb/vexact-py) as an ANN-Benchmarks and VIBE algorithm. fit() runs
 # rust/tools/fit.py on the training vectors and builds the index; queries run one at a time on one thread.
 # VEXACT_SRC is where the image keeps the sources (rust/ and combined/); VEXACT_WORK is where fit() writes.
-# The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is pca, and the
+# The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is dual too, and the
 # measured index (SYSTEM.md) uses dual. With dual on a dataset that supplies a sample of its
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
 # The build parameter `order` (corpus, the default, or queries) is what the approximate mode's cluster order and dials are
@@ -79,8 +79,8 @@ class Vexact(BaseANN):
         train = os.path.join(work, "train.npy")
         args = [sys.executable, os.path.join(SRC, "rust", "tools", "fit.py"), train, os.path.join(work, "index"),
                 "--metric", "angular", "--basis", self.basis, "--per-cluster", self.clusters]
-        if self.clusters == "by-n":
-            args += ["--groups", "by-n"]
+        # the group rule named either way (fit.py's default is by-n since the levels-clusters decision)
+        args += ["--groups", "by-n" if self.clusters == "by-n" else "by-k8"]
         save_padded(train, X, d)
         if sample is not None:
             args += ["--query-sample", os.path.join(work, "sample.npy")]

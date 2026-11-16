@@ -2,15 +2,15 @@
 # clusters with a local basis each, the query-offset profile, the level schedule and the randomised blocks. The Rust
 # build (`vexact --v2 --index OUTDIR --rebuild`, v2::rebuild) encodes every item from these and saves the index in
 # OUTDIR/encoded; `vexact --v2 --index OUTDIR MODE` opens it.
-# usage: python3 fit.py VECTORS.npy OUTDIR [--basis pca|dual] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
-#   [--per-cluster M|by-n] [--groups by-k8|by-n|G] [--rows ROWS.npy]
+# usage: python3 fit.py VECTORS.npy OUTDIR [--basis dual|pca] [--query-sample QUERIES.npy] [--metric angular] [--seed S]
+#   [--per-cluster by-n|M] [--groups by-n|by-k8|G] [--rows ROWS.npy]
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i. The vectors are read from it as needed (no float32 copy).
-#   --per-cluster: items per cluster on average, 1,000 by default; by-n: 2,000 up to 2M items, doubling for each 4x N
-#     (4,000 up to 8M, 8,000 up to 32M, ...; research/levels-clusters' rule, `per_cluster`).
-#   --groups: by-k8 (default): min(64, K / 8, N / (20 n)); by-n: min(64, K, N / (20 n)) (levels-clusters' rule); or G.
+#   --per-cluster: by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x N (4,000 up to 8M, 8,000
+#     up to 32M, ...; research/levels-clusters' rule, `per_cluster`); or M items per cluster on average (1,000 before).
+#   --groups: by-n (default): min(64, K, N / (20 n)) (levels-clusters' rule); by-k8: min(64, K / 8, N / (20 n)); or G.
 #   --rows: a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...
-#   --basis pca (default): each group's PCA basis of the residuals and the data-only profile H25.
-#   --basis dual: the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
+#   --basis pca: each group's PCA basis of the residuals and the data-only profile H25.
+#   --basis dual (default): the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
 #     covariance of query offsets q - (q.m^) m^ from clusters drawn by size, 40 per pseudo-query, with a ridge of 0.1
 #     of its mean eigenvalue; the pseudo-queries are 3,000 corpus items, or with --query-sample the normalised mean of
 #     that and the same covariance of the given queries. V is the query-side transform V_Q (q.r = (V_Q^T q).(V_Q^-1 r));
@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import certify  # noqa: E402
 from rules import per_cluster, groups_for  # noqa: E402,F401 (tools/rules.py, shared with partition.py)
 
-# Design constants (not fitted): items per cluster (the default; `per_cluster` gives the rule by N), the guarantee's N and epsilon, the deterministic level ends, the
+# Design constants (not fitted): items per cluster before the rule by N (`per_cluster`, the default), the guarantee's N and epsilon, the deterministic level ends, the
 # randomised level ends up to 256 B, randomised block boundaries as fractions of n, the H25 hedge weight.
 PER_CLUSTER = 1000
 NTARGET, EPS = 1e9, 1e-9
@@ -169,12 +169,12 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--metric", default="angular", choices=["angular"])
     ap.add_argument("--seed", type=int, default=20261112)
-    ap.add_argument("--basis", default="pca", choices=["pca", "dual"])
+    ap.add_argument("--basis", default="dual", choices=["dual", "pca"])
     ap.add_argument("--query-sample", default="", help="queries mixed into Sigma_Q (dual basis only)")
     ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
-    ap.add_argument("--per-cluster", default=str(PER_CLUSTER),
-                    help="items per cluster on average (default 1000), or by-n: 2,000 up to 2M items, doubling for each 4x")
-    ap.add_argument("--groups", default="by-k8", help="by-k8 (default): min(64, K / 8, N / (20 n)); by-n: min(64, K, N / (20 n)); or G")
+    ap.add_argument("--per-cluster", default="by-n",
+                    help="by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x; or items per cluster on average (1000 before)")
+    ap.add_argument("--groups", default="by-n", help="by-n (default): min(64, K, N / (20 n)); by-k8: min(64, K / 8, N / (20 n)); or G")
     ap.add_argument("--rows", default="", help="a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
@@ -339,7 +339,7 @@ def main():
     meta = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(K), G=int(G), metric=a.metric, DLV=DLV, RLV=rlv, BOUNDS=bounds,
                 CSG=math.sqrt(2 * L1), L1=L1, EPS=EPS, xs="Xs.npy", source=os.path.abspath(a.vectors),
                 format=FORMAT, fit=fit)
-    # recorded only when not the default, so a default fit's meta.json is as before
+    # recorded only when not the earlier default (1,000 per cluster, by-k8), so such a fit's meta.json is as before
     if a.per_cluster != str(PER_CLUSTER) or a.groups != "by-k8":
         meta["clusters"] = dict(per_cluster=a.per_cluster, groups=a.groups)
     if a.rows:
