@@ -1,5 +1,6 @@
-//! The library's source fingerprint: a fixed hash of `Cargo.lock` (the dependencies' versions) and of every `.rs` file
-//! under `src/` that the library compiles outside its tests, by sorted path and contents. Left out: the binary's own
+//! The library's source fingerprint: a fixed hash of the compiler's version (`rustc -V`), `Cargo.lock` (the
+//! dependencies' versions) and every `.rs` file under `src/` that the library compiles outside its tests, by sorted
+//! path and contents. Left out: the binary's own
 //! modules (`main.rs`, `run2.rs`, `ann.rs`, `scale.rs`) and `v2/e2e.rs`, which is compiled only for tests; test modules
 //! inside library files stay in (comments too: stripping them would be fragile). A saved index's key includes it, so
 //! an edit to the encoder (or to anything else in the library) makes a saved index stale instead of serving old
@@ -53,7 +54,12 @@ fn main() {
     let mut h = Fx(0);
     let lock = root.join("Cargo.lock");
     h.bytes(b"Cargo.lock");
-    h.bytes(&std::fs::read(&lock).unwrap_or_default());
+    h.bytes(&std::fs::read(&lock).unwrap_or_else(|e| panic!("cannot read {}: {e}; the source fingerprint covers the dependencies' versions", lock.display())));
+    // the compiler's version
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into());
+    let out = std::process::Command::new(&rustc).arg("-V").output().unwrap_or_else(|e| panic!("cannot run {rustc} -V: {e}"));
+    assert!(out.status.success(), "{rustc} -V failed");
+    h.bytes(&out.stdout);
     for (r, p) in &rel {
         h.bytes(r.as_bytes());
         h.bytes(&std::fs::read(p).unwrap_or_else(|e| panic!("cannot read {}: {e}", p.display())));

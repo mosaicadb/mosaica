@@ -410,6 +410,9 @@ impl Part {
         }
         let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
         // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        // whole groups of 4 units: the centre tables (kern::centre_tab) hold units / 4 * 4 per part, the queries read
+        // all of them (total % 16 == 0 and 4 bits per unit already imply it)
+        assert!(ufields.len() % 4 == 0, "a part of {} units, not a multiple of 4", ufields.len());
         assert!(ufields.len() <= 257, "a part of {} units can overflow its 16-bit table sums; split it into parts of at most 257 units", ufields.len());
         Part { j, fields, ufields }
     }
@@ -2042,12 +2045,18 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     let edir = edir.as_str();
     let parent = store::parent_of(edir);
     std::fs::create_dir_all(&parent).map_err(|e| format!("cannot create {parent}: {e}"))?;
-    let (lock, waited) = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
+    // the saved index's index.json before waiting (none, or its device, inode and modification time)
+    let ident = || {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(format!("{edir}/index.json")).ok().map(|m| (m.dev(), m.ino(), m.mtime(), m.mtime_nsec()))
+    };
+    let before = ident();
+    let (lock, _) = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
     let design_c = design_constants(&p, o, log);
-    if let Some(since) = waited {
-        // the rebuild we waited for may have just saved this very index
-        let fresh = std::fs::metadata(format!("{edir}/index.json")).and_then(|m| m.modified()).is_ok_and(|m| m >= since);
-        if fresh {
+    {
+        // another rebuild may have saved an index here meanwhile: if it is this one (it opens with this key), use it
+        let now = ident();
+        if now.is_some() && now != before {
             if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
                 drop(lock);
                 log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));

@@ -544,8 +544,18 @@ pub fn parent_of(edir: &str) -> String {
 ///   or removed, and never waits behind an encode.
 pub struct Lock(#[allow(dead_code)] std::fs::File);
 impl Lock {
-    fn file(path: &str) -> std::io::Result<std::fs::File> {
-        std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)
+    /// The lock file `path`: opened read-only when it exists (flock needs only read access, so a lock file another
+    /// user created works), else created. None when it is missing and cannot be created.
+    fn file(path: &str) -> std::io::Result<Option<std::fs::File>> {
+        match std::fs::File::open(path) {
+            Ok(f) => Ok(Some(f)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => match std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path) {
+                Ok(f) => Ok(Some(f)),
+                Err(e) if matches!(e.raw_os_error(), Some(libc::EROFS) | Some(libc::EACCES) | Some(libc::EPERM)) => Ok(None),
+                Err(e) => Err(e),
+            },
+            Err(e) => Err(e),
+        }
     }
     fn flock(f: &std::fs::File, op: i32) -> std::io::Result<()> {
         loop {
@@ -558,17 +568,16 @@ impl Lock {
             }
         }
     }
-    /// The rebuild lock of `parent`. Returns, with the lock, when this rebuild started waiting for another one (None
-    /// when the lock was free).
-    pub fn take(parent: &str, log: &mut dyn FnMut(String)) -> (Lock, Option<std::time::SystemTime>) {
+    /// The rebuild lock of `parent`. Returns, with the lock, whether this rebuild had to wait for another one.
+    pub fn take(parent: &str, log: &mut dyn FnMut(String)) -> (Lock, bool) {
         let path = format!("{parent}/encoded.lock");
-        let f = Lock::file(&path).unwrap_or_else(|e| panic!("cannot open the lock file {path}: {e}"));
-        let mut waited = None;
+        let f = Lock::file(&path).unwrap_or_else(|e| panic!("cannot open the lock file {path}: {e}")).unwrap_or_else(|| panic!("cannot create the lock file {path}; a rebuild needs to write in {parent}"));
+        let mut waited = false;
         if let Err(e) = Lock::flock(&f, libc::LOCK_EX | libc::LOCK_NB) {
             if e.raw_os_error() != Some(libc::EWOULDBLOCK) {
                 panic!("cannot lock {path}: {e}");
             }
-            waited = Some(std::time::SystemTime::now());
+            waited = true;
             log(format!("waiting for another rebuild in {parent} (it holds {path})"));
             let t = Timer::new();
             Lock::flock(&f, libc::LOCK_EX).unwrap_or_else(|e| panic!("cannot lock {path}: {e}"));
@@ -576,13 +585,15 @@ impl Lock {
         }
         (Lock(f), waited)
     }
-    /// The install lock of `parent`, exclusive (to install) or shared (to open). An open in a directory where the lock
-    /// file cannot be created (read-only) goes ahead without it: nothing can install there either.
+    /// The install lock of `parent`, exclusive (to install) or shared (to open). An existing lock file is opened
+    /// read-only, whoever made it. An open where the lock file is missing and cannot be created (a read-only
+    /// directory) goes ahead without it: nothing can install there either.
     pub fn install(parent: &str, exclusive: bool) -> Result<Option<Lock>, String> {
         let path = format!("{parent}/encoded.install.lock");
         let f = match Lock::file(&path) {
-            Ok(f) => f,
-            Err(e) if !exclusive && matches!(e.raw_os_error(), Some(libc::EROFS) | Some(libc::EACCES) | Some(libc::EPERM)) => return Ok(None),
+            Ok(Some(f)) => f,
+            Ok(None) if !exclusive => return Ok(None),
+            Ok(None) => return Err(format!("cannot create the lock file {path}")),
             Err(e) => return Err(format!("cannot open the lock file {path}: {e}")),
         };
         Lock::flock(&f, if exclusive { libc::LOCK_EX } else { libc::LOCK_SH }).map_err(|e| format!("cannot lock {path}: {e}"))?;
@@ -661,12 +672,15 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
 pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>, key: &str, dir: &str, log: &mut dyn FnMut(String)) -> Result<Index2, String> {
     let t = Timer::new();
     let missing = |e: String| format!("no index of this fit and these options is saved in {dir} ({e}); build it with --rebuild (v2::rebuild)");
-    let _lock = Lock::install(&parent_of(dir), false)?;
+    let damaged = |what: &str| format!("{dir}: {what}; rebuild the index");
+    let nl = NDL + p.meta.rlv.len();
+    // every file opened and mapped through one descriptor of `dir`, under the shared install lock (held only for this:
+    // the checks and the plans below need no lock, so an open never holds up an install for long)
+    let lock = Lock::install(&parent_of(dir), false)?;
     let dfd = std::fs::File::open(dir).map_err(|e| missing(e.to_string()))?;
     let base = format!("/proc/self/fd/{}", dfd.as_raw_fd());
     let f = |name: &str| format!("{base}/{name}");
     let ours = |e: String| e.replace(&base, dir);
-    let damaged = |what: &str| format!("{dir}: {what}; rebuild the index");
     let text = std::fs::read_to_string(f("index.json")).map_err(|e| missing(e.to_string()))?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{dir}/index.json: {e}; rebuild the index"))?;
     if v["format"].as_u64() != Some(STORE_FORMAT) {
@@ -677,6 +691,19 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         Some(k) => return Err(format!("the index in {dir} was built from another fit, other options or another version of the library (key {k}, these give {key}); rebuild it")),
         None => return Err(format!("{dir} holds an unfinished index (no key); rebuild it")),
     }
+    let us = |k: &str| v[k].as_u64().map(|x| x as usize).ok_or(format!("{dir}/index.json has no {k}; rebuild the index"));
+    let (n, k, nrows, nanch, nent) = (us("n")?, us("k")?, us("nrows")?, us("nanch")?, us("nent")?);
+    let cbuf = std::fs::read(f("clusters.bin")).map_err(|e| format!("cannot read {dir}/clusters.bin: {e}; rebuild the index"))?;
+    let offs: Arr<u64> = Arr::map(&f("offsets.bin")).map_err(ours)?;
+    let (ek, ev): (Arr<u64>, Arr<f32>) = (Arr::map(&f("esc_key.bin")).map_err(ours)?, Arr::map(&f("esc_val.bin")).map_err(ours)?);
+    let anchors: Vec<f64> = Arr::<f64>::map(&f("anchors.bin")).map_err(ours)?.to_vec();
+    let (hi, lo): (Vec<f32>, Vec<f32>) = (Arr::<f32>::map(&f("hi.bin")).map_err(ours)?.to_vec(), Arr::<f32>::map(&f("lo.bin")).map_err(ours)?.to_vec());
+    let lcode: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("code{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
+    let lscal: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("scal{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
+    let (ahat, row_ent, ent_row, nukey): (Arr<i16>, Arr<u32>, Arr<u32>, Arr<u16>) = (Arr::map(&f("ahat.bin")).map_err(ours)?, Arr::map(&f("row_ent.bin")).map_err(ours)?, Arr::map(&f("ent_row.bin")).map_err(ours)?, Arr::map(&f("nukey.bin")).map_err(ours)?);
+    let rows = disk::Rows::open(&f("vectors.bin"), nrows.checked_mul(n).ok_or(damaged("nrows x n overflows"))?, "normal").map_err(|e| format!("{}; rebuild the index", ours(e)))?;
+    drop(dfd);
+    drop(lock);
     // the vectors file it was built from
     match (XsId::from_json(&v["xs"]), XsId::of(&p.xs_path)) {
         (_, Err(e)) => log(format!("WARNING: the fit's vectors file is missing or unreadable ({e}); the index holds its own vectors, opening it")),
@@ -704,8 +731,6 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         }
         _ => {}
     }
-    let us = |k: &str| v[k].as_u64().map(|x| x as usize).ok_or(format!("{dir}/index.json has no {k}; rebuild the index"));
-    let (n, k, nrows, nanch, nent) = (us("n")?, us("k")?, us("nrows")?, us("nanch")?, us("nent")?);
     if n != p.meta.n || k != p.meta.k {
         return Err(format!("{dir} was built with {k} clusters of {n} dimensions, the fit has {} of {}; rebuild it", p.meta.k, p.meta.n));
     }
@@ -729,11 +754,9 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
             gp.set_calibration(cal);
         }
     }
-    let nl = meta.nl();
-    if groups.iter().any(|g| g.levels.len() != nl) {
+    if meta.nl() != nl || groups.iter().any(|g| g.levels.len() != nl) {
         return Err(damaged("a group's plan has another level count"));
     }
-    let cbuf = std::fs::read(f("clusters.bin")).map_err(|e| format!("cannot read {dir}/clusters.bin: {e}; rebuild the index"))?;
     let mut r = Rd(&cbuf);
     let (cl, ctab): (Vec<Cl2>, Vec<Vec<kern::CTab>>) = (0..k).map(|_| get_cluster(&mut r)).collect::<Result<Vec<_>, String>>().map_err(|e| format!("{dir}/{e}"))?.into_iter().unzip();
     if !r.0.is_empty() {
@@ -746,31 +769,30 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
             return Err(damaged(&format!("cluster {c}'s record does not fit the index")));
         }
         for (l, (ct, lp)) in t.iter().zip(&groups[x.g].levels).enumerate() {
-            let units: usize = lp.parts.iter().map(|pt| pt.units() / 4 * 4).sum();
+            // the table holds units / 4 * 4 per part (centre_tab) and queries read all units: equal as every part
+            // has a multiple of 4 units (Part::pack)
+            if lp.parts.iter().any(|pt| pt.units() % 4 != 0) {
+                return Err(damaged(&format!("a part of level {l} has a unit count that is not a multiple of 4")));
+            }
+            let units: usize = lp.parts.iter().map(|pt| pt.units()).sum();
             let np = lp.parts.len();
             if ct.th.len() != units || ct.tmax.len() != units || ct.step.len() != np || ct.off.len() != np || ct.err.len() != np {
                 return Err(damaged(&format!("cluster {c}'s centre table at level {l} does not fit the plan")));
             }
         }
     }
-    let offs: Arr<u64> = Arr::map(&f("offsets.bin")).map_err(ours)?;
     if offs.len() != 2 * nl * k {
         return Err(format!("{dir}/offsets.bin does not hold {nl} levels of {k} clusters; rebuild the index"));
     }
     let off = |i: usize| -> Vec<Vec<usize>> { (0..nl).map(|l| offs[(i * nl + l) * k..(i * nl + l + 1) * k].iter().map(|&o| o as usize).collect()).collect() };
-    let (ek, ev): (Arr<u64>, Arr<f32>) = (Arr::map(&f("esc_key.bin")).map_err(ours)?, Arr::map(&f("esc_val.bin")).map_err(ours)?);
     if ek.len() != ev.len() {
         return Err(format!("{dir}: esc_key.bin and esc_val.bin differ in length; rebuild the index"));
     }
     // O(escapes), not O(clusters): the in-memory escape map queries look up (a few per hundred rows)
     let esc = ek.iter().zip(ev.iter()).map(|(&k, &v)| (((k >> 40) as u8, (k >> 32) as u8, k as u32), v)).collect();
-    let anchors: Vec<f64> = Arr::<f64>::map(&f("anchors.bin")).map_err(ours)?.to_vec();
-    let (hi, lo): (Vec<f32>, Vec<f32>) = (Arr::<f32>::map(&f("hi.bin")).map_err(ours)?.to_vec(), Arr::<f32>::map(&f("lo.bin")).map_err(ours)?.to_vec());
     if anchors.len() != nanch * n || hi.len() != nanch * k || lo.len() != nanch * k {
         return Err(format!("{dir}: the support table does not hold {nanch} anchors of {n} and their bounds over {k} clusters; rebuild the index"));
     }
-    let lcode: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("code{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
-    let lscal: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("scal{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
     let (coff, soff) = (off(0), off(1));
     for l in 0..nl {
         // each cluster's blocks lie inside its level's arrays, which end in 128 bytes of slack
@@ -783,14 +805,12 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
             }
         }
     }
-    let (ahat, row_ent, ent_row, nukey) = (Arr::map(&f("ahat.bin")).map_err(ours)?, Arr::map(&f("row_ent.bin")).map_err(ours)?, Arr::map(&f("ent_row.bin")).map_err(ours)?, Arr::map(&f("nukey.bin")).map_err(ours)?);
     if ahat.len() != nrows + 32 || row_ent.len() != nrows || ent_row.len() != nent || !(nukey.is_empty() || nukey.len() == nrows) || cl.last().map_or(0, |c| c.r1) != nrows {
         return Err(damaged(&format!("the row arrays do not hold {nrows} rows")));
     }
     if nukey.is_empty() == o.nusort {
         return Err(format!("{dir} was built {} the norm sort, the options ask {}; rebuild it", if o.nusort { "without" } else { "with" }, if o.nusort { "for it" } else { "for none" }));
     }
-    let rows = disk::Rows::open(&f("vectors.bin"), nrows * n, "normal").map_err(|e| format!("{}; rebuild the index", ours(e)))?;
     let ix = Index2 {
         nukey,
         repack: vec![0.6; nl],
@@ -926,14 +946,34 @@ impl Index2 {
             h.pod(&[g.e_inv]);
             h.pod(&g.v8t);
             h.pod(&g.vsc);
-            h.str(&format!("{:?}", g.cal));
+            match &g.cal {
+                None => h.u64(0),
+                Some(c) => {
+                    h.u64(1);
+                    h.pod(&c.kmin);
+                    h.pod(&c.y0);
+                    h.pod(&c.ys);
+                    h.pod(&c.tq);
+                    h.pod(&c.k0);
+                    h.pod(&c.ks);
+                    h.pod(&c.kb);
+                }
+            }
             h.u64(g.levels.len() as u64);
             for lp in &g.levels {
                 h.usizes(&[lp.units, lp.srows, lp.parts.len()]);
                 for part in &lp.parts {
                     h.u64(part.j.map_or(u64::MAX, |j| j as u64));
                     h.pod(&part.ufields);
-                    h.str(&format!("{:?}", part.fields));
+                    h.u64(part.fields.len() as u64);
+                    for fl in &part.fields {
+                        let kind = match fl.kind {
+                            FK::Tree { to } => (1u64 << 8) | to as u64,
+                            FK::Resid => 2 << 8,
+                            FK::Rand { d } => (3u64 << 8) | d as u64,
+                        };
+                        h.usizes(&[fl.widx as usize, fl.nb as usize, fl.unit as usize, fl.off as usize, kind as usize, fl.eid as usize]);
+                    }
                 }
             }
         }
