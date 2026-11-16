@@ -226,6 +226,16 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
                 p.scan_lo = a.parse().expect("scanband=LO:HI");
                 p.scan_hi = b.parse().expect("scanband=LO:HI");
             }
+            // the planner's mode for a variant (as --plan for the first): auto, index (every open cluster on the index
+            // path) or flat (every candidate from its full vector)
+            "mode=auto" => p.mode = PlanMode::Auto,
+            "mode=index" => p.mode = PlanMode::Index,
+            "mode=flat" => p.mode = PlanMode::Flat,
+            // the cost constants of a file of name=value lines (as RESULTS/plan.txt), for a variant
+            f if f.starts_with("pf=") => p = Plan::from_kv(p, &std::fs::read_to_string(&f[3..]).unwrap_or_else(|e| {
+                eprintln!("pf={}: cannot read it: {e}", &f[3..]);
+                std::process::exit(2);
+            })),
             f if f.starts_with("tol=") => p.tol = f[4..].parse().expect("tol=SCORE (the tolerance d, in score units)"),
             f if f.starts_with("repackx=") => {
                 p.repack = true;
@@ -918,6 +928,27 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                         *e += *x as f64;
                     }
                 }
+                // the planner's choice per query (untimed, one thread): a scan of the visible set, or per query the clusters
+                // scored directly, run on the index path and decided from full vectors
+                let (mut nscan, mut ndir, mut nidx, mut nfull) = (0usize, 0usize, 0usize, 0usize);
+                for qi in 0..qs.len() {
+                    let pr = prep2(&c.ix, &qs[qi]);
+                    let t = if cell < sizes_f.len() { ths[qi][cell] } else { let mut st = Stats::new(nl); seed2(&c.ix, &pr, knn_ks[cell - sizes_f.len()], None, &mut st) };
+                    let o = Opts2 { vis: None, verify: false, want_iv: cell >= sizes_f.len(), plan };
+                    match pl.install(|| plan2(&c.ix, &pr, t, &o)) {
+                        Planned::Scan => nscan += 1,
+                        Planned::Run { pre, use_idx, .. } => {
+                            for (ci, p) in pre.iter().enumerate() {
+                                match p {
+                                    Pre::Direct => ndir += 1,
+                                    Pre::Open { ncand, .. } if *ncand > 0 => if use_idx[ci] { nidx += 1 } else { nfull += 1 },
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                out!("e2e2 path {vname} {cls} {}: scan {nscan}/{}, per query clusters direct {:.1} index {:.1} full {:.1}", cell_name(cell), qs.len(), ndir as f64 / k, nidx as f64 / k, nfull as f64 / k);
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
                 out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", cell_name(cell), br / k, tch / k / nrows as f64, fr / k / nrows as f64);
