@@ -248,6 +248,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
         nguar,
         csg_plain: args().iter().any(|a| a == "--csg-plain"),
         keep_index: args().iter().any(|a| a == "--keep-index"),
+        // glibc's mmap threshold fixed for the build, as `vexact build` did: only in a run that builds and then runs no
+        // experiment (the setting stays for the rest of the process)
+        tune_malloc: !MODES.iter().any(|m| has_mode(m)),
         ..BuildOptions::default()
     };
     let prof_path = bo.profile.clone().unwrap_or_else(|| format!("{dir}/profile.npy"));

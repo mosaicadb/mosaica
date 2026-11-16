@@ -42,13 +42,19 @@ pub struct BuildOptions {
     pub csg_plain: bool,
     /// Items of each group the encoder's calibration samples, spread evenly over up to CAL_CLUSTERS of its clusters.
     pub cal_items: usize,
+    /// Fix glibc's mmap threshold at 1 MB for the rest of the process when a build starts (util::fix_mmap_threshold),
+    /// which keeps a large build's memory from growing with its row count (38 bytes a row at 4M rows otherwise). The
+    /// setting is process-wide and is never undone, so the default is false: set it only in a process that does
+    /// nothing but build (the vexact binary does, for a rebuild run with no experiment). Not part of the key: it does
+    /// not change what is built.
+    pub tune_malloc: bool,
     /// Open only (not part of the key): open a saved index although the fit's vectors file has changed length or
     /// modification time since it was built (the index holds its own vectors); a warning instead of an error.
     pub keep_index: bool,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, keep_index: false }
+        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, tune_malloc: false, keep_index: false }
     }
 }
 
@@ -2135,11 +2141,12 @@ fn set_repack(ix: &mut Index2, log: &mut dyn FnMut(String)) {
 /// The fitted directory `dir` built into a queryable index in memory (codes, repack thresholds and, without the norm
 /// sort, the support table), with the parameters it was built from. Nothing is saved.
 pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    let malloc = crate::util::BuildMalloc::enter();
+    if o.tune_malloc {
+        crate::util::fix_mmap_threshold(1 << 20);
+    }
     let (p, prof) = prepare(dir, o)?;
     let design_c = design_constants(&p, o, log);
     let mut ix = encode(&p, &prof, design_c.as_deref(), o, dir, None, log)?;
-    drop(malloc);
     set_repack(&mut ix, log);
     Ok((p, ix))
 }
@@ -2184,7 +2191,9 @@ pub fn rebuild_at(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(S
 }
 
 fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    let malloc = crate::util::BuildMalloc::enter();
+    if o.tune_malloc {
+        crate::util::fix_mmap_threshold(1 << 20);
+    }
     let (p, prof) = prepare(dir, o)?;
     log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
     let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
@@ -2207,7 +2216,6 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
         if now.is_some() && now != before {
             if let Ok(mut ix) = store::open(&p, &prof, o, design_c.as_deref(), &key, edir, &mut |s| log(format!("[open] {s}"))) {
                 drop(lock);
-                drop(malloc);
                 log(format!("[build2] another rebuild just produced this index ({edir}); opened it instead of encoding again"));
                 set_repack(&mut ix, log);
                 return Ok((p, ix));
@@ -2227,7 +2235,6 @@ fn rebuild_in(dir: &str, edir: Option<&str>, o: &BuildOptions, log: &mut dyn FnM
     let h = store::seal(&ix, &tmp, &key, Some(xs));
     store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
     drop(lock);
-    drop(malloc);
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
     Ok((p, ix))
