@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
-use vexact::v2::q::{knn2, knn2_fast, pseudo_queries, Approx, Dial, Plan, Vis2};
+use vexact::v2::q::{knn2, knn2_fast, pseudo_queries, Approx, Dial, KnnOut2, Plan, PlanMode, Vis2};
 use vexact::v2::{open, BuildOptions, Index2};
 
 #[pyclass(module = "vexact_py")]
@@ -24,13 +24,27 @@ struct Index {
 #[pymethods]
 impl Index {
     /// Build the index from a fitted directory, time the planner's constants on one thread (pinned to `core` when
-    /// given), and fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries.
+    /// given), and fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. `plan` is "auto" (the
+    /// planner decides), "index" (full vectors and scans priced out, so every cluster takes the index path, in the
+    /// approximate mode too) or "flat" (the planner's flat mode).
     #[new]
-    #[pyo3(signature = (dir, core=None, pseudo=1000, calib=16))]
-    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, calib: usize) -> PyResult<Index> {
+    #[pyo3(signature = (dir, core=None, pseudo=1000, calib=16, plan="auto"))]
+    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, calib: usize, plan: &str) -> PyResult<Index> {
+        let force = match plan {
+            "auto" | "index" | "flat" => plan.to_string(),
+            _ => return Err(PyValueError::new_err(format!("plan is auto, index or flat, not {plan:?}"))),
+        };
         py.detach(|| {
             let (p, ix) = open(&dir, &BuildOptions::default(), &mut |s| eprintln!("{s}"));
-            let plan = Plan::calibrate(&ix, Plan::default(), calib, core);
+            let mut plan = Plan::calibrate(&ix, Plan::default(), calib, core);
+            match force.as_str() {
+                "index" => {
+                    plan.mode = PlanMode::Index;
+                    (plan.full_us, plan.scan_us, plan.cscan_us) = (1e3, 1e3, 1e3);
+                }
+                "flat" => plan.mode = PlanMode::Flat,
+                _ => {}
+            }
             let pseudo = pseudo_queries(&ix, pseudo, 10);
             let approx = if pseudo.is_empty() { Approx { f: 0.0, rad: Vec::new() } } else { Approx::fit(&ix, &pseudo).0 };
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -107,6 +121,30 @@ impl Index {
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let out: Vec<Vec<(f64, u32)>> = py.detach(|| rows.par_iter().map(|q| knn2(ix, q, k, vis, plan).ents).collect());
         Ok(out.iter().map(|e| ids(py, e, k)).collect())
+    }
+
+    /// The planner's constants, one `name=value` per line.
+    #[getter]
+    fn plan(&self) -> String {
+        self.plan.to_kv()
+    }
+
+    /// What one query did: rows touched, full vectors read, clusters opened on the index path, and the time in ms,
+    /// exact (nprobe None) or approximate.
+    #[pyo3(signature = (q, k, nprobe=None, eps=0.0))]
+    fn explain(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: Option<usize>, eps: f64) -> PyResult<(u64, u64, u64, f64)> {
+        if eps > 0.0 {
+            self.fit_dial(py, k);
+        }
+        let dial = if eps > 0.0 { self.dials.get(&k).map(|d| d.for_eps(eps)) } else { None };
+        let q = q.as_slice()?;
+        let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
+        let t = std::time::Instant::now();
+        let o: KnnOut2 = py.detach(|| self.pool.install(|| match nprobe {
+            None => knn2(ix, q, k, vis, plan),
+            Some(np) => knn2_fast(ix, ap, q, k, vis, np, dial, plan),
+        }));
+        Ok((o.st.touched, o.st.full_reads, o.st.clusters_open, t.elapsed().as_secs_f64() * 1e3))
     }
 
     #[getter]
