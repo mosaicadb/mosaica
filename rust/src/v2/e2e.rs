@@ -318,8 +318,13 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let (_, opened) = open_at(dir, edir, o, &mut |_| {}).unwrap();
     assert_eq!(opened.store_hash(), built.store_hash());
     assert_eq!((opened.meta.dlv.clone(), opened.meta.ddec), (vec![8, 32], 0b10));
-    for other in [BuildOptions::default(), BuildOptions { ddec: u32::MAX, ..o.clone() }, BuildOptions { dlv: Some(vec![16, 32]), ..o.clone() }] {
-        assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "opened under other levels: {:?} {:#b}", other.dlv, other.ddec);
+    // which levels decide is the open's choice: the same saved index opens under any, and holds the same
+    for ddec in [u32::MAX, 0, 0b01] {
+        let (_, other) = open_at(dir, edir, &BuildOptions { ddec, ..o.clone() }, &mut |_| {}).unwrap();
+        assert_eq!((other.meta.ddec, other.store_hash()), (ddec, built.store_hash()), "ddec {ddec:#b}");
+    }
+    for other in [BuildOptions::default(), BuildOptions { dlv: Some(vec![16, 32]), ..o.clone() }] {
+        assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "opened under other levels: {:?}", other.dlv);
     }
     drop((built, opened));
     std::fs::remove_dir_all(&tmp).unwrap();

@@ -214,7 +214,7 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
-            f if f.starts_with("dlv=") || f.starts_with("ddec=") => {} // build options, read by setup2_at
+            f if f.starts_with("dlv=") || f.starts_with("ddec=") => {} // index options, read by setup2_at
             "noscanband" => {
                 p.scan_lo = 2.0;
                 p.scan_hi = 2.0;
@@ -244,8 +244,9 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let profile = (dir == data_dir()).then(|| arg_str("--profile", "")).filter(|v| !v.is_empty());
     let nguar = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()).map(|v| v.parse::<f64>().expect("--nguar N (items the guarantee covers)"));
     let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
-    // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels),
-    // and the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none): build options, in the index's key.
+    // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels):
+    // a build option, in the index's key. And the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none):
+    // a query-time option, set when the index is built or opened (any value opens the same saved index).
     // From --dlv and --ddec for the first index, from the flags dlv=B.B... and ddec=... for any (they take precedence)
     let flag = |name: &str| flags.split(',').map(|f| f.trim()).find_map(|f| f.strip_prefix(name).map(|v| v.to_string()));
     let main = dir == data_dir();

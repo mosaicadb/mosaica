@@ -39,7 +39,9 @@ pub struct BuildOptions {
     pub dlv: Option<Vec<usize>>,
     /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: at every level, the
     /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
-    /// does not depend on it. Nothing stored changes; it is recorded in the index (`Meta2::ddec`) and its key.
+    /// does not depend on it. Nothing stored changes, so it is a query-time option: not in the key, not in what an
+    /// index stores or `plan_hash`; a build and an open set it on the index in memory (`Meta2::ddec`), and one saved
+    /// index opens under any value.
     pub ddec: u32,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
@@ -947,8 +949,8 @@ pub struct Meta2 {
     /// its own (query, threshold) or its own k-NN query only: reusing an item's intervals for another threshold, or a
     /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
     pub npow: u32,
-    /// Threshold queries decide at deterministic level l only when bit l is set (`BuildOptions::ddec`); a level that
-    /// does not decide still reads its codes and advances the sums.
+    /// Threshold queries decide at deterministic level l only when bit l is set (`BuildOptions::ddec`, set when the
+    /// index is built or opened; not stored); a level that does not decide still reads its codes and advances the sums.
     pub ddec: u32,
 }
 impl Meta2 {

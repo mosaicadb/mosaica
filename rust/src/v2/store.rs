@@ -367,7 +367,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
     })).collect();
     let meta = serde_json::json!({
         "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
-        "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "ddec": ix.meta.ddec, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
+        "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
@@ -741,10 +741,11 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     if Some(meta.npow as u64) != v["npow"].as_u64() {
         return Err(format!("{dir} was built for a guarantee of 2^{} rows, these options give 2^{}; rebuild it", v["npow"], meta.npow));
     }
-    // the deterministic levels and the levels that decide (in the key too; checked against what this open derived)
+    // the deterministic levels (in the key too; checked against what this open derived). Which of them decide
+    // (`ddec`) is this open's choice, not the build's
     let dlv_was: Option<Vec<usize>> = v["dlv"].as_array().and_then(|a| a.iter().map(|x| x.as_u64().map(|y| y as usize)).collect());
-    if dlv_was.as_ref() != Some(&meta.dlv) || v["ddec"].as_u64() != Some(meta.ddec as u64) {
-        return Err(format!("{dir} was built with deterministic levels {} deciding at {}, these options give {:?} deciding at {:#b}; rebuild it", v["dlv"], v["ddec"], meta.dlv, meta.ddec));
+    if dlv_was.as_ref() != Some(&meta.dlv) {
+        return Err(format!("{dir} was built with deterministic levels {}, these options give {:?}; rebuild it", v["dlv"], meta.dlv));
     }
     let gv = v["groups"].as_array().filter(|a| a.len() == groups.len()).ok_or(format!("{dir}/index.json does not hold {} groups; rebuild the index", groups.len()))?;
     for (gp, gv) in groups.iter_mut().zip(gv) {
@@ -993,7 +994,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     h.str(&p.partition_name);
     h.str(&p.partition_id);
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
-    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items, o.ddec as usize]);
+    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items]);
     match o.nguar {
         Some(x) => h.pod(&[1.0, x]),
         None => h.u64(0),
@@ -1013,12 +1014,7 @@ impl Index2 {
         h.usizes(&[self.n(), self.k(), self.meta.npow as usize]);
         h.usizes(&self.meta.dlv);
         h.usizes(&self.meta.rlv);
-        // which deterministic levels decide: hashed only when not all, so an index that decides at all of them hashes
-        // as before the option existed
-        if self.meta.ddec != u32::MAX {
-            h.str("ddec");
-            h.u64(self.meta.ddec as u64);
-        }
+        // (not which deterministic levels decide, `Meta2::ddec`: a query-time choice, not stored)
         for g in self.groups.iter() {
             h.pod(&g.sig);
             h.pod(&[g.lamsum]);
