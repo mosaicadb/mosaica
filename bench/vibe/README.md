@@ -62,3 +62,10 @@ out-of-distribution queries), `ivf-rabitq(faiss)`, `vamana-lvq(svs)` and `lorann
 The index is built with `fit.py --basis dual`. VIBE gives an algorithm marked `ood: true` a sample of the query
 distribution (`fit_ood`), and on those datasets the adapter passes it to `fit.py --query-sample`, which fits the
 basis's query side to where the queries point. On the in-distribution datasets the basis is fitted to the corpus alone.
+
+`vexact-approx-queries` (build argument `order: queries`) also fits the approximate mode's cluster order and dials on
+1,000 of those sample queries and their true neighbours, in place of corpus pseudo-queries. It runs on the
+out-of-distribution datasets only, so it is not in `run.sh`'s default list: add it with `ALGOS`. On
+laion-clip-512-normalized it is about twice as fast as `vexact-approx` at the same recall (VIBE's recall, k = 100, one
+core): nprobe 64 gives 0.970 at 187 QPS against 0.947 at 97 for `vexact-approx` at nprobe 128, and nprobe 256 with
+eps 0.01 gives 0.999 at 71 QPS against 0.999 at 37 at nprobe 512.
