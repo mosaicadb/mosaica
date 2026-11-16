@@ -73,6 +73,37 @@ impl Index {
         Ok(())
     }
 
+    /// Refit the approximate mode's cluster order, and later dials, on a sample of real queries instead of corpus
+    /// pseudo-queries: `qs` (one query per row, normalised here) and `gt`, each query's nearest entity ids, best first
+    /// (the first 10 are used). Dials fitted before are dropped.
+    fn fit_queries(&mut self, py: Python<'_>, qs: PyReadonlyArray2<'_, f32>, gt: PyReadonlyArray2<'_, i64>) -> PyResult<()> {
+        let (qa, ga) = (qs.as_array(), gt.as_array());
+        if qa.nrows() != ga.nrows() || qa.nrows() == 0 || qa.ncols() != self.ix.n() {
+            return Err(PyValueError::new_err(format!(
+                "need as many neighbour rows as queries, at least one query, and {} columns; got {:?} and {:?}",
+                self.ix.n(), qa.shape(), ga.shape())));
+        }
+        let n = self.ix.nrows as i64;
+        let mut pseudo = Vec::with_capacity(qa.nrows());
+        for (q, g) in qa.outer_iter().zip(ga.outer_iter()) {
+            let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+            if qn < 1e-12 {
+                continue;
+            }
+            if let Some(&bad) = g.iter().find(|&&e| e < 0 || e >= n) {
+                return Err(PyValueError::new_err(format!("entity id {bad} is outside 0..{n}")));
+            }
+            let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
+            // a row past the index marks a held-out query, not a stored row
+            pseudo.push((usize::MAX, q, g.iter().take(10).map(|&e| e as u32).collect::<Vec<u32>>()));
+        }
+        let ix = &self.ix;
+        self.approx = py.detach(|| Approx::fit(ix, &pseudo).0);
+        self.pseudo = pseudo;
+        self.dials.clear();
+        Ok(())
+    }
+
     /// Fit the approximate mode's dial for k (once per k; it is used when eps > 0).
     fn fit_dial(&mut self, py: Python<'_>, k: usize) {
         if self.pseudo.is_empty() || self.dials.contains_key(&k) {

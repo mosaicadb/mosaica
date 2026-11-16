@@ -4,6 +4,8 @@
 # The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is pca, and the
 # measured index (SYSTEM.md) uses dual. With dual on a dataset that supplies a sample of its
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
+# The build parameter `order` (corpus, the default, or queries) is what the approximate mode's cluster order and dials are
+# fitted on: corpus pseudo-queries, or with `queries` 1,000 of the query sample and their true neighbours (fit_ood only).
 import os
 import subprocess
 import sys
@@ -26,20 +28,30 @@ def save_padded(path, X, d):
 
 
 class Vexact(BaseANN):
-    def __init__(self, metric, method_param=None):
+    def __init__(self, metric, method_param=None, order=None):
         if metric not in ("angular", "cosine", "normalized"):
             raise ValueError(f"vexact supports cosine similarity only (angular, cosine, normalized), not {metric}")
         # ANN-Benchmarks passes the build arguments as a dict, VIBE as values in order
         self.basis = method_param.get("basis", "dual") if isinstance(method_param, dict) else method_param or "dual"
         if self.basis not in ("pca", "dual"):
             raise ValueError(f"basis is pca or dual, not {self.basis}")
+        self.order = (method_param.get("order") if isinstance(method_param, dict) else order) or "corpus"
+        if self.order not in ("corpus", "queries"):
+            raise ValueError(f"order is corpus or queries, not {self.order}")
         self.index = None
 
     def fit(self, X):
+        if self.order == "queries":
+            raise ValueError("order=queries needs a sample of the queries (an out-of-distribution dataset)")
         self.build(X, None)
 
     def fit_ood(self, X, X_learn, X_learn_neighbors):
         self.build(X, X_learn if self.basis == "dual" else None)
+        if self.order == "queries":
+            pick = np.linspace(0, len(X_learn) - 1, min(1000, len(X_learn))).astype(np.int64)
+            qs = np.zeros((len(pick), len(self.qbuf)), np.float32)
+            qs[:, : X_learn.shape[1]] = X_learn[pick]
+            self.index.fit_queries(qs, np.ascontiguousarray(X_learn_neighbors[pick, :10], dtype=np.int64))
 
     def build(self, X, sample):
         work = tempfile.mkdtemp(prefix="vexact-", dir=os.environ.get("VEXACT_WORK"))
@@ -65,20 +77,20 @@ class Vexact(BaseANN):
 
 
 class VexactExact(Vexact):
-    def __init__(self, metric, method_param=None):
-        super().__init__(metric, method_param)
-        self.name = f"vexact-exact (basis={self.basis})"
+    def __init__(self, metric, method_param=None, order=None):
+        super().__init__(metric, method_param, order)
+        self.name = f"vexact-exact (basis={self.basis}, order={self.order})"
 
     def set_query_arguments(self, mode="exact"):
-        self.name = f"vexact-exact (basis={self.basis}, query sample={self.sampled}, mode={mode})"
+        self.name = f"vexact-exact (basis={self.basis}, query sample={self.sampled}, order={self.order}, mode={mode})"
 
     def query(self, v, n):
         return self.index.knn(self.q(v), n)
 
 
 class VexactApprox(Vexact):
-    def __init__(self, metric, method_param=None):
-        super().__init__(metric, method_param)
+    def __init__(self, metric, method_param=None, order=None):
+        super().__init__(metric, method_param, order)
         self.nprobe, self.eps = 1, 0.0
 
     def set_query_arguments(self, nprobe, eps):
@@ -87,7 +99,7 @@ class VexactApprox(Vexact):
             # the dial is fitted per k; ANN-Benchmarks asks for 10 neighbours and VIBE for 100
             self.index.fit_dial(10)
             self.index.fit_dial(100)
-        self.name = f"vexact-approx (basis={self.basis}, query sample={self.sampled}, nprobe={nprobe}, eps={eps})"
+        self.name = f"vexact-approx (basis={self.basis}, query sample={self.sampled}, order={self.order}, nprobe={nprobe}, eps={eps})"
 
     def query(self, v, n):
         return self.index.knn_approx(self.q(v), n, self.nprobe, self.eps)
