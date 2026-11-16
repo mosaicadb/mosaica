@@ -24,6 +24,44 @@ const HEDGE: f64 = 0.25;
 const FORMAT: u64 = 2;
 const RIDGE: f64 = 0.1;
 
+/// How the fit divides its clusters into groups (each with a basis of its own).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Groups {
+    /// min(64, K / 8, N / (20 n)), at least 1: enough items per group for a basis, at most 64 groups and 8 clusters per
+    /// group on average (the default, as tools/fit.py's default).
+    ByK8,
+    /// min(64, K, N / (20 n)), at least 1: research/levels-clusters' rule, with its cluster size by N
+    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`).
+    ByN,
+    /// This many groups, at most K.
+    Fixed(usize),
+}
+impl Groups {
+    /// The number of groups for k clusters of nrow items of n0 dimensions.
+    pub fn count(&self, nrow: usize, k: usize, n0: usize) -> usize {
+        match *self {
+            Groups::ByK8 => 1.max(64.min(k / 8).min(nrow / (20 * n0))),
+            Groups::ByN => 1.max(64.min(k).min(nrow / (20 * n0))),
+            Groups::Fixed(g) => 1.max(g.min(k)),
+        }
+    }
+    /// by-k8, by-n or a positive number.
+    pub fn parse(s: &str) -> Result<Groups, String> {
+        match s {
+            "by-k8" => Ok(Groups::ByK8),
+            "by-n" => Ok(Groups::ByN),
+            _ => s.parse::<usize>().ok().filter(|&g| g > 0).map(Groups::Fixed).ok_or(format!("groups is by-k8, by-n or a positive number, not {s}")),
+        }
+    }
+}
+
+/// Items per cluster by research/levels-clusters' rule for N items: 2,000 x sqrt(N / 1M), rounded in log2 to a
+/// power-of-two multiple of 2,000 (ties down), at least 2,000 (2,000 up to 2M items, 4,000 up to 8M, 8,000 up to 32M,
+/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`; the default is 1,000.
+pub fn per_cluster_by_n(nrow: usize) -> usize {
+    2000 << ((nrow as f64 / 1e6).log2() / 2.0 - 0.5).ceil().max(0.0) as u32
+}
+
 /// What a fit takes besides the partition.
 pub struct FitOptions {
     /// "pca" or "dual".
@@ -39,10 +77,12 @@ pub struct FitOptions {
     pub image: usize,
     pub text_anchors: Option<String>,
     pub text_count: usize,
+    /// How the clusters are grouped (the default `Groups::ByK8`).
+    pub groups: Groups,
 }
 impl Default for FitOptions {
     fn default() -> FitOptions {
-        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256 }
+        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256, groups: Groups::ByK8 }
     }
 }
 
@@ -313,8 +353,9 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         m.iter().map(move |&v| if nr > 0.0 { v / nr } else { v })
     }).collect();
 
-    // groups: enough items per group for a basis (20 n), at most 64 groups and 8 clusters per group on average
-    let g0 = 1.max(64.min(k / 8).min(nrow / (20 * n0)));
+    // groups (`Groups`): by default enough items per group for a basis (20 n), at most 64 groups and 8 clusters per
+    // group on average
+    let g0 = o.groups.count(nrow, k, n0);
     let gc = kmeans(&mh, n, g0, &mut rng, 20);
     let graw = argmax_rows(&mh, &gc, n);
     let mut gk: Vec<usize> = graw.clone();
@@ -571,6 +612,11 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         "partition_file": partition_file.json(),
         "format": FORMAT, "fit": fitj,
     });
+    // recorded only when not the default, so a default fit's meta.json is as before
+    let mut meta = meta;
+    if o.groups != Groups::ByK8 {
+        meta["clusters"] = serde_json::json!({ "groups": format!("{:?}", o.groups) });
+    }
     let tmp = format!("{meta_path}.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(&meta).unwrap()).map_err(|e| format!("cannot write {tmp}: {e}"))?;
     std::fs::rename(&tmp, &meta_path).map_err(|e| format!("cannot move {tmp} to {meta_path}: {e}"))?;
@@ -717,6 +763,24 @@ mod tests {
         assert!(anchors_of(&c, n, k, 0, None, 5, 3).is_err());
         assert!(crate::index::check_anchors(&[1.0, 1e-5], 2).is_err());
         assert!(crate::index::check_anchors(&[0.6, 0.8, 1.0], 2).is_err());
+    }
+
+    /// The cluster-size rule (as tools/fit.py's and tools/partition.py's `by-n`) and the group rules.
+    #[test]
+    fn cluster_size_and_group_rules() {
+        let pc: Vec<usize> = [0, 500_000, 1_000_000, 2_000_000, 2_100_000, 8_000_000, 8_100_000, 32_000_000, 33_000_000, 1_000_000_000].iter().map(|&n| per_cluster_by_n(n)).collect();
+        assert_eq!(pc, [2000, 2000, 2000, 2000, 4000, 4000, 8000, 8000, 16000, 64000]);
+        // 1M items of 768 dimensions: 1,000 clusters by default, 500 by the rule
+        assert_eq!(Groups::ByK8.count(1_000_000, 1000, 768), 64);
+        assert_eq!(Groups::ByK8.count(1_000_000, 500, 768), 62);
+        assert_eq!(Groups::ByN.count(1_000_000, 500, 768), 64);
+        assert_eq!(Groups::ByN.count(60_000, 30, 768), 3);
+        assert_eq!(Groups::ByK8.count(60_000, 60, 768), 3);
+        assert_eq!(Groups::ByN.count(1_000, 4, 768), 1);
+        assert_eq!(Groups::Fixed(10).count(1_000_000, 4, 768), 4);
+        assert_eq!(Groups::parse("by-n"), Ok(Groups::ByN));
+        assert_eq!(Groups::parse("12"), Ok(Groups::Fixed(12)));
+        assert!(Groups::parse("0").is_err() && Groups::parse("k8").is_err());
     }
 
     /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.

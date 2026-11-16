@@ -1,10 +1,12 @@
 # Partition a file of vectors into cells for the fit and the build (`vexact --index OUT fit --partition DIR`), with faiss:
 # coarse cells, fine clusters of about PER_CLUSTER items trained per cell, every row assigned to a fine centre.
 # Nothing holds more than a chunk of the vectors and one cell's training sample at a time.
-# usage: python3 -I partition.py VECTORS.npy OUTDIR [--cells C] [--cross T] [--per-cluster 1000]
+# usage: python3 -I partition.py VECTORS.npy OUTDIR [--cells C] [--cross T] [--per-cluster 1000|by-n]
 #        [--sample-per-centre 200] [--cell-sample 1000] [--niter 20] [--seed S]
 #   VECTORS.npy: N x n0, float16/32/64; row i is entity i.
 #   --cells C: coarse cells (default 1: one cell, one k-means over a sample of the whole set).
+#   --per-cluster: items per cluster on average (default 1,000), or by-n: research/levels-clusters' rule, 2,000 up to
+#     2M items, doubling for each 4x N (tools/fit.py `per_cluster`).
 #   --cross T: each row is assigned to its nearest fine centre among those of its cell's T nearest cells (default 1;
 #     T >= C is exact assignment over all centres). A row whose centre lies in another cell moves to that cell.
 # Writes to OUTDIR, per cell c: cell{c}.f16 (unit rows, float16, zero-padded to n, a multiple of 32), cell{c}.ids
@@ -13,7 +15,7 @@
 # numbered cell by cell), cluster_cell.npy (K, uint32) and manifest.json, written last: it lists every file with its
 # length, the moment of the run and a random token, so a partition written again is another (`bucket::partition_id`).
 # The manifest and the files of any earlier partition in OUTDIR are removed before anything is written.
-import argparse, glob, json, os, time
+import argparse, glob, json, math, os, time
 import numpy as np
 import faiss
 
@@ -52,12 +54,14 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--cells", type=int, default=1)
     ap.add_argument("--cross", type=int, default=1)
-    ap.add_argument("--per-cluster", type=int, default=1000)
+    ap.add_argument("--per-cluster", default="1000")
     ap.add_argument("--sample-per-centre", type=int, default=200)
     ap.add_argument("--cell-sample", type=int, default=1000)
     ap.add_argument("--niter", type=int, default=20)
     ap.add_argument("--seed", type=int, default=20261112)
     a = ap.parse_args()
+    if not (a.per_cluster == "by-n" or (a.per_cluster.isdigit() and int(a.per_cluster) > 0)):
+        raise SystemExit(f"--per-cluster is a positive number or by-n, not {a.per_cluster}")
     os.makedirs(a.out, exist_ok=True)
     # an earlier partition here: its manifest first (until the new one is written last, OUTDIR is no partition, so no
     # cell can change under a manifest), then its files (a cell it had and this run does not write would be stale)
@@ -68,11 +72,12 @@ def main():
     X = np.load(a.vectors, mmap_mode="r")
     N, n0 = X.shape
     n = (n0 + 31) // 32 * 32
-    K = max(1, round(N / a.per_cluster))
+    pc = 2000 * 2 ** max(0, math.ceil(math.log2(N / 1e6) / 2 - 0.5)) if a.per_cluster == "by-n" else int(a.per_cluster)
+    K = max(1, round(N / pc))
     C = max(1, min(a.cells, K))
     rng = np.random.default_rng(a.seed)
     f = lambda name: os.path.join(a.out, name)
-    log(f"N {N} n {n0} (padded to {n}): K {K} clusters in {C} cell(s), cross {a.cross}")
+    log(f"N {N} n {n0} (padded to {n}): K {K} clusters ({pc} per cluster, {a.per_cluster}) in {C} cell(s), cross {a.cross}")
 
     # coarse cells from a sample, then every row to its cell's bucket
     if C > 1:
@@ -149,7 +154,7 @@ def main():
     files = {nm: os.path.getsize(f(nm)) for nm in names}
     man = dict(N=int(N), n=int(n), n_orig=int(n0), K=int(len(cent)), cells=int(C), cross=int(a.cross),
                seed=a.seed, source=src, source_bytes=st.st_size, source_mtime=st.st_mtime,
-               rows=[int(r) for r in rows], moved=int(moved), files=files, created=time.time_ns(),
+               per_cluster=a.per_cluster, rows=[int(r) for r in rows], moved=int(moved), files=files, created=time.time_ns(),
                token=os.urandom(8).hex())
     with open(f("manifest.json.tmp"), "w") as fh:
         json.dump(man, fh, indent=1)

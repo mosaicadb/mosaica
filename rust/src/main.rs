@@ -41,12 +41,12 @@ fn main() {
             run2::bytesq2(&c, get("--nq", 100));
         }
         if run2::has_mode("e2e") {
-            // further variants: another index (--index-b, --index-c) and/or plan switches (--b, --c), measured
+            // further variants: another index (--index-b, --index-c, --index-d) and/or plan switches (--b, --c, --d), measured
             // interleaved with the first
             // (a variant that only changes plan flags shares the first variant's index)
             let mut extra = Vec::new();
             let mut same = Vec::new();
-            for v in ["b", "c"] {
+            for v in ["b", "c", "d"] {
                 let (ib, bf) = (run2::arg_str(&format!("--index-{v}"), ""), run2::arg_str(&format!("--{v}"), ""));
                 if !ib.is_empty() {
                     extra.push((v, run2::setup2_at("run2", &ib, &bf)));

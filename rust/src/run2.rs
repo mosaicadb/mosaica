@@ -39,9 +39,9 @@ pub struct Ctx2 {
 /// so that a removed or misspelt flag cannot be ignored silently. (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
     "--anchors", "--b", "--basis", "--bfracs", "--c", "--cert-time", "--calib", "--cap", "--cap-ms", "--clusters", "--cmp-order",
-    "--cmp-vis", "--cmp-what", "--core", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min",
+    "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
-    "--groups", "--index", "--index-b", "--index-c", "--item-queries", "--k", "--knn", "--ks",
+    "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
     "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
     "--order", "--params", "--partition", "--passes", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
@@ -169,6 +169,10 @@ pub fn fit_cmd() {
         image: arg_usize("--anchors", d.image),
         text_anchors: Some(arg_str("--text-anchors", "")).filter(|s| !s.is_empty()),
         text_count: arg_usize("--text-count", d.text_count),
+        groups: crate::vexact_fit::Groups::parse(&arg_str("--groups", "by-k8")).unwrap_or_else(|e| {
+            eprintln!("--groups: {e}");
+            std::process::exit(2);
+        }),
     };
     if let Err(e) = crate::vexact_fit::fit(&data_dir(), &part, &o, &mut |s| println!("{s}")) {
         eprintln!("{e}");
@@ -210,6 +214,7 @@ pub fn plan_flags(mut p: Plan, flags: &str) -> Plan {
             "direct" => p.direct = true,
             "nodirect" => p.direct = false,
             "nusort" => {} // a build option, read by setup2_at
+            f if f.starts_with("dlv=") || f.starts_with("ddec=") => {} // build options, read by setup2_at
             "noscanband" => {
                 p.scan_lo = 2.0;
                 p.scan_hi = 2.0;
@@ -239,10 +244,33 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     let profile = (dir == data_dir()).then(|| arg_str("--profile", "")).filter(|v| !v.is_empty());
     let nguar = Some(arg_str("--nguar", "")).filter(|v| !v.is_empty()).map(|v| v.parse::<f64>().expect("--nguar N (items the guarantee covers)"));
     let rlv = Some(arg_str("--rlv", "")).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().expect("--rlv BYTES,BYTES,...")).collect());
+    // another deterministic level schedule (cumulative bytes; its length is the index's number of deterministic levels),
+    // and the deterministic levels that decide (LEVEL.LEVEL... from 0, all or none): build options, in the index's key.
+    // From --dlv and --ddec for the first index, from the flags dlv=B.B... and ddec=... for any (they take precedence)
+    let flag = |name: &str| flags.split(',').map(|f| f.trim()).find_map(|f| f.strip_prefix(name).map(|v| v.to_string()));
+    let main = dir == data_dir();
+    let dlv_s = flag("dlv=").map(|v| v.replace('.', ",")).or_else(|| main.then(|| arg_str("--dlv", ""))).unwrap_or_default();
+    let dlv = Some(dlv_s.clone()).filter(|v| !v.is_empty()).map(|v| v.split(',').map(|x| x.parse().unwrap_or_else(|_| {
+        eprintln!("--dlv BYTES,BYTES,... (cumulative bytes of the deterministic levels; dlv=B.B... as a flag), not {v}");
+        std::process::exit(2);
+    })).collect());
+    let ddec = match flag("ddec=").or_else(|| main.then(|| arg_str("--ddec", "all"))).unwrap_or("all".into()).as_str() {
+        "all" => u32::MAX,
+        "none" => 0,
+        v => v.split('.').map(|x| match x.parse::<u32>() {
+            Ok(l) if l < 32 => 1u32 << l,
+            _ => {
+                eprintln!("--ddec LEVEL.LEVEL... (deterministic levels from 0 that decide), all or none; not {v}");
+                std::process::exit(2);
+            }
+        }).fold(0, |a, b| a | b),
+    };
     let bo = BuildOptions {
         profile,
         clusters: Some(arg_usize("--clusters", 100000)),
         rlv,
+        dlv,
+        ddec,
         design_exact: args().iter().any(|a| a == "--design-exact"),
         nusort: flags.split(',').any(|f| f == "nusort") || (dir == data_dir() && args().iter().any(|a| a == "--nusort")),
         nguar,
@@ -826,7 +854,17 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             let sc = fl.scores(&pr.q32);
             thresholds_for(&fl, &pr.q16, &sc, full_err2(&c0.ix, &pr), &sizes)
         }).collect();
-        let ncell = sizes_f.len() + if arg_usize("--knn", 1) > 0 { 1 } else { 0 }; // the last cell is k-NN
+        // the last cells are exact k-NN, one per k of `--knn-k` (default 10)
+        let knn_ks: Vec<usize> = if arg_usize("--knn", 1) > 0 {
+            arg_str("--knn-k", "10").split(',').map(|x| x.parse().ok().filter(|&k| k > 0).unwrap_or_else(|| {
+                eprintln!("--knn-k K,K,... (each at least 1), not {x}");
+                std::process::exit(2);
+            })).collect()
+        } else {
+            Vec::new()
+        };
+        let ncell = sizes_f.len() + knn_ks.len();
+        let cell_name = |cell: usize| if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { format!("knn{}", knn_ks[cell - sizes_f.len()]) };
         let run_cell = |c: &Ctx2, plan: Plan, cell: usize, qi: usize| -> Stats {
             let ix = &c.ix;
             if cell < sizes_f.len() {
@@ -836,7 +874,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                 std::hint::black_box(to_bitmap2(ix, &r.rows));
                 r.st
             } else {
-                knn2(ix, &qs[qi], 10, None, plan).st
+                knn2(ix, &qs[qi], knn_ks[cell - sizes_f.len()], None, plan).st
             }
         };
         let k = qs.len() as f64;
@@ -857,7 +895,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
                 }
                 let ent: Vec<String> = enter.iter().map(|x| format!("{:.5}", x / k / nrows as f64)).collect();
                 cellinfo[vi].push(format!("{:.3},{:.4},{:.5},{}", br / k, tch / k / nrows as f64, fr / k / nrows as f64, ent.join(";")));
-                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", if cell < sizes_f.len() { format!("{}", sizes_f[cell]) } else { "knn10".into() }, br / k, tch / k / nrows as f64, fr / k / nrows as f64);
+                out!("e2e2 bytes {vname} {cls} {}: bytes/item {:.3}, touched {:.4}, full reads/item {:.5}", cell_name(cell), br / k, tch / k / nrows as f64, fr / k / nrows as f64);
             }
         }
         for &th in &threads {
@@ -881,7 +919,7 @@ pub fn e2e2(vs: &[(&str, &Ctx2, Plan)], nq: usize) {
             for (vi, &(vname, _, _)) in vs.iter().enumerate() {
                 for cell in 0..ncell {
                     let v = &per[vi][cell];
-                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr", sizes_f[cell]) } else { ("index2_knn10", 0.0) };
+                    let (what, frac) = if cell < sizes_f.len() { ("index2_thr".to_string(), sizes_f[cell]) } else { let kk = knn_ks[cell - sizes_f.len()]; (format!("index2_knn{kk}"), if kk == 10 { 0.0 } else { kk as f64 }) };
                     let line = format!("{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{}", vname, cls, th, what, frac, median(v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(0.0, f64::max), qs.len(), runs, cellinfo[vi][cell]);
                     out!("e2e2 {line}");
                     lines.push(line);
@@ -935,6 +973,9 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let mut parts = [0f64; 21];
                 let mut cnt = [0f64; 4];
                 let mut rkap = 0f64;
+                // per query: clusters on the index path, on full vectors, items entering the first level, item-levels,
+                // groups, full reads
+                let mut opened = [0f64; 6];
                 for (qi, q) in qs.iter().enumerate() {
                     let mut best = f64::MAX;
                     let mut keep = None;
@@ -979,6 +1020,13 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                         cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
                     rkap += ms(cy[P_RKAP]);
+                    let nqf = qs.len() as f64;
+                    opened[0] += r.idx_clusters as f64 / nqf;
+                    opened[1] += r.flat_clusters as f64 / nqf;
+                    opened[2] += r.st.enter[0] as f64 / nqf;
+                    opened[3] += r.st.enter[..r.st.enter.len() - 1].iter().sum::<u64>() as f64 / nqf;
+                    opened[4] += r.st.groups as f64 / nqf;
+                    opened[5] += r.st.full_reads as f64 / nqf;
                     br += bytes_read2(ix, &r.st) / qs.len() as f64;
                     fr += r.st.full_reads as f64 / qs.len() as f64;
                     let (a, b) = sym_diff(&bm, &truths[qi]);
@@ -991,6 +1039,7 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 out!("breakdown2 {line}");
                 out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
+                out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels, {:.1} groups, {:.0} full reads", opened[0], opened[1], opened[2], opened[3], opened[4], opened[5]);
                 lines.push(line);
             }
         }

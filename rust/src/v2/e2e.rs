@@ -259,6 +259,78 @@ fn a_saved_index_opens_as_the_index_it_saves() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
+/// Fewer deterministic levels (`BuildOptions::dlv`) and fewer of them deciding (`BuildOptions::ddec`): threshold and
+/// k-NN answers equal brute force on every path, verify finds no bound violated, a level that does not decide decides
+/// nothing, the saved index opens as built (and not under other options), and schedules or levels that do not fit are
+/// refused.
+#[test]
+fn fewer_deterministic_levels_and_decisions_answer_exactly() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let f = fixture();
+    let variants = [
+        ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, 2),
+        ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ddec: 0b10, ..BuildOptions::default() }, 2),
+        ("3 levels, 4/16/40", BuildOptions { dlv: Some(vec![4, 16, 40]), ..BuildOptions::default() }, 3),
+        ("6 levels, none deciding", BuildOptions { ddec: 0, ..BuildOptions::default() }, 6),
+        ("6 levels, deciding at the first and last", BuildOptions { ddec: 0b100001, ..BuildOptions::default() }, 6),
+    ];
+    for (vname, o, ndl) in &variants {
+        let (_, ix) = build(dir, o, &mut |_| {}).unwrap();
+        assert_eq!(ix.meta.ndl(), *ndl, "{vname}");
+        assert_eq!(ix.meta.nl(), ndl + 1, "{vname}");
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(&ix, q);
+            for (sname, bm) in &f.sets[..3] {
+                let vis = bm.as_ref().map(|b| Vis2::new(&ix, b));
+                let t = truth(&ix, q, bm.as_ref());
+                for th in thresholds(&t) {
+                    let want = answer(&t, th);
+                    for (pname, plan) in plans() {
+                        let r = threshold2(&ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+                        assert_eq!(to_bitmap2(&ix, &r.rows), want, "{vname}: threshold, plan {pname}, set {sname}, query {qi}, t {th}");
+                        if matches!(plan.mode, PlanMode::Index) {
+                            for l in 0..*ndl {
+                                if o.ddec >> l & 1 == 0 {
+                                    assert_eq!(r.st.dec_in[l] + r.st.dec_out[l], 0, "{vname}: level {l} decided, plan {pname}");
+                                }
+                            }
+                        }
+                        let v = threshold2(&ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: true, want_iv: false, plan });
+                        assert_eq!(to_bitmap2(&ix, &v.rows), want, "{vname}: verify, plan {pname}, set {sname}, query {qi}, t {th}");
+                        assert_eq!((v.st.viol_det, v.st.viol_rand), (0, 0), "{vname}: bounds violated, plan {pname}, query {qi}, t {th}");
+                    }
+                }
+                for k in [1, 10, 100].into_iter().filter(|&k| k <= t.len()) {
+                    for (pname, plan) in plans() {
+                        let r = knn2(&ix, q, k, vis.as_ref(), plan);
+                        assert_eq!(sub_values(&ix, &r.ents, q), top_values(&t, k), "{vname}: k-NN, plan {pname}, set {sname}, query {qi}, k {k}");
+                    }
+                }
+            }
+        }
+    }
+    // saved and opened as built; refused under other options
+    let tmp = tmp_dir("dlv");
+    let edir = tmp.join("encoded-d");
+    let edir = edir.to_str().unwrap();
+    let o = &variants[1].1;
+    let (_, built) = rebuild_at(dir, edir, o, &mut |_| {}).unwrap();
+    let (_, opened) = open_at(dir, edir, o, &mut |_| {}).unwrap();
+    assert_eq!(opened.store_hash(), built.store_hash());
+    assert_eq!((opened.meta.dlv.clone(), opened.meta.ddec), (vec![8, 32], 0b10));
+    for other in [BuildOptions::default(), BuildOptions { ddec: u32::MAX, ..o.clone() }, BuildOptions { dlv: Some(vec![16, 32]), ..o.clone() }] {
+        assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "opened under other levels: {:?} {:#b}", other.dlv, other.ddec);
+    }
+    drop((built, opened));
+    std::fs::remove_dir_all(&tmp).unwrap();
+    // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes)
+    for (dlv, ddec) in [(Some(vec![]), u32::MAX), (Some(vec![16, 8]), u32::MAX), (Some(vec![0, 8]), u32::MAX), (Some(vec![4, 8, 12, 16, 20, 24, 32]), u32::MAX),
+        (Some(vec![16, 48]), u32::MAX), (Some(vec![16, 32]), 0b100), (None, 1 << 6)] {
+        let o = BuildOptions { dlv: dlv.clone(), ddec, ..BuildOptions::default() };
+        assert!(prepare(dir, &o).is_err(), "accepted dlv {dlv:?}, ddec {ddec:#b}");
+    }
+}
+
 fn tmp_dir(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("vexact-e2e-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
     std::fs::create_dir_all(&d).unwrap();

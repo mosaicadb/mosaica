@@ -219,7 +219,7 @@ impl Rd<'_> {
     }
 }
 
-fn put_cluster(w: &mut Wr, c: &Cl2, ctab: &[kern::CTab]) {
+fn put_cluster(w: &mut Wr, c: &Cl2, ctab: &[kern::CTab], ndl: usize) {
     for x in [c.g, c.r0, c.r1, c.nblk] {
         w.put(x as u64);
     }
@@ -227,7 +227,7 @@ fn put_cluster(w: &mut Wr, c: &Cl2, ctab: &[kern::CTab]) {
         w.put(x);
     }
     w.put(c.mn32);
-    w.arr(&c.bm);
+    w.arr(&c.bm[..ndl]);
     w.arr(&c.b2);
     w.arr(&c.l1m);
     w.arr(&c.mhat);
@@ -243,7 +243,7 @@ fn put_cluster(w: &mut Wr, c: &Cl2, ctab: &[kern::CTab]) {
     }
 }
 
-fn get_cluster(r: &mut Rd) -> Result<(Cl2, Vec<kern::CTab>), String> {
+fn get_cluster(r: &mut Rd, ndl: usize) -> Result<(Cl2, Vec<kern::CTab>), String> {
     let mut u = [0usize; 4];
     for x in u.iter_mut() {
         *x = r.get::<u64>()? as usize;
@@ -255,7 +255,12 @@ fn get_cluster(r: &mut Rd) -> Result<(Cl2, Vec<kern::CTab>), String> {
     }
     let [mn, btot, mvn, rmax, numax, bmin, bmax] = f;
     let mn32 = r.get::<f32>()?;
-    let bm: [f64; NDL] = r.arr::<f64>()?.try_into().map_err(|_| "clusters.bin: a record of another level count; rebuild the index")?;
+    let bmv = r.arr::<f64>()?;
+    if bmv.len() != ndl {
+        return Err("clusters.bin: a record of another level count; rebuild the index".into());
+    }
+    let mut bm = [0f64; NDL_MAX];
+    bm[..ndl].copy_from_slice(&bmv);
     let b2: [f64; J] = r.arr::<f64>()?.try_into().map_err(|_| "clusters.bin: a record of another block count; rebuild the index")?;
     let l1m: [f32; J + 1] = r.arr::<f32>()?.try_into().map_err(|_| "clusters.bin: a record of another block count; rebuild the index")?;
     let (mhat, mv32, wmr) = (r.arr()?, r.arr()?, r.arr()?);
@@ -264,17 +269,17 @@ fn get_cluster(r: &mut Rd) -> Result<(Cl2, Vec<kern::CTab>), String> {
     Ok((Cl2 { g, r0, r1, nblk, mn, mn32, mhat: Arc::new(mhat), mv32: Arc::new(mv32), wmr: Arc::new(wmr), bm, b2, l1m, btot, mvn, rmax, numax, bmin, bmax }, ctab))
 }
 
-fn cal_json(c: &CalIn) -> serde_json::Value {
+fn cal_json(c: &CalIn, ndl: usize) -> serde_json::Value {
     let fin = c.y0.iter().chain(&c.ys).chain(c.k0.iter().flatten()).chain(c.ks.iter().flatten()).all(|x| x.is_finite()) && c.tq.iter().flatten().flatten().all(|x| x.is_finite());
     assert!(fin, "a calibration value is not finite and cannot be saved in JSON: {c:?}");
     serde_json::json!({
-        "kmin": c.kmin, "y0": c.y0, "ys": c.ys,
+        "kmin": c.kmin[..ndl], "y0": c.y0, "ys": c.ys,
         "tq": c.tq.iter().map(|a| a.iter().map(|b| b.to_vec()).collect::<Vec<_>>()).collect::<Vec<_>>(),
         "k0": c.k0, "ks": c.ks, "kb": c.kb,
     })
 }
 
-fn cal_from(v: &serde_json::Value) -> Result<CalIn, String> {
+fn cal_from(v: &serde_json::Value, ndl: usize) -> Result<CalIn, String> {
     const BAD: &str = "index.json: a calibration value is missing or not a number; rebuild the index";
     let f = |x: &serde_json::Value| x.as_f64().ok_or(BAD);
     let arr_f = |x: &serde_json::Value| -> Result<[f64; J], &str> {
@@ -285,9 +290,12 @@ fn cal_from(v: &serde_json::Value) -> Result<CalIn, String> {
         Ok(a)
     };
     let lr = v["k0"].as_array().map_or(0, |a| a.len());
-    let mut kmin = [0i32; NDL];
-    for (l, y) in kmin.iter_mut().enumerate() {
-        *y = v["kmin"][l].as_i64().ok_or(BAD)? as i32;
+    if v["kmin"].as_array().map(|a| a.len()) != Some(ndl) {
+        return Err(BAD.into());
+    }
+    let mut kmin = [0i32; NDL_MAX];
+    for (l, y) in kmin.iter_mut().enumerate().take(ndl) {
+        *y = v["kmin"][l].as_i64().and_then(|x| i32::try_from(x).ok()).ok_or(BAD)?;
     }
     let mut c = CalIn { kmin, y0: arr_f(&v["y0"])?, ys: arr_f(&v["ys"])?, tq: Vec::new(), k0: Vec::new(), ks: Vec::new(), kb: Vec::new() };
     for r in 0..lr {
@@ -355,11 +363,11 @@ pub fn perm_hash(perm: &[i64]) -> u64 {
 /// runs, then with its key and hashes when the index is complete).
 fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
     let groups: Vec<serde_json::Value> = ix.groups.iter().map(|g| serde_json::json!({
-        "e_inv": g.e_inv, "csgl": g.csgl, "cal": g.cal.as_ref().map(cal_json),
+        "e_inv": g.e_inv, "csgl": g.csgl, "cal": g.cal.as_ref().map(|c| cal_json(c, ix.meta.ndl())),
     })).collect();
     let meta = serde_json::json!({
         "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
-        "npow": ix.meta.npow, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
+        "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "ddec": ix.meta.ddec, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
@@ -515,7 +523,7 @@ pub fn save_rest(ix: &Index2, dir: &str) {
     write_file(&f("esc_val.bin"), &esc.iter().map(|e| e.1).collect::<Vec<_>>());
     let mut w = Wr::default();
     for (c, t) in ix.cl.iter().zip(ix.ctab.iter()) {
-        put_cluster(&mut w, c, t);
+        put_cluster(&mut w, c, t, ix.meta.ndl());
     }
     write_file(&f("clusters.bin"), &w.0);
     index_json(ix, dir, None);
@@ -685,7 +693,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     let t = Timer::new();
     let missing = |e: String| format!("no index of this fit and these options is saved in {dir} ({e}); build it with --rebuild (v2::rebuild)");
     let damaged = |what: &str| format!("{dir}: {what}; rebuild the index");
-    let nl = NDL + p.meta.rlv.len();
+    let nl = p.meta.dlv.len() + p.meta.rlv.len();
     // every file opened and mapped through one descriptor of `dir`, under the shared install lock (held only for this:
     // the checks and the plans below need no lock, so an open never holds up an install for long)
     let lock = Lock::install(&parent_of(dir), false)?;
@@ -733,6 +741,11 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
     if Some(meta.npow as u64) != v["npow"].as_u64() {
         return Err(format!("{dir} was built for a guarantee of 2^{} rows, these options give 2^{}; rebuild it", v["npow"], meta.npow));
     }
+    // the deterministic levels and the levels that decide (in the key too; checked against what this open derived)
+    let dlv_was: Option<Vec<usize>> = v["dlv"].as_array().and_then(|a| a.iter().map(|x| x.as_u64().map(|y| y as usize)).collect());
+    if dlv_was.as_ref() != Some(&meta.dlv) || v["ddec"].as_u64() != Some(meta.ddec as u64) {
+        return Err(format!("{dir} was built with deterministic levels {} deciding at {}, these options give {:?} deciding at {:#b}; rebuild it", v["dlv"], v["ddec"], meta.dlv, meta.ddec));
+    }
     let gv = v["groups"].as_array().filter(|a| a.len() == groups.len()).ok_or(format!("{dir}/index.json does not hold {} groups; rebuild the index", groups.len()))?;
     for (gp, gv) in groups.iter_mut().zip(gv) {
         gp.e_inv = gv["e_inv"].as_f64().ok_or(format!("{dir}/index.json: a group has no e_inv; rebuild the index"))?;
@@ -742,7 +755,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         }
         gp.csgl = csgl;
         if !gv["cal"].is_null() {
-            let cal = cal_from(&gv["cal"]).map_err(|e| format!("{dir}/{e}"))?;
+            let cal = cal_from(&gv["cal"], meta.ndl()).map_err(|e| format!("{dir}/{e}"))?;
             if cal.tq.len() != gp.rates.len() {
                 return Err(format!("{dir}/index.json: a group's calibration has {} randomised levels, the plan {}; rebuild the index", cal.tq.len(), gp.rates.len()));
             }
@@ -753,7 +766,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, design_c: Option<&[f64]>
         return Err(damaged("a group's plan has another level count"));
     }
     let mut r = Rd(&cbuf);
-    let (cl, ctab): (Vec<Cl2>, Vec<Vec<kern::CTab>>) = (0..k).map(|_| get_cluster(&mut r)).collect::<Result<Vec<_>, String>>().map_err(|e| format!("{dir}/{e}"))?.into_iter().unzip();
+    let (cl, ctab): (Vec<Cl2>, Vec<Vec<kern::CTab>>) = (0..k).map(|_| get_cluster(&mut r, meta.ndl())).collect::<Result<Vec<_>, String>>().map_err(|e| format!("{dir}/{e}"))?.into_iter().unzip();
     if !r.0.is_empty() {
         return Err(format!("{dir}/clusters.bin has data past its {k} clusters; rebuild the index"));
     }
@@ -980,7 +993,7 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     h.str(&p.partition_name);
     h.str(&p.partition_id);
     // the options not already in the fit and profile above (the clusters, randomised levels and profile are)
-    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items]);
+    h.usizes(&[o.design_exact as usize, o.nusort as usize, o.csg_plain as usize, o.cal_items, o.ddec as usize]);
     match o.nguar {
         Some(x) => h.pod(&[1.0, x]),
         None => h.u64(0),
@@ -1000,6 +1013,12 @@ impl Index2 {
         h.usizes(&[self.n(), self.k(), self.meta.npow as usize]);
         h.usizes(&self.meta.dlv);
         h.usizes(&self.meta.rlv);
+        // which deterministic levels decide: hashed only when not all, so an index that decides at all of them hashes
+        // as before the option existed
+        if self.meta.ddec != u32::MAX {
+            h.str("ddec");
+            h.u64(self.meta.ddec as u64);
+        }
         for g in self.groups.iter() {
             h.pod(&g.sig);
             h.pod(&[g.lamsum]);
@@ -1100,7 +1119,7 @@ impl Index2 {
         h.big_pod(&e);
         for (c, t) in self.cl.iter().zip(self.ctab.iter()) {
             let mut w = Wr::default();
-            put_cluster(&mut w, c, t);
+            put_cluster(&mut w, c, t, self.meta.ndl());
             h.bytes(&w.0);
         }
         h.pod(&self.anchors[..]);
@@ -1335,8 +1354,13 @@ pub(crate) mod tests {
             ks: (0..nr).map(|_| core::array::from_fn(|_| f())).collect(),
             kb: (0..nr).map(|_| core::array::from_fn(|j| if j % 2 == 0 { 4 } else { 8 })).collect(),
         };
-        let text = serde_json::to_string(&cal_json(&cal)).unwrap();
-        let back = cal_from(&serde_json::from_str(&text).unwrap()).unwrap();
+        let text = serde_json::to_string(&cal_json(&cal, NDL_MAX)).unwrap();
+        let back = cal_from(&serde_json::from_str(&text).unwrap(), NDL_MAX).unwrap();
+        // with fewer deterministic levels only theirs are stored, and another count is refused
+        let few = CalIn { kmin: core::array::from_fn(|l| if l < 2 { cal.kmin[l] } else { 0 }), ..cal.clone() };
+        let t2 = serde_json::to_string(&cal_json(&few, 2)).unwrap();
+        assert_eq!(format!("{:?}", cal_from(&serde_json::from_str(&t2).unwrap(), 2).unwrap()), format!("{few:?}"));
+        assert!(cal_from(&serde_json::from_str(&t2).unwrap(), 3).is_err());
         assert_eq!(format!("{:?}", back), format!("{:?}", cal));
         let bits = |c: &CalIn| -> Vec<u64> {
             c.y0.iter().chain(&c.ys).chain(c.k0.iter().flatten()).chain(c.ks.iter().flatten()).map(|x| x.to_bits())

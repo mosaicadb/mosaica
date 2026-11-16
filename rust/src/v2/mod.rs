@@ -32,6 +32,15 @@ pub struct BuildOptions {
     /// Another randomised level schedule (cumulative bytes, rising from above the last deterministic level); the union
     /// bound's constant follows the number of levels.
     pub rlv: Option<Vec<usize>>,
+    /// Another deterministic level schedule (cumulative bytes, rising, below the first randomised level), in place of
+    /// the fit's DLV; its length is the index's number of deterministic levels (1 to NDL_MAX). The randomised levels'
+    /// budgets start after its last level, and no constant changes (research/levels-clusters' `--dlv`, as a build
+    /// option: the codes are built for it).
+    pub dlv: Option<Vec<usize>>,
+    /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: at every level, the
+    /// default). A level that does not decide still reads its codes and advances the sums; the bound of a later level
+    /// does not depend on it. Nothing stored changes; it is recorded in the index (`Meta2::ddec`) and its key.
+    pub ddec: u32,
     /// Design the randomised rates with the exact-law constant of each set of coded blocks, not the sub-Gaussian one.
     pub design_exact: bool,
     /// Sort each cluster's rows by their residual norm (the norm sort) instead of by key.
@@ -54,7 +63,7 @@ pub struct BuildOptions {
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
-        BuildOptions { profile: None, clusters: None, rlv: None, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, tune_malloc: false, keep_index: false }
+        BuildOptions { profile: None, clusters: None, rlv: None, dlv: None, ddec: u32::MAX, design_exact: false, nusort: false, nguar: None, csg_plain: false, cal_items: CAL_ITEMS, tune_malloc: false, keep_index: false }
     }
 }
 
@@ -66,7 +75,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 pub use store::Arr;
 
-pub const NDL: usize = 6;
+/// The most deterministic levels an index can have. An index has `Meta2::ndl` of them: the fit's DLV, or
+/// `BuildOptions::dlv`; the per-level arrays below are this long, of which the first ndl are used.
+pub const NDL_MAX: usize = 6;
 pub const J: usize = 4;
 pub const BLK: usize = 32;
 pub const LAMS: [f64; 6] = [2.0, 2.3, 2.6, 3.0, 3.5, 4.2];
@@ -439,9 +450,9 @@ pub struct GroupPlan2 {
     pub sig: Vec<f32>,
     pub lamsum: f32,
     pub d: Vec<Vec<f32>>,
-    pub pconst: [f32; NDL],
-    pub kmin: [i32; NDL],
-    pub ntab: [[f32; 16]; NDL],
+    pub pconst: [f32; NDL_MAX],
+    pub kmin: [i32; NDL_MAX],
+    pub ntab: [[f32; 16]; NDL_MAX],
     pub dt: Vec<f32>,
     pub ridx: Vec<u16>,
     pub nb: [usize; J],
@@ -476,7 +487,7 @@ pub struct GroupPlan2 {
 /// log2), the tan(phi) levels, and the kappa grids (start, steps per octave, bits) per randomised level and block.
 #[derive(Clone, Debug)]
 pub struct CalIn {
-    pub kmin: [i32; NDL],
+    pub kmin: [i32; NDL_MAX],
     pub y0: [f64; J],
     pub ys: [f64; J],
     pub tq: Vec<[[f32; 15]; J]>,
@@ -605,13 +616,14 @@ impl GroupPlan2 {
         // orthogonal basis
         let lamsum = p.r2.as_ref().map_or(lam.iter().sum::<f64>(), |r| r[g]) as f32;
         let (moves, states) = det_alloc_tree(lam, pq, dt_, &m.dlv);
+        let ndl = m.dlv.len();
         let gc = |l: usize, c: usize| -> f64 {
             let s = states[l][c];
             dt_.d[s.0 as usize][s.1 as usize]
         };
-        let d: Vec<Vec<f32>> = (0..NDL).map(|l| (0..n).map(|c| (((lam[c] * gc(l, c) + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect()).collect();
-        let mut pconst = [0f32; NDL];
-        for l in 0..NDL {
+        let d: Vec<Vec<f32>> = (0..ndl).map(|l| (0..n).map(|c| (((lam[c] * gc(l, c) + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect()).collect();
+        let mut pconst = [0f32; NDL_MAX];
+        for l in 0..ndl {
             let mut s = 0.0;
             for c in 0..n {
                 let dd = d[l][c] as f64;
@@ -620,7 +632,7 @@ impl GroupPlan2 {
             pconst[l] = (s / lamsum as f64).sqrt() as f32;
         }
         // randomised design on the fitted final distortion
-        let lres: Vec<f64> = (0..n).map(|c| lam[c] * gc(NDL - 1, c)).collect();
+        let lres: Vec<f64> = (0..n).map(|c| lam[c] * gc(ndl - 1, c)).collect();
         let dt: Vec<f32> = (0..n).map(|c| (((lres[c] + 1e-10) / (pq[c] + 1e-10)).powf(0.25)) as f32).collect();
         let ai: Vec<f64> = (0..n).map(|c| (lres[c] * pq[c]).sqrt()).collect();
         let mut order: Vec<usize> = (0..n).collect();
@@ -634,7 +646,7 @@ impl GroupPlan2 {
         }
         boff[J] = n;
         let sj: Vec<f64> = (0..J).map(|j| order[boff[j]..boff[j + 1]].iter().map(|&c| ai[c]).sum()).collect();
-        let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[NDL - 1])).collect();
+        let budgets: Vec<usize> = m.rlv.iter().map(|&b| 8 * (b - m.dlv[ndl - 1])).collect();
         let rv = match design_c {
             Some(cs) => derive::design_by(&sj, &nb, &budgets, &|set| cs[set as usize], tof, QUANTUM),
             None => derive::design(&sj, &nb, &budgets, m.csg, tof, QUANTUM),
@@ -651,7 +663,7 @@ impl GroupPlan2 {
         }
         // levels: deterministic parts
         let mut levels = Vec::new();
-        for l in 0..NDL {
+        for l in 0..ndl {
             let fv: Vec<(Field, [f32; 16])> = moves[l].iter().map(|mv| match *mv {
                 Move::Tree { c, from, to } => {
                     let mut exp = [0f32; 16];
@@ -711,8 +723,8 @@ impl GroupPlan2 {
             lamsum,
             d,
             pconst,
-            kmin: [0; NDL],
-            ntab: [[0.0; 16]; NDL],
+            kmin: [0; NDL_MAX],
+            ntab: [[0.0; 16]; NDL_MAX],
             dt,
             ridx,
             nb,
@@ -746,6 +758,7 @@ impl GroupPlan2 {
     /// and tan(phi) (1 row).
     pub fn set_rows(&mut self) {
         let nr = self.rates.len();
+        let ndl = self.levels.len() - nr;
         self.rrow = vec![Vec::new(); nr];
         for lr in 0..nr {
             let mut r = if lr == 0 { 2 * J } else { 0 };
@@ -753,7 +766,7 @@ impl GroupPlan2 {
                 self.rrow[lr].push(r);
                 r += self.kbits[lr][j] as usize / 4 + 1;
             }
-            self.levels[NDL + lr].srows = r;
+            self.levels[ndl + lr].srows = r;
         }
     }
     /// Scalar code tables from calibration: deterministic norms (offset), |y| and kappa (geometric grids with an
@@ -762,7 +775,7 @@ impl GroupPlan2 {
         let CalIn { kmin, y0, ys, tq, k0, ks, kb } = cal.clone();
         self.cal = Some(cal);
         self.kmin = kmin;
-        for l in 0..NDL {
+        for l in 0..self.levels.len() - self.rates.len() {
             for c in 0..15 {
                 self.ntab[l][c] = 2f64.powf((OFF[c] + kmin[l]) as f64 / 16.0) as f32;
             }
@@ -934,13 +947,21 @@ pub struct Meta2 {
     /// its own (query, threshold) or its own k-NN query only: reusing an item's intervals for another threshold, or a
     /// threshold's intervals for a later k-NN query, needs the two-sided budget (ln(1/delta) larger by ln 2).
     pub npow: u32,
+    /// Threshold queries decide at deterministic level l only when bit l is set (`BuildOptions::ddec`); a level that
+    /// does not decide still reads its codes and advances the sums.
+    pub ddec: u32,
 }
 impl Meta2 {
+    /// The number of deterministic levels (at most NDL_MAX).
+    #[inline]
+    pub fn ndl(&self) -> usize {
+        self.dlv.len()
+    }
     pub fn nl(&self) -> usize {
-        NDL + self.rlv.len()
+        self.dlv.len() + self.rlv.len()
     }
     pub fn level_bytes(&self, l: usize) -> usize {
-        if l < NDL { self.dlv[l] } else { self.rlv[l - NDL] }
+        if l < self.ndl() { self.dlv[l] } else { self.rlv[l - self.ndl()] }
     }
 }
 
@@ -955,7 +976,7 @@ pub struct Cl2 {
     pub mhat: Arc<Vec<f64>>,
     pub mv32: Arc<Vec<f32>>, // V_q^T m
     pub wmr: Arc<Vec<f32>>,  // R_j (mv*dt) by position
-    pub bm: [f64; NDL],
+    pub bm: [f64; NDL_MAX],
     pub b2: [f64; J],
     pub l1m: [f32; J + 1], // |wm| sums: det, then per block
     pub btot: f64,
@@ -1414,11 +1435,12 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
     let nblk = (nc + BLK - 1) / BLK;
     let nl = meta.nl();
     let nr = meta.rlv.len();
+    let ndl = meta.ndl();
     let mut lc: Vec<Vec<u8>> = (0..nl).map(|l| vec![0u8; nblk * gp.levels[l].units * 16]).collect();
     let mut ls: Vec<Vec<u8>> = (0..nl).map(|l| vec![0u8; nblk * gp.levels[l].srows * 16]).collect();
     let mut esc = Vec::new();
     let mut cal = if calib {
-        Some(Calib { kpool: vec![Vec::new(); NDL], ypool: vec![Vec::new(); J], tpool: vec![vec![Vec::new(); J]; nr], kapool: vec![vec![Vec::new(); J]; nr] })
+        Some(Calib { kpool: vec![Vec::new(); ndl], ypool: vec![Vec::new(); J], tpool: vec![vec![Vec::new(); J]; nr], kapool: vec![vec![Vec::new(); J]; nr] })
     } else {
         None
     };
@@ -1430,7 +1452,7 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
         let z = &it.z[i * n..(i + 1) * n];
         let s = svec[i] as f64;
         val.iter_mut().for_each(|v| *v = 0.0);
-        for l in 0..NDL {
+        for l in 0..ndl {
             let lp = &gp.levels[l];
             for f in &lp.parts[0].fields {
                 let c = f.widx as usize;
@@ -1523,22 +1545,22 @@ fn encode_cluster(it: Items2, gp: &GroupPlan2, codes: &DetTab, et: &ExpTab, meta
                 code += 1;
             }
             if code <= 254 {
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j, (code & 15) as u8);
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j + 1, (code >> 4) as u8);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j, (code & 15) as u8);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j + 1, (code >> 4) as u8);
                 yhv[j] = (pr * gp.ytab[j][code as usize]) as f64;
             } else {
                 let mut v = roundup_abs(need + 1e-30, 4096.0, -60.0) as f32;
                 while (v as f64) < need {
                     v *= 1.0 + 2e-7;
                 }
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j, 15);
-                setnib(&mut ls[NDL], gp.levels[NDL].srows, i, 2 * j + 1, 15);
-                esc.push((NDL as u8, 1 + j as u8, i as u32, v));
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j, 15);
+                setnib(&mut ls[ndl], gp.levels[ndl].srows, i, 2 * j + 1, 15);
+                esc.push((ndl as u8, 1 + j as u8, i as u32, v));
                 yhv[j] = v as f64;
             }
         }
         for lr in 0..nr {
-            let l = NDL + lr;
+            let l = ndl + lr;
             let lp = &gp.levels[l];
             let mut ubase = 0;
             for part in &lp.parts {
@@ -1637,8 +1659,8 @@ fn cluster_info(gp: &GroupPlan2, m: &[f32], rots: &[Vec<f64>], ah: &[i16], x2: f
         }
         b2[j] = (gp.boff[j]..gp.boff[j + 1]).map(|pp| mvt_pos[pp].powi(2)).sum();
     }
-    let mut bm = [0f64; NDL];
-    for l in 0..NDL {
+    let mut bm = [0f64; NDL_MAX];
+    for l in 0..gp.d.len() {
         for c in 0..n {
             let dd = gp.d[l][c] as f64;
             bm[l] += mv[c] * mv[c] * dd * dd;
@@ -1680,7 +1702,7 @@ pub fn plans(p: &Params, prof: &[f64], rows: usize, o: &BuildOptions, design_c: 
     if nguar < rows as f64 {
         log(format!("the guarantee's N, {nguar}, is below the {rows} rows built: the guarantee covers only {nguar} rows"));
     }
-    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32 };
+    let meta = Meta2 { n, dlv: p.meta.dlv.clone(), rlv: p.meta.rlv.clone(), npow: nguar.log2().ceil() as u32, ddec: o.ddec };
     let rots: Vec<Vec<f64>> = (0..J).map(|j| haar_rotation(p.meta.bounds[j + 1] - p.meta.bounds[j], SEED, j as u64)).collect();
     let t2 = rand_tan2();
     log(format!("randomised code tan^2 by rate {:?}", t2.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>()));
@@ -1821,7 +1843,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
             continue;
         }
         let pool = |f: &dyn Fn(&Calib) -> &Vec<f64>| -> Vec<f64> { mine.iter().flat_map(|c| f(c).iter().copied()).collect() };
-        let kmin: [i32; NDL] = core::array::from_fn(|l| quantile(&mut pool(&|c| &c.kpool[l]), 0.003).floor() as i32);
+        let kmin: [i32; NDL_MAX] = core::array::from_fn(|l| if l < meta.ndl() { quantile(&mut pool(&|c| &c.kpool[l]), 0.003).floor() as i32 } else { 0 });
         // a geometric grid covering [q_lo, q_hi] of log2 values with at most 254 steps, at most `smax` per octave
         let grid = |v: &mut Vec<f64>, smax: f64| -> (f64, f64) {
             if v.is_empty() {
@@ -2063,6 +2085,19 @@ pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String
         if !(nv > 0.0) {
             return Err(format!("the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count"));
         }
+    }
+    if let Some(new) = &o.dlv {
+        let first_r = o.rlv.as_ref().unwrap_or(&p.meta.rlv).first().copied().unwrap_or(usize::MAX);
+        if new.is_empty() || new.len() > NDL_MAX || new[0] == 0 || !new.windows(2).all(|w| w[0] < w[1]) || new[new.len() - 1] >= first_r || new[new.len() - 1] > p.meta.n {
+            return Err(format!("the deterministic levels {new:?} must be 1 to {NDL_MAX} rising byte counts, from 1, below the first randomised level ({first_r}) and at most one byte per dimension ({})", p.meta.n));
+        }
+        p.meta.dlv = new.clone();
+    }
+    if p.meta.dlv.is_empty() || p.meta.dlv.len() > NDL_MAX {
+        return Err(format!("the fit's deterministic levels {:?} are not 1 to {NDL_MAX} levels; give others with BuildOptions::dlv (--dlv)", p.meta.dlv));
+    }
+    if o.ddec != u32::MAX && o.ddec >> p.meta.dlv.len() != 0 {
+        return Err(format!("ddec {:#b} names a deterministic level beyond this index's {} (levels 0 to {})", o.ddec, p.meta.dlv.len(), p.meta.dlv.len() - 1));
     }
     if let Some(new) = &o.rlv {
         let top = p.meta.dlv.last().copied().unwrap_or(0);
