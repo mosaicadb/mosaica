@@ -119,6 +119,22 @@ pub fn check_args_of(a: &[String]) -> Result<(), String> {
             if *m == "certify-layout" && (!has("--ds") || !has("--lnd")) {
                 return Err("certify-layout needs --ds D1,D2,.. (2 to 4 block dimensions) and --lnd LN_DELTA".into());
             }
+            let val = |f: &str| a.iter().position(|x| x == f).map(|i| a[i + 1].as_str());
+            if let Some(v) = val("--time-cap") {
+                if !v.parse::<f64>().is_ok_and(|c| c >= 0.0) {
+                    return Err(format!("--time-cap is a number of seconds, at least 0, not {v}"));
+                }
+            }
+            if let Some(v) = val("--ds") {
+                if !v.split(',').all(|d| d.trim().parse::<usize>().is_ok_and(|d| d >= 4)) {
+                    return Err(format!("--ds is 2 to 4 block dimensions of at least 4 each, not {v}"));
+                }
+            }
+            if let Some(v) = val("--lnd") {
+                if !v.parse::<f64>().is_ok_and(|l| l < 0.0 && l.is_finite()) {
+                    return Err(format!("--lnd is ln delta, a negative number, not {v}"));
+                }
+            }
         } else if let Some(f) = flags.iter().find(|f| takes.contains(f)) {
             return Err(format!("{f} is {m}'s (vexact {m} ...)"));
         }
@@ -179,7 +195,10 @@ pub fn cert_cmd() {
     if has_mode("certify-layout") {
         let ds = list("--ds");
         let lnd: f64 = arg_str("--lnd", "").parse().unwrap_or_else(|_| exit2("--lnd is a number (ln delta)"));
-        let cap: f64 = arg_str("--time-cap", "600").parse().unwrap_or_else(|_| exit2("--time-cap is a number of seconds"));
+        let cap: f64 = arg_str("--time-cap", "600").parse().ok().filter(|c: &f64| *c >= 0.0).unwrap_or_else(|| exit2("--time-cap is a number of seconds, at least 0"));
+        if let Some(d) = ds.iter().find(|&&d| d < 4) {
+            exit2(&format!("--ds: a block has {d} dimensions; a certificate is for blocks of at least 4"));
+        }
         let x = vexact::certify::certify_layout(&ds, lnd, cap, &mut |s| eprintln!("{s}"));
         println!("{}", serde_json::json!({"ds": ds, "lnd": lnd, "X": x}));
     } else {
@@ -2129,6 +2148,12 @@ mod tests {
         ok("certify-layout --ds 15,15,15,15 --lnd -29.04 --time-cap 60");
         ok("cert-layouts --dims 64,768");
         refused("certify-layout --ds 15,15", "needs --ds");
+        refused("certify-layout --ds 1,15 --lnd -30", "at least 4");
+        refused("certify-layout --ds 15,x --lnd -30", "at least 4");
+        refused("certify-layout --ds 15,15 --lnd -30 --time-cap nan", "--time-cap");
+        refused("certify-layout --ds 15,15 --lnd -30 --time-cap -1", "--time-cap");
+        refused("certify-layout --ds 15,15 --lnd nan", "--lnd");
+        ok("certify-layout --ds 15,15 --lnd -30 --time-cap inf");
         refused("certify-layout --ds 15,15 --lnd -30 --index D", "runs alone");
         refused("--v2 --index D certify-layout --ds 15,15 --lnd -30", "runs alone");
         refused("--v2 --index D e2e --lnd -30", "certify-layout's");

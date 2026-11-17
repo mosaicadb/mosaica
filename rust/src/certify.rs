@@ -218,13 +218,30 @@ impl<'a> Tables<'a> {
     }
 }
 
+/// The layouts and budgets a certificate is for: 2 to 4 blocks of at least 4 dimensions each (the coordinate density
+/// (1 - s^2)^((d - 3) / 2) is singular or degenerate at the ends below that; the fit's blocks have at least 15), and a
+/// ln delta that is a negative number (a NaN would let every cell pass).
+fn check_layout(ds: &[usize], lnd: f64) -> Result<(), String> {
+    if !(2..=4).contains(&ds.len()) {
+        return Err(format!("a certificate is for 2 to 4 blocks, not {}", ds.len()));
+    }
+    if let Some(d) = ds.iter().find(|&&d| d < 4) {
+        return Err(format!("a block has {d} dimensions; a certificate is for blocks of at least 4"));
+    }
+    if !(lnd < 0.0) || !lnd.is_finite() {
+        return Err(format!("ln delta is a negative number, not {lnd}"));
+    }
+    Ok(())
+}
+
 /// Whether the lattice upper bound of the tail at X is at most exp(lnd) on every cell of the share simplex: Ok(false)
 /// when a cell still fails at Kmax or the deadline passes; an error when the grid cannot hold the layout (certify.py
 /// asserts). A cell whose sum is not a number fails here (in numpy it would pass); none has been seen.
 pub fn certify(ds: &[usize], lnd: f64, x: f64, deadline: Instant, g: &Grid) -> Result<bool, String> {
+    check_layout(ds, lnd)?;
     let j = ds.len();
-    if !(2..=4).contains(&j) {
-        return Err(format!("a certificate is for 2 to 4 blocks, not {j}"));
+    if !x.is_finite() || x <= 0.0 {
+        return Err(format!("X is a positive number, not {x}"));
     }
     let (eta, m, k0) = (g.eta, g.m, g.k0);
     let lam = x;
@@ -575,8 +592,16 @@ pub fn ln_delta(items: usize, levels: usize, eps: f64) -> f64 {
 /// that certifies (six tries, 0.002 apart), or None within `time_cap` seconds (or when the grid cannot hold the
 /// layout).
 pub fn certify_layout(ds: &[usize], lnd: f64, time_cap: f64, log: &mut dyn FnMut(String)) -> Option<f64> {
+    if let Err(e) = check_layout(ds, lnd) {
+        log(format!("certify {ds:?} ln delta {lnd:.4}: {e}"));
+        return None;
+    }
+    if !(time_cap >= 0.0) {
+        log(format!("certify {ds:?}: the time cap is a number of seconds, at least 0, not {time_cap}"));
+        return None;
+    }
     let t0 = Instant::now();
-    let deadline = t0 + Duration::from_secs_f64(time_cap.clamp(0.0, 1e9));
+    let deadline = t0 + Duration::from_secs_f64(time_cap.min(1e9));
     let g = Grid::for_dims(ds);
     let pred = sphere_constant(ds.iter().sum::<usize>() + 2 * ds.len() - 2, lnd);
     let m0 = ((pred + 0.008) * 1000.0).ceil() as i64;
@@ -717,6 +742,57 @@ mod tests {
         // a deadline already passed certifies nothing
         assert_eq!(certify(&[15, 15], -30.0, 6.0, Instant::now() - Duration::from_secs(1), &g), Ok(false));
         assert_eq!(certify_layout(&[15, 15], -30.0, 0.0, &mut |_| {}), None);
+        // blocks too small for the density, budgets and X that are not numbers, and time caps that are not: refused
+        // with an error or a log line, never a panic
+        for ds in [&[1usize, 15][..], &[15, 3], &[2, 2, 2]] {
+            assert!(certify(ds, -30.0, 6.0, far, &g).is_err(), "{ds:?}");
+            let mut said = Vec::new();
+            assert_eq!(certify_layout(ds, -30.0, 60.0, &mut |s| said.push(s)), None);
+            assert!(said.iter().any(|s| s.contains("at least 4")), "{said:?}");
+        }
+        assert_eq!(certify_layout(&[], -30.0, 60.0, &mut |_| {}), None);
+        for lnd in [f64::NAN, 0.0, 1.0, f64::NEG_INFINITY] {
+            assert!(certify(&[15, 15], lnd, 6.0, far, &g).is_err(), "{lnd}");
+            assert_eq!(certify_layout(&[15, 15], lnd, 60.0, &mut |_| {}), None);
+        }
+        assert!(certify(&[15, 15], -30.0, f64::NAN, far, &g).is_err());
+        for cap in [f64::NAN, -1.0] {
+            let mut said = Vec::new();
+            assert_eq!(certify_layout(&[15, 15], -30.0, cap, &mut |s| said.push(s)), None);
+            assert!(said.iter().any(|s| s.contains("time cap")), "{said:?}");
+        }
+        assert_eq!(certify_layout(&[15, 15], -28.0, f64::INFINITY, &mut |_| {}), Some(5.089));
+    }
+
+    /// The failing side: certify() at a fixed X just below a pass/fail cut-off in ln delta (fails) and just above it
+    /// (certifies), for 2, 3 and 4 blocks, as certify.py answers there; the points are 5e-7 outside the interval that
+    /// holds the cut-off, half the shift the REL margin makes, so a port without the margin, or one that certifies too
+    /// easily, fails here. And two searches that fail at their first X and certify at a later step, as in certify.py.
+    #[test]
+    fn the_failing_side_matches_certify_py() {
+        let f = fixture();
+        let far = Instant::now() + Duration::from_secs(3600);
+        let cuts = f["cutoffs"].as_array().unwrap();
+        assert_eq!(cuts.len(), 6);
+        let blocks = |c: &serde_json::Value| -> Vec<usize> { c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect() };
+        for c in cuts {
+            let ds = blocks(c);
+            let (lnd, x, ok) = (c["lnd"].as_f64().unwrap(), c["X"].as_f64().unwrap(), c["ok"].as_bool().unwrap());
+            assert_eq!(certify(&ds, lnd, x, far, &Grid::for_dims(&ds)), Ok(ok), "{ds:?} at X {x}, ln delta {lnd}");
+        }
+        // each cut-off has its failing point and its certifying point
+        for n in [2, 3, 4] {
+            let oks: Vec<bool> = cuts.iter().filter(|c| blocks(c).len() == n).map(|c| c["ok"].as_bool().unwrap()).collect();
+            assert_eq!(oks, [false, true], "{n} blocks");
+        }
+        for c in f["later"].as_array().unwrap() {
+            let ds = blocks(c);
+            let lnd = c["lnd"].as_f64().unwrap();
+            let mut tries = 0;
+            let got = certify_layout(&ds, lnd, 1e6, &mut |_| tries += 1);
+            assert_eq!((got, tries), (c["X"].as_f64(), c["tries"].as_u64().unwrap() as usize), "{ds:?} at {lnd}");
+            assert!(tries > 1);
+        }
     }
 
     #[test]

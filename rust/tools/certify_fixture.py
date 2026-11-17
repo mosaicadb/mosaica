@@ -1,7 +1,8 @@
 # The fixture of src/certify.rs's tests (testdata/certify_fixture.json): scipy's values of the special functions the
 # port implements (gammaln, betainc, betaincinv, certify.py's sphere_constant) and certify.py's X on a grid of layouts
 # (the fit's four-block layouts of several dimensions, two- and three-block subsets of them, each at the budgets of
-# N = 2^10, 2^20 and 2^30). The layouts and budgets come from the Rust binary (`vexact cert-layouts`), so the layout
+# N = 2^10, 2^20 and 2^30), certify() on both sides of three pass/fail cut-offs, and two searches that certify after
+# failing at their first X. The layouts and budgets come from the Rust binary (`vexact cert-layouts`), so the layout
 # rule lives only there. The tests then compare the port with these values without Python.
 #
 # usage: python3 -I certify_fixture.py VEXACT_BINARY [OUT.json]
@@ -12,6 +13,10 @@ import certify  # noqa: E402
 from scipy.special import betainc, betaincinv, gammaln  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# (blocks, X, ln delta ends of an interval holding the cut-off where certify() turns from false to true), measured
+# by bisection with both implementations
+CUTOFFS = [([31, 63], 6.9, -35.5156978313, -35.5156977894), ([31, 47, 79], 7.0, -31.9187998027, -31.9187997608),
+           ([15, 15, 15, 15], 6.0, -29.0154239032, -29.0154238986)]
 
 
 def layouts(vexact, dims):
@@ -44,6 +49,18 @@ def main():
                 X = certify.certify_layout(ds, lnd, 1e6, log=lambda s: print(s, file=sys.stderr))
                 grid.append(dict(n0=n0, ds=ds, lnd=lnd, X=X, seconds=round(time.time() - t, 1)))
     fx["certs"] = grid
+    # the failing side: certify() at a fixed X just below and just above a pass/fail cut-off in ln delta (5e-7 outside
+    # the interval that holds the cut-off, half the REL margin's shift), for 2, 3 and 4 blocks; and layouts whose
+    # search fails at its first X and certifies at a later step
+    fx["cutoffs"] = []
+    for ds, X, lo, hi in CUTOFFS:
+        for lnd in (lo - 5e-7, hi + 5e-7):
+            fx["cutoffs"].append(dict(ds=ds, X=X, lnd=lnd, ok=certify.certify(ds, lnd, X, time.time() + 1e6)))
+    fx["later"] = []
+    for ds, lnd in [([15, 15], -32.4), ([15, 15, 15], -37.1)]:
+        tries = []
+        X = certify.certify_layout(ds, lnd, 1e6, log=tries.append)
+        fx["later"].append(dict(ds=ds, lnd=lnd, X=X, tries=len(tries)))
     with open(out, "w") as f:
         json.dump(fx, f, indent=1)
     print(f"wrote {out}: {len(grid)} certificates")
