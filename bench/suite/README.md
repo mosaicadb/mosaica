@@ -232,6 +232,12 @@ the k-NN boundaries and the thresholds are exact up to f32 rounding, computed wi
 would need 80 GB at 100M). No answer dumps and no check stage: exact k-NN is compared with the streaming truth, the
 threshold answer sizes are recorded, and approximate k-NN gets its recall.
 
+Items of an exact k-NN answer that differ from that truth are examined with check.py's rounding allowance (f16 vector
+and query, 2^-11 each), plus n 2^-24 for the truth's f32 sums (`scale_diffs.csv`, marked `~` or `WRONG` in the report).
+The streaming truth itself applies no allowance. In the scale test the few that differ are exact ties (two rows with
+bit-identical stored vectors, one in the answer and one not) or pairs within about 2e-6 of each other whose order flips
+when the query is rounded to f16, as vexact rounds it: with the f16 query vexact's item is the larger one.
+
 **Systems**: vexact (exact, threshold, approximate), faiss flat over f16 (`IndexScalarQuantizer` QT_fp16, mapped;
 10 queries once: a scan at 100M reads 100 GB) and faiss IVF on disk (approximate). `scale-test` is the same code on two
 parts: 200k inside 500k inside 1M.

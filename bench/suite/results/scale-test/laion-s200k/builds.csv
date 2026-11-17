@@ -1,4 +1,4 @@
 system,status,build_s,threads,index_gib,peak_rss_gib,detail
 faiss-flat-mmap,ok,1.0,3,0.191,0.71,"{""storage"": ""f16""}"
 faiss-ivf-disk,ok,56.6,3,0.196,1.03,"{""nlist"": 2048, ""storage"": ""f16""}"
-vexact,ok,114.7,3,0.653,1.97,"{""fit_s"": 63.2, ""encode_s"": 34.6, ""sample"": true}"
+vexact,ok,110.1,3,0.653,1.97,"{""fit_s"": 62.1, ""encode_s"": 33.0, ""sample"": true}"
