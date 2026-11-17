@@ -1879,7 +1879,7 @@ pub const R_ROWS: usize = 64;
 pub const R_KAPPA: f64 = 0.186;
 /// The exact k-NN seed in the same rows, saved when a filtered k-NN scans first: measured 1.18-1.45 ms against 0.19 us
 /// a row on 1M BioCLIP-2 (k 10 and 100), 6,200-7,600 rows; the lower end. The seed is the anchor search over the
-/// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at level 3, and 2k + 8 exact products:
+/// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at 16 bytes (`seed_level`), and 2k + 8 exact products:
 /// it grows with the number of anchors and with k, not with the clusters' rows. So at large k (beyond the 100
 /// measured) this constant underestimates it, which leans toward the index path (the seed is paid, not saved).
 pub const R_SEED: usize = 6000;
@@ -3250,8 +3250,13 @@ impl Dial {
     }
 }
 
+/// The level the seed reads: the deepest that ends within 16 bytes an item, else the first.
+pub fn seed_level(ix: &Index2) -> usize {
+    (0..ix.meta.nl()).rev().find(|&l| ix.meta.level_bytes(l) <= 16).unwrap_or(0)
+}
+
 /// A first k-th best score: the visible items of the 64 clusters with the largest bound, taken by centre score until
-/// 2,000 are read at level 3, and the best 2k + 8 of those by interval midpoint scored exactly.
+/// 2,000 are read at the seed's level (`seed_level`), and the best 2k + 8 of those by interval midpoint scored exactly.
 pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut Stats) -> f64 {
     let k = ix.k();
     let rr = ix.x2.sqrt();
@@ -3276,7 +3281,7 @@ pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut St
     cand.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     cand.truncate(64);
     let clusters: Vec<usize> = cand.iter().map(|&(_, ci)| ci).collect();
-    let seed_iv = probe(ix, pr, by_centre(ix, pr, clusters), vis, 3, 2000, st);
+    let seed_iv = probe(ix, pr, by_centre(ix, pr, clusters), vis, seed_level(ix), 2000, st);
     let take = (2 * kk + 8).min(seed_iv.len());
     let mut ex: Vec<f64> = seed_iv[..take].iter().map(|x| exact_value2(ix, pr, x.0 as usize)).collect();
     st.full_reads += take as u64;
