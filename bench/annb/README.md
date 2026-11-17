@@ -5,8 +5,9 @@ algorithm `vexact`. It then runs the index against the harness's own builds of h
 DiskANN and BLAS brute force on the harness's datasets. `bench/run.sh` remains the place for filtered runs and for
 checks against the oracle. This folder covers only the unfiltered protocol, run by the harness itself.
 
-- `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `set_visible`,
-  `fit_dial`. They depend on `rust/` by path and need no change to it.
+- `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `threshold`,
+  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` (used by
+  `bench/suite`) is not part of the harnesses' protocol.
 - `vexact/`: the algorithm folder the harness loads: `module.py`, `config.yml`, `Dockerfile`.
 - `install.sh`: copies the algorithm folder into a checkout, with `rust/` and `combined/core.py` taken from a pinned
   revision, and builds the `ann-benchmarks-vexact` image.
@@ -39,7 +40,7 @@ about 6 GB of download and 20 GB of memory to build, and the brute-force ground 
 benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
 `PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings use only `v2::open`,
 `v2::rebuild`, `BuildOptions`, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`,
-`Vis2::new`, `knn2` and `knn2_fast`. The pin is a merge of `research/exact-vector-search` (saved index, planner without
+`Vis2::new`, `knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`. The pin is a merge of `research/exact-vector-search` (saved index, planner without
 timing, levels-clusters options off by default) with this branch's AVX-512 basis products and integer levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.

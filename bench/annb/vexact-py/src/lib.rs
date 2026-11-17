@@ -1,12 +1,12 @@
-//! Python bindings over the fast-scan index for ANN-Benchmarks and VIBE: open a directory written by `rust/tools/fit.py`
-//! and answer k-NN queries one at a time, on one thread, exact or approximate.
+//! Python bindings over the fast-scan index for ANN-Benchmarks, VIBE and `bench/suite`: open a directory written by
+//! `rust/tools/fit.py` and answer k-NN queries (exact or approximate) and threshold queries one at a time, on one thread.
 use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
-use vexact::v2::q::{knn2, knn2_fast, pseudo_queries, Approx, Dial, KnnOut2, Plan, PlanMode, Vis2};
+use vexact::v2::q::{knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{open, rebuild, BuildOptions, Index2};
 
 #[pyclass(module = "vexact_py")]
@@ -147,6 +147,32 @@ impl Index {
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| knn2_fast(ix, ap, q, k, vis, nprobe, dial, plan).ents));
         Ok(ids(py, &ents, k))
+    }
+
+    /// The threshold query: every visible entity id whose stored vector x has q.x >= t, ascending (int64). `q` is taken
+    /// as given (pass a unit vector for cosine thresholds); the index stores unit vectors. The answer is exact: items the
+    /// index's bounds cannot decide are checked on their full vectors, as `threshold2` does through the planner
+    /// (as in `run2.rs` dbcmp's `index`). `verify` also checks every decided item's bounds against its full vector
+    /// (slow; for tests): a bound that failed raises an error.
+    #[pyo3(signature = (q, t, verify=false))]
+    fn threshold<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, verify: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let q = q.as_slice()?;
+        if q.len() != self.ix.n() {
+            return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), self.ix.n())));
+        }
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let (ents, viol) = py.detach(|| {
+            self.pool.install(|| {
+                let pr = prep2(ix, q);
+                let r = threshold2(ix, &pr, t, &Opts2 { vis, verify, want_iv: false, plan });
+                let ents: Vec<i64> = to_bitmap2(ix, &r.rows).iter().map(|e| e as i64).collect();
+                (ents, (r.st.viol_det, r.st.viol_rand))
+            })
+        });
+        if verify && viol != (0, 0) {
+            return Err(PyValueError::new_err(format!("bounds violated: {} deterministic, {} randomised", viol.0, viol.1)));
+        }
+        Ok(PyArray1::from_vec(py, ents))
     }
 
     /// Exact k-NN of every row of `qs` on all threads (for checks, not for timing).
