@@ -722,7 +722,7 @@ fn same_index(a: &Index2, b: &Index2) {
     assert_eq!((&a.ahat[..], &a.row_ent[..], &a.ent_row[..], &a.nukey[..]), (&b.ahat[..], &b.row_ent[..], &b.ent_row[..], &b.nukey[..]));
     assert_eq!((&a.coff, &a.soff, &a.vrow), (&b.coff, &b.soff, &b.vrow));
     let esc = |x: &Index2| {
-        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (*k, v.to_bits())).collect();
+        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (k, v.to_bits())).collect();
         e.sort_unstable();
         e
     };

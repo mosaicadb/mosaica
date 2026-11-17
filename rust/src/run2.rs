@@ -598,7 +598,7 @@ impl Ctx2 {
             ("ctab", ix.ctab.iter().flatten().map(|t| b(&t.th) + b(&t.tmax) + b(&t.step) + b(&t.off) + b(&t.err)).sum()),
             ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
             ("centres32", b(&ix.centres32)), ("apm+anchors32", b(&ix.apm) + b(&ix.anchors32)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
-            ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
+            ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.bytes()),
             ("nukey", b(&ix.nukey)), ("ent_xs+row_ent", b(&self.ent_xs) + b(&self.row_ent)),
             ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
         ];

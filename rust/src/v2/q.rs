@@ -1038,7 +1038,7 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
         let k = k0 + i;
         let s = sv.s[k] as f64;
         let code = nib(sp, 0, i);
-        let rho = if code == 15 { ix.esc[&(l as u8, 0u8, (c.r0 + sv.idx[k] as usize) as u32)] as f64 } else { gp.pconst[l] as f64 * s * gp.ntab[l][code] as f64 };
+        let rho = if code == 15 { ix.esc.get(l as u8, 0u8, (c.r0 + sv.idx[k] as usize) as u32) as f64 } else { gp.pconst[l] as f64 * s * gp.ntab[l][code] as f64 };
         let hh = dwa * rho * (1.0 + 1e-6) + fixed + s * ew;
         let est = qm + alr * sv.mr[k] as f64 + s * sv.a64[k];
         let tr = sv.truth[k];
@@ -1434,7 +1434,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                                 let mut r = arr(y);
                                 for i in 0..16 {
                                     if em >> i & 1 == 1 {
-                                        r[i] = ix.esc[&(l as u8, 1 + j as u8, (c.r0 + sv.idx[o + i] as usize) as u32)];
+                                        r[i] = ix.esc.get(l as u8, 1 + j as u8, (c.r0 + sv.idx[o + i] as usize) as u32);
                                     }
                                 }
                                 y = _mm512_loadu_ps(r.as_ptr());
@@ -1482,10 +1482,10 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                                 }
                                 let row = (c.r0 + sv.idx[o + i] as usize) as u32;
                                 if ek >> i & 1 == 1 {
-                                    rk[i] = ix.esc[&(l as u8, 8 + j as u8, row)];
+                                    rk[i] = ix.esc.get(l as u8, 8 + j as u8, row);
                                 }
                                 if et >> i & 1 == 1 {
-                                    rt[i] = ix.esc[&(l as u8, 16 + j as u8, row)];
+                                    rt[i] = ix.esc.get(l as u8, 16 + j as u8, row);
                                 }
                             }
                             kap = _mm512_loadu_ps(rk.as_ptr());
@@ -1520,7 +1520,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         for i in 0..16 {
                             if em >> i & 1 == 1 {
                                 let row = (c.r0 + sv.idx[o + i] as usize) as u32;
-                                r[i] = ix.esc[&(l as u8, 0u8, row)];
+                                r[i] = ix.esc.get(l as u8, 0u8, row);
                             }
                         }
                         rho = _mm512_loadu_ps(r.as_ptr());
