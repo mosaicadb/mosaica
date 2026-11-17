@@ -9,9 +9,9 @@
 //!
 //! - One coded block: P[U >= s] is the exact tail, so c = s* sqrt(d) with P[U >= s*] = delta.
 //! - Several, three bounds, the smallest taken:
-//!   - a certificate from the index's meta (tools/certify.py): the worst case over shares of the exact tail, certified
-//!     for the index's block dimensions at a ln delta at most this one. A certificate for a set of blocks covers every
-//!     subset of it (the other scales are zero).
+//!   - a certificate from the index's meta (`crate::certify`, or tools/certify.py): the worst case over shares of the
+//!     exact tail, certified for the index's block dimensions at a ln delta at most this one. A certificate for a set
+//!     of blocks covers every subset of it (the other scales are zero).
 //!   - convex order against one large sphere: with D = sum_j d_j, m_j = E sqrt(Beta(d_j / 2, (D - d_j) / 2)) and
 //!     s^2 = sum_j a_j^2 / m_j^2, P[X >= x] <= inf_{t < x} E (s U_D - t)_+ / (x - t), and s <= theta sqrt(D) sigma
 //!     with theta^2 = max_j d_j / (D m_j^2).
@@ -182,7 +182,7 @@ fn chernoff(ds: &[usize], l1: f64) -> f64 {
 }
 
 /// A certified worst-case constant: P[sum_j a_j U_j >= x sigma] <= exp(lnd) for every a >= 0 over blocks of
-/// dimensions `ds` (tools/certify.py).
+/// dimensions `ds` (`crate::certify`, tools/certify.py).
 #[derive(Clone, Debug)]
 pub struct Cert {
     pub ds: Vec<usize>,

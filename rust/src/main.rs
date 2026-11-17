@@ -14,6 +14,10 @@ fn main() {
         v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
         return;
     }
+    if run2::has_mode("certify-layout") || run2::has_mode("cert-layouts") {
+        run2::cert_cmd();
+        return;
+    }
     if run2::has_mode("create") {
         run2::create_cmd();
         return;

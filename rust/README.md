@@ -22,7 +22,10 @@ cargo test --release      # includes the end-to-end test on testdata/synth4k
 
 An index is a directory. `create` makes one from a file of vectors, the whole pipeline in one step: it partitions the
 vectors into `DIR/partition` (`tools/partition.py`, with python3, numpy and faiss), fits the build parameters into `DIR`
-(`src/fit.rs`, with the support table's anchors), encodes every item and saves the index in `DIR/encoded`:
+(`src/fit.rs`, with the support table's anchors and the randomised levels' certificate), encodes every item and saves
+the index in `DIR/encoded`. The fit needs no Python: its certificate comes from a shipped table (`src/certs_table.json`)
+for the layouts of common dimensions, else from the Rust port of `tools/certify.py` (`src/certify.rs`). Only the
+partition still runs Python, until there is a partition in Rust.
 
 ```bash
 V="$CARGO_TARGET_DIR/release/vexact"
@@ -37,7 +40,8 @@ In the library these are `v2::create(vectors, dir, &BuildOptions, log)`, `v2::op
 The build flags are the fields of `v2::BuildOptions`. The partition and the fit, given to `create` only (a rebuild
 re-encodes the fit as it is): `--per-cluster by-n|M` (items per cluster; default by-n, 2,000 up to 2M items, doubling
 for each 4x N), `--groups by-n|by-k8|G` (default by-n), `--basis dual|pca` (default dual), `--query-sample QUERIES.npy`,
-`--cert-time SECONDS`. The support table's anchors, to `create` or a rebuild (which builds with them and writes them
+`--cert-time SECONDS` (the time the fit may spend certifying a layout the table lacks; default 600; 0: no certificate,
+the build then uses larger closed-form constants). The support table's anchors, to `create` or a rebuild (which builds with them and writes them
 into the fit as it installs the index): `--anchors A` (from the centres; default 1,024), `--text-anchors PROMPTS.npy`,
 `--text-count C`. The encoding: `--dlv B,B,...|fit` (the deterministic levels; default 16,32, two levels; `fit`: the
 fit's six, 4 / 8 / 12 / 16 / 24 / 32 B), `--rlv B,B,...`, `--profile P.npy`, `--cal-items N`, `--nguar N`, `--nusort`,
@@ -121,6 +125,9 @@ order, so a scan reads memory in order. A rebuild takes about 100 s at 1M on 4 c
 - `src/v2/kern.rs` — tables, survivor re-packing, the shuffle kernel; `src/v2/tail.rs` — the certified constants;
   `src/v2/disk.rs` — full vectors on file under a memory cap; `src/v2/setup.rs` — the exact basis product.
 - `src/v2/e2e.rs` — the end-to-end test.
+- `src/certify.rs` — the randomised levels' certificate for a block layout (the method of `tools/certify.py`, which
+  stays as the independent implementation) and the shipped table `src/certs_table.json` (`tools/certs_table.py` makes
+  it, certifying every entry with both; `vexact certify-layout --ds D1,D2,.. --lnd LN_DELTA` certifies one layout).
 - `src/index.rs` — the fitted parameters and the mapped vector file; `src/derive.rs` — the profile and rate design;
   `src/query.rs` — brute force over the stored vectors; `src/kernel.rs` — statistics and the f16 dot products;
   `src/util.rs` — .npy reader, exact similarity on f16 integers, reproducible Haar rotations; `src/simd.rs` — the AVX2

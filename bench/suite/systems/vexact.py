@@ -28,7 +28,7 @@ class Vexact(System):
         os.makedirs(self.work, exist_ok=True)
         d = self.prep.d
         self.dp = max(d, MIN_DIM)
-        src = self.prep.f("corpus32.npy")
+        src = self.prep.corpus_path()
         tmp = []
         if self.dp != d:
             src = self._padded("train.npy", self.prep.corpus())
@@ -50,10 +50,46 @@ class Vexact(System):
         t = time.time()
         self.ix = vexact_py.Index(out, core=self.core)
         self.encode_s = time.time() - t
+        if self.params.get("disk_mode"):
+            # at scale: reopen the saved index mapped, with the full vectors on file (load), not on the heap
+            self.ix = None
+            info = self.load()
+            self.disk_info = info
         # fit.py stores the vectors zero-padded to a multiple of 32 dimensions, and the index takes queries that wide
-        self.qbuf = np.zeros(-(-self.dp // 32) * 32, np.float32)
+        if not self.params.get("disk_mode"):
+            self.qbuf = np.zeros(-(-self.dp // 32) * 32, np.float32)
         self.ids = None
         return dict(fit_s=round(self.fit_s, 1), encode_s=round(self.encode_s, 1), sample=learn is not None)
+
+    disk = True
+
+    def load(self):
+        """Opens the saved index (v2::open maps it; nothing is encoded) with the full vectors moved to a file of their
+        own in disk mode (params["disk"]: advice, read, willneed, direct_min, dontcache_min; the defaults are those of
+        ../threshold-db/REPORT_CAPPED.md's runs: random advice, io_uring reads priced by the planner, willneed, O_DIRECT
+        from 8 KiB)."""
+        import vexact_py
+        dk = dict(advice="random", read="uring", willneed=True, direct_min=8192, dontcache_min=None)
+        dk.update(self.params.get("disk", {}))
+        if dk["read"] == "uring" and not vexact_py.Index.uring_available():
+            dk["read"] = "mmap"
+        self.disk_opts = dk
+        full = os.path.join(self.work, "full.f16")
+        if os.path.exists(full):
+            os.remove(full)
+        self.ix = vexact_py.Index(os.path.join(self.work, "index"), core=self.core, full_file=full, **dk)
+        self.qbuf = np.zeros(self.ix.dim, np.float32)
+        return dict(dk, full_resident=self.ix.full_resident())
+
+    def counters(self):
+        # the reader's reads (io_uring, disk mode): count, bytes, and the time spent waiting for them
+        import vexact_py
+        n, b, w = vexact_py.Index.io_counters()
+        return dict(reads=n, read_kb=b / 1024, wait_us=w / 1e3)
+
+    def evict_cold(self, cg):
+        # the full vectors only: the codes and the rest of the index stay where they are
+        self.ix.evict_full()
 
     def _padded(self, name, X):
         p = os.path.join(self.work, name)

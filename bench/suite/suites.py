@@ -26,7 +26,7 @@ SYSTEM_PARAMS = {
     "vexact": dict(basis="dual", approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
     # faiss IndexFlatIP: search / range_search; under a visible set through IDSelectorBitmap and over a compacted copy
     "faiss-flat": dict(settings=["idselector", "compacted"]),
-    # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as ../threshold-db/ann.py)
+    # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as the earlier threshold-db/ann.py)
     "faiss-panorama": dict(levels=8, settings=["idselector"]),
     # PDX-BOND (cwida/PDX at the last revision with BOND): exact pruned k-NN over the PDX layout, no index
     "pdx-bond": dict(settings=["selection"]),
@@ -36,7 +36,24 @@ SYSTEM_PARAMS = {
     "acorn": dict(M=32, gamma=12, M_beta=32, approx=[dict(ef=e) for e in (64, 256, 1024)]),
     # PostgreSQL + pgvector, sequential scans (no vector index), timed at the client
     "pgvector": dict(),
+    # under a memory cap: faiss flat opened memory-mapped (the scan baseline), faiss IVF with on-disk lists, DiskANN
+    # a mapped scan reads the whole file per query once it no longer fits the cache (seconds a query): 5 queries, once
+    "faiss-flat-mmap": dict(storage="f32", cap_step=20, cap_reps=1),
+    "faiss-ivf-disk": dict(storage="f16", approx=[dict(nprobe=p) for p in (16, 64, 256)]),
+    "diskann": dict(R=64, L=100, pq_fraction=0.05, approx=[dict(L=l) for l in (20, 50, 100, 200)]),
 }
+
+# The memory-cap axis (capmem.py): caps are fractions of the dataset's size, N x d x 4 bytes (its f32 vectors as
+# distributed), plus "uncapped" (the same capped code path with no limit). Every system on a dataset gets the same cap.
+# Systems that keep their data on files (disk = True) build once and open their index under each cap; an in-memory
+# system is built inside each capped process and the cap set after, so a cap below what it holds is refused (or ends
+# in an OOM kill) and reported as not fitting.
+CAP_SYSTEMS = dict(
+    exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
+    threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
+    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
+)
+IN_MEMORY = ["faiss-flat", "faiss-panorama", "pdx-bond", "faiss-hnsw", "acorn"]
 
 # The quick grids for the public suites: each algorithm's run_groups, in that suite's own config.yml format, replace
 # the checkout's while the driver runs (public.py), and the checkout's file is restored after.
@@ -85,6 +102,12 @@ QUICK = dict(
     params=SYSTEM_PARAMS,
     only={},
     overrides={},
+    caps=dict(datasets=["yahoo-minilm-384-normalized", "laion-clip-512-normalized"], fractions=[0.5, 0.25, 0.1],
+              systems={t: {r: [x for x in v if x != "pgvector"] for r, v in d.items()} for t, d in CAP_SYSTEMS.items()},
+              types=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-4, 1e-2, 1e-1]), approx=dict(k=[10])),
+              filters=["none", "random-1"],
+              filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-2]), approx=dict(k=[10])),
+              step=5, reps=5, in_memory=IN_MEMORY),
     public=dict(vibe=VIBE_QUICK, annb=ANNB_QUICK,
                 datasets={"vibe": ["yahoo-minilm-384-normalized", "laion-clip-512-normalized",
                                    "inaturalist-resnet-2048-cosine"],
@@ -121,12 +144,60 @@ FULL = dict(
     # the large answer shares on two datasets
     overrides={d: dict(threshold=dict(shares=[1e-4, 1e-3, 1e-2, 1e-1, 0.3, 0.5, 0.75]))
                for d in ("yahoo-minilm-384-normalized", "laion-clip-512-normalized")},
+    caps=dict(datasets=FULL_VIBE + ["glove-100-angular", "nytimes-256-angular"], fractions=[0.5, 0.25, 0.1],
+              systems=CAP_SYSTEMS,
+              types=dict(exact=dict(k=[10, 100]), threshold=dict(shares=[1e-4, 1e-3, 1e-2, 1e-1]), approx=dict(k=[10])),
+              filters=["none", "random-1", "random-25", "region-1"],
+              filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-2]), approx=dict(k=[10])),
+              step=5, reps=5, in_memory=IN_MEMORY),
     # the public suites' own grids, unchanged (no overlay)
     public=dict(vibe=dict(algos=None, overlay={}), annb=dict(algos=None, overlay={}),
                 datasets={"vibe": FULL_VIBE, "annb": ["glove-100-angular", "nytimes-256-angular"]}),
 )
 
-SUITES = {"quick": QUICK, "full": FULL}
+# The LAION scale suite: speed only. CLIP ViT-B/32 image embeddings of LAION-400M (512 dimensions; part 0 is VIBE's
+# laion-clip-512 corpus) at 10M, 40M and 100M, nested and stratified by part (datasets.py, prep_scale.py), with text
+# embeddings as out-of-distribution queries. No answer dumps and no check stage: thresholds are estimated from a sample
+# of the corpus (the answer sizes returned are recorded), and the exact top 100 is computed in a streaming pass for
+# `truth_nq` of the queries, for the recall of approximate k-NN and an agreement count for exact k-NN. Only f16 vectors
+# are stored, so faiss runs on f16 (QT_fp16) at scale. The scans see few queries and one repetition.
+SCALE_SYSTEMS = dict(
+    exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
+    threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
+    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
+)
+
+
+def scale_suite(name, datasets):
+    return dict(
+        name=name, scale=True, datasets=datasets, nq=100, truth_nq=30, reps=3,
+        types=dict(exact=dict(k=[10, 100]), threshold=dict(shares=[1e-5, 1e-4, 1e-3]), approx=dict(k=[10])),
+        filters=["none", "random-1"],
+        filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-3]), approx=dict(k=[10])),
+        # approximate k-NN runs unfiltered here too: the public suites do not run these sizes
+        approx_unfiltered=True,
+        systems=SCALE_SYSTEMS,
+        params=dict(SYSTEM_PARAMS,
+                    vexact=dict(SYSTEM_PARAMS["vexact"], disk_mode=True),
+                    **{"faiss-flat-mmap": dict(storage="f16", step=10, reps=1, cap_step=20, cap_reps=1),
+                       "faiss-ivf-disk": dict(storage="f16", approx=[dict(nprobe=p) for p in (16, 64, 256)]),
+                       "faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], storage="f16")}),
+        only={}, overrides={}, public=dict(datasets={"vibe": [], "annb": []}),
+        # the optional cap axis (synthetic; README), on the smallest test size only
+        caps=dict(datasets=[d for d in datasets if d == "laion-s200k"], fractions=[0.5, 0.25, 0.1],
+                  systems={t: {r: [x for x in v if x != "pgvector"] for r, v in d.items()} for t, d in CAP_SYSTEMS.items()},
+                  types=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-4]), approx=dict(k=[10])),
+                  filters=["none", "random-1"],
+                  filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-3]), approx=dict(k=[10])),
+                  step=5, reps=3, in_memory=IN_MEMORY),
+    )
+
+
+SCALE = scale_suite("scale", ["laion-10m", "laion-40m", "laion-100m"])
+# the same code on a small nested sample (2 parts: 200k in 500k in 1M), to test the scale path end to end
+SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m"])
+
+SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST}
 
 
 def types_for(suite, dataset):
@@ -137,24 +208,30 @@ def types_for(suite, dataset):
     return t
 
 
-def cells(suite, dataset, qtype):
+def cells(suite, dataset, qtype, cap=False):
     """(filter, parameter list) for one type on one dataset: unfiltered with the type's parameters (none for approx:
-    the public suites run it), and each visible set with the `filtered` parameters."""
+    the public suites run it, except under a cap and at scale), and each visible set with the `filtered` parameters.
+    With cap, the cap axis's own types, filters and parameters."""
+    if cap:
+        c = suite["caps"]
+        return [(f, c["types"][qtype] if f == "none" else c["filtered"][qtype]) for f in c["filters"]]
     t = types_for(suite, dataset)[qtype]
     out = []
     for f in suite["filters"]:
         if f == "none":
-            if qtype != "approx":
+            if qtype != "approx" or suite.get("approx_unfiltered"):
                 out.append(("none", t))
         else:
             out.append((f, suite["filtered"][qtype]))
     return out
 
 
-def systems_for(suite, dataset, qtype):
-    """[(role, system)] for one type on one dataset."""
+def systems_for(suite, dataset, qtype, cap=False):
+    """[(role, system)] for one type on one dataset (with cap: the cap axis's systems)."""
     out = []
-    for role, names in suite["systems"][qtype].items():
+    if cap and dataset not in suite.get("caps", {}).get("datasets", []):
+        return out
+    for role, names in (suite["caps"]["systems"] if cap else suite["systems"])[qtype].items():
         for s in names:
             if s in suite["only"] and dataset not in suite["only"][s]:
                 continue
@@ -165,9 +242,17 @@ def systems_for(suite, dataset, qtype):
 def truth_needs(suite, dataset):
     """What prep must compute: the unfiltered k-NN depth and answer shares, and per filter its own."""
     t = types_for(suite, dataset)
-    ks = sorted(set(t["exact"]["k"]) | set(t["approx"]["k"]))
-    shares = sorted(set(t["threshold"]["shares"]))
-    fk = sorted(set(suite["filtered"]["exact"]["k"]) | set(suite["filtered"]["approx"]["k"]))
-    fs = sorted(set(suite["filtered"]["threshold"]["shares"]))
-    filters = {f: dict(FILTERS[f], k=fk, shares=fs) for f in suite["filters"] if f != "none"}
-    return dict(k=ks, shares=shares, filters=filters)
+    ks = set(t["exact"]["k"]) | set(t["approx"]["k"])
+    shares = set(t["threshold"]["shares"])
+    fk = set(suite["filtered"]["exact"]["k"]) | set(suite["filtered"]["approx"]["k"])
+    fs = set(suite["filtered"]["threshold"]["shares"])
+    fl = [f for f in suite["filters"] if f != "none"]
+    c = suite.get("caps")
+    if c and dataset in c["datasets"]:
+        ks |= set(c["types"]["exact"]["k"]) | set(c["types"]["approx"]["k"])
+        shares |= set(c["types"]["threshold"]["shares"])
+        fk |= set(c["filtered"]["exact"]["k"]) | set(c["filtered"]["approx"]["k"])
+        fs |= set(c["filtered"]["threshold"]["shares"])
+        fl += [f for f in c["filters"] if f != "none" and f not in fl]
+    filters = {f: dict(FILTERS[f], k=sorted(fk), shares=sorted(fs)) for f in fl}
+    return dict(k=sorted(ks), shares=sorted(shares), filters=filters)

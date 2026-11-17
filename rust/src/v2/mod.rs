@@ -36,8 +36,8 @@ pub struct BuildOptions {
     pub query_sample: Option<String>,
     /// The seed of the partition, the fit and the anchors.
     pub seed: u64,
-    /// Seconds tools/certify.py may take to certify the randomised levels' constant (create only; 0: not certified,
-    /// the build then uses the larger closed-form bounds).
+    /// Seconds the fit may take to certify the randomised levels' constant when the shipped table has none for its
+    /// layout (`certify`; create only; 0: not certified, the build then uses the larger closed-form bounds).
     pub cert_time: f64,
     /// The support table's anchors (`fit::write_anchors`). None: `create` writes the default ones (`Anchors::default`)
     /// and `rebuild` keeps the fit's anchors.npy as it is; given, `rebuild` builds with them and writes them into the
@@ -2419,7 +2419,7 @@ pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(St
         crate::util::fix_mmap_threshold(1 << 20);
     }
     let t = Timer::new();
-    // the partition: tools/partition.py until a partition in Rust exists (as the fit runs tools/certify.py)
+    // the partition: tools/partition.py until a partition in Rust exists (the fit needs no Python)
     let part = format!("{dir}/partition");
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/partition.py");
     let args = ["-I", script, vectors, &part, "--per-cluster", &o.per_cluster.arg(), "--seed", &o.seed.to_string()].map(|s| s.to_string());

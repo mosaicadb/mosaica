@@ -19,6 +19,7 @@ memmap2 = "0.9"
 libc = "0.2"
 io-uring = "0.7"
 faer = "0.24"
+realfft = "3.5"
 
 [profile.release]
 debug = 0

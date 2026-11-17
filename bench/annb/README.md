@@ -2,12 +2,13 @@
 
 This folder adds the fast-scan index (`rust/`) to [ANN-Benchmarks](https://github.com/erikbern/ann-benchmarks) as the
 algorithm `vexact`. It then runs the index against the harness's own builds of hnswlib, faiss, ScaNN, glass, PyNNDescent,
-DiskANN and BLAS brute force on the harness's datasets. `bench/run.sh` remains the place for filtered runs and for
-checks against the oracle. This folder covers only the unfiltered protocol, run by the harness itself.
+DiskANN and BLAS brute force on the harness's datasets. Filtered, exact and threshold queries are in `bench/suite`.
+This folder covers only the unfiltered protocol, run by the harness itself.
 
 - `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `threshold`,
-  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` (used by
-  `bench/suite`) is not part of the harnesses' protocol.
+  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` and the disk mode
+  (`full_file` and its read options, `evict_full`, `full_resident`; used by `bench/suite`'s memory-cap axis) are not
+  part of the harnesses' protocol.
 - `vexact/`: the algorithm folder the harness loads: `module.py`, `config.yml`, `Dockerfile`.
 - `install.sh`: copies the algorithm folder into a checkout, with `rust/` and `combined/core.py` taken from a pinned
   revision, and builds the `ann-benchmarks-vexact` image.
@@ -41,10 +42,11 @@ benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds
 `PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings follow the library's
 `create` / `open` / `rebuild` API (`v2::open` with `OpenOptions`, `v2::saved_options`, `v2::rebuild` with
 `BuildOptions`). They use only those, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`,
-`Dial::fit`, `Vis2::new`, `knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and
-`to_bitmap2`. The pin is `research/exact-vector-search` with the create/open/rebuild API, the AVX-512 kernels, and the
-owner's build defaults (clusters by N, deterministic levels 16 and 32, the dual basis); the binding's own default
-build keeps the fit's six levels.
+`Dial::fit`, `Vis2::new`, `knn2` and `knn2_fast`, for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`, and
+for the disk mode `Full2`, `Index2::own_rows`, `disk::Rows` (`to_file`, `policy`, `evict`, `resident`, `file_path`),
+`disk::uring_available` and `q::disk_constants`. The pin is `research/exact-vector-search` with the
+create/open/rebuild API, the AVX-512 kernels, and the owner's build defaults (clusters by N, deterministic levels 16
+and 32, the dual basis); the binding's own default build keeps the fit's six levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
 
@@ -70,7 +72,7 @@ in rows (`Plan::default`). Without a `dlv` build argument the bindings build the
   levels-clusters defaults"): A, clusters by N (build argument `clusters: by-n`, `fit.py --per-cluster by-n --groups
   by-n`); B, two deterministic levels (`dlv: "16.32"`); C, both. Not in `run.sh`'s default list; add it with `ALGOS`.
 - Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured
-  here, but `bench/run.sh` times from Rust and is the better tool above about 10,000 QPS.
+  here, but matters above about 10,000 QPS.
 
 ## Deviations from the harness
 

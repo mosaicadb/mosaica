@@ -1,7 +1,9 @@
 # faiss (pip faiss-cpu): the flat index (the standard exact system), Panorama (a frontier exact system) and HNSW (the
-# standard approximate system under a visible set). Forms as in ../threshold-db/ann.py: inner product over the unit
+# standard approximate system under a visible set). Forms as in the earlier threshold-db/ann.py: inner product over the unit
 # vectors; a visible set through IDSelectorBitmap, and for the flat index also over a compacted copy of the visible rows
 # (built when the visible set is set, as a session would; its time is recorded with the setup).
+import os
+
 import numpy as np
 
 from .base import System, Unavailable, faiss_bitmap
@@ -123,16 +125,126 @@ class FaissHNSW(FaissBase):
 
     def _build(self):
         p = self.params
-        self.ix = self.faiss.IndexHNSWFlat(self.prep.d, p.get("M", 16), self.faiss.METRIC_INNER_PRODUCT)
+        f = self.faiss
+        if p.get("storage", "f32") == "f16":  # at scale, where only f16 vectors are stored: IndexHNSWSQ QT_fp16
+            self.ix = f.IndexHNSWSQ(self.prep.d, f.ScalarQuantizer.QT_fp16, p.get("M", 16), f.METRIC_INNER_PRODUCT)
+            self.ix.train(np.ascontiguousarray(self.prep.corpus()[:1000], dtype=np.float32))
+        else:
+            self.ix = f.IndexHNSWFlat(self.prep.d, p.get("M", 16), f.METRIC_INNER_PRODUCT)
         self.ix.hnsw.efConstruction = p.get("efConstruction", 200)
         _add(self.ix, self.prep.corpus())
-        return dict(M=p.get("M", 16), efConstruction=p.get("efConstruction", 200))
+        return dict(M=p.get("M", 16), efConstruction=p.get("efConstruction", 200), storage=p.get("storage", "f32"))
 
     def index_bytes(self):
-        return self.prep.N * (self.prep.d * 4 + self.params.get("M", 16) * 2 * 4)
+        vec = 2 if self.params.get("storage", "f32") == "f16" else 4
+        return self.prep.N * (self.prep.d * vec + self.params.get("M", 16) * 2 * 4)
 
     def approx(self, q, k, p):
         sp = self.faiss.SearchParametersHNSW(efSearch=max(p["ef"], k))
+        if self.sel is not None:
+            sp.sel = self.sel
+        _, I = self.ix.search(self._q(q), k, params=sp)
+        return I[0][I[0] >= 0]
+
+
+class FaissFlatMmap(FaissBase):
+    """The scan baseline under a memory cap: IndexFlatIP (or, with params storage "f16", IndexScalarQuantizer QT_fp16,
+    as at scale) written to a file and opened memory-mapped (IO_FLAG_MMAP_IFC), so its vectors are page cache, not
+    anonymous memory. search / range_search; a visible set through IDSelectorBitmap."""
+    name = "faiss-flat-mmap"
+    types = ("exact", "threshold")
+    disk = True
+
+    def path(self):
+        return os.path.join(self.work, "flat.index")
+
+    def _build(self):
+        import os as _os
+        _os.makedirs(self.work, exist_ok=True)
+        d = self.prep.d
+        if self.params.get("storage", "f32") == "f16":
+            self.rounding = "f16"
+            ix = self.faiss.IndexScalarQuantizer(d, self.faiss.ScalarQuantizer.QT_fp16, self.faiss.METRIC_INNER_PRODUCT)
+        else:
+            ix = self.faiss.IndexFlatIP(d)
+        _add(ix, self.prep.corpus())
+        self.faiss.write_index(ix, self.path())
+        del ix
+        self.ix = self.faiss.read_index(self.path(), self.faiss.IO_FLAG_MMAP_IFC)
+        return dict(storage=self.params.get("storage", "f32"))
+
+    def load(self):
+        self.faiss = _faiss()
+        self.sel = self.compact = None
+        self.ix = self.faiss.read_index(self.path(), self.faiss.IO_FLAG_MMAP_IFC)
+        return dict(storage=self.params.get("storage", "f32"))
+
+    def index_bytes(self):
+        return os.path.getsize(self.path())
+
+    def knn(self, q, k):
+        _, I = self.ix.search(self._q(q), k, params=self._params())
+        return I[0][I[0] >= 0]
+
+    def range(self, q, t):
+        _, _, I = self.ix.range_search(self._q(q), float(t), params=self._params())
+        return I
+
+
+class FaissIVFDisk(FaissBase):
+    """faiss IVF with its inverted lists on disk (OnDiskInvertedLists, mapped by faiss), as
+    ../threshold-db/capped/faiss_capped.py: IVF-SQ QT_fp16 (params storage "f32": IVF-Flat), nlist 4096 at a million
+    vectors and more (else the power of two nearest 4 sqrt(N)), trained on 200,000 rows. Approximate k-NN at the
+    grid's nprobe; a visible set through IDSelectorBitmap. Opened without IO_FLAG_MMAP (on top of the on-disk lists it
+    crashed the first search in faiss 1.16.0); the lists are mapped all the same."""
+    name = "faiss-ivf-disk"
+    types = ("approx",)
+    disk = True
+
+    def path(self):
+        return os.path.join(self.work, "ivf_ondisk.index")
+
+    def _build(self):
+        os.makedirs(self.work, exist_ok=True)
+        f = self.faiss
+        X = self.prep.corpus()
+        N, d = X.shape
+        nlist = self.params.get("nlist") or (4096 if N >= 1_000_000 else int(2 ** round(np.log2(4 * np.sqrt(N)))))
+        q = f.IndexFlatIP(d)
+        if self.params.get("storage", "f16") == "f16":
+            ix = f.IndexIVFScalarQuantizer(q, d, nlist, f.ScalarQuantizer.QT_fp16, f.METRIC_INNER_PRODUCT)
+        else:
+            ix = f.IndexIVFFlat(q, d, nlist, f.METRIC_INNER_PRODUCT)
+        rng = np.random.default_rng(1)
+        ix.train(np.ascontiguousarray(X[np.sort(rng.choice(N, min(N, 200_000), replace=False))], dtype=np.float32))
+        _add(ix, X)
+        od = f.OnDiskInvertedLists(ix.nlist, ix.code_size, os.path.join(self.work, "ivf_ondisk.ivfdata"))
+        v = f.InvertedListsPtrVector()
+        v.push_back(ix.invlists)
+        od.merge_from_multiple(v.data(), v.size(), False)
+        ix.replace_invlists(od, True)
+        od.this.disown()
+        f.write_index(ix, self.path())
+        del ix
+        self.load()
+        return dict(nlist=nlist, storage=self.params.get("storage", "f16"))
+
+    def load(self):
+        self.faiss = _faiss()
+        self.sel = self.compact = None
+        cwd = os.getcwd()
+        os.chdir(self.work)  # the index file names its .ivfdata relative to where it was written
+        try:
+            self.ix = self.faiss.read_index(self.path())
+        finally:
+            os.chdir(cwd)
+        return dict(nlist=self.ix.nlist)
+
+    def index_bytes(self):
+        return sum(os.path.getsize(os.path.join(self.work, f)) for f in os.listdir(self.work))
+
+    def approx(self, q, k, p):
+        sp = self.faiss.SearchParametersIVF(nprobe=p["nprobe"])
         if self.sel is not None:
             sp.sel = self.sel
         _, I = self.ix.search(self._q(q), k, params=sp)

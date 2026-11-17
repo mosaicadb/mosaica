@@ -71,8 +71,17 @@ class Prep:
             self._cache[name] = np.load(self.f(name), mmap_mode="r" if mmap else None)
         return self._cache[name]
 
+    def corpus_path(self):
+        """The corpus file: corpus32.npy, or at scale (where prep stores f16 only) corpus16.npy."""
+        p = self.f("corpus32.npy")
+        return p if os.path.exists(p) else self.f("corpus16.npy")
+
     def corpus(self):
-        return self.load("corpus32.npy")
+        return self.load(os.path.basename(self.corpus_path()))
+
+    def dataset_bytes(self):
+        """The dataset's size for the memory cap: N x d x 4 bytes, the f32 vectors as distributed."""
+        return self.N * self.d * 4
 
     def queries(self):
         return self.load("queries.npy", mmap=False)
