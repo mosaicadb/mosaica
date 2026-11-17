@@ -1,0 +1,350 @@
+score: mean recall@10 over scanned shares 0.5%..25% ('avg'); recall at 0.5 / 1.6 / 6.3 / 25% scanned
+
+corpus-only fits per dataset: nu (Student-t from the excess kurtosis on 32 corpus directions), f' estimated vs best
+  laion-text           K  500  excess kurtosis median +0.24 (90% +0.60); nu median 29 (10/90% 14/100, share at 3: 0.00); f' est 0.229 (dirs 10/90% 0.18/0.30); own best f' 0.5: avg est 0.872 / 0.4 0.879 / best 0.882; tau_model - tau_true (r16 g) +0.0021
+  laion-image          K  500  excess kurtosis median +0.24 (90% +0.60); nu median 29 (10/90% 14/100, share at 3: 0.00); f' est 0.229 (dirs 10/90% 0.18/0.30); own best f' 0.5: avg est 0.944 / 0.4 0.951 / best 0.951; tau_model - tau_true (r16 g) +0.0007
+  glove                K  592  excess kurtosis median -0.03 (90% +0.06); nu median 100 (10/90% 99/100, share at 3: 0.00); f' est 0.172 (dirs 10/90% 0.15/0.20); own best f' 0.3: avg est 0.831 / 0.4 0.833 / best 0.837; tau_model - tau_true (r16 g) +0.0085
+  yahoo                K  339  excess kurtosis median +0.33 (90% +0.59); nu median 22 (10/90% 14/47, share at 3: 0.00); f' est 0.096 (dirs 10/90% 0.08/0.11); own best f' 0.3: avg est 0.905 / 0.4 0.904 / best 0.906; tau_model - tau_true (r16 g) -0.0590
+  vibe-laion           K  500  excess kurtosis median +0.32 (90% +1.20); nu median 23 (10/90% 9/100, share at 3: 0.00); f' est 0.238 (dirs 10/90% 0.18/0.31); own best f' 0.6: avg est 0.852 / 0.4 0.859 / best 0.863; tau_model - tau_true (r16 g) -0.0000
+  laion-text-learn*    K  500  excess kurtosis median +0.24 (90% +0.60); nu median 29 (10/90% 14/100, share at 3: 0.00); f' est 0.229 (dirs 10/90% 0.18/0.30); own best f' 0.5: avg est 0.854 / 0.4 0.860 / best 0.862; tau_model - tau_true (r16 g) +0.0010
+  glove-1000*          K  592  excess kurtosis median -0.03 (90% +0.06); nu median 100 (10/90% 99/100, share at 3: 0.00); f' est 0.172 (dirs 10/90% 0.15/0.20); own best f' 0.3: avg est 0.855 / 0.4 0.857 / best 0.860; tau_model - tau_true (r16 g) +0.0160
+  yahoo-900*           K  339  excess kurtosis median +0.33 (90% +0.59); nu median 22 (10/90% 14/47, share at 3: 0.00); f' est 0.096 (dirs 10/90% 0.08/0.11); own best f' 0.3: avg est 0.898 / 0.4 0.897 / best 0.899; tau_model - tau_true (r16 g) -0.0606
+  vibe-laion-learn*    K  500  excess kurtosis median +0.32 (90% +1.20); nu median 23 (10/90% 9/100, share at 3: 0.00); f' est 0.238 (dirs 10/90% 0.18/0.31); own best f' 0.6: avg est 0.856 / 0.4 0.863 / best 0.864; tau_model - tau_true (r16 g) +0.0009
+
+laion-text (K 500, nq 100, oracle f 0.1)
+  O2 f'=0.4                        0.629 0.812 0.938 0.993   avg 0.879
+  H r4                             0.669 0.827 0.951 0.996   avg 0.894
+  H r16                            0.681 0.854 0.961 0.996   avg 0.906
+  O2 f'=est                        0.599 0.802 0.930 0.992   avg 0.872
+  O3 r16                           0.670 0.859 0.957 0.995   avg 0.904
+  O3-t r16                         0.651 0.853 0.954 0.994   avg 0.900
+  thr-g r4 model row               0.669 0.822 0.949 0.995   avg 0.894
+  thr-g r4 model probe             0.655 0.834 0.949 0.995   avg 0.896
+  thr-g r4 running/1 row           0.658 0.824 0.944 0.995   avg 0.892
+  thr-g r4 running/8 row           0.654 0.829 0.945 0.995   avg 0.895
+  thr-g r4 true row                0.660 0.825 0.943 0.995   avg 0.890
+  thr-g r16 model row              0.683 0.856 0.967 0.997   avg 0.910
+  thr-g r16 model probe            0.673 0.859 0.967 0.997   avg 0.910
+  thr-g r16 running/1 row          0.678 0.858 0.967 0.997   avg 0.910
+  thr-g r16 running/1 probe        0.671 0.861 0.964 0.997   avg 0.908
+  thr-g r16 running/8 row          0.664 0.863 0.967 0.997   avg 0.909
+  thr-g r16 model->running/8 row   0.683 0.856 0.967 0.997   avg 0.910
+  thr-g r16 true row               0.684 0.854 0.967 0.997   avg 0.910
+  thr-g r16 true probe             0.671 0.860 0.965 0.997   avg 0.908
+  thr-g exact model row            0.705 0.862 0.968 0.998   avg 0.915
+  thr-g exact true row             0.705 0.864 0.965 0.998   avg 0.916
+  thr-t r16 model row              0.651 0.829 0.946 0.990   avg 0.889
+  thr-t r16 running/1 row          0.668 0.846 0.959 0.990   avg 0.900
+  thr-t r16 true row               0.662 0.842 0.959 0.989   avg 0.898
+  oracle                           0.634 0.813 0.942 0.993   avg 0.882
+  faiss nlist=K                    0.600 0.821 0.933 0.994   avg 0.879
+
+laion-image (K 500, nq 1000, oracle f 0.5)
+  O2 f'=0.4                        0.788 0.931 0.987 0.999   avg 0.951
+  H r4                             0.796 0.935 0.990 0.999   avg 0.954
+  H r16                            0.795 0.935 0.991 0.999   avg 0.955
+  O2 f'=est                        0.773 0.921 0.981 0.998   avg 0.944
+  O3 r16                           0.788 0.929 0.989 0.999   avg 0.951
+  O3-t r16                         0.779 0.924 0.988 0.999   avg 0.949
+  thr-g r4 model row               0.713 0.868 0.960 0.997   avg 0.915
+  thr-g r4 model probe             0.720 0.877 0.962 0.997   avg 0.918
+  thr-g r4 running/1 row           0.718 0.854 0.949 0.993   avg 0.906
+  thr-g r4 running/8 row           0.754 0.915 0.958 0.993   avg 0.930
+  thr-g r4 true row                0.658 0.831 0.940 0.993   avg 0.890
+  thr-g r16 model row              0.768 0.906 0.979 0.998   avg 0.940
+  thr-g r16 model probe            0.778 0.916 0.981 0.998   avg 0.944
+  thr-g r16 running/1 row          0.781 0.916 0.980 0.998   avg 0.944
+  thr-g r16 running/1 probe        0.786 0.920 0.982 0.998   avg 0.946
+  thr-g r16 running/8 row          0.788 0.930 0.981 0.998   avg 0.949
+  thr-g r16 model->running/8 row   0.768 0.908 0.980 0.998   avg 0.941
+  thr-g r16 true row               0.768 0.910 0.979 0.998   avg 0.940
+  thr-g r16 true probe             0.777 0.917 0.982 0.998   avg 0.944
+  thr-g exact model row            0.786 0.929 0.987 0.999   avg 0.950
+  thr-g exact true row             0.788 0.932 0.988 0.999   avg 0.952
+  thr-t r16 model row              0.734 0.878 0.963 0.994   avg 0.920
+  thr-t r16 running/1 row          0.775 0.903 0.974 0.995   avg 0.937
+  thr-t r16 true row               0.750 0.892 0.971 0.995   avg 0.929
+  oracle                           0.783 0.931 0.989 0.999   avg 0.952
+  faiss nlist=K                    0.779 0.934 0.991 0.999   avg 0.952
+
+glove (K 592, nq 100, oracle f 0.35)
+  O2 f'=0.4                        0.542 0.746 0.900 0.985   avg 0.833
+  H r4                             0.555 0.756 0.907 0.985   avg 0.842
+  H r16                            0.559 0.762 0.908 0.985   avg 0.846
+  O2 f'=est                        0.537 0.739 0.895 0.981   avg 0.831
+  O3 r16                           0.513 0.733 0.880 0.977   avg 0.818
+  O3-t r16                         0.511 0.727 0.879 0.976   avg 0.815
+  thr-g r4 model row               0.542 0.749 0.904 0.983   avg 0.834
+  thr-g r4 model probe             0.513 0.732 0.896 0.982   avg 0.825
+  thr-g r4 running/1 row           0.534 0.746 0.907 0.985   avg 0.834
+  thr-g r4 running/8 row           0.502 0.725 0.907 0.985   avg 0.825
+  thr-g r4 true row                0.539 0.746 0.906 0.985   avg 0.834
+  thr-g r16 model row              0.547 0.760 0.909 0.982   avg 0.841
+  thr-g r16 model probe            0.531 0.742 0.899 0.983   avg 0.833
+  thr-g r16 running/1 row          0.547 0.767 0.912 0.982   avg 0.843
+  thr-g r16 running/1 probe        0.517 0.742 0.899 0.983   avg 0.830
+  thr-g r16 running/8 row          0.512 0.733 0.912 0.982   avg 0.831
+  thr-g r16 model->running/8 row   0.547 0.761 0.912 0.982   avg 0.842
+  thr-g r16 true row               0.548 0.766 0.912 0.982   avg 0.842
+  thr-g r16 true probe             0.527 0.747 0.899 0.983   avg 0.833
+  thr-g exact model row            0.550 0.753 0.909 0.982   avg 0.840
+  thr-g exact true row             0.548 0.762 0.909 0.983   avg 0.842
+  thr-t r16 model row              0.525 0.757 0.907 0.980   avg 0.834
+  thr-t r16 running/1 row          0.538 0.764 0.911 0.981   avg 0.839
+  thr-t r16 true row               0.536 0.762 0.912 0.981   avg 0.838
+  oracle                           0.538 0.750 0.897 0.981   avg 0.835
+  faiss nlist=K                    0.537 0.739 0.892 0.979   avg 0.831
+
+yahoo (K 339, nq 100, oracle f 0.5)
+  O2 f'=0.4                        0.643 0.852 0.966 0.996   avg 0.904
+  H r4                             0.658 0.860 0.973 0.997   avg 0.911
+  H r16                            0.662 0.878 0.974 0.997   avg 0.916
+  O2 f'=est                        0.649 0.855 0.969 0.997   avg 0.905
+  O3 r16                           0.660 0.884 0.974 0.997   avg 0.917
+  O3-t r16                         0.661 0.886 0.976 0.997   avg 0.916
+  thr-g r4 model row               0.622 0.842 0.961 0.995   avg 0.896
+  thr-g r4 model probe             0.622 0.846 0.961 0.995   avg 0.896
+  thr-g r4 running/1 row           0.628 0.821 0.947 0.995   avg 0.886
+  thr-g r4 running/8 row           0.640 0.855 0.952 0.995   avg 0.900
+  thr-g r4 true row                0.594 0.805 0.947 0.995   avg 0.878
+  thr-g r16 model row              0.654 0.883 0.971 0.996   avg 0.915
+  thr-g r16 model probe            0.658 0.883 0.972 0.996   avg 0.915
+  thr-g r16 running/1 row          0.658 0.881 0.969 0.996   avg 0.913
+  thr-g r16 running/1 probe        0.659 0.876 0.970 0.996   avg 0.912
+  thr-g r16 running/8 row          0.660 0.884 0.969 0.996   avg 0.915
+  thr-g r16 model->running/8 row   0.654 0.883 0.969 0.996   avg 0.914
+  thr-g r16 true row               0.647 0.876 0.969 0.996   avg 0.911
+  thr-g r16 true probe             0.647 0.873 0.970 0.996   avg 0.910
+  thr-g exact model row            0.669 0.884 0.973 0.997   avg 0.919
+  thr-g exact true row             0.662 0.886 0.973 0.997   avg 0.917
+  thr-t r16 model row              0.652 0.870 0.967 0.995   avg 0.910
+  thr-t r16 running/1 row          0.662 0.865 0.952 0.993   avg 0.905
+  thr-t r16 true row               0.646 0.857 0.950 0.993   avg 0.901
+  oracle                           0.654 0.854 0.973 0.996   avg 0.907
+  faiss nlist=K                    0.625 0.860 0.976 0.998   avg 0.908
+
+vibe-laion (K 500, nq 100, oracle f 0.1)
+  O2 f'=0.4                        0.538 0.778 0.935 0.993   avg 0.859
+  H r4                             0.565 0.787 0.950 0.992   avg 0.872
+  H r16                            0.594 0.822 0.956 0.993   avg 0.886
+  O2 f'=est                        0.525 0.769 0.928 0.992   avg 0.852
+  O3 r16                           0.569 0.815 0.959 0.992   avg 0.879
+  O3-t r16                         0.581 0.796 0.949 0.992   avg 0.875
+  thr-g r4 model row               0.564 0.801 0.944 0.993   avg 0.871
+  thr-g r4 model probe             0.568 0.803 0.947 0.992   avg 0.871
+  thr-g r4 running/1 row           0.574 0.798 0.938 0.992   avg 0.869
+  thr-g r4 running/8 row           0.574 0.795 0.939 0.992   avg 0.868
+  thr-g r4 true row                0.560 0.797 0.930 0.992   avg 0.865
+  thr-g r16 model row              0.606 0.828 0.953 0.994   avg 0.888
+  thr-g r16 model probe            0.596 0.836 0.954 0.993   avg 0.888
+  thr-g r16 running/1 row          0.593 0.823 0.954 0.994   avg 0.886
+  thr-g r16 running/1 probe        0.582 0.822 0.956 0.992   avg 0.884
+  thr-g r16 running/8 row          0.582 0.813 0.955 0.994   avg 0.882
+  thr-g r16 model->running/8 row   0.606 0.828 0.955 0.994   avg 0.887
+  thr-g r16 true row               0.602 0.823 0.953 0.994   avg 0.885
+  thr-g r16 true probe             0.599 0.823 0.951 0.992   avg 0.885
+  thr-g exact model row            0.618 0.841 0.958 0.994   avg 0.895
+  thr-g exact true row             0.620 0.841 0.959 0.994   avg 0.894
+  thr-t r16 model row              0.553 0.752 0.885 0.966   avg 0.825
+  thr-t r16 running/1 row          0.589 0.792 0.927 0.980   avg 0.863
+  thr-t r16 true row               0.597 0.778 0.918 0.980   avg 0.856
+  oracle                           0.534 0.780 0.939 0.991   avg 0.861
+  faiss nlist=K                    0.550 0.761 0.938 0.992   avg 0.860
+
+laion-text-learn* (K 500, nq 1000, oracle f 0.1)
+  O2 f'=0.4                        0.587 0.786 0.923 0.987   avg 0.860
+  H r4                             0.611 0.806 0.935 0.990   avg 0.873
+  H r16                            0.628 0.827 0.946 0.993   avg 0.885
+  O2 f'=est                        0.584 0.775 0.917 0.983   avg 0.854
+  O3 r16                           0.627 0.821 0.946 0.991   avg 0.883
+  O3-t r16                         0.622 0.816 0.943 0.991   avg 0.880
+  thr-g r4 model row               0.609 0.804 0.935 0.990   avg 0.873
+  thr-g r4 model probe             0.607 0.805 0.936 0.990   avg 0.872
+  thr-g r4 running/1 row           0.610 0.801 0.933 0.990   avg 0.870
+  thr-g r4 running/8 row           0.609 0.801 0.934 0.990   avg 0.871
+  thr-g r4 true row                0.597 0.798 0.932 0.990   avg 0.868
+  thr-g r16 model row              0.638 0.831 0.950 0.991   avg 0.889
+  thr-g r16 model probe            0.636 0.832 0.950 0.992   avg 0.889
+  thr-g r16 running/1 row          0.638 0.831 0.951 0.991   avg 0.890
+  thr-g r16 running/1 probe        0.629 0.830 0.951 0.992   avg 0.888
+  thr-g r16 running/8 row          0.628 0.824 0.951 0.991   avg 0.887
+  thr-g r16 model->running/8 row   0.638 0.831 0.951 0.991   avg 0.890
+  thr-g r16 true row               0.636 0.829 0.950 0.991   avg 0.889
+  thr-g r16 true probe             0.634 0.830 0.951 0.992   avg 0.888
+  thr-g exact model row            0.645 0.847 0.957 0.994   avg 0.898
+  thr-g exact true row             0.645 0.845 0.957 0.994   avg 0.897
+  thr-t r16 model row              0.612 0.809 0.932 0.985   avg 0.872
+  thr-t r16 running/1 row          0.631 0.824 0.941 0.987   avg 0.881
+  thr-t r16 true row               0.624 0.820 0.940 0.987   avg 0.878
+  oracle                           0.588 0.786 0.924 0.989   avg 0.862
+  faiss nlist=K                    0.569 0.770 0.911 0.984   avg 0.849
+
+glove-1000* (K 592, nq 1000, oracle f 0.5)
+  O2 f'=0.4                        0.607 0.779 0.913 0.985   avg 0.857
+  H r4                             0.614 0.788 0.917 0.984   avg 0.862
+  H r16                            0.618 0.794 0.920 0.984   avg 0.864
+  O2 f'=est                        0.606 0.776 0.911 0.983   avg 0.855
+  O3 r16                           0.582 0.767 0.897 0.977   avg 0.842
+  O3-t r16                         0.578 0.763 0.895 0.977   avg 0.840
+  thr-g r4 model row               0.595 0.779 0.913 0.983   avg 0.855
+  thr-g r4 model probe             0.583 0.773 0.908 0.981   avg 0.848
+  thr-g r4 running/1 row           0.597 0.781 0.915 0.984   avg 0.857
+  thr-g r4 running/8 row           0.577 0.761 0.915 0.984   avg 0.850
+  thr-g r4 true row                0.594 0.782 0.915 0.984   avg 0.856
+  thr-g r16 model row              0.605 0.786 0.918 0.985   avg 0.860
+  thr-g r16 model probe            0.594 0.778 0.912 0.983   avg 0.853
+  thr-g r16 running/1 row          0.610 0.788 0.920 0.986   avg 0.862
+  thr-g r16 running/1 probe        0.584 0.777 0.910 0.983   avg 0.852
+  thr-g r16 running/8 row          0.583 0.767 0.920 0.986   avg 0.854
+  thr-g r16 model->running/8 row   0.605 0.786 0.920 0.986   avg 0.861
+  thr-g r16 true row               0.610 0.788 0.919 0.985   avg 0.861
+  thr-g r16 true probe             0.590 0.779 0.912 0.983   avg 0.853
+  thr-g exact model row            0.604 0.785 0.917 0.985   avg 0.859
+  thr-g exact true row             0.609 0.789 0.918 0.986   avg 0.862
+  thr-t r16 model row              0.595 0.779 0.914 0.984   avg 0.855
+  thr-t r16 running/1 row          0.605 0.786 0.917 0.985   avg 0.859
+  thr-t r16 true row               0.605 0.785 0.917 0.985   avg 0.858
+  oracle                           0.611 0.779 0.916 0.985   avg 0.859
+  faiss nlist=K                    0.587 0.772 0.909 0.982   avg 0.849
+
+yahoo-900* (K 339, nq 900, oracle f 0.5)
+  O2 f'=0.4                        0.620 0.850 0.960 0.993   avg 0.897
+  H r4                             0.644 0.862 0.963 0.994   avg 0.905
+  H r16                            0.648 0.871 0.966 0.996   avg 0.909
+  O2 f'=est                        0.619 0.855 0.961 0.994   avg 0.898
+  O3 r16                           0.647 0.867 0.965 0.995   avg 0.909
+  O3-t r16                         0.645 0.865 0.966 0.995   avg 0.908
+  thr-g r4 model row               0.623 0.838 0.952 0.993   avg 0.890
+  thr-g r4 model probe             0.621 0.837 0.952 0.993   avg 0.891
+  thr-g r4 running/1 row           0.618 0.816 0.941 0.991   avg 0.879
+  thr-g r4 running/8 row           0.628 0.854 0.945 0.991   avg 0.893
+  thr-g r4 true row                0.583 0.806 0.939 0.991   avg 0.872
+  thr-g r16 model row              0.653 0.866 0.962 0.995   avg 0.907
+  thr-g r16 model probe            0.649 0.867 0.963 0.995   avg 0.908
+  thr-g r16 running/1 row          0.648 0.862 0.959 0.995   avg 0.904
+  thr-g r16 running/1 probe        0.646 0.862 0.960 0.995   avg 0.905
+  thr-g r16 running/8 row          0.646 0.868 0.960 0.995   avg 0.906
+  thr-g r16 model->running/8 row   0.653 0.866 0.959 0.995   avg 0.906
+  thr-g r16 true row               0.645 0.859 0.959 0.995   avg 0.903
+  thr-g r16 true probe             0.644 0.858 0.960 0.995   avg 0.903
+  thr-g exact model row            0.658 0.871 0.967 0.996   avg 0.912
+  thr-g exact true row             0.658 0.870 0.966 0.997   avg 0.911
+  thr-t r16 model row              0.644 0.855 0.955 0.991   avg 0.899
+  thr-t r16 running/1 row          0.643 0.847 0.949 0.988   avg 0.895
+  thr-t r16 true row               0.632 0.838 0.946 0.987   avg 0.889
+  oracle                           0.624 0.855 0.962 0.994   avg 0.899
+  faiss nlist=K                    0.615 0.853 0.962 0.995   avg 0.898
+
+vibe-laion-learn* (K 500, nq 1000, oracle f 0.1)
+  O2 f'=0.4                        0.590 0.790 0.926 0.987   avg 0.863
+  H r4                             0.621 0.811 0.937 0.992   avg 0.877
+  H r16                            0.639 0.826 0.949 0.994   avg 0.889
+  O2 f'=est                        0.580 0.784 0.921 0.985   avg 0.856
+  O3 r16                           0.635 0.821 0.949 0.994   avg 0.886
+  O3-t r16                         0.624 0.814 0.945 0.992   avg 0.881
+  thr-g r4 model row               0.611 0.804 0.936 0.991   avg 0.874
+  thr-g r4 model probe             0.611 0.802 0.935 0.992   avg 0.874
+  thr-g r4 running/1 row           0.614 0.801 0.934 0.991   avg 0.872
+  thr-g r4 running/8 row           0.614 0.803 0.935 0.991   avg 0.873
+  thr-g r4 true row                0.607 0.797 0.932 0.990   avg 0.870
+  thr-g r16 model row              0.644 0.831 0.953 0.994   avg 0.892
+  thr-g r16 model probe            0.641 0.832 0.952 0.994   avg 0.892
+  thr-g r16 running/1 row          0.646 0.829 0.952 0.994   avg 0.892
+  thr-g r16 running/1 probe        0.637 0.828 0.952 0.994   avg 0.890
+  thr-g r16 running/8 row          0.636 0.823 0.953 0.994   avg 0.889
+  thr-g r16 model->running/8 row   0.644 0.831 0.953 0.994   avg 0.892
+  thr-g r16 true row               0.646 0.832 0.952 0.994   avg 0.892
+  thr-g r16 true probe             0.640 0.831 0.951 0.994   avg 0.891
+  thr-g exact model row            0.653 0.846 0.962 0.995   avg 0.900
+  thr-g exact true row             0.653 0.845 0.961 0.994   avg 0.900
+  thr-t r16 model row              0.590 0.759 0.884 0.960   avg 0.832
+  thr-t r16 running/1 row          0.639 0.808 0.922 0.978   avg 0.870
+  thr-t r16 true row               0.625 0.799 0.916 0.977   avg 0.864
+  oracle                           0.591 0.793 0.926 0.988   avg 0.864
+  faiss nlist=K                    0.580 0.778 0.923 0.989   avg 0.858
+
+loss against the oracle (oracle - order: avg / 1.6% / 6.3%; negative = better), worst case over the main datasets; then loss against H r16 (avg)
+  H r16                              worst -0.003 / -0.004 / -0.001   per dataset avg -0.024 -0.003 -0.010 -0.009 -0.024   vs H r16: worst +0.000, mean +0.000
+  H r4                               worst -0.002 / -0.004 / +0.000   per dataset avg -0.011 -0.002 -0.007 -0.004 -0.011   vs H r16: worst +0.014, mean +0.007
+  thr-g exact running/1 row          worst -0.001 / -0.003 / +0.001   per dataset avg -0.033 -0.001 -0.007 -0.012 -0.033   vs H r16: worst +0.003, mean -0.003
+  thr-g exact true row               worst +0.000 / -0.001 / +0.001   per dataset avg -0.033 +0.000 -0.007 -0.010 -0.033   vs H r16: worst +0.003, mean -0.002
+  thr-g exact model row              worst +0.002 / +0.002 / +0.002   per dataset avg -0.033 +0.002 -0.005 -0.012 -0.034   vs H r16: worst +0.006, mean -0.002
+  O2 f'=0.4                          worst +0.003 / +0.003 / +0.007   per dataset avg +0.003 +0.001 +0.002 +0.003 +0.002   vs H r16: worst +0.027, mean +0.016
+  thr-g r16 running/8 row            worst +0.004 / +0.017 / +0.008   per dataset avg -0.027 +0.003 +0.004 -0.008 -0.021   vs H r16: worst +0.014, mean +0.004
+  thr-t exact running/1 row          worst +0.004 / +0.006 / +0.021   per dataset avg -0.021 +0.004 -0.002 -0.008 +0.000   vs H r16: worst +0.025, mean +0.009
+  faiss nlist=K                      worst +0.004 / +0.019 / +0.010   per dataset avg +0.003 -0.000 +0.004 -0.001 +0.001   vs H r16: worst +0.027, mean +0.016
+  thr-g exact true probe             worst +0.005 / +0.011 / +0.010   per dataset avg -0.033 -0.003 +0.005 -0.010 -0.032   vs H r16: worst +0.015, mean -0.000
+  thr-g exact model probe            worst +0.005 / +0.013 / +0.007   per dataset avg -0.033 -0.001 +0.005 -0.013 -0.033   vs H r16: worst +0.015, mean -0.001
+  thr-g exact running/8 row          worst +0.005 / +0.023 / +0.001   per dataset avg -0.033 -0.002 +0.005 -0.010 -0.029   vs H r16: worst +0.016, mean +0.001
+  thr-g r16 running/1 probe          worst +0.006 / +0.011 / +0.007   per dataset avg -0.026 +0.006 +0.005 -0.005 -0.023   vs H r16: worst +0.016, mean +0.006
+  thr-g exact running/1 probe        worst +0.007 / +0.015 / +0.009   per dataset avg -0.032 -0.003 +0.007 -0.012 -0.033   vs H r16: worst +0.017, mean -0.000
+  thr-g r16 model->running/1 row     worst +0.008 / +0.015 / +0.009   per dataset avg -0.028 +0.008 -0.008 -0.005 -0.024   vs H r16: worst +0.011, mean +0.003
+  thr-g r16 model probe              worst +0.008 / +0.015 / +0.008   per dataset avg -0.027 +0.008 +0.002 -0.008 -0.027   vs H r16: worst +0.013, mean +0.004
+  thr-g r16 running/1 row            worst +0.008 / +0.015 / +0.009   per dataset avg -0.027 +0.008 -0.008 -0.006 -0.024   vs H r16: worst +0.011, mean +0.003
+  thr-g r16 true probe               worst +0.008 / +0.014 / +0.007   per dataset avg -0.026 +0.008 +0.002 -0.003 -0.024   vs H r16: worst +0.013, mean +0.006
+  thr-g r16 running/8 probe          worst +0.008 / +0.017 / +0.006   per dataset avg -0.026 +0.003 +0.008 -0.008 -0.021   vs H r16: worst +0.019, mean +0.005
+  thr-g exact running/8 probe        worst +0.010 / +0.023 / +0.009   per dataset avg -0.032 -0.003 +0.010 -0.010 -0.029   vs H r16: worst +0.021, mean +0.001
+  O2 f'=est                          worst +0.010 / +0.012 / +0.012   per dataset avg +0.010 +0.008 +0.004 +0.002 +0.009   vs H r16: worst +0.034, mean +0.021
+  thr-g r16 model->running/8 row     worst +0.011 / +0.023 / +0.009   per dataset avg -0.028 +0.011 -0.007 -0.007 -0.025   vs H r16: worst +0.014, mean +0.003
+  thr-t exact true row               worst +0.011 / +0.011 / +0.027   per dataset avg -0.017 +0.007 -0.001 -0.007 +0.011   vs H r16: worst +0.035, mean +0.013
+  thr-g r16 model row                worst +0.012 / +0.024 / +0.010   per dataset avg -0.027 +0.012 -0.006 -0.008 -0.026   vs H r16: worst +0.015, mean +0.003
+  thr-g r16 true row                 worst +0.012 / +0.021 / +0.010   per dataset avg -0.028 +0.012 -0.007 -0.004 -0.024   vs H r16: worst +0.015, mean +0.004
+  thr-g r16 max(model,running)/8 row worst +0.012 / +0.025 / +0.011   per dataset avg -0.027 +0.012 -0.006 -0.007 -0.026   vs H r16: worst +0.015, mean +0.004
+  thr-g r16 max(model,running)/1 row worst +0.013 / +0.026 / +0.011   per dataset avg -0.027 +0.013 -0.005 -0.005 -0.026   vs H r16: worst +0.016, mean +0.004
+  thr-t r16 running/1 probe          worst +0.014 / +0.024 / +0.023   per dataset avg -0.011 +0.014 +0.013 +0.004 +0.006   vs H r16: worst +0.031, mean +0.019
+  thr-t exact running/1 probe        worst +0.014 / +0.018 / +0.030   per dataset avg -0.016 +0.004 +0.014 -0.005 +0.008   vs H r16: worst +0.032, mean +0.015
+  thr-t r16 running/1 row            worst +0.015 / +0.028 / +0.021   per dataset avg -0.018 +0.015 -0.004 +0.002 -0.001   vs H r16: worst +0.023, mean +0.013
+  O3 r16                             worst +0.017 / +0.017 / +0.017   per dataset avg -0.022 +0.000 +0.017 -0.010 -0.018   vs H r16: worst +0.027, mean +0.008
+  thr-t exact true probe             worst +0.018 / +0.022 / +0.036   per dataset avg -0.013 +0.006 +0.013 -0.004 +0.018   vs H r16: worst +0.043, mean +0.018
+  thr-t r16 true probe               worst +0.019 / +0.031 / +0.032   per dataset avg -0.009 +0.019 +0.011 +0.008 +0.015   vs H r16: worst +0.040, mean +0.023
+  O3 exact                           worst +0.019 / +0.023 / +0.022   per dataset avg -0.028 -0.003 +0.019 -0.010 -0.026   vs H r16: worst +0.030, mean +0.005
+  O3-t r16                           worst +0.020 / +0.023 / +0.018   per dataset avg -0.017 +0.003 +0.020 -0.009 -0.013   vs H r16: worst +0.031, mean +0.011
+  thr-g r4 running/8 probe           worst +0.022 / +0.025 / +0.030   per dataset avg -0.012 +0.022 +0.014 +0.007 -0.006   vs H r16: worst +0.025, mean +0.019
+  thr-t exact model row              worst +0.022 / +0.030 / +0.044   per dataset avg -0.013 +0.019 +0.005 -0.009 +0.022   vs H r16: worst +0.046, mean +0.019
+  thr-g r4 running/8 row             worst +0.022 / +0.025 / +0.031   per dataset avg -0.013 +0.022 +0.010 +0.007 -0.006   vs H r16: worst +0.025, mean +0.018
+  thr-t r16 true row                 worst +0.023 / +0.039 / +0.023   per dataset avg -0.015 +0.023 -0.003 +0.006 +0.006   vs H r16: worst +0.030, mean +0.017
+  O3-t exact                         worst +0.023 / +0.026 / +0.027   per dataset avg -0.024 -0.000 +0.023 -0.010 -0.020   vs H r16: worst +0.033, mean +0.008
+  O3 r4                              worst +0.023 / +0.025 / +0.022   per dataset avg -0.010 +0.011 +0.023 +0.001 -0.009   vs H r16: worst +0.033, mean +0.017
+  O3-t r4                            worst +0.026 / +0.031 / +0.027   per dataset avg -0.003 +0.015 +0.026 +0.002 -0.003   vs H r16: worst +0.036, mean +0.021
+  thr-t exact model probe            worst +0.030 / +0.031 / +0.049   per dataset avg -0.008 +0.015 +0.016 -0.006 +0.030   vs H r16: worst +0.055, mean +0.023
+  thr-g r4 model probe               worst +0.034 / +0.054 / +0.026   per dataset avg -0.014 +0.034 +0.011 +0.011 -0.010   vs H r16: worst +0.036, mean +0.020
+  thr-t r16 model row                worst +0.036 / +0.053 / +0.054   per dataset avg -0.007 +0.032 +0.001 -0.003 +0.036   vs H r16: worst +0.061, mean +0.026
+  thr-g r4 model row                 worst +0.037 / +0.063 / +0.029   per dataset avg -0.012 +0.037 +0.001 +0.011 -0.010   vs H r16: worst +0.040, mean +0.020
+  thr-g r4 running/1 probe           worst +0.043 / +0.072 / +0.039   per dataset avg -0.009 +0.043 +0.013 +0.021 -0.004   vs H r16: worst +0.046, mean +0.027
+  thr-g r4 model->running/8 row      worst +0.044 / +0.064 / +0.040   per dataset avg -0.010 +0.044 -0.001 +0.016 -0.007   vs H r16: worst +0.046, mean +0.022
+  thr-g r4 max(model,running)/8 row  worst +0.044 / +0.065 / +0.041   per dataset avg -0.009 +0.044 +0.001 +0.016 -0.007   vs H r16: worst +0.047, mean +0.023
+  thr-t r16 model probe              worst +0.045 / +0.048 / +0.057   per dataset avg -0.002 +0.027 +0.012 +0.001 +0.045   vs H r16: worst +0.070, mean +0.031
+  thr-g r4 model->running/1 row      worst +0.046 / +0.076 / +0.040   per dataset avg -0.010 +0.046 -0.000 +0.023 -0.007   vs H r16: worst +0.048, mean +0.024
+  thr-g r4 running/1 row             worst +0.046 / +0.077 / +0.040   per dataset avg -0.010 +0.046 +0.001 +0.021 -0.008   vs H r16: worst +0.049, mean +0.024
+  thr-g r4 max(model,running)/1 row  worst +0.050 / +0.081 / +0.042   per dataset avg -0.008 +0.050 +0.002 +0.023 -0.006   vs H r16: worst +0.053, mean +0.026
+  thr-g r4 true probe                worst +0.057 / +0.094 / +0.045   per dataset avg -0.008 +0.057 +0.011 +0.029 -0.004   vs H r16: worst +0.060, mean +0.031
+  thr-g r4 true row                  worst +0.062 / +0.100 / +0.049   per dataset avg -0.008 +0.062 +0.001 +0.029 -0.004   vs H r16: worst +0.065, mean +0.030
+  (datasets in order: laion-text, laion-image, glove, yahoo, vibe-laion)
+
+same on the extra query sets (check):
+  H r16                              worst vs oracle -0.005  per set -0.024 -0.005 -0.010 -0.025   vs H r16 worst +0.000
+  H r4                               worst vs oracle -0.003  per set -0.012 -0.003 -0.006 -0.013   vs H r16 worst +0.012
+  thr-g r16 model->running/1 row     worst vs oracle -0.003  per set -0.028 -0.003 -0.005 -0.028   vs H r16 worst +0.005
+  thr-g r16 running/1 row            worst vs oracle -0.003  per set -0.028 -0.003 -0.005 -0.028   vs H r16 worst +0.005
+  thr-g exact true row               worst vs oracle -0.002  per set -0.035 -0.002 -0.012 -0.036   vs H r16 worst +0.003
+  thr-g exact running/1 row          worst vs oracle -0.002  per set -0.036 -0.002 -0.012 -0.036   vs H r16 worst +0.003
+  thr-g r16 true row                 worst vs oracle -0.002  per set -0.028 -0.002 -0.003 -0.028   vs H r16 worst +0.007
+  thr-g r16 model->running/8 row     worst vs oracle -0.002  per set -0.028 -0.002 -0.007 -0.028   vs H r16 worst +0.003
+  thr-g r16 max(model,running)/1 row worst vs oracle -0.001  per set -0.027 -0.001 -0.005 -0.028   vs H r16 worst +0.005
+  thr-g r16 max(model,running)/8 row worst vs oracle -0.001  per set -0.027 -0.001 -0.007 -0.028   vs H r16 worst +0.004
+  thr-g r16 model row                worst vs oracle -0.001  per set -0.028 -0.001 -0.008 -0.029   vs H r16 worst +0.004
+  thr-g exact model row              worst vs oracle -0.000  per set -0.036 -0.000 -0.012 -0.037   vs H r16 worst +0.005
+  thr-t exact running/1 row          worst vs oracle +0.000  per set -0.024 +0.000 -0.005 -0.005   vs H r16 worst +0.020
+  O2 f'=0.4                          worst vs oracle +0.002  per set +0.002 +0.002 +0.002 +0.000   vs H r16 worst +0.025
+  thr-t r16 running/1 row            worst vs oracle +0.005  per set -0.019 +0.000 +0.005 -0.007   vs H r16 worst +0.018
+  thr-t exact true row               worst vs oracle +0.005  per set -0.020 +0.001 -0.003 +0.005   vs H r16 worst +0.030
+  thr-g r16 running/8 row            worst vs oracle +0.005  per set -0.025 +0.005 -0.007 -0.025   vs H r16 worst +0.010
+  thr-g exact running/8 row          worst vs oracle +0.006  per set -0.032 +0.006 -0.011 -0.032   vs H r16 worst +0.011
+  thr-g r16 true probe               worst vs oracle +0.006  per set -0.027 +0.006 -0.004 -0.027   vs H r16 worst +0.011
+  thr-g r16 model probe              worst vs oracle +0.006  per set -0.028 +0.006 -0.008 -0.028   vs H r16 worst +0.011
+  thr-g exact true probe             worst vs oracle +0.006  per set -0.035 +0.006 -0.012 -0.036   vs H r16 worst +0.011
+  thr-g exact model probe            worst vs oracle +0.007  per set -0.035 +0.007 -0.012 -0.036   vs H r16 worst +0.012
+  thr-g r16 running/1 probe          worst vs oracle +0.007  per set -0.026 +0.007 -0.006 -0.026   vs H r16 worst +0.012
+  O2 f'=est                          worst vs oracle +0.008  per set +0.008 +0.004 +0.001 +0.008   vs H r16 worst +0.033
+  thr-g exact running/1 probe        worst vs oracle +0.008  per set -0.035 +0.008 -0.012 -0.036   vs H r16 worst +0.013
+  (sets: laion-text-learn*, glove-1000*, yahoo-900*, vibe-laion-learn*)

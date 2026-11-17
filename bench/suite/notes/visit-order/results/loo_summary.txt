@@ -1,0 +1,338 @@
+score: mean recall@10 over scanned shares 0.5%..25%; oracle: best rad f per dataset on its test queries
+datasets: laion-text (K 500, nq 100, 1st/10th sim 0.35/0.32, O0 f 0.5, oracle f 0.1), laion-image (K 500, nq 1000, 1st/10th sim 0.83/0.79, O0 f 0.5, oracle f 0.5), glove-100-angular (K 592, nq 100, 1st/10th sim 0.69/0.59, O0 f 0.5, oracle f 0.35), yahoo-minilm-384-normalized (K 339, nq 100, 1st/10th sim 0.66/0.55, O0 f 0.75, oracle f 0.5), vibe-laion-text (K 500, nq 100, 1st/10th sim 0.35/0.32, O0 f 0.35, oracle f 0.1), laion-text-learn* (K 500, nq 1000, 1st/10th sim 0.36/0.32, O0 f 0.5, oracle f 0.1), glove-100-angular-1000* (K 592, nq 1000, 1st/10th sim 0.68/0.60, O0 f 0.5, oracle f 0.5), yahoo-minilm-384-normalized-1000* (K 339, nq 900, 1st/10th sim 0.65/0.56, O0 f 0.75, oracle f 0.5), vibe-laion-learn* (K 500, nq 1000, 1st/10th sim 0.36/0.33, O0 f 0.35, oracle f 0.1)
+
+O2 sd: score by parameter (rows: datasets; cols [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
+  laion-text             0.853 0.862 0.870 0.877 0.879 0.882 0.875 0.855 0.819 0.747 0.568 0.429 0.340   own best 0.5
+  laion-image            0.921 0.933 0.941 0.947 0.951 0.951 0.939 0.891 0.793 0.696 0.543 0.427 0.348   own best 0.5
+  glove-100-angular      0.804 0.822 0.833 0.837 0.833 0.823 0.777 0.708 0.632 0.549 0.423 0.335 0.262   own best 0.3
+  yahoo-minilm-384-normalized 0.903 0.905 0.906 0.906 0.904 0.903 0.889 0.868 0.830 0.784 0.675 0.580 0.489   own best 0.3
+  vibe-laion-text        0.833 0.843 0.850 0.856 0.859 0.863 0.855 0.828 0.775 0.682 0.516 0.401 0.325   own best 0.5
+  laion-text-learn*      0.836 0.845 0.852 0.857 0.860 0.862 0.857 0.835 0.789 0.718 0.552 0.425 0.338   own best 0.5
+  glove-100-angular-1000* 0.834 0.849 0.856 0.860 0.857 0.850 0.809 0.736 0.644 0.556 0.416 0.316 0.250   own best 0.3
+  yahoo-minilm-384-normalized-1000* 0.896 0.898 0.899 0.899 0.897 0.894 0.879 0.853 0.815 0.763 0.635 0.516 0.420   own best 0.3
+  vibe-laion-learn*      0.837 0.847 0.854 0.860 0.863 0.864 0.860 0.838 0.794 0.723 0.553 0.419 0.329   own best 0.5
+  global (all LOO datasets) best: 0.4
+  leave out laion-text            : chosen 0.4, loss 0.0026 vs own best 0.5
+  leave out laion-image           : chosen 0.4, loss 0.0002 vs own best 0.5
+  leave out glove-100-angular     : chosen 0.5, loss 0.0136 vs own best 0.3
+  leave out yahoo-minilm-384-normalized: chosen 0.4, loss 0.0021 vs own best 0.3
+  leave out vibe-laion-text       : chosen 0.4, loss 0.0031 vs own best 0.5
+
+O2 mad: score by parameter (rows: datasets; cols [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
+  laion-text             0.853 0.860 0.868 0.875 0.878 0.881 0.877 0.869 0.847 0.808 0.677 0.517 0.405   own best 0.5
+  laion-image            0.921 0.933 0.941 0.946 0.950 0.950 0.938 0.890 0.794 0.704 0.570 0.466 0.387   own best 0.5
+  glove-100-angular      0.804 0.821 0.831 0.835 0.834 0.829 0.795 0.741 0.682 0.618 0.485 0.393 0.316   own best 0.3
+  yahoo-minilm-384-normalized 0.903 0.905 0.906 0.907 0.906 0.904 0.897 0.885 0.869 0.850 0.790 0.723 0.652   own best 0.3
+  vibe-laion-text        0.833 0.843 0.849 0.854 0.859 0.862 0.861 0.845 0.810 0.755 0.597 0.466 0.379   own best 0.5
+  laion-text-learn*      0.836 0.844 0.851 0.856 0.859 0.861 0.860 0.846 0.818 0.774 0.641 0.504 0.402   own best 0.5
+  glove-100-angular-1000* 0.834 0.847 0.855 0.859 0.859 0.854 0.828 0.780 0.713 0.636 0.484 0.373 0.297   own best 0.3
+  yahoo-minilm-384-normalized-1000* 0.896 0.898 0.899 0.899 0.898 0.897 0.888 0.875 0.857 0.833 0.771 0.690 0.602   own best 0.3
+  vibe-laion-learn*      0.837 0.846 0.853 0.858 0.862 0.864 0.863 0.849 0.820 0.774 0.636 0.496 0.391   own best 0.5
+  global (all LOO datasets) best: 0.4
+  leave out laion-text            : chosen 0.4, loss 0.0027 vs own best 0.5
+  leave out laion-image           : chosen 0.4, loss 0.0002 vs own best 0.5
+  leave out glove-100-angular     : chosen 0.5, loss 0.0069 vs own best 0.3
+  leave out yahoo-minilm-384-normalized: chosen 0.5, loss 0.0024 vs own best 0.3
+  leave out vibe-laion-text       : chosen 0.4, loss 0.0026 vs own best 0.5
+
+O3 r4: score by parameter (rows: datasets; cols [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
+  laion-text             0.853 0.871 0.885 0.891 0.892 0.891 0.885 0.869 0.850 0.826   own best 1.0
+  laion-image            0.921 0.936 0.942 0.944 0.941 0.932 0.918 0.880 0.836 0.787   own best 0.75
+  glove-100-angular      0.804 0.810 0.813 0.813 0.812 0.810 0.805 0.791 0.768 0.743   own best 0.5
+  yahoo-minilm-384-normalized 0.903 0.908 0.910 0.908 0.906 0.901 0.896 0.880 0.869 0.853   own best 0.5
+  vibe-laion-text        0.833 0.850 0.860 0.864 0.870 0.870 0.865 0.855 0.834 0.806   own best 1.25
+  laion-text-learn*      0.836 0.852 0.863 0.868 0.870 0.868 0.863 0.847 0.824 0.797   own best 1.0
+  glove-100-angular-1000* 0.834 0.838 0.840 0.840 0.839 0.835 0.830 0.814 0.794 0.770   own best 0.5
+  yahoo-minilm-384-normalized-1000* 0.896 0.902 0.903 0.903 0.900 0.896 0.891 0.877 0.862 0.847   own best 0.5
+  vibe-laion-learn*      0.837 0.855 0.866 0.871 0.873 0.872 0.868 0.853 0.831 0.805   own best 1.0
+  global (all LOO datasets) best: 1.0
+  leave out laion-text            : chosen 1.0, loss 0.0000 vs own best 1.0
+  leave out laion-image           : chosen 1.0, loss 0.0035 vs own best 0.75
+  leave out glove-100-angular     : chosen 1.0, loss 0.0005 vs own best 0.5
+  leave out yahoo-minilm-384-normalized: chosen 1.0, loss 0.0043 vs own best 0.5
+  leave out vibe-laion-text       : chosen 0.75, loss 0.0067 vs own best 1.25
+
+O3 r16: score by parameter (rows: datasets; cols [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
+  laion-text             0.853 0.877 0.894 0.902 0.904 0.906 0.904 0.894 0.879 0.860   own best 1.25
+  laion-image            0.921 0.937 0.947 0.951 0.951 0.949 0.942 0.921 0.893 0.858   own best 1.0
+  glove-100-angular      0.804 0.812 0.816 0.818 0.818 0.816 0.813 0.803 0.784 0.764   own best 1.0
+  yahoo-minilm-384-normalized 0.903 0.910 0.914 0.915 0.917 0.915 0.913 0.907 0.899 0.892   own best 1.0
+  vibe-laion-text        0.833 0.853 0.865 0.873 0.879 0.883 0.884 0.875 0.860 0.840   own best 1.5
+  laion-text-learn*      0.836 0.858 0.871 0.880 0.883 0.884 0.882 0.872 0.855 0.836   own best 1.25
+  glove-100-angular-1000* 0.834 0.839 0.842 0.843 0.842 0.840 0.835 0.823 0.807 0.788   own best 0.75
+  yahoo-minilm-384-normalized-1000* 0.896 0.903 0.907 0.909 0.909 0.908 0.906 0.899 0.891 0.881   own best 0.75
+  vibe-laion-learn*      0.837 0.859 0.873 0.882 0.886 0.888 0.886 0.876 0.861 0.841   own best 1.25
+  global (all LOO datasets) best: 1.0
+  leave out laion-text            : chosen 1.0, loss 0.0017 vs own best 1.25
+  leave out laion-image           : chosen 1.25, loss 0.0025 vs own best 1.0
+  leave out glove-100-angular     : chosen 1.25, loss 0.0021 vs own best 1.0
+  leave out yahoo-minilm-384-normalized: chosen 1.25, loss 0.0015 vs own best 1.0
+  leave out vibe-laion-text       : chosen 1.0, loss 0.0047 vs own best 1.5
+
+O3 exact: score by parameter (rows: datasets; cols [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0])
+  laion-text             0.853 0.881 0.897 0.906 0.910 0.911 0.911 0.902 0.888 0.877   own best 1.25
+  laion-image            0.921 0.937 0.947 0.952 0.955 0.954 0.950 0.937 0.916 0.890   own best 1.0
+  glove-100-angular      0.804 0.812 0.814 0.815 0.816 0.813 0.808 0.796 0.777 0.753   own best 1.0
+  yahoo-minilm-384-normalized 0.903 0.910 0.914 0.916 0.917 0.918 0.917 0.914 0.909 0.905   own best 1.25
+  vibe-laion-text        0.833 0.855 0.870 0.880 0.887 0.888 0.888 0.884 0.870 0.856   own best 1.25
+  laion-text-learn*      0.836 0.860 0.875 0.885 0.889 0.891 0.891 0.883 0.870 0.854   own best 1.25
+  glove-100-angular-1000* 0.834 0.839 0.842 0.843 0.842 0.839 0.834 0.821 0.804 0.785   own best 0.75
+  yahoo-minilm-384-normalized-1000* 0.896 0.903 0.907 0.910 0.911 0.911 0.910 0.907 0.902 0.896   own best 1.25
+  vibe-laion-learn*      0.837 0.862 0.877 0.887 0.893 0.895 0.895 0.888 0.875 0.860   own best 1.25
+  global (all LOO datasets) best: 1.25
+  leave out laion-text            : chosen 1.0, loss 0.0014 vs own best 1.25
+  leave out laion-image           : chosen 1.25, loss 0.0008 vs own best 1.0
+  leave out glove-100-angular     : chosen 1.25, loss 0.0025 vs own best 1.0
+  leave out yahoo-minilm-384-normalized: chosen 1.0, loss 0.0011 vs own best 1.25
+  leave out vibe-laion-text       : chosen 1.0, loss 0.0017 vs own best 1.25
+
+H r4: score by parameter (rows: datasets; cols ["x0.5 f'=0.1", "x0.5 f'=0.2", "x0.5 f'=0.3", "x0.75 f'=0.1", "x0.75 f'=0.2", "x0.75 f'=0.3", "x1.0 f'=0.1", "x1.0 f'=0.2", "x1.0 f'=0.3"])
+  laion-text             0.888 0.891 0.894 0.894 0.894 0.896 0.894 0.893 0.894   own best x0.75 f'=0.3
+  laion-image            0.949 0.953 0.954 0.948 0.950 0.949 0.943 0.942 0.939   own best x0.5 f'=0.3
+  glove-100-angular      0.828 0.838 0.842 0.828 0.837 0.840 0.826 0.834 0.835   own best x0.5 f'=0.3
+  yahoo-minilm-384-normalized 0.912 0.913 0.911 0.911 0.911 0.910 0.907 0.907 0.907   own best x0.5 f'=0.2
+  vibe-laion-text        0.866 0.870 0.872 0.869 0.873 0.874 0.873 0.873 0.872   own best x0.75 f'=0.3
+  laion-text-learn*      0.868 0.871 0.873 0.872 0.874 0.874 0.872 0.872 0.871   own best x0.75 f'=0.3
+  glove-100-angular-1000* 0.852 0.859 0.862 0.851 0.858 0.860 0.849 0.855 0.857   own best x0.5 f'=0.3
+  yahoo-minilm-384-normalized-1000* 0.905 0.906 0.905 0.904 0.905 0.903 0.901 0.901 0.900   own best x0.5 f'=0.2
+  vibe-laion-learn*      0.871 0.875 0.877 0.875 0.877 0.878 0.876 0.877 0.876   own best x0.75 f'=0.3
+  global (all LOO datasets) best: x0.5 f'=0.3
+  leave out laion-text            : chosen x0.5 f'=0.3, loss 0.0020 vs own best x0.75 f'=0.3
+  leave out laion-image           : chosen x0.75 f'=0.3, loss 0.0050 vs own best x0.5 f'=0.3
+  leave out glove-100-angular     : chosen x0.5 f'=0.3, loss 0.0000 vs own best x0.5 f'=0.3
+  leave out yahoo-minilm-384-normalized: chosen x0.5 f'=0.3, loss 0.0013 vs own best x0.5 f'=0.2
+  leave out vibe-laion-text       : chosen x0.5 f'=0.3, loss 0.0017 vs own best x0.75 f'=0.3
+
+H r16: score by parameter (rows: datasets; cols ["x0.5 f'=0.1", "x0.5 f'=0.2", "x0.5 f'=0.3", "x0.75 f'=0.1", "x0.75 f'=0.2", "x0.75 f'=0.3", "x1.0 f'=0.1", "x1.0 f'=0.2", "x1.0 f'=0.3"])
+  laion-text             0.898 0.902 0.903 0.905 0.906 0.906 0.906 0.907 0.908   own best x1.0 f'=0.3
+  laion-image            0.952 0.956 0.957 0.955 0.956 0.955 0.953 0.952 0.949   own best x0.5 f'=0.3
+  glove-100-angular      0.830 0.842 0.846 0.832 0.841 0.846 0.832 0.840 0.844   own best x0.5 f'=0.3
+  yahoo-minilm-384-normalized 0.916 0.916 0.916 0.918 0.918 0.916 0.918 0.917 0.918   own best x0.75 f'=0.2
+  vibe-laion-text        0.871 0.875 0.880 0.878 0.882 0.886 0.884 0.886 0.886   own best x1.0 f'=0.2
+  laion-text-learn*      0.876 0.880 0.881 0.883 0.885 0.885 0.885 0.886 0.886   own best x1.0 f'=0.2
+  glove-100-angular-1000* 0.854 0.862 0.865 0.855 0.861 0.864 0.853 0.860 0.862   own best x0.5 f'=0.3
+  yahoo-minilm-384-normalized-1000* 0.909 0.908 0.908 0.910 0.910 0.909 0.910 0.910 0.909   own best x0.75 f'=0.2
+  vibe-laion-learn*      0.878 0.882 0.884 0.885 0.888 0.889 0.888 0.890 0.890   own best x1.0 f'=0.2
+  global (all LOO datasets) best: x0.75 f'=0.3
+  leave out laion-text            : chosen x0.75 f'=0.3, loss 0.0017 vs own best x1.0 f'=0.3
+  leave out laion-image           : chosen x1.0 f'=0.3, loss 0.0078 vs own best x0.5 f'=0.3
+  leave out glove-100-angular     : chosen x1.0 f'=0.2, loss 0.0059 vs own best x0.5 f'=0.3
+  leave out yahoo-minilm-384-normalized: chosen x0.75 f'=0.3, loss 0.0014 vs own best x0.75 f'=0.2
+  leave out vibe-laion-text       : chosen x0.75 f'=0.3, loss 0.0008 vs own best x1.0 f'=0.2
+
+laion-text  (K 500; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.278   0.481   0.717   0.921   0.642    27   [O0]
+  O1 q.m                           0.554   0.800   0.909   0.980   0.853     2   [rad f=0.0]
+  q.m_hat                          0.600   0.785   0.938   0.995   0.867     2   [m_hat]
+  O2 sd f'=0.4 (global)            0.629   0.812   0.938   0.993   0.879     2   [O2 sd f'=0.4]
+  O2 sd own best                   0.642   0.809   0.940   0.993   0.882     2   [O2 sd f'=0.5]
+  O2 mad f'=0.4 (global)           0.624   0.808   0.935   0.993   0.878     3   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.658   0.828   0.947   0.995   0.892     1   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.658   0.828   0.947   0.995   0.892     1   [O3 r4 x1.0]
+  O3 r4 own best                   0.658   0.828   0.947   0.995   0.892     1   [O3 r4 x1.0]
+  O3 r16 x1 (param-free)           0.670   0.859   0.957   0.995   0.904     0   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.670   0.859   0.957   0.995   0.904     0   [O3 r16 x1.0]
+  O3 r16 own best                  0.662   0.855   0.959   0.996   0.906     0   [O3 r16 x1.25]
+  O3 exact x1                      0.699   0.861   0.958   0.996   0.910     1   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.688   0.860   0.961   0.996   0.911     1   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.669   0.827   0.951   0.996   0.894     1   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.681   0.854   0.961   0.996   0.906     0   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.681   0.853   0.960   0.996   0.908     0   [H r16 x1.0 f'=0.3]
+  oracle (best rad f)              0.634   0.813   0.942   0.993   0.882     2   [rad f=0.1]
+  faiss nlist=K                    0.600   0.821   0.933   0.994   0.879     2   [faiss nlist=500]
+
+laion-image  (K 500; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.783   0.931   0.989   0.999   0.952     0   [O0]
+  O1 q.m                           0.722   0.885   0.965   0.995   0.921     1   [rad f=0.0]
+  q.m_hat                          0.780   0.930   0.989   0.999   0.951     0   [m_hat]
+  O2 sd f'=0.4 (global)            0.788   0.931   0.987   0.999   0.951     1   [O2 sd f'=0.4]
+  O2 sd own best                   0.781   0.931   0.988   0.999   0.951     0   [O2 sd f'=0.5]
+  O2 mad f'=0.4 (global)           0.784   0.929   0.986   0.999   0.950     1   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.755   0.914   0.981   0.999   0.941     1   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.755   0.914   0.981   0.999   0.941     1   [O3 r4 x1.0]
+  O3 r4 own best                   0.775   0.917   0.980   0.998   0.944     1   [O3 r4 x0.75]
+  O3 r16 x1 (param-free)           0.788   0.929   0.989   0.999   0.951     0   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.788   0.929   0.989   0.999   0.951     0   [O3 r16 x1.0]
+  O3 r16 own best                  0.788   0.929   0.989   0.999   0.951     0   [O3 r16 x1.0]
+  O3 exact x1                      0.799   0.936   0.989   0.999   0.955     0   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.792   0.934   0.990   0.999   0.954     0   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.796   0.935   0.990   0.999   0.954     0   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.795   0.935   0.991   0.999   0.955     0   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.805   0.938   0.991   0.999   0.957     0   [H r16 x0.5 f'=0.3]
+  oracle (best rad f)              0.783   0.931   0.989   0.999   0.952     0   [rad f=0.5]
+  faiss nlist=K                    0.779   0.934   0.991   0.999   0.952     1   [faiss nlist=500]
+
+glove-100-angular  (K 592; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.539   0.750   0.898   0.984   0.835     1   [O0]
+  O1 q.m                           0.493   0.713   0.871   0.976   0.804     0   [rad f=0.0]
+  q.m_hat                          0.537   0.749   0.900   0.983   0.834     1   [m_hat]
+  O2 sd f'=0.4 (global)            0.542   0.746   0.900   0.985   0.833     1   [O2 sd f'=0.4]
+  O2 sd own best                   0.539   0.757   0.898   0.984   0.837     1   [O2 sd f'=0.3]
+  O2 mad f'=0.4 (global)           0.540   0.755   0.894   0.984   0.834     1   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.502   0.725   0.875   0.978   0.812     1   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.502   0.725   0.875   0.978   0.812     1   [O3 r4 x1.0]
+  O3 r4 own best                   0.508   0.721   0.875   0.980   0.813     1   [O3 r4 x0.5]
+  O3 r16 x1 (param-free)           0.513   0.733   0.880   0.977   0.818     0   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.513   0.733   0.880   0.977   0.818     0   [O3 r16 x1.0]
+  O3 r16 own best                  0.513   0.733   0.880   0.977   0.818     0   [O3 r16 x1.0]
+  O3 exact x1                      0.521   0.726   0.875   0.978   0.816     0   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.515   0.726   0.874   0.976   0.813     0   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.555   0.756   0.907   0.985   0.842     1   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.559   0.762   0.908   0.985   0.846     0   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.559   0.760   0.908   0.986   0.846     1   [H r16 x0.5 f'=0.3]
+  oracle (best rad f)              0.538   0.750   0.897   0.981   0.835     0   [rad f=0.35]
+  faiss nlist=K                    0.537   0.739   0.892   0.979   0.831     1   [faiss nlist=592]
+
+yahoo-minilm-384-normalized  (K 339; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.645   0.853   0.966   0.996   0.905     0   [O0]
+  O1 q.m                           0.637   0.852   0.968   0.997   0.903     1   [rad f=0.0]
+  q.m_hat                          0.644   0.854   0.970   0.997   0.906     0   [m_hat]
+  O2 sd f'=0.4 (global)            0.643   0.852   0.966   0.996   0.904     0   [O2 sd f'=0.4]
+  O2 sd own best                   0.647   0.854   0.970   0.996   0.906     0   [O2 sd f'=0.3]
+  O2 mad f'=0.4 (global)           0.646   0.854   0.971   0.996   0.906     0   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.640   0.854   0.971   0.997   0.906     0   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.640   0.854   0.971   0.997   0.906     0   [O3 r4 x1.0]
+  O3 r4 own best                   0.656   0.862   0.971   0.997   0.910     0   [O3 r4 x0.5]
+  O3 r16 x1 (param-free)           0.660   0.884   0.974   0.997   0.917     0   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.660   0.884   0.974   0.997   0.917     0   [O3 r16 x1.0]
+  O3 r16 own best                  0.660   0.884   0.974   0.997   0.917     0   [O3 r16 x1.0]
+  O3 exact x1                      0.666   0.880   0.974   0.997   0.917     0   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.664   0.884   0.975   0.997   0.918     0   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.658   0.860   0.973   0.997   0.911     0   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.662   0.878   0.974   0.997   0.916     0   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.667   0.882   0.975   0.997   0.918     0   [H r16 x0.75 f'=0.2]
+  oracle (best rad f)              0.654   0.854   0.973   0.996   0.907     0   [rad f=0.5]
+  faiss nlist=K                    0.625   0.860   0.976   0.998   0.908     1   [faiss nlist=339]
+
+vibe-laion-text  (K 500; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.437   0.638   0.865   0.974   0.778     4   [O0]
+  O1 q.m                           0.495   0.740   0.902   0.986   0.833     1   [rad f=0.0]
+  q.m_hat                          0.530   0.775   0.938   0.992   0.856     2   [m_hat]
+  O2 sd f'=0.4 (global)            0.538   0.778   0.935   0.993   0.859     0   [O2 sd f'=0.4]
+  O2 sd own best                   0.541   0.790   0.937   0.992   0.863     0   [O2 sd f'=0.5]
+  O2 mad f'=0.4 (global)           0.536   0.779   0.934   0.993   0.859     0   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.563   0.801   0.946   0.993   0.870     0   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.563   0.801   0.946   0.993   0.870     0   [O3 r4 x1.0]
+  O3 r4 own best                   0.561   0.800   0.951   0.992   0.870     0   [O3 r4 x1.25]
+  O3 r16 x1 (param-free)           0.569   0.815   0.959   0.992   0.879     0   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.569   0.815   0.959   0.992   0.879     0   [O3 r16 x1.0]
+  O3 r16 own best                  0.590   0.828   0.952   0.992   0.884     0   [O3 r16 x1.5]
+  O3 exact x1                      0.600   0.818   0.960   0.994   0.887     0   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.596   0.823   0.962   0.994   0.888     1   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.565   0.787   0.950   0.992   0.872     0   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.594   0.822   0.956   0.993   0.886     0   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.593   0.822   0.957   0.992   0.886     0   [H r16 x1.0 f'=0.2]
+  oracle (best rad f)              0.534   0.780   0.939   0.991   0.861     0   [rad f=0.1]
+  faiss nlist=K                    0.550   0.761   0.938   0.992   0.860     1   [faiss nlist=500]
+
+laion-text-learn*  (K 500; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.283   0.457   0.685   0.913   0.625   234   [O0]
+  O1 q.m                           0.562   0.749   0.899   0.977   0.836    17   [rad f=0.0]
+  q.m_hat                          0.567   0.768   0.916   0.988   0.850    18   [m_hat]
+  O2 sd f'=0.4 (global)            0.587   0.786   0.923   0.987   0.860    12   [O2 sd f'=0.4]
+  O2 sd own best                   0.590   0.786   0.925   0.989   0.862    13   [O2 sd f'=0.5]
+  O2 mad f'=0.4 (global)           0.586   0.783   0.922   0.986   0.859    12   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.607   0.800   0.934   0.988   0.870     2   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.607   0.800   0.934   0.988   0.870     2   [O3 r4 x1.0]
+  O3 r4 own best                   0.607   0.800   0.934   0.988   0.870     2   [O3 r4 x1.0]
+  O3 r16 x1 (param-free)           0.627   0.821   0.946   0.991   0.883     1   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.627   0.821   0.946   0.991   0.883     1   [O3 r16 x1.0]
+  O3 r16 own best                  0.624   0.822   0.946   0.992   0.884     2   [O3 r16 x1.25]
+  O3 exact x1                      0.635   0.834   0.950   0.992   0.889     1   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.633   0.838   0.953   0.993   0.891     2   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.611   0.806   0.935   0.990   0.873     5   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.628   0.827   0.946   0.993   0.885     2   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.632   0.828   0.947   0.992   0.886     1   [H r16 x1.0 f'=0.2]
+  oracle (best rad f)              0.588   0.786   0.924   0.989   0.862    12   [rad f=0.1]
+  faiss nlist=K                    0.569   0.770   0.911   0.984   0.849    11   [faiss nlist=500]
+
+glove-100-angular-1000*  (K 592; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.611   0.779   0.916   0.985   0.859     4   [O0]
+  O1 q.m                           0.569   0.751   0.894   0.978   0.834    11   [rad f=0.0]
+  q.m_hat                          0.606   0.779   0.915   0.985   0.857     2   [m_hat]
+  O2 sd f'=0.4 (global)            0.607   0.779   0.913   0.985   0.857     3   [O2 sd f'=0.4]
+  O2 sd own best                   0.610   0.781   0.916   0.985   0.860     4   [O2 sd f'=0.3]
+  O2 mad f'=0.4 (global)           0.610   0.780   0.915   0.985   0.859     4   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.577   0.761   0.895   0.976   0.839    13   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.577   0.761   0.895   0.976   0.839    13   [O3 r4 x1.0]
+  O3 r4 own best                   0.580   0.761   0.898   0.977   0.840    13   [O3 r4 x0.5]
+  O3 r16 x1 (param-free)           0.582   0.767   0.897   0.977   0.842    12   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.582   0.767   0.897   0.977   0.842    12   [O3 r16 x1.0]
+  O3 r16 own best                  0.585   0.767   0.898   0.978   0.843    13   [O3 r16 x0.75]
+  O3 exact x1                      0.583   0.765   0.898   0.978   0.842    15   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.577   0.760   0.896   0.977   0.839    15   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.614   0.788   0.917   0.984   0.862     4   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.618   0.794   0.920   0.984   0.864     3   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.618   0.793   0.920   0.985   0.865     4   [H r16 x0.5 f'=0.3]
+  oracle (best rad f)              0.611   0.779   0.916   0.985   0.859     4   [rad f=0.5]
+  faiss nlist=K                    0.587   0.772   0.909   0.982   0.849     6   [faiss nlist=592]
+
+yahoo-minilm-384-normalized-1000*  (K 339; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.622   0.850   0.960   0.993   0.897     5   [O0]
+  O1 q.m                           0.614   0.849   0.959   0.994   0.896     4   [rad f=0.0]
+  q.m_hat                          0.622   0.854   0.962   0.994   0.899     4   [m_hat]
+  O2 sd f'=0.4 (global)            0.620   0.850   0.960   0.993   0.897     5   [O2 sd f'=0.4]
+  O2 sd own best                   0.624   0.853   0.962   0.994   0.899     3   [O2 sd f'=0.3]
+  O2 mad f'=0.4 (global)           0.621   0.853   0.962   0.993   0.898     5   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.629   0.854   0.960   0.994   0.900     2   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.629   0.854   0.960   0.994   0.900     2   [O3 r4 x1.0]
+  O3 r4 own best                   0.639   0.860   0.963   0.995   0.903     1   [O3 r4 x0.5]
+  O3 r16 x1 (param-free)           0.647   0.867   0.965   0.995   0.909     1   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.647   0.867   0.965   0.995   0.909     1   [O3 r16 x1.0]
+  O3 r16 own best                  0.648   0.867   0.966   0.996   0.909     1   [O3 r16 x0.75]
+  O3 exact x1                      0.649   0.871   0.969   0.996   0.911     1   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.652   0.872   0.968   0.996   0.911     0   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.644   0.862   0.963   0.994   0.905     1   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.648   0.871   0.966   0.996   0.909     1   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.651   0.871   0.967   0.995   0.910     1   [H r16 x0.75 f'=0.2]
+  oracle (best rad f)              0.624   0.855   0.962   0.994   0.899     3   [rad f=0.5]
+  faiss nlist=K                    0.615   0.853   0.962   0.995   0.898     6   [faiss nlist=339]
+
+vibe-laion-learn*  (K 500; recall@10 at scanned share)
+  order                             0.5%    1.6%    6.3%     25%     avg   r=0@1.6%
+  O0 (today)                       0.482   0.676   0.863   0.968   0.790    50   [O0]
+  O1 q.m                           0.555   0.759   0.904   0.975   0.837    23   [rad f=0.0]
+  q.m_hat                          0.571   0.779   0.920   0.987   0.855    15   [m_hat]
+  O2 sd f'=0.4 (global)            0.590   0.790   0.926   0.987   0.863    11   [O2 sd f'=0.4]
+  O2 sd own best                   0.593   0.792   0.927   0.988   0.864     9   [O2 sd f'=0.5]
+  O2 mad f'=0.4 (global)           0.589   0.789   0.925   0.987   0.862    13   [O2 mad f'=0.4]
+  O3 r4 x1 (param-free)            0.614   0.799   0.937   0.991   0.873     8   [O3 r4 x1.0]
+  O3 r4 x1.0 (global)              0.614   0.799   0.937   0.991   0.873     8   [O3 r4 x1.0]
+  O3 r4 own best                   0.614   0.799   0.937   0.991   0.873     8   [O3 r4 x1.0]
+  O3 r16 x1 (param-free)           0.635   0.821   0.949   0.994   0.886     5   [O3 r16 x1.0]
+  O3 r16 x1.0 (global)             0.635   0.821   0.949   0.994   0.886     5   [O3 r16 x1.0]
+  O3 r16 own best                  0.634   0.822   0.949   0.994   0.888     5   [O3 r16 x1.25]
+  O3 exact x1                      0.649   0.830   0.954   0.994   0.893     4   [O3 exact x1.0]
+  O3 exact x1.25 (global)          0.646   0.836   0.957   0.995   0.895     4   [O3 exact x1.25]
+  H r4 x0.5 f'=0.3 (global)        0.621   0.811   0.937   0.992   0.877     6   [H r4 x0.5 f'=0.3]
+  H r16 x0.75 f'=0.3 (global)      0.639   0.826   0.949   0.994   0.889     6   [H r16 x0.75 f'=0.3]
+  H r16 own best                   0.640   0.828   0.950   0.994   0.890     6   [H r16 x1.0 f'=0.2]
+  oracle (best rad f)              0.591   0.793   0.926   0.988   0.864    11   [rad f=0.1]
+  faiss nlist=K                    0.580   0.778   0.923   0.989   0.858    19   [faiss nlist=500]
+
+loss against the oracle (oracle - order), per dataset, in avg and at 1.6% / 6.3%; worst case last
+  O0 (today)                     laion-text: +0.241/+0.332/+0.226  laion-image: +0.000/+0.000/+0.000  glove-100-angular: +0.000/-0.000/-0.001  yahoo-minilm-384-normalized: +0.002/+0.000/+0.007  vibe-laion-text: +0.084/+0.142/+0.074  laion-text-learn*: +0.237/+0.329/+0.239  glove-100-angular-1000*: +0.000/+0.000/+0.000  yahoo-minilm-384-normalized-1000*: +0.002/+0.005/+0.002  vibe-laion-learn*: +0.074/+0.117/+0.063   | worst avg +0.241, worst 1.6% +0.332, worst 6.3% +0.239
+  O1 q.m                         laion-text: +0.030/+0.013/+0.033  laion-image: +0.031/+0.046/+0.024  glove-100-angular: +0.031/+0.037/+0.027  yahoo-minilm-384-normalized: +0.004/+0.001/+0.005  vibe-laion-text: +0.029/+0.040/+0.037  laion-text-learn*: +0.026/+0.037/+0.026  glove-100-angular-1000*: +0.025/+0.028/+0.022  yahoo-minilm-384-normalized-1000*: +0.003/+0.007/+0.003  vibe-laion-learn*: +0.027/+0.035/+0.022   | worst avg +0.031, worst 1.6% +0.046, worst 6.3% +0.037
+  q.m_hat                        laion-text: +0.015/+0.028/+0.005  laion-image: +0.001/+0.001/-0.001  glove-100-angular: +0.001/+0.001/-0.003  yahoo-minilm-384-normalized: +0.001/-0.000/+0.003  vibe-laion-text: +0.005/+0.005/+0.001  laion-text-learn*: +0.011/+0.018/+0.009  glove-100-angular-1000*: +0.002/+0.001/+0.001  yahoo-minilm-384-normalized-1000*: +0.000/+0.002/+0.001  vibe-laion-learn*: +0.009/+0.015/+0.005   | worst avg +0.015, worst 1.6% +0.028, worst 6.3% +0.009
+  O2 sd f'=0.4 (global)          laion-text: +0.003/+0.002/+0.004  laion-image: +0.001/+0.000/+0.002  glove-100-angular: +0.002/+0.003/-0.003  yahoo-minilm-384-normalized: +0.003/+0.001/+0.007  vibe-laion-text: +0.002/+0.002/+0.004  laion-text-learn*: +0.002/+0.000/+0.002  glove-100-angular-1000*: +0.002/+0.000/+0.003  yahoo-minilm-384-normalized-1000*: +0.002/+0.006/+0.002  vibe-laion-learn*: +0.000/+0.003/+0.000   | worst avg +0.003, worst 1.6% +0.006, worst 6.3% +0.007
+  O2 sd own best                 laion-text: +0.000/+0.004/+0.002  laion-image: +0.001/+0.000/+0.001  glove-100-angular: -0.002/-0.007/-0.001  yahoo-minilm-384-normalized: +0.001/+0.000/+0.003  vibe-laion-text: -0.001/-0.010/+0.002  laion-text-learn*: -0.000/+0.000/-0.001  glove-100-angular-1000*: -0.001/-0.002/+0.001  yahoo-minilm-384-normalized-1000*: +0.000/+0.002/+0.001  vibe-laion-learn*: -0.000/+0.001/-0.001   | worst avg +0.001, worst 1.6% +0.004, worst 6.3% +0.003
+  O2 mad f'=0.4 (global)         laion-text: +0.004/+0.005/+0.007  laion-image: +0.002/+0.002/+0.002  glove-100-angular: +0.001/-0.006/+0.003  yahoo-minilm-384-normalized: +0.001/+0.000/+0.002  vibe-laion-text: +0.002/+0.001/+0.005  laion-text-learn*: +0.002/+0.003/+0.002  glove-100-angular-1000*: +0.000/-0.000/+0.001  yahoo-minilm-384-normalized-1000*: +0.001/+0.003/+0.000  vibe-laion-learn*: +0.002/+0.004/+0.001   | worst avg +0.004, worst 1.6% +0.005, worst 6.3% +0.007
+  O3 r4 x1 (param-free)          laion-text: -0.010/-0.015/-0.005  laion-image: +0.011/+0.017/+0.008  glove-100-angular: +0.023/+0.025/+0.022  yahoo-minilm-384-normalized: +0.001/-0.001/+0.002  vibe-laion-text: -0.009/-0.021/-0.008  laion-text-learn*: -0.008/-0.014/-0.009  glove-100-angular-1000*: +0.020/+0.018/+0.021  yahoo-minilm-384-normalized-1000*: -0.001/+0.002/+0.002  vibe-laion-learn*: -0.009/-0.006/-0.011   | worst avg +0.023, worst 1.6% +0.025, worst 6.3% +0.022
+  O3 r4 x1.0 (global)            laion-text: -0.010/-0.015/-0.005  laion-image: +0.011/+0.017/+0.008  glove-100-angular: +0.023/+0.025/+0.022  yahoo-minilm-384-normalized: +0.001/-0.001/+0.002  vibe-laion-text: -0.009/-0.021/-0.008  laion-text-learn*: -0.008/-0.014/-0.009  glove-100-angular-1000*: +0.020/+0.018/+0.021  yahoo-minilm-384-normalized-1000*: -0.001/+0.002/+0.002  vibe-laion-learn*: -0.009/-0.006/-0.011   | worst avg +0.023, worst 1.6% +0.025, worst 6.3% +0.022
+  O3 r4 own best                 laion-text: -0.010/-0.015/-0.005  laion-image: +0.008/+0.014/+0.009  glove-100-angular: +0.022/+0.029/+0.022  yahoo-minilm-384-normalized: -0.003/-0.008/+0.002  vibe-laion-text: -0.009/-0.020/-0.012  laion-text-learn*: -0.008/-0.014/-0.009  glove-100-angular-1000*: +0.019/+0.019/+0.019  yahoo-minilm-384-normalized-1000*: -0.004/-0.004/-0.001  vibe-laion-learn*: -0.009/-0.006/-0.011   | worst avg +0.022, worst 1.6% +0.029, worst 6.3% +0.022
+  O3 r16 x1 (param-free)         laion-text: -0.022/-0.046/-0.015  laion-image: +0.000/+0.002/+0.000  glove-100-angular: +0.017/+0.017/+0.017  yahoo-minilm-384-normalized: -0.010/-0.030/-0.001  vibe-laion-text: -0.018/-0.035/-0.021  laion-text-learn*: -0.022/-0.035/-0.022  glove-100-angular-1000*: +0.017/+0.012/+0.019  yahoo-minilm-384-normalized-1000*: -0.009/-0.012/-0.003  vibe-laion-learn*: -0.022/-0.027/-0.023   | worst avg +0.017, worst 1.6% +0.017, worst 6.3% +0.019
+  O3 r16 x1.0 (global)           laion-text: -0.022/-0.046/-0.015  laion-image: +0.000/+0.002/+0.000  glove-100-angular: +0.017/+0.017/+0.017  yahoo-minilm-384-normalized: -0.010/-0.030/-0.001  vibe-laion-text: -0.018/-0.035/-0.021  laion-text-learn*: -0.022/-0.035/-0.022  glove-100-angular-1000*: +0.017/+0.012/+0.019  yahoo-minilm-384-normalized-1000*: -0.009/-0.012/-0.003  vibe-laion-learn*: -0.022/-0.027/-0.023   | worst avg +0.017, worst 1.6% +0.017, worst 6.3% +0.019
+  O3 r16 own best                laion-text: -0.023/-0.042/-0.016  laion-image: +0.000/+0.002/+0.000  glove-100-angular: +0.017/+0.017/+0.017  yahoo-minilm-384-normalized: -0.010/-0.030/-0.001  vibe-laion-text: -0.023/-0.048/-0.013  laion-text-learn*: -0.023/-0.036/-0.021  glove-100-angular-1000*: +0.016/+0.012/+0.018  yahoo-minilm-384-normalized-1000*: -0.009/-0.011/-0.004  vibe-laion-learn*: -0.024/-0.029/-0.023   | worst avg +0.017, worst 1.6% +0.017, worst 6.3% +0.018
+  O3 exact x1                    laion-text: -0.028/-0.048/-0.015  laion-image: -0.003/-0.005/-0.000  glove-100-angular: +0.019/+0.023/+0.022  yahoo-minilm-384-normalized: -0.010/-0.026/-0.001  vibe-laion-text: -0.026/-0.038/-0.021  laion-text-learn*: -0.028/-0.048/-0.026  glove-100-angular-1000*: +0.017/+0.014/+0.019  yahoo-minilm-384-normalized-1000*: -0.011/-0.016/-0.006  vibe-laion-learn*: -0.029/-0.037/-0.028   | worst avg +0.019, worst 1.6% +0.023, worst 6.3% +0.022
+  O3 exact x1.25 (global)        laion-text: -0.029/-0.047/-0.019  laion-image: -0.002/-0.003/-0.002  glove-100-angular: +0.022/+0.023/+0.023  yahoo-minilm-384-normalized: -0.011/-0.031/-0.002  vibe-laion-text: -0.027/-0.043/-0.023  laion-text-learn*: -0.030/-0.052/-0.028  glove-100-angular-1000*: +0.020/+0.019/+0.020  yahoo-minilm-384-normalized-1000*: -0.012/-0.016/-0.006  vibe-laion-learn*: -0.031/-0.043/-0.031   | worst avg +0.022, worst 1.6% +0.023, worst 6.3% +0.023
+  H r4 x0.5 f'=0.3 (global)      laion-text: -0.011/-0.014/-0.008  laion-image: -0.002/-0.004/-0.001  glove-100-angular: -0.007/-0.006/-0.010  yahoo-minilm-384-normalized: -0.004/-0.006/+0.000  vibe-laion-text: -0.011/-0.007/-0.011  laion-text-learn*: -0.012/-0.020/-0.010  glove-100-angular-1000*: -0.003/-0.009/-0.001  yahoo-minilm-384-normalized-1000*: -0.006/-0.006/-0.001  vibe-laion-learn*: -0.013/-0.018/-0.012   | worst avg -0.002, worst 1.6% -0.004, worst 6.3% +0.000
+  H r16 x0.75 f'=0.3 (global)    laion-text: -0.024/-0.040/-0.018  laion-image: -0.003/-0.004/-0.002  glove-100-angular: -0.010/-0.012/-0.011  yahoo-minilm-384-normalized: -0.009/-0.024/-0.001  vibe-laion-text: -0.024/-0.042/-0.017  laion-text-learn*: -0.024/-0.041/-0.021  glove-100-angular-1000*: -0.005/-0.015/-0.004  yahoo-minilm-384-normalized-1000*: -0.010/-0.016/-0.004  vibe-laion-learn*: -0.025/-0.033/-0.023   | worst avg -0.003, worst 1.6% -0.004, worst 6.3% -0.001
+  H r16 own best                 laion-text: -0.025/-0.039/-0.018  laion-image: -0.005/-0.008/-0.002  glove-100-angular: -0.011/-0.010/-0.011  yahoo-minilm-384-normalized: -0.011/-0.028/-0.002  vibe-laion-text: -0.025/-0.042/-0.019  laion-text-learn*: -0.025/-0.042/-0.023  glove-100-angular-1000*: -0.006/-0.014/-0.004  yahoo-minilm-384-normalized-1000*: -0.011/-0.015/-0.005  vibe-laion-learn*: -0.026/-0.035/-0.025   | worst avg -0.005, worst 1.6% -0.008, worst 6.3% -0.002
