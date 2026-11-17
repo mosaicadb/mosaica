@@ -3185,11 +3185,17 @@ pub fn pseudo_queries(ix: &Index2, nq: usize, kk: usize) -> Vec<(usize, Vec<f32>
 }
 
 impl Approx {
-    /// As `order`, from q.m of every cluster.
-    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+    /// The first `take` clusters of `order`, from q.m of every cluster: only those are sorted (by descending key, the
+    /// lower index first among equal keys, as the full sort ordered them).
+    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>, take: usize) -> Vec<usize> {
         let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
             .map(|ci| (qm[ci] + self.f * self.rad[ci], ci)).collect();
-        keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+        let by = |x: &(f64, usize), y: &(f64, usize)| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1));
+        if take > 0 && take < keys.len() {
+            keys.select_nth_unstable_by(take - 1, by);
+            keys.truncate(take);
+        }
+        keys.sort_unstable_by(by);
         keys.into_iter().map(|x| x.1).collect()
     }
     /// Clusters holding a visible item, by descending q.m + f r.
@@ -3422,9 +3428,17 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     }
     let qm = pr.qms(ix, None);
     let mut st = Stats::new(nl);
-    let mut order = ap.order_qm(ix, &qm, vis);
-    order.truncate(nprobe);
+    let order = ap.order_qm(ix, &qm, vis, nprobe);
     st.cyc[P_PLAN] += tick() - t0;
+    // the groups of the probed clusters with too many visible rows to be scored directly, set up together: each
+    // rotation is read once for all of them, not once per group
+    let mut gs: Vec<usize> = order.iter().filter(|&&ci| {
+        let nv = vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+        nv as f64 * COSTS.full_us > COSTS.index_us(nv, 1.0)
+    }).map(|&ci| ix.cl[ci].g).collect();
+    gs.sort_unstable();
+    gs.dedup();
+    setup_groups(ix, &pr, &gs, &mut st);
     let mut top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
     let mut sv = State::default();
     let (mut rows_in, mut pend) = (Vec::new(), Vec::new());
