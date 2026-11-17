@@ -992,9 +992,28 @@ ms are the mean of the rounds, Rust / partition.py:
 Geometric mean 1.015 (range 0.94–1.11); a cell's ratio moves by 0.84–1.37 between rounds. One thread is level
 (0.94–1.06). At four threads the 0.1% answers are slower in every round (item 1.03–1.34, text 1.01–1.15), 8–11% on
 the mean, while the bytes read are lower (item) or level (text). Not resolved; not a property of the k-means as far
-as measured (its objective is level over four seeds). A likely cause, not measured: this seed's clustering has a
-largest cluster of 11,568 rows against 7,744, which four threads split less evenly; the largest cluster varies from
-7,744 to 15,381 rows between seeds of either writer. Not tuned.
+as measured (its objective is level over four seeds). Not tuned.
+
+**Seeds, to tell the writer from the seed.** Three 1M indexes from each writer (seeds 20261112, 1, 2; `create --seed S`
+against partition.py `--seed S` with the same fit seed and build), `e2e` at 0.1% and 1% answers (`--knn 0`), 1 and 4
+threads, 7 rounds one at a time with the order rotated and reversed; each index's median over the rounds of its
+median-of-runs ms (4-thread rounds were disturbed by other load, up to 2x, so the median). Ratio of the writers' means,
+Rust / partition.py:
+
+| | item 0.1% | item 1% | text 0.1% | text 1% |
+|---|---|---|---|---|
+| 1 thread | 0.97 | 0.99 | 0.98 | 1.00 |
+| 4 threads | **1.08** (Rust 11.3–13.0, py 11.3–11.5 ms) | **1.08** (14.8–15.7 against 13.6–14.9) | 1.00 | 0.98 |
+
+The largest cluster does not explain it: partition.py's seed 1 (largest 15,381 rows) is among the fastest at four
+threads, and Rust's seed 2 (7,857) is as fast as partition.py's default (7,744); correlations of time with the largest
+cluster or the size spread are mixed in sign. Text, and items on one thread, are level within the seeds' spread. Items
+on four threads are about 8% slower for two of Rust's three seeds (the third is level): weak (three seeds a side,
+noisy 4-thread timings) but consistent, also on the means of the two quietest rounds (1.05, 1.06). It is not more
+work: bytes per item at 0.1% are 44.9–45.0 for Rust against 45.0–46.3, full reads per item 0.00101–0.00105 against
+0.00102–0.00119. Not measured: how the work splits across the threads. Not controlled: the partition.py side was
+fitted and built by a separate program compiled without `rust/.cargo/config.toml`'s `-C target-cpu=native` (its
+default-seed index still has the recorded `create` hash). Open in NEXT.md.
 
 **Time and peak anonymous memory of the partition step** (4 threads, page cache warm, the same session):
 
