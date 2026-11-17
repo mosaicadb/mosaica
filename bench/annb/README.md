@@ -40,11 +40,11 @@ about 6 GB of download and 20 GB of memory to build, and the brute-force ground 
 benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
 `PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings follow the library's
 `create` / `open` / `rebuild` API (`v2::open` with `OpenOptions`, `v2::saved_options`, `v2::rebuild` with
-`BuildOptions`), which the pinned revision predates: move `PIN` to a revision that has it before installing. They use
-only those, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`, `Vis2::new`,
-`knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`. The pin is a merge of
-`research/exact-vector-search` (saved index, planner without
-timing, levels-clusters options off by default) with this branch's AVX-512 basis products and integer levels.
+`BuildOptions`). They use only those, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`,
+`Dial::fit`, `Vis2::new`, `knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and
+`to_bitmap2`. The pin is `research/exact-vector-search` with the create/open/rebuild API, the AVX-512 kernels, and the
+owner's build defaults (clusters by N, deterministic levels 16 and 32, the dual basis); the binding's own default
+build keeps the fit's six levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
 

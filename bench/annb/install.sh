@@ -5,7 +5,7 @@
 #   benchmarked until the pin moves; the bindings (vexact-py) and the algorithm files come from this working tree.
 #   The image is built with -C target-cpu=native: build it on the machine that runs the benchmark.
 set -euo pipefail
-PIN=0bd114ade77bbc50944be2069888a18c3c5534af
+PIN=8f35446ec6134b3acd3b050525d4e3894af5448f
 AB=$(cd "$1" && pwd)
 REV=${2:-$PIN}
 HERE=$(cd "$(dirname "$0")" && pwd)
