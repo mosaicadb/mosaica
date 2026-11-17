@@ -796,3 +796,40 @@ share; if they kept falling below 24% at 64,000 rows, the rule would score direc
 crossover there (the harmful direction, by that margin). Not measured. R0 and κ are dimensionless but their values come from this machine. Raw logs: the session's
 `plan3b/` (`e2e/`, `e2e_table.md`, `fl/`, `fl_table.md`, `sweep/`, `sweep2/`, `ans/`, `disk/`, `open/`) and
 `plan3c/` (`sweep3/`, `comp/`, `e2e/`, `fl/`, `ans/`).
+
+## Final gates of batch 4 (2026-11-17)
+
+After the review fixes (the rule at 250, the `--full-file` guard, anchors written at install, `create`'s and
+`--seed`'s flags), on the rebased branch:
+
+- Tests: `cargo test --release` after `cargo clean -p vexact`: 63 + 3 pass (1 ignored, a timing); every commit from
+  d4ee2d9 on passes from a clean worktree of its own; `cargo check` in `bench/annb/vexact-py` passes.
+- Code hashes, each rebuilt and opened again (open 0.08–0.52 s). Old defaults by flags (`--dlv fit` on the existing
+  fits): synth4k `7ac80b6c54101fa9`, 60k `c44827e2e155e64f`, 1M `pyfit` `b8bdd054938fe563`. New defaults: synth4k
+  `165fef0c0d6b5659`, 60k `181dbe516f640885`, 1M `pyfit` `c8779c606204880b`, `fitA` `771eaba1d111dca4`.
+- 1M BioCLIP-2 `create` from the raw vectors, 4 threads, against `create` with the old defaults by flags
+  (`--per-cluster 1000 --groups by-k8 --basis pca --dlv fit`, hash `db6ca06f69bb8c74` as before) in the same session:
+
+| | Clusters | Partition | Fit | Total | Build's anon. memory (calibrated / encoded) | Peak anonymous memory | Code hash |
+|---|---|---|---|---|---|---|---|
+| New defaults (dual, by-n, 16,32) | 500 | 76 s | +35 s | 183 s | 900 / 906 MB | 1,950 MB | `66237726622c9883` |
+| Old defaults by flags | 1,000 | 88 s | +28 s | 193 s | 942 / 952 MB | 1,952 MB | `db6ca06f69bb8c74` |
+
+  The peak is the same in both (the partition's Python process). The new index opens in 0.80 s in all (0.40 s to map
+  it); `verify`: 0 wrong in or out over 80 queries × 7 answer sizes and the four filtered sets, 0 interval violations
+  in 924 million checks, 0 k-NN mismatches.
+- The 4M synthetic memory gate was not run: its partition and index directory take about 5.0 GB (2.0 + 3.0 at the
+  step 4 run) and the disk had 4.8 GB free.
+- The shipped gain (`e2e --nq 50 --runs 3`, 2 rounds, binary order rotated, both indexes opened from their saved
+  files): this branch on the new-default 1M index made by `create` against upstream d4ee2d9's binary on its default
+  build of `pyfit` (1,000 clusters, six levels); ms, mean of rounds, and this branch / upstream:
+
+| answer | item, 1 thread | item, 4 threads | text, 1 thread | text, 4 threads |
+|---|---|---|---|---|
+| 0.01% | 26.2 / 40.0 (0.65) | 8.7 / 11.5 (0.76) | 16.0 / 25.5 (0.63) | 6.5 / 8.7 (0.74) |
+| 0.1% | 33.8 / 46.5 (0.73) | 9.8 / 13.2 (0.74) | 21.5 / 31.8 (0.68) | 7.6 / 9.7 (0.79) |
+| 1% | 40.1 / 54.4 (0.74) | 12.7 / 16.6 (0.77) | 38.8 / 54.2 (0.72) | 12.5 / 15.2 (0.83) |
+| k-NN 10 | 22.4 / 36.3 (0.62) | 8.7 / 11.4 (0.77) | 15.5 / 24.2 (0.64) | 6.8 / 9.0 (0.76) |
+| k-NN 100 | 38.3 / 50.0 (0.77) | 15.8 / 19.5 (0.81) | 18.0 / 30.0 (0.60) | 9.2 / 10.6 (0.87) |
+
+  Mean ratio 0.73 (0.60–0.87), 1.38× faster by the geometric mean. Raw logs: the session's `b4/final2/`.
