@@ -604,7 +604,8 @@ one, a cluster's visible rows are all its rows): the query scans the visible row
 Σ (R0 + κ·S) over the clusters holding one (S a cluster's rows), a test made first, before the anchor search and the
 support table, since it needs neither. Otherwise the support table skips or takes in what its bounds decide, and a
 cluster it leaves open is scored directly when it holds at most R0 + κ·S visible rows, else cut and run on the index
-path. `Plan::r_rows` = R0 = 64, `r_kappa` = κ = 0.24 (fitted below). No sample or answer-share estimate. Filtered
+path. `Plan::r_rows` = R0 = 64, `r_kappa` = κ = 0.186 (fitted below at 0.24; set to 0.186
+after the AVX-512 re-check below). No sample or answer-share estimate. Filtered
 exact k-NN (and unfiltered k-NN in memory) scans before the seed when the rows are at most that sum plus `r_seed` =
 6,000 rows (the seed: 1.18–1.45 ms against 0.19 µs a row, so 6,200–7,600; the lower end). The seed is the anchor
 search, a probe of 64 clusters to 2,000 items and 2k + 8 exact products: it grows with the number of anchors and with
@@ -612,7 +613,7 @@ k, not with the clusters' rows, so beyond k = 100 the constant underestimates it
 All are ratios of costs of the same kind (a pass over memory per row), so they do not move with the machine's speed
 the way each microsecond cost does.
 
-Without a visible set, a cluster is scored directly only when it holds at most R0 / (1 − κ) = 84 rows: on a full index
+Without a visible set, a cluster is scored directly only when it holds at most R0 / (1 − κ) = 78 rows (84 at κ = 0.24): on a full index
 (`pyfit`: 3 of 1,000 clusters hold 100 rows or fewer) every open cluster takes the index path, where the measurement
 above found it best or tied everywhere, and its own cost (the cut, the levels, the full vectors of the last
 survivors) is already proportional to what the bounds leave. An index compacted to a visible set (`Index2::compact`,
@@ -670,6 +671,19 @@ and κ = 0.24 sit just below both lines, toward the index path (304 rows at 1,00
 4,000; 3,934 at 16,129). (The crossover is the share where the index / scan ratio crosses 1, interpolated in log
 share; the clusters are of unequal size, and a random set gives each the same share.) Raw logs: `plan3c/sweep3/`.
 
+**The rule at 250 (after the AVX-512 kernels, 2026-11-17).** The kernels of upstream d4ee2d9 made the index path
+faster, so the same sweep on the rebased binary (`pyfit` saved and opened, 1,000 rows a cluster; index / scan, ms)
+moved the crossover down:
+
+| threads | 1% | 2% | 5% | 10% | 20% | 30% | 40% | 50% | crossover | rows a cluster at it |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 10.99 | 6.43 | 3.37 | 2.02 | 1.03 | 0.90 | 0.70 | 0.56 | 22.1% | 221 |
+| 4 | 10.49 | 7.24 | 3.89 | 2.20 | 1.27 | 1.03 | 0.78 | 0.67 | 30.8% | 308 |
+
+κ = 0.24 put the rule at 304 rows, above the one-thread crossover. The owner set it at 250 rows at 1,000 a cluster,
+between the two: R0 = 64, κ = 0.186 (436 rows at 2,000 a cluster; without a visible set, clusters of at most 78 rows
+are scored directly). Raw logs: `b4/recheck/sweep*`.
+
 **Compacted sessions (measured).** `dbcmp`'s `cindex`/`cvindex` query the index compacted to the session's visible
 set (codes only; codes and vectors) with no visible set. The first version of this planner took every such cluster
 to the index path; the rule now scans them. 93 text queries × 5 thresholds, `--step 4 --reps 3`, medians in ms; before
@@ -721,7 +735,7 @@ index path, which runs the same code in both; 4 rounds, binaries and variant ord
 
 Mean 0.984 over the 36 cells, 0.878–1.055; the largest (item k-NN 10, one thread) has rounds 0.98–1.07 against
 0.93–1.00, within the spread. (These tables are of the first version, R = 300; the rows rule by cluster size below now also
-scores clusters of 84 rows or fewer directly, about 2 a query on this index.) That version ran every open cluster on
+scores clusters of 84 rows or fewer (78 since the rule at 250) directly, about 2 a query on this index.) That version ran every open cluster on
 the index path; M sent 7–17 a query to full
 vectors or direct scoring for item queries, 7–100 for text (the most at 0.01% and at k-NN). Unfiltered on these
 clusters that version and its forced index path were the same code (the support table, then the index path on

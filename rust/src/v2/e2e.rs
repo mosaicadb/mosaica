@@ -70,7 +70,7 @@ fn answer(t: &[(f64, u32)], th: f64) -> RoaringBitmap {
 /// The default plan and the float path (no integer levels, cluster tables, fixed repack), each left to choose and
 /// forced; and the rule's rows at the extremes and either side of synth4k's random 10% set (about 12.5 visible rows
 /// per cluster), so that visible sets are scanned, scored directly per cluster and run on the index path in turn.
-/// (synth4k's clusters hold about 125 rows, above the default rule's 84 rows without a visible set.)
+/// (synth4k's clusters hold about 125 rows, above the default rule's 78 rows without a visible set.)
 fn plans() -> Vec<(&'static str, Plan)> {
     let float = Plan { int_det: false, gtab: false, repack: false, ..Plan::default() };
     let rows = |r_rows: usize| Plan { r_rows, r_kappa: 0.0, ..Plan::default() };
@@ -1520,6 +1520,19 @@ fn plan_files_refuse_values_out_of_range() {
         assert!(e.contains(says), "{bad}: {e}");
     }
     assert!(Plan::kv_gives_disk("io_us=4\nio_gbps=2\n") && !Plan::kv_gives_disk("io_us=4\nr_rows=3\n"));
+}
+
+/// The default rule at its boundaries: 250 visible rows at 1,000 rows a cluster (64 + 0.186 * 1000; the owner's
+/// choice after the AVX-512 re-check, between the crossovers of 221 rows on one thread and 308 on four), 436 at 2,000;
+/// without a visible set a cluster of 78 rows is scored directly and one of 79 takes the index path.
+#[test]
+fn default_rule_boundaries() {
+    let p = Plan::default();
+    assert_eq!((p.r_rows, p.r_kappa), (64, 0.186));
+    for (s, m) in [(0, 64), (78, 78), (79, 78), (999, 249), (1000, 250), (1001, 250), (2000, 436), (4000, 808)] {
+        assert_eq!(p.direct_max(s), m, "{s} rows");
+    }
+    assert!(p.direct_max(78) >= 78 && p.direct_max(79) < 79);
 }
 
 /// The library's API on a copy of synth4k (nothing is written into testdata): `rebuild` saves the index in
