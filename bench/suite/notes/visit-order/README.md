@@ -9,7 +9,8 @@ owners.
   synthetic checks in `theory/`. Its references were collected by an agent and have not each been checked.
 - `results/`: the replay tables. `summary_table.txt` is the first replay at 1M (both fits); `loo_summary.txt` the
   candidate defaults on five datasets with leave-one-dataset-out choices; `table3.txt` the principled orders;
-  `table4.txt` the calibrated spread, the ceilings, the collapse check and the stopping rule.
+  `table4.txt` the calibrated spread, the ceilings, the collapse check and the stopping rule;
+  `table5.txt` query-time cost, shared bases, the rad-aware model, stopping on each order and recall targets.
 - `scripts/`: the replay scripts, as run (paths under a scratch directory `$S`; they expect the suite's prep, a
   `vexact_py` install and `rust/tools/fit.py`; see the comments at the top of each).
 
@@ -80,15 +81,35 @@ the test machine's disk. Differences below about 0.01 are within noise at 100 qu
    same mean rows scanned, gains +0.017 to +0.043 recall at 0.5% scanned and up to +0.028 at 1.6%; fixed rows per
    query is worse than either. With it, the calibrated r16 order beats H r16 at fixed nprobe on four of five
    datasets at 1.6% (LAION text .886 against .854; glove ties).
-7. **f′ estimated from the corpus** (within- against between-cluster spread) came out 2 to 3 times too low and is not
+7. **Query-time cost; a shared basis is not enough.** Every order pays q·m_c (K·d, 256k multiply-adds and 250 KB at
+   LAION 1M). On top of that: f′ 1k multiply-adds and 2 KB; H r4 1.0M and 2 MB; H r16 4.1M and 8 MB (scanning 1.6%
+   of rows' f16 vectors is 8.2M and 16 MB). Projecting the query once into a shared basis of 16 to 128 global
+   directions with per-cluster variances costs about 1/60 of H r16 but only reaches f′'s recall: the shared basis
+   spans 39 to 55% of the residual variance. Adding 2 to 4 of each cluster's own directions recovers H r4's recall at
+   H r4's cost. The index's own per-group bases are computed at query time only for probed groups; computing them
+   for every group would cost 17M multiply-adds. All of H's constants fold into stored values at build time.
+8. **A rad-aware exceedance model gives usable probabilities.** `log p = g(ζ) + β·log(rad_c/median rad)`, fitted
+   offline by a Poisson fit on plain and shifted corpus pseudo-queries (a 65-value table), ranks about as well as H
+   r16 (worse on LAION images, better on text and glove), but its probabilities are calibrated: a global stopping
+   threshold on it beats a fixed nprobe by +0.035 / +0.024 / +0.015 at 0.5 / 1.6 / 6.3% scanned (mean over five
+   datasets), and with it the order beats H r16 at fixed nprobe on four of five datasets at 1.6%. With the cheap
+   shared basis (66k multiply-adds) it matches or beats H r4 at fixed nprobe on all five. Calibrating H's or f′'s own
+   score to a probability (isotonic on the gap) does not help them.
+9. **Recall targets.** With the rad-aware model, stopping each query once its predicted recall reaches r meets the
+   target on average for image and text queries alike: r 0.9 gives .932 (in distribution) and .923 (text), r 0.99
+   gives .997 and .996, slightly over-delivering, with about 18% of queries below r at 0.9. An average target (one
+   global threshold chosen offline) saves rows over a fixed nprobe at equal recall but under-delivers on text (.876
+   at 0.9). Probabilities from the Gaussian ζ-order undershoot (tails too light), probabilities calibrated on H's or
+   f′'s gap fail on text (.61 to .69 at 0.9), and the running τ estimate of `theory.md` (4.2) undershoots.
+10. **f′ estimated from the corpus** (within- against between-cluster spread) came out 2 to 3 times too low and is not
    usable as derived.
 
 ## Recommendation
 
 Retire today's order. Offer f′ = 0.4 (no extra state), H r4 and H r16 as options, with `fit_queries` kept as an
-override for users with a query sample. The principled successor to H (`theory.md`, section 9) replaces its
-constants with a spread calibrated once per index; measured, it matches H r16 on average but not in the worst case,
-because exceedance also depends on rad (finding 5). The clearer gain is the global stopping threshold (finding 6),
-which needs the order's score on a probability scale. Being measured next: a shared basis for the spread (projected
-once per query instead of K·r·d work and about 8 MB read), a rad-aware exceedance model, and the stopping rule on
-top of H and f′.
+override for users with a query sample. The principled successor to H (`theory.md`, section 9),
+a spread calibrated once per index, matches H r16 on average but not in the worst case, because exceedance also
+depends on rad (finding 5). The useful successor is a different part: replace the fixed nprobe by the rad-aware
+model's probability (finding 8), which both stops better and lets the caller ask for a recall target directly
+(finding 9). It needs the spread it ranks with (H r16's or the shared basis plus own directions) and adds about 20k
+operations and a 65-value table per query; the shared basis alone does not support it well (β is unstable).

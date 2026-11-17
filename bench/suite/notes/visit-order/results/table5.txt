@@ -1,0 +1,596 @@
+score: recall@10 at 0.5 / 1.6 / 6.3 / 25% scanned and the mean over 0.5%..25% (avg)
+
+spread accuracy on pseudo-queries: rms relative error of sigma_c, plain / shifted; shared basis: share of the residual variance it spans
+  laion-s1m                    own r4 0.329/0.061  own r16 0.082/0.033  sh16 0.115/0.098  sh32 0.113/0.088  sh64 0.114/0.080  sh128 0.114/0.079  sh32+own2 0.084/0.068  sh64+own4 0.070/0.051  group 0.069/0.066
+                               shared span sh16 (R 16) 0.19, sh32 (R 32) 0.28, sh64 (R 64) 0.39, sh128 (R 128) 0.55; rad-aware model beta exact +1.97, own r16 +1.16, sh32 +2.37, sh64 +2.47, sh64+own4 +2.33, group +1.33
+  glove-100-angular            own r4 0.034/0.034  own r16 0.020/0.021  sh16 0.051/0.044  sh32 0.051/0.043  sh64 0.050/0.042  sh128 0.050/0.041  sh32+own2 0.040/0.037  sh64+own4 0.037/0.036  group 0.039/0.035
+                               shared span sh16 (R 16) 0.19, sh32 (R 32) 0.36, sh64 (R 64) 0.69, sh128 (R 92) 0.94; rad-aware model beta exact +6.67, own r16 +6.15, sh32 +3.21, sh64 +3.22, sh64+own4 +5.20, group +4.72
+  yahoo-minilm-384-normalized  own r4 0.245/0.094  own r16 0.119/0.054  sh16 0.203/0.103  sh32 0.168/0.086  sh64 0.154/0.076  sh128 0.152/0.074  sh32+own2 0.132/0.070  sh64+own4 0.098/0.051  group 0.086/0.060
+                               shared span sh16 (R 16) 0.16, sh32 (R 32) 0.27, sh64 (R 64) 0.43, sh128 (R 128) 0.67; rad-aware model beta exact +1.33, own r16 -1.52, sh32 -6.24, sh64 -6.51, sh64+own4 -2.37, group -2.56
+  laion-clip-512-normalized    own r4 0.324/0.061  own r16 0.086/0.033  sh16 0.124/0.098  sh32 0.122/0.088  sh64 0.124/0.081  sh128 0.125/0.080  sh32+own2 0.092/0.068  sh64+own4 0.076/0.050  group 0.075/0.067
+                               shared span sh16 (R 16) 0.18, sh32 (R 32) 0.27, sh64 (R 64) 0.39, sh128 (R 128) 0.55; rad-aware model beta exact +2.32, own r16 +1.99, sh32 +3.83, sh64 +3.76, sh64+own4 +2.97, group +1.89
+
+H form per spread: (alpha, w) chosen on all main sets, and leave-one-dataset-out losses (held-out set's own best minus LOO choice)
+  own r16    global a0.75 w0.3  LOO losses 0.0017 0.0078 0.0059 0.0014 0.0008  (max 0.0078)
+  own r4     global a0.5 w0.3   LOO losses 0.0020 0.0050 0.0000 0.0013 0.0017  (max 0.0050)
+  sh16       global a0.5 w0.3   LOO losses 0.0000 0.0013 0.0000 0.0022 0.0014  (max 0.0022)
+  sh32       global a0.5 w0.3   LOO losses 0.0000 0.0011 0.0026 0.0029 0.0014  (max 0.0029)
+  sh64       global a0.5 w0.3   LOO losses 0.0000 0.0009 0.0031 0.0031 0.0007  (max 0.0031)
+  sh128      global a0.5 w0.3   LOO losses 0.0000 0.0009 0.0025 0.0028 0.0017  (max 0.0028)
+  sh32+own2  global a0.5 w0.3   LOO losses 0.0001 0.0000 0.0000 0.0012 0.0001  (max 0.0012)
+  sh64+own4  global a0.5 w0.3   LOO losses 0.0016 0.0022 0.0031 0.0015 0.0038  (max 0.0038)
+  group      global a0.75 w0.3  LOO losses 0.0013 0.0007 0.0001 0.0008 0.0012  (max 0.0013)
+  exact      global a1.0 w0.3   LOO losses 0.0033 0.0037 0.0060 0.0015 0.0015  (max 0.0060)
+
+laion-text (K 500, nq 100, oracle f 0.1)
+  H r16 (as proposed)                0.681 0.854 0.961 0.996   avg 0.906   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.669 0.827 0.951 0.996   avg 0.894   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.629 0.812 0.938 0.993   avg 0.879   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.681 0.854 0.961 0.996   avg 0.906   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.669 0.827 0.951 0.996   avg 0.894   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.631 0.818 0.938 0.993   avg 0.881   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.629 0.818 0.940 0.992   avg 0.882   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.629 0.818 0.940 0.993   avg 0.882   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.637 0.819 0.940 0.992   avg 0.882   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.662 0.825 0.947 0.995   avg 0.893   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.666 0.830 0.950 0.996   avg 0.895   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.653 0.844 0.955 0.997   avg 0.898   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.706 0.867 0.968 0.996   avg 0.916   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.680 0.859 0.967 0.997   avg 0.911   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.633 0.810 0.943 0.996   avg 0.881   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.631 0.811 0.943 0.996   avg 0.881   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.658 0.823 0.954 0.997   avg 0.896   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.658 0.847 0.961 0.998   avg 0.902   [lin group 3.3]
+  rad-model own r16 beta             0.683 0.858 0.967 0.997   avg 0.911   [model own r16 beta]
+  rad-model own r16 nobeta           0.681 0.859 0.967 0.997   avg 0.911   [model own r16 nobeta]
+  rad-model sh32 beta                0.621 0.800 0.937 0.994   avg 0.875   [model sh32 beta]
+  rad-model sh32 nobeta              0.621 0.810 0.943 0.995   avg 0.880   [model sh32 nobeta]
+  rad-model sh64 beta                0.625 0.798 0.939 0.994   avg 0.875   [model sh64 beta]
+  rad-model sh64 nobeta              0.623 0.810 0.943 0.996   avg 0.881   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.675 0.826 0.952 0.996   avg 0.896   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.675 0.827 0.954 0.996   avg 0.900   [model sh64+own4 nobeta]
+  rad-model group beta               0.672 0.850 0.960 0.997   avg 0.903   [model group beta]
+  rad-model group nobeta             0.667 0.849 0.962 0.997   avg 0.903   [model group nobeta]
+  rad-model exact beta               0.711 0.868 0.968 0.997   avg 0.918   [model exact beta]
+  rad-model exact nobeta             0.702 0.865 0.970 0.998   avg 0.916   [model exact nobeta]
+  oracle                             0.634 0.813 0.942 0.993   avg 0.882   [oracle]
+  faiss nlist=K                      0.600 0.821 0.933 0.994   avg 0.879   [faiss nlist=K]
+
+laion-image (K 500, nq 1000, oracle f 0.5)
+  H r16 (as proposed)                0.795 0.935 0.991 0.999   avg 0.955   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.796 0.935 0.990 0.999   avg 0.954   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.788 0.931 0.987 0.999   avg 0.951   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.795 0.935 0.991 0.999   avg 0.955   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.796 0.935 0.990 0.999   avg 0.954   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.785 0.928 0.987 0.999   avg 0.950   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.785 0.928 0.986 0.999   avg 0.950   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.785 0.928 0.986 0.999   avg 0.950   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.785 0.928 0.986 0.999   avg 0.950   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.792 0.935 0.988 0.999   avg 0.953   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.798 0.935 0.989 0.999   avg 0.954   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.784 0.931 0.989 0.999   avg 0.952   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.788 0.936 0.991 0.999   avg 0.953   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.764 0.920 0.987 0.999   avg 0.945   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.771 0.917 0.980 0.998   avg 0.942   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.771 0.917 0.980 0.998   avg 0.942   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.752 0.916 0.983 0.999   avg 0.941   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.767 0.925 0.986 0.999   avg 0.947   [lin group 3.3]
+  rad-model own r16 beta             0.782 0.922 0.983 0.998   avg 0.946   [model own r16 beta]
+  rad-model own r16 nobeta           0.782 0.922 0.984 0.999   avg 0.947   [model own r16 nobeta]
+  rad-model sh32 beta                0.778 0.922 0.985 0.999   avg 0.946   [model sh32 beta]
+  rad-model sh32 nobeta              0.769 0.917 0.981 0.999   avg 0.943   [model sh32 nobeta]
+  rad-model sh64 beta                0.778 0.923 0.985 0.999   avg 0.946   [model sh64 beta]
+  rad-model sh64 nobeta              0.769 0.918 0.981 0.998   avg 0.943   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.772 0.917 0.983 0.999   avg 0.944   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.772 0.918 0.982 0.999   avg 0.944   [model sh64+own4 nobeta]
+  rad-model group beta               0.774 0.926 0.986 0.999   avg 0.948   [model group beta]
+  rad-model group nobeta             0.770 0.926 0.986 0.999   avg 0.948   [model group nobeta]
+  rad-model exact beta               0.794 0.935 0.988 0.999   avg 0.954   [model exact beta]
+  rad-model exact nobeta             0.795 0.935 0.989 0.999   avg 0.954   [model exact nobeta]
+  oracle                             0.783 0.931 0.989 0.999   avg 0.952   [oracle]
+  faiss nlist=K                      0.779 0.934 0.991 0.999   avg 0.952   [faiss nlist=K]
+
+glove (K 592, nq 100, oracle f 0.35)
+  H r16 (as proposed)                0.559 0.762 0.908 0.985   avg 0.846   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.555 0.756 0.907 0.985   avg 0.842   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.542 0.746 0.900 0.985   avg 0.833   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.559 0.762 0.908 0.985   avg 0.846   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.555 0.756 0.907 0.985   avg 0.842   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.540 0.752 0.902 0.986   avg 0.837   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.541 0.752 0.901 0.986   avg 0.837   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.541 0.752 0.903 0.986   avg 0.837   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.542 0.752 0.904 0.986   avg 0.838   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.550 0.755 0.903 0.985   avg 0.841   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.561 0.758 0.906 0.986   avg 0.843   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.543 0.754 0.909 0.989   avg 0.841   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.558 0.756 0.915 0.982   avg 0.844   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.548 0.762 0.908 0.983   avg 0.841   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.540 0.743 0.897 0.981   avg 0.832   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.539 0.744 0.898 0.980   avg 0.832   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.539 0.727 0.897 0.983   avg 0.830   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.528 0.745 0.902 0.984   avg 0.834   [lin group 3.3]
+  rad-model own r16 beta             0.561 0.770 0.909 0.984   avg 0.849   [model own r16 beta]
+  rad-model own r16 nobeta           0.551 0.762 0.910 0.981   avg 0.842   [model own r16 nobeta]
+  rad-model sh32 beta                0.540 0.752 0.906 0.985   avg 0.837   [model sh32 beta]
+  rad-model sh32 nobeta              0.538 0.743 0.899 0.982   avg 0.832   [model sh32 nobeta]
+  rad-model sh64 beta                0.540 0.753 0.908 0.985   avg 0.837   [model sh64 beta]
+  rad-model sh64 nobeta              0.539 0.742 0.900 0.982   avg 0.832   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.548 0.747 0.909 0.986   avg 0.835   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.539 0.731 0.897 0.983   avg 0.830   [model sh64+own4 nobeta]
+  rad-model group beta               0.537 0.752 0.907 0.990   avg 0.841   [model group beta]
+  rad-model group nobeta             0.532 0.742 0.903 0.985   avg 0.835   [model group nobeta]
+  rad-model exact beta               0.560 0.773 0.911 0.987   avg 0.848   [model exact beta]
+  rad-model exact nobeta             0.554 0.751 0.907 0.983   avg 0.842   [model exact nobeta]
+  oracle                             0.538 0.750 0.897 0.981   avg 0.835   [oracle]
+  faiss nlist=K                      0.537 0.739 0.892 0.979   avg 0.831   [faiss nlist=K]
+
+yahoo (K 339, nq 100, oracle f 0.5)
+  H r16 (as proposed)                0.662 0.878 0.974 0.997   avg 0.916   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.658 0.860 0.973 0.997   avg 0.911   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.643 0.852 0.966 0.996   avg 0.904   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.662 0.878 0.974 0.997   avg 0.916   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.658 0.860 0.973 0.997   avg 0.911   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.642 0.852 0.964 0.996   avg 0.904   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.641 0.850 0.963 0.996   avg 0.904   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.641 0.850 0.964 0.996   avg 0.903   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.641 0.849 0.964 0.996   avg 0.904   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.653 0.854 0.973 0.997   avg 0.910   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.657 0.858 0.973 0.997   avg 0.911   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.652 0.859 0.972 0.997   avg 0.909   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.659 0.880 0.975 0.997   avg 0.917   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.652 0.888 0.972 0.997   avg 0.916   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.647 0.854 0.969 0.996   avg 0.903   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.649 0.852 0.969 0.996   avg 0.903   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.624 0.857 0.975 0.997   avg 0.905   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.651 0.849 0.969 0.997   avg 0.906   [lin group 3.3]
+  rad-model own r16 beta             0.652 0.883 0.971 0.997   avg 0.914   [model own r16 beta]
+  rad-model own r16 nobeta           0.655 0.884 0.971 0.996   avg 0.916   [model own r16 nobeta]
+  rad-model sh32 beta                0.639 0.841 0.936 0.961   avg 0.880   [model sh32 beta]
+  rad-model sh32 nobeta              0.646 0.846 0.938 0.956   avg 0.881   [model sh32 nobeta]
+  rad-model sh64 beta                0.640 0.845 0.964 0.986   avg 0.896   [model sh64 beta]
+  rad-model sh64 nobeta              0.648 0.851 0.965 0.994   avg 0.901   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.622 0.853 0.962 0.995   avg 0.900   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.624 0.851 0.962 0.996   avg 0.900   [model sh64+own4 nobeta]
+  rad-model group beta               0.656 0.854 0.969 0.997   avg 0.906   [model group beta]
+  rad-model group nobeta             0.652 0.854 0.968 0.997   avg 0.906   [model group nobeta]
+  rad-model exact beta               0.669 0.886 0.973 0.997   avg 0.919   [model exact beta]
+  rad-model exact nobeta             0.669 0.884 0.973 0.997   avg 0.919   [model exact nobeta]
+  oracle                             0.654 0.854 0.973 0.996   avg 0.907   [oracle]
+  faiss nlist=K                      0.625 0.860 0.976 0.998   avg 0.908   [faiss nlist=K]
+
+vibe-laion (K 500, nq 100, oracle f 0.1)
+  H r16 (as proposed)                0.594 0.822 0.956 0.993   avg 0.886   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.565 0.787 0.950 0.992   avg 0.872   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.538 0.778 0.935 0.993   avg 0.859   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.594 0.822 0.956 0.993   avg 0.886   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.565 0.787 0.950 0.992   avg 0.872   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.540 0.784 0.945 0.991   avg 0.861   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.544 0.783 0.945 0.991   avg 0.862   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.544 0.782 0.943 0.991   avg 0.862   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.543 0.782 0.944 0.991   avg 0.862   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.554 0.773 0.949 0.992   avg 0.865   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.561 0.788 0.950 0.992   avg 0.872   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.549 0.805 0.956 0.993   avg 0.874   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.607 0.839 0.966 0.995   avg 0.894   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.602 0.824 0.957 0.993   avg 0.888   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.556 0.794 0.946 0.991   avg 0.867   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.558 0.794 0.948 0.991   avg 0.868   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.558 0.802 0.956 0.994   avg 0.875   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.555 0.804 0.955 0.995   avg 0.873   [lin group 3.3]
+  rad-model own r16 beta             0.607 0.829 0.956 0.994   avg 0.888   [model own r16 beta]
+  rad-model own r16 nobeta           0.595 0.828 0.957 0.994   avg 0.889   [model own r16 nobeta]
+  rad-model sh32 beta                0.551 0.785 0.933 0.980   avg 0.854   [model sh32 beta]
+  rad-model sh32 nobeta              0.557 0.797 0.944 0.991   avg 0.865   [model sh32 nobeta]
+  rad-model sh64 beta                0.551 0.786 0.933 0.983   avg 0.855   [model sh64 beta]
+  rad-model sh64 nobeta              0.558 0.801 0.946 0.990   avg 0.865   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.574 0.803 0.938 0.992   avg 0.872   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.580 0.803 0.952 0.993   avg 0.876   [model sh64+own4 nobeta]
+  rad-model group beta               0.550 0.811 0.953 0.996   avg 0.875   [model group beta]
+  rad-model group nobeta             0.557 0.814 0.959 0.995   avg 0.875   [model group nobeta]
+  rad-model exact beta               0.618 0.843 0.959 0.995   avg 0.896   [model exact beta]
+  rad-model exact nobeta             0.616 0.837 0.965 0.994   avg 0.895   [model exact nobeta]
+  oracle                             0.534 0.780 0.939 0.991   avg 0.861   [oracle]
+  faiss nlist=K                      0.550 0.761 0.938 0.992   avg 0.860   [faiss nlist=K]
+
+laion-text-learn* (K 500, nq 1000, oracle f 0.1)
+  H r16 (as proposed)                0.628 0.827 0.946 0.993   avg 0.885   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.611 0.806 0.935 0.990   avg 0.873   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.587 0.786 0.923 0.987   avg 0.860   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.628 0.827 0.946 0.993   avg 0.885   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.611 0.806 0.935 0.990   avg 0.873   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.589 0.784 0.923 0.988   avg 0.861   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.590 0.785 0.923 0.988   avg 0.861   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.591 0.786 0.924 0.989   avg 0.861   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.591 0.787 0.925 0.989   avg 0.861   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.602 0.800 0.931 0.989   avg 0.869   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.611 0.807 0.936 0.990   avg 0.874   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.598 0.810 0.941 0.992   avg 0.876   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.644 0.844 0.954 0.994   avg 0.896   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.636 0.833 0.949 0.993   avg 0.891   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.590 0.790 0.926 0.989   avg 0.863   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.590 0.792 0.925 0.989   avg 0.864   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.609 0.807 0.941 0.992   avg 0.877   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.601 0.814 0.945 0.992   avg 0.879   [lin group 3.3]
+  rad-model own r16 beta             0.640 0.833 0.950 0.992   avg 0.890   [model own r16 beta]
+  rad-model own r16 nobeta           0.640 0.833 0.950 0.992   avg 0.891   [model own r16 nobeta]
+  rad-model sh32 beta                0.588 0.786 0.917 0.984   avg 0.858   [model sh32 beta]
+  rad-model sh32 nobeta              0.594 0.791 0.923 0.988   avg 0.863   [model sh32 nobeta]
+  rad-model sh64 beta                0.588 0.785 0.918 0.983   avg 0.857   [model sh64 beta]
+  rad-model sh64 nobeta              0.595 0.793 0.924 0.987   avg 0.864   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.617 0.809 0.937 0.988   avg 0.875   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.619 0.809 0.939 0.990   avg 0.878   [model sh64+own4 nobeta]
+  rad-model group beta               0.603 0.818 0.947 0.993   avg 0.881   [model group beta]
+  rad-model group nobeta             0.603 0.818 0.947 0.993   avg 0.881   [model group nobeta]
+  rad-model exact beta               0.649 0.849 0.958 0.994   avg 0.899   [model exact beta]
+  rad-model exact nobeta             0.646 0.847 0.957 0.995   avg 0.899   [model exact nobeta]
+  oracle                             0.588 0.786 0.924 0.989   avg 0.862   [oracle]
+  faiss nlist=K                      0.569 0.770 0.911 0.984   avg 0.849   [faiss nlist=K]
+
+glove-1000* (K 592, nq 1000, oracle f 0.5)
+  H r16 (as proposed)                0.618 0.794 0.920 0.984   avg 0.864   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.614 0.788 0.917 0.984   avg 0.862   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.607 0.779 0.913 0.985   avg 0.857   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.618 0.794 0.920 0.984   avg 0.864   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.614 0.788 0.917 0.984   avg 0.862   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.609 0.780 0.915 0.984   avg 0.858   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.609 0.779 0.915 0.984   avg 0.859   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.609 0.780 0.915 0.984   avg 0.859   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.609 0.780 0.915 0.984   avg 0.859   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.610 0.787 0.917 0.984   avg 0.861   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.614 0.789 0.919 0.984   avg 0.863   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.606 0.783 0.917 0.983   avg 0.859   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.615 0.793 0.920 0.984   avg 0.864   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.607 0.787 0.918 0.985   avg 0.860   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.595 0.774 0.914 0.984   avg 0.853   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.595 0.774 0.913 0.984   avg 0.853   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.586 0.773 0.913 0.984   avg 0.852   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.593 0.776 0.915 0.984   avg 0.854   [lin group 3.3]
+  rad-model own r16 beta             0.620 0.794 0.921 0.986   avg 0.866   [model own r16 beta]
+  rad-model own r16 nobeta           0.610 0.788 0.919 0.985   avg 0.861   [model own r16 nobeta]
+  rad-model sh32 beta                0.605 0.780 0.916 0.985   avg 0.858   [model sh32 beta]
+  rad-model sh32 nobeta              0.596 0.775 0.914 0.984   avg 0.854   [model sh32 nobeta]
+  rad-model sh64 beta                0.605 0.780 0.915 0.985   avg 0.858   [model sh64 beta]
+  rad-model sh64 nobeta              0.596 0.774 0.913 0.985   avg 0.854   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.601 0.780 0.915 0.983   avg 0.856   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.595 0.774 0.911 0.982   avg 0.852   [model sh64+own4 nobeta]
+  rad-model group beta               0.603 0.783 0.916 0.985   avg 0.859   [model group beta]
+  rad-model group nobeta             0.594 0.775 0.915 0.984   avg 0.854   [model group nobeta]
+  rad-model exact beta               0.620 0.798 0.923 0.987   avg 0.867   [model exact beta]
+  rad-model exact nobeta             0.606 0.788 0.918 0.986   avg 0.861   [model exact nobeta]
+  oracle                             0.611 0.779 0.916 0.985   avg 0.859   [oracle]
+  faiss nlist=K                      0.587 0.772 0.909 0.982   avg 0.849   [faiss nlist=K]
+
+yahoo-900* (K 339, nq 900, oracle f 0.5)
+  H r16 (as proposed)                0.648 0.871 0.966 0.996   avg 0.909   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.644 0.862 0.963 0.994   avg 0.905   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.620 0.850 0.960 0.993   avg 0.897   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.648 0.871 0.966 0.996   avg 0.909   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.644 0.862 0.963 0.994   avg 0.905   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.621 0.854 0.962 0.993   avg 0.898   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.621 0.855 0.962 0.993   avg 0.898   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.623 0.855 0.962 0.994   avg 0.898   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.622 0.854 0.962 0.993   avg 0.898   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.635 0.859 0.962 0.994   avg 0.902   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.641 0.863 0.963 0.994   avg 0.905   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.627 0.854 0.962 0.994   avg 0.901   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.651 0.871 0.968 0.996   avg 0.911   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.650 0.868 0.965 0.996   avg 0.909   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.620 0.850 0.959 0.993   avg 0.897   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.620 0.850 0.959 0.994   avg 0.897   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.628 0.851 0.959 0.994   avg 0.899   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.631 0.851 0.961 0.995   avg 0.899   [lin group 3.3]
+  rad-model own r16 beta             0.652 0.866 0.962 0.995   avg 0.907   [model own r16 beta]
+  rad-model own r16 nobeta           0.652 0.867 0.962 0.995   avg 0.908   [model own r16 nobeta]
+  rad-model sh32 beta                0.616 0.838 0.926 0.954   avg 0.871   [model sh32 beta]
+  rad-model sh32 nobeta              0.620 0.846 0.931 0.950   avg 0.874   [model sh32 nobeta]
+  rad-model sh64 beta                0.616 0.846 0.953 0.984   avg 0.891   [model sh64 beta]
+  rad-model sh64 nobeta              0.620 0.851 0.956 0.991   avg 0.896   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.627 0.843 0.954 0.993   avg 0.894   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.629 0.844 0.954 0.993   avg 0.894   [model sh64+own4 nobeta]
+  rad-model group beta               0.633 0.848 0.957 0.994   avg 0.898   [model group beta]
+  rad-model group nobeta             0.632 0.848 0.958 0.995   avg 0.898   [model group nobeta]
+  rad-model exact beta               0.660 0.871 0.967 0.996   avg 0.912   [model exact beta]
+  rad-model exact nobeta             0.659 0.871 0.967 0.996   avg 0.912   [model exact nobeta]
+  oracle                             0.624 0.855 0.962 0.994   avg 0.899   [oracle]
+  faiss nlist=K                      0.615 0.853 0.962 0.995   avg 0.898   [faiss nlist=K]
+
+vibe-laion-learn* (K 500, nq 1000, oracle f 0.1)
+  H r16 (as proposed)                0.639 0.826 0.949 0.994   avg 0.889   [H own r16 a0.75 w0.3]
+  H r4 (as proposed)                 0.621 0.811 0.937 0.992   avg 0.877   [H own r4 a0.5 w0.3]
+  f'=0.4                             0.590 0.790 0.926 0.987   avg 0.863   [O2 f'=0.4]
+  H own r16 (LOO-chosen)             0.639 0.826 0.949 0.994   avg 0.889   [H own r16 a0.75 w0.3]
+  H own r4 (LOO-chosen)              0.621 0.811 0.937 0.992   avg 0.877   [H own r4 a0.5 w0.3]
+  H sh16 (LOO-chosen)                0.594 0.791 0.924 0.989   avg 0.864   [H sh16 a0.5 w0.3]
+  H sh32 (LOO-chosen)                0.595 0.791 0.924 0.989   avg 0.864   [H sh32 a0.5 w0.3]
+  H sh64 (LOO-chosen)                0.595 0.792 0.925 0.989   avg 0.865   [H sh64 a0.5 w0.3]
+  H sh128 (LOO-chosen)               0.596 0.791 0.926 0.989   avg 0.865   [H sh128 a0.5 w0.3]
+  H sh32+own2 (LOO-chosen)           0.612 0.803 0.935 0.991   avg 0.873   [H sh32+own2 a0.5 w0.3]
+  H sh64+own4 (LOO-chosen)           0.621 0.812 0.937 0.992   avg 0.877   [H sh64+own4 a0.5 w0.3]
+  H group (LOO-chosen)               0.610 0.813 0.942 0.993   avg 0.879   [H group a0.75 w0.3]
+  H exact (LOO-chosen)               0.652 0.840 0.959 0.996   avg 0.899   [H exact a1.0 w0.3]
+  mu+3.3 sigma own r16               0.644 0.833 0.955 0.995   avg 0.893   [lin own r16 3.3]
+  mu+3.3 sigma sh32                  0.597 0.795 0.928 0.989   avg 0.866   [lin sh32 3.3]
+  mu+3.3 sigma sh64                  0.597 0.795 0.929 0.989   avg 0.867   [lin sh64 3.3]
+  mu+3.3 sigma sh64+own4             0.614 0.812 0.943 0.993   avg 0.879   [lin sh64+own4 3.3]
+  mu+3.3 sigma group                 0.612 0.817 0.944 0.994   avg 0.881   [lin group 3.3]
+  rad-model own r16 beta             0.647 0.834 0.952 0.993   avg 0.893   [model own r16 beta]
+  rad-model own r16 nobeta           0.648 0.833 0.954 0.994   avg 0.894   [model own r16 nobeta]
+  rad-model sh32 beta                0.591 0.784 0.914 0.978   avg 0.854   [model sh32 beta]
+  rad-model sh32 nobeta              0.597 0.797 0.927 0.987   avg 0.866   [model sh32 nobeta]
+  rad-model sh64 beta                0.590 0.785 0.914 0.979   avg 0.855   [model sh64 beta]
+  rad-model sh64 nobeta              0.601 0.795 0.926 0.987   avg 0.866   [model sh64 nobeta]
+  rad-model sh64+own4 beta           0.620 0.809 0.935 0.989   avg 0.876   [model sh64+own4 beta]
+  rad-model sh64+own4 nobeta         0.621 0.812 0.942 0.992   avg 0.880   [model sh64+own4 nobeta]
+  rad-model group beta               0.614 0.816 0.945 0.994   avg 0.882   [model group beta]
+  rad-model group nobeta             0.612 0.815 0.945 0.994   avg 0.881   [model group nobeta]
+  rad-model exact beta               0.661 0.848 0.962 0.995   avg 0.902   [model exact beta]
+  rad-model exact nobeta             0.658 0.845 0.961 0.995   avg 0.901   [model exact nobeta]
+  oracle                             0.591 0.793 0.926 0.988   avg 0.864   [oracle]
+  faiss nlist=K                      0.580 0.778 0.923 0.989   avg 0.858   [faiss nlist=K]
+
+main sets: worst loss against the oracle (avg / 1.6% / 6.3%; negative = better) over laion-text, laion-image, glove, yahoo, vibe-laion; then against H r16 (avg: worst, mean)
+  H own r16 (LOO-chosen)             -0.003 / -0.004 / -0.001   per set -0.024 -0.003 -0.010 -0.009 -0.024   vs H r16 worst +0.000 mean +0.000
+  H r16 (as proposed)                -0.003 / -0.004 / -0.001   per set -0.024 -0.003 -0.010 -0.009 -0.024   vs H r16 worst +0.000 mean +0.000
+  H sh64+own4 (LOO-chosen)           -0.002 / -0.004 / +0.000   per set -0.012 -0.002 -0.008 -0.004 -0.010   vs H r16 worst +0.014 mean +0.007
+  rad-model exact nobeta             -0.002 / -0.002 / +0.000   per set -0.033 -0.002 -0.007 -0.012 -0.034   vs H r16 worst +0.004 mean -0.003
+  H own r4 (LOO-chosen)              -0.002 / -0.004 / +0.000   per set -0.011 -0.002 -0.007 -0.004 -0.011   vs H r16 worst +0.014 mean +0.007
+  H r4 (as proposed)                 -0.002 / -0.004 / +0.000   per set -0.011 -0.002 -0.007 -0.004 -0.011   vs H r16 worst +0.014 mean +0.007
+  rad-model exact beta               -0.002 / -0.004 / +0.001   per set -0.035 -0.002 -0.013 -0.012 -0.035   vs H r16 worst +0.001 mean -0.005
+  H exact (LOO-chosen)               -0.002 / -0.005 / -0.002   per set -0.034 -0.002 -0.009 -0.010 -0.032   vs H r16 worst +0.001 mean -0.003
+  H sh32+own2 (LOO-chosen)           -0.001 / +0.007 / +0.000   per set -0.010 -0.001 -0.006 -0.003 -0.004   vs H r16 worst +0.021 mean +0.009
+  H group (LOO-chosen)               -0.000 / -0.000 / +0.001   per set -0.016 -0.000 -0.006 -0.002 -0.013   vs H r16 worst +0.012 mean +0.007
+  H sh16 (LOO-chosen)                +0.003 / +0.003 / +0.009   per set +0.001 +0.002 -0.002 +0.003 -0.000   vs H r16 worst +0.025 mean +0.015
+  H sh128 (LOO-chosen)               +0.003 / +0.005 / +0.009   per set -0.000 +0.002 -0.003 +0.003 -0.001   vs H r16 worst +0.024 mean +0.015
+  f'=0.4                             +0.003 / +0.003 / +0.007   per set +0.003 +0.001 +0.002 +0.003 +0.002   vs H r16 worst +0.027 mean +0.016
+  H sh32 (LOO-chosen)                +0.003 / +0.004 / +0.010   per set +0.001 +0.002 -0.002 +0.003 -0.001   vs H r16 worst +0.025 mean +0.015
+  H sh64 (LOO-chosen)                +0.003 / +0.004 / +0.009   per set +0.001 +0.002 -0.002 +0.003 -0.001   vs H r16 worst +0.024 mean +0.015
+  rad-model group beta               +0.004 / +0.005 / +0.004   per set -0.021 +0.004 -0.006 +0.001 -0.014   vs H r16 worst +0.011 mean +0.007
+  faiss nlist=K                      +0.004 / +0.019 / +0.010   per set +0.003 -0.000 +0.004 -0.001 +0.001   vs H r16 worst +0.027 mean +0.016
+  rad-model group nobeta             +0.004 / +0.008 / +0.005   per set -0.021 +0.004 +0.001 +0.001 -0.014   vs H r16 worst +0.011 mean +0.008
+  mu+3.3 sigma group                 +0.005 / +0.006 / +0.004   per set -0.020 +0.005 +0.002 +0.001 -0.012   vs H r16 worst +0.012 mean +0.009
+  rad-model own r16 nobeta           +0.005 / +0.009 / +0.005   per set -0.028 +0.005 -0.007 -0.009 -0.028   vs H r16 worst +0.008 mean +0.001
+  rad-model own r16 beta             +0.006 / +0.009 / +0.006   per set -0.029 +0.006 -0.013 -0.007 -0.027   vs H r16 worst +0.009 mean -0.000
+  mu+3.3 sigma own r16               +0.007 / +0.011 / +0.002   per set -0.028 +0.007 -0.006 -0.009 -0.027   vs H r16 worst +0.009 mean +0.001
+  rad-model sh64+own4 beta           +0.008 / +0.014 / +0.011   per set -0.014 +0.008 -0.000 +0.007 -0.011   vs H r16 worst +0.016 mean +0.012
+  rad-model sh64+own4 nobeta         +0.008 / +0.019 / +0.011   per set -0.018 +0.008 +0.005 +0.007 -0.015   vs H r16 worst +0.016 mean +0.012
+  rad-model sh64 nobeta              +0.009 / +0.013 / +0.008   per set +0.001 +0.009 +0.003 +0.006 -0.004   vs H r16 worst +0.025 mean +0.017
+  mu+3.3 sigma sh32                  +0.010 / +0.014 / +0.009   per set +0.001 +0.010 +0.003 +0.004 -0.006   vs H r16 worst +0.025 mean +0.017
+  mu+3.3 sigma sh64                  +0.010 / +0.014 / +0.009   per set +0.001 +0.010 +0.003 +0.004 -0.006   vs H r16 worst +0.025 mean +0.017
+  mu+3.3 sigma sh64+own4             +0.011 / +0.023 / +0.006   per set -0.014 +0.011 +0.006 +0.002 -0.014   vs H r16 worst +0.016 mean +0.012
+  rad-model sh64 beta                +0.011 / +0.015 / +0.009   per set +0.007 +0.006 -0.002 +0.011 +0.006   vs H r16 worst +0.031 mean +0.020
+  rad-model sh32 nobeta              +0.026 / +0.014 / +0.035   per set +0.002 +0.009 +0.003 +0.026 -0.004   vs H r16 worst +0.035 mean +0.021
+  rad-model sh32 beta                +0.027 / +0.013 / +0.037   per set +0.007 +0.006 -0.002 +0.027 +0.007   vs H r16 worst +0.036 mean +0.023
+
+extra sets: worst loss against the oracle (avg / 1.6% / 6.3%; negative = better) over laion-text-learn*, glove-1000*, yahoo-900*, vibe-laion-learn*; then against H r16 (avg: worst, mean)
+  rad-model exact beta               -0.008 / -0.016 / -0.005   per set -0.037 -0.008 -0.013 -0.038   vs H r16 worst -0.003 mean -0.008
+  rad-model own r16 beta             -0.007 / -0.011 / +0.001   per set -0.029 -0.007 -0.008 -0.029   vs H r16 worst +0.002 mean -0.002
+  H own r16 (LOO-chosen)             -0.005 / -0.015 / -0.004   per set -0.024 -0.005 -0.010 -0.025   vs H r16 worst +0.000 mean +0.000
+  H r16 (as proposed)                -0.005 / -0.015 / -0.004   per set -0.024 -0.005 -0.010 -0.025   vs H r16 worst +0.000 mean +0.000
+  H exact (LOO-chosen)               -0.005 / -0.014 / -0.003   per set -0.034 -0.005 -0.011 -0.035   vs H r16 worst +0.000 mean -0.005
+  H sh64+own4 (LOO-chosen)           -0.004 / -0.008 / -0.001   per set -0.012 -0.004 -0.006 -0.013   vs H r16 worst +0.011 mean +0.007
+  H own r4 (LOO-chosen)              -0.003 / -0.006 / -0.001   per set -0.012 -0.003 -0.006 -0.013   vs H r16 worst +0.012 mean +0.008
+  H r4 (as proposed)                 -0.003 / -0.006 / -0.001   per set -0.012 -0.003 -0.006 -0.013   vs H r16 worst +0.012 mean +0.008
+  rad-model own r16 nobeta           -0.002 / -0.009 / +0.000   per set -0.029 -0.002 -0.008 -0.030   vs H r16 worst +0.003 mean -0.001
+  H sh32+own2 (LOO-chosen)           -0.002 / -0.004 / +0.000   per set -0.008 -0.002 -0.003 -0.009   vs H r16 worst +0.016 mean +0.011
+  rad-model exact nobeta             -0.002 / -0.009 / -0.001   per set -0.037 -0.002 -0.013 -0.037   vs H r16 worst +0.004 mean -0.006
+  mu+3.3 sigma own r16               -0.001 / -0.008 / -0.002   per set -0.029 -0.001 -0.010 -0.030   vs H r16 worst +0.004 mean -0.001
+  H group (LOO-chosen)               -0.000 / +0.002 / -0.000   per set -0.015 -0.000 -0.001 -0.016   vs H r16 worst +0.009 mean +0.008
+  H sh64 (LOO-chosen)                +0.001 / +0.002 / +0.001   per set +0.001 +0.000 +0.001 -0.001   vs H r16 worst +0.024 mean +0.016
+  H sh32 (LOO-chosen)                +0.001 / +0.002 / +0.001   per set +0.001 +0.001 +0.001 -0.001   vs H r16 worst +0.025 mean +0.016
+  H sh128 (LOO-chosen)               +0.001 / +0.002 / +0.001   per set +0.000 +0.001 +0.001 -0.001   vs H r16 worst +0.024 mean +0.016
+  H sh16 (LOO-chosen)                +0.001 / +0.002 / +0.001   per set +0.001 +0.001 +0.001 -0.001   vs H r16 worst +0.025 mean +0.016
+  rad-model group beta               +0.002 / +0.008 / +0.005   per set -0.020 +0.000 +0.002 -0.018   vs H r16 worst +0.012 mean +0.007
+  f'=0.4                             +0.002 / +0.006 / +0.003   per set +0.002 +0.002 +0.002 +0.000   vs H r16 worst +0.025 mean +0.017
+  rad-model group nobeta             +0.005 / +0.007 / +0.004   per set -0.019 +0.005 +0.001 -0.018   vs H r16 worst +0.012 mean +0.008
+  rad-model sh64 nobeta              +0.005 / +0.005 / +0.006   per set -0.002 +0.005 +0.004 -0.003   vs H r16 worst +0.022 mean +0.017
+  mu+3.3 sigma group                 +0.005 / +0.005 / +0.002   per set -0.018 +0.005 -0.000 -0.017   vs H r16 worst +0.010 mean +0.008
+  rad-model sh64+own4 beta           +0.005 / +0.012 / +0.008   per set -0.013 +0.003 +0.005 -0.012   vs H r16 worst +0.015 mean +0.012
+  mu+3.3 sigma sh32                  +0.006 / +0.005 / +0.004   per set -0.002 +0.006 +0.002 -0.002   vs H r16 worst +0.022 mean +0.017
+  mu+3.3 sigma sh64                  +0.006 / +0.005 / +0.003   per set -0.002 +0.006 +0.002 -0.003   vs H r16 worst +0.022 mean +0.017
+  rad-model sh64+own4 nobeta         +0.007 / +0.012 / +0.008   per set -0.016 +0.007 +0.005 -0.016   vs H r16 worst +0.015 mean +0.011
+  mu+3.3 sigma sh64+own4             +0.007 / +0.006 / +0.004   per set -0.015 +0.007 +0.000 -0.016   vs H r16 worst +0.012 mean +0.010
+  rad-model sh64 beta                +0.009 / +0.009 / +0.012   per set +0.004 +0.001 +0.009 +0.009   vs H r16 worst +0.033 mean +0.022
+  faiss nlist=K                      +0.012 / +0.016 / +0.013   per set +0.012 +0.010 +0.001 +0.006   vs H r16 worst +0.036 mean +0.023
+  rad-model sh32 nobeta              +0.025 / +0.010 / +0.031   per set -0.002 +0.005 +0.025 -0.002   vs H r16 worst +0.035 mean +0.023
+  rad-model sh32 beta                +0.028 / +0.017 / +0.036   per set +0.004 +0.001 +0.028 +0.010   vs H r16 worst +0.039 mean +0.027
+
+query-time cost at LAION 1M (K 500, d 512, G 64), beyond q.m for every cluster (K d = 256k multiply-adds, 250 KB of int8 centres); for scale, scanning 1.6% of the rows' f16 vectors is 8.2M multiply-adds and 16 MB
+  order                       multiply-adds   bytes read   special functions
+  f'=0.4 (O2)                         1.0k        2.0KB   none (sd of q.m over clusters: K)
+  H own r4                         1025.0k     2011.7KB   K sqrt
+  H own r16                        4097.0k     8035.2KB   K sqrt
+  H sh16                             17.2k       35.5KB   K sqrt
+  H sh32                             33.4k       67.2KB   K sqrt
+  H sh64                             65.8k      130.4KB   K sqrt
+  H sh128                           130.5k      256.9KB   K sqrt
+  H sh32+own2                       544.4k     1067.2KB   K sqrt
+  H sh64+own4                      1088.8k     2130.4KB   K sqrt
+  H group (every group)           17033.2k    16884.0KB   K sqrt
+  rad-model + spread                 20.0k        0.2KB   + about 40 K exp / table lookups for tau (bisection), K logs
+
+stopping: recall at equal mean rows scanned, global threshold on the calibrated per-row probability / fixed nprobe (calibration: E[true neighbours | (s_max - s_c)/sd(q)] by isotonic regression on pseudo-queries, a table of <= 800 values)
+  laion-text
+    H r16                  0.5%: 0.701/0.681 (+0.020)  1.6%: 0.861/0.854 (+0.008)  6.3%: 0.961/0.961 (+0.000)  25%: 0.995/0.996 (-0.001)
+    H r4                   0.5%: 0.673/0.669 (+0.005)  1.6%: 0.847/0.827 (+0.020)  6.3%: 0.948/0.951 (-0.003)  25%: 0.990/0.996 (-0.006)
+    f'=0.4                 0.5%: 0.610/0.629 (-0.019)  1.6%: 0.818/0.812 (+0.006)  6.3%: 0.939/0.938 (+0.001)  25%: 0.984/0.993 (-0.009)
+    H sh32 LOO             0.5%: 0.618/0.629 (-0.011)  1.6%: 0.822/0.818 (+0.004)  6.3%: 0.944/0.940 (+0.004)  25%: 0.985/0.992 (-0.007)
+    H sh64 LOO             0.5%: 0.617/0.629 (-0.013)  1.6%: 0.822/0.818 (+0.004)  6.3%: 0.944/0.940 (+0.004)  25%: 0.984/0.993 (-0.009)
+    H sh64+own4 LOO        0.5%: 0.677/0.666 (+0.012)  1.6%: 0.851/0.830 (+0.022)  6.3%: 0.949/0.950 (-0.000)  25%: 0.990/0.996 (-0.006)
+    H group LOO            0.5%: 0.659/0.653 (+0.006)  1.6%: 0.845/0.844 (+0.002)  6.3%: 0.949/0.955 (-0.006)  25%: 0.992/0.997 (-0.005)
+    rad-model own r16      0.5%: 0.721/0.683 (+0.038)  1.6%: 0.888/0.858 (+0.030)  6.3%: 0.978/0.967 (+0.011)  25%: 0.998/0.997 (+0.001)
+    rad-model sh64         0.5%: 0.650/0.625 (+0.025)  1.6%: 0.846/0.798 (+0.048)  6.3%: 0.945/0.939 (+0.005)  25%: 0.994/0.994 (-0.000)
+    rad-model sh32         0.5%: 0.648/0.621 (+0.026)  1.6%: 0.846/0.800 (+0.046)  6.3%: 0.945/0.937 (+0.008)  25%: 0.989/0.994 (-0.005)
+  laion-image
+    H r16                  0.5%: 0.794/0.795 (-0.001)  1.6%: 0.927/0.935 (-0.008)  6.3%: 0.980/0.991 (-0.011)  25%: 0.997/0.999 (-0.002)
+    H r4                   0.5%: 0.800/0.796 (+0.004)  1.6%: 0.931/0.935 (-0.004)  6.3%: 0.980/0.990 (-0.009)  25%: 0.998/0.999 (-0.001)
+    f'=0.4                 0.5%: 0.794/0.788 (+0.006)  1.6%: 0.926/0.931 (-0.005)  6.3%: 0.978/0.987 (-0.009)  25%: 0.997/0.999 (-0.002)
+    H sh32 LOO             0.5%: 0.795/0.785 (+0.010)  1.6%: 0.925/0.928 (-0.003)  6.3%: 0.977/0.986 (-0.009)  25%: 0.996/0.999 (-0.002)
+    H sh64 LOO             0.5%: 0.795/0.785 (+0.009)  1.6%: 0.924/0.928 (-0.003)  6.3%: 0.977/0.986 (-0.010)  25%: 0.996/0.999 (-0.003)
+    H sh64+own4 LOO        0.5%: 0.805/0.798 (+0.007)  1.6%: 0.933/0.935 (-0.002)  6.3%: 0.981/0.989 (-0.008)  25%: 0.998/0.999 (-0.001)
+    H group LOO            0.5%: 0.788/0.784 (+0.004)  1.6%: 0.922/0.931 (-0.010)  6.3%: 0.977/0.989 (-0.012)  25%: 0.996/0.999 (-0.003)
+    rad-model own r16      0.5%: 0.817/0.782 (+0.035)  1.6%: 0.950/0.922 (+0.027)  6.3%: 0.993/0.983 (+0.011)  25%: 1.000/0.998 (+0.001)
+    rad-model sh64         0.5%: 0.805/0.778 (+0.027)  1.6%: 0.946/0.923 (+0.023)  6.3%: 0.992/0.985 (+0.007)  25%: 0.999/0.999 (+0.001)
+    rad-model sh32         0.5%: 0.806/0.778 (+0.028)  1.6%: 0.947/0.922 (+0.024)  6.3%: 0.992/0.985 (+0.007)  25%: 0.999/0.999 (+0.001)
+  glove
+    H r16                  0.5%: 0.520/0.559 (-0.039)  1.6%: 0.725/0.762 (-0.037)  6.3%: 0.914/0.908 (+0.006)  25%: 0.978/0.985 (-0.007)
+    H r4                   0.5%: 0.525/0.555 (-0.030)  1.6%: 0.710/0.756 (-0.046)  6.3%: 0.900/0.907 (-0.007)  25%: 0.979/0.985 (-0.006)
+    f'=0.4                 0.5%: 0.487/0.542 (-0.056)  1.6%: 0.701/0.746 (-0.045)  6.3%: 0.873/0.900 (-0.027)  25%: 0.975/0.985 (-0.010)
+    H sh32 LOO             0.5%: 0.521/0.541 (-0.020)  1.6%: 0.720/0.752 (-0.032)  6.3%: 0.890/0.901 (-0.011)  25%: 0.977/0.986 (-0.009)
+    H sh64 LOO             0.5%: 0.523/0.541 (-0.018)  1.6%: 0.719/0.752 (-0.033)  6.3%: 0.891/0.903 (-0.013)  25%: 0.975/0.986 (-0.011)
+    H sh64+own4 LOO        0.5%: 0.516/0.561 (-0.045)  1.6%: 0.710/0.758 (-0.049)  6.3%: 0.916/0.906 (+0.010)  25%: 0.979/0.986 (-0.007)
+    H group LOO            0.5%: 0.521/0.543 (-0.022)  1.6%: 0.711/0.754 (-0.043)  6.3%: 0.900/0.909 (-0.009)  25%: 0.974/0.989 (-0.015)
+    rad-model own r16      0.5%: 0.572/0.561 (+0.011)  1.6%: 0.789/0.770 (+0.018)  6.3%: 0.943/0.909 (+0.034)  25%: 0.993/0.984 (+0.009)
+    rad-model sh64         0.5%: 0.551/0.540 (+0.012)  1.6%: 0.765/0.753 (+0.012)  6.3%: 0.936/0.908 (+0.027)  25%: 0.994/0.985 (+0.009)
+    rad-model sh32         0.5%: 0.553/0.540 (+0.013)  1.6%: 0.761/0.752 (+0.008)  6.3%: 0.934/0.906 (+0.027)  25%: 0.993/0.985 (+0.008)
+  yahoo
+    H r16                  0.5%: 0.694/0.662 (+0.032)  1.6%: 0.883/0.878 (+0.005)  6.3%: 0.977/0.974 (+0.003)  25%: 0.997/0.997 (+0.000)
+    H r4                   0.5%: 0.680/0.658 (+0.021)  1.6%: 0.877/0.860 (+0.017)  6.3%: 0.977/0.973 (+0.005)  25%: 0.994/0.997 (-0.003)
+    f'=0.4                 0.5%: 0.681/0.643 (+0.038)  1.6%: 0.878/0.852 (+0.026)  6.3%: 0.971/0.966 (+0.005)  25%: 0.992/0.996 (-0.004)
+    H sh32 LOO             0.5%: 0.672/0.641 (+0.031)  1.6%: 0.870/0.850 (+0.020)  6.3%: 0.971/0.963 (+0.008)  25%: 0.994/0.996 (-0.002)
+    H sh64 LOO             0.5%: 0.673/0.641 (+0.032)  1.6%: 0.872/0.850 (+0.022)  6.3%: 0.972/0.964 (+0.008)  25%: 0.993/0.996 (-0.003)
+    H sh64+own4 LOO        0.5%: 0.693/0.657 (+0.036)  1.6%: 0.874/0.858 (+0.017)  6.3%: 0.976/0.973 (+0.003)  25%: 0.995/0.997 (-0.002)
+    H group LOO            0.5%: 0.680/0.652 (+0.028)  1.6%: 0.875/0.859 (+0.016)  6.3%: 0.972/0.972 (+0.000)  25%: 0.995/0.997 (-0.002)
+    rad-model own r16      0.5%: 0.705/0.652 (+0.053)  1.6%: 0.901/0.883 (+0.019)  6.3%: 0.983/0.971 (+0.012)  25%: 0.998/0.997 (+0.001)
+    rad-model sh64         0.5%: 0.679/0.640 (+0.039)  1.6%: 0.882/0.845 (+0.037)  6.3%: 0.972/0.964 (+0.008)  25%: 0.992/0.986 (+0.006)
+    rad-model sh32         0.5%: 0.674/0.639 (+0.034)  1.6%: 0.878/0.841 (+0.037)  6.3%: 0.941/0.936 (+0.005)  25%: 0.966/0.961 (+0.005)
+  vibe-laion
+    H r16                  0.5%: 0.617/0.594 (+0.024)  1.6%: 0.812/0.822 (-0.010)  6.3%: 0.956/0.956 (+0.001)  25%: 0.993/0.993 (-0.000)
+    H r4                   0.5%: 0.597/0.565 (+0.032)  1.6%: 0.796/0.787 (+0.009)  6.3%: 0.947/0.950 (-0.003)  25%: 0.994/0.992 (+0.002)
+    f'=0.4                 0.5%: 0.539/0.538 (+0.001)  1.6%: 0.770/0.778 (-0.008)  6.3%: 0.936/0.935 (+0.001)  25%: 0.990/0.993 (-0.003)
+    H sh32 LOO             0.5%: 0.558/0.544 (+0.014)  1.6%: 0.776/0.783 (-0.007)  6.3%: 0.935/0.945 (-0.010)  25%: 0.988/0.991 (-0.003)
+    H sh64 LOO             0.5%: 0.566/0.544 (+0.021)  1.6%: 0.771/0.782 (-0.011)  6.3%: 0.935/0.943 (-0.008)  25%: 0.988/0.991 (-0.003)
+    H sh64+own4 LOO        0.5%: 0.597/0.561 (+0.036)  1.6%: 0.802/0.788 (+0.013)  6.3%: 0.942/0.950 (-0.008)  25%: 0.994/0.992 (+0.002)
+    H group LOO            0.5%: 0.566/0.549 (+0.017)  1.6%: 0.800/0.805 (-0.005)  6.3%: 0.955/0.956 (-0.002)  25%: 0.994/0.993 (+0.001)
+    rad-model own r16      0.5%: 0.645/0.607 (+0.038)  1.6%: 0.855/0.829 (+0.026)  6.3%: 0.962/0.956 (+0.006)  25%: 0.996/0.994 (+0.002)
+    rad-model sh64         0.5%: 0.582/0.551 (+0.032)  1.6%: 0.792/0.786 (+0.006)  6.3%: 0.938/0.933 (+0.005)  25%: 0.988/0.983 (+0.005)
+    rad-model sh32         0.5%: 0.577/0.551 (+0.027)  1.6%: 0.790/0.785 (+0.005)  6.3%: 0.941/0.933 (+0.008)  25%: 0.985/0.980 (+0.005)
+  laion-text-learn*
+    H r16                  0.5%: 0.629/0.628 (+0.001)  1.6%: 0.822/0.827 (-0.005)  6.3%: 0.945/0.946 (-0.000)  25%: 0.992/0.993 (-0.001)
+    H r4                   0.5%: 0.612/0.611 (+0.001)  1.6%: 0.801/0.806 (-0.005)  6.3%: 0.932/0.935 (-0.003)  25%: 0.989/0.990 (-0.001)
+    f'=0.4                 0.5%: 0.586/0.587 (-0.001)  1.6%: 0.773/0.786 (-0.013)  6.3%: 0.917/0.923 (-0.005)  25%: 0.987/0.987 (-0.000)
+    H sh32 LOO             0.5%: 0.584/0.590 (-0.007)  1.6%: 0.777/0.785 (-0.008)  6.3%: 0.920/0.923 (-0.003)  25%: 0.988/0.988 (-0.001)
+    H sh64 LOO             0.5%: 0.584/0.591 (-0.007)  1.6%: 0.778/0.786 (-0.008)  6.3%: 0.921/0.924 (-0.003)  25%: 0.987/0.989 (-0.001)
+    H sh64+own4 LOO        0.5%: 0.613/0.611 (+0.001)  1.6%: 0.802/0.807 (-0.005)  6.3%: 0.933/0.936 (-0.003)  25%: 0.989/0.990 (-0.001)
+    H group LOO            0.5%: 0.603/0.598 (+0.005)  1.6%: 0.807/0.810 (-0.004)  6.3%: 0.941/0.941 (+0.001)  25%: 0.992/0.992 (-0.000)
+    rad-model own r16      0.5%: 0.664/0.640 (+0.024)  1.6%: 0.857/0.833 (+0.023)  6.3%: 0.961/0.950 (+0.011)  25%: 0.997/0.992 (+0.005)
+    rad-model sh64         0.5%: 0.607/0.588 (+0.019)  1.6%: 0.807/0.785 (+0.022)  6.3%: 0.932/0.918 (+0.015)  25%: 0.990/0.983 (+0.007)
+    rad-model sh32         0.5%: 0.609/0.588 (+0.021)  1.6%: 0.806/0.786 (+0.020)  6.3%: 0.932/0.917 (+0.014)  25%: 0.989/0.984 (+0.004)
+  glove-1000*
+    H r16                  0.5%: 0.607/0.618 (-0.011)  1.6%: 0.783/0.794 (-0.011)  6.3%: 0.924/0.920 (+0.004)  25%: 0.990/0.984 (+0.005)
+    H r4                   0.5%: 0.601/0.614 (-0.013)  1.6%: 0.780/0.788 (-0.008)  6.3%: 0.923/0.917 (+0.006)  25%: 0.988/0.984 (+0.004)
+    f'=0.4                 0.5%: 0.577/0.607 (-0.030)  1.6%: 0.755/0.779 (-0.024)  6.3%: 0.906/0.913 (-0.007)  25%: 0.984/0.985 (-0.001)
+    H sh32 LOO             0.5%: 0.599/0.609 (-0.010)  1.6%: 0.776/0.779 (-0.004)  6.3%: 0.921/0.915 (+0.005)  25%: 0.988/0.984 (+0.003)
+    H sh64 LOO             0.5%: 0.598/0.609 (-0.010)  1.6%: 0.778/0.780 (-0.003)  6.3%: 0.921/0.915 (+0.005)  25%: 0.988/0.984 (+0.003)
+    H sh64+own4 LOO        0.5%: 0.599/0.614 (-0.016)  1.6%: 0.778/0.789 (-0.011)  6.3%: 0.922/0.919 (+0.003)  25%: 0.988/0.984 (+0.003)
+    H group LOO            0.5%: 0.599/0.606 (-0.007)  1.6%: 0.778/0.783 (-0.005)  6.3%: 0.922/0.917 (+0.005)  25%: 0.988/0.983 (+0.005)
+    rad-model own r16      0.5%: 0.644/0.620 (+0.023)  1.6%: 0.822/0.794 (+0.027)  6.3%: 0.951/0.921 (+0.030)  25%: 0.996/0.986 (+0.010)
+    rad-model sh64         0.5%: 0.631/0.605 (+0.026)  1.6%: 0.808/0.780 (+0.027)  6.3%: 0.944/0.915 (+0.028)  25%: 0.995/0.985 (+0.010)
+    rad-model sh32         0.5%: 0.631/0.605 (+0.026)  1.6%: 0.807/0.780 (+0.027)  6.3%: 0.944/0.916 (+0.028)  25%: 0.995/0.985 (+0.009)
+  yahoo-900*
+    H r16                  0.5%: 0.666/0.648 (+0.018)  1.6%: 0.869/0.871 (-0.002)  6.3%: 0.966/0.966 (-0.001)  25%: 0.996/0.996 (+0.000)
+    H r4                   0.5%: 0.656/0.644 (+0.012)  1.6%: 0.859/0.862 (-0.002)  6.3%: 0.963/0.963 (-0.000)  25%: 0.995/0.994 (+0.002)
+    f'=0.4                 0.5%: 0.630/0.620 (+0.009)  1.6%: 0.850/0.850 (+0.001)  6.3%: 0.959/0.960 (-0.001)  25%: 0.995/0.993 (+0.002)
+    H sh32 LOO             0.5%: 0.638/0.621 (+0.017)  1.6%: 0.852/0.855 (-0.002)  6.3%: 0.961/0.962 (-0.001)  25%: 0.995/0.993 (+0.001)
+    H sh64 LOO             0.5%: 0.637/0.623 (+0.015)  1.6%: 0.852/0.855 (-0.002)  6.3%: 0.961/0.962 (-0.001)  25%: 0.995/0.994 (+0.002)
+    H sh64+own4 LOO        0.5%: 0.656/0.641 (+0.014)  1.6%: 0.860/0.863 (-0.004)  6.3%: 0.963/0.963 (-0.000)  25%: 0.995/0.994 (+0.001)
+    H group LOO            0.5%: 0.647/0.627 (+0.019)  1.6%: 0.854/0.854 (-0.000)  6.3%: 0.962/0.962 (-0.000)  25%: 0.996/0.994 (+0.001)
+    rad-model own r16      0.5%: 0.689/0.652 (+0.038)  1.6%: 0.889/0.866 (+0.023)  6.3%: 0.976/0.962 (+0.014)  25%: 0.998/0.995 (+0.003)
+    rad-model sh64         0.5%: 0.657/0.616 (+0.041)  1.6%: 0.873/0.846 (+0.027)  6.3%: 0.965/0.953 (+0.012)  25%: 0.989/0.984 (+0.006)
+    rad-model sh32         0.5%: 0.655/0.616 (+0.039)  1.6%: 0.872/0.838 (+0.034)  6.3%: 0.930/0.926 (+0.004)  25%: 0.958/0.954 (+0.005)
+  vibe-laion-learn*
+    H r16                  0.5%: 0.638/0.639 (-0.001)  1.6%: 0.816/0.826 (-0.010)  6.3%: 0.947/0.949 (-0.002)  25%: 0.993/0.994 (-0.001)
+    H r4                   0.5%: 0.618/0.621 (-0.003)  1.6%: 0.791/0.811 (-0.021)  6.3%: 0.931/0.937 (-0.006)  25%: 0.990/0.992 (-0.001)
+    f'=0.4                 0.5%: 0.586/0.590 (-0.004)  1.6%: 0.767/0.790 (-0.024)  6.3%: 0.915/0.926 (-0.010)  25%: 0.985/0.987 (-0.003)
+    H sh32 LOO             0.5%: 0.586/0.595 (-0.009)  1.6%: 0.770/0.791 (-0.021)  6.3%: 0.919/0.924 (-0.006)  25%: 0.986/0.989 (-0.003)
+    H sh64 LOO             0.5%: 0.587/0.595 (-0.008)  1.6%: 0.771/0.792 (-0.021)  6.3%: 0.919/0.925 (-0.007)  25%: 0.986/0.989 (-0.003)
+    H sh64+own4 LOO        0.5%: 0.619/0.621 (-0.002)  1.6%: 0.791/0.812 (-0.021)  6.3%: 0.933/0.937 (-0.004)  25%: 0.991/0.992 (-0.001)
+    H group LOO            0.5%: 0.603/0.610 (-0.007)  1.6%: 0.794/0.813 (-0.019)  6.3%: 0.936/0.942 (-0.006)  25%: 0.992/0.993 (-0.001)
+    rad-model own r16      0.5%: 0.674/0.647 (+0.027)  1.6%: 0.856/0.834 (+0.022)  6.3%: 0.964/0.952 (+0.012)  25%: 0.996/0.993 (+0.004)
+    rad-model sh64         0.5%: 0.611/0.590 (+0.020)  1.6%: 0.798/0.785 (+0.013)  6.3%: 0.925/0.914 (+0.011)  25%: 0.986/0.979 (+0.006)
+    rad-model sh32         0.5%: 0.611/0.591 (+0.020)  1.6%: 0.795/0.784 (+0.011)  6.3%: 0.923/0.914 (+0.010)  25%: 0.984/0.978 (+0.006)
+
+stopping gain (global - fixed), mean over the main sets
+  H r16                  0.5%: +0.007  1.6%: -0.009  6.3%: -0.000  25%: -0.002   recall with stopping: 0.5% min 0.520  1.6% min 0.725
+  H r4                   0.5%: +0.006  1.6%: -0.001  6.3%: -0.004  25%: -0.003   recall with stopping: 0.5% min 0.525  1.6% min 0.710
+  f'=0.4                 0.5%: -0.006  1.6%: -0.005  6.3%: -0.006  25%: -0.006   recall with stopping: 0.5% min 0.487  1.6% min 0.701
+  H sh32 LOO             0.5%: +0.005  1.6%: -0.004  6.3%: -0.004  25%: -0.005   recall with stopping: 0.5% min 0.521  1.6% min 0.720
+  H sh64 LOO             0.5%: +0.006  1.6%: -0.004  6.3%: -0.004  25%: -0.006   recall with stopping: 0.5% min 0.523  1.6% min 0.719
+  H sh64+own4 LOO        0.5%: +0.009  1.6%: +0.000  6.3%: -0.001  25%: -0.003   recall with stopping: 0.5% min 0.516  1.6% min 0.710
+  H group LOO            0.5%: +0.007  1.6%: -0.008  6.3%: -0.006  25%: -0.005   recall with stopping: 0.5% min 0.521  1.6% min 0.711
+  rad-model own r16      0.5%: +0.035  1.6%: +0.024  6.3%: +0.015  25%: +0.003   recall with stopping: 0.5% min 0.572  1.6% min 0.789
+  rad-model sh64         0.5%: +0.027  1.6%: +0.025  6.3%: +0.011  25%: +0.004   recall with stopping: 0.5% min 0.551  1.6% min 0.765
+  rad-model sh32         0.5%: +0.026  1.6%: +0.024  6.3%: +0.011  25%: +0.003   recall with stopping: 0.5% min 0.553  1.6% min 0.761
+
+recall targets: achieved mean recall / share of queries below the target / mean rows scanned (% of N); for the average target also the rows a fixed nprobe of the same order needs for the same recall. Groups: in-distribution ['laion-image', 'glove', 'yahoo'], out-of-distribution ['laion-text', 'vibe-laion'], extra sets ['glove-1000*', 'yahoo-900*', 'laion-text-learn*', 'vibe-laion-learn*'] (each averaged over its sets). Calibration on plain or mixed pseudo-queries.
+  H r16 | mixed                  per-query ID    0.8: 0.877/0.20/6.2%  0.9: 0.934/0.17/12.2%  0.95: 0.965/0.20/19.2%  0.99: 0.992/0.05/38.1%
+  H r16 | mixed                  per-query OOD   0.8: 0.619/0.64/0.5%  0.9: 0.691/0.69/0.7%  0.95: 0.758/0.76/1.1%  0.99: 0.909/0.45/5.1%
+  H r16 | mixed                  per-query extra 0.8: 0.727/0.44/4.8%  0.9: 0.793/0.45/9.2%  0.95: 0.843/0.52/13.8%  0.99: 0.941/0.29/24.3%
+  H r16 | mixed                  average   ID    0.8: 0.893/0.16/5.4% (fixed 5.3%)  0.9: 0.949/0.13/10.6% (fixed 8.6%)  0.95: 0.978/0.13/16.4% (fixed 14.5%)  0.99: 0.994/0.04/31.9% (fixed 22.4%)
+  H r16 | mixed                  average   OOD   0.8: 0.679/0.54/0.5% (fixed 0.7%)  0.9: 0.762/0.56/0.9% (fixed 1.0%)  0.95: 0.838/0.63/1.6% (fixed 1.7%)  0.99: 0.947/0.34/5.0% (fixed 5.0%)
+  H r16 | mixed                  average   extra 0.8: 0.767/0.38/3.7% (fixed 4.4%)  0.9: 0.843/0.37/7.5% (fixed 8.9%)  0.95: 0.892/0.44/11.8% (fixed 13.0%)  0.99: 0.963/0.23/21.8% (fixed 23.2%)
+  H sh64+own4 | mixed            per-query ID    0.8: 0.882/0.20/6.4%  0.9: 0.939/0.15/12.7%  0.95: 0.968/0.17/19.8%  0.99: 0.993/0.04/39.2%
+  H sh64+own4 | mixed            per-query OOD   0.8: 0.576/0.68/0.4%  0.9: 0.671/0.70/0.7%  0.95: 0.745/0.75/1.2%  0.99: 0.916/0.42/6.1%
+  H sh64+own4 | mixed            per-query extra 0.8: 0.718/0.45/5.0%  0.9: 0.786/0.46/9.5%  0.95: 0.838/0.52/14.2%  0.99: 0.940/0.28/25.3%
+  H sh64+own4 | mixed            average   ID    0.8: 0.897/0.15/5.7% (fixed 5.9%)  0.9: 0.953/0.12/11.1% (fixed 9.6%)  0.95: 0.978/0.14/17.0% (fixed 15.4%)  0.99: 0.995/0.04/33.6% (fixed 24.4%)
+  H sh64+own4 | mixed            average   OOD   0.8: 0.652/0.56/0.5% (fixed 0.7%)  0.9: 0.744/0.57/1.0% (fixed 1.0%)  0.95: 0.831/0.64/1.6% (fixed 2.0%)  0.99: 0.942/0.35/5.8% (fixed 5.5%)
+  H sh64+own4 | mixed            average   extra 0.8: 0.756/0.39/3.9% (fixed 4.4%)  0.9: 0.834/0.37/7.9% (fixed 9.0%)  0.95: 0.885/0.45/12.3% (fixed 12.8%)  0.99: 0.960/0.23/22.9% (fixed 23.7%)
+  O2 f'=0.4 | mixed              per-query ID    0.8: 0.884/0.20/7.0%  0.9: 0.940/0.15/13.8%  0.95: 0.971/0.16/21.4%  0.99: 0.993/0.04/41.6%
+  O2 f'=0.4 | mixed              per-query OOD   0.8: 0.510/0.71/0.4%  0.9: 0.611/0.72/0.8%  0.95: 0.728/0.77/1.5%  0.99: 0.922/0.38/8.0%
+  O2 f'=0.4 | mixed              per-query extra 0.8: 0.710/0.44/5.6%  0.9: 0.779/0.45/10.4%  0.95: 0.834/0.50/15.2%  0.99: 0.944/0.26/27.2%
+  O2 f'=0.4 | mixed              average   ID    0.8: 0.891/0.17/6.7% (fixed 5.2%)  0.9: 0.954/0.11/12.8% (fixed 10.7%)  0.95: 0.979/0.13/19.4% (fixed 16.4%)  0.99: 0.995/0.03/37.2% (fixed 25.4%)
+  O2 f'=0.4 | mixed              average   OOD   0.8: 0.575/0.62/0.5% (fixed 0.6%)  0.9: 0.722/0.57/1.0% (fixed 1.1%)  0.95: 0.818/0.65/1.9% (fixed 2.1%)  0.99: 0.943/0.33/7.0% (fixed 7.1%)
+  O2 f'=0.4 | mixed              average   extra 0.8: 0.747/0.39/4.8% (fixed 4.6%)  0.9: 0.826/0.38/9.5% (fixed 9.2%)  0.95: 0.884/0.44/14.3% (fixed 13.9%)  0.99: 0.960/0.22/25.6% (fixed 24.8%)
+  rad-model r16 | mixed          per-query ID    0.8: 0.879/0.17/2.8%  0.9: 0.932/0.18/5.2%  0.95: 0.974/0.19/9.3%  0.99: 0.997/0.03/25.6%
+  rad-model r16 | mixed          per-query OOD   0.8: 0.846/0.26/1.8%  0.9: 0.923/0.18/3.9%  0.95: 0.966/0.24/7.7%  0.99: 0.996/0.04/26.3%
+  rad-model r16 | mixed          per-query extra 0.8: 0.850/0.23/2.6%  0.9: 0.923/0.19/5.4%  0.95: 0.965/0.25/10.1%  0.99: 0.997/0.03/29.9%
+  rad-model r16 | mixed          running   ID    0.8: 0.707/0.47/1.8%  0.9: 0.777/0.52/3.1%  0.95: 0.892/0.38/43.5%  0.99: 0.892/0.38/43.5%
+  rad-model r16 | mixed          running   OOD   0.8: 0.719/0.46/1.8%  0.9: 0.782/0.48/2.8%  0.95: 0.903/0.35/43.3%  0.99: 0.903/0.35/43.3%
+  rad-model r16 | mixed          running   extra 0.8: 0.699/0.50/1.9%  0.9: 0.765/0.53/3.3%  0.95: 0.891/0.39/44.8%  0.99: 0.891/0.39/44.8%
+  rad-model r16 | mixed          average   ID    0.8: 0.891/0.15/2.6% (fixed 4.2%)  0.9: 0.941/0.15/4.6% (fixed 6.8%)  0.95: 0.963/0.24/6.9% (fixed 9.4%)  0.99: 0.990/0.09/14.3% (fixed 18.6%)
+  rad-model r16 | mixed          average   OOD   0.8: 0.766/0.42/0.8% (fixed 1.1%)  0.9: 0.876/0.33/1.6% (fixed 2.1%)  0.95: 0.927/0.46/3.0% (fixed 3.8%)  0.99: 0.984/0.14/9.1% (fixed 11.2%)
+  rad-model r16 | mixed          average   extra 0.8: 0.818/0.29/2.0% (fixed 3.0%)  0.9: 0.895/0.26/3.7% (fixed 6.0%)  0.95: 0.940/0.36/6.0% (fixed 9.5%)  0.99: 0.983/0.14/14.0% (fixed 21.2%)
+  zeta cal r16 | mixed           per-query ID    0.8: 0.813/0.30/1.7%  0.9: 0.882/0.32/2.9%  0.95: 0.916/0.44/4.4%  0.99: 0.956/0.27/8.6%
+  zeta cal r16 | mixed           per-query OOD   0.8: 0.779/0.41/1.1%  0.9: 0.848/0.42/1.8%  0.95: 0.898/0.56/2.7%  0.99: 0.956/0.32/6.0%
+  zeta cal r16 | mixed           per-query extra 0.8: 0.776/0.38/1.5%  0.9: 0.846/0.41/2.7%  0.95: 0.893/0.54/4.1%  0.99: 0.949/0.32/8.6%
+  zeta cal r16 | mixed           running   ID    0.8: 0.780/0.35/3.7%  0.9: 0.819/0.38/5.2%  0.95: 0.906/0.32/38.0%  0.99: 0.906/0.32/38.0%
+  zeta cal r16 | mixed           running   OOD   0.8: 0.787/0.33/2.4%  0.9: 0.847/0.38/3.2%  0.95: 0.932/0.29/48.4%  0.99: 0.932/0.29/48.4%
+  zeta cal r16 | mixed           running   extra 0.8: 0.761/0.39/3.4%  0.9: 0.802/0.45/4.9%  0.95: 0.903/0.34/42.5%  0.99: 0.903/0.34/42.5%
+  zeta cal r16 | mixed           average   ID    0.8: 0.872/0.18/2.4% (fixed 3.5%)  0.9: 0.930/0.19/4.1% (fixed 5.7%)  0.95: 0.959/0.27/6.2% (fixed 7.9%)  0.99: 0.990/0.08/12.8% (fixed 18.4%)
+  zeta cal r16 | mixed           average   OOD   0.8: 0.754/0.44/0.8% (fixed 1.0%)  0.9: 0.861/0.38/1.6% (fixed 1.9%)  0.95: 0.917/0.51/2.7% (fixed 3.5%)  0.99: 0.980/0.17/8.4% (fixed 9.9%)
+  zeta cal r16 | mixed           average   extra 0.8: 0.805/0.32/1.9% (fixed 2.8%)  0.9: 0.884/0.30/3.3% (fixed 5.2%)  0.95: 0.932/0.40/5.4% (fixed 8.2%)  0.99: 0.979/0.16/12.5% (fixed 18.2%)
+  H r16 | plain                  per-query ID    0.8: 0.812/0.32/2.0%  0.9: 0.884/0.29/4.1%  0.95: 0.937/0.31/7.2%  0.99: 0.982/0.10/18.6%
+  H r16 | plain                  per-query OOD   0.8: 0.606/0.65/0.4%  0.9: 0.669/0.71/0.6%  0.95: 0.729/0.78/0.9%  0.99: 0.845/0.62/2.2%
+  H r16 | plain                  per-query extra 0.8: 0.686/0.51/1.4%  0.9: 0.764/0.50/2.7%  0.95: 0.815/0.58/4.9%  0.99: 0.901/0.40/12.8%
+  H r16 | plain                  average   ID    0.8: 0.804/0.31/1.3% (fixed 1.3%)  0.9: 0.906/0.24/3.1% (fixed 3.4%)  0.95: 0.952/0.27/5.7% (fixed 6.1%)  0.99: 0.984/0.11/16.3% (fixed 13.1%)
+  H r16 | plain                  average   OOD   0.8: 0.640/0.60/0.4% (fixed 0.6%)  0.9: 0.706/0.65/0.7% (fixed 0.8%)  0.95: 0.778/0.71/1.1% (fixed 1.2%)  0.99: 0.894/0.55/2.7% (fixed 2.8%)
+  H r16 | plain                  average   extra 0.8: 0.704/0.48/1.0% (fixed 1.1%)  0.9: 0.791/0.46/2.1% (fixed 2.3%)  0.95: 0.849/0.55/3.9% (fixed 4.3%)  0.99: 0.932/0.34/11.2% (fixed 12.5%)
+  H sh64+own4 | plain            per-query ID    0.8: 0.807/0.33/2.0%  0.9: 0.886/0.29/4.1%  0.95: 0.938/0.31/7.0%  0.99: 0.982/0.11/18.7%
+  H sh64+own4 | plain            per-query OOD   0.8: 0.564/0.68/0.4%  0.9: 0.635/0.72/0.6%  0.95: 0.709/0.78/0.8%  0.99: 0.838/0.64/2.4%
+  H sh64+own4 | plain            per-query extra 0.8: 0.676/0.51/1.4%  0.9: 0.751/0.52/2.8%  0.95: 0.803/0.59/4.8%  0.99: 0.893/0.41/12.9%
+  H sh64+own4 | plain            average   ID    0.8: 0.811/0.31/1.4% (fixed 1.4%)  0.9: 0.900/0.26/3.1% (fixed 3.4%)  0.95: 0.951/0.27/5.8% (fixed 6.4%)  0.99: 0.984/0.10/16.0% (fixed 12.9%)
+  H sh64+own4 | plain            average   OOD   0.8: 0.609/0.60/0.4% (fixed 0.6%)  0.9: 0.682/0.65/0.6% (fixed 0.8%)  0.95: 0.757/0.73/1.1% (fixed 1.1%)  0.99: 0.892/0.53/2.9% (fixed 3.1%)
+  H sh64+own4 | plain            average   extra 0.8: 0.700/0.48/1.0% (fixed 1.1%)  0.9: 0.777/0.48/2.2% (fixed 2.4%)  0.95: 0.836/0.55/4.0% (fixed 4.4%)  0.99: 0.923/0.35/11.1% (fixed 12.0%)
+  O2 f'=0.4 | plain              per-query ID    0.8: 0.802/0.34/2.0%  0.9: 0.884/0.29/4.0%  0.95: 0.932/0.32/7.1%  0.99: 0.981/0.11/20.1%
+  O2 f'=0.4 | plain              per-query OOD   0.8: 0.492/0.73/0.4%  0.9: 0.574/0.74/0.6%  0.95: 0.658/0.80/0.9%  0.99: 0.826/0.60/2.9%
+  O2 f'=0.4 | plain              per-query extra 0.8: 0.660/0.52/1.4%  0.9: 0.738/0.51/2.9%  0.95: 0.792/0.58/5.1%  0.99: 0.888/0.40/13.9%
+  O2 f'=0.4 | plain              average   ID    0.8: 0.797/0.36/1.5% (fixed 1.3%)  0.9: 0.895/0.27/3.4% (fixed 3.3%)  0.95: 0.941/0.30/6.4% (fixed 5.8%)  0.99: 0.985/0.10/18.0% (fixed 15.4%)
+  O2 f'=0.4 | plain              average   OOD   0.8: 0.522/0.69/0.4% (fixed 0.5%)  0.9: 0.637/0.66/0.6% (fixed 0.8%)  0.95: 0.732/0.73/1.1% (fixed 1.2%)  0.99: 0.881/0.55/3.3% (fixed 3.0%)
+  O2 f'=0.4 | plain              average   extra 0.8: 0.676/0.50/1.1% (fixed 1.1%)  0.9: 0.764/0.48/2.4% (fixed 2.5%)  0.95: 0.826/0.56/4.6% (fixed 4.6%)  0.99: 0.922/0.34/12.9% (fixed 13.1%)
+  rad-model r16 | plain          per-query ID    0.8: 0.898/0.12/2.8%  0.9: 0.959/0.09/5.4%  0.95: 0.979/0.17/9.1%  0.99: 0.995/0.04/21.5%
+  rad-model r16 | plain          per-query OOD   0.8: 0.915/0.11/3.5%  0.9: 0.969/0.07/7.7%  0.95: 0.989/0.10/14.1%  0.99: 0.999/0.01/34.5%
+  rad-model r16 | plain          per-query extra 0.8: 0.899/0.12/3.4%  0.9: 0.955/0.09/7.1%  0.95: 0.981/0.16/12.5%  0.99: 0.997/0.03/29.7%
+  rad-model r16 | plain          running   ID    0.8: 0.795/0.36/1.9%  0.9: 0.863/0.35/3.5%  0.95: 0.952/0.23/54.6%  0.99: 0.952/0.23/54.6%
+  rad-model r16 | plain          running   OOD   0.8: 0.830/0.30/5.0%  0.9: 0.889/0.29/7.9%  0.95: 0.954/0.22/56.1%  0.99: 0.954/0.22/56.1%
+  rad-model r16 | plain          running   extra 0.8: 0.802/0.33/3.4%  0.9: 0.870/0.33/5.8%  0.95: 0.951/0.23/55.5%  0.99: 0.951/0.23/55.5%
+  rad-model r16 | plain          average   ID    0.8: 0.799/0.33/1.0% (fixed 1.2%)  0.9: 0.903/0.26/2.2% (fixed 3.0%)  0.95: 0.951/0.30/4.1% (fixed 6.3%)  0.99: 0.989/0.09/11.5% (fixed 17.2%)
+  rad-model r16 | plain          average   OOD   0.8: 0.712/0.47/0.6% (fixed 0.7%)  0.9: 0.841/0.40/1.3% (fixed 1.7%)  0.95: 0.911/0.50/2.7% (fixed 3.3%)  0.99: 0.987/0.12/10.5% (fixed 14.4%)
+  rad-model r16 | plain          average   extra 0.8: 0.741/0.41/0.8% (fixed 1.1%)  0.9: 0.862/0.34/1.9% (fixed 2.7%)  0.95: 0.926/0.41/3.7% (fixed 5.6%)  0.99: 0.985/0.13/12.4% (fixed 19.1%)
+  zeta cal r16 | plain           per-query ID    0.8: 0.813/0.30/1.7%  0.9: 0.879/0.33/2.9%  0.95: 0.918/0.43/4.4%  0.99: 0.958/0.25/8.7%
+  zeta cal r16 | plain           per-query OOD   0.8: 0.786/0.40/1.2%  0.9: 0.859/0.40/2.0%  0.95: 0.907/0.52/3.1%  0.99: 0.961/0.28/6.7%
+  zeta cal r16 | plain           per-query extra 0.8: 0.783/0.37/1.6%  0.9: 0.853/0.39/2.8%  0.95: 0.899/0.52/4.3%  0.99: 0.953/0.30/9.0%
+  zeta cal r16 | plain           running   ID    0.8: 0.803/0.32/3.8%  0.9: 0.844/0.35/5.3%  0.95: 0.924/0.27/42.1%  0.99: 0.924/0.27/42.1%
+  zeta cal r16 | plain           running   OOD   0.8: 0.840/0.28/3.6%  0.9: 0.879/0.32/5.2%  0.95: 0.948/0.24/52.0%  0.99: 0.948/0.24/52.0%
+  zeta cal r16 | plain           running   extra 0.8: 0.803/0.32/4.0%  0.9: 0.846/0.36/5.8%  0.95: 0.926/0.29/46.5%  0.99: 0.926/0.29/46.5%
+  zeta cal r16 | plain           average   ID    0.8: 0.803/0.33/1.0% (fixed 1.3%)  0.9: 0.902/0.26/2.3% (fixed 3.1%)  0.95: 0.953/0.29/4.3% (fixed 6.5%)  0.99: 0.989/0.09/11.4% (fixed 18.3%)
+  zeta cal r16 | plain           average   OOD   0.8: 0.730/0.47/0.6% (fixed 0.9%)  0.9: 0.860/0.40/1.5% (fixed 1.9%)  0.95: 0.924/0.48/3.0% (fixed 3.7%)  0.99: 0.987/0.11/11.1% (fixed 12.0%)
+  zeta cal r16 | plain           average   extra 0.8: 0.753/0.41/0.9% (fixed 1.2%)  0.9: 0.868/0.35/2.1% (fixed 2.8%)  0.95: 0.931/0.41/4.0% (fixed 5.8%)  0.99: 0.984/0.13/12.6% (fixed 18.3%)
