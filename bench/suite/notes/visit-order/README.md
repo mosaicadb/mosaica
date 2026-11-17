@@ -8,7 +8,8 @@ owners.
 - `theory.md`: the mathematical analysis (what is optimal, under which model; proofs, bounds, references), with
   synthetic checks in `theory/`. Its references were collected by an agent and have not each been checked.
 - `results/`: the replay tables. `summary_table.txt` is the first replay at 1M (both fits); `loo_summary.txt` the
-  candidate defaults on five datasets with leave-one-dataset-out choices; `table3.txt` the principled orders.
+  candidate defaults on five datasets with leave-one-dataset-out choices; `table3.txt` the principled orders;
+  `table4.txt` the calibrated spread, the ceilings, the collapse check and the stopping rule.
 - `scripts/`: the replay scripts, as run (paths under a scratch directory `$S`; they expect the suite's prep, a
   `vexact_py` install and `rust/tools/fit.py`; see the comments at the top of each).
 
@@ -67,12 +68,27 @@ the test machine's disk. Differences below about 0.01 are within noise at 100 qu
    constants and matches or beats the oracle everywhere. With the deployable rank-16 Σ it loses on in-distribution
    images (.906 against .935 at 1.6%): the order needs σ_c to within a few percent (Theorem 12), and H's α < 1 and
    rad term act as shrinkage of the noisy estimate.
-5. **f′ estimated from the corpus** (within- against between-cluster spread) came out 2 to 3 times too low and is not
+5. **A calibrated spread does not beat H.** Fitting `σ̃² = a·σ̂²_r + b·σ(q)²·rad² + c₀·σ(q)²` once per index on
+   corpus pseudo-queries (plain and shifted to mimic text) and ranking by `μ + 3.3·σ̃` matches H r16 on average and
+   loses up to 0.007 on LAION images (worst case against the oracle +0.003 against H r16's −0.003); calibrated r4
+   loses to H r4 by up to 0.011. The reason is a model error, not noise: at the same ζ, clusters in the top rad
+   tercile hold 1.6 to 3.8 times more rows above τ than the bottom tercile on four of five datasets, so the rate is
+   not a function of ζ alone. H's rad term corrects for that. Every order built from (μ, σ) stays about the same
+   distance from the clairvoyant ceiling (rank by true neighbours per row: .97 to .99 at 1.6%), which is information
+   the mean and spread do not carry.
+6. **Stop on a global threshold, not a fixed nprobe.** Thresholding the calibrated `1 − Φ(ζ)` across queries, at the
+   same mean rows scanned, gains +0.017 to +0.043 recall at 0.5% scanned and up to +0.028 at 1.6%; fixed rows per
+   query is worse than either. With it, the calibrated r16 order beats H r16 at fixed nprobe on four of five
+   datasets at 1.6% (LAION text .886 against .854; glove ties).
+7. **f′ estimated from the corpus** (within- against between-cluster spread) came out 2 to 3 times too low and is not
    usable as derived.
 
 ## Recommendation
 
 Retire today's order. Offer f′ = 0.4 (no extra state), H r4 and H r16 as options, with `fit_queries` kept as an
 override for users with a query sample. The principled successor to H (`theory.md`, section 9) replaces its
-constants with a spread calibrated once per index by regression on corpus pseudo-queries, used in the threshold
-order, with a global stopping threshold on p_c in place of a fixed nprobe; that is being measured.
+constants with a spread calibrated once per index; measured, it matches H r16 on average but not in the worst case,
+because exceedance also depends on rad (finding 5). The clearer gain is the global stopping threshold (finding 6),
+which needs the order's score on a probability scale. Being measured next: a shared basis for the spread (projected
+once per query instead of K·r·d work and about 8 MB read), a rad-aware exceedance model, and the stopping rule on
+top of H and f′.
