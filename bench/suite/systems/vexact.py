@@ -50,7 +50,8 @@ class Vexact(System):
         t = time.time()
         self.ix = vexact_py.Index(out, core=self.core)
         self.encode_s = time.time() - t
-        self.qbuf = np.zeros(self.dp, np.float32)
+        # fit.py stores the vectors zero-padded to a multiple of 32 dimensions, and the index takes queries that wide
+        self.qbuf = np.zeros(-(-self.dp // 32) * 32, np.float32)
         self.ids = None
         return dict(fit_s=round(self.fit_s, 1), encode_s=round(self.encode_s, 1), sample=learn is not None)
 

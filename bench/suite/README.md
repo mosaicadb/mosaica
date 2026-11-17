@@ -144,3 +144,21 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
 - **pgvector**: PostgreSQL with pgvector, sequential scans, one worker; `ORDER BY v <#> q LIMIT k` and
   `WHERE (v <#> q) <= -t`, a visible set as `id IN (SELECT id FROM vis_...)`. Timed at the client as
   `../threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
+
+## Status
+
+The quick suite's exact, threshold and filtered cells were run on a 4-core cloud VM (Xeon at 2.1 GHz with AVX-512,
+15 GB, timing on core 3, builds on cores 0-2) on yahoo-minilm-384-normalized, laion-clip-512-normalized,
+inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`. Not run there:
+
+- **ACORN** ran on yahoo only: its build took 1,247 s on 3 cores for 677k vectors of 384 dimensions, and the other
+  datasets would each have taken an hour or more. Run it with `--keep-work` (a kept index is reused) on a larger
+  machine.
+- **bioclip2-768**: the source is implemented, but its text queries are BioCLIP-2 text-prompt embeddings that are not
+  published; produce `text_q.npy` and `text_insample.npy` with the BioCLIP-2 text tower (as `agent2/encode_text.py`
+  does) and fetch the images with `../threshold-db/fetch.py`.
+- **pgvector** (full suite only): the adapter was checked against brute force on a 20,000-row table (PostgreSQL 16,
+  pgvector 0.6.0 from Ubuntu's packages), not run on a dataset.
+- **The public suites** (`--stages public`): the overlay was checked (applied and restored on VIBE and ANN-Benchmarks
+  checkouts), but the images for faiss and glass were not built here, and ANN-Benchmarks' Docker images were absent,
+  so the unfiltered approximate k-NN was left for a machine with the images.

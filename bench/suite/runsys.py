@@ -107,7 +107,8 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, threads, reps, data):
                   [dict(system=sname, status="unavailable", detail=str(e))], lambda r: r["system"] == sname)
         return
     build_s = time.time() - t
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20
+    # the larger of this process's peak and its children's (fit.py, acorn_bench)
+    rss = max(resource.getrusage(w).ru_maxrss for w in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)) / 2 ** 20
     log(f"{sname} on {ds}: built in {build_s:.0f} s on {threads} threads; peak RSS {rss:.2f} GiB; {extra}")
     merge_csv(os.path.join(rdir, "builds.csv"), ["system", "status", "build_s", "threads", "index_gib",
                                                    "peak_rss_gib", "detail"],

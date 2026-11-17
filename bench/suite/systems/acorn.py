@@ -4,6 +4,7 @@
 # the unit vectors (the same order as inner product) on several threads; `serve` answers over a pipe, pinned to the
 # timing core, and times each search itself (the time reported is the search call's own, without the pipe).
 # The binary: params["bin"], else $ACORN_BENCH, else acorn_bench on PATH.
+import json
 import os
 import shutil
 import subprocess
@@ -25,11 +26,19 @@ class Acorn(System):
         os.makedirs(self.work, exist_ok=True)
         self.path = os.path.join(self.work, "acorn.index")
         p = self.params
+        info = dict(M=p.get("M", 32), gamma=p.get("gamma", 12), M_beta=p.get("M_beta", 32))
+        # the build is long (half an hour and more at 1M items on 3 cores): an index kept from an earlier run with
+        # --keep-work, for the same corpus and parameters, is reused
+        tag = json.dumps(dict(info, N=self.prep.N, d=self.prep.d))
+        if os.path.exists(self.path) and os.path.exists(self.path + ".json") and open(self.path + ".json").read() == tag:
+            return dict(info, reused=True)
         env = dict(os.environ, OMP_NUM_THREADS=str(threads))
-        subprocess.run([self.bin, "build", self.prep.f("corpus32.npy"), self.path, str(p.get("M", 32)),
-                        str(p.get("gamma", 12)), str(p.get("M_beta", 32)), "0", str(self.prep.N)],
+        subprocess.run([self.bin, "build", self.prep.f("corpus32.npy"), self.path, str(info["M"]),
+                        str(info["gamma"]), str(info["M_beta"]), "0", str(self.prep.N)],
                        check=True, env=env, stdout=subprocess.DEVNULL)
-        return dict(M=p.get("M", 32), gamma=p.get("gamma", 12), M_beta=p.get("M_beta", 32))
+        with open(self.path + ".json", "w") as f:
+            f.write(tag)
+        return info
 
     def single_thread(self):
         env = dict(os.environ, OMP_NUM_THREADS="1")

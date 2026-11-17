@@ -1,0 +1,11 @@
+type,filter,setting,set_visible_ms,setting_ms
+exact,none,default,0.01,0.00
+exact,random-1,idselector,1.48,0.00
+exact,random-1,compacted,1.48,37.14
+exact,random-25,idselector,3.86,0.00
+exact,random-25,compacted,3.86,749.26
+threshold,none,default,39.25,0.00
+threshold,random-1,idselector,0.27,0.00
+threshold,random-1,compacted,0.27,84.88
+threshold,random-25,idselector,2.66,0.00
+threshold,random-25,compacted,2.66,1212.02

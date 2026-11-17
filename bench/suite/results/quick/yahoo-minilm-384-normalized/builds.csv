@@ -1,0 +1,7 @@
+system,status,build_s,threads,index_gib,peak_rss_gib,detail
+vexact,ok,140.5,3,1.217,1.59,"{""fit_s"": 68.4, ""encode_s"": 72.1, ""sample"": false}"
+faiss-flat,ok,1.8,3,0.969,1.98,{}
+pdx-bond,ok,5.8,3,0.971,2.01,"{""blocks"": 67}"
+faiss-panorama,ok,6.4,3,0.969,2.47,{}
+faiss-hnsw,ok,222.0,3,1.050,2.08,"{""M"": 16, ""efConstruction"": 200}"
+acorn,ok,1246.8,3,1.210,0.03,"{""M"": 32, ""gamma"": 12, ""M_beta"": 32}"
