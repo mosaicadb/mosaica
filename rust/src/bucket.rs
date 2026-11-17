@@ -1,6 +1,6 @@
-//! A partition's cells (`tools/partition.py`), mapped: each cell's own rows and the rows that moved into it, f16 unit
-//! vectors zero-padded to n. With a fit's row order (`ord{c}.u32`, `clcell.npy` and `clpos.npy`, written by
-//! `fit::fit`), any fit row is read without holding the vectors in memory.
+//! A partition's cells (`partition::partition`, or `tools/partition.py`), mapped: each cell's own rows and the rows
+//! that moved into it, f16 unit vectors zero-padded to n. With a fit's row order (`ord{c}.u32`, `clcell.npy` and
+//! `clpos.npy`, written by `fit::fit`), any fit row is read without holding the vectors in memory.
 
 use crate::util::try_read_npy;
 
@@ -82,7 +82,7 @@ pub struct Partition {
 fn manifest(dir: &str) -> Result<(Vec<u8>, serde_json::Value), String> {
     let (b, m, missing) = manifest_missing(dir)?;
     if let Some((name, e)) = missing.into_iter().next() {
-        return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); rerun tools/partition.py"));
+        return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); partition the vectors again"));
     }
     Ok((b, m))
 }
@@ -91,20 +91,20 @@ fn manifest(dir: &str) -> Result<(Vec<u8>, serde_json::Value), String> {
 /// file of another length, or one that exists but cannot be read, is still an error.
 fn manifest_missing(dir: &str) -> Result<(Vec<u8>, serde_json::Value, Vec<(String, std::io::Error)>), String> {
     let path = format!("{dir}/manifest.json");
-    let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; run tools/partition.py first"))?;
-    let m: serde_json::Value = serde_json::from_slice(&b).map_err(|e| format!("{path}: {e}; rerun tools/partition.py"))?;
-    let files = m["files"].as_object().ok_or(format!("{path} does not list the partition's files (an older tools/partition.py wrote it); rerun tools/partition.py"))?;
+    let b = std::fs::read(&path).map_err(|e| format!("cannot read {path}: {e}; partition the vectors first (vexact --vectors V partition --out DIR)"))?;
+    let m: serde_json::Value = serde_json::from_slice(&b).map_err(|e| format!("{path}: {e}; partition the vectors again"))?;
+    let files = m["files"].as_object().ok_or(format!("{path} does not list the partition's files (an older tools/partition.py wrote it); partition the vectors again"))?;
     let mut missing = Vec::new();
     for (name, len) in files {
-        let want = len.as_u64().ok_or(format!("{path}: the length of {name} is not a number; rerun tools/partition.py"))?;
+        let want = len.as_u64().ok_or(format!("{path}: the length of {name} is not a number; partition the vectors again"))?;
         if name.is_empty() || name.contains('/') || name.starts_with('.') {
-            return Err(format!("{path} lists the file {name:?}, which is not a name in the partition's directory; rerun tools/partition.py"));
+            return Err(format!("{path} lists the file {name:?}, which is not a name in the partition's directory; partition the vectors again"));
         }
         match std::fs::metadata(format!("{dir}/{name}")) {
             Ok(md) if md.len() == want => {}
-            Ok(md) => return Err(format!("{dir}/{name} is {} bytes, the partition's manifest says {want}: the partition changed after it was written; rerun tools/partition.py", md.len())),
+            Ok(md) => return Err(format!("{dir}/{name} is {} bytes, the partition's manifest says {want}: the partition changed after it was written; partition the vectors again", md.len())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => missing.push((name.clone(), e)),
-            Err(e) => return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); rerun tools/partition.py")),
+            Err(e) => return Err(format!("{dir}/{name}, which the partition's manifest lists, cannot be read ({e}); partition the vectors again")),
         }
     }
     Ok((b, m, missing))
@@ -116,7 +116,7 @@ impl Partition {
     pub fn open(dir: &str) -> Result<Partition, String> {
         let path = format!("{dir}/manifest.json");
         let (_, m) = manifest(dir)?;
-        let us = |k: &str| m[k].as_u64().map(|x| x as usize).ok_or(format!("{path} has no {k}; rerun tools/partition.py"));
+        let us = |k: &str| m[k].as_u64().map(|x| x as usize).ok_or(format!("{path} has no {k}; partition the vectors again"));
         let (n, nc) = (us("n")?, us("cells")?);
         let mut cells = Vec::with_capacity(nc);
         for c in 0..nc {
@@ -128,13 +128,13 @@ impl Partition {
             let own = words::<u64>(&cell.ids).len();
             let nin = words::<u32>(&cell.in_cl).len();
             if own.checked_mul(n) != Some(words::<u16>(&cell.vec).len()) || words::<u32>(&cell.cl).len() != own || nin.checked_mul(n) != Some(words::<u16>(&cell.in_vec).len()) || words::<u64>(&cell.in_ids).len() != nin {
-                return Err(format!("{dir}/cell{c}: its vectors, ids and clusters disagree on the number of rows; rerun tools/partition.py"));
+                return Err(format!("{dir}/cell{c}: its vectors, ids and clusters disagree on the number of rows; partition the vectors again"));
             }
             cells.push(Cell { own, ..cell });
         }
         let cluster_cell: Vec<u32> = try_read_npy(&format!("{dir}/cluster_cell.npy"))?.u32s();
         if cluster_cell.iter().any(|&c| c as usize >= nc) {
-            return Err(format!("{dir}/cluster_cell.npy names a cell beyond its {nc}; rerun tools/partition.py"));
+            return Err(format!("{dir}/cluster_cell.npy names a cell beyond its {nc}; partition the vectors again"));
         }
         Ok(Partition { n, n_orig: us("n_orig")?, rows: us("N")?, k: cluster_cell.len(), cells, cluster_cell })
     }
@@ -142,9 +142,9 @@ impl Partition {
 
 /// The identity of the partition in `dir`, which a fit records (meta.json "partition_id") and a build and an open
 /// check: a fixed hash of its manifest.json, after checking that every file the manifest lists has the length it
-/// lists. tools/partition.py removes the manifest before it writes anything and writes it last, with the partition's
-/// source, sizes, seed, files and lengths, and the moment and a random token of that run, so a partition written again
-/// into the same directory has another identity. Only the content counts: a copy, a move or a chmod of the partition
+/// lists. A partition (`partition::partition`, tools/partition.py) removes the manifest before it writes anything and
+/// writes it last, with the partition's source, sizes, seed, files and lengths, and the moment and a random token of
+/// that run, so a partition written again into the same directory has another identity. Only the content counts: a copy, a move or a chmod of the partition
 /// keeps it (the fit records the manifest's file identity too, and a build warns when that changed). Reads the
 /// manifest and the lengths of its files: O(cells), never the rows.
 pub fn partition_id(dir: &str) -> Result<String, String> {

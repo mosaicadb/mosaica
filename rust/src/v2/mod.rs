@@ -26,7 +26,7 @@ pub mod tail;
 /// `rebuild` when given) and the encoding (`create` and `rebuild`). The default is the build SYSTEM.md describes.
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
-    /// Items per cluster on average, as tools/partition.py's `--per-cluster` (create only; the default the rule by N).
+    /// Items per cluster on average, the partition's `--per-cluster` (create only; the default the rule by N).
     pub per_cluster: PerCluster,
     /// How the fit groups the clusters (create only).
     pub groups: crate::fit::Groups,
@@ -146,7 +146,7 @@ impl BuildOptions {
     }
 }
 
-/// Items per cluster on average (tools/partition.py's `--per-cluster`).
+/// Items per cluster on average (the partition's `--per-cluster`, as tools/partition.py's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PerCluster {
     /// About this many items per cluster.
@@ -162,7 +162,7 @@ impl PerCluster {
             _ => s.parse::<usize>().ok().filter(|&m| m > 0).map(PerCluster::Items).ok_or(format!("the cluster size is a positive number of items or by-n, not {s}")),
         }
     }
-    /// As tools/partition.py takes it.
+    /// As the partition's command line (and tools/partition.py) takes it.
     pub fn arg(&self) -> String {
         match self {
             PerCluster::Items(m) => m.to_string(),
@@ -2376,8 +2376,9 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result
 }
 
 /// Make the index directory `dir` from the vectors file `vectors` (N x n0 npy, f16, f32 or f64; row i is entity i):
-/// partition the vectors into `dir/partition` (tools/partition.py, with python3, numpy and faiss), fit them into `dir`
-/// (`fit::fit`, with the support table's anchors), encode the fit and save the index in `dir/encoded` (`rebuild`).
+/// partition the vectors into `dir/partition` (`partition::partition`, in this process, at its defaults with the
+/// options' cluster size and seed), fit them into `dir` (`fit::fit`, with the support table's anchors), encode the fit
+/// and save the index in `dir/encoded` (`rebuild`).
 /// `dir` must be missing or empty. Returns the index, with the parameters it was built from; `open` opens it again.
 pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     match std::fs::read_dir(dir).map(|mut rd| rd.next().is_some()) {
@@ -2391,16 +2392,11 @@ pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(St
         crate::util::fix_mmap_threshold(1 << 20);
     }
     let t = Timer::new();
-    // the partition: tools/partition.py until a partition in Rust exists (the fit needs no Python)
+    // the partition (partition::partition, in this process), as tools/partition.py makes it at its defaults
     let part = format!("{dir}/partition");
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/partition.py");
-    let args = ["-I", script, vectors, &part, "--per-cluster", &o.per_cluster.arg(), "--seed", &o.seed.to_string()].map(|s| s.to_string());
-    log(format!("[create] python3 {}", args.join(" ")));
-    match std::process::Command::new("python3").args(&args).status() {
-        Ok(s) if s.success() => {}
-        Ok(s) => return Err(format!("{script} failed on {vectors} ({s}); it needs numpy and faiss for python3")),
-        Err(e) => return Err(format!("cannot run python3 for {script}: {e}")),
-    }
+    let po = crate::partition::PartitionOptions { per_cluster: o.per_cluster, seed: o.seed, ..Default::default() };
+    log(format!("[create] partition {vectors} into {part}"));
+    crate::partition::partition(vectors, &part, &po, &mut |s| log(format!("[partition] {s}")))?;
     log(format!("[create] partitioned in {:.1}s", t.s()));
     let a = o.anchors.clone().unwrap_or_default();
     let fo = crate::fit::FitOptions {
