@@ -108,7 +108,10 @@ assembled phase holds what still grows). Before a billion-row build, in rough or
    at 4M it takes 18 s and 111 MB at the new defaults (partition.py: 72 s, 466 MB in the same session). `create`
    still uses one cell, so the fine k-means trains K centres on 200 K rows of one cell; at 1B (K = 15,625, a 3.1M-row
    sample, 4.8 GB in f16 at 768 dimensions) the cells must be set from N and memory (`vexact ... partition --cells C
-   --cross T` runs the experiments): the question of the cell count remains.
+   --cross T` runs the experiments): the question of the cell count remains. Open files grow with the cells: pass 1
+   keeps 2 per cell open and pass 2 up to 3, each with a 64 KiB buffer, so the partition refuses more cells than
+   `ulimit -n` allows (3 C + 32 files; about 330 cells at the usual 1,024). Many cells need the limit raised, or the
+   passes rewritten to write a bounded number of cells at a time.
 6. **Then the gates at scale:** 20M BioCLIP-2, 100M synthetic, peak memory and build time per phase, open time.
 
 ## Restructuring

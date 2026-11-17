@@ -1008,3 +1008,19 @@ largest cluster of 11,568 rows against 7,744, which four threads split less even
 The first 1M run with a cold page cache took 34 s (pass 1 waits on the disk). At 4,000 centres in one cell the
 sample is 800,000 rows (410 MB in f16), which is the peak. `create` at 4M (`--cert-time 0`): 109 s in all, peak
 468 MB (the build's; 206 s and 469 MB with partition.py).
+
+**Review fixes.** A row that is not finite was found only in the first pass, after the earlier partition in the
+directory had been removed (a NaN in row 19,999 left no manifest and part of a cell). Every value is now checked in a
+read-only pass over the rows before anything in the directory is touched: 0.4–0.6 s at 1M BioCLIP-2 with 4 threads,
+1.0 s with one (page cache warm; it reads the 1.5 GB input once more, which is a disk read when cold). The test now
+checks that the earlier partition's files, manifest and identity are unchanged after a refused input. Also: f64 rows
+of finite values whose sum of squares overflows or nears underflow (about 1e154 and above, 1e-140 and below) are
+scaled by their largest value instead of refused or zeroed, which never applies to f16 or f32 values, so other rows
+are bit for bit as before; a symbolic link named like a partition file, dangling or not, is removed (the link only),
+and outputs are opened with O_NOFOLLOW; more cells than the open-files limit allows (3 C + 32 files) are refused with
+the limit named; the sample sizes and the cells' seeds cannot overflow; the manifest's `source` is normalised as
+Python's `os.path.abspath` (`.` and `..` removed); `vexact ... partition` loses only its log, not the partition, on
+a closed stdout. New tests: the nearest cells (a cross of the farthest failed them), K and each cell's share rounding
+half to even (N = 250 at 100 per cluster gives K = 2, N = 350 gives 4; two equal cells of K = 3 take 2 each), links.
+The 1M BioCLIP-2 partition at the defaults is byte for byte the one before the fixes (`cmp` of every file; the
+manifests differ in `created` and `token`).

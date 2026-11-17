@@ -389,7 +389,10 @@ pub fn partition_cmd() {
         seed: arg_str("--seed", &d.seed.to_string()).parse().unwrap_or_else(|_| exit2("--seed N (a whole number)")),
     };
     let (vectors, out) = (arg_str("--vectors", ""), arg_str("--out", ""));
-    vexact::partition::partition(&vectors, &out, &o, &mut |s| println!("[partition] {s}")).unwrap_or_else(|e| exit2(&e));
+    // a closed stdout (EPIPE) loses the log, never the partition
+    vexact::partition::partition(&vectors, &out, &o, &mut |s| {
+        let _ = writeln!(std::io::stdout(), "[partition] {s}");
+    }).unwrap_or_else(|e| exit2(&e));
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {

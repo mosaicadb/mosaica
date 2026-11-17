@@ -120,23 +120,43 @@ impl Vectors {
         Ok(Vectors { map, off, rows, n0, width })
     }
 
-    /// Row i as a unit vector in `out` (n >= n0 values, zero past n0; a zero row stays zero); false when the row is
-    /// not finite.
-    fn unit(&self, i: usize, out: &mut [f32]) -> bool {
+    /// Value j of row i, as f64.
+    #[inline]
+    fn value(&self, i: usize, j: usize) -> f64 {
         let (n0, w) = (self.n0, self.width);
         let b = &self.map[self.off + i * n0 * w..self.off + (i + 1) * n0 * w];
-        let x = |j: usize| -> f64 {
-            match w {
-                2 => f16::from_bits(u16::from_le_bytes([b[2 * j], b[2 * j + 1]])).to_f64(),
-                4 => f32::from_le_bytes(b[4 * j..4 * j + 4].try_into().unwrap()) as f64,
-                _ => f64::from_le_bytes(b[8 * j..8 * j + 8].try_into().unwrap()),
-            }
-        };
-        let ss: f64 = (0..n0).map(|j| x(j) * x(j)).sum();
-        if !ss.is_finite() {
-            return false;
+        match w {
+            2 => f16::from_bits(u16::from_le_bytes([b[2 * j], b[2 * j + 1]])).to_f64(),
+            4 => f32::from_le_bytes(b[4 * j..4 * j + 4].try_into().unwrap()) as f64,
+            _ => f64::from_le_bytes(b[8 * j..8 * j + 8].try_into().unwrap()),
         }
-        let nr = ss.sqrt();
+    }
+
+    /// The first row with a value that is not finite, if any: a read-only pass over every row, in parallel (the
+    /// partition makes it before anything in its directory is touched).
+    pub fn first_not_finite(&self) -> Option<usize> {
+        (0..self.rows.div_ceil(4096)).into_par_iter().filter_map(|b| {
+            (b * 4096..self.rows.min((b + 1) * 4096)).find(|&i| (0..self.n0).any(|j| !self.value(i, j).is_finite()))
+        }).min()
+    }
+
+    /// Row i as a unit vector in `out` (n >= n0 values, zero past n0; a zero row stays zero); false when the row is
+    /// not finite. The norm is sqrt of the sum of squares in f64; when that sum overflows or nears f64's underflow
+    /// (finite f64 values beyond about 1e154 or below 1e-140; never for f16 or f32 values), the row is scaled by its
+    /// largest |value| first.
+    fn unit(&self, i: usize, out: &mut [f32]) -> bool {
+        let n0 = self.n0;
+        let x = |j: usize| self.value(i, j);
+        let ss: f64 = (0..n0).map(|j| x(j) * x(j)).sum();
+        let nr = if ss.is_finite() && ss >= 1e-280 {
+            ss.sqrt()
+        } else {
+            if (0..n0).any(|j| !x(j).is_finite()) {
+                return false;
+            }
+            let mx = (0..n0).map(|j| x(j).abs()).fold(0.0, f64::max);
+            if mx == 0.0 { 0.0 } else { mx * (0..n0).map(|j| (x(j) / mx) * (x(j) / mx)).sum::<f64>().sqrt() }
+        };
         out.fill(0.0);
         if nr > 0.0 {
             for j in 0..n0 {
@@ -320,8 +340,9 @@ pub fn own_name(name: &str) -> bool {
 
 /// Remove an earlier partition in `out`, as tools/partition.py's `clear_partition`: its manifest first (until the new
 /// one is written last, `out` is no partition, so no cell can change under a manifest), then the regular files of the
-/// names a partition writes (`own_name`; a cell it had and this run does not write would be stale). Nothing else, and
-/// never the input `vectors` (a name that is it, or a link to it, stays).
+/// names a partition writes (`own_name`; a cell it had and this run does not write would be stale), and any symbolic
+/// link of those names, dangling or not (the link, never what it names). Nothing else, and never the input `vectors`
+/// (a name that is it, or a link to it, stays; `partition` refuses such an input before it clears anything).
 pub fn clear_partition(out: &str, vectors: &str) -> Result<(), String> {
     let keep = std::fs::canonicalize(vectors).ok();
     let man = format!("{out}/manifest.json");
@@ -332,7 +353,9 @@ pub fn clear_partition(out: &str, vectors: &str) -> Result<(), String> {
     names.sort();
     for name in names.iter().filter(|nm| own_name(nm)) {
         let path = format!("{out}/{name}");
-        if std::fs::metadata(&path).is_ok_and(|m| m.is_file()) && std::fs::canonicalize(&path).ok() != keep {
+        let Ok(lm) = std::fs::symlink_metadata(&path) else { continue };
+        let removable = lm.is_symlink() || lm.is_file();
+        if removable && (keep.is_none() || std::fs::canonicalize(&path).ok() != keep) {
             std::fs::remove_file(&path).map_err(|e| format!("cannot remove {path}: {e}"))?;
         }
     }
@@ -351,8 +374,10 @@ struct Out {
     w: std::io::BufWriter<std::fs::File>,
 }
 impl Out {
+    /// A new file at `path`, never through a symbolic link (O_NOFOLLOW: a link there is an error, not followed).
     fn create(path: String) -> Result<Out, String> {
-        let f = std::fs::File::create(&path).map_err(|e| format!("cannot create {path}: {e}"))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        let f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).custom_flags(libc::O_NOFOLLOW).open(&path).map_err(|e| format!("cannot create {path}: {e}"))?;
         Ok(Out { w: std::io::BufWriter::with_capacity(1 << 16, f), path })
     }
     fn put(&mut self, b: &[u8]) -> Result<(), String> {
@@ -429,10 +454,64 @@ fn raw<T: Into<serde_json::Value>>(x: T) -> J {
     J::Raw(x.into().to_string())
 }
 
+/// The fine centres of each cell: in proportion to its rows, at least one for a cell with rows (numpy's
+/// `max(1, round(K * rows / N))`, ties to even). The total is K = max(1, round(N / per_cluster)) only up to rounding.
+fn per_cell(k_all: usize, nn: usize, rows: &[usize]) -> Vec<usize> {
+    rows.iter().map(|&r| if r > 0 { (round_even((k_all as u128 * r as u128) as f64 / nn as f64) as usize).max(1) } else { 0 }).collect()
+}
+
+/// For each coarse centre (rows of `coarse`, n wide), the `cross` cells of largest inner product with it (itself
+/// first), in increasing order; on equal products the lower index.
+fn near_cells(coarse: &[f32], n: usize, cross: usize) -> Vec<Vec<usize>> {
+    let nc = coarse.len() / n;
+    (0..nc).map(|a| {
+        let sims: Vec<f64> = (0..nc).map(|b| (0..n).map(|t| coarse[a * n + t] as f64 * coarse[b * n + t] as f64).sum()).collect();
+        let mut order: Vec<usize> = (0..nc).collect();
+        order.sort_by(|&p, &q| sims[q].total_cmp(&sims[p]));
+        order.truncate(cross);
+        order.sort_unstable();
+        order
+    }).collect()
+}
+
+/// The soft limit of open files (RLIMIT_NOFILE; unlimited when it cannot be read).
+fn open_files_limit() -> usize {
+    let mut r = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: getrlimit writes the struct it is given
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut r) } != 0 || r.rlim_cur == libc::RLIM_INFINITY {
+        return usize::MAX;
+    }
+    r.rlim_cur as usize
+}
+
+/// `path` made absolute and normalised as Python's `os.path.abspath` does (lexically: `.` and empty parts dropped, a
+/// `..` removes the part before it; links are not resolved).
+fn abspath(path: &str) -> Result<String, String> {
+    let abs = std::path::absolute(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut parts: Vec<std::ffi::OsString> = Vec::new();
+    for c in abs.components() {
+        match c {
+            std::path::Component::Normal(p) => parts.push(p.to_os_string()),
+            std::path::Component::ParentDir => {
+                parts.pop();
+            }
+            _ => {}
+        }
+    }
+    let mut s = String::new();
+    for p in &parts {
+        s.push('/');
+        s.push_str(&p.to_string_lossy());
+    }
+    Ok(if s.is_empty() { "/".into() } else { s })
+}
+
 /// Partition the vectors in `vectors` (N x n0 .npy, f16/f32/f64; row i is entity i) into the directory `out` (made if
 /// missing), as `tools/partition.py VECTORS OUT` does with the same options (module comment). The input is checked
-/// before anything in `out` is touched; then an earlier partition there is removed (`clear_partition`) and the new one
-/// written, its manifest last. An input that is itself one of the files a partition writes in `out` is refused.
+/// before anything in `out` is touched (its header, then every value finite, in a read-only pass over the rows); then
+/// an earlier partition there is removed (`clear_partition`) and the new one written, its manifest last. An input that
+/// is itself one of the files a partition writes in `out` is refused, and so are more cells than the open-files limit
+/// allows (pass 2 keeps up to 3 files open per cell).
 pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn FnMut(String)) -> Result<Summary, String> {
     let t = Timer::new();
     if o.cells == 0 || o.cross == 0 || o.sample_per_centre == 0 || o.cell_sample == 0 {
@@ -449,6 +528,19 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
         PerCluster::ByN => crate::fit::per_cluster_by_n(nn),
         PerCluster::Items(m) => m,
     };
+    let k_all = (round_even(nn as f64 / pc as f64) as usize).max(1);
+    let nc = o.cells.min(k_all).max(1);
+    // pass 1 keeps 2 files open per cell, pass 2 up to 3 (each with a 64 KiB buffer)
+    let soft = open_files_limit();
+    if 3 * nc + 32 > soft {
+        return Err(format!("{nc} cells keep up to {} files open, beyond the limit of {soft} open files (ulimit -n); raise it or give fewer cells", 3 * nc));
+    }
+    // every value finite, read before anything in `out` is touched
+    let tc = Timer::new();
+    if let Some(i) = x.first_not_finite() {
+        return Err(format!("{vectors}: row {i} is not finite"));
+    }
+    log(format!("input checked: every value finite ({:.1}s)", tc.s()));
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {out}: {e}"))?;
     if let Ok(src) = std::fs::canonicalize(vectors) {
         let rd = std::fs::read_dir(out).map_err(|e| format!("cannot read {out}: {e}"))?;
@@ -460,8 +552,6 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
         }
     }
     clear_partition(out, vectors)?;
-    let k_all = (round_even(nn as f64 / pc as f64) as usize).max(1);
-    let nc = o.cells.min(k_all).max(1);
     let f = |name: &str| format!("{out}/{name}");
     let mut srng = ChaCha8Rng::seed_from_u64(o.seed);
     srng.set_stream(1);
@@ -469,7 +559,7 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
 
     // coarse cells from a sample, then every row to its cell's files
     let coarse: Vec<f32> = if nc > 1 {
-        let mut idx = rand::seq::index::sample(&mut srng, nn, nn.min(o.cell_sample * nc)).into_vec();
+        let mut idx = rand::seq::index::sample(&mut srng, nn, nn.min(o.cell_sample.saturating_mul(nc))).into_vec();
         idx.sort_unstable();
         let mut s = vec![0f32; idx.len() * n];
         let bad: Option<usize> = s.par_chunks_mut(n).zip(&idx).filter_map(|(r, &i)| (!x.unit(i, r)).then_some(i)).min();
@@ -525,14 +615,14 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
     log(format!("pass 1: cells of {}..{} rows ({:.1}s)", rows.iter().min().unwrap(), rows.iter().max().unwrap(), t.s()));
 
     // fine centres per cell, in proportion to its rows, from a sample of the cell
-    let kc: Vec<usize> = rows.iter().map(|&r| if r > 0 { (round_even((k_all as u128 * r as u128) as f64 / nn as f64) as usize).max(1) } else { 0 }).collect();
+    let kc = per_cell(k_all, nn, &rows);
     let mut cent: Vec<f32> = Vec::new();
     let mut ccell: Vec<u32> = Vec::new();
     for c in 0..nc {
         if kc[c] == 0 {
             continue;
         }
-        let m = rows[c].min(o.sample_per_centre * kc[c]);
+        let m = rows[c].min(o.sample_per_centre.saturating_mul(kc[c]));
         let mut sidx = rand::seq::index::sample(&mut srng, rows[c], m).into_vec();
         sidx.sort_unstable();
         let cm = map(&f(&format!("cell{c}.f16")))?;
@@ -542,7 +632,7 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
             d.copy_from_slice(&all[i * n..(i + 1) * n]);
         }
         let kk = kc[c].min(m);
-        cent.extend(kmeans(&F16Rows(&s, n), n, kk, o.seed + 1 + c as u64, o.niter));
+        cent.extend(kmeans(&F16Rows(&s, n), n, kk, o.seed.wrapping_add(1).wrapping_add(c as u64), o.niter));
         ccell.extend(std::iter::repeat(c as u32).take(kk));
     }
     cent.chunks_mut(n).for_each(normalise);
@@ -552,18 +642,7 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
 
     // every row to its nearest fine centre among its cell's `cross` nearest cells; rows of another cell's centre move
     // there
-    let near: Vec<Vec<usize>> = if nc > 1 {
-        (0..nc).map(|a| {
-            let sims: Vec<f64> = (0..nc).map(|b| (0..n).map(|t| coarse[a * n + t] as f64 * coarse[b * n + t] as f64).sum()).collect();
-            let mut order: Vec<usize> = (0..nc).collect();
-            order.sort_by(|&p, &q| sims[q].total_cmp(&sims[p]));
-            order.truncate(o.cross);
-            order.sort_unstable();
-            order
-        }).collect()
-    } else {
-        vec![vec![0]]
-    };
+    let near: Vec<Vec<usize>> = if nc > 1 { near_cells(&coarse, n, o.cross) } else { vec![vec![0]] };
     let mut moved = 0usize;
     let mut outs: std::collections::BTreeMap<usize, [Out; 3]> = std::collections::BTreeMap::new();
     let mut sizes = vec![0usize; k];
@@ -644,7 +723,7 @@ pub fn partition(vectors: &str, out: &str, o: &PartitionOptions, log: &mut dyn F
     let mut w = Out::create(f("cluster_cell.npy"))?;
     w.put(&cc_npy)?;
     w.finish()?;
-    let src = std::path::absolute(vectors).map_err(|e| format!("{vectors}: {e}"))?.to_string_lossy().to_string();
+    let src = abspath(vectors)?;
     let st = std::fs::metadata(vectors).map_err(|e| format!("cannot read {vectors}: {e}"))?;
     let mtime = st.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0.0, |d| d.as_secs_f64());
     let names: Vec<String> = (0..nc).flat_map(|c| ["f16", "ids", "cl"].map(|x| format!("cell{c}.{x}"))).chain(dests.iter().flat_map(|d| ["f16", "ids", "cl"].map(|x| format!("cell{d}.in.{x}")))).chain(["centres.npy".to_string(), "cluster_cell.npy".to_string()]).collect();
@@ -992,6 +1071,8 @@ mod tests {
         let o = PartitionOptions { per_cluster: PerCluster::Items(100), ..Default::default() };
         partition(v.to_str().unwrap(), ds, &o, &mut |_| {}).unwrap();
         let id = crate::bucket::partition_id(ds).unwrap();
+        let before = files_of(&d);
+        let manifest = std::fs::read(d.join("manifest.json")).unwrap();
         let bad = |name: &str, descr: &str, shape: &[usize], data: &[u8], says: &str| {
             let p = tmp.join(name);
             write_npy(p.to_str().unwrap(), descr, shape, data);
@@ -1006,12 +1087,34 @@ mod tests {
         assert!(partition(tmp.join("text.npy").to_str().unwrap(), ds, &o, &mut |_| {}).unwrap_err().contains("expected N x n"));
         assert!(partition(tmp.join("missing.npy").to_str().unwrap(), ds, &o, &mut |_| {}).unwrap_err().contains("cannot open"));
         assert_eq!(crate::bucket::partition_id(ds).unwrap(), id);
-        let mut y = x.clone();
-        y[5 * 8 + 3] = f32::NAN;
-        let p = tmp.join("nan.npy");
-        save_f32(&p, &y, 8);
-        let e = partition(p.to_str().unwrap(), ds, &o, &mut |_| {}).unwrap_err();
-        assert!(e.contains("row 5 is not finite"), "{e}");
+        // a value that is not finite, in an early row and in the last (past the first chunk of the first pass): refused
+        // by the read-only check before anything is removed
+        let (y, _) = mixture(20_000, 8, 3, 0.3, 7);
+        for (row, v) in [(5, f32::NAN), (19_999, f32::INFINITY)] {
+            let mut z = y.clone();
+            z[row * 8 + 3] = v;
+            let p = tmp.join("nan.npy");
+            save_f32(&p, &z, 8);
+            let e = partition(p.to_str().unwrap(), ds, &o, &mut |_| {}).unwrap_err();
+            assert!(e.contains(&format!("row {row} is not finite")), "{e}");
+            assert_eq!(files_of(&d), before, "the earlier partition changed");
+            assert_eq!(std::fs::read(d.join("manifest.json")).unwrap(), manifest);
+            assert_eq!(crate::bucket::partition_id(ds).unwrap(), id);
+        }
+        // f64 rows of finite values whose squares overflow or underflow are read (scaled by their largest value), and
+        // give the unit rows of the same values at ordinary scale to within one f16 step
+        for scale in [1e200f64, 1e-200] {
+            let w: Vec<u8> = x.iter().flat_map(|&v| (v as f64 * scale).to_le_bytes()).collect();
+            write_npy(tmp.join("big.npy").to_str().unwrap(), "<f8", &[300, 8], &w);
+            partition(tmp.join("big.npy").to_str().unwrap(), tmp.join("pbig").to_str().unwrap(), &o, &mut |_| {}).unwrap();
+            let p = crate::bucket::Partition::open(tmp.join("pbig").to_str().unwrap()).unwrap();
+            for i in 0..p.cells[0].own {
+                let e = p.cells[0].id(i) as usize;
+                for (a, b) in p.cells[0].vector(32, i).iter().zip(unit_f16(&x, 8, 32, e)) {
+                    assert!((*a as i32 - b as i32).abs() <= 1, "scale {scale}, entity {e}: {a:#x} against {b:#x}");
+                }
+            }
+        }
         // the same values in f16, f32 and f64
         let w16: Vec<u8> = x.iter().flat_map(|&v| f16::from_f32(v).to_le_bytes()).collect();
         let x16: Vec<f32> = x.iter().map(|&v| f16::from_f32(v).to_f32()).collect();
@@ -1025,5 +1128,83 @@ mod tests {
         };
         assert_eq!(cells("h.npy", "ph"), cells("h32.npy", "ph32"));
         assert_eq!(cells("d.npy", "pd"), cells("v.npy", "pv"));
+    }
+
+    /// A symbolic link named like a partition's file, dangling or not, is removed (the link, not what it names) and
+    /// never written through; the files it named stay as they were.
+    #[test]
+    fn links_named_like_outputs_are_removed_not_followed() {
+        let tmp = TmpDir::new("part-links");
+        let (x, _) = mixture(300, 8, 3, 0.3, 8);
+        let v = tmp.join("v.npy");
+        save_f32(&v, &x, 8);
+        let d = tmp.join("p");
+        std::fs::create_dir_all(&d).unwrap();
+        let victim = tmp.join("victim.txt");
+        std::fs::write(&victim, b"keep me").unwrap();
+        std::os::unix::fs::symlink(&victim, d.join("cell0.f16")).unwrap();
+        std::os::unix::fs::symlink(tmp.join("nowhere"), d.join("centres.npy")).unwrap();
+        std::os::unix::fs::symlink(tmp.join("nowhere2"), d.join("cell0.in.cl")).unwrap();
+        partition(v.to_str().unwrap(), d.to_str().unwrap(), &PartitionOptions { per_cluster: PerCluster::Items(100), ..Default::default() }, &mut |_| {}).unwrap();
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
+        assert!(!tmp.join("nowhere").exists() && !tmp.join("nowhere2").exists());
+        for f in ["cell0.f16", "centres.npy"] {
+            assert!(!std::fs::symlink_metadata(d.join(f)).unwrap().is_symlink(), "{f}");
+        }
+        assert!(std::fs::symlink_metadata(d.join("cell0.in.cl")).is_err());
+        crate::bucket::Partition::open(d.to_str().unwrap()).unwrap();
+        // an output name that is a link when the partition creates it is refused, not followed
+        std::os::unix::fs::symlink(&victim, d.join("late.f16")).unwrap();
+        assert!(Out::create(d.join("late.f16").to_str().unwrap().to_string()).is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
+    }
+
+    /// Each cell's candidate cells are its `cross` nearest coarse centres (itself first), not any others.
+    #[test]
+    fn rows_look_in_the_nearest_cells() {
+        // five unit centres on a circle at 0, 10, 30, 70 and 150 degrees
+        let n = 2;
+        let deg = [0f64, 10.0, 30.0, 70.0, 150.0];
+        let c: Vec<f32> = deg.iter().flat_map(|d| [d.to_radians().cos() as f32, d.to_radians().sin() as f32]).collect();
+        assert_eq!(near_cells(&c, n, 1), vec![vec![0], vec![1], vec![2], vec![3], vec![4]]);
+        assert_eq!(near_cells(&c, n, 2), vec![vec![0, 1], vec![0, 1], vec![1, 2], vec![2, 3], vec![3, 4]]);
+        assert_eq!(near_cells(&c, n, 3), vec![vec![0, 1, 2], vec![0, 1, 2], vec![0, 1, 2], vec![1, 2, 3], vec![2, 3, 4]]);
+        assert_eq!(near_cells(&c, n, 9)[4], vec![0, 1, 2, 3, 4]);
+        // through a partition: every row's cluster lies in its cell or in the cell nearest to it
+        let tmp = TmpDir::new("part-near");
+        let (x, _) = mixture(3000, 40, 60, 1.5, 9);
+        let v = tmp.join("v.npy");
+        save_f32(&v, &x, 40);
+        let out = tmp.join("p");
+        let s = run(4, &v, &out, &PartitionOptions { cells: 4, cross: 2, per_cluster: PerCluster::Items(100), ..Default::default() });
+        assert!(s.moved > 0);
+        let p = crate::bucket::Partition::open(out.to_str().unwrap()).unwrap();
+        // the coarse centres are not written; each cell's moved rows go to one other cell, its nearest
+        for (c, cell) in p.cells.iter().enumerate() {
+            let mut dest: Vec<u32> = (0..cell.own).map(|i| p.cluster_cell[cell.cluster(i) as usize]).filter(|&d| d as usize != c).collect();
+            dest.sort();
+            dest.dedup();
+            assert!(dest.len() <= 1, "cell {c} sends rows to {dest:?}");
+        }
+    }
+
+    /// K and each cell's share round half to even, as numpy's and Python's round: N = 250 at 100 per cluster is
+    /// K = 2, N = 350 is K = 4; two equal cells of K = 3 take 2 centres each (1.5 rounds to 2), of K = 5 2 each (2.5).
+    #[test]
+    fn cluster_counts_round_half_to_even() {
+        for (nn, want) in [(250usize, 2usize), (350, 4), (150, 2), (50, 1), (40, 1)] {
+            let tmp = TmpDir::new("part-round");
+            let (x, _) = mixture(nn, 8, 3, 0.3, 10);
+            let v = tmp.join("v.npy");
+            save_f32(&v, &x, 8);
+            let s = run(2, &v, &tmp.join("p"), &PartitionOptions { per_cluster: PerCluster::Items(100), ..Default::default() });
+            assert_eq!(s.k, want, "N = {nn}");
+        }
+        assert_eq!(per_cell(3, 300, &[150, 150]), vec![2, 2]);
+        assert_eq!(per_cell(5, 300, &[150, 150]), vec![2, 2]);
+        assert_eq!(per_cell(7, 200, &[50, 150, 0]), vec![2, 5, 0]);
+        assert_eq!(per_cell(1, 1000, &[1, 999]), vec![1, 1]);
+        assert_eq!(abspath("/a/./b/../c//d/").unwrap(), "/a/c/d");
+        assert_eq!(abspath("/..").unwrap(), "/");
     }
 }
