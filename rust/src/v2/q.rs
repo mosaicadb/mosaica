@@ -3065,25 +3065,56 @@ pub struct KnnOut2 {
     pub npow: u32, // the index's guarantee N, as 2^npow (Meta2::npow)
 }
 
-/// Interval of one row at a level (from scratch), or exact at level nl.
-pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut Stats) -> (f64, f64) {
-    let nl = ix.meta.nl();
-    if level >= nl {
-        st.full_reads += 1;
-        let v = exact_value2(ix, pr, row);
-        return (v, v);
+/// Intervals of rows at levels for the k-NN selection: per call, the rows grouped by cluster and level, each
+/// (cluster, level) run once over its rows; each cluster set up once, its tables kept for later calls. At level nl and
+/// beyond, a row's exact score (lower = upper).
+pub struct Refiner<'a> {
+    ix: &'a Index2,
+    pr: &'a Prep2,
+    cqs: std::collections::HashMap<usize, CQ2>,
+    sv: State,
+}
+impl<'a> Refiner<'a> {
+    pub fn new(ix: &'a Index2, pr: &'a Prep2) -> Refiner<'a> {
+        Refiner { ix, pr, cqs: Default::default(), sv: State::default() }
     }
-    let ci = ix.cl.partition_point(|c| c.r1 <= row);
-    let c = &ix.cl[ci];
-    let gq = get_gq2(ix, pr, c.g, st);
-    let qm = pr.qm(ix, ci);
-    let mut cq = cluster_q2(ix, ci, gq, pr, qm);
-    let mut iv = Vec::new();
-    let (mut rin, mut pend) = (Vec::new(), Vec::new());
-    let mut sv = State::default();
-    let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
-    unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &[(row - c.r0) as u32], f64::NAN, Mode2::Interval(level), false, &mut sv, st, &mut out) };
-    (iv[0].1 as f64, iv[0].2 as f64)
+    /// The interval of each (row, level) of `req`, in its order.
+    pub fn refine(&mut self, req: &[(u32, usize)], st: &mut Stats) -> Vec<(f64, f64)> {
+        let (ix, pr) = (self.ix, self.pr);
+        let nl = ix.meta.nl();
+        let mut out = vec![(0.0, 0.0); req.len()];
+        // (cluster, level, row, position in req), so that a (cluster, level) is one run over ascending rows
+        let mut by: Vec<(usize, usize, u32, usize)> = Vec::with_capacity(req.len());
+        for (i, &(r, lv)) in req.iter().enumerate() {
+            if lv >= nl {
+                st.full_reads += 1;
+                let v = exact_value2(ix, pr, r as usize);
+                out[i] = (v, v);
+            } else {
+                by.push((ix.cl.partition_point(|c| c.r1 <= r as usize), lv, r, i));
+            }
+        }
+        by.sort_unstable();
+        let mut iv = Vec::new();
+        for g in by.chunk_by(|a, b| (a.0, a.1) == (b.0, b.1)) {
+            let (ci, lv) = (g[0].0, g[0].1);
+            let c = &ix.cl[ci];
+            let gq = get_gq2(ix, pr, c.g, st);
+            let cq = self.cqs.entry(ci).or_insert_with(|| cluster_q2(ix, ci, gq, pr, pr.qm(ix, ci)));
+            let cands: Vec<u32> = g.iter().map(|x| x.2 - c.r0 as u32).collect();
+            let (mut rin, mut pend) = (Vec::new(), Vec::new());
+            iv.clear();
+            let mut o = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+            unsafe { run_cluster(ix, ci, pr, gq, cq, &cands, f64::NAN, Mode2::Interval(lv), false, &mut self.sv, st, &mut o) };
+            // nothing is decided at a threshold of NaN, so every row's interval comes back, in row order
+            assert_eq!(iv.len(), g.len(), "an interval for every row refined");
+            for (x, y) in g.iter().zip(&iv) {
+                debug_assert_eq!(x.2, y.0);
+                out[x.3] = (y.1 as f64, y.2 as f64);
+            }
+        }
+        out
+    }
 }
 
 /// Clusters in descending order of q.m^ (their centre direction).
@@ -3532,7 +3563,8 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let next = if lv >= 254 { 0usize } else { lv as usize + 1 };
         cands.push((r, lb as f64, ub as f64, next, false));
     }
-    let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |r, lv| row_interval2(ix, &pr, r as usize, lv, &mut st), |r| exact_value2(ix, &pr, r as usize))
+    let mut rf = Refiner::new(ix, &pr);
+    let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |req| rf.refine(req, &mut st), |r| exact_value2(ix, &pr, r as usize))
         .into_iter().map(|(v, r)| (v, ix.row_ent[r as usize])).collect();
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
@@ -3541,13 +3573,14 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
 }
 
 /// The k best of `cands` (row, lower bound, upper bound, next level, exact), refining intervals a level at a time:
-/// `refine(row, level)` is the row's interval at that level, its exact score (lower = upper) at level `nl`. A candidate
+/// `refine` takes the (row, level) pairs of a round and gives each row's interval at that level, its exact score
+/// (lower = upper) at level `nl`. A candidate
 /// is dropped when at least k other candidates have a lower bound above its upper bound, and certified when at most
 /// k - 1 others have an upper bound at or above its lower bound; an exact score replaces the interval. Intervals are
 /// intersected across levels. Returns the survivors with their exact scores, or +inf where certified without one; the
 /// caller keeps the k largest. The answer is exact when every upper bound of the true k best holds and every lower bound of every
 /// other candidate holds, whatever the other sides do; the candidates must contain the k best.
-pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: usize, mut refine: impl FnMut(u32, usize) -> (f64, f64), mut exact: impl FnMut(u32) -> f64) -> Vec<(f64, u32)> {
+pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: usize, mut refine: impl FnMut(&[(u32, usize)]) -> Vec<(f64, f64)>, mut exact: impl FnMut(u32) -> f64) -> Vec<(f64, u32)> {
     let desc = |v: &mut Vec<f64>| v.sort_by(|a, b| b.partial_cmp(a).unwrap());
     // the candidate's own bound is left out of each count
     let certified = |c: &(u32, f64, f64, usize, bool), ubs: &[f64]| ubs.partition_point(|&u| u >= c.1) - ((c.2 >= c.1) as usize) < kk;
@@ -3563,17 +3596,14 @@ pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: u
         }
         let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
         desc(&mut ubs);
-        let mut refined = 0;
-        for c in cands.iter_mut() {
-            if c.4 || certified(c, &ubs) {
-                continue;
-            }
-            refined += 1;
-            let (l, h) = refine(c.0, c.3);
-            *c = if c.3 >= nl { (c.0, l, h, c.3 + 1, true) } else { (c.0, l.max(c.1), h.min(c.2), c.3 + 1, false) };
-        }
-        if refined == 0 {
+        let todo: Vec<usize> = (0..cands.len()).filter(|&i| !cands[i].4 && !certified(&cands[i], &ubs)).collect();
+        if todo.is_empty() {
             break;
+        }
+        let got = refine(&todo.iter().map(|&i| (cands[i].0, cands[i].3)).collect::<Vec<_>>());
+        for (&i, (l, h)) in todo.iter().zip(got) {
+            let c = &mut cands[i];
+            *c = if c.3 >= nl { (c.0, l, h, c.3 + 1, true) } else { (c.0, l.max(c.1), h.min(c.2), c.3 + 1, false) };
         }
     }
     let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
@@ -3617,7 +3647,7 @@ mod knn_tests {
                 (s[i] + e - h, s[i] + e + h)
             }).collect()).collect();
             let cands = (0..n).map(|i| (i as u32, iv[i][0].0, iv[i][0].1, 1, false)).collect();
-            let refine = |r: u32, lv: usize| if lv >= l { (s[r as usize], s[r as usize]) } else { iv[r as usize][lv] };
+            let refine = |req: &[(u32, usize)]| req.iter().map(|&(r, lv)| if lv >= l { (s[r as usize], s[r as usize]) } else { iv[r as usize][lv] }).collect();
             let mut fin = select_knn(cands, k, l, refine, |r| s[r as usize]);
             fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
             let mut got: Vec<u32> = fin[..k.min(fin.len())].iter().map(|x| x.1).collect();
