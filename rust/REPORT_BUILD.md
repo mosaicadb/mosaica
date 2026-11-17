@@ -359,7 +359,8 @@ when the saved index was missing or stale. Now (README, "Making an index"):
   or stale index (another fit, or another version of the library) is an error that says to rebuild. Still O(clusters):
   the fit's parameters and the per-cluster records are read, the rows mapped. `vexact --v2 --index DIR MODE`.
 - `v2::rebuild(dir, &BuildOptions, log)`: re-encodes the fit in `dir` (a `create`d one, or a `tools/fit.py` fit),
-  writing the anchors first when given. `vexact --v2 --index DIR --rebuild [build flags] [MODE]`.
+  with the anchors when given (written into the fit, each file renamed into place, only as the new index is
+  installed). `vexact --v2 --index DIR --rebuild [build flags] [MODE]`.
 - `BuildOptions` holds the cluster size (`per_cluster`), groups, basis, query sample, seed, certification time, the
   anchors (image count, text prompts, text count), the level schedules (`dlv`, `rlv`), the calibration items and the
   other encoding options. `OpenOptions` holds only what an open may choose without changing what is stored: which

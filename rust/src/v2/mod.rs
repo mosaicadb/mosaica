@@ -40,7 +40,8 @@ pub struct BuildOptions {
     /// the build then uses the larger closed-form bounds).
     pub cert_time: f64,
     /// The support table's anchors (`fit::write_anchors`). None: `create` writes the default ones (`Anchors::default`)
-    /// and `rebuild` keeps the fit's anchors.npy as it is; given, `rebuild` writes them into the fit first.
+    /// and `rebuild` keeps the fit's anchors.npy as it is; given, `rebuild` builds with them and writes them into the
+    /// fit as it installs the index (never before, so a failed rebuild leaves the fit's anchors as they were).
     pub anchors: Option<Anchors>,
     /// The query profile, in place of the directory's profile.npy.
     pub profile: Option<String>,
@@ -2230,8 +2231,17 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
 /// The fit in `dir` with the options `o` applied, and the profile: the inputs of a build, and of the key of the index
 /// they build.
 pub fn prepare(dir: &str, o: &BuildOptions) -> Result<(Params, Vec<f64>), String> {
+    prepare_with(dir, o, None)
+}
+
+/// `prepare` with the anchors `anchors` in place of the fit's anchors.npy when given (`fit::make_anchors`: None for
+/// one anchor per cluster, its centre), which is then not read.
+fn prepare_with(dir: &str, o: &BuildOptions, anchors: Option<&Option<Vec<f64>>>) -> Result<(Params, Vec<f64>), String> {
     let mut p = crate::index::load_params(dir)?;
-    p.anchors = crate::index::load_anchors(dir, p.meta.n, p.meta.k, &p.centres)?;
+    p.anchors = match anchors {
+        Some(a) => a.clone().unwrap_or_default(),
+        None => crate::index::load_anchors(dir, p.meta.n, p.meta.k, &p.centres)?,
+    };
     if let Some(nv) = o.nguar {
         if !(nv > 0.0) {
             return Err(format!("the guarantee's N is {nv}; give the number of rows the guarantee should cover, or none to use the row count"));
@@ -2466,27 +2476,36 @@ pub(crate) fn open_in(dir: &str, edir: &str, oo: &OpenOptions, log: &mut dyn FnM
 }
 
 /// Re-encode the fit in the index directory `dir` with `o` and save the index in `dir/encoded`, replacing the one
-/// saved there; returns it, with the parameters it was built from. `o.anchors`, when given, are written into the fit
-/// first (`fit::write_anchors`); the options that make the fit (cluster size, groups, basis, ...) are `create`'s and
-/// are not used here. The rebuild holds `encoded.lock` in `dir` for its whole run (a second rebuild waits, and if the
+/// saved there; returns it, with the parameters it was built from. `o.anchors`, when given, are made first
+/// (`fit::make_anchors`) and the index is built with them, but they are written into the fit (`fit::put_anchors`, each
+/// file through a new one renamed over it, so a `cp -al` copy's other directory keeps its own) only as the index is
+/// installed, under both locks: a rebuild that fails, or one still running, leaves the fit's anchors and its saved
+/// index as they were, and openable. The options that make the fit (cluster size, groups, basis, ...) are `create`'s
+/// and are not used here. The rebuild holds `encoded.lock` in `dir` for its whole run (a second rebuild waits, and if the
 /// first just saved the index it was going to build, opens that instead of encoding again), writes into a scratch
 /// directory of its own beside the index and swaps it into place once complete and synced (`store::install`). An
 /// error when the fit's vectors cannot be read.
 pub fn rebuild(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
-    if let Some(a) = &o.anchors {
-        let s = crate::fit::write_anchors(dir, a.image, a.text.as_deref(), a.text_count, o.seed)?;
-        log(format!("[build2] anchors: {s}"));
-    }
-    rebuild_in(dir, &saved_dir(dir), o, log)
+    let anchors = match &o.anchors {
+        Some(a) => Some(crate::fit::make_anchors(dir, a.image, a.text.as_deref(), a.text_count, o.seed)?),
+        None => None,
+    };
+    rebuild_with(dir, &saved_dir(dir), o, anchors, log)
 }
 
 /// `rebuild` of the fit in `dir` into `edir` (the tests keep a fit read-only and save beside it); `o.anchors` is not
 /// read.
+#[cfg(test)]
 pub(crate) fn rebuild_in(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    rebuild_with(dir, edir, o, None, log)
+}
+
+/// `rebuild_in`, built with `anchors` (from `fit::make_anchors`) when given, which are written into the fit at install.
+fn rebuild_with(dir: &str, edir: &str, o: &BuildOptions, anchors: Option<Option<Vec<f64>>>, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
-    let (mut p, prof) = prepare(dir, o)?;
+    let (mut p, prof) = prepare_with(dir, o, anchors.as_ref())?;
     // perm.npy's identity before its rows are read, as the vectors file's
     let perm_id = store::XsId::of(&p.perm_path).map_err(|e| format!("{e}; a rebuild reads the fit's perm.npy"))?;
     p.load_perm()?;
@@ -2528,8 +2547,23 @@ pub(crate) fn rebuild_in(dir: &str, edir: &str, o: &BuildOptions, log: &mut dyn 
         }
     };
     let h = store::seal(&ix, &tmp, &key, &o.encoding_json(), Some(xs), perm);
-    store::install(&tmp, edir, &mut |s| log(format!("[build2] {s}")));
+    // the new anchors go into the fit inside the install lock, just before the swap (an open checks them against the
+    // index it maps); if they cannot be written, the old index and anchors stay
+    let mut wrote = None;
+    let mut put = || {
+        if let Some(a) = &anchors {
+            wrote = Some(crate::fit::put_anchors(dir, a.as_deref())?);
+        }
+        Ok(())
+    };
+    if let Err(e) = store::install_with(&tmp, edir, &mut put, &mut |s| log(format!("[build2] {s}"))) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(format!("{e}; the index saved in {edir} and the fit's anchors are as they were"));
+    }
     drop(lock);
+    if let Some(s) = wrote {
+        log(format!("[build2] anchors: {s}"));
+    }
     log(format!("[build2] saved to {edir}; store hash {h:016x}"));
     set_repack(&mut ix, log);
     Ok((p, ix))

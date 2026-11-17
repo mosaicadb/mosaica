@@ -1644,6 +1644,53 @@ fn a_rebuild_writes_the_anchors_it_is_given() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
+/// `cp -al DIR DIR2` (every file a hard link, as README advises for a variant of one fit) then a rebuild of DIR2 with
+/// other anchors: DIR keeps its anchors' bytes and opens with the index and anchors it had; DIR2 opens with the new
+/// ones. A rebuild with anchors that fails (here: levels out of range) leaves the fit's anchors and saved index as they
+/// were, and openable.
+#[test]
+fn anchors_of_a_rebuild_never_reach_a_hard_linked_copy_or_a_failed_rebuild() {
+    let tmp = tmp_dir("rbcpal");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let with = |image| BuildOptions { anchors: Some(Anchors { image, text: None, text_count: 0 }), ..BuildOptions::default() };
+    let (_, ix) = rebuild(dir, &with(8), &mut |_| {}).unwrap();
+    let h8 = ix.store_hash();
+    assert_eq!(ix.nanch, 8);
+    let files = |d: &std::path::Path| ["anchors.npy", "anchors.json"].map(|f| std::fs::read(d.join(f)).unwrap());
+    let before = files(&fit);
+    // cp -al
+    fn link_tree(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for e in std::fs::read_dir(src).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                link_tree(&e.path(), &dst.join(e.file_name()));
+            } else {
+                std::fs::hard_link(e.path(), dst.join(e.file_name())).unwrap();
+            }
+        }
+    }
+    let fit2 = tmp.join("fit2");
+    link_tree(&fit, &fit2);
+    let dir2 = fit2.to_str().unwrap();
+    let (_, ix) = rebuild(dir2, &with(4), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
+    assert_eq!(files(&fit), before, "the copy's rebuild wrote the original's anchors");
+    let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "the original opens with its own index and anchors");
+    let (_, ix) = open(dir2, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
+    // a rebuild with anchors that fails: nothing written
+    let bad = BuildOptions { dlv: Some(vec![]), ..with(16) };
+    assert!(rebuild(dir, &bad, &mut |_| {}).is_err());
+    assert_eq!(files(&fit), before, "a failed rebuild wrote the anchors");
+    let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "a failed rebuild left the index unopenable");
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
 /// `create` from a vectors file (synth4k's rows; python3 with numpy and faiss runs tools/partition.py, else the test
 /// is skipped with a message): the index opens as created and answers as brute force does, and it is the index the
 /// steps by hand make (the same partition fitted with `fit::fit` and encoded by `rebuild`). A directory that is not

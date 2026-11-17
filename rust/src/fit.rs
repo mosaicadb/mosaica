@@ -92,7 +92,27 @@ fn save<T: Copy>(dir: &str, name: &str, descr: &str, shape: &[usize], v: &[T]) -
     let path = format!("{dir}/{name}.npy");
     let mut out = npy_header_bytes(descr, shape);
     out.extend_from_slice(b);
-    std::fs::write(&path, out).map_err(|e| format!("cannot write {path}: {e}"))
+    write_new(&path, &out)
+}
+
+/// Write `bytes` as `path` through a new file beside it, synced and renamed over it: a reader never sees a part
+/// written, and a file `path` named before (or another name of it, a hard link of a `cp -al` copy) is replaced,
+/// never written.
+fn write_new(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    let name = p.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let tmp = p.with_file_name(format!(".{name}.tmp-{}-{nanos}", std::process::id()));
+    let r = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, p)
+    })();
+    r.map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot write {path}: {e}")
+    })
 }
 
 /// Randomised level ends and block bounds, as tools/fit.py `schedule`.
@@ -647,9 +667,30 @@ pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, 
     anchors_into(dir, n, k, &centres, image, text, ntext, seed)
 }
 
+/// The anchors `write_anchors` would write for the fit in `dir`, without writing them: None when they are the centres
+/// (no file). `put_anchors` writes them; `v2::rebuild` does so only once the index made with them is installed.
+pub fn make_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<Option<Vec<f64>>, String> {
+    let (n, k, centres) = crate::index::load_centres(dir)?;
+    anchors_for(n, k, &centres, image, text, ntext, seed)
+}
+
+/// Write anchors from `make_anchors` into the fit in `dir` (None: remove its anchors.npy and anchors.json). Returns
+/// what was written, for the log.
+pub fn put_anchors(dir: &str, anchors: Option<&[f64]>) -> Result<String, String> {
+    let (n, k, centres) = crate::index::load_centres(dir)?;
+    put_anchors_of(dir, n, k, &centres, anchors)
+}
+
 /// `write_anchors` for the fit in `dir` with these centres (K x n, as `index::load_centres` gives them).
 #[allow(clippy::too_many_arguments)]
 fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<String, String> {
+    let a = anchors_for(n, k, centres, image, text, ntext, seed)?;
+    put_anchors_of(dir, n, k, centres, a.as_deref())
+}
+
+/// `make_anchors` with these centres.
+#[allow(clippy::too_many_arguments)]
+fn anchors_for(n: usize, k: usize, centres: &[f32], image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<Option<Vec<f64>>, String> {
     let text = match text {
         Some(path) => {
             let (v, w) = try_read_npy(path)?.rows_f32(path)?;
@@ -660,8 +701,13 @@ fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, te
         }
         None => None,
     };
+    anchors_of(centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)
+}
+
+/// `put_anchors` with these centres.
+fn put_anchors_of(dir: &str, n: usize, k: usize, centres: &[f32], anchors: Option<&[f64]>) -> Result<String, String> {
     let path = format!("{dir}/anchors.npy");
-    match anchors_of(centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)? {
+    match anchors {
         None => {
             for f in [path.clone(), format!("{dir}/anchors.json")] {
                 if std::path::Path::new(&f).exists() {
@@ -671,7 +717,7 @@ fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, te
             Ok(format!("no anchors.npy: the support table's anchors are the {k} centres"))
         }
         Some(a) => {
-            save_anchors(dir, n, k, centres, &a)?;
+            save_anchors(dir, n, k, centres, a)?;
             Ok(format!("{} support-table anchors in {path}", a.len() / n))
         }
     }
@@ -683,14 +729,12 @@ fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, te
 pub fn save_anchors(dir: &str, n: usize, k: usize, centres: &[f32], anchors: &[f64]) -> Result<(), String> {
     crate::index::check_anchors(anchors, n)?;
     let side = format!("{dir}/anchors.json");
-    // the sidecar goes first, so a failure between the two leaves anchors.npy unmatched (refused), never matched to the
-    // wrong file
-    if std::path::Path::new(&side).exists() {
-        std::fs::remove_file(&side).map_err(|e| format!("cannot remove {side}: {e}"))?;
-    }
+    // each through a new file renamed over the old one (a hard link of a `cp -al` copy keeps the other directory's
+    // file); anchors.npy first, so a failure between the two leaves it unmatched to the sidecar's hash (refused),
+    // never matched to the wrong file
     save(dir, "anchors", "<f8", &[anchors.len() / n, n], anchors)?;
     let j = serde_json::json!({"fit": crate::index::centres_hash(n, k, centres), "anchors": crate::index::anchors_hash(anchors)});
-    std::fs::write(&side, j.to_string()).map_err(|e| format!("cannot write {side}: {e}"))
+    write_new(&side, j.to_string().as_bytes())
 }
 
 /// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,

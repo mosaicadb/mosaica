@@ -633,8 +633,15 @@ pub fn scratch_dir(edir: &str) -> String {
 /// else the old one is renamed aside first. The old directory is removed afterwards; if that fails (a busy NFS file,
 /// say) it is left with a warning, and `log_stale` reports it later. Indexes already open keep the files they mapped.
 pub fn install(tmp: &str, edir: &str, log: &mut dyn FnMut(String)) {
+    install_with(tmp, edir, &mut || Ok(()), log).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// `install`, running `before` under the install lock just before the swap (a rebuild writes the fit's new anchors
+/// there); if it fails, nothing is swapped and its error is returned (`tmp` is left to the caller).
+pub fn install_with(tmp: &str, edir: &str, before: &mut dyn FnMut() -> Result<(), String>, log: &mut dyn FnMut(String)) -> Result<(), String> {
     let parent = parent_of(edir);
-    let _lock = Lock::install(&parent, true).unwrap_or_else(|e| panic!("{e}"));
+    let _lock = Lock::install(&parent, true)?;
+    before()?;
     let c = |s: &str| std::ffi::CString::new(s).unwrap();
     let old = if std::path::Path::new(edir).exists() {
         let r = unsafe { libc::renameat2(libc::AT_FDCWD, c(tmp).as_ptr(), libc::AT_FDCWD, c(edir).as_ptr(), libc::RENAME_EXCHANGE) };
@@ -657,6 +664,7 @@ pub fn install(tmp: &str, edir: &str, log: &mut dyn FnMut(String)) {
             log(format!("WARNING: cannot remove the replaced index {o} ({e}); it is left in place, remove it by hand"));
         }
     }
+    Ok(())
 }
 
 /// Log every other index directory in `parent` (`encoded-KEY` ones saved by earlier versions, stale now, and rebuilds'
