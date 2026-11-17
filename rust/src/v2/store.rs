@@ -519,7 +519,7 @@ pub fn save_rest(ix: &Index2, dir: &str) {
     let f = |name: &str| format!("{dir}/{name}");
     let offs: Vec<u64> = ix.coff.iter().chain(&ix.soff).flatten().map(|&o| o as u64).collect();
     write_file(&f("offsets.bin"), &offs);
-    let mut esc: Vec<(u64, f32)> = ix.esc.iter().map(|(&(l, s, r), &v)| (((l as u64) << 40) | ((s as u64) << 32) | r as u64, v)).collect();
+    let mut esc: Vec<(u64, f32)> = ix.esc.iter().map(|((l, s, r), v)| (((l as u64) << 40) | ((s as u64) << 32) | r as u64, v)).collect();
     esc.sort_unstable_by_key(|e| e.0);
     write_file(&f("esc_key.bin"), &esc.iter().map(|e| e.0).collect::<Vec<_>>());
     write_file(&f("esc_val.bin"), &esc.iter().map(|e| e.1).collect::<Vec<_>>());

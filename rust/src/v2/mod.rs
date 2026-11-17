@@ -26,7 +26,7 @@ pub mod tail;
 /// `rebuild` when given) and the encoding (`create` and `rebuild`). The default is the build SYSTEM.md describes.
 #[derive(Clone, Debug)]
 pub struct BuildOptions {
-    /// Items per cluster on average, as tools/partition.py's `--per-cluster` (create only; the default the rule by N).
+    /// Items per cluster on average, the partition's `--per-cluster` (create only; the default the rule by N).
     pub per_cluster: PerCluster,
     /// How the fit groups the clusters (create only).
     pub groups: crate::fit::Groups,
@@ -146,7 +146,7 @@ impl BuildOptions {
     }
 }
 
-/// Items per cluster on average (tools/partition.py's `--per-cluster`).
+/// Items per cluster on average (the partition's `--per-cluster`, as tools/partition.py's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PerCluster {
     /// About this many items per cluster.
@@ -162,7 +162,7 @@ impl PerCluster {
             _ => s.parse::<usize>().ok().filter(|&m| m > 0).map(PerCluster::Items).ok_or(format!("the cluster size is a positive number of items or by-n, not {s}")),
         }
     }
-    /// As tools/partition.py takes it.
+    /// As the partition's command line (and tools/partition.py) takes it.
     pub fn arg(&self) -> String {
         match self {
             PerCluster::Items(m) => m.to_string(),
@@ -1165,6 +1165,47 @@ pub enum Full2 {
     Synth(q::Synth2),
 }
 
+/// Escaped scalars, (level, slot, row) -> value: det norm (slot 0), yh (1 + j), kappa (8 + j), tan (16 + j). Sorted by
+/// row, then level and slot, with the first entry of every 32 rows, so a lookup searches the few entries of its block.
+#[derive(Clone, Default)]
+pub struct Esc {
+    key: Vec<u64>,
+    val: Vec<f32>,
+    blk: Vec<u32>,
+}
+impl Esc {
+    #[inline(always)]
+    fn pack(l: u8, slot: u8, row: u32) -> u64 {
+        (row as u64) << 16 | (l as u64) << 8 | slot as u64
+    }
+    pub fn bytes(&self) -> usize {
+        self.key.len() * 12 + self.blk.len() * 4
+    }
+    pub fn iter(&self) -> impl Iterator<Item = ((u8, u8, u32), f32)> + '_ {
+        self.key.iter().zip(&self.val).map(|(&k, &v)| (((k >> 8) as u8, k as u8, (k >> 16) as u32), v))
+    }
+    /// The value of an escape the codes say is there.
+    #[inline]
+    pub fn get(&self, l: u8, slot: u8, row: u32) -> f32 {
+        let b = row as usize >> 5;
+        let (lo, hi) = (self.blk[b] as usize, self.blk[b + 1] as usize);
+        let k = Self::pack(l, slot, row);
+        let i = lo + self.key[lo..hi].partition_point(|&x| x < k);
+        assert!(i < hi && self.key[i] == k, "no escape for level {l} slot {slot} row {row}");
+        self.val[i]
+    }
+}
+impl FromIterator<((u8, u8, u32), f32)> for Esc {
+    fn from_iter<I: IntoIterator<Item = ((u8, u8, u32), f32)>>(it: I) -> Self {
+        let mut e: Vec<(u64, f32)> = it.into_iter().map(|((l, s, r), v)| (Esc::pack(l, s, r), v)).collect();
+        e.sort_unstable_by_key(|x| x.0);
+        let key: Vec<u64> = e.iter().map(|x| x.0).collect();
+        let nb = key.last().map_or(0, |&k| (k >> 21) as usize + 1);
+        let blk = (0..=nb).map(|b| key.partition_point(|&k| (k >> 21) < b as u64) as u32).collect();
+        Esc { key, val: e.iter().map(|x| x.1).collect(), blk }
+    }
+}
+
 /// The query-independent parts that do not depend on which rows a cluster holds are shared (Arc) with the indexes
 /// compacted from this one (`Index2::compact`).
 pub struct Index2 {
@@ -1198,7 +1239,7 @@ pub struct Index2 {
     pub lscal: Vec<Arr<u8>>, // per level: scalar rows
     pub coff: Vec<Vec<usize>>, // per level per cluster: byte offset into lcode
     pub soff: Vec<Vec<usize>>,
-    pub esc: HashMap<(u8, u8, u32), f32>, // (level, slot, row) -> value: det norm (slot 0), yh (1 + j), kappa (8 + j), tan (16 + j)
+    pub esc: Esc,
     pub x2: f64,
     pub full: Full2,
     pub nrows: usize,
@@ -1380,12 +1421,7 @@ impl Index2 {
         drop(per);
         let mut ahat: Vec<i16> = rows.iter().map(|&r| self.ahat[r as usize]).collect();
         ahat.extend_from_slice(&[0i16; 32]);
-        let mut esc = HashMap::new();
-        for (&(l, slot, r), &v) in &self.esc {
-            if let Ok(i) = rows.binary_search(&r) {
-                esc.insert((l, slot, i as u32), v);
-            }
-        }
+        let esc = self.esc.iter().filter_map(|((l, slot, r), v)| rows.binary_search(&r).ok().map(|i| ((l, slot, i as u32), v))).collect();
         let (full, vrow) = if vectors {
             let mut v = F16Rows::zeroed(rows.len() * n);
             v.par_chunks_mut(n).zip(rows.par_iter()).for_each(|(d, &r)| d.copy_from_slice(self.full_row_f16(r as usize)));
@@ -1438,7 +1474,7 @@ impl Index2 {
             _ => 0,
         };
         self.lcode.iter().chain(&self.lscal).map(|v| v.len()).sum::<usize>() + self.ahat.len() * 2 + self.row_ent.len() * 4
-            + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.len() * 24 + self.cl.len() * std::mem::size_of::<Cl2>() + full
+            + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.bytes() + self.cl.len() * std::mem::size_of::<Cl2>() + full
     }
     /// The row of entity e. A compacted index has no entity-to-row map (it would cost 4 bytes per entity of the
     /// parent): map an entity through the index it was compacted from, then to the compacted row by the row list.
@@ -2178,12 +2214,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         }
         info
     }).collect();
-    let mut esc = HashMap::new();
-    for (c, d) in done.iter().enumerate() {
-        for &(l, slot, i, v) in &d.esc {
-            esc.insert((l, slot, (row0[c] + i as usize) as u32), v);
-        }
-    }
+    let esc = done.iter().zip(&row0).flat_map(|(d, &r0)| d.esc.iter().map(move |&(l, slot, i, v)| ((l, slot, (r0 + i as usize) as u32), v))).collect();
     drop(done);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
@@ -2404,8 +2435,9 @@ pub fn build(dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result
 }
 
 /// Make the index directory `dir` from the vectors file `vectors` (N x n0 npy, f16, f32 or f64; row i is entity i):
-/// partition the vectors into `dir/partition` (tools/partition.py, with python3, numpy and faiss), fit them into `dir`
-/// (`fit::fit`, with the support table's anchors), encode the fit and save the index in `dir/encoded` (`rebuild`).
+/// partition the vectors into `dir/partition` (`partition::partition`, in this process, at its defaults with the
+/// options' cluster size and seed), fit them into `dir` (`fit::fit`, with the support table's anchors), encode the fit
+/// and save the index in `dir/encoded` (`rebuild`).
 /// `dir` must be missing or empty. Returns the index, with the parameters it was built from; `open` opens it again.
 pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     match std::fs::read_dir(dir).map(|mut rd| rd.next().is_some()) {
@@ -2419,16 +2451,11 @@ pub fn create(vectors: &str, dir: &str, o: &BuildOptions, log: &mut dyn FnMut(St
         crate::util::fix_mmap_threshold(1 << 20);
     }
     let t = Timer::new();
-    // the partition: tools/partition.py until a partition in Rust exists (the fit needs no Python)
+    // the partition (partition::partition, in this process), as tools/partition.py makes it at its defaults
     let part = format!("{dir}/partition");
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/partition.py");
-    let args = ["-I", script, vectors, &part, "--per-cluster", &o.per_cluster.arg(), "--seed", &o.seed.to_string()].map(|s| s.to_string());
-    log(format!("[create] python3 {}", args.join(" ")));
-    match std::process::Command::new("python3").args(&args).status() {
-        Ok(s) if s.success() => {}
-        Ok(s) => return Err(format!("{script} failed on {vectors} ({s}); it needs numpy and faiss for python3")),
-        Err(e) => return Err(format!("cannot run python3 for {script}: {e}")),
-    }
+    let po = crate::partition::PartitionOptions { per_cluster: o.per_cluster, seed: o.seed, ..Default::default() };
+    log(format!("[create] partition {vectors} into {part}"));
+    crate::partition::partition(vectors, &part, &po, &mut |s| log(format!("[partition] {s}")))?;
     log(format!("[create] partitioned in {:.1}s", t.s()));
     let a = o.anchors.clone().unwrap_or_default();
     let fo = crate::fit::FitOptions {

@@ -51,6 +51,11 @@ cache; every result carries the power (`Meta2::npow`) for one to use.
 `rust/tools/fit.py` fits what is learnt from the data and writes an index directory. The Rust build derives every other
 parameter from it and encodes every item when the index is opened.
 
+`vexact --vectors V --index DIR create` does the same without Python: it partitions the vectors into cells and
+clusters (`rust/src/partition.rs`: spherical k-means as faiss's, on a sample of 200 rows per centre, then every row to
+its nearest centre; `rust/tools/partition.py`, with faiss, stays as the reference and writes the same files), fits the
+partition in Rust (`rust/src/fit.rs`) and encodes it. Neither step holds the vectors in memory.
+
 **Clusters.** The fit normalises the vectors, pads them to a multiple of 32 dimensions and runs k-means to clusters of
 about 1,000 items (K = 999 at 1M). Each centre m is stored at 8 bits per dimension, and the residual r = x − m is taken
 against the stored centre, so q·x = q·m + q·r holds exactly. Within a cluster the rows are sorted by a 16-bit **key**,

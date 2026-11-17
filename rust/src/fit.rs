@@ -1,4 +1,4 @@
-//! The fit: from a partition of the vectors (`tools/partition.py`), the parameters the build reads, written as the
+//! The fit: from a partition of the vectors (`partition::partition`, or `tools/partition.py`), the parameters the build reads, written as the
 //! directory `tools/fit.py` writes, without its copy of the vectors: the build reads them from the partition in the
 //! fit's row order (`ord{c}.u32`, `clcell.npy`, `clpos.npy`; `bucket::Buckets`). Every pass goes cell by cell or
 //! cluster by cluster; nothing holds the vectors in memory.
@@ -57,7 +57,8 @@ impl Groups {
 
 /// Items per cluster by research/levels-clusters' rule for N items: 2,000 x sqrt(N / 1M), rounded in log2 to a
 /// power-of-two multiple of 2,000 (ties down), at least 2,000 (2,000 up to 2M items, 4,000 up to 8M, 8,000 up to 32M,
-/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`, their default.
+/// 64,000 at 1B). The partition (`partition::partition`, tools/partition.py) and tools/fit.py apply it with
+/// `--per-cluster by-n`, their default.
 pub fn per_cluster_by_n(nrow: usize) -> usize {
     2000 << ((nrow as f64 / 1e6).log2() / 2.0 - 0.5).ceil().max(0.0) as u32
 }
@@ -396,7 +397,7 @@ fn trace(a: &[f64], n: usize) -> f64 {
     (0..n).map(|i| a[i * n + i]).sum()
 }
 
-/// Fit the partition in `pdir` (the output of `python3 -I tools/partition.py VECTORS.npy DIR`) into the directory `out`,
+/// Fit the partition in `pdir` (written by `partition::partition`, or `python3 -I tools/partition.py VECTORS.npy DIR`) into the directory `out`,
 /// which the build then reads (`v2::rebuild`).
 pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) -> Result<(), String> {
     let t = Timer::new();
@@ -438,7 +439,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     let mut placed = 0usize;
     for (c, cell) in part.cells.iter().enumerate() {
         if let Some(i) = (0..cell.rows()).find(|&i| cell.cluster(i) as usize >= part.k) {
-            return Err(format!("{pdir}/cell{c}: row {i} names cluster {}, beyond the partition's {}; rerun tools/partition.py", cell.cluster(i), part.k));
+            return Err(format!("{pdir}/cell{c}: row {i} names cluster {}, beyond the partition's {}; partition the vectors again", cell.cluster(i), part.k));
         }
         let mut loc: Vec<(u32, u32)> = (0..cell.rows()).filter_map(|i| {
             let k = cell.cluster(i);
@@ -473,7 +474,7 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
         }
     }
     if placed != nrow {
-        return Err(format!("the partition in {pdir} places {placed} rows in its cells' clusters, not its {nrow} rows; rerun tools/partition.py"));
+        return Err(format!("the partition in {pdir} places {placed} rows in its cells' clusters, not its {nrow} rows; partition the vectors again"));
     }
     let keep: Vec<usize> = (0..part.k).filter(|&c| cnt0[c] > 0).collect();
     let k = keep.len();

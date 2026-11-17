@@ -18,6 +18,10 @@ fn main() {
         run2::cert_cmd();
         return;
     }
+    if run2::has_mode("partition") {
+        run2::partition_cmd();
+        return;
+    }
     if run2::has_mode("create") {
         run2::create_cmd();
         return;

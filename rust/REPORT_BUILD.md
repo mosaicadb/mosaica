@@ -320,7 +320,7 @@ s), so the times in this section are only comparable with each other.
 - `perm` and per-cluster records (`Cl2`, the centre tables) mapped rather than read onto the heap, at build and open.
 - int8 q·m.
 - The item-bytes gap of about 1% at small answers between the Rust fit and `fit.py` at 1M BioCLIP-2.
-- Anything above 4M rows; a GPU faiss partition.
+- Anything above 4M rows.
 - (Done since: the certificate without Python, "The certificate in Rust" at the end.)
 
 ## Commands
@@ -900,3 +900,146 @@ it).
 `create` from `x.npy` at the new defaults `66237726622c9883` (156 s) and at the old defaults by flags
 `db6ca06f69bb8c74` (193 s); synth4k and the 60k fit (tools/fit.py fits) with their CERTS replaced by the port's (the
 same values) rebuilt to `165fef0c0d6b5659` (`--dlv fit`: `7ac80b6c54101fa9`) and `181dbe516f640885`. All as before.
+
+## The partition in Rust (2026-11-17)
+
+`create` no longer runs Python. The partition is `src/partition.rs`, `tools/partition.py`'s algorithm with the same
+files (names, layouts, the manifest's fields and its write last through `manifest.json.tmp`, synced and renamed),
+run in the process; `vexact --vectors V partition --out DIR [--cells C] [--cross T] [--per-cluster by-n|M] [--seed S]
+[--sample-per-centre 200] [--cell-sample 1000] [--niter 20]` runs it alone. `tools/partition.py` stays as the
+independent reference, and the fit takes a partition from either (below: a partition.py partition fitted and built
+by this library gives the recorded faiss hash). The vectors are read through a mapping in chunks of 16,384 rows; the
+heap holds a chunk, one cell's training sample in f16 (as the cell file stores it; partition.py held it in f32) and
+the centres. `clear_partition` removes the manifest first, then only the partition's own names, never the input; an
+input that is itself one of those files in the output directory is refused before anything is removed
+(partition.py would have truncated it).
+
+**The k-means**, as faiss's `Kmeans(spherical=True, min_points_per_centroid=1)`: k distinct sample rows to start;
+each of 20 iterations assigns every sample row to the centre of largest inner product (f32 GEMMs with faer in fixed
+blocks of 256 rows by 1,024 centres; the lowest index on a tie), sets each centre to its rows' mean, splits a cluster
+for each empty one and normalises. The split is faiss's `split_clusters`: a cluster drawn by walking the clusters with
+probability (size − 1) / (m − k), its centre copied to the empty one with a relative 1/1024 up and down in alternate
+dimensions, its size halved (the next assignment divides its rows). Where it differs from faiss: the random numbers
+(ChaCha8 seeded as elsewhere in the crate: the samples from the seed's stream 1, the coarse k-means from the seed,
+cell c's from seed + 1 + c; the split draws from the k-means' own generator, where faiss reseeds a generator with
+1234 at every call); the centre sums in f64 over each cluster's rows in row order (faiss sums in f32); unit rows
+normalised in f64; with as many rows as centres a cluster of two or more is split (faiss divides by zero there); a
+row that is not finite is refused (partition.py wrote zeros or NaNs). Every parallel loop writes per-row or
+per-cluster results, and no block depends on the thread count, so the files are the same at any number of threads.
+
+**Tests** (`cargo test --release` after `cargo clean -p vexact --release`: 79 + 3 pass, 1 ignored; each of the four
+commits passes on its own from a clean export of the tree): `create_makes_the_index_the_steps_by_hand_make` always
+runs now (it skipped without python3 and faiss), and checks that a partition made by hand with create's seed has the
+same cells; new: the same files at 1 and 4 threads (with moved rows); the format read back through
+`bucket::Partition` and, after a fit, `bucket::Buckets` (every row its entity's unit f16 vector, every moved row in
+both cells, each row's centre the nearest among its candidate cells); separated groups found whenever the starting
+rows cover them; empty-cluster splits; `clear_partition` with foreign names, a directory, the input by name and
+through a link; bad inputs refused before anything is removed, and f16, f32 and f64 inputs of the same values giving
+the same partition; the command line's registry.
+
+**Determinism.** 1M BioCLIP-2 at the defaults and at `--cells 32 --cross 2`, `RAYON_NUM_THREADS=1` against 4: every
+file the same (`cmp`), the manifests differing only in `created` and `token`.
+
+**Hashes that do not use create's partition, unchanged:** synth4k rebuilt `165fef0c0d6b5659` (`--dlv fit`:
+`7ac80b6c54101fa9`), the 60k fit (tools/fit.py) `181dbe516f640885`. A partition.py partition of the 1M set, fitted
+and built by this library as `create` does, gives `66237726622c9883`, the faiss `create`'s hash recorded above.
+**New `create` hashes** (another partition, so other clusters): synth4k `create` `f4d71e83c35af8ec` (store
+`888329be5fd1c2eb`; K = 2 by the rule at 4,000 rows) and with `--per-cluster 125` `abcfbc9bd474f615` (store
+`285c65143787faa7`); 1M BioCLIP-2 at the new defaults `222ea6431bca8b20` (store `de14bfe66cb7e8f1`); 4M synthetic
+(`--cert-time 0`) `184e333726086610`.
+
+**No Python.** The 1M `create` ran with PATH holding only a `python3` that logs and fails: nothing called it, and it
+took 112 s in all (partition 12.7 s, fit +20 s, build 77 s; 156 s with partition.py before), peak anonymous memory
+1,247 MB (the build's calibration; 1,345 MB before, which partition.py's process set).
+
+**Partition quality, 1M BioCLIP-2** (K = 500, one cell, 200 sample rows per centre, 20 iterations; the mean cosine of
+every row to its centre, and the cluster sizes, from the written files by the same script for both):
+
+| Seed | Rust mean cosine | partition.py | Rust sizes (min..max, sd/mean) | partition.py |
+|---|---|---|---|---|
+| 20261112 (default) | 0.916943 | 0.917123 | 236..11,568, 0.643 | 74..7,744, 0.657 |
+| 1 | 0.917296 | 0.917434 | 107..9,226, 0.642 | 6..15,381, 0.705 |
+| 2 | 0.917358 | 0.917009 | 84..7,857, 0.608 | 119..8,049, 0.618 |
+| 3 | 0.917269 | 0.917202 | 221..14,910, 0.726 | 48..7,988, 0.647 |
+| mean | 0.917217 | 0.917192 | | |
+
+Equal within the seeds' spread (0.0004 for each). At `--cells 32 --cross 2`: 0.915717 against 0.915998 (one seed),
+18,258 rows moved against 18,212. At 4M synthetic: 0.672173 against 0.672050.
+
+**`create` both ways, 1M BioCLIP-2, new defaults** (the Rust partition, against partition.py's partition with the
+same fit and build; one binary for the queries):
+
+| | item bytes 0.01% / 0.1% / 1% / 10% | text bytes 0.01% / 0.1% / 1% / 10% |
+|---|---|---|
+| partition.py | 32.05 / 42.96 / 66.02 / 134.00 | 25.14 / 34.65 / 67.39 / 202.02 |
+| Rust | 31.43 / 42.19 / 64.61 / 131.78 (−1.9 / −1.8 / −2.1 / −1.7%) | 25.22 / 34.89 / 67.93 / 201.49 (+0.3 / +0.7 / +0.8 / −0.3%) |
+
+`bytesq` with 200 queries of each. `verify` (569 queries × 7 answer sizes, the filtered sets, k-NN) is clean on both:
+0 wrong in or out, 0 deterministic and 0 randomised interval violations in 920 and 924 million checks, 0 k-NN
+mismatches. Bytes are within the seed spread recorded above (about ±2%).
+
+`e2e` (`--nq 50 --runs 3`, answers 0.01%, 0.1%, 1%, k-NN 10 and 100, 4 threads and 1), five rounds, the order rotated;
+ms are the mean of the rounds, Rust / partition.py:
+
+| answer | item, 1 thread | item, 4 threads | text, 1 thread | text, 4 threads |
+|---|---|---|---|---|
+| 0.01% | 30.6 / 28.8 (1.06) | 9.33 / 9.27 (1.01) | 19.1 / 19.5 (0.98) | 6.87 / 6.64 (1.03) |
+| 0.1% | 36.3 / 35.9 (1.01) | 11.6 / 10.5 (1.11) | 24.2 / 24.6 (0.98) | 8.30 / 7.69 (1.08) |
+| 1% | 45.4 / 44.4 (1.02) | 14.3 / 13.5 (1.06) | 41.7 / 40.0 (1.04) | 13.1 / 12.6 (1.04) |
+| k-NN 10 | 25.2 / 24.7 (1.02) | 9.15 / 9.21 (0.99) | 17.2 / 18.4 (0.94) | 7.52 / 6.96 (1.08) |
+| k-NN 100 | 39.2 / 40.9 (0.96) | 16.6 / 17.1 (0.97) | 20.7 / 22.1 (0.94) | 9.15 / 9.14 (1.00) |
+
+Geometric mean 1.015 (range 0.94–1.11); a cell's ratio moves by 0.84–1.37 between rounds. One thread is level
+(0.94–1.06). At four threads the 0.1% answers are slower in every round (item 1.03–1.34, text 1.01–1.15), 8–11% on
+the mean, while the bytes read are lower (item) or level (text). Not resolved; not a property of the k-means as far
+as measured (its objective is level over four seeds). Not tuned.
+
+**Seeds, to tell the writer from the seed.** Three 1M indexes from each writer (seeds 20261112, 1, 2; `create --seed S`
+against partition.py `--seed S` with the same fit seed and build), `e2e` at 0.1% and 1% answers (`--knn 0`), 1 and 4
+threads, 7 rounds one at a time with the order rotated and reversed; each index's median over the rounds of its
+median-of-runs ms (4-thread rounds were disturbed by other load, up to 2x, so the median). Ratio of the writers' means,
+Rust / partition.py:
+
+| | item 0.1% | item 1% | text 0.1% | text 1% |
+|---|---|---|---|---|
+| 1 thread | 0.97 | 0.99 | 0.98 | 1.00 |
+| 4 threads | **1.08** (Rust 11.3–13.0, py 11.3–11.5 ms) | **1.08** (14.8–15.7 against 13.6–14.9) | 1.00 | 0.98 |
+
+The largest cluster does not explain it: partition.py's seed 1 (largest 15,381 rows) is among the fastest at four
+threads, and Rust's seed 2 (7,857) is as fast as partition.py's default (7,744); correlations of time with the largest
+cluster or the size spread are mixed in sign. Text, and items on one thread, are level within the seeds' spread. Items
+on four threads are about 8% slower for two of Rust's three seeds (the third is level): weak (three seeds a side,
+noisy 4-thread timings) but consistent, also on the means of the two quietest rounds (1.05, 1.06). It is not more
+work: bytes per item at 0.1% are 44.9–45.0 for Rust against 45.0–46.3, full reads per item 0.00101–0.00105 against
+0.00102–0.00119. Not measured: how the work splits across the threads. Not controlled: the partition.py side was
+fitted and built by a separate program compiled without `rust/.cargo/config.toml`'s `-C target-cpu=native` (its
+default-seed index still has the recorded `create` hash). Open in NEXT.md.
+
+**Time and peak anonymous memory of the partition step** (4 threads, page cache warm, the same session):
+
+| | Rust | partition.py |
+|---|---|---|
+| 1M BioCLIP-2, new defaults (K = 500) | 11.5 s, 160 MB (1 thread: 30.2 s, 154 MB) | 51.7 s, 1,338 MB |
+| 1M, `--cells 32 --cross 2` | 6.8 s, 98 MB | 29.3 s, 1,369 MB |
+| 4M synthetic, new defaults (K = 1,000) | 17.7 s, 111 MB | 71.7 s, 466 MB |
+| 4M synthetic, old defaults (`--per-cluster 1000`, K = 4,000) | 110 s, 416 MB | 440 s, 1.2 GB (recorded above) |
+
+The first 1M run with a cold page cache took 34 s (pass 1 waits on the disk). At 4,000 centres in one cell the
+sample is 800,000 rows (410 MB in f16), which is the peak. `create` at 4M (`--cert-time 0`): 109 s in all, peak
+468 MB (the build's; 206 s and 469 MB with partition.py).
+
+**Review fixes.** A row that is not finite was found only in the first pass, after the earlier partition in the
+directory had been removed (a NaN in row 19,999 left no manifest and part of a cell). Every value is now checked in a
+read-only pass over the rows before anything in the directory is touched: 0.4–0.6 s at 1M BioCLIP-2 with 4 threads,
+1.0 s with one (page cache warm; it reads the 1.5 GB input once more, which is a disk read when cold). The test now
+checks that the earlier partition's files, manifest and identity are unchanged after a refused input. Also: f64 rows
+of finite values whose sum of squares overflows or nears underflow (about 1e154 and above, 1e-140 and below) are
+scaled by their largest value instead of refused or zeroed, which never applies to f16 or f32 values, so other rows
+are bit for bit as before; a symbolic link named like a partition file, dangling or not, is removed (the link only),
+and outputs are opened with O_NOFOLLOW; more cells than the open-files limit allows (3 C + 32 files) are refused with
+the limit named; the sample sizes and the cells' seeds cannot overflow; the manifest's `source` is normalised as
+Python's `os.path.abspath` (`.` and `..` removed); `vexact ... partition` loses only its log, not the partition, on
+a closed stdout. New tests: the nearest cells (a cross of the farthest failed them), K and each cell's share rounding
+half to even (N = 250 at 100 per cluster gives K = 2, N = 350 gives 4; two equal cells of K = 3 take 2 each), links.
+The 1M BioCLIP-2 partition at the defaults is byte for byte the one before the fixes (`cmp` of every file; the
+manifests differ in `created` and `token`).

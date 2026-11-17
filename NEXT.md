@@ -30,17 +30,16 @@ rust/REPORT_CONSOLIDATION.md records what was checked; these were not.
     24 MB at random 1%, 120 ms and 186 MB at 10%, and 576 ms and 913 MB at 50% (codes alone: 12 ms and 9 MB, 38 ms and
     33 MB, 162 ms and 147 MB).
   - **The uncompacted index path over sparse clusters** costs more than the model predicts (22 ms forced at random 1%).
-- **Two deterministic levels and larger clusters.** Levels at 16 and 32 B (rust/REPORT_DETLEVELS.md) and about 4,000
-  items per cluster (rust/REPORT_CLUSTERSIZE.md) are 18–33% faster for text and 10–23% for items at 1M together. The
-  code is on research/levels-clusters, on research/combined at d443f66; it needs rebasing onto this branch (q.rs and
-  fit.py conflict). At 500k, 1M and 3M (rust/REPORT_SCALING.md), 1,000 items per cluster was never the best; on the
-  uniform samples the best was 2,000 at 1M and 4,000 at 3M (where 2,000 ties on thresholds and is 16–51% slower on
-  exact k-NN). fit.py's default on that branch now grows with N: 2,000 items per cluster up to 2M, doubling for each
-  4x N with no cap (64,000 at 1B), with up to 64 groups. Before relying on it above 32M: time 16,000 per cluster
-  there, give the approximate mode u32 positions for clusters of 65,536 rows or more, and grow fit.py's k-means sample
-  with K.
-- **Store the codes at build.** They are rebuilt at every open (2.5–3.5 minutes at 1M); at a billion items they must
-  be stored.
+- **Item queries at 4 threads on a Rust-partitioned index** (rust/REPORT_BUILD.md, "The partition in Rust"): over
+  three seeds a side at 1M BioCLIP-2, item queries at 0.1% and 1% answers on four threads take about 1.08 times as
+  long on indexes made by `create` (the Rust partition) as on indexes from tools/partition.py's partition; text, and
+  one thread, are level (0.97–1.00). Not the largest cluster (ruled out across seeds) and not more work (bytes and full
+  reads per item the same or lower). Next: how the item 0.1% query's work splits across the four threads on each
+  index, and the partition.py side rebuilt by a binary with `create`'s compile flags (it was not).
+- **Clusters by N above 32M.** The defaults now grow the clusters with N (2,000 items per cluster up to 2M, doubling
+  for each 4x N with no cap: 64,000 at 1B, up to 64 groups) with deterministic levels at 16 and 32 B
+  (rust/REPORT_BUILD.md, the owner's decision). Before relying on them above 32M: time 16,000 per cluster there, give
+  the approximate mode u32 positions for clusters of 65,536 rows or more, and grow the k-means sample with K.
 - **A hot-row cache over O_DIRECT,** only if repeated small queries under a memory cap matter: direct reads miss the
   page cache, so a warm repeat at 1% answers costs 65 ms against 48–50 through the mapping. RWF_DONTCACHE was tried and
   lost (REPORT_DISK.md on research/disk-reads).
@@ -98,14 +97,21 @@ The build now keeps memory flat up to 4M rows (rust/REPORT_BUILD.md: 469 MB peak
 assembled phase holds what still grows). Before a billion-row build, in rough order:
 1. **Map `perm` and the per-cluster records** (`Cl2`, the centre tables) at build and open instead of reading them
    onto the heap. They are what still grows with N (about 18 KB a cluster, plus 4 bytes a row for `perm`).
-2. **No per-row work at open:** the escape `HashMap` built at open becomes a stored table that open maps, so opening
+2. **No per-row work at open:** the escapes are now a sorted array with the first entry of every 32 rows (d6adf05,
+   no longer a `HashMap`), but open still builds it from the codes; it should be stored at build and mapped, so opening
    stays proportional to the clusters.
 3. **Bound the per-cluster build buffers:** with clusters growing with N (about 64,000 rows a cluster at 1B), the
    support table's `px` and the encoder's per-cluster rows must be processed in bounded chunks.
 4. **A stored `pm` table,** mapped at open rather than computed.
-5. **The partition's cell count at scale:** `create` lets `tools/partition.py` choose, and at 4M it chose one cell
-   (one k-means over every row: 440 s and 1.2 GB with 4,000 centres). At 1B the cells must be set from N and memory,
-   and the partition should run without loading all rows (or move to Rust/GPU faiss).
+5. **The partition's cell count at scale:** the partition is now Rust (`rust/src/partition.rs`, `create` runs it in
+   the process; no Python): it reads the vectors through a mapping and holds one cell's training sample in f16, and
+   at 4M it takes 18 s and 111 MB at the new defaults (partition.py: 72 s, 466 MB in the same session). `create`
+   still uses one cell, so the fine k-means trains K centres on 200 K rows of one cell; at 1B (K = 15,625, a 3.1M-row
+   sample, 4.8 GB in f16 at 768 dimensions) the cells must be set from N and memory (`vexact ... partition --cells C
+   --cross T` runs the experiments): the question of the cell count remains. Open files grow with the cells: pass 1
+   keeps 2 per cell open and pass 2 up to 3, each with a 64 KiB buffer, so the partition refuses more cells than
+   `ulimit -n` allows (3 C + 32 files; about 330 cells at the usual 1,024). Many cells need the limit raised, or the
+   passes rewritten to write a bounded number of cells at a time.
 6. **Then the gates at scale:** 20M BioCLIP-2, 100M synthetic, peak memory and build time per phase, open time.
 
 ## Restructuring

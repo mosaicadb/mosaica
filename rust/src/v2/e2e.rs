@@ -722,7 +722,7 @@ fn same_index(a: &Index2, b: &Index2) {
     assert_eq!((&a.ahat[..], &a.row_ent[..], &a.ent_row[..], &a.nukey[..]), (&b.ahat[..], &b.row_ent[..], &b.ent_row[..], &b.nukey[..]));
     assert_eq!((&a.coff, &a.soff, &a.vrow), (&b.coff, &b.soff, &b.vrow));
     let esc = |x: &Index2| {
-        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (*k, v.to_bits())).collect();
+        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (k, v.to_bits())).collect();
         e.sort_unstable();
         e
     };
@@ -1773,16 +1773,12 @@ fn a_waiting_rebuild_reads_the_fit_the_one_before_it_left() {
     assert_eq!(ix.nanch, 4);
 }
 
-/// `create` from a vectors file (synth4k's rows; python3 with numpy and faiss runs tools/partition.py, else the test
-/// is skipped with a message): the index opens as created and answers as brute force does, and it is the index the
-/// steps by hand make (the same partition fitted with `fit::fit` and encoded by `rebuild`). A directory that is not
-/// empty is refused.
+/// `create` from a vectors file (synth4k's rows; the partition in Rust, no Python): the index opens as created and
+/// answers as brute force does, and it is the index the steps by hand make (the same partition fitted with `fit::fit`
+/// and encoded by `rebuild`; and a partition made again with the same seed, by `partition::partition`, is the same).
+/// A directory that is not empty is refused.
 #[test]
 fn create_makes_the_index_the_steps_by_hand_make() {
-    if !std::process::Command::new("python3").args(["-I", "-c", "import numpy, faiss"]).status().is_ok_and(|s| s.success()) {
-        eprintln!("create_makes_the_index_the_steps_by_hand_make skipped: python3 cannot import numpy and faiss");
-        return;
-    }
     let tmp = tmp_dir("create");
     let vectors = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k/Xs.npy");
     let dir = tmp.join("index");
@@ -1811,6 +1807,13 @@ fn create_makes_the_index_the_steps_by_hand_make() {
     crate::fit::fit(fit.to_str().unwrap(), &format!("{dir}/partition"), &fo, &mut |_| {}).unwrap();
     let (_, hand) = rebuild(fit.to_str().unwrap(), &BuildOptions::default(), &mut |_| {}).unwrap();
     assert_eq!((hand.code_hash(), hand.store_hash()), (ix.code_hash(), ix.store_hash()));
+    // the partition by hand, with create's cluster size and seed: the same cells
+    let part = tmp.join("part");
+    let po = crate::partition::PartitionOptions { per_cluster: o.per_cluster, seed: o.seed, ..Default::default() };
+    crate::partition::partition(vectors, part.to_str().unwrap(), &po, &mut |_| {}).unwrap();
+    for f in ["cell0.f16", "cell0.ids", "cell0.cl", "centres.npy", "cluster_cell.npy"] {
+        assert_eq!(std::fs::read(part.join(f)).unwrap(), std::fs::read(format!("{dir}/partition/{f}")).unwrap(), "{f}");
+    }
     drop((made, ix, hand));
     std::fs::remove_dir_all(&tmp).unwrap();
 }

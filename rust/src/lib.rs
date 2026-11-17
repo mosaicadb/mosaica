@@ -6,6 +6,7 @@ pub mod derive;
 pub mod fit;
 pub mod index;
 pub mod kernel;
+pub mod partition;
 pub mod query;
 pub mod simd;
 pub mod util;

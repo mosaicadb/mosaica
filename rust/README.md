@@ -21,18 +21,25 @@ cargo test --release      # includes the end-to-end test on testdata/synth4k
 ## Making an index
 
 An index is a directory. `create` makes one from a file of vectors, the whole pipeline in one step: it partitions the
-vectors into `DIR/partition` (`tools/partition.py`, with python3, numpy and faiss), fits the build parameters into `DIR`
-(`src/fit.rs`, with the support table's anchors and the randomised levels' certificate), encodes every item and saves
-the index in `DIR/encoded`. The fit needs no Python: its certificate comes from a shipped table (`src/certs_table.json`)
-for the layouts of common dimensions, else from the Rust port of `tools/certify.py` (`src/certify.rs`). Only the
-partition still runs Python, until there is a partition in Rust.
+vectors into `DIR/partition` (`src/partition.rs`), fits the build parameters into `DIR` (`src/fit.rs`, with the
+support table's anchors and the randomised levels' certificate), encodes every item and saves the index in
+`DIR/encoded`. Nothing runs Python: the partition is `tools/partition.py`'s algorithm in Rust (spherical k-means as
+faiss's, the same files), and the fit's certificate comes from a shipped table (`src/certs_table.json`) for the layouts
+of common dimensions, else from the Rust port of `tools/certify.py` (`src/certify.rs`). The fit takes a partition
+written by either.
 
 ```bash
 V="$CARGO_TARGET_DIR/release/vexact"
 $V --vectors VECTORS.npy --index DIR create [build flags]      # N x n0 floats; row i is entity i; DIR new or empty
 $V --v2 --index DIR MODE...                                    # opens the saved index (never encodes) and runs MODE
 $V --v2 --index DIR --rebuild [build flags] [MODE...]          # re-encodes the fit in DIR and saves it, then runs MODE
+$V --vectors VECTORS.npy partition --out PART [--cells C] [--cross T] [--per-cluster by-n|M] [--seed S]
+   [--sample-per-centre 200] [--cell-sample 1000] [--niter 20]   # the partition alone, as tools/partition.py's flags
 ```
+
+`partition` runs alone, for experiments with coarse cells (`--cells C`: C cells, each with its own fine k-means;
+`--cross T`: each row to its nearest centre among its cell's T nearest cells; `create` uses one cell). The same seed and
+input give the same files at any thread count; the manifest's moment and token make each run another partition.
 
 In the library these are `v2::create(vectors, dir, &BuildOptions, log)`, `v2::open(dir, &OpenOptions, log)` and
 `v2::rebuild(dir, &BuildOptions, log)`; `v2::build` encodes in memory and saves nothing (`--in-memory`).
@@ -133,5 +140,7 @@ order, so a scan reads memory in order. A rebuild takes about 100 s at 1M on 4 c
   `src/util.rs` — .npy reader, exact similarity on f16 integers, reproducible Haar rotations; `src/simd.rs` — the AVX2
   forms of 16-lane operations.
 - `src/run2.rs`, `src/ann.rs`, `src/scale.rs`, `src/main.rs` — the experiments and the command line.
+- `src/partition.rs` — the partition `create` runs (and `vexact ... partition`): cells, spherical k-means, the files.
 - `src/fit.rs`, `src/bucket.rs` — the fit of a partition, and the partition's cells read in the fit's row order.
-- `tools/partition.py` — the partition `create` runs; `tools/fit.py` — fits the build parameters to a file of vectors.
+- `tools/partition.py` — the partition with faiss, kept as the independent reference (the fit takes either);
+  `tools/fit.py` — fits the build parameters to a file of vectors.
