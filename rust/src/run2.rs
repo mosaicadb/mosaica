@@ -43,7 +43,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
-    "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
+    "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nprobe", "--nq", "--onq",
     "--order", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
     "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads",
@@ -56,7 +56,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 const MODES: &[&str] = &[
     "ann", "ann-truth", "breakdown", "bytesq", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+    "filter", "levels", "oracle", "qbench", "qvbench", "scanbench", "setup", "verify",
 ];
 /// The flags that make an index (`v2::BuildOptions`): given only where one is made, with `create`, `--rebuild` or
 /// `--in-memory`.
@@ -2150,5 +2150,82 @@ mod tests {
         });
         assert!(timed && p.io_gbps == 9.0);
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+}
+
+/// Query-path timings and answer hashes, one thread: threshold queries at `--sizes` (answer shares), exact k-NN at
+/// `--knn-k` (seed, sweep and selection apart) and approximate k-NN (k = 10, no dial) at `--nprobe` clusters, item and
+/// text queries. Each query runs `--reps` times and keeps its fastest; a cell prints the mean and median of those, the
+/// bytes read per item and a hash of every query's answer (threshold rows, k-NN entities), so that two binaries can be
+/// compared for speed and for identical answers.
+pub fn qbench(c: &Ctx2, nq: usize) {
+    use std::hash::{Hash, Hasher};
+    let ix = &c.ix;
+    let reps = arg_usize("--reps", 3);
+    let sizes_f: Vec<f64> = { let a = arg_str("--sizes", ""); if a.is_empty() { vec![1e-4, 1e-3, 1e-2, 0.1, 0.5] } else { a.split(',').map(|x| x.parse().unwrap()).collect() } };
+    // an empty list (or 0) leaves a kind of cell out
+    let list = |name: &str, d: &str| -> Vec<usize> { arg_str(name, d).split(',').filter_map(|x| x.parse().ok()).filter(|&x| x > 0).collect() };
+    let (ks, nps) = (list("--knn-k", "10,100"), list("--nprobe", "8,32"));
+    let nrows = c.flat().nrows;
+    let sizes: Vec<usize> = sizes_f.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
+    let ap = if c.approx.rad.is_empty() { Approx { f: 0.0, rad: vec![0.0; ix.k()] } } else { Approx { f: c.approx.f, rad: c.approx.rad.clone() } };
+    let pl = pool(1);
+    let med = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
+    for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
+        let qs: Vec<&Vec<f32>> = qs.iter().take(nq).collect();
+        if qs.is_empty() {
+            continue;
+        }
+        let ths: Vec<Vec<f64>> = qs.iter().map(|q| {
+            let fl = c.flat();
+            let pr = prep2(ix, q);
+            let sc = fl.scores(&pr.q32);
+            thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &sizes)
+        }).collect();
+        // (name, per query: fastest ms, bytes per item, answer hash, extra times)
+        let mut cells: Vec<String> = sizes_f.iter().map(|f| format!("thr{f}")).collect();
+        cells.extend(ks.iter().map(|k| format!("knn{k}")));
+        cells.extend(nps.iter().map(|np| format!("ann10np{np}")));
+        for (ci, name) in cells.iter().enumerate() {
+            let (mut ms, mut br, mut extra) = (Vec::new(), 0.0, [0.0f64; 3]);
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for (qi, q) in qs.iter().enumerate() {
+                let (mut best, mut best_br, mut best_ex, mut last) = (f64::INFINITY, 0.0, [0.0; 3], Vec::new());
+                for _ in 0..reps.max(1) {
+                    let t = Timer::new();
+                    let (ans, st, ex): (Vec<u32>, Stats, [f64; 3]) = pl.install(|| {
+                        if ci < sizes.len() {
+                            let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
+                            let r = threshold2(ix, &prep2(ix, q), ths[qi][ci], &o);
+                            (to_bitmap2(ix, &r.rows).iter().collect(), r.st, [0.0; 3])
+                        } else if ci < sizes.len() + ks.len() {
+                            let r = knn2(ix, q, ks[ci - sizes.len()], None, c.plan);
+                            let mut e: Vec<u32> = r.ents.iter().map(|x| x.1).collect();
+                            e.sort_unstable();
+                            (e, r.st, [r.t_seed, r.t_sweep, r.t_sel])
+                        } else {
+                            let r = knn2_fast(ix, &ap, q, 10, None, nps[ci - sizes.len() - ks.len()], None, c.plan);
+                            let mut e: Vec<u32> = r.ents.iter().map(|x| x.1).collect();
+                            e.sort_unstable();
+                            (e, r.st, [0.0; 3])
+                        }
+                    });
+                    let el = t.ms();
+                    if el < best {
+                        (best, best_br, best_ex) = (el, bytes_read2(ix, &st), ex);
+                    }
+                    last = ans;
+                }
+                last.hash(&mut h);
+                br += best_br;
+                for k in 0..3 {
+                    extra[k] += best_ex[k];
+                }
+                ms.push(best);
+            }
+            let n = qs.len() as f64;
+            let mean = ms.iter().sum::<f64>() / n;
+            out!("qb {cls} {name:<12} mean {mean:8.3} med {:8.3} ms  B/item {:8.2}  seed/sweep/sel {:.3}/{:.3}/{:.3}  hash {:016x}", med(&mut ms), br / n, extra[0] / n, extra[1] / n, extra[2] / n, h.finish());
+        }
     }
 }
