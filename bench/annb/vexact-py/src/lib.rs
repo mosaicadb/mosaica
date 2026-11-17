@@ -265,6 +265,14 @@ impl Index {
         self.ix.own_rows().and_then(|r| r.file_path()).map(|p| p.to_string_lossy().to_string())
     }
 
+    /// The process-wide counters of full-vector reads through the reader (disk mode, read="uring"): reads issued,
+    /// bytes read, and nanoseconds spent waiting for them (`disk::NREADS`, `NBYTES`, `WAIT_NS`). Reads through the
+    /// mapping (faults) are not counted here.
+    #[staticmethod]
+    fn io_counters() -> (u64, u64, u64) {
+        (disk::NREADS.load(Relaxed), disk::NBYTES.load(Relaxed), disk::WAIT_NS.load(Relaxed))
+    }
+
     /// Whether io_uring can be used here.
     #[staticmethod]
     fn uring_available() -> bool {

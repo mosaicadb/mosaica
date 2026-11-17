@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import RESULTS, share_label, summarise  # noqa: E402
 import suites as S  # noqa: E402
 
-ROLE_ORDER = {"ours": 0, "standard": 1, "frontier": 2, "database": 3}
+ROLE_ORDER = {"ours": 0, "standard": 1, "frontier": 2, "database": 3, "in memory": 4}
 FILTER_ORDER = {f: i for i, f in enumerate(["none"] + list(S.FILTERS))}
 
 
@@ -209,18 +209,28 @@ def caps_section(suite):
                 continue
             for r in read_csv(f):
                 k = (r["type"], r["filter"], r["param"], r["system"], r["role"])
-                c = cells[k].setdefault(r["cap"], dict(ms=[], cold=None, rec=[]))
+                c = cells[k].setdefault(r["cap"], dict(ms=[], cold=None, rec=[], stats=[]))
                 if r["kind"] == "cold":
                     c["cold"] = float(r["median_ms"])
                 else:
                     c["ms"].append(float(r["median_ms"]))
                     if r["recall"] != "":
                         c["rec"].append(float(r["recall"]))
+                    if r.get("stats"):
+                        c["stats"].append(dict(json.loads(r["stats"]), ms=float(r["median_ms"])))
+        dcf = os.path.join(cdir, "diskcheck.csv")
+        dchk = {r["system"]: r for r in read_csv(dcf)} if os.path.exists(dcf) else {}
+
+        def host_mark(system):
+            d = dchk.get(system)
+            if d is None:
+                return " ‡?"
+            return " ‡" if d.get("host_cached") == "True" else ""
         out += [f"### {ds}", "", "| type | filter | param | system | " + " | ".join(
             "uncapped" if c == "uncapped" else f"{c}%" for c in caps) + " |", "|---" * (4 + len(caps)) + "|"]
         for k in sorted(cells, key=lambda k: (["exact", "threshold", "approx"].index(k[0]), FILTER_ORDER.get(k[1], 99),
                                               param_key(k[0], k[2]), ROLE_ORDER.get(k[4], 9), k[3])):
-            line = [k[0], k[1], param_label(k[0], k[2]), f"{k[3]} [{k[4]}]"]
+            line = [k[0], k[1], param_label(k[0], k[2]), f"{k[3]} [{k[4]}]" + (host_mark(k[3]) if k[4] != "in memory" else "")]
             for cap in caps:
                 st = status.get((k[3], cap))
                 c = cells[k].get(cap)
@@ -238,6 +248,58 @@ def caps_section(suite):
             out.append("| " + " | ".join(line) + " |")
         if any(st["status"] == "does not fit" for st in status.values()):
             out += ["", "† measured before the OOM killer stopped that run, later in the same cap."]
+        out += ["", "‡ host-cached: timings optimistic. The disk check below found the system's index file read more "
+                "than 3 times faster than a large file nobody had read, so its reads came from a cache under the "
+                "guest (the VM's host caches its virtual disk), not from the device. ‡? not checked: runs made before "
+                "the check existed; on this VM assume host-cached (O_DIRECT 4 KiB reads: a freshly written file 33 us "
+                "at the median, a file nobody had read 651 us)."]
+        if dchk:
+            out += ["", "Disk check before the runs (`diskcheck.py`: random 4 KiB O_DIRECT reads at queue depth 1, and "
+                    "a QD1 sequential read in 1 MiB requests; (a) a large file this session had not read, (b) the "
+                    "system's index file after dropping it from the guest's cache):", "",
+                    "| system | (a) file | (a) p50 / p99 us | (a) seq MB/s | (b) file | (b) p50 / p99 us | (b) seq MB/s | (a)/(b) | host-cached |",
+                    "|---|---|---|---|---|---|---|---|---|"]
+            for sysn, d in sorted(dchk.items()):
+                out.append(f"| {sysn} | {d['cold_file']} ({d['cold_size_mb']} MB) | {d['cold_p50_us']} / {d['cold_p99_us']} | "
+                           f"{d['cold_seq_mbs']} | {os.path.basename(d['index_file'])} ({d['index_size_mb']} MB) | "
+                           f"{d['index_p50_us']} / {d['index_p99_us']} | {d['index_seq_mbs']} | {d['ratio']} | {d['host_cached']} |")
+        io_rows = []
+        for k in sorted(cells, key=lambda k: (["exact", "threshold", "approx"].index(k[0]), FILTER_ORDER.get(k[1], 99),
+                                              param_key(k[0], k[2]), ROLE_ORDER.get(k[4], 9), k[3])):
+            line = [k[0], k[1], param_label(k[0], k[2]), k[3]]
+            any_st = False
+            for cap in caps:
+                c = cells[k].get(cap)
+                st = c["stats"] if c else []
+                if not st:
+                    line.append("")
+                    continue
+                any_st = True
+                med = lambda key: float(np.median([x.get(key, 0) for x in st]))
+                reads = med("reads") + med("majflt")
+                if "rounds" in st[0]:  # DiskANN: its own counters; the I/O time it measured is replaced by the model
+                    cpu = med("cpu_us") / 1e3
+                    v = (f"{med('reads'):.0f} reads, {med('rounds'):.0f} rounds; model {cpu + med('reads') * 0.16:.3g} "
+                         f"(QD1) / {cpu + med('rounds') * 0.16:.3g} (a round at a time)")
+                else:
+                    base = float(np.median([x["ms"] for x in st])) - med("wait_us") / 1e3
+                    v = f"{med('reads'):.0f} reads + {med('majflt'):.0f} faults; model {base + reads * 0.16:.3g}"
+                line.append(v)
+            if any_st:
+                io_rows.append("| " + " | ".join(line) + " |")
+        if io_rows:
+            out += ["", "Storage reads per query (medians over the warm queries, from the last repetition) and a "
+                    "**modelled, not measured** time for a disk that takes 160 us per 4 KiB read at queue depth 1 (the "
+                    "WSL2 disk of the earlier threshold-db/REPORT_CAPPED.md). DiskANN: its own QueryStats, reads and "
+                    "rounds (each round waits for its beam's reads); modelled as its CPU time plus 160 us per read "
+                    "(QD1) or per round (the reads of a round in flight together). vexact: its reader's reads "
+                    "(io_uring; it keeps up to 64 in flight, so the serial model is an upper bound) and its page "
+                    "faults, modelled as the measured time minus its measured wait plus 160 us per read and fault. "
+                    "faiss: major page faults of the mapped files, modelled as the measured time plus 160 us per fault "
+                    "(an upper bound where faults read ahead more than 4 KiB).", "",
+                    "| type | filter | param | system | " + " | ".join(
+                        "uncapped" if c == "uncapped" else f"{c}%" for c in caps) + " |", "|---" * (4 + len(caps)) + "|"]
+            out += io_rows
         bf = os.path.join(cdir, "builds.csv")
         if os.path.exists(bf):
             out += ["", "Builds for the cap axis (uncapped, several threads):", "",

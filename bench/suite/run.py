@@ -66,6 +66,10 @@ def runsys_cmd(a, ds, s, types, extra=()):
     return cmd
 
 
+DISKCHECK_COLS = ["system", "when", "cold_file", "cold_size_mb", "cold_p50_us", "cold_p99_us", "cold_seq_mbs",
+                  "index_file", "index_size_mb", "index_p50_us", "index_p99_us", "index_seq_mbs", "ratio", "host_cached"]
+
+
 def run_caps(a, suite, ds, types):
     """The memory-cap axis on one dataset: a build, then one capped process per cap, for each system."""
     import shutil
@@ -89,12 +93,27 @@ def run_caps(a, suite, ds, types):
             if s not in names and (not a.systems or s in a.systems.split(",")):
                 names.append(s)
     env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
+    from systems import REGISTRY
+    import diskcheck
+    from common import REPO
     for s in names:
-        log(f"{ds}: {s}: build for the cap axis")
-        r = subprocess.run(runsys_cmd(a, ds, s, types, ["--cap", "build"]), env=env)
-        if r.returncode:
-            log(f"{ds}: {s}: build failed ({r.returncode})")
-            continue
+        if REGISTRY[s].disk:
+            log(f"{ds}: {s}: build for the cap axis")
+            r = subprocess.run(runsys_cmd(a, ds, s, types, ["--cap", "build"]), env=env)
+            if r.returncode:
+                log(f"{ds}: {s}: build failed ({r.returncode})")
+                continue
+            # the disk check: a file nobody read against the system's index files (diskcheck.py)
+            w = work_dir(a.data, ds, s)
+            dc = diskcheck.check(diskcheck.largest_files([w]), exclude=[a.data, REPO, os.path.dirname(a.data)])
+            log(f"{ds}: {s}: disk check {dc}")
+            merge_csv(os.path.join(results_dir(a.suite, ds), "caps", "diskcheck.csv"), DISKCHECK_COLS,
+                      [dict({k: dc.get(k, "") for k in DISKCHECK_COLS}, system=s, when=time.strftime("%Y-%m-%d %H:%M"))],
+                      lambda row: row["system"] == s)
+            if s in a.check_only.split(","):
+                if not a.keep_work:
+                    shutil.rmtree(w, ignore_errors=True)
+                continue
         for f in ["uncapped"] + fracs:
             busy = busy_cores()
             if busy > 0.5:
@@ -132,6 +151,7 @@ def main():
     ap.add_argument("--vibe", default="", help="a VIBE checkout (stage public)")
     ap.add_argument("--annb", default="", help="an ANN-Benchmarks checkout (stage public)")
     ap.add_argument("--caps", default="", help="the cap fractions to run (stage cap; default the suite's)")
+    ap.add_argument("--check-only", default="", help="stage cap: for these systems only build and run the disk check")
     ap.add_argument("--download", default="", help="scale prep: where LAION's parts are downloaded, one at a time")
     P.add_args(ap)
     a = ap.parse_args()

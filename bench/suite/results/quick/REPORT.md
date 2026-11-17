@@ -145,34 +145,36 @@ Caps are fractions of the dataset's size, N x d x 4 bytes (its f32 vectors as di
 
 | type | filter | param | system | uncapped | 50% | 25% | 10% |
 |---|---|---|---|---|---|---|---|
-| exact | none | k=10 | vexact [ours] | 60.2 / 164 | 55.5 / 172 | 50.9 / 143 | 175 / 165 |
-| exact | none | k=10 | faiss-flat-mmap [standard] | 156 / 1.49e+04 | 1.36e+04 / 1.37e+04 | 1.32e+04 / 1.29e+04 | 1.31e+04 / 1.27e+04 |
-| exact | random-1 | k=10 | vexact [ours] | 0.627 / 278 | 0.562 / 306 | 0.667 / 309 | 266 / 262 |
-| exact | random-1 | k=10 | faiss-flat-mmap [standard] | 5.14 / 389 | 4.91 / 485 | 4.3 / 353 | 5.36 / 396 |
-| threshold | none | 0.01% | vexact [ours] | 53.4 / 53 | 53.7 / 52.8 | 51.7 / 86.8 | 190 / 151 |
-| threshold | none | 0.01% | faiss-flat-mmap [standard] | 154 / 1.45e+04 | 1.4e+04 / 1.4e+04 | 1.33e+04 / 1.29e+04 | 1.34e+04 / 1.32e+04 |
-| threshold | none | 1% | vexact [ours] | 109 / 111 | 96.4 / 110 | 104 / 133 | 335 / 286 |
-| threshold | none | 1% | faiss-flat-mmap [standard] | 149 / 1.45e+04 | 1.38e+04 / 1.32e+04 | 1.33e+04 / 1.3e+04 | 1.39e+04 / 1.36e+04 |
-| threshold | none | 10% | vexact [ours] | 258 / 234 | 224 / 222 | 293 / 246 | 522 / 494 |
-| threshold | none | 10% | faiss-flat-mmap [standard] | 160 / 1.48e+04 | 1.39e+04 / 1.33e+04 | 1.33e+04 / 1.28e+04 | 1.4e+04 / 1.43e+04 |
-| threshold | random-1 | 1% | vexact [ours] | 1.35 / 51.4 | 1.26 / 42.9 | 1.25 / 55.8 | 75.6 / 72 |
-| threshold | random-1 | 1% | faiss-flat-mmap [standard] | 4.36 / 367 | 4.09 / 361 | 4.29 / 364 | 4.19 / 392 |
-| approx | none | k=10 L=20 | diskann [frontier] | 0.792 / 2.72 r 0.405 | 0.878 / 0.919 r 0.405 | 0.639 / 0.923 r 0.405 | 0.642 / 0.854 r 0.405 |
-| approx | none | k=10 L=50 | diskann [frontier] | 1.36 / 1.75 r 0.620 | 1.34 / 1.27 r 0.620 | 1.22 / 1.1 r 0.620 | 1.31 / 1.37 r 0.620 |
-| approx | none | k=10 L=100 | diskann [frontier] | 2.49 / 3.92 r 0.735 | 2.87 / 4.58 r 0.735 | 2.38 / 2.41 r 0.735 | 2.44 / 3.51 r 0.735 |
-| approx | none | k=10 L=200 | diskann [frontier] | 4.87 / 5.07 r 0.800 | 4.24 / 4.54 r 0.800 | 4.54 / 4.21 r 0.800 | 4.91 / 4.61 r 0.800 |
-| approx | none | k=10 nprobe=16 eps=0.0 | vexact [ours] | 2.44 / 12.8 r 0.740 | 1.72 / 13 r 0.740 | 1.71 / 11.2 r 0.740 | 12.7 / 21.8 r 0.740 |
-| approx | none | k=10 nprobe=64 eps=0.0 | vexact [ours] | 5.73 / 13.6 r 0.850 | 4.53 / 11.6 r 0.850 | 4.64 / 13 r 0.850 | 81.4 / 73.8 r 0.850 |
-| approx | none | k=10 nprobe=256 eps=0.0 | vexact [ours] | 19 / 32 r 0.955 | 14.8 / 22.8 r 0.955 | 16.8 / 36.4 r 0.955 | 367 / 357 r 0.955 |
-| approx | none | k=10 nprobe=16 | faiss-ivf-disk [standard] | 1.09 / 7.2 r 0.790 | 1.05 / 7.09 r 0.790 | 1.13 / 6.78 r 0.790 | 1.02 / 5.73 r 0.790 |
-| approx | none | k=10 nprobe=64 | faiss-ivf-disk [standard] | 2.63 / 16.5 r 0.885 | 2.41 / 15.2 r 0.885 | 2.4 / 15.3 r 0.885 | 2.93 / 18.1 r 0.885 |
-| approx | none | k=10 nprobe=256 | faiss-ivf-disk [standard] | 8.33 / 73.1 r 0.950 | 7.33 / 56.9 r 0.950 | 7.42 / 63.8 r 0.950 | 7.22 / 63.7 r 0.950 |
-| approx | random-1 | k=10 nprobe=16 eps=0.0 | vexact [ours] | 0.509 / 5.4 r 0.490 | 0.369 / 3.68 r 0.490 | 0.39 / 4.56 r 0.490 | 0.366 / 4.17 r 0.490 |
-| approx | random-1 | k=10 nprobe=64 eps=0.0 | vexact [ours] | 0.578 / 19.2 r 0.700 | 0.469 / 13.7 r 0.700 | 0.445 / 14.6 r 0.700 | 0.481 / 13.7 r 0.700 |
-| approx | random-1 | k=10 nprobe=256 eps=0.0 | vexact [ours] | 0.679 / 71.5 r 0.895 | 0.571 / 65.1 r 0.895 | 0.706 / 68.1 r 0.895 | 1.98 / 66.6 r 0.895 |
-| approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] | 0.857 / 5.87 r 0.515 | 0.826 / 5.86 r 0.515 | 1.04 / 6.34 r 0.515 | 0.769 / 5.11 r 0.515 |
-| approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] | 1.54 / 10.3 r 0.730 | 1.3 / 11.1 r 0.730 | 1.28 / 14.2 r 0.730 | 1.36 / 14.3 r 0.730 |
-| approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] | 2.24 / 54.8 r 0.865 | 1.55 / 52.4 r 0.865 | 2.06 / 53.5 r 0.865 | 9.67 / 55.8 r 0.865 |
+| exact | none | k=10 | vexact [ours] ‡? | 60.2 / 164 | 55.5 / 172 | 50.9 / 143 | 175 / 165 |
+| exact | none | k=10 | faiss-flat-mmap [standard] ‡? | 156 / 1.49e+04 | 1.36e+04 / 1.37e+04 | 1.32e+04 / 1.29e+04 | 1.31e+04 / 1.27e+04 |
+| exact | random-1 | k=10 | vexact [ours] ‡? | 0.627 / 278 | 0.562 / 306 | 0.667 / 309 | 266 / 262 |
+| exact | random-1 | k=10 | faiss-flat-mmap [standard] ‡? | 5.14 / 389 | 4.91 / 485 | 4.3 / 353 | 5.36 / 396 |
+| threshold | none | 0.01% | vexact [ours] ‡? | 53.4 / 53 | 53.7 / 52.8 | 51.7 / 86.8 | 190 / 151 |
+| threshold | none | 0.01% | faiss-flat-mmap [standard] ‡? | 154 / 1.45e+04 | 1.4e+04 / 1.4e+04 | 1.33e+04 / 1.29e+04 | 1.34e+04 / 1.32e+04 |
+| threshold | none | 1% | vexact [ours] ‡? | 109 / 111 | 96.4 / 110 | 104 / 133 | 335 / 286 |
+| threshold | none | 1% | faiss-flat-mmap [standard] ‡? | 149 / 1.45e+04 | 1.38e+04 / 1.32e+04 | 1.33e+04 / 1.3e+04 | 1.39e+04 / 1.36e+04 |
+| threshold | none | 10% | vexact [ours] ‡? | 258 / 234 | 224 / 222 | 293 / 246 | 522 / 494 |
+| threshold | none | 10% | faiss-flat-mmap [standard] ‡? | 160 / 1.48e+04 | 1.39e+04 / 1.33e+04 | 1.33e+04 / 1.28e+04 | 1.4e+04 / 1.43e+04 |
+| threshold | random-1 | 1% | vexact [ours] ‡? | 1.35 / 51.4 | 1.26 / 42.9 | 1.25 / 55.8 | 75.6 / 72 |
+| threshold | random-1 | 1% | faiss-flat-mmap [standard] ‡? | 4.36 / 367 | 4.09 / 361 | 4.29 / 364 | 4.19 / 392 |
+| approx | none | k=10 L=20 | diskann [frontier] ‡? | 0.792 / 2.72 r 0.405 | 0.878 / 0.919 r 0.405 | 0.639 / 0.923 r 0.405 | 0.642 / 0.854 r 0.405 |
+| approx | none | k=10 L=50 | diskann [frontier] ‡? | 1.36 / 1.75 r 0.620 | 1.34 / 1.27 r 0.620 | 1.22 / 1.1 r 0.620 | 1.31 / 1.37 r 0.620 |
+| approx | none | k=10 L=100 | diskann [frontier] ‡? | 2.49 / 3.92 r 0.735 | 2.87 / 4.58 r 0.735 | 2.38 / 2.41 r 0.735 | 2.44 / 3.51 r 0.735 |
+| approx | none | k=10 L=200 | diskann [frontier] ‡? | 4.87 / 5.07 r 0.800 | 4.24 / 4.54 r 0.800 | 4.54 / 4.21 r 0.800 | 4.91 / 4.61 r 0.800 |
+| approx | none | k=10 nprobe=16 eps=0.0 | vexact [ours] ‡? | 2.44 / 12.8 r 0.740 | 1.72 / 13 r 0.740 | 1.71 / 11.2 r 0.740 | 12.7 / 21.8 r 0.740 |
+| approx | none | k=10 nprobe=64 eps=0.0 | vexact [ours] ‡? | 5.73 / 13.6 r 0.850 | 4.53 / 11.6 r 0.850 | 4.64 / 13 r 0.850 | 81.4 / 73.8 r 0.850 |
+| approx | none | k=10 nprobe=256 eps=0.0 | vexact [ours] ‡? | 19 / 32 r 0.955 | 14.8 / 22.8 r 0.955 | 16.8 / 36.4 r 0.955 | 367 / 357 r 0.955 |
+| approx | none | k=10 nprobe=16 | faiss-ivf-disk [standard] ‡? | 1.09 / 7.2 r 0.790 | 1.05 / 7.09 r 0.790 | 1.13 / 6.78 r 0.790 | 1.02 / 5.73 r 0.790 |
+| approx | none | k=10 nprobe=64 | faiss-ivf-disk [standard] ‡? | 2.63 / 16.5 r 0.885 | 2.41 / 15.2 r 0.885 | 2.4 / 15.3 r 0.885 | 2.93 / 18.1 r 0.885 |
+| approx | none | k=10 nprobe=256 | faiss-ivf-disk [standard] ‡? | 8.33 / 73.1 r 0.950 | 7.33 / 56.9 r 0.950 | 7.42 / 63.8 r 0.950 | 7.22 / 63.7 r 0.950 |
+| approx | random-1 | k=10 nprobe=16 eps=0.0 | vexact [ours] ‡? | 0.509 / 5.4 r 0.490 | 0.369 / 3.68 r 0.490 | 0.39 / 4.56 r 0.490 | 0.366 / 4.17 r 0.490 |
+| approx | random-1 | k=10 nprobe=64 eps=0.0 | vexact [ours] ‡? | 0.578 / 19.2 r 0.700 | 0.469 / 13.7 r 0.700 | 0.445 / 14.6 r 0.700 | 0.481 / 13.7 r 0.700 |
+| approx | random-1 | k=10 nprobe=256 eps=0.0 | vexact [ours] ‡? | 0.679 / 71.5 r 0.895 | 0.571 / 65.1 r 0.895 | 0.706 / 68.1 r 0.895 | 1.98 / 66.6 r 0.895 |
+| approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] ‡? | 0.857 / 5.87 r 0.515 | 0.826 / 5.86 r 0.515 | 1.04 / 6.34 r 0.515 | 0.769 / 5.11 r 0.515 |
+| approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] ‡? | 1.54 / 10.3 r 0.730 | 1.3 / 11.1 r 0.730 | 1.28 / 14.2 r 0.730 | 1.36 / 14.3 r 0.730 |
+| approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] ‡? | 2.24 / 54.8 r 0.865 | 1.55 / 52.4 r 0.865 | 2.06 / 53.5 r 0.865 | 9.67 / 55.8 r 0.865 |
+
+‡ host-cached: timings optimistic. The disk check below found the system's index file read more than 3 times faster than a large file nobody had read, so its reads came from a cache under the guest (the VM's host caches its virtual disk), not from the device. ‡? not checked: runs made before the check existed; on this VM assume host-cached (O_DIRECT 4 KiB reads: a freshly written file 33 us at the median, a file nobody had read 651 us).
 
 Builds for the cap axis (uncapped, several threads):
 
@@ -208,36 +210,38 @@ Evidence (after the last cell of each run): the cgroup's usage, its anonymous an
 
 | type | filter | param | system | uncapped | 50% | 25% | 10% |
 |---|---|---|---|---|---|---|---|
-| exact | none | k=10 | vexact [ours] | 23.5 / 98 | 23.9 / 91.8 | 23.6 / 98.1 | 122 / 817 † |
-| exact | none | k=10 | faiss-flat-mmap [standard] | 75.1 / 7.23e+03 | 6.79e+03 / 7.21e+03 | 6.59e+03 / 6.43e+03 | 6.57e+03 / 6.3e+03 |
-| exact | random-1 | k=10 | vexact [ours] | 0.372 / 192 | 0.475 / 207 | 0.397 / 190 | 197 / 196 † |
-| exact | random-1 | k=10 | faiss-flat-mmap [standard] | 2.42 / 258 | 3.79 / 245 | 3.18 / 235 | 2.5 / 216 |
-| threshold | none | 0.01% | vexact [ours] | 24.3 / 30.1 | 25.3 / 30.2 | 25.2 / 58 | does not fit |
-| threshold | none | 0.01% | faiss-flat-mmap [standard] | 75.9 / 7e+03 | 6.76e+03 / 6.84e+03 | 6.78e+03 / 6.42e+03 | 6.72e+03 / 6.52e+03 |
-| threshold | none | 1% | vexact [ours] | 45.4 / 93.9 | 45.6 / 76.2 | 109 / 132 | does not fit |
-| threshold | none | 1% | faiss-flat-mmap [standard] | 76.4 / 6.89e+03 | 6.91e+03 / 6.41e+03 | 6.67e+03 / 6.79e+03 | 7.19e+03 / 6.66e+03 |
-| threshold | none | 10% | vexact [ours] | 87.3 / 113 | 84.4 / 92.1 | 174 / 210 | does not fit |
-| threshold | none | 10% | faiss-flat-mmap [standard] | 82.8 / 6.64e+03 | 6.75e+03 / 6.84e+03 | 6.42e+03 / 6.76e+03 | 6.94e+03 / 7.17e+03 |
-| threshold | random-1 | 1% | vexact [ours] | 0.637 / 28.6 | 0.62 / 32.7 | 0.689 / 31.2 | does not fit |
-| threshold | random-1 | 1% | faiss-flat-mmap [standard] | 3.57 / 224 | 2.39 / 252 | 2.75 / 218 | 2.43 / 250 |
-| approx | none | k=10 L=20 | diskann [frontier] | 0.558 / 5.24 r 0.900 | 0.516 / 0.84 r 0.900 | 0.524 / 0.823 r 0.900 | 0.524 / 0.784 r 0.900 |
-| approx | none | k=10 L=50 | diskann [frontier] | 1.08 / 1.29 r 0.985 | 1.23 / 1.22 r 0.985 | 1.09 / 1.3 r 0.985 | 1.12 / 1.26 r 0.985 |
-| approx | none | k=10 L=100 | diskann [frontier] | 2.24 / 2.92 r 0.990 | 2.03 / 3.56 r 0.990 | 1.95 / 2.27 r 0.990 | 2 / 2.49 r 0.990 |
-| approx | none | k=10 L=200 | diskann [frontier] | 3.84 / 4.69 r 1.000 | 4 / 3.94 r 1.000 | 3.69 / 4.16 r 1.000 | 3.77 / 4.37 r 1.000 |
-| approx | none | k=10 nprobe=16 eps=0.0 | vexact [ours] | 1.2 / 11.9 r 0.930 | 1.2 / 9.11 r 0.930 | 1.24 / 18.1 r 0.930 | does not fit |
-| approx | none | k=10 nprobe=64 eps=0.0 | vexact [ours] | 3.53 / 10.1 r 0.990 | 3.27 / 10.1 r 0.990 | 3.37 / 13.5 r 0.990 | does not fit |
-| approx | none | k=10 nprobe=256 eps=0.0 | vexact [ours] | 11.1 / 18.4 r 1.000 | 9.03 / 17.3 r 1.000 | 11.1 / 21.7 r 1.000 | does not fit |
-| approx | none | k=10 nprobe=16 | faiss-ivf-disk [standard] | 0.924 / 4.46 r 0.895 | 0.852 / 5.85 r 0.895 | 0.837 / 4.28 r 0.895 | 0.801 / 4.29 r 0.895 |
-| approx | none | k=10 nprobe=64 | faiss-ivf-disk [standard] | 1.62 / 11.3 r 0.970 | 1.64 / 11.9 r 0.970 | 1.61 / 10.2 r 0.970 | 1.75 / 12.2 r 0.970 |
-| approx | none | k=10 nprobe=256 | faiss-ivf-disk [standard] | 3.99 / 39.8 r 0.995 | 3.75 / 35.7 r 0.995 | 3.97 / 34.8 r 0.995 | 6.18 / 34 r 0.995 |
-| approx | random-1 | k=10 nprobe=16 eps=0.0 | vexact [ours] | 0.23 / 4.34 r 0.845 | 0.223 / 4.06 r 0.845 | 0.222 / 6.92 r 0.845 | does not fit |
-| approx | random-1 | k=10 nprobe=64 eps=0.0 | vexact [ours] | 0.243 / 16.9 r 0.945 | 0.26 / 16 r 0.945 | 0.313 / 18.4 r 0.945 | does not fit |
-| approx | random-1 | k=10 nprobe=256 eps=0.0 | vexact [ours] | 0.395 / 63.3 r 1.000 | 0.398 / 73.2 r 1.000 | 0.4 / 69.3 r 1.000 | does not fit |
-| approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] | 0.743 / 4.39 r 0.590 | 0.723 / 3.64 r 0.590 | 0.75 / 4.08 r 0.590 | 0.774 / 3.7 r 0.590 |
-| approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] | 1.25 / 6.25 r 0.815 | 1.18 / 8.29 r 0.815 | 1.2 / 9.64 r 0.815 | 1.61 / 10.8 r 0.815 |
-| approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] | 1.43 / 33.1 r 0.965 | 1.37 / 39.6 r 0.965 | 4.05 / 34.3 r 0.965 | 8.17 / 36 r 0.965 |
+| exact | none | k=10 | vexact [ours] ‡? | 23.5 / 98 | 23.9 / 91.8 | 23.6 / 98.1 | 122 / 817 † |
+| exact | none | k=10 | faiss-flat-mmap [standard] ‡? | 75.1 / 7.23e+03 | 6.79e+03 / 7.21e+03 | 6.59e+03 / 6.43e+03 | 6.57e+03 / 6.3e+03 |
+| exact | random-1 | k=10 | vexact [ours] ‡? | 0.372 / 192 | 0.475 / 207 | 0.397 / 190 | 197 / 196 † |
+| exact | random-1 | k=10 | faiss-flat-mmap [standard] ‡? | 2.42 / 258 | 3.79 / 245 | 3.18 / 235 | 2.5 / 216 |
+| threshold | none | 0.01% | vexact [ours] ‡? | 24.3 / 30.1 | 25.3 / 30.2 | 25.2 / 58 | does not fit |
+| threshold | none | 0.01% | faiss-flat-mmap [standard] ‡? | 75.9 / 7e+03 | 6.76e+03 / 6.84e+03 | 6.78e+03 / 6.42e+03 | 6.72e+03 / 6.52e+03 |
+| threshold | none | 1% | vexact [ours] ‡? | 45.4 / 93.9 | 45.6 / 76.2 | 109 / 132 | does not fit |
+| threshold | none | 1% | faiss-flat-mmap [standard] ‡? | 76.4 / 6.89e+03 | 6.91e+03 / 6.41e+03 | 6.67e+03 / 6.79e+03 | 7.19e+03 / 6.66e+03 |
+| threshold | none | 10% | vexact [ours] ‡? | 87.3 / 113 | 84.4 / 92.1 | 174 / 210 | does not fit |
+| threshold | none | 10% | faiss-flat-mmap [standard] ‡? | 82.8 / 6.64e+03 | 6.75e+03 / 6.84e+03 | 6.42e+03 / 6.76e+03 | 6.94e+03 / 7.17e+03 |
+| threshold | random-1 | 1% | vexact [ours] ‡? | 0.637 / 28.6 | 0.62 / 32.7 | 0.689 / 31.2 | does not fit |
+| threshold | random-1 | 1% | faiss-flat-mmap [standard] ‡? | 3.57 / 224 | 2.39 / 252 | 2.75 / 218 | 2.43 / 250 |
+| approx | none | k=10 L=20 | diskann [frontier] ‡? | 0.558 / 5.24 r 0.900 | 0.516 / 0.84 r 0.900 | 0.524 / 0.823 r 0.900 | 0.524 / 0.784 r 0.900 |
+| approx | none | k=10 L=50 | diskann [frontier] ‡? | 1.08 / 1.29 r 0.985 | 1.23 / 1.22 r 0.985 | 1.09 / 1.3 r 0.985 | 1.12 / 1.26 r 0.985 |
+| approx | none | k=10 L=100 | diskann [frontier] ‡? | 2.24 / 2.92 r 0.990 | 2.03 / 3.56 r 0.990 | 1.95 / 2.27 r 0.990 | 2 / 2.49 r 0.990 |
+| approx | none | k=10 L=200 | diskann [frontier] ‡? | 3.84 / 4.69 r 1.000 | 4 / 3.94 r 1.000 | 3.69 / 4.16 r 1.000 | 3.77 / 4.37 r 1.000 |
+| approx | none | k=10 nprobe=16 eps=0.0 | vexact [ours] ‡? | 1.2 / 11.9 r 0.930 | 1.2 / 9.11 r 0.930 | 1.24 / 18.1 r 0.930 | does not fit |
+| approx | none | k=10 nprobe=64 eps=0.0 | vexact [ours] ‡? | 3.53 / 10.1 r 0.990 | 3.27 / 10.1 r 0.990 | 3.37 / 13.5 r 0.990 | does not fit |
+| approx | none | k=10 nprobe=256 eps=0.0 | vexact [ours] ‡? | 11.1 / 18.4 r 1.000 | 9.03 / 17.3 r 1.000 | 11.1 / 21.7 r 1.000 | does not fit |
+| approx | none | k=10 nprobe=16 | faiss-ivf-disk [standard] ‡? | 0.924 / 4.46 r 0.895 | 0.852 / 5.85 r 0.895 | 0.837 / 4.28 r 0.895 | 0.801 / 4.29 r 0.895 |
+| approx | none | k=10 nprobe=64 | faiss-ivf-disk [standard] ‡? | 1.62 / 11.3 r 0.970 | 1.64 / 11.9 r 0.970 | 1.61 / 10.2 r 0.970 | 1.75 / 12.2 r 0.970 |
+| approx | none | k=10 nprobe=256 | faiss-ivf-disk [standard] ‡? | 3.99 / 39.8 r 0.995 | 3.75 / 35.7 r 0.995 | 3.97 / 34.8 r 0.995 | 6.18 / 34 r 0.995 |
+| approx | random-1 | k=10 nprobe=16 eps=0.0 | vexact [ours] ‡? | 0.23 / 4.34 r 0.845 | 0.223 / 4.06 r 0.845 | 0.222 / 6.92 r 0.845 | does not fit |
+| approx | random-1 | k=10 nprobe=64 eps=0.0 | vexact [ours] ‡? | 0.243 / 16.9 r 0.945 | 0.26 / 16 r 0.945 | 0.313 / 18.4 r 0.945 | does not fit |
+| approx | random-1 | k=10 nprobe=256 eps=0.0 | vexact [ours] ‡? | 0.395 / 63.3 r 1.000 | 0.398 / 73.2 r 1.000 | 0.4 / 69.3 r 1.000 | does not fit |
+| approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] ‡? | 0.743 / 4.39 r 0.590 | 0.723 / 3.64 r 0.590 | 0.75 / 4.08 r 0.590 | 0.774 / 3.7 r 0.590 |
+| approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] ‡? | 1.25 / 6.25 r 0.815 | 1.18 / 8.29 r 0.815 | 1.2 / 9.64 r 0.815 | 1.61 / 10.8 r 0.815 |
+| approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] ‡? | 1.43 / 33.1 r 0.965 | 1.37 / 39.6 r 0.965 | 4.05 / 34.3 r 0.965 | 8.17 / 36 r 0.965 |
 
 † measured before the OOM killer stopped that run, later in the same cap.
+
+‡ host-cached: timings optimistic. The disk check below found the system's index file read more than 3 times faster than a large file nobody had read, so its reads came from a cache under the guest (the VM's host caches its virtual disk), not from the device. ‡? not checked: runs made before the check existed; on this VM assume host-cached (O_DIRECT 4 KiB reads: a freshly written file 33 us at the median, a file nobody had read 651 us).
 
 Builds for the cap axis (uncapped, several threads):
 

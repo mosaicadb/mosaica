@@ -40,7 +40,7 @@ from systems.base import pin_thread  # noqa: E402
 
 COLS = ["dataset", "type", "filter", "system", "role", "setting", "param", "query", "median_ms", "min_ms",
         "returned", "expected", "nonmatch", "recall"]
-CAP_COLS = COLS + ["cap", "kind", "read_kb"]
+CAP_COLS = COLS + ["cap", "kind", "read_kb", "stats"]
 MEM_COLS = ["cap", "cell", "usage_mib", "anon_mib", "file_mib", "peak_mib", "limit_mib", "failcnt", "oom_kill",
             "major_faults", "read_mib", "detail"]
 STATUS_COLS = ["system", "cap", "cap_bytes", "status", "detail"]
@@ -161,6 +161,21 @@ def scale_diffs(prep, sysobj, ds, f, k, qi, ti, got, exp):
     return rows
 
 
+def snap(sysobj):
+    """Counters around one query (outside its timing): the system's own (vexact's reader reads), the storage bytes its
+    processes read, and this process's major faults."""
+    c = dict(sysobj.counters())
+    c["proc_read_kb"] = capmem.io_read_bytes(sysobj.io_pids()) / 1024
+    c["majflt"] = resource.getrusage(resource.RUSAGE_SELF).ru_majflt
+    return c
+
+
+def stats_of(sysobj, s0, s1):
+    d = {k: round(s1[k] - s0[k], 1) for k in s1}
+    d.update(sysobj.query_stats() or {})
+    return json.dumps(d, separators=(",", ":"))
+
+
 def cap_label(c):
     return "uncapped" if c == "uncapped" else f"{float(c) * 100:g}"
 
@@ -196,10 +211,20 @@ def enter_cap(a, ds, sname, sysobj, prep):
     """Moves into a cgroup, opens the kept index, drops its files from the page cache and sets the cap. None (and a
     status row) when it does not fit."""
     nbytes = 0 if a.cap == "uncapped" else int(round(float(a.cap) * prep.dataset_bytes()))
+    if not sysobj.disk and nbytes:
+        status(a, ds, sname, nbytes, "does not fit", "in memory: it holds the f32 vectors (100% of the dataset's size) "
+               "in anonymous memory")
+        return None
     cg = capmem.Cgroup().enter()
     log(f"{sname} on {ds}: in {cg.dir} (cgroup v{cg.v}); {cg.report()}")
     try:
-        extra = sysobj.load() or {}
+        if sysobj.disk:
+            extra = sysobj.load() or {}
+        else:  # an in-memory system: built here, in the group, and run uncapped
+            if not build(a, ds, sname, sysobj, len(os.sched_getaffinity(0)), "caps/builds.csv"):
+                cg.leave()
+                return None
+            extra = {}
     except Unavailable as e:
         status(a, ds, sname, nbytes, "unavailable", str(e))
         cg.leave()
@@ -291,9 +316,11 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                     sysobj.qi = qi
                     sysobj.evict_cold(cg)
                     b0 = capmem.io_read_bytes(sysobj.io_pids())
+                    s0 = snap(sysobj)
                     t0 = time.perf_counter()
                     got = call_for(qi)()
                     ms = sysobj.own_ms if sysobj.own_ms is not None else (time.perf_counter() - t0) * 1e3
+                    cold_stats = stats_of(sysobj, s0, snap(sysobj))
                     got = np.asarray(got, dtype=np.int64)
                     exp = expected(qi)
                     hit = len(np.intersect1d(got, exp)) if exp is not None else 0
@@ -302,17 +329,24 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                                      min_ms=f"{ms:.4f}", returned=len(got), expected="" if exp is None else len(exp),
                                      nonmatch="" if exp is None else len(got) + len(exp) - 2 * hit,
                                      recall="" if exp is None else f"{hit / max(1, len(exp)):.5f}", cap=label,
-                                     kind="cold", read_kb=f"{(capmem.io_read_bytes(sysobj.io_pids()) - b0) / 1024:.0f}"))
+                                     kind="cold", read_kb=f"{(capmem.io_read_bytes(sysobj.io_pids()) - b0) / 1024:.0f}",
+                                     stats=cold_stats))
                 b0 = capmem.io_read_bytes(sysobj.io_pids()) if cg is not None else 0
                 for qi in qis:
                     call = call_for(qi)
                     sysobj.qi = qi
                     ts = []
-                    for _ in range(reps):
+                    qstats = ""
+                    for r in range(reps):
+                        last = cg is not None and r == reps - 1
+                        if last:
+                            s0 = snap(sysobj)
                         t0 = time.perf_counter()
                         got = call()
                         ms = (time.perf_counter() - t0) * 1e3
                         ts.append(sysobj.own_ms if sysobj.own_ms is not None else ms)
+                        if last:
+                            qstats = stats_of(sysobj, s0, snap(sysobj))
                     got = np.asarray(got, dtype=np.int64)
                     got = got[got >= 0]
                     exp = expected(qi)
@@ -333,7 +367,7 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                                expected="" if exp is None else len(exp), nonmatch="" if exp is None else nonmatch,
                                recall="" if exp is None else f"{rec:.5f}")
                     if cg is not None:
-                        row.update(cap=label, kind="warm", read_kb="")
+                        row.update(cap=label, kind="warm", read_kb="", stats=qstats)
                     rows.append(row)
                 med, p90 = summarise(meds)
                 note = ""

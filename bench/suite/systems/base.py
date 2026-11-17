@@ -55,6 +55,14 @@ class System:
     def data_files(self):
         return [self.work]
 
+    def counters(self):
+        """The system's own cumulative counters, read before and after a query under a cap (numbers only)."""
+        return {}
+
+    def query_stats(self):
+        """Statistics of the last query the system reports itself (a dict), or None."""
+        return None
+
     def io_pids(self):
         """The processes whose storage reads count as this system's (a server it drives, too)."""
         return [os.getpid()]

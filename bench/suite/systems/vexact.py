@@ -81,6 +81,12 @@ class Vexact(System):
         self.qbuf = np.zeros(self.ix.dim, np.float32)
         return dict(dk, full_resident=self.ix.full_resident())
 
+    def counters(self):
+        # the reader's reads (io_uring, disk mode): count, bytes, and the time spent waiting for them
+        import vexact_py
+        n, b, w = vexact_py.Index.io_counters()
+        return dict(reads=n, read_kb=b / 1024, wait_us=w / 1e3)
+
     def evict_cold(self, cg):
         # the full vectors only: the codes and the rest of the index stay where they are
         self.ix.evict_full()

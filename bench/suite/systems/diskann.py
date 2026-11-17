@@ -91,7 +91,16 @@ class DiskANN(System):
             raise RuntimeError("diskann_bench stopped")
         self.own_ms = float(np.frombuffer(head[:8], np.float64)[0])
         n = int(np.frombuffer(head[8:], np.int64)[0])
-        return np.frombuffer(self.srv.stdout.read(8 * n), np.int64)
+        ids = np.frombuffer(self.srv.stdout.read(8 * n), np.int64)
+        st = np.frombuffer(self.srv.stdout.read(48), np.float64)
+        # DiskANN's own counters for this search: reads, rounds (each waits for its beam's reads), distances, the
+        # time in I/O and in CPU (us), the bytes read
+        self.qstats = dict(reads=int(st[0]), rounds=int(st[1]), cmps=int(st[2]), io_us=round(float(st[3]), 1),
+                           cpu_us=round(float(st[4]), 1), read_kb=round(float(st[5]) / 1024, 1))
+        return ids
+
+    def query_stats(self):
+        return getattr(self, "qstats", None)
 
     def close(self):
         if getattr(self, "srv", None):

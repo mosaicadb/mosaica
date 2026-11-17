@@ -50,7 +50,7 @@ SYSTEM_PARAMS = {
 CAP_SYSTEMS = dict(
     exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
     threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
-    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"]),
+    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
 )
 IN_MEMORY = ["faiss-flat", "faiss-panorama", "pdx-bond", "faiss-hnsw", "acorn"]
 

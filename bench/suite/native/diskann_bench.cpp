@@ -10,7 +10,9 @@
 //         q QI K L BEAM           the K nearest to query QI (QUERIES.npy holds f64 rows), search list L, beam width
 //                                 BEAM
 //       and answers each with the search time in ms (f64), the id count (i64) and the ids (i64), in binary, as
-//       ../../threshold-db/acorn_bench.cpp does.
+//       ../../threshold-db/acorn_bench.cpp does, then six f64 from the search's QueryStats: reads issued (n_ios),
+//       rounds (n_hops: each waits for its beam's reads), distance computations (n_cmps), the time in I/O and in CPU
+//       (io_us, cpu_us) and the bytes read.
 #include <omp.h>
 #include <cstdio>
 #include <cstring>
@@ -25,6 +27,7 @@
 
 #include "disk_utils.h"
 #include "linux_aligned_file_reader.h"
+#include "percentile_stats.h"
 #include "pq_flash_index.h"
 
 static double now_ms() {
@@ -104,7 +107,8 @@ int main(int argc, char** argv) {
             std::vector<uint64_t> ids(k);
             std::vector<float> dist(k);
             double s = now_ms();
-            ix->cached_beam_search(qbuf, k, L, ids.data(), dist.data(), beam);
+            diskann::QueryStats st;
+            ix->cached_beam_search(qbuf, k, L, ids.data(), dist.data(), beam, false, &st);
             double ms = now_ms() - s;
             std::vector<int64_t> res;
             for (size_t j = 0; j < k; j++)
@@ -113,6 +117,9 @@ int main(int argc, char** argv) {
             fwrite(&ms, 8, 1, out);
             fwrite(&n, 8, 1, out);
             fwrite(res.data(), 8, n, out);
+            double qs[6] = {(double)st.n_ios, (double)st.n_hops, (double)st.n_cmps, (double)st.io_us, (double)st.cpu_us,
+                            (double)st.read_size};
+            fwrite(qs, 8, 6, out);
             fflush(out);
         }
         return 0;
