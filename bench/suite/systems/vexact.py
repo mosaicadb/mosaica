@@ -48,7 +48,7 @@ class Vexact(System):
         for f in tmp:
             os.remove(f)
         t = time.time()
-        self.ix = vexact_py.Index(out, core=self.core)
+        self.ix = vexact_py.Index(out, core=self.core, **self.index_opts())
         self.encode_s = time.time() - t
         if self.params.get("disk_mode"):
             # at scale: reopen the saved index mapped, with the full vectors on file (load), not on the heap
@@ -77,9 +77,15 @@ class Vexact(System):
         full = os.path.join(self.work, "full.f16")
         if os.path.exists(full):
             os.remove(full)
-        self.ix = vexact_py.Index(os.path.join(self.work, "index"), core=self.core, full_file=full, **dk)
+        self.ix = vexact_py.Index(os.path.join(self.work, "index"), core=self.core, full_file=full, **dk,
+                                  **self.index_opts())
         self.qbuf = np.zeros(self.ix.dim, np.float32)
         return dict(dk, full_resident=self.ix.full_resident())
+
+    def index_opts(self):
+        # the deterministic levels (`dlv`, cumulative bytes): None keeps the bindings' default, the fit's six levels
+        dlv = self.params.get("dlv")
+        return {} if dlv is None else dict(dlv=list(dlv))
 
     def counters(self):
         # the reader's reads (io_uring, disk mode): count, bytes, and the time spent waiting for them
@@ -131,3 +137,9 @@ class Vexact(System):
 
     def close(self):
         self.ix = None
+
+
+class VexactD2(Vexact):
+    """The same index built with the library's own default levels (BuildOptions::default(): two deterministic levels,
+    ending at 16 and 32 bytes) in place of the bindings' six; the query-path speedups target these."""
+    name = "vexact-d2"
