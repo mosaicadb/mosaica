@@ -1170,7 +1170,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let (mut walls, mut br, mut fr, mut wrong, mut pwall) = (Vec::new(), 0.0, 0.0, 0u64, 0.0);
                 let mut parts = [0f64; 21];
                 let mut cnt = [0f64; 4];
-                let mut rkap = 0f64;
                 // per query: clusters on the index path, on full vectors, items entering the first level, item-levels,
                 // groups, full reads
                 let mut opened = [0f64; 6];
@@ -1217,7 +1216,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     for k in 0..4 {
                         cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
-                    rkap += ms(cy[P_RKAP]);
                     let nqf = qs.len() as f64;
                     opened[0] += r.idx_clusters as f64 / nqf;
                     opened[1] += r.flat_clusters as f64 / nqf;
@@ -1235,7 +1233,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let tot: f64 = parts[..20].iter().sum();
                 let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
-                out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
                 out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels, {:.1} groups, {:.0} full reads", opened[0], opened[1], opened[2], opened[3], opened[4], opened[5]);
                 lines.push(line);
