@@ -321,7 +321,7 @@ s), so the times in this section are only comparable with each other.
 - int8 q·m.
 - The item-bytes gap of about 1% at small answers between the Rust fit and `fit.py` at 1M BioCLIP-2.
 - Anything above 4M rows; a GPU faiss partition.
-- The certificate table that would take Python out of the fit.
+- (Done since: the certificate without Python, "The certificate in Rust" at the end.)
 
 ## Commands
 
@@ -846,3 +846,57 @@ After the review fixes (the rule at 250, the `--full-file` guard, anchors writte
 | k-NN 100 | 38.3 / 50.0 (0.77) | 15.8 / 19.5 (0.81) | 18.0 / 30.0 (0.60) | 9.2 / 10.6 (0.87) |
 
   Mean ratio 0.73 (0.60–0.87), 1.38× faster by the geometric mean. Raw logs: the session's `b4/final2/`.
+
+## The certificate in Rust (2026-11-17)
+
+The fit no longer runs Python. Its certificate (meta.json `CERTS`, the randomised levels' worst-case constant X for
+the index's block layout at its budget, read by `v2::tail::level_constant`) comes from a shipped table
+(`src/certs_table.json`) when the layout and budget are there, else from `src/certify.rs`, a port of
+`tools/certify.py`, within `--cert-time`; else the build falls back to the closed-form bounds, as before. The fit
+records exactly what certify.py recorded (`{ds, lnd, X}`, the same X). `tools/fit.py` reads the table, then runs
+certify.py; certify.py's own command line never reads the table. The partition still needs Python
+(`tools/partition.py`, numpy and faiss).
+
+**Method parity.** The port is the same computation with the same constants and margins (K0 = 64 to Kmax = 4096,
+eta = 0.001, M = 65536 / 131072 and k0 = 400 / 800 above 1,100 dimensions, REL = 1e-6, ABS = 1e-11, 8-point
+Gauss–Legendre, the X search from the sphere prediction + 0.008 in six steps of 0.002). lgamma is cephes' (scipy's
+`gammaln` bit for bit at 313 points), sums are numpy's pairwise sums, the quadrature nodes numpy's; the FFT (rustfft)
+and the four-block cells (a GEMM, BLAS in numpy) differ in the last bits, which moves a cell's log bound by ~1e-10, so
+only a cell that close to the budget could pass in one and fail in the other. The sphere prediction (betainc by
+continued fraction, a bisection inverse) is within 7e-15 of scipy's on all 377 layouts below, and (pred + 0.008) ×
+1000, whose ceiling starts the search, is never within 2e-4 of an integer there, so both start at the same X.
+certify.py itself was changed for memory only: it kept every failing cell to take the next box from their extent
+(10 GB at 64 dimensions and N = 2^30); it now keeps each coordinate's extent, and on the finest grid returns at the
+first failing cell, which is the answer the full pass gives. The port does the same.
+
+**Agreement.** X equal everywhere it was compared: the tests' fixture (27 layouts: the four-block layouts of 64, 384,
+768 and 1536 dimensions and two- and three-block subsets, at N = 2^10, 2^20, 2^30) and all 350 table entries. No
+layout differed.
+
+**Table coverage.** The fit's layout of n0 = 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1152, 1536, 2048, 3072 and
+4096 (synth4k's 64 and the 60k and BioCLIP-2 sets' 768 among them) at every N = 2^10 … 2^34: 350 entries, 345 with a
+certificate and 5 without (64 dimensions at N ≥ 2^30, where neither search finds one in its six steps; recorded as
+X null, so a fit does not search again). Layouts and budgets come from `vexact cert-layouts`, so the layout rule lives
+only in `src/fit.rs`. `tools/certs_table.py` took 6,388 s on 4 cores (certify.py 16,408 s in all, three processes at
+once; the port 6,389 s on 2 threads); the five 64-dimension entries without a certificate took a quarter of
+certify.py's time. A layout outside the table is certified in the fit: 300 dimensions, 5,000 rows, `create` with
+python3 refused outside the partition certified X 7.213 in 2.1 s, and certify.py gives 7.213 on the same fit.
+
+**Times** (idle machine; peak anonymous memory):
+
+| Layout, N = 2^20 | certify.py | Port, 4 threads | Port, 1 thread |
+|---|---|---|---|
+| 768 (1M BioCLIP-2), [95, 127, 255, 287] | 15.3 s, 112 MB | 3.8 s, 40 MB | 12.2 s, 26 MB |
+| 1536, [191, 255, 511, 575] | 38.5 s, 236 MB | 9.3 s, 95 MB | 34.6 s, 62 MB |
+| 4096, [511, 687, 1359, 1535] | 90.1 s, 363 MB | 22.2 s, 130 MB | 86.4 s, 83 MB |
+| 64 at N = 2^30 (no certificate) | 80.9 s, 169 MB | 12.8 s, 66 MB | 70.2 s, 44 MB |
+
+A table hit takes no measurable time: the 1M BioCLIP-2 `create` fitted in 21 s (35 s with certify.py in "Final gates
+of batch 4"), and its peak anonymous memory fell from 1,950 MB to 1,345 MB (the certificate's Python process had set
+it).
+
+**Hashes**, with the port's certificate and python3 refused outside the partition (a `python3` on PATH that runs only
+`tools/partition.py`; `create` then runs the partition and the Rust fit; nothing else asked for Python): 1M BioCLIP-2
+`create` from `x.npy` at the new defaults `66237726622c9883` (156 s) and at the old defaults by flags
+`db6ca06f69bb8c74` (193 s); synth4k and the 60k fit (tools/fit.py fits) with their CERTS replaced by the port's (the
+same values) rebuilt to `165fef0c0d6b5659` (`--dlv fit`: `7ac80b6c54101fa9`) and `181dbe516f640885`. All as before.

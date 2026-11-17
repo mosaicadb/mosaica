@@ -100,9 +100,10 @@ and tan φ are at least the true values. Values off the grids escape to exact fl
 
 **Support table, centre tables and certificate.** Every centre direction is an anchor, and for each (anchor, cluster)
 pair the build stores the exact extremes of anchor·x over the cluster, rounded outward. It also stores each cluster's
-centre tables, the query-independent part of every level's lookup tables. `rust/tools/certify.py`, run by `fit.py`
-within `--cert-time` (600 s by default), certifies the randomised constant for the index's block layout and writes it to
-`meta.json` (section 3).
+centre tables, the query-independent part of every level's lookup tables. The fit takes the randomised constant for the
+index's block layout from a shipped table of certificates (`rust/src/certs_table.json`), or else certifies it within
+`--cert-time` (600 s by default; `rust/src/certify.rs`, the method of `rust/tools/certify.py`, which `fit.py` runs), and
+writes it to `meta.json` (section 3).
 
 **Opening.** The encoded codes are not written to disk, so opening an index derives the allocations, rates and scalar
 grids and encodes every item: 147 s at 1M on three cores and 208 s on two in the runs in `rust/results/system/`. The
