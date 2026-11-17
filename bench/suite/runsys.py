@@ -131,6 +131,36 @@ def main():
             shutil.rmtree(work, ignore_errors=True)
 
 
+DIFF_COLS = ["dataset", "system", "filter", "k", "query", "id", "side", "s", "t", "s_minus_t", "allowance",
+             "beyond_rounding", "same_vector_as"]
+
+
+def scale_diffs(prep, sysobj, ds, f, k, qi, ti, got, exp):
+    """At scale, the items of an exact k-NN answer that differ from the streaming truth, each with its similarity s
+    (f64, the stored f16 vector and the f64 query), the boundary t (the midpoint between the k-th and (k+1)-th
+    similarity, prep_scale.py, computed in f32) and the allowance of check.py for the system's rounding (f16: 2^-11 on
+    the vector and on the query; f32: 2^-24 on each and n 2^-24 of accumulation), plus n 2^-24 for the f32 truth;
+    `same_vector_as`: an answer item with a bit-identical stored vector (a duplicate, an exact tie)."""
+    X = prep.corpus()
+    q = prep.queries()[qi]
+    t = float(np.load(prep.f("knn_thr.npy" if f == "none" else f"knn_thr_{f}.npy"))[ti, (
+        prep.meta["k"] if f == "none" else prep.meta["filters"][f]["k"]).index(k)])
+    n = prep.d
+    ux, uq, uacc = (2.0 ** -11, 2.0 ** -11, 0.0) if sysobj.rounding == "f16" else (2.0 ** -24, 2.0 ** -24, n * 2.0 ** -24)
+    rows = []
+    gs, es = set(got.tolist()), set(exp.tolist())
+    for i in sorted(gs ^ es):
+        x = np.asarray(X[i], dtype=np.float64)
+        sv = float(x @ q)
+        allow = float(np.abs(x * q).sum() * (ux + uq + uacc + n * 2.0 ** -24)) + 1e-12
+        others = [j for j in (es if i in gs else gs) if np.array_equal(np.asarray(X[j]), np.asarray(X[i]))]
+        rows.append(dict(dataset=ds, system=sysobj.name, filter=f, k=k, query=qi, id=i,
+                         side="returned, not in the truth" if i in gs else "in the truth, not returned",
+                         s=f"{sv:.9f}", t=f"{t:.9f}", s_minus_t=f"{sv - t:.3g}", allowance=f"{allow:.3g}",
+                         beyond_rounding=int(abs(sv - t) > allow), same_vector_as=" ".join(map(str, others))))
+    return rows
+
+
 def cap_label(c):
     return "uncapped" if c == "uncapped" else f"{float(c) * 100:g}"
 
@@ -205,7 +235,7 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
     label = cap_label(a.cap) if cg is not None else None
     out_csv = os.path.join(rdir, "caps", f"{sname}.cap-{label}.csv") if cg is not None else os.path.join(rdir, f"{sname}.csv")
     mem_csv = os.path.join(rdir, "caps", f"{sname}.cap-{label}.mem.csv")
-    setup_rows, done = [], set()
+    setup_rows, done, diff_rows = [], set(), []
     if cg is not None:
         merge_csv(mem_csv, MEM_COLS, [], lambda r: True)
     for qt, role, f, p in plan:
@@ -292,6 +322,8 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                         rec = hit / len(exp) if len(exp) else 1.0
                         bad += nonmatch
                         recs.append(rec)
+                        if scale and qt == "exact" and nonmatch:
+                            diff_rows += scale_diffs(prep, sysobj, ds, f, par["k"], qi, tq[qi], got, exp)
                     meds.append(float(np.median(ts)))
                     if dumps:
                         dump.write(np.array([qi, pi, len(got)], "<u4").tobytes() + np.sort(got).astype("<u4").tobytes())
@@ -328,6 +360,11 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
     merge_csv(os.path.join(rdir, "caps" if cg is not None else "", f"{sname}{'.cap-' + label if cg is not None else ''}_setup.csv"),
               ["type", "filter", "setting", "set_visible_ms", "setting_ms"], setup_rows,
               lambda r: (r["type"], r["filter"]) in done)
+    if diff_rows:
+        merge_csv(os.path.join(rdir, "scale_diffs.csv"), DIFF_COLS, diff_rows, lambda r: r["system"] == sname)
+        beyond = sum(int(r["beyond_rounding"]) for r in diff_rows)
+        log(f"{sname}: {len(diff_rows)} items differ from the streaming truth in exact k-NN; {beyond} beyond the "
+            "rounding allowance (scale_diffs.csv)")
     if cg is not None:
         status(a, ds, sname, cg.limit or 0, "ok", cg.report())
     log(f"{sname} on {ds}: done; peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20:.2f} GiB")

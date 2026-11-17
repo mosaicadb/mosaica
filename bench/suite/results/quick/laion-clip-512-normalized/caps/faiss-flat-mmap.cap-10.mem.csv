@@ -1,0 +1,7 @@
+cap,cell,usage_mib,anon_mib,file_mib,peak_mib,limit_mib,failcnt,oom_kill,major_faults,read_mib,detail
+10,"exact none default {""k"":10}",195.3,8.6,178.7,195.4,195.4,0,0,3001255,9769.7,
+10,"exact random-1 default {""k"":10}",76.2,9.7,58.2,195.4,195.4,0,0,3016160,0.0,
+10,"threshold none default {""share"":0.0001}",195.4,9.8,177.6,195.4,195.4,0,0,6017414,9769.7,
+10,"threshold none default {""share"":0.01}",195.4,10.0,177.4,195.4,195.4,0,0,9018668,9769.7,
+10,"threshold none default {""share"":0.1}",195.2,15.2,172.3,195.4,195.4,0,0,12019922,9769.7,
+10,"threshold random-1 default {""share"":0.01}",81.6,15.2,58.2,195.4,195.4,0,0,12034827,0.0,

@@ -1,0 +1,5 @@
+type,filter,setting,set_visible_ms,setting_ms
+exact,none,default,0.01,0.00
+exact,random-1,default,1.93,0.00
+threshold,none,default,0.07,0.00
+threshold,random-1,default,0.24,0.00

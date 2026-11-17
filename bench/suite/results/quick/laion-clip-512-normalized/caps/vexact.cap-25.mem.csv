@@ -1,0 +1,13 @@
+cap,cell,usage_mib,anon_mib,file_mib,peak_mib,limit_mib,failcnt,oom_kill,major_faults,read_mib,detail
+25,"exact none default {""k"":10}",464.6,158.9,300.8,464.6,488.5,0,0,330674,267.2,
+25,"exact random-1 default {""k"":10}",470.3,159.5,305.1,470.3,488.5,0,0,340530,0.0,
+25,"threshold none default {""share"":0.0001}",443.8,159.8,279.8,470.6,488.5,0,0,340539,64.1,
+25,"threshold none default {""share"":0.01}",488.5,167.1,315.5,488.5,488.5,0,0,345476,5597.4,
+25,"threshold none default {""share"":0.1}",488.3,177.2,305.4,488.5,488.5,0,0,362589,43516.4,
+25,"threshold random-1 default {""share"":0.01}",488.4,177.3,305.4,488.5,488.5,0,0,362613,41.3,
+25,"approx none default {""k"":10,""nprobe"":16,""eps"":0.0}",470.3,177.3,290.5,488.5,488.5,0,0,368699,22.6,
+25,"approx none default {""k"":10,""nprobe"":64,""eps"":0.0}",471.8,177.3,291.6,488.5,488.5,0,0,375020,23.6,
+25,"approx none default {""k"":10,""nprobe"":256,""eps"":0.0}",472.8,177.3,292.3,488.5,488.5,0,0,381509,24.0,
+25,"approx random-1 default {""k"":10,""nprobe"":16,""eps"":0.0}",454.5,177.4,273.9,488.5,488.5,0,0,383275,6.4,
+25,"approx random-1 default {""k"":10,""nprobe"":64,""eps"":0.0}",465.5,177.4,284.0,488.5,488.5,0,0,387612,14.8,
+25,"approx random-1 default {""k"":10,""nprobe"":256,""eps"":0.0}",479.5,177.4,296.8,488.5,488.5,0,0,395244,20.5,

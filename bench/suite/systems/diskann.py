@@ -36,13 +36,16 @@ class DiskANN(System):
     def build(self, threads):
         b = self._bin()
         os.makedirs(self.work, exist_ok=True)
-        X = self.prep.corpus()
-        N, d = X.shape
+        N, d = self.prep.N, self.prep.d
         binf = os.path.join(self.work, "corpus32.bin")
-        with open(binf, "wb") as f:
-            f.write(np.array([N, d], "<i4").tobytes())
-            for i in range(0, N, 100_000):
-                f.write(np.ascontiguousarray(X[i:i + 100_000], dtype="<f4").tobytes())
+        # a corpus file already in place is used as it is: written ahead, it lets corpus32.npy go before a build that
+        # needs the disk (about 2 + 2 + 4 GB at a million 512-d vectors: this file, the graph build's copy, the index)
+        if not (os.path.exists(binf) and os.path.getsize(binf) == 8 + 4 * N * d):
+            X = self.prep.corpus()
+            with open(binf, "wb") as f:
+                f.write(np.array([N, d], "<i4").tobytes())
+                for i in range(0, N, 100_000):
+                    f.write(np.ascontiguousarray(X[i:i + 100_000], dtype="<f4").tobytes())
         pq_gb = self.params.get("pq_fraction", 0.05) * self.prep.dataset_bytes() / 1e9
         R, L = self.params.get("R", 64), self.params.get("L", 100)
         cmd = [b, "build", binf, self.prefix(), str(R), str(L), f"{pq_gb:.6f}", str(self.params.get("build_ram_gb", 4)),

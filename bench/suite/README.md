@@ -78,6 +78,10 @@ python3 -I bench/suite/run.py quick                 # prep, run, check, report o
 python3 -I bench/suite/run.py quick --datasets yahoo-minilm-384-normalized --systems vexact,faiss-flat \
     --types exact,threshold --filters none,random-1
 python3 -I bench/suite/run.py quick --stages public --vibe ~/vibe --annb ~/ann-benchmarks
+bash bench/suite/install/diskann.sh ~/src/diskann  # then export DISKANN_BENCH=~/src/diskann/diskann_bench
+python3 -I bench/suite/run.py quick --stages prep,cap,report      # the memory-cap axis (yahoo and laion in quick)
+python3 -I bench/suite/run.py scale-test                           # the scale path on 200k / 500k / 1M (2 GB download)
+python3 -I bench/suite/run.py scale --download /big/disk/laion     # 10M / 40M / 100M (see the table below)
 ```
 
 Options: `--core` (the timing core, default 3) and `--build-cores` (default 0-2); `--hdf5-dirs` (more places to look
@@ -164,7 +168,10 @@ the cache would otherwise serve it unseen) and reclaims its group's cache, then 
 `memory.limit_in_bytes` and `memory.memsw.limit_in_bytes` (memory plus swap), v2 `memory.max` and
 `memory.swap.max = 0`. A server the system drives (DiskANN's) is started by that process, so it is inside the group.
 After each cell the run logs the group's usage, anonymous and file memory, peak, limit hits (v1 `failcnt`, v2
-`max` events), OOM kills, major faults and the bytes read from storage (`caps/<system>.cap-<cap>.mem.csv`).
+`max` events), OOM kills, major faults and the bytes read from storage (`caps/<system>.cap-<cap>.mem.csv`). On this
+container's kernel (6.18, cgroup v1) `failcnt` stayed at 0 although the groups ran at their limit; the evidence that a
+cap held is the peak equal to the limit, the usage pinned there, and the storage reads (the mapped faiss scan, for
+instance, read its whole file again on every query under every cap).
 
 **Does not fit.** A limit the kernel refuses (v1 cannot shrink the group below what it cannot reclaim, EBUSY), and a
 process the OOM killer stops under the cap, are recorded as `does not fit` in `caps/status.csv`; the cells a run
@@ -240,7 +247,8 @@ linearly above that; nothing above 3M has been measured for the index (`rust/REP
 | prep time (download-bound here: 60-110 s a part) | | 2-3 h | 2-3 h | 2-3 h |
 | corpus16.npy | 1.0 GB | 10 GB | 41 GB | 102 GB |
 | vexact files: Xs.npy (fit) + saved index (vectors.bin, codes) + the disk-mode copy of the vectors | 2.3 GB + 1.0 GB | 34 GB | 136 GB | 340 GB |
-| vexact codes alone (what a cap must leave room for) | 0.3-0.4 GB (0.43 GiB at 768-d, threshold-db) | 4 GB | 16 GB | 40 GB |
+| vexact codes alone (on file in disk mode, so page cache under a cap) | 0.3-0.4 GB (0.43 GiB at 768-d, threshold-db) | 4 GB | 16 GB | 40 GB |
+| vexact query process in disk mode: anonymous memory at open | 152 MiB at 1M (90 MiB at yahoo's 677k) | ~1.5 GiB | ~6 GiB | ~15 GiB |
 | vexact build: peak RSS (fit.py, then the encode, which holds the f16 vectors on the heap) | 2.0 / 2.4 / 3.0 GiB at 0.2 / 0.5 / 1M | ~15 GiB | ~54 GiB | ~130 GiB |
 | vexact build time (3 threads) | 350 s (fit 139 s, encode 127 s) | ~1 h | ~4 h | ~10 h |
 | vexact exact k-NN, k = 10, one thread | 53 ms (11 ms at 200k, 27 ms at 500k) | | | |
@@ -277,6 +285,13 @@ inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`.
 - **The public suites** (`--stages public`): the overlay was checked (applied and restored on VIBE and ANN-Benchmarks
   checkouts), but the images for faiss and glass were not built here, and ANN-Benchmarks' Docker images were absent,
   so the unfiltered approximate k-NN was left for a machine with the images.
+- **The cap axis** ran here on yahoo-minilm-384 and laion-clip-512 (`results/quick/REPORT.md`, "Under a memory cap"),
+  on cgroup v1 (a writable memory controller in the container), with vexact in disk mode, faiss flat mapped, faiss IVF
+  on disk and DiskANN; pgvector under a cap was not run. The disk here reads 4 KiB at random in about 32 µs at queue
+  depth 1 and 1.9 GB/s sequentially (`../threshold-db/capped/diskbench.c`), five times faster per read than the WSL2
+  disk of the earlier capped runs, so cold figures here are optimistic for slower disks.
+- **The scale suite** was tested end to end on its small sizes (`scale-test`: 200k, 500k and 1M from two LAION parts;
+  `results/scale-test/REPORT.md`); `scale` itself (10M to 100M) is for a machine with the disk and memory above.
 
 ## The scripts this suite replaced
 

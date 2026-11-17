@@ -141,13 +141,76 @@ Several threads; recorded apart from the queries.
 
 Caps are fractions of the dataset's size, N x d x 4 bytes (its f32 vectors as distributed), for the whole query process (and a server it uses), page cache included, with no swap (capmem.py). Each system builds uncapped, then each cap runs in a fresh process: the system's files are dropped from the page cache, the limit is set, and each cell runs one cold query (query 0 once, after the full vectors, or for the other systems the group's page cache, are dropped; codes, graph and PQ stay) and then the warm repetitions. Cells are `warm median / cold` ms, with the mean recall for approximate k-NN. `does not fit`: the kernel refused the limit, or the OOM killer stopped the process under it. The in-memory systems (faiss-flat, faiss-panorama, pdx-bond, faiss-hnsw, acorn) keep at least the f32 vectors (100% of the dataset's size) in anonymous memory, so none of them fits under a cap of 50% or less; they are not run capped.
 
+### laion-clip-512-normalized
+
+| type | filter | param | system | uncapped | 50% | 25% | 10% |
+|---|---|---|---|---|---|---|---|
+| exact | none | k=10 | vexact [ours] | 60.2 / 164 | 55.5 / 172 | 50.9 / 143 | 175 / 165 |
+| exact | none | k=10 | faiss-flat-mmap [standard] | 156 / 1.49e+04 | 1.36e+04 / 1.37e+04 | 1.32e+04 / 1.29e+04 | 1.31e+04 / 1.27e+04 |
+| exact | random-1 | k=10 | vexact [ours] | 0.627 / 278 | 0.562 / 306 | 0.667 / 309 | 266 / 262 |
+| exact | random-1 | k=10 | faiss-flat-mmap [standard] | 5.14 / 389 | 4.91 / 485 | 4.3 / 353 | 5.36 / 396 |
+| threshold | none | 0.01% | vexact [ours] | 53.4 / 53 | 53.7 / 52.8 | 51.7 / 86.8 | 190 / 151 |
+| threshold | none | 0.01% | faiss-flat-mmap [standard] | 154 / 1.45e+04 | 1.4e+04 / 1.4e+04 | 1.33e+04 / 1.29e+04 | 1.34e+04 / 1.32e+04 |
+| threshold | none | 1% | vexact [ours] | 109 / 111 | 96.4 / 110 | 104 / 133 | 335 / 286 |
+| threshold | none | 1% | faiss-flat-mmap [standard] | 149 / 1.45e+04 | 1.38e+04 / 1.32e+04 | 1.33e+04 / 1.3e+04 | 1.39e+04 / 1.36e+04 |
+| threshold | none | 10% | vexact [ours] | 258 / 234 | 224 / 222 | 293 / 246 | 522 / 494 |
+| threshold | none | 10% | faiss-flat-mmap [standard] | 160 / 1.48e+04 | 1.39e+04 / 1.33e+04 | 1.33e+04 / 1.28e+04 | 1.4e+04 / 1.43e+04 |
+| threshold | random-1 | 1% | vexact [ours] | 1.35 / 51.4 | 1.26 / 42.9 | 1.25 / 55.8 | 75.6 / 72 |
+| threshold | random-1 | 1% | faiss-flat-mmap [standard] | 4.36 / 367 | 4.09 / 361 | 4.29 / 364 | 4.19 / 392 |
+| approx | none | k=10 L=20 | diskann [frontier] | 0.792 / 2.72 r 0.405 | 0.878 / 0.919 r 0.405 | 0.639 / 0.923 r 0.405 | 0.642 / 0.854 r 0.405 |
+| approx | none | k=10 L=50 | diskann [frontier] | 1.36 / 1.75 r 0.620 | 1.34 / 1.27 r 0.620 | 1.22 / 1.1 r 0.620 | 1.31 / 1.37 r 0.620 |
+| approx | none | k=10 L=100 | diskann [frontier] | 2.49 / 3.92 r 0.735 | 2.87 / 4.58 r 0.735 | 2.38 / 2.41 r 0.735 | 2.44 / 3.51 r 0.735 |
+| approx | none | k=10 L=200 | diskann [frontier] | 4.87 / 5.07 r 0.800 | 4.24 / 4.54 r 0.800 | 4.54 / 4.21 r 0.800 | 4.91 / 4.61 r 0.800 |
+| approx | none | k=10 nprobe=16 eps=0.0 | vexact [ours] | 2.44 / 12.8 r 0.740 | 1.72 / 13 r 0.740 | 1.71 / 11.2 r 0.740 | 12.7 / 21.8 r 0.740 |
+| approx | none | k=10 nprobe=64 eps=0.0 | vexact [ours] | 5.73 / 13.6 r 0.850 | 4.53 / 11.6 r 0.850 | 4.64 / 13 r 0.850 | 81.4 / 73.8 r 0.850 |
+| approx | none | k=10 nprobe=256 eps=0.0 | vexact [ours] | 19 / 32 r 0.955 | 14.8 / 22.8 r 0.955 | 16.8 / 36.4 r 0.955 | 367 / 357 r 0.955 |
+| approx | none | k=10 nprobe=16 | faiss-ivf-disk [standard] | 1.09 / 7.2 r 0.790 | 1.05 / 7.09 r 0.790 | 1.13 / 6.78 r 0.790 | 1.02 / 5.73 r 0.790 |
+| approx | none | k=10 nprobe=64 | faiss-ivf-disk [standard] | 2.63 / 16.5 r 0.885 | 2.41 / 15.2 r 0.885 | 2.4 / 15.3 r 0.885 | 2.93 / 18.1 r 0.885 |
+| approx | none | k=10 nprobe=256 | faiss-ivf-disk [standard] | 8.33 / 73.1 r 0.950 | 7.33 / 56.9 r 0.950 | 7.42 / 63.8 r 0.950 | 7.22 / 63.7 r 0.950 |
+| approx | random-1 | k=10 nprobe=16 eps=0.0 | vexact [ours] | 0.509 / 5.4 r 0.490 | 0.369 / 3.68 r 0.490 | 0.39 / 4.56 r 0.490 | 0.366 / 4.17 r 0.490 |
+| approx | random-1 | k=10 nprobe=64 eps=0.0 | vexact [ours] | 0.578 / 19.2 r 0.700 | 0.469 / 13.7 r 0.700 | 0.445 / 14.6 r 0.700 | 0.481 / 13.7 r 0.700 |
+| approx | random-1 | k=10 nprobe=256 eps=0.0 | vexact [ours] | 0.679 / 71.5 r 0.895 | 0.571 / 65.1 r 0.895 | 0.706 / 68.1 r 0.895 | 1.98 / 66.6 r 0.895 |
+| approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] | 0.857 / 5.87 r 0.515 | 0.826 / 5.86 r 0.515 | 1.04 / 6.34 r 0.515 | 0.769 / 5.11 r 0.515 |
+| approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] | 1.54 / 10.3 r 0.730 | 1.3 / 11.1 r 0.730 | 1.28 / 14.2 r 0.730 | 1.36 / 14.3 r 0.730 |
+| approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] | 2.24 / 54.8 r 0.865 | 1.55 / 52.4 r 0.865 | 2.06 / 53.5 r 0.865 | 9.67 / 55.8 r 0.865 |
+
+Builds for the cap axis (uncapped, several threads):
+
+| system | status | build s | threads | index GiB | peak RSS GiB | detail |
+|---|---|---|---|---|---|---|
+| vexact | ok | 257.9 | 3 | 2.288 | 3.83 | {"fit_s": 132.5, "encode_s": 125.0, "sample": true} |
+| faiss-flat-mmap | ok | 10.0 | 3 | 1.908 | 4.81 | {"storage": "f32"} |
+| faiss-ivf-disk | ok | 153.7 | 3 | 0.969 | 4.23 | {"nlist": 4096, "storage": "f16"} |
+| diskann | ok | 912.3 | 3 | 6.018 | 7.37 | {"R": 64, "L": 100, "pq_ram_gb": 0.1024, "pq_fraction": 0.05} |
+
+Evidence (after the last cell of each run): the cgroup's usage, its anonymous and file memory, its peak since the cap was set, the limit, the times the limit was hit (v1 failcnt; v2 max events), OOM kills and the bytes the process read from storage over its cells.
+
+| system | cap | status | usage MiB | anon MiB | file MiB | peak MiB | limit MiB | failcnt | OOM | read MiB | detail |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| diskann | 10 | ok | 114.6 | 113.7 | 0.1 | 114.6 | 195.4 | 0 | 0 | 165 |  |
+| diskann | 25 | ok | 114.6 | 113.7 | 0.1 | 114.6 | 488.5 | 0 | 0 | 165 |  |
+| diskann | 50 | ok | 114.6 | 113.7 | 0.1 | 114.6 | 977.0 | 0 | 0 | 165 |  |
+| diskann | uncapped | ok | 119.1 | 113.7 | 4.8 | 217.8 |  | 0 | 0 | 178 |  |
+| faiss-flat-mmap | 10 | ok | 81.6 | 15.2 | 58.2 | 195.4 | 195.4 | 0 | 0 | 39079 |  |
+| faiss-flat-mmap | 25 | ok | 81.9 | 15.2 | 58.2 | 488.5 | 488.5 | 0 | 0 | 39079 |  |
+| faiss-flat-mmap | 50 | ok | 81.9 | 15.2 | 58.2 | 977.0 | 977.0 | 0 | 0 | 39079 |  |
+| faiss-flat-mmap | uncapped | ok | 82.6 | 15.2 | 58.8 | 1978.5 |  | 0 | 0 | 0 |  |
+| faiss-ivf-disk | 10 | ok | 195.3 | 18.2 | 171.2 | 195.4 | 195.4 | 0 | 0 | 4606 |  |
+| faiss-ivf-disk | 25 | ok | 488.2 | 18.2 | 463.6 | 488.5 | 488.5 | 0 | 0 | 2418 |  |
+| faiss-ivf-disk | 50 | ok | 751.5 | 18.2 | 726.2 | 751.5 | 977.0 | 0 | 0 | 2112 |  |
+| faiss-ivf-disk | uncapped | ok | 751.5 | 18.2 | 725.9 | 751.5 |  | 0 | 0 | 2111 |  |
+| vexact | 10 | ok | 195.3 | 175.8 | 14.3 | 195.4 | 195.4 | 0 | 0 | 209904 |  |
+| vexact | 25 | ok | 479.5 | 177.4 | 296.8 | 488.5 | 488.5 | 0 | 0 | 49598 |  |
+| vexact | 50 | ok | 483.4 | 177.4 | 300.5 | 963.8 | 977.0 | 0 | 0 | 45494 |  |
+| vexact | uncapped | ok | 485.4 | 179.2 | 300.6 | 1134.9 |  | 0 | 0 | 45494 |  |
+
 ### yahoo-minilm-384-normalized
 
 | type | filter | param | system | uncapped | 50% | 25% | 10% |
 |---|---|---|---|---|---|---|---|
-| exact | none | k=10 | vexact [ours] | 23.5 / 98 | 23.9 / 91.8 | 23.6 / 98.1 | 122 / 817 |
+| exact | none | k=10 | vexact [ours] | 23.5 / 98 | 23.9 / 91.8 | 23.6 / 98.1 | 122 / 817 † |
 | exact | none | k=10 | faiss-flat-mmap [standard] | 75.1 / 7.23e+03 | 6.79e+03 / 7.21e+03 | 6.59e+03 / 6.43e+03 | 6.57e+03 / 6.3e+03 |
-| exact | random-1 | k=10 | vexact [ours] | 0.372 / 192 | 0.475 / 207 | 0.397 / 190 | 197 / 196 |
+| exact | random-1 | k=10 | vexact [ours] | 0.372 / 192 | 0.475 / 207 | 0.397 / 190 | 197 / 196 † |
 | exact | random-1 | k=10 | faiss-flat-mmap [standard] | 2.42 / 258 | 3.79 / 245 | 3.18 / 235 | 2.5 / 216 |
 | threshold | none | 0.01% | vexact [ours] | 24.3 / 30.1 | 25.3 / 30.2 | 25.2 / 58 | does not fit |
 | threshold | none | 0.01% | faiss-flat-mmap [standard] | 75.9 / 7e+03 | 6.76e+03 / 6.84e+03 | 6.78e+03 / 6.42e+03 | 6.72e+03 / 6.52e+03 |
@@ -173,6 +236,8 @@ Caps are fractions of the dataset's size, N x d x 4 bytes (its f32 vectors as di
 | approx | random-1 | k=10 nprobe=16 | faiss-ivf-disk [standard] | 0.743 / 4.39 r 0.590 | 0.723 / 3.64 r 0.590 | 0.75 / 4.08 r 0.590 | 0.774 / 3.7 r 0.590 |
 | approx | random-1 | k=10 nprobe=64 | faiss-ivf-disk [standard] | 1.25 / 6.25 r 0.815 | 1.18 / 8.29 r 0.815 | 1.2 / 9.64 r 0.815 | 1.61 / 10.8 r 0.815 |
 | approx | random-1 | k=10 nprobe=256 | faiss-ivf-disk [standard] | 1.43 / 33.1 r 0.965 | 1.37 / 39.6 r 0.965 | 4.05 / 34.3 r 0.965 | 8.17 / 36 r 0.965 |
+
+† measured before the OOM killer stopped that run, later in the same cap.
 
 Builds for the cap axis (uncapped, several threads):
 

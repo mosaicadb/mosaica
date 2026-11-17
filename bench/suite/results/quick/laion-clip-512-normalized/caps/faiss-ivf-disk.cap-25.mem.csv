@@ -1,0 +1,7 @@
+cap,cell,usage_mib,anon_mib,file_mib,peak_mib,limit_mib,failcnt,oom_kill,major_faults,read_mib,detail
+25,"approx none default {""k"":10,""nprobe"":16}",136.2,16.9,114.2,136.7,488.5,0,0,650,108.2,
+25,"approx none default {""k"":10,""nprobe"":64}",380.0,17.0,355.5,380.4,488.5,0,0,2589,328.8,
+25,"approx none default {""k"":10,""nprobe"":256}",488.2,17.3,465.3,488.5,488.5,0,0,7366,771.6,
+25,"approx random-1 default {""k"":10,""nprobe"":16}",140.3,18.1,114.3,488.5,488.5,0,0,8045,108.1,
+25,"approx random-1 default {""k"":10,""nprobe"":64}",383.3,18.2,355.5,488.5,488.5,0,0,10030,328.7,
+25,"approx random-1 default {""k"":10,""nprobe"":256}",488.2,18.2,463.6,488.5,488.5,0,0,14856,772.4,
