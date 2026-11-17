@@ -1,5 +1,3 @@
 dataset,system,filter,k,query,id,side,s,t,s_minus_t,allowance,beyond_rounding,same_vector_as
 laion-s200k,vexact,none,100,88,24996,"returned, not in the truth",0.279513158,0.279513121,3.76e-08,0.000515,0,93210
 laion-s200k,vexact,none,100,88,93210,"in the truth, not returned",0.279513158,0.279513121,3.76e-08,0.000515,0,24996
-laion-s200k,vexact-d2,none,100,88,24996,"returned, not in the truth",0.279513158,0.279513121,3.76e-08,0.000515,0,93210
-laion-s200k,vexact-d2,none,100,88,93210,"in the truth, not returned",0.279513158,0.279513121,3.76e-08,0.000515,0,24996

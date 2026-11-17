@@ -8,7 +8,7 @@
 # fitted on: corpus pseudo-queries, or with `queries` 1,000 of the query sample and their true neighbours (fit_ood only).
 # The build parameters `clusters` and `dlv` are research/levels-clusters' options (REPORT_BUILD.md, "the levels-clusters
 # defaults"): `clusters` 1000 (the default, 1,000 items per cluster) or by-n (fit.py --per-cluster by-n --groups by-n),
-# and `dlv` the deterministic levels' cumulative bytes, fit (the default: the fit's) or e.g. "16.32".
+# and `dlv` the deterministic levels' cumulative bytes: default (the library's, 16.32), fit (the fit's six) or e.g. "16.32".
 # fit() encodes the index and saves it in the work directory (v2::rebuild); the directory is removed at exit.
 import atexit
 import os
@@ -52,9 +52,10 @@ class Vexact(BaseANN):
         self.clusters = str(a.get("clusters") or "1000")
         if not (self.clusters == "by-n" or self.clusters.isdigit()):
             raise ValueError(f"clusters is a number of items per cluster or by-n, not {self.clusters}")
-        dlv = str(a.get("dlv") or "fit")
-        self.dlv = [] if dlv == "fit" else [int(x) for x in dlv.replace(",", ".").split(".")]
-        self.tag = f"basis={self.basis}, order={self.order}, clusters={self.clusters}, dlv={'.'.join(map(str, self.dlv)) or 'fit'}"
+        dlv = str(a.get("dlv") or "default")
+        # None: the library's default levels; []: the fit's six (the bindings' convention)
+        self.dlv = None if dlv == "default" else [] if dlv == "fit" else [int(x) for x in dlv.replace(",", ".").split(".")]
+        self.tag = f"basis={self.basis}, order={self.order}, clusters={self.clusters}, dlv={dlv}"
         self.index = None
 
     def fit(self, X):
@@ -89,7 +90,7 @@ class Vexact(BaseANN):
         for f in ("train.npy", "sample.npy"):
             if os.path.exists(os.path.join(work, f)):
                 os.remove(os.path.join(work, f))
-        self.index = vexact_py.Index(os.path.join(work, "index"), dlv=self.dlv or None)
+        self.index = vexact_py.Index(os.path.join(work, "index"), dlv=self.dlv)
         self.sampled = sample is not None
 
     def q(self, v):

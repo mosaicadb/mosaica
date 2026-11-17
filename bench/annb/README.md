@@ -46,7 +46,7 @@ benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds
 for the disk mode `Full2`, `Index2::own_rows`, `disk::Rows` (`to_file`, `policy`, `evict`, `resident`, `file_path`),
 `disk::uring_available` and `q::disk_constants`. The pin is `research/exact-vector-search` with the
 create/open/rebuild API, the AVX-512 kernels, and the owner's build defaults (clusters by N, deterministic levels 16
-and 32, the dual basis); the binding's own default build keeps the fit's six levels.
+and 32, the dual basis); the bindings build the library's default levels unless given `dlv`.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.
 
@@ -57,9 +57,9 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
   approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings open the index saved in the fit when it was built with the same
 options, else encode the fit and save the index there (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
 mapped from its files, as `v2::open` gives it. The planner times nothing: in memory it is the support table and the rule
-in rows (`Plan::default`). Without a `dlv` build argument the bindings build the fit's six deterministic levels
-  (4 / 8 / 12 / 16 / 24 / 32 B), not the library's default two (16, 32): the benchmark keeps the options it was run
-  with. One directory holds one index, so two builds with different `dlv` on one fit replace each other's saved
+in rows (`Plan::default`). Without a `dlv` build argument the bindings build the library's default deterministic
+  levels (two, at 16 and 32 B); `dlv: fit` builds the fit's six (4 / 8 / 12 / 16 / 24 / 32 B), the default of the runs
+  before the library's defaults changed. One directory holds one index, so two builds with different `dlv` on one fit replace each other's saved
   index; each variant needs its own directory (`cp -al` of the fit).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.

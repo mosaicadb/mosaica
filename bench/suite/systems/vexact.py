@@ -83,7 +83,8 @@ class Vexact(System):
         return dict(dk, full_resident=self.ix.full_resident())
 
     def index_opts(self):
-        # the deterministic levels (`dlv`, cumulative bytes): None keeps the bindings' default, the fit's six levels
+        # the deterministic levels (`dlv`, cumulative bytes): None, the library's default (two, at 16 and 32 bytes);
+        # [] the fit's six
         dlv = self.params.get("dlv")
         return {} if dlv is None else dict(dlv=list(dlv))
 
@@ -138,8 +139,3 @@ class Vexact(System):
     def close(self):
         self.ix = None
 
-
-class VexactD2(Vexact):
-    """The same index built with the library's own default levels (BuildOptions::default(): two deterministic levels,
-    ending at 16 and 32 bytes) in place of the bindings' six; the query-path speedups target these."""
-    name = "vexact-d2"

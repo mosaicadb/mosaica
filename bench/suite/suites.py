@@ -22,10 +22,9 @@ FILTERS = {
 
 SYSTEM_PARAMS = {
     # the index through bench/annb/vexact-py, built as bench/annb/vexact/module.py builds it (fit.py --basis dual, with
-    # --query-sample from the learn sample on out-of-distribution sets)
+    # --query-sample from the learn sample on out-of-distribution sets), with the library's default levels (16, 32 B;
+    # dlv=[] for the fit's six)
     "vexact": dict(basis="dual", approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
-    # the same with the library's default levels (two, ending at 16 and 32 bytes) in place of the bindings' six
-    "vexact-d2": dict(basis="dual", dlv=[16, 32], approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
     # faiss IndexFlatIP: search / range_search; under a visible set through IDSelectorBitmap and over a compacted copy
     "faiss-flat": dict(settings=["idselector", "compacted"]),
     # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as the earlier threshold-db/ann.py)
@@ -164,9 +163,9 @@ FULL = dict(
 # `truth_nq` of the queries, for the recall of approximate k-NN and an agreement count for exact k-NN. Only f16 vectors
 # are stored, so faiss runs on f16 (QT_fp16) at scale. The scans see few queries and one repetition.
 SCALE_SYSTEMS = dict(
-    exact=dict(ours=["vexact", "vexact-d2"], standard=["faiss-flat-mmap"]),
-    threshold=dict(ours=["vexact", "vexact-d2"], standard=["faiss-flat-mmap"]),
-    approx=dict(ours=["vexact", "vexact-d2"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
+    exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
+    threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
+    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
 )
 
 
@@ -181,7 +180,6 @@ def scale_suite(name, datasets):
         systems=SCALE_SYSTEMS,
         params=dict(SYSTEM_PARAMS,
                     vexact=dict(SYSTEM_PARAMS["vexact"], disk_mode=True),
-                    **{"vexact-d2": dict(SYSTEM_PARAMS["vexact-d2"], disk_mode=True)},
                     **{"faiss-flat-mmap": dict(storage="f16", step=10, reps=1, cap_step=20, cap_reps=1),
                        "faiss-ivf-disk": dict(storage="f16", approx=[dict(nprobe=p) for p in (16, 64, 256)]),
                        "faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], storage="f16")}),

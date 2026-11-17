@@ -132,7 +132,8 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
 
 - **vexact**: the working tree's `rust/` through `bench/annb/vexact-py` (built with `-C target-cpu=native`), built as
   `bench/annb/vexact/module.py` does: `rust/tools/fit.py --basis dual` (with `--query-sample` from the learn sample on
-  out-of-distribution sets), then `vexact_py.Index` (planner `auto`). Exact k-NN is `knn`, the threshold query the
+  out-of-distribution sets), then `vexact_py.Index` (planner `auto`) with the library's default build: clusters and
+  groups by N, two deterministic levels at 16 and 32 bytes (the parameter `dlv`; `dlv=[]` builds the fit's six). Exact k-NN is `knn`, the threshold query the
   bindings' `threshold` (`threshold2` through the planner, entity ids), approximate `knn_approx` (nprobe 16, 64, 256 in
   the quick suite), all under `set_visible`.
 - **faiss-flat**: pip `faiss-cpu` 1.16.0. `search` and `range_search` on `IndexFlatIP`; under a visible set through
@@ -327,6 +328,10 @@ inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`.
 - **The scale suite** was tested end to end on its small sizes (`scale-test`: 200k, 500k and 1M from two LAION parts;
   `results/scale-test/REPORT.md`, which records the machine); `scale` itself (10M to 100M) is for a machine with the
   disk and memory above.
+- **vexact's build and query path moved under the quick results.** `results/quick` was run with the earlier defaults
+  (1,000 items per cluster, the fit's six deterministic levels) and before the query-path speedups of
+  `research/exact-vector-search` (20591ca); `results/scale-test` is on the current defaults and code. Rerun the quick
+  suite before comparing vexact's numbers across the two.
 
 ## The scripts this suite replaced
 
