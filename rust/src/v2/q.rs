@@ -1333,7 +1333,12 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 let sb = (a0 as usize + k0) / BLK;
                 g.ident = Some(sb);
                 // the level's codes of a cluster span a few pages, which the hardware prefetcher ramps up on late
-                if b + PF < nb {
+                let k1 = k0 + PF * BLK;
+                let live_ahead = || {
+                    let (x0, x1) = (_mm512_loadu_si512(sv.idx.as_ptr().add(k1) as *const _), _mm512_loadu_si512(sv.idx.as_ptr().add(k1 + 16) as *const _));
+                    _mm512_cmpeq_epi32_mask(x0, none) & _mm512_cmpeq_epi32_mask(x1, none) != 0xffff
+                };
+                if b + PF < nb && live_ahead() {
                     let pc = cbase.add((sb + PF) * units * 16);
                     for x in (0..units * 16).step_by(64) {
                         _mm_prefetch::<_MM_HINT_T0>(pc.add(x) as *const i8);
