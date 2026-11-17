@@ -125,13 +125,19 @@ class FaissHNSW(FaissBase):
 
     def _build(self):
         p = self.params
-        self.ix = self.faiss.IndexHNSWFlat(self.prep.d, p.get("M", 16), self.faiss.METRIC_INNER_PRODUCT)
+        f = self.faiss
+        if p.get("storage", "f32") == "f16":  # at scale, where only f16 vectors are stored: IndexHNSWSQ QT_fp16
+            self.ix = f.IndexHNSWSQ(self.prep.d, f.ScalarQuantizer.QT_fp16, p.get("M", 16), f.METRIC_INNER_PRODUCT)
+            self.ix.train(np.ascontiguousarray(self.prep.corpus()[:1000], dtype=np.float32))
+        else:
+            self.ix = f.IndexHNSWFlat(self.prep.d, p.get("M", 16), f.METRIC_INNER_PRODUCT)
         self.ix.hnsw.efConstruction = p.get("efConstruction", 200)
         _add(self.ix, self.prep.corpus())
-        return dict(M=p.get("M", 16), efConstruction=p.get("efConstruction", 200))
+        return dict(M=p.get("M", 16), efConstruction=p.get("efConstruction", 200), storage=p.get("storage", "f32"))
 
     def index_bytes(self):
-        return self.prep.N * (self.prep.d * 4 + self.params.get("M", 16) * 2 * 4)
+        vec = 2 if self.params.get("storage", "f32") == "f16" else 4
+        return self.prep.N * (self.prep.d * vec + self.params.get("M", 16) * 2 * 4)
 
     def approx(self, q, k, p):
         sp = self.faiss.SearchParametersHNSW(efSearch=max(p["ef"], k))

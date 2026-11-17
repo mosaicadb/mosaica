@@ -1,5 +1,0 @@
-system,status,build_s,threads,index_gib,peak_rss_gib,detail
-vexact,ok,257.9,3,2.288,3.83,"{""fit_s"": 132.5, ""encode_s"": 125.0, ""sample"": true}"
-faiss-flat-mmap,ok,10.0,3,1.908,4.81,"{""storage"": ""f32""}"
-faiss-ivf-disk,ok,153.7,3,0.969,4.23,"{""nlist"": 4096, ""storage"": ""f16""}"
-diskann,ok,912.3,3,6.018,7.37,"{""R"": 64, ""L"": 100, ""pq_ram_gb"": 0.1024, ""pq_fraction"": 0.05}"

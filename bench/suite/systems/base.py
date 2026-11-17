@@ -13,8 +13,8 @@
 # (build(), leaving its index in the work directory), then each capped process calls load() inside its cgroup, which
 # opens that index without rebuilding. data_files() are the files that hold its data (dropped from the page cache before
 # the cap is set), and evict_cold() drops what a cold query must read again (default: the cgroup's page cache).
-# A system that keeps its vectors in anonymous memory (`disk = False`) does not fit under any cap below the dataset's
-# size and is not run capped. `filters = False`: the system takes no visible set; `unfiltered = False`: it runs the
+# A system that keeps its data in anonymous memory (`disk = False`) is built inside each capped process and the cap set
+# after, so a cap below what it holds is refused: it does not fit. `filters = False`: the system takes no visible set; `unfiltered = False`: it runs the
 # filtered cells only.
 import os
 import time

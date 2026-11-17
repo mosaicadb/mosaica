@@ -1,3 +1,3 @@
 type,filter,setting,set_visible_ms,setting_ms
-approx,none,default,0.00,0.02
-approx,random-1,default,0.53,0.00
+approx,none,default,0.01,0.01
+approx,random-1,default,0.55,0.00

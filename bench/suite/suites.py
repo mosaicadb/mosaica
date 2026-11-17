@@ -45,8 +45,9 @@ SYSTEM_PARAMS = {
 
 # The memory-cap axis (capmem.py): caps are fractions of the dataset's size, N x d x 4 bytes (its f32 vectors as
 # distributed), plus "uncapped" (the same capped code path with no limit). Every system on a dataset gets the same cap.
-# Only systems that keep their data on files (disk = True) can run under one; the in-memory ones hold at least the f32
-# vectors (100% of the dataset's size) in anonymous memory and are reported as not fitting under any cap below it.
+# Systems that keep their data on files (disk = True) build once and open their index under each cap; an in-memory
+# system is built inside each capped process and the cap set after, so a cap below what it holds is refused (or ends
+# in an OOM kill) and reported as not fitting.
 CAP_SYSTEMS = dict(
     exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
     threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"], database=["pgvector"]),
@@ -163,7 +164,7 @@ FULL = dict(
 SCALE_SYSTEMS = dict(
     exact=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
     threshold=dict(ours=["vexact"], standard=["faiss-flat-mmap"]),
-    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"]),
+    approx=dict(ours=["vexact"], standard=["faiss-ivf-disk"], frontier=["diskann"], **{"in memory": ["faiss-hnsw"]}),
 )
 
 
@@ -179,8 +180,16 @@ def scale_suite(name, datasets):
         params=dict(SYSTEM_PARAMS,
                     vexact=dict(SYSTEM_PARAMS["vexact"], disk_mode=True),
                     **{"faiss-flat-mmap": dict(storage="f16", step=10, reps=1, cap_step=20, cap_reps=1),
-                       "faiss-ivf-disk": dict(storage="f16", approx=[dict(nprobe=p) for p in (16, 64, 256)])}),
+                       "faiss-ivf-disk": dict(storage="f16", approx=[dict(nprobe=p) for p in (16, 64, 256)]),
+                       "faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], storage="f16")}),
         only={}, overrides={}, public=dict(datasets={"vibe": [], "annb": []}),
+        # the optional cap axis (synthetic; README), on the smallest test size only
+        caps=dict(datasets=[d for d in datasets if d == "laion-s200k"], fractions=[0.5, 0.25, 0.1],
+                  systems={t: {r: [x for x in v if x != "pgvector"] for r, v in d.items()} for t, d in CAP_SYSTEMS.items()},
+                  types=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-4]), approx=dict(k=[10])),
+                  filters=["none", "random-1"],
+                  filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-3]), approx=dict(k=[10])),
+                  step=5, reps=3, in_memory=IN_MEMORY),
     )
 
 

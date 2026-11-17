@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import HERE, data_dir, prep_dir  # noqa: E402
 import suites as S  # noqa: E402
 import prep as P  # noqa: E402
+import machine  # noqa: E402
 
 
 def log(*a):
@@ -66,10 +67,6 @@ def runsys_cmd(a, ds, s, types, extra=()):
     return cmd
 
 
-DISKCHECK_COLS = ["system", "when", "cold_file", "cold_size_mb", "cold_p50_us", "cold_p99_us", "cold_seq_mbs",
-                  "index_file", "index_size_mb", "index_p50_us", "index_p99_us", "index_seq_mbs", "ratio", "host_cached"]
-
-
 def run_caps(a, suite, ds, types):
     """The memory-cap axis on one dataset: a build, then one capped process per cap, for each system."""
     import shutil
@@ -94,25 +91,12 @@ def run_caps(a, suite, ds, types):
                 names.append(s)
     env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
     from systems import REGISTRY
-    import diskcheck
-    from common import REPO
     for s in names:
         if REGISTRY[s].disk:
             log(f"{ds}: {s}: build for the cap axis")
             r = subprocess.run(runsys_cmd(a, ds, s, types, ["--cap", "build"]), env=env)
             if r.returncode:
                 log(f"{ds}: {s}: build failed ({r.returncode})")
-                continue
-            # the disk check: a file nobody read against the system's index files (diskcheck.py)
-            w = work_dir(a.data, ds, s)
-            dc = diskcheck.check(diskcheck.largest_files([w]), exclude=[a.data, REPO, os.path.dirname(a.data)])
-            log(f"{ds}: {s}: disk check {dc}")
-            merge_csv(os.path.join(results_dir(a.suite, ds), "caps", "diskcheck.csv"), DISKCHECK_COLS,
-                      [dict({k: dc.get(k, "") for k in DISKCHECK_COLS}, system=s, when=time.strftime("%Y-%m-%d %H:%M"))],
-                      lambda row: row["system"] == s)
-            if s in a.check_only.split(","):
-                if not a.keep_work:
-                    shutil.rmtree(w, ignore_errors=True)
                 continue
         for f in ["uncapped"] + fracs:
             busy = busy_cores()
@@ -151,7 +135,6 @@ def main():
     ap.add_argument("--vibe", default="", help="a VIBE checkout (stage public)")
     ap.add_argument("--annb", default="", help="an ANN-Benchmarks checkout (stage public)")
     ap.add_argument("--caps", default="", help="the cap fractions to run (stage cap; default the suite's)")
-    ap.add_argument("--check-only", default="", help="stage cap: for these systems only build and run the disk check")
     ap.add_argument("--download", default="", help="scale prep: where LAION's parts are downloaded, one at a time")
     P.add_args(ap)
     a = ap.parse_args()
@@ -163,6 +146,19 @@ def main():
     for ds in datasets:
         if ds not in suite["datasets"]:
             log(f"note: {ds} is not in the {a.suite} suite's list; running it with the suite's parameters")
+    if "run" in stages or "cap" in stages:
+        import json
+        from common import RESULTS
+        rec = dict(machine.record(a.data), datasets=datasets, stages=stages)
+        # the run stage's record goes with the suite's results, the cap stage's with each dataset's caps/
+        paths = ([os.path.join(RESULTS, a.suite, "machine.json")] if "run" in stages else []) + \
+            ([os.path.join(RESULTS, a.suite, ds, "caps", "machine.json") for ds in datasets
+              if ds in suite.get("caps", {}).get("datasets", [])] if "cap" in stages else [])
+        for p in paths:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as fo:
+                json.dump(rec, fo, indent=1)
+        log("machine: " + machine.summary(rec))
     if "public" in stages:
         import public
         public.run(suite, datasets, a)
@@ -189,7 +185,16 @@ def main():
                 env = dict(os.environ, OPENBLAS_NUM_THREADS="1", OMP_NUM_THREADS="1", MKL_NUM_THREADS="1")
                 log(f"{ds}: {s}")
                 r = subprocess.run(cmd, env=env)
-                if r.returncode:
+                if r.returncode in (-9, 137):
+                    # the OOM killer: the machine's memory is the cap (the scale suite); recorded, not skipped
+                    from common import results_dir
+                    from runsys import BUILD_COLS, merge_csv
+                    merge_csv(os.path.join(results_dir(a.suite, ds), "builds.csv"), BUILD_COLS,
+                              [dict(system=s, status="does not fit", detail="killed (SIGKILL: the OOM killer); the "
+                                    f"machine has {machine.record()['ram_gib']} GiB of RAM")],
+                              lambda row: row["system"] == s)
+                    log(f"{ds}: {s} does not fit: killed by the OOM killer")
+                elif r.returncode:
                     log(f"{ds}: {s} failed with exit code {r.returncode}")
         if "check" in stages and not suite.get("scale"):
             import check

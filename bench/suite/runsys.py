@@ -18,8 +18,9 @@
 # status (ok, or does not fit and why) to caps/status.csv. A cap the kernel refuses, or one below the anonymous memory
 # the system holds, is recorded as not fitting; an OOM kill is recorded by run.py.
 #
-# At scale (the suite's `scale`): no dumps; exact k-NN and approximate recall are compared on the prep's truth queries
-# only, and threshold answers are recorded by size (their thresholds are estimates from a sample).
+# At scale (the suite's `scale`): no dumps; exact k-NN and approximate recall are compared with the prep's streaming
+# truth, threshold answers are recorded by size, and each query's last repetition records its storage reads (the
+# `stats` column: the system's own counters, the bytes its processes read, major faults).
 import argparse
 import csv
 import json
@@ -49,6 +50,15 @@ BUILD_COLS = ["system", "status", "build_s", "threads", "index_gib", "peak_rss_g
 
 def log(*a):
     print(f"[{time.strftime('%H:%M:%S')}]", *a, flush=True)
+
+
+def peak_rss_kib():
+    """This process's peak RSS since it started (VmHWM). getrusage's ru_maxrss is not used: after a fork and exec it
+    starts from the parent's RSS at the fork, so a runner forked from a large process reported the parent's."""
+    for l in open("/proc/self/status"):
+        if l.startswith("VmHWM:"):
+            return int(l.split()[1])
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
 
 def merge_csv(path, cols, rows, drop):
@@ -193,12 +203,13 @@ def build(a, ds, sname, sysobj, threads, fname):
         extra = sysobj.build(threads) or {}
     except Unavailable as e:
         log(f"{sname} unavailable: {e}")
-        merge_csv(os.path.join(rdir, fname), BUILD_COLS, [dict(system=sname, status="unavailable", detail=str(e))],
+        st = "does not fit" if str(e).startswith("does not fit") else "unavailable"
+        merge_csv(os.path.join(rdir, fname), BUILD_COLS, [dict(system=sname, status=st, detail=str(e))],
                   lambda r: r["system"] == sname)
         return False
     build_s = time.time() - t
     # the larger of this process's peak and its children's (fit.py, acorn_bench)
-    rss = max(resource.getrusage(w).ru_maxrss for w in (resource.RUSAGE_SELF, resource.RUSAGE_CHILDREN)) / 2 ** 20
+    rss = max(peak_rss_kib(), resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss) / 2 ** 20
     log(f"{sname} on {ds}: built in {build_s:.0f} s on {threads} threads; peak RSS {rss:.2f} GiB; {extra}")
     merge_csv(os.path.join(rdir, fname), BUILD_COLS,
               [dict(system=sname, status="ok", build_s=f"{build_s:.1f}", threads=threads,
@@ -211,16 +222,13 @@ def enter_cap(a, ds, sname, sysobj, prep):
     """Moves into a cgroup, opens the kept index, drops its files from the page cache and sets the cap. None (and a
     status row) when it does not fit."""
     nbytes = 0 if a.cap == "uncapped" else int(round(float(a.cap) * prep.dataset_bytes()))
-    if not sysobj.disk and nbytes:
-        status(a, ds, sname, nbytes, "does not fit", "in memory: it holds the f32 vectors (100% of the dataset's size) "
-               "in anonymous memory")
-        return None
     cg = capmem.Cgroup().enter()
     log(f"{sname} on {ds}: in {cg.dir} (cgroup v{cg.v}); {cg.report()}")
     try:
         if sysobj.disk:
             extra = sysobj.load() or {}
-        else:  # an in-memory system: built here, in the group, and run uncapped
+        else:  # an in-memory system: built here, in the group, before the cap (which the kernel then refuses if what
+            # the system holds does not fit under it)
             if not build(a, ds, sname, sysobj, len(os.sched_getaffinity(0)), "caps/builds.csv"):
                 cg.leave()
                 return None
@@ -338,7 +346,7 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                     ts = []
                     qstats = ""
                     for r in range(reps):
-                        last = cg is not None and r == reps - 1
+                        last = (cg is not None or scale) and r == reps - 1
                         if last:
                             s0 = snap(sysobj)
                         t0 = time.perf_counter()
@@ -368,6 +376,8 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
                                recall="" if exp is None else f"{rec:.5f}")
                     if cg is not None:
                         row.update(cap=label, kind="warm", read_kb="", stats=qstats)
+                    elif scale:
+                        row["stats"] = qstats
                     rows.append(row)
                 med, p90 = summarise(meds)
                 note = ""
@@ -389,7 +399,7 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
             if dumps:
                 dump.close()
             key = (qt, f, setting)
-            merge_csv(out_csv, CAP_COLS if cg is not None else COLS, rows,
+            merge_csv(out_csv, CAP_COLS if cg is not None else COLS + ["stats"] if scale else COLS, rows,
                       lambda r: (r["type"], r["filter"], r["setting"]) == key)
     merge_csv(os.path.join(rdir, "caps" if cg is not None else "", f"{sname}{'.cap-' + label if cg is not None else ''}_setup.csv"),
               ["type", "filter", "setting", "set_visible_ms", "setting_ms"], setup_rows,
@@ -401,7 +411,7 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
             "rounding allowance (scale_diffs.csv)")
     if cg is not None:
         status(a, ds, sname, cg.limit or 0, "ok", cg.report())
-    log(f"{sname} on {ds}: done; peak RSS {resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20:.2f} GiB")
+    log(f"{sname} on {ds}: done; peak RSS {peak_rss_kib() / 2 ** 20:.2f} GiB")
 
 
 if __name__ == "__main__":

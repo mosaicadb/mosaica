@@ -49,7 +49,7 @@ def param_key(qt, p):
 
 def load(suite):
     root = os.path.join(RESULTS, suite)
-    cells = defaultdict(lambda: dict(ms=[], nonmatch=0, recall=[], returned=[]))
+    cells = defaultdict(lambda: dict(ms=[], nonmatch=0, recall=[], returned=[], stats=[]))
     checks, builds = {}, []
     for ddir in sorted(glob.glob(os.path.join(root, "*", ""))):
         ds = os.path.basename(os.path.dirname(ddir))
@@ -74,6 +74,8 @@ def load(suite):
                         c["nonmatch"] += int(r["nonmatch"])
                         c["recall"].append(float(r["recall"]))
                     c["returned"].append(int(r["returned"]))
+                    if r.get("stats"):
+                        c["stats"].append(json.loads(r["stats"]))
     return cells, checks, builds
 
 
@@ -173,11 +175,82 @@ def report(suite):
                   "prep_scale.py, and each item that differs is examined with check.py's rounding allowance "
                   "(`scale_diffs.csv`): `~` all within it, `WRONG n` beyond it; threshold cells give the median "
                   "answer size returned; approximate k-NN the mean recall.")
+    if scale:
+        rows = []
+        for k in sorted(cells, key=lambda k: (ds_key(k[0]), ["exact", "threshold", "approx"].index(k[1]),
+                                              FILTER_ORDER.get(k[2], 99), param_key(k[1], k[3]), k[4])):
+            st = cells[k]["stats"]
+            if not st:
+                continue
+            med = lambda key: float(np.median([x.get(key, 0) for x in st]))
+            extra = (f"{med('reads'):.0f} reads, {med('rounds'):.0f} rounds" if "rounds" in st[0] else
+                     f"{med('reads'):.0f} reader reads" if "reads" in st[0] else "")
+            rows.append(f"| {k[0]} | {k[1]} | {k[2]} | {param_label(k[1], k[3])} | {col_name(k[4], k[5])} | "
+                        f"{med('proc_read_kb'):.0f} | {med('majflt'):.0f} | {extra} |")
+        if rows:
+            out += ["## Storage reads per query", "",
+                    "Medians over the queries of each query's last repetition: KiB the system's processes read from "
+                    "storage (/proc), major page faults, and the system's own counters (vexact's io_uring reader reads; "
+                    "DiskANN's QueryStats reads and rounds). Zero where the data sat in the page cache.", "",
+                    "| dataset | type | filter | param | system | KiB read | major faults | own counters |",
+                    "|---|---|---|---|---|---|---|---|"] + rows + [""]
+    m = machine_record(root)
+    head = ["", f"**Machine** (`machine.json`, recorded at the last run): {m}", ""] if m else []
+    if scale:
+        head += regime_section(builds, root)
+    out[3:3] = head
     out += caps_section(suite)
     with open(os.path.join(root, "REPORT.md"), "w") as f:
         f.write("\n".join(out))
     print(f"wrote {os.path.join(root, 'REPORT.md')}")
     plots(cells, root)
+
+
+def machine_record(root):
+    p = os.path.join(root, "machine.json")
+    if not os.path.exists(p):
+        return ""
+    import machine
+    return machine.summary(json.load(open(p)))
+
+
+def regime(gib, ram):
+    """fits (at most half the RAM), partly fits (up to the RAM), exceeds RAM."""
+    if not ram:
+        return "?"
+    return "fits" if gib <= 0.5 * ram else "partly fits" if gib <= ram else "exceeds RAM"
+
+
+def regime_section(builds, root):
+    """At scale the machine's RAM is the cap: each size's f16 vectors and each system's footprint against it."""
+    p = os.path.join(root, "machine.json")
+    ram = json.load(open(p))["ram_gib"] if os.path.exists(p) else 0
+    from datasets import DATASETS
+    dss = sorted({b["dataset"] for b in builds}, key=ds_key)
+    systems = sorted({b["system"] for b in builds})
+    out = ["## Regimes", "",
+           f"The machine's RAM ({ram} GiB) is the cap. Each size's f16 vectors (N x d x 2 bytes) and each system's "
+           "footprint (its index on disk, or for an in-memory system what it holds in memory; and the build's peak RSS) "
+           "are set against it: `fits` at most half the RAM, `partly fits` up to the RAM, `exceeds RAM` beyond. A "
+           "system the OOM killer stopped is `does not fit`.", "",
+           "| dataset | f16 vectors GiB | " + " | ".join(f"{s}: index GiB / build peak GiB" for s in systems) + " |",
+           "|---" * (2 + len(systems)) + "|"]
+    for ds in dss:
+        d = DATASETS.get(ds, {})
+        f16 = d.get("N", 0) * d.get("d", 0) * 2 / 2 ** 30
+        line = [ds, f"{f16:.2f} ({regime(f16, ram)})"]
+        for sname in systems:
+            b = next((b for b in builds if b["dataset"] == ds and b["system"] == sname), None)
+            if b is None:
+                line.append("")
+            elif b["status"] != "ok":
+                line.append(b["status"] + (" (disk)" if "on disk" in b.get("detail", "") else
+                                           " (OOM)" if "OOM" in b.get("detail", "") else ""))
+            else:
+                ix, pk = float(b["index_gib"] or 0), float(b["peak_rss_gib"] or 0)
+                line.append(f"{ix:.2f} ({regime(ix, ram)}) / {pk:.2f} ({regime(pk, ram)})")
+        out.append("| " + " | ".join(line) + " |")
+    return out + [""]
 
 
 def caps_section(suite):
@@ -195,9 +268,9 @@ def caps_section(suite):
             "limit is set, and each cell runs one cold query (query 0 once, after the full vectors, or for the other "
             "systems the group's page cache, are dropped; codes, graph and PQ stay) and then the warm repetitions. "
             "Cells are `warm median / cold` ms, with the mean recall for approximate k-NN. `does not fit`: the kernel "
-            "refused the limit, or the OOM killer stopped the process under it. The in-memory systems ("
-            + ", ".join(caps_cfg.get("in_memory", [])) + ") keep at least the f32 vectors (100% of the dataset's size) "
-            "in anonymous memory, so none of them fits under a cap of 50% or less; they are not run capped.", ""]
+            "refused the limit, or the OOM killer stopped the process under it. An in-memory system named on the "
+            "axis is built inside each capped process and the cap set after, so it does not fit wherever what it "
+            "holds exceeds the cap. Storage reads per query and the peak memory are in the tables below.", ""]
     for ds in dss:
         cdir = os.path.join(root, ds, "caps")
         status = {(r["system"], r["cap"]): r for r in read_csv(os.path.join(cdir, "status.csv"))} \
@@ -218,19 +291,11 @@ def caps_section(suite):
                         c["rec"].append(float(r["recall"]))
                     if r.get("stats"):
                         c["stats"].append(dict(json.loads(r["stats"]), ms=float(r["median_ms"])))
-        dcf = os.path.join(cdir, "diskcheck.csv")
-        dchk = {r["system"]: r for r in read_csv(dcf)} if os.path.exists(dcf) else {}
-
-        def host_mark(system):
-            d = dchk.get(system)
-            if d is None:
-                return " ‡?"
-            return " ‡" if d.get("host_cached") == "True" else ""
         out += [f"### {ds}", "", "| type | filter | param | system | " + " | ".join(
             "uncapped" if c == "uncapped" else f"{c}%" for c in caps) + " |", "|---" * (4 + len(caps)) + "|"]
         for k in sorted(cells, key=lambda k: (["exact", "threshold", "approx"].index(k[0]), FILTER_ORDER.get(k[1], 99),
                                               param_key(k[0], k[2]), ROLE_ORDER.get(k[4], 9), k[3])):
-            line = [k[0], k[1], param_label(k[0], k[2]), f"{k[3]} [{k[4]}]" + (host_mark(k[3]) if k[4] != "in memory" else "")]
+            line = [k[0], k[1], param_label(k[0], k[2]), f"{k[3]} [{k[4]}]"]
             for cap in caps:
                 st = status.get((k[3], cap))
                 c = cells[k].get(cap)
@@ -248,21 +313,6 @@ def caps_section(suite):
             out.append("| " + " | ".join(line) + " |")
         if any(st["status"] == "does not fit" for st in status.values()):
             out += ["", "† measured before the OOM killer stopped that run, later in the same cap."]
-        out += ["", "‡ host-cached: timings optimistic. The disk check below found the system's index file read more "
-                "than 3 times faster than a large file nobody had read, so its reads came from a cache under the "
-                "guest (the VM's host caches its virtual disk), not from the device. ‡? not checked: runs made before "
-                "the check existed; on this VM assume host-cached (O_DIRECT 4 KiB reads: a freshly written file 33 us "
-                "at the median, a file nobody had read 651 us)."]
-        if dchk:
-            out += ["", "Disk check before the runs (`diskcheck.py`: random 4 KiB O_DIRECT reads at queue depth 1, and "
-                    "a QD1 sequential read in 1 MiB requests; (a) a large file this session had not read, (b) the "
-                    "system's index file after dropping it from the guest's cache):", "",
-                    "| system | (a) file | (a) p50 / p99 us | (a) seq MB/s | (b) file | (b) p50 / p99 us | (b) seq MB/s | (a)/(b) | host-cached |",
-                    "|---|---|---|---|---|---|---|---|---|"]
-            for sysn, d in sorted(dchk.items()):
-                out.append(f"| {sysn} | {d['cold_file']} ({d['cold_size_mb']} MB) | {d['cold_p50_us']} / {d['cold_p99_us']} | "
-                           f"{d['cold_seq_mbs']} | {os.path.basename(d['index_file'])} ({d['index_size_mb']} MB) | "
-                           f"{d['index_p50_us']} / {d['index_p99_us']} | {d['index_seq_mbs']} | {d['ratio']} | {d['host_cached']} |")
         io_rows = []
         for k in sorted(cells, key=lambda k: (["exact", "threshold", "approx"].index(k[0]), FILTER_ORDER.get(k[1], 99),
                                               param_key(k[0], k[2]), ROLE_ORDER.get(k[4], 9), k[3])):
@@ -276,27 +326,18 @@ def caps_section(suite):
                     continue
                 any_st = True
                 med = lambda key: float(np.median([x.get(key, 0) for x in st]))
-                reads = med("reads") + med("majflt")
-                if "rounds" in st[0]:  # DiskANN: its own counters; the I/O time it measured is replaced by the model
-                    cpu = med("cpu_us") / 1e3
-                    v = (f"{med('reads'):.0f} reads, {med('rounds'):.0f} rounds; model {cpu + med('reads') * 0.16:.3g} "
-                         f"(QD1) / {cpu + med('rounds') * 0.16:.3g} (a round at a time)")
+                if "rounds" in st[0]:  # DiskANN: its own counters
+                    v = f"{med('reads'):.0f} reads, {med('rounds'):.0f} rounds, {med('proc_read_kb'):.0f} KiB"
                 else:
-                    base = float(np.median([x["ms"] for x in st])) - med("wait_us") / 1e3
-                    v = f"{med('reads'):.0f} reads + {med('majflt'):.0f} faults; model {base + reads * 0.16:.3g}"
+                    v = (f"{med('reads'):.0f} reads, " if "reads" in st[0] else "") + \
+                        f"{med('majflt'):.0f} faults, {med('proc_read_kb'):.0f} KiB"
                 line.append(v)
             if any_st:
                 io_rows.append("| " + " | ".join(line) + " |")
         if io_rows:
-            out += ["", "Storage reads per query (medians over the warm queries, from the last repetition) and a "
-                    "**modelled, not measured** time for a disk that takes 160 us per 4 KiB read at queue depth 1 (the "
-                    "WSL2 disk of the earlier threshold-db/REPORT_CAPPED.md). DiskANN: its own QueryStats, reads and "
-                    "rounds (each round waits for its beam's reads); modelled as its CPU time plus 160 us per read "
-                    "(QD1) or per round (the reads of a round in flight together). vexact: its reader's reads "
-                    "(io_uring; it keeps up to 64 in flight, so the serial model is an upper bound) and its page "
-                    "faults, modelled as the measured time minus its measured wait plus 160 us per read and fault. "
-                    "faiss: major page faults of the mapped files, modelled as the measured time plus 160 us per fault "
-                    "(an upper bound where faults read ahead more than 4 KiB).", "",
+            out += ["", "Storage reads per query (medians over the warm queries, from the last repetition): DiskANN's "
+                    "own QueryStats (reads, rounds, bytes), vexact's reader (io_uring reads), major page faults, and the "
+                    "bytes the system's processes read from storage (/proc).", "",
                     "| type | filter | param | system | " + " | ".join(
                         "uncapped" if c == "uncapped" else f"{c}%" for c in caps) + " |", "|---" * (4 + len(caps)) + "|"]
             out += io_rows

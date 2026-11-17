@@ -38,6 +38,14 @@ class DiskANN(System):
         os.makedirs(self.work, exist_ok=True)
         N, d = self.prep.N, self.prep.d
         binf = os.path.join(self.work, "corpus32.bin")
+        # the build needs the f32 corpus file, the graph build's own copy of it, and the index (a node per 4 KiB sector
+        # or less): refuse up front rather than fill the disk
+        R = self.params.get("R", 64)
+        node = d * 4 + 4 * (R + 1)
+        need = 2 * N * d * 4 + N * (4096 if node > 2048 else node) * 1.05
+        free = shutil.disk_usage(self.work).free + (os.path.getsize(binf) if os.path.exists(binf) else 0)
+        if need > free:
+            raise Unavailable(f"does not fit on disk: the build needs about {need / 1e9:.1f} GB, {free / 1e9:.1f} GB free")
         # a corpus file already in place is used as it is: written ahead, it lets corpus32.npy go before a build that
         # needs the disk (about 2 + 2 + 4 GB at a million 512-d vectors: this file, the graph build's copy, the index)
         if not (os.path.exists(binf) and os.path.getsize(binf) == 8 + 4 * N * d):

@@ -92,7 +92,7 @@ def population(suite, name):
 
 def prep(suite, name, a):
     parts, sizes = population(suite, name)
-    if all(os.path.exists(os.path.join(prep_dir(a.data, d), "meta.json")) for d in sizes):
+    if all(os.path.exists(os.path.join(prep_dir(a.data, d), f)) for d in sizes for f in ("meta.json", "corpus16.npy")):
         log(f"{name}: prepared already ({', '.join(sizes)})")
         return
     t0 = time.time()

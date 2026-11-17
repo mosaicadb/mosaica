@@ -60,7 +60,8 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
 - `report.py`: `results/<suite>/REPORT.md` (a table per type across datasets, the filtered approximate runs, the
   builds) and a plot per type (`exact.png`, `threshold.png`, `approx.png`).
 - `public.py`: the public suites' driver (below).
-- `capmem.py`: the memory cap (cgroup v1 and v2) and its evidence; `prep_scale.py`: the LAION scale suites' prep.
+- `capmem.py`: the optional memory cap (cgroup v1 and v2) and its evidence; `prep_scale.py`: the LAION scale suites'
+  prep; `machine.py`: the machine record a run keeps with its results.
 - `systems/`: one adapter per system (`base.py` has the interface). `install/`: builds of PDX-BOND, ACORN and DiskANN;
   `native/`: DiskANN's driver and the header that builds it against OpenBLAS.
 
@@ -79,7 +80,7 @@ python3 -I bench/suite/run.py quick --datasets yahoo-minilm-384-normalized --sys
     --types exact,threshold --filters none,random-1
 python3 -I bench/suite/run.py quick --stages public --vibe ~/vibe --annb ~/ann-benchmarks
 bash bench/suite/install/diskann.sh ~/src/diskann  # then export DISKANN_BENCH=~/src/diskann/diskann_bench
-python3 -I bench/suite/run.py quick --stages prep,cap,report      # the memory-cap axis (yahoo and laion in quick)
+python3 -I bench/suite/run.py quick --stages prep,cap,report      # optional: the synthetic cap axis (see below)
 python3 -I bench/suite/run.py scale-test                           # the scale path on 200k / 500k / 1M (2 GB download)
 python3 -I bench/suite/run.py scale --download /big/disk/laion     # 10M / 40M / 100M (see the table below)
 ```
@@ -151,12 +152,25 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
   `WHERE (v <#> q) <= -t`, a visible set as `id IN (SELECT id FROM vis_...)`. Timed at the client as
   the earlier `threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
 
-## The memory-cap axis (`--stages cap`)
+## The memory-cap axis (`--stages cap`): optional and synthetic
+
+How memory-constrained runs are meant to be done is the scale suite below: on whatever machine runs it, its RAM is the
+cap. The cap axis is an optional synthetic test besides it, not part of any suite's default stages (run it with
+`--stages cap`). Read its figures with care:
+
+- It is meaningful only on a normal machine or VM whose storage is not cached by a hypervisor. A VM's host often caches
+  its virtual disk (and WSL2's vhdx may be cached by Windows), so reads the cgroup forces out of the guest's page cache
+  come back from the host's memory, not from the device. This sandbox's disk is such a disk: 4 KiB O_DIRECT reads of a
+  recently written or read file took about 33 us at the median, of a large file nobody had read about 650-750 us.
+- A system that reads with O_DIRECT (DiskANN) bypasses the page cache, so a cgroup cap does not constrain its reads at
+  all: for it the result is the peak memory it needed (the evidence table), not a time under pressure.
 
 A cap is a fraction of the dataset's size, defined as **N x d x 4 bytes** (its f32 vectors as distributed): 50%, 25%
 and 10%, plus `uncapped` (the same code path with no limit). Every system on a dataset gets the same cap, for its whole
 query process, page cache included, with no swap, so that only the page cache gives way. The quick suite runs the axis
-on yahoo-minilm-384 and laion-clip-512; the full suite on every dataset (`suites.py`, `caps`).
+on yahoo-minilm-384 and laion-clip-512, the full suite on every dataset and `scale-test` on laion-s200k when asked
+(`suites.py`, `caps`). Under a cap each warm query's last repetition records its storage reads (the system's own
+counters, the bytes its processes read, major faults), reported per cell with the peak memory.
 
 **How it is applied** (`capmem.py`, `runsys.py --cap`). Each system builds once, uncapped, on the build cores, and keeps
 its index in the work directory. Each cap then runs in a fresh process that first moves into a memory cgroup of its own
@@ -175,9 +189,8 @@ instance, read its whole file again on every query under every cap).
 
 **Does not fit.** A limit the kernel refuses (v1 cannot shrink the group below what it cannot reclaim, EBUSY), and a
 process the OOM killer stops under the cap, are recorded as `does not fit` in `caps/status.csv`; the cells a run
-finished before an OOM kill are kept. The in-memory systems (faiss flat and HNSW, Panorama, PDX-BOND, ACORN) keep at
-least the f32 vectors, 100% of the dataset's size, in anonymous memory, so they cannot fit under any cap on this axis;
-they are reported as not fitting and are not run capped.
+finished before an OOM kill are kept. An in-memory system named on the axis (faiss HNSW) is built inside each capped
+process and the cap set after it, so a cap below what it holds is refused or ends in an OOM kill: `does not fit`.
 
 **Cold and warm.** Each cell first times one cold query (query 0, once): vexact drops its full vectors (the codes stay),
 the other systems their group's page cache (anonymous memory, such as faiss IVF's centroids and DiskANN's PQ codes,
@@ -238,9 +251,22 @@ The streaming truth itself applies no allowance. In the scale test the few that 
 bit-identical stored vectors, one in the answer and one not) or pairs within about 2e-6 of each other whose order flips
 when the query is rounded to f16, as vexact rounds it: with the f16 query vexact's item is the larger one.
 
-**Systems**: vexact (exact, threshold, approximate), faiss flat over f16 (`IndexScalarQuantizer` QT_fp16, mapped;
-10 queries once: a scan at 100M reads 100 GB) and faiss IVF on disk (approximate). `scale-test` is the same code on two
-parts: 200k inside 500k inside 1M.
+**Systems**: vexact (exact, threshold, approximate; disk mode: its saved index mapped, the full vectors on file),
+faiss flat over f16 (`IndexScalarQuantizer` QT_fp16, mapped; 10 queries once: a scan at 100M reads 100 GB), and for
+approximate k-NN faiss IVF on disk, DiskANN's SSD index and faiss HNSW over f16 (`IndexHNSWSQ` QT_fp16, M 16,
+efConstruction 200; in memory). `scale-test` is the same code on two parts: 200k inside 500k inside 1M.
+
+**The machine is the cap.** The scale suite runs on whatever machine it is given, with no cgroup limit: the machine's
+RAM is the cap. `run.py` records the machine with the results (`results/<suite>/machine.json`, shown at the top of the
+report): CPU model, cores and SIMD flags (AVX2, AVX-512), RAM and swap, free space on the data disk, kernel, and
+virtualisation (`systemd-detect-virt --vm` and `--container`, else /sys/class/dmi and the CPU's hypervisor flag). The
+report labels each size's regime against that RAM: the f16 vectors and each system's footprint (its index on disk, or
+what an in-memory system holds; and its build's peak RSS) `fits` (at most half the RAM), `partly fits` (up to the
+RAM) or `exceeds RAM`. The in-memory systems run too: one the OOM killer stops, or that refuses (DiskANN when its
+build would not fit on the disk), is reported as `does not fit`, not skipped. Each query's last repetition records its
+storage reads (KiB its processes read, major faults, vexact's io_uring reads, DiskANN's reads and rounds), in the
+`stats` column and the report's "Storage reads per query". The sizes are fixed, so runs on different machines share
+data points.
 
 **What each size needs** (from the 1M-scale measurements here, 512 dimensions; scale linearly):
 
@@ -259,6 +285,8 @@ linearly above that; nothing above 3M has been measured for the index (`rust/REP
 | vexact build time (3 threads) | 350 s (fit 139 s, encode 127 s) | ~1 h | ~4 h | ~10 h |
 | vexact exact k-NN, k = 10, one thread | 53 ms (11 ms at 200k, 27 ms at 500k) | | | |
 | faiss flat f16, mapped: file / one scan | 1.0 GB / 150 ms from the page cache | 10 GB / 1.5 s | 41 GB / 6 s | 102 GB / 15 s from the cache, about 50 s from a 2 GB/s disk |
+| DiskANN: index / disk during the build (f32 corpus file, the graph build's copy, the index) / build peak RSS / build time | 6.0 GB / 8.4 GB / 4.1 GiB at 500k / 1,040 s (at 500k: 519 s) | 60 GB / 84 GB | 240 GB / 340 GB | 600 GB / 840 GB |
+| faiss HNSW f16 (in memory): index / build peak RSS / build time | 1.07 GB / 2.8 GiB / 230 s | 11 GB / ~25 GiB / ~40 min | 43 GB / ~100 GiB | 107 GB / ~250 GiB: exceeds most machines' RAM |
 | faiss IVF on disk: files / build peak RSS (lists are built in memory, then moved to disk) | 1.0 GB / 3.3 GiB | 10 GB / ~30 GiB | 41 GB / ~130 GiB | 102 GB / ~330 GiB: build in shards (faiss's `merge_ondisk`) |
 
 The vexact rows assume the in-memory build (`v2::rebuild`) that the bindings use; at 100M its heap copy of the vectors
@@ -291,13 +319,14 @@ inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`.
 - **The public suites** (`--stages public`): the overlay was checked (applied and restored on VIBE and ANN-Benchmarks
   checkouts), but the images for faiss and glass were not built here, and ANN-Benchmarks' Docker images were absent,
   so the unfiltered approximate k-NN was left for a machine with the images.
-- **The cap axis** ran here on yahoo-minilm-384 and laion-clip-512 (`results/quick/REPORT.md`, "Under a memory cap"),
-  on cgroup v1 (a writable memory controller in the container), with vexact in disk mode, faiss flat mapped, faiss IVF
-  on disk and DiskANN; pgvector under a cap was not run. The disk here reads 4 KiB at random in about 32 µs at queue
-  depth 1 and 1.9 GB/s sequentially (`../threshold-db/capped/diskbench.c`), five times faster per read than the WSL2
-  disk of the earlier capped runs, so cold figures here are optimistic for slower disks.
+- **The cap axis**: its runs here (yahoo-minilm-384 and laion-clip-512, at 50%, 25% and 10%) were removed from the
+  results. They measured this VM's host cache, not storage: the files the cgroup pushed out of the guest's cache came
+  back from the host's memory in about 33 us per 4 KiB read, against 650-750 us for a file nobody had read (the 32 us
+  that `../threshold-db/capped/diskbench.c` reported here was that cache). They are in the history at 10d3605. The
+  mechanics were checked again once on laion-s200k (`scale-test --stages cap`) and not committed.
 - **The scale suite** was tested end to end on its small sizes (`scale-test`: 200k, 500k and 1M from two LAION parts;
-  `results/scale-test/REPORT.md`); `scale` itself (10M to 100M) is for a machine with the disk and memory above.
+  `results/scale-test/REPORT.md`, which records the machine); `scale` itself (10M to 100M) is for a machine with the
+  disk and memory above.
 
 ## The scripts this suite replaced
 
