@@ -368,14 +368,15 @@ when the saved index was missing or stale. Now (README, "Making an index"):
 - `open_at` and `rebuild_at` are folded: one directory holds one index (`DIR/encoded`), so variants of one fit are
   directories of their own (`cp -al` of the fit). Only the tests save beside a read-only fit (`open_in`, `rebuild_in`,
   crate-private), and e2e's variant flags `dlv=` and `nusort` are refused (another build is another index directory).
-- Every flag is in the binary's registry; a build flag where nothing is built, a fit flag given to a rebuild, `--vectors`
-  without `create`, positional arguments and the removed commands are refused with what to use instead.
+- Every flag is in the binary's registry; a build flag where nothing is built, a fit flag given to a rebuild,
+  `--vectors` without `create`, any other flag given to `create`, `--seed` where it seeds nothing, positional
+  arguments and the removed commands are refused with what to use instead.
 
 Code hashes through the new commands are unchanged (synth4k `7ac80b6c54101fa9`, 60k `c44827e2e155e64f`, 1M `pyfit`
-`b8bdd054938fe563`; each also opened again, 0.1 to 0.4 s), and `create` at the defaults then (1,000 per cluster, by-k8, pca, six levels) from the 1M BioCLIP-2
-vectors (353 s on 4 threads: partition, fit with the certificate, encoding) gives code hash `db6ca06f69bb8c74`, the
-hash the steps before the API give from the same partition (`fit --partition` and a build of the earlier binary), with
-the fit's files byte-identical.
+`b8bdd054938fe563`; each also opened again, 0.1 to 0.4 s), and `create` at the defaults then (1,000 per cluster,
+by-k8, pca, six levels) from the 1M BioCLIP-2 vectors (353 s on 4 threads: partition, fit with the certificate,
+encoding) gives code hash `db6ca06f69bb8c74`, the hash the steps before the API give from the same partition (`fit
+--partition` and a build of the earlier binary), with the fit's files byte-identical.
 
 ## Rebased (2026-11-16)
 

@@ -29,7 +29,11 @@ impl Index {
     /// thread, pinned to `core` when given.
     /// `plan`: "auto" (the planner: in memory, the support table and the rule in rows; nothing is timed), "index" (every
     /// cluster the support table leaves open on the index path), "flat" (decided from full vectors) or "scan".
-    /// `dlv`: the deterministic levels' cumulative bytes (a build input, e.g. [16, 32]); None: the fit's.
+    /// `dlv`: the deterministic levels' cumulative bytes (a build input, e.g. [16, 32]); None: the fit's six levels
+    /// (4 / 8 / 12 / 16 / 24 / 32 B). Unlike `BuildOptions::default()` (two levels, 16 and 32 B), so that the benchmark
+    /// stays on the options it was run with before the library's defaults changed; pass [16, 32] for the library's.
+    /// One directory holds one index (`dir/encoded`): two `Index(dir)` with different `dlv` replace each other's saved
+    /// index, each rebuilding it; give each variant a directory of its own (`cp -al` of the fit).
     /// `ddec`: the deterministic levels that decide in threshold queries, as a bit mask (None: all).
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None))]

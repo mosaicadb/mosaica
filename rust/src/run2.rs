@@ -340,17 +340,23 @@ pub fn read_plan_file(p: Plan, f: &str) -> Result<(Plan, bool), String> {
 /// plan file that cannot be read or holds another name stops the run.
 pub fn plan_with_file(ix: &Index2, plan: Plan, priced: bool, dir: &str, flags: &str) -> Plan {
     let file = arg_str("--plan-file", "");
-    let (fp, gives_disk) = if file.is_empty() { (plan, false) } else { read_plan_file(plan, &file).unwrap_or_else(|e| exit2(&e)) };
+    plan_with_file_by(plan, priced, &file, flags, &mut |s| out!("{s}"), &mut |p, log| disk_constants(ix, p, dir, log))
+}
+
+/// `plan_with_file` with the plan file `file` ("": none), its lines logged by `log` and the disk constants timed (or
+/// read from the cache) by `time`.
+fn plan_with_file_by(plan: Plan, priced: bool, file: &str, flags: &str, log: &mut dyn FnMut(String), time: &mut dyn FnMut(Plan, &mut dyn FnMut(String)) -> Plan) -> Plan {
+    let (fp, gives_disk) = if file.is_empty() { (plan, false) } else { read_plan_file(plan, file).unwrap_or_else(|e| exit2(&e)) };
     if !priced {
         return fp;
     }
     let pf = flags.split(',').filter_map(|f| f.trim().strip_prefix("pf=")).find(|f| std::fs::read_to_string(f).is_ok_and(|t| Plan::kv_gives_disk(&t)));
     if gives_disk || pf.is_some() {
-        out!("[plan] disk constants io_us={} io_gbps={} from {}; not timed", fp.io_us, fp.io_gbps, if gives_disk { file.as_str() } else { pf.unwrap() });
+        log(format!("[plan] disk constants io_us={} io_gbps={} from {}; not timed", fp.io_us, fp.io_gbps, if gives_disk { file } else { pf.unwrap() }));
         return fp;
     }
-    let timed = disk_constants(ix, plan, dir, &mut |s| out!("{s}"));
-    if file.is_empty() { timed } else { read_plan_file(timed, &file).unwrap_or_else(|e| exit2(&e)).0 }
+    let timed = time(plan, log);
+    if file.is_empty() { timed } else { read_plan_file(timed, file).unwrap_or_else(|e| exit2(&e)).0 }
 }
 
 /// Prints `e` and stops the run with status 2.
@@ -2110,26 +2116,32 @@ mod tests {
         refused("--v2 --index D --seed 7 e2e", "does nothing");
     }
 
-    /// A variant's `pf=` file that gives both disk constants is used as given: nothing is timed, evicted or cached.
+    /// A variant's `pf=` file that gives both disk constants is used as given: nothing is timed (the timer panics) and
+    /// the run logs that; one that gives only one of them leaves them to the timer.
     #[test]
     fn disk_constants_from_a_pf_file_are_not_timed() {
         let tmp = std::env::temp_dir().join(format!("vexact-pf-{}-{}", std::process::id(), now_s() as u64));
-        let fit = tmp.join("fit");
-        std::fs::create_dir_all(&fit).unwrap();
-        let src = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-        for e in std::fs::read_dir(src).unwrap().map(|e| e.unwrap()).filter(|e| e.file_type().unwrap().is_file()) {
-            std::fs::copy(e.path(), fit.join(e.file_name())).unwrap();
-        }
-        let dir = fit.to_str().unwrap();
-        let (_, ix) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
-        let pf = tmp.join("plan.txt");
-        std::fs::write(&pf, "io_us=7.25\nio_gbps=1.5\n").unwrap();
-        let flags = format!("noint,pf={}", pf.display());
+        std::fs::create_dir_all(&tmp).unwrap();
+        let (both, one) = (tmp.join("plan.txt"), tmp.join("half.txt"));
+        std::fs::write(&both, "io_us=7.25\nio_gbps=1.5\n").unwrap();
+        std::fs::write(&one, "io_us=7.25\n").unwrap();
+        let flags = format!("noint,pf={}", both.display());
         let plan = plan_flags(Plan::default(), &flags).unwrap();
-        let p = plan_with_file(&ix, plan, true, dir, &flags);
+        let mut lines = Vec::new();
+        let p = plan_with_file_by(plan, true, "", &flags, &mut |s| lines.push(s), &mut |_, _| panic!("the disk constants were timed"));
         assert_eq!((p.io_us, p.io_gbps), (7.25, 1.5));
-        assert!(!fit.join(DISK_CACHE).exists(), "the disk constants were timed");
-        drop(ix);
+        assert!(lines.iter().any(|l| l.contains("io_us=7.25 io_gbps=1.5") && l.contains("not timed")), "{lines:?}");
+        // in memory (reads not priced) nothing is timed either
+        plan_with_file_by(plan, false, "", "", &mut |_| {}, &mut |_, _| panic!("timed in memory"));
+        // a pf= file with one constant: timed
+        let flags = format!("pf={}", one.display());
+        let plan = plan_flags(Plan::default(), &flags).unwrap();
+        let mut timed = false;
+        let p = plan_with_file_by(plan, true, "", &flags, &mut |_| {}, &mut |p, _| {
+            timed = true;
+            Plan { io_gbps: 9.0, ..p }
+        });
+        assert!(timed && p.io_gbps == 9.0);
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 }
