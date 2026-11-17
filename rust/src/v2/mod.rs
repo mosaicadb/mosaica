@@ -1173,9 +1173,14 @@ pub struct Index2 {
     pub codes: Arc<DetTab>,
     pub etab: Arc<ExpTab>,
     pub cl: Vec<Cl2>,
-    pub centres64: Arc<Vec<f64>>,
+    /// The stored centres (K x n), whose values are f32: q.m reads them widened (`Index2::qm`).
+    pub centres32: Arc<Vec<f32>>,
     pub rots: Arc<Vec<Vec<f64>>>,
     pub anchors: Arc<Vec<f64>>,
+    /// The anchors rounded to f32, for the search of a query's nearest (whose beta is then taken from `anchors`).
+    pub anchors32: Arc<Vec<f32>>,
+    /// nanch x k: anchor a . (cluster c's centre direction) at [a * k + c], as dot64 gives it; query-independent.
+    pub apm: Arc<Vec<f64>>,
     // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward; on the heap after a
     // build, mapped from hi.bin and lo.bin after an open (so an open reads none of it)
     pub hi: Arc<Arr<f32>>,
@@ -1202,6 +1207,14 @@ pub struct Index2 {
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
     pub nent: usize,     // entity ids are below this
     pub nukey: Arr<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
+}
+
+/// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
+pub fn anchor_mhat(anchors: &[f64], cl: &[Cl2], n: usize) -> Vec<f64> {
+    if n == 0 {
+        return Vec::new();
+    }
+    anchors.par_chunks(n).flat_map_iter(|a| cl.iter().map(move |c| dot64(a, &c.mhat))).collect()
 }
 
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
@@ -1273,9 +1286,19 @@ impl Index2 {
         }
         out
     }
-    pub fn centres_f64(&self, ci: usize) -> &[f64] {
+    /// Cluster ci's stored centre.
+    pub fn centre(&self, ci: usize) -> &[f32] {
         let n = self.n();
-        &self.centres64[ci * n..(ci + 1) * n]
+        &self.centres32[ci * n..(ci + 1) * n]
+    }
+    /// Cluster ci's stored centre as f64.
+    pub fn centre_f64(&self, ci: usize) -> Vec<f64> {
+        self.centre(ci).iter().map(|&x| x as f64).collect()
+    }
+    /// q.m of cluster ci (dot64 of q and the centre).
+    #[inline]
+    pub fn qm(&self, q64: &[f64], ci: usize) -> f64 {
+        dot64_32(q64, self.centre(ci))
     }
     /// The stored vectors, when this index's row ids address them directly: not when it shares a parent's through
     /// `vrow`, whose rows the reader and the page-cache hints would then miss.
@@ -1377,9 +1400,11 @@ impl Index2 {
             codes: self.codes.clone(),
             etab: self.etab.clone(),
             cl,
-            centres64: self.centres64.clone(),
+            centres32: self.centres32.clone(),
             rots: self.rots.clone(),
             anchors: self.anchors.clone(),
+            anchors32: self.anchors32.clone(),
+            apm: self.apm.clone(),
             hi: self.hi.clone(),
             lo: self.lo.clone(),
             nanch: self.nanch,
@@ -2186,6 +2211,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         let wm = c.wm(gp);
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
+    let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
@@ -2195,8 +2221,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         codes: Arc::new(codes),
         etab: Arc::new(et),
         cl,
-        centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
+        centres32: Arc::new(p.centres[..k * n].to_vec()),
         rots: Arc::new(rots),
+        anchors32: Arc::new(anchors.iter().map(|&x| x as f32).collect()),
+        apm: Arc::new(apm),
         anchors: Arc::new(anchors),
         hi: Arc::new(thi.finish()),
         lo: Arc::new(tlo.finish()),

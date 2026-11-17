@@ -292,6 +292,26 @@ pub fn haar_rotation(m: usize, seed: u64, stream: u64) -> Vec<f64> {
 }
 
 /// f64 dot product with eight independent partial sums (vectorises; a different but fixed summation order).
+/// dot64 with `b` held as f32: each element widened exactly, the same operations in the same order, so the result
+/// equals dot64 of the widened vector bit for bit.
+pub fn dot64_32(a: &[f64], b: &[f32]) -> f64 {
+    let n = a.len().min(b.len());
+    let mut s = [0f64; 8];
+    let mut i = 0;
+    while i + 8 <= n {
+        for k in 0..8 {
+            s[k] += a[i + k] * b[i + k] as f64;
+        }
+        i += 8;
+    }
+    let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+    while i < n {
+        r += a[i] * b[i] as f64;
+        i += 1;
+    }
+    r
+}
+
 pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let mut s = [0f64; 8];

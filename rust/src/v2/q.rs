@@ -80,6 +80,8 @@ pub struct Prep2 {
     pub qlo: Vec<i16>,
     /// The nearest anchor, found on first use: a plan that scans never reads the anchors.
     anc: OnceLock<Anc>,
+    /// q.m of the clusters asked for on first use (`qms`), NaN for the rest.
+    qm: OnceLock<Vec<f64>>,
     pub gq: Vec<OnceLock<GQ2>>,
     pub dial: Vec<f32>, // per level, factor on the item intervals' upper half-width (1: certified; below: approximate)
 }
@@ -99,28 +101,70 @@ impl Prep2 {
     }
     /// The nearest anchor; on the first call with `among` (clusters, when anchor a is cluster a's centre: anc_centres), the
     /// nearest of those clusters' anchors. Any anchor gives sound bounds, and a query over a few clusters needs the
-    /// one nearest to them.
+    /// one nearest to them. The search ranks the anchors cheaply (by q.m / |m| from `qms` when the anchors are the
+    /// centres' directions, else in f32) and takes q.p in f64 of each within the ranking's error of the best, so the
+    /// anchor is the one with the largest f64 q.p (the first of equals).
     pub fn anc_among(&self, ix: &Index2, among: Option<&[usize]>) -> Anc {
         *self.anc.get_or_init(|| {
             let n = ix.n();
-            let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
             let all: Vec<usize>;
-            let cand = match among.filter(|_| ix.anc_centres) {
+            let centres = ix.anc_centres && ix.nanch == ix.k();
+            let cand: &[usize] = match among.filter(|_| centres) {
                 Some(c) if !c.is_empty() => c,
                 _ => {
                     all = (0..ix.nanch).collect();
                     &all
                 }
             };
-            for &a in cand {
-                let b = unsafe { dot64v(&self.q64, &ix.anchors[a * n..(a + 1) * n]) };
-                if b > best {
-                    best = b;
-                    ba = a;
+            let score: Vec<f64> = if centres {
+                self.qms(ix, Some(cand));
+                cand.iter().map(|&a| self.qm(ix, a) / ix.cl[a].mn).collect()
+            } else {
+                cand.iter().map(|&a| unsafe { dot32(&self.q32, &ix.anchors32[a * n..(a + 1) * n]) }).collect()
+            };
+            // the ranking's error bound on each score: f64 rounding of q.m and of the division, or the f32 product of
+            // the rounded anchor (64 u for the sum, 2^-24 for the rounding, relative to |q| |p| = |q|)
+            let err = if centres { 1e-12 * self.qn + 1e-300 } else { 70.0 * U * self.qn + 1e-300 };
+            let top = score.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
+            for (i, &a) in cand.iter().enumerate() {
+                if score[i] >= top - 2.0 * err {
+                    let b = unsafe { dot64v(&self.q64, &ix.anchors[a * n..(a + 1) * n]) };
+                    if b > best {
+                        best = b;
+                        ba = a;
+                    }
                 }
             }
             anc_of(self.qn, ba, best)
         })
+    }
+
+    /// q.m of every cluster of `among` (every cluster when None), computed on the first call (in parallel; NaN for the
+    /// clusters left out); later calls return the same, whatever they ask for, so `qm` falls back for the rest.
+    pub fn qms(&self, ix: &Index2, among: Option<&[usize]>) -> &[f64] {
+        self.qm.get_or_init(|| {
+            let mut v = vec![f64::NAN; ix.k()];
+            match among {
+                None => v.par_iter_mut().enumerate().for_each(|(ci, x)| *x = ix.qm(&self.q64, ci)),
+                Some(c) => {
+                    let got: Vec<f64> = c.par_iter().map(|&ci| ix.qm(&self.q64, ci)).collect();
+                    for (&ci, x) in c.iter().zip(got) {
+                        v[ci] = x;
+                    }
+                }
+            }
+            v
+        })
+    }
+
+    /// q.m of cluster ci (from `qms` when it holds it).
+    #[inline]
+    pub fn qm(&self, ix: &Index2, ci: usize) -> f64 {
+        match self.qm.get().map(|v| v[ci]) {
+            Some(x) if !x.is_nan() => x,
+            _ => ix.qm(&self.q64, ci),
+        }
     }
 }
 
@@ -137,30 +181,12 @@ pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
 }
 
 pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
-    prep2_qm(ix, q, None)
-}
-
-/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (`anc_centres`): the
-/// anchor is the cluster with the largest q.m / |m|, and only its product is taken again.
-pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
-    let n = ix.n();
     let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
     let fx: Vec<i64> = q16.iter().map(|&h| f16_fixed(h)).collect();
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
-    let anc = OnceLock::new();
-    if let Some(qm) = qm.filter(|_| ix.anc_centres && ix.nanch == ix.k() && ix.nanch > 0) {
-        let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
-        for (c, &v) in qm.iter().enumerate() {
-            if v / ix.cl[c].mn > best {
-                best = v / ix.cl[c].mn;
-                ba = c;
-            }
-        }
-        let _ = anc.set(anc_of(qn, ba, unsafe { dot64v(&q64, &ix.anchors[ba * n..(ba + 1) * n]) }));
-    }
-    Prep2 { q16, q32, q64, qn, qhi, qlo, anc, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
+    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
@@ -670,7 +696,7 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let Anc { a, beta: b, rho } = pr.anc(ix);
     let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
     let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
-    let pm = dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat);
+    let pm = if ix.apm.is_empty() { dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat) } else { ix.apm[a * k + ci] };
     let rm = cm - b * pm;
     let rp = (rho * rho - rm * rm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
     Cut { cm, s1, bh, bl, rm, rp }
@@ -2587,7 +2613,7 @@ fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: 
 /// The cluster's cut and sorted range (under the norm sort, its groups set up first).
 fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
     let c = &ix.cl[ci];
-    let qm = dot64(&pr.q64, ix.centres_f64(ci));
+    let qm = pr.qm(ix, ci);
     let (u0, u1, d0, d1) = if nusort {
         let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
         let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
@@ -2892,7 +2918,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     let iv = if o.want_iv { Some((-1.0, 1.0)) } else { None };
                     push(&mut acc, c.r0, c.r1, iv);
                     if o.want_iv && !ix.nukey.is_empty() {
-                        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+                        let qm = pr.qm(ix, ci);
                         let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
@@ -3050,7 +3076,7 @@ pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut
     let ci = ix.cl.partition_point(|c| c.r1 <= row);
     let c = &ix.cl[ci];
     let gq = get_gq2(ix, pr, c.g, st);
-    let qm = dot64(&pr.q64, ix.centres_f64(ci));
+    let qm = pr.qm(ix, ci);
     let mut cq = cluster_q2(ix, ci, gq, pr, qm);
     let mut iv = Vec::new();
     let (mut rin, mut pend) = (Vec::new(), Vec::new());
@@ -3062,7 +3088,7 @@ pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut
 
 /// Clusters in descending order of q.m^ (their centre direction).
 pub fn by_centre(ix: &Index2, pr: &Prep2, clusters: Vec<usize>) -> Vec<usize> {
-    let mut byc: Vec<(f64, usize)> = clusters.into_iter().map(|ci| (dot64(&pr.q64, ix.centres_f64(ci)) / ix.cl[ci].mn, ci)).collect();
+    let mut byc: Vec<(f64, usize)> = clusters.into_iter().map(|ci| (pr.qm(ix, ci) / ix.cl[ci].mn, ci)).collect();
     byc.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     byc.into_iter().map(|x| x.1).collect()
 }
@@ -3082,7 +3108,7 @@ pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, 
         nvis += cands.len();
         st.touched += cands.len() as u64;
         let gq = get_gq2(ix, pr, c.g, st);
-        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+        let qm = pr.qm(ix, ci);
         let mut cq = cluster_q2(ix, ci, gq, pr, qm);
         let (mut rin, mut pend) = (Vec::new(), Vec::new());
         let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
@@ -3133,7 +3159,7 @@ impl Approx {
     /// Clusters holding a visible item, by descending q.m + f r.
     pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
         let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
-            .map(|ci| (dot64(q64, ix.centres_f64(ci)) + self.f * self.rad[ci], ci)).collect();
+            .map(|ci| (ix.qm(q64, ci) + self.f * self.rad[ci], ci)).collect();
         keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
         keys.into_iter().map(|x| x.1).collect()
     }
@@ -3145,12 +3171,12 @@ impl Approx {
         let n = ix.n();
         let rad: Vec<f64> = (0..ix.k()).into_par_iter().map(|ci| {
             let c = &ix.cl[ci];
-            let m = ix.centres_f64(ci);
+            let m = ix.centre_f64(ci);
             let mut x = vec![0f64; n];
             let mut s = 0.0;
             for r in c.r0..c.r1 {
                 ix.full_row_f64(r, &mut x);
-                s += x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+                s += x.iter().zip(&m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
             }
             (s / (c.r1 - c.r0).max(1) as f64).sqrt()
         }).collect();
@@ -3272,7 +3298,7 @@ pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut St
         gs.dedup();
         setup_groups(ix, pr, &gs, st);
         live.iter().map(|&ci| {
-            let qm = dot64(&pr.q64, ix.centres_f64(ci));
+            let qm = pr.qm(ix, ci);
             (NuCut::new(ix, ci, pr, pr.gq[ix.cl[ci].g].get().unwrap(), qm).bounds(ix.cl[ci].numax).1, ci)
         }).collect()
     };
@@ -3354,12 +3380,11 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let nl = ix.meta.nl();
     let t0 = tick();
     // q.m of every cluster, for the order, the anchor and each probed cluster
-    let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
-    let qm: Vec<f64> = (0..ix.k()).map(|ci| dot64(&q64, ix.centres_f64(ci))).collect();
-    let mut pr = prep2_qm(ix, q, Some(&qm));
+    let mut pr = prep2(ix, q);
     if let Some(d) = dial {
         pr.dial = d.to_vec();
     }
+    let qm = pr.qms(ix, None);
     let mut st = Stats::new(nl);
     let mut order = ap.order_qm(ix, &qm, vis);
     order.truncate(nprobe);
@@ -3662,7 +3687,7 @@ impl Synth2 {
         let gq = get_gq2(ix, pr, ix.cl[c].g, &mut st);
         let mut z = vec![0f64; self.n];
         self.gen(c, self.ext[row], &mut z);
-        dot64(&pr.q64, ix.centres_f64(c)) + dot64(&gq.qv, &z)
+        pr.qm(ix, c) + dot64(&gq.qv, &z)
     }
     pub fn x_f64(&self, ix: &Index2, row: usize, out: &mut [f64]) {
         let c = self.row_cl[row] as usize;
@@ -3670,7 +3695,7 @@ impl Synth2 {
         let mut z = vec![0f64; n];
         self.gen(c, self.ext[row], &mut z);
         let v = &self.vq[self.grp[c]];
-        let m = ix.centres_f64(c);
+        let m = ix.centre_f64(c);
         for i in 0..n {
             out[i] = m[i] + (0..n).map(|k| v[i * n + k] * z[k]).sum::<f64>();
         }

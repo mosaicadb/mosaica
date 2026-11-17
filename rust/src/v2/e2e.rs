@@ -699,7 +699,7 @@ fn same_index(a: &Index2, b: &Index2) {
         e
     };
     assert_eq!(esc(a), esc(b));
-    assert_eq!((f64b(&a.centres64), f64b(&a.anchors), f32b(&a.hi), f32b(&a.lo)), (f64b(&b.centres64), f64b(&b.anchors), f32b(&b.hi), f32b(&b.lo)));
+    assert_eq!((f32b(&a.centres32), f64b(&a.anchors), f64b(&a.apm), f32b(&a.hi), f32b(&a.lo)), (f32b(&b.centres32), f64b(&b.anchors), f64b(&b.apm), f32b(&b.hi), f32b(&b.lo)));
     assert_eq!(a.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>(), b.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>());
     assert_eq!((a.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&a.etab.lo), f32b(&a.etab.hi)), (b.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&b.etab.lo), f32b(&b.etab.hi)));
     for (x, y) in a.cl.iter().zip(&b.cl) {
@@ -910,8 +910,7 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
         let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
         let best = (0..k).map(|a| (dot64(&q64, &ix.anchors[a * n..(a + 1) * n]), a)).fold((f64::NEG_INFINITY, 0), |b, x| if x.0 > b.0 { x } else { b }).1;
         // the anchor of a query given q.m of every cluster, and of a query over one cluster: the nearest of all anchors
-        let qm: Vec<f64> = (0..k).map(|c| dot64(&q64, ix.centres_f64(c))).collect();
-        assert_eq!(prep2_qm(&ix, q, Some(&qm)).anc(&ix).a, best);
+        assert_eq!(prep2(&ix, q).anc(&ix).a, best);
         assert_eq!(prep2(&ix, q).anc_among(&ix, Some(&[0])).a, best);
         // (on the centres' index the shortcuts are taken: one cluster's anchor is its own)
         assert_eq!(prep2(&base, q).anc_among(&base, Some(&[3])).a, 3);

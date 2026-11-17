@@ -536,7 +536,7 @@ impl Ctx2 {
             ("groups.tables", ix.groups.iter().map(|g| b(&g.ytab) + b(&g.ktab) + b(&g.ttab) + b(&g.khl)).sum()),
             ("ctab", ix.ctab.iter().flatten().map(|t| b(&t.th) + b(&t.tmax) + b(&t.step) + b(&t.off) + b(&t.err)).sum()),
             ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
-            ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
+            ("centres32", b(&ix.centres32)), ("apm+anchors32", b(&ix.apm) + b(&ix.anchors32)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
             ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
             ("nukey", b(&ix.nukey)), ("ent_xs+row_ent", b(&self.ent_xs) + b(&self.row_ent)),
             ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
@@ -600,12 +600,12 @@ pub fn scale_check(ix: &Index2) -> (usize, usize, f64, f64, f64) {
     let ng = ix.groups.len();
     let r2row: Vec<(usize, f64, f64)> = (0..ix.k()).into_par_iter().flat_map_iter(|ci| {
         let c = &ix.cl[ci];
-        let m = ix.centres_f64(ci);
+        let m = ix.centre_f64(ci);
         let mut x = vec![0f64; n];
         (c.r0..c.r1).map(move |r| {
             ix.full_row_f64(r, &mut x);
             let x2: f64 = x.iter().map(|v| v * v).sum();
-            let rr: f64 = x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum();
+            let rr: f64 = x.iter().zip(&m).map(|(a, b)| (a - b) * (a - b)).sum();
             (ci, rr, x2)
         }).collect::<Vec<_>>()
     }).collect();
@@ -762,7 +762,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
         let mut st = Stats::new(nl);
         let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| {
             let gq = get_gq2(ix, &pr, ix.cl[ci].g, &mut st);
-            let mut cq = cluster_q2(ix, ci, gq, &pr, dot64(&pr.q64, ix.centres_f64(ci)));
+            let mut cq = cluster_q2(ix, ci, gq, &pr, pr.qm(ix, ci));
             if sweep && c.plan.int_det {
                 cq.gtab = c.plan.gtab;
                 cq.enable_int(ix, ci, gq);
@@ -913,7 +913,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             }
             trot.push(t.ms());
             let t = Timer::new();
-            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, dot64(&pr.q64, ix.centres_f64(ci)))).collect();
+            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, pr.qm(ix, ci))).collect();
             tc.push(t.ms());
             let t = Timer::new();
             for (ci, cq) in cqs.iter_mut().enumerate() {
