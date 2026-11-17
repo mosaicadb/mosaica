@@ -1473,6 +1473,10 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
         }
         let rl = (l >= ndl).then(|| {
             let bits = |f: &dyn Fn(usize) -> bool| (0..J).fold(0u32, |m, j| m | (f(j) as u32) << j);
+            // a block's accumulator advances where it rises (rand_half): every part of the level must be of a block
+            // that rises here
+            let parts = lut.parts.iter().fold(0u32, |m, p| m | 1 << p.j.unwrap());
+            assert_eq!(parts & !bits(&|j| gp.thchg[lr].contains(&j)), 0, "a randomised level has a part of a block that does not rise there");
             let mut row = [0; J];
             for (slot, &j) in gp.thchg[lr].iter().enumerate() {
                 row[j] = gp.rrow[lr][slot];
