@@ -74,7 +74,8 @@ class Vexact(BaseANN):
         work = tempfile.mkdtemp(prefix="vexact-", dir=os.environ.get("VEXACT_WORK"))
         atexit.register(shutil.rmtree, work, ignore_errors=True)
         d = max(X.shape[1], MIN_DIM)
-        self.qbuf = np.zeros(d, np.float32)
+        # fit.py stores the vectors zero-padded to a multiple of 32 dimensions, and the index takes queries that wide
+        self.qbuf = np.zeros(-(-d // 32) * 32, np.float32)
         train = os.path.join(work, "train.npy")
         args = [sys.executable, os.path.join(SRC, "rust", "tools", "fit.py"), train, os.path.join(work, "index"),
                 "--metric", "angular", "--basis", self.basis, "--per-cluster", self.clusters]
