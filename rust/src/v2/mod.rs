@@ -572,7 +572,7 @@ impl Part {
             f.eid = et.id(core::array::from_fn(|k| v[(k >> f.off) & mask]), f.nb);
         }
         let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
-        // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        // part_sums2 adds the units' table bytes (at most 255 each) in 16 bits
         // whole groups of 4 units: the centre tables (kern::centre_tab) hold units / 4 * 4 per part, the queries read
         // all of them (total % 16 == 0 and 4 bits per unit already imply it)
         assert!(ufields.len() % 4 == 0, "a part of {} units, not a multiple of 4", ufields.len());

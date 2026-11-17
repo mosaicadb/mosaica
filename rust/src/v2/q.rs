@@ -1368,10 +1368,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             // part values
             let mut pv: [[__m512; 2]; J + 1] = [[_mm512_setzero_ps(); 2]; J + 1];
             for pl in &lut.parts {
-                let (h0, h1) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
-                let (l0, l1) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
-                let s0 = _mm512_fmadd_ps(h0, _mm512_set1_ps(256.0), l0);
-                let s1 = _mm512_fmadd_ps(h1, _mm512_set1_ps(256.0), l1);
+                let (s0, s1) = part_sums2(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
                 let k = match pl.j {
                     None => 0,
                     Some(j) => 1 + j,
@@ -1807,9 +1804,8 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
         let decode = |cp: *const u8| unsafe {
             let mut acc = _mm512_setzero_ps();
             for pl in &lut.parts {
-                let (a, b) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
-                let (x, y) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
-                acc = _mm512_add_ps(acc, _mm512_add_ps(_mm512_add_ps(a, b), _mm512_add_ps(x, y)));
+                let (a, b) = part_sums2(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
+                acc = _mm512_add_ps(acc, _mm512_add_ps(a, b));
             }
             std::hint::black_box(arr(acc));
         };
