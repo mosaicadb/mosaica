@@ -1114,14 +1114,16 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             };
         }
     }
-    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
+    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_));
     if intm {
         // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
-        // only lowers Tout
+        // only lowers Tout. An item taken in must carry its interval (out.iv), which the integer levels do not give,
+        // so with out.iv they take nothing in (Tin clamps to TMAX) and leave it to the randomised levels.
         let dmax = pr.dial[..ndl].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
-        int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
+        let cin = if out.iv.is_some() { f64::INFINITY } else { t - cq.tol + fixed - qm };
+        int_thresholds(&sv.s, &sv.mr, nsurv, cin, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
     }
     st.cyc[P_INIT] += tick() - ti;
     let t32 = t as f32;
@@ -2957,7 +2959,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.idx_clusters += 1;
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
-                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det && !o.want_iv);
+                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det);
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
