@@ -513,6 +513,7 @@ pub fn ip(k: usize, f: usize) -> usize {
 /// Per-item thresholds for slots 0..n (rounded up to 4; s and mr are read that far) from s and mr:
 /// kin = (cin - alr mr) / s and kout = (cout - alr mr) / s, divided by sigma and rounded outward with a slack covering
 /// the f64 evaluation (`mag` bounds |t| + |fixed| + |qm|).
+#[cfg(not(target_feature = "avx512f"))]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f64, alr: f64, mag: f64, sigma: f64, ist: &mut [i16]) {
     let eps = 2f64.powi(-46);
@@ -536,6 +537,34 @@ pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f6
         let yo = _mm256_mul_pd(_mm256_mul_pd(_mm256_sub_pd(vcout, a), r), vinv);
         let ti = _mm256_ceil_pd(_mm256_add_pd(_mm256_add_pd(yi, slack), _mm256_mul_pd(abs(yi), veps)));
         let to = _mm256_floor_pd(_mm256_sub_pd(_mm256_sub_pd(yo, slack), _mm256_mul_pd(abs(yo), veps)));
+        put(ti, k, 2, ist);
+        put(to, k, 4, ist);
+    }
+}
+
+/// int_thresholds eight slots at a time (slots 0..n rounded up to 8; s and mr are read that far): the same f64
+/// operations on each slot.
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
+pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f64, alr: f64, mag: f64, sigma: f64, ist: &mut [i16]) {
+    let eps = 2f64.powi(-46);
+    let (vcin, vcout, valr, vmag) = (_mm512_set1_pd(cin), _mm512_set1_pd(cout), _mm512_set1_pd(alr), _mm512_set1_pd(mag));
+    let (vinv, veps, vse) = (_mm512_set1_pd(1.0 / sigma), _mm512_set1_pd(eps), _mm512_set1_pd(eps / sigma));
+    let (lo, hi) = (_mm512_set1_pd(TMIN as f64), _mm512_set1_pd(TMAX as f64));
+    // within [TMIN, TMAX] the high word and the low byte fit i16, so the truncating packs keep them
+    let put = |v: __m512d, k: usize, f: usize, ist: &mut [i16]| {
+        let v = _mm512_cvtpd_epi32(_mm512_min_pd(_mm512_max_pd(v, lo), hi));
+        _mm_storeu_si128(ist.as_mut_ptr().add(ip(k, f)) as *mut _, _mm256_cvtepi32_epi16(_mm256_srai_epi32::<8>(v)));
+        _mm_storeu_si128(ist.as_mut_ptr().add(ip(k, f + 1)) as *mut _, _mm256_cvtepi32_epi16(_mm256_and_si256(v, _mm256_set1_epi32(255))));
+    };
+    for k in (0..n).step_by(8) {
+        let r = _mm512_div_pd(_mm512_set1_pd(1.0), _mm512_cvtps_pd(_mm256_loadu_ps(s.as_ptr().add(k))));
+        let a = _mm512_mul_pd(valr, _mm512_cvtps_pd(_mm256_loadu_ps(mr.as_ptr().add(k))));
+        let slack = _mm512_mul_pd(_mm512_mul_pd(_mm512_add_pd(vmag, _mm512_abs_pd(a)), r), vse);
+        let yi = _mm512_mul_pd(_mm512_mul_pd(_mm512_sub_pd(vcin, a), r), vinv);
+        let yo = _mm512_mul_pd(_mm512_mul_pd(_mm512_sub_pd(vcout, a), r), vinv);
+        let ti = _mm512_roundscale_pd::<{ _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC }>(_mm512_add_pd(_mm512_add_pd(yi, slack), _mm512_mul_pd(_mm512_abs_pd(yi), veps)));
+        let to = _mm512_roundscale_pd::<{ _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC }>(_mm512_sub_pd(_mm512_sub_pd(yo, slack), _mm512_mul_pd(_mm512_abs_pd(yo), veps)));
         put(ti, k, 2, ist);
         put(to, k, 4, ist);
     }
