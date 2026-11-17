@@ -1317,10 +1317,23 @@ pub(crate) mod tests {
             unsafe { o.put(0, &(0..4096).map(|i| i as u16).collect::<Vec<_>>()) };
             o.finish()
         };
-        std::fs::create_dir_all(root.join("encoded-0123")).unwrap();
-        let inside = format!("{rd}/encoded-0123/vectors.bin");
-        assert!(fresh().to_file(&inside, "normal", &[]).is_err());
-        assert!(!Path::new(&inside).exists());
+        // inside a saved index (DIR/encoded, and the older encoded-<key>) or a build's scratch (encoded.tmp-*), also
+        // through a link to it: refused, and an existing file there (the saved vectors) keeps its bytes
+        for sub in ["encoded", "encoded-0123", "encoded.tmp-0123"] {
+            std::fs::create_dir_all(root.join(sub)).unwrap();
+            let inside = format!("{rd}/{sub}/vectors.bin");
+            std::fs::write(&inside, vec![9u8; 100]).unwrap();
+            let e = fresh().to_file(&inside, "normal", &[]).unwrap_err();
+            assert!(e.contains("inside a saved index"), "{sub}: {e}");
+            let new = format!("{rd}/{sub}/rows.bin");
+            assert!(fresh().to_file(&new, "normal", &[]).is_err() && !Path::new(&new).exists(), "{sub}");
+            std::os::unix::fs::symlink(root.join(sub), root.join(format!("ln-{sub}"))).unwrap();
+            assert!(fresh().to_file(&format!("{rd}/ln-{sub}/vectors.bin"), "normal", &[]).is_err(), "{sub} through a link");
+            assert_eq!(std::fs::read(&inside).unwrap(), vec![9u8; 100], "{sub}: the saved vectors were written");
+        }
+        // a name that only starts like one is not inside an index
+        std::fs::create_dir_all(root.join("encodedx")).unwrap();
+        fresh().to_file(&format!("{rd}/encodedx/rows.bin"), "normal", &[]).unwrap();
         // a hard link to another file: the link is replaced, the other file keeps its bytes
         let orig = format!("{rd}/orig.bin");
         std::fs::write(&orig, vec![7u8; 10000]).unwrap();
