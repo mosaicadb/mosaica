@@ -66,6 +66,10 @@ const BUILD_FLAGS: &[&str] = &[
 ];
 /// Of those, the ones that make the partition and the fit: `create` only (a rebuild re-encodes the fit as it is).
 const FIT_FLAGS: &[&str] = &["--per-cluster", "--groups", "--basis", "--query-sample", "--cert-time"];
+/// Of those, the ones that make the support table's anchors (with `--seed`, the only thing a rebuild seeds).
+const ANCHOR_FLAGS: &[&str] = &["--anchors", "--text-anchors", "--text-count"];
+/// The flags `create` takes besides the build flags.
+const CREATE_FLAGS: &[&str] = &["--vectors", "--index", "--hash"];
 
 /// Exits with a message naming any argument that `check_args_of` refuses.
 pub fn check_args() {
@@ -113,11 +117,24 @@ pub fn check_args_of(a: &[String]) -> Result<(), String> {
         if !has("--vectors") || !has("--index") {
             return Err("create needs --vectors VECTORS.npy (N x n0, row i is entity i) and --index DIR (a new directory)".into());
         }
+        let other: Vec<&str> = flags.iter().copied().filter(|f| !BUILD_FLAGS.contains(f) && !CREATE_FLAGS.contains(f)).collect();
+        if !other.is_empty() {
+            return Err(format!("create takes build flags and {CREATE_FLAGS:?} only, not {other:?}: they do nothing there; give them to a run on the index afterwards (vexact --v2 --index DIR MODE)"));
+        }
     } else if has("--vectors") {
         return Err("--vectors is create's: vexact --vectors VECTORS.npy --index DIR create".into());
     }
     if has("--rebuild") && has("--in-memory") {
         return Err("--rebuild saves the index it encodes, --in-memory saves nothing: give one".into());
+    }
+    // the seed is the partition's, the fit's and the anchors': a rebuild uses it only to make anchors, a build in
+    // memory not at all
+    if has("--seed") && (has("--in-memory") || !create && !ANCHOR_FLAGS.iter().any(|f| has(f))) {
+        return Err(if has("--in-memory") {
+            "--seed does nothing with --in-memory (the seed is the partition's, the fit's and the anchors'; a build in memory takes the fit's anchors)".to_string()
+        } else {
+            format!("--seed does nothing here: a rebuild uses it only to make anchors ({ANCHOR_FLAGS:?}); the partition's and the fit's seed is create's")
+        });
     }
     // qvbench takes --groups (the groups it times), and nothing else of the build
     let qv = modes.contains(&"qvbench");
@@ -2057,6 +2074,9 @@ mod tests {
         ok("--vectors v.npy --index D create --per-cluster by-n --groups by-n --dlv 16,32 --anchors 512 --text-anchors t.npy --hash");
         ok("--v2 --index D e2e --nq 10");
         ok("--v2 --index D --rebuild --dlv 16,32 --anchors 64");
+        ok("--vectors v.npy --index D create --seed 7");
+        ok("--v2 --index D --rebuild --anchors 64 --seed 7");
+        ok("--v2 --index D --rebuild --text-anchors t.npy --text-count 32 --seed 7 e2e");
         ok("--v2 --index D --in-memory --nusort verify");
         ok("--v2 --index D --ddec 0.1 --keep-index bytesq");
         ok("qvbench --groups 8");
@@ -2077,6 +2097,17 @@ mod tests {
         refused("--v2 --index D --rebuild --basis dual", "create's");
         refused("--v2 --index D --rebuild --in-memory", "give one");
         refused("--v2 --index D e2e --nq", "needs a value");
+        // create takes build flags, --vectors, --index and --hash only
+        refused("--vectors v.npy --index D create --ddec 0", "create takes");
+        refused("--vectors v.npy --index D create --keep-index", "create takes");
+        refused("--vectors v.npy --index D create --nq 5", "create takes");
+        refused("--vectors v.npy --index D create --results R", "create takes");
+        // --seed only where it seeds something
+        refused("--v2 --index D --rebuild --seed 7", "does nothing");
+        refused("--v2 --index D --rebuild --dlv 16,32 --seed 7 e2e", "does nothing");
+        refused("--v2 --index D --in-memory --seed 7 verify", "--in-memory");
+        refused("--v2 --index D --in-memory --anchors 64 --seed 7 verify", "--in-memory");
+        refused("--v2 --index D --seed 7 e2e", "does nothing");
     }
 
     /// A variant's `pf=` file that gives both disk constants is used as given: nothing is timed, evicted or cached.

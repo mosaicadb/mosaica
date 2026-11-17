@@ -37,13 +37,14 @@ In the library these are `v2::create(vectors, dir, &BuildOptions, log)`, `v2::op
 The build flags are the fields of `v2::BuildOptions`. The partition and the fit, given to `create` only (a rebuild
 re-encodes the fit as it is): `--per-cluster by-n|M` (items per cluster; default by-n, 2,000 up to 2M items, doubling
 for each 4x N), `--groups by-n|by-k8|G` (default by-n), `--basis dual|pca` (default dual), `--query-sample QUERIES.npy`,
-`--cert-time SECONDS`. The support table's anchors, to `create` or a
-rebuild (which writes them into the fit first): `--anchors A` (from the centres; default 1,024), `--text-anchors
-PROMPTS.npy`, `--text-count C`. The encoding: `--dlv B,B,...|fit` (the deterministic levels; default 16,32, two levels; `fit`: the fit's six,
-4 / 8 / 12 / 16 / 24 / 32 B), `--rlv B,B,...`,
-`--profile P.npy`, `--cal-items N`, `--nguar N`, `--nusort`, `--design-exact`, `--csg-plain`, `--clusters K` (the first K
-clusters only), and `--seed S` for all of them. A build flag where nothing is built is refused, as is any argument the
-binary does not know (there are no positional arguments).
+`--cert-time SECONDS`. The support table's anchors, to `create` or a rebuild (which builds with them and writes them
+into the fit as it installs the index): `--anchors A` (from the centres; default 1,024), `--text-anchors PROMPTS.npy`,
+`--text-count C`. The encoding: `--dlv B,B,...|fit` (the deterministic levels; default 16,32, two levels; `fit`: the
+fit's six, 4 / 8 / 12 / 16 / 24 / 32 B), `--rlv B,B,...`, `--profile P.npy`, `--cal-items N`, `--nguar N`, `--nusort`,
+`--design-exact`, `--csg-plain`, `--clusters K` (the first K clusters only). `--seed S` seeds the partition, the fit
+and the anchors: `create` takes it, a rebuild only with an anchor flag, a build in memory (`--in-memory`) not at all.
+`create` takes the build flags, `--vectors`, `--index` and `--hash`, nothing else. A build flag where nothing is
+built is refused, as is any argument the binary does not know (there are no positional arguments).
 
 `v2::OpenOptions` holds what an open may choose without changing what is stored: `--ddec LEVELS` (the deterministic
 levels that decide threshold queries) and `--keep-index` (open although the fit's vectors file, perm.npy or partition
