@@ -112,4 +112,5 @@ a spread calibrated once per index, matches H r16 on average but not in the wors
 depends on rad (finding 5). The useful successor is a different part: replace the fixed nprobe by the rad-aware
 model's probability (finding 8), which both stops better and lets the caller ask for a recall target directly
 (finding 9). It needs the spread it ranks with (H r16's or the shared basis plus own directions) and adds about 20k
-operations and a 65-value table per query; the shared basis alone does not support it well (β is unstable).
+operations and a 65-value table per query. With the shared basis alone (66k multiply-adds) its order is weaker and
+its β less stable, but stopping on it still matches or beats H r4 at fixed nprobe.
