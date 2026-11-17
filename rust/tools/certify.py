@@ -14,6 +14,10 @@
 #      tilted probabilities; the frequencies left out are bounded by the block with the smallest remainder.
 # Margins REL (relative) and ABS (absolute) cover quadrature and rounding.
 #
+# The fit (src/fit.rs) runs the same method in Rust (src/certify.rs) and first looks in a shipped table of certificates
+# (src/certs_table.json, made by tools/certs_table.py with both); tools/fit.py looks in that table, then runs this.
+# This script stays as the independent implementation: it never reads the table.
+#
 # usage: python3 -I certify.py INDEX [--n-guarantee N] [--lnd LN_DELTA] [--time-cap SECONDS]
 #   The default budget is the one the Rust build uses: delta = EPS / (N L), N the index's item count rounded up to a
 #   power of two, L the number of randomised levels.
@@ -175,14 +179,35 @@ def ln_delta(meta, n_guarantee=None):
     return -math.log(N * len(meta["RLV"]) / meta.get("EPS", 1e-9))
 
 
-def add_certificate(out, lnd, time_cap, log=print):
-    """Certify the layout of the index in `out` at `lnd` and record the result in its meta.json (CERTS)."""
+TABLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "certs_table.json")
+
+
+def table_entry(ds, lnd):
+    """The shipped table's entry (src/certs_table.json, tools/certs_table.py) for exactly these blocks and this ln delta:
+    a list [X] (X None where no certificate was found), or None when the table has no such entry."""
+    if not os.path.exists(TABLE):
+        return None
+    for e in json.load(open(TABLE)):
+        if e["ds"] == ds and e["lnd"] == lnd:
+            return [e["X"]]
+    return None
+
+
+def add_certificate(out, lnd, time_cap, log=print, table=False):
+    """Certify the layout of the index in `out` at `lnd` and record the result in its meta.json (CERTS). With
+    `table`, the shipped table's entry for the layout and budget, when it has one, in place of certifying (a time cap
+    of 0 still certifies nothing)."""
     path = os.path.join(out, "meta.json")
     meta = json.load(open(path))
     ds = block_dims(meta)
-    X = certify_layout(ds, lnd, time_cap, log)
+    hit = table_entry(ds, lnd) if table and time_cap > 0 else None
+    if hit is not None:
+        X = hit[0]
+        log(f"certificate for {ds} at ln delta {lnd:.4f} from the shipped table: X {X}")
+    else:
+        X = certify_layout(ds, lnd, time_cap, log)
     if X is None:
-        log(f"no certificate for {ds} at ln delta {lnd:.4f} within {time_cap:.0f}s; the build uses the convex-order and Chernoff bounds")
+        log(f"no certificate for {ds} at ln delta {lnd:.4f}; the build uses the convex-order and Chernoff bounds")
         return None
     certs = [c for c in meta.get("CERTS", []) if not (c["ds"] == ds and abs(c["lnd"] - lnd) < 1e-9)]
     certs.append(dict(ds=ds, lnd=lnd, X=X))

@@ -19,7 +19,8 @@
 # Writes to OUTDIR: Xs.npy (unit vectors in cluster order, f16, zero-padded to a multiple of 32 dimensions), perm.npy
 # (row -> entity), cstart, grp, mq8, msc, lam, V, r2 (mean |r|^2 per group), profile.npy, tree tables, qi (rows for
 # verification), meta.json (with the fit used, under "fit", and the randomised levels' certified constant under
-# "CERTS", from certify.py; --cert-time caps that step, after which the build falls back to closed-form bounds).
+# "CERTS": the shipped table's entry for the layout (src/certs_table.json), else from certify.py; --cert-time caps that
+# step, after which the build falls back to closed-form bounds).
 import argparse, json, math, os, sys, time
 import numpy as np
 
@@ -347,7 +348,7 @@ def main():
     with open(os.path.join(a.out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("saved", meta)
-    certify.add_certificate(a.out, certify.ln_delta(meta), a.cert_time, log)
+    certify.add_certificate(a.out, certify.ln_delta(meta), a.cert_time, log, table=True)
 
 
 if __name__ == "__main__":

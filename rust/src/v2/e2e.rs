@@ -964,6 +964,29 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
+/// The fit records the randomised levels' certificate as tools/certify.py does (the synth4k fit's, made by tools/fit.py
+/// and certify.py, has the same layout and budget): from the shipped table, which holds the value the port certifies;
+/// with a certification time of 0, none.
+#[test]
+fn the_fit_records_certify_pys_certificate() {
+    let tmp = tmp_dir("cert");
+    let (part, _) = synth_partition(&tmp.join("part"));
+    let fit = tmp.join("fit");
+    let fit = fit.to_str().unwrap();
+    let certs = |dir: &str| serde_json::from_slice::<serde_json::Value>(&std::fs::read(format!("{dir}/meta.json")).unwrap()).unwrap()["CERTS"].clone();
+    let mut log = Vec::new();
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions::default(), &mut |s| log.push(s)).unwrap();
+    let want = certs(concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k"));
+    assert_eq!(certs(fit), want);
+    assert!(log.iter().any(|l| l.contains("from the shipped table")), "{log:#?}");
+    let c = &want[0];
+    let ds: Vec<usize> = c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect();
+    assert_eq!(crate::certify::certify_layout(&ds, c["lnd"].as_f64().unwrap(), 600.0, &mut |_| {}), c["X"].as_f64());
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
+    assert!(certs(fit).is_null());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
 /// A partition written again into the fitted one's directory (another assignment, as another seed gives) is refused at
 /// the rebuild; an entity id changed in a cell file (the partition's manifest unchanged) is caught by the build's check
 /// of every row's entity against the fit's perm.npy.

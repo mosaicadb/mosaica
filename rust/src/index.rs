@@ -24,7 +24,8 @@ pub struct Meta {
     pub csg: f64,
     /// the guarantee's failure probability per query (meta "EPS", default 1e-9)
     pub eps: f64,
-    /// certified worst-case constants of the randomised levels (meta "CERTS", written by tools/certify.py)
+    /// certified worst-case constants of the randomised levels (meta "CERTS", written by the fit, `crate::certify`,
+    /// or tools/certify.py)
     pub certs: Vec<crate::v2::tail::Cert>,
 }
 impl Meta {

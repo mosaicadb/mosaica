@@ -69,8 +69,9 @@ pub struct FitOptions {
     /// Queries that shape Sigma_Q with the corpus items (the dual basis only).
     pub query_sample: Option<String>,
     pub seed: u64,
-    /// Seconds tools/certify.py may take to certify the randomised levels' constant (0: not certified; the build then
-    /// uses the larger closed-form bounds).
+    /// Seconds the fit may take to certify the randomised levels' constant when the shipped table has none for its
+    /// layout (`certify::certify_layout`; 0: not certified, not even from the table; the build then uses the larger
+    /// closed-form bounds).
     pub cert_time: f64,
     /// The support table's anchors (`write_anchors`): `image` from the centre directions, `text_count` from the
     /// prompts in `text_anchors`.
@@ -749,21 +750,29 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     if o.groups != Groups::ByK8 {
         meta["clusters"] = serde_json::json!({ "groups": format!("{:?}", o.groups) });
     }
+    // the randomised levels' certified constant (meta "CERTS", as tools/certify.py records it): the shipped table's for
+    // this layout and budget, else certified here within cert_time (0 skips it); without one the build uses the
+    // closed-form bounds, which are larger
+    if cert_time > 0.0 {
+        let ds = block_dims(&bounds);
+        let lnd = crate::certify::ln_delta(nrow, rlv.len(), EPS);
+        let tc = Timer::new();
+        let (x, why) = match crate::certify::lookup(&ds, lnd) {
+            Some(x) => (x, "the shipped table".to_string()),
+            None => (crate::certify::certify_layout(&ds, lnd, cert_time, &mut |s| log(&t, s)), format!("certification within {cert_time:.0}s")),
+        };
+        match x {
+            Some(x) => {
+                meta["CERTS"] = serde_json::json!([{ "ds": ds, "lnd": lnd, "X": x }]);
+                log(&t, format!("certificate for {ds:?} at ln delta {lnd:.4}: X {x:.3}, from {why} in {:.1}s", tc.s()));
+            }
+            None => log(&t, format!("no certificate for {ds:?} at ln delta {lnd:.4} from {why}; the build uses the convex-order and Chernoff bounds")),
+        }
+    }
     let tmp = format!("{meta_path}.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(&meta).unwrap()).map_err(|e| format!("cannot write {tmp}: {e}"))?;
     std::fs::rename(&tmp, &meta_path).map_err(|e| format!("cannot move {tmp} to {meta_path}: {e}"))?;
     log(&t, format!("saved {out}; {na}"));
-
-    // the randomised levels' certified constant, by tools/certify.py within cert_time (0 skips it: the build then
-    // uses the closed-form bounds, which are larger)
-    if cert_time > 0.0 {
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/certify.py");
-        let st = std::process::Command::new("python3").args(["-I", script, out, "--time-cap", &cert_time.to_string()]).status();
-        match st {
-            Ok(s) if s.success() => log(&t, "certified".into()),
-            _ => return Err(format!("{script} failed on {out}; the build would fall back to larger closed-form constants. Install numpy and scipy for python3 and rerun, or fit with a certification time of 0 to accept the larger constants.")),
-        }
-    }
     Ok(())
 }
 
