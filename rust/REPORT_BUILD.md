@@ -802,7 +802,8 @@ crossover there (the harmful direction, by that margin). Not measured. R0 and κ
 After the review fixes (the rule at 250, the `--full-file` guard, anchors written at install, `create`'s and
 `--seed`'s flags), on the rebased branch:
 
-- Tests: `cargo test --release` after `cargo clean -p vexact`: 63 + 3 pass (1 ignored, a timing); every commit from
+- Tests: `cargo test --release` after `cargo clean -p vexact`: 64 + 3 pass after the second review's fixes (63 + 3
+  before them) (1 ignored, a timing); every commit from
   d4ee2d9 on passes from a clean worktree of its own; `cargo check` in `bench/annb/vexact-py` passes.
 - Code hashes, each rebuilt and opened again (open 0.08–0.52 s). Old defaults by flags (`--dlv fit` on the existing
   fits): synth4k `7ac80b6c54101fa9`, 60k `c44827e2e155e64f`, 1M `pyfit` `b8bdd054938fe563`. New defaults: synth4k
@@ -818,8 +819,20 @@ After the review fixes (the rule at 250, the `--full-file` guard, anchors writte
   The peak is the same in both (the partition's Python process). The new index opens in 0.80 s in all (0.40 s to map
   it); `verify`: 0 wrong in or out over 80 queries × 7 answer sizes and the four filtered sets, 0 interval violations
   in 924 million checks, 0 k-NN mismatches.
-- The 4M synthetic memory gate was not run: its partition and index directory take about 5.0 GB (2.0 + 3.0 at the
-  step 4 run) and the disk had 4.8 GB free.
+- 4M synthetic rows (256 dimensions, the step 4/5 gate's vectors), `create --cert-time 0`, 4 threads, peak anonymous
+  memory of the process and its children; the old defaults by flags in the same session, and the separate steps
+  recorded above (cells of about 250,000 rows; `create` lets `partition.py` choose, one cell here):
+
+| | Clusters | Partition | Fit | Build (calibrated / encoded / assembled) | Total | Peak anonymous memory |
+|---|---|---|---|---|---|---|
+| `create`, new defaults | 1,000 | 116 s | +6 s | 81 s (276 / 290 / 298 MB) | 206 s | 469 MB |
+| `create`, old defaults by flags | 4,000 | 440 s | +7 s | 78 s (327 / 338 / 389 MB) | 526 s | 1,231 MB |
+| Steps 4/5 recorded (C = 16) | 3,999 | 53–145 s, 470 MB | 4.5–6.2 s, 190 MB | 90–107 s, 452–461 MB | | 470 MB |
+
+  The gate holds at the new defaults: the peak (the partition's Python process) is the recorded one, and the build's
+  own anonymous memory is lower (298 MB assembled against 376) with a quarter of the clusters. With the old defaults
+  in one cell the partition's k-means over 4,000 centres takes 440 s and 1.2 GB; the recorded runs split it into 16
+  cells. Code hashes `15ad51ee06ddc189` (new) and `82703b3ad8ff8f11` (old). Both directories deleted.
 - The shipped gain (`e2e --nq 50 --runs 3`, 2 rounds, binary order rotated, both indexes opened from their saved
   files): this branch on the new-default 1M index made by `create` against upstream d4ee2d9's binary on its default
   build of `pyfit` (1,000 clusters, six levels); ms, mean of rounds, and this branch / upstream:
