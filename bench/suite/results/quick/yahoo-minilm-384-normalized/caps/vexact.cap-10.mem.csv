@@ -1,0 +1,4 @@
+cap,cell,usage_mib,anon_mib,file_mib,peak_mib,limit_mib,failcnt,oom_kill,major_faults,read_mib,detail
+10,"exact none default {""k"":10}",99.1,92.7,4.8,99.2,99.2,0,0,274864,15365.8,
+10,"exact random-1 default {""k"":10}",99.1,92.9,3.0,99.2,99.2,0,0,1022620,2892.0,
+10,"threshold none default {""share"":0.0001}",99.2,93.4,4.3,99.2,99.2,0,0,1133745,16643.4,

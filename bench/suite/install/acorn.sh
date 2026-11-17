@@ -9,7 +9,7 @@ set -euo pipefail
 DIR=$1
 HERE=$(cd "$(dirname "$0")" && pwd)
 TDB=$HERE/../../threshold-db
-[ -d "$DIR/.git" ] || git clone https://github.com/stanford-futuredata/ACORN.git "$DIR"
+[ -e "$DIR/.git" ] || git clone https://github.com/stanford-futuredata/ACORN.git "$DIR"
 cd "$DIR"
 git checkout -q c259f11cdbec880671658eaa0d8747e2cc9de79d
 git apply --check "$TDB/acorn.patch" 2>/dev/null && git apply "$TDB/acorn.patch"

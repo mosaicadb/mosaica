@@ -42,7 +42,7 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
 
 ## Layout
 
-- `run.py`: the entry point; stages `prep`, `run`, `check`, `report` (default) and `public`.
+- `run.py`: the entry point; stages `prep`, `run`, `check`, `report` (default), `public` and `cap`.
 - `suites.py`: the suites, filters and system parameters. `datasets.py`: the datasets and their sources.
 - `prep.py`: per dataset, under `DATA/prep/<name>/`: the corpus normalised in f64 and stored as f32 (`corpus32.npy`,
   row i is entity i) and f16 (`corpus16.npy`, unless `--no-f16`; no system here reads it), the query subset
@@ -60,7 +60,9 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
 - `report.py`: `results/<suite>/REPORT.md` (a table per type across datasets, the filtered approximate runs, the
   builds) and a plot per type (`exact.png`, `threshold.png`, `approx.png`).
 - `public.py`: the public suites' driver (below).
-- `systems/`: one adapter per system (`base.py` has the interface). `install/`: builds of PDX-BOND and ACORN.
+- `capmem.py`: the memory cap (cgroup v1 and v2) and its evidence; `prep_scale.py`: the LAION scale suites' prep.
+- `systems/`: one adapter per system (`base.py` has the interface). `install/`: builds of PDX-BOND, ACORN and DiskANN;
+  `native/`: DiskANN's driver and the header that builds it against OpenBLAS.
 
 ## Running it
 
@@ -144,6 +146,119 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
 - **pgvector**: PostgreSQL with pgvector, sequential scans, one worker; `ORDER BY v <#> q LIMIT k` and
   `WHERE (v <#> q) <= -t`, a visible set as `id IN (SELECT id FROM vis_...)`. Timed at the client as
   the earlier `threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
+
+## The memory-cap axis (`--stages cap`)
+
+A cap is a fraction of the dataset's size, defined as **N x d x 4 bytes** (its f32 vectors as distributed): 50%, 25%
+and 10%, plus `uncapped` (the same code path with no limit). Every system on a dataset gets the same cap, for its whole
+query process, page cache included, with no swap, so that only the page cache gives way. The quick suite runs the axis
+on yahoo-minilm-384 and laion-clip-512; the full suite on every dataset (`suites.py`, `caps`).
+
+**How it is applied** (`capmem.py`, `runsys.py --cap`). Each system builds once, uncapped, on the build cores, and keeps
+its index in the work directory. Each cap then runs in a fresh process that first moves into a memory cgroup of its own
+before it allocates anything: on cgroup v1 (as in a container whose memory controller is writable) a child of its own
+group; on cgroup v2 the scope `run.py` starts it in, `systemd-run --user --scope -p MemoryMax=infinity
+-p MemorySwapMax=0` (as the earlier `threshold-db/REPORT_CAPPED.md` did). It opens the kept index without rebuilding,
+drops every file of the system from the page cache (fsync, then `posix_fadvise(DONTNEED)`; pages another group left in
+the cache would otherwise serve it unseen) and reclaims its group's cache, then sets the limit: v1
+`memory.limit_in_bytes` and `memory.memsw.limit_in_bytes` (memory plus swap), v2 `memory.max` and
+`memory.swap.max = 0`. A server the system drives (DiskANN's) is started by that process, so it is inside the group.
+After each cell the run logs the group's usage, anonymous and file memory, peak, limit hits (v1 `failcnt`, v2
+`max` events), OOM kills, major faults and the bytes read from storage (`caps/<system>.cap-<cap>.mem.csv`).
+
+**Does not fit.** A limit the kernel refuses (v1 cannot shrink the group below what it cannot reclaim, EBUSY), and a
+process the OOM killer stops under the cap, are recorded as `does not fit` in `caps/status.csv`; the cells a run
+finished before an OOM kill are kept. The in-memory systems (faiss flat and HNSW, Panorama, PDX-BOND, ACORN) keep at
+least the f32 vectors, 100% of the dataset's size, in anonymous memory, so they cannot fit under any cap on this axis;
+they are reported as not fitting and are not run capped.
+
+**Cold and warm.** Each cell first times one cold query (query 0, once): vexact drops its full vectors (the codes stay),
+the other systems their group's page cache (anonymous memory, such as faiss IVF's centroids and DiskANN's PQ codes,
+stays). Then the warm repetitions run as everywhere (20 queries, 5 repetitions; the mapped faiss scan, which reads its
+whole file per query once the file no longer fits the cache, 5 queries once).
+
+**The systems under a cap** (`disk = True` in `systems/`):
+
+- **vexact, disk mode**: the saved index opened with `v2::open` (its codes are mapped from their files, so they are
+  page cache too, not anonymous memory) and the full vectors moved to a file of their own (`full_file`:
+  `Rows::to_file`, a fresh file outside the saved index's `encoded-*` directory, which `to_file` refuses), read as the
+  earlier capped runs read them: `MADV_RANDOM`, pread through io_uring with `willneed` ahead of each batch, O_DIRECT for
+  extents from 8 KiB, and the planner pricing those reads (`disk_constants`, timed once per machine and cached in the
+  index directory). The bindings' options mirror `rust/src/run2.rs`'s `--full-file`, `--full-advice`, `--full-read`,
+  `--willneed`, `--direct-min` and `--dontcache-min`.
+- **faiss-flat-mmap**: `IndexFlatIP` written to a file and opened with `IO_FLAG_MMAP_IFC` (the scan baseline).
+- **faiss-ivf-disk**: IVF4096 (fewer lists below 1M vectors) with QT_fp16 codes and `OnDiskInvertedLists`, the earlier
+  `threshold-db/capped/faiss_capped.py`; approximate, nprobe 16, 64, 256.
+- **diskann**: DiskANN's SSD index (microsoft/DiskANN C++ 0.7.0 through `native/diskann_bench.cpp`; R 64, L 100,
+  Linux AIO with O_DIRECT, no node cache), approximate and unfiltered (it takes no query-time visible set), search list
+  20, 50, 100, 200, beam width 2. Its PQ codes are the part that must stay in memory; one index per dataset is built with
+  a PQ budget of 5% of the dataset's size (half the 10% cap), so it fits every cap; the budget is recorded with the
+  build (`caps/builds.csv`). The diskannpy wheel wraps the same release but times through Python and has no wheel for
+  newer Pythons, so the C++ library is built directly (`install/diskann.sh`, against OpenBLAS: DiskANN's CMake insists
+  on Intel MKL, 2.2 GB, for four BLAS/LAPACK calls). One change was needed: with one search thread, `load()` deadlocks
+  in 0.7.0 (it holds the only I/O context while reading the medoids), so the server opens two contexts.
+- **pgvector** (full suite): the adapter is defined; under a cap its server must run inside the group (restart the
+  postmaster from the capped process, with `shared_buffers` under the cap). Not run here.
+
+## The LAION scale suite (`scale`, `scale-test`)
+
+Speed only: "validate correctness at smaller scales, speed at larger ones". LAION-400M's CLIP ViT-B/32 embeddings,
+512 dimensions, at 10M, 40M and 100M (`laion-10m`, `laion-40m`, `laion-100m`), with text embeddings as
+out-of-distribution queries, as VIBE's laion-clip-512.
+
+**Source.** LAION's own release at `deploy.laion.ai/8f83b608504d46bb81708ec86e912220/embeddings/` (`img_emb/`,
+`text_emb/`, `metadata/`): 410 parts of 1,000,448 rows (the last 518,720), f16, about 1 GB each. Part 0's images are
+exactly VIBE's laion-clip-512 corpus (checked: within 9e-8 of VIBE's `train` after normalisation), and VIBE draws its
+queries and learn sample from `text_emb_0.npy`, so the scale sets extend VIBE's. The address VIBE's `datasets.py`
+uses, `the-eye.eu`, serves an expired TLS certificate (and 403 over plain HTTP); `cat-state/clip-embeddings` on Hugging
+Face holds only one 9,212-row sample part; `laion/relaion400m` holds metadata only (and is gated).
+
+**Sets.** A population is the first 100 parts (100,044,800 rows). Each size takes the same uniform random fraction of
+every part's rows (10%, 40%, 100%), the smaller sizes a prefix of the same per-part permutation, so 10M is inside 40M
+inside 100M and each is stratified by part, as `rust/REPORT_SCALING.md` built R1M inside R3M. Queries: 100 text rows of
+part 0; the learn sample: 100,000 other text rows (for the dual fit). Visible sets: random 1%.
+
+**Prep** (`prep_scale.py`) streams: one part at a time is downloaded, its rows for every size are normalised and
+written as f16 (`corpus16.npy`; no f32 copy at scale), and the part is deleted. The same pass keeps, per query, the
+running top K of the f32 similarities (K = the largest answer the shares need, plus one), so `order.npy` (the top 100),
+the k-NN boundaries and the thresholds are exact up to f32 rounding, computed without an N x nq matrix (the f64 prep
+would need 80 GB at 100M). No answer dumps and no check stage: exact k-NN is compared with the streaming truth, the
+threshold answer sizes are recorded, and approximate k-NN gets its recall.
+
+**Systems**: vexact (exact, threshold, approximate), faiss flat over f16 (`IndexScalarQuantizer` QT_fp16, mapped;
+10 queries once: a scan at 100M reads 100 GB) and faiss IVF on disk (approximate). `scale-test` is the same code on two
+parts: 200k inside 500k inside 1M.
+
+**What each size needs** (from the 1M-scale measurements here, 512 dimensions; scale linearly):
+
+Measured here at 200k, 500k and 1M (`results/scale-test/`, 3 build threads on a 2.1 GHz Xeon, 15 GB), extrapolated
+linearly above that; nothing above 3M has been measured for the index (`rust/REPORT_SCALING.md`).
+
+| | per million vectors (measured) | 10M | 40M | 100M |
+|---|---|---|---|---|
+| download (streamed, one 1 GB part on disk at a time) | all 100 parts whatever the size, 100 GB, plus 1 GB of text | 101 GB | 101 GB | 101 GB |
+| prep time (download-bound here: 60-110 s a part) | | 2-3 h | 2-3 h | 2-3 h |
+| corpus16.npy | 1.0 GB | 10 GB | 41 GB | 102 GB |
+| vexact files: Xs.npy (fit) + saved index (vectors.bin, codes) + the disk-mode copy of the vectors | 2.3 GB + 1.0 GB | 34 GB | 136 GB | 340 GB |
+| vexact codes alone (what a cap must leave room for) | 0.3-0.4 GB (0.43 GiB at 768-d, threshold-db) | 4 GB | 16 GB | 40 GB |
+| vexact build: peak RSS (fit.py, then the encode, which holds the f16 vectors on the heap) | 2.0 / 2.4 / 3.0 GiB at 0.2 / 0.5 / 1M | ~15 GiB | ~54 GiB | ~130 GiB |
+| vexact build time (3 threads) | 350 s (fit 139 s, encode 127 s) | ~1 h | ~4 h | ~10 h |
+| vexact exact k-NN, k = 10, one thread | 53 ms (11 ms at 200k, 27 ms at 500k) | | | |
+| faiss flat f16, mapped: file / one scan | 1.0 GB / 150 ms from the page cache | 10 GB / 1.5 s | 41 GB / 6 s | 102 GB / 15 s from the cache, about 50 s from a 2 GB/s disk |
+| faiss IVF on disk: files / build peak RSS (lists are built in memory, then moved to disk) | 1.0 GB / 3.3 GiB | 10 GB / ~30 GiB | 41 GB / ~130 GiB | 102 GB / ~330 GiB: build in shards (faiss's `merge_ondisk`) |
+
+The vexact rows assume the in-memory build (`v2::rebuild`) that the bindings use; at 100M its heap copy of the vectors
+alone is 100 GB, so build where memory allows or with a build that writes the vectors to file as it goes (the earlier
+capped runs built in memory, then moved the vectors to a file).
+
+**Known limits of the index at scale** (flagged, not fixed here, since `rust/` is out of bounds for this work):
+
+- Cluster size: 1,000 items per cluster by default, so 10,000 clusters at 10M and 100,000 at 100M; `--per-cluster by-n`
+  (research/levels-clusters' rule) is untested above 3M.
+- The approximate mode stores row positions within a cluster as u16: clusters over 65,536 rows overflow, which the
+  by-n rule reaches from about 32M.
+- `fit.py` fits its k-means on a 200,000-row sample, whatever N.
+- Build memory above 3M is unmeasured (`rust/REPORT_SCALING.md` stops there).
 
 ## Status
 

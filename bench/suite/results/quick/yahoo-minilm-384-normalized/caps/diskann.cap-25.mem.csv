@@ -1,0 +1,5 @@
+cap,cell,usage_mib,anon_mib,file_mib,peak_mib,limit_mib,failcnt,oom_kill,major_faults,read_mib,detail
+25,"approx none default {""k"":10,""L"":20}",61.4,60.8,0.1,61.4,248.0,0,0,1,11.0,
+25,"approx none default {""k"":10,""L"":50}",61.6,60.8,0.1,61.6,248.0,0,0,1,22.3,
+25,"approx none default {""k"":10,""L"":100}",61.8,61.1,0.1,61.8,248.0,0,0,1,41.7,
+25,"approx none default {""k"":10,""L"":200}",62.9,62.1,0.1,62.9,248.0,0,0,1,80.5,
