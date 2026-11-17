@@ -1,16 +1,16 @@
 # Next steps
 
-What is open on LIMINAL as of 15 November 2026, in rough order. SYSTEM.md describes the index as it stands; each item
+What is open on LIMINAL as of 17 November 2026, in rough order. SYSTEM.md describes the index as it stands; each item
 names the branch or report that holds its evidence.
 
 ## Checks the consolidation could not run
 
 rust/REPORT_CONSOLIDATION.md records what was checked; these were not.
 - **A run under a memory cap** with the current planner, through bench/threshold-db/capped/run_ours.sh at one answer
-  share, its answers compared with the uncapped dumps. Refit results/ours/plan.txt first (see the costs below).
+  share, its answers compared with the uncapped dumps. Plan files now carry only the disk constants (`io_us`,
+  `io_gbps`); without one the open measures them once per machine and device and caches them (rust/REPORT_BUILD.md).
 - **Out-of-distribution queries:** the 50k check (rust/results/const/check.sh) with the BioCLIP-2 text prompts, which
   need the text encoder.
-- **Calibration on a quiet machine:** `Plan::calibrate` now times the integer path; refit the plan files.
 
 ## Exact path
 
@@ -78,19 +78,35 @@ rust/REPORT_CONSOLIDATION.md records what was checked; these were not.
 
 ## Costs the planner gets wrong (the planner chooses; answers do not change)
 
-From review/REVIEW_2026-11-15_merges.md:
-- **Calibration matches threshold queries but not exact k-NN.** `Plan::calibrate` times the integer path, but `knn2`
-  runs the interval path (`want_iv: true`), so k-NN's index path is underpriced. Fit a second factor for the interval
-  path, with the `Plan` split below.
+In memory the planner no longer times anything (rust/REPORT_BUILD.md, "The planner without timing"): unfiltered
+queries take the support table and the index path; under a visible set a rule in rows (64 + 0.186 x cluster rows)
+picks scan, direct scoring or the index path. `Plan::calibrate`, `--calib` and `--plan-default` are gone. Still open,
+from review/REVIEW_2026-11-15_merges.md, on the priced (vectors on disk) path:
 - **The index path's survivor reads are never priced on file** (no disk term in `index_us`), while the full-vector
   path's are, so the index path looks cheaper than it is at large answers under a cap.
 - Reads priced as sequential where execution faults pages: direct scoring, filtered scans, `knn2`'s scan; codes-only
-  compaction's faults are not priced; pricing ignores what is cached; `answer_share`'s 256-row sample is not priced;
-  `scan_band` is timed with the constants from before calibration; `--plan-default` and the scale run price the
-  integer path with float-path constants. Plan files fitted before 0f93ea3 should be refitted.
-- **A capped rerun is not REPORT_CAPPED's run:** reads through io_uring are priced, the per-cluster planner runs with
-  constants missing from results/ours/plan.txt (they fall back to `Plan::default()`), and every session's compacted
-  copies are built before the cap. Refit the plan file before comparing.
+  compaction's faults are not priced; pricing ignores what is cached.
+- **A capped rerun is not REPORT_CAPPED's run:** reads through io_uring are priced, and every session's compacted
+  copies are built before the cap.
+- **The rows rule was measured on one machine** (1M BioCLIP-2; with AVX-512 the crossover at 1,000 rows a cluster is
+  221 rows on one thread and 308 on four; the owner set 250); compacted sessions of about 10% lean to the index path
+  (1.4-1.6 times a scan).
+
+## Scaling to 1B (on hold)
+
+The build now keeps memory flat up to 4M rows (rust/REPORT_BUILD.md: 469 MB peak at 4M with the new defaults; the
+assembled phase holds what still grows). Before a billion-row build, in rough order:
+1. **Map `perm` and the per-cluster records** (`Cl2`, the centre tables) at build and open instead of reading them
+   onto the heap. They are what still grows with N (about 18 KB a cluster, plus 4 bytes a row for `perm`).
+2. **No per-row work at open:** the escape `HashMap` built at open becomes a stored table that open maps, so opening
+   stays proportional to the clusters.
+3. **Bound the per-cluster build buffers:** with clusters growing with N (about 64,000 rows a cluster at 1B), the
+   support table's `px` and the encoder's per-cluster rows must be processed in bounded chunks.
+4. **A stored `pm` table,** mapped at open rather than computed.
+5. **The partition's cell count at scale:** `create` lets `tools/partition.py` choose, and at 4M it chose one cell
+   (one k-means over every row: 440 s and 1.2 GB with 4,000 centres). At 1B the cells must be set from N and memory,
+   and the partition should run without loading all rows (or move to Rust/GPU faiss).
+6. **Then the gates at scale:** 20M BioCLIP-2, 100M synthetic, peak memory and build time per phase, open time.
 
 ## Restructuring
 
