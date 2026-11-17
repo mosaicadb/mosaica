@@ -103,9 +103,12 @@ assembled phase holds what still grows). Before a billion-row build, in rough or
 3. **Bound the per-cluster build buffers:** with clusters growing with N (about 64,000 rows a cluster at 1B), the
    support table's `px` and the encoder's per-cluster rows must be processed in bounded chunks.
 4. **A stored `pm` table,** mapped at open rather than computed.
-5. **The partition's cell count at scale:** `create` lets `tools/partition.py` choose, and at 4M it chose one cell
-   (one k-means over every row: 440 s and 1.2 GB with 4,000 centres). At 1B the cells must be set from N and memory,
-   and the partition should run without loading all rows (or move to Rust/GPU faiss).
+5. **The partition's cell count at scale:** the partition is now Rust (`rust/src/partition.rs`, `create` runs it in
+   the process; no Python): it reads the vectors through a mapping and holds one cell's training sample in f16, and
+   at 4M it takes 18 s and 111 MB at the new defaults (partition.py: 72 s, 466 MB in the same session). `create`
+   still uses one cell, so the fine k-means trains K centres on 200 K rows of one cell; at 1B (K = 15,625, a 3.1M-row
+   sample, 4.8 GB in f16 at 768 dimensions) the cells must be set from N and memory (`vexact ... partition --cells C
+   --cross T` runs the experiments): the question of the cell count remains.
 6. **Then the gates at scale:** 20M BioCLIP-2, 100M synthetic, peak memory and build time per phase, open time.
 
 ## Restructuring
