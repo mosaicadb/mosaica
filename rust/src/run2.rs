@@ -39,13 +39,13 @@ pub struct Ctx2 {
 /// so that a removed or misspelt flag cannot be ignored silently, and so is a flag given where it would do nothing
 /// (`check_args_of`). (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
-    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cal-items", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
-    "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dims", "--ds", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
+    "--anchors", "--b", "--basis", "--bfracs", "--c", "--cal-items", "--cell-sample", "--cells", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
+    "--cmp-vis", "--cmp-what", "--core", "--cross", "--d", "--ddec", "--dims", "--ds", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
-    "--ladder-from", "--levels", "--lnd", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
-    "--order", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
-    "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
+    "--ladder-from", "--levels", "--lnd", "--methods", "--n", "--name", "--nguar", "--niter", "--nq", "--onq",
+    "--order", "--out", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
+    "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--sample-per-centre", "--scale",
     "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads", "--time-cap",
     "--vcheck", "--vectors", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
@@ -56,7 +56,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 const MODES: &[&str] = &[
     "ann", "ann-truth", "breakdown", "bytesq", "cert-layouts", "certify-layout", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
+    "filter", "levels", "oracle", "partition", "qvbench", "scanbench", "setup", "verify",
 ];
 /// The flags that make an index (`v2::BuildOptions`): given only where one is made, with `create`, `--rebuild` or
 /// `--in-memory`.
@@ -70,6 +70,9 @@ const FIT_FLAGS: &[&str] = &["--per-cluster", "--groups", "--basis", "--query-sa
 const ANCHOR_FLAGS: &[&str] = &["--anchors", "--text-anchors", "--text-count"];
 /// The certificate's tools (`cert_cmd`): each mode with the flags it takes (it runs alone, with these only).
 const CERT_MODES: &[(&str, &[&str])] = &[("certify-layout", &["--ds", "--lnd", "--time-cap"]), ("cert-layouts", &["--dims"])];
+/// The partition alone (`partition_cmd`): the flags it takes, and of those the ones that are its only.
+const PARTITION_FLAGS: &[&str] = &["--vectors", "--out", "--cells", "--cross", "--per-cluster", "--seed", "--sample-per-centre", "--cell-sample", "--niter"];
+const PARTITION_ONLY: &[&str] = &["--out", "--cells", "--cross", "--sample-per-centre", "--cell-sample", "--niter"];
 /// The flags `create` takes besides the build flags.
 const CREATE_FLAGS: &[&str] = &["--vectors", "--index", "--hash"];
 
@@ -138,6 +141,32 @@ pub fn check_args_of(a: &[String]) -> Result<(), String> {
         } else if let Some(f) = flags.iter().find(|f| takes.contains(f)) {
             return Err(format!("{f} is {m}'s (vexact {m} ...)"));
         }
+    }
+    if modes.contains(&"partition") {
+        if modes.len() > 1 || flags.iter().any(|f| !PARTITION_FLAGS.contains(f)) {
+            return Err(format!("partition runs alone, with {PARTITION_FLAGS:?} only"));
+        }
+        if !has("--vectors") || !has("--out") {
+            return Err("partition needs --vectors VECTORS.npy (N x n0, row i is entity i) and --out DIR".into());
+        }
+        let val = |f: &str| a.iter().position(|x| x == f).map(|i| a[i + 1].as_str());
+        for f in ["--cells", "--cross", "--sample-per-centre", "--cell-sample", "--niter"] {
+            if let Some(v) = val(f) {
+                if !v.parse::<usize>().is_ok_and(|x| x >= 1 || f == "--niter") {
+                    return Err(format!("{f} is a whole number{}, not {v}", if f == "--niter" { "" } else { " of at least 1" }));
+                }
+            }
+        }
+        if let Some(v) = val("--per-cluster") {
+            PerCluster::parse(v).map_err(|e| format!("--per-cluster: {e}"))?;
+        }
+        if let Some(v) = val("--seed") {
+            v.parse::<u64>().map_err(|_| format!("--seed is a whole number, not {v}"))?;
+        }
+        return Ok(());
+    }
+    if let Some(f) = flags.iter().find(|f| PARTITION_ONLY.contains(f)) {
+        return Err(format!("{f} is partition's (vexact --vectors VECTORS.npy partition --out DIR {f} ...); create partitions at the defaults"));
     }
     let create = modes.contains(&"create");
     if create {
@@ -342,6 +371,25 @@ pub fn create_cmd() {
     }
     println!("created {dir} from {vectors}: {} rows, {} clusters in {:.1}s; stored bytes/item cumulative by level: {:?}", ix.nrows, ix.k(), t.s(),
         ix.stored_bytes_per_item().iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>());
+}
+
+/// The partition alone: `vexact --vectors VECTORS.npy partition --out DIR [--cells C] [--cross T] [--per-cluster
+/// by-n|M] [--seed S] [--sample-per-centre 200] [--cell-sample 1000] [--niter 20]` (`partition::partition`; the flags
+/// of tools/partition.py, with its defaults).
+pub fn partition_cmd() {
+    let d = vexact::partition::PartitionOptions::default();
+    let num = |k: &str, dv: usize| -> usize { Some(arg_str(k, "")).filter(|v| !v.is_empty()).map_or(dv, |v| v.parse().unwrap_or_else(|_| exit2(&format!("{k} is a whole number, not {v}")))) };
+    let o = vexact::partition::PartitionOptions {
+        cells: num("--cells", d.cells),
+        cross: num("--cross", d.cross),
+        per_cluster: Some(arg_str("--per-cluster", "")).filter(|v| !v.is_empty()).map_or(d.per_cluster, |v| PerCluster::parse(&v).unwrap_or_else(|e| exit2(&format!("--per-cluster: {e}")))),
+        sample_per_centre: num("--sample-per-centre", d.sample_per_centre),
+        cell_sample: num("--cell-sample", d.cell_sample),
+        niter: num("--niter", d.niter),
+        seed: arg_str("--seed", &d.seed.to_string()).parse().unwrap_or_else(|_| exit2("--seed N (a whole number)")),
+    };
+    let (vectors, out) = (arg_str("--vectors", ""), arg_str("--out", ""));
+    vexact::partition::partition(&vectors, &out, &o, &mut |s| println!("[partition] {s}")).unwrap_or_else(|e| exit2(&e));
 }
 
 pub fn setup2(tag: &str) -> Ctx2 {
@@ -2158,6 +2206,19 @@ mod tests {
         refused("--v2 --index D certify-layout --ds 15,15 --lnd -30", "runs alone");
         refused("--v2 --index D e2e --lnd -30", "certify-layout's");
         refused("--vectors v.npy --index D create --dims 64", "cert-layouts's");
+        // the partition alone, with its own flags
+        ok("--vectors v.npy partition --out P");
+        ok("--vectors v.npy partition --out P --cells 32 --cross 2 --per-cluster by-n --seed 7 --sample-per-centre 100 --cell-sample 500 --niter 0");
+        refused("--vectors v.npy partition", "--out");
+        refused("partition --out P", "--vectors");
+        refused("--vectors v.npy partition --out P --cells 0", "--cells");
+        refused("--vectors v.npy partition --out P --cross x", "--cross");
+        refused("--vectors v.npy partition --out P --per-cluster 0", "--per-cluster");
+        refused("--vectors v.npy partition --out P --index D", "runs alone");
+        refused("--vectors v.npy partition --out P create", "runs alone");
+        refused("--vectors v.npy partition --out P --groups by-n", "runs alone");
+        refused("--vectors v.npy --index D create --cells 4", "partition's");
+        refused("--v2 --index D e2e --out P", "partition's");
         ok("--v2 --index D --in-memory --nusort verify");
         ok("--v2 --index D --ddec 0.1 --keep-index bytesq");
         ok("qvbench --groups 8");
