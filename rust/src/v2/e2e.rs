@@ -112,6 +112,34 @@ fn threshold_answers_equal_brute_force_on_every_path() {
     }
 }
 
+/// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
+/// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
+#[test]
+fn intervals_of_rows_taken_in_hold_their_scores() {
+    let f = fixture();
+    let ix = &f.ix;
+    let mut n = 0usize;
+    for (qi, q) in f.queries.iter().enumerate() {
+        let pr = prep2(ix, q);
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let t = truth(ix, q, bm.as_ref());
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let r = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: true, plan });
+                    assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "plan {pname}, set {sname}, query {qi}, t {th}");
+                    for &(row, lb, ub, lv) in &r.iv {
+                        let v = exact_value2(ix, &pr, row as usize);
+                        assert!(lb as f64 <= v && v <= ub as f64, "row {row} level {lv}: {v} outside [{lb}, {ub}], plan {pname}, set {sname}, query {qi}, t {th}");
+                        n += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(n > 0, "no interval returned: the test checks nothing");
+}
+
 #[test]
 fn compacted_sessions_answer_as_the_index_does() {
     let f = fixture();
