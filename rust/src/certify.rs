@@ -1,5 +1,5 @@
 //! The randomised levels' worst-case constant certified for a block layout: the method of `tools/certify.py`, ported
-//! to Rust.
+//! so that the fit needs no Python, plus a shipped table of certificates for common layouts (`certs_table.json`).
 //!
 //! Statement certified, for block dimensions d_j = nb_j - 1 and a ln delta:
 //!   P[sum_j a_j U_j >= X] <= delta  for every a >= 0 with sum_j a_j^2 / d_j = 1,
@@ -18,8 +18,8 @@
 //! vectors are numpy's pairwise sums, complex products numpy's formula, and the quadrature nodes are numpy's
 //! `leggauss(8)` values. The FFT (rustfft rather than pocketfft) and the dot products of the four-block cells (BLAS in
 //! numpy) differ in their last bits; that moves a cell's log bound by ~1e-10 at most, so only a cell within that of the
-//! budget could pass in one and fail in the other. The tests compare against certify.py's values on a grid of
-//! layouts.
+//! budget could pass in one and fail in the other. tools/certs_table.py certifies every shipped entry with both and
+//! stores only those where they agree; the tests compare against certify.py's values on a grid of layouts.
 use rayon::prelude::*;
 use realfft::num_complex::Complex;
 use realfft::{RealFftPlanner, RealToComplex};
@@ -600,6 +600,25 @@ pub fn certify_layout(ds: &[usize], lnd: f64, time_cap: f64, log: &mut dyn FnMut
     None
 }
 
+/// The shipped certificates (`certs_table.json`, made by tools/certs_table.py with both this port and certify.py):
+/// (ds, lnd, X), X None where both searches find no certificate.
+pub fn table() -> &'static [(Vec<usize>, f64, Option<f64>)] {
+    static T: std::sync::OnceLock<Vec<(Vec<usize>, f64, Option<f64>)>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let v: serde_json::Value = serde_json::from_str(include_str!("certs_table.json")).expect("certs_table.json");
+        v.as_array().expect("certs_table.json is a list").iter().map(|c| {
+            let ds = c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect();
+            (ds, c["lnd"].as_f64().unwrap(), if c["X"].is_null() { None } else { Some(c["X"].as_f64().unwrap()) })
+        }).collect()
+    })
+}
+
+/// The shipped entry for exactly these blocks and this budget, if there is one: Some(X), or Some(None) when the search
+/// finds no certificate for them.
+pub fn lookup(ds: &[usize], lnd: f64) -> Option<Option<f64>> {
+    table().iter().find(|(d, l, _)| d == ds && l.to_bits() == lnd.to_bits()).map(|e| e.2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,10 +720,29 @@ mod tests {
     }
 
     #[test]
-    fn budget() {
+    fn budget_and_table() {
         // N rounded up to a power of two; the 1M BioCLIP-2 fit's (four levels) and synth4k's (one level, 4,000 items)
         assert_eq!(ln_delta(1_000_000, 4, 1e-9), -35.972503809265206);
         assert_eq!(ln_delta(4000, 1, 1e-9), -29.041032003665755);
         assert_eq!(ln_delta(1 << 20, 4, 1e-9), ln_delta((1 << 19) + 1, 4, 1e-9));
+        // the table holds an entry for the fit's layout of every dimension of tools/certs_table.py's list at every
+        // N = 2^10 .. 2^34, at the budget as the fit computes it, and nothing else; the lookup is exact
+        let t = table();
+        let dims = [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1152, 1536, 2048, 3072, 4096];
+        let want: Vec<(Vec<usize>, f64)> = dims.iter().flat_map(|&n0| {
+            let (ds, levels) = crate::fit::cert_layout(n0).unwrap();
+            (10..=34).map(move |p| (ds.clone(), ln_delta(1 << p, levels, 1e-9)))
+        }).collect();
+        assert_eq!(t.len(), want.len());
+        for (ds, lnd) in &want {
+            assert!(lookup(ds, *lnd).is_some(), "no entry for {ds:?} at {lnd}");
+        }
+        for (ds, lnd, x) in t {
+            assert_eq!(lookup(ds, *lnd), Some(*x));
+            assert_eq!(lookup(ds, lnd + 1e-12), None);
+            if let Some(x) = x {
+                assert!(*x > 5.0 && *x < 10.0 && (x * 1000.0).round() / 1000.0 == *x, "{x}");
+            }
+        }
     }
 }
