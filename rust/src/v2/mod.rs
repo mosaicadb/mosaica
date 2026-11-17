@@ -2455,6 +2455,20 @@ pub fn load_perm_checked(p: &mut Params, edir: &str) -> Result<(), String> {
 
 /// `open` of the fit in `dir` from the index saved in `edir` (the tests keep a fit read-only and save beside it).
 pub(crate) fn open_in(dir: &str, edir: &str, oo: &OpenOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
+    // the fit and index.json are read before the open takes the install lock (shared), so an open that overlaps a
+    // rebuild's install (new anchors written, then the index swapped) can find them out of step; once more under the
+    // lock, where no install runs, before an error is returned
+    match open_once(dir, edir, oo, log) {
+        Ok(x) => Ok(x),
+        Err(first) => {
+            let _held = store::Lock::install(&store::parent_of(edir), false).map_err(|e| format!("{first} ({e})"))?;
+            open_once(dir, edir, oo, log)
+        }
+    }
+}
+
+/// One attempt of `open_in`.
+fn open_once(dir: &str, edir: &str, oo: &OpenOptions, log: &mut dyn FnMut(String)) -> Result<(Params, Index2), String> {
     let t = Timer::new();
     let json = format!("{edir}/index.json");
     let text = std::fs::read_to_string(&json).map_err(|e| format!("no index is saved in {dir} ({json}: {e}); create it (v2::create; vexact --vectors VECTORS.npy --index {dir} create), or rebuild it from its fit (v2::rebuild; vexact --v2 --index {dir} --rebuild)"))?;
@@ -2505,14 +2519,6 @@ fn rebuild_with(dir: &str, edir: &str, o: &BuildOptions, anchors: Option<Option<
     if o.tune_malloc {
         crate::util::fix_mmap_threshold(1 << 20);
     }
-    let (mut p, prof) = prepare_with(dir, o, anchors.as_ref())?;
-    // perm.npy's identity before its rows are read, as the vectors file's
-    let perm_id = store::XsId::of(&p.perm_path).map_err(|e| format!("{e}; a rebuild reads the fit's perm.npy"))?;
-    p.load_perm()?;
-    let perm = Some((store::perm_hash(&p.perm), perm_id));
-    log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
-    let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
-    let key = store::build_key(&p, &prof, o);
     let parent = store::parent_of(edir);
     std::fs::create_dir_all(&parent).map_err(|e| format!("cannot create {parent}: {e}"))?;
     // the saved index's index.json before waiting (none, or its device, inode and modification time)
@@ -2521,7 +2527,16 @@ fn rebuild_with(dir: &str, edir: &str, o: &BuildOptions, anchors: Option<Option<
         std::fs::metadata(format!("{edir}/index.json")).ok().map(|m| (m.dev(), m.ino(), m.mtime(), m.mtime_nsec()))
     };
     let before = ident();
+    // the fit is read under the lock: a rebuild waited for may have written new anchors into it
     let (lock, _) = store::Lock::take(&parent, &mut |s| log(format!("[build2] {s}")));
+    let (mut p, prof) = prepare_with(dir, o, anchors.as_ref())?;
+    // perm.npy's identity before its rows are read, as the vectors file's
+    let perm_id = store::XsId::of(&p.perm_path).map_err(|e| format!("{e}; a rebuild reads the fit's perm.npy"))?;
+    p.load_perm()?;
+    let perm = Some((store::perm_hash(&p.perm), perm_id));
+    log(format!("[build2] fit loaded; anon {:.0} MB", crate::util::anon_mb()));
+    let xs = store::XsId::of(&p.vectors_id_path()).map_err(|e| format!("{e}; a rebuild reads the fit's vectors"))?;
+    let key = store::build_key(&p, &prof, o);
     let design_c = design_constants(&p, o, log);
     {
         // another rebuild may have saved an index here meanwhile: if it is this one (it opens with this key), use it
@@ -2558,7 +2573,7 @@ fn rebuild_with(dir: &str, edir: &str, o: &BuildOptions, anchors: Option<Option<
     };
     if let Err(e) = store::install_with(&tmp, edir, &mut put, &mut |s| log(format!("[build2] {s}"))) {
         let _ = std::fs::remove_dir_all(&tmp);
-        return Err(format!("{e}; the index saved in {edir} and the fit's anchors are as they were"));
+        return Err(format!("{e}; the index saved in {edir} is as it was"));
     }
     drop(lock);
     if let Some(s) = wrote {

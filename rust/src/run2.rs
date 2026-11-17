@@ -2120,8 +2120,15 @@ mod tests {
     /// the run logs that; one that gives only one of them leaves them to the timer.
     #[test]
     fn disk_constants_from_a_pf_file_are_not_timed() {
-        let tmp = std::env::temp_dir().join(format!("vexact-pf-{}-{}", std::process::id(), now_s() as u64));
-        std::fs::create_dir_all(&tmp).unwrap();
+        struct Rm(std::path::PathBuf); // removed when dropped, also when the test fails
+        impl Drop for Rm {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let tmp = Rm(std::env::temp_dir().join(format!("vexact-pf-{}-{}", std::process::id(), now_s() as u64)));
+        let tmp = &tmp.0;
+        std::fs::create_dir_all(tmp).unwrap();
         let (both, one) = (tmp.join("plan.txt"), tmp.join("half.txt"));
         std::fs::write(&both, "io_us=7.25\nio_gbps=1.5\n").unwrap();
         std::fs::write(&one, "io_us=7.25\n").unwrap();

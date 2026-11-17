@@ -100,9 +100,7 @@ fn save<T: Copy>(dir: &str, name: &str, descr: &str, shape: &[usize], v: &[T]) -
 /// never written.
 fn write_new(path: &str, bytes: &[u8]) -> Result<(), String> {
     let p = std::path::Path::new(path);
-    let name = p.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-    let tmp = p.with_file_name(format!(".{name}.tmp-{}-{nanos}", std::process::id()));
+    let tmp = beside(p, "tmp");
     let r = (|| {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -113,6 +111,104 @@ fn write_new(path: &str, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         format!("cannot write {path}: {e}")
     })
+}
+
+/// A name beside `path` for a temporary file of this process: `.NAME.KIND-PID-NANOS` (`log_stale` reports leftovers).
+fn beside(path: &std::path::Path, kind: &str) -> std::path::PathBuf {
+    let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    path.with_file_name(format!(".{name}.{kind}-{}-{nanos}", std::process::id()))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: make `replace_files`' step with this index (0 the first rename or removal) fail, on this thread only.
+    pub static FAIL_STEP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Replace the files `items` (path, new contents; None removes the file) together: every new content is written to a
+/// file beside its path and synced first, every old file is kept under a second name (a hard link, so another
+/// directory's link to it is never touched), then the renames and removals run back to back. If one fails, the old
+/// files are put back and the error says whether that worked; on success the kept names are removed.
+fn replace_files(items: &[(String, Option<Vec<u8>>)]) -> Result<(), String> {
+    use std::path::{Path, PathBuf};
+    let mut tmps: Vec<Option<PathBuf>> = Vec::new();
+    let clean = |tmps: &[Option<PathBuf>], baks: &[Option<PathBuf>]| {
+        for t in tmps.iter().chain(baks).flatten() {
+            let _ = std::fs::remove_file(t);
+        }
+    };
+    for (path, new) in items {
+        let t = match new {
+            Some(bytes) => {
+                let t = beside(Path::new(path), "tmp");
+                let r = (|| {
+                    let mut f = std::fs::File::create(&t)?;
+                    f.write_all(bytes)?;
+                    f.sync_all()
+                })();
+                if let Err(e) = r {
+                    let _ = std::fs::remove_file(&t);
+                    clean(&tmps, &[]);
+                    return Err(format!("cannot write {path}: {e}; nothing was replaced"));
+                }
+                Some(t)
+            }
+            None => None,
+        };
+        tmps.push(t);
+    }
+    let mut baks: Vec<Option<PathBuf>> = Vec::new();
+    for (path, _) in items {
+        let p = Path::new(path);
+        let b = if p.exists() {
+            let b = beside(p, "bak");
+            if let Err(e) = std::fs::hard_link(p, &b) {
+                clean(&tmps, &baks);
+                return Err(format!("cannot keep {path} aside: {e}; nothing was replaced"));
+            }
+            Some(b)
+        } else {
+            None
+        };
+        baks.push(b);
+    }
+    for (i, (path, _)) in items.iter().enumerate() {
+        #[cfg(test)]
+        let injected = FAIL_STEP.with(|f| f.get()) == Some(i);
+        #[cfg(not(test))]
+        let injected = false;
+        let r = if injected {
+            Err(std::io::Error::other("injected failure"))
+        } else {
+            match &tmps[i] {
+                Some(t) => std::fs::rename(t, path),
+                None if Path::new(path).exists() => std::fs::remove_file(path),
+                None => Ok(()),
+            }
+        };
+        if let Err(e) = r {
+            // put back what steps 0..i changed (step i changed nothing)
+            let mut lost = Vec::new();
+            for (j, (pj, _)) in items.iter().enumerate().take(i) {
+                let back = match &baks[j] {
+                    Some(b) => std::fs::rename(b, pj),
+                    None => std::fs::remove_file(pj),
+                };
+                if let Err(e2) = back {
+                    lost.push(format!("{pj} ({e2})"));
+                }
+            }
+            clean(&tmps, &baks);
+            return Err(if lost.is_empty() {
+                format!("cannot replace {path}: {e}; the files were put back as they were")
+            } else {
+                format!("cannot replace {path}: {e}; and could not put back {}: the files are not as they were", lost.join(", "))
+            });
+        }
+    }
+    clean(&[], &baks);
+    Ok(())
 }
 
 /// Randomised level ends and block bounds, as tools/fit.py `schedule`.
@@ -709,11 +805,8 @@ fn put_anchors_of(dir: &str, n: usize, k: usize, centres: &[f32], anchors: Optio
     let path = format!("{dir}/anchors.npy");
     match anchors {
         None => {
-            for f in [path.clone(), format!("{dir}/anchors.json")] {
-                if std::path::Path::new(&f).exists() {
-                    std::fs::remove_file(&f).map_err(|e| format!("cannot remove {f}: {e}"))?;
-                }
-            }
+            // the sidecar first: a file left without it is refused, never taken for this fit's
+            replace_files(&[(format!("{dir}/anchors.json"), None), (path.clone(), None)]).map_err(|e| format!("the fit's anchors: {e}"))?;
             Ok(format!("no anchors.npy: the support table's anchors are the {k} centres"))
         }
         Some(a) => {
@@ -728,13 +821,14 @@ fn put_anchors_of(dir: &str, n: usize, k: usize, centres: &[f32], anchors: Optio
 /// (`index::load_anchors`): a refit, or anchors.npy replaced alone, is refused rather than built with.
 pub fn save_anchors(dir: &str, n: usize, k: usize, centres: &[f32], anchors: &[f64]) -> Result<(), String> {
     crate::index::check_anchors(anchors, n)?;
-    let side = format!("{dir}/anchors.json");
-    // each through a new file renamed over the old one (a hard link of a `cp -al` copy keeps the other directory's
-    // file); anchors.npy first, so a failure between the two leaves it unmatched to the sidecar's hash (refused),
-    // never matched to the wrong file
-    save(dir, "anchors", "<f8", &[anchors.len() / n, n], anchors)?;
+    // both written and synced beside the fit's, then renamed over the old ones back to back (a hard link of a
+    // `cp -al` copy keeps the other directory's file); anchors.npy first, so the sidecar never names a file that is not
+    // there yet; a failure puts the old pair back (`replace_files`)
+    let sb = unsafe { std::slice::from_raw_parts(anchors.as_ptr() as *const u8, std::mem::size_of_val(anchors)) };
+    let mut npy = npy_header_bytes("<f8", &[anchors.len() / n, n]);
+    npy.extend_from_slice(sb);
     let j = serde_json::json!({"fit": crate::index::centres_hash(n, k, centres), "anchors": crate::index::anchors_hash(anchors)});
-    write_new(&side, j.to_string().as_bytes())
+    replace_files(&[(format!("{dir}/anchors.npy"), Some(npy)), (format!("{dir}/anchors.json"), Some(j.to_string().into_bytes()))]).map_err(|e| format!("the fit's anchors: {e}"))
 }
 
 /// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,
@@ -868,8 +962,7 @@ mod tests {
     /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.
     #[test]
     fn prompt_files_of_any_float_width() {
-        let dir = std::env::temp_dir().join(format!("vexact-anch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::util::TmpDir::new("anch");
         let v: Vec<f32> = vec![0.5, -0.25, 1.0, 0.125, -2.0, 0.75];
         let p = |s: &str| dir.join(s).to_str().unwrap().to_string();
         write_npy(&p("a2.npy"), "<f2", &[2, 3], &v.iter().flat_map(|&x| f32_to_f16(x).to_le_bytes()).collect::<Vec<_>>());

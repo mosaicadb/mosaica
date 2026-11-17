@@ -668,7 +668,7 @@ pub fn install_with(tmp: &str, edir: &str, before: &mut dyn FnMut() -> Result<()
 }
 
 /// Log every other index directory in `parent` (`encoded-KEY` ones saved by earlier versions, stale now, and rebuilds'
-/// scratch directories) with its size. Nothing is removed.
+/// scratch directories) with its size, and temporary or kept-aside copies of the fit's files. Nothing is removed.
 pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
     let keep = std::path::Path::new(keep).file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
     let Ok(rd) = std::fs::read_dir(parent) else { return };
@@ -682,6 +682,15 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
     for (n, size) in found {
         let what = if n.contains(".tmp-") || n.contains(".old-") { "a rebuild's scratch directory (one running now, or left by an interrupted one)" } else { "saved for another fit, other options or another version; stale for this one" };
         log(format!("{parent}/{n} ({:.1} MB) is {what}; remove it if nothing uses it", size as f64 / 1e6));
+    }
+    // the fit's files written through a temporary name (`.NAME.tmp-*`) or kept aside while replaced (`.NAME.bak-*`)
+    // and left by an interrupted write
+    let Ok(rd) = std::fs::read_dir(parent) else { return };
+    let mut left: Vec<String> = rd.filter_map(|e| e.ok()).filter(|e| e.file_type().is_ok_and(|t| t.is_file())).map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with('.') && (n.contains(".tmp-") || n.contains(".bak-"))).collect();
+    left.sort();
+    for n in left {
+        log(format!("{parent}/{n} is a temporary or kept-aside copy of a fit's file (a write running now, or left by an interrupted one); remove it if nothing is writing the fit"));
     }
 }
 
@@ -1167,12 +1176,10 @@ impl Index2 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    fn tmpdir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("vexact-{tag}-{}-{}", std::process::id(), nanos()));
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    fn tmpdir(tag: &str) -> crate::util::TmpDir {
+        crate::util::TmpDir::new(tag)
     }
 
     /// A copy of testdata/synth4k in `dst` (the tests never write into testdata).

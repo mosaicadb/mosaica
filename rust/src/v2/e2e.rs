@@ -211,9 +211,8 @@ fn approximate_knn_over_every_cluster_without_a_dial_is_exact_up_to_f32() {
 #[test]
 fn a_saved_index_opens_as_the_index_it_saves() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-    let tmp = std::env::temp_dir().join(format!("vexact-e2e-{}-{}", std::process::id(), crate::util::now_s() as u64));
+    let tmp = tmp_dir("saved");
     let edir = tmp.join("encoded");
-    std::fs::create_dir_all(&tmp).unwrap();
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
     let before: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
@@ -396,10 +395,9 @@ fn deciding_levels_are_chosen_per_query() {
     }
 }
 
-fn tmp_dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("vexact-e2e-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A new temporary directory, removed when dropped (also when the test fails).
+fn tmp_dir(tag: &str) -> crate::util::TmpDir {
+    crate::util::TmpDir::new(&format!("e2e-{tag}"))
 }
 
 /// Under other options (the norm sort, the plain constant with another N, fewer clusters with another randomised
@@ -1682,13 +1680,47 @@ fn anchors_of_a_rebuild_never_reach_a_hard_linked_copy_or_a_failed_rebuild() {
     assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "the original opens with its own index and anchors");
     let (_, ix) = open(dir2, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(ix.nanch, 4);
-    // a rebuild with anchors that fails: nothing written
-    let bad = BuildOptions { dlv: Some(vec![]), ..with(16) };
-    assert!(rebuild(dir, &bad, &mut |_| {}).is_err());
-    assert_eq!(files(&fit), before, "a failed rebuild wrote the anchors");
-    let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "a failed rebuild left the index unopenable");
+    // a rebuild with anchors that fails as it writes them, inside the install lock (each step of the replacement in
+    // turn; the default anchors on 32 clusters are the centres, so that one removes the files): the old index and
+    // anchors stay, openable, with nothing left beside them
+    for (a, step) in [(16, 0), (16, 1), (64, 0), (64, 1)] {
+        crate::fit::FAIL_STEP.with(|f| f.set(Some(step)));
+        let r = rebuild(dir, &with(a), &mut |_| {});
+        crate::fit::FAIL_STEP.with(|f| f.set(None));
+        let e = r.map(|_| ()).unwrap_err();
+        assert!(e.contains("injected") && e.contains("put back as they were") && e.contains("is as it was"), "{e}");
+        assert_eq!(files(&fit), before, "anchors {a}, step {step}: the failed rebuild changed the anchors");
+        let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+        assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "anchors {a}, step {step}: the failed rebuild left the index unopenable");
+        let left: Vec<String> = std::fs::read_dir(&fit).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).filter(|n| n.starts_with('.') || n.contains(".tmp-")).collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+    // anchors made for the levels as given are refused before anything is written
+    assert!(rebuild(dir, &BuildOptions { dlv: Some(vec![]), ..with(16) }, &mut |_| {}).is_err());
+    assert_eq!(files(&fit), before);
     std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// A rebuild that waits for another reads the fit once it holds the lock: here the other "rebuild" (this test, holding
+/// encoded.lock) writes 4 anchors over 8 meanwhile, and the waiting rebuild's index opens with them, not stale.
+#[test]
+fn a_waiting_rebuild_reads_the_fit_the_one_before_it_left() {
+    let tmp = tmp_dir("rbwait");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap().to_string();
+    let with = |image| BuildOptions { anchors: Some(Anchors { image, text: None, text_count: 0 }), ..BuildOptions::default() };
+    rebuild(&dir, &with(8), &mut |_| {}).unwrap();
+    let (lock, _) = store::Lock::take(&dir, &mut |_| {});
+    let d2 = dir.clone();
+    let waiting = std::thread::spawn(move || rebuild(&d2, &BuildOptions::default(), &mut |_| {}).map(|(_, ix)| ix.nanch));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let a = crate::fit::make_anchors(&dir, 4, None, 0, BuildOptions::default().seed).unwrap();
+    crate::fit::put_anchors(&dir, a.as_deref()).unwrap();
+    drop(lock);
+    assert_eq!(waiting.join().unwrap().unwrap(), 4);
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
 }
 
 /// `create` from a vectors file (synth4k's rows; python3 with numpy and faiss runs tools/partition.py, else the test
