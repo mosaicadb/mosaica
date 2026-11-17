@@ -2,8 +2,8 @@
 
 This folder adds the fast-scan index (`rust/`) to [ANN-Benchmarks](https://github.com/erikbern/ann-benchmarks) as the
 algorithm `vexact`. It then runs the index against the harness's own builds of hnswlib, faiss, ScaNN, glass, PyNNDescent,
-DiskANN and BLAS brute force on the harness's datasets. `bench/run.sh` remains the place for filtered runs and for
-checks against the oracle. This folder covers only the unfiltered protocol, run by the harness itself.
+DiskANN and BLAS brute force on the harness's datasets. Filtered, exact and threshold queries are in `bench/suite`.
+This folder covers only the unfiltered protocol, run by the harness itself.
 
 - `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `threshold`,
   `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` (used by
@@ -64,7 +64,7 @@ in rows (`Plan::default`).
   levels-clusters defaults"): A, clusters by N (build argument `clusters: by-n`, `fit.py --per-cluster by-n --groups
   by-n`); B, two deterministic levels (`dlv: "16.32"`); C, both. Not in `run.sh`'s default list; add it with `ALGOS`.
 - Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured
-  here, but `bench/run.sh` times from Rust and is the better tool above about 10,000 QPS.
+  here, but matters above about 10,000 QPS.
 
 ## Deviations from the harness
 

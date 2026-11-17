@@ -55,7 +55,7 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
   on the build cores). Rows go to `results/<suite>/<dataset>/<system>.csv` (one per query and cell),
   `builds.csv` and `<system>_setup.csv` (the time to set each visible set); answers are dumped under
   `DATA/dumps/` for the check.
-- `check.py`: every exact answer against the truth, with the rounding allowance of `../threshold-db/check.py`;
+- `check.py`: every exact answer against the truth, with the rounding allowance of the earlier `threshold-db/check.py`;
   writes `results/<suite>/<dataset>/check.csv`.
 - `report.py`: `results/<suite>/REPORT.md` (a table per type across datasets, the filtered approximate runs, the
   builds) and a plot per type (`exact.png`, `threshold.png`, `approx.png`).
@@ -92,7 +92,7 @@ settings at 1, and the index's one-thread pool pinned with `core=`), warm (the d
 5 times; a query's figure is the median of its 5, and a cell's the median over queries, with the p90 over the same
 per-query medians. Builds may use several threads (`--build-cores`) and are recorded apart. Times are taken in Python
 around each call, from the query vector to the ids as numpy; ACORN, served by a C++ process over a pipe, reports the
-search call's own time, as in `../threshold-db/ann.py`.
+search call's own time, as in the earlier `threshold-db/ann.py`.
 
 Exactness: `check.py` compares every exact answer with the f64 truth. An item that differs is within the rounding
 allowance when |s - t| is at most what rounding the stored vectors and the query can move its similarity (f16 systems,
@@ -132,7 +132,7 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
   `IDSelectorBitmap` (`idselector`) and over a compacted `IndexFlatIP` of the visible rows (`compacted`, built when the
   set is set).
 - **faiss-panorama**: `IndexFlatIPPanorama`, 8 levels, after an orthogonal PCA rotation of the data and of each query
-  (inside the timed call), as `../threshold-db/ann.py`. Under a visible set through `IDSelectorBitmap`.
+  (inside the timed call), as the earlier `threshold-db/ann.py`. Under a visible set through `IDSelectorBitmap`.
 - **pdx-bond**: `pdxearch` from github.com/cwida/PDX at 91618e0 (the last revision with BOND), `IndexBONDFlat`: L2 over
   the unit vectors, the PDX layout in blocks of 10,240, written by the adapter and mapped (`restore`). k-NN only (PDX
   has no range search); under a visible set `filtered_search` with a selection vector.
@@ -143,7 +143,7 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
   efSearch 64, 256, 1024. The build is one piece on the build cores.
 - **pgvector**: PostgreSQL with pgvector, sequential scans, one worker; `ORDER BY v <#> q LIMIT k` and
   `WHERE (v <#> q) <= -t`, a visible set as `id IN (SELECT id FROM vis_...)`. Timed at the client as
-  `../threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
+  the earlier `threshold-db/dbrun.py`. Needs `psycopg` and `PGVECTOR_DSN`; pin the server to the timing core yourself.
 
 ## Status
 
@@ -162,3 +162,18 @@ inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`.
 - **The public suites** (`--stages public`): the overlay was checked (applied and restored on VIBE and ANN-Benchmarks
   checkouts), but the images for faiss and glass were not built here, and ANN-Benchmarks' Docker images were absent,
   so the unfiltered approximate k-NN was left for a machine with the images.
+
+## The scripts this suite replaced
+
+The suite replaced these scripts, which were removed after its first quick run; they are in the history at 3a384da:
+
+- `bench/`: `run.sh` (the Rust-timed filtered runs: `rust/src/ann.rs`, scored by `score.py`), `annlib.py`,
+  `baselines.py`, `convert.py`, `filters.py`, `score.py`, `report.py`, `remeasure.sh`.
+- `bench/threshold-db/`: `ann.py`, `check.py`, `dbrun.py`, `load.py`, `clickhouse.sh`, `summarise.py`, `plot.py`,
+  `plot_filtered.py`, `table_filtered.py` (ClickHouse is replaced by pgvector).
+- `bench/topk/`: `ann_topk.py`, `plot.py`.
+
+Kept: `threshold-db/prep.py` (its output is what `rust/src/run2.rs` and `threshold-db/capped/` read),
+`ch-user-files.xml` (mounted by `capped/clickhouse_capped.sh`), `fetch.py`, `fetch_species.py`, `taxa.py`,
+`clusters.py`, `acorn_bench.cpp`, `acorn.patch`, and `bench/oracle.py` and `oracle_thr.py` (they check the Rust runner's
+truth files). The REPORT files and results directories are the historical record of those runs.

@@ -1,5 +1,5 @@
 # faiss (pip faiss-cpu): the flat index (the standard exact system), Panorama (a frontier exact system) and HNSW (the
-# standard approximate system under a visible set). Forms as in ../threshold-db/ann.py: inner product over the unit
+# standard approximate system under a visible set). Forms as in the earlier threshold-db/ann.py: inner product over the unit
 # vectors; a visible set through IDSelectorBitmap, and for the flat index also over a compacted copy of the visible rows
 # (built when the visible set is set, as a session would; its time is recorded with the setup).
 import numpy as np

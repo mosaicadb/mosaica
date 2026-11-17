@@ -26,7 +26,7 @@ SYSTEM_PARAMS = {
     "vexact": dict(basis="dual", approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
     # faiss IndexFlatIP: search / range_search; under a visible set through IDSelectorBitmap and over a compacted copy
     "faiss-flat": dict(settings=["idselector", "compacted"]),
-    # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as ../threshold-db/ann.py)
+    # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as the earlier threshold-db/ann.py)
     "faiss-panorama": dict(levels=8, settings=["idselector"]),
     # PDX-BOND (cwida/PDX at the last revision with BOND): exact pruned k-NN over the PDX layout, no index
     "pdx-bond": dict(settings=["selection"]),
