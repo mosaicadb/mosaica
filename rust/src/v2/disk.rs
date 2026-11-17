@@ -85,16 +85,21 @@ impl Rows {
     /// Writes the rows to `path` (from memory, or from the file they are mapped from), syncs, drops the copy and maps
     /// the file with `advice` (normal, random or sequential). The rows go to a new file beside `path` that is renamed
     /// over it once complete, so a file `path` named before (or another name of it, a hard link) is never truncated
-    /// or written. Refused: a `path` inside a saved index (a directory named `encoded-*`), and a `path` that is the
-    /// file of any of `avoid` or of any file this process maps (the index's own vectors) under another name.
+    /// or written. Refused: a `path` inside a saved index or a build's scratch (a directory named `encoded`,
+    /// `encoded-*` or `encoded.tmp-*`, after links are resolved), and a `path` that is the file of any of `avoid` or of
+    /// any file this process maps (the index's own vectors) under another name.
     pub fn to_file(&mut self, path: &str, advice: &str, avoid: &[&str]) -> Result<(), String> {
         use std::os::unix::fs::MetadataExt;
         let p = std::path::Path::new(path);
         let name = p.file_name().ok_or(format!("--full-file {path} names no file"))?.to_string_lossy().to_string();
         let parent = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
         let cparent = std::fs::canonicalize(parent).map_err(|e| format!("--full-file {path}: cannot resolve its directory: {e}"))?;
-        if cparent.components().any(|c| c.as_os_str().to_string_lossy().starts_with("encoded-")) {
-            return Err(format!("--full-file {path} is inside a saved index ({}); give a path outside every encoded-* directory", cparent.display()));
+        let in_index = |c: std::path::Component| {
+            let c = c.as_os_str().to_string_lossy();
+            c == "encoded" || c.starts_with("encoded-") || c.starts_with("encoded.tmp-")
+        };
+        if cparent.components().any(in_index) {
+            return Err(format!("--full-file {path} is inside a saved index ({}); give a path outside every directory named encoded, encoded-* or encoded.tmp-*", cparent.display()));
         }
         if let Ok(md) = std::fs::metadata(path) {
             let id = (md.dev(), md.ino());

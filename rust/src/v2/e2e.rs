@@ -70,7 +70,7 @@ fn answer(t: &[(f64, u32)], th: f64) -> RoaringBitmap {
 /// The default plan and the float path (no integer levels, cluster tables, fixed repack), each left to choose and
 /// forced; and the rule's rows at the extremes and either side of synth4k's random 10% set (about 12.5 visible rows
 /// per cluster), so that visible sets are scanned, scored directly per cluster and run on the index path in turn.
-/// (synth4k's clusters hold about 125 rows, above the default rule's 84 rows without a visible set.)
+/// (synth4k's clusters hold about 125 rows, above the default rule's 78 rows without a visible set.)
 fn plans() -> Vec<(&'static str, Plan)> {
     let float = Plan { int_det: false, gtab: false, repack: false, ..Plan::default() };
     let rows = |r_rows: usize| Plan { r_rows, r_kappa: 0.0, ..Plan::default() };
@@ -211,14 +211,13 @@ fn approximate_knn_over_every_cluster_without_a_dial_is_exact_up_to_f32() {
 #[test]
 fn a_saved_index_opens_as_the_index_it_saves() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
-    let tmp = std::env::temp_dir().join(format!("vexact-e2e-{}-{}", std::process::id(), crate::util::now_s() as u64));
+    let tmp = tmp_dir("saved");
     let edir = tmp.join("encoded");
-    std::fs::create_dir_all(&tmp).unwrap();
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
     let before: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
-    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
-    let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let (_, built) = rebuild_in(dir, edir, &o, &mut |_| {}).unwrap();
+    let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let after: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(before, after, "a build saved elsewhere wrote into the fitted directory");
     assert_eq!(built.code_hash(), fixture().ix.code_hash(), "the saved build encodes as the build in memory does");
@@ -253,34 +252,36 @@ fn a_saved_index_opens_as_the_index_it_saves() {
             }
         }
     }
-    // other options, or another file format, are refused
-    let other = BuildOptions { cal_items: 4096, ..BuildOptions::default() };
-    assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "an index opened under options it was not built with");
+    // the index records the options it was built with (an open derives its key from them); another file format is
+    // refused
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{edir}/index.json")).unwrap()).unwrap();
+    assert_eq!(v["options"], o.encoding_json());
     let json = format!("{edir}/index.json");
     let text = std::fs::read_to_string(&json).unwrap();
     std::fs::write(&json, text.replace(&format!("\"format\": {}", store::STORE_FORMAT), "\"format\": 1")).unwrap();
-    assert!(open_at(dir, edir, &o, &mut |_| {}).is_err(), "an index of another format opened");
+    assert!(open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).is_err(), "an index of another format opened");
     drop(opened);
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
-/// Fewer deterministic levels (`BuildOptions::dlv`) and fewer of them deciding (`BuildOptions::ddec`): threshold and
+/// Fewer deterministic levels (`BuildOptions::dlv`) and fewer of them deciding (`OpenOptions::ddec`): threshold and
 /// k-NN answers equal brute force on every path, verify finds no bound violated, a level that does not decide decides
-/// nothing, the saved index opens as built (and not under other options), and schedules or levels that do not fit are
-/// refused.
+/// nothing, the saved index opens as built (under any choice of the levels that decide), and schedules or levels that
+/// do not fit are refused.
 #[test]
 fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let f = fixture();
     let variants = [
-        ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, 2),
-        ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ddec: 0b10, ..BuildOptions::default() }, 2),
-        ("3 levels, 4/16/40", BuildOptions { dlv: Some(vec![4, 16, 40]), ..BuildOptions::default() }, 3),
-        ("6 levels, none deciding", BuildOptions { ddec: 0, ..BuildOptions::default() }, 6),
-        ("6 levels, deciding at the first and last", BuildOptions { ddec: 0b100001, ..BuildOptions::default() }, 6),
+        ("2 levels, 16/32", BuildOptions { dlv: Some(vec![16, 32]), ..BuildOptions::default() }, u32::MAX, 2),
+        ("2 levels, 8/32, deciding at the second", BuildOptions { dlv: Some(vec![8, 32]), ..BuildOptions::default() }, 0b10, 2),
+        ("3 levels, 4/16/40", BuildOptions { dlv: Some(vec![4, 16, 40]), ..BuildOptions::default() }, u32::MAX, 3),
+        ("6 levels, none deciding", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0, 6),
+        ("6 levels, deciding at the first and last", BuildOptions { dlv: Some(vec![4, 8, 12, 16, 24, 32]), ..BuildOptions::default() }, 0b100001, 6),
     ];
-    for (vname, o, ndl) in &variants {
-        let (_, ix) = build(dir, o, &mut |_| {}).unwrap();
+    for (vname, o, ddec, ndl) in &variants {
+        let (_, mut ix) = build(dir, o, &mut |_| {}).unwrap();
+        ix.set_ddec(*ddec).unwrap();
         assert_eq!(ix.meta.ndl(), *ndl, "{vname}");
         assert_eq!(ix.meta.nl(), ndl + 1, "{vname}");
         for (qi, q) in f.queries.iter().enumerate() {
@@ -295,7 +296,7 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
                         assert_eq!(to_bitmap2(&ix, &r.rows), want, "{vname}: threshold, plan {pname}, set {sname}, query {qi}, t {th}");
                         if matches!(plan.mode, PlanMode::Index) {
                             for l in 0..*ndl {
-                                if o.ddec >> l & 1 == 0 {
+                                if ddec >> l & 1 == 0 {
                                     assert_eq!(r.st.dec_in[l] + r.st.dec_out[l], 0, "{vname}: level {l} decided, plan {pname}");
                                 }
                             }
@@ -318,37 +319,40 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
     let tmp = tmp_dir("dlv");
     let edir = tmp.join("encoded-d");
     let edir = edir.to_str().unwrap();
-    let o = &variants[1].1;
-    let (_, built) = rebuild_at(dir, edir, o, &mut |_| {}).unwrap();
-    let (_, opened) = open_at(dir, edir, o, &mut |_| {}).unwrap();
+    let (o, ddec) = (&variants[1].1, variants[1].2);
+    let (_, built) = rebuild_in(dir, edir, o, &mut |_| {}).unwrap();
+    let (_, opened) = open_in(dir, edir, &OpenOptions { ddec, ..OpenOptions::default() }, &mut |_| {}).unwrap();
     assert_eq!(opened.store_hash(), built.store_hash());
     assert_eq!((opened.meta.dlv.clone(), opened.meta.ddec), (vec![8, 32], 0b10));
-    // which levels decide is the open's choice: the same saved index opens under any, and holds the same
+    // which levels decide is the open's choice: the same saved index opens under any, and holds the same; a level it
+    // does not have is refused
     for ddec in [u32::MAX, 0, 0b01] {
-        let (_, other) = open_at(dir, edir, &BuildOptions { ddec, ..o.clone() }, &mut |_| {}).unwrap();
+        let (_, other) = open_in(dir, edir, &OpenOptions { ddec, ..OpenOptions::default() }, &mut |_| {}).unwrap();
         assert_eq!((other.meta.ddec, other.store_hash()), (ddec, built.store_hash()), "ddec {ddec:#b}");
     }
-    for other in [BuildOptions::default(), BuildOptions { dlv: Some(vec![16, 32]), ..o.clone() }] {
-        assert!(open_at(dir, edir, &other, &mut |_| {}).is_err(), "opened under other levels: {:?}", other.dlv);
+    for ddec in [0b100, 1 << 6] {
+        assert!(open_in(dir, edir, &OpenOptions { ddec, ..OpenOptions::default() }, &mut |_| {}).is_err(), "opened deciding at {ddec:#b}");
     }
     drop((built, opened));
     std::fs::remove_dir_all(&tmp).unwrap();
     // schedules and levels that do not fit this fit (64 dimensions, the first randomised level at 48 bytes)
-    for (dlv, ddec) in [(Some(vec![]), u32::MAX), (Some(vec![16, 8]), u32::MAX), (Some(vec![0, 8]), u32::MAX), (Some(vec![4, 8, 12, 16, 20, 24, 32]), u32::MAX),
-        (Some(vec![16, 48]), u32::MAX), (Some(vec![16, 32]), 0b100), (None, 1 << 6)] {
-        let o = BuildOptions { dlv: dlv.clone(), ddec, ..BuildOptions::default() };
-        assert!(prepare(dir, &o).is_err(), "accepted dlv {dlv:?}, ddec {ddec:#b}");
+    for dlv in [vec![], vec![16, 8], vec![0, 8], vec![4, 8, 12, 16, 20, 24, 32], vec![16, 48]] {
+        let o = BuildOptions { dlv: Some(dlv.clone()), ..BuildOptions::default() };
+        assert!(prepare(dir, &o).is_err(), "accepted dlv {dlv:?}");
     }
 }
 
 /// The default build of synth4k encodes as the reference build does: its code hash (the gates' `--rebuild --hash`
-/// reference since the calibration change; `code_hash` uses std's DefaultHasher, so a Rust release that changes it
-/// changes this value, not the codes) and its store hash (a fixed hash, `Fx`).
+/// reference; `code_hash` uses std's DefaultHasher, so a Rust release that changes it changes this value, not the
+/// codes) and its store hash (a fixed hash, `Fx`). The default since the levels-clusters decision has two
+/// deterministic levels (`DLV`); the fit's own six (`dlv: None`, the earlier default) still give the earlier reference.
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x}", ix.code_hash()), "7ac80b6c54101fa9");
-    assert_eq!(format!("{:016x}", ix.store_hash()), "3782663ec5d076fd");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 e9ba6817c35cf8b0");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 3782663ec5d076fd");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -359,8 +363,8 @@ fn deciding_levels_are_chosen_per_query() {
     let f = fixture();
     let ix = &f.ix;
     let ndl = ix.meta.ndl();
-    assert_eq!((ndl, ix.meta.ddec), (6, u32::MAX));
-    for ddec in [None, Some(u32::MAX), Some(0), Some(0b10), Some(0b100001)] {
+    assert_eq!((ndl, ix.meta.ddec), (2, u32::MAX));
+    for ddec in [None, Some(u32::MAX), Some(0), Some(0b10), Some(0b01)] {
         let index = Plan { mode: PlanMode::Index, ddec, ..Plan::default() };
         assert!(index.check(ix).is_ok(), "ddec {ddec:?}");
         for (pname, plan) in [("index path", index), ("index path, float", Plan { int_det: false, gtab: false, repack: false, ..index }), ("default", Plan { ddec, ..Plan::default() })] {
@@ -385,16 +389,15 @@ fn deciding_levels_are_chosen_per_query() {
             }
         }
     }
-    // levels beyond the index's six
-    for bad in [1 << 6, 1 << 31, 0b1000001] {
+    // levels beyond the index's two (the default levels)
+    for bad in [1 << 2, 1 << 31, 0b101] {
         assert!(Plan { ddec: Some(bad), ..Plan::default() }.check(ix).is_err(), "accepted ddec {bad:#b}");
     }
 }
 
-fn tmp_dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("vexact-e2e-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A new temporary directory, removed when dropped (also when the test fails).
+fn tmp_dir(tag: &str) -> crate::util::TmpDir {
+    crate::util::TmpDir::new(&format!("e2e-{tag}"))
 }
 
 /// Under other options (the norm sort, the plain constant with another N, fewer clusters with another randomised
@@ -412,14 +415,15 @@ fn saved_indexes_under_other_options_open_as_built() {
         let edir = tmp.join(name.replace([' ', ','], "_"));
         let edir = edir.to_str().unwrap();
         let (_, mem) = build(dir, &o, &mut |_| {}).unwrap();
-        let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
-        let (_, opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+        let (_, built) = rebuild_in(dir, edir, &o, &mut |_| {}).unwrap();
+        let (_, opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
         same_index(&mem, &built);
         same_index(&built, &opened);
         assert_eq!(mem.code_hash(), opened.code_hash(), "{name}");
         assert_eq!((mem.store_hash(), built.store_hash()), (opened.store_hash(), opened.store_hash()), "{name}");
         assert_ne!(opened.store_hash(), fixture().ix.store_hash(), "{name} built the default index");
-        assert!(open_at(dir, edir, &BuildOptions::default(), &mut |_| {}).is_err(), "{name} opened under the default options");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{edir}/index.json")).unwrap()).unwrap();
+        assert_eq!(v["options"], o.encoding_json(), "{name}: the options recorded");
     }
     std::fs::remove_dir_all(&tmp).unwrap();
 }
@@ -432,8 +436,8 @@ fn compactions_of_an_opened_index_answer_as_the_built_ones() {
     let edir = tmp.join("encoded");
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
-    let (_, built) = rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
-    let (_, mut opened) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let (_, built) = rebuild_in(dir, edir, &o, &mut |_| {}).unwrap();
+    let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     opened.repack = built.repack.clone();
     let f = fixture();
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(11);
@@ -480,7 +484,7 @@ fn concurrent_rebuilds_are_serialised() {
     let (tx, rx) = mpsc::channel::<String>();
     let h = {
         let (edir, o) = (edir.clone(), o.clone());
-        std::thread::spawn(move || rebuild_at(dir, &edir, &o, &mut |l| { let _ = tx.send(l); }).map(|(_, ix)| ix.store_hash()))
+        std::thread::spawn(move || rebuild_in(dir, &edir, &o, &mut |l| { let _ = tx.send(l); }).map(|(_, ix)| ix.store_hash()))
     };
     let t0 = std::time::Instant::now();
     loop {
@@ -504,7 +508,7 @@ fn concurrent_rebuilds_are_serialised() {
             s.spawn(move || {
                 let mut log = Vec::new();
                 bar.wait();
-                let (_, ix) = rebuild_at(dir, edir, o, &mut |l| log.push(l)).unwrap();
+                let (_, ix) = rebuild_in(dir, edir, o, &mut |l| log.push(l)).unwrap();
                 assert_eq!(ix.store_hash(), want);
                 log
             })
@@ -515,7 +519,7 @@ fn concurrent_rebuilds_are_serialised() {
     assert_eq!(count("waiting for another rebuild"), 1, "{logs:?}");
     assert_eq!(count("another rebuild just produced this index"), 1, "{logs:?}");
     assert_eq!(count("saved to"), 1, "{logs:?}");
-    let (_, opened) = open_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    let (_, opened) = open_in(dir, &edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(opened.store_hash(), want, "the saved index is the one a single build makes");
     let mut left: Vec<String> = std::fs::read_dir(&tmp).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
     left.sort();
@@ -534,18 +538,18 @@ fn opens_during_installs_always_succeed() {
     let edir = tmp.join("encoded-y").to_str().unwrap().to_string();
     let o = BuildOptions::default();
     let want = fixture().ix.store_hash();
-    rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    rebuild_in(dir, &edir, &o, &mut |_| {}).unwrap();
     let done = AtomicBool::new(false);
     let opens = std::thread::scope(|s| {
         let r = s.spawn(|| {
             for _ in 0..4 {
-                rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+                rebuild_in(dir, &edir, &o, &mut |_| {}).unwrap();
             }
             done.store(true, Ordering::Relaxed);
         });
         let mut opens = 0;
         while !done.load(Ordering::Relaxed) {
-            let (_, ix) = open_at(dir, &edir, &o, &mut |_| {}).unwrap_or_else(|e| panic!("an open during an install failed: {e}"));
+            let (_, ix) = open_in(dir, &edir, &OpenOptions::default(), &mut |_| {}).unwrap_or_else(|e| panic!("an open during an install failed: {e}"));
             assert_eq!(ix.store_hash(), want);
             opens += 1;
         }
@@ -569,16 +573,17 @@ fn the_vectors_file_is_checked_at_open() {
     let dir = fit.to_str().unwrap();
     let edir = tmp.join("encoded-z").to_str().unwrap().to_string();
     let o = BuildOptions::default();
-    let (_, built) = rebuild_at(dir, &edir, &o, &mut |_| {}).unwrap();
+    let (_, built) = rebuild_in(dir, &edir, &o, &mut |_| {}).unwrap();
     let want = built.store_hash();
     drop(built);
-    let opened = |o: &BuildOptions| -> (Result<u64, String>, Vec<String>) {
+    let oo = OpenOptions::default();
+    let opened = |o: &OpenOptions| -> (Result<u64, String>, Vec<String>) {
         let mut log = Vec::new();
-        let r = open_at(dir, &edir, o, &mut |l| log.push(l)).map(|(_, ix)| ix.store_hash());
+        let r = open_in(dir, &edir, o, &mut |l| log.push(l)).map(|(_, ix)| ix.store_hash());
         (r, log)
     };
     let warned = |log: &[String], pat: &str| log.iter().any(|l| l.contains("WARNING") && l.contains(pat));
-    let (r, log) = opened(&o);
+    let (r, log) = opened(&oo);
     assert_eq!(r.unwrap(), want);
     assert!(!log.iter().any(|l| l.contains("WARNING")), "{log:?}");
     // rows swapped in place, length and mtime kept (as touch -r does)
@@ -595,14 +600,14 @@ fn the_vectors_file_is_checked_at_open() {
     f.write_all(&buf[end - 2 * row..]).unwrap();
     f.set_modified(mtime).unwrap();
     drop(f);
-    let (r, log) = opened(&o);
+    let (r, log) = opened(&oo);
     assert_eq!(r.unwrap(), want, "the index serves the vectors it was built from");
     assert!(warned(&log, "ctime"), "{log:?}");
     // another modification time: an error, unless --keep-index
     std::fs::File::options().write(true).open(&xs).unwrap().set_modified(mtime + std::time::Duration::from_secs(1)).unwrap();
-    let (r, _) = opened(&o);
+    let (r, _) = opened(&oo);
     assert!(r.unwrap_err().contains("--keep-index"));
-    let keep = BuildOptions { keep_index: true, ..o.clone() };
+    let keep = OpenOptions { keep_index: true, ..oo.clone() };
     let (r, log) = opened(&keep);
     assert_eq!(r.unwrap(), want);
     assert!(warned(&log, "changed since this index was built"), "{log:?}");
@@ -621,11 +626,11 @@ fn the_vectors_file_is_checked_at_open() {
     std::fs::File::options().write(true).open(&perm).unwrap().set_modified(pm + std::time::Duration::from_secs(1)).unwrap();
     let (r, _) = opened(&keep);
     assert_eq!(r.unwrap(), want);
-    let (r, _) = opened(&BuildOptions { keep_index: false, ..o.clone() });
+    let (r, _) = opened(&OpenOptions { keep_index: false, ..oo.clone() });
     // (the vectors file's mtime is also off: --keep-index is named either way)
     assert!(r.unwrap_err().contains("--keep-index"));
     // the build reads it, checked: an entity outside 0..2^32 is an error, not a panic
-    let e = rebuild_at(dir, &tmp.join("encoded-perm").to_string_lossy(), &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    let e = rebuild_in(dir, &tmp.join("encoded-perm").to_string_lossy(), &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("perm.npy") && e.contains("outside"), "{e}");
     // missing: a warning
     std::fs::remove_file(&perm).unwrap();
@@ -633,11 +638,11 @@ fn the_vectors_file_is_checked_at_open() {
     assert_eq!(r.unwrap(), want);
     assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("perm.npy") && l.contains("missing")), "{log:?}");
     std::fs::remove_file(&xs).unwrap();
-    let (r, log) = opened(&o);
+    let (r, log) = opened(&oo);
     assert_eq!(r.unwrap(), want);
     assert!(warned(&log, "missing"), "{log:?}");
     // a rebuild without the vectors is an error, not a panic
-    assert!(rebuild_at(dir, &edir, &o, &mut |_| {}).is_err());
+    assert!(rebuild_in(dir, &edir, &o, &mut |_| {}).is_err());
     // damaged files: errors that say to rebuild
     let damage = |name: &str, f: &dyn Fn(&mut Vec<u8>)| {
         let p = format!("{edir}/{name}");
@@ -645,7 +650,7 @@ fn the_vectors_file_is_checked_at_open() {
         let mut b = orig.clone();
         f(&mut b);
         std::fs::write(&p, &b).unwrap();
-        let (r, _) = opened(&o);
+        let (r, _) = opened(&oo);
         std::fs::write(&p, &orig).unwrap();
         r
     };
@@ -669,7 +674,7 @@ fn the_vectors_file_is_checked_at_open() {
         });
         assert!(r.as_ref().is_err_and(|e| e.contains("rebuild")), "{what}: {r:?}");
     }
-    let (r, _) = opened(&o);
+    let (r, _) = opened(&oo);
     assert_eq!(r.unwrap(), want);
     std::fs::remove_dir_all(&tmp).unwrap();
 }
@@ -800,8 +805,8 @@ fn a_partitioned_fit_builds_an_index_of_its_vectors() {
         let edir = tmp.join(format!("encoded-{basis}"));
         let edir = edir.to_str().unwrap();
         let bo = BuildOptions::default();
-        let (_, built) = rebuild_at(fit, edir, &bo, &mut |_| {}).unwrap();
-        let (_, ix) = open_at(fit, edir, &bo, &mut |_| {}).unwrap();
+        let (_, built) = rebuild_in(fit, edir, &bo, &mut |_| {}).unwrap();
+        let (_, ix) = open_in(fit, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
         assert_eq!(ix.store_hash(), built.store_hash());
         ix.check_maps().unwrap();
         // every entity is stored once, with its own vector
@@ -849,12 +854,12 @@ fn perm_read_after_an_open_is_checked_against_the_index() {
     let o = BuildOptions::default();
     let edir = tmp.join("encoded-p");
     let edir = edir.to_str().unwrap();
-    rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
-    let (mut p, _) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    rebuild_in(dir, edir, &o, &mut |_| {}).unwrap();
+    let (mut p, _) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert!(p.perm.is_empty(), "an open reads no perm.npy");
     load_perm_checked(&mut p, edir).unwrap();
     assert_eq!(p.perm.len(), p.cstart[p.meta.k]);
-    let (mut p, _) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    let (mut p, _) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let path = fit.join("perm.npy");
     let mut b = std::fs::read(&path).unwrap();
     let l = b.len();
@@ -882,7 +887,7 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     let o = BuildOptions::default();
     let (ec, er) = (tmp.join("encoded-c"), tmp.join("encoded-r"));
     let (ec, er) = (ec.to_str().unwrap(), er.to_str().unwrap());
-    let (_, base) = rebuild_at(dir, ec, &o, &mut |_| {}).unwrap();
+    let (_, base) = rebuild_in(dir, ec, &o, &mut |_| {}).unwrap();
     let (k, n) = (base.k(), base.n());
     assert!(base.anc_centres && base.nanch == k, "without anchors.npy, one anchor per cluster, its centre");
     // the same as the build in memory, which (as UP's build) takes the centres' directions as the anchors
@@ -890,8 +895,8 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     let rev: Vec<f64> = (0..k).rev().flat_map(|c| base.anchors[c * n..(c + 1) * n].to_vec()).collect();
     let (_, _, centres) = crate::index::load_centres(dir).unwrap();
     crate::fit::save_anchors(dir, n, k, &centres, &rev).unwrap();
-    let (_, built) = rebuild_at(dir, er, &o, &mut |_| {}).unwrap();
-    let (_, ix) = open_at(dir, er, &o, &mut |_| {}).unwrap();
+    let (_, built) = rebuild_in(dir, er, &o, &mut |_| {}).unwrap();
+    let (_, ix) = open_in(dir, er, &OpenOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(ix.store_hash(), built.store_hash());
     assert!(!ix.anc_centres && ix.nanch == k, "anchors counted like the clusters taken for the centres");
     assert_eq!(ix.code_hash(), base.code_hash(), "the anchors change the table, not the codes");
@@ -926,21 +931,21 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     drop((built, ix));
     // the fit's anchors removed: the index built with them is refused, the centres' one opens
     std::fs::remove_file(fit.join("anchors.npy")).unwrap();
-    assert!(open_at(dir, er, &o, &mut |_| {}).is_err());
-    open_at(dir, ec, &o, &mut |_| {}).unwrap();
+    assert!(open_in(dir, er, &OpenOptions::default(), &mut |_| {}).is_err());
+    open_in(dir, ec, &OpenOptions::default(), &mut |_| {}).unwrap();
     // index.json claiming the centres for the reversed anchors is refused at open
     crate::fit::save_anchors(dir, n, k, &centres, &rev).unwrap();
     let json = format!("{er}/index.json");
     let text = std::fs::read_to_string(&json).unwrap();
     assert!(text.contains("\"anc_centres\": false"));
     std::fs::write(&json, text.replace("\"anc_centres\": false", "\"anc_centres\": true")).unwrap();
-    assert!(open_at(dir, er, &o, &mut |_| {}).is_err(), "an index claiming its anchors are the centres opened against a fit with other anchors");
+    assert!(open_in(dir, er, &OpenOptions::default(), &mut |_| {}).is_err(), "an index claiming its anchors are the centres opened against a fit with other anchors");
     // anchors made for another fit, an anchors.npy replaced alone or without its sidecar, and anchors that are not
     // unit rows are refused, at open and at rebuild
     let side = fit.join("anchors.json");
     let sj = std::fs::read_to_string(&side).unwrap();
     let refused = |what: &str, pat: &str| {
-        let (a, b) = (open_at(dir, er, &o, &mut |_| {}), rebuild_at(dir, er, &o, &mut |_| {}));
+        let (a, b) = (open_in(dir, er, &OpenOptions::default(), &mut |_| {}), rebuild_in(dir, er, &o, &mut |_| {}));
         assert!(a.as_ref().is_err_and(|e| e.contains(pat)) && b.as_ref().is_err_and(|e| e.contains(pat)), "{what}: {:?} {:?}", a.err(), b.err());
     };
     let v: serde_json::Value = serde_json::from_str(&sj).unwrap();
@@ -955,7 +960,30 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
     refused("anchors.npy without anchors.json", "no ");
     crate::util::write_npy(fit.join("anchors.npy").to_str().unwrap(), "<f8", &[1, n], &vec![0u8; n * 8]);
     assert!(crate::fit::save_anchors(dir, n, k, &centres, &vec![0f64; n]).is_err(), "anchors that are not unit rows saved");
-    assert!(open_at(dir, er, &o, &mut |_| {}).is_err() && rebuild_at(dir, er, &o, &mut |_| {}).is_err());
+    assert!(open_in(dir, er, &OpenOptions::default(), &mut |_| {}).is_err() && rebuild_in(dir, er, &o, &mut |_| {}).is_err());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// The fit records the randomised levels' certificate as tools/certify.py does (the synth4k fit's, made by tools/fit.py
+/// and certify.py, has the same layout and budget): from the shipped table, which holds the value the port certifies;
+/// with a certification time of 0, none.
+#[test]
+fn the_fit_records_certify_pys_certificate() {
+    let tmp = tmp_dir("cert");
+    let (part, _) = synth_partition(&tmp.join("part"));
+    let fit = tmp.join("fit");
+    let fit = fit.to_str().unwrap();
+    let certs = |dir: &str| serde_json::from_slice::<serde_json::Value>(&std::fs::read(format!("{dir}/meta.json")).unwrap()).unwrap()["CERTS"].clone();
+    let mut log = Vec::new();
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions::default(), &mut |s| log.push(s)).unwrap();
+    let want = certs(concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k"));
+    assert_eq!(certs(fit), want);
+    assert!(log.iter().any(|l| l.contains("from the shipped table")), "{log:#?}");
+    let c = &want[0];
+    let ds: Vec<usize> = c["ds"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect();
+    assert_eq!(crate::certify::certify_layout(&ds, c["lnd"].as_f64().unwrap(), 600.0, &mut |_| {}), c["X"].as_f64());
+    crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
+    assert!(certs(fit).is_null());
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
@@ -973,22 +1001,22 @@ fn a_changed_partition_is_refused_at_the_build() {
     let o = BuildOptions::default();
     let edir = tmp.join("encoded-p");
     let edir = edir.to_str().unwrap();
-    rebuild_at(fit, edir, &o, &mut |_| {}).unwrap();
+    rebuild_in(fit, edir, &o, &mut |_| {}).unwrap();
     // the same data partitioned again (other rows moved) into the same directory
     std::fs::remove_dir_all(&pdir).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
     synth_partition_moving(&pdir, 5);
-    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    let e = rebuild_in(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("changed since the fit"), "{e}");
     // a fit of the new partition builds; then one entity id changed in place, the manifest left as it was
     crate::fit::fit(fit, &part, &crate::fit::FitOptions { cert_time: 0.0, ..crate::fit::FitOptions::default() }, &mut |_| {}).unwrap();
-    rebuild_at(fit, edir, &o, &mut |_| {}).unwrap();
+    rebuild_in(fit, edir, &o, &mut |_| {}).unwrap();
     let ids = pdir.join("cell0.ids");
     let mut b = std::fs::read(&ids).unwrap();
     let e0 = u64::from_le_bytes(b[..8].try_into().unwrap());
     b[..8].copy_from_slice(&(e0 ^ 1).to_le_bytes());
     std::fs::write(&ids, b).unwrap();
-    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    let e = rebuild_in(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("perm.npy"), "{e}");
     std::fs::remove_dir_all(&tmp).unwrap();
 }
@@ -1009,7 +1037,7 @@ fn a_partition_is_known_by_its_content() {
     let o = BuildOptions::default();
     let edir = tmp.join("encoded-p");
     let edir = edir.to_str().unwrap();
-    let want = rebuild_at(fit, edir, &o, &mut |_| {}).unwrap().1.store_hash();
+    let want = rebuild_in(fit, edir, &o, &mut |_| {}).unwrap().1.store_hash();
     let man = pdir.join("manifest.json");
     let text = std::fs::read(&man).unwrap();
     // the manifest copied in place: another file with the same content
@@ -1017,11 +1045,11 @@ fn a_partition_is_known_by_its_content() {
     std::fs::remove_file(&man).unwrap();
     std::fs::write(&man, &text).unwrap();
     let mut log = Vec::new();
-    let (_, ix) = open_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    let (_, ix) = open_in(fit, edir, &OpenOptions::default(), &mut |l| log.push(l)).unwrap();
     assert_eq!(ix.store_hash(), want);
     assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("holds what was fitted")), "{log:?}");
     let mut log = Vec::new();
-    let (_, ix) = rebuild_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    let (_, ix) = rebuild_in(fit, edir, &o, &mut |l| log.push(l)).unwrap();
     assert_eq!(ix.store_hash(), want, "the same partition, copied, builds the same index");
     assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("holds what was fitted")), "{log:?}");
     // the content changed (one byte of the seed): refused at the build, and at the open unless --keep-index
@@ -1029,32 +1057,32 @@ fn a_partition_is_known_by_its_content() {
     t2 = t2.replace("\"seed\":3", "\"seed\":4");
     assert_ne!(t2.as_bytes(), &text[..]);
     std::fs::write(&man, &t2).unwrap();
-    assert!(rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("changed since the fit"));
-    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("--keep-index"));
-    let (_, ix) = open_at(fit, edir, &BuildOptions { keep_index: true, ..o.clone() }, &mut |_| {}).unwrap();
+    assert!(rebuild_in(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("changed since the fit"));
+    assert!(open_in(fit, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err().contains("--keep-index"));
+    let (_, ix) = open_in(fit, edir, &OpenOptions { keep_index: true, ..OpenOptions::default() }, &mut |_| {}).unwrap();
     assert_eq!(ix.store_hash(), want);
     // a cell file of another length than listed
     std::fs::write(&man, &text).unwrap();
-    open_at(fit, edir, &o, &mut |_| {}).unwrap();
+    open_in(fit, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let cl = pdir.join("cell1.cl");
     let mut b = std::fs::read(&cl).unwrap();
     b.extend([0u8; 4]);
     std::fs::write(&cl, &b).unwrap();
-    let e = rebuild_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
+    let e = rebuild_in(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err();
     assert!(e.contains("cell1.cl") && e.contains("bytes"), "{e}");
-    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
+    assert!(open_in(fit, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
     // listed cell files deleted: still refused while another listed file has another length; alone, a warning at the
     // open (as a missing partition: the index holds its own vectors) and an error at the rebuild, which reads them
     std::fs::remove_file(pdir.join("cell0.f16")).unwrap();
-    assert!(open_at(fit, edir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
+    assert!(open_in(fit, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err().contains("cell1.cl"));
     b.truncate(b.len() - 4);
     std::fs::write(&cl, &b).unwrap();
     std::fs::remove_file(pdir.join("cell1.in.f16")).unwrap();
     let mut log = Vec::new();
-    let (_, ix) = open_at(fit, edir, &o, &mut |l| log.push(l)).unwrap();
+    let (_, ix) = open_in(fit, edir, &OpenOptions::default(), &mut |l| log.push(l)).unwrap();
     assert_eq!(ix.store_hash(), want);
     assert!(log.iter().any(|l| l.contains("WARNING") && l.contains("lacks 2 of the files") && l.contains("cell0.f16")), "{log:?}");
-    assert!(rebuild_at(fit, edir, &o, &mut |_| {}).is_err());
+    assert!(rebuild_in(fit, edir, &o, &mut |_| {}).is_err());
     // no files listed: refused at the fit
     let mut m: serde_json::Value = serde_json::from_slice(&text).unwrap();
     m.as_object_mut().unwrap().remove("files");
@@ -1373,8 +1401,8 @@ fn disk_constants_are_cached_by_machine_and_device() {
     let edir = d.join("encoded");
     let edir = edir.to_str().unwrap();
     let o = BuildOptions::default();
-    rebuild_at(dir, edir, &o, &mut |_| {}).unwrap();
-    let (_, ix) = open_at(dir, edir, &o, &mut |_| {}).unwrap();
+    rebuild_in(dir, edir, &o, &mut |_| {}).unwrap();
+    let (_, ix) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let Some(rows @ disk::Rows::Map { file, policy, .. }) = ix.own_rows() else { panic!("an opened index's vectors are not on file") };
     let key = disk_key(file, policy).unwrap();
     assert!(key.starts_with(&format!("v{DISK_KEY_VERSION}; machine ")) && key.contains("; cpu ") && key.contains("; device ") && key.contains("; fs ") && key.contains("; read qd "), "{key}");
@@ -1437,6 +1465,18 @@ fn a_read_only_index_directory_caches_disk_constants_per_user() {
     assert!(got == Some((4.0, 2.5)) && why.contains("saved"), "{why}");
     let (got, why) = cached_disk_constants(&a, "k1", || panic!("timed again under the same key"));
     assert!(got == Some((4.0, 2.5)) && why.starts_with("read from"), "{why}");
+    // the writability probe leaves nothing in a writable index directory (no lock file, which needs only the file's
+    // permission and so said nothing about the directory's)
+    assert_eq!(std::fs::read_dir(&w).unwrap().count(), 0);
+    // a write the index directory refuses falls back to the per-user file
+    let fb = user_cache_file(&user, "k3");
+    let (got, why) = cached_disk_constants_or(&ro.join(DISK_CACHE), Some(&fb), "k3", || Some((2.0, 1.0)));
+    assert!(got == Some((2.0, 1.0)) && why.contains("saved in") && why.contains(fb.to_str().unwrap()), "{why}");
+    // and a lookup finds the per-user file when the index directory's cache lacks the key, so nothing is timed again
+    let (_, why) = cached_disk_constants(&user_cache_file(&user, "k4"), "k4", || Some((1.0, 1.0)));
+    assert!(why.contains("saved"), "{why}");
+    assert_eq!(disk_cache_path(w.to_str().unwrap(), "k4", Some(&user)), user_cache_file(&user, "k4"));
+    assert_eq!(disk_cache_path(w.to_str().unwrap(), "k5", Some(&user)), w.join(DISK_CACHE));
     std::fs::remove_dir_all(&d).unwrap();
 }
 
@@ -1457,7 +1497,6 @@ fn concurrent_disk_constant_writers_time_once() {
     });
     assert_eq!(timed.load(std::sync::atomic::Ordering::SeqCst), 1, "{got:?}");
     assert!(got.iter().all(|g| g.0 == Some((3.0, 1.5))), "{got:?}");
-    assert_eq!(got.iter().filter(|g| g.1.contains("saved by another open")).count(), 5, "{got:?}");
     assert!(std::fs::read_dir(&d).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
     std::fs::remove_dir_all(&d).unwrap();
 }
@@ -1502,4 +1541,249 @@ fn plan_files_refuse_values_out_of_range() {
         assert!(e.contains(says), "{bad}: {e}");
     }
     assert!(Plan::kv_gives_disk("io_us=4\nio_gbps=2\n") && !Plan::kv_gives_disk("io_us=4\nr_rows=3\n"));
+}
+
+/// The default rule at its boundaries: 250 visible rows at 1,000 rows a cluster (64 + 0.186 * 1000; the owner's
+/// choice after the AVX-512 re-check, between the crossovers of 221 rows on one thread and 308 on four), 436 at 2,000;
+/// without a visible set a cluster of 78 rows is scored directly and one of 79 takes the index path.
+#[test]
+fn default_rule_boundaries() {
+    let p = Plan::default();
+    assert_eq!((p.r_rows, p.r_kappa), (64, 0.186));
+    for (s, m) in [(0, 64), (78, 78), (79, 78), (999, 249), (1000, 250), (1001, 250), (2000, 436), (4000, 808)] {
+        assert_eq!(p.direct_max(s), m, "{s} rows");
+    }
+    assert!(p.direct_max(78) >= 78 && p.direct_max(79) < 79);
+}
+
+/// The library's API on a copy of synth4k (nothing is written into testdata): `rebuild` saves the index in
+/// `DIR/encoded` and `open` maps it, with the reference code hash, holding what the build in memory holds and giving
+/// the same answers doing the same work; a rebuild with other build options saves another index under another key,
+/// which `open` then opens; an open of a missing directory, of a fit with no index, or of a stale index (the fit
+/// changed, or another key recorded) is an error that names rebuild; an open never encodes.
+#[test]
+fn rebuild_then_open_on_a_copy_of_synth4k() {
+    let tmp = tmp_dir("api");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let says_rebuild = |r: Result<(Params, Index2), String>, what: &str| {
+        let e = r.map(|_| ()).unwrap_err();
+        assert!(e.contains("rebuild"), "{what}: {e}");
+    };
+    says_rebuild(open(tmp.join("missing").to_str().unwrap(), &OpenOptions::default(), &mut |_| {}), "a missing directory");
+    says_rebuild(open(dir, &OpenOptions::default(), &mut |_| {}), "a fit with no index");
+    let (_, built) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let mut log = Vec::new();
+    let (_, mut opened) = open(dir, &OpenOptions::default(), &mut |l| log.push(l)).unwrap();
+    assert!(!log.iter().any(|l| l.contains("[build2]")), "an open encoded: {log:?}");
+    assert_eq!(format!("{:016x}", opened.code_hash()), format!("{:016x}", fixture().ix.code_hash()));
+    assert_eq!(opened.store_hash(), fixture().ix.store_hash());
+    same_index(&fixture().ix, &opened);
+    same_index(&built, &opened);
+    opened.repack = fixture().ix.repack.clone();
+    let f = fixture();
+    let ix = &f.ix;
+    for (qi, q) in f.queries.iter().enumerate() {
+        let (pa, pb) = (prep2(ix, q), prep2(&opened, q));
+        for (sname, bm) in &f.sets[..3] {
+            let (va, vb) = (bm.as_ref().map(|b| Vis2::new(ix, b)), bm.as_ref().map(|b| Vis2::new(&opened, b)));
+            for th in thresholds(&truth(ix, q, bm.as_ref())) {
+                for (pname, plan) in plans() {
+                    let a = threshold2(ix, &pa, th, &Opts2 { vis: va.as_ref(), verify: false, want_iv: false, plan });
+                    let b = threshold2(&opened, &pb, th, &Opts2 { vis: vb.as_ref(), verify: false, want_iv: false, plan });
+                    assert_eq!(a.rows, b.rows, "threshold, plan {pname}, set {sname}, query {qi}, t {th}");
+                    same_work(&a.st, &b.st, &format!("threshold, plan {pname}, set {sname}, query {qi}, t {th}"));
+                }
+            }
+            for (pname, plan) in plans() {
+                assert_eq!(knn2(ix, q, 10, va.as_ref(), plan).ents, knn2(&opened, q, 10, vb.as_ref(), plan).ents, "k-NN, plan {pname}, set {sname}, query {qi}");
+            }
+        }
+    }
+    drop((built, opened));
+    let key_of = || -> String {
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(format!("{}/index.json", saved_dir(dir))).unwrap()).unwrap();
+        v["key"].as_str().unwrap().to_string()
+    };
+    let k0 = key_of();
+    // other build options: another key, and the open takes the options the index records
+    let other = BuildOptions { cal_items: 1000, dlv: Some(vec![8, 32]), ..BuildOptions::default() };
+    let (_, b2) = rebuild(dir, &other, &mut |_| {}).unwrap();
+    let k1 = key_of();
+    assert_ne!(k0, k1, "other build options, the same key");
+    let (_, o2) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!((o2.store_hash(), o2.meta.dlv.clone()), (b2.store_hash(), vec![8, 32]));
+    assert_ne!(o2.store_hash(), fixture().ix.store_hash());
+    drop((b2, o2));
+    // the same options again: the same key
+    rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(key_of(), k0);
+    // stale: the fit's profile changed
+    let prof = fit.join("profile.npy");
+    let orig = std::fs::read(&prof).unwrap();
+    let mut b = orig.clone();
+    let l = b.len();
+    b[l - 1] ^= 1;
+    std::fs::write(&prof, &b).unwrap();
+    let e = open(dir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("stale") && e.contains("rebuild"), "{e}");
+    std::fs::write(&prof, &orig).unwrap();
+    open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    // stale: another key recorded (as another version of the library gives)
+    let json = format!("{}/index.json", saved_dir(dir));
+    let text = std::fs::read_to_string(&json).unwrap();
+    std::fs::write(&json, text.replace(&k0, "0123456789abcdef")).unwrap();
+    let e = open(dir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains("stale") && e.contains("rebuild"), "{e}");
+    // no options recorded (an index of an earlier version)
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    v.as_object_mut().unwrap().remove("options");
+    std::fs::write(&json, v.to_string()).unwrap();
+    says_rebuild(open(dir, &OpenOptions::default(), &mut |_| {}), "no options recorded");
+    // a build in memory takes the fit's anchors, never writes them
+    assert!(build(dir, &BuildOptions { anchors: Some(Anchors::default()), ..BuildOptions::default() }, &mut |_| {}).is_err());
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// Anchors are a build option: a rebuild with them writes them into the fit and builds the K x A table; one without
+/// keeps the fit's.
+#[test]
+fn a_rebuild_writes_the_anchors_it_is_given() {
+    let tmp = tmp_dir("rbanc");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let a = Anchors { image: 8, text: None, text_count: 0 };
+    let (_, ix) = rebuild(dir, &BuildOptions { anchors: Some(a), ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert!(fit.join("anchors.npy").exists() && !ix.anc_centres && ix.nanch == 8, "{} anchors", ix.nanch);
+    assert_eq!(ix.code_hash(), fixture().ix.code_hash(), "the anchors change the table, not the codes");
+    let (_, ix) = rebuild(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 8, "a rebuild without anchors keeps the fit's");
+    let (_, ix) = rebuild(dir, &BuildOptions { anchors: Some(Anchors::default()), ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert!(!fit.join("anchors.npy").exists() && ix.anc_centres && ix.store_hash() == fixture().ix.store_hash(), "the default anchors on 32 clusters are the centres");
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// `cp -al DIR DIR2` (every file a hard link, as README advises for a variant of one fit) then a rebuild of DIR2 with
+/// other anchors: DIR keeps its anchors' bytes and opens with the index and anchors it had; DIR2 opens with the new
+/// ones. A rebuild with anchors that fails (here: levels out of range) leaves the fit's anchors and saved index as they
+/// were, and openable.
+#[test]
+fn anchors_of_a_rebuild_never_reach_a_hard_linked_copy_or_a_failed_rebuild() {
+    let tmp = tmp_dir("rbcpal");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap();
+    let with = |image| BuildOptions { anchors: Some(Anchors { image, text: None, text_count: 0 }), ..BuildOptions::default() };
+    let (_, ix) = rebuild(dir, &with(8), &mut |_| {}).unwrap();
+    let h8 = ix.store_hash();
+    assert_eq!(ix.nanch, 8);
+    let files = |d: &std::path::Path| ["anchors.npy", "anchors.json"].map(|f| std::fs::read(d.join(f)).unwrap());
+    let before = files(&fit);
+    // cp -al
+    fn link_tree(src: &std::path::Path, dst: &std::path::Path) {
+        std::fs::create_dir_all(dst).unwrap();
+        for e in std::fs::read_dir(src).unwrap() {
+            let e = e.unwrap();
+            if e.file_type().unwrap().is_dir() {
+                link_tree(&e.path(), &dst.join(e.file_name()));
+            } else {
+                std::fs::hard_link(e.path(), dst.join(e.file_name())).unwrap();
+            }
+        }
+    }
+    let fit2 = tmp.join("fit2");
+    link_tree(&fit, &fit2);
+    let dir2 = fit2.to_str().unwrap();
+    let (_, ix) = rebuild(dir2, &with(4), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
+    assert_eq!(files(&fit), before, "the copy's rebuild wrote the original's anchors");
+    let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "the original opens with its own index and anchors");
+    let (_, ix) = open(dir2, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
+    // a rebuild with anchors that fails as it writes them, inside the install lock (each step of the replacement in
+    // turn; the default anchors on 32 clusters are the centres, so that one removes the files): the old index and
+    // anchors stay, openable, with nothing left beside them
+    for (a, step) in [(16, 0), (16, 1), (64, 0), (64, 1)] {
+        crate::fit::FAIL_STEP.with(|f| f.set(Some(step)));
+        let r = rebuild(dir, &with(a), &mut |_| {});
+        crate::fit::FAIL_STEP.with(|f| f.set(None));
+        let e = r.map(|_| ()).unwrap_err();
+        assert!(e.contains("injected") && e.contains("put back as they were") && e.contains("is as it was"), "{e}");
+        assert_eq!(files(&fit), before, "anchors {a}, step {step}: the failed rebuild changed the anchors");
+        let (_, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+        assert_eq!((ix.nanch, ix.store_hash()), (8, h8), "anchors {a}, step {step}: the failed rebuild left the index unopenable");
+        let left: Vec<String> = std::fs::read_dir(&fit).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).filter(|n| n.starts_with('.') || n.contains(".tmp-")).collect();
+        assert!(left.is_empty(), "left behind: {left:?}");
+    }
+    // anchors made for the levels as given are refused before anything is written
+    assert!(rebuild(dir, &BuildOptions { dlv: Some(vec![]), ..with(16) }, &mut |_| {}).is_err());
+    assert_eq!(files(&fit), before);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// A rebuild that waits for another reads the fit once it holds the lock: here the other "rebuild" (this test, holding
+/// encoded.lock) writes 4 anchors over 8 meanwhile, and the waiting rebuild's index opens with them, not stale.
+#[test]
+fn a_waiting_rebuild_reads_the_fit_the_one_before_it_left() {
+    let tmp = tmp_dir("rbwait");
+    let fit = tmp.join("fit");
+    store::tests::copy_fit(&fit);
+    let dir = fit.to_str().unwrap().to_string();
+    let with = |image| BuildOptions { anchors: Some(Anchors { image, text: None, text_count: 0 }), ..BuildOptions::default() };
+    rebuild(&dir, &with(8), &mut |_| {}).unwrap();
+    let (lock, _) = store::Lock::take(&dir, &mut |_| {});
+    let d2 = dir.clone();
+    let waiting = std::thread::spawn(move || rebuild(&d2, &BuildOptions::default(), &mut |_| {}).map(|(_, ix)| ix.nanch));
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let a = crate::fit::make_anchors(&dir, 4, None, 0, BuildOptions::default().seed).unwrap();
+    crate::fit::put_anchors(&dir, a.as_deref()).unwrap();
+    drop(lock);
+    assert_eq!(waiting.join().unwrap().unwrap(), 4);
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(ix.nanch, 4);
+}
+
+/// `create` from a vectors file (synth4k's rows; python3 with numpy and faiss runs tools/partition.py, else the test
+/// is skipped with a message): the index opens as created and answers as brute force does, and it is the index the
+/// steps by hand make (the same partition fitted with `fit::fit` and encoded by `rebuild`). A directory that is not
+/// empty is refused.
+#[test]
+fn create_makes_the_index_the_steps_by_hand_make() {
+    if !std::process::Command::new("python3").args(["-I", "-c", "import numpy, faiss"]).status().is_ok_and(|s| s.success()) {
+        eprintln!("create_makes_the_index_the_steps_by_hand_make skipped: python3 cannot import numpy and faiss");
+        return;
+    }
+    let tmp = tmp_dir("create");
+    let vectors = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k/Xs.npy");
+    let dir = tmp.join("index");
+    let dir = dir.to_str().unwrap();
+    let o = BuildOptions { per_cluster: PerCluster::Items(125), cert_time: 0.0, ..BuildOptions::default() };
+    let (_, made) = create(vectors, dir, &o, &mut |_| {}).unwrap();
+    assert!(create(vectors, dir, &o, &mut |_| {}).map(|_| ()).unwrap_err().contains("not empty"));
+    let (p, ix) = open(dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    same_index(&made, &ix);
+    ix.check_maps().unwrap();
+    assert_eq!(ix.nrows, 4000);
+    // the defaults: a dual-basis fit, two deterministic levels
+    let fitj: serde_json::Value = serde_json::from_str(&p.fit).unwrap();
+    assert_eq!((fitj["basis"].as_str(), ix.meta.dlv.clone()), (Some("dual"), DLV.to_vec()), "{fitj}");
+    for q in &fixture().queries {
+        let pr = prep2(&ix, q);
+        let t = truth(&ix, q, None);
+        for th in thresholds(&t) {
+            let r = threshold2(&ix, &pr, th, &Opts2 { vis: None, verify: false, want_iv: false, plan: Plan::default() });
+            assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "threshold {th}");
+        }
+    }
+    // by hand: the same partition, fitted and encoded
+    let fit = tmp.join("fit");
+    let fo = crate::fit::FitOptions { cert_time: 0.0, groups: o.groups, ..crate::fit::FitOptions::default() };
+    crate::fit::fit(fit.to_str().unwrap(), &format!("{dir}/partition"), &fo, &mut |_| {}).unwrap();
+    let (_, hand) = rebuild(fit.to_str().unwrap(), &BuildOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!((hand.code_hash(), hand.store_hash()), (ix.code_hash(), ix.store_hash()));
+    drop((made, ix, hand));
+    std::fs::remove_dir_all(&tmp).unwrap();
 }

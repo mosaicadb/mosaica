@@ -14,12 +14,12 @@ fn main() {
         v2::setup::qvbench(get("--n", 768), get("--groups", 64), get("--reps", 21));
         return;
     }
-    if run2::has_mode("anchors") {
-        run2::anchors_cmd();
+    if run2::has_mode("certify-layout") || run2::has_mode("cert-layouts") {
+        run2::cert_cmd();
         return;
     }
-    if run2::has_mode("fit") {
-        run2::fit_cmd();
+    if run2::has_mode("create") {
+        run2::create_cmd();
         return;
     }
     if has("--v2") {
@@ -41,10 +41,10 @@ fn main() {
             run2::bytesq2(&c, get("--nq", 100));
         }
         if run2::has_mode("e2e") {
-            // further variants: another index (--index-b, --index-c, --index-d) and/or plan switches (--b, --c, --d), measured
-            // interleaved with the first
+            // further variants: another index (--index-b, --index-c, --index-d), opened as saved, and/or plan switches
+            // (--b, --c, --d), measured interleaved with the first
             // (a variant that only changes plan flags, ddec= among them, shares the first variant's index; dlv= or nusort
-            // there is an error: they need an index of their own)
+            // is an error: an index records its build options, so another build is another index directory)
             let mut extra = Vec::new();
             let mut same = Vec::new();
             for v in ["b", "c", "d"] {
@@ -92,6 +92,6 @@ fn main() {
         }
         return;
     }
-    eprintln!("no index given: add --v2 and a mode, such as verify, e2e, dbcmp, dbtopk, dbknn or ann");
+    eprintln!("nothing to do: make an index with vexact --vectors VECTORS.npy --index DIR create, then run --v2 --index DIR and a mode, such as verify, e2e, dbcmp, dbtopk, dbknn or ann");
     std::process::exit(2);
 }

@@ -24,7 +24,8 @@ pub struct Meta {
     pub csg: f64,
     /// the guarantee's failure probability per query (meta "EPS", default 1e-9)
     pub eps: f64,
-    /// certified worst-case constants of the randomised levels (meta "CERTS", written by tools/certify.py)
+    /// certified worst-case constants of the randomised levels (meta "CERTS", written by the fit, `crate::certify`,
+    /// or tools/certify.py)
     pub certs: Vec<crate::v2::tail::Cert>,
 }
 impl Meta {
@@ -136,7 +137,7 @@ pub fn load_anchors(dir: &str, n: usize, k: usize, centres: &[f32]) -> Result<Ve
     if !std::path::Path::new(&path).exists() {
         return Ok(Vec::new());
     }
-    let again = format!("write them again for this fit (vexact --index {dir} anchors ..., fit::write_anchors), or remove {path} to use one anchor per cluster");
+    let again = format!("write them again for this fit (a rebuild with anchors: vexact --v2 --index {dir} --rebuild --anchors A, v2::BuildOptions::anchors), or remove {path} to use one anchor per cluster");
     let side = format!("{dir}/anchors.json");
     let sv: serde_json::Value = match std::fs::read_to_string(&side) {
         Ok(t) => serde_json::from_str(&t).map_err(|e| format!("{side}: {e}; {again}"))?,

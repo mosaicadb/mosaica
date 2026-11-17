@@ -28,10 +28,10 @@ const RIDGE: f64 = 0.1;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Groups {
     /// min(64, K / 8, N / (20 n)), at least 1: enough items per group for a basis, at most 64 groups and 8 clusters per
-    /// group on average (the default, as tools/fit.py's default).
+    /// group on average (the default before research/levels-clusters' rule).
     ByK8,
     /// min(64, K, N / (20 n)), at least 1: research/levels-clusters' rule, with its cluster size by N
-    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`).
+    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`); the default, as tools/fit.py's.
     ByN,
     /// This many groups, at most K.
     Fixed(usize),
@@ -57,32 +57,33 @@ impl Groups {
 
 /// Items per cluster by research/levels-clusters' rule for N items: 2,000 x sqrt(N / 1M), rounded in log2 to a
 /// power-of-two multiple of 2,000 (ties down), at least 2,000 (2,000 up to 2M items, 4,000 up to 8M, 8,000 up to 32M,
-/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`; the default is 1,000.
+/// 64,000 at 1B). tools/partition.py and tools/fit.py apply it with `--per-cluster by-n`, their default.
 pub fn per_cluster_by_n(nrow: usize) -> usize {
     2000 << ((nrow as f64 / 1e6).log2() / 2.0 - 0.5).ceil().max(0.0) as u32
 }
 
 /// What a fit takes besides the partition.
 pub struct FitOptions {
-    /// "pca" or "dual".
+    /// "dual" (the default) or "pca".
     pub basis: String,
     /// Queries that shape Sigma_Q with the corpus items (the dual basis only).
     pub query_sample: Option<String>,
     pub seed: u64,
-    /// Seconds tools/certify.py may take to certify the randomised levels' constant (0: not certified; the build then
-    /// uses the larger closed-form bounds).
+    /// Seconds the fit may take to certify the randomised levels' constant when the shipped table has none for its
+    /// layout (`certify::certify_layout`; 0: not certified, not even from the table; the build then uses the larger
+    /// closed-form bounds).
     pub cert_time: f64,
     /// The support table's anchors (`write_anchors`): `image` from the centre directions, `text_count` from the
     /// prompts in `text_anchors`.
     pub image: usize,
     pub text_anchors: Option<String>,
     pub text_count: usize,
-    /// How the clusters are grouped (the default `Groups::ByK8`).
+    /// How the clusters are grouped (the default `Groups::ByN`).
     pub groups: Groups,
 }
 impl Default for FitOptions {
     fn default() -> FitOptions {
-        FitOptions { basis: "pca".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256, groups: Groups::ByK8 }
+        FitOptions { basis: "dual".into(), query_sample: None, seed: 20261112, cert_time: 600.0, image: 1024, text_anchors: None, text_count: 256, groups: Groups::ByN }
     }
 }
 
@@ -92,7 +93,139 @@ fn save<T: Copy>(dir: &str, name: &str, descr: &str, shape: &[usize], v: &[T]) -
     let path = format!("{dir}/{name}.npy");
     let mut out = npy_header_bytes(descr, shape);
     out.extend_from_slice(b);
-    std::fs::write(&path, out).map_err(|e| format!("cannot write {path}: {e}"))
+    write_new(&path, &out)
+}
+
+/// Write `bytes` as `path` through a new file beside it, synced and renamed over it: a reader never sees a part
+/// written, and a file `path` named before (or another name of it, a hard link of a `cp -al` copy) is replaced,
+/// never written.
+fn write_new(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    let tmp = beside(p, "tmp");
+    let r = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, p)
+    })();
+    r.map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("cannot write {path}: {e}")
+    })
+}
+
+/// A name beside `path` for a temporary file of this process: `.NAME.KIND-PID-NANOS` (`log_stale` reports leftovers).
+fn beside(path: &std::path::Path, kind: &str) -> std::path::PathBuf {
+    let name = path.file_name().map_or(String::new(), |n| n.to_string_lossy().to_string());
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    path.with_file_name(format!(".{name}.{kind}-{}-{nanos}", std::process::id()))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: make `replace_files`' step with this index (0 the first rename or removal) fail, on this thread only.
+    pub static FAIL_STEP: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Replace the files `items` (path, new contents; None removes the file) together: every new content is written to a
+/// file beside its path and synced first, every old file is kept under a second name (a hard link, so another
+/// directory's link to it is never touched), then the renames and removals run back to back. If one fails, the old
+/// files are put back and the error says whether that worked; on success the kept names are removed.
+fn replace_files(items: &[(String, Option<Vec<u8>>)]) -> Result<(), String> {
+    use std::path::{Path, PathBuf};
+    let mut tmps: Vec<Option<PathBuf>> = Vec::new();
+    let clean = |tmps: &[Option<PathBuf>], baks: &[Option<PathBuf>]| {
+        for t in tmps.iter().chain(baks).flatten() {
+            let _ = std::fs::remove_file(t);
+        }
+    };
+    for (path, new) in items {
+        let t = match new {
+            Some(bytes) => {
+                let t = beside(Path::new(path), "tmp");
+                let r = (|| {
+                    let mut f = std::fs::File::create(&t)?;
+                    f.write_all(bytes)?;
+                    f.sync_all()
+                })();
+                if let Err(e) = r {
+                    let _ = std::fs::remove_file(&t);
+                    clean(&tmps, &[]);
+                    return Err(format!("cannot write {path}: {e}; nothing was replaced"));
+                }
+                Some(t)
+            }
+            None => None,
+        };
+        tmps.push(t);
+    }
+    let mut baks: Vec<Option<PathBuf>> = Vec::new();
+    for (path, _) in items {
+        let p = Path::new(path);
+        let b = if p.exists() {
+            let b = beside(p, "bak");
+            if let Err(e) = std::fs::hard_link(p, &b) {
+                clean(&tmps, &baks);
+                return Err(format!("cannot keep {path} aside: {e}; nothing was replaced"));
+            }
+            Some(b)
+        } else {
+            None
+        };
+        baks.push(b);
+    }
+    for (i, (path, _)) in items.iter().enumerate() {
+        #[cfg(test)]
+        let injected = FAIL_STEP.with(|f| f.get()) == Some(i);
+        #[cfg(not(test))]
+        let injected = false;
+        let r = if injected {
+            Err(std::io::Error::other("injected failure"))
+        } else {
+            match &tmps[i] {
+                Some(t) => std::fs::rename(t, path),
+                None if Path::new(path).exists() => std::fs::remove_file(path),
+                None => Ok(()),
+            }
+        };
+        if let Err(e) = r {
+            // put back what steps 0..i changed (step i changed nothing)
+            let mut lost = Vec::new();
+            for (j, (pj, _)) in items.iter().enumerate().take(i) {
+                let back = match &baks[j] {
+                    Some(b) => std::fs::rename(b, pj),
+                    None => std::fs::remove_file(pj),
+                };
+                if let Err(e2) = back {
+                    lost.push(format!("{pj} ({e2})"));
+                }
+            }
+            clean(&tmps, &baks);
+            return Err(if lost.is_empty() {
+                format!("cannot replace {path}: {e}; the files were put back as they were")
+            } else {
+                format!("cannot replace {path}: {e}; and could not put back {}: the files are not as they were", lost.join(", "))
+            });
+        }
+    }
+    clean(&[], &baks);
+    Ok(())
+}
+
+/// The certificate's layout for vectors of n0 dimensions, as the fit makes it (`schedule`, on n0 padded to a multiple
+/// of 32 as tools/partition.py pads it): the randomised blocks' dimensions (each block's width less one) and the
+/// number of randomised levels, which sets the budget (`certify::ln_delta`).
+pub fn cert_layout(n0: usize) -> Result<(Vec<usize>, usize), String> {
+    if n0 < 50 {
+        return Err(format!("the fit needs at least 50 dimensions, not {n0}"));
+    }
+    let (rlv, bounds) = schedule(n0, n0.div_ceil(32) * 32)?;
+    Ok((block_dims(&bounds), rlv.len()))
+}
+
+/// The dimensions of the randomised blocks between `bounds` (certify.py `block_dims`).
+fn block_dims(bounds: &[usize]) -> Vec<usize> {
+    bounds.windows(2).map(|w| w[1] - w[0] - 1).collect()
 }
 
 /// Randomised level ends and block bounds, as tools/fit.py `schedule`.
@@ -617,21 +750,29 @@ pub fn fit(out: &str, pdir: &str, o: &FitOptions, logf: &mut dyn FnMut(String)) 
     if o.groups != Groups::ByK8 {
         meta["clusters"] = serde_json::json!({ "groups": format!("{:?}", o.groups) });
     }
+    // the randomised levels' certified constant (meta "CERTS", as tools/certify.py records it): the shipped table's for
+    // this layout and budget, else certified here within cert_time (0 skips it); without one the build uses the
+    // closed-form bounds, which are larger
+    if cert_time > 0.0 {
+        let ds = block_dims(&bounds);
+        let lnd = crate::certify::ln_delta(nrow, rlv.len(), EPS);
+        let tc = Timer::new();
+        let (x, why) = match crate::certify::lookup(&ds, lnd) {
+            Some(x) => (x, "the shipped table".to_string()),
+            None => (crate::certify::certify_layout(&ds, lnd, cert_time, &mut |s| log(&t, s)), format!("certification within {cert_time:.0}s")),
+        };
+        match x {
+            Some(x) => {
+                meta["CERTS"] = serde_json::json!([{ "ds": ds, "lnd": lnd, "X": x }]);
+                log(&t, format!("certificate for {ds:?} at ln delta {lnd:.4}: X {x:.3}, from {why} in {:.1}s", tc.s()));
+            }
+            None => log(&t, format!("no certificate for {ds:?} at ln delta {lnd:.4} from {why}; the build uses the convex-order and Chernoff bounds")),
+        }
+    }
     let tmp = format!("{meta_path}.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(&meta).unwrap()).map_err(|e| format!("cannot write {tmp}: {e}"))?;
     std::fs::rename(&tmp, &meta_path).map_err(|e| format!("cannot move {tmp} to {meta_path}: {e}"))?;
     log(&t, format!("saved {out}; {na}"));
-
-    // the randomised levels' certified constant, by tools/certify.py within cert_time (0 skips it: the build then
-    // uses the closed-form bounds, which are larger)
-    if cert_time > 0.0 {
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tools/certify.py");
-        let st = std::process::Command::new("python3").args(["-I", script, out, "--time-cap", &cert_time.to_string()]).status();
-        match st {
-            Ok(s) if s.success() => log(&t, "certified".into()),
-            _ => return Err(format!("{script} failed on {out}; the build would fall back to larger closed-form constants. Install numpy and scipy for python3 and rerun, or fit with a certification time of 0 to accept the larger constants.")),
-        }
-    }
     Ok(())
 }
 
@@ -647,9 +788,30 @@ pub fn write_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, 
     anchors_into(dir, n, k, &centres, image, text, ntext, seed)
 }
 
+/// The anchors `write_anchors` would write for the fit in `dir`, without writing them: None when they are the centres
+/// (no file). `put_anchors` writes them; `v2::rebuild` does so only once the index made with them is installed.
+pub fn make_anchors(dir: &str, image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<Option<Vec<f64>>, String> {
+    let (n, k, centres) = crate::index::load_centres(dir)?;
+    anchors_for(n, k, &centres, image, text, ntext, seed)
+}
+
+/// Write anchors from `make_anchors` into the fit in `dir` (None: remove its anchors.npy and anchors.json). Returns
+/// what was written, for the log.
+pub fn put_anchors(dir: &str, anchors: Option<&[f64]>) -> Result<String, String> {
+    let (n, k, centres) = crate::index::load_centres(dir)?;
+    put_anchors_of(dir, n, k, &centres, anchors)
+}
+
 /// `write_anchors` for the fit in `dir` with these centres (K x n, as `index::load_centres` gives them).
 #[allow(clippy::too_many_arguments)]
 fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<String, String> {
+    let a = anchors_for(n, k, centres, image, text, ntext, seed)?;
+    put_anchors_of(dir, n, k, centres, a.as_deref())
+}
+
+/// `make_anchors` with these centres.
+#[allow(clippy::too_many_arguments)]
+fn anchors_for(n: usize, k: usize, centres: &[f32], image: usize, text: Option<&str>, ntext: usize, seed: u64) -> Result<Option<Vec<f64>>, String> {
     let text = match text {
         Some(path) => {
             let (v, w) = try_read_npy(path)?.rows_f32(path)?;
@@ -660,18 +822,20 @@ fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, te
         }
         None => None,
     };
+    anchors_of(centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)
+}
+
+/// `put_anchors` with these centres.
+fn put_anchors_of(dir: &str, n: usize, k: usize, centres: &[f32], anchors: Option<&[f64]>) -> Result<String, String> {
     let path = format!("{dir}/anchors.npy");
-    match anchors_of(centres, n, k, image, text.as_ref().map(|(v, w)| (&v[..], *w)), ntext, seed)? {
+    match anchors {
         None => {
-            for f in [path.clone(), format!("{dir}/anchors.json")] {
-                if std::path::Path::new(&f).exists() {
-                    std::fs::remove_file(&f).map_err(|e| format!("cannot remove {f}: {e}"))?;
-                }
-            }
+            // the sidecar first: a file left without it is refused, never taken for this fit's
+            replace_files(&[(format!("{dir}/anchors.json"), None), (path.clone(), None)]).map_err(|e| format!("the fit's anchors: {e}"))?;
             Ok(format!("no anchors.npy: the support table's anchors are the {k} centres"))
         }
         Some(a) => {
-            save_anchors(dir, n, k, centres, &a)?;
+            save_anchors(dir, n, k, centres, a)?;
             Ok(format!("{} support-table anchors in {path}", a.len() / n))
         }
     }
@@ -682,15 +846,14 @@ fn anchors_into(dir: &str, n: usize, k: usize, centres: &[f32], image: usize, te
 /// (`index::load_anchors`): a refit, or anchors.npy replaced alone, is refused rather than built with.
 pub fn save_anchors(dir: &str, n: usize, k: usize, centres: &[f32], anchors: &[f64]) -> Result<(), String> {
     crate::index::check_anchors(anchors, n)?;
-    let side = format!("{dir}/anchors.json");
-    // the sidecar goes first, so a failure between the two leaves anchors.npy unmatched (refused), never matched to the
-    // wrong file
-    if std::path::Path::new(&side).exists() {
-        std::fs::remove_file(&side).map_err(|e| format!("cannot remove {side}: {e}"))?;
-    }
-    save(dir, "anchors", "<f8", &[anchors.len() / n, n], anchors)?;
+    // both written and synced beside the fit's, then renamed over the old ones back to back (a hard link of a
+    // `cp -al` copy keeps the other directory's file); anchors.npy first, so the sidecar never names a file that is not
+    // there yet; a failure puts the old pair back (`replace_files`)
+    let sb = unsafe { std::slice::from_raw_parts(anchors.as_ptr() as *const u8, std::mem::size_of_val(anchors)) };
+    let mut npy = npy_header_bytes("<f8", &[anchors.len() / n, n]);
+    npy.extend_from_slice(sb);
     let j = serde_json::json!({"fit": crate::index::centres_hash(n, k, centres), "anchors": crate::index::anchors_hash(anchors)});
-    std::fs::write(&side, j.to_string()).map_err(|e| format!("cannot write {side}: {e}"))
+    replace_files(&[(format!("{dir}/anchors.npy"), Some(npy)), (format!("{dir}/anchors.json"), Some(j.to_string().into_bytes()))]).map_err(|e| format!("the fit's anchors: {e}"))
 }
 
 /// The anchors of `write_anchors` (A x n, unit, f64) from the centres (K x n) and the prompts (rows of w <= n values,
@@ -824,8 +987,7 @@ mod tests {
     /// Prompts in f16 read as the same values as in f32; other types and shapes are refused.
     #[test]
     fn prompt_files_of_any_float_width() {
-        let dir = std::env::temp_dir().join(format!("vexact-anch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::util::TmpDir::new("anch");
         let v: Vec<f32> = vec![0.5, -0.25, 1.0, 0.125, -2.0, 0.75];
         let p = |s: &str| dir.join(s).to_str().unwrap().to_string();
         write_npy(&p("a2.npy"), "<f2", &[2, 3], &v.iter().flat_map(|&x| f32_to_f16(x).to_le_bytes()).collect::<Vec<_>>());

@@ -1869,13 +1869,14 @@ pub enum PlanMode {
 /// not vanish. Fitted on 1M BioCLIP-2 refit at 1,000, 4,000 and 16,129 rows a cluster (text queries at five
 /// thresholds, random visible sets of 1-50%): forced index path and forced scan cross at 322, 1,053 and 4,048 visible
 /// rows a cluster on one thread, 388, 1,293 and 5,000 on four, a line of 72 + 0.246 S and 78 + 0.305 S (within 6
-/// rows of each point). R0 = 64 and kappa = 0.24 sit just below both, toward the index path: 304 rows at 1,000 rows a
-/// cluster (the 300 of a rule without kappa). Without a visible set, a cluster is scored directly when it holds at
-/// most 84 rows (64 / 0.76), so the clusters of a full index take the index path and an index compacted to a small
-/// visible set is scanned (REPORT_BUILD, "The planner without timing").
+/// rows of each point). With the AVX-512 kernels the index path got faster: at 1,000 rows a cluster the crossover fell
+/// to 221 visible rows on one thread and 308 on four. R0 = 64 and kappa = 0.186 put it at 250 rows at 1,000 rows a
+/// cluster (436 at 2,000), between the two (the owner's choice). Without a visible set, a cluster is scored directly
+/// when it holds at most 78 rows (64 / 0.814), so the clusters of a full index take the index path and an index
+/// compacted to a small visible set is scanned (REPORT_BUILD, "The planner without timing").
 pub const R_ROWS: usize = 64;
 /// The rule's rows per row of a cluster (kappa above).
-pub const R_KAPPA: f64 = 0.24;
+pub const R_KAPPA: f64 = 0.186;
 /// The exact k-NN seed in the same rows, saved when a filtered k-NN scans first: measured 1.18-1.45 ms against 0.19 us
 /// a row on 1M BioCLIP-2 (k 10 and 100), 6,200-7,600 rows; the lower end. The seed is the anchor search over the
 /// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at level 3, and 2k + 8 exact products:
@@ -1885,7 +1886,7 @@ pub const R_SEED: usize = 6000;
 
 /// The planner's choices. In memory it needs no timed constant: the support table decides what it can, and the rule in
 /// rows (`r_rows`, `r_kappa`: `R_ROWS`) decides between a scan, direct scoring and the index path, with or without a
-/// visible set; on clusters of more than 84 rows and no visible set that is the index path. "In memory" means the
+/// visible set; on clusters of more than 78 rows and no visible set that is the index path. "In memory" means the
 /// reads are not priced (`disk::ReadPolicy::priced` unset): vectors mapped from a file that are not resident count as
 /// in memory too. With the full vectors on file and their reads priced
 /// (`disk::ReadPolicy::priced`), a cost model in microseconds decides, whose read costs (`io_us`, `io_gbps`) are timed
@@ -1904,7 +1905,7 @@ pub struct Plan {
     pub pscan: bool,       // a scan of the visible set copies their vectors into a buffer, a block at a time, and scans that
     // Full vectors on file with their reads priced: one read with QD reads in flight, per read (us), and the bandwidth
     // of large reads (GB/s). `Plan::default`'s are placeholders from another machine: where reads are priced, take
-    // this machine's from `disk_constants` (or a plan file); `open_at` does not, since pricing is set after the open.
+    // this machine's from `disk_constants` (or a plan file); `v2::open` does not, since pricing is set after the open.
     pub io_us: f64,
     pub io_gbps: f64,
     /// Threshold queries decide at deterministic level l only when bit l is set (u32::MAX: every level); None: the
@@ -2174,6 +2175,12 @@ fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// that cannot be locked or written is reported and the timed constants are used all the same. None when they could
 /// be neither read nor timed.
 pub fn cached_disk_constants(path: &std::path::Path, key: &str, time: impl FnOnce() -> Option<(f64, f64)>) -> (Option<(f64, f64)>, String) {
+    cached_disk_constants_or(path, None, key, time)
+}
+
+/// `cached_disk_constants`, saving to `fallback` (the per-user cache) when `path`'s directory refuses the write
+/// (permission, a read-only file system, not a directory), so that the next open reads them instead of timing again.
+pub fn cached_disk_constants_or(path: &std::path::Path, fallback: Option<&std::path::Path>, key: &str, time: impl FnOnce() -> Option<(f64, f64)>) -> (Option<(f64, f64)>, String) {
     let why = match read_disk_cache(path, key) {
         Ok(c) => return (Some(c), format!("read from {} (key {key})", path.display())),
         Err(e) => e,
@@ -2188,9 +2195,21 @@ pub fn cached_disk_constants(path: &std::path::Path, key: &str, time: impl FnOnc
     let why = if why.starts_with("no cache") { format!("timed: {why}") } else { format!("timed again: {why}") };
     let why = if lock.is_none() { format!("{why} (not locked)") } else { why };
     let Some((us, gb)) = time() else { return (None, format!("{why}; but they cannot be timed here (no io_uring reader)")) };
-    let why = match write_atomic(path, &format!("key={key}\nio_us={us}\nio_gbps={gb}\n")) {
+    let text = format!("key={key}\nio_us={us}\nio_gbps={gb}\n");
+    let why = match write_atomic(path, &text) {
         Ok(()) => format!("{why}; saved under key {key}"),
-        Err(e) => format!("{why}; not saved ({e})"),
+        Err(e) => match fallback.filter(|_| matches!(e.raw_os_error(), Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS) | Some(libc::ENOTDIR))) {
+            Some(f) => {
+                if let Some(d) = f.parent() {
+                    let _ = std::fs::create_dir_all(d);
+                }
+                match write_atomic(f, &text) {
+                    Ok(()) => format!("{why}; not saved in {} ({e}), saved in {} under key {key}", path.display(), f.display()),
+                    Err(e2) => format!("{why}; not saved ({e}; nor in {}: {e2})", f.display()),
+                }
+            }
+            None => format!("{why}; not saved ({e})"),
+        },
     };
     drop(lock);
     (Some((us, gb)), why)
@@ -2207,16 +2226,39 @@ pub fn user_cache_dir() -> Option<std::path::PathBuf> {
     Some(base.join("vexact"))
 }
 
+/// The per-user cache file for disk constants under `key` in the directory `user`.
+pub fn user_cache_file(user: &std::path::Path, key: &str) -> std::path::PathBuf {
+    user.join(format!("disk-constants-{:016x}.txt", fnv1a64(key.as_bytes())))
+}
+
+/// Whether a file can be created in `dir`: a probe file created and removed (the permission that matters for the
+/// cache's atomic write, which a lock file opened for writing does not show).
+fn dir_writable(dir: &std::path::Path) -> bool {
+    let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let probe = dir.join(format!(".vexact-probe.{}.{ns}", std::process::id()));
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Where the disk constants under `key` are cached: `DISK_CACHE` in the index directory `dir`, unless it does not hold
-/// them under `key` and `dir` cannot be written (a read-only index); then the per-user directory `user` (when given),
-/// in a file named by the key.
+/// them under `key` and either the per-user directory `user` (when given) does, or `dir` cannot be written (a
+/// read-only index); then the per-user directory, in a file named by the key.
 pub fn disk_cache_path(dir: &str, key: &str, user: Option<&std::path::Path>) -> std::path::PathBuf {
     let main = std::path::Path::new(dir).join(DISK_CACHE);
-    let writable = || std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(main.with_extension("lock")).is_ok();
     match user {
-        Some(u) if read_disk_cache(&main, key).is_err() && !writable() => {
-            let _ = std::fs::create_dir_all(u);
-            u.join(format!("disk-constants-{:016x}.txt", fnv1a64(key.as_bytes())))
+        Some(u) if read_disk_cache(&main, key).is_err() => {
+            let uf = user_cache_file(u, key);
+            if read_disk_cache(&uf, key).is_ok() || !dir_writable(std::path::Path::new(dir)) {
+                let _ = std::fs::create_dir_all(u);
+                uf
+            } else {
+                main
+            }
         }
         _ => main,
     }
@@ -2255,7 +2297,9 @@ pub fn disk_constants_in(ix: &Index2, base: Plan, dir: &str, user: Option<&std::
     };
     let t = Timer::new();
     let path = disk_cache_path(dir, &key, user);
-    let (got, why) = cached_disk_constants(&path, &key, || {
+    // the index directory's cache, falling back to the per-user one when the index directory refuses the write
+    let fallback = user.filter(|_| path == std::path::Path::new(dir).join(DISK_CACHE)).map(|u| user_cache_file(u, &key));
+    let (got, why) = cached_disk_constants_or(&path, fallback.as_deref(), &key, || {
         let _restore = RestoreFlag(&policy.uring, policy.uring.swap(true, std::sync::atomic::Ordering::Relaxed));
         Plan::calibrate_disk(ix)
     });
@@ -2574,9 +2618,9 @@ fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusor
 /// first, before the anchors and the support table, since it needs neither. Otherwise each cluster is decided by the
 /// support table where it can be (wholly out or wholly in); one it leaves open is scored directly from its visible
 /// rows when it holds at most R0 + kappa * S of them, else cut to its sorted range and run on the index path. So a
-/// cluster scored directly is one whose index path would cost more than its rows; on clusters of more than 84 rows
-/// (the default R0 / (1 - kappa)) without a visible set every open cluster takes the index path (measured: within noise of the best choice in every
-/// cell, and 1.6-6x faster than a scan; REPORT_BUILD), while an index compacted to a small visible set
+/// cluster scored directly is one whose index path would cost more than its rows; on clusters of more than 78 rows
+/// (the default R0 / (1 - kappa)) without a visible set every open cluster takes the index path (measured: within
+/// noise of the best choice in every cell, and 1.6-6x faster than a scan; REPORT_BUILD), while an index compacted to a small visible set
 /// (`Index2::compact`) is scanned, as its visible set would be.
 ///
 /// Vectors on file whose reads are priced (`disk::ReadPolicy::priced`), under `Auto`: the cost model (`plan2_priced`).
@@ -3417,7 +3461,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
 /// else (at most the rule's rows of the clusters holding one, plus the seed's `r_seed`: `Plan::scan_first`), or after
 /// the seed (`plan2`'s rule at the seed's k-th score); otherwise the threshold query at the seed's k-th score runs as
 /// planned and the selection refines the survivors' intervals until the k best are certain. Unfiltered on clusters of
-/// more than 84 rows (by default) it does not scan; an index compacted to a small visible set does.
+/// more than 78 rows (by default) it does not scan; an index compacted to a small visible set does.
 pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -> KnnOut2 {
     let tm = Timer::new();
     let nl = ix.meta.nl();

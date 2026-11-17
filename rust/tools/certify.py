@@ -14,6 +14,10 @@
 #      tilted probabilities; the frequencies left out are bounded by the block with the smallest remainder.
 # Margins REL (relative) and ABS (absolute) cover quadrature and rounding.
 #
+# The fit (src/fit.rs) runs the same method in Rust (src/certify.rs) and first looks in a shipped table of certificates
+# (src/certs_table.json, made by tools/certs_table.py with both); tools/fit.py looks in that table, then runs this.
+# This script stays as the independent implementation: it never reads the table.
+#
 # usage: python3 -I certify.py INDEX [--n-guarantee N] [--lnd LN_DELTA] [--time-cap SECONDS]
 #   The default budget is the one the Rust build uses: delta = EPS / (N L), N the index's item count rounded up to a
 #   power of two, L the number of randomised levels.
@@ -62,7 +66,7 @@ class Tables:
                 arr = np.zeros(self.M); arr[k % self.M] = q / m
                 F = np.fft.rfft(arr); k0, M = self.k0, self.M
                 r = len(self.lnM[j]); self.key[j][f] = r
-                self.lnM[j].append(math.log(m)); self.Phi[j].append(F[:k0 + 1])
+                self.lnM[j].append(math.log(m)); self.Phi[j].append(F[:k0 + 1].copy())  # a view would hold all of F
                 self.R[j].append((2 * (np.abs(F[k0 + 1:M // 2]) * self.absk[k0 + 1:M // 2]).sum() + abs(F[M // 2]) * self.absk[M // 2]) / M)
                 new = True
             rows[n] = r
@@ -91,7 +95,7 @@ def certify(ds, lnd, X, deadline, K0=64, Kmax=4096, eta=0.001, M=65536, k0=400):
         if time.time() > deadline:
             return False
         top = K + J - 1
-        fails = []
+        fails = None                            # the failing cells' least and greatest index per free coordinate
         if J == 4:
             (lo1, hi1), (lo2, hi2), (lo3, hi3) = box
             for s in range(lo1 + lo2, hi1 + hi2 + 1):
@@ -108,7 +112,9 @@ def certify(ds, lnd, X, deadline, K0=64, Kmax=4096, eta=0.001, M=65536, k0=400):
                 lt = np.log(np.maximum(S, 1e-300)) + (L1_ + L2_)[:, None] + (L3_ + L4_)[None, :] + base
                 f = np.argwhere(lt > lnd)
                 if len(f):
-                    fails.append(np.c_[i1[f[:, 0]], i2[f[:, 0]], i3[f[:, 1]]])
+                    if K >= Kmax:               # a cell fails on the finest grid: the answer is known
+                        return False
+                    fails = extent(fails, np.c_[i1[f[:, 0]], i2[f[:, 0]], i3[f[:, 1]]])
         else:
             rng = [range(lo, hi + 1) for lo, hi in box]
             tup = np.array([p for p in itertools.product(*rng) if top - sum(p) >= 1], int).reshape(-1, J - 1)
@@ -121,14 +127,20 @@ def certify(ds, lnd, X, deadline, K0=64, Kmax=4096, eta=0.001, M=65536, k0=400):
                     Ls = Ls + Lj; Ps = Ps * Pj; Rs = Rj if Rs is None else np.minimum(Rs, Rj)
                 lt = np.log(np.maximum(Ps.real.sum(1) + Rs + ABS, 1e-300)) + Ls + base
                 if (lt > lnd).any():
-                    fails.append(tt[lt > lnd])
-        if not fails:
+                    if K >= Kmax:
+                        return False
+                    fails = extent(fails, tt[lt > lnd])
+        if fails is None:
             return True
-        if K >= Kmax:
-            return False
-        F = np.vstack(fails)
-        box = [(max(0, 2 * int(F[:, j].min()) - 1), 2 * int(F[:, j].max())) for j in range(J - 1)]
+        box = [(max(0, 2 * int(fails[0][j]) - 1), 2 * int(fails[1][j])) for j in range(J - 1)]
         K *= 2
+
+
+def extent(e, F):
+    """The least and greatest index in each column of the failing cells F, and of those in e (None: none yet). Only
+    these set the next grid's box, so the cells themselves are not kept (at Kmax they can number 1e8)."""
+    lo, hi = F.min(0), F.max(0)
+    return (lo, hi) if e is None else (np.minimum(e[0], lo), np.maximum(e[1], hi))
 
 
 def sphere_constant(D, lnd):
@@ -167,14 +179,35 @@ def ln_delta(meta, n_guarantee=None):
     return -math.log(N * len(meta["RLV"]) / meta.get("EPS", 1e-9))
 
 
-def add_certificate(out, lnd, time_cap, log=print):
-    """Certify the layout of the index in `out` at `lnd` and record the result in its meta.json (CERTS)."""
+TABLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "certs_table.json")
+
+
+def table_entry(ds, lnd):
+    """The shipped table's entry (src/certs_table.json, tools/certs_table.py) for exactly these blocks and this ln delta:
+    a list [X] (X None where no certificate was found), or None when the table has no such entry."""
+    if not os.path.exists(TABLE):
+        return None
+    for e in json.load(open(TABLE)):
+        if e["ds"] == ds and e["lnd"] == lnd:
+            return [e["X"]]
+    return None
+
+
+def add_certificate(out, lnd, time_cap, log=print, table=False):
+    """Certify the layout of the index in `out` at `lnd` and record the result in its meta.json (CERTS). With
+    `table`, the shipped table's entry for the layout and budget, when it has one, in place of certifying (a time cap
+    of 0 still certifies nothing)."""
     path = os.path.join(out, "meta.json")
     meta = json.load(open(path))
     ds = block_dims(meta)
-    X = certify_layout(ds, lnd, time_cap, log)
+    hit = table_entry(ds, lnd) if table and time_cap > 0 else None
+    if hit is not None:
+        X = hit[0]
+        log(f"certificate for {ds} at ln delta {lnd:.4f} from the shipped table: X {X}")
+    else:
+        X = certify_layout(ds, lnd, time_cap, log)
     if X is None:
-        log(f"no certificate for {ds} at ln delta {lnd:.4f} within {time_cap:.0f}s; the build uses the convex-order and Chernoff bounds")
+        log(f"no certificate for {ds} at ln delta {lnd:.4f}; the build uses the convex-order and Chernoff bounds")
         return None
     certs = [c for c in meta.get("CERTS", []) if not (c["ds"] == ds and abs(c["lnd"] - lnd) < 1e-9)]
     certs.append(dict(ds=ds, lnd=lnd, X=X))

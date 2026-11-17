@@ -1,12 +1,13 @@
-# Partition a file of vectors into cells for the fit and the build (`vexact --index OUT fit --partition DIR`), with faiss:
+# Partition a file of vectors into cells for the fit and the build (`vexact --vectors V --index DIR create` runs it into
+# DIR/partition, then fits and encodes; v2::create), with faiss:
 # coarse cells, fine clusters of about PER_CLUSTER items trained per cell, every row assigned to a fine centre.
 # Nothing holds more than a chunk of the vectors and one cell's training sample at a time.
-# usage: python3 -I partition.py VECTORS.npy OUTDIR [--cells C] [--cross T] [--per-cluster 1000|by-n]
+# usage: python3 -I partition.py VECTORS.npy OUTDIR [--cells C] [--cross T] [--per-cluster by-n|M]
 #        [--sample-per-centre 200] [--cell-sample 1000] [--niter 20] [--seed S]
 #   VECTORS.npy: N x n0, float16/32/64; row i is entity i.
 #   --cells C: coarse cells (default 1: one cell, one k-means over a sample of the whole set).
-#   --per-cluster: items per cluster on average (default 1,000), or by-n: research/levels-clusters' rule, 2,000 up to
-#     2M items, doubling for each 4x N (tools/rules.py `per_cluster`, shared with fit.py).
+#   --per-cluster: by-n (default): research/levels-clusters' rule, 2,000 items per cluster up to 2M items, doubling for
+#     each 4x N (tools/rules.py `per_cluster`, shared with fit.py); or items per cluster on average (1,000 before).
 #   --cross T: each row is assigned to its nearest fine centre among those of its cell's T nearest cells (default 1;
 #     T >= C is exact assignment over all centres). A row whose centre lies in another cell moves to that cell.
 # Writes to OUTDIR, per cell c: cell{c}.f16 (unit rows, float16, zero-padded to n, a multiple of 32), cell{c}.ids
@@ -80,7 +81,7 @@ def main():
     ap.add_argument("out")
     ap.add_argument("--cells", type=int, default=1)
     ap.add_argument("--cross", type=int, default=1)
-    ap.add_argument("--per-cluster", default="1000")
+    ap.add_argument("--per-cluster", default="by-n")
     ap.add_argument("--sample-per-centre", type=int, default=200)
     ap.add_argument("--cell-sample", type=int, default=1000)
     ap.add_argument("--niter", type=int, default=20)

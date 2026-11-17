@@ -362,3 +362,34 @@ pub fn fix_mmap_threshold(bytes: i32) {
     }
     let _ = bytes;
 }
+
+/// Tests: a new directory under the system's temporary directory, removed when dropped (also when a test panics).
+#[cfg(test)]
+pub struct TmpDir(pub std::path::PathBuf);
+#[cfg(test)]
+impl TmpDir {
+    pub fn new(tag: &str) -> TmpDir {
+        let d = std::env::temp_dir().join(format!("vexact-{tag}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&d).unwrap();
+        TmpDir(d)
+    }
+}
+#[cfg(test)]
+impl std::ops::Deref for TmpDir {
+    type Target = std::path::Path;
+    fn deref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+#[cfg(test)]
+impl AsRef<std::path::Path> for TmpDir {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.0
+    }
+}
+#[cfg(test)]
+impl Drop for TmpDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
