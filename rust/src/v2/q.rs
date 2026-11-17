@@ -43,8 +43,6 @@ pub const C_TABLES: usize = 20;
 pub const C_UNITS: usize = 21;
 pub const C_TSURV: usize = 22;
 pub const C_TSMALL: usize = 23;
-/// Inside bounds+decisions at the randomised levels: the scalars' decode (|y| at the first, kappa and tan at rises).
-pub const P_RKAP: usize = 24;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -80,6 +78,8 @@ pub struct Prep2 {
     pub qlo: Vec<i16>,
     /// The nearest anchor, found on first use: a plan that scans never reads the anchors.
     anc: OnceLock<Anc>,
+    /// q.m of the clusters asked for on first use (`qms`), NaN for the rest.
+    qm: OnceLock<Vec<f64>>,
     pub gq: Vec<OnceLock<GQ2>>,
     pub dial: Vec<f32>, // per level, factor on the item intervals' upper half-width (1: certified; below: approximate)
 }
@@ -99,28 +99,70 @@ impl Prep2 {
     }
     /// The nearest anchor; on the first call with `among` (clusters, when anchor a is cluster a's centre: anc_centres), the
     /// nearest of those clusters' anchors. Any anchor gives sound bounds, and a query over a few clusters needs the
-    /// one nearest to them.
+    /// one nearest to them. The search ranks the anchors cheaply (by q.m / |m| from `qms` when the anchors are the
+    /// centres' directions, else in f32) and takes q.p in f64 of each within the ranking's error of the best, so the
+    /// anchor is the one with the largest f64 q.p (the first of equals).
     pub fn anc_among(&self, ix: &Index2, among: Option<&[usize]>) -> Anc {
         *self.anc.get_or_init(|| {
             let n = ix.n();
-            let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
             let all: Vec<usize>;
-            let cand = match among.filter(|_| ix.anc_centres) {
+            let centres = ix.anc_centres && ix.nanch == ix.k();
+            let cand: &[usize] = match among.filter(|_| centres) {
                 Some(c) if !c.is_empty() => c,
                 _ => {
                     all = (0..ix.nanch).collect();
                     &all
                 }
             };
-            for &a in cand {
-                let b = unsafe { dot64v(&self.q64, &ix.anchors[a * n..(a + 1) * n]) };
-                if b > best {
-                    best = b;
-                    ba = a;
+            let score: Vec<f64> = if centres {
+                self.qms(ix, Some(cand));
+                cand.iter().map(|&a| self.qm(ix, a) / ix.cl[a].mn).collect()
+            } else {
+                cand.iter().map(|&a| unsafe { dot32(&self.q32, &ix.anchors32[a * n..(a + 1) * n]) }).collect()
+            };
+            // the ranking's error bound on each score: f64 rounding of q.m and of the division, or the f32 product of
+            // the rounded anchor (64 u for the sum, 2^-24 for the rounding, relative to |q| |p| = |q|)
+            let err = if centres { 1e-12 * self.qn + 1e-300 } else { 70.0 * U * self.qn + 1e-300 };
+            let top = score.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
+            for (i, &a) in cand.iter().enumerate() {
+                if score[i] >= top - 2.0 * err {
+                    let b = unsafe { dot64v(&self.q64, &ix.anchors[a * n..(a + 1) * n]) };
+                    if b > best {
+                        best = b;
+                        ba = a;
+                    }
                 }
             }
             anc_of(self.qn, ba, best)
         })
+    }
+
+    /// q.m of every cluster of `among` (every cluster when None), computed on the first call (in parallel; NaN for the
+    /// clusters left out); later calls return the same, whatever they ask for, so `qm` falls back for the rest.
+    pub fn qms(&self, ix: &Index2, among: Option<&[usize]>) -> &[f64] {
+        self.qm.get_or_init(|| {
+            let mut v = vec![f64::NAN; ix.k()];
+            match among {
+                None => v.par_iter_mut().enumerate().for_each(|(ci, x)| *x = ix.qm(&self.q64, ci)),
+                Some(c) => {
+                    let got: Vec<f64> = c.par_iter().map(|&ci| ix.qm(&self.q64, ci)).collect();
+                    for (&ci, x) in c.iter().zip(got) {
+                        v[ci] = x;
+                    }
+                }
+            }
+            v
+        })
+    }
+
+    /// q.m of cluster ci (from `qms` when it holds it).
+    #[inline]
+    pub fn qm(&self, ix: &Index2, ci: usize) -> f64 {
+        match self.qm.get().map(|v| v[ci]) {
+            Some(x) if !x.is_nan() => x,
+            _ => ix.qm(&self.q64, ci),
+        }
     }
 }
 
@@ -137,30 +179,12 @@ pub fn query_f16(q: &[f32]) -> (Vec<u16>, Vec<f32>, f64) {
 }
 
 pub fn prep2(ix: &Index2, q: &[f32]) -> Prep2 {
-    prep2_qm(ix, q, None)
-}
-
-/// prep2, with q.m of every cluster given when the anchors are the clusters' centre directions (`anc_centres`): the
-/// anchor is the cluster with the largest q.m / |m|, and only its product is taken again.
-pub fn prep2_qm(ix: &Index2, q: &[f32], qm: Option<&[f64]>) -> Prep2 {
-    let n = ix.n();
     let (q16, q32, qn) = query_f16(q);
     let q64: Vec<f64> = q32.iter().map(|&x| x as f64).collect();
     let fx: Vec<i64> = q16.iter().map(|&h| f16_fixed(h)).collect();
     let qhi = fx.iter().map(|&v| (v >> 13) as i16).collect();
     let qlo = fx.iter().map(|&v| (v & 8191) as i16).collect();
-    let anc = OnceLock::new();
-    if let Some(qm) = qm.filter(|_| ix.anc_centres && ix.nanch == ix.k() && ix.nanch > 0) {
-        let (mut best, mut ba) = (f64::NEG_INFINITY, 0);
-        for (c, &v) in qm.iter().enumerate() {
-            if v / ix.cl[c].mn > best {
-                best = v / ix.cl[c].mn;
-                ba = c;
-            }
-        }
-        let _ = anc.set(anc_of(qn, ba, unsafe { dot64v(&q64, &ix.anchors[ba * n..(ba + 1) * n]) }));
-    }
-    Prep2 { q16, q32, q64, qn, qhi, qlo, anc, gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
+    Prep2 { q16, q32, q64, qn, qhi, qlo, anc: OnceLock::new(), qm: OnceLock::new(), gq: (0..ix.groups.len()).map(|_| OnceLock::new()).collect(), dial: vec![1.0; ix.meta.nl()] }
 }
 
 /// V_q^T q exactly: int8 basis x (q * 2^24 split into 13-bit halves), i32 sums (VNNI), then one rounding to f64.
@@ -670,7 +694,7 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
     let Anc { a, beta: b, rho } = pr.anc(ix);
     let (hi, lo) = (ix.hi[a * k + ci] as f64, ix.lo[a * k + ci] as f64);
     let (bh, bl) = if b >= 0.0 { (b * hi, b * lo) } else { (b * lo, b * hi) };
-    let pm = dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat);
+    let pm = if ix.apm.is_empty() { dot64(&ix.anchors[a * n..(a + 1) * n], &c.mhat) } else { ix.apm[a * k + ci] };
     let rm = cm - b * pm;
     let rp = (rho * rho - rm * rm).max(0.0).sqrt() * (1.0 + 1e-12) + 1e-12;
     Cut { cm, s1, bh, bl, rm, rp }
@@ -998,6 +1022,163 @@ unsafe fn compact_rand(sv: &mut State, w: usize, m: u16, o: usize, need: RandNee
     }
 }
 
+/// What the bounds of a randomised level read that is fixed for the level, and which of the survivors' state arrays
+/// it writes (those a later level reads, all of them in verify mode).
+struct RandLv<'a> {
+    r0: usize, // the cluster's first row
+    l: usize,
+    lr: usize,
+    coded: u32, // bit j: block j coded at this level
+    rise: u32,  // bit j: block j rises here (its kappa and tan are decoded)
+    row: [usize; J],
+    kb8: u32, // bit j: an 8-bit kappa code
+    ktab: [&'a [f32; 16]; J],
+    khl: [&'a [[f32; 16]; 2]; J],
+    ttab: [&'a [f32; 16]; J],
+    yhl: &'a [[[f32; 16]; 2]; J],
+    ypredw: [f32; J],
+    nd: [f32; J],
+    inb: [f32; J],   // 1 / (block size - 1)
+    dk: [f32; J],    // kappa rounding bound and the estimate's 16 u
+    ekw: [f32; J],   // table and weight error per unit kappa
+    csgl: f32,
+    dial: f32,
+    alr: f32,
+    qm: f32,
+    edw: f32, // edet + ewdet
+    fixed: f32,
+    st_aj: u32,
+    st_kap: u32,
+    st_yh: bool,
+    st_c0: bool,
+}
+
+/// The lanes of half `H` of a block whose 4-bit code in row `p` is 15 (the low nibbles of the row's 16 bytes are
+/// slots 0..16, the high nibbles slots 16..32).
+#[inline(always)]
+unsafe fn esc15<const H: usize>(r: __m128i) -> u16 {
+    let m = _mm_set1_epi8(if H == 0 { 0x0f } else { 0xf0u8 as i8 });
+    _mm_movemask_epi8(_mm_cmpeq_epi8(_mm_and_si128(r, m), m)) as u16
+}
+/// The 4-bit codes of half `H` of a block in row `r`, as table indices (only their low 4 bits are read).
+#[inline(always)]
+unsafe fn nibs<const H: usize>(r: __m128i) -> __m512i {
+    let v = _mm512_cvtepu8_epi32(r);
+    if H == 0 { v } else { _mm512_srli_epi32(v, 4) }
+}
+#[inline(always)]
+unsafe fn row16(sp: *const u8, row: usize) -> __m128i {
+    _mm_loadu_si128(sp.add(row * 16) as *const _)
+}
+
+/// A randomised level's bounds of the 16 slots of half `H` of a block (lanes `hm`, slots o..o+16): |y| decoded at the
+/// first such level, kappa and tan at a block's rise, the accumulators advanced by the level's part values `pv`.
+/// Returns (lower bound, upper bound, estimate, half-width's deterministic part, sd).
+#[inline(always)]
+unsafe fn rand_half<const H: usize>(ix: &Index2, rl: &RandLv, sv: &mut State, sp: *const u8, pv: &[[__m512; 2]; J + 1], o: usize, hm: u16) -> (__m512, __m512, __m512, __m512, __m512) {
+    let fix = |v: __m512, em: u16, slot: usize, idx: &[u32]| {
+        let mut r = arr(v);
+        for i in 0..16 {
+            if em >> i & 1 == 1 {
+                r[i] = ix.esc.get(rl.l as u8, slot as u8, (rl.r0 + idx[o + i] as usize) as u32);
+            }
+        }
+        _mm512_loadu_ps(r.as_ptr())
+    };
+    let mut yh = [_mm512_setzero_ps(); J];
+    let first = rl.lr == 0;
+    if first {
+        let s = ld(&sv.s, o);
+        for (j, yj) in yh.iter_mut().enumerate() {
+            let (a, b) = (row16(sp, 2 * j), row16(sp, 2 * j + 1));
+            let pr_ = _mm512_mul_ps(_mm512_set1_ps(rl.ypredw[j]), s);
+            let tv = _mm512_mul_ps(_mm512_permutexvar_ps(nibs::<H>(b), _mm512_loadu_ps(rl.yhl[j][1].as_ptr())), _mm512_permutexvar_ps(nibs::<H>(a), _mm512_loadu_ps(rl.yhl[j][0].as_ptr())));
+            let mut y = _mm512_mul_ps(pr_, tv);
+            let em = esc15::<H>(_mm_and_si128(a, b)) & hm;
+            if em != 0 {
+                y = fix(y, em, 1 + j, &sv.idx);
+            }
+            if rl.st_yh {
+                _mm512_storeu_ps(sv.yh[j].as_mut_ptr().add(o), y);
+            }
+            *yj = y;
+        }
+    }
+    // the constant parts, once at the first randomised level (the same f32 operations as before)
+    let (c0, h0) = if first {
+        let s = ld(&sv.s, o);
+        let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(rl.alr), ld(&sv.mr, o), _mm512_set1_ps(rl.qm));
+        let sa = _mm512_mul_ps(s, ld(&sv.adet, o));
+        let c0 = _mm512_add_ps(alrmr, sa);
+        let fl = _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa));
+        let h0 = _mm512_fmadd_ps(_mm512_set1_ps((16.0 * U) as f32), fl, _mm512_fmadd_ps(s, _mm512_set1_ps(rl.edw), _mm512_set1_ps(rl.fixed)));
+        if rl.st_c0 {
+            _mm512_storeu_ps(sv.c0.as_mut_ptr().add(o), c0);
+            _mm512_storeu_ps(sv.h0.as_mut_ptr().add(o), h0);
+        }
+        (c0, h0)
+    } else {
+        (ld(&sv.c0, o), ld(&sv.h0, o))
+    };
+    let mut e = c0;
+    let mut hpar = h0;
+    let mut var = _mm512_setzero_ps();
+    for j in 0..J {
+        let yv = if first { yh[j] } else { ld(&sv.yh[j], o) };
+        if rl.coded >> j & 1 == 0 {
+            hpar = _mm512_fmadd_ps(yv, _mm512_set1_ps(rl.nd[j]), hpar);
+            continue;
+        }
+        let (kap, vj, aj);
+        if rl.rise >> j & 1 == 1 {
+            let a = _mm512_add_ps(ld(&sv.aj[j], o), pv[1 + j][H]);
+            if rl.st_aj >> j & 1 == 1 {
+                _mm512_storeu_ps(sv.aj[j].as_mut_ptr().add(o), a);
+            }
+            aj = a;
+            // a 4-bit code reads the table's first 16 entries; an 8-bit one is the product of its nibbles' entries (an
+            // escape's value is replaced below)
+            let row = rl.row[j];
+            let kl = row16(sp, row);
+            let (kv, kx, tr) = if rl.kb8 >> j & 1 == 1 {
+                let kh = row16(sp, row + 1);
+                let v = _mm512_mul_ps(_mm512_permutexvar_ps(nibs::<H>(kh), _mm512_loadu_ps(rl.khl[j][1].as_ptr())), _mm512_permutexvar_ps(nibs::<H>(kl), _mm512_loadu_ps(rl.khl[j][0].as_ptr())));
+                (v, _mm_and_si128(kl, kh), row16(sp, row + 2))
+            } else {
+                (_mm512_permutexvar_ps(nibs::<H>(kl), _mm512_loadu_ps(rl.ktab[j].as_ptr())), kl, row16(sp, row + 1))
+            };
+            let mut k = _mm512_mul_ps(yv, kv);
+            let mut th = _mm512_permutexvar_ps(nibs::<H>(tr), _mm512_loadu_ps(rl.ttab[j].as_ptr()));
+            let ek = esc15::<H>(kx) & hm;
+            let et = esc15::<H>(tr) & hm;
+            if ek != 0 {
+                k = fix(k, ek, 8 + j, &sv.idx);
+            }
+            if et != 0 {
+                th = fix(th, et, 16 + j, &sv.idx);
+            }
+            let ab = _mm512_mul_ps(_mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)), _mm512_set1_ps(rl.nd[j]));
+            let v = _mm512_mul_ps(_mm512_mul_ps(ab, ab), _mm512_set1_ps(rl.inb[j]));
+            if rl.st_kap >> j & 1 == 1 {
+                _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), k);
+                _mm512_storeu_ps(sv.var[j].as_mut_ptr().add(o), v);
+            }
+            (kap, vj) = (k, v);
+        } else {
+            (kap, vj, aj) = (ld(&sv.kap[j], o), ld(&sv.var[j], o), ld(&sv.aj[j], o));
+        }
+        let eb = _mm512_mul_ps(kap, aj);
+        e = _mm512_add_ps(e, eb);
+        // the kappa rounding bound and the estimate's 16 u share of |eb| in one product
+        hpar = _mm512_fmadd_ps(_mm512_set1_ps(rl.dk[j]), _mm512_abs_ps(eb), hpar);
+        hpar = _mm512_fmadd_ps(kap, _mm512_set1_ps(rl.ekw[j]), hpar);
+        var = _mm512_add_ps(var, vj);
+    }
+    let sdv = _mm512_sqrt_ps(var);
+    let hh = _mm512_mul_ps(_mm512_fmadd_ps(_mm512_set1_ps(rl.csgl), sdv, hpar), _mm512_set1_ps(1.0 + 1e-6));
+    (_mm512_sub_ps(e, hh), _mm512_add_ps(e, _mm512_mul_ps(hh, _mm512_set1_ps(rl.dial))), e, hpar, sdv)
+}
+
 /// Verify mode, a deterministic level of one block (bit i: slot k0 + i): count the decisions (in, out) that the
 /// real-valued certificate, evaluated in f64 from the f64 table sum, does not imply, and the active lanes whose exact
 /// score it does not contain.
@@ -1012,7 +1193,7 @@ unsafe fn check_det(ix: &Index2, ci: usize, pr: &Prep2, cq: &CQ2, l: usize, t: f
         let k = k0 + i;
         let s = sv.s[k] as f64;
         let code = nib(sp, 0, i);
-        let rho = if code == 15 { ix.esc[&(l as u8, 0u8, (c.r0 + sv.idx[k] as usize) as u32)] as f64 } else { gp.pconst[l] as f64 * s * gp.ntab[l][code] as f64 };
+        let rho = if code == 15 { ix.esc.get(l as u8, 0u8, (c.r0 + sv.idx[k] as usize) as u32) as f64 } else { gp.pconst[l] as f64 * s * gp.ntab[l][code] as f64 };
         let hh = dwa * rho * (1.0 + 1e-6) + fixed + s * ew;
         let est = qm + alr * sv.mr[k] as f64 + s * sv.a64[k];
         let tr = sv.truth[k];
@@ -1114,14 +1295,16 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             };
         }
     }
-    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_)) && out.iv.is_none();
+    let intm = cq.int.is_some() && !matches!(mode, Mode2::Interval(_));
     if intm {
         // Tout is shared by the deterministic levels, so the fixed term takes their largest factor; a larger factor
-        // only lowers Tout
+        // only lowers Tout. An item taken in must carry its interval (out.iv), which the integer levels do not give,
+        // so with out.iv they take nothing in (Tin clamps to TMAX) and leave it to the randomised levels.
         let dmax = pr.dial[..ndl].iter().fold(0f32, |a, &d| a.max(d)) as f64;
         let (qm, alr, fixed) = (cq.qm as f64, cq.alr as f64, cq.fixed as f64);
         let sigma = cq.int.as_ref().unwrap().sigma as f64;
-        int_thresholds(&sv.s, &sv.mr, nsurv, t - cq.tol + fixed - qm, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
+        let cin = if out.iv.is_some() { f64::INFINITY } else { t - cq.tol + fixed - qm };
+        int_thresholds(&sv.s, &sv.mr, nsurv, cin, t - dmax * fixed - qm, alr, t.abs() + fixed.abs() + qm.abs(), sigma, &mut sv.ist);
     }
     st.cyc[P_INIT] += tick() - ti;
     let t32 = t as f32;
@@ -1288,6 +1471,45 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 }
             }
         }
+        let rl = (l >= ndl).then(|| {
+            let bits = |f: &dyn Fn(usize) -> bool| (0..J).fold(0u32, |m, j| m | (f(j) as u32) << j);
+            // a block's accumulator advances where it rises (rand_half): every part of the level must be of a block
+            // that rises here
+            let parts = lut.parts.iter().fold(0u32, |m, p| m | 1 << p.j.unwrap());
+            assert_eq!(parts & !bits(&|j| gp.thchg[lr].contains(&j)), 0, "a randomised level has a part of a block that does not rise there");
+            let mut row = [0; J];
+            for (slot, &j) in gp.thchg[lr].iter().enumerate() {
+                row[j] = gp.rrow[lr][slot];
+            }
+            RandLv {
+                r0: c.r0,
+                l,
+                lr,
+                coded: bits(&|j| gp.rates[lr][j] > 0.0),
+                rise: bits(&|j| gp.thchg[lr].contains(&j)),
+                row,
+                kb8: bits(&|j| gp.kbits[lr][j] == 8),
+                ktab: std::array::from_fn(|j| gp.ktab[lr][j][..16].try_into().unwrap()),
+                khl: std::array::from_fn(|j| &gp.khl[lr][j]),
+                ttab: std::array::from_fn(|j| &gp.ttab[lr][j]),
+                yhl: &gp.yhl,
+                ypredw: gp.ypredw,
+                nd: cq.nd,
+                inb: std::array::from_fn(|j| 1.0 / (gp.nb[j] - 1) as f32),
+                dk: std::array::from_fn(|j| dmxj[j] + (16.0 * U) as f32),
+                ekw: std::array::from_fn(|j| ej[j] + cq.ewj[j]),
+                csgl: gp.csgl[lr],
+                dial: pr.dial[l],
+                alr: cq.alr,
+                qm: cq.qm,
+                edw: edet + cq.ewdet,
+                fixed: cq.fixed,
+                st_aj: if verify { !0 } else { need.aj },
+                st_kap: if verify { !0 } else { need.kap },
+                st_yh: verify || need.yh,
+                st_c0: verify || need.c0,
+            }
+        });
         let mut wpos = 0usize;
         for b in 0..nb {
             let k0 = b * BLK;
@@ -1305,7 +1527,12 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                 let sb = (a0 as usize + k0) / BLK;
                 g.ident = Some(sb);
                 // the level's codes of a cluster span a few pages, which the hardware prefetcher ramps up on late
-                if b + PF < nb {
+                let k1 = k0 + PF * BLK;
+                let live_ahead = || {
+                    let (x0, x1) = (_mm512_loadu_si512(sv.idx.as_ptr().add(k1) as *const _), _mm512_loadu_si512(sv.idx.as_ptr().add(k1 + 16) as *const _));
+                    _mm512_cmpeq_epi32_mask(x0, none) & _mm512_cmpeq_epi32_mask(x1, none) != 0xffff
+                };
+                if b + PF < nb && live_ahead() {
                     let pc = cbase.add((sb + PF) * units * 16);
                     for x in (0..units * 16).step_by(64) {
                         _mm_prefetch::<_MM_HINT_T0>(pc.add(x) as *const i8);
@@ -1366,10 +1593,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             // part values
             let mut pv: [[__m512; 2]; J + 1] = [[_mm512_setzero_ps(); 2]; J + 1];
             for pl in &lut.parts {
-                let (h0, h1) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
-                let (l0, l1) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
-                let s0 = _mm512_fmadd_ps(h0, _mm512_set1_ps(256.0), l0);
-                let s1 = _mm512_fmadd_ps(h1, _mm512_set1_ps(256.0), l1);
+                let (s0, s1) = part_sums2(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
                 let k = match pl.j {
                     None => 0,
                     Some(j) => 1 + j,
@@ -1379,95 +1603,6 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
             }
             let t2 = tick();
             st.cyc[P_DECODE] += t2 - t1;
-            // the randomised levels' scalars, both halves of the block from each row: |y| at the first, kappa and tan
-            // at a block's rise
-            if l >= ndl {
-                let tk = tick();
-                let hms = [act as u16, (act >> 16) as u16];
-                    if lr == 0 {
-                        for j in 0..J {
-                            let (a0, a1) = row_nibbles(sp.add(2 * j * 16));
-                            let (b0, b1) = row_nibbles(sp.add((2 * j + 1) * 16));
-                            for h in 0..2 {
-                            let hm = hms[h];
-                            if hm == 0 {
-                                continue;
-                            }
-                            let o = k0 + 16 * h;
-                            let s = ld(&sv.s, o);
-                            let (lo, hi) = if h == 0 { (a0, b0) } else { (a1, b1) };
-                            let pr_ = _mm512_mul_ps(_mm512_set1_ps(gp.ypredw[j]), s);
-                            let tv = _mm512_mul_ps(_mm512_permutexvar_ps(hi, _mm512_loadu_ps(gp.yhl[j][1].as_ptr())), _mm512_permutexvar_ps(lo, _mm512_loadu_ps(gp.yhl[j][0].as_ptr())));
-                            let mut y = _mm512_mul_ps(pr_, tv);
-                            let em = _mm512_cmpeq_epi32_mask(_mm512_and_si512(lo, hi), _mm512_set1_epi32(15)) & hm;
-                            if em != 0 {
-                                let mut r = arr(y);
-                                for i in 0..16 {
-                                    if em >> i & 1 == 1 {
-                                        r[i] = ix.esc[&(l as u8, 1 + j as u8, (c.r0 + sv.idx[o + i] as usize) as u32)];
-                                    }
-                                }
-                                y = _mm512_loadu_ps(r.as_ptr());
-                            }
-                            _mm512_storeu_ps(sv.yh[j].as_mut_ptr().add(o), y);
-                            }
-                        }
-                    }
-                    for (slot, &j) in gp.thchg[lr].iter().enumerate() {
-                        let row = gp.rrow[lr][slot];
-                        let kb = gp.kbits[lr][j] as usize;
-                        let (a0, a1) = row_nibbles(sp.add(row * 16));
-                        let (t0, t1) = row_nibbles(sp.add((row + kb / 4) * 16));
-                        let (mut b0, mut b1) = (_mm512_setzero_si512(), _mm512_setzero_si512());
-                        if kb == 8 {
-                            (b0, b1) = row_nibbles(sp.add((row + 1) * 16));
-                        }
-                        for h in 0..2 {
-                        let hm = hms[h];
-                        if hm == 0 {
-                            continue;
-                        }
-                        let o = k0 + 16 * h;
-                        // a 4-bit code reads the table's first 16 entries; an 8-bit one is the product of its nibbles'
-                        // entries (an escape's value is replaced below)
-                        let kl = if h == 0 { a0 } else { a1 };
-                        let (kv, kx) = if kb == 8 {
-                            let kh = if h == 0 { b0 } else { b1 };
-                            let v = _mm512_mul_ps(_mm512_permutexvar_ps(kh, _mm512_loadu_ps(gp.khl[lr][j][1].as_ptr())), _mm512_permutexvar_ps(kl, _mm512_loadu_ps(gp.khl[lr][j][0].as_ptr())));
-                            (v, _mm512_and_si512(kl, kh))
-                        } else {
-                            (_mm512_permutexvar_ps(kl, _mm512_loadu_ps(gp.ktab[lr][j].as_ptr())), kl)
-                        };
-                        let tc = if h == 0 { t0 } else { t1 };
-                        let yv = ld(&sv.yh[j], o);
-                        let mut kap = _mm512_mul_ps(yv, kv);
-                        let mut th = _mm512_permutexvar_ps(tc, _mm512_loadu_ps(gp.ttab[lr][j].as_ptr()));
-                        let ek = _mm512_cmpeq_epi32_mask(kx, _mm512_set1_epi32(15)) & hm;
-                        let et = _mm512_cmpeq_epi32_mask(tc, _mm512_set1_epi32(15)) & hm;
-                        if ek | et != 0 {
-                            let (mut rk, mut rt) = (arr(kap), arr(th));
-                            for i in 0..16 {
-                                if (ek | et) >> i & 1 == 0 {
-                                    continue;
-                                }
-                                let row = (c.r0 + sv.idx[o + i] as usize) as u32;
-                                if ek >> i & 1 == 1 {
-                                    rk[i] = ix.esc[&(l as u8, 8 + j as u8, row)];
-                                }
-                                if et >> i & 1 == 1 {
-                                    rt[i] = ix.esc[&(l as u8, 16 + j as u8, row)];
-                                }
-                            }
-                            kap = _mm512_loadu_ps(rk.as_ptr());
-                            th = _mm512_loadu_ps(rt.as_ptr());
-                        }
-                        _mm512_storeu_ps(sv.kap[j].as_mut_ptr().add(o), kap);
-                        let ab = _mm512_mul_ps(_mm512_mul_ps(_mm512_mul_ps(yv, th), _mm512_set1_ps(1.0 + 1e-6)), _mm512_set1_ps(cq.nd[j]));
-                        _mm512_storeu_ps(sv.var[j].as_mut_ptr().add(o), _mm512_mul_ps(_mm512_mul_ps(ab, ab), _mm512_set1_ps(1.0 / (gp.nb[j] - 1) as f32)));
-                        }
-                    }
-                st.cyc[P_RKAP] += tick() - tk;
-            }
             for h in 0..2 {
                 let hm: u16 = (act >> (16 * h)) as u16;
                 if hm == 0 {
@@ -1490,7 +1625,7 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                         for i in 0..16 {
                             if em >> i & 1 == 1 {
                                 let row = (c.r0 + sv.idx[o + i] as usize) as u32;
-                                r[i] = ix.esc[&(l as u8, 0u8, row)];
+                                r[i] = ix.esc.get(l as u8, 0u8, row);
                             }
                         }
                         rho = _mm512_loadu_ps(r.as_ptr());
@@ -1504,50 +1639,8 @@ pub unsafe fn run_cluster(ix: &Index2, ci: usize, pr: &Prep2, gq: &GQ2, cq: &mut
                     hn = hh;
                     sd = _mm512_setzero_ps();
                 } else {
-                    for pl in &lut.parts {
-                        let j = pl.j.unwrap();
-                        let a = _mm512_add_ps(ld(&sv.aj[j], o), pv[1 + j][h]);
-                        _mm512_storeu_ps(sv.aj[j].as_mut_ptr().add(o), a);
-                    }
-                    // the constant parts, once at the first randomised level (the same f32 operations as before)
-                    let (c0, h0) = if lr == 0 {
-                        let s = ld(&sv.s, o);
-                        let alrmr = _mm512_fmadd_ps(_mm512_set1_ps(cq.alr), ld(&sv.mr, o), _mm512_set1_ps(cq.qm));
-                        let sa = _mm512_mul_ps(s, ld(&sv.adet, o));
-                        let c0 = _mm512_add_ps(alrmr, sa);
-                        let fl = _mm512_add_ps(_mm512_abs_ps(alrmr), _mm512_abs_ps(sa));
-                        let h0 = _mm512_fmadd_ps(u16x, fl, _mm512_fmadd_ps(s, _mm512_set1_ps(edet + cq.ewdet), _mm512_set1_ps(cq.fixed)));
-                        _mm512_storeu_ps(sv.c0.as_mut_ptr().add(o), c0);
-                        _mm512_storeu_ps(sv.h0.as_mut_ptr().add(o), h0);
-                        (c0, h0)
-                    } else {
-                        (ld(&sv.c0, o), ld(&sv.h0, o))
-                    };
-                    let mut e = c0;
-                    let mut hpar = h0;
-                    let mut var = _mm512_setzero_ps();
-                    let rates = &gp.rates[lr];
-                    for j in 0..J {
-                        if rates[j] == 0.0 {
-                            hpar = _mm512_fmadd_ps(ld(&sv.yh[j], o), _mm512_set1_ps(cq.nd[j]), hpar);
-                            continue;
-                        }
-                        let kap = ld(&sv.kap[j], o);
-                        let eb = _mm512_mul_ps(kap, ld(&sv.aj[j], o));
-                        e = _mm512_add_ps(e, eb);
-                        // the kappa rounding bound and the estimate's 16 u share of |eb| in one product
-                        hpar = _mm512_fmadd_ps(_mm512_set1_ps(dmxj[j] + (16.0 * U) as f32), _mm512_abs_ps(eb), hpar);
-                        hpar = _mm512_fmadd_ps(kap, _mm512_set1_ps(ej[j] + cq.ewj[j]), hpar);
-                        var = _mm512_add_ps(var, ld(&sv.var[j], o));
-                    }
-                    let sdv = _mm512_sqrt_ps(var);
-                    let hnv = hpar;
-                    let hh = _mm512_mul_ps(_mm512_fmadd_ps(_mm512_set1_ps(gp.csgl[lr]), sdv, hnv), one6);
-                    est = e;
-                    lb = _mm512_sub_ps(e, hh);
-                    ub = _mm512_add_ps(e, _mm512_mul_ps(hh, _mm512_set1_ps(pr.dial[l])));
-                    hn = hnv;
-                    sd = sdv;
+                    let rl = rl.as_ref().unwrap();
+                    (lb, ub, est, hn, sd) = if h == 0 { rand_half::<0>(ix, rl, sv, sp, &pv, o, hm) } else { rand_half::<1>(ix, rl, sv, sp, &pv, o, hm) };
                 }
                 lbh[h] = lb;
                 ubh[h] = ub;
@@ -1805,9 +1898,8 @@ pub fn calibrate_repack(ix: &Index2) -> Vec<f32> {
         let decode = |cp: *const u8| unsafe {
             let mut acc = _mm512_setzero_ps();
             for pl in &lut.parts {
-                let (a, b) = part_sums(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), pl.groups);
-                let (x, y) = part_sums(cp.add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
-                acc = _mm512_add_ps(acc, _mm512_add_ps(_mm512_add_ps(a, b), _mm512_add_ps(x, y)));
+                let (a, b) = part_sums2(cp.add(pl.g0 * 64), lut.hi.as_ptr().add(pl.g0 * 64), lut.lo.as_ptr().add(pl.g0 * 64), pl.groups);
+                acc = _mm512_add_ps(acc, _mm512_add_ps(a, b));
             }
             std::hint::black_box(arr(acc));
         };
@@ -1879,7 +1971,7 @@ pub const R_ROWS: usize = 64;
 pub const R_KAPPA: f64 = 0.186;
 /// The exact k-NN seed in the same rows, saved when a filtered k-NN scans first: measured 1.18-1.45 ms against 0.19 us
 /// a row on 1M BioCLIP-2 (k 10 and 100), 6,200-7,600 rows; the lower end. The seed is the anchor search over the
-/// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at level 3, and 2k + 8 exact products:
+/// anchors, a probe of the 64 clusters with the largest bound to 2,000 items at 16 bytes (`seed_level`), and 2k + 8 exact products:
 /// it grows with the number of anchors and with k, not with the clusters' rows. So at large k (beyond the 100
 /// measured) this constant underestimates it, which leans toward the index path (the seed is paid, not saved).
 pub const R_SEED: usize = 6000;
@@ -2589,7 +2681,7 @@ fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: 
 /// The cluster's cut and sorted range (under the norm sort, its groups set up first).
 fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
     let c = &ix.cl[ci];
-    let qm = dot64(&pr.q64, ix.centres_f64(ci));
+    let qm = pr.qm(ix, ci);
     let (u0, u1, d0, d1) = if nusort {
         let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
         let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
@@ -2894,7 +2986,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     let iv = if o.want_iv { Some((-1.0, 1.0)) } else { None };
                     push(&mut acc, c.r0, c.r1, iv);
                     if o.want_iv && !ix.nukey.is_empty() {
-                        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+                        let qm = pr.qm(ix, ci);
                         let (lb, ub) = NuCut::new(ix, ci, pr, get_gq2(ix, pr, c.g, &mut acc.st), qm).bounds(c.numax);
                         let nn = acc.iv.len();
                         let cnt = nvis_in(c.r0, c.r1);
@@ -2957,7 +3049,7 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                             acc.idx_clusters += 1;
                             let gq = get_gq2(ix, pr, c.g, &mut acc.st);
                             let tq = tick();
-                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det && !o.want_iv);
+                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det);
                             acc.st.cyc[P_CLSETUP] += tick() - tq;
                             let mut ivv = Vec::new();
                             let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
@@ -3041,30 +3133,61 @@ pub struct KnnOut2 {
     pub npow: u32, // the index's guarantee N, as 2^npow (Meta2::npow)
 }
 
-/// Interval of one row at a level (from scratch), or exact at level nl.
-pub fn row_interval2(ix: &Index2, pr: &Prep2, row: usize, level: usize, st: &mut Stats) -> (f64, f64) {
-    let nl = ix.meta.nl();
-    if level >= nl {
-        st.full_reads += 1;
-        let v = exact_value2(ix, pr, row);
-        return (v, v);
+/// Intervals of rows at levels for the k-NN selection: per call, the rows grouped by cluster and level, each
+/// (cluster, level) run once over its rows; each cluster set up once, its tables kept for later calls. At level nl and
+/// beyond, a row's exact score (lower = upper).
+pub struct Refiner<'a> {
+    ix: &'a Index2,
+    pr: &'a Prep2,
+    cqs: std::collections::HashMap<usize, CQ2>,
+    sv: State,
+}
+impl<'a> Refiner<'a> {
+    pub fn new(ix: &'a Index2, pr: &'a Prep2) -> Refiner<'a> {
+        Refiner { ix, pr, cqs: Default::default(), sv: State::default() }
     }
-    let ci = ix.cl.partition_point(|c| c.r1 <= row);
-    let c = &ix.cl[ci];
-    let gq = get_gq2(ix, pr, c.g, st);
-    let qm = dot64(&pr.q64, ix.centres_f64(ci));
-    let mut cq = cluster_q2(ix, ci, gq, pr, qm);
-    let mut iv = Vec::new();
-    let (mut rin, mut pend) = (Vec::new(), Vec::new());
-    let mut sv = State::default();
-    let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
-    unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &[(row - c.r0) as u32], f64::NAN, Mode2::Interval(level), false, &mut sv, st, &mut out) };
-    (iv[0].1 as f64, iv[0].2 as f64)
+    /// The interval of each (row, level) of `req`, in its order.
+    pub fn refine(&mut self, req: &[(u32, usize)], st: &mut Stats) -> Vec<(f64, f64)> {
+        let (ix, pr) = (self.ix, self.pr);
+        let nl = ix.meta.nl();
+        let mut out = vec![(0.0, 0.0); req.len()];
+        // (cluster, level, row, position in req), so that a (cluster, level) is one run over ascending rows
+        let mut by: Vec<(usize, usize, u32, usize)> = Vec::with_capacity(req.len());
+        for (i, &(r, lv)) in req.iter().enumerate() {
+            if lv >= nl {
+                st.full_reads += 1;
+                let v = exact_value2(ix, pr, r as usize);
+                out[i] = (v, v);
+            } else {
+                by.push((ix.cl.partition_point(|c| c.r1 <= r as usize), lv, r, i));
+            }
+        }
+        by.sort_unstable();
+        let mut iv = Vec::new();
+        for g in by.chunk_by(|a, b| (a.0, a.1) == (b.0, b.1)) {
+            let (ci, lv) = (g[0].0, g[0].1);
+            let c = &ix.cl[ci];
+            let gq = get_gq2(ix, pr, c.g, st);
+            let cq = self.cqs.entry(ci).or_insert_with(|| cluster_q2(ix, ci, gq, pr, pr.qm(ix, ci)));
+            let cands: Vec<u32> = g.iter().map(|x| x.2 - c.r0 as u32).collect();
+            let (mut rin, mut pend) = (Vec::new(), Vec::new());
+            iv.clear();
+            let mut o = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
+            unsafe { run_cluster(ix, ci, pr, gq, cq, &cands, f64::NAN, Mode2::Interval(lv), false, &mut self.sv, st, &mut o) };
+            // nothing is decided at a threshold of NaN, so every row's interval comes back, in row order
+            assert_eq!(iv.len(), g.len(), "an interval for every row refined");
+            for (x, y) in g.iter().zip(&iv) {
+                debug_assert_eq!(x.2, y.0);
+                out[x.3] = (y.1 as f64, y.2 as f64);
+            }
+        }
+        out
+    }
 }
 
 /// Clusters in descending order of q.m^ (their centre direction).
 pub fn by_centre(ix: &Index2, pr: &Prep2, clusters: Vec<usize>) -> Vec<usize> {
-    let mut byc: Vec<(f64, usize)> = clusters.into_iter().map(|ci| (dot64(&pr.q64, ix.centres_f64(ci)) / ix.cl[ci].mn, ci)).collect();
+    let mut byc: Vec<(f64, usize)> = clusters.into_iter().map(|ci| (pr.qm(ix, ci) / ix.cl[ci].mn, ci)).collect();
     byc.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     byc.into_iter().map(|x| x.1).collect()
 }
@@ -3084,7 +3207,7 @@ pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, 
         nvis += cands.len();
         st.touched += cands.len() as u64;
         let gq = get_gq2(ix, pr, c.g, st);
-        let qm = dot64(&pr.q64, ix.centres_f64(ci));
+        let qm = pr.qm(ix, ci);
         let mut cq = cluster_q2(ix, ci, gq, pr, qm);
         let (mut rin, mut pend) = (Vec::new(), Vec::new());
         let mut out = RunOut { rows_in: &mut rin, pend: &mut pend, iv: Some(&mut iv) };
@@ -3125,17 +3248,23 @@ pub fn pseudo_queries(ix: &Index2, nq: usize, kk: usize) -> Vec<(usize, Vec<f32>
 }
 
 impl Approx {
-    /// As `order`, from q.m of every cluster.
-    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+    /// The first `take` clusters of `order`, from q.m of every cluster: only those are sorted (by descending key, the
+    /// lower index first among equal keys, as the full sort ordered them).
+    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>, take: usize) -> Vec<usize> {
         let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
             .map(|ci| (qm[ci] + self.f * self.rad[ci], ci)).collect();
-        keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
+        let by = |x: &(f64, usize), y: &(f64, usize)| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1));
+        if take > 0 && take < keys.len() {
+            keys.select_nth_unstable_by(take - 1, by);
+            keys.truncate(take);
+        }
+        keys.sort_unstable_by(by);
         keys.into_iter().map(|x| x.1).collect()
     }
     /// Clusters holding a visible item, by descending q.m + f r.
     pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
         let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
-            .map(|ci| (dot64(q64, ix.centres_f64(ci)) + self.f * self.rad[ci], ci)).collect();
+            .map(|ci| (ix.qm(q64, ci) + self.f * self.rad[ci], ci)).collect();
         keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
         keys.into_iter().map(|x| x.1).collect()
     }
@@ -3147,12 +3276,12 @@ impl Approx {
         let n = ix.n();
         let rad: Vec<f64> = (0..ix.k()).into_par_iter().map(|ci| {
             let c = &ix.cl[ci];
-            let m = ix.centres_f64(ci);
+            let m = ix.centre_f64(ci);
             let mut x = vec![0f64; n];
             let mut s = 0.0;
             for r in c.r0..c.r1 {
                 ix.full_row_f64(r, &mut x);
-                s += x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
+                s += x.iter().zip(&m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
             }
             (s / (c.r1 - c.r0).max(1) as f64).sqrt()
         }).collect();
@@ -3250,8 +3379,13 @@ impl Dial {
     }
 }
 
+/// The level the seed reads: the deepest that ends within 16 bytes an item, else the first.
+pub fn seed_level(ix: &Index2) -> usize {
+    (0..ix.meta.nl()).rev().find(|&l| ix.meta.level_bytes(l) <= 16).unwrap_or(0)
+}
+
 /// A first k-th best score: the visible items of the 64 clusters with the largest bound, taken by centre score until
-/// 2,000 are read at level 3, and the best 2k + 8 of those by interval midpoint scored exactly.
+/// 2,000 are read at the seed's level (`seed_level`), and the best 2k + 8 of those by interval midpoint scored exactly.
 pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut Stats) -> f64 {
     let k = ix.k();
     let rr = ix.x2.sqrt();
@@ -3269,14 +3403,14 @@ pub fn seed2(ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>, st: &mut St
         gs.dedup();
         setup_groups(ix, pr, &gs, st);
         live.iter().map(|&ci| {
-            let qm = dot64(&pr.q64, ix.centres_f64(ci));
+            let qm = pr.qm(ix, ci);
             (NuCut::new(ix, ci, pr, pr.gq[ix.cl[ci].g].get().unwrap(), qm).bounds(ix.cl[ci].numax).1, ci)
         }).collect()
     };
     cand.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
     cand.truncate(64);
     let clusters: Vec<usize> = cand.iter().map(|&(_, ci)| ci).collect();
-    let seed_iv = probe(ix, pr, by_centre(ix, pr, clusters), vis, 3, 2000, st);
+    let seed_iv = probe(ix, pr, by_centre(ix, pr, clusters), vis, seed_level(ix), 2000, st);
     let take = (2 * kk + 8).min(seed_iv.len());
     let mut ex: Vec<f64> = seed_iv[..take].iter().map(|x| exact_value2(ix, pr, x.0 as usize)).collect();
     st.full_reads += take as u64;
@@ -3351,16 +3485,23 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let nl = ix.meta.nl();
     let t0 = tick();
     // q.m of every cluster, for the order, the anchor and each probed cluster
-    let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
-    let qm: Vec<f64> = (0..ix.k()).map(|ci| dot64(&q64, ix.centres_f64(ci))).collect();
-    let mut pr = prep2_qm(ix, q, Some(&qm));
+    let mut pr = prep2(ix, q);
     if let Some(d) = dial {
         pr.dial = d.to_vec();
     }
+    let qm = pr.qms(ix, None);
     let mut st = Stats::new(nl);
-    let mut order = ap.order_qm(ix, &qm, vis);
-    order.truncate(nprobe);
+    let order = ap.order_qm(ix, &qm, vis, nprobe);
     st.cyc[P_PLAN] += tick() - t0;
+    // the groups of the probed clusters with too many visible rows to be scored directly, set up together: each
+    // rotation is read once for all of them, not once per group
+    let mut gs: Vec<usize> = order.iter().filter(|&&ci| {
+        let nv = vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+        nv as f64 * COSTS.full_us > COSTS.index_us(nv, 1.0)
+    }).map(|&ci| ix.cl[ci].g).collect();
+    gs.sort_unstable();
+    gs.dedup();
+    setup_groups(ix, &pr, &gs, &mut st);
     let mut top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
     let mut sv = State::default();
     let (mut rows_in, mut pend) = (Vec::new(), Vec::new());
@@ -3504,7 +3645,8 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let next = if lv >= 254 { 0usize } else { lv as usize + 1 };
         cands.push((r, lb as f64, ub as f64, next, false));
     }
-    let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |r, lv| row_interval2(ix, &pr, r as usize, lv, &mut st), |r| exact_value2(ix, &pr, r as usize))
+    let mut rf = Refiner::new(ix, &pr);
+    let mut fin: Vec<(f64, u32)> = select_knn(cands, kk, nl, |req| rf.refine(req, &mut st), |r| exact_value2(ix, &pr, r as usize))
         .into_iter().map(|(v, r)| (v, ix.row_ent[r as usize])).collect();
     fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
     fin.truncate(kk);
@@ -3513,13 +3655,14 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
 }
 
 /// The k best of `cands` (row, lower bound, upper bound, next level, exact), refining intervals a level at a time:
-/// `refine(row, level)` is the row's interval at that level, its exact score (lower = upper) at level `nl`. A candidate
+/// `refine` takes the (row, level) pairs of a round and gives each row's interval at that level, its exact score
+/// (lower = upper) at level `nl`. A candidate
 /// is dropped when at least k other candidates have a lower bound above its upper bound, and certified when at most
 /// k - 1 others have an upper bound at or above its lower bound; an exact score replaces the interval. Intervals are
 /// intersected across levels. Returns the survivors with their exact scores, or +inf where certified without one; the
 /// caller keeps the k largest. The answer is exact when every upper bound of the true k best holds and every lower bound of every
 /// other candidate holds, whatever the other sides do; the candidates must contain the k best.
-pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: usize, mut refine: impl FnMut(u32, usize) -> (f64, f64), mut exact: impl FnMut(u32) -> f64) -> Vec<(f64, u32)> {
+pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: usize, mut refine: impl FnMut(&[(u32, usize)]) -> Vec<(f64, f64)>, mut exact: impl FnMut(u32) -> f64) -> Vec<(f64, u32)> {
     let desc = |v: &mut Vec<f64>| v.sort_by(|a, b| b.partial_cmp(a).unwrap());
     // the candidate's own bound is left out of each count
     let certified = |c: &(u32, f64, f64, usize, bool), ubs: &[f64]| ubs.partition_point(|&u| u >= c.1) - ((c.2 >= c.1) as usize) < kk;
@@ -3535,17 +3678,14 @@ pub fn select_knn(mut cands: Vec<(u32, f64, f64, usize, bool)>, kk: usize, nl: u
         }
         let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
         desc(&mut ubs);
-        let mut refined = 0;
-        for c in cands.iter_mut() {
-            if c.4 || certified(c, &ubs) {
-                continue;
-            }
-            refined += 1;
-            let (l, h) = refine(c.0, c.3);
-            *c = if c.3 >= nl { (c.0, l, h, c.3 + 1, true) } else { (c.0, l.max(c.1), h.min(c.2), c.3 + 1, false) };
-        }
-        if refined == 0 {
+        let todo: Vec<usize> = (0..cands.len()).filter(|&i| !cands[i].4 && !certified(&cands[i], &ubs)).collect();
+        if todo.is_empty() {
             break;
+        }
+        let got = refine(&todo.iter().map(|&i| (cands[i].0, cands[i].3)).collect::<Vec<_>>());
+        for (&i, (l, h)) in todo.iter().zip(got) {
+            let c = &mut cands[i];
+            *c = if c.3 >= nl { (c.0, l, h, c.3 + 1, true) } else { (c.0, l.max(c.1), h.min(c.2), c.3 + 1, false) };
         }
     }
     let mut ubs: Vec<f64> = cands.iter().map(|c| c.2).collect();
@@ -3589,7 +3729,7 @@ mod knn_tests {
                 (s[i] + e - h, s[i] + e + h)
             }).collect()).collect();
             let cands = (0..n).map(|i| (i as u32, iv[i][0].0, iv[i][0].1, 1, false)).collect();
-            let refine = |r: u32, lv: usize| if lv >= l { (s[r as usize], s[r as usize]) } else { iv[r as usize][lv] };
+            let refine = |req: &[(u32, usize)]| req.iter().map(|&(r, lv)| if lv >= l { (s[r as usize], s[r as usize]) } else { iv[r as usize][lv] }).collect();
             let mut fin = select_knn(cands, k, l, refine, |r| s[r as usize]);
             fin.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
             let mut got: Vec<u32> = fin[..k.min(fin.len())].iter().map(|x| x.1).collect();
@@ -3659,7 +3799,7 @@ impl Synth2 {
         let gq = get_gq2(ix, pr, ix.cl[c].g, &mut st);
         let mut z = vec![0f64; self.n];
         self.gen(c, self.ext[row], &mut z);
-        dot64(&pr.q64, ix.centres_f64(c)) + dot64(&gq.qv, &z)
+        pr.qm(ix, c) + dot64(&gq.qv, &z)
     }
     pub fn x_f64(&self, ix: &Index2, row: usize, out: &mut [f64]) {
         let c = self.row_cl[row] as usize;
@@ -3667,7 +3807,7 @@ impl Synth2 {
         let mut z = vec![0f64; n];
         self.gen(c, self.ext[row], &mut z);
         let v = &self.vq[self.grp[c]];
-        let m = ix.centres_f64(c);
+        let m = ix.centre_f64(c);
         for i in 0..n {
             out[i] = m[i] + (0..n).map(|k| v[i * n + k] * z[k]).sum::<f64>();
         }

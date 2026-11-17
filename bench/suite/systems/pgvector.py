@@ -1,7 +1,7 @@
 # PostgreSQL with pgvector, as a database baseline (full suite, two datasets). No vector index: exact k-NN is a
 # sequential scan ordered by the negative inner product (ORDER BY v <#> q LIMIT k), a threshold query is
 # WHERE (v <#> q) <= -t, and a visible set is a table of ids joined in (id IN (SELECT id FROM vis_<name>)).
-# One worker (max_parallel_workers_per_gather = 0). Timing follows ../threshold-db/dbrun.py: at the client, from
+# One worker (max_parallel_workers_per_gather = 0). Timing follows the earlier threshold-db/dbrun.py: at the client, from
 # sending the SQL to holding the ids as a numpy array. Pin the server to the timing core yourself (taskset on the
 # postmaster before the run); the client runs where the suite runs.
 # Connection: params["dsn"] or $PGVECTOR_DSN (e.g. "host=127.0.0.1 dbname=bench user=bench"); needs psycopg (3).

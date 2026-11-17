@@ -37,6 +37,31 @@ DATASETS = {
     "bioclip2-768": dict(source="bioclip", url=None, N=999_950, d=768, ood=True, kind="images+text->images"),
 }
 
+# The LAION scale sets (prep_scale.py): CLIP ViT-B/32 embeddings of LAION-400M as LAION released them (410 parts of
+# 1,000,448 image and text embeddings each, f16, 512 dimensions; the last part is about half), from
+# deploy.laion.ai. Part 0's images are exactly VIBE's laion-clip-512 corpus (VIBE's datasets.py reads img_emb_0.npy and
+# draws its queries from text_emb_0.npy), checked here to 9e-8 after normalisation. A population is the first `parts`
+# parts; each size takes the same uniform random fraction of every part's rows (seeded by part), and a smaller size's
+# rows are a prefix of the same per-part permutation, so 10M is inside 40M inside 100M, stratified by part (as
+# rust/REPORT_SCALING.md built R1M inside R3M). Queries are text embeddings of part 0 (out of distribution, as VIBE's).
+LAION_URL = "https://deploy.laion.ai/8f83b608504d46bb81708ec86e912220/embeddings/{kind}_emb/{kind}_emb_{part}.npy"
+
+
+def laion_scale(parts, fraction, n):
+    return dict(source="laion-scale", url=None, N=n, d=512, ood=True, kind="text->images", parts=parts,
+                fraction=fraction)
+
+
+DATASETS.update({
+    "laion-10m": laion_scale(100, 0.1, 10_004_500),
+    "laion-40m": laion_scale(100, 0.4, 40_017_900),
+    "laion-100m": laion_scale(100, 1.0, 100_044_800),
+    # the same code on two parts: 200k in 500k in 1M
+    "laion-s200k": laion_scale(2, 0.1, 200_090),
+    "laion-s500k": laion_scale(2, 0.25, 500_224),
+    "laion-s1m": laion_scale(2, 0.5, 1_000_448),
+})
+
 
 def url(name):
     ds = DATASETS[name]

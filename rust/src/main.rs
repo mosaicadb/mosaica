@@ -67,6 +67,9 @@ fn main() {
             vs.extend(same.iter().map(|(v, p)| (*v, &c, *p)));
             run2::e2e2(&vs, get("--nq", 100));
         }
+        if run2::has_mode("qbench") {
+            run2::qbench(&c, get("--nq", 50));
+        }
         if run2::has_mode("breakdown") {
             run2::breakdown2(&c, get("--nq", 20));
         }

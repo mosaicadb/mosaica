@@ -143,7 +143,72 @@ pub fn f16_fixed(h: u16) -> i64 {
 /// The similarity, defined exactly: s(q,x) = 2^-48 * sum_i Q_i X_i with Q_i, X_i the f16 values times 2^24.
 /// Returned as the exact integer numerator.
 pub fn exact_dot(q16: &[u16], x16: &[u16]) -> i128 {
+    #[cfg(target_feature = "avx512f")]
+    let v = unsafe { exact_dot_512(q16, x16) };
+    #[cfg(all(not(target_feature = "avx512f"), target_feature = "avx2"))]
+    let v = unsafe { exact_dot_256(q16, x16) };
+    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2")))]
+    let v = None;
+    v.unwrap_or_else(|| exact_dot_scalar(q16, x16))
+}
+
+fn exact_dot_scalar(q16: &[u16], x16: &[u16]) -> i128 {
     q16.iter().zip(x16).map(|(&a, &b)| f16_fixed(a) as i128 * f16_fixed(b) as i128).sum()
+}
+
+/// exact_dot sixteen elements at a time. A finite f16 times 2^24 is M 2^S, M = m (e = 0) or 1024 + m below 2^11 and
+/// S = max(e - 1, 0), so a product is M_q M_x 2^(S_q + S_x) with M_q M_x below 2^22. Each product goes to the bucket
+/// of its shift's high three bits, shifted by the low three (below 2^29); a bucket's i64 lanes hold at most n / 16
+/// such terms, and the i128 total is the buckets' sums shifted by 8 a. None when an element is inf or NaN (the scalar
+/// path refuses those).
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
+unsafe fn exact_dot_512(q16: &[u16], x16: &[u16]) -> Option<i128> {
+    use std::arch::x86_64::*;
+    let n = q16.len().min(x16.len());
+    assert!(n <= 1 << 24, "exact_dot: {n} elements overflow the 64-bit buckets");
+    let z = _mm512_setzero_si512();
+    let mut acc = [[z; 2]; 8];
+    let (f31, m1023, one, seven) = (_mm512_set1_epi32(31), _mm512_set1_epi32(1023), _mm512_set1_epi32(1), _mm512_set1_epi32(7));
+    // (M, S, sign bit) of 16 f16 values; the mask of lanes that are inf or NaN
+    let split = |h: __m512i| {
+        let e = _mm512_and_si512(_mm512_srli_epi32(h, 10), f31);
+        let m = _mm512_and_si512(h, m1023);
+        let mm = _mm512_mask_or_epi32(m, _mm512_test_epi32_mask(e, e), m, _mm512_set1_epi32(1024));
+        (mm, _mm512_max_epi32(_mm512_sub_epi32(e, one), z), _mm512_srli_epi32(h, 15), _mm512_cmpeq_epi32_mask(e, f31))
+    };
+    let mut i = 0;
+    while i + 16 <= n {
+        let (mq, sq, gq, bq) = split(_mm512_cvtepu16_epi32(_mm256_loadu_si256(q16.as_ptr().add(i) as *const _)));
+        let (mx, sx, gx, bx) = split(_mm512_cvtepu16_epi32(_mm256_loadu_si256(x16.as_ptr().add(i) as *const _)));
+        if bq | bx != 0 {
+            return None;
+        }
+        let sh = _mm512_add_epi32(sq, sx);
+        let mut v = _mm512_sllv_epi32(_mm512_mullo_epi32(mq, mx), _mm512_and_si512(sh, seven));
+        v = _mm512_mask_sub_epi32(v, _mm512_test_epi32_mask(_mm512_xor_si512(gq, gx), one), z, v);
+        let a = _mm512_srli_epi32(sh, 3);
+        let (lo, hi) = (_mm512_cvtepi32_epi64(_mm512_castsi512_si256(v)), _mm512_cvtepi32_epi64(_mm512_extracti64x4_epi64(v, 1)));
+        for (b, ab) in acc.iter_mut().enumerate() {
+            let k = _mm512_cmpeq_epi32_mask(a, _mm512_set1_epi32(b as i32));
+            if k != 0 {
+                ab[0] = _mm512_mask_add_epi64(ab[0], k as u8, ab[0], lo);
+                ab[1] = _mm512_mask_add_epi64(ab[1], (k >> 8) as u8, ab[1], hi);
+            }
+        }
+        i += 16;
+    }
+    let mut r: i128 = 0;
+    for (b, ab) in acc.iter().enumerate() {
+        r += (_mm512_reduce_add_epi64(_mm512_add_epi64(ab[0], ab[1])) as i128) << (8 * b);
+    }
+    for j in i..n {
+        if (q16[j] >> 10) & 31 == 31 || (x16[j] >> 10) & 31 == 31 {
+            return None;
+        }
+        r += f16_fixed(q16[j]) as i128 * f16_fixed(x16[j]) as i128;
+    }
+    Some(r)
 }
 /// Decide s(q,x) >= t exactly.
 pub fn exact_ge(num: i128, t: f64) -> bool {
@@ -292,6 +357,26 @@ pub fn haar_rotation(m: usize, seed: u64, stream: u64) -> Vec<f64> {
 }
 
 /// f64 dot product with eight independent partial sums (vectorises; a different but fixed summation order).
+/// dot64 with `b` held as f32: each element widened exactly, the same operations in the same order, so the result
+/// equals dot64 of the widened vector bit for bit.
+pub fn dot64_32(a: &[f64], b: &[f32]) -> f64 {
+    let n = a.len().min(b.len());
+    let mut s = [0f64; 8];
+    let mut i = 0;
+    while i + 8 <= n {
+        for k in 0..8 {
+            s[k] += a[i + k] * b[i + k] as f64;
+        }
+        i += 8;
+    }
+    let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+    while i < n {
+        r += a[i] * b[i] as f64;
+        i += 1;
+    }
+    r
+}
+
 pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
     let mut s = [0f64; 8];
@@ -391,5 +476,109 @@ impl AsRef<std::path::Path> for TmpDir {
 impl Drop for TmpDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+
+/// exact_dot_512 on AVX2, eight elements at a time: the same buckets, each a pair of four i64 lanes, and only the
+/// buckets some lane of the eight falls in are added to.
+#[cfg(all(not(target_feature = "avx512f"), target_feature = "avx2"))]
+#[target_feature(enable = "avx2")]
+unsafe fn exact_dot_256(q16: &[u16], x16: &[u16]) -> Option<i128> {
+    use std::arch::x86_64::*;
+    let n = q16.len().min(x16.len());
+    assert!(n <= 1 << 24, "exact_dot: {n} elements overflow the 64-bit buckets");
+    let z = _mm256_setzero_si256();
+    let mut acc = [[z; 2]; 8];
+    let (f31, m1023, one, seven, b1024) = (_mm256_set1_epi32(31), _mm256_set1_epi32(1023), _mm256_set1_epi32(1), _mm256_set1_epi32(7), _mm256_set1_epi32(1024));
+    // (M, S, sign bit) of 8 f16 values, and whether any is inf or NaN
+    let split = |h: __m256i| {
+        let e = _mm256_and_si256(_mm256_srli_epi32::<10>(h), f31);
+        let m = _mm256_and_si256(h, m1023);
+        let nz = _mm256_andnot_si256(_mm256_cmpeq_epi32(e, z), b1024);
+        let bad = _mm256_movemask_epi8(_mm256_cmpeq_epi32(e, f31)) != 0;
+        (_mm256_or_si256(m, nz), _mm256_max_epi32(_mm256_sub_epi32(e, one), z), _mm256_srli_epi32::<15>(h), bad)
+    };
+    let mut i = 0;
+    while i + 8 <= n {
+        let (mq, sq, gq, bq) = split(_mm256_cvtepu16_epi32(_mm_loadu_si128(q16.as_ptr().add(i) as *const _)));
+        let (mx, sx, gx, bx) = split(_mm256_cvtepu16_epi32(_mm_loadu_si128(x16.as_ptr().add(i) as *const _)));
+        if bq || bx {
+            return None;
+        }
+        let sh = _mm256_add_epi32(sq, sx);
+        let v = _mm256_sllv_epi32(_mm256_mullo_epi32(mq, mx), _mm256_and_si256(sh, seven));
+        // negate where the signs differ: (v ^ s) - s with s all ones there
+        let sg = _mm256_sub_epi32(z, _mm256_xor_si256(gq, gx));
+        let v = _mm256_sub_epi32(_mm256_xor_si256(v, sg), sg);
+        let a = _mm256_srli_epi32::<3>(sh);
+        // the buckets present: a ranges over 0..7, so the lanes' smallest and largest bound them
+        let lo4 = _mm_min_epi32(_mm256_castsi256_si128(a), _mm256_extracti128_si256::<1>(a));
+        let hi4 = _mm_max_epi32(_mm256_castsi256_si128(a), _mm256_extracti128_si256::<1>(a));
+        let lo2 = _mm_min_epi32(lo4, _mm_shuffle_epi32::<0x4e>(lo4));
+        let hi2 = _mm_max_epi32(hi4, _mm_shuffle_epi32::<0x4e>(hi4));
+        let (b0, b1) = (_mm_cvtsi128_si32(_mm_min_epi32(lo2, _mm_shuffle_epi32::<0xb1>(lo2))), _mm_cvtsi128_si32(_mm_max_epi32(hi2, _mm_shuffle_epi32::<0xb1>(hi2))));
+        for b in b0 as usize..=b1 as usize {
+            let w = _mm256_and_si256(v, _mm256_cmpeq_epi32(a, _mm256_set1_epi32(b as i32)));
+            let ab = &mut acc[b];
+            ab[0] = _mm256_add_epi64(ab[0], _mm256_cvtepi32_epi64(_mm256_castsi256_si128(w)));
+            ab[1] = _mm256_add_epi64(ab[1], _mm256_cvtepi32_epi64(_mm256_extracti128_si256::<1>(w)));
+        }
+        i += 8;
+    }
+    let mut r: i128 = 0;
+    for (b, ab) in acc.iter().enumerate() {
+        let mut l = [0i64; 4];
+        _mm256_storeu_si256(l.as_mut_ptr() as *mut _, _mm256_add_epi64(ab[0], ab[1]));
+        r += (l.iter().sum::<i64>() as i128) << (8 * b);
+    }
+    for j in i..n {
+        if (q16[j] >> 10) & 31 == 31 || (x16[j] >> 10) & 31 == 31 {
+            return None;
+        }
+        r += f16_fixed(q16[j]) as i128 * f16_fixed(x16[j]) as i128;
+    }
+    Some(r)
+}
+
+#[cfg(test)]
+mod exact_dot_tests {
+    use super::*;
+    use rand::{Rng, SeedableRng};
+
+    /// Random finite f16 bit patterns (subnormals, zeros of both signs, the largest values) at lengths around the
+    /// 16-element blocks: the vector path equals the scalar sum.
+    #[test]
+    fn exact_dot_equals_the_scalar_sum() {
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
+        let finite = |r: &mut rand_chacha::ChaCha8Rng| loop {
+            let h: u16 = match r.gen_range(0..4) {
+                0 => r.gen(),
+                1 => r.gen::<u16>() & 0x83ff,
+                2 => 0x7bff | (r.gen::<u16>() & 0x8000),
+                _ => r.gen::<u16>() & 0x8000,
+            };
+            if (h >> 10) & 31 != 31 {
+                return h;
+            }
+        };
+        for n in [0, 1, 15, 16, 17, 64, 767, 768, 1024, 4096] {
+            for _ in 0..20 {
+                let q: Vec<u16> = (0..n).map(|_| finite(&mut rng)).collect();
+                let x: Vec<u16> = (0..n).map(|_| finite(&mut rng)).collect();
+                assert_eq!(exact_dot(&q, &x), exact_dot_scalar(&q, &x), "n {n}");
+            }
+        }
+        // every element at the largest magnitude, all signs alike: the largest bucket sums
+        let big = vec![0x7bffu16; 4096];
+        assert_eq!(exact_dot(&big, &big), exact_dot_scalar(&big, &big));
+    }
+
+    #[test]
+    #[should_panic(expected = "inf/nan")]
+    fn exact_dot_refuses_inf() {
+        let mut q = vec![0x3c00u16; 32];
+        q[20] = 0x7c00;
+        exact_dot(&q, &vec![0x3c00u16; 32]);
     }
 }

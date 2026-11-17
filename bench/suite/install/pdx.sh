@@ -8,7 +8,7 @@ set -euo pipefail
 DIR=$1
 PY=${2:-python3}
 REV=91618e01e574e594e27c71abfe3b1d5094657d53
-[ -d "$DIR/.git" ] || git clone https://github.com/cwida/PDX.git "$DIR"
+[ -e "$DIR/.git" ] || git clone https://github.com/cwida/PDX.git "$DIR"
 cd "$DIR"
 git checkout -q "$REV"
 git submodule update --init --depth 1 extern/pybind11 extern/Eigen

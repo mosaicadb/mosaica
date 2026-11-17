@@ -519,7 +519,7 @@ pub fn save_rest(ix: &Index2, dir: &str) {
     let f = |name: &str| format!("{dir}/{name}");
     let offs: Vec<u64> = ix.coff.iter().chain(&ix.soff).flatten().map(|&o| o as u64).collect();
     write_file(&f("offsets.bin"), &offs);
-    let mut esc: Vec<(u64, f32)> = ix.esc.iter().map(|(&(l, s, r), &v)| (((l as u64) << 40) | ((s as u64) << 32) | r as u64, v)).collect();
+    let mut esc: Vec<(u64, f32)> = ix.esc.iter().map(|((l, s, r), v)| (((l as u64) << 40) | ((s as u64) << 32) | r as u64, v)).collect();
     esc.sort_unstable_by_key(|e| e.0);
     write_file(&f("esc_key.bin"), &esc.iter().map(|e| e.0).collect::<Vec<_>>());
     write_file(&f("esc_val.bin"), &esc.iter().map(|e| e.1).collect::<Vec<_>>());
@@ -845,6 +845,7 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     if nukey.is_empty() == o.nusort {
         return Err(format!("{dir} was built {} the norm sort, the options ask {}; rebuild it", if o.nusort { "without" } else { "with" }, if o.nusort { "for it" } else { "for none" }));
     }
+    let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         nukey,
         repack: vec![0.6; nl],
@@ -854,8 +855,10 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         codes: Arc::new(codes),
         etab: Arc::new(et),
         cl,
-        centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
+        centres32: Arc::new(p.centres[..k * n].to_vec()),
         rots: Arc::new(rots),
+        anchors32: Arc::new(anchors.iter().map(|&x| x as f32).collect()),
+        apm: Arc::new(apm),
         anchors: Arc::new(anchors),
         hi: Arc::new(hi),
         lo: Arc::new(lo),
@@ -1106,7 +1109,7 @@ impl Index2 {
         h.pod(&self.etab.e);
         h.pod(&self.etab.lo);
         h.pod(&self.etab.hi);
-        h.pod(&self.centres64);
+        h.pod(&self.centres32.iter().map(|&x| x as f64).collect::<Vec<f64>>());
         self.rots.iter().for_each(|r| h.pod(r));
         h.u64(self.anc_centres as u64);
         h.finish()

@@ -572,7 +572,7 @@ impl Part {
             f.eid = et.id(core::array::from_fn(|k| v[(k >> f.off) & mask]), f.nb);
         }
         let ufields: Vec<[u16; 4]> = ufields.iter().map(|v| core::array::from_fn(|i| if i < v.len() { v[i] } else { u16::MAX })).collect();
-        // part_sums adds the units' table bytes (at most 255 each) in 16 bits
+        // part_sums2 adds the units' table bytes (at most 255 each) in 16 bits
         // whole groups of 4 units: the centre tables (kern::centre_tab) hold units / 4 * 4 per part, the queries read
         // all of them (total % 16 == 0 and 4 bits per unit already imply it)
         assert!(ufields.len() % 4 == 0, "a part of {} units, not a multiple of 4", ufields.len());
@@ -1165,6 +1165,47 @@ pub enum Full2 {
     Synth(q::Synth2),
 }
 
+/// Escaped scalars, (level, slot, row) -> value: det norm (slot 0), yh (1 + j), kappa (8 + j), tan (16 + j). Sorted by
+/// row, then level and slot, with the first entry of every 32 rows, so a lookup searches the few entries of its block.
+#[derive(Clone, Default)]
+pub struct Esc {
+    key: Vec<u64>,
+    val: Vec<f32>,
+    blk: Vec<u32>,
+}
+impl Esc {
+    #[inline(always)]
+    fn pack(l: u8, slot: u8, row: u32) -> u64 {
+        (row as u64) << 16 | (l as u64) << 8 | slot as u64
+    }
+    pub fn bytes(&self) -> usize {
+        self.key.len() * 12 + self.blk.len() * 4
+    }
+    pub fn iter(&self) -> impl Iterator<Item = ((u8, u8, u32), f32)> + '_ {
+        self.key.iter().zip(&self.val).map(|(&k, &v)| (((k >> 8) as u8, k as u8, (k >> 16) as u32), v))
+    }
+    /// The value of an escape the codes say is there.
+    #[inline]
+    pub fn get(&self, l: u8, slot: u8, row: u32) -> f32 {
+        let b = row as usize >> 5;
+        let (lo, hi) = (self.blk[b] as usize, self.blk[b + 1] as usize);
+        let k = Self::pack(l, slot, row);
+        let i = lo + self.key[lo..hi].partition_point(|&x| x < k);
+        assert!(i < hi && self.key[i] == k, "no escape for level {l} slot {slot} row {row}");
+        self.val[i]
+    }
+}
+impl FromIterator<((u8, u8, u32), f32)> for Esc {
+    fn from_iter<I: IntoIterator<Item = ((u8, u8, u32), f32)>>(it: I) -> Self {
+        let mut e: Vec<(u64, f32)> = it.into_iter().map(|((l, s, r), v)| (Esc::pack(l, s, r), v)).collect();
+        e.sort_unstable_by_key(|x| x.0);
+        let key: Vec<u64> = e.iter().map(|x| x.0).collect();
+        let nb = key.last().map_or(0, |&k| (k >> 21) as usize + 1);
+        let blk = (0..=nb).map(|b| key.partition_point(|&k| (k >> 21) < b as u64) as u32).collect();
+        Esc { key, val: e.iter().map(|x| x.1).collect(), blk }
+    }
+}
+
 /// The query-independent parts that do not depend on which rows a cluster holds are shared (Arc) with the indexes
 /// compacted from this one (`Index2::compact`).
 pub struct Index2 {
@@ -1173,9 +1214,14 @@ pub struct Index2 {
     pub codes: Arc<DetTab>,
     pub etab: Arc<ExpTab>,
     pub cl: Vec<Cl2>,
-    pub centres64: Arc<Vec<f64>>,
+    /// The stored centres (K x n), whose values are f32: q.m reads them widened (`Index2::qm`).
+    pub centres32: Arc<Vec<f32>>,
     pub rots: Arc<Vec<Vec<f64>>>,
     pub anchors: Arc<Vec<f64>>,
+    /// The anchors rounded to f32, for the search of a query's nearest (whose beta is then taken from `anchors`).
+    pub anchors32: Arc<Vec<f32>>,
+    /// nanch x k: anchor a . (cluster c's centre direction) at [a * k + c], as dot64 gives it; query-independent.
+    pub apm: Arc<Vec<f64>>,
     // nanch x k: cluster c's largest and smallest x . anchor a at [a * k + c], rounded outward; on the heap after a
     // build, mapped from hi.bin and lo.bin after an open (so an open reads none of it)
     pub hi: Arc<Arr<f32>>,
@@ -1193,7 +1239,7 @@ pub struct Index2 {
     pub lscal: Vec<Arr<u8>>, // per level: scalar rows
     pub coff: Vec<Vec<usize>>, // per level per cluster: byte offset into lcode
     pub soff: Vec<Vec<usize>>,
-    pub esc: HashMap<(u8, u8, u32), f32>, // (level, slot, row) -> value: det norm (slot 0), yh (1 + j), kappa (8 + j), tan (16 + j)
+    pub esc: Esc,
     pub x2: f64,
     pub full: Full2,
     pub nrows: usize,
@@ -1202,6 +1248,14 @@ pub struct Index2 {
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
     pub nent: usize,     // entity ids are below this
     pub nukey: Arr<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
+}
+
+/// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
+pub fn anchor_mhat(anchors: &[f64], cl: &[Cl2], n: usize) -> Vec<f64> {
+    if n == 0 {
+        return Vec::new();
+    }
+    anchors.par_chunks(n).flat_map_iter(|a| cl.iter().map(move |c| dot64(a, &c.mhat))).collect()
 }
 
 /// The format of the encoded index (codes, scalars, centre tables), which this build derives when it opens a fitted
@@ -1273,9 +1327,19 @@ impl Index2 {
         }
         out
     }
-    pub fn centres_f64(&self, ci: usize) -> &[f64] {
+    /// Cluster ci's stored centre.
+    pub fn centre(&self, ci: usize) -> &[f32] {
         let n = self.n();
-        &self.centres64[ci * n..(ci + 1) * n]
+        &self.centres32[ci * n..(ci + 1) * n]
+    }
+    /// Cluster ci's stored centre as f64.
+    pub fn centre_f64(&self, ci: usize) -> Vec<f64> {
+        self.centre(ci).iter().map(|&x| x as f64).collect()
+    }
+    /// q.m of cluster ci (dot64 of q and the centre).
+    #[inline]
+    pub fn qm(&self, q64: &[f64], ci: usize) -> f64 {
+        dot64_32(q64, self.centre(ci))
     }
     /// The stored vectors, when this index's row ids address them directly: not when it shares a parent's through
     /// `vrow`, whose rows the reader and the page-cache hints would then miss.
@@ -1357,12 +1421,7 @@ impl Index2 {
         drop(per);
         let mut ahat: Vec<i16> = rows.iter().map(|&r| self.ahat[r as usize]).collect();
         ahat.extend_from_slice(&[0i16; 32]);
-        let mut esc = HashMap::new();
-        for (&(l, slot, r), &v) in &self.esc {
-            if let Ok(i) = rows.binary_search(&r) {
-                esc.insert((l, slot, i as u32), v);
-            }
-        }
+        let esc = self.esc.iter().filter_map(|((l, slot, r), v)| rows.binary_search(&r).ok().map(|i| ((l, slot, i as u32), v))).collect();
         let (full, vrow) = if vectors {
             let mut v = F16Rows::zeroed(rows.len() * n);
             v.par_chunks_mut(n).zip(rows.par_iter()).for_each(|(d, &r)| d.copy_from_slice(self.full_row_f16(r as usize)));
@@ -1377,9 +1436,11 @@ impl Index2 {
             codes: self.codes.clone(),
             etab: self.etab.clone(),
             cl,
-            centres64: self.centres64.clone(),
+            centres32: self.centres32.clone(),
             rots: self.rots.clone(),
             anchors: self.anchors.clone(),
+            anchors32: self.anchors32.clone(),
+            apm: self.apm.clone(),
             hi: self.hi.clone(),
             lo: self.lo.clone(),
             nanch: self.nanch,
@@ -1413,7 +1474,7 @@ impl Index2 {
             _ => 0,
         };
         self.lcode.iter().chain(&self.lscal).map(|v| v.len()).sum::<usize>() + self.ahat.len() * 2 + self.row_ent.len() * 4
-            + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.len() * 24 + self.cl.len() * std::mem::size_of::<Cl2>() + full
+            + self.vrow.len() * 4 + self.nukey.len() * 2 + self.esc.bytes() + self.cl.len() * std::mem::size_of::<Cl2>() + full
     }
     /// The row of entity e. A compacted index has no entity-to-row map (it would cost 4 bytes per entity of the
     /// parent): map an entity through the index it was compacted from, then to the compacted row by the row list.
@@ -2153,12 +2214,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         }
         info
     }).collect();
-    let mut esc = HashMap::new();
-    for (c, d) in done.iter().enumerate() {
-        for &(l, slot, i, v) in &d.esc {
-            esc.insert((l, slot, (row0[c] + i as usize) as u32), v);
-        }
-    }
+    let esc = done.iter().zip(&row0).flat_map(|(d, &r0)| d.esc.iter().map(move |&(l, slot, i, v)| ((l, slot, (r0 + i as usize) as u32), v))).collect();
     drop(done);
     for gp in groups.iter_mut() {
         gp.vinv = Vec::new();
@@ -2186,6 +2242,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         let wm = c.wm(gp);
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
+    let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
@@ -2195,8 +2252,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         codes: Arc::new(codes),
         etab: Arc::new(et),
         cl,
-        centres64: Arc::new(p.centres[..k * n].iter().map(|&x| x as f64).collect()),
+        centres32: Arc::new(p.centres[..k * n].to_vec()),
         rots: Arc::new(rots),
+        anchors32: Arc::new(anchors.iter().map(|&x| x as f32).collect()),
+        apm: Arc::new(apm),
         anchors: Arc::new(anchors),
         hi: Arc::new(thi.finish()),
         lo: Arc::new(tlo.finish()),

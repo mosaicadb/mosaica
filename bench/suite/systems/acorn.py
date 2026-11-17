@@ -51,6 +51,9 @@ class Acorn(System):
     def index_bytes(self):
         return os.path.getsize(self.path)
 
+    def io_pids(self):
+        return [os.getpid()] + ([self.srv.pid] if getattr(self, "srv", None) else [])
+
     def set_visible(self, ids, name=None):
         self.vis = ids
         if ids is None:

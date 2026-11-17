@@ -43,7 +43,7 @@ const VALUE_FLAGS: &[&str] = &[
     "--cmp-vis", "--cmp-what", "--core", "--cross", "--d", "--ddec", "--dims", "--ds", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
-    "--ladder-from", "--levels", "--lnd", "--methods", "--n", "--name", "--nguar", "--niter", "--nq", "--onq",
+    "--ladder-from", "--levels", "--lnd", "--methods", "--n", "--name", "--nguar", "--niter", "--nprobe", "--nq", "--onq",
     "--order", "--out", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--sample-per-centre", "--scale",
     "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads", "--time-cap",
@@ -56,7 +56,7 @@ const BOOL_FLAGS: &[&str] = &[
 ];
 const MODES: &[&str] = &[
     "ann", "ann-truth", "breakdown", "bytesq", "cert-layouts", "certify-layout", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
-    "filter", "levels", "oracle", "partition", "qvbench", "scanbench", "setup", "verify",
+    "filter", "levels", "oracle", "partition", "qbench", "qvbench", "scanbench", "setup", "verify",
 ];
 /// The flags that make an index (`v2::BuildOptions`): given only where one is made, with `create`, `--rebuild` or
 /// `--in-memory`.
@@ -648,8 +648,8 @@ impl Ctx2 {
             ("groups.tables", ix.groups.iter().map(|g| b(&g.ytab) + b(&g.ktab) + b(&g.ttab) + b(&g.khl)).sum()),
             ("ctab", ix.ctab.iter().flatten().map(|t| b(&t.th) + b(&t.tmax) + b(&t.step) + b(&t.off) + b(&t.err)).sum()),
             ("cl", ix.cl.iter().map(|c| b(&c.mhat) + b(&c.mv32) + b(&c.wmr)).sum()),
-            ("centres64", b(&ix.centres64)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
-            ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.len() * 24),
+            ("centres32", b(&ix.centres32)), ("apm+anchors32", b(&ix.apm) + b(&ix.anchors32)), ("rots", ix.rots.iter().map(|x| b(x)).sum()), ("anchors+ahat", b(&ix.anchors) + b(&ix.ahat)),
+            ("hi+lo", b(&ix.hi) + b(&ix.lo)), ("row_ent+ent_row", b(&ix.row_ent) + b(&ix.ent_row)), ("esc", ix.esc.bytes()),
             ("nukey", b(&ix.nukey)), ("ent_xs+row_ent", b(&self.ent_xs) + b(&self.row_ent)),
             ("full rows in memory", match &ix.full { Full2::Real { rows, .. } => match &**rows { crate::v2::disk::Rows::Mem(v) => b(v), _ => 0 }, _ => 0 }),
         ];
@@ -712,12 +712,12 @@ pub fn scale_check(ix: &Index2) -> (usize, usize, f64, f64, f64) {
     let ng = ix.groups.len();
     let r2row: Vec<(usize, f64, f64)> = (0..ix.k()).into_par_iter().flat_map_iter(|ci| {
         let c = &ix.cl[ci];
-        let m = ix.centres_f64(ci);
+        let m = ix.centre_f64(ci);
         let mut x = vec![0f64; n];
         (c.r0..c.r1).map(move |r| {
             ix.full_row_f64(r, &mut x);
             let x2: f64 = x.iter().map(|v| v * v).sum();
-            let rr: f64 = x.iter().zip(m).map(|(a, b)| (a - b) * (a - b)).sum();
+            let rr: f64 = x.iter().zip(&m).map(|(a, b)| (a - b) * (a - b)).sum();
             (ci, rr, x2)
         }).collect::<Vec<_>>()
     }).collect();
@@ -874,7 +874,7 @@ pub fn levels2(c: &Ctx2, reps: usize) {
         let mut st = Stats::new(nl);
         let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| {
             let gq = get_gq2(ix, &pr, ix.cl[ci].g, &mut st);
-            let mut cq = cluster_q2(ix, ci, gq, &pr, dot64(&pr.q64, ix.centres_f64(ci)));
+            let mut cq = cluster_q2(ix, ci, gq, &pr, pr.qm(ix, ci));
             if sweep && c.plan.int_det {
                 cq.gtab = c.plan.gtab;
                 cq.enable_int(ix, ci, gq);
@@ -1025,7 +1025,7 @@ fn setup_cost1(c: &Ctx2, nq: usize) {
             }
             trot.push(t.ms());
             let t = Timer::new();
-            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, dot64(&pr.q64, ix.centres_f64(ci)))).collect();
+            let mut cqs: Vec<CQ2> = (0..ix.k()).map(|ci| cluster_q2(ix, ci, pr.gq[ix.cl[ci].g].get().unwrap(), &pr, pr.qm(ix, ci))).collect();
             tc.push(t.ms());
             let t = Timer::new();
             for (ci, cq) in cqs.iter_mut().enumerate() {
@@ -1221,7 +1221,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let (mut walls, mut br, mut fr, mut wrong, mut pwall) = (Vec::new(), 0.0, 0.0, 0u64, 0.0);
                 let mut parts = [0f64; 21];
                 let mut cnt = [0f64; 4];
-                let mut rkap = 0f64;
                 // per query: clusters on the index path, on full vectors, items entering the first level, item-levels,
                 // groups, full reads
                 let mut opened = [0f64; 6];
@@ -1268,7 +1267,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                     for k in 0..4 {
                         cnt[k] += cy[C_TABLES + k] as f64 / qs.len() as f64;
                     }
-                    rkap += ms(cy[P_RKAP]);
                     let nqf = qs.len() as f64;
                     opened[0] += r.idx_clusters as f64 / nqf;
                     opened[1] += r.flat_clusters as f64 / nqf;
@@ -1286,7 +1284,6 @@ pub fn breakdown2(c: &Ctx2, nq: usize) {
                 let tot: f64 = parts[..20].iter().sum();
                 let line = format!("{},{cls},{},{},{:.2},{:.2},{:.2},{},{:.2},{:.0},{}", vname, frac, th, median(&walls), pwall, tot, parts.iter().map(|x| format!("{:.2}", x)).collect::<Vec<_>>().join(","), br, fr, wrong);
                 out!("breakdown2 {line}");
-                out!("breakdown2 rand {vname} {cls} {frac}: of bounds+decisions, randomised scalars (|y|, kappa, tan decode) {:.2} ms", rkap);
                 out!("breakdown2 tables {vname} {cls} {frac}: per query {:.0} (cluster, level) tables, {:.0} units, {:.1} survivors per table, {:.0} tables for at most 8", cnt[0], cnt[1], cnt[2] / cnt[0].max(1.0), cnt[3]);
                 out!("breakdown2 counts {vname} {cls} {frac}: per query {:.1} clusters on the index path, {:.1} on full vectors, {:.0} items entering the first level, {:.0} item-levels, {:.1} groups, {:.0} full reads", opened[0], opened[1], opened[2], opened[3], opened[4], opened[5]);
                 lines.push(line);
@@ -2289,5 +2286,101 @@ mod tests {
         });
         assert!(timed && p.io_gbps == 9.0);
         std::fs::remove_dir_all(&tmp).unwrap();
+    }
+}
+
+/// Query-path timings and answer hashes, one thread: threshold queries at `--sizes` (answer shares), exact k-NN at
+/// `--knn-k` (seed, sweep and selection apart) and approximate k-NN (k = 10, no dial) at `--nprobe` clusters, item and
+/// text queries. Each query runs `--reps` times and keeps its fastest; a cell prints the mean and median of those, the
+/// bytes read per item and a hash of every query's answer (threshold rows, k-NN entities), so that two binaries can be
+/// compared for speed and for identical answers.
+pub fn qbench(c: &Ctx2, nq: usize) {
+    use std::hash::{Hash, Hasher};
+    let ix = &c.ix;
+    let reps = arg_usize("--reps", 3);
+    let sizes_f: Vec<f64> = { let a = arg_str("--sizes", ""); if a.is_empty() { vec![1e-4, 1e-3, 1e-2, 0.1, 0.5] } else { a.split(',').map(|x| x.parse().unwrap()).collect() } };
+    // an empty list (or 0) leaves a kind of cell out
+    let list = |name: &str, d: &str| -> Vec<usize> { arg_str(name, d).split(',').filter_map(|x| x.parse().ok()).filter(|&x| x > 0).collect() };
+    let (ks, nps) = (list("--knn-k", "10,100"), list("--nprobe", "8,32"));
+    let nrows = c.flat().nrows;
+    let sizes: Vec<usize> = sizes_f.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
+    let ap = if c.approx.rad.is_empty() { Approx { f: 0.0, rad: vec![0.0; ix.k()] } } else { Approx { f: c.approx.f, rad: c.approx.rad.clone() } };
+    let pl = pool(1);
+    // with --prof: the phases of the fastest run of each query (time-stamp counter, rated against the clock here)
+    let prof = args().iter().any(|a| a == "--prof");
+    PROF.store(prof, std::sync::atomic::Ordering::Relaxed);
+    let tsc_ms = {
+        let (t, c0) = (Timer::new(), unsafe { core::arch::x86_64::_rdtsc() });
+        while t.ms() < 50.0 {}
+        (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.ms()
+    };
+    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
+    let med = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
+    for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
+        let qs: Vec<&Vec<f32>> = qs.iter().take(nq).collect();
+        if qs.is_empty() {
+            continue;
+        }
+        let ths: Vec<Vec<f64>> = qs.iter().map(|q| {
+            let fl = c.flat();
+            let pr = prep2(ix, q);
+            let sc = fl.scores(&pr.q32);
+            thresholds_for(&fl, &pr.q16, &sc, full_err2(ix, &pr), &sizes)
+        }).collect();
+        // (name, per query: fastest ms, bytes per item, answer hash, extra times)
+        let mut cells: Vec<String> = sizes_f.iter().map(|f| format!("thr{f}")).collect();
+        cells.extend(ks.iter().map(|k| format!("knn{k}")));
+        cells.extend(nps.iter().map(|np| format!("ann10np{np}")));
+        for (ci, name) in cells.iter().enumerate() {
+            let (mut ms, mut br, mut extra) = (Vec::new(), 0.0, [0.0f64; 3]);
+            let (mut cyc, mut fr, mut fb) = ([0u64; 32], 0u64, 0u64);
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for (qi, q) in qs.iter().enumerate() {
+                let (mut best, mut best_br, mut best_ex, mut last, mut best_st) = (f64::INFINITY, 0.0, [0.0; 3], Vec::new(), Stats::default());
+                for _ in 0..reps.max(1) {
+                    let t = Timer::new();
+                    let (ans, st, ex): (Vec<u32>, Stats, [f64; 3]) = pl.install(|| {
+                        if ci < sizes.len() {
+                            let o = Opts2 { vis: None, verify: false, want_iv: false, plan: c.plan };
+                            let r = threshold2(ix, &prep2(ix, q), ths[qi][ci], &o);
+                            (to_bitmap2(ix, &r.rows).iter().collect(), r.st, [0.0; 3])
+                        } else if ci < sizes.len() + ks.len() {
+                            let r = knn2(ix, q, ks[ci - sizes.len()], None, c.plan);
+                            let mut e: Vec<u32> = r.ents.iter().map(|x| x.1).collect();
+                            e.sort_unstable();
+                            (e, r.st, [r.t_seed, r.t_sweep, r.t_sel])
+                        } else {
+                            let r = knn2_fast(ix, &ap, q, 10, None, nps[ci - sizes.len() - ks.len()], None, c.plan);
+                            let mut e: Vec<u32> = r.ents.iter().map(|x| x.1).collect();
+                            e.sort_unstable();
+                            (e, r.st, [0.0; 3])
+                        }
+                    });
+                    let el = t.ms();
+                    if el < best {
+                        (best, best_br, best_ex) = (el, bytes_read2(ix, &st), ex);
+                        best_st = st;
+                    }
+                    last = ans;
+                }
+                last.hash(&mut h);
+                br += best_br;
+                for k in 0..3 {
+                    extra[k] += best_ex[k];
+                }
+                ms.push(best);
+                for (a, b) in cyc.iter_mut().zip(best_st.cyc) {
+                    *a += b;
+                }
+                (fr, fb) = (fr + best_st.full_reads, fb + best_st.exact_fallbacks);
+            }
+            let n = qs.len() as f64;
+            let mean = ms.iter().sum::<f64>() / n;
+            if prof {
+                let ph: Vec<String> = names.iter().map(|&(i, nm)| format!("{nm} {:.3}", cyc[i] as f64 / tsc_ms / qs.len() as f64)).collect();
+                out!("qbp {cls} {name:<12} {}  full reads {:.0} exact fallbacks {:.1}", ph.join(" "), fr as f64 / qs.len() as f64, fb as f64 / qs.len() as f64);
+            }
+            out!("qb {cls} {name:<12} mean {mean:8.3} med {:8.3} ms  B/item {:8.2}  seed/sweep/sel {:.3}/{:.3}/{:.3}  hash {:016x}", med(&mut ms), br / n, extra[0] / n, extra[1] / n, extra[2] / n, h.finish());
+        }
     }
 }

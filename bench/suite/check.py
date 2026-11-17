@@ -2,7 +2,7 @@
 # usage: python3 -I check.py SUITE DATASET [--data DIR]
 # For each dumped cell, counts the items that differ from the exact answer (the f64 top k, or every item above the
 # threshold, within the visible set). A differing item is "within rounding" when |s - t| is at most what rounding the
-# stored vectors and the query can move its similarity (as ../threshold-db/check.py): sum_i |q_i x_i| times the unit
+# stored vectors and the query can move its similarity (as the earlier threshold-db/check.py): sum_i |q_i x_i| times the unit
 # roundoff of each (f16 systems: 2^-11 on both; f32 systems: 2^-24 on both, plus an f32 accumulation bound of
 # n 2^-24 sum_i |q_i x_i|). s is the f64 product of the f64 query and the stored f32 vector, and t the threshold, or for
 # k-NN the midpoint between the k-th and (k+1)-th similarity. Writes results/<suite>/<dataset>/check.csv.

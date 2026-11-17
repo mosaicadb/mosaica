@@ -191,43 +191,43 @@ pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8
     }
 }
 
+/// The two tables of a 16-bit part (high and low bytes, the same codes) over one block, 256 S_hi + S_lo for items
+/// 0..15 and 16..31: each block of codes is read and split into nibbles once for both tables.
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
+pub unsafe fn part_sums2(codes: *const u8, th: *const u8, tl: *const u8, groups: usize) -> (__m512, __m512) {
+    let m0f = _mm512_set1_epi8(0x0f);
+    let z = _mm512_setzero_si512();
+    let mut acc = [[z; 4]; 2];
+    for g in 0..groups {
+        let c = _mm512_loadu_si512(codes.add(g * 64) as *const _);
+        let lo = _mm512_and_si512(c, m0f);
+        let hi = _mm512_and_si512(_mm512_srli_epi16(c, 4), m0f);
+        for (k, t) in [th, tl].into_iter().enumerate() {
+            let t = _mm512_loadu_si512(t.add(g * 64) as *const _);
+            let (r0, r1) = (_mm512_shuffle_epi8(t, lo), _mm512_shuffle_epi8(t, hi));
+            let a = &mut acc[k];
+            a[0] = _mm512_add_epi16(a[0], r0);
+            a[1] = _mm512_add_epi16(a[1], _mm512_srli_epi16(r0, 8));
+            a[2] = _mm512_add_epi16(a[2], r1);
+            a[3] = _mm512_add_epi16(a[3], _mm512_srli_epi16(r1, 8));
+        }
+    }
+    let w = |a: &[__m512i; 4], h: usize| lane_sum_i(_mm512_sub_epi16(a[2 * h], _mm512_slli_epi16(a[2 * h + 1], 8)), a[2 * h + 1]);
+    let s = |h: usize| _mm512_cvtepi32_ps(_mm512_add_epi32(_mm512_slli_epi32(w(&acc[0], h), 8), w(&acc[1], h)));
+    (s(0), s(1))
+}
+
+/// e: words = sums of even bytes per 128-bit lane, o: odd; sum the four lanes and interleave to item order, as i32.
 #[cfg(target_feature = "avx512f")]
 #[inline(always)]
-unsafe fn lane_sum(e: __m512i, o: __m512i) -> (__m512, __m512) {
-    // e: words = sums of even bytes per 128-bit lane, o: odd; sum the four lanes and interleave to item order
+unsafe fn lane_sum_i(e: __m512i, o: __m512i) -> __m512i {
     let f = |x: __m512i| {
         let x = _mm512_add_epi16(x, _mm512_shuffle_i64x2(x, x, 0x4e));
         _mm512_castsi512_si128(_mm512_add_epi16(x, _mm512_shuffle_i64x2(x, x, 0xb1)))
     };
     let (e, o) = (f(e), f(o));
-    let a = _mm_unpacklo_epi16(e, o);
-    let b = _mm_unpackhi_epi16(e, o);
-    let v = _mm256_set_m128i(b, a);
-    let w = _mm512_cvtepu16_epi32(v);
-    (_mm512_cvtepi32_ps(w), _mm512_setzero_ps())
-}
-
-/// Integer table sums of one part over one block: S for items 0..15 and 16..31.
-#[cfg(target_feature = "avx512f")]
-#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl,avx512vbmi")]
-pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m512, __m512) {
-    let m0f = _mm512_set1_epi8(0x0f);
-    let (mut a0, mut b0, mut a1, mut b1) = (_mm512_setzero_si512(), _mm512_setzero_si512(), _mm512_setzero_si512(), _mm512_setzero_si512());
-    for g in 0..groups {
-        let c = _mm512_loadu_si512(codes.add(g * 64) as *const _);
-        let t = _mm512_loadu_si512(tab.add(g * 64) as *const _);
-        let lo = _mm512_and_si512(c, m0f);
-        let hi = _mm512_and_si512(_mm512_srli_epi16(c, 4), m0f);
-        let r0 = _mm512_shuffle_epi8(t, lo);
-        let r1 = _mm512_shuffle_epi8(t, hi);
-        a0 = _mm512_add_epi16(a0, r0);
-        b0 = _mm512_add_epi16(b0, _mm512_srli_epi16(r0, 8));
-        a1 = _mm512_add_epi16(a1, r1);
-        b1 = _mm512_add_epi16(b1, _mm512_srli_epi16(r1, 8));
-    }
-    let (s0, _) = lane_sum(_mm512_sub_epi16(a0, _mm512_slli_epi16(b0, 8)), b0);
-    let (s1, _) = lane_sum(_mm512_sub_epi16(a1, _mm512_slli_epi16(b1, 8)), b1);
-    (s0, s1)
+    _mm512_cvtepu16_epi32(_mm256_set_m128i(_mm_unpackhi_epi16(e, o), _mm_unpacklo_epi16(e, o)))
 }
 
 #[cfg(target_feature = "avx512f")]
@@ -332,17 +332,17 @@ pub unsafe fn gather_rows(g: &Gather, base: *const u8, rows: usize, dst: *mut u8
     }
 }
 
-/// Integer table sums of one part over one block: S for items 0..15 and 16..31.
+/// part_sums2 on AVX2: 256 S_hi + S_lo of a 16-bit part for items 0..15 and 16..31, the codes read once.
 #[cfg(not(target_feature = "avx512f"))]
 #[target_feature(enable = "avx2,fma")]
-pub unsafe fn part_sums(codes: *const u8, tab: *const u8, groups: usize) -> (__m512, __m512) {
-    let [(a, b)] = sums16::<1>(codes, [tab], groups);
-    let f = |v: __m256i| {
-        let lo = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(v));
-        let hi = _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(v));
-        __m512(_mm256_cvtepi32_ps(lo), _mm256_cvtepi32_ps(hi))
+pub unsafe fn part_sums2(codes: *const u8, th: *const u8, tl: *const u8, groups: usize) -> (__m512, __m512) {
+    let [(h0, h1), (l0, l1)] = sums16::<2>(codes, [th, tl], groups);
+    let f = |h: __m256i, l: __m256i, k: i32| {
+        let hh = if k == 0 { _mm256_cvtepu16_epi32(_mm256_castsi256_si128(h)) } else { _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(h)) };
+        let ll = if k == 0 { _mm256_cvtepu16_epi32(_mm256_castsi256_si128(l)) } else { _mm256_cvtepu16_epi32(_mm256_extracti128_si256::<1>(l)) };
+        _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_slli_epi32::<8>(hh), ll))
     };
-    (f(a), f(b))
+    (__m512(f(h0, l0, 0), f(h0, l0, 1)), __m512(f(h1, l1, 0), f(h1, l1, 1)))
 }
 
 /// Table sums of one part over one block for each of NT tables (the same codes), as u16 in item order: items 0..15
@@ -513,6 +513,7 @@ pub fn ip(k: usize, f: usize) -> usize {
 /// Per-item thresholds for slots 0..n (rounded up to 4; s and mr are read that far) from s and mr:
 /// kin = (cin - alr mr) / s and kout = (cout - alr mr) / s, divided by sigma and rounded outward with a slack covering
 /// the f64 evaluation (`mag` bounds |t| + |fixed| + |qm|).
+#[cfg(not(target_feature = "avx512f"))]
 #[target_feature(enable = "avx2,fma")]
 pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f64, alr: f64, mag: f64, sigma: f64, ist: &mut [i16]) {
     let eps = 2f64.powi(-46);
@@ -536,6 +537,34 @@ pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f6
         let yo = _mm256_mul_pd(_mm256_mul_pd(_mm256_sub_pd(vcout, a), r), vinv);
         let ti = _mm256_ceil_pd(_mm256_add_pd(_mm256_add_pd(yi, slack), _mm256_mul_pd(abs(yi), veps)));
         let to = _mm256_floor_pd(_mm256_sub_pd(_mm256_sub_pd(yo, slack), _mm256_mul_pd(abs(yo), veps)));
+        put(ti, k, 2, ist);
+        put(to, k, 4, ist);
+    }
+}
+
+/// int_thresholds eight slots at a time (slots 0..n rounded up to 8; s and mr are read that far): the same f64
+/// operations on each slot.
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw,avx512dq,avx512vl")]
+pub unsafe fn int_thresholds(s: &[f32], mr: &[f32], n: usize, cin: f64, cout: f64, alr: f64, mag: f64, sigma: f64, ist: &mut [i16]) {
+    let eps = 2f64.powi(-46);
+    let (vcin, vcout, valr, vmag) = (_mm512_set1_pd(cin), _mm512_set1_pd(cout), _mm512_set1_pd(alr), _mm512_set1_pd(mag));
+    let (vinv, veps, vse) = (_mm512_set1_pd(1.0 / sigma), _mm512_set1_pd(eps), _mm512_set1_pd(eps / sigma));
+    let (lo, hi) = (_mm512_set1_pd(TMIN as f64), _mm512_set1_pd(TMAX as f64));
+    // within [TMIN, TMAX] the high word and the low byte fit i16, so the truncating packs keep them
+    let put = |v: __m512d, k: usize, f: usize, ist: &mut [i16]| {
+        let v = _mm512_cvtpd_epi32(_mm512_min_pd(_mm512_max_pd(v, lo), hi));
+        _mm_storeu_si128(ist.as_mut_ptr().add(ip(k, f)) as *mut _, _mm256_cvtepi32_epi16(_mm256_srai_epi32::<8>(v)));
+        _mm_storeu_si128(ist.as_mut_ptr().add(ip(k, f + 1)) as *mut _, _mm256_cvtepi32_epi16(_mm256_and_si256(v, _mm256_set1_epi32(255))));
+    };
+    for k in (0..n).step_by(8) {
+        let r = _mm512_div_pd(_mm512_set1_pd(1.0), _mm512_cvtps_pd(_mm256_loadu_ps(s.as_ptr().add(k))));
+        let a = _mm512_mul_pd(valr, _mm512_cvtps_pd(_mm256_loadu_ps(mr.as_ptr().add(k))));
+        let slack = _mm512_mul_pd(_mm512_mul_pd(_mm512_add_pd(vmag, _mm512_abs_pd(a)), r), vse);
+        let yi = _mm512_mul_pd(_mm512_mul_pd(_mm512_sub_pd(vcin, a), r), vinv);
+        let yo = _mm512_mul_pd(_mm512_mul_pd(_mm512_sub_pd(vcout, a), r), vinv);
+        let ti = _mm512_roundscale_pd::<{ _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC }>(_mm512_add_pd(_mm512_add_pd(yi, slack), _mm512_mul_pd(_mm512_abs_pd(yi), veps)));
+        let to = _mm512_roundscale_pd::<{ _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC }>(_mm512_sub_pd(_mm512_sub_pd(yo, slack), _mm512_mul_pd(_mm512_abs_pd(yo), veps)));
         put(ti, k, 2, ist);
         put(to, k, 4, ist);
     }
@@ -1285,35 +1314,36 @@ mod tests {
     }
 
     #[test]
-    fn part_sums_match_scalar() {
+    fn part_sums2_match_scalar() {
         let groups = 5;
         let codes: Vec<u8> = (0..groups * 64).map(|i| (i * 37 % 251) as u8).collect();
-        let tab: Vec<u8> = (0..groups * 64).map(|i| (i * 91 % 256) as u8).collect();
-        let (s0, s1) = unsafe { part_sums(codes.as_ptr(), tab.as_ptr(), groups) };
+        let th: Vec<u8> = (0..groups * 64).map(|i| (i * 91 % 256) as u8).collect();
+        let tl: Vec<u8> = (0..groups * 64).map(|i| (i * 13 % 256) as u8).collect();
+        let (s0, s1) = unsafe { part_sums2(codes.as_ptr(), th.as_ptr(), tl.as_ptr(), groups) };
         let mut got = [0f32; 32];
         unsafe {
             _mm512_storeu_ps(got.as_mut_ptr(), s0);
             _mm512_storeu_ps(got.as_mut_ptr().add(16), s1);
         }
         for item in 0..32 {
-            let want: u32 = (0..groups * 4).map(|row| tab[row * 16 + nib(&codes, row, item) as usize] as u32).sum();
-            assert_eq!(got[item], want as f32, "item {item}");
+            let sum = |t: &[u8]| -> u32 { (0..groups * 4).map(|row| t[row * 16 + nib(&codes, row, item) as usize] as u32).sum() };
+            assert_eq!(got[item], (256 * sum(&th) + sum(&tl)) as f32, "item {item}");
         }
     }
 
     #[test]
-    fn part_sums_at_the_largest_part() {
+    fn part_sums2_at_the_largest_part() {
         // 64 groups (256 units, the most Part::pack allows) of all-255 tables: 65,280, the largest 16-bit sum
         let groups = 64;
         let codes: Vec<u8> = (0..groups * 64).map(|i| (i * 37 % 251) as u8).collect();
         let tab = vec![255u8; groups * 64];
-        let (s0, s1) = unsafe { part_sums(codes.as_ptr(), tab.as_ptr(), groups) };
+        let (s0, s1) = unsafe { part_sums2(codes.as_ptr(), tab.as_ptr(), tab.as_ptr(), groups) };
         let mut got = [0f32; 32];
         unsafe {
             _mm512_storeu_ps(got.as_mut_ptr(), s0);
             _mm512_storeu_ps(got.as_mut_ptr().add(16), s1);
         }
-        assert!(got.iter().all(|&x| x == (255 * 4 * groups) as f32), "{got:?}");
+        assert!(got.iter().all(|&x| x == (257 * 255 * 4 * groups) as f32), "{got:?}");
     }
 
     #[test]

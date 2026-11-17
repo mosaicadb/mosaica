@@ -112,6 +112,34 @@ fn threshold_answers_equal_brute_force_on_every_path() {
     }
 }
 
+/// With intervals wanted (as exact k-NN asks), every plan answers exactly and every interval it gives for a row taken
+/// in holds that row's exact score, whichever level (or the key, or the support table) decided it.
+#[test]
+fn intervals_of_rows_taken_in_hold_their_scores() {
+    let f = fixture();
+    let ix = &f.ix;
+    let mut n = 0usize;
+    for (qi, q) in f.queries.iter().enumerate() {
+        let pr = prep2(ix, q);
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let t = truth(ix, q, bm.as_ref());
+            for th in thresholds(&t) {
+                for (pname, plan) in plans() {
+                    let r = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: true, plan });
+                    assert_eq!(to_bitmap2(ix, &r.rows), answer(&t, th), "plan {pname}, set {sname}, query {qi}, t {th}");
+                    for &(row, lb, ub, lv) in &r.iv {
+                        let v = exact_value2(ix, &pr, row as usize);
+                        assert!(lb as f64 <= v && v <= ub as f64, "row {row} level {lv}: {v} outside [{lb}, {ub}], plan {pname}, set {sname}, query {qi}, t {th}");
+                        n += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(n > 0, "no interval returned: the test checks nothing");
+}
+
 #[test]
 fn compacted_sessions_answer_as_the_index_does() {
     let f = fixture();
@@ -694,12 +722,12 @@ fn same_index(a: &Index2, b: &Index2) {
     assert_eq!((&a.ahat[..], &a.row_ent[..], &a.ent_row[..], &a.nukey[..]), (&b.ahat[..], &b.row_ent[..], &b.ent_row[..], &b.nukey[..]));
     assert_eq!((&a.coff, &a.soff, &a.vrow), (&b.coff, &b.soff, &b.vrow));
     let esc = |x: &Index2| {
-        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (*k, v.to_bits())).collect();
+        let mut e: Vec<_> = x.esc.iter().map(|(k, v)| (k, v.to_bits())).collect();
         e.sort_unstable();
         e
     };
     assert_eq!(esc(a), esc(b));
-    assert_eq!((f64b(&a.centres64), f64b(&a.anchors), f32b(&a.hi), f32b(&a.lo)), (f64b(&b.centres64), f64b(&b.anchors), f32b(&b.hi), f32b(&b.lo)));
+    assert_eq!((f32b(&a.centres32), f64b(&a.anchors), f64b(&a.apm), f32b(&a.hi), f32b(&a.lo)), (f32b(&b.centres32), f64b(&b.anchors), f64b(&b.apm), f32b(&b.hi), f32b(&b.lo)));
     assert_eq!(a.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>(), b.rots.iter().map(|r| f64b(r)).collect::<Vec<_>>());
     assert_eq!((a.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&a.etab.lo), f32b(&a.etab.hi)), (b.etab.e.iter().map(|e| f32b(e)).collect::<Vec<_>>(), f32b(&b.etab.lo), f32b(&b.etab.hi)));
     for (x, y) in a.cl.iter().zip(&b.cl) {
@@ -910,8 +938,7 @@ fn anchors_as_many_as_the_clusters_are_not_taken_for_the_centres() {
         let q64: Vec<f64> = query_f16(q).1.iter().map(|&x| x as f64).collect();
         let best = (0..k).map(|a| (dot64(&q64, &ix.anchors[a * n..(a + 1) * n]), a)).fold((f64::NEG_INFINITY, 0), |b, x| if x.0 > b.0 { x } else { b }).1;
         // the anchor of a query given q.m of every cluster, and of a query over one cluster: the nearest of all anchors
-        let qm: Vec<f64> = (0..k).map(|c| dot64(&q64, ix.centres_f64(c))).collect();
-        assert_eq!(prep2_qm(&ix, q, Some(&qm)).anc(&ix).a, best);
+        assert_eq!(prep2(&ix, q).anc(&ix).a, best);
         assert_eq!(prep2(&ix, q).anc_among(&ix, Some(&[0])).a, best);
         // (on the centres' index the shortcuts are taken: one cluster's anchor is its own)
         assert_eq!(prep2(&base, q).anc_among(&base, Some(&[3])).a, 3);

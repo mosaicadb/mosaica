@@ -106,10 +106,10 @@ pub fn run2(scale: usize, nq: usize) {
         let nc = it.ah.len();
         let mut px = vec![0f64; nc * nanch];
         unsafe { matrixmultiply::dgemm(nc, n, nanch, 1.0, it.z.as_ptr(), n as isize, 1, pv[g].as_ptr(), 1, n as isize, 0.0, px.as_mut_ptr(), nanch as isize, 1) };
-        let m = ix.centres_f64(c);
+        let m = ix.centre_f64(c);
         let (mut hi, mut lo) = (vec![0f32; nanch], vec![0f32; nanch]);
         for a in 0..nanch {
-            let pm = dot64(&anchors[a * n..(a + 1) * n], m);
+            let pm = dot64(&anchors[a * n..(a + 1) * n], &m);
             let (mut mx, mut mi) = (f64::NEG_INFINITY, f64::INFINITY);
             for i in 0..nc {
                 mx = mx.max(px[i * nanch + a]);
@@ -162,7 +162,7 @@ pub fn run2(scale: usize, nq: usize) {
             let g = cl.g;
             let mut z = vec![0f64; n];
             let mut out = vec![0f64; (cl.r1 - cl.r0) * nqq];
-            let qms: Vec<f64> = preps.iter().map(|pr| dot64(&pr.q64, ix.centres_f64(c))).collect();
+            let qms: Vec<f64> = preps.iter().map(|pr| pr.qm(&ix, c)).collect();
             if let Full2::Synth(sy) = &ix.full {
                 for r in cl.r0..cl.r1 {
                     sy.gen(c, sy.ext[r], &mut z);

@@ -1,0 +1,6 @@
+system,status,build_s,threads,index_gib,peak_rss_gib,detail
+vexact,ok,332.3,3,3.220,3.06,"{""fit_s"": 127.1, ""encode_s"": 123.2, ""sample"": true}"
+faiss-flat-mmap,ok,4.7,3,0.954,2.71,"{""storage"": ""f16""}"
+faiss-ivf-disk,ok,193.9,3,0.969,3.29,"{""nlist"": 4096, ""storage"": ""f16""}"
+diskann,unavailable,,,,,diskann_bench is not built (install/diskann.sh) or not given ($DISKANN_BENCH)
+faiss-hnsw,ok,260.4,3,1.073,2.83,"{""M"": 16, ""efConstruction"": 200, ""storage"": ""f16""}"

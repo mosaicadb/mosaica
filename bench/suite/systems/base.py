@@ -8,6 +8,14 @@
 # `rounding` is the precision of the stored vectors and of the query as the system computes with them, for the check's
 # rounding allowance: "f16" (vectors and query rounded to f16, products accumulated exactly) or "f32" (f32 vectors and
 # query, f32 accumulation).
+#
+# Under a memory cap (capmem.py, runsys.py --cap): a system with `disk = True` builds in one uncapped process
+# (build(), leaving its index in the work directory), then each capped process calls load() inside its cgroup, which
+# opens that index without rebuilding. data_files() are the files that hold its data (dropped from the page cache before
+# the cap is set), and evict_cold() drops what a cold query must read again (default: the cgroup's page cache).
+# A system that keeps its data in anonymous memory (`disk = False`) is built inside each capped process and the cap set
+# after, so a cap below what it holds is refused: it does not fit. `filters = False`: the system takes no visible set; `unfiltered = False`: it runs the
+# filtered cells only.
 import os
 import time
 
@@ -22,6 +30,11 @@ class System:
     name = ""
     types = ()
     rounding = "f32"
+    disk = False
+    filters = True
+    unfiltered = True
+    # the Python that runs this system ("" this one); e.g. DiskANN's own venv
+    python_env = ""
 
     def __init__(self, prep, work, params, core=None):
         self.prep, self.work, self.params, self.core = prep, work, params, core
@@ -34,6 +47,28 @@ class System:
 
     def single_thread(self):
         """Called after the build, before any timed query: one thread from here on."""
+
+    def load(self):
+        """Opens the index build() left in the work directory (disk systems)."""
+        raise NotImplementedError
+
+    def data_files(self):
+        return [self.work]
+
+    def counters(self):
+        """The system's own cumulative counters, read before and after a query under a cap (numbers only)."""
+        return {}
+
+    def query_stats(self):
+        """Statistics of the last query the system reports itself (a dict), or None."""
+        return None
+
+    def io_pids(self):
+        """The processes whose storage reads count as this system's (a server it drives, too)."""
+        return [os.getpid()]
+
+    def evict_cold(self, cg):
+        cg.reclaim()
 
     def index_bytes(self):
         return 0
