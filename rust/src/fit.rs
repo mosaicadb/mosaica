@@ -211,6 +211,22 @@ fn replace_files(items: &[(String, Option<Vec<u8>>)]) -> Result<(), String> {
     Ok(())
 }
 
+/// The certificate's layout for vectors of n0 dimensions, as the fit makes it (`schedule`, on n0 padded to a multiple
+/// of 32 as tools/partition.py pads it): the randomised blocks' dimensions (each block's width less one) and the
+/// number of randomised levels, which sets the budget (`certify::ln_delta`).
+pub fn cert_layout(n0: usize) -> Result<(Vec<usize>, usize), String> {
+    if n0 < 50 {
+        return Err(format!("the fit needs at least 50 dimensions, not {n0}"));
+    }
+    let (rlv, bounds) = schedule(n0, n0.div_ceil(32) * 32)?;
+    Ok((block_dims(&bounds), rlv.len()))
+}
+
+/// The dimensions of the randomised blocks between `bounds` (certify.py `block_dims`).
+fn block_dims(bounds: &[usize]) -> Vec<usize> {
+    bounds.windows(2).map(|w| w[1] - w[0] - 1).collect()
+}
+
 /// Randomised level ends and block bounds, as tools/fit.py `schedule`.
 fn schedule(n0: usize, n: usize) -> Result<(Vec<usize>, Vec<usize>), String> {
     let cap = (0.4 * 2.0 * n0 as f64).min(256.0 * (n0 as f64 / 768.0).max(1.0)).min((DLV[5] + n) as f64);

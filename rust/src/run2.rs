@@ -40,13 +40,13 @@ pub struct Ctx2 {
 /// (`check_args_of`). (`--int` and `--gtab` restate the default.)
 const VALUE_FLAGS: &[&str] = &[
     "--anchors", "--b", "--basis", "--bfracs", "--c", "--cal-items", "--cert-time", "--cap", "--cap-ms", "--clusters", "--cmp-order",
-    "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
+    "--cmp-vis", "--cmp-what", "--core", "--d", "--ddec", "--dims", "--ds", "--dial", "--dial-eps", "--dial-from", "--dial-k-max", "--direct-min", "--dlv",
     "--dontcache-min", "--dump", "--filters", "--flags", "--fnq", "--full-advice", "--full-file", "--full-read",
     "--groups", "--index", "--index-b", "--index-c", "--index-d", "--item-queries", "--k", "--knn", "--knn-k", "--ks",
-    "--ladder-from", "--levels", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
+    "--ladder-from", "--levels", "--lnd", "--methods", "--n", "--name", "--nguar", "--nq", "--onq",
     "--order", "--params", "--passes", "--per-cluster", "--pin", "--plan", "--plan-file", "--profile", "--pseudo",
     "--pseudo-dial", "--queries", "--query-sample", "--read-modes", "--reps", "--results", "--rlv", "--runs", "--scale",
-    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads",
+    "--seed", "--sets", "--sizes", "--slow-ms", "--step", "--tag", "--targets", "--text-anchors", "--text-count", "--thr", "--threads", "--time-cap",
     "--vcheck", "--vectors", "--vfilt", "--vis", "--vis-sets", "--vitem", "--vtext", "--what",
 ];
 const BOOL_FLAGS: &[&str] = &[
@@ -55,7 +55,7 @@ const BOOL_FLAGS: &[&str] = &[
     "--skip-all", "--sweep", "--v2", "--willneed",
 ];
 const MODES: &[&str] = &[
-    "ann", "ann-truth", "breakdown", "bytesq", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
+    "ann", "ann-truth", "breakdown", "bytesq", "cert-layouts", "certify-layout", "create", "dbcmp", "dbknn", "dbtopk", "e2e",
     "filter", "levels", "oracle", "qvbench", "scanbench", "setup", "verify",
 ];
 /// The flags that make an index (`v2::BuildOptions`): given only where one is made, with `create`, `--rebuild` or
@@ -68,6 +68,8 @@ const BUILD_FLAGS: &[&str] = &[
 const FIT_FLAGS: &[&str] = &["--per-cluster", "--groups", "--basis", "--query-sample", "--cert-time"];
 /// Of those, the ones that make the support table's anchors (with `--seed`, the only thing a rebuild seeds).
 const ANCHOR_FLAGS: &[&str] = &["--anchors", "--text-anchors", "--text-count"];
+/// The certificate's tools (`cert_cmd`): each mode with the flags it takes (it runs alone, with these only).
+const CERT_MODES: &[(&str, &[&str])] = &[("certify-layout", &["--ds", "--lnd", "--time-cap"]), ("cert-layouts", &["--dims"])];
 /// The flags `create` takes besides the build flags.
 const CREATE_FLAGS: &[&str] = &["--vectors", "--index", "--hash"];
 
@@ -109,6 +111,18 @@ pub fn check_args_of(a: &[String]) -> Result<(), String> {
         return Err(format!("unknown arguments {bad:?}: give modes from {MODES:?}, and flags from {BOOL_FLAGS:?} or, each followed by its value, {VALUE_FLAGS:?}"));
     }
     let has = |f: &str| flags.contains(&f);
+    for (m, takes) in CERT_MODES {
+        if modes.contains(m) {
+            if modes.len() > 1 || flags.iter().any(|f| !takes.contains(f)) {
+                return Err(format!("{m} runs alone, with {takes:?} only"));
+            }
+            if *m == "certify-layout" && (!has("--ds") || !has("--lnd")) {
+                return Err("certify-layout needs --ds D1,D2,.. (2 to 4 block dimensions) and --lnd LN_DELTA".into());
+            }
+        } else if let Some(f) = flags.iter().find(|f| takes.contains(f)) {
+            return Err(format!("{f} is {m}'s (vexact {m} ...)"));
+        }
+    }
     let create = modes.contains(&"create");
     if create {
         if modes.len() > 1 || has("--v2") || has("--rebuild") || has("--in-memory") {
@@ -151,6 +165,34 @@ pub fn check_args_of(a: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The certificate's tools: `certify-layout --ds D1,D2,.. --lnd LN_DELTA [--time-cap SECONDS]` certifies a layout
+/// (`certify::certify_layout`, 600 s by default; its progress on stderr) and prints {"ds", "lnd", "X"} as certify.py
+/// does (X null when not certified); `cert-layouts --dims N0,N0,..` prints, per dimension, the fit's layout and its
+/// budgets at N = 2^10 .. 2^34, or the fit's error for it (tools/certify_fixture.py and tools/certs_table.py read
+/// them, so the layout rule lives only in the fit).
+pub fn cert_cmd() {
+    let list = |k: &str| -> Vec<usize> {
+        arg_str(k, "").split(',').filter(|s| !s.is_empty()).map(|s| s.trim().parse().unwrap_or_else(|_| exit2(&format!("{k}: {s} is not a whole number")))).collect()
+    };
+    if has_mode("certify-layout") {
+        let ds = list("--ds");
+        let lnd: f64 = arg_str("--lnd", "").parse().unwrap_or_else(|_| exit2("--lnd is a number (ln delta)"));
+        let cap: f64 = arg_str("--time-cap", "600").parse().unwrap_or_else(|_| exit2("--time-cap is a number of seconds"));
+        let x = vexact::certify::certify_layout(&ds, lnd, cap, &mut |s| eprintln!("{s}"));
+        println!("{}", serde_json::json!({"ds": ds, "lnd": lnd, "X": x}));
+    } else {
+        for n0 in list("--dims") {
+            match vexact::fit::cert_layout(n0) {
+                Ok((ds, levels)) => {
+                    let lnd: Vec<(u32, f64)> = (10..=34u32).map(|p| (p, vexact::certify::ln_delta(1usize << p, levels, 1e-9))).collect();
+                    println!("{}", serde_json::json!({"n0": n0, "ds": ds, "levels": levels, "lnd": lnd}));
+                }
+                Err(e) => println!("{}", serde_json::json!({"n0": n0, "error": e})),
+            }
+        }
+    }
 }
 
 /// Whether `m` is given as a mode (not as a flag's value, such as a directory named like a mode).
@@ -2083,6 +2125,14 @@ mod tests {
         ok("--vectors v.npy --index D create --seed 7");
         ok("--v2 --index D --rebuild --anchors 64 --seed 7");
         ok("--v2 --index D --rebuild --text-anchors t.npy --text-count 32 --seed 7 e2e");
+        // the certificate's tools run alone, with their own flags
+        ok("certify-layout --ds 15,15,15,15 --lnd -29.04 --time-cap 60");
+        ok("cert-layouts --dims 64,768");
+        refused("certify-layout --ds 15,15", "needs --ds");
+        refused("certify-layout --ds 15,15 --lnd -30 --index D", "runs alone");
+        refused("--v2 --index D certify-layout --ds 15,15 --lnd -30", "runs alone");
+        refused("--v2 --index D e2e --lnd -30", "certify-layout's");
+        refused("--vectors v.npy --index D create --dims 64", "cert-layouts's");
         ok("--v2 --index D --in-memory --nusort verify");
         ok("--v2 --index D --ddec 0.1 --keep-index bytesq");
         ok("qvbench --groups 8");
