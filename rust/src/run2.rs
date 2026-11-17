@@ -2170,6 +2170,15 @@ pub fn qbench(c: &Ctx2, nq: usize) {
     let sizes: Vec<usize> = sizes_f.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
     let ap = if c.approx.rad.is_empty() { Approx { f: 0.0, rad: vec![0.0; ix.k()] } } else { Approx { f: c.approx.f, rad: c.approx.rad.clone() } };
     let pl = pool(1);
+    // with --prof: the phases of the fastest run of each query (time-stamp counter, rated against the clock here)
+    let prof = args().iter().any(|a| a == "--prof");
+    PROF.store(prof, std::sync::atomic::Ordering::Relaxed);
+    let tsc_ms = {
+        let (t, c0) = (Timer::new(), unsafe { core::arch::x86_64::_rdtsc() });
+        while t.ms() < 50.0 {}
+        (unsafe { core::arch::x86_64::_rdtsc() } - c0) as f64 / t.ms()
+    };
+    let names = [(P_ANCHOR, "anchor"), (P_CUT, "cut"), (P_BASIS, "basis"), (P_GPOST, "gpost"), (P_ROT, "rot"), (P_CLSETUP, "clsetup"), (P_TABLES, "tables"), (P_INIT, "init"), (P_LVSETUP, "lvsetup"), (P_DECODE, "decode"), (P_BOUNDS, "bounds"), (P_REPACK, "repack"), (P_COMPACT, "compact"), (P_FULL, "full"), (P_PLAN, "plan")];
     let med = |v: &mut Vec<f64>| { v.sort_by(|a, b| a.partial_cmp(b).unwrap()); v[v.len() / 2] };
     for (cls, qs) in [("item", &c.items), ("text", &c.texts)] {
         let qs: Vec<&Vec<f32>> = qs.iter().take(nq).collect();
@@ -2188,9 +2197,10 @@ pub fn qbench(c: &Ctx2, nq: usize) {
         cells.extend(nps.iter().map(|np| format!("ann10np{np}")));
         for (ci, name) in cells.iter().enumerate() {
             let (mut ms, mut br, mut extra) = (Vec::new(), 0.0, [0.0f64; 3]);
+            let (mut cyc, mut fr, mut fb) = ([0u64; 32], 0u64, 0u64);
             let mut h = std::collections::hash_map::DefaultHasher::new();
             for (qi, q) in qs.iter().enumerate() {
-                let (mut best, mut best_br, mut best_ex, mut last) = (f64::INFINITY, 0.0, [0.0; 3], Vec::new());
+                let (mut best, mut best_br, mut best_ex, mut last, mut best_st) = (f64::INFINITY, 0.0, [0.0; 3], Vec::new(), Stats::default());
                 for _ in 0..reps.max(1) {
                     let t = Timer::new();
                     let (ans, st, ex): (Vec<u32>, Stats, [f64; 3]) = pl.install(|| {
@@ -2213,6 +2223,7 @@ pub fn qbench(c: &Ctx2, nq: usize) {
                     let el = t.ms();
                     if el < best {
                         (best, best_br, best_ex) = (el, bytes_read2(ix, &st), ex);
+                        best_st = st;
                     }
                     last = ans;
                 }
@@ -2222,9 +2233,17 @@ pub fn qbench(c: &Ctx2, nq: usize) {
                     extra[k] += best_ex[k];
                 }
                 ms.push(best);
+                for (a, b) in cyc.iter_mut().zip(best_st.cyc) {
+                    *a += b;
+                }
+                (fr, fb) = (fr + best_st.full_reads, fb + best_st.exact_fallbacks);
             }
             let n = qs.len() as f64;
             let mean = ms.iter().sum::<f64>() / n;
+            if prof {
+                let ph: Vec<String> = names.iter().map(|&(i, nm)| format!("{nm} {:.3}", cyc[i] as f64 / tsc_ms / qs.len() as f64)).collect();
+                out!("qbp {cls} {name:<12} {}  full reads {:.0} exact fallbacks {:.1}", ph.join(" "), fr as f64 / qs.len() as f64, fb as f64 / qs.len() as f64);
+            }
             out!("qb {cls} {name:<12} mean {mean:8.3} med {:8.3} ms  B/item {:8.2}  seed/sweep/sel {:.3}/{:.3}/{:.3}  hash {:016x}", med(&mut ms), br / n, extra[0] / n, extra[1] / n, extra[2] / n, h.finish());
         }
     }
