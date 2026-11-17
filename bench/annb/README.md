@@ -6,8 +6,9 @@ DiskANN and BLAS brute force on the harness's datasets. Filtered, exact and thre
 This folder covers only the unfiltered protocol, run by the harness itself.
 
 - `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `threshold`,
-  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` (used by
-  `bench/suite`) is not part of the harnesses' protocol.
+  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` and the disk mode
+  (`full_file` and its read options, `evict_full`, `full_resident`; used by `bench/suite`'s memory-cap axis) are not
+  part of the harnesses' protocol.
 - `vexact/`: the algorithm folder the harness loads: `module.py`, `config.yml`, `Dockerfile`.
 - `install.sh`: copies the algorithm folder into a checkout, with `rust/` and `combined/core.py` taken from a pinned
   revision, and builds the `ann-benchmarks-vexact` image.
@@ -40,7 +41,9 @@ about 6 GB of download and 20 GB of memory to build, and the brute-force ground 
 benchmarked index stays fixed while `rust/` changes. `install.sh DIR REV` builds another revision. To move the pin, set
 `PIN`, rebuild, and fix `vexact-py/src/lib.rs` if the library's API has moved. The bindings use only `v2::open`,
 `v2::rebuild`, `BuildOptions`, `Plan` (`Plan::default`, `Plan::check`), `pseudo_queries`, `Approx::fit`, `Dial::fit`,
-`Vis2::new`, `knn2` and `knn2_fast`, and for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`. The pin is a merge of `research/exact-vector-search` (saved index, planner without
+`Vis2::new`, `knn2` and `knn2_fast`, for `threshold` `prep2`, `threshold2`, `Opts2` and `to_bitmap2`, and for the disk
+mode `Full2`, `Index2::own_rows`, `disk::Rows` (`to_file`, `policy`, `evict`, `resident`, `file_path`),
+`disk::uring_available` and `q::disk_constants`; all of them are in the pinned revision too. The pin is a merge of `research/exact-vector-search` (saved index, planner without
 timing, levels-clusters options off by default) with this branch's AVX-512 basis products and integer levels.
 
 The image compiles with `-C target-cpu=native`, so build it on the machine that will run the benchmark.

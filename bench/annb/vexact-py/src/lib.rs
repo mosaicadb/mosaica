@@ -6,8 +6,9 @@ use pyo3::prelude::*;
 use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
-use vexact::v2::q::{knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
-use vexact::v2::{open, rebuild, BuildOptions, Index2};
+use std::sync::atomic::Ordering::Relaxed;
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::{disk, open, rebuild, BuildOptions, Full2, Index2};
 
 #[pyclass(module = "vexact_py")]
 struct Index {
@@ -31,9 +32,27 @@ impl Index {
     /// cluster the support table leaves open on the index path), "flat" (decided from full vectors) or "scan".
     /// `dlv`: the deterministic levels' cumulative bytes, in place of the fit's (a build input, e.g. [16, 32]).
     /// `ddec`: the deterministic levels that decide in threshold queries, as a bit mask (None: all).
+    ///
+    /// Disk mode, for runs under a memory cap (as `rust/src/run2.rs` `--full-file` and its options): `full_file` writes
+    /// the full vectors to a new file there (`Rows::to_file`: never inside a saved index's `encoded-*` directory, never
+    /// over the fit's vectors or a file this process maps) and maps it with `advice` (normal, random, sequential),
+    /// evicted from the page cache. `read` "uring" reads the rows the index path leaves with pread through io_uring (and
+    /// the planner prices those reads: its disk constants are read from the index directory's cache or timed once,
+    /// `disk_constants`), "mmap" through the mapping (not priced). `willneed` asks the kernel to start reading a batch's
+    /// pages before it is decided; `direct_min` (bytes; None: never) reads extents at least that large with O_DIRECT;
+    /// `dontcache_min` (bytes; None: never) reads extents from that size up to `direct_min` with RWF_DONTCACHE.
+    /// `priced` overrides whether the planner prices the reads. Without `full_file` an opened index reads its vectors
+    /// through the saved index's own mapping (normal advice, not priced).
     #[new]
-    #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None))]
-    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>) -> PyResult<Index> {
+    #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
+                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
+           full_file: Option<String>, advice: &str, read: &str, willneed: bool, direct_min: Option<usize>, dontcache_min: Option<usize>,
+           priced: Option<bool>) -> PyResult<Index> {
+        if read != "uring" && read != "mmap" {
+            return Err(PyValueError::new_err(format!("read is uring or mmap, not {read:?}")));
+        }
         let mode = match plan {
             "auto" => PlanMode::Auto,
             "index" => PlanMode::Index,
@@ -44,12 +63,26 @@ impl Index {
         py.detach(|| {
             let o = BuildOptions { dlv, ..BuildOptions::default() };
             let mut log = |s: String| eprintln!("{s}");
-            let (p, ix) = match open(&dir, &o, &mut log) {
+            let (p, mut ix) = match open(&dir, &o, &mut log) {
                 Ok(x) => x,
                 Err(_) => rebuild(&dir, &o, &mut log).map_err(PyValueError::new_err)?,
             };
-            let plan = Plan { mode, ddec, ..Plan::default() };
+            let mut plan = Plan { mode, ddec, ..Plan::default() };
             plan.check(&ix).map_err(PyValueError::new_err)?;
+            if let Some(ff) = &full_file {
+                let Full2::Real { rows } = &mut ix.full else { return Err(PyValueError::new_err("full_file needs stored vectors")) };
+                let rows = std::sync::Arc::get_mut(rows).ok_or_else(|| PyValueError::new_err("the full vectors are shared; cannot move them to a file"))?;
+                rows.to_file(ff, advice, &p.vector_files().iter().map(|s| s.as_str()).collect::<Vec<_>>()).map_err(PyValueError::new_err)?;
+                let pol = rows.policy().ok_or_else(|| PyValueError::new_err("the full vectors were not mapped from the file"))?;
+                pol.willneed.store(willneed, Relaxed);
+                pol.uring.store(read == "uring", Relaxed);
+                pol.priced.store(priced.unwrap_or(read == "uring"), Relaxed);
+                pol.direct_min.store(direct_min.unwrap_or(usize::MAX), Relaxed);
+                pol.dontcache_min.store(dontcache_min.unwrap_or(usize::MAX), Relaxed);
+                if pol.priced.load(Relaxed) {
+                    plan = disk_constants(&ix, plan, &dir, &mut log);
+                }
+            }
             let pseudo = pseudo_queries(&ix, pseudo, 10);
             let approx = if pseudo.is_empty() { Approx { f: 0.0, rad: Vec::new() } } else { Approx::fit(&ix, &pseudo).0 };
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -207,6 +240,41 @@ impl Index {
             Some(np) => knn2_fast(ix, ap, q, k, vis, np, dial, plan),
         }));
         Ok((o.st.touched, o.st.full_reads, o.st.clusters_open, t.elapsed().as_secs_f64() * 1e3))
+    }
+
+    /// Drops the full vectors (when on file, from `full_file`) from this process's mappings and from the page cache;
+    /// the codes stay. Returns the bytes still resident afterwards.
+    fn evict_full(&self) -> usize {
+        match self.ix.own_rows() {
+            Some(r) => {
+                r.evict();
+                r.resident()
+            }
+            None => 0,
+        }
+    }
+
+    /// Bytes of the full vectors resident in the page cache (0 when they are in memory, not on file).
+    fn full_resident(&self) -> usize {
+        self.ix.own_rows().map_or(0, |r| r.resident())
+    }
+
+    /// The file the full vectors are mapped from, if any.
+    #[getter]
+    fn full_path(&self) -> Option<String> {
+        self.ix.own_rows().and_then(|r| r.file_path()).map(|p| p.to_string_lossy().to_string())
+    }
+
+    /// Whether io_uring can be used here.
+    #[staticmethod]
+    fn uring_available() -> bool {
+        disk::uring_available()
+    }
+
+    /// The dimension the index takes queries in (the fit's, padded to a multiple of 32).
+    #[getter]
+    fn dim(&self) -> usize {
+        self.ix.n()
     }
 
     #[getter]
