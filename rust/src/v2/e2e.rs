@@ -233,6 +233,33 @@ fn approximate_knn_over_every_cluster_without_a_dial_is_exact_up_to_f32() {
     }
 }
 
+/// The H order over every cluster (m 0) computes the spread only of clusters whose key can still reach the cut, and its
+/// first clusters are those of the full order (every cluster's key computed), unfiltered and under each visible set,
+/// at every k and cut.
+#[test]
+fn the_h_order_cut_keeps_the_full_orders_first_clusters() {
+    let f = fixture();
+    let ix = &f.ix;
+    for r in [1, 4, 16] {
+        let ap = Approx::new(ix, OrderKind::H { r, m: 0 }, H_F, Approx::radii(ix));
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(ix, q);
+            let qm = ap.centre_scores(ix, &pr.q32);
+            for (sname, bm) in &f.sets {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                for kk in [1, 10, 100] {
+                    let (all, _) = ap.order_qm(ix, &pr.q32, &qm, kk, vis.as_ref(), 0);
+                    for take in [1, 3, 8, 20] {
+                        let (cut, done) = ap.order_qm(ix, &pr.q32, &qm, kk, vis.as_ref(), take);
+                        assert_eq!(cut, all[..take.min(all.len())], "r {r}, query {qi}, set {sname}, k {kk}, take {take}");
+                        assert!(done <= all.len());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A saved index, opened, is the index that was built: the same codes, scalars, keys, plans, per-cluster records,
 /// tables and vectors, and every query path gives the same answers doing the same work. An open with other options
 /// is refused, and nothing is written into the fitted directory.

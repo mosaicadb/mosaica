@@ -251,3 +251,86 @@ mod tests {
         }
     }
 }
+
+/// out[r] = sum_i q_i x[r n + i] over the int8 rows of x, in f32, four rows at a time (each row's products in 16 lanes,
+/// then its tail in order).
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f,avx512bw")]
+pub unsafe fn gemv_i8(q: &[f32], x: &[i8], n: usize, out: &mut [f32]) {
+    let rows = out.len();
+    assert!(q.len() >= n && x.len() >= rows * n);
+    let body = n - n % 16;
+    let tail = |r: usize| (body..n).map(|i| q[i] * x[r * n + i] as f32).sum::<f32>();
+    let mut r = 0;
+    while r + 4 <= rows {
+        let mut s = [_mm512_setzero_ps(); 4];
+        let mut i = 0;
+        while i < body {
+            let qv = _mm512_loadu_ps(q.as_ptr().add(i));
+            for (j, sj) in s.iter_mut().enumerate() {
+                let b = _mm_loadu_si128(x.as_ptr().add((r + j) * n + i) as *const __m128i);
+                *sj = _mm512_fmadd_ps(qv, _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(b)), *sj);
+            }
+            i += 16;
+        }
+        for (j, sj) in s.iter().enumerate() {
+            out[r + j] = _mm512_reduce_add_ps(*sj) + tail(r + j);
+        }
+        r += 4;
+    }
+    while r < rows {
+        let mut s = _mm512_setzero_ps();
+        let mut i = 0;
+        while i < body {
+            let b = _mm_loadu_si128(x.as_ptr().add(r * n + i) as *const __m128i);
+            s = _mm512_fmadd_ps(_mm512_loadu_ps(q.as_ptr().add(i)), _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(b)), s);
+            i += 16;
+        }
+        out[r] = _mm512_reduce_add_ps(s) + tail(r);
+        r += 1;
+    }
+}
+
+/// As the AVX-512 version, with two 8-lane sums per row.
+#[cfg(not(target_feature = "avx512f"))]
+#[target_feature(enable = "avx2,fma")]
+pub unsafe fn gemv_i8(q: &[f32], x: &[i8], n: usize, out: &mut [f32]) {
+    let rows = out.len();
+    assert!(q.len() >= n && x.len() >= rows * n);
+    let body = n - n % 16;
+    for (r, o) in out.iter_mut().enumerate() {
+        let (mut s0, mut s1) = (_mm256_setzero_ps(), _mm256_setzero_ps());
+        let mut i = 0;
+        while i < body {
+            let b = _mm_loadu_si128(x.as_ptr().add(r * n + i) as *const __m128i);
+            let lo = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(b));
+            let hi = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_srli_si128::<8>(b)));
+            s0 = _mm256_fmadd_ps(_mm256_loadu_ps(q.as_ptr().add(i)), lo, s0);
+            s1 = _mm256_fmadd_ps(_mm256_loadu_ps(q.as_ptr().add(i + 8)), hi, s1);
+            i += 16;
+        }
+        *o = hsum_ps(_mm256_add_ps(s0, s1)) + (body..n).map(|i| q[i] * x[r * n + i] as f32).sum::<f32>();
+    }
+}
+
+#[cfg(test)]
+mod gemv_tests {
+    use super::*;
+    use rand::{Rng, SeedableRng};
+
+    #[test]
+    fn gemv_i8_matches_the_f64_products() {
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(3);
+        for (rows, n) in [(1, 16), (3, 32), (4, 64), (9, 100), (13, 512)] {
+            let q: Vec<f32> = (0..n).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
+            let x: Vec<i8> = (0..rows * n).map(|_| rng.gen_range(-127i8..=127)).collect();
+            let mut out = vec![0f32; rows];
+            unsafe { gemv_i8(&q, &x, n, &mut out) };
+            for r in 0..rows {
+                let want: f64 = (0..n).map(|i| q[i] as f64 * x[r * n + i] as f64).sum();
+                let bound: f64 = (0..n).map(|i| (q[i] as f64 * x[r * n + i] as f64).abs()).sum::<f64>() * 1e-6;
+                assert!((out[r] as f64 - want).abs() <= bound, "rows {rows} n {n} row {r}: {} against {want}", out[r]);
+            }
+        }
+    }
+}

@@ -105,49 +105,88 @@ A phase passes when it is at least as good as the baseline at every recall level
 
 ## Progress
 
-Runs on this machine (4 cores, timing on core 3), the `order` suite (`suites.py`: glove-100-angular,
+Runs on this machine (4 cores, timing on core 3, AVX-512), on the `order` suite (`suites.py`: glove-100-angular,
 yahoo-minilm-384-normalized, laion-clip-512-normalized; 100 queries; approximate k-NN at k = 10, nprobe 4 to 256,
-unfiltered and under random-1 and random-25). `results/order-baseline/` is phase 0, `results/order/` phase 1 (the
-settings `radius` and `spread` on one build).
+unfiltered and under random-1 and random-25). `results/order-baseline/` is the library as it was (suite
+`order-default`), `results/order/` the current one with the settings `radius` and `spread`, run back to back.
+
+**Measuring.** The machine's speed drifts by 10 to 40% between runs and within one (a run after a restart was faster
+everywhere, including work nothing here changed). Between revisions of the library only back-to-back suite runs are
+compared. Between orders, `scripts/ab_orders.py` opens one index per order in one process and gives each query to
+every order in turn, and reports rows touched, which does not depend on the machine; `scripts/ab_curves.py`
+interpolates time and rows to a recall. Differences below about 5% in a paired run, and 10% between runs, are not
+findings.
 
 **Phase 0: where the time goes** (`scripts/profile_phases.py`; `results/phases-0-baseline.txt`). Under a sparse
-visible set the order is nearly the whole query: at random-1 and nprobe 4, 62 of 72 µs on glove, 79 of 94 on yahoo,
-184 of 200 on LAION. Unfiltered it is 13 to 18% at nprobe 4. Inside it, q.m of every cluster cost 37 µs (glove) to
-137 µs (LAION), the sort 7 µs, the query's preparation 2 µs.
+visible set the order was nearly the whole query: at random-1 and nprobe 4, 62 of 72 µs on glove, 79 of 94 on yahoo,
+184 of 200 on LAION; unfiltered, 13 to 18%. Inside it, q.m of every cluster cost 37 µs (glove) to 137 µs (LAION).
 
 **Phase 1.**
-- `util::dot64_32` (and `dot64`) were vectorised two lanes wide by the compiler. Written for AVX-512 with the same
-  operations in the same order (a multiply and an add per lane, not fused), the result is bitwise the same and 3.2×
-  faster: q.m of every cluster 125 → 40 µs on LAION, 37 → 13 on glove. It serves the exact paths too
-  (`results/phases-1-dot.txt`).
-- The order ranks every cluster by f32 products (`q::dot32`, 18 µs on LAION) and computes q.m in f64, which the
-  bounds take, for the probed clusters only. The anchor stays the nearest of all (computed when a cluster on the index
-  path first asks for it): the nearest among the probed clusters gave looser bounds and cost about 15% unfiltered.
-- The `spread` order (f′ = 0.4, `OrderKind::Spread`) is the bindings' default; `radius` (today's, fitted) stays as an
-  option, and `fit_queries` fits f for either.
+- `util::dot64_32` and `dot64` were vectorised two lanes wide by the compiler. Written for AVX-512 and AVX2 with the
+  same operations in the same order (a multiply and an add per lane, not fused), they return the same bits 3.2×
+  faster (q.m of every cluster 125 → 40 µs on LAION). The exact paths use them too.
+- The order ranks clusters by int8 centres: `fit.py` stores each centre as int8 times max|m| / 127, which
+  `Approx::new` recovers exactly from the f32 centres (0.25 MB on LAION against 1 MB), with an int8 GEMV
+  (`kernel::gemv_i8`, AVX-512 and AVX2): 11 µs on LAION, within 1e-8 of the f64 products. q.m in f64, which the
+  bounds take, is computed for the probed clusters only; the anchor stays the nearest of all (computed when a cluster
+  on the index path first asks for it), since the nearest among the probed gave looser bounds.
+- The `spread` order (f′ = 0.4, `OrderKind::Spread`) is the bindings' default; `radius` stays as an option, and
+  `fit_queries` fits f for any order.
 
-With `radius` (the same order as before), a query at random-1 and nprobe 4 now takes 36 µs on LAION (was 198), 27
-on glove (70) and 32 on yahoo (102); the order is 26, 15 and 19 µs of those (`results/phases-1-f32-order.txt`, which
-profiles `spread`). Time to reach a recall (`results/phase1-orders.txt`, by `scripts/compare_runs.py`), baseline /
-radius / spread, in µs:
+Back to back (`results/phase1-orders.txt`), with the same order as before (`radius`), a LAION query at random-1 takes
+24 µs at nprobe 4 (153 before) and 32 at nprobe 16 (211); the order is 18 of them (`results/phases-1-int8-order.txt`).
+Time to reach a recall, baseline / radius / spread, in µs:
 
 | | recall 0.8 | 0.9 | 0.95 |
 |---|---|---|---|
-| LAION, unfiltered | 2961 / 2776 / 1457 | 5588 / 5121 / 2318 | 10248 / 9363 / 4701 |
-| LAION, random-1 | 363 / 188 / 88 | 527 / 367 / 188 | 699 / 545 / 317 |
-| LAION, random-25 | 2805 / 2480 / 1279 | 5710 / 5205 / 2561 | 10910 / 10154 / 5475 |
-| glove, unfiltered | 789 / 785 / 793 | 1819 / 1632 / 1771 | 3145 / 2980 / 3396 |
-| glove, random-1 | 99 / 53 / 53 | 150 / 106 / 111 | 226 / 186 / 208 |
-| yahoo, unfiltered | 672 / 698 / 649 | 995 / 1015 / 1045 | 1498 / 1517 / 1514 |
-| yahoo, random-1 | 132 / 32 / 32 | 157 / 53 / 51 | 228 / 114 / 115 |
+| LAION, unfiltered | 2088 / 2311 / 1396 | 4695 / 4038 / 1977 | 8352 / 8110 / 3964 |
+| LAION, random-1 | 263 / 119 / 45 | 378 / 277 / 154 | 493 / 467 / 246 |
+| LAION, random-25 | 2446 / 1954 / 1582 | 3939 / 4601 / 2338 | 7425 / 7334 / 4600 |
+| glove, random-1 | 83 / 64 / 40 | 155 / 193 / 77 | 269 / 262 / 145 |
+| yahoo, random-1 | 102 / 21 / 23 | 132 / 34 / 35 | 221 / 90 / 145 |
 
-`radius` returns the same recall as the baseline in every cell (the same order). On LAION's text queries `spread`
-halves the time to every recall, on top of the faster order; on glove it loses about 0.008 recall at a fixed nprobe
-(as the replays found, within 0.01) and is up to 14% slower to recall 0.95 unfiltered, faster under random-25; on
-yahoo they tie. Single medians differ by up to about 10% between runs of the same work at these sizes, so
-differences below that are not findings.
+Unfiltered glove and yahoo, where the probed clusters' work dominates, differ by less than the drift. Paired
+(`results/phase1-paired-radius-spread.txt`): on yahoo the two orders touch the same rows at the same recall and time;
+on glove `spread` loses 0.008 to 0.015 recall at a fixed nprobe for 3 to 4% fewer rows (accepted); on LAION it gains
+0.05 to 0.23 recall for 25 to 35% more rows and about 5% more time per nprobe.
 
-**Next.** Unfiltered, the order is now 3 to 6% of a query and the probed clusters' own work is the rest, so H's
-extra cost (phase 2) has to buy recall at a fixed nprobe; under sparse filters the order is still about two thirds of
-a query (26 of 36 µs on LAION), where only cheaper ranking helps: the f16 or int8 centres (9 µs in `microbench/`) and
-then the hierarchy of phase 2b.
+**Phase 2: H** (`OrderKind::H { r, m }`, the bindings' orders `h4`, `h16`, `h4x8`).
+- Each cluster's top r principal directions about its centre (int8, a scale each), their variances and the mean
+  variance of the rest are computed when the order is chosen (`HSpread::new`, faer): 0.4 s on glove. Not yet stored.
+- z(k, n) takes the cluster's visible rows, and is negative under 2k of them (the bounds allow either sign).
+- First version, the exact cut (the rank-0 bounds rest |q|² ≤ σ_c² ≤ λ₁|q|², `results/phase2-paired-h-exact-cut.txt`):
+  unfiltered the bounds prune nothing (499 of 500 clusters computed on LAION; the order 113 to 317 µs for h4, 551 to
+  1043 µs for h16). Even so h4 reaches recall 0.9 in 9% less time than `spread` on LAION and 0.95 in 25% less, and
+  9 to 15% less under random-25; under random-1 it is 31 to 40% slower and h16 twice as slow.
+- Second version: H's key only for the m·nprobe clusters first by the `spread` key (m = 4 unless the name gives it;
+  x0 for every cluster). No longer exactly H's top nprobe, but at m = 2, 4 and 8 h4 needs the same rows to every
+  recall as over every cluster on all three datasets (`results/phase2-paired-h-prefilter.txt`), so the cut costs no
+  recall, and the order's cost now grows with nprobe, not K.
+- Under random-1 H needed more rows than `spread` to every recall: with about 20 visible rows a cluster, z(10, n) is
+  about 0, and H is `spread` with a weaker radius weight. H now takes the `spread` key for a query whose clusters
+  hold under 8k visible rows on average (`H_MIN_ROWS_PER_K`; set between the measured points, about 2k rows a
+  cluster under random-1 and 50k under random-25, not tuned between them). Under random-1 it then probes what
+  `spread` probes, at the same time (`results/phase2-paired-h-sparse-switch.txt`).
+
+Time to reach a recall against `spread`, paired (negative is faster):
+
+| | recall | h4x2 | h4x4 | h16x4 |
+|---|---|---|---|---|
+| LAION, unfiltered | 0.8 / 0.9 / 0.95 | −11 / −15 / −26% | −12 / −14 / −25% | −21 / −22 / −30% |
+| LAION, random-25 | 0.8 / 0.9 / 0.95 | −20 / −15 / −12% | −13 / −8 / −6% | −22 / −22 / −12% |
+| yahoo, unfiltered | 0.8 / 0.9 / 0.95 | −3 / −9 / −9% | −3 / −9 / −8% | −3 / −13 / −13% |
+| yahoo, random-25 | 0.8 / 0.9 / 0.95 | −9 / −13 / −21% | −12 / −14 / −20% | −14 / −19 / −24% |
+| glove, unfiltered | 0.8 / 0.9 | −5 / −11% | −6 / −15% | −12 / −14% |
+| glove, random-25 | 0.8 / 0.9 | −10 / −20% | −14 / −21% | −12 / −24% |
+| random-1 (all three) | | ±5% (the `spread` order) | | ±6% |
+
+h16x4 is the best order wherever the visible set is dense. Its state is 4 MB on LAION 1M (int8) and takes 6.3 s on
+4 threads to compute, almost all of it the full 512 × 512 eigendecompositions.
+
+**Next.**
+- Make h16 the default once its state is computed at build and stored (format version bumped) rather than at open,
+  and computed from a sample of each cluster's rows with a randomised top-r solver: at 1B (about 22,000 clusters of
+  45,000 rows) the full covariances would take hours.
+- Inserts leave the directions as built until compaction; n_c (for z) follows the visible counts already.
+- Phase 2b (the hierarchy) and phase 3 (stopping on the rad-aware model's probability) as planned. Under sparse
+  filters the order is still the larger part of a query (18 of 24 µs on LAION at random-1 and nprobe 4).

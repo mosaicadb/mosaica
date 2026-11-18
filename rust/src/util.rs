@@ -361,67 +361,107 @@ pub fn haar_rotation(m: usize, seed: u64, stream: u64) -> Vec<f64> {
 /// equals dot64 of the widened vector bit for bit.
 pub fn dot64_32(a: &[f64], b: &[f32]) -> f64 {
     let n = a.len().min(b.len());
-    #[cfg(target_feature = "avx512f")]
+    let (a, b) = (&a[..n], &b[..n]);
+    #[cfg(any(target_feature = "avx512f", target_feature = "avx2"))]
     {
-        // the eight partial sums are the eight lanes, each a multiply then an add (not fused), as the loop below
-        let s = unsafe { dot64_32_lanes(&a[..n], &b[..n]) };
-        let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+        let mut r = pairwise(unsafe { dot64_32_lanes(a, b) });
         for i in n - n % 8..n {
             r += a[i] * b[i] as f64;
         }
         r
     }
-    #[cfg(not(target_feature = "avx512f"))]
+    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2")))]
     {
-        let (ca, cb) = (a[..n].chunks_exact(8), b[..n].chunks_exact(8));
-        let (ra, rb) = (ca.remainder(), cb.remainder());
         let mut s = [0f64; 8];
-        for (x, y) in ca.zip(cb) {
+        for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
             for k in 0..8 {
                 s[k] += x[k] * y[k] as f64;
             }
         }
-        let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
-        for (x, y) in ra.iter().zip(rb) {
-            r += x * *y as f64;
+        let mut r = pairwise(s);
+        for i in n - n % 8..n {
+            r += a[i] * b[i] as f64;
         }
         r
     }
 }
 
-/// dot64_32's eight partial sums over the whole blocks of eight.
+pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
+    let n = a.len().min(b.len());
+    let (a, b) = (&a[..n], &b[..n]);
+    #[cfg(any(target_feature = "avx512f", target_feature = "avx2"))]
+    let s = unsafe { dot64_lanes(a, b) };
+    #[cfg(not(any(target_feature = "avx512f", target_feature = "avx2")))]
+    let s = {
+        let mut s = [0f64; 8];
+        for (x, y) in a.chunks_exact(8).zip(b.chunks_exact(8)) {
+            for k in 0..8 {
+                s[k] += x[k] * y[k];
+            }
+        }
+        s
+    };
+    let mut r = pairwise(s);
+    for i in n - n % 8..n {
+        r += a[i] * b[i];
+    }
+    r
+}
+
+/// dot64's and dot64_32's eight partial sums (by index mod 8) combined.
+fn pairwise(s: [f64; 8]) -> f64 {
+    (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]))
+}
+
+// The eight partial sums over the whole blocks of eight, each a multiply then an add (not fused), lane k holding
+// index k mod 8: the same operations in the same order as the scalar loop, so the same bits.
 #[cfg(target_feature = "avx512f")]
 #[target_feature(enable = "avx512f")]
 unsafe fn dot64_32_lanes(a: &[f64], b: &[f32]) -> [f64; 8] {
     use std::arch::x86_64::*;
     let mut s = _mm512_setzero_pd();
-    let mut i = 0;
-    while i + 8 <= a.len() {
-        let x = _mm512_loadu_pd(a.as_ptr().add(i));
+    for i in (0..a.len() - a.len() % 8).step_by(8) {
         let y = _mm512_cvtps_pd(_mm256_loadu_ps(b.as_ptr().add(i)));
-        s = _mm512_add_pd(s, _mm512_mul_pd(x, y));
-        i += 8;
+        s = _mm512_add_pd(s, _mm512_mul_pd(_mm512_loadu_pd(a.as_ptr().add(i)), y));
     }
-    let mut out = [0f64; 8];
-    _mm512_storeu_pd(out.as_mut_ptr(), s);
-    out
+    std::mem::transmute(s)
 }
 
-pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
-    let n = a.len().min(b.len());
-    let (ca, cb) = (a[..n].chunks_exact(8), b[..n].chunks_exact(8));
-    let (ra, rb) = (ca.remainder(), cb.remainder());
-    let mut s = [0f64; 8];
-    for (x, y) in ca.zip(cb) {
-        for k in 0..8 {
-            s[k] += x[k] * y[k];
-        }
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f")]
+unsafe fn dot64_lanes(a: &[f64], b: &[f64]) -> [f64; 8] {
+    use std::arch::x86_64::*;
+    let mut s = _mm512_setzero_pd();
+    for i in (0..a.len() - a.len() % 8).step_by(8) {
+        s = _mm512_add_pd(s, _mm512_mul_pd(_mm512_loadu_pd(a.as_ptr().add(i)), _mm512_loadu_pd(b.as_ptr().add(i))));
     }
-    let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
-    for (x, y) in ra.iter().zip(rb) {
-        r += x * y;
+    std::mem::transmute(s)
+}
+
+#[cfg(all(target_feature = "avx2", not(target_feature = "avx512f")))]
+#[target_feature(enable = "avx2")]
+unsafe fn dot64_32_lanes(a: &[f64], b: &[f32]) -> [f64; 8] {
+    use std::arch::x86_64::*;
+    let (mut s0, mut s1) = (_mm256_setzero_pd(), _mm256_setzero_pd());
+    for i in (0..a.len() - a.len() % 8).step_by(8) {
+        let y = _mm256_loadu_ps(b.as_ptr().add(i));
+        let (y0, y1) = (_mm256_cvtps_pd(_mm256_castps256_ps128(y)), _mm256_cvtps_pd(_mm256_extractf128_ps::<1>(y)));
+        s0 = _mm256_add_pd(s0, _mm256_mul_pd(_mm256_loadu_pd(a.as_ptr().add(i)), y0));
+        s1 = _mm256_add_pd(s1, _mm256_mul_pd(_mm256_loadu_pd(a.as_ptr().add(i + 4)), y1));
     }
-    r
+    std::mem::transmute([s0, s1])
+}
+
+#[cfg(all(target_feature = "avx2", not(target_feature = "avx512f")))]
+#[target_feature(enable = "avx2")]
+unsafe fn dot64_lanes(a: &[f64], b: &[f64]) -> [f64; 8] {
+    use std::arch::x86_64::*;
+    let (mut s0, mut s1) = (_mm256_setzero_pd(), _mm256_setzero_pd());
+    for i in (0..a.len() - a.len() % 8).step_by(8) {
+        s0 = _mm256_add_pd(s0, _mm256_mul_pd(_mm256_loadu_pd(a.as_ptr().add(i)), _mm256_loadu_pd(b.as_ptr().add(i))));
+        s1 = _mm256_add_pd(s1, _mm256_mul_pd(_mm256_loadu_pd(a.as_ptr().add(i + 4)), _mm256_loadu_pd(b.as_ptr().add(i + 4))));
+    }
+    std::mem::transmute([s0, s1])
 }
 
 pub fn quantile(v: &mut Vec<f64>, q: f64) -> f64 {

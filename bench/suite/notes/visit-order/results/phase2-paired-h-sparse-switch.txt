@@ -1,0 +1,18 @@
+laion-clip-512-normalized: 500 clusters, 100 queries, k 10, 3 repetitions; spread f=0.4, h16x4 f=0.3, h4x2 f=0.3
+random-1   nprobe    4    spread: 0.538       90 rows     26.0 us     h16x4: 0.538       90 rows     25.4 us (x0.982)      h4x2: 0.538       90 rows     25.0 us (x0.970)
+random-1   nprobe    8    spread: 0.654      173 rows     32.1 us     h16x4: 0.654      173 rows     30.8 us (x0.966)      h4x2: 0.654      173 rows     30.0 us (x0.944)
+random-1   nprobe   16    spread: 0.772      341 rows     49.5 us     h16x4: 0.772      341 rows     46.7 us (x0.954)      h4x2: 0.772      341 rows     47.2 us (x0.945)
+random-1   nprobe   32    spread: 0.860      670 rows     97.4 us     h16x4: 0.860      670 rows     96.6 us (x0.983)      h4x2: 0.860      670 rows     94.1 us (x0.963)
+random-1   nprobe   64    spread: 0.924     1320 rows    193.8 us     h16x4: 0.924     1320 rows    193.8 us (x0.991)      h4x2: 0.924     1320 rows    194.9 us (x0.991)
+yahoo-minilm-384-normalized: 339 clusters, 100 queries, k 10, 3 repetitions; spread f=0.4, h16x4 f=0.3, h4x2 f=0.3
+random-1   nprobe    4    spread: 0.635       84 rows     29.2 us     h16x4: 0.635       84 rows     28.1 us (x0.974)      h4x2: 0.635       84 rows     27.6 us (x0.963)
+random-1   nprobe    8    spread: 0.763      164 rows     36.7 us     h16x4: 0.763      164 rows     34.9 us (x0.955)      h4x2: 0.763      164 rows     34.3 us (x0.931)
+random-1   nprobe   16    spread: 0.857      321 rows     56.9 us     h16x4: 0.857      321 rows     52.6 us (x0.944)      h4x2: 0.857      321 rows     50.8 us (x0.891)
+random-1   nprobe   32    spread: 0.923      629 rows     64.1 us     h16x4: 0.923      629 rows     61.4 us (x0.943)      h4x2: 0.923      629 rows     57.8 us (x0.913)
+random-1   nprobe   64    spread: 0.967     1254 rows    201.9 us     h16x4: 0.967     1254 rows    209.8 us (x0.974)      h4x2: 0.967     1254 rows    185.6 us (x1.016)
+glove-100-angular: 592 clusters, 100 queries, k 10, 3 repetitions; spread f=0.4, h16x4 f=0.3, h4x2 f=0.3
+random-1   nprobe    4    spread: 0.458       92 rows     16.7 us     h16x4: 0.458       92 rows     16.7 us (x0.996)      h4x2: 0.458       92 rows     16.6 us (x0.990)
+random-1   nprobe    8    spread: 0.561      179 rows     18.8 us     h16x4: 0.561      179 rows     18.7 us (x0.995)      h4x2: 0.561      179 rows     18.5 us (x0.992)
+random-1   nprobe   16    spread: 0.657      348 rows     23.0 us     h16x4: 0.657      348 rows     22.8 us (x0.995)      h4x2: 0.657      348 rows     22.7 us (x0.989)
+random-1   nprobe   32    spread: 0.755      671 rows     31.5 us     h16x4: 0.755      671 rows     31.4 us (x0.997)      h4x2: 0.755      671 rows     31.3 us (x0.999)
+random-1   nprobe   64    spread: 0.845     1294 rows     48.8 us     h16x4: 0.845     1294 rows     47.4 us (x0.979)      h4x2: 0.845     1294 rows     48.2 us (x0.984)

@@ -1,7 +1,7 @@
 type,filter,setting,set_visible_ms,setting_ms
-approx,none,radius,0.01,170.10
-approx,none,spread,0.01,0.01
-approx,random-1,radius,1.26,144.31
-approx,random-1,spread,1.26,0.01
-approx,random-25,radius,12.97,144.33
-approx,random-25,spread,12.97,0.01
+approx,none,radius,0.01,130.10
+approx,none,spread,0.01,0.27
+approx,random-1,radius,1.05,123.29
+approx,random-1,spread,1.05,0.25
+approx,random-25,radius,11.26,135.57
+approx,random-25,spread,11.26,0.26

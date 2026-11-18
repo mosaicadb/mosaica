@@ -208,7 +208,13 @@ ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-3
                                                     approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256)])),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 
-SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST, "order": ORDER}
+# The same cells with the library's default order only, for comparing revisions of the library (which may not have
+# the orders as settings).
+ORDER_DEFAULT = dict(ORDER, name="order-default",
+                     params=dict(ORDER["params"], vexact={k: v for k, v in ORDER["params"]["vexact"].items() if k != "orders"}))
+
+SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST, "order": ORDER,
+          "order-default": ORDER_DEFAULT}
 
 
 def types_for(suite, dataset):

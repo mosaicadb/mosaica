@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
-use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, SPREAD_F, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -48,7 +48,9 @@ impl Index {
     /// `priced` overrides whether the planner prices the reads. Without `full_file` an opened index reads its vectors
     /// through the saved index's own mapping (normal advice, not priced).
     /// `order` is the approximate mode's cluster order (`OrderKind`): "radius", with f fitted on `pseudo` corpus
-    /// pseudo-queries, or "spread", with f = `SPREAD_F`. `fit_queries` fits f for either on real queries.
+    /// pseudo-queries, "spread" or "h4", "h16", "h4x8" (H with that many directions per cluster, and optionally
+    /// its candidates per probed cluster, `OrderKind::H`), with f at
+    /// `OrderKind::default_f`. `fit_queries` fits f for any of them on real queries.
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
                         read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread"))]
@@ -97,10 +99,10 @@ impl Index {
                 }
             }
             let pseudo = pseudo_queries(&ix, pseudo, 10);
-            let approx = match kind {
-                OrderKind::Spread => Approx::new(kind, SPREAD_F, Approx::radii(&ix)),
-                OrderKind::Radius if pseudo.is_empty() => Approx::centres(&ix),
-                OrderKind::Radius => Approx::fit(&ix, &pseudo, kind).0,
+            let approx = match kind.default_f() {
+                Some(f) => Approx::new(&ix, kind, f, Approx::radii(&ix)),
+                None if pseudo.is_empty() => Approx::centres(&ix),
+                None => Approx::fit(&ix, &pseudo, kind).0,
             };
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
             if let Some(cpu) = core {
@@ -160,16 +162,16 @@ impl Index {
         Ok(())
     }
 
-    /// Switch the approximate mode's cluster order (as `order` at open): "spread" takes f = `SPREAD_F`, "radius" is
-    /// fitted on the pseudo-queries. The radii are kept. Dials fitted before are dropped.
+    /// Switch the approximate mode's cluster order (as `order` at open). The radii are kept. Dials fitted before are
+    /// dropped.
     fn set_order(&mut self, py: Python<'_>, order: &str) -> PyResult<()> {
         let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
         let rad = std::mem::take(&mut self.approx.rad);
         let (ix, pseudo) = (&self.ix, &self.pseudo);
-        self.approx = match kind {
-            OrderKind::Spread => Approx::new(kind, SPREAD_F, if rad.is_empty() { Approx::radii(ix) } else { rad }),
-            OrderKind::Radius if pseudo.is_empty() => Approx::centres(ix),
-            OrderKind::Radius => py.detach(|| Approx::fit(ix, pseudo, kind).0),
+        self.approx = match kind.default_f() {
+            Some(f) => py.detach(|| Approx::new(ix, kind, f, if rad.is_empty() { Approx::radii(ix) } else { rad })),
+            None if pseudo.is_empty() => Approx::centres(ix),
+            None => py.detach(|| Approx::fit(ix, pseudo, kind).0),
         };
         self.dials.clear();
         Ok(())
@@ -178,7 +180,11 @@ impl Index {
     /// The approximate mode's cluster order and its f.
     #[getter]
     fn order(&self) -> (String, f64) {
-        (format!("{:?}", self.approx.kind).to_lowercase(), self.approx.f)
+        let name = match self.approx.kind {
+            OrderKind::H { r, m } => format!("h{r}x{m}"),
+            k => format!("{k:?}").to_lowercase(),
+        };
+        (name, self.approx.f)
     }
 
     /// Fit the approximate mode's dial for k (once per k; it is used when eps > 0).
