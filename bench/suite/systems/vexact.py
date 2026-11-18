@@ -112,6 +112,15 @@ class Vexact(System):
             tot += sum(os.path.getsize(os.path.join(root, f)) for f in files)
         return tot
 
+    def settings(self, qtype, filtered):
+        # the approximate mode's cluster orders to compare (`orders`, e.g. ["radius", "spread"]), one setting each
+        return list(self.params.get("orders", ["default"])) if qtype == "approx" else ["default"]
+
+    def use(self, setting):
+        self.setting = setting
+        if setting != "default":
+            self.ix.set_order(setting)
+
     def set_visible(self, ids, name=None):
         self.vis = ids
         self.ix.set_visible(None if ids is None else ids.astype(np.int64))

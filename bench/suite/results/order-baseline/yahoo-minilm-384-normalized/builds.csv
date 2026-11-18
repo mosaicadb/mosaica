@@ -1,0 +1,2 @@
+system,status,build_s,threads,index_gib,peak_rss_gib,detail
+vexact,ok,167.2,3,1.203,1.93,"{""fit_s"": 82.4, ""encode_s"": 84.8, ""sample"": false}"

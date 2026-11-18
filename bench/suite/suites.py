@@ -198,7 +198,17 @@ SCALE = scale_suite("scale", ["laion-10m", "laion-40m", "laion-100m"])
 # the same code on a small nested sample (2 parts: 200k in 500k in 1M), to test the scale path end to end
 SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m"])
 
-SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST}
+# The approximate mode's cluster order (notes/visit-order/PLAN.md): the quick suite's public datasets, approximate k-NN
+# only, unfiltered and under the quick filters, on a finer nprobe grid; vexact alone, since the comparison is between
+# its orders.
+ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized"],
+             types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
+             systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
+             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["radius", "spread"],
+                                                    approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256)])),
+             public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
+
+SUITES = {"quick": QUICK, "full": FULL, "scale": SCALE, "scale-test": SCALE_TEST, "order": ORDER}
 
 
 def types_for(suite, dataset):

@@ -102,3 +102,40 @@ A phase passes when it is at least as good as the baseline at every recall level
    at the quick suite's K and at about 5,000 clusters (`--per-cluster 200`, more groups) to reach a 1B index's ratio
    of children to parent. Built only if coverage holds on LAION text queries.
 3. **The rad-aware model's stopping and recall targets.**
+
+## Progress
+
+Runs on this machine (4 cores, timing on core 3), the `order` suite (`suites.py`: glove-100-angular,
+yahoo-minilm-384-normalized, laion-clip-512-normalized; 100 queries; approximate k-NN at k = 10, nprobe 4 to 256,
+unfiltered and under random-1 and random-25). `results/order-baseline/` is phase 0, `results/order/` phase 1 (the
+settings `radius` and `spread` on one build).
+
+**Phase 0: where the time goes** (`scripts/profile_phases.py`; `results/phases-0-baseline.txt`). Under a sparse
+visible set the order is nearly the whole query: at random-1 and nprobe 4, 62 of 72 µs on glove, 79 of 94 on yahoo,
+184 of 200 on LAION. Unfiltered it is 13 to 18% at nprobe 4. Inside it, q.m of every cluster cost 37 µs (glove) to
+137 µs (LAION), the sort 7 µs, the query's preparation 2 µs.
+
+**Phase 1.**
+- `util::dot64_32` (and `dot64`) were vectorised two lanes wide by the compiler. Written for AVX-512 with the same
+  operations in the same order (a multiply and an add per lane, not fused), the result is bitwise the same and 3.2×
+  faster: q.m of every cluster 125 → 40 µs on LAION, 37 → 13 on glove. It serves the exact paths too. At random-1 and
+  nprobe 4 a query now takes 58 µs on LAION (was 204), 27 on glove (62), 37 on yahoo (94); the order is still 44, 19
+  and 24 µs of those (`results/phases-1-dot.txt`).
+- The `spread` order (f′ = 0.4, `OrderKind::Spread`) is the bindings' default; `radius` (today's, fitted) stays as an
+  option, and `fit_queries` fits f for either. Time to reach a recall (`results/phase1-orders.txt`, by
+  `scripts/compare_runs.py`), baseline / radius / spread:
+
+  | | recall 0.8 | 0.9 | 0.95 |
+  |---|---|---|---|
+  | LAION, unfiltered | 2961 / 2637 / 1463 µs | 5588 / 4916 / 2505 | 10248 / 8634 / 4729 |
+  | LAION, random-1 | 363 / 206 / 120 | 527 / 408 / 213 | 699 / 565 / 341 |
+  | LAION, random-25 | 2805 / 2338 / 1174 | 5710 / 5116 / 2440 | 10910 / 9578 / 5060 |
+  | glove, unfiltered | 789 / 759 / 828 | 1819 / 1678 / 1757 | 3145 / 3098 / 3328 |
+  | glove, random-1 | 99 / 54 / 53 | 150 / 105 / 110 | 226 / 189 / 220 |
+  | yahoo, unfiltered | 672 / 609 / 713 | 995 / 961 / 1026 | 1498 / 1388 / 1410 |
+  | yahoo, random-1 | 132 / 39 / 41 | 157 / 75 / 64 | 228 / 172 / 138 |
+
+  `radius` returns the same recall as the baseline in every cell (the same order). On LAION's text queries `spread`
+  more than halves the time to every recall; on glove it loses about 0.008 recall at a fixed nprobe (as the replays
+  found, within 0.01) and is up to 9% slower to a recall than `radius`; on yahoo they tie. Single medians differ by
+  up to about 10% between runs of the same work at these sizes, so differences below that are not findings.

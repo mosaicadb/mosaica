@@ -7,7 +7,7 @@ use roaring::RoaringBitmap;
 use std::collections::HashMap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
-use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, SPREAD_F, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -47,13 +47,16 @@ impl Index {
     /// `dontcache_min` (bytes; None: never) reads extents from that size up to `direct_min` with RWF_DONTCACHE.
     /// `priced` overrides whether the planner prices the reads. Without `full_file` an opened index reads its vectors
     /// through the saved index's own mapping (normal advice, not priced).
+    /// `order` is the approximate mode's cluster order (`OrderKind`): "radius", with f fitted on `pseudo` corpus
+    /// pseudo-queries, or "spread", with f = `SPREAD_F`. `fit_queries` fits f for either on real queries.
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
-                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None))]
+                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread"))]
     #[allow(clippy::too_many_arguments)]
     fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
            full_file: Option<String>, advice: &str, read: &str, willneed: bool, direct_min: Option<usize>, dontcache_min: Option<usize>,
-           priced: Option<bool>) -> PyResult<Index> {
+           priced: Option<bool>, order: &str) -> PyResult<Index> {
+        let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
         if read != "uring" && read != "mmap" {
             return Err(PyValueError::new_err(format!("read is uring or mmap, not {read:?}")));
         }
@@ -94,7 +97,11 @@ impl Index {
                 }
             }
             let pseudo = pseudo_queries(&ix, pseudo, 10);
-            let approx = if pseudo.is_empty() { Approx { f: 0.0, rad: Vec::new() } } else { Approx::fit(&ix, &pseudo).0 };
+            let approx = match kind {
+                OrderKind::Spread => Approx::new(kind, SPREAD_F, Approx::radii(&ix)),
+                OrderKind::Radius if pseudo.is_empty() => Approx::centres(&ix),
+                OrderKind::Radius => Approx::fit(&ix, &pseudo, kind).0,
+            };
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
             if let Some(cpu) = core {
                 pool.install(|| vexact::util::pin(cpu));
@@ -146,10 +153,32 @@ impl Index {
             pseudo.push((usize::MAX, q, g.iter().take(10).map(|&e| e as u32).collect::<Vec<u32>>()));
         }
         let ix = &self.ix;
-        self.approx = py.detach(|| Approx::fit(ix, &pseudo).0);
+        let kind = self.approx.kind;
+        self.approx = py.detach(|| Approx::fit(ix, &pseudo, kind).0);
         self.pseudo = pseudo;
         self.dials.clear();
         Ok(())
+    }
+
+    /// Switch the approximate mode's cluster order (as `order` at open): "spread" takes f = `SPREAD_F`, "radius" is
+    /// fitted on the pseudo-queries. The radii are kept. Dials fitted before are dropped.
+    fn set_order(&mut self, py: Python<'_>, order: &str) -> PyResult<()> {
+        let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
+        let rad = std::mem::take(&mut self.approx.rad);
+        let (ix, pseudo) = (&self.ix, &self.pseudo);
+        self.approx = match kind {
+            OrderKind::Spread => Approx::new(kind, SPREAD_F, if rad.is_empty() { Approx::radii(ix) } else { rad }),
+            OrderKind::Radius if pseudo.is_empty() => Approx::centres(ix),
+            OrderKind::Radius => py.detach(|| Approx::fit(ix, pseudo, kind).0),
+        };
+        self.dials.clear();
+        Ok(())
+    }
+
+    /// The approximate mode's cluster order and its f.
+    #[getter]
+    fn order(&self) -> (String, f64) {
+        (format!("{:?}", self.approx.kind).to_lowercase(), self.approx.f)
     }
 
     /// Fit the approximate mode's dial for k (once per k; it is used when eps > 0).
@@ -250,6 +279,29 @@ impl Index {
             Some(np) => knn2_fast(ix, ap, q, k, vis, np, dial, plan),
         }));
         Ok((o.st.touched, o.st.full_reads, o.st.clusters_open, t.elapsed().as_secs_f64() * 1e3))
+    }
+
+    /// Where one approximate query's time goes: the time-stamp-counter cycles of each phase (`Stats::cyc`, indexed by
+    /// the `P_*` constants of `v2::q`; `P_QUERY` is the whole call), with the time stamp counter's cycles per second.
+    #[pyo3(signature = (q, k, nprobe, eps=0.0))]
+    fn profile(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: usize, eps: f64) -> PyResult<(Vec<u64>, f64)> {
+        use std::sync::atomic::Ordering::Relaxed;
+        if eps > 0.0 {
+            self.fit_dial(py, k);
+        }
+        let dial = if eps > 0.0 { self.dials.get(&k).map(|d| d.for_eps(eps)) } else { None };
+        let q = q.as_slice()?;
+        let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
+        let (cyc, hz) = py.detach(|| self.pool.install(|| {
+            vexact::v2::q::PROF.store(true, Relaxed);
+            let (t, c0) = (std::time::Instant::now(), unsafe { core::arch::x86_64::_rdtsc() });
+            let mut o = knn2_fast(ix, ap, q, k, vis, nprobe, dial, plan);
+            let c1 = unsafe { core::arch::x86_64::_rdtsc() };
+            vexact::v2::q::PROF.store(false, Relaxed);
+            o.st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
+            (o.st.cyc.to_vec(), (c1 - c0) as f64 / t.elapsed().as_secs_f64())
+        }));
+        Ok((cyc, hz))
     }
 
     /// Drops the full vectors (when on file, from `full_file`) from this process's mappings and from the page cache;

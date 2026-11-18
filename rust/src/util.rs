@@ -361,36 +361,65 @@ pub fn haar_rotation(m: usize, seed: u64, stream: u64) -> Vec<f64> {
 /// equals dot64 of the widened vector bit for bit.
 pub fn dot64_32(a: &[f64], b: &[f32]) -> f64 {
     let n = a.len().min(b.len());
-    let mut s = [0f64; 8];
-    let mut i = 0;
-    while i + 8 <= n {
-        for k in 0..8 {
-            s[k] += a[i + k] * b[i + k] as f64;
+    #[cfg(target_feature = "avx512f")]
+    {
+        // the eight partial sums are the eight lanes, each a multiply then an add (not fused), as the loop below
+        let s = unsafe { dot64_32_lanes(&a[..n], &b[..n]) };
+        let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+        for i in n - n % 8..n {
+            r += a[i] * b[i] as f64;
         }
+        r
+    }
+    #[cfg(not(target_feature = "avx512f"))]
+    {
+        let (ca, cb) = (a[..n].chunks_exact(8), b[..n].chunks_exact(8));
+        let (ra, rb) = (ca.remainder(), cb.remainder());
+        let mut s = [0f64; 8];
+        for (x, y) in ca.zip(cb) {
+            for k in 0..8 {
+                s[k] += x[k] * y[k] as f64;
+            }
+        }
+        let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+        for (x, y) in ra.iter().zip(rb) {
+            r += x * *y as f64;
+        }
+        r
+    }
+}
+
+/// dot64_32's eight partial sums over the whole blocks of eight.
+#[cfg(target_feature = "avx512f")]
+#[target_feature(enable = "avx512f")]
+unsafe fn dot64_32_lanes(a: &[f64], b: &[f32]) -> [f64; 8] {
+    use std::arch::x86_64::*;
+    let mut s = _mm512_setzero_pd();
+    let mut i = 0;
+    while i + 8 <= a.len() {
+        let x = _mm512_loadu_pd(a.as_ptr().add(i));
+        let y = _mm512_cvtps_pd(_mm256_loadu_ps(b.as_ptr().add(i)));
+        s = _mm512_add_pd(s, _mm512_mul_pd(x, y));
         i += 8;
     }
-    let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
-    while i < n {
-        r += a[i] * b[i] as f64;
-        i += 1;
-    }
-    r
+    let mut out = [0f64; 8];
+    _mm512_storeu_pd(out.as_mut_ptr(), s);
+    out
 }
 
 pub fn dot64(a: &[f64], b: &[f64]) -> f64 {
     let n = a.len().min(b.len());
+    let (ca, cb) = (a[..n].chunks_exact(8), b[..n].chunks_exact(8));
+    let (ra, rb) = (ca.remainder(), cb.remainder());
     let mut s = [0f64; 8];
-    let mut i = 0;
-    while i + 8 <= n {
+    for (x, y) in ca.zip(cb) {
         for k in 0..8 {
-            s[k] += a[i + k] * b[i + k];
+            s[k] += x[k] * y[k];
         }
-        i += 8;
     }
     let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
-    while i < n {
-        r += a[i] * b[i];
-        i += 1;
+    for (x, y) in ra.iter().zip(rb) {
+        r += x * y;
     }
     r
 }
@@ -580,5 +609,49 @@ mod exact_dot_tests {
         let mut q = vec![0x3c00u16; 32];
         q[20] = 0x7c00;
         exact_dot(&q, &vec![0x3c00u16; 32]);
+    }
+}
+
+#[cfg(test)]
+mod dot64_tests {
+    use super::*;
+    use rand::{Rng, SeedableRng};
+
+    /// The summation dot64 and dot64_32 are defined by: eight partial sums by index mod 8, combined pairwise, then the
+    /// tail in order.
+    fn reference(a: &[f64], b: &[f64]) -> f64 {
+        let n = a.len().min(b.len());
+        let mut s = [0f64; 8];
+        let mut i = 0;
+        while i + 8 <= n {
+            for k in 0..8 {
+                s[k] += a[i + k] * b[i + k];
+            }
+            i += 8;
+        }
+        let mut r = (s[0] + s[1]) + (s[2] + s[3]) + ((s[4] + s[5]) + (s[6] + s[7]));
+        while i < n {
+            r += a[i] * b[i];
+            i += 1;
+        }
+        r
+    }
+
+    #[test]
+    fn dot64_and_dot64_32_keep_their_summation_order() {
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
+        for n in [0, 1, 7, 8, 9, 63, 100, 512, 515] {
+            for _ in 0..20 {
+                let a: Vec<f64> = (0..n).map(|_| rng.gen_range(-1.0..1.0) * 10f64.powi(rng.gen_range(-8..8))).collect();
+                let b32: Vec<f32> = (0..n).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
+                let b: Vec<f64> = b32.iter().map(|&x| x as f64).collect();
+                assert_eq!(dot64(&a, &b).to_bits(), reference(&a, &b).to_bits(), "n {n}");
+                assert_eq!(dot64_32(&a, &b32).to_bits(), reference(&a, &b).to_bits(), "n {n}");
+                // a longer second argument is cut to the first's length
+                let mut long = b32.clone();
+                long.push(1.0);
+                assert_eq!(dot64_32(&a, &long).to_bits(), reference(&a, &b).to_bits(), "n {n}");
+            }
+        }
     }
 }

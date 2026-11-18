@@ -19,7 +19,7 @@ fn fixture() -> &'static Fixture {
     F.get_or_init(|| {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
         let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
-        let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10));
+        let (ap, _) = Approx::fit(&ix, &pseudo_queries(&ix, 200, 10), OrderKind::Radius);
 
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
         let n = ix.n();

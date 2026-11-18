@@ -576,7 +576,7 @@ pub fn setup2_at(tag: &str, dir: &str, flags: &str) -> Ctx2 {
     }
     let t = Timer::new();
     let pseudo = pseudo_queries(&ix, if args().iter().any(|a| a == "--no-approx") { 0 } else { arg_usize("--pseudo", 1000) }, 10);
-    let (approx, fres) = if pseudo.is_empty() { (Approx { f: 0.0, rad: Vec::new() }, Vec::new()) } else { Approx::fit(&ix, &pseudo) };
+    let (approx, fres) = if pseudo.is_empty() { (Approx::new(OrderKind::Radius, 0.0, Vec::new()), Vec::new()) } else { Approx::fit(&ix, &pseudo, OrderKind::Radius) };
     out!("[approx] f = {} from {} pseudo-queries in {:.1}s; mean items scanned at recall 0.95 by f: {:?}", approx.f, pseudo.len(), t.s(), fres.iter().map(|x| (x.0, x.1.round())).collect::<Vec<_>>());
     // full vectors from a file (`--full-file PATH`, mapped with `--full-advice`), for runs under a memory cap
     let ff = arg_str("--full-file", "");
@@ -2304,7 +2304,7 @@ pub fn qbench(c: &Ctx2, nq: usize) {
     let (ks, nps) = (list("--knn-k", "10,100"), list("--nprobe", "8,32"));
     let nrows = c.flat().nrows;
     let sizes: Vec<usize> = sizes_f.iter().map(|f| ((nrows as f64 * f).round() as usize).max(1)).collect();
-    let ap = if c.approx.rad.is_empty() { Approx { f: 0.0, rad: vec![0.0; ix.k()] } } else { Approx { f: c.approx.f, rad: c.approx.rad.clone() } };
+    let ap = if c.approx.rad.is_empty() { Approx::centres(ix) } else { c.approx.clone() };
     let pl = pool(1);
     // with --prof: the phases of the fastest run of each query (time-stamp counter, rated against the clock here)
     let prof = args().iter().any(|a| a == "--prof");

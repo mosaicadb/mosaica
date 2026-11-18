@@ -3220,11 +3220,46 @@ pub fn probe(ix: &Index2, pr: &Prep2, clusters: Vec<usize>, vis: Option<&Vis2>, 
     iv
 }
 
-/// The approximate mode's cluster order: q.m + f r, the centre score plus f times the cluster's RMS radius about its
-/// centre (an optimistic estimate of its best item's score), with f fitted on corpus pseudo-queries.
+/// The approximate mode's cluster order: clusters by descending q.m + b(q) rad, the centre score plus a bonus for the
+/// cluster's RMS radius about its centre (an optimistic estimate of its best item's score).
+/// `Radius`: b(q) = f, fitted on corpus pseudo-queries. `Spread`: b(q) = f sd(q) / sd(rad), sd(q) the standard
+/// deviation of q.m over the clusters; it does not change when the query is scaled or moved along a direction in which
+/// the centres do not vary, as out-of-distribution queries are (bench/suite/notes/visit-order).
+/// f of the `Spread` order when no queries are given to fit it on: chosen by leave-one-dataset-out over five datasets,
+/// in and out of distribution (bench/suite/notes/visit-order, `loo_summary.txt`). Corpus pseudo-queries are not used to
+/// fit it, since they are in distribution by construction.
+pub const SPREAD_F: f64 = 0.4;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OrderKind {
+    Radius,
+    Spread,
+}
+
+impl OrderKind {
+    pub fn parse(s: &str) -> Result<OrderKind, String> {
+        match s {
+            "radius" => Ok(OrderKind::Radius),
+            "spread" => Ok(OrderKind::Spread),
+            _ => Err(format!("the order is radius or spread, not {s:?}")),
+        }
+    }
+    /// The values `Approx::fit` chooses f from.
+    fn grid(self) -> &'static [f64] {
+        match self {
+            OrderKind::Radius => &[0.0, 0.1, 0.2, 0.35, 0.5, 0.75],
+            OrderKind::Spread => &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8],
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct Approx {
+    pub kind: OrderKind,
     pub f: f64,
     pub rad: Vec<f64>,
+    /// The standard deviation of rad over the clusters.
+    pub sd_rad: f64,
 }
 
 /// Corpus rows used as pseudo-queries (spread over the index, near-zero rows left out), as unit queries, with their
@@ -3248,33 +3283,10 @@ pub fn pseudo_queries(ix: &Index2, nq: usize, kk: usize) -> Vec<(usize, Vec<f32>
 }
 
 impl Approx {
-    /// The first `take` clusters of `order`, from q.m of every cluster: only those are sorted (by descending key, the
-    /// lower index first among equal keys, as the full sort ordered them).
-    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>, take: usize) -> Vec<usize> {
-        let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
-            .map(|ci| (qm[ci] + self.f * self.rad[ci], ci)).collect();
-        let by = |x: &(f64, usize), y: &(f64, usize)| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1));
-        if take > 0 && take < keys.len() {
-            keys.select_nth_unstable_by(take - 1, by);
-            keys.truncate(take);
-        }
-        keys.sort_unstable_by(by);
-        keys.into_iter().map(|x| x.1).collect()
-    }
-    /// Clusters holding a visible item, by descending q.m + f r.
-    pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
-        let mut keys: Vec<(f64, usize)> = (0..ix.k()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
-            .map(|ci| (ix.qm(q64, ci) + self.f * self.rad[ci], ci)).collect();
-        keys.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap());
-        keys.into_iter().map(|x| x.1).collect()
-    }
-
-    /// Radii from the stored vectors; f from the grid {0, 0.1, 0.2, 0.35, 0.5, 0.75}, the one that reaches mean
-    /// recall@10 0.95 on the pseudo-queries (exact scan of the probed clusters, same number of clusters for every
-    /// query) with the fewest items scanned.
-    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)]) -> (Approx, Vec<(f64, f64)>) {
+    /// Every cluster's RMS radius about its stored centre, from the stored vectors.
+    pub fn radii(ix: &Index2) -> Vec<f64> {
         let n = ix.n();
-        let rad: Vec<f64> = (0..ix.k()).into_par_iter().map(|ci| {
+        (0..ix.k()).into_par_iter().map(|ci| {
             let c = &ix.cl[ci];
             let m = ix.centre_f64(ci);
             let mut x = vec![0f64; n];
@@ -3284,12 +3296,67 @@ impl Approx {
                 s += x.iter().zip(&m).map(|(a, b)| (a - b) * (a - b)).sum::<f64>();
             }
             (s / (c.r1 - c.r0).max(1) as f64).sqrt()
-        }).collect();
+        }).collect()
+    }
+
+    pub fn new(kind: OrderKind, f: f64, rad: Vec<f64>) -> Approx {
+        let k = rad.len().max(1) as f64;
+        let mean = rad.iter().sum::<f64>() / k;
+        let sd_rad = (rad.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / k).sqrt();
+        Approx { kind, f, rad, sd_rad }
+    }
+
+    /// The order with no radius bonus: by centre score alone.
+    pub fn centres(ix: &Index2) -> Approx {
+        Approx::new(OrderKind::Radius, 0.0, vec![0.0; ix.k()])
+    }
+
+    /// The bonus per unit of radius for a query with these centre scores (q.m of every cluster).
+    pub fn bonus(&self, qm: &[f64]) -> f64 {
+        match self.kind {
+            OrderKind::Radius => self.f,
+            OrderKind::Spread => {
+                if self.sd_rad <= 0.0 || qm.is_empty() {
+                    return 0.0;
+                }
+                let k = qm.len() as f64;
+                let mean = qm.iter().sum::<f64>() / k;
+                let sd = (qm.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / k).sqrt();
+                self.f * sd / self.sd_rad
+            }
+        }
+    }
+
+    /// The first `take` clusters of the order (all when `take` is 0), from q.m of every cluster: only those are
+    /// sorted (by descending key, the lower index first among equal keys).
+    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>, take: usize) -> Vec<usize> {
+        let b = self.bonus(qm);
+        let mut keys: Vec<(f64, usize)> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
+            .map(|ci| (qm[ci] + b * self.rad[ci], ci)).collect();
+        let by = |x: &(f64, usize), y: &(f64, usize)| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1));
+        if take > 0 && take < keys.len() {
+            keys.select_nth_unstable_by(take - 1, by);
+            keys.truncate(take);
+        }
+        keys.sort_unstable_by(by);
+        keys.into_iter().map(|x| x.1).collect()
+    }
+    /// Clusters holding a visible item, in order.
+    pub fn order(&self, ix: &Index2, q64: &[f64], vis: Option<&Vis2>) -> Vec<usize> {
+        let qm: Vec<f64> = (0..ix.k()).map(|ci| ix.qm(q64, ci)).collect();
+        self.order_qm(ix, &qm, vis, 0)
+    }
+
+    /// f for `kind` from its grid (`OrderKind::grid`): the one that reaches mean recall@10 0.95 on the queries (exact
+    /// scan of the probed clusters, same number of clusters for every query) with the fewest items scanned; radii from
+    /// the stored vectors. Also returns the mean items scanned at each f.
+    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)], kind: OrderKind) -> (Approx, Vec<(f64, f64)>) {
+        let rad = Approx::radii(ix);
         let k = ix.k();
         let row_cl: Vec<u32> = ix.cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
         let mut res = Vec::new();
-        for f in [0.0, 0.1, 0.2, 0.35, 0.5, 0.75] {
-            let ap = Approx { f, rad: rad.clone() };
+        for &f in kind.grid() {
+            let ap = Approx::new(kind, f, rad.clone());
             // per query: items scanned and items found by the first p clusters, p = 1..k
             let per: Vec<(Vec<f64>, Vec<f64>)> = pseudo.par_iter().map(|(_, q, gt)| {
                 let pr = prep2(ix, q);
@@ -3314,7 +3381,7 @@ impl Approx {
             res.push((f, per.iter().map(|x| x.1[p95]).sum::<f64>() / nq));
         }
         let best = res.iter().cloned().fold((0.0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
-        (Approx { f: best.0, rad }, res)
+        (Approx::new(kind, best.0, rad), res)
     }
 }
 
