@@ -41,6 +41,9 @@ fn main() {
         if run2::has_mode("setup") {
             run2::setup_cost(&c, 10);
         }
+        if run2::has_mode("gsetup") {
+            run2::gsetup_cost(&c, get("--nq", 20));
+        }
         if run2::has_mode("bytesq") {
             run2::bytesq2(&c, get("--nq", 100));
         }
