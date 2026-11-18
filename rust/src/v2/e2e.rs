@@ -464,10 +464,10 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 875d95f7d068df05");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 68a2f53eb4f1db0c");
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
-    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 a32ccf45ad21c491");
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 5b58e29aee21f7b0");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -1932,7 +1932,7 @@ fn same_calib(a: &calib::Calib, b: &calib::Calib) {
     assert_eq!(f64b(&[a.delta, a.med_rad]), f64b(&[b.delta, b.med_rad]), "the margin and the median radius");
     assert_eq!(a.bands.iter().map(|b| b.len()).collect::<Vec<_>>(), b.bands.iter().map(|b| b.len()).collect::<Vec<_>>());
     for (x, y) in a.bands.iter().flatten().zip(b.bands.iter().flatten()) {
-        assert_eq!((x.knn, x.size.to_bits(), f64b(&x.ln_lam), f64b(&x.recall)), (y.knn, y.size.to_bits(), f64b(&y.ln_lam), f64b(&y.recall)), "a price band");
+        assert_eq!((x.knn, x.size.to_bits(), x.vis.to_bits(), f64b(&x.ln_lam), f64b(&x.recall)), (y.knn, y.size.to_bits(), y.vis.to_bits(), f64b(&y.ln_lam), f64b(&y.recall)), "a price band");
     }
     let (g, h) = (&a.gcov, &b.gcov);
     assert_eq!((g.r, g.n0, f64b(&g.rad), f32b(&g.lam), f32b(&g.dsc)), (h.r, h.n0, f64b(&h.rad), f32b(&h.lam), f32b(&h.dsc)), "the group covariances");
@@ -2284,4 +2284,208 @@ fn process_knn_returns_k_items_whenever_k_are_visible() {
             }
         }
     }
+}
+
+/// knn2_fast's answers and work on synth4k under five visible sets (none, random 1%, 5% and 30%, the first quarter of
+/// the rows), 30 queries, k 1, 10 and 50, nprobe 1, 3, 8 and 32, with and without the dial: one line each (entities,
+/// then rows touched, full reads, range in and out, clusters opened, groups, each level's entries and decisions, and
+/// the table counts), as the library printed them before knn2_fast's reads moved into `KnnReader`.
+fn knn2_fast_lines(with_scores: bool) -> Vec<String> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, ix) = build(dir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let pq = pseudo_queries(&ix, 200, 10);
+    let n = ix.n();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(9);
+    let unit = |v: Vec<f32>| {
+        let s = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.into_iter().map(|x| x / s).collect::<Vec<f32>>()
+    };
+    let mut qs = Vec::new();
+    for _ in 0..30 {
+        let r = rng.gen_range(0..ix.nrows);
+        let x: Vec<f32> = ix.full_row_f16(r).iter().map(|&h| half::f16::from_bits(h).to_f32()).collect();
+        qs.push(unit(x.iter().map(|v| v + 0.5 * rng.gen_range(-1.0f32..1.0) / (n as f32).sqrt()).collect()));
+    }
+    let mut sets: Vec<Option<RoaringBitmap>> = vec![None];
+    for p in [0.01, 0.05, 0.3] {
+        let mut bm = RoaringBitmap::new();
+        for e in 0..ix.nent as u32 {
+            if rng.gen::<f64>() < p {
+                bm.insert(e);
+            }
+        }
+        sets.push(Some(bm));
+    }
+    let mut bm = RoaringBitmap::new();
+    for r in 0..ix.nrows / 4 {
+        bm.insert(ix.row_ent[r]);
+    }
+    sets.push(Some(bm));
+    let (ap, _) = Approx::fit(&ix, &pq, OrderKind::Radius);
+    let dial = Dial::fit(&ix, &pq, Plan::default(), false, 10, &ap);
+    let mut out = Vec::new();
+    for (si, s) in sets.iter().enumerate() {
+        let vis = s.as_ref().map(|b| Vis2::new(&ix, b));
+        for (qi, q) in qs.iter().enumerate() {
+            for kk in [1, 10, 50] {
+                for np in [1, 3, 8, 32] {
+                    for d in [None, Some(dial.for_eps(dial.eps[0]).to_vec())] {
+                        let o = knn2_fast(&ix, &ap, q, kk, vis.as_ref(), np, d.as_deref(), Plan::default());
+                        let st = &o.st;
+                        let ents: Vec<String> = o.ents.iter().map(|x| if with_scores { format!("{}:{:016x}", x.1, x.0.to_bits()) } else { x.1.to_string() }).collect();
+                        out.push(format!("s{si} q{qi} k{kk} np{np} d{} | {} | t{} f{} ri{} ro{} co{} g{} enter{:?} in{:?} out{:?} c{:?}", d.is_some(), ents.join(","), st.touched, st.full_reads, st.range_in, st.range_out, st.clusters_open, st.groups, st.enter, st.dec_in, st.dec_out, &st.cyc[20..25]));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// FNV-1a over the lines, each ended by a newline.
+fn fnv_lines(lines: &[String]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for l in lines {
+        for &b in l.as_bytes().iter().chain(b"\n") {
+            h = (h ^ b as u64).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    h
+}
+
+/// knn2_fast answers and works as the library did before its reads moved into `KnnReader` (the lines' hash without
+/// the scores' bits, which follow the instruction set's f32 sums; with them the lines were checked byte for byte
+/// against that library's on AVX-512).
+#[test]
+fn knn2_fast_is_unchanged() {
+    assert_eq!(format!("{:016x}", fnv_lines(&knn2_fast_lines(false))), "998eb0419010b953");
+}
+
+/// Every path of the process counts the visible rows it reads as touched: a scan its visible set, the exact query its
+/// own reads, a plan the rows of the clusters it read (at least one row when anything is visible).
+#[test]
+fn process_counts_the_rows_it_reads() {
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let nvis = vis.as_ref().map_or(ix.nrows, |v| v.rows.len()) as u64;
+            for (stop, mode) in [(process::Stop::Price(1e-3), PlanMode::Auto), (process::Stop::Recall(1.0), PlanMode::Auto), (process::Stop::Price(1e-3), PlanMode::Scan)] {
+                let o = process::ProcOpts { plan: Plan { mode, ..Plan::default() }, ..process::ProcOpts::new(stop) };
+                let what = format!("query {qi}, set {sname}, {stop:?}, {mode:?}");
+                let (out, info) = pc.knn(ix, q, 10, vis.as_ref(), None, &o);
+                match info.path {
+                    "scan" => assert_eq!(out.st.touched, nvis, "{what}"),
+                    "empty" => assert_eq!(nvis, 0, "{what}"),
+                    _ => assert!(out.st.touched > 0, "k-NN {} touched nothing, {what}", info.path),
+                }
+                let t = truth(ix, q, bm.as_ref()).get(20).map_or(0.0, |x| x.0);
+                let (out, info) = pc.threshold(ix, q, t, vis.as_ref(), &o);
+                if info.path == "scan" {
+                    assert_eq!(out.st.touched, nvis, "threshold, {what}");
+                }
+            }
+        }
+    }
+}
+
+/// The reader a k-NN plan runs, given every cluster holding a visible row on either path, returns the k best visible
+/// items (up to f32 rounding): a plan reading every unit is exact.
+#[test]
+fn reading_every_unit_is_exact() {
+    let f = fixture();
+    let ix = &f.ix;
+    for (qi, q) in f.queries.iter().enumerate() {
+        let e = 2.0 * full_err2(ix, &prep2(ix, q));
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let t = truth(ix, q, bm.as_ref());
+            for kk in [1, 10, 100] {
+                for (pname, path) in [("direct", (|_: usize| KnnPath::Direct) as fn(usize) -> KnnPath), ("index", |_: usize| KnnPath::Index), ("mixed", |c: usize| if c % 2 == 0 { KnnPath::Index } else { KnnPath::Direct })] {
+                    let pr = prep2(ix, q);
+                    let live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(true, |v| v.cl_cnt[c] > 0)).collect();
+                    let gs: Vec<usize> = { let mut g: Vec<usize> = live.iter().map(|&c| ix.cl[c].g).collect(); g.sort_unstable(); g.dedup(); g };
+                    let mut st = crate::kernel::Stats::new(ix.meta.nl());
+                    setup_groups(ix, &pr, &gs, &mut st);
+                    let mut rd = KnnReader::new(ix, &pr, vis.as_ref(), kk, Plan::default(), st);
+                    for &c in &live {
+                        rd.visit(c, path(c));
+                    }
+                    let (ents, _) = rd.finish();
+                    let got = sub_values(ix, &ents, q);
+                    assert_eq!(got.len(), kk.min(t.len()), "query {qi}, set {sname}, k {kk}, {pname}");
+                    if kk <= t.len() {
+                        let kth = t[kk - 1].0;
+                        assert!(got.iter().all(|&v| v >= kth - e), "below the k-th best, query {qi}, set {sname}, k {kk}, {pname}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The process on an index built with the norm sort (no support table): k-NN gives k visible items whenever k are
+/// visible and the exact k best when asked for everything; threshold answers are subsets of the exact one, and exact
+/// when asked for everything.
+#[test]
+fn the_process_runs_on_a_norm_sorted_index() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, ix) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert!(!ix.nukey.is_empty() && ix.calib.is_some());
+    let pc = process::Process::new(&ix).unwrap();
+    let f = fixture();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(&ix, b));
+            let t = truth(&ix, q, bm.as_ref());
+            for sp in SPREADS {
+                for stop in proc_dials() {
+                    let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                    let what = format!("query {qi}, set {sname}, {sp:?}, {stop:?}");
+                    let (out, _) = pc.knn(&ix, q, 10, vis.as_ref(), None, &o);
+                    assert_eq!(out.ents.len(), 10.min(t.len()), "{what}");
+                    assert!(out.ents.iter().all(|x| bm.as_ref().map_or(true, |b| b.contains(x.1))), "{what}");
+                    for th in thresholds(&t) {
+                        let (r, _) = pc.threshold(&ix, q, th, vis.as_ref(), &o);
+                        assert!(to_bitmap2(&ix, &r.rows).is_subset(&answer(&t, th)), "threshold {th}, {what}");
+                    }
+                }
+                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Recall(1.0)) };
+                let (out, _) = pc.knn(&ix, q, 10, vis.as_ref(), None, &o);
+                assert_eq!(sub_values(&ix, &out.ents, q), top_values(&t, 10.min(t.len())), "query {qi}, set {sname}, {sp:?}");
+                for th in thresholds(&t) {
+                    let (r, _) = pc.threshold(&ix, q, th, vis.as_ref(), &o);
+                    assert_eq!(to_bitmap2(&ix, &r.rows), answer(&t, th), "threshold {th}, query {qi}, set {sname}, {sp:?}");
+                }
+            }
+        }
+    }
+}
+
+/// `Spread::Own` gives the units near its plan's margin their own spreads, which changes the shares (and on some
+/// queries the plan) against `Spread::Group`; the units it refines lie within the calibration's margin of the plan.
+#[test]
+fn the_own_spread_refines_the_units_near_the_margin() {
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    let (mut refined, mut changed) = (0, 0);
+    for q in &f.queries {
+        for (_, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            for stop in proc_dials() {
+                let og = process::ProcOpts::new(stop);
+                let oo = process::ProcOpts { spread: process::Spread::Own, ..og };
+                let (_, ug, _) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &og);
+                let (_, uo, io) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &oo);
+                refined += io.refined;
+                if ug.len() == uo.len() && ug.iter().zip(&uo).any(|(a, b)| (a.1 - b.1).abs() > 1e-12) {
+                    changed += 1;
+                }
+            }
+        }
+    }
+    assert!(refined > 0 && changed > 0, "refined {refined}, changed {changed}");
 }
