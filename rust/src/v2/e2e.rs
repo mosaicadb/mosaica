@@ -2186,3 +2186,37 @@ fn recall_targets_and_budgets_hold_in_the_plan() {
         }
     }
 }
+
+/// The build fits no calibration for an index of fewer rows than `calib::MIN_ROWS`, and a saved index without one
+/// ("calib": null and no calibration files) opens: the exact queries answer on it and the approximate process says
+/// why it cannot run. (The saved index is synth4k's with its calibration taken out, as the Rust fit of a 63-row
+/// index stops earlier, in the randomised levels' constants.)
+#[test]
+fn an_index_without_a_calibration_opens() {
+    let f = fixture();
+    let rows: Vec<u32> = (0..calib::MIN_ROWS as u32 - 1).collect();
+    let small = f.ix.compact(&rows, true);
+    assert!(calib::fit(&small, &mut |_| {}).is_none(), "a calibration for {} rows", small.nrows);
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("nocalib");
+    let edir = tmp.join("encoded");
+    let edir = edir.to_str().unwrap();
+    rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let json = format!("{edir}/index.json");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+    v["calib"] = serde_json::Value::Null;
+    std::fs::write(&json, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    for name in calib::FILES {
+        std::fs::remove_file(format!("{edir}/{name}")).unwrap();
+    }
+    let (_, ix) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    assert!(ix.calib.is_none());
+    let e = process::Process::new(&ix).map(|_| ()).unwrap_err();
+    assert!(e.contains(&format!("{} rows", calib::MIN_ROWS)) && e.contains("exactly"), "{e}");
+    for q in &f.queries {
+        let t = truth(&ix, q, None);
+        assert_eq!(sub_values(&ix, &knn2(&ix, q, 10, None, Plan::default()).ents, q), top_values(&t, 10));
+    }
+    drop(ix);
+    std::fs::remove_dir_all(&tmp).unwrap();
+}

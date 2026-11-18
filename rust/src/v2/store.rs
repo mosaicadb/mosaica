@@ -759,8 +759,13 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     let [orad, olam, odsc, odirs] = order::FILES.map(|name| f(name));
     let gone = |e: String| if e.contains("rebuild") { ours(e) } else { format!("{}; rebuild the index", ours(e)) };
     let (orad, olam, odsc, odirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&orad).map_err(gone)?, Arr::map(&olam).map_err(gone)?, Arr::map(&odsc).map_err(gone)?, Arr::map(&odirs).map_err(gone)?);
-    let [crad, clam, cdsc, cdirs] = calib::FILES.map(|name| f(name));
-    let (crad, clam, cdsc, cdirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&crad).map_err(gone)?, Arr::map(&clam).map_err(gone)?, Arr::map(&cdsc).map_err(gone)?, Arr::map(&cdirs).map_err(gone)?);
+    // the calibration's files exist only when the build fitted one (`calib::fit`; "calib": null otherwise)
+    let cfiles: Option<(Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>)> = if v["calib"].is_null() {
+        None
+    } else {
+        let [crad, clam, cdsc, cdirs] = calib::FILES.map(|name| f(name));
+        Some((Arr::map(&crad).map_err(gone)?, Arr::map(&clam).map_err(gone)?, Arr::map(&cdsc).map_err(gone)?, Arr::map(&cdirs).map_err(gone)?))
+    };
     drop(dfd);
     drop(lock);
     // the fit's vectors (its Xs.npy, or its partition) and its perm.npy, as they were when the index was built: by
@@ -873,13 +878,18 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
-    // the approximate process's calibration, read as built
+    // the approximate process's calibration, read as built (none when the build fitted none)
     let ng = groups.len();
-    let cal = calib::Calib::from_json(&v["calib"], crad, clam, cdsc, cdirs).ok_or(format!("{dir}/index.json does not hold the approximate process's calibration ({}); rebuild the index", if v["calib"].is_null() { "none" } else { "unreadable" }))?;
-    if cal.gcov.r != r || cal.gcov.n0 != n0 || cal.gcov.rad.len() != ng || cal.gcov.lam.len() != ng * r || cal.gcov.dsc.len() != ng * r || cal.gcov.dirs8.len() != ng * r * n {
-        return Err(damaged(&format!("the calibration's group covariances do not hold {r} directions of {n} dimensions for each of {ng} groups")));
-    }
-    let calib = Some(Arc::new(cal));
+    let calib = match cfiles {
+        None => None,
+        Some((crad, clam, cdsc, cdirs)) => {
+            let cal = calib::Calib::from_json(&v["calib"], crad, clam, cdsc, cdirs).ok_or(format!("{dir}/index.json holds an unreadable calibration of the approximate process; rebuild the index"))?;
+            if cal.gcov.r != r || cal.gcov.n0 != n0 || cal.gcov.rad.len() != ng || cal.gcov.lam.len() != ng * r || cal.gcov.dsc.len() != ng * r || cal.gcov.dirs8.len() != ng * r * n {
+                return Err(damaged(&format!("the calibration's group covariances do not hold {r} directions of {n} dimensions for each of {ng} groups")));
+            }
+            Some(Arc::new(cal))
+        }
+    };
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         order,

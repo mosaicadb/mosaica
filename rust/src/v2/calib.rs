@@ -29,6 +29,8 @@ use rand_distr::{Distribution, StandardNormal};
 
 /// Values of the exceedance table's grid of zeta.
 pub const NG: usize = 65;
+/// The fewest rows an index needs for the build to fit a calibration (none below: the approximate process refuses it).
+pub const MIN_ROWS: usize = 64;
 /// ln P is never below this, so that every cluster holding a visible row keeps a positive value.
 pub const LN_P_MIN: f64 = -700.0;
 /// Corpus rows used as pseudo-queries (each plain and shifted).
@@ -536,10 +538,10 @@ fn ranks(nrows: usize) -> Vec<usize> {
     r
 }
 
-/// The calibration of `ix` (None without stored vectors and the order state, or with fewer than 64 rows).
+/// The calibration of `ix` (None without stored vectors and the order state, or with fewer than `MIN_ROWS` rows).
 pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
     let st = ix.order.as_ref()?;
-    if !matches!(ix.full, Full2::Real { .. }) || ix.nrows < 64 || ix.k() == 0 {
+    if !matches!(ix.full, Full2::Real { .. }) || ix.nrows < MIN_ROWS || ix.k() == 0 {
         return None;
     }
     let t = Timer::new();

@@ -389,10 +389,12 @@ enum Made {
 }
 
 impl Process {
-    /// The state for `ix`; an error when the index holds no calibration (an index built without stored vectors, or
-    /// by a library before it).
+    /// The state for `ix`; an error when the index has no stored vectors or holds no calibration.
     pub fn new(ix: &Index2) -> Result<Process, String> {
-        let cal = ix.calib.as_ref().ok_or("this index holds no calibration for the approximate process (an index without stored vectors, or built by an earlier library); rebuild it (v2::rebuild; vexact --v2 --index DIR --rebuild)")?;
+        if !matches!(ix.full, Full2::Real { .. }) {
+            return Err("the approximate process reads stored vectors, and this index has none; query it exactly (knn2, threshold2)".into());
+        }
+        let cal = ix.calib.as_ref().ok_or(format!("this index holds no calibration for the approximate process: the build fits one only for an index of at least {} rows in at least one cluster, and this one has {} rows in {} clusters; query it exactly (knn2, threshold2) or by a cluster order (knn2_fast)", calib::MIN_ROWS, ix.nrows, ix.k()))?;
         let st = ix.order.as_ref().ok_or("this index holds no order state; rebuild it")?;
         let (cen8, csc) = int8_centres(&ix.centres32, ix.n()).unwrap_or_default();
         let r = st.r;
