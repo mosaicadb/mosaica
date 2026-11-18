@@ -30,13 +30,24 @@ struct Index {
 #[allow(clippy::too_many_arguments)]
 fn proc_opts(plan: Plan, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<ProcOpts> {
     let stop = match (price, mean_recall, recall, budget) {
-        (Some(x), None, None, None) if x >= 0.0 => Stop::Price(x),
+        (Some(x), None, None, None) if x.is_finite() && x >= 0.0 => Stop::Price(x),
         (None, Some(x), None, None) if (0.0..=1.0).contains(&x) => Stop::MeanRecall(x),
         (None, None, Some(x), None) if (0.0..=1.0).contains(&x) => Stop::Recall(x),
         (None, None, None, Some(x)) if x >= 0.0 => Stop::Budget(x),
-        _ => return Err(PyValueError::new_err("give exactly one dial: price (recall per modelled microsecond, at least 0), mean_recall or recall (0 to 1), or budget (modelled microseconds, at least 0)")),
+        _ => return Err(PyValueError::new_err("give exactly one dial: price (recall per modelled microsecond, finite and at least 0), mean_recall or recall (0 to 1), or budget (modelled microseconds, at least 0)")),
     };
     Ok(ProcOpts { spread: Spread::parse(spread).map_err(PyValueError::new_err)?, stop, plain: control, plan })
+}
+
+/// The query's length against the index's, and k at least 1 (k-NN), as errors to raise.
+fn check_query(ix: &Index2, q: &[f32], k: Option<usize>) -> PyResult<()> {
+    if q.len() != ix.n() {
+        return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), ix.n())));
+    }
+    if k == Some(0) {
+        return Err(PyValueError::new_err("k must be at least 1"));
+    }
+    Ok(())
 }
 
 fn info_dict<'py>(py: Python<'py>, i: &ProcInfo) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
@@ -45,7 +56,7 @@ fn info_dict<'py>(py: Python<'py>, i: &ProcInfo) -> PyResult<Bound<'py, pyo3::ty
     for (k, v) in [("tau", i.tau), ("lam", i.lam), ("pred", i.pred), ("cost", i.cost), ("fixed", i.fixed), ("scan_cost", i.scan_cost), ("all_cost", i.all_cost), ("lambda", i.lambda)] {
         d.set_item(k, v)?;
     }
-    for (k, v) in [("units", i.units), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads), ("refined", i.refined), ("evals", i.evals)] {
+    for (k, v) in [("units", i.units), ("candidates", i.candidates), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads), ("refined", i.refined), ("evals", i.evals)] {
         d.set_item(k, v)?;
     }
     Ok(d)
@@ -240,8 +251,9 @@ impl Index {
     #[allow(clippy::too_many_arguments)]
     fn knn_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
-        let dial = self.eps_dial(py, k, eps)?;
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
+        let dial = self.eps_dial(py, k, eps)?;
         let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
         let (ix, vis) = (&self.ix, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| pc.knn(ix, q, k, vis, dial.as_deref(), &o).0.ents));
@@ -256,9 +268,7 @@ impl Index {
     fn threshold_process<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
         let q = q.as_slice()?;
-        if q.len() != self.ix.n() {
-            return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), self.ix.n())));
-        }
+        check_query(&self.ix, q, None)?;
         let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
         let (ix, vis) = (&self.ix, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| {
@@ -277,8 +287,9 @@ impl Index {
     #[allow(clippy::too_many_arguments)]
     fn explain_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
-        let dial = self.eps_dial(py, k, eps)?;
         let q = q.as_slice()?;
+        check_query(&self.ix, q, if t.is_none() { Some(k) } else { None })?;
+        let dial = if t.is_none() { self.eps_dial(py, k, eps)? } else { None };
         let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
         let (ix, vis) = (&self.ix, self.vis.as_ref());
         let tm = std::time::Instant::now();
@@ -308,8 +319,9 @@ impl Index {
     #[allow(clippy::too_many_arguments)]
     fn profile_process(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<(Vec<u64>, f64)> {
         let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
-        let dial = self.eps_dial(py, k, eps)?;
         let q = q.as_slice()?;
+        check_query(&self.ix, q, Some(k))?;
+        let dial = self.eps_dial(py, k, eps)?;
         let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
         let (ix, vis) = (&self.ix, self.vis.as_ref());
         Ok(py.detach(|| self.pool.install(|| {
