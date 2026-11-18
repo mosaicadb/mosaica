@@ -6,9 +6,11 @@
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
 //! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
-//! state, `order::OrderState`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
-//! number of directions the order state holds per cluster, the build options that decide the encoding, and the key of
-//! the fit and those options it was built from).
+//! state, `order::OrderState`), `calib_grad.bin`, `calib_glam.bin`, `calib_gdsc.bin` and `calib_gdirs.bin` (the
+//! approximate process's group covariances, `calib::GroupCov`), and `index.json` (sizes, the per-group calibration,
+//! constants and basis defect, the number of directions the order state holds per cluster, the approximate process's
+//! exceedance tables, margin and price bands (`calib::Calib`), the build options that decide the encoding, and the key
+//! of the fit and those options it was built from).
 //!
 //! A saved index is `DIR/encoded` in its index directory DIR (the fit). A rebuild holds an exclusive lock on
 //! `encoded.lock` beside it for its whole run, writes into a scratch directory of its own (`encoded.tmp-PID-NANOS`),
@@ -22,7 +24,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 7;
+pub const STORE_FORMAT: u64 = 8;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -373,6 +375,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
         "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
         "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
         "order": ix.order.as_ref().map(|o| serde_json::json!({ "r": o.r, "n0": o.n0 })),
+        "calib": ix.calib.as_ref().map(|c| c.json()),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "options": seal.map(|s| s.options), "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
@@ -531,6 +534,13 @@ pub fn save_rest(ix: &Index2, dir: &str) {
         put_cluster(&mut w, c, t, ix.meta.ndl());
     }
     write_file(&f("clusters.bin"), &w.0);
+    if let Some(c) = &ix.calib {
+        let [rad, lam, dsc, dirs] = calib::FILES;
+        write_file(&f(rad), &c.gcov.rad);
+        write_file(&f(lam), &c.gcov.lam);
+        write_file(&f(dsc), &c.gcov.dsc);
+        write_file(&f(dirs), &c.gcov.dirs8);
+    }
     index_json(ix, dir, None);
 }
 
@@ -749,6 +759,8 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     let [orad, olam, odsc, odirs] = order::FILES.map(|name| f(name));
     let gone = |e: String| if e.contains("rebuild") { ours(e) } else { format!("{}; rebuild the index", ours(e)) };
     let (orad, olam, odsc, odirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&orad).map_err(gone)?, Arr::map(&olam).map_err(gone)?, Arr::map(&odsc).map_err(gone)?, Arr::map(&odirs).map_err(gone)?);
+    let [crad, clam, cdsc, cdirs] = calib::FILES.map(|name| f(name));
+    let (crad, clam, cdsc, cdirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&crad).map_err(gone)?, Arr::map(&clam).map_err(gone)?, Arr::map(&cdsc).map_err(gone)?, Arr::map(&cdirs).map_err(gone)?);
     drop(dfd);
     drop(lock);
     // the fit's vectors (its Xs.npy, or its partition) and its perm.npy, as they were when the index was built: by
@@ -861,9 +873,17 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
         return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
+    // the approximate process's calibration, read as built
+    let ng = groups.len();
+    let cal = calib::Calib::from_json(&v["calib"], crad, clam, cdsc, cdirs).ok_or(format!("{dir}/index.json does not hold the approximate process's calibration ({}); rebuild the index", if v["calib"].is_null() { "none" } else { "unreadable" }))?;
+    if cal.gcov.r != r || cal.gcov.n0 != n0 || cal.gcov.rad.len() != ng || cal.gcov.lam.len() != ng * r || cal.gcov.dsc.len() != ng * r || cal.gcov.dirs8.len() != ng * r * n {
+        return Err(damaged(&format!("the calibration's group covariances do not hold {r} directions of {n} dimensions for each of {ng} groups")));
+    }
+    let calib = Some(Arc::new(cal));
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         order,
+        calib,
         nukey,
         repack: vec![0.6; nl],
         ctab: Arc::new(ctab),
@@ -1134,7 +1154,8 @@ impl Index2 {
 
     /// A fixed hash (`Fx`) of everything the index holds and a query reads: `plan_hash`, the sizes and `x2`, every
     /// per-row array (codes, scalars, keys, row and entity maps, norm keys, compaction's row map), the offsets and
-    /// escapes, every per-cluster record and centre table, the support table, the order state and the stored vectors.
+    /// escapes, every per-cluster record and centre table, the support table, the order state, the approximate process's
+    /// calibration (its report of checks apart) and the stored vectors.
     /// Only the repack thresholds, which are timed, are left out. The large arrays are hashed in parallel in fixed
     /// chunks (`Fx::big`), so the value does not depend on the thread count. A built index and the same index opened
     /// hash alike.
@@ -1175,6 +1196,13 @@ impl Index2 {
                 h.pod(&o.lam[..]);
                 h.pod(&o.dsc[..]);
                 h.big_pod(&o.dirs8[..]);
+            }
+        }
+        match &self.calib {
+            None => h.u64(0),
+            Some(c) => {
+                h.u64(1);
+                c.hash(&mut h);
             }
         }
         match &self.full {

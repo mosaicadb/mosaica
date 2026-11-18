@@ -458,16 +458,16 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 
 /// The default build of synth4k encodes as the reference build does: its code hash (the gates' `--rebuild --hash`
 /// reference; `code_hash` uses std's DefaultHasher, so a Rust release that changes it changes this value, not the
-/// codes) and its store hash (a fixed hash, `Fx`, over the order state too, which is the same bits whatever the
-/// instruction set). The default since the levels-clusters decision has two
-/// deterministic levels (`DLV`); the fit's own six (`dlv: None`, the earlier default) still give the earlier reference.
+/// codes) and its store hash (a fixed hash, `Fx`, over the order state and the approximate process's calibration too,
+/// which are the same bits whatever the instruction set). The default since the levels-clusters decision has two
+/// deterministic levels (`DLV`); the fit's own six (`dlv: None`, the earlier default) give the other reference.
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 45b898e83a7e9b86");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 875d95f7d068df05");
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
-    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 899ea7d7e812932c");
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 a32ccf45ad21c491");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -1917,4 +1917,272 @@ fn create_makes_the_index_the_steps_by_hand_make() {
     }
     drop((made, ix, hand));
     std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+// ---------------- the approximate process ----------------
+
+/// Two calibrations hold the same stored values, to the bit (the report of checks apart).
+fn same_calib(a: &calib::Calib, b: &calib::Calib) {
+    let f32b = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let f64b = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let tab = |t: &calib::Table| (f64b(&[t.lo, t.step, t.beta, t.slope]), f64b(&t.g));
+    for (x, y) in a.tables.iter().chain(&a.plain).zip(b.tables.iter().chain(&b.plain)) {
+        assert_eq!(tab(x), tab(y), "an exceedance table");
+    }
+    assert_eq!(f64b(&[a.delta, a.med_rad]), f64b(&[b.delta, b.med_rad]), "the margin and the median radius");
+    assert_eq!(a.bands.iter().map(|b| b.len()).collect::<Vec<_>>(), b.bands.iter().map(|b| b.len()).collect::<Vec<_>>());
+    for (x, y) in a.bands.iter().flatten().zip(b.bands.iter().flatten()) {
+        assert_eq!((x.knn, x.size.to_bits(), f64b(&x.ln_lam), f64b(&x.recall)), (y.knn, y.size.to_bits(), f64b(&y.ln_lam), f64b(&y.recall)), "a price band");
+    }
+    let (g, h) = (&a.gcov, &b.gcov);
+    assert_eq!((g.r, g.n0, f64b(&g.rad), f32b(&g.lam), f32b(&g.dsc)), (h.r, h.n0, f64b(&h.rad), f32b(&h.lam), f32b(&h.dsc)), "the group covariances");
+    assert_eq!(&g.dirs8[..], &h.dirs8[..], "the group covariances' directions");
+}
+
+/// The process's dials exercised by the tests.
+fn proc_dials() -> Vec<process::Stop> {
+    use process::Stop::*;
+    vec![Price(1e-2), Price(1e-4), Price(1e-7), MeanRecall(0.5), MeanRecall(0.9), Recall(0.3), Recall(0.9), Recall(0.999), Budget(5.0), Budget(50.0)]
+}
+const SPREADS: [process::Spread; 3] = [process::Spread::Group, process::Spread::Own, process::Spread::OwnAll];
+
+/// The process on `ix` with its cost model, and with one under which the index path and its groups are cheap (on
+/// synth4k's small clusters of 64 dimensions the model reads every cluster directly).
+fn procs(ix: &Index2) -> Vec<(&'static str, process::Process)> {
+    let mut cheap = process::Process::new(ix).unwrap();
+    cheap.cm = process::Costs1 { grp: 0.5, cl: 0.1, item: 1e-3, ..cheap.cm };
+    vec![("model", process::Process::new(ix).unwrap()), ("cheap index path", cheap)]
+}
+
+/// The build fits the approximate process's calibration and saves it with the index: the index opened holds it to the
+/// bit, a build in memory holds the same (its fit is deterministic), and the process answers on the opened index as
+/// on the built one, doing the same work. Its tables are non-increasing in zeta and its price bands' recalls lie in
+/// [0, 1]. An index missing a calibration file is refused with a message to rebuild it.
+#[test]
+fn the_calibration_is_built_saved_and_opened() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("calib");
+    let edir = tmp.join("encoded");
+    let edir = edir.to_str().unwrap();
+    let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    opened.repack = built.repack.clone();
+    let (ca, cb) = (built.calib.as_ref().unwrap(), opened.calib.as_ref().unwrap());
+    same_calib(ca, cb);
+    same_calib(fixture().ix.calib.as_ref().unwrap(), ca);
+    assert_eq!(built.store_hash(), opened.store_hash());
+    for t in ca.tables.iter().chain(&ca.plain) {
+        assert!(t.g.windows(2).all(|w| w[1] <= w[0]) && t.slope <= 0.0 && t.beta.is_finite() && t.step > 0.0, "{t:?}");
+        let mut last = f64::INFINITY;
+        for i in -100..300 {
+            let p = t.ln_p(t.lo + i as f64 * t.step * 0.37, 0.3);
+            assert!(p <= last && p <= 0.0 && p >= calib::LN_P_MIN);
+            last = p;
+        }
+    }
+    assert!(ca.delta >= 0.0 && ca.delta.is_finite());
+    assert!(ca.bands.iter().all(|b| !b.is_empty()) && ca.bands.iter().flatten().all(|b| b.recall.iter().all(|&r| (0.0..=1.0).contains(&r))));
+    let (pa, pb) = (process::Process::new(&built).unwrap(), process::Process::new(&opened).unwrap());
+    let f = fixture();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let (va, vb) = (bm.as_ref().map(|x| Vis2::new(&built, x)), bm.as_ref().map(|x| Vis2::new(&opened, x)));
+            let t = truth(&built, q, bm.as_ref()).get(20).map_or(0.0, |x| x.0);
+            for sp in SPREADS {
+                for stop in proc_dials() {
+                    let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                    let what = format!("query {qi}, set {sname}, {sp:?}, {stop:?}");
+                    let (x, ix) = pa.knn(&built, q, 10, va.as_ref(), None, &o);
+                    let (y, iy) = pb.knn(&opened, q, 10, vb.as_ref(), None, &o);
+                    assert_eq!((x.ents, ix.path), (y.ents, iy.path), "{what}");
+                    same_work(&x.st, &y.st, &what);
+                    let (x, _) = pa.threshold(&built, q, t, va.as_ref(), &o);
+                    let (y, _) = pb.threshold(&opened, q, t, vb.as_ref(), &o);
+                    let sorted = |mut v: Vec<u32>| {
+                        v.sort_unstable();
+                        v
+                    };
+                    assert_eq!(sorted(x.rows), sorted(y.rows), "threshold, {what}");
+                }
+            }
+        }
+    }
+    drop((built, opened));
+    for name in calib::FILES {
+        let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/{name}.kept"));
+        std::fs::rename(&path, &keep).unwrap();
+        let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+        assert!(e.contains(name) && e.contains("rebuild"), "{e}");
+        std::fs::rename(&keep, &path).unwrap();
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
+/// The process's values are shares of the answer: for k-NN, Lambda(tau*) = k and the shares sum to 1; for a
+/// threshold query, the shares are n^vis P(t) / max(Lambda(t), 1), summing to min(Lambda(t), 1). Every unit holds a
+/// visible row and has a positive k-NN share.
+#[test]
+fn process_shares_sum_as_specified() {
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let nv = |ci: usize| vis.as_ref().map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+            let t = truth(ix, q, bm.as_ref());
+            for sp in SPREADS {
+                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Price(1e-4)) };
+                let what = format!("query {qi}, set {sname}, {sp:?}");
+                for kk in [1, 10, 100] {
+                    let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(kk), vis.as_ref(), &o);
+                    if units.is_empty() {
+                        continue;
+                    }
+                    let sum: f64 = units.iter().map(|u| u.1).sum();
+                    assert!((sum - 1.0).abs() < 1e-9, "k-NN shares sum to {sum}, {what}, k {kk}");
+                    assert!((info.lambda / kk as f64 - 1.0).abs() < 1e-8, "Lambda(tau*) {} for k {kk}, {what}", info.lambda);
+                    assert!(units.iter().all(|u| nv(u.0) > 0 && u.1 > 0.0), "{what}");
+                }
+                for th in thresholds(&t) {
+                    let (_, units, info) = pc.shares_for(ix, q, process::Target::Thr(th), vis.as_ref(), &o);
+                    if units.is_empty() {
+                        continue;
+                    }
+                    let sum: f64 = units.iter().map(|u| u.1).sum();
+                    assert!((sum - info.lambda.min(1.0)).abs() < 1e-9 * (1.0 + sum), "threshold shares sum to {sum}, Lambda {}, {what}", info.lambda);
+                    assert!(units.iter().all(|u| nv(u.0) > 0), "{what}");
+                }
+            }
+        }
+    }
+}
+
+/// Approximate k-NN by the process, under every visible set, spread and dial: at most k distinct visible items, each
+/// with its own score (up to f32 rounding), and the hand-overs' answers exact; with the dial asking for everything (a
+/// recall of 1, a mean recall of 1, a price of 0) the exact k best; with a forced scan the exact k best.
+#[test]
+fn process_knn_answers_are_visible_and_exact_when_asked_for_everything() {
+    let f = fixture();
+    let ix = &f.ix;
+    for (cname, pc) in procs(ix) {
+        let mut indexed = 0usize;
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(ix, q);
+            let e = 2.0 * full_err2(ix, &pr);
+            for (sname, bm) in &f.sets {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let t = truth(ix, q, bm.as_ref());
+                for kk in [1, 10, 100] {
+                    for sp in SPREADS {
+                        let what = format!("{cname}: query {qi}, set {sname}, k {kk}, {sp:?}");
+                        for stop in proc_dials() {
+                            let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                            let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
+                            indexed += (info.path == "plan" && info.index > 0) as usize;
+                            assert!(out.ents.len() <= kk, "{what}, {stop:?}");
+                            let mut ids: Vec<u32> = out.ents.iter().map(|x| x.1).collect();
+                            ids.sort_unstable();
+                            ids.dedup();
+                            assert_eq!(ids.len(), out.ents.len(), "an item twice, {what}, {stop:?}");
+                            assert!(out.ents.iter().all(|x| bm.as_ref().map_or(true, |b| b.contains(x.1))), "an invisible item, {what}, {stop:?}");
+                            assert!(out.ents.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e), "a score not the item's, {what}, {stop:?}");
+                            assert!(["plan", "scan", "exact", "empty"].contains(&info.path));
+                            if info.path != "plan" {
+                                assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "hand-over {} not exact, {what}, {stop:?}", info.path);
+                            }
+                        }
+                        for stop in [process::Stop::Recall(1.0), process::Stop::MeanRecall(1.0), process::Stop::Price(0.0)] {
+                            let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                            let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
+                            assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "{what}, {stop:?}, path {}", info.path);
+                        }
+                        let o = process::ProcOpts { spread: sp, plan: Plan { mode: PlanMode::Scan, ..Plan::default() }, ..process::ProcOpts::new(process::Stop::Recall(0.5)) };
+                        let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
+                        if !t.is_empty() {
+                            assert_eq!(info.path, "scan", "{what}");
+                        }
+                        assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "scan, {what}");
+                    }
+                }
+            }
+        }
+        assert!(cname == "model" || indexed > 0, "{cname}: no plan took the index path");
+    }
+}
+
+/// Approximate threshold queries by the process, under every visible set, spread and dial: a subset of the exact
+/// answer (visible rows scoring at least t), exact on the hand-overs; with the dial asking for everything, the exact
+/// answer; and a plan that reads every unit (a price low enough for each unit's positive share) the exact answer too.
+#[test]
+fn process_threshold_answers_are_subsets_and_exact_when_asked_for_everything() {
+    let f = fixture();
+    let ix = &f.ix;
+    for (cname, pc) in procs(ix) {
+        let mut indexed = 0usize;
+        for (qi, q) in f.queries.iter().enumerate() {
+            for (sname, bm) in &f.sets {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let t = truth(ix, q, bm.as_ref());
+                for th in thresholds(&t) {
+                    let want = answer(&t, th);
+                    for sp in SPREADS {
+                        let what = format!("{cname}: query {qi}, set {sname}, t {th}, {sp:?}");
+                        for stop in proc_dials() {
+                            let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                            let (out, info) = pc.threshold(ix, q, th, vis.as_ref(), &o);
+                            indexed += (info.path == "plan" && info.index > 0) as usize;
+                            let got = to_bitmap2(ix, &out.rows);
+                            assert_eq!(got.len() as usize, out.rows.len(), "a row twice, {what}, {stop:?}");
+                            assert!(got.is_subset(&want), "rows outside the exact answer, {what}, {stop:?}, path {}", info.path);
+                            if info.path != "plan" {
+                                assert_eq!(got, want, "hand-over {} not exact, {what}, {stop:?}", info.path);
+                            }
+                        }
+                        for stop in [process::Stop::Recall(1.0), process::Stop::MeanRecall(1.0), process::Stop::Price(0.0)] {
+                            let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                            let (out, _) = pc.threshold(ix, q, th, vis.as_ref(), &o);
+                            assert_eq!(to_bitmap2(ix, &out.rows), want, "{what}, {stop:?}");
+                        }
+                        let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Price(1e-300)) };
+                        let (_, units, _) = pc.shares_for(ix, q, process::Target::Thr(th), vis.as_ref(), &o);
+                        let (out, info) = pc.threshold(ix, q, th, vis.as_ref(), &o);
+                        if info.path != "plan" || units.iter().all(|u| u.2 != process::Act::Skip) {
+                            assert_eq!(to_bitmap2(ix, &out.rows), want, "every unit read, {what}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cname == "model" || indexed > 0, "{cname}: no plan took the index path");
+    }
+}
+
+/// A per-query recall target's plan predicts at least the target, and a budget's plan costs at most the budget.
+#[test]
+fn recall_targets_and_budgets_hold_in_the_plan() {
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            for sp in SPREADS {
+                for r in [0.2, 0.5, 0.8, 0.95, 0.99] {
+                    let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Recall(r)) };
+                    let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &o);
+                    if !units.is_empty() {
+                        assert!(info.pred >= r - 1e-6, "predicted {} under the target {r}, query {qi}, set {sname}, {sp:?}", info.pred);
+                    }
+                }
+                for b in [1.0, 5.0, 20.0, 100.0] {
+                    let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Budget(b)) };
+                    let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &o);
+                    if !units.is_empty() {
+                        assert!(info.cost <= b * (1.0 + 1e-9), "cost {} over the budget {b}, query {qi}, set {sname}, {sp:?}", info.cost);
+                    }
+                }
+            }
+        }
+    }
 }

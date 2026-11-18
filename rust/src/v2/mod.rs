@@ -13,11 +13,13 @@
 //!
 //! The basis of each group is stored in int8 (one scale per basis vector). The encoder codes z = V_q^-1 r, so
 //! q.r = (V_q^T q).z + q.eps with |eps| <= e_inv |r|, and V_q^T q is computed exactly in integers.
+pub mod calib;
 pub mod disk;
 #[cfg(test)]
 mod e2e;
 pub mod kern;
 pub mod order;
+pub mod process;
 pub mod q;
 pub mod setup;
 pub mod store;
@@ -1252,6 +1254,9 @@ pub struct Index2 {
     /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
     /// None for an index without stored vectors.
     pub order: Option<Arc<order::OrderState>>,
+    /// The approximate process's calibration (`calib`), fitted by the build on corpus pseudo-queries (a compaction
+    /// shares its parent's); None for an index without stored vectors.
+    pub calib: Option<Arc<calib::Calib>>,
 }
 
 /// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
@@ -1466,6 +1471,7 @@ impl Index2 {
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
             order: self.order.clone(),
+            calib: self.calib.clone(),
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -2277,8 +2283,9 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         gp.levels.iter().map(|lp| kern::centre_tab(&wm, lp, &et)).collect()
     }).collect();
     let apm = anchor_mhat(&anchors, &cl, n);
-    let ix = Index2 {
+    let mut ix = Index2 {
         order,
+        calib: None,
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
         ctab: Arc::new(ctab),
@@ -2310,6 +2317,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         full,
         nrows,
     };
+    ix.calib = calib::fit(&ix, log).map(Arc::new);
     if let Some(d) = dir {
         store::save_rest(&ix, d);
     }
