@@ -2523,6 +2523,7 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
         out.exact.extend(p.exact);
     }
     out.flat_items = out.st.full_reads;
+    out.st.touched += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
     out
 }
 
@@ -3801,7 +3802,7 @@ pub enum KnnPath {
     Rule,
     /// every visible row scored from its stored vector
     Direct,
-    /// the index path at the running k-th best, its candidates scored directly when the cut leaves too few to pay
+    /// the index path at the running k-th best once k items are held (before, the visible rows fill the k best directly)
     Index,
 }
 
@@ -3908,7 +3909,7 @@ impl<'a> KnnReader<'a> {
             let d = cands.len() as f64 / nv.max(1) as f64;
             // the group's setup is left out: charged to the first cluster of each group, it sends that cluster's items
             // to their full vectors, which reads far more and saves no time
-            if self.top.full() && cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d) {
+            if self.top.full() && (path == KnnPath::Index || cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d)) {
                 self.st.clusters_open += 1;
                 let gq = get_gq2(ix, pr, c.g, &mut self.st);
                 let tq = tick();
@@ -3949,7 +3950,9 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let (q16, q32, qn) = query_f16(q);
         let ents = scan_knn(ix, &q16, &q32, qn, kk, vis);
         let mut st = st;
-        st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
+        let nv = vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
+        st.full_reads += nv;
+        st.touched += nv;
         KnnOut2 { ents, st, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
     // the rule in rows before the seed: always under a visible set (as before the rule covered unfiltered queries), and
