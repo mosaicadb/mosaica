@@ -45,6 +45,15 @@ pub const C_TSURV: usize = 22;
 pub const C_TSMALL: usize = 23;
 /// Clusters whose spread the H order computed (`Approx::order_qm`).
 pub const C_HCAND: usize = 24;
+/// The approximate process (`v2::process`): the cycles of its spreads, and of its solve for tau and its plan; the
+/// spreads it computed (directions projected, in rows of n), the clusters its plan reads directly and on the index
+/// path, and the groups it opens.
+pub const P_SPREAD: usize = 12;
+pub const P_SOLVE: usize = 25;
+pub const C_SPREADS: usize = 26;
+pub const C_DIRECT: usize = 27;
+pub const C_INDEX: usize = 28;
+pub const C_GROUPS: usize = 29;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -2659,7 +2668,7 @@ fn cands_of(ix: &Index2, ci: usize, d0: usize, d1: usize, vis: Option<&Vis2>) ->
 /// A cluster decided by the support table alone, from the certified bounds of the query's anchor: wholly below t
 /// (skipped) or wholly above (taken in); None when neither, or under the norm sort, whose cut decides both. A cluster
 /// with no visible row is skipped.
-fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: bool) -> Option<Pre> {
+pub(super) fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: bool) -> Option<Pre> {
     if nvis == 0 {
         return Some(Pre::Skip);
     }
@@ -2681,7 +2690,7 @@ fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usize, nusort: 
 }
 
 /// The cluster's cut and sorted range (under the norm sort, its groups set up first).
-fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
+pub(super) fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
     let c = &ix.cl[ci];
     let qm = pr.qm(ix, ci);
     let (u0, u1, d0, d1) = if nusort {
@@ -3376,7 +3385,7 @@ pub struct Approx {
 
 /// The int8 rows and scales of centres that are int8 times a scale per cluster with 127 the largest magnitude (as
 /// `fit.py` stores them), or None when one is not.
-fn int8_centres(c: &[f32], n: usize) -> Option<(Vec<i8>, Vec<f32>)> {
+pub(super) fn int8_centres(c: &[f32], n: usize) -> Option<(Vec<i8>, Vec<f32>)> {
     let k = c.len() / n.max(1);
     let (mut q, mut sc) = (Vec::with_capacity(k * n), Vec::with_capacity(k));
     for row in c.chunks_exact(n) {
@@ -3775,50 +3784,104 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     gs.sort_unstable();
     gs.dedup();
     setup_groups(ix, &pr, &gs, &mut st);
-    let mut top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-    let mut sv = State::default();
-    let (mut rows_in, mut pend) = (Vec::new(), Vec::new());
-    let stored = matches!(ix.full, Full2::Real { .. });
-    assert!(stored, "knn2_fast scores from stored vectors");
-    // visible rows of clusters too small for the index path, scored together in row order
-    let mut flat: Vec<u32> = Vec::new();
-    let flush = |flat: &mut Vec<u32>, top: &mut TopK, st: &mut Stats| {
-        let tf = tick();
-        flat.sort_unstable();
-        top.score(ix, &pr, flat, st);
-        flat.clear();
-        st.cyc[P_FULL] += tick() - tf;
-    };
-    let vis_rows = |a: usize, b: usize| -> &[u32] {
-        let v = vis.unwrap();
+    let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
+    for ci in order {
+        rd.visit(ci, KnnPath::Rule);
+    }
+    let (ents, mut st) = rd.finish();
+    st.cyc[P_QUERY] += tick() - t0;
+    KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
+}
+
+/// How `KnnReader::visit` reads a cluster: by `knn2_fast`'s rule (its visible rows scored directly when the fixed
+/// `COSTS` say the index path's setup would not pay, at most about 129 of them), or as a plan chose. Whatever the path,
+/// a cluster whose visible rows all fit among the k best not yet held is scored directly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum KnnPath {
+    Rule,
+    /// every visible row scored from its stored vector
+    Direct,
+    /// the index path at the running k-th best, its candidates scored directly when the cut leaves too few to pay
+    Index,
+}
+
+/// Approximate k-NN over clusters given one at a time (`visit`), reading only visible rows, the k best kept from
+/// stored vectors. Until k items are held, a cluster's visible items are scored from their stored vectors. After that,
+/// a cluster on the index path runs as a threshold query at the running k-th best score: the key range and the levels
+/// drop an item once its upper bound falls below it, each level's half-width scaled by the query's dial
+/// (`Prep2::dial`), and the items left (or taken in by a certified lower bound) are scored from their stored vectors
+/// into the k best. Directly scored clusters are batched in row order.
+pub struct KnnReader<'a> {
+    ix: &'a Index2,
+    pr: &'a Prep2,
+    vis: Option<&'a Vis2>,
+    kk: usize,
+    plan: Plan,
+    top: TopK,
+    sv: State,
+    rows_in: Vec<u32>,
+    pend: Vec<u32>,
+    flat: Vec<u32>,
+    pub st: Stats,
+}
+
+impl<'a> KnnReader<'a> {
+    pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
+        assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
+        let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), st }
+    }
+
+    /// The visible rows of [a, b), from the sorted list.
+    fn vis_rows(&self, a: usize, b: usize) -> &'a [u32] {
+        let v = self.vis.unwrap();
         let i = v.rows.partition_point(|&r| (r as usize) < a);
         &v.rows[i..i + v.rows[i..].partition_point(|&r| (r as usize) < b)]
-    };
-    for ci in order {
+    }
+
+    /// The batched directly scored rows, scored in row order.
+    fn flush(&mut self) {
+        let tf = tick();
+        self.flat.sort_unstable();
+        self.top.score(self.ix, self.pr, &self.flat, &mut self.st);
+        self.flat.clear();
+        self.st.cyc[P_FULL] += tick() - tf;
+    }
+
+    /// Reads cluster ci's visible rows by `path`.
+    pub fn visit(&mut self, ci: usize, path: KnnPath) {
+        let (ix, pr, vis, kk) = (self.ix, self.pr, self.vis, self.kk);
         let c = &ix.cl[ci];
         let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize);
-        if (top.full() && nv as f64 * COSTS.full_us <= COSTS.index_us(nv, 1.0)) || (!top.full() && top.h.len() + flat.len() + nv <= kk) {
+        let fits = !self.top.full() && self.top.h.len() + self.flat.len() + nv <= kk;
+        let direct = match path {
+            KnnPath::Rule => (self.top.full() && nv as f64 * COSTS.full_us <= COSTS.index_us(nv, 1.0)) || fits,
+            KnnPath::Direct => true,
+            KnnPath::Index => fits,
+        };
+        if direct {
             match vis {
-                None => flat.extend(c.r0 as u32..c.r1 as u32),
-                Some(_) => flat.extend_from_slice(vis_rows(c.r0, c.r1)),
+                None => self.flat.extend(c.r0 as u32..c.r1 as u32),
+                Some(_) => self.flat.extend_from_slice(self.vis_rows(c.r0, c.r1)),
             }
-            st.touched += nv as u64;
-            if flat.len() >= 256 || !top.full() {
-                flush(&mut flat, &mut top, &mut st);
+            self.st.touched += nv as u64;
+            if self.flat.len() >= 256 || !self.top.full() {
+                self.flush();
             }
-            continue;
+            return;
         }
-        flush(&mut flat, &mut top, &mut st);
-        let t = top.kth();
-        rows_in.clear();
-        pend.clear();
+        self.flush();
+        let t = self.top.kth();
+        self.rows_in.clear();
+        self.pend.clear();
         let qm = pr.qm(ix, ci);
-        let (u0, u1, d0, d1) = if top.full() && ix.nukey.is_empty() { sorted_range2(ix, ci, &cut_params2(ix, ci, &pr, qm), t) } else { (c.r0, c.r1, c.r0, c.r1) };
+        let (u0, u1, d0, d1) = if self.top.full() && ix.nukey.is_empty() { sorted_range2(ix, ci, &cut_params2(ix, ci, pr, qm), t) } else { (c.r0, c.r1, c.r0, c.r1) };
         // the key alone takes these in
         if u0 < d0 || d1 < u1 {
             match vis {
-                None => pend.extend((u0 as u32..d0 as u32).chain(d1 as u32..u1 as u32)),
+                None => self.pend.extend((u0 as u32..d0 as u32).chain(d1 as u32..u1 as u32)),
                 Some(v) => {
+                    let pend = &mut self.pend;
                     v.each(u0, d0, |r| pend.push(r as u32));
                     v.each(d1, u1, |r| pend.push(r as u32));
                 }
@@ -3827,48 +3890,50 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
         // the visible rows of [d0, d1) from the sorted list, not by testing every row
         let mut cands: Vec<u32> = match vis {
             None => (0..(d1 - d0) as u32).map(|i| i + (d0 - c.r0) as u32).collect(),
-            Some(_) => vis_rows(d0, d1).iter().map(|&r| r - c.r0 as u32).collect(),
+            Some(_) => self.vis_rows(d0, d1).iter().map(|&r| r - c.r0 as u32).collect(),
         };
-        if !top.full() && cands.len() > kk - top.h.len() {
+        if !self.top.full() && cands.len() > kk - self.top.h.len() {
             // enough here to fill the k best: score the items nearest the centre direction (largest key), then run the
             // rest against the k-th of those
-            let first = cands.split_off(cands.len() - (kk - top.h.len()));
+            let first = cands.split_off(cands.len() - (kk - self.top.h.len()));
             let rows: Vec<u32> = first.iter().map(|&i| (c.r0 + i as usize) as u32).collect();
-            st.touched += rows.len() as u64;
-            top.score(ix, &pr, &rows, &mut st);
+            self.st.touched += rows.len() as u64;
+            self.top.score(ix, pr, &rows, &mut self.st);
         }
-        let t = top.kth();
-        st.range_in += pend.len() as u64;
-        st.range_out += ((u0 - c.r0) + (c.r1 - u1)) as u64;
-        st.touched += (cands.len() + pend.len()) as u64;
+        let t = self.top.kth();
+        self.st.range_in += self.pend.len() as u64;
+        self.st.range_out += ((u0 - c.r0) + (c.r1 - u1)) as u64;
+        self.st.touched += (cands.len() + self.pend.len()) as u64;
         if !cands.is_empty() {
-            let nv = vis.map_or(c.r1 - c.r0, |v| v.cl_cnt[ci] as usize).max(1);
-            let d = cands.len() as f64 / nv as f64;
+            let d = cands.len() as f64 / nv.max(1) as f64;
             // the group's setup is left out: charged to the first cluster of each group, it sends that cluster's items
             // to their full vectors, which reads far more and saves no time
-            if top.full() && cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d) {
-                st.clusters_open += 1;
-                let gq = get_gq2(ix, &pr, c.g, &mut st);
+            if self.top.full() && cands.len() as f64 * COSTS.full_us > COSTS.index_us(cands.len(), d) {
+                self.st.clusters_open += 1;
+                let gq = get_gq2(ix, pr, c.g, &mut self.st);
                 let tq = tick();
-                let mut cq = open_cluster(ix, ci, gq, &pr, qm, plan, plan.int_det);
-                st.cyc[P_CLSETUP] += tick() - tq;
-                let mut out = RunOut { rows_in: &mut rows_in, pend: &mut pend, iv: None };
-                unsafe { run_cluster(ix, ci, &pr, gq, &mut cq, &cands, t, Mode2::Thr, false, &mut sv, &mut st, &mut out) };
-                sv.recycle(&mut cq);
+                let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
+                self.st.cyc[P_CLSETUP] += tick() - tq;
+                let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };
+                unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, false, &mut self.sv, &mut self.st, &mut out) };
+                self.sv.recycle(&mut cq);
             } else {
-                pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
+                self.pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
             }
         }
         let tf = tick();
-        top.score(ix, &pr, &rows_in, &mut st);
-        top.score(ix, &pr, &pend, &mut st);
-        st.cyc[P_FULL] += tick() - tf;
+        self.top.score(ix, pr, &self.rows_in, &mut self.st);
+        self.top.score(ix, pr, &self.pend, &mut self.st);
+        self.st.cyc[P_FULL] += tick() - tf;
     }
-    flush(&mut flat, &mut top, &mut st);
-    st.cyc[P_QUERY] += tick() - t0;
-    let mut ents: Vec<(f64, u32)> = top.h.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
-    ents.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
-    KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
+
+    /// The k best (score, entity), best first (the lower entity first among equal scores), and the work done.
+    pub fn finish(mut self) -> (Vec<(f64, u32)>, Stats) {
+        self.flush();
+        let mut ents: Vec<(f64, u32)> = self.top.h.into_iter().map(|x| (x.0 .0, x.0 .1)).collect();
+        ents.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap().then(a.1.cmp(&b.1)));
+        (ents, self.st)
+    }
 }
 
 /// Exact k-NN. The planner may send the query to a scan of the visible set (every row without one) before anything
