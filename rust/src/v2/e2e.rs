@@ -2164,3 +2164,81 @@ fn measured_constants_are_cached_and_read_again() {
     assert!((kappa - 1.0 / 6.0).abs() < 1e-12);
     assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(), None);
 }
+
+/// The exact paths' answers and work on synth4k (plain and norm-sorted) under nine visible sets, 12 queries, every
+/// plan: knn2 at k 1, 10 and 100 (entities) and threshold2 at six thresholds (rows), each with its counters (rows
+/// touched, full reads, range in and out, clusters open, in, out and without a visible row, groups, exact fallbacks,
+/// each level's entries and decisions, the table counts; not the blocks, which follow the build's timed repack
+/// thresholds), one line each.
+fn exact_lines() -> Vec<String> {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let mut out = Vec::new();
+    for nusort in [false, true] {
+        let (_, ix) = build(dir, &BuildOptions { nusort, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+        let n = ix.n();
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(1234);
+        let unit = |v: Vec<f32>| {
+            let s = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            v.into_iter().map(|x| x / s).collect::<Vec<f32>>()
+        };
+        let mut qs = Vec::new();
+        for _ in 0..8 {
+            let r = rng.gen_range(0..ix.nrows);
+            let x: Vec<f32> = ix.full_row_f16(r).iter().map(|&h| half::f16::from_bits(h).to_f32()).collect();
+            qs.push(unit(x.iter().map(|v| v + 0.5 * rng.gen_range(-1.0f32..1.0) / (n as f32).sqrt()).collect()));
+        }
+        for _ in 0..4 {
+            qs.push(unit((0..n).map(|_| rng.gen::<f32>() - 0.5).collect()));
+        }
+        let mut sets: Vec<Option<RoaringBitmap>> = vec![None];
+        for p in [0.01, 0.05, 0.3, 0.9] {
+            sets.push(Some((0..ix.nent as u32).filter(|_| rng.gen::<f64>() < p).collect()));
+        }
+        sets.push(Some((0..ix.nrows / 4).map(|r| ix.row_ent[r]).collect()));
+        sets.push(Some((0..ix.k()).filter(|c| c % 3 == 1).flat_map(|c| ix.cl[c].r0..ix.cl[c].r1).map(|r| ix.row_ent[r]).collect()));
+        sets.push(Some([5u32, 77, 2000].into_iter().collect()));
+        sets.push(Some(RoaringBitmap::new()));
+        let plans = [Plan::default(), Plan { mode: PlanMode::Index, ..Plan::default() }, Plan { mode: PlanMode::Flat, ..Plan::default() }, Plan { mode: PlanMode::Scan, ..Plan::default() }, Plan { r_rows: 0, r_kappa: 0.0, r_seed: 0, ..Plan::default() }];
+        let stl = |st: &crate::kernel::Stats| format!("t{} f{} ri{} ro{} co{} ci{} cout{} cnv{} g{} ef{} enter{:?} in{:?} out{:?} c{:?}",
+            st.touched, st.full_reads, st.range_in, st.range_out, st.clusters_open, st.clusters_in, st.clusters_out, st.clusters_novis,
+            st.groups, st.exact_fallbacks, st.enter, st.dec_in, st.dec_out, &st.cyc[20..24]);
+        for (si, s) in sets.iter().enumerate() {
+            let vis = s.as_ref().map(|b| Vis2::new(&ix, b));
+            for (qi, q) in qs.iter().enumerate() {
+                for kk in [1, 10, 100] {
+                    for (pi, pl) in plans.iter().enumerate() {
+                        let o = knn2(&ix, q, kk, vis.as_ref(), *pl);
+                        let ents: Vec<String> = o.ents.iter().map(|x| x.1.to_string()).collect();
+                        out.push(format!("{nusort} knn2 s{si} q{qi} k{kk} p{pi} | {} | {}", ents.join(","), stl(&o.st)));
+                    }
+                }
+                let pr0 = prep2(&ix, q);
+                let mut sc: Vec<f64> = (0..ix.nrows).filter(|&r| vis.as_ref().is_none_or(|v| v.has(r))).map(|r| exact_value2(&ix, &pr0, r)).collect();
+                sc.sort_by(|a, b| b.total_cmp(a));
+                let mut ths: Vec<f64> = [0usize, 9, 99, 999].iter().filter_map(|&i| sc.get(i).copied()).collect();
+                ths.extend([-2.0, 2.0]);
+                for th in ths {
+                    for (pi, pl) in plans.iter().enumerate() {
+                        let pr = prep2(&ix, q);
+                        let o = threshold2(&ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan: *pl });
+                        let mut rows = o.rows.clone();
+                        rows.sort_unstable();
+                        out.push(format!("{nusort} thr s{si} q{qi} t{:016x} p{pi} | {:?} | {} idx{} flc{} fli{} sc{}", th.to_bits(), rows, stl(&o.st), o.idx_clusters, o.flat_clusters, o.flat_items, o.scanned));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The exact paths answer and work, counters included, as the library did before the approximate queries were
+/// rebuilt (commit 99854a4; the lines' hash).
+#[test]
+fn the_exact_paths_are_unchanged() {
+    let lines = exact_lines();
+    if let Ok(p) = std::env::var("VEXACT_EXACT_LINES") {
+        std::fs::write(p, lines.join("\n") + "\n").unwrap();
+    }
+    assert_eq!(format!("{:016x}", fnv_lines(&lines)), "8ce77501d8d48630");
+}

@@ -2533,7 +2533,6 @@ pub fn scan_visible(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, want_ex
         out.exact.extend(p.exact);
     }
     out.flat_items = out.st.full_reads;
-    out.st.touched += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
     out
 }
 
@@ -3782,9 +3781,7 @@ pub fn knn2(ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, plan: Plan) -
         let (q16, q32, qn) = query_f16(q);
         let ents = scan_knn(ix, &q16, &q32, qn, kk, vis);
         let mut st = st;
-        let nv = vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
-        st.full_reads += nv;
-        st.touched += nv;
+        st.full_reads += vis.map_or(ix.nrows, |v| v.rows.len()) as u64;
         KnnOut2 { ents, st, t_seed, t_sweep: tm.ms() - t_seed, t_sel: 0.0, npow: ix.meta.npow }
     };
     // the rule in rows before the seed: always under a visible set (as before the rule covered unfiltered queries), and
