@@ -77,6 +77,9 @@ pub enum Act {
     Skip,
     Direct,
     Index,
+    /// A threshold query's unit that the support table puts wholly at or above t: its visible rows are the answer's,
+    /// emitted without being read; always taken, outside the plan.
+    Sure,
 }
 
 /// Units in groups, for the plan: each unit's value, its direct cost and its index-path cost, units of one group
@@ -91,9 +94,9 @@ pub struct Blocks {
 }
 
 impl Blocks {
-    /// The units `cl` (clusters of `ix`) with values `v` and visible rows `nv`, costed by `cm`.
-    pub fn new(ix: &Index2, cl: &[usize], v: Vec<f64>, nv: &[f64], cm: &Costs1) -> Blocks {
-        let mut idx: Vec<usize> = (0..cl.len()).collect();
+    /// The units `idx` of a list of clusters `cl` (of `ix`) with values `v` and visible rows `nv`, costed by `cm`.
+    pub fn new(ix: &Index2, idx: &[usize], cl: &[usize], v: &[f64], nv: &[f64], cm: &Costs1) -> Blocks {
+        let mut idx = idx.to_vec();
         idx.sort_by_key(|&i| (ix.cl[cl[i]].g, cl[i]));
         Blocks::of(idx.iter().map(|&i| (i, ix.cl[cl[i]].g, v[i], cm.direct(nv[i]), cm.index(nv[i]))))
     }
@@ -539,36 +542,49 @@ impl Process {
         info.scan_cost = nvis as f64 * self.cm.full;
         let tier0 = if o.spread == Spread::OwnAll { Tier::Own } else { Tier::Group };
         let r = cal.gcov.r;
-        info.fixed = k as f64 * self.cm.row8 + if tier0 == Tier::Group { (ix.groups.len() * r) as f64 * self.cm.row8 } else { (live.len() * r) as f64 * self.cm.row8 };
         if nvis == 0 {
             return Made::Empty;
         }
-        if matches!(o.plan.mode, PlanMode::Scan) || matches!(target, Target::Knn(kk) if nvis <= kk) || info.scan_cost <= info.fixed {
+        if matches!(o.plan.mode, PlanMode::Scan) || matches!(target, Target::Knn(kk) if nvis <= kk) {
             return Made::Scan;
         }
         if o.stop.everything() {
             return Made::Exact;
+        }
+        // a threshold query's support-table verdicts (its anchor's search costs a row product per anchor): units
+        // wholly below t are dropped, those wholly above are sure
+        let verdict: Vec<Option<Pre>> = match target {
+            Target::Thr(t) if ix.nukey.is_empty() && ix.nanch > 0 => {
+                info.fixed += ix.nanch as f64 * self.cm.full;
+                if info.scan_cost <= info.fixed {
+                    return Made::Scan;
+                }
+                pr.anc_among(ix, Some(&live));
+                live.iter().map(|&ci| support_pre(ix, pr, t, nv_of(ci), ci, false)).collect()
+            }
+            _ => vec![None; live.len()],
+        };
+        let free: Vec<usize> = (0..live.len()).filter(|&j| verdict[j].is_none()).collect();
+        // the centre scores and the spreads of the units the plan decides
+        let spread_rows = if free.is_empty() { 0 } else if tier0 == Tier::Group { ix.groups.len() * r } else { free.len() * r };
+        info.fixed += (k + spread_rows) as f64 * self.cm.row8;
+        if info.scan_cost <= info.fixed {
+            return Made::Scan;
         }
         let qm = self.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - t0;
         let ts = tick();
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let mut u = Units { cl: Vec::new(), nv: Vec::new(), mu: Vec::new(), s: Vec::new(), tier: Vec::new(), sure: Vec::new() };
-        // a threshold query's support-table verdicts: units wholly below t are dropped, those wholly above are sure
-        let verdict: Vec<Option<Pre>> = match target {
-            Target::Thr(t) if ix.nukey.is_empty() && ix.nanch > 0 => {
-                pr.anc_among(ix, Some(&live));
-                live.iter().map(|&ci| support_pre(ix, pr, t, nv_of(ci), ci, false)).collect()
-            }
-            _ => vec![None; live.len()],
-        };
-        let sg = if tier0 == Tier::Group { self.group_sigmas(ix, cal, &pr.q32, qq) } else { Vec::new() };
+        let sg = if tier0 == Tier::Group && !free.is_empty() { self.group_sigmas(ix, cal, &pr.q32, qq) } else { Vec::new() };
         let mut p = vec![0f32; r.max(1)];
         for (j, &ci) in live.iter().enumerate() {
+            let sure = matches!(verdict[j], Some(Pre::In));
             if matches!(verdict[j], Some(Pre::Skip)) {
                 continue;
             }
             let s = match tier0 {
+                _ if sure => 1.0,
                 Tier::Group => sg[ix.cl[ci].g] * ix.order.as_ref().unwrap().rad[ci] / cal.gcov.rad[ix.cl[ci].g].max(1e-300),
                 Tier::Own => self.own_sigma(ix, ci, &pr.q32, qq, &mut p),
             };
@@ -577,9 +593,9 @@ impl Process {
             u.mu.push(qm[ci]);
             u.s.push(s.max(1e-12));
             u.tier.push(tier0);
-            u.sure.push(matches!(verdict[j], Some(Pre::In)));
+            u.sure.push(sure);
         }
-        info.spreads += if tier0 == Tier::Group { ix.groups.len() * r } else { live.len() * r };
+        info.spreads += spread_rows;
         st.cyc[P_SPREAD] += tick() - ts;
         if u.cl.is_empty() {
             return Made::Empty;
@@ -587,10 +603,18 @@ impl Process {
         let tp = tick();
         let (mut tau, mut v) = self.shares(cal, o, &u, &target, info);
         let lam_size = |u: &Units, tau: f64| (0..u.cl.len()).map(|i| u.nv[i] * self.ln_p(cal, o.plain, u, i, tau).exp()).sum::<f64>();
-        let mut b = Blocks::new(ix, &u.cl, v.clone(), &u.nv, &self.cm);
+        // the units the support table puts wholly above t are emitted without a read: outside the plan, their shares
+        // taken as given (a recall target asks the plan for the rest)
+        let free: Vec<usize> = (0..u.cl.len()).filter(|&i| !u.sure[i]).collect();
+        let sure = |v: &[f64]| (0..u.cl.len()).filter(|&i| u.sure[i]).map(|i| v[i]).sum::<f64>();
+        let stop = |v: &[f64]| match o.stop {
+            Stop::Recall(r) => Stop::Recall((r - sure(v)).max(0.0)),
+            s => s,
+        };
+        let mut b = Blocks::new(ix, &free, &u.cl, &v, &u.nv, &self.cm);
         let mut act = Vec::new();
         let size = if matches!(target, Target::Thr(_)) { lam_size(&u, tau) } else { 0.0 };
-        let (mut lam, mut val, mut cost, mut groups) = self.plan_dial(cal, tier0, &b, o.stop, &target, nvis as f64, size, &mut act);
+        let (mut lam, mut val, mut cost, mut groups) = self.plan_dial(cal, tier0, &b, stop(&v), &target, nvis as f64, size, &mut act);
         st.cyc[P_SOLVE] += tick() - tp;
         if o.spread == Spread::Own {
             let ts = tick();
@@ -611,14 +635,14 @@ impl Process {
             st.cyc[P_SPREAD] += tick() - ts;
             let tp = tick();
             (tau, v) = self.shares(cal, o, &u, &target, info);
-            b = Blocks::new(ix, &u.cl, v.clone(), &u.nv, &self.cm);
+            b = Blocks::new(ix, &free, &u.cl, &v, &u.nv, &self.cm);
             let size = if matches!(target, Target::Thr(_)) { lam_size(&u, tau) } else { 0.0 };
-            (lam, val, cost, groups) = self.plan_dial(cal, Tier::Own, &b, o.stop, &target, nvis as f64, size, &mut act);
+            (lam, val, cost, groups) = self.plan_dial(cal, Tier::Own, &b, stop(&v), &target, nvis as f64, size, &mut act);
             st.cyc[P_SOLVE] += tick() - tp;
         }
         info.tau = tau;
         info.lam = lam;
-        info.pred = val.min(1.0);
+        info.pred = (val + sure(&v)).min(1.0);
         info.cost = cost;
         info.groups = groups;
         info.all_cost = b.all_cost(self.cm.grp);
@@ -627,7 +651,7 @@ impl Process {
         if cost >= info.scan_cost {
             return Made::Scan;
         }
-        if cost >= info.all_cost {
+        if !b.v.is_empty() && cost >= info.all_cost {
             return Made::Exact;
         }
         Made::Run { u, b, act }
@@ -641,7 +665,10 @@ impl Process {
         let mut info = ProcInfo::default();
         let made = self.make(ix, cal, &pr, vis, target, o, &mut info, &mut Stats::new(ix.meta.nl()));
         match made {
-            Made::Run { u, b, act } => (info.tau, (0..b.v.len()).map(|i| (u.cl[b.units[i]], b.v[i], act[i])).collect(), info),
+            Made::Run { u, b, act } => {
+                let sure = (0..u.cl.len()).filter(|&i| u.sure[i]).map(|i| (u.cl[i], u.nv[i] / info.lambda.max(1.0), Act::Sure));
+                (info.tau, (0..b.v.len()).map(|i| (u.cl[b.units[i]], b.v[i], act[i])).chain(sure).collect(), info)
+            }
             _ => (info.tau, Vec::new(), info),
         }
     }
@@ -657,7 +684,7 @@ impl Process {
                 match act[i] {
                     Act::Direct => keyed.push((b.v[i] / b.cd[i], 0.0, i, Act::Direct)),
                     Act::Index => keyed.push((gv / gc, b.v[i] / b.cx[i], i, Act::Index)),
-                    Act::Skip => {}
+                    Act::Skip | Act::Sure => {}
                 }
             }
         }
@@ -762,12 +789,15 @@ impl Process {
                     setup_groups(ix, &pr, &gs, &mut st);
                 }
                 let flat = matches!(o.plan.mode, PlanMode::Flat);
+                for (j, &ci) in u.cl.iter().enumerate() {
+                    if u.sure[j] {
+                        pre[ci] = Pre::In;
+                    }
+                }
                 for i in 0..b.v.len() {
-                    let j = b.units[i];
-                    let ci = u.cl[j];
+                    let ci = u.cl[b.units[i]];
                     pre[ci] = match act[i] {
-                        Act::Skip => Pre::Skip,
-                        _ if u.sure[j] => Pre::In,
+                        Act::Skip | Act::Sure => Pre::Skip,
                         Act::Direct => Pre::Direct,
                         Act::Index => {
                             let p = cut_pre(ix, &pr, t, vis, ci, !ix.nukey.is_empty());
@@ -848,7 +878,7 @@ mod tests {
                             (v2, c2) = (v2 + b.v[i], c2 + b.cx[i]);
                             open[j] = true;
                         }
-                        Act::Skip => {}
+                        Act::Skip | Act::Sure => {}
                     }
                 }
             }

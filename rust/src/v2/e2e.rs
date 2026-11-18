@@ -2220,3 +2220,36 @@ fn an_index_without_a_calibration_opens() {
     drop(ix);
     std::fs::remove_dir_all(&tmp).unwrap();
 }
+
+/// A threshold query below every score: the support table puts every cluster wholly above t, and the process emits
+/// every visible row without reading one (or scans a visible set smaller than the anchors' search), under every dial
+/// and visible set, as the exact query does.
+#[test]
+fn process_threshold_takes_the_clusters_wholly_above_t_without_reading() {
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let want = answer(&truth(ix, q, bm.as_ref()), -2.0);
+            for t in [-2.0, -10.0] {
+                for sp in SPREADS {
+                    for stop in proc_dials() {
+                        let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                        let (out, info) = pc.threshold(ix, q, t, vis.as_ref(), &o);
+                        let what = format!("query {qi}, set {sname}, t {t}, {sp:?}, {stop:?}");
+                        assert_eq!(to_bitmap2(ix, &out.rows), want, "{what}");
+                        // a scan only where it costs less than the anchor search alone (a few visible rows)
+                        if info.path == "scan" {
+                            assert!(info.scan_cost <= info.fixed, "a scan of cost {} over the plan's fixed {}, {what}", info.scan_cost, info.fixed);
+                        } else if !want.is_empty() {
+                            assert_eq!((info.path, out.st.full_reads, info.cost), ("plan", 0, 0.0), "{what}");
+                            assert!((info.pred - 1.0).abs() < 1e-9, "predicted recall {}, {what}", info.pred);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

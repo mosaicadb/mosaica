@@ -756,7 +756,8 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
                 for &(c, v) in &p.cnt[j] {
                     cnt[c as usize] = v;
                 }
-                let blocks = Blocks::new(ix, &units, w.iter().map(|x| x / norm).collect(), &ex, &cm);
+                let vals: Vec<f64> = w.iter().map(|x| x / norm).collect();
+                let blocks = Blocks::new(ix, &(0..units.len()).collect::<Vec<_>>(), &units, &vals, &ex, &cm);
                 let mut act = Vec::new();
                 (0..LAM_STEPS).map(|s| {
                     let lam = 10f64.powf(1.0 - s as f64 / 4.0);
