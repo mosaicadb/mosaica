@@ -5,7 +5,7 @@
 #   benchmarked until the pin moves; the bindings (vexact-py) and the algorithm files come from this working tree.
 #   The image is built with -C target-cpu=native: build it on the machine that runs the benchmark.
 set -euo pipefail
-PIN=8f35446ec6134b3acd3b050525d4e3894af5448f
+PIN=ed7674e84db27a80082d111835b20b18b17aa32a
 AB=$(cd "$1" && pwd)
 REV=${2:-$PIN}
 # the bindings in this tree need the library's approximate queries (rust/src/v2/adaptive.rs): refuse an older rust/
