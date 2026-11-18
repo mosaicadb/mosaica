@@ -1,0 +1,14 @@
+150 queries. ln kappa at k = 10: mean +0.21, sd 1.07, 10% to 90% [-1.01, +1.52]; at answers of 100: sd 0.59
+k-NN, k = 10: mean cost (microseconds) at mean recall 0.8 / 0.9 / 0.95, one global price swept
+   tau* once (shares)                     136     193     256   relative to the first: 1.00 1.00 1.00
+   true tau, raw values                   179     260     331   relative to the first: 1.31 1.34 1.29
+   true tau, shares                       135     188     247   relative to the first: 0.99 0.97 0.96
+   oracle (true sigma, true tau)          138     190     244   relative to the first: 1.01 0.98 0.95
+   clairvoyant (true counts)              125     168     197   relative to the first: 0.92 0.87 0.77
+   re-solved after every read             140     208     285   relative to the first: 1.03 1.08 1.11
+   kappa learned (a = 0.3)                137     189     243   relative to the first: 1.01 0.97 0.95
+   kappa learned (a = 3)                  134     189     253   relative to the first: 0.99 0.98 0.99
+threshold queries, answers of 100 rows: mean cost at mean recall 0.8 / 0.9 / 0.95
+   counts n P(t), price on answers                  186     287     398   relative to the first: 1.00 1.00 1.00
+   shares n P(t) / Lambda(t), price on recall       163     250     349   relative to the first: 0.88 0.87 0.88
+   clairvoyant shares                               161     239     323   relative to the first: 0.87 0.83 0.81

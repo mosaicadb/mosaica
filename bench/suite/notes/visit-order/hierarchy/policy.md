@@ -9,6 +9,11 @@ Status labels: **[proved]** (proof here), **[checked]** (exhaustive or simulated
 output `theory/policy_check_out.txt`), **[cited]** (not verified against the paper), **[open]** (to be settled by
 the replay of section 9). Nothing here has been run on real data; the measurements quoted are from `theory.md`.
 
+**Revised after the replay** (`policy_replay.md`). Sections 1 to 10 are kept as first written. Section 11 says
+what the replay refuted and confirmed and replaces the parts that failed: a unit's value is its predicted **share**
+of the query's answer, not a count; τ for k-NN is solved once and not updated; the tier S0 is dropped. Where
+section 11 and an earlier section disagree, section 11 holds. Section 12 is the next replay.
+
 The proposal I was given is kept in outline and corrected in five places:
 
 1. **τ for k-NN is not the running k-th best** but the model's estimate of the final k-th best,
@@ -503,6 +508,273 @@ Bertsimas and Niño-Mora (not relied on). Open: whether a table calibrated on co
 real out-of-distribution queries well enough for a global price; E1 against E2; the cost constants for
 sub-cluster reads; the correction under correlated visible sets; the loss of the certainty-equivalent policy for
 k-NN outside the model (wrong tails), which the true-τ ceiling in the replay measures.
+
+---
+
+## 11. Revision after the replay
+
+The replay (`policy_replay.md`, with `replay/results/policy_tables.md` and `calib_summary.md`; three datasets, 100
+real queries each, counts measured, microseconds modelled) is the evidence for this section. Its numbers are quoted
+as it reports them. The synthetic check added here is `theory/policy_check2.py` (output `policy_check2_out.txt`).
+
+### 11.1 What it refuted and what it confirmed
+
+| in sections 1 to 10 | replay | consequence |
+|---|---|---|
+| Tier S0 (s = σ(q)) is a usable table (4.2) | refuted: δ 0.58 to 1.17 on real queries, plain and shifted pseudo-queries disagree, its order is worse than `spread` on two datasets | **S0 is dropped.** The cheapest tier is S1 (the group's covariance). `spread`'s f′ does not become a fitted β with σ(q) as the only scale |
+| A value is a count, n·P(τ) (1.1), with one global price on counts (Theorem C) | refuted as specified: the table is right in the pool (S1, S2: δ 0.05 to 0.49) and wrong per query by a factor κ_q whose 10 to 90% range at k = 10 is e^−2.5 to e^+1.6, for in-distribution queries too | **A value is a share** (11.2, 11.3) |
+| τ̂ re-solved at epochs (1.3, 2.5) is "protection against a wrong table" | refuted: true τ worst, epochs in between, τ\* once best, on all three | **τ\* once.** 2.5's last sentence is wrong: the re-solve is what lets a wrong table steer the stop (11.2) |
+| The fitted table replaces f′, α, z, 0.3 in the order (section 3) | confirmed where the spread statistic is the same: O1 level with `spread`, O2 level with H r16, at a fixed probe count, no constant set by hand | stands |
+| The price beats a probe count (Theorem C) | confirmed once values are shares: P1\*, P2\* at 0.52 to 0.92 of `spread`'s modelled cost at recall 0.9 on every dataset and condition run, P2\* at or ahead of H r16 nearly everywhere | stands, restated for shares (Theorem C′) |
+| The group term a_g (1.2) | works and matters little at the measured group cost (1% of cost on LAION) | stands; small at these n |
+| E1 for sub-clusters (1.4, Proposition D) | confirmed: expands nothing under random 1%, where the tuned two-level arms lose 20 to 120%; with one plan the sub-cluster arms are the best measured unfiltered | stands; E2 not yet run |
+| Random visible sets need no fallback (section 7) | confirmed for cost (P2\* 0.77 to 0.86 of `spread` at 1%); the table's counts are off under thinning on yahoo and LAION (δ 0.4 to 1.3) | explained by shares (11.3): a factor common to a query cancels |
+| Correlated sets: "a global price does not keep its meaning" (section 7) | the counts are off (δ up to 1.5); recall per cost is not worse than the tuned orders' (0.57 to 0.92) | my warning was about counts; with shares it does not arise in the same way. The weakness of centre-based orders under such sets (`theory.md` 7.1) is unchanged |
+| Thresholds: one plan at τ = t on counts | P2 level or better; P1 fails on LAION at answers of 0.01% (1.86) | values must be shares there too (11.3) |
+| Laziness, k = 100, E2, recall targets, the image control | not run | section 12 |
+
+### 11.2 Why τ\* once wins, and in what sense it is optimal
+
+**The fact that was missing.** The answer of a k-NN query has exactly k rows: Σ_u N_u = k, whatever the query.
+An estimate of the counts that does not sum to k is known to be wrong before anything is read, and by how much.
+Recall is Σ_read N_u / k: a sum of shares. What the plan needs from the table is each unit's share of the answer;
+the level is given.
+
+**The error model the replay found** (M-κ): E[N_u | features, q] = κ_q · n_u P_u(τ_q) for all units u of a query,
+τ_q the true k-th score, κ_q a factor per query with a wide spread (ln κ_q of the order of ±2 at k = 10) and
+mean about 1 in the pool. Then Σ_u n_u P_u(τ_q) = k/κ_q.
+
+**Proposition G (shares).** Under M-κ, s_u(τ) = n_u P_u(τ)/Σ_w n_w P_w(τ) at τ = τ_q is the unit's exact expected
+share of the answer, free of κ_q. At τ = τ\* (the root of Σ n P = k, where k·s_u = n_u P_u(τ\*) with no division),
+
+    ln s_u(τ*) − ln s_u(τ_q) ≈ (h_u/h̄ − 1) · ln κ_q ,                                              (11.1)
+
+h_u = −∂ ln P_u/∂τ the unit's hazard and h̄ its value-weighted mean. So the plan on the values n_u P_u(τ\*) has
+log-error at most |ln κ_q| · max_u |h_u/h̄ − 1| over the units at the margin, and Proposition E applies with that δ;
+the plan on the raw values n_u P_u(τ_q) has log-error |ln κ_q| against a price.
+
+*Proof.* The first statement is division of M-κ by its sum over units. For the second, moving τ from τ\* to τ_q
+multiplies P_u by exp(−h_u Δ) to first order, Δ = τ_q − τ\*; summing, k/κ_q = k·exp(−h̄Δ), so Δ = ln κ_q / h̄, and
+the share of u changes by exp(−(h_u − h̄)Δ). ∎
+
+So a per-query factor and an offset of τ are the same thing to first order, and solving τ from the model's own
+count removes it: the model is used at its own k-th quantile, where it is self-consistent, instead of at the
+truth's, where it is off by κ_q. What is left is the spread of the hazards across units, a second-order term
+(with a Gaussian tail h_u ≈ ζ_u/s_u, and the units at the margin have similar ζ).
+
+**Why the re-solved τ̂ is worse.** Its equation, (found above t) + Σ_unread n P(t) = k, trusts the table's level on
+the unread units. For a query with κ_q > 1 the units read deliver more than predicted; the equation is met at a
+τ̂ near the running k-th best with almost nothing predicted to remain, and the process stops while true answers
+are unread. For κ_q < 1 the found count falls short, τ̂ rises, much is predicted to remain, and the process reads
+on. The factor that the frozen τ\* cancels is brought back into the stopping decision, read by read. With the true
+τ and raw values it is there in full. That is the order the replay measured.
+
+[checked, `policy_check2.py`: 150 queries, a model right in the pool and off per query by ln κ of sd 1.07; modelled
+cost at recall 0.9 relative to τ\* once: true τ with raw values 1.34, re-solved after every read 1.08, true τ with
+values renormalised to shares 0.97, the model with the true spread 0.98. The replay's order is reproduced, and the
+true τ is harmless once its values are normalised: the damage was the level, not the threshold.]
+
+**Theorem C′ (the price on shares).** Let s_u be calibrated shares: E[N_u/A | features] = s_u, A the size of the
+query's answer (k, or the number of rows at or above t). Among all rules choosing a closed set per query from the
+same features with expected cost at most that of the plan S_λ on the values s_u, the plan has the largest expected
+recall. *Proof.* Lemma 1 and Theorem C with g(S) = Σ_S s_u; recall is Σ_read N_u/A. ∎
+
+That is the precise sense: **τ\* once with a global price is the optimal static rule for mean recall per mean cost
+when the table's shares are calibrated, whatever its level per query.** It is not optimal when the shares
+themselves are off (the shape term of (11.1), and everything a unit's features do not carry: 11.5), and it is
+static: it does not use what is found (11.4).
+
+Two corrections to the replay's reading. (i) The price is not "in effect a predicted-recall target per query":
+at one price a query whose answer is concentrated stops at a high predicted recall and a diffuse one at a low
+one; by Theorem C′ that unevenness is what makes the price cheaper than a per-query target at the same mean
+recall. (ii) Nothing in this says the table is good at τ\*; it says its errors there are of the kind that cancel.
+
+### 11.3 The dials, re-specified
+
+**Value.** For both query types, the value of a unit is its predicted share of the answer:
+
+    s_u = n_u^vis P_u(τ) / Λ(τ) ,    Λ(τ) = Σ_w n_w^vis P_w(τ)  over all units holding a visible row,
+
+- **k-NN:** τ = τ\*, the root of Λ(τ\*) = k, solved once per query; then s_u = n_u^vis P_u(τ\*)/k. τ is not updated
+  (but see 11.4).
+- **Threshold:** τ = t. Λ(t) is the table's estimate of the answer size and is wrong by κ_q; dividing by it
+  removes the factor exactly as τ\* does. This is what was missing where P1 failed (LAION, answers of 0.01%): the
+  plan was pricing counts, and for a threshold query a count objective is also a different objective (it weighs
+  a query by the size of its answer, where mean recall weighs queries equally). [checked in the same simulation:
+  shares need 0.87 of the cost of counts at recall 0.9, with ln κ of sd 0.59] One guard, with no constant: divide
+  by max(Λ(t), 1). An answer has at least one row or is empty, so when the table predicts less than one row the
+  values fall back to counts and a query whose answer is probably empty reads little, instead of spreading a
+  whole unit of recall over noise.
+
+**Price.** λ in recall per microsecond: stop when a further microsecond is expected to add less than λ of recall.
+The plan is (1.1) with v = s. One table λ(r̄) from mean recall to price, fitted at build on held-out pseudo-queries,
+per k band (and per answer-size band for thresholds), because the cost of a query grows with both.
+
+**Recall target per query.** The smallest plan with Σ_S s_u ≥ r (the breakpoints of Theorem B, or bisection on λ
+when clusters have the direct alternative). It no longer reads found items (the specification in 1.5 for k-NN,
+"until #{found ≥ τ̂} ≥ r·k", is withdrawn: it rests on τ̂). Achieved recall equals r on average if the shares are
+calibrated; each query's own recall scatters around r by what the features do not carry.
+
+**Budget.** Unchanged: the largest plan within it. The order is by share per cost, and a factor per query cannot
+change an order, which is why O1 and O2 were right before any of this.
+
+**Under visible sets.** Random: s is invariant to any miscalibration common to a query's units, including the
+table's drift under thinning (the replay's δ of 0.4 to 1.3 with a shifted median on yahoo): shares can be right
+where counts are not, and the cost curves say they are. Correlated: the same cancellation for the common part;
+the part that differs by unit (which clusters' visible rows are the ones near the query) is the weakness of
+`theory.md` 7.1 and stays.
+
+**What the table must satisfy now** (replacing 4.1, points 1 and 4): calibration of shares, E[N_u/A | features] = s_u,
+which the pooled δ of the replay does not measure and the per-query κ does not contradict. The check: for each
+query, bin the units by predicted share and compare Σ predicted with Σ observed N_u/A; report δ_s, the largest
+|ln(observed/predicted)| over bins holding 95% of the recall, per query type and per visible set. κ_q is still
+reported (its spread sets the prior of 11.4 and tells how far Λ(t) can be trusted as an answer size).
+
+**Sub-clusters.** When a cluster is expanded, its sub-clusters' values n_s P_s(τ) come from the sub-cluster row of
+the table and need not sum to the cluster's n_c P_c(τ). Two specifications, both in the next replay: **N0**, use
+them as they are (the finer level is taken to know better how much the cluster holds; this is what the replay
+ran, and its sub-cluster arms were the best unfiltered); **N1**, rescale them to the cluster's planned value (the
+query's shares keep summing to one; the finer level only redistributes). N1 is the one Theorem C′ covers; N0 can
+be better if the sub-cluster table is the better estimate of level, and is then a (legitimate) update of shares.
+
+### 11.4 Should τ, or anything, be updated from what is found?
+
+Not by the equation of 1.3. If at all, by an update that learns the level instead of assuming it. Under M-κ with a
+Gamma(a, a) prior on κ_q (mean 1; a = 1/(e^(s²) − 1) for ln κ of standard deviation s, taken from the calibration),
+the counts found in the units read are Poisson with mean κ_q times the prediction, so
+
+    κ̂(t) = ( a + #{found ≥ t} ) / ( a + Σ_read n_u P_u(t) ) ,
+    τ̂ : #{found ≥ τ̂} + κ̂(τ̂) · Σ_unread n_u P_u(τ̂) = k ,        v_u = κ̂(τ̂) · n_u P_u(τ̂)  for unread units.     (11.2)
+
+Before anything is read κ̂ = 1 and τ̂ = τ\*: it starts as the frozen plan. As reads accumulate the level is learned
+from them and the values of the unread units sum to the answers actually missing, so a price on them is again a
+price on counts that are right. As a → ∞ it is the update of 1.3 (which the replay refuted); a → 0 trusts only
+what is found.
+
+[checked in `policy_check2.py`: with a = 0.3, cost at recall 0.9 / 0.95 is 0.97 / 0.95 of τ\* once, equal to the
+model with the true spread; with a = 3, 0.98 / 0.99; the update of 1.3 is 1.08 / 1.11.] The gain over τ\* once is a
+few per cent in a model where the error is exactly a common factor. On real data the factor is not exactly
+common, the units read first are the ones the table liked best (their residuals are not a fair sample if the
+table's error grows towards the margin), and each epoch costs O(K). **Default: τ\* once. (11.2) is an arm of the
+next replay, not part of the specification, and the plain re-solve is withdrawn.** With (11.2), re-planning at
+epochs is as in 1.3 and Proposition F still needs keys rebuilt at an epoch, since values can rise.
+
+### 11.5 The gap to the clairvoyant plan, and what could narrow it
+
+The replay's clairvoyant plan (true counts as values) costs 0.20, 0.14 and 0.34 of `spread` at recall 0.9; the
+best arms 0.44 to 0.56. With shares the per-query factor is no longer in that gap: it cancels. What is left is
+the error of the shares, unit by unit. It has three parts, and only two can be reduced.
+
+1. **Realisation.** Even with every unit's expected share known exactly, which units hold the k rows is random.
+   The clairvoyant plan knows the realisation and no rule can. In the simulation, where rows are independent, this
+   part is small (the clairvoyant is 0.88 of the model with true rates at recall 0.9). On real data the answer's
+   rows are near one another, so they fall into few units together and the counts are over-dispersed: this part
+   is larger and nothing stored per unit removes it (`../theory.md`, Proposition 8). k = 100 will show its size:
+   `theory.md` measured the clairvoyant order 6 times cheaper in rows than `spread` at k = 10 and 2.2 times at
+   k = 100 on glove clusters.
+2. **Shape within a unit**: what the mean, one spread and the radius do not say about the unit's tail towards q.
+3. **Unit effects**: units that deliver more or less than their features predict for every query (dense cores,
+   outlying shells).
+
+Candidate features, each read-only beside the index (no row, basis or code is touched) and each a statement about
+shares, so robust to the per-query level:
+
+- **F1. The mixture over sub-clusters** (part 2). P_c(τ) = Σ_s (n_s/n_c) P_s(τ) is a far better description of a
+  cluster's tail than one Gaussian-like term; it is what expansion computes, and the measured gain of sub-clusters
+  is this. With the exact spread per sub-cluster, `theory.md` measured rows to recall 0.9 of 2.05%, 0.48% and 0.93%
+  (glove, yahoo, LAION text), against 1.07%, 1.06% and 0.85% for the clairvoyant order over whole clusters: a
+  16-way mixture with good spreads is about where the cluster-level clairvoyant is. That is the realistic target:
+  **1.4 to 2 times fewer rows than the sub-cluster arms' cheap spreads give (2.87%, 0.70%, 1.89% in that
+  measurement), not the 3 to 7 times of the clairvoyant.** The obstacle is the
+  sub-cluster spread (the replay's rank-4 own spread is miscalibrated on LAION, δ 0.54 to 0.82).
+- **F2. A fitted effect per unit** (part 3): one number b_u per cluster and sub-cluster, the shrunk mean over the
+  build's pseudo-queries of ln(observed/predicted) for that unit, added to ln P. One byte per unit, no query-time
+  cost. The replay's residuals by rad and size terciles are within ±0.1 to ±0.27; per unit they are not known and
+  are the first thing to measure.
+- **F3. The extremes the exact path already stores** (part 2): the support table holds, for each anchor and
+  cluster, the largest and smallest anchor·x over the cluster's rows, and a query reads one row of it. The
+  cluster's realised reach towards the query's nearest anchor, (max − p̂·m_c)/s_c, is a measured tail feature in
+  a direction near q. It helps where the query is near an anchor (item-like queries) and not otherwise, and it
+  describes all rows, not the visible ones.
+- **F4. What is found** (part 1, the only handle on it): answers are near one another, so the units near the best
+  items found are likelier to hold the rest than their centre scores against q say. As a feature: the centre
+  score against the best item found so far, beside the score against q. It costs K·d per use, makes the values
+  move with the reads (so the plan is re-made, as with (11.2)), and is the one item here that goes beyond a static
+  rule. Its ceiling can be measured before building anything: the order by centre score against the query's true
+  nearest neighbour.
+
+What I would not expect to help: more moments per unit (the fourth-moment bound of `../theory.md` 3.3 needs
+tensors), or a better tail family (the per-query factor absorbed the tail's level, and Proposition 6 of that note
+says a common shape does not change the order).
+
+### 11.6 Knobs, restated
+
+As section 3, with these changes: the epoch schedule is gone with the update; λ is in recall per microsecond;
+f′ is replaced by the table on S1 or S2, not on σ(q); the prior strength a of (11.2) exists only if that arm is
+adopted and is then read off the calibration, not set.
+
+---
+
+## 12. The next replay
+
+Same harness, scripts and cost model as `policy_replay.md`, with the changes of section 11. Everything is
+calibrated per index on its corpus; real queries are never used in a fit.
+
+**Data.** The three suite datasets with their 100 queries **and the 1,000-query sets**; **LAION with held-out image
+queries** (in distribution) beside its text queries. The price is a between-query effect and 100 queries is few
+for it: report every cost ratio with a bootstrap interval over queries.
+
+**k and answers.** k = 10 **and k = 100**; thresholds at answers of 0.01%, 0.1%, 1%, 10%. A separate λ sweep per
+k and per answer size; the table λ(r̄) per band is a deliverable.
+
+**Visible sets.** Unfiltered; random 1%, 5%, 25%; whole clusters 1% and 25%; a cap 1% and 25%; a contiguous id
+range 5%.
+
+**Arms.**
+
+| arm | values | τ | stop |
+|---|---|---|---|
+| T1, T2, T4 | the tuned orders (`spread`; H r16 ×4; 16 sub-clusters two-level) | – | probe count |
+| O1, O2 | P at τ\* (S1; S2), order only | τ\* once | probe count |
+| **Q1, Q2** | **shares at τ\* (S1; S2); threshold: n P(t)/Λ(t)** | **τ\* once; t** | **price on recall** |
+| Q1r, Q2r | the same | the same | per-query predicted-recall target r ∈ {0.8, 0.9, 0.95, 0.99} |
+| Q1c | counts n P(t), thresholds only (the first replay's P1) | t | price on answers |
+| Q1t | shares at the true τ (values renormalised) | true τ | price |
+| Q1k | (11.2), a from the calibration's κ spread; epochs at doubling | κ-learned | price |
+| Q1s, Q2s | Q1, Q2 with 16 sub-clusters, expansion **E1**, sub-values **N0** and **N1** | τ\* once | price |
+| Q1e, Q2e | the same with **E2** (the Ψ table of 1.4 and 4.3, fitted on shares) | τ\* once | price |
+| Q2z | Q2 with S2 evaluated lazily under the rank-0 bounds (Proposition F): units evaluated against units available | τ\* once | price |
+| F2, F3 | Q1 with the per-unit effect; with the support-table reach (if the fit has the table) | τ\* once | price |
+| F4 ceiling | order by centre score against the true nearest neighbour, alone and added to Q1's key | – | probe count |
+| ceilings | true counts as values; true shares with the direct path fixed (`i`) | – | price |
+
+Each Q arm also with the path fixed by the planner's rule (`i`), as before, so that order and stop are separated
+from the choice of path.
+
+**Calibration report, before any recall number.** As 4.4, plus: δ_s (11.3) per query type, level and visible set;
+κ_q's distribution per k and answer size, for plain pseudo-queries, shifted ones and real ones (it sets a); the
+shape term of (11.1): the spread of h_u/h̄ over the units of each plan; residuals **per unit** and per group (F2);
+for shifted pseudo-queries, the over-count the first replay saw (e^1.0 to e^2.4), with the shift rebuilt along
+directions in which the centres do not vary, and the table refitted without shifted queries as a control: with
+shares the level they were meant to teach should no longer matter.
+
+**Measures.** Mean recall against mean modelled cost and against rows, with intervals; cost at recall 0.8, 0.9,
+0.95; clusters and groups opened; for target arms, achieved against requested recall and the share of queries
+more than 0.1 below target; for Q1k, epochs and the trajectory of κ̂ against the true κ_q.
+
+**What would confirm section 11.** Q1 ≤ P1\* and Q2 ≤ P2\* of the first replay within noise for k-NN (they are the
+same plan), and for thresholds Q1 well below Q1c on LAION at 0.01% answers, with no arm above T1. Q1t within
+about 5% of Q1 (the true τ harmless once normalised): if Q1t is clearly better, the shape term matters and an
+update is worth having; if clearly worse, the table is better at its own quantile than at the truth's, which
+(11.1) does not predict. Achieved recall of the target arms within 0.02 of requested on average, for image, text
+and corpus queries alike. Under random thinning, δ_s small where δ was large.
+
+**What would send it back.** Q1k clearly better than Q1 (then the level carries information the frozen plan
+wastes, and (11.2) becomes the specification); N0 against N1 differing by more than noise in either direction
+(decides whether a finer level may move mass between clusters); E2 no better than E1 (then drop the second
+table); F2 or F3 closing less than a tenth of the gap to the clairvoyant plan (then stop looking for static
+features and measure F4's ceiling); k = 100 showing a clairvoyant gap as large as at k = 10 (then the gap is not
+mostly realisation, and features are worth more than 11.5 allows).
 
 ## References (from memory; not checked)
 
