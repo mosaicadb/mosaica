@@ -13,3 +13,6 @@ idx_*/
 work_*/
 site/proofs.html
 .venv/
+
+# git worktrees of agent sessions
+.claude/worktrees/
