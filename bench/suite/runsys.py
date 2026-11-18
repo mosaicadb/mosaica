@@ -285,8 +285,10 @@ def run(a, suite, ds, sname, prep, cls, sysobj, plan, reps, data, cg):
         elif qt == "exact":
             params_list = [dict(k=k) for k in p["k"]]
         else:
-            params_list = [dict(k=k, **g) for k in p["k"] for g in sysobj.approx_grid()]
+            params_list = None
         for setting in sysobj.settings(qt, filtered):
+            if qt == "approx":
+                params_list = [dict(k=k, **g) for k in p["k"] for g in sysobj.approx_grid_for(setting)]
             t0 = time.perf_counter()
             sysobj.use(setting)
             use_ms = (time.perf_counter() - t0) * 1e3

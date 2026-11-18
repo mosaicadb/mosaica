@@ -96,6 +96,10 @@ class System:
     def approx_grid(self):
         return self.params.get("approx", [])
 
+    def approx_grid_for(self, setting):
+        """The approximate grid run under `setting` (a setting with a dial of its own sweeps that)."""
+        return self.approx_grid()
+
     # a system that times its own queries (a server, say) sets this after each call, in ms
     own_ms = None
 

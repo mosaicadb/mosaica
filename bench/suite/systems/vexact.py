@@ -113,13 +113,20 @@ class Vexact(System):
         return tot
 
     def settings(self, qtype, filtered):
-        # the approximate mode's cluster orders to compare (`orders`, e.g. ["radius", "spread"]), one setting each
+        # the approximate mode's arms to compare (`orders`), one setting each: cluster orders stopped by nprobe (e.g.
+        # "radius", "spread", "h16x4"; grid `approx`) and the approximate process, "process-SPREAD" with SPREAD its
+        # spread's source (group, own, own-all; grid `process`, one of its dials per entry)
         return list(self.params.get("orders", ["default"])) if qtype == "approx" else ["default"]
 
     def use(self, setting):
         self.setting = setting
-        if setting != "default":
+        if setting != "default" and not setting.startswith("process-"):
             self.ix.set_order(setting)
+
+    def approx_grid_for(self, setting):
+        if setting.startswith("process-"):
+            return self.params.get("process", [])
+        return self.approx_grid()
 
     def set_visible(self, ids, name=None):
         self.vis = ids
@@ -136,6 +143,9 @@ class Vexact(System):
         return self.ix.threshold(self.q(q), t)
 
     def approx(self, q, k, p):
+        if self.setting is not None and self.setting.startswith("process-"):
+            dial = {x: p[x] for x in ("price", "mean_recall", "recall", "budget") if x in p}
+            return self.ix.knn_process(self.q(q), k, spread=self.setting[len("process-"):], eps=p.get("eps", 0.0), **dial)
         return self.ix.knn_approx(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
 
     def approx_grid(self):
