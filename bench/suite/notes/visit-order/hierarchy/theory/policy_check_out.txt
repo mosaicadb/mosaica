@@ -1,0 +1,13 @@
+1. Trees with setup costs (2 groups x 2 clusters x 2 leaves, 14 jobs; 200 random instances)
+   largest relative excess of the index order over the optimal sum of value x completion time: 4.44e-16; prices at which S(lambda) is not a prefix of the order: 0
+2. Lazy evaluation (300 random trees, 3 groups x 3 clusters x 3 leaves, upper bounds = exact x (1 + U(0, 2)))
+   sequences that differ: 0 of 300 (run to the end, so every index is evaluated: 11700 of 11700; the saving of laziness is in what lies below the stopping price)
+3. Calibration error (2 x 2 x 2 trees, values misjudged by factors exp(U(-delta, delta)); exhaustive best closed set of no greater cost)
+   delta 0.1: smallest ratio 1.000, mean 1.000; bound exp(-2 delta) = 0.819
+   delta 0.3: smallest ratio 0.985, mean 1.000; bound exp(-2 delta) = 0.549
+   delta 0.7: smallest ratio 0.915, mean 0.999; bound exp(-2 delta) = 0.247
+4. k-NN (k = 10): 40 groups x 10 clusters, n = 2,000, Gaussian scores N(mu_c, sigma_c^2), mu_c = group effect + N(0, 0.6^2), sigma_c = 0.3 LogNormal(0, 0.3); costs in microseconds: row 0.03, cluster 8, group 40. 200 queries. Mean recall | mean cost (ms)
+   lambda 0.003 answers per microsecond:  true: 0.964 | 0.282  plugin: 0.970 | 0.286  estimate: 0.972 | 0.291  running: 0.973 | 0.473
+   lambda 0.001 answers per microsecond:  true: 0.988 | 0.378  plugin: 0.988 | 0.383  estimate: 0.988 | 0.379  running: 0.988 | 0.554
+   lambda 0.0003 answers per microsecond:  true: 0.996 | 0.500  plugin: 0.996 | 0.502  estimate: 0.996 | 0.501  running: 0.996 | 0.671
+   lambda 0.0001 answers per microsecond:  true: 0.998 | 0.621  plugin: 0.999 | 0.622  estimate: 1.000 | 0.623  running: 1.000 | 0.790
