@@ -199,9 +199,10 @@ SCALE = scale_suite("scale", ["laion-10m", "laion-40m", "laion-100m"])
 SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m"])
 
 # The approximate mode's cluster order (notes/visit-order/PLAN.md): the quick suite's public datasets, approximate k-NN
-# only, unfiltered and under the quick filters, on a finer nprobe grid; vexact alone, since the comparison is between
-# its orders.
+# only, unfiltered and under random and correlated (region) visible sets, on a finer nprobe grid; vexact alone, since
+# the comparison is between its orders.
 ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized"],
+             filters=["none", "random-1", "random-25", "region-1", "region-25"],
              types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
              params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["radius", "spread"],
