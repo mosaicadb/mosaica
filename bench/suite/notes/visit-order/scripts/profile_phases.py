@@ -5,8 +5,9 @@
 # and the reads' setup (P_PLAN), the spreads (P_SPREAD), tau and the plan (P_SOLVE), then the same three phases of the
 # reads, and its counts: spreads' directions projected, units read directly and on the index path, groups set up.
 # A simple arm (`--simple VARIANT`, swept over `--knob`): the centre scores (P_PLAN), the spreads (P_SPREAD), the order
-# (P_SOLVE: keys, heap and stop), the path choice and the race's accounting (P_CHOICE), then the reads' three phases,
-# and its counts: directions projected, clusters visited, read directly and on the index path, groups set up.
+# (P_SOLVE: keys, heap and stop), the path choice, the anchor search and the race's accounting (P_CHOICE), then the
+# reads' three phases, and its counts: directions projected, clusters visited, read directly and on the index path,
+# groups set up.
 # Median microseconds (and counts) over the suite's queries, after one warm-up pass, on one pinned core.
 # usage: SUITE_DATA=... python3 -I profile_phases.py DATASET [--nprobe 16,64] [--filters none,random-1,random-25]
 #        [--core 3] [--order ORDER | --process group|own|own-all [--price 1e-3,1e-4,1e-5]

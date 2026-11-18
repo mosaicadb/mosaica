@@ -389,9 +389,9 @@ impl Index {
     }
 
     /// Where one query of a simple arm spends its time, as `profile`: the cycles of each phase (`Stats::cyc`; `P_PLAN`
-    /// the centre scores, `P_SPREAD` the spreads, `P_SOLVE` the order (keys, heap, stop), `P_CHOICE` the path choice
-    /// and the race's accounting, `P_QUERY` the whole call; the counts C_SPREADS (directions projected), C_DIRECT,
-    /// C_INDEX, C_GROUPS, C_VISITED) and the time stamp counter's cycles per second.
+    /// the centre scores, `P_SPREAD` the spreads, `P_SOLVE` the order (keys, heap, stop), `P_CHOICE` the path choice,
+    /// the anchor search and the race's accounting, `P_QUERY` the whole call; the counts C_SPREADS (directions
+    /// projected), C_DIRECT, C_INDEX, C_GROUPS, C_VISITED) and the time stamp counter's cycles per second.
     #[pyo3(signature = (q, k, variant, knob))]
     fn profile_simple(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, variant: &str, knob: f64) -> PyResult<(Vec<u64>, f64)> {
         let q = q.as_slice()?;

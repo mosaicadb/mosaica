@@ -54,7 +54,8 @@ pub const C_SPREADS: usize = 26;
 pub const C_DIRECT: usize = 27;
 pub const C_INDEX: usize = 28;
 pub const C_GROUPS: usize = 29;
-/// The simple arms (`v2::simple`): their path choice and race accounting (cycles), and the clusters they visited.
+/// The simple arms (`v2::simple`): their path choice, anchor search and race accounting (cycles), and the clusters they
+/// visited.
 pub const P_CHOICE: usize = 30;
 pub const C_VISITED: usize = 31;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
