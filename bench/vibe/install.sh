@@ -8,6 +8,11 @@ set -euo pipefail
 PIN=$(sed -n 's/^PIN=//p' "$(dirname "$0")/../annb/install.sh")
 VIBE=$(cd "$1" && pwd)
 REV=${2:-$PIN}
+# the bindings in this tree need the library's approximate queries (rust/src/v2/adaptive.rs): refuse an older rust/
+git -C "$(dirname "$0")" cat-file -e "$REV:rust/src/v2/adaptive.rs" 2>/dev/null || {
+  echo "rust/ at $REV is older than the bindings in this tree need (it has no rust/src/v2/adaptive.rs): pass a newer REV, or move PIN in bench/annb/install.sh" >&2
+  exit 2
+}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
 ALG=$VIBE/vibe/algorithms/vexact

@@ -40,7 +40,6 @@ float:
           basis: [dual]
         query_args:
           nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-          eps: [0, 0.01, 0.03]
   # research/levels-clusters' candidates (REPORT_BUILD.md), in the legacy arm: A clusters by N, B two deterministic
   # levels, C both
   - base_args: ['@metric']
@@ -59,7 +58,6 @@ float:
           dlv: [fit]
         query_args: &lc_query
           nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-          eps: [0, 0.01, 0.03]
       B:
         args:
           basis: [dual]

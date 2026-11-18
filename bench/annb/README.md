@@ -5,8 +5,8 @@ algorithm `vexact`. It then runs the index against the harness's own builds of h
 DiskANN and BLAS brute force on the harness's datasets. Filtered, exact and threshold queries are in `bench/suite`.
 This folder covers only the unfiltered protocol, run by the harness itself.
 
-- `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`, `threshold`,
-  `set_visible`, `fit_dial`. They depend on `rust/` by path and need no change to it. `threshold` and the disk mode
+- `vexact-py/`: Python bindings (pyo3) over the `vexact` library: `Index(dir)`, `knn`, `knn_approx`,
+  `threshold_approx`, `threshold`, `set_visible`, and the legacy `knn_nprobe`. They depend on `rust/` by path and need no change to it. `threshold` and the disk mode
   (`full_file` and its read options, `evict_full`, `full_resident`; used by `bench/suite`'s memory-cap axis) are not
   part of the harnesses' protocol.
 - `vexact/`: the algorithm folder the harness loads: `module.py`, `config.yml`, `Dockerfile`.
@@ -65,12 +65,10 @@ in rows (`Plan::default`). Without a `dlv` build argument the bindings build the
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.
 - **vexact-approx**: the library's approximate k-NN (`knn_approx`, `v2::adaptive`): clusters in the order of their
   centre score plus psi times the spread of their scores along the query, until the next one's falls below the running
-  k-th best, racing a scan of the visible rows; psi 2 to 7 (4.5 by default; larger reads more).
+  k-th best, racing a scan of the visible rows; psi 2 to 7 (4.5 by default; larger reads more). Its cost model is
+  timed when the index is opened (once per machine and index), outside the timed queries.
 - **vexact-nprobe**: the legacy arm, kept for comparison: `knn2_fast` over the first `nprobe` clusters (1 to 512) of
-  the `spread` order, with the dial off (`eps` 0) or fitted for a miss rate of 0.01 or 0.03 per level. The dials for k = 10 and k = 100 are fitted in `set_query_arguments`,
-  outside the timed queries. At 64 dimensions (glove-25) the dial changes nothing, because reading a probed cluster's
-  full vectors is cheaper than its codes. At 384 dimensions (VIBE's yahoo-minilm-384, k = 100) `eps` 0.03 is 1.46 times
-  faster at nprobe 64 and 1.6 times at nprobe 128, for recall 0.001–0.002 lower.
+  the `spread` order. Its per-level dial (`eps`) was taken out with the fitted orders.
 - **vexact-approx-lc**: as vexact-nprobe on research/levels-clusters' candidate builds (REPORT_BUILD.md, "the
   levels-clusters defaults"): A, clusters by N (build argument `clusters: by-n`, `fit.py --per-cluster by-n --groups
   by-n`); B, two deterministic levels (`dlv: "16.32"`); C, both. Not in `run.sh`'s default list; add it with `ALGOS`.

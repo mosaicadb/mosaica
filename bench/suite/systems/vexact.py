@@ -85,12 +85,8 @@ class Vexact(System):
     def index_opts(self):
         # the deterministic levels (`dlv`, cumulative bytes): None, the library's default (two, at 16 and 32 bytes);
         # [] the fit's six
-        # pseudo-queries are made only for the legacy arm's dial (eps > 0)
         dlv = self.params.get("dlv")
-        o = {} if dlv is None else dict(dlv=list(dlv))
-        if not any(p.get("eps", 0) > 0 for p in self.params.get("approx", [])):
-            o["pseudo"] = 0
-        return o
+        return {} if dlv is None else dict(dlv=list(dlv))
 
     def counters(self):
         # the reader's reads (io_uring, disk mode): count, bytes, and the time spent waiting for them
@@ -148,13 +144,16 @@ class Vexact(System):
         # a grid point with psi is the approximate k-NN, one with nprobe the legacy arm
         if "psi" in p:
             return self.ix.knn_approx(self.q(q), k, p["psi"])
-        # (a library before the approximate k-NN took knn_approx's name has the legacy arm under that name)
-        legacy = getattr(self.ix, "knn_nprobe", None) or self.ix.knn_approx
-        return legacy(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
+        if hasattr(self.ix, "knn_nprobe"):
+            return self.ix.knn_nprobe(self.q(q), k, p["nprobe"])
+        # a library before the approximate k-NN took knn_approx's name has the legacy arm (and its dial) under it
+        return self.ix.knn_approx(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
 
     def approx_grid(self):
         g = self.params.get("approx", [])
         if any(p.get("eps", 0) > 0 for p in g):
+            if not hasattr(self.ix, "fit_dial"):
+                raise ValueError("eps (the legacy arm's dial) was taken out of the library; drop it from the grid")
             for k in (10, 100):
                 self.ix.fit_dial(k)
         return g

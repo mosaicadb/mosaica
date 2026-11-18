@@ -40,7 +40,7 @@ def main():
     data = os.environ["SUITE_DATA"]
     prep = Prep(prep_dir(data, a.dataset))
     os.sched_setaffinity(0, {a.core})
-    ix = vexact_py.Index(os.path.join(work_dir(data, a.dataset, "vexact"), "index"), core=a.core, pseudo=0)
+    ix = vexact_py.Index(os.path.join(work_dir(data, a.dataset, "vexact"), "index"), core=a.core)
     Q = prep.queries()
     qb = np.zeros(ix.dim, np.float32)
     print(f"{a.dataset}: {ix.clusters} clusters, {prep.N} rows, k {a.k}")

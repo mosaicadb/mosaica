@@ -1,5 +1,5 @@
-# Compares approximate k-NN runs of the suite's `order` suite: per dataset, filter and grid point (nprobe for a cluster
-# order, the price or budget for the approximate process, the knob for a simple arm), each run's mean recall and
+# Compares approximate k-NN runs of the suite's `order` suite: per dataset, filter and grid point (nprobe for the
+# legacy arm, psi for the approximate k-NN; an earlier run's price, budget or knob), each run's mean recall and
 # median time (the median over queries of each query's median), and the time each run needs to reach a recall, by
 # linear interpolation between grid points on its (time, recall) curve.
 # usage: python3 -I compare_runs.py LABEL=RESULTS_DIR[:SETTING] ... [--targets 0.8,0.9,0.95]
@@ -24,7 +24,7 @@ def load(spec):
             if r["type"] != "approx" or (setting and r["setting"] != setting):
                 continue
             p = json.loads(r["param"])
-            point = p["nprobe"] if "nprobe" in p else next(p[x] for x in ("price", "budget", "knob", "mean_recall", "recall") if x in p)
+            point = next(p[x] for x in ("nprobe", "psi", "price", "budget", "knob", "mean_recall", "recall") if x in p)
             c = cells[(r["dataset"], r["filter"], point)]
             c[0].append(float(r["median_ms"]))
             c[1].append(float(r["recall"]))
@@ -32,8 +32,8 @@ def load(spec):
 
 
 def time_at(curve, target):
-    """us to reach mean recall `target` on a run's curve (its grid points in order of time, since a price falls as
-    the effort grows while nprobe and a knob rise), interpolated; None if never reached."""
+    """us to reach mean recall `target` on a run's curve (its grid points in order of time, which grows with nprobe
+    and psi), interpolated; None if never reached."""
     pts = sorted(curve, key=lambda x: (x[1], x[2]))
     for (t0, r0), (t1, r1) in zip([(0.0, 0.0)] + [(t, r) for _, t, r in pts], [(t, r) for _, t, r in pts]):
         if r1 >= target:
@@ -54,7 +54,7 @@ def main():
             ks = [k for k in keys if k[0] == ds and k[1] == f]
             if not ks:
                 continue
-            print(f"\n{ds}, {f}: recall / median us by grid point (nprobe, the process's price or budget, or a simple arm's knob)")
+            print(f"\n{ds}, {f}: recall / median us by grid point (nprobe for the legacy arm, psi for the approximate k-NN)")
             print(f"  {'point':>6}  " + "  ".join(f"{l:>16}" for l in labels))
             for k in ks:
                 row = [r.get(k) for _, r in runs]

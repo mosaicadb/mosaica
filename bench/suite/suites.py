@@ -137,7 +137,7 @@ FULL = dict(
     ),
     params=dict(SYSTEM_PARAMS,
                 vexact=dict(SYSTEM_PARAMS["vexact"],
-                            approx=[dict(nprobe=p, eps=e) for p in (8, 32, 128, 512) for e in (0.0, 0.03)]),
+                            approx=[dict(psi=x) for x in (3.0, 4.0, 4.5, 5.0, 6.0, 7.0)]),
                 **{"faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], approx=[dict(ef=e) for e in (32, 128, 512, 2048)]),
                    "acorn": dict(SYSTEM_PARAMS["acorn"], approx=[dict(ef=e) for e in (32, 128, 512, 2048)])}),
     # the database runs on two datasets only
@@ -206,7 +206,7 @@ ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-3
              types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
              params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "adaptive"],
-                                                    approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
+                                                    approx=[dict(nprobe=p) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
                                                     adaptive=[dict(psi=x) for x in (2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7)])),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 

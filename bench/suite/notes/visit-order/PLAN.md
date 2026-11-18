@@ -226,8 +226,10 @@ another arm's last (most expensive) ones: `spread` at nprobe 4 took 122 µs for 
 
 The library now has one approximate k-NN and one approximate threshold query (`rust/src/v2/adaptive.rs`; bindings
 `knn_approx(q, k, psi=4.5)`, `threshold_approx(q, t, psi=4.5)`): the key μ_c + ψσ_c(q) from the stored directions,
-computed in the `spread` order 8 clusters ahead of the probe, the stop at the running k-th best (threshold: the
-clusters whose key reaches t, after the support table), the race against a scan (k-NN; at most twice its modelled
+σ_c computed lazily under its bound √(λ₁)|q| (only when the bound beats the best key computed, so the order and the
+stop are those of every key computed first; the ablation's arm used the `spread` order 8 clusters ahead instead,
+which could stop before a cluster whose key reached the k-th best), the stop before the first cluster whose key is
+below the running k-th best (threshold: the clusters whose key reaches t, after the support table), the race against a scan (k-NN; at most twice its modelled
 cost) and the hand-over to a scan or the exact query (threshold), and each cluster's path by constants measured on
 the machine and cached with the index. The calibrated process (its tables, group covariances, price and budget, and
 the build's calibration), the H order, the radius order and `fit_queries` are gone; the `spread` order by nprobe

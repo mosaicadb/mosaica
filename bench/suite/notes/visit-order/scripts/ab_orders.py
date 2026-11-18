@@ -46,7 +46,7 @@ def main():
     os.sched_setaffinity(0, {a.core})
     path = os.path.join(work_dir(data, a.dataset, "vexact"), "index")
     psis = [float(x) for x in a.psi.split(",")]
-    ix = {arm: vexact_py.Index(path, core=a.core, pseudo=0) for arm in a.arms}
+    ix = {arm: vexact_py.Index(path, core=a.core) for arm in a.arms}
     first = next(iter(ix.values()))
     Q = prep.queries()
     qb = np.zeros(first.dim, np.float32)
@@ -66,7 +66,7 @@ def main():
             if "spread" in ix:
                 x = ix["spread"]
                 for p in [int(v) for v in a.nprobe.split(",")]:
-                    cells.append(("spread", f"nprobe={p}", lambda q, qi, x=x, p=p: x.knn_nprobe(q, a.k, p, 0.0),
+                    cells.append(("spread", f"nprobe={p}", lambda q, qi, x=x, p=p: x.knn_nprobe(q, a.k, p),
                                   lambda q, qi, x=x, p=p: dict(touched=x.explain(q, a.k, p)[0]), want))
             if "adaptive" in ix:
                 x = ix["adaptive"]

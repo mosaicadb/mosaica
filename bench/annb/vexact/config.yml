@@ -29,7 +29,7 @@ float:
     run_groups:
       nprobe:
         args: [{basis: dual}]
-        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]]
   # research/levels-clusters' candidates (REPORT_BUILD.md), in the legacy arm: A clusters by N, B two deterministic
   # levels, C both
   - base_args: ['@metric']
@@ -41,10 +41,10 @@ float:
     run_groups:
       A:
         args: [{basis: dual, clusters: by-n}]
-        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]]
       B:
         args: [{basis: dual, dlv: "16.32"}]
-        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]]
       C:
         args: [{basis: dual, clusters: by-n, dlv: "16.32"}]
-        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]]

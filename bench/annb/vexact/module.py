@@ -4,8 +4,7 @@
 # The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is dual too, and the
 # measured index (SYSTEM.md) uses dual. With dual on a dataset that supplies a sample of its
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
-# The build parameter `order` is accepted as corpus only (the approximate k-NN fits nothing on queries; the legacy
-# arm's dial is fitted on corpus pseudo-queries).
+# The build parameter `order` is accepted as corpus only (nothing is fitted on queries).
 # The build parameters `clusters` and `dlv` are research/levels-clusters' options (REPORT_BUILD.md, "the levels-clusters
 # defaults"): `clusters` 1000 (the default, 1,000 items per cluster) or by-n (fit.py --per-cluster by-n --groups by-n),
 # and `dlv` the deterministic levels' cumulative bytes: default (the library's, 16.32), fit (the fit's six) or e.g. "16.32".
@@ -83,6 +82,7 @@ class Vexact(BaseANN):
         for f in ("train.npy", "sample.npy"):
             if os.path.exists(os.path.join(work, f)):
                 os.remove(os.path.join(work, f))
+        # the approximate queries' cost model is timed here, at the open (once per machine and index), not in a query
         self.index = vexact_py.Index(os.path.join(work, "index"), dlv=self.dlv)
         self.sampled = sample is not None
 
@@ -123,15 +123,11 @@ class VexactNprobe(Vexact):
 
     def __init__(self, metric, method_param=None, *rest):
         super().__init__(metric, method_param, *rest)
-        self.nprobe, self.eps = 1, 0.0
+        self.nprobe = 1
 
-    def set_query_arguments(self, nprobe, eps):
-        self.nprobe, self.eps = nprobe, eps
-        if eps > 0:
-            # the dial is fitted per k; ANN-Benchmarks asks for 10 neighbours and VIBE for 100
-            self.index.fit_dial(10)
-            self.index.fit_dial(100)
-        self.name = f"vexact-nprobe ({self.tag}, query sample={self.sampled}, nprobe={nprobe}, eps={eps})"
+    def set_query_arguments(self, nprobe):
+        self.nprobe = nprobe
+        self.name = f"vexact-nprobe ({self.tag}, query sample={self.sampled}, nprobe={nprobe})"
 
     def query(self, v, n):
-        return self.index.knn_nprobe(self.q(v), n, self.nprobe, self.eps)
+        return self.index.knn_nprobe(self.q(v), n, self.nprobe)
