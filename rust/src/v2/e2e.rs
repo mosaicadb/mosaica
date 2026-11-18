@@ -2270,6 +2270,30 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
     assert!(probes > 0);
 }
 
+/// A group's setup is bought as skis are: with the index path saving on every cluster, a free setup sends every
+/// cluster read to it, an unaffordable one none, and one worth a few clusters' savings sends a group's first clusters
+/// to direct reads and its later ones to the index path once their savings have paid for it.
+#[test]
+fn a_groups_setup_is_bought_once_its_savings_pay_for_it() {
+    let f = fixture();
+    let ix = &f.ix;
+    let base = adaptive::Measured { i8_us: 1e-6, row_us: 1.0, dir_us: 1e-6, cl_us: 0.0, size_us: 0.0, vis_us: 0.5, grp_us: 0.0, anc_us: 0.0 };
+    let saving = 0.5 * (ix.nrows / ix.k()) as f64;
+    let (mut free, mut never, mut some) = ((0, 0), (0, 0), (0, 0));
+    for (grp, acc) in [(0.0, &mut free), (1e12, &mut never), (3.0 * saving, &mut some)] {
+        let ad = adaptive::Adaptive::new(ix, adaptive::Measured { grp_us: grp, ..base }).unwrap();
+        for q in &f.queries {
+            let (_, info) = ad.knn(ix, q, 10, None, 8.0, Plan::default());
+            assert!(info.groups <= ix.groups.len());
+            acc.0 += info.direct;
+            acc.1 += info.index;
+        }
+    }
+    assert!(free.0 == 0 && free.1 > 0, "a free setup: {free:?} direct, index");
+    assert!(never.1 == 0 && never.0 > 0, "an unaffordable setup: {never:?}");
+    assert!(some.0 > 0 && some.1 > 0, "a setup worth three clusters: {some:?}");
+}
+
 /// The answers do not depend on the measured constants but through the race and the hand-overs (which answer exactly):
 /// with the index path cheap or dear, a probe that does not race reads the same clusters and returns the same items,
 /// and a threshold query that probes in both returns the same rows.

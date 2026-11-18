@@ -507,29 +507,40 @@ pub struct Adaptive {
     low: Vec<f64>,
 }
 
-/// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once.
+/// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once. A group's setup
+/// serves every later cluster of the group, which a choice cluster by cluster does not see, so it is bought as skis
+/// are: while the group is not set up, its clusters are read directly and the savings the index path would have given
+/// them (`lost`) are summed, and the cluster whose saving takes the sum to the setup's cost sets the group up. A group
+/// set up then costs at most twice what the best choice for its clusters read would have.
 struct Charges<'a> {
     m: &'a Measured,
     ix: &'a Index2,
     pr: &'a Prep2,
     anchored: bool,
     gset: Vec<bool>,
+    lost: Vec<f64>,
 }
 
-impl Charges<'_> {
-    /// The cheaper path for cluster ci, `nv` of its rows visible, given what is already set up (`anchors` the anchors a
-    /// first search would score), its cost, and whether it sets up a group; marks what the index path sets up.
+impl<'a> Charges<'a> {
+    fn new(m: &'a Measured, ix: &'a Index2, pr: &'a Prep2, anchored: bool) -> Charges<'a> {
+        Charges { m, ix, pr, anchored, gset: vec![false; ix.groups.len()], lost: vec![0.0; ix.groups.len()] }
+    }
+
+    /// The path for cluster ci, `nv` of its rows visible, given what is already set up (`anchors` the anchors a first
+    /// search would score), its cost, and whether it sets up a group; marks what the index path sets up.
     fn choose(&mut self, ci: usize, nv: usize, anchors: usize) -> (KnnPath, f64, bool) {
         let (m, ix) = (self.m, self.ix);
         let rows = ix.cl[ci].r1 - ix.cl[ci].r0;
         let g = ix.cl[ci].g;
         let gnew = !self.gset[g] && self.pr.gq[g].get().is_none();
-        let idx = m.index(rows, nv) + if gnew { m.grp_us } else { 0.0 } + if self.anchored { 0.0 } else { m.anc_us * anchors as f64 };
+        let idx = m.index(rows, nv) + if self.anchored { 0.0 } else { m.anc_us * anchors as f64 };
         let dir = m.direct(nv);
-        if idx < dir {
+        let save = dir - idx;
+        if save > 0.0 && (!gnew || self.lost[g] + save >= m.grp_us) {
             self.gset[g] = true;
-            (KnnPath::Index, idx, gnew)
+            (KnnPath::Index, idx + if gnew { m.grp_us } else { 0.0 }, gnew)
         } else {
+            self.lost[g] += save.max(0.0);
             (KnnPath::Direct, dir, false)
         }
     }
@@ -666,7 +677,7 @@ impl Adaptive {
                 price(ci, &mut spent, &mut priced, &mut info);
             }
         }
-        let mut ch = Charges { m, ix, pr: &pr, anchored: !ix.nukey.is_empty(), gset: vec![false; ix.groups.len()] };
+        let mut ch = Charges::new(m, ix, &pr, !ix.nukey.is_empty());
         let mut visited = vec![false; k];
         let mut raced = false;
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
@@ -708,13 +719,13 @@ impl Adaptive {
             let Some(Key(_, Reverse(ci))) = next else { break };
             let tch = tick();
             let nv = nv_of(ci);
-            if spent + m.direct(nv) > cs {
+            let (path, cost, gnew) = ch.choose(ci, nv, Self::anchors(ix, info.read.len() + 1));
+            if spent + cost > cs {
                 raced = true;
                 rd.st.cyc[P_CHOICE] += tick() - tch;
                 break;
             }
             info.read.push(ci as u32);
-            let (path, cost, gnew) = ch.choose(ci, nv, Self::anchors(ix, info.read.len()));
             if path == KnnPath::Index {
                 if !ch.anchored {
                     let among: Vec<usize> = info.read.iter().map(|&c| c as usize).collect();
@@ -830,7 +841,7 @@ impl Adaptive {
         // the reads' costs (each cluster's cheaper path, a group's setup once), against a scan and against the exact
         // query (every open cluster)
         let tch = tick();
-        let mut ch = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
+        let mut ch = Charges::new(m, ix, &pr, true);
         let mut paths: Vec<(usize, KnnPath, bool)> = Vec::new();
         let mut cp = 0.0;
         for &ci in &sure {
@@ -839,7 +850,7 @@ impl Adaptive {
             paths.push((ci, path, gnew));
         }
         info.exact_cost = {
-            let mut cx = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
+            let mut cx = Charges::new(m, ix, &pr, true);
             open.iter().map(|&ci| cx.choose(ci, nv_of(ci), 0).1).sum()
         };
         let other = cs.min(info.exact_cost);
