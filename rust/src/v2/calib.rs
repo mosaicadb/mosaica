@@ -8,25 +8,23 @@
 //!   the plain pseudo-queries alone, is kept as the control for the shifted ones;
 //! - each group's residual covariance: 16 principal directions (int8 with a scale each), their variances and the
 //!   group's RMS residual;
-//! - the margin within which the group tier's ranking of a cluster can differ from its own tier's (`Calib::delta`);
-//! - the mean-recall dial's table: per spread setting and table set, mean recall against price for k-NN bands and
-//!   answer-share bands, each at several visible shares (`Band`), from the process's own decision (`process::decide`,
-//!   hand-overs and the support table's verdicts included) on held-out pseudo-queries.
+//! - the margin within which the group tier's ranking of a cluster can differ from its own tier's (`Calib::delta`).
+//!
+//! No dial is calibrated: the process's dials are its raw price and budget.
 //!
 //! Pseudo-queries are corpus rows spread over the index, each used plain and shifted: q' = normalise(a q + v), v a
 //! unit vector in the directions in which the centres do not vary (the least-variance directions of the centres
 //! holding `SHIFT_SHARE` of their variance) and a in `SHIFT_SCALES`. A pseudo-query's own row is left out of its
-//! counts. Half of them fit the tables (all rows visible); the other half, under visible shares `VIS_SHARES` (fixed
-//! random subsets of the rows), fit the dial, the margin and the build's report.
+//! counts. Half of them fit the tables; the other half, held out, fit the margin and the build's report. Every row is
+//! visible to them.
 //!
 //! The rows' scores come from blocks of rows against every pseudo-query at once (one f32 product per block); each
-//! view's thresholds and counts are exact (rows within the f32 products' error of a threshold are scored by the exact
-//! integer product of the query rounded to f16), and every sum over pseudo-queries, clusters or rows runs in a fixed
-//! order with separate multiplies and adds, so the calibration is the same bits whatever the instruction set and the
-//! thread count, and a build and a rebuild store the same.
+//! pseudo-query's thresholds and counts are exact (rows within the f32 products' error of a threshold are scored by
+//! the exact integer product of the query rounded to f16), and every sum over pseudo-queries, clusters or rows runs in
+//! a fixed order with separate multiplies and adds, so the calibration is the same bits whatever the instruction set
+//! and the thread count, and a build and a rebuild store the same.
 
-use super::process::{self, Act, Model, Outcome, ProcInfo, Spread, Stop, Target, Units};
-use super::q::{prep2, query_f16, support_pre, Pre};
+use super::q::query_f16;
 use super::*;
 use rand::SeedableRng;
 use rand_distr::{Distribution, StandardNormal};
@@ -45,14 +43,8 @@ pub const SHIFT_SCALES: [f64; 3] = [1.0, 0.5, 0.25];
 pub const SHIFT_SHARE: f64 = 1e-3;
 /// Thresholds per pseudo-query, as shares of the rows above them.
 pub const FRACTIONS: [f64; 6] = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1];
-/// k of the mean-recall dial's k-NN bands.
-pub const KNN_BANDS: [usize; 4] = [1, 10, 100, 1000];
-/// Answer shares (of the visible rows) of the dial's threshold bands.
-pub const THR_BANDS: [f64; 4] = [1e-4, 1e-3, 1e-2, 1e-1];
-/// The visible shares the dial's bands are fitted under (fixed random subsets of the rows; 1: every row).
-pub const VIS_SHARES: [f64; 3] = [1.0, 0.1, 0.01];
-/// The dial's grid of prices (recall per microsecond): 10^(1 - i/4), i = 0..LAM_STEPS.
-pub const LAM_STEPS: usize = 33;
+/// Thresholds per pseudo-query, as k-NN answer sizes (rows above them) besides `FRACTIONS`.
+pub const KNN_RANKS: [usize; 4] = [1, 10, 100, 1000];
 /// The saved index's files of the group covariances: RMS residuals, variances, scales and directions.
 pub const FILES: [&str; 4] = ["calib_grad.bin", "calib_glam.bin", "calib_gdsc.bin", "calib_gdirs.bin"];
 /// Sampled rows per block of the scoring passes, pseudo-queries per product, and bins of the first pass's histogram
@@ -144,50 +136,6 @@ impl Table {
     }
 }
 
-/// One band of the mean-recall dial: mean recall on the held-out pseudo-queries against ln price, along the price
-/// grid (prices falling, recall rising), for k-NN at k = `size` or threshold queries answered by a share `size` of
-/// the visible rows, with a visible share `vis` of the rows.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Band {
-    pub knn: bool,
-    pub size: f64,
-    pub vis: f64,
-    pub ln_lam: Vec<f64>,
-    pub recall: Vec<f64>,
-}
-
-impl Band {
-    /// The price whose mean recall on the pseudo-queries is `r` (log-linear between the grid's prices); the grid's
-    /// lowest price when no price reaches it.
-    pub fn price(&self, r: f64) -> f64 {
-        let i = self.recall.iter().position(|&x| x >= r).unwrap_or(self.recall.len() - 1);
-        if i == 0 || self.recall[i] < r {
-            return self.ln_lam[i].exp();
-        }
-        let (r0, r1) = (self.recall[i - 1], self.recall[i]);
-        let f = if r1 > r0 { (r - r0) / (r1 - r0) } else { 1.0 };
-        (self.ln_lam[i - 1] + f * (self.ln_lam[i] - self.ln_lam[i - 1])).exp()
-    }
-
-    fn json(&self) -> serde_json::Value {
-        serde_json::json!({ "knn": self.knn, "size": self.size, "vis": self.vis, "ln_lam": self.ln_lam, "recall": self.recall })
-    }
-
-    fn from_json(v: &serde_json::Value) -> Option<Band> {
-        let f = |k: &str| -> Option<Vec<f64>> { v[k].as_array()?.iter().map(|x| x.as_f64()).collect() };
-        let (ln_lam, recall) = (f("ln_lam")?, f("recall")?);
-        (ln_lam.len() == recall.len() && !ln_lam.is_empty()).then_some(())?;
-        Some(Band { knn: v["knn"].as_bool()?, size: v["size"].as_f64()?, vis: v["vis"].as_f64()?, ln_lam, recall })
-    }
-}
-
-/// The price for mean recall `r` from the band nearest the query's visible share (in log), then its k or answer
-/// share; 0 (read everything) without bands.
-pub fn band_price(bands: &[Band], knn: bool, size: f64, vis: f64, r: f64) -> f64 {
-    let d = |a: f64, b: f64| (a.max(1e-12).ln() - b.max(1e-12).ln()).abs();
-    bands.iter().filter(|b| b.knn == knn).min_by(|a, b| d(a.vis, vis).total_cmp(&d(b.vis, vis)).then(d(a.size, size).total_cmp(&d(b.size, size)))).map_or(0.0, |b| b.price(r))
-}
-
 /// Each group's residual covariance (its rows about their own clusters' centres): its first `r` principal
 /// directions as int8 rows with a scale each, their variances, and its RMS residual (`rad`).
 pub struct GroupCov {
@@ -235,8 +183,6 @@ pub struct Calib {
     /// of the answer under the two tiers: where the group tier's value is within this of the plan's margin, the
     /// own tier can change the plan.
     pub delta: f64,
-    /// The mean-recall dial's bands, per spread setting (`Spread::ALL`) and table set (main, control): index 2 s + p.
-    pub bands: Vec<Vec<Band>>,
     pub gcov: GroupCov,
     /// The median of the clusters' radii (`order::OrderState::rad`).
     pub med_rad: f64,
@@ -250,19 +196,12 @@ impl Calib {
         if plain { &self.plain[tier as usize] } else { &self.tables[tier as usize] }
     }
 
-    /// The mean-recall dial's bands for a spread setting and table set.
-    pub fn bands(&self, spread: Spread, plain: bool) -> &[Band] {
-        let s = Spread::ALL.iter().position(|&x| x == spread).unwrap();
-        self.bands.get(2 * s + plain as usize).map_or(&[], |b| &b[..])
-    }
-
     /// Everything but the group covariances' arrays, for index.json.
     pub fn json(&self) -> serde_json::Value {
         serde_json::json!({
             "tables": self.tables.iter().map(|t| t.json()).collect::<Vec<_>>(),
             "plain": self.plain.iter().map(|t| t.json()).collect::<Vec<_>>(),
             "delta": self.delta, "med_rad": self.med_rad,
-            "bands": self.bands.iter().map(|b| b.iter().map(|x| x.json()).collect::<Vec<_>>()).collect::<Vec<_>>(),
             "gcov": { "r": self.gcov.r, "n0": self.gcov.n0 },
             "report": self.report,
         })
@@ -275,10 +214,8 @@ impl Calib {
             (a.len() == 2).then_some(())?;
             Some([Table::from_json(&a[0])?, Table::from_json(&a[1])?])
         };
-        let bands: Vec<Vec<Band>> = v["bands"].as_array()?.iter().map(|x| x.as_array()?.iter().map(Band::from_json).collect()).collect::<Option<_>>()?;
-        (bands.len() == 2 * Spread::ALL.len()).then_some(())?;
         let gcov = GroupCov { r: v["gcov"]["r"].as_u64()? as usize, n0: v["gcov"]["n0"].as_u64()? as usize, rad, lam, dsc, dirs8 };
-        Some(Calib { tables: tabs("tables")?, plain: tabs("plain")?, delta: v["delta"].as_f64()?, bands, gcov, med_rad: v["med_rad"].as_f64()?, report: v["report"].clone() })
+        Some(Calib { tables: tabs("tables")?, plain: tabs("plain")?, delta: v["delta"].as_f64()?, gcov, med_rad: v["med_rad"].as_f64()?, report: v["report"].clone() })
     }
 
     /// Hashes everything stored (`Index2::store_hash`).
@@ -289,13 +226,6 @@ impl Calib {
         };
         self.tables.iter().chain(&self.plain).for_each(&mut t);
         h.pod(&[self.delta, self.med_rad]);
-        h.u64(self.bands.len() as u64);
-        for b in self.bands.iter().flatten() {
-            h.usizes(&[b.knn as usize, b.ln_lam.len()]);
-            h.pod(&[b.size, b.vis]);
-            h.pod(&b.ln_lam);
-            h.pod(&b.recall);
-        }
         h.usizes(&[self.gcov.r, self.gcov.n0]);
         h.pod(&self.gcov.rad[..]);
         h.pod(&self.gcov.lam[..]);
@@ -558,20 +488,6 @@ struct Sample {
     row: Vec<u32>,
     w: Vec<f64>,
     cl: Vec<u32>,
-    /// per visible share (`VIS_SHARES`), whether each sampled row is visible
-    vis: Vec<Vec<bool>>,
-}
-
-/// Whether row `row` is in the fixed random subset holding a share `s` of the rows (a hash of the row).
-fn in_share(row: u32, s: f64) -> bool {
-    if s >= 1.0 {
-        return true;
-    }
-    let mut z = (row as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
-    ((z >> 11) as f64) * (1.0 / 9_007_199_254_740_992.0) < s
 }
 
 /// A pseudo-query: its f16-rounded forms, its own row (left out of its counts) and that row's place in the sample.
@@ -586,11 +502,9 @@ struct Pq {
     fit: bool,
 }
 
-/// A view: pseudo-query `q` with the rows of visible share `VIS_SHARES[share]`, counted at `ranks` (rows above the
-/// threshold, in the sample's weights).
+/// A view: pseudo-query `q` counted at `ranks` (rows above the threshold, in the sample's weights).
 struct View {
     q: usize,
-    share: usize,
     ranks: Vec<usize>,
 }
 
@@ -640,11 +554,10 @@ fn score_views(ix: &Index2, s: &Sample, qs: &[Pq], views: &[View]) -> Vec<Scored
     for &(a, b) in &blocks {
         let x = xblock(a, b);
         by_chunks(&qmat, n, &x, b - a, &mut hist, &|q, c, h: &mut Vec<Vec<f64>>| {
-            for (hv, &vi) in h.iter_mut().zip(&qviews[q]) {
-                let vis = &s.vis[views[vi].share];
+            for hv in h.iter_mut() {
                 for (r, &sc) in c.iter().enumerate() {
                     let i = a + r;
-                    if vis[i] && qs[q].own_s != Some(i) {
+                    if qs[q].own_s != Some(i) {
                         hv[bin(q, sc as f64)] += s.w[i];
                     }
                 }
@@ -699,10 +612,10 @@ fn score_views(ix: &Index2, s: &Sample, qs: &[Pq], views: &[View]) -> Vec<Scored
         let x = xblock(a, b);
         by_chunks(&qmat, n, &x, b - a, &mut sts, &|q, c, st: &mut St| {
             for (k, &vi) in qviews[q].iter().enumerate() {
-                let (vis, win) = (&s.vis[views[vi].share], &windows[vi]);
+                let win = &windows[vi];
                 for (r, &sc) in c.iter().enumerate() {
                     let i = a + r;
-                    if !vis[i] || qs[q].own_s == Some(i) {
+                    if qs[q].own_s == Some(i) {
                         continue;
                     }
                     if s.cl[i] != st.cur[k] {
@@ -800,12 +713,11 @@ fn features(ix: &Index2, gcov: &GroupCov, grest: &[f64], orest: &[f64], q32: &[f
     Feats { mu, s: [s1, s2] }
 }
 
-/// The ranks a view is counted at: for every row visible, the shares of `FRACTIONS` and of the bands; for a visible
-/// share, the bands' k and answer shares; always at most half the visible rows.
-fn ranks(nvis: usize, full: bool) -> Vec<usize> {
+/// The ranks a pseudo-query is counted at: the shares `FRACTIONS` of the rows and the answer sizes `KNN_RANKS`, at
+/// most half the rows.
+fn ranks(nvis: usize) -> Vec<usize> {
     let of = |f: f64| ((f * nvis as f64).round() as usize).max(1);
-    let fr: &[f64] = if full { &FRACTIONS } else { &[] };
-    let mut r: Vec<usize> = fr.iter().chain(&THR_BANDS).map(|&f| of(f)).chain(KNN_BANDS).filter(|&x| x <= nvis / 2).collect();
+    let mut r: Vec<usize> = FRACTIONS.iter().map(|&f| of(f)).chain(KNN_RANKS).filter(|&x| x <= nvis / 2).collect();
     r.sort_unstable();
     r.dedup();
     r
@@ -910,9 +822,8 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
     let (gr, r) = (gcov.r, st.r);
     let grest: Vec<f64> = (0..ix.groups.len()).map(|g| rest(gcov.rad[g], &gcov.lam[g * gr..(g + 1) * gr], gcov.n0)).collect();
     let orest: Vec<f64> = (0..k).map(|c| rest(st.rad[c], &st.lam[c * r..(c + 1) * r], st.n0)).collect();
-    let grp: Vec<usize> = ix.cl.iter().map(|c| c.g).collect();
-    // the sample, and every cluster's visible rows under each visible share
-    let mut smp = Sample { row: Vec::new(), w: Vec::new(), cl: Vec::new(), vis: Vec::new() };
+    // the sample
+    let mut smp = Sample { row: Vec::new(), w: Vec::new(), cl: Vec::new() };
     for (c, cl) in ix.cl.iter().enumerate() {
         let m = cl.r1 - cl.r0;
         let take = spread(m, order::SAMPLE);
@@ -923,8 +834,6 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
             smp.cl.push(c as u32);
         }
     }
-    smp.vis = VIS_SHARES.iter().map(|&f| smp.row.iter().map(|&row| in_share(row, f)).collect()).collect();
-    let nvs: Vec<Vec<f64>> = VIS_SHARES.iter().map(|&f| ix.cl.iter().map(|c| (c.r0..c.r1).filter(|&row| in_share(row as u32, f)).count() as f64).collect()).collect();
     let row_cl: Vec<u32> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c as u32, cl.r1 - cl.r0)).collect();
     // the pseudo-queries: rows spread over the index, each plain and shifted
     let rows: Vec<usize> = spread(nrows, NQ_ROWS);
@@ -957,21 +866,13 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
             push(&sh, true);
         }
     }
-    // the views: every pseudo-query with every row visible; the held-out ones under each other visible share too
-    let nvis_share: Vec<usize> = nvs.iter().map(|v| v.iter().sum::<f64>() as usize - 1).collect();
-    let mut views: Vec<View> = Vec::new();
-    for (q, p) in qs.iter().enumerate() {
-        for (si, _) in VIS_SHARES.iter().enumerate().filter(|&(si, _)| si == 0 || !p.fit) {
-            let rk = ranks(nvis_share[si], si == 0);
-            if !rk.is_empty() {
-                views.push(View { q, share: si, ranks: rk });
-            }
-        }
-    }
+    // the views: every pseudo-query, every row but its own counted
+    let rk = ranks(nrows - 1);
+    let views: Vec<View> = if rk.is_empty() { Vec::new() } else { (0..qs.len()).map(|q| View { q, ranks: rk.clone() }).collect() };
     let scored = score_views(ix, &smp, &qs, &views);
     let t_score = t.s() - t_cov - t_basis;
-    let exposure = |q: usize, share: usize, c: usize| nvs[share][c] - (row_cl[qs[q].own] as usize == c && in_share(qs[q].own as u32, VIS_SHARES[share])) as usize as f64;
-    let full: Vec<usize> = (0..views.len()).filter(|&v| views[v].share == 0).collect();
+    let exposure = |q: usize, c: usize| (ix.cl[c].r1 - ix.cl[c].r0) as f64 - (row_cl[qs[q].own] as usize == c) as usize as f64;
+    let full: Vec<usize> = (0..views.len()).collect();
     // the fit half, a chunk at a time: features, then every triple binned (the first chunk places the grids)
     let fit_views: Vec<usize> = full.iter().copied().filter(|&v| qs[views[v].q].fit).collect();
     let mut bins: Vec<Bins> = Vec::new(); // [main group, main own, plain group, plain own]
@@ -1001,7 +902,7 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
                     dense[c as usize] = w;
                 }
                 for c in 0..k {
-                    let ex = exposure(q, 0, c);
+                    let ex = exposure(q, c);
                     if ex > 0.0 {
                         for tier in 0..2 {
                             let z = (tv - f.mu[c]) / f.s[tier][c];
@@ -1021,7 +922,7 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
     let tables = [bins[0].fit(&lr), bins[1].fit(&lr)];
     let plain = [bins[2].fit(&lr), bins[3].fit(&lr)];
     drop(bins);
-    // the held-out half: features (kept for the dial), the tables' reliability and count factor, the margin
+    // the held-out half: features, the tables' reliability and count factor, the margin
     let held: Vec<usize> = (0..qs.len()).filter(|&q| !qs[q].fit).collect();
     let hfeat: Vec<Feats> = held.par_iter().map(|&q| features(ix, &gcov, &grest, &orest, &qs[q].q32)).collect();
     let feat_of = |q: usize| &hfeat[held.binary_search(&q).unwrap()];
@@ -1043,7 +944,7 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
                     }
                     let mut m = 0.0;
                     for c in 0..k {
-                        let ex = exposure(q, 0, c);
+                        let ex = exposure(q, c);
                         if ex > 0.0 {
                             let lp = tables[tier].ln_p((tv - f.mu[c]) / f.s[tier][c], lr[c]);
                             let b = ((lp / std::f64::consts::LN_10 * 3.0).floor() + 30.0).clamp(0.0, 30.0) as usize;
@@ -1072,7 +973,7 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
         let q = views[v].q;
         let f = feat_of(q);
         for (j, &tv) in scored[v].tau.iter().enumerate() {
-            let w = |tier: usize| -> Vec<f64> { (0..k).map(|c| exposure(q, 0, c) * tables[tier].ln_p((tv - f.mu[c]) / f.s[tier][c], lr[c]).exp()).collect() };
+            let w = |tier: usize| -> Vec<f64> { (0..k).map(|c| exposure(q, c) * tables[tier].ln_p((tv - f.mu[c]) / f.s[tier][c], lr[c]).exp()).collect() };
             let (w1, w2) = (w(0), w(1));
             let (s1, s2): (f64, f64) = (w1.iter().sum(), w2.iter().sum());
             for &(c, cnt) in &scored[v].cnt[j] {
@@ -1082,106 +983,10 @@ pub fn fit(ix: &Index2, log: &mut dyn FnMut(String)) -> Option<Calib> {
         }
     }
     let delta = wquantile(&mut ds, 0.95);
-    // the mean-recall dial: per held-out view, band, spread setting and table set, the recall of the process's own
-    // decision at each price of the grid
-    let cm = process::Costs1::for_dim(n);
-    let all_cl: Vec<usize> = (0..k).filter(|&c| ix.cl[c].r1 > ix.cl[c].r0).collect();
-    let held_views: Vec<usize> = (0..views.len()).filter(|&v| !qs[views[v].q].fit).collect();
-    // (setting, plain, share, knn, size) of each band, in a fixed order
-    let mut specs: Vec<(usize, bool, usize, bool, f64)> = Vec::new();
-    for si in 0..Spread::ALL.len() {
-        for plain_set in [false, true] {
-            for share in 0..VIS_SHARES.len() {
-                for &kk in &KNN_BANDS {
-                    specs.push((si, plain_set, share, true, kk as f64));
-                }
-                for &f in &THR_BANDS {
-                    specs.push((si, plain_set, share, false, f));
-                }
-            }
-        }
-    }
-    let per_view: Vec<Vec<Option<Vec<f64>>>> = held_views.par_iter().map(|&v| {
-        let (q, share) = (views[v].q, views[v].share);
-        let f = feat_of(q);
-        let nvis: f64 = (0..k).map(|c| exposure(q, share, c)).sum();
-        let pr = prep2(ix, &qs[q].q32);
-        if ix.nukey.is_empty() && ix.nanch > 0 {
-            pr.anc_among(ix, Some(&all_cl));
-        }
-        specs.iter().map(|&(si, plain_set, sh, knn, size)| {
-            if sh != share {
-                return None;
-            }
-            let rank = if knn { size as usize } else { ((size * nvis_share[share] as f64).round() as usize).max(1) };
-            let j = views[v].ranks.iter().position(|&x| x == rank)?;
-            let (tv, tot) = (scored[v].tau[j], scored[v].tot[j]);
-            let mut cnt = vec![0f64; k];
-            for &(c, w) in &scored[v].cnt[j] {
-                cnt[c as usize] = w;
-            }
-            let target = if knn { Target::Knn(rank) } else { Target::Thr(tv) };
-            let spread = Spread::ALL[si];
-            let tier0 = if spread == Spread::OwnAll { Tier::Own } else { Tier::Group };
-            let tabs = if plain_set { [&plain[0], &plain[1]] } else { [&tables[0], &tables[1]] };
-            let model = Model { tabs, delta, cm, bands: &[], vis_share: VIS_SHARES[share], nvis };
-            let anchors = if knn || !ix.nukey.is_empty() { 0 } else { ix.nanch };
-            if process::early_scan(&cm, k, anchors, nvis as usize, target) {
-                return Some(vec![1.0; LAM_STEPS]);
-            }
-            let mut base = Units::default();
-            for c in 0..k {
-                let ex = exposure(q, share, c);
-                if ex <= 0.0 {
-                    continue;
-                }
-                let verdict = if knn || anchors == 0 { None } else { support_pre(ix, &pr, tv, ex as usize, c, false) };
-                if matches!(verdict, Some(Pre::Skip)) {
-                    continue;
-                }
-                base.push(c, grp[c], ex, f.mu[c], lr[c], f.s[tier0 as usize][c], tier0, true, matches!(verdict, Some(Pre::In)));
-            }
-            if base.cl.is_empty() {
-                return Some(vec![1.0; LAM_STEPS]);
-            }
-            Some((0..LAM_STEPS).map(|s| {
-                let lam = 10f64.powf(1.0 - s as f64 / 4.0);
-                let mut u = base.clone();
-                let mut fill = |u: &mut Units, idx: &[usize], tier: Tier| -> usize {
-                    for &i in idx {
-                        u.s[i] = f.s[tier as usize][u.cl[i]];
-                        u.tier[i] = tier;
-                        u.exact[i] = true;
-                    }
-                    0
-                };
-                let mut info = ProcInfo { scan_cost: nvis * cm.full, ..ProcInfo::default() };
-                match process::decide(&model, &mut u, &mut fill, target, Stop::Price(lam), spread, &mut info) {
-                    Outcome::Scan | Outcome::Exact => 1.0,
-                    Outcome::Plan { b, act } => {
-                        let got: f64 = (0..b.v.len()).filter(|&i| act[i] != Act::Skip).map(|i| cnt[u.cl[b.units[i]]]).sum::<f64>()
-                            + (0..u.cl.len()).filter(|&i| u.sure[i]).map(|i| cnt[u.cl[i]]).sum::<f64>();
-                        (got / tot).min(1.0)
-                    }
-                }
-            }).collect())
-        }).collect()
-    }).collect();
-    let ln_lam: Vec<f64> = (0..LAM_STEPS).map(|s| (1.0 - s as f64 / 4.0) * std::f64::consts::LN_10).collect();
-    let mut bands: Vec<Vec<Band>> = vec![Vec::new(); 2 * Spread::ALL.len()];
-    for (bi, &(si, plain_set, share, knn, size)) in specs.iter().enumerate() {
-        let curves: Vec<&Vec<f64>> = per_view.iter().filter_map(|pv| pv[bi].as_ref()).collect();
-        if curves.is_empty() {
-            continue;
-        }
-        let m = curves.len() as f64;
-        let recall: Vec<f64> = (0..LAM_STEPS).map(|s| curves.iter().map(|c| c[s]).sum::<f64>() / m).collect();
-        bands[2 * si + plain_set as usize].push(Band { knn, size, vis: VIS_SHARES[share], ln_lam: ln_lam.clone(), recall });
-    }
     report.insert("pseudo_queries".into(), serde_json::json!({ "rows": rows.len(), "fit": qs.iter().filter(|p| p.fit).count(), "held_out": held.len(), "views": views.len(), "shift_directions": basis.len(), "ranks": rk0 }));
-    log(format!("calibration in {:.1}s (group covariances {t_cov:.1}s, shift basis {t_basis:.1}s of {} directions, {} pseudo-queries in {} views scored {t_score:.1}s, fits and dial {:.1}s): beta {:.3} / {:.3}, margin {delta:.3}; held out {}",
+    log(format!("calibration in {:.1}s (group covariances {t_cov:.1}s, shift basis {t_basis:.1}s of {} directions, {} pseudo-queries in {} views scored {t_score:.1}s, fits {:.1}s): beta {:.3} / {:.3}, margin {delta:.3}; held out {}",
                 t.s(), basis.len(), qs.len(), views.len(), t.s() - t_cov - t_basis - t_score, tables[0].beta, tables[1].beta, serde_json::Value::Object(report.clone())));
-    Some(Calib { tables, plain, delta, bands, gcov, med_rad, report: report.into() })
+    Some(Calib { tables, plain, delta, gcov, med_rad, report: report.into() })
 }
 
 /// The `p` quantile of values weighted by their second element (0 when there are none).

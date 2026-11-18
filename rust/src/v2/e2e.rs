@@ -464,10 +464,10 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 daf36e761f708261");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 71fcd992c67e91d8");
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
-    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 8fa68bf71f66dff2");
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 08c9b7c85b86ef41");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -1930,10 +1930,6 @@ fn same_calib(a: &calib::Calib, b: &calib::Calib) {
         assert_eq!(tab(x), tab(y), "an exceedance table");
     }
     assert_eq!(f64b(&[a.delta, a.med_rad]), f64b(&[b.delta, b.med_rad]), "the margin and the median radius");
-    assert_eq!(a.bands.iter().map(|b| b.len()).collect::<Vec<_>>(), b.bands.iter().map(|b| b.len()).collect::<Vec<_>>());
-    for (x, y) in a.bands.iter().flatten().zip(b.bands.iter().flatten()) {
-        assert_eq!((x.knn, x.size.to_bits(), x.vis.to_bits(), f64b(&x.ln_lam), f64b(&x.recall)), (y.knn, y.size.to_bits(), y.vis.to_bits(), f64b(&y.ln_lam), f64b(&y.recall)), "a price band");
-    }
     let (g, h) = (&a.gcov, &b.gcov);
     assert_eq!((g.r, g.n0, f64b(&g.rad), f32b(&g.lam), f32b(&g.dsc)), (h.r, h.n0, f64b(&h.rad), f32b(&h.lam), f32b(&h.dsc)), "the group covariances");
     assert_eq!(&g.dirs8[..], &h.dirs8[..], "the group covariances' directions");
@@ -1942,7 +1938,7 @@ fn same_calib(a: &calib::Calib, b: &calib::Calib) {
 /// The process's dials exercised by the tests.
 fn proc_dials() -> Vec<process::Stop> {
     use process::Stop::*;
-    vec![Price(1e-2), Price(1e-4), Price(1e-7), MeanRecall(0.5), MeanRecall(0.9), Recall(0.3), Recall(0.9), Recall(0.999), Budget(5.0), Budget(50.0)]
+    vec![Price(1e-2), Price(1e-4), Price(1e-7), Budget(5.0), Budget(50.0)]
 }
 const SPREADS: [process::Spread; 3] = [process::Spread::Group, process::Spread::Own, process::Spread::OwnAll];
 
@@ -1956,7 +1952,7 @@ fn procs(ix: &Index2) -> Vec<(&'static str, process::Process)> {
 
 /// The build fits the approximate process's calibration and saves it with the index: the index opened holds it to the
 /// bit, a build in memory holds the same (its fit is deterministic), and the process answers on the opened index as
-/// on the built one, doing the same work. Its tables are non-increasing in zeta and its price bands' recalls lie in
+/// An index missing a calibration file is refused with a message to rebuild it.
 /// [0, 1]. An index missing a calibration file is refused with a message to rebuild it.
 #[test]
 fn the_calibration_is_built_saved_and_opened() {
@@ -1981,7 +1977,6 @@ fn the_calibration_is_built_saved_and_opened() {
         }
     }
     assert!(ca.delta >= 0.0 && ca.delta.is_finite());
-    assert!(ca.bands.iter().all(|b| !b.is_empty()) && ca.bands.iter().flatten().all(|b| b.recall.iter().all(|&r| (0.0..=1.0).contains(&r))));
     let (pa, pb) = (process::Process::new(&built).unwrap(), process::Process::new(&opened).unwrap());
     let f = fixture();
     for (qi, q) in f.queries.iter().enumerate() {
@@ -2093,12 +2088,12 @@ fn process_knn_answers_are_visible_and_exact_when_asked_for_everything() {
                                 assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "hand-over {} not exact, {what}, {stop:?}", info.path);
                             }
                         }
-                        for stop in [process::Stop::Recall(1.0), process::Stop::MeanRecall(1.0), process::Stop::Price(0.0)] {
+                        for stop in [process::Stop::Price(0.0), process::Stop::Budget(f64::INFINITY)] {
                             let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
                             let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
                             assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "{what}, {stop:?}, path {}", info.path);
                         }
-                        let o = process::ProcOpts { spread: sp, plan: Plan { mode: PlanMode::Scan, ..Plan::default() }, ..process::ProcOpts::new(process::Stop::Recall(0.5)) };
+                        let o = process::ProcOpts { spread: sp, plan: Plan { mode: PlanMode::Scan, ..Plan::default() }, ..process::ProcOpts::new(process::Stop::Price(1e-3)) };
                         let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
                         if !t.is_empty() {
                             assert_eq!(info.path, "scan", "{what}");
@@ -2140,7 +2135,7 @@ fn process_threshold_answers_are_subsets_and_exact_when_asked_for_everything() {
                                 assert_eq!(got, want, "hand-over {} not exact, {what}, {stop:?}", info.path);
                             }
                         }
-                        for stop in [process::Stop::Recall(1.0), process::Stop::MeanRecall(1.0), process::Stop::Price(0.0)] {
+                        for stop in [process::Stop::Price(0.0), process::Stop::Budget(f64::INFINITY)] {
                             let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
                             let (out, _) = pc.threshold(ix, q, th, vis.as_ref(), &o);
                             assert_eq!(to_bitmap2(ix, &out.rows), want, "{what}, {stop:?}");
@@ -2159,10 +2154,9 @@ fn process_threshold_answers_are_subsets_and_exact_when_asked_for_everything() {
     }
 }
 
-/// A per-query recall target's plan predicts at least the target, and a budget's plan costs at most the budget
-/// unless it needs more to hold k visible rows.
+/// A budget's plan costs at most the budget unless it needs more to hold k visible rows.
 #[test]
-fn recall_targets_and_budgets_hold_in_the_plan() {
+fn budgets_hold_in_the_plan() {
     let f = fixture();
     let ix = &f.ix;
     let pc = process::Process::new(ix).unwrap();
@@ -2170,13 +2164,6 @@ fn recall_targets_and_budgets_hold_in_the_plan() {
         for (sname, bm) in &f.sets {
             let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
             for sp in SPREADS {
-                for r in [0.2, 0.5, 0.8, 0.95, 0.99] {
-                    let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Recall(r)) };
-                    let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &o);
-                    if !units.is_empty() {
-                        assert!(info.pred >= r - 1e-6, "predicted {} under the target {r}, query {qi}, set {sname}, {sp:?}", info.pred);
-                    }
-                }
                 for b in [1.0, 5.0, 20.0, 100.0] {
                     let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Budget(b)) };
                     let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &o);
@@ -2261,7 +2248,7 @@ fn process_threshold_takes_the_clusters_wholly_above_t_without_reading() {
 }
 
 /// Approximate k-NN returns k items whenever k are visible (all of them when fewer are), under every dial, however
-/// little it asks for (a price no unit reaches, a budget of nothing, a low mean recall), every spread and visible set.
+/// little it asks for (a price no unit reaches, a budget of nothing), every spread and visible set.
 #[test]
 fn process_knn_returns_k_items_whenever_k_are_visible() {
     use process::Stop::*;
@@ -2269,7 +2256,7 @@ fn process_knn_returns_k_items_whenever_k_are_visible() {
     let ix = &f.ix;
     let pc = process::Process::new(ix).unwrap();
     let mut dials = proc_dials();
-    dials.extend([Price(1e9), Price(0.5), Budget(0.0), Budget(0.5), MeanRecall(0.0), MeanRecall(0.05), Recall(0.0), Recall(0.01)]);
+    dials.extend([Price(1e9), Price(0.5), Budget(0.0), Budget(0.5), Budget(1e-9)]);
     for (qi, q) in f.queries.iter().enumerate() {
         for (sname, bm) in &f.sets {
             let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
@@ -2373,7 +2360,7 @@ fn process_counts_the_rows_it_reads() {
         for (sname, bm) in &f.sets {
             let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
             let nvis = vis.as_ref().map_or(ix.nrows, |v| v.rows.len()) as u64;
-            for (stop, mode) in [(process::Stop::Price(1e-3), PlanMode::Auto), (process::Stop::Recall(1.0), PlanMode::Auto), (process::Stop::Price(1e-3), PlanMode::Scan)] {
+            for (stop, mode) in [(process::Stop::Price(1e-3), PlanMode::Auto), (process::Stop::Price(0.0), PlanMode::Auto), (process::Stop::Price(1e-3), PlanMode::Scan)] {
                 let o = process::ProcOpts { plan: Plan { mode, ..Plan::default() }, ..process::ProcOpts::new(stop) };
                 let what = format!("query {qi}, set {sname}, {stop:?}, {mode:?}");
                 let (out, info) = pc.knn(ix, q, 10, vis.as_ref(), None, &o);
@@ -2453,7 +2440,7 @@ fn the_process_runs_on_a_norm_sorted_index() {
                         assert!(to_bitmap2(&ix, &r.rows).is_subset(&answer(&t, th)), "threshold {th}, {what}");
                     }
                 }
-                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Recall(1.0)) };
+                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Price(0.0)) };
                 let (out, _) = pc.knn(&ix, q, 10, vis.as_ref(), None, &o);
                 assert_eq!(sub_values(&ix, &out.ents, q), top_values(&t, 10.min(t.len())), "query {qi}, set {sname}, {sp:?}");
                 for th in thresholds(&t) {
@@ -2493,7 +2480,7 @@ fn the_own_spread_refines_the_units_near_the_margin() {
 
 /// Operation counts of the process on a real index (no timing): `VEXACT_PROC_FIT` a fitted directory (rebuilt into
 /// its `encoded`), `VEXACT_PROC_PREP` the suite's prep directory of its dataset (queries.npy, order*.npy, vis_*.npy).
-/// Per visible set, spread and mean-recall dial: mean recall@10, rows touched, units, candidates, directions projected,
+/// Per visible set, spread and price: mean recall@10, rows touched, units, candidates, directions projected,
 /// evaluations of Lambda, refined units, units read directly and on the index path, groups, paths.
 #[test]
 #[ignore]
@@ -2517,8 +2504,8 @@ fn process_counts_on_a_real_fit() {
         let vis = vis.map(|v| Vis2::new(&ix, &i32s(&v).iter().map(|&e| e as u32).collect::<RoaringBitmap>()));
         let (ow, ov) = (ord.shape[1], i32s(&ord));
         for sp in [process::Spread::Group, process::Spread::Own] {
-            for r in [0.5, 0.8, 0.9, 0.95] {
-                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::MeanRecall(r)) };
+            for lam in [1e-2, 1e-3, 1e-4, 1e-5] {
+                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Price(lam)) };
                 let mut acc = [0f64; 12];
                 let mut paths = std::collections::BTreeMap::new();
                 for (qi, q) in queries.iter().enumerate() {
@@ -2530,7 +2517,7 @@ fn process_counts_on_a_real_fit() {
                     }
                     *paths.entry(info.path).or_insert(0) += 1;
                 }
-                eprintln!("{f:<10} {:<6} mean_recall {r}: recall {:.3} rows {:.0} units {:.0} candidates {:.1} dirs {:.0} evals {:.1} refined {:.1} direct {:.1} index {:.1} groups {:.1} pred {:.3} price {:.2e} paths {paths:?}",
+                eprintln!("{f:<10} {:<6} price {lam:e}: recall {:.3} rows {:.0} units {:.0} candidates {:.1} dirs {:.0} evals {:.1} refined {:.1} direct {:.1} index {:.1} groups {:.1} pred {:.3} price {:.2e} paths {paths:?}",
                           sp.name(), acc[0], acc[1], acc[2], acc[3], acc[4], acc[5], acc[6], acc[7], acc[8], acc[9], acc[10], acc[11]);
             }
         }

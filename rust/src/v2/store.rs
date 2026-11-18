@@ -9,7 +9,7 @@
 //! state, `order::OrderState`), `calib_grad.bin`, `calib_glam.bin`, `calib_gdsc.bin` and `calib_gdirs.bin` (the
 //! approximate process's group covariances, `calib::GroupCov`), and `index.json` (sizes, the per-group calibration,
 //! constants and basis defect, the number of directions the order state holds per cluster, the approximate process's
-//! exceedance tables, margin and price bands (`calib::Calib`), the build options that decide the encoding, and the key
+//! exceedance tables and margin (`calib::Calib`), the build options that decide the encoding, and the key
 //! of the fit and those options it was built from).
 //!
 //! A saved index is `DIR/encoded` in its index directory DIR (the fit). A rebuild holds an exclusive lock on
@@ -24,7 +24,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 8;
+pub const STORE_FORMAT: u64 = 9;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}

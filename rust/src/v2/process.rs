@@ -15,10 +15,9 @@
 //! - each unit's cost by the cost model (`Costs1`): read directly, dir + full n^vis; on the index path, cl + item n^vis,
 //!   with its group's setup grp(n) charged once per group;
 //! - the plan at a price lambda (`plan_at`): the closed set of actions maximising (sum of shares) - lambda (cost), a
-//!   group set up exactly when the index path saves its clusters more than its setup; a per-query recall target takes
-//!   the cheapest plan of the prices' family whose shares reach it and a budget the largest within it (`sweep`), a
-//!   mean recall the price the build fitted for it under the query's visible share (`calib::Band`); a k-NN plan holds
-//!   at least k visible rows (`fill_to_k`);
+//!   group set up exactly when the index path saves its clusters more than its setup; a budget takes the most valuable
+//!   plan of the prices' family within it (`sweep`); a k-NN plan holds at least k visible rows (`fill_to_k`). The
+//!   dials are these raw quantities only, none calibrated;
 //! - the plan run best value per cost first, each group's setup before its first cluster; k-NN reads its clusters
 //!   at the running k-th best (`KnnReader`, on the path planned), a threshold query as the exact one does
 //!   (`run_planned`) over the planned clusters only;
@@ -26,13 +25,10 @@
 //!   it reaches that of reading every unit (an upper bound of the exact path's), or the dial asks for everything, the
 //!   exact query runs. Both answer exactly.
 //!
-//! The same decision (`decide`) runs at query time from the int8 features and at build, on the calibration's
-//! pseudo-queries, to fit the mean-recall dial (`calib`).
-//!
 //! The units form one level (clusters in groups); a finer level (sub-clusters as row labels) would add units under a
 //! cluster with their own table row and an expansion cost, and the plan's closed sets one more layer.
 
-use super::calib::{Band, Calib, Table, Tier};
+use super::calib::{Calib, Table, Tier};
 use super::q::*;
 use super::*;
 use crate::kernel::Stats;
@@ -341,14 +337,6 @@ impl Ord for OrdF {
     }
 }
 
-/// The price of the cheapest plan of the family (`sweep`) whose value reaches `r` (the largest value's when none
-/// does).
-pub fn price_for_value(states: &[(f64, f64, f64)], r: f64) -> f64 {
-    states.iter().filter(|s| s.1 >= r).min_by(|a, b| a.2.total_cmp(&b.2).then(b.0.total_cmp(&a.0)))
-        .or_else(|| states.iter().max_by(|a, b| a.1.total_cmp(&b.1).then(b.2.total_cmp(&a.2))))
-        .map_or(0.0, |s| s.0)
-}
-
 /// The price of the most valuable plan of the family (`sweep`) costing at most `budget` (the empty plan's when none
 /// does).
 pub fn price_for_cost(states: &[(f64, f64, f64)], budget: f64) -> f64 {
@@ -449,16 +437,11 @@ impl Units {
 /// them exact) and returns the directions it projected (rows of n).
 pub type Fill<'a> = dyn FnMut(&mut Units, &[usize], Tier) -> usize + 'a;
 
-/// What a decision needs besides the query's units: the tables (main or control), the margin, the cost model, the
-/// mean-recall dial's bands for this setting, and the query's visible share of the rows.
+/// What a decision needs besides the query's units: the tables (main or control), the margin and the cost model.
 pub struct Model<'a> {
     pub tabs: [&'a Table; 2],
     pub delta: f64,
     pub cm: Costs1,
-    pub bands: &'a [Band],
-    pub vis_share: f64,
-    /// The query's visible rows.
-    pub nvis: f64,
 }
 
 impl Model<'_> {
@@ -656,13 +639,13 @@ pub fn decide(m: &Model, u: &mut Units, fill: &mut Fill, target: Target, stop: S
     info.candidates = cand.len();
     let (mut tau, mut v) = shares(m, u, &cand, &ub, target, lo, info);
     // the units the support table puts wholly above t are emitted without a read: outside the plan, their shares
-    // taken as given (a recall target asks the plan for the rest)
+    // taken as given
     let free: Vec<usize> = (0..n).filter(|&i| !u.sure[i]).collect();
     let sure: Vec<usize> = (0..n).filter(|&i| u.sure[i]).collect();
     let sure_share = |v: &[f64]| sure.iter().map(|&i| v[i]).sum::<f64>();
     let mut b = Blocks::new(&free, &u.grp, &v, &u.nv, &m.cm);
     let mut act = Vec::new();
-    let mut lam = dial_price(m, &b, stop, target, info.lambda, sure_share(&v));
+    let mut lam = dial_price(m, &b, stop);
     let (mut val, mut cost, mut groups) = plan_at(&b, lam, ag, &mut act);
     if spread == Spread::Own {
         // the plan's marginal value per cost (the best unit's when it is empty), and the units within the margin of it
@@ -675,7 +658,7 @@ pub fn decide(m: &Model, u: &mut Units, fill: &mut Fill, target: Target, stop: S
         info.spreads += fill(u, &refine, Tier::Own);
         (tau, v) = shares(m, u, &cand, &ub, target, lo, info);
         b = Blocks::new(&free, &u.grp, &v, &u.nv, &m.cm);
-        lam = dial_price(m, &b, stop, target, info.lambda, sure_share(&v));
+        lam = dial_price(m, &b, stop);
         (val, cost, groups) = plan_at(&b, lam, ag, &mut act);
     }
     if let Target::Knn(kk) = target {
@@ -707,17 +690,10 @@ pub fn early_scan(cm: &Costs1, k: usize, anchors: usize, nvis: usize, target: Ta
     matches!(target, Target::Knn(kk) if nvis <= kk) || nvis as f64 * cm.full <= anchors as f64 * cm.full + k as f64 * cm.row8
 }
 
-/// The price the dial asks for: given; the build's for a mean recall (its band nearest the query's k or predicted
-/// answer share and visible share); the cheapest plan reaching a recall (less the shares taken without a read) or
-/// the most valuable within a budget, over the family of plans (`sweep`).
-fn dial_price(m: &Model, b: &Blocks, stop: Stop, target: Target, lambda: f64, sure: f64) -> f64 {
+/// The price the dial asks for: given, or the most valuable plan within a budget over the family of plans (`sweep`).
+fn dial_price(m: &Model, b: &Blocks, stop: Stop) -> f64 {
     match stop {
         Stop::Price(l) => l,
-        Stop::MeanRecall(r) => match target {
-            Target::Knn(kk) => calib::band_price(m.bands, true, kk as f64, m.vis_share, r),
-            Target::Thr(_) => calib::band_price(m.bands, false, lambda.max(1.0) / m.nvis.max(1.0), m.vis_share, r),
-        },
-        Stop::Recall(r) => price_for_value(&sweep(b, m.cm.grp), (r - sure).max(0.0)),
         Stop::Budget(bu) => price_for_cost(&sweep(b, m.cm.grp), bu),
     }
 }
@@ -761,10 +737,6 @@ impl Spread {
 pub enum Stop {
     /// A price: stop where a further microsecond is expected to add less than this share of the answer.
     Price(f64),
-    /// A mean recall over queries: the price the build fitted for it on held-out pseudo-queries (`calib::Band`).
-    MeanRecall(f64),
-    /// A recall per query: the cheapest plan whose predicted shares reach it.
-    Recall(f64),
     /// A budget of modelled microseconds for the reads (centre scores and spreads apart): the largest plan within it.
     Budget(f64),
 }
@@ -774,7 +746,6 @@ impl Stop {
     pub fn everything(self) -> bool {
         match self {
             Stop::Price(l) => l <= 0.0,
-            Stop::MeanRecall(r) | Stop::Recall(r) => r >= 1.0,
             Stop::Budget(b) => b == f64::INFINITY,
         }
     }
@@ -784,7 +755,7 @@ impl Stop {
 pub struct ProcOpts {
     pub spread: Spread,
     pub stop: Stop,
-    /// The control tables (plain pseudo-queries only), with their own mean-recall bands.
+    /// The control tables (plain pseudo-queries only).
     pub plain: bool,
     pub plan: Plan,
 }
@@ -985,7 +956,7 @@ impl Process {
             spread_cyc += tick() - tf;
             rows
         };
-        let model = Model { tabs: [cal.table(Tier::Group, o.plain), cal.table(Tier::Own, o.plain)], delta: cal.delta, cm: self.cm, bands: cal.bands(o.spread, o.plain), vis_share: nvis as f64 / ix.nrows.max(1) as f64, nvis: nvis as f64 };
+        let model = Model { tabs: [cal.table(Tier::Group, o.plain), cal.table(Tier::Own, o.plain)], delta: cal.delta, cm: self.cm };
         let out = decide(&model, &mut u, &mut fill, target, o.stop, o.spread, info);
         st.cyc[P_SPREAD] += spread_cyc;
         st.cyc[P_SOLVE] += (tick() - tp).saturating_sub(spread_cyc);
@@ -1257,11 +1228,7 @@ mod tests {
                 let lam = 10f64.powf(2.0 - s as f64 / 40.0);
                 let (pv, pc, _) = plan_at(&b, lam, ag, &mut act);
                 assert!(states.iter().any(|x| (x.1 - pv).abs() < 1e-9 && (x.2 - pc).abs() < 1e-9 * (1.0 + pc)), "trial {trial}: plan_at at {lam} ({pv}, {pc}) not in the sweep");
-                // the dials' choices are at least as good as any price's plan
-                let r = pv;
-                let lr = price_for_value(&states, r - 1e-12);
-                let (_, cr, _) = plan_at(&b, lr, ag, &mut act);
-                assert!(cr <= pc + 1e-9 * (1.0 + pc), "trial {trial}: the recall dial's plan costs {cr}, a price's {pc}");
+                // the budget dial's choice is at least as good as any price's plan within it
                 let lb = price_for_cost(&states, pc * (1.0 + 1e-9) + 1e-12);
                 let (vb, _, _) = plan_at(&b, lb, ag, &mut act);
                 assert!(vb >= pv - 1e-9, "trial {trial}: the budget dial's plan holds {vb}, a price's {pv}");
@@ -1320,7 +1287,7 @@ mod tests {
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
         let t = gauss_table();
         let cm = Costs1::for_dim(128);
-        let model = Model { tabs: [&t, &t], delta: 0.5, cm, bands: &[], vis_share: 1.0, nvis: 1.0 };
+        let model = Model { tabs: [&t, &t], delta: 0.5, cm };
         for trial in 0..300 {
             let m: usize = rng.gen_range(1..300);
             let mut u = Units::default();

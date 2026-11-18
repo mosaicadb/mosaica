@@ -25,16 +25,13 @@ struct Index {
     process: Result<Process, String>,
 }
 
-/// The process's options from the bindings' arguments: exactly one dial (`price`, `mean_recall`, `recall`, `budget`),
-/// the spread's source and whether to use the control tables.
-#[allow(clippy::too_many_arguments)]
-fn proc_opts(plan: Plan, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<ProcOpts> {
-    let stop = match (price, mean_recall, recall, budget) {
-        (Some(x), None, None, None) if x.is_finite() && x >= 0.0 => Stop::Price(x),
-        (None, Some(x), None, None) if (0.0..=1.0).contains(&x) => Stop::MeanRecall(x),
-        (None, None, Some(x), None) if (0.0..=1.0).contains(&x) => Stop::Recall(x),
-        (None, None, None, Some(x)) if x >= 0.0 => Stop::Budget(x),
-        _ => return Err(PyValueError::new_err("give exactly one dial: price (recall per modelled microsecond, finite and at least 0), mean_recall or recall (0 to 1), or budget (modelled microseconds, at least 0)")),
+/// The process's options from the bindings' arguments: exactly one dial (`price` or `budget`), the spread's source
+/// and whether to use the control tables.
+fn proc_opts(plan: Plan, price: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<ProcOpts> {
+    let stop = match (price, budget) {
+        (Some(x), None) if x.is_finite() && x >= 0.0 => Stop::Price(x),
+        (None, Some(x)) if x >= 0.0 => Stop::Budget(x),
+        _ => return Err(PyValueError::new_err("give exactly one dial: price (share of the answer per modelled microsecond, finite and at least 0) or budget (modelled microseconds, at least 0)")),
     };
     Ok(ProcOpts { spread: Spread::parse(spread).map_err(PyValueError::new_err)?, stop, plain: control, plan })
 }
@@ -241,16 +238,15 @@ impl Index {
         }
     }
 
-    /// The approximate k nearest by the approximate process (`v2::process`), with exactly one dial: `price` (recall
-    /// per modelled microsecond), `mean_recall` (the price the build fitted for that mean recall), `recall` (the
-    /// cheapest plan predicted to reach it, per query) or `budget` (modelled microseconds for the reads). `spread`:
+    /// The approximate k nearest by the approximate process (`v2::process`), with exactly one dial: `price` (share of
+    /// the answer per modelled microsecond; 0 reads everything) or `budget` (modelled microseconds for the reads). `spread`:
     /// "group" (each group's covariance), "own" (each cluster's own where it can change the plan) or "own-all".
     /// `control`: the tables fitted without the shifted pseudo-queries. `eps` as for `knn_approx`. Returns k ids
     /// whenever k items are visible, whatever the dial (-1 only where fewer are visible).
-    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0))]
+    #[pyo3(signature = (q, k, price=None, budget=None, spread="group", control=false, eps=0.0))]
     #[allow(clippy::too_many_arguments)]
-    fn knn_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
-        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+    fn knn_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let o = proc_opts(self.plan, price, budget, spread, control)?;
         let q = q.as_slice()?;
         check_query(&self.ix, q, Some(k))?;
         let dial = self.eps_dial(py, k, eps)?;
@@ -263,10 +259,10 @@ impl Index {
     /// The approximate threshold query by the approximate process: the visible entity ids of the planned clusters whose
     /// stored vector x has q.x >= t, ascending (a subset of `threshold`'s answer). Dials as `knn_process`; the shares
     /// are of the predicted answer.
-    #[pyo3(signature = (q, t, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false))]
+    #[pyo3(signature = (q, t, price=None, budget=None, spread="group", control=false))]
     #[allow(clippy::too_many_arguments)]
-    fn threshold_process<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
-        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+    fn threshold_process<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, price: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let o = proc_opts(self.plan, price, budget, spread, control)?;
         let q = q.as_slice()?;
         check_query(&self.ix, q, None)?;
         let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
@@ -283,10 +279,10 @@ impl Index {
     /// units, those read directly and on the index path, the groups set up, the spreads' directions projected, the
     /// units given their own spread and the evaluations of Lambda; and rows touched, full vectors read, clusters on the
     /// index path and the time in ms. With `t`, a threshold query at t, else k-NN at k.
-    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0, t=None))]
+    #[pyo3(signature = (q, k, price=None, budget=None, spread="group", control=false, eps=0.0, t=None))]
     #[allow(clippy::too_many_arguments)]
-    fn explain_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
-        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+    fn explain_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let o = proc_opts(self.plan, price, budget, spread, control)?;
         let q = q.as_slice()?;
         check_query(&self.ix, q, if t.is_none() { Some(k) } else { None })?;
         let dial = if t.is_none() { self.eps_dial(py, k, eps)? } else { None };
@@ -315,10 +311,10 @@ impl Index {
     /// Where one k-NN query of the process spends its time, as `profile`: the cycles of each phase (`Stats::cyc`;
     /// `P_PLAN` the centre scores and the reads' setup, `P_SPREAD` the spreads, `P_SOLVE` tau and the plan, `P_QUERY`
     /// the whole call; the process's counts after them) and the time stamp counter's cycles per second.
-    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0))]
+    #[pyo3(signature = (q, k, price=None, budget=None, spread="group", control=false, eps=0.0))]
     #[allow(clippy::too_many_arguments)]
-    fn profile_process(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<(Vec<u64>, f64)> {
-        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+    fn profile_process(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, price: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<(Vec<u64>, f64)> {
+        let o = proc_opts(self.plan, price, budget, spread, control)?;
         let q = q.as_slice()?;
         check_query(&self.ix, q, Some(k))?;
         let dial = self.eps_dial(py, k, eps)?;
