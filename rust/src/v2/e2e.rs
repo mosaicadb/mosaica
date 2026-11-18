@@ -1991,7 +1991,7 @@ fn adaptives(ix: &Index2) -> Vec<(&'static str, adaptive::Adaptive)> {
     ["measured", "fixed", "cheap index path"].into_iter().zip([m, fixed_costs(), cheap]).map(|(name, m)| (name, adaptive::Adaptive::new(ix, m).unwrap())).collect()
 }
 
-const PSIS: [f64; 5] = [-1.0, 0.0, 2.0, adaptive::PSI, f64::INFINITY];
+const PSIS: [f64; 5] = [0.0, 1.0, 2.0, adaptive::PSI, f64::INFINITY];
 
 /// Approximate k-NN returns visible items, each once and with its own score, k of them whenever k are visible, under
 /// every psi; the exact k best when psi is infinite and whenever the scan race scans (before probing or the rest); and
@@ -2049,7 +2049,7 @@ fn the_scan_race_hands_over_to_the_scan() {
     for q in &f.queries {
         let (out, info) = ad.knn(ix, q, 10, None, f64::INFINITY, Plan::default());
         assert_eq!(info.path, "race");
-        assert!(info.visited < ix.k() && info.cost <= 2.0 * info.scan_cost, "{info:?}");
+        assert!(info.read.len() < ix.k() && info.cost <= 2.0 * info.scan_cost, "{info:?}");
         assert_eq!(sub_values(ix, &out.ents, q), top_values(&truth(ix, q, None), 10));
     }
 }
@@ -2078,6 +2078,12 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                         assert!(got.is_subset(&want), "rows outside the exact answer, {what}, path {}", info.path);
                         if psi == f64::INFINITY || info.path != "probe" {
                             assert_eq!(got, want, "not exact, {what}, path {}", info.path);
+                        }
+                        // psi infinite hands over, to the cheaper of a scan and the exact query, and pays that (unless the
+                        // support table decides every cluster)
+                        if psi == f64::INFINITY && info.path != "empty" && !(info.path == "probe" && info.read.is_empty()) {
+                            assert!(info.path == "scan" || (info.path == "exact" && info.exact_cost <= info.scan_cost), "{what}: {info:?}");
+                            assert!(info.cost <= info.fixed + info.scan_cost.min(info.exact_cost) + 1e-9, "{what}: {info:?}");
                         }
                         if th == -2.0 && info.path == "probe" {
                             assert_eq!((got.len(), out.st.full_reads), (want.len(), 0), "a threshold below every score reads rows, {what}");
@@ -2127,28 +2133,39 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
 }
 
 /// The measured constants are timed once and cached under their key: a second open reads them, another key times
-/// them again. They are numbers of at least 0, and give the exact planner's rule.
+/// them again, and constants that cannot price a query are neither saved nor used. They give the exact planner's rule.
 #[test]
 fn measured_constants_are_cached_and_read_again() {
     let f = fixture();
     let m = adaptive::measure(&f.ix).unwrap();
     assert!(m.to_kv().lines().count() == 8 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
-    assert!(m.row_us > 0.0 && m.i8_us > 0.0, "{m:?}");
+    assert!(m.check().is_ok(), "{m:?}");
     let d = tmp_dir("measured");
     let path = d.join(adaptive::COMPUTE_CACHE);
-    let (got, why) = adaptive::cached_measured(&path, "key A", || Some(m));
-    assert_eq!(got, Some(m));
+    let (got, why) = adaptive::cached_measured(&path, "key A", || Ok(m)).unwrap();
+    assert_eq!(got, m);
     assert!(why.starts_with("timed: no cache"), "{why}");
-    let (got, why) = adaptive::cached_measured(&path, "key A", || panic!("timed again under the same key"));
-    assert_eq!(got, Some(m));
+    let (got, why) = adaptive::cached_measured(&path, "key A", || panic!("timed again under the same key")).unwrap();
+    assert_eq!(got, m);
     assert!(why.starts_with("read from"), "{why}");
     let m2 = adaptive::Measured { row_us: m.row_us * 2.0, ..m };
-    let (got, why) = adaptive::cached_measured(&path, "key B", || Some(m2));
-    assert_eq!(got, Some(m2));
+    let (got, why) = adaptive::cached_measured(&path, "key B", || Ok(m2)).unwrap();
+    assert_eq!(got, m2);
     assert!(why.starts_with("timed again") && why.contains("another machine"), "{why}");
-    let (got, _) = adaptive::cached_measured(&path, "key B", || panic!("timed again under the same key"));
-    assert_eq!(got, Some(m2));
-    // through the index directory, under the index's own key
+    let (got, _) = adaptive::cached_measured(&path, "key B", || panic!("timed again under the same key")).unwrap();
+    assert_eq!(got, m2);
+    // a degenerate timing is refused and not saved: the cache still holds the last good constants
+    let e = adaptive::cached_measured(&path, "key C", || Ok(adaptive::Measured { row_us: 0.0, ..m })).unwrap_err();
+    assert!(e.contains("row_us"), "{e}");
+    assert!(adaptive::cached_measured(&path, "key C", || Err("busy".into())).is_err());
+    let (got, _) = adaptive::cached_measured(&path, "key B", || panic!("timed again under the same key")).unwrap();
+    assert_eq!(got, m2);
+    // a cache whose text holds a degenerate value is timed again
+    std::fs::write(&path, format!("key=key D\n{}", adaptive::Measured { dir_us: 0.0, ..m }.to_kv())).unwrap();
+    let (got, why) = adaptive::cached_measured(&path, "key D", || Ok(m)).unwrap();
+    assert!(got == m && why.starts_with("timed again") && why.contains("dir_us"), "{why}");
+    // through the index directory, under the index's own key: the machine, the library, the index's plan and where its
+    // vectors are read from
     let dir = d.join("index");
     std::fs::create_dir_all(&dir).unwrap();
     let mut logs = Vec::new();
@@ -2156,13 +2173,104 @@ fn measured_constants_are_cached_and_read_again() {
     let b = adaptive::measured_constants(&f.ix, dir.to_str().unwrap(), &mut |s| logs.push(s)).unwrap();
     assert_eq!(a, b);
     assert!(logs[0].contains("timed: no cache") && logs[1].contains("read from"), "{logs:?}");
-    assert!(std::fs::read_to_string(dir.join(adaptive::COMPUTE_CACHE)).unwrap().contains(&adaptive::compute_key(&f.ix)));
-    // the rule: direct exactly where dir + row v <= cl + size S + vis v
-    let r = adaptive::Measured { i8_us: 0.0, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0 };
-    let (r0, kappa) = r.rule().unwrap();
+    let key = adaptive::compute_key(&f.ix);
+    assert!(std::fs::read_to_string(dir.join(adaptive::COMPUTE_CACHE)).unwrap().contains(&key));
+    assert!(key.contains(store::LIB_FINGERPRINT) && key.contains(&format!("{:016x}", f.ix.plan_hash())) && key.contains("vectors memory"), "{key}");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, other) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    assert_ne!(adaptive::compute_key(&other), key, "a norm-sorted build of the same fit");
+    // the rule: direct exactly where dir + row v <= cl + size S + vis v, the crossover kept at the typical size
+    let r = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0 };
+    let (r0, kappa) = r.rule(1000).unwrap();
     assert_eq!(r0, 100);
     assert!((kappa - 1.0 / 6.0).abs() < 1e-12);
-    assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(), None);
+    assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(1000), None);
+}
+
+/// The lazy pricing under the bound reads the same clusters in the same order, stops at the same one and answers the
+/// same as pricing every cluster first, on synth4k, on a norm-sorted build, and on random compactions of it, under
+/// every visible set, k and psi.
+#[test]
+fn the_lazy_probe_reads_what_the_eager_one_reads() {
+    let f = fixture();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let (_, nus) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(31);
+    let comps: Vec<Index2> = [0.3, 0.6].iter().map(|&share| {
+        let rows: Vec<u32> = (0..f.ix.nrows as u32).filter(|_| rng.gen::<f64>() < share).collect();
+        f.ix.compact(&rows, false)
+    }).collect();
+    // a compaction has no entity-to-row map: its visible set is all of it
+    let mut ixs: Vec<(&str, &Index2, bool)> = vec![("synth4k", &f.ix, true), ("norm-sorted", &nus, true)];
+    ixs.extend(comps.iter().map(|c| ("random compaction", c, false)));
+    // sigmas and reads priced so that no race fires before the last cluster
+    let m = adaptive::Measured { i8_us: 1e-12, row_us: 1.0, dir_us: 1e-12, cl_us: 1e9, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0 };
+    let mut stops = 0;
+    for &(name, ix, filtered) in &ixs {
+        let ad = adaptive::Adaptive::new(ix, m).unwrap();
+        for (qi, q) in f.queries.iter().enumerate() {
+            for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                for kk in [1, 10, 100] {
+                    for psi in [0.0, 1.0, 2.0, 3.5, adaptive::PSI, 8.0] {
+                        let what = format!("{name}, query {qi}, set {sname}, k {kk}, psi {psi}");
+                        let (lazy, li) = ad.knn_priced(ix, q, kk, vis.as_ref(), psi, Plan::default(), false);
+                        let (eager, ei) = ad.knn_priced(ix, q, kk, vis.as_ref(), psi, Plan::default(), true);
+                        assert_eq!((li.path, &li.read), (ei.path, &ei.read), "{what}");
+                        assert_eq!(lazy.ents, eager.ents, "{what}");
+                        assert!(li.spreads <= ei.spreads, "{what}");
+                        stops += (li.path == "probe" && li.read.len() < ix.k()) as usize;
+                    }
+                }
+            }
+        }
+    }
+    assert!(stops > 0, "no probe stopped early");
+}
+
+/// The answers do not depend on the measured constants but through the race and the hand-overs (which answer exactly):
+/// with the index path cheap or dear, a probe that does not race reads the same clusters and returns the same items,
+/// and a threshold query that probes in both returns the same rows.
+#[test]
+fn the_constants_change_the_answer_only_through_the_race() {
+    let f = fixture();
+    let ix = &f.ix;
+    let base = adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07 };
+    let (a, b) = (adaptive::Adaptive::new(ix, cheap_index(base)).unwrap(), adaptive::Adaptive::new(ix, adaptive::Measured { cl_us: 1e6, ..base }).unwrap());
+    let (mut both, mut index) = (0, 0);
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let t = truth(ix, q, bm.as_ref());
+            for kk in [1, 10, 100] {
+                for psi in PSIS {
+                    let what = format!("query {qi}, set {sname}, k {kk}, psi {psi}");
+                    let ((x, xi), (y, yi)) = (a.knn(ix, q, kk, vis.as_ref(), psi, Plan::default()), b.knn(ix, q, kk, vis.as_ref(), psi, Plan::default()));
+                    if xi.path == "probe" && yi.path == "probe" {
+                        both += 1;
+                        index += xi.index;
+                        assert_eq!(xi.read, yi.read, "{what}");
+                        // the same items; their f32 products may round apart, summed in other batches
+                        assert_eq!(x.ents.iter().map(|e| e.1).collect::<Vec<_>>(), y.ents.iter().map(|e| e.1).collect::<Vec<_>>(), "{what}");
+                    }
+                }
+            }
+            for th in thresholds(&t) {
+                for psi in PSIS {
+                    let ((x, xi), (y, yi)) = (a.threshold(ix, q, th, vis.as_ref(), psi, Plan::default()), b.threshold(ix, q, th, vis.as_ref(), psi, Plan::default()));
+                    if xi.path == "probe" && yi.path == "probe" {
+                        assert_eq!(to_bitmap2(ix, &x.rows), to_bitmap2(ix, &y.rows), "query {qi}, set {sname}, t {th}, psi {psi}");
+                    }
+                }
+            }
+        }
+    }
+    assert!(both > 0 && index > 0, "{both} probes compared, {index} clusters on the index path");
+}
+
+/// `m` with the index path and its groups cheap.
+fn cheap_index(m: adaptive::Measured) -> adaptive::Measured {
+    adaptive::Measured { cl_us: 0.01, size_us: 0.0, vis_us: 1e-4, grp_us: 0.01, anc_us: 1e-4, ..m }
 }
 
 /// The exact paths' answers and work on synth4k (plain and norm-sorted) under nine visible sets, 12 queries, every
