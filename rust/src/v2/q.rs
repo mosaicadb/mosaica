@@ -3551,14 +3551,17 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     let tm = Timer::new();
     let nl = ix.meta.nl();
     let t0 = tick();
-    // q.m of every cluster, for the order, the anchor and each probed cluster
     let mut pr = prep2(ix, q);
     if let Some(d) = dial {
         pr.dial = d.to_vec();
     }
-    let qm = pr.qms(ix, None);
+    // the order ranks every cluster by f32 products; q.m in f64, which the bounds take, is computed for the probed
+    // clusters only (and for every centre when a cluster on the index path first asks for the anchor)
+    let n = ix.n();
+    let qmo: Vec<f64> = (0..ix.k()).map(|ci| unsafe { dot32(&pr.q32, &ix.centres32[ci * n..(ci + 1) * n]) }).collect();
     let mut st = Stats::new(nl);
-    let order = ap.order_qm(ix, &qm, vis, nprobe);
+    let order = ap.order_qm(ix, &qmo, vis, nprobe);
+    pr.qms(ix, Some(&order));
     st.cyc[P_PLAN] += tick() - t0;
     // the groups of the probed clusters with too many visible rows to be scored directly, set up together: each
     // rotation is read once for all of them, not once per group
@@ -3606,7 +3609,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
         let t = top.kth();
         rows_in.clear();
         pend.clear();
-        let qm = qm[ci];
+        let qm = pr.qm(ix, ci);
         let (u0, u1, d0, d1) = if top.full() && ix.nukey.is_empty() { sorted_range2(ix, ci, &cut_params2(ix, ci, &pr, qm), t) } else { (c.r0, c.r1, c.r0, c.r1) };
         // the key alone takes these in
         if u0 < d0 || d1 < u1 {

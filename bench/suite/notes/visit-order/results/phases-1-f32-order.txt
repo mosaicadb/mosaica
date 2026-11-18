@@ -1,0 +1,33 @@
+glove-100-angular: 592 clusters, 1183514 rows, k 10
+filter     nprobe    total    order   groups   stored     rest   us, median over 100 queries
+none            4    540.6     28.4     22.9     59.3    430.0
+none           16   1364.8     34.7     46.5     63.3   1220.2
+none           64   3573.1     39.2    104.6     72.6   3356.6
+random-1        4     23.8     15.3      0.0      5.3      3.3
+random-1       16     38.0     15.7      0.0     16.0      6.2
+random-1       64     84.9     19.4      0.0     51.6     13.9
+random-25       4    380.9     24.6     19.5     22.1    314.7
+random-25      16   1000.0     30.8     41.4     27.7    900.1
+random-25      64   3048.5     37.8    100.9     37.5   2872.4
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+filter     nprobe    total    order   groups   stored     rest   us, median over 100 queries
+none            4    920.9     33.7    103.4    104.4    679.3
+none           16   2187.7     38.5    221.1    112.0   1816.1
+none           64   6049.9     42.9    551.1    107.6   5348.3
+random-1        4     31.6     18.6      0.0      8.9      4.1
+random-1       16     50.9     20.4      0.0     23.7      6.8
+random-1       64    141.6     32.7      0.0     89.2     19.7
+random-25       4    730.8     30.2     98.7     37.7    564.2
+random-25      16   1757.4     36.5    212.0     41.9   1467.1
+random-25      64   4929.8     44.8    572.1     51.6   4261.4
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+filter     nprobe    total    order   groups   stored     rest   us, median over 100 queries
+none            4   1165.7     55.9    148.0    191.5    770.2
+none           16   3080.4     59.8    300.5    213.9   2506.3
+none           64   9673.0     78.2    863.6    242.9   8488.2
+random-1        4     51.5     32.7      0.0     12.6      6.2
+random-1       16     90.3     40.1      0.0     37.4     12.8
+random-1       64    240.9     66.3      0.0    137.5     37.0
+random-25       4    999.4     53.0    157.4     67.2    721.7
+random-25      16   2392.7     55.3    282.6     71.3   1983.4
+random-25      64   7550.2     69.5    763.4     99.0   6618.3
