@@ -1,0 +1,67 @@
+== yahoo-minilm-384-normalized: exceedance tables fitted on 300 pseudo-queries (half plain, half shifted); checks on the held-out half and on the 100 real queries
+
+-- level cluster, tier S0: beta +1.656; tail slope -1.30 per unit of zeta; zeta grid -1.61..11.65; ln P at the ends -0.08 .. -14.32
+plain    delta 1.03; ln(obs/pred) overall -0.25; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.33 [-3.74, +2.54]; 0.001: -0.01 [-0.84, +1.01]; 0.01: +0.25 [-0.07, +0.66]; residual ln(obs/pred) by rad terciles -0.24 -0.25 -0.28, n terciles -0.26 -0.26 -0.25
+shifted  delta 0.56; ln(obs/pred) overall +0.35; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.47 [-3.31, +1.30]; 0.001: -0.69 [-1.53, +0.20]; 0.01: -0.53 [-1.00, -0.03]; residual ln(obs/pred) by rad terciles +0.32 +0.34 +0.41, n terciles +0.36 +0.35 +0.35
+real     delta 0.58; ln(obs/pred) overall -0.26; ln kappa median [10%, 90%] at answer fraction 1e-05: +0.49 [-2.79, +2.44]; 0.001: +0.05 [-0.70, +1.11]; 0.01: +0.26 [+0.00, +0.66]; residual ln(obs/pred) by rad terciles -0.27 -0.24 -0.26, n terciles -0.27 -0.25 -0.25
+real, random-1  delta 1.18; ln(obs/pred) -0.36; ln kappa at k = 10: +0.08 [-0.72, +1.16]; at 1% of the visible: +0.29 [-0.04, +0.68]
+real, random-25 delta 1.28; ln(obs/pred) -0.35; ln kappa at k = 10: +0.38 [-2.52, +1.77]; at 1% of the visible: +0.27 [-0.04, +0.65]
+real, clus-1    delta 1.62; ln(obs/pred) -1.24; ln kappa at k = 10: +1.62 [-0.26, +2.64]; at 1% of the visible: +1.02 [+0.17, +1.61]
+real, clus-25   delta 1.29; ln(obs/pred) -0.43; ln kappa at k = 10: +0.50 [-2.22, +2.28]; at 1% of the visible: +0.37 [-0.01, +0.77]
+real, cap-1     delta 2.03; ln(obs/pred) -1.69; ln kappa at k = 10: +2.35 [+0.69, +3.18]; at 1% of the visible: +1.42 [+0.64, +2.00]
+real, cap-25    delta 1.78; ln(obs/pred) -0.66; ln kappa at k = 10: +0.81 [-2.13, +2.45]; at 1% of the visible: +0.48 [-0.15, +1.14]
+
+-- level cluster, tier S1: beta +0.006; tail slope -2.66 per unit of zeta; zeta grid -1.09..8.33; ln P at the ends -0.11 .. -14.74
+plain    delta 0.49; ln(obs/pred) overall +0.15; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.75 [-2.46, +0.70]; 0.001: -0.61 [-1.06, -0.24]; 0.01: -0.31 [-0.52, -0.13]; residual ln(obs/pred) by rad terciles +0.12 +0.16 +0.18, n terciles +0.16 +0.16 +0.14
+shifted  delta 0.37; ln(obs/pred) overall -0.12; ln kappa median [10%, 90%] at answer fraction 1e-05: +2.37 [+1.29, +3.02]; 0.001: +0.68 [+0.38, +1.01]; 0.01: +0.36 [+0.21, +0.48]; residual ln(obs/pred) by rad terciles -0.11 -0.13 -0.14, n terciles -0.12 -0.13 -0.12
+real     delta 0.49; ln(obs/pred) overall +0.15; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.54 [-2.07, +0.56]; 0.001: -0.58 [-1.15, -0.21]; 0.01: -0.29 [-0.55, -0.18]; residual ln(obs/pred) by rad terciles +0.14 +0.16 +0.16, n terciles +0.16 +0.16 +0.14
+real, random-1  delta 1.25; ln(obs/pred) +0.32; ln kappa at k = 10: -0.62 [-1.26, -0.04]; at 1% of the visible: -0.27 [-0.56, -0.14]
+real, random-25 delta 1.29; ln(obs/pred) +0.31; ln kappa at k = 10: -0.89 [-2.35, +0.15]; at 1% of the visible: -0.29 [-0.54, -0.18]
+real, clus-1    delta 1.52; ln(obs/pred) +0.76; ln kappa at k = 10: -1.30 [-2.19, -0.36]; at 1% of the visible: -0.82 [-1.51, -0.20]
+real, clus-25   delta 1.27; ln(obs/pred) +0.35; ln kappa at k = 10: -0.66 [-1.91, +0.18]; at 1% of the visible: -0.32 [-0.69, -0.14]
+real, cap-1     delta 0.79; ln(obs/pred) -0.20; ln kappa at k = 10: +0.08 [-0.94, +1.31]; at 1% of the visible: +0.04 [-0.75, +0.68]
+real, cap-25    delta 0.87; ln(obs/pred) +0.18; ln kappa at k = 10: -0.35 [-2.19, +0.82]; at 1% of the visible: -0.24 [-0.57, +0.16]
+
+-- level cluster, tier S2: beta +0.042; tail slope -3.00 per unit of zeta; zeta grid -1.01..7.91; ln P at the ends -0.10 .. -14.80
+plain    delta 0.47; ln(obs/pred) overall +0.12; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.06 [-1.72, +0.85]; 0.001: -0.29 [-0.55, -0.11]; 0.01: -0.22 [-0.38, -0.11]; residual ln(obs/pred) by rad terciles +0.10 +0.13 +0.15, n terciles +0.13 +0.13 +0.12
+shifted  delta 0.31; ln(obs/pred) overall -0.10; ln kappa median [10%, 90%] at answer fraction 1e-05: +2.14 [+1.14, +2.72]; 0.001: +0.64 [+0.39, +0.93]; 0.01: +0.32 [+0.20, +0.43]; residual ln(obs/pred) by rad terciles -0.09 -0.11 -0.12, n terciles -0.10 -0.11 -0.10
+real     delta 0.47; ln(obs/pred) overall +0.13; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.06 [-1.28, +0.65]; 0.001: -0.31 [-0.61, -0.14]; 0.01: -0.21 [-0.38, -0.13]; residual ln(obs/pred) by rad terciles +0.12 +0.13 +0.14, n terciles +0.13 +0.13 +0.12
+real, random-1  delta 1.02; ln(obs/pred) +0.23; ln kappa at k = 10: -0.45 [-0.85, +0.10]; at 1% of the visible: -0.21 [-0.42, -0.09]
+real, random-25 delta 1.04; ln(obs/pred) +0.23; ln kappa at k = 10: -0.40 [-1.21, +0.23]; at 1% of the visible: -0.21 [-0.36, -0.12]
+real, clus-1    delta 1.56; ln(obs/pred) +0.69; ln kappa at k = 10: -1.29 [-2.09, -0.41]; at 1% of the visible: -0.73 [-1.11, -0.27]
+real, clus-25   delta 1.04; ln(obs/pred) +0.27; ln kappa at k = 10: -0.47 [-1.54, +0.17]; at 1% of the visible: -0.25 [-0.49, -0.12]
+real, cap-1     delta 1.06; ln(obs/pred) -0.17; ln kappa at k = 10: +0.12 [-0.83, +1.38]; at 1% of the visible: +0.04 [-0.72, +0.61]
+real, cap-25    delta 0.76; ln(obs/pred) +0.09; ln kappa at k = 10: +0.09 [-1.42, +1.06]; at 1% of the visible: -0.15 [-0.45, +0.22]
+
+-- level sub, tier S0: beta +1.164; tail slope -2.90 per unit of zeta; zeta grid -1.96..8.46; ln P at the ends -0.01 .. -13.12
+plain    delta 1.07; ln(obs/pred) overall -0.24; ln kappa median [10%, 90%] at answer fraction 1e-05: +0.02 [-2.63, +2.20]; 0.001: +0.12 [-0.43, +0.86]; 0.01: +0.21 [-0.06, +0.54]; residual ln(obs/pred) by rad terciles -0.21 -0.24 -0.26, n terciles -0.24 -0.24 -0.24
+shifted  delta 0.60; ln(obs/pred) overall +0.33; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.77 [-3.03, +1.04]; 0.001: -0.59 [-1.22, +0.08]; 0.01: -0.48 [-0.88, -0.06]; residual ln(obs/pred) by rad terciles +0.26 +0.31 +0.41, n terciles +0.32 +0.33 +0.33
+real     delta 1.10; ln(obs/pred) overall -0.24; ln kappa median [10%, 90%] at answer fraction 1e-05: +0.52 [-1.33, +2.33]; 0.001: +0.14 [-0.33, +0.98]; 0.01: +0.21 [+0.02, +0.55]; residual ln(obs/pred) by rad terciles -0.23 -0.24 -0.25, n terciles -0.24 -0.24 -0.24
+real, random-1  delta 1.36; ln(obs/pred) -0.31; ln kappa at k = 10: +0.12 [-0.40, +1.04]; at 1% of the visible: +0.24 [-0.04, +0.59]
+real, random-25 delta 1.19; ln(obs/pred) -0.29; ln kappa at k = 10: +0.49 [-1.26, +1.67]; at 1% of the visible: +0.22 [+0.01, +0.55]
+real, clus-1    delta 1.74; ln(obs/pred) -1.01; ln kappa at k = 10: +1.37 [-0.26, +2.26]; at 1% of the visible: +0.75 [-0.03, +1.40]
+real, clus-25   delta 1.33; ln(obs/pred) -0.36; ln kappa at k = 10: +0.47 [-1.45, +2.05]; at 1% of the visible: +0.30 [+0.04, +0.66]
+real, cap-1     delta 2.13; ln(obs/pred) -1.48; ln kappa at k = 10: +2.01 [+0.44, +2.86]; at 1% of the visible: +1.26 [+0.42, +1.86]
+real, cap-25    delta 1.77; ln(obs/pred) -0.54; ln kappa at k = 10: +0.69 [-0.90, +2.20]; at 1% of the visible: +0.42 [-0.04, +0.97]
+
+-- level sub, tier S1: beta -0.019; tail slope -3.01 per unit of zeta; zeta grid -1.50..6.62; ln P at the ends -0.04 .. -12.96
+plain    delta 0.49; ln(obs/pred) overall +0.10; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.58 [-2.61, +0.76]; 0.001: -0.25 [-0.56, -0.02]; 0.01: -0.19 [-0.36, -0.07]; residual ln(obs/pred) by rad terciles +0.08 +0.11 +0.13, n terciles +0.11 +0.11 +0.10
+shifted  delta 0.27; ln(obs/pred) overall -0.09; ln kappa median [10%, 90%] at answer fraction 1e-05: +1.90 [+0.58, +2.58]; 0.001: +0.55 [+0.31, +0.82]; 0.01: +0.25 [+0.16, +0.36]; residual ln(obs/pred) by rad terciles -0.07 -0.09 -0.10, n terciles -0.09 -0.09 -0.09
+real     delta 0.50; ln(obs/pred) overall +0.11; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.63 [-2.10, +0.57]; 0.001: -0.26 [-0.60, +0.01]; 0.01: -0.18 [-0.36, -0.09]; residual ln(obs/pred) by rad terciles +0.09 +0.11 +0.12, n terciles +0.12 +0.11 +0.10
+real, random-1  delta 1.09; ln(obs/pred) +0.20; ln kappa at k = 10: -0.34 [-0.80, +0.11]; at 1% of the visible: -0.18 [-0.41, -0.03]
+real, random-25 delta 1.07; ln(obs/pred) +0.20; ln kappa at k = 10: -0.55 [-1.48, +0.39]; at 1% of the visible: -0.18 [-0.37, -0.09]
+real, clus-1    delta 1.46; ln(obs/pred) +0.70; ln kappa at k = 10: -1.44 [-2.40, -0.37]; at 1% of the visible: -0.74 [-1.36, -0.16]
+real, clus-25   delta 1.04; ln(obs/pred) +0.23; ln kappa at k = 10: -0.70 [-1.76, +0.31]; at 1% of the visible: -0.19 [-0.47, -0.10]
+real, cap-1     delta 0.51; ln(obs/pred) -0.06; ln kappa at k = 10: +0.02 [-0.93, +0.90]; at 1% of the visible: -0.03 [-0.64, +0.46]
+real, cap-25    delta 0.85; ln(obs/pred) +0.10; ln kappa at k = 10: -0.10 [-1.47, +0.81]; at 1% of the visible: -0.13 [-0.39, +0.16]
+
+-- level sub, tier S2: beta +0.033; tail slope -2.89 per unit of zeta; zeta grid -1.81..7.06; ln P at the ends -0.04 .. -13.00
+plain    delta 0.73; ln(obs/pred) overall +0.18; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.48 [-1.42, +0.17]; 0.001: -0.51 [-0.82, -0.29]; 0.01: -0.33 [-0.51, -0.17]; residual ln(obs/pred) by rad terciles +0.13 +0.18 +0.21, n terciles +0.17 +0.18 +0.17
+shifted  delta 0.45; ln(obs/pred) overall -0.15; ln kappa median [10%, 90%] at answer fraction 1e-05: +2.41 [+1.38, +3.12]; 0.001: +0.79 [+0.45, +1.10]; 0.01: +0.38 [+0.24, +0.52]; residual ln(obs/pred) by rad terciles -0.12 -0.15 -0.17, n terciles -0.14 -0.15 -0.15
+real     delta 0.74; ln(obs/pred) overall +0.18; ln kappa median [10%, 90%] at answer fraction 1e-05: -0.57 [-1.33, -0.06]; 0.001: -0.56 [-0.80, -0.30]; 0.01: -0.35 [-0.53, -0.21]; residual ln(obs/pred) by rad terciles +0.14 +0.18 +0.21, n terciles +0.18 +0.18 +0.18
+real, random-1  delta 1.36; ln(obs/pred) +0.37; ln kappa at k = 10: -0.58 [-1.07, -0.11]; at 1% of the visible: -0.36 [-0.59, -0.17]
+real, random-25 delta 1.33; ln(obs/pred) +0.35; ln kappa at k = 10: -0.78 [-1.21, -0.25]; at 1% of the visible: -0.35 [-0.51, -0.21]
+real, clus-1    delta 1.37; ln(obs/pred) +0.78; ln kappa at k = 10: -1.17 [-1.86, -0.61]; at 1% of the visible: -0.79 [-1.08, -0.46]
+real, clus-25   delta 1.30; ln(obs/pred) +0.41; ln kappa at k = 10: -0.80 [-1.38, -0.33]; at 1% of the visible: -0.43 [-0.68, -0.20]
+real, cap-1     delta 0.92; ln(obs/pred) +0.21; ln kappa at k = 10: -0.35 [-1.29, +0.59]; at 1% of the visible: -0.33 [-0.81, +0.25]
+real, cap-25    delta 1.06; ln(obs/pred) +0.24; ln kappa at k = 10: -0.43 [-1.39, +0.45]; at 1% of the visible: -0.23 [-0.56, +0.00]
