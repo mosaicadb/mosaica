@@ -11,6 +11,8 @@ owners.
   candidate defaults on five datasets with leave-one-dataset-out choices; `table3.txt` the principled orders;
   `table4.txt` the calibrated spread, the ceilings, the collapse check and the stopping rule;
   `table5.txt` query-time cost, shared bases, the rad-aware model, stopping on each order and recall targets.
+- `PLAN.md`: how these orders go into `rust/`: their measured cost per query, how to make them cheap, pre-filtering
+  the cluster space, and the phases. `microbench/` times the per-query work.
 - `scripts/`: the replay scripts, as run (paths under a scratch directory `$S`; they expect the suite's prep, a
   `vexact_py` install and `rust/tools/fit.py`; see the comments at the top of each).
 
