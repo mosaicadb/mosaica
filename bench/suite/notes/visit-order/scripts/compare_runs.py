@@ -46,7 +46,7 @@ def main():
     keys = sorted({k for _, r in runs for k in r})
     labels = [l for l, _ in runs]
     for ds in sorted({k[0] for k in keys}):
-        for f in ["none", "random-1", "random-25"]:
+        for f in ["none", "random-1", "random-25", "region-1", "region-25"]:
             ks = [k for k in keys if k[0] == ds and k[1] == f]
             if not ks:
                 continue
