@@ -1,6 +1,6 @@
-//! The approximate mode's cluster-order state (`q::Approx`), computed by the build from each cluster's rows and saved
-//! with the index: every cluster's RMS radius about its centre, and its top `R_MAX` principal directions about the
-//! centre (int8 rows with a scale each) with their variances. An order with r directions takes the first r.
+//! The approximate queries' cluster state (the spreads of `adaptive::Adaptive`, the radii of `q::Approx`), computed
+//! by the build from each cluster's rows and saved with the index: every cluster's RMS radius about its centre, and
+//! its top `R_MAX` principal directions about the centre (int8 rows with a scale each) with their variances.
 //!
 //! The directions come from a fixed sample of the cluster's rows (`SAMPLE`, spread evenly over them) by a randomised
 //! subspace iteration on the sample's covariance about the centre, finished by a Rayleigh-Ritz step; the radius is over
@@ -484,7 +484,7 @@ mod tests {
             let s = m.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
             m.iter().map(|&x| x as f64 / s).collect()
         }).collect();
-        // sigma^2 = sum lam_j (u_j.q)^2 + rest (|q|^2 - sum (u_j.q)^2), the rest from the trace (as `HSpread` has it)
+        // sigma^2 = sum lam_j (u_j.q)^2 + rest (|q|^2 - sum (u_j.q)^2), the rest from the trace (as `adaptive` has it)
         let sigma = |lam: &[f64], u: &[Vec<f64>], tr: f64, q: &[f64]| -> f64 {
             let j = lam.len();
             let rest = (tr - lam.iter().sum::<f64>()).max(0.0) / (n0.max(j + 1) - j) as f64;

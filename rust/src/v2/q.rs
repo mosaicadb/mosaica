@@ -43,20 +43,17 @@ pub const C_TABLES: usize = 20;
 pub const C_UNITS: usize = 21;
 pub const C_TSURV: usize = 22;
 pub const C_TSMALL: usize = 23;
-/// Clusters whose spread the H order computed (`Approx::order_qm`).
-pub const C_HCAND: usize = 24;
-/// The approximate process (`v2::process`): the cycles of its spreads, and of its solve for tau and its plan; the
-/// spreads it computed (directions projected, in rows of n), the clusters its plan reads directly and on the index
-/// path, and the groups it opens.
+/// The adaptive approximate queries (`v2::adaptive`): the cycles of the clusters' spreads, of the order (keys, heap
+/// and stop) and of the path choice (with the anchor search and the race's accounting); the spreads' directions
+/// projected (rows of n), the clusters read directly and on the index path, the groups set up and the clusters
+/// visited.
 pub const P_SPREAD: usize = 12;
-pub const P_SOLVE: usize = 25;
+pub const P_ORDER: usize = 25;
+pub const P_CHOICE: usize = 30;
 pub const C_SPREADS: usize = 26;
 pub const C_DIRECT: usize = 27;
 pub const C_INDEX: usize = 28;
 pub const C_GROUPS: usize = 29;
-/// The simple arms (`v2::simple`): their path choice, anchor search and race accounting (cycles), and the clusters they
-/// visited.
-pub const P_CHOICE: usize = 30;
 pub const C_VISITED: usize = 31;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
@@ -3271,121 +3268,16 @@ mod int8_centre_tests {
     }
 }
 
-/// The approximate mode's cluster order: clusters by descending q.m + b(q) rad, the centre score plus a bonus for the
-/// cluster's RMS radius about its centre (an optimistic estimate of its best item's score).
-/// `Radius`: b(q) = f, fitted on corpus pseudo-queries. `Spread`: b(q) = f sd(q) / sd(rad), sd(q) the standard
-/// deviation of q.m over the clusters; it does not change when the query is scaled or moved along a direction in which
-/// the centres do not vary, as out-of-distribution queries are (bench/suite/notes/visit-order).
-/// f of the `Spread` order when no queries are given to fit it on: chosen by leave-one-dataset-out over five datasets,
-/// in and out of distribution (bench/suite/notes/visit-order, `loo_summary.txt`). Corpus pseudo-queries are not used to
-/// fit it, since they are in distribution by construction.
+/// The legacy approximate order of `knn2_fast` (`spread`), kept as the comparison arm of the adaptive approximate k-NN
+/// (`adaptive`): clusters by descending q.m + b(q) rad, the centre score plus a bonus for the cluster's RMS radius about
+/// its centre, b(q) = f sd(q) / sd(rad), sd(q) the standard deviation of q.m over the clusters; it does not change
+/// when the query is scaled or moved along a direction in which the centres do not vary, as out-of-distribution
+/// queries are (bench/suite/notes/visit-order). f by default: chosen by leave-one-dataset-out over five datasets, in
+/// and out of distribution (bench/suite/notes/visit-order, `loo_summary.txt`).
 pub const SPREAD_F: f64 = 0.4;
-/// `H`'s f (the weight of its radius term), chosen as SPREAD_F was.
-pub const H_F: f64 = 0.3;
-/// `H`'s m when the order's name does not give it.
-pub const H_M: usize = 4;
-/// `H` takes the `Spread` key for a query whose clusters hold under this many times k visible rows on average: z(k, n)
-/// is under 1.15 there and H's spread term carries little (under random-1 visible sets H needed more rows than `Spread`
-/// to every recall; under random-25 and unfiltered fewer).
-pub const H_MIN_ROWS_PER_K: usize = 8;
-
-/// `H(r)`: q.m + alpha z(k, n_c) sigma_c(q) + f sd(q) rad / sd(rad), sigma_c(q)^2 = q' S_c q the variance of the
-/// cluster's scores, S_c its covariance as its top r principal directions and an isotropic rest, z(k, n) =
-/// Phi^-1(1 - k/n) (0 for n <= k) with n the cluster's visible rows, and alpha 0.5 for r up to 4, else 0.75. Its key
-/// is computed for the m nprobe clusters first by the `Spread` key (every cluster when m is 0), so its first nprobe
-/// clusters are those of H over all clusters only when they are among those; under a sparse visible set the order is
-/// `Spread`'s (`H_MIN_ROWS_PER_K`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OrderKind {
-    Radius,
-    Spread,
-    H { r: usize, m: usize },
-}
-
-impl OrderKind {
-    pub fn parse(s: &str) -> Result<OrderKind, String> {
-        match s {
-            "radius" => Ok(OrderKind::Radius),
-            "spread" => Ok(OrderKind::Spread),
-            _ => {
-                let h = s.strip_prefix('h').map(|x| x.split_once('x').unwrap_or((x, "")));
-                match h.map(|(r, m)| (r.parse::<usize>(), if m.is_empty() { Ok(H_M) } else { m.parse::<usize>() })) {
-                    Some((Ok(r), Ok(m))) if (1..=super::order::R_MAX).contains(&r) => Ok(OrderKind::H { r, m }),
-                    _ => Err(format!("the order is radius, spread, or h with 1 to {} directions per cluster (the index stores that \
-                                      many) and optionally x and the candidates per probed cluster (h4, h16, h4x8, h4x0 for every \
-                                      cluster), not {s:?}", super::order::R_MAX)),
-                }
-            }
-        }
-    }
-    /// The values `Approx::fit` chooses f from.
-    fn grid(self) -> &'static [f64] {
-        match self {
-            OrderKind::Radius => &[0.0, 0.1, 0.2, 0.35, 0.5, 0.75],
-            OrderKind::Spread => &[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8],
-            OrderKind::H { .. } => &[0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
-        }
-    }
-    /// f without queries to fit it on; None for `Radius`, which is fitted on corpus pseudo-queries.
-    pub fn default_f(self) -> Option<f64> {
-        match self {
-            OrderKind::Radius => None,
-            OrderKind::Spread => Some(SPREAD_F),
-            OrderKind::H { .. } => Some(H_F),
-        }
-    }
-}
-
-/// Each cluster's spread for the H order: the first r of the principal directions the index stores
-/// (`order::OrderState`), their variances, and the mean variance over the other dimensions the data spans.
-struct HSpread {
-    r: usize,
-    alpha: f64,
-    st: std::sync::Arc<super::order::OrderState>,
-    rest: Vec<f32>,
-}
-
-impl HSpread {
-    /// The spread with r directions (at most those stored): its rest is what the cluster's variance (its radius
-    /// squared) leaves after the first r directions, spread over the other dimensions.
-    fn new(st: std::sync::Arc<super::order::OrderState>, r: usize) -> HSpread {
-        let r = r.min(st.r);
-        let n0 = st.n0.max(r + 1);
-        let rest = st.rad.iter().enumerate().map(|(ci, &rad)| {
-            let top: f64 = st.lam[ci * st.r..ci * st.r + r].iter().map(|&l| l as f64).sum();
-            ((rad * rad - top).max(0.0) / (n0 - r) as f64) as f32
-        }).collect();
-        let alpha = if r <= 4 { 0.5 } else { 0.75 };
-        HSpread { r, alpha, st, rest }
-    }
-
-    /// The largest variance along a direction of cluster ci.
-    fn lam1(&self, ci: usize) -> f32 {
-        if self.r == 0 { 0.0 } else { self.st.lam[ci * self.st.r] }
-    }
-
-    /// q' S_c q, from the query's f32 values and |q|^2.
-    fn var(&self, ci: usize, q32: &[f32], qq: f64, n: usize, p: &mut [f32]) -> f64 {
-        let (r, rs) = (self.r, self.st.r);
-        unsafe { crate::kernel::gemv_i8(q32, self.st.dirs(ci, r, n), n, &mut p[..r]) };
-        let (mut v, mut pp) = (0f64, 0f64);
-        for j in 0..r {
-            let x = (p[j] * self.st.dsc[ci * rs + j]) as f64;
-            v += self.st.lam[ci * rs + j] as f64 * x * x;
-            pp += x * x;
-        }
-        v + self.rest[ci] as f64 * (qq - pp).max(0.0)
-    }
-}
-
-/// z(k, n) = Phi^-1(1 - k/n), the expected best of n standard normal scores reaching k of them; 0 for n <= k.
-fn z_of(k: usize, n: usize) -> f64 {
-    if n > k { super::inv_norm(1.0 - k as f64 / n as f64) } else { 0.0 }
-}
 
 #[derive(Clone)]
 pub struct Approx {
-    pub kind: OrderKind,
     pub f: f64,
     pub rad: Vec<f64>,
     /// The standard deviation of rad over the clusters.
@@ -3394,7 +3286,6 @@ pub struct Approx {
     /// `Index2::centres32`; empty when a centre is not of that form, and the order then reads `centres32`.
     cen8: Vec<i8>,
     csc: Vec<f32>,
-    h: Option<std::sync::Arc<HSpread>>,
 }
 
 /// The int8 rows and scales of centres that are int8 times a scale per cluster with 127 the largest magnitude (as
@@ -3457,26 +3348,23 @@ impl Approx {
         }).collect()
     }
 
-    /// The order `kind` with radius weight f over the radii `rad`. `H` reads the directions the index stores; an index
-    /// that stores none (a synthetic one) has them computed here (`OrderState::compute`).
-    pub fn new(ix: &Index2, kind: OrderKind, f: f64, rad: Vec<f64>) -> Approx {
+    /// The order with radius weight f over the radii `rad`.
+    pub fn new(ix: &Index2, f: f64, rad: Vec<f64>) -> Approx {
         let k = rad.len().max(1) as f64;
         let mean = rad.iter().sum::<f64>() / k;
         let sd_rad = (rad.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / k).sqrt();
         let (cen8, csc) = int8_centres(&ix.centres32, ix.n()).unwrap_or_default();
-        let h = match kind {
-            OrderKind::H { r, .. } => {
-                let st = ix.order.clone().unwrap_or_else(|| std::sync::Arc::new(super::order::OrderState::compute(ix)));
-                Some(std::sync::Arc::new(HSpread::new(st, r)))
-            }
-            _ => None,
-        };
-        Approx { kind, f, rad, sd_rad, cen8, csc, h }
+        Approx { f, rad, sd_rad, cen8, csc }
+    }
+
+    /// The `spread` order at its default f over the radii the index stores.
+    pub fn spread(ix: &Index2) -> Approx {
+        Approx::new(ix, SPREAD_F, Approx::radii(ix))
     }
 
     /// The order with no radius bonus: by centre score alone.
     pub fn centres(ix: &Index2) -> Approx {
-        Approx::new(ix, OrderKind::Radius, 0.0, vec![0.0; ix.k()])
+        Approx::new(ix, 0.0, vec![0.0; ix.k()])
     }
 
     /// q.m of every cluster in f32 (`q32` the query's f32 values): the order's centre scores.
@@ -3492,10 +3380,7 @@ impl Approx {
 
     /// The bonus per unit of radius for a query with these centre scores (q.m of every cluster).
     pub fn bonus(&self, qm: &[f64]) -> f64 {
-        match self.kind {
-            OrderKind::Radius => self.f,
-            OrderKind::Spread | OrderKind::H { .. } => self.f * self.sd_ratio(qm),
-        }
+        self.f * self.sd_ratio(qm)
     }
 
     /// sd(q) / sd(rad), sd(q) the standard deviation of the centre scores over the clusters.
@@ -3508,106 +3393,27 @@ impl Approx {
         (qm.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / k).sqrt() / self.sd_rad
     }
 
-    /// The first `take` clusters of the order (all when `take` is 0) for a query asking for its `kk` best, from q.m of
-    /// every cluster and the query's f32 values: only those are sorted (by descending key, the lower index first among
-    /// equal keys). Also returns the number of clusters whose H spread was computed: of the m take first by the
-    /// `Spread` key (`OrderKind::H`), those whose key can still reach the take-th largest, by the bounds
-    /// rest |q|^2 <= q' S_c q <= lambda_1 |q|^2.
-    pub fn order_qm(&self, ix: &Index2, q32: &[f32], qm: &[f64], kk: usize, vis: Option<&Vis2>, take: usize) -> (Vec<usize>, usize) {
-        let live: Vec<usize> = (0..qm.len()).filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0)).collect();
-        let dense = vis.is_none_or(|v| v.rows.len() >= H_MIN_ROWS_PER_K * kk * live.len());
-        let h = self.h.as_ref().filter(|_| dense);
-        let b = if self.h.is_some() && h.is_none() { SPREAD_F * self.sd_ratio(qm) } else { self.bonus(qm) };
+    /// The first `take` clusters of the order (all when `take` is 0) holding a visible row, from q.m of every cluster:
+    /// only those are sorted (by descending key, the lower index first among equal keys).
+    pub fn order_qm(&self, ix: &Index2, qm: &[f64], vis: Option<&Vis2>, take: usize) -> Vec<usize> {
+        let b = self.bonus(qm);
         let by = |x: &(f64, usize), y: &(f64, usize)| y.0.partial_cmp(&x.0).unwrap().then(x.1.cmp(&y.1));
-        let mut done = 0;
-        let mut keys: Vec<(f64, usize)> = match h {
-            None => live.into_iter().map(|ci| (qm[ci] + b * self.rad[ci], ci)).collect(),
-            Some(h) => {
-                let (n, r) = (ix.n(), h.r);
-                let qq: f64 = q32.iter().map(|&x| x as f64 * x as f64).sum();
-                let mut live = live;
-                let m = match self.kind {
-                    OrderKind::H { m, .. } => m,
-                    _ => 0,
-                };
-                if m > 0 && take > 0 && m * take < live.len() {
-                    let bs = SPREAD_F * self.sd_ratio(qm);
-                    let key = |ci: usize| qm[ci] + bs * self.rad[ci];
-                    live.select_nth_unstable_by(m * take - 1, |&x, &y| key(y).total_cmp(&key(x)).then(x.cmp(&y)));
-                    live.truncate(m * take);
-                }
-                // (lower bound, upper bound, cluster, alpha z); the bounds widened for the int8 directions
-                let bounds: Vec<(f64, f64, usize, f64)> = live.into_iter().map(|ci| {
-                    let nv = vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
-                    let az = h.alpha * z_of(kk, nv);
-                    let base = qm[ci] + b * self.rad[ci];
-                    // sigma_c lies in [s0, s1]; alpha z is negative when the cluster has under 2 k visible rows
-                    let s0 = (h.rest[ci] as f64 * qq).sqrt() * 0.999;
-                    let s1 = (h.lam1(ci).max(h.rest[ci]) as f64 * qq).sqrt() * 1.001;
-                    (base + (az * s0).min(az * s1), base + (az * s0).max(az * s1), ci, az)
-                }).collect();
-                let cut = if take > 0 && take < bounds.len() {
-                    let mut lo: Vec<f64> = bounds.iter().map(|x| x.0).collect();
-                    let (_, &mut c, _) = lo.select_nth_unstable_by(take - 1, |x, y| y.total_cmp(x));
-                    c
-                } else {
-                    f64::NEG_INFINITY
-                };
-                let mut p = vec![0f32; r];
-                bounds.iter().filter(|x| x.1 >= cut).map(|&(_, _, ci, az)| {
-                    done += 1;
-                    (qm[ci] + b * self.rad[ci] + az * h.var(ci, q32, qq, n, &mut p).sqrt(), ci)
-                }).collect()
-            }
-        };
+        let mut keys: Vec<(f64, usize)> = (0..qm.len())
+            .filter(|&ci| vis.map_or(ix.cl[ci].r1 > ix.cl[ci].r0, |v| v.cl_cnt[ci] > 0))
+            .map(|ci| (qm[ci] + b * self.rad[ci], ci))
+            .collect();
         if take > 0 && take < keys.len() {
             keys.select_nth_unstable_by(take - 1, by);
             keys.truncate(take);
         }
         keys.sort_unstable_by(by);
-        (keys.into_iter().map(|x| x.1).collect(), done)
-    }
-    /// Clusters holding a visible item, in order, for a query asking for its `kk` best.
-    pub fn order(&self, ix: &Index2, pr: &Prep2, kk: usize, vis: Option<&Vis2>) -> Vec<usize> {
-        let qm: Vec<f64> = (0..ix.k()).map(|ci| ix.qm(&pr.q64, ci)).collect();
-        self.order_qm(ix, &pr.q32, &qm, kk, vis, 0).0
+        keys.into_iter().map(|x| x.1).collect()
     }
 
-    /// f for `kind` from its grid (`OrderKind::grid`): the one that reaches mean recall@10 0.95 on the queries (exact
-    /// scan of the probed clusters, same number of clusters for every query) with the fewest items scanned; radii from
-    /// the stored vectors. Also returns the mean items scanned at each f.
-    pub fn fit(ix: &Index2, pseudo: &[(usize, Vec<f32>, Vec<u32>)], kind: OrderKind) -> (Approx, Vec<(f64, f64)>) {
-        let base = Approx::new(ix, kind, 0.0, Approx::radii(ix));
-        let k = ix.k();
-        let row_cl: Vec<u32> = ix.cl.iter().enumerate().flat_map(|(ci, c)| std::iter::repeat(ci as u32).take(c.r1 - c.r0)).collect();
-        let mut res = Vec::new();
-        for &f in kind.grid() {
-            let ap = Approx { f, ..base.clone() };
-            // per query: items scanned and items found by the first p clusters, p = 1..k
-            let per: Vec<(Vec<f64>, Vec<f64>)> = pseudo.par_iter().map(|(_, q, gt)| {
-                let pr = prep2(ix, q);
-                let ord = ap.order(ix, &pr, gt.len().max(1), None);
-                let mut rank = vec![0usize; k];
-                for (i, &ci) in ord.iter().enumerate() {
-                    rank[ci] = i;
-                }
-                let mut found = vec![0f64; k + 1];
-                for &e in gt {
-                    found[rank[row_cl[ix.row_of_ent(e)] as usize] + 1] += 1.0 / gt.len() as f64;
-                }
-                let mut items = vec![0f64; k + 1];
-                for p in 1..=k {
-                    found[p] += found[p - 1];
-                    items[p] = items[p - 1] + (ix.cl[ord[p - 1]].r1 - ix.cl[ord[p - 1]].r0) as f64;
-                }
-                (found, items)
-            }).collect();
-            let nq = per.len() as f64;
-            let p95 = (1..=k).find(|&p| per.iter().map(|x| x.0[p]).sum::<f64>() / nq >= 0.95).unwrap_or(k);
-            res.push((f, per.iter().map(|x| x.1[p95]).sum::<f64>() / nq));
-        }
-        let best = res.iter().cloned().fold((0.0, f64::INFINITY), |a, b| if b.1 < a.1 { b } else { a });
-        (Approx { f: best.0, ..base }, res)
+    /// Clusters holding a visible item, in order.
+    pub fn order(&self, ix: &Index2, pr: &Prep2, vis: Option<&Vis2>) -> Vec<usize> {
+        let qm: Vec<f64> = (0..ix.k()).map(|ci| ix.qm(&pr.q64, ci)).collect();
+        self.order_qm(ix, &qm, vis, 0)
     }
 }
 
@@ -3785,8 +3591,7 @@ pub fn knn2_fast(ix: &Index2, ap: &Approx, q: &[f32], kk: usize, vis: Option<&Vi
     // clusters only (and for every centre when a cluster on the index path first asks for the anchor)
     let qmo = ap.centre_scores(ix, &pr.q32);
     let mut st = Stats::new(nl);
-    let (order, hcand) = ap.order_qm(ix, &pr.q32, &qmo, kk, vis, nprobe);
-    st.cyc[C_HCAND] += hcand as u64;
+    let order = ap.order_qm(ix, &qmo, vis, nprobe);
     pr.qms(ix, Some(&order));
     st.cyc[P_PLAN] += tick() - t0;
     // the groups of the probed clusters with too many visible rows to be scored directly, set up together: each

@@ -1,23 +1,30 @@
-//! The simple arms of approximate k-NN: how far the simplest pieces go against the approximate process (`process`).
-//! Cumulative steps (`Variant`) of one loop over the clusters holding a visible row, each cluster read whole by
-//! `KnnReader` (its visible rows scored from their stored vectors, or the index path at the running k-th best):
+//! The approximate queries: adaptive k-NN and threshold queries over the clusters, with one raw knob psi.
 //!
-//! - S1: the `spread` order, key q.m + f sd(q) rad / sd(rad) at f = `SPREAD_F`, its first nprobe clusters (the knob)
-//!   and as many more as it takes to hold k items; each cluster read directly or on the index path, whichever the
-//!   measured cost model (`Measured`) says is cheaper;
-//! - S2: the same key at f the knob, the probe stopped when the next cluster's key falls below the running k-th best.
-//!   The key is on the score scale (q.m plus f times the centre scores' standard deviation, in units of the radii's),
-//!   an optimistic estimate of the cluster's best score that grows with f;
-//! - S3: S2 racing a scan of the visible rows: before each step, when the probe's modelled cost would pass that of the
-//!   scan (C_s), the rows not yet read are scanned instead. The answer is then exact, and the whole costs at most
-//!   2 C_s: the probe spends at most C_s, and the rest of the scan at most C_s, since no row is read twice;
-//! - S4: S3 by the key mu_c + psi sigma_c(q), psi the knob (`PSI` when the knob asks for everything), sigma_c the
-//!   spread of the cluster's scores from its group's covariance (the calibration's `GroupCov`, one product over all
-//!   the groups' directions, scaled by the cluster's radius) or from the cluster's own directions (`OrderState`),
-//!   computed in the `spread` order `LOOKAHEAD` clusters ahead of the probe.
+//! Each cluster holding a visible row is keyed by u_c = mu_c + psi sigma_c(q): mu_c its centre score (the int8
+//! centres), sigma_c(q) = sqrt(q' S_c q) the spread of its rows' scores along the query, S_c the cluster's covariance as
+//! its stored principal directions (`order::OrderState`) and an isotropic rest. u_c is an optimistic estimate of the
+//! cluster's best score, on the score scale, and psi says how optimistic (theory: the best multiplier is 3 to 4 at
+//! every unit size and dataset, `hierarchy/theory.md` 3.4).
 //!
-//! Every variant returns k items whenever k are visible. Its cost model's constants are timed on this machine and
-//! cached with the index (`measured_constants`); nothing in it is set by hand.
+//! - k-NN: clusters are read in u order, each read whole by `KnnReader` (its visible rows scored from their stored
+//!   vectors, or the index path at the running k-th best), until the next cluster's u falls below the running k-th
+//!   best; k items are returned whenever k are visible. The sigmas are computed lazily: the clusters come in the
+//!   `spread` order (`q::Approx`, free from the centre scores), and the `LOOKAHEAD` next ones have their sigma, so
+//!   that a cluster whose spread puts it ahead can overtake within that window. The probe races a scan of the visible
+//!   rows: before each step, when its modelled cost would pass that of the scan (C_s), the rows not yet read are
+//!   scanned instead. The answer is then exact and the whole costs at most 2 C_s (the probe spends at most C_s, the
+//!   rest of the scan at most C_s, and no row is read twice).
+//! - threshold at t: the clusters whose u reaches t are read (the support table first drops those wholly below t
+//!   and takes in those wholly above it without a read), each exactly as the exact query reads it. That set does not
+//!   depend on what is read, so the race is settled before reading: when a scan of the visible rows, or the exact query
+//!   (every cluster the support table leaves open), costs no more than the set, the query hands over to the cheaper,
+//!   which answers exactly.
+//! - a sigma is computed only where it costs less than reading the cluster it could save (16 int8 rows of n against
+//!   the cluster's direct read); a cluster cheaper to read than to price takes its key's upper bound
+//!   (sigma <= sqrt(max(lambda_1, rest)) |q|) and is read on it.
+//! - each cluster is read directly or on the index path, whichever the measured cost model says is cheaper
+//!   (`Measured`), with a group's setup and the anchor search charged to the first cluster that needs them. The model's
+//!   constants are timed on this machine on first use and cached with the index (`measured_constants`).
 
 use super::q::*;
 use super::*;
@@ -27,13 +34,18 @@ use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::time::Instant;
 
-/// S4's psi when the knob asks for everything (the order then does not change the answer): the middle of the best
-/// multipliers measured at every unit size and dataset (`hierarchy/theory.md` 3.4: 3 to 4).
-pub const PSI: f64 = 3.5;
-/// S4 with the clusters' own spreads: how many clusters ahead of the probe, in the `spread` order, have theirs.
+/// psi by default. Measured paired on glove, yahoo and LAION (k = 10): psi 4 gives recall 0.78-0.89 unfiltered and
+/// psi 5 gives 0.90-0.985; filtered sets reach more at the same psi. 4.5 sits between: about 0.85-0.96 unfiltered,
+/// 0.90 and above under the random and region visible sets measured.
+pub const PSI: f64 = 4.5;
+/// The order's key when the knob asks for everything (psi infinite: the order then changes no answer).
+const PSI_ALL: f64 = 3.5;
+/// The clusters next in the `spread` order that have their sigma before the probe reaches them: the window in which a
+/// cluster can overtake by its spread. Each query computes this many sigmas beyond those it reads (16 int8 rows of n
+/// each), so the window costs a fixed few microseconds.
 pub const LOOKAHEAD: usize = 8;
 
-/// The cost model of the simple arms, in microseconds on the calling thread, timed on this machine (`measure`):
+/// The cost model of the approximate queries, in microseconds on the calling thread, timed on this machine (`measure`):
 /// - `i8_us`, a product of the query with an int8 row of n (centre scores, spreads' directions);
 /// - `row_us`, `dir_us`: a cluster read directly costs dir + row v for its v visible rows; a scan of v rows, row v;
 /// - `cl_us`, `size_us`, `vis_us`: a cluster of S rows on the index path costs cl + size S + vis v, at the running
@@ -141,11 +153,12 @@ fn fit_rel(x: &[Vec<f64>], t: &[f64]) -> Vec<f64> {
                 singular = Some(idx[c]);
                 break;
             }
-            for r in 0..p {
+            let pivot = a[c].clone();
+            for (r, row) in a.iter_mut().enumerate() {
                 if r != c {
-                    let f = a[r][c] / a[c][c];
-                    for cc in c..=p {
-                        a[r][cc] -= f * a[c][cc];
+                    let f = row[c] / pivot[c];
+                    for (x, y) in row[c..].iter_mut().zip(&pivot[c..]) {
+                        *x -= f * y;
                     }
                 }
             }
@@ -226,7 +239,7 @@ pub fn measure(ix: &Index2) -> Option<Measured> {
     // the visible sets: every row, then one in s by a hash of the row
     let sets: Vec<Option<Vis2>> = T_SHARES.iter().map(|&s| {
         (s > 1).then(|| {
-            let bm: RoaringBitmap = (0..ix.nrows).filter(|&r| ((r as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) % s == 0).map(|r| ix.row_ent[r]).collect();
+            let bm: RoaringBitmap = (0..ix.nrows).filter(|&r| ((r as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32).is_multiple_of(s)).map(|r| ix.row_ent[r]).collect();
             Vis2::new(ix, &bm)
         })
     }).collect();
@@ -364,56 +377,21 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
     let t = Timer::new();
     let (m, why) = cached_measured(&path, &key, || measure(ix));
     match &m {
-        Some(m) => log(format!("[simple] measured constants {}: {why}, in {:.1}s; the exact planner's rule from them: {}", m.to_kv().trim().replace('\n', " "), t.s(),
+        Some(m) => log(format!("[approx] measured constants {}: {why}, in {:.1}s; the exact planner's rule from them: {}", m.to_kv().trim().replace('\n', " "), t.s(),
                                m.rule().map_or("every cluster scored directly".into(), |(r, kp)| format!("r_rows={r} r_kappa={kp:.3}")))),
-        None => log(format!("[simple] no measured constants: {why}")),
+        None => log(format!("[approx] no measured constants: {why}")),
     }
     m
 }
 
-/// A simple arm (see the module's comment).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Variant {
-    S1,
-    S2,
-    S3,
-    S4Group,
-    S4Own,
-}
 
-impl Variant {
-    pub const ALL: [Variant; 5] = [Variant::S1, Variant::S2, Variant::S3, Variant::S4Group, Variant::S4Own];
-    pub fn parse(s: &str) -> Result<Variant, String> {
-        match s {
-            "s1" => Ok(Variant::S1),
-            "s2" => Ok(Variant::S2),
-            "s3" => Ok(Variant::S3),
-            "s4" => Ok(Variant::S4Group),
-            "s4-own" => Ok(Variant::S4Own),
-            _ => Err(format!("the simple arm is s1, s2, s3, s4 (group spreads) or s4-own (the clusters' own), not {s:?}")),
-        }
-    }
-    pub fn name(self) -> &'static str {
-        match self {
-            Variant::S1 => "s1",
-            Variant::S2 => "s2",
-            Variant::S3 => "s3",
-            Variant::S4Group => "s4",
-            Variant::S4Own => "s4-own",
-        }
-    }
-    /// Whether the probe races a scan.
-    pub fn race(self) -> bool {
-        matches!(self, Variant::S3 | Variant::S4Group | Variant::S4Own)
-    }
-}
-
-/// What one query of a simple arm did. `path`: "probe" (stopped by its knob), "race" (the rest scanned once the probe
-/// would cost more than a scan), "scan" (scanned before probing: k or fewer visible rows, or the order alone would
-/// cost the scan), "empty". Costs are modelled (`Measured`): `fixed` the order's (centre scores, group spreads),
-/// `cost` everything, `scan_cost` a scan of the visible rows.
+/// What one approximate query did. `path`: "probe" (k-NN stopped by its knob; a threshold query's clusters read),
+/// "race" (k-NN: the rest scanned once the probe would cost more than a scan), "scan" (the visible rows scanned before
+/// probing), "exact" (a threshold query handed to the exact one), "empty". Costs are modelled (`Measured`): `fixed`
+/// the order's (centre scores; the anchor search of a threshold query), `cost` everything, `scan_cost` a scan of the
+/// visible rows, `exact_cost` (threshold) every cluster the support table leaves open, at its cheaper path.
 #[derive(Clone, Debug, Default)]
-pub struct SimpleInfo {
+pub struct AdaptiveInfo {
     pub path: &'static str,
     pub visited: usize,
     pub direct: usize,
@@ -423,6 +401,7 @@ pub struct SimpleInfo {
     pub fixed: f64,
     pub cost: f64,
     pub scan_cost: f64,
+    pub exact_cost: f64,
 }
 
 /// A cluster's key in a max-heap, the lower cluster first among equal keys.
@@ -440,52 +419,98 @@ impl Ord for Key {
     }
 }
 
-/// The simple arms' state for one index.
-pub struct Simple {
+/// The approximate queries' state for one index.
+pub struct Adaptive {
     pub m: Measured,
+    /// the `spread` order (the stream the sigmas are computed in) and the int8 centres
     ap: Approx,
-    /// the clusters' own directions (S4 own), with each cluster's isotropic rest
-    own: Option<(std::sync::Arc<super::order::OrderState>, Vec<f64>)>,
-    /// each group's isotropic rest (S4 group; with the calibration's group covariances)
-    grest: Vec<f64>,
+    st: std::sync::Arc<super::order::OrderState>,
+    /// per cluster, the variance its directions leave per other spanned dimension, and the largest variance along any
+    /// direction (sigma <= sqrt(top |q|^2))
+    rest: Vec<f64>,
+    top: Vec<f64>,
 }
 
-impl Simple {
-    /// The state for `ix` with the constants `m`: the `spread` order's radii and int8 centres, and the spreads' rests.
-    pub fn new(ix: &Index2, m: Measured) -> Result<Simple, String> {
+/// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once.
+struct Charges<'a> {
+    m: &'a Measured,
+    ix: &'a Index2,
+    pr: &'a Prep2,
+    anchored: bool,
+    gset: Vec<bool>,
+}
+
+impl Charges<'_> {
+    /// The cheaper path for a cluster of `rows` rows, `nv` visible, given what is already set up (`anchors` the anchors
+    /// a first search would score), and its cost; marks what the index path sets up.
+    fn choose(&mut self, ci: usize, nv: usize, anchors: usize) -> (KnnPath, f64, bool) {
+        let (m, ix) = (self.m, self.ix);
+        let rows = ix.cl[ci].r1 - ix.cl[ci].r0;
+        let g = ix.cl[ci].g;
+        let gnew = !self.gset[g] && self.pr.gq[g].get().is_none();
+        let idx = m.index(rows, nv) + if gnew { m.grp_us } else { 0.0 } + if self.anchored { 0.0 } else { m.anc_us * anchors as f64 };
+        let dir = m.direct(nv);
+        if idx < dir {
+            self.gset[g] = true;
+            (KnnPath::Index, idx, gnew)
+        } else {
+            (KnnPath::Direct, dir, false)
+        }
+    }
+}
+
+impl Adaptive {
+    /// The state for `ix` with the constants `m`: the `spread` order's radii and int8 centres, and each cluster's
+    /// spread's rest and bound from its stored directions.
+    pub fn new(ix: &Index2, m: Measured) -> Result<Adaptive, String> {
         if !matches!(ix.full, Full2::Real { .. }) {
-            return Err("the simple arms read stored vectors, and this index has none; query it exactly (knn2)".into());
+            return Err("the approximate queries read stored vectors, and this index has none; query it exactly (knn2, threshold2)".into());
         }
-        let ap = Approx::new(ix, OrderKind::Spread, SPREAD_F, Approx::radii(ix));
-        let own = ix.order.clone().map(|st| {
-            let r = st.r;
-            let rest = (0..ix.k()).map(|c| super::calib::rest(st.rad[c], &st.lam[c * r..(c + 1) * r], st.n0)).collect();
-            (st, rest)
-        });
-        let grest = ix.calib.as_ref().map_or(Vec::new(), |cal| {
-            let g = &cal.gcov;
-            (0..ix.groups.len()).map(|i| super::calib::rest(g.rad[i], &g.lam[i * g.r..(i + 1) * g.r], g.n0)).collect()
-        });
-        Ok(Simple { m, ap, own, grest })
+        let st = ix.order.clone().ok_or("this index holds no order state (the clusters' directions the approximate queries read); rebuild it")?;
+        let r = st.r;
+        let rest: Vec<f64> = (0..ix.k()).map(|c| {
+            let lam = &st.lam[c * r..(c + 1) * r];
+            let top: f64 = lam.iter().map(|&l| l as f64).sum();
+            (st.rad[c] * st.rad[c] - top).max(0.0) / (st.n0.max(r + 1) - r) as f64
+        }).collect();
+        let top = (0..ix.k()).map(|c| st.lam.get(c * r).map_or(0.0, |&l| l as f64).max(rest[c])).collect();
+        Ok(Adaptive { m, ap: Approx::spread(ix), st, rest, top })
     }
 
-    /// Whether variant `v` can run on `ix`: S4 needs the calibration's group covariances, or the order state's
-    /// directions.
-    pub fn check(&self, ix: &Index2, v: Variant) -> Result<(), String> {
-        match v {
-            Variant::S4Group if ix.calib.is_none() => Err("s4 reads the group covariances of the approximate process's calibration, and this index has none (too few rows); use s4-own or s3".into()),
-            Variant::S4Own if self.own.is_none() => Err("s4-own reads the clusters' directions of the order state, and this index has none; rebuild it".into()),
-            _ => Ok(()),
+    /// sigma_c(q) of cluster ci from its stored directions (`p` and `pf` scratch of r values), the query's f32 values
+    /// and |q|^2.
+    fn sigma(&self, ix: &Index2, ci: usize, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
+        let (st, r, n) = (&self.st, self.st.r, ix.n());
+        unsafe { crate::kernel::gemv_i8(q32, st.dirs(ci, r, n), n, &mut p[..r]) };
+        let (mut v, mut pp) = (0f64, 0f64);
+        for ((&pj, &sc), &l) in p[..r].iter().zip(&st.dsc[ci * r..(ci + 1) * r]).zip(&st.lam[ci * r..(ci + 1) * r]) {
+            let x = pj as f64 * sc as f64;
+            v += l as f64 * x * x;
+            pp += x * x;
+        }
+        (v + self.rest[ci] * (qq - pp).max(0.0)).max(0.0).sqrt()
+    }
+
+    /// The cost of one sigma (its directions' products).
+    fn sigma_cost(&self) -> f64 {
+        self.m.i8_us * self.st.r as f64
+    }
+
+    /// The anchors a first anchor search scores when it may take the nearest of `among` clusters' anchors.
+    fn anchors(ix: &Index2, among: usize) -> usize {
+        if !ix.nukey.is_empty() {
+            0
+        } else if ix.anc_centres && ix.nanch == ix.k() {
+            among
+        } else {
+            ix.nanch
         }
     }
 
-    /// Approximate k-NN by variant `v` with knob `knob`: nprobe for S1, f for S2 and S3, psi for S4; infinity asks
-    /// for every cluster. Returns k items whenever k are visible. `plan` is the index path's (its dial is the
-    /// certified one).
-    #[allow(clippy::too_many_arguments)]
-    pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, v: Variant, knob: f64, plan: Plan) -> (KnnOut2, SimpleInfo) {
+    /// Approximate k-NN with knob `psi` (`PSI` by default; infinity reads every cluster and answers exactly). Returns
+    /// k items whenever k are visible. `plan` is the index path's (its dial is the certified one).
+    pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
-        self.check(ix, v).unwrap();
         let tm = Timer::new();
         let t0 = tick();
         let (k, nl, m) = (ix.k(), ix.meta.nl(), &self.m);
@@ -494,10 +519,9 @@ impl Simple {
         let nv_of = |ci: usize| vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
         let live: Vec<usize> = (0..k).filter(|&ci| nv_of(ci) > 0).collect();
         let nvis: usize = live.iter().map(|&ci| nv_of(ci)).sum();
-        let all = knob.is_nan() || knob == f64::INFINITY;
-        let gr = ix.calib.as_ref().map_or(0, |c| c.gcov.r);
-        let fixed = m.i8_us * (k + if v == Variant::S4Group { ix.groups.len() * gr } else { 0 }) as f64;
-        let mut info = SimpleInfo { fixed, scan_cost: m.scan(nvis), ..SimpleInfo::default() };
+        let all = psi.is_nan() || psi == f64::INFINITY;
+        let fixed = m.i8_us * k as f64;
+        let mut info = AdaptiveInfo { fixed, scan_cost: m.scan(nvis), ..AdaptiveInfo::default() };
         let out = |ents: Vec<(f64, u32)>, mut st: Stats| {
             st.cyc[P_QUERY] += tick() - t0;
             KnnOut2 { ents, st, t_seed: 0.0, t_sweep: tm.ms(), t_sel: 0.0, npow: ix.meta.npow }
@@ -507,72 +531,27 @@ impl Simple {
             return (out(Vec::new(), st), info);
         }
         let cs = info.scan_cost;
-        if v.race() && (nvis <= kk || fixed >= cs) {
+        if nvis <= kk || fixed >= cs {
             info.path = "scan";
             info.cost = cs;
             st.full_reads += nvis as u64;
             st.touched += nvis as u64;
             return (out(scan_knn(ix, &pr.q16, &pr.q32, pr.qn, kk, vis), st), info);
         }
-        // the order
         let tc = tick();
         let qm = self.ap.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - tc;
-        let sdr = self.ap.sd_ratio(&qm);
-        let spread_key = |ci: usize, f: f64| qm[ci] + f * sdr * self.ap.rad[ci];
+        let ts = tick();
+        let b = self.ap.bonus(&qm);
+        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(qm[ci] + b * self.ap.rad[ci], Reverse(ci))).collect();
+        st.cyc[P_ORDER] += tick() - ts;
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        let psi = if all { PSI } else { knob };
-        let mut spent = fixed;
-        let mut heap: BinaryHeap<Key> = match v {
-            Variant::S1 | Variant::S2 | Variant::S3 => {
-                let f = if v == Variant::S1 || all { SPREAD_F } else { knob };
-                let ts = tick();
-                let h = live.iter().map(|&ci| Key(spread_key(ci, f), Reverse(ci))).collect();
-                st.cyc[P_SOLVE] += tick() - ts;
-                h
-            }
-            Variant::S4Group => {
-                let cal = ix.calib.as_ref().unwrap();
-                let g = &cal.gcov;
-                let tsp = tick();
-                let mut p = vec![0f32; ix.groups.len() * g.r];
-                unsafe { crate::kernel::gemv_i8(&pr.q32, &g.dirs8, ix.n(), &mut p) };
-                let gsig: Vec<f64> = (0..ix.groups.len()).map(|i| {
-                    let pf: Vec<f64> = p[i * g.r..(i + 1) * g.r].iter().map(|&x| x as f64).collect();
-                    super::calib::sigma(&pf, &g.lam[i * g.r..(i + 1) * g.r], &g.dsc[i * g.r..(i + 1) * g.r], self.grest[i], qq)
-                }).collect();
-                st.cyc[P_SPREAD] += tick() - tsp;
-                st.cyc[C_SPREADS] += p.len() as u64;
-                info.spreads = live.len();
-                let ts = tick();
-                let h = live.iter().map(|&ci| {
-                    let gi = ix.cl[ci].g;
-                    Key(qm[ci] + psi * gsig[gi] * self.ap.rad[ci] / g.rad[gi].max(1e-300), Reverse(ci))
-                }).collect();
-                st.cyc[P_SOLVE] += tick() - ts;
-                h
-            }
-            // the stream in the `spread` order; the clusters given their spread move to `window`
-            Variant::S4Own => {
-                let ts = tick();
-                let h = live.iter().map(|&ci| Key(spread_key(ci, SPREAD_F), Reverse(ci))).collect();
-                st.cyc[P_SOLVE] += tick() - ts;
-                h
-            }
-        };
+        let psi = if all { PSI_ALL } else { psi };
+        let sc = self.sigma_cost();
+        let mut p = vec![0f32; self.st.r];
         let mut window: BinaryHeap<Key> = BinaryHeap::new();
-        let own_sigma = |ci: usize, p: &mut [f32]| -> f64 {
-            let (st0, rest) = self.own.as_ref().unwrap();
-            let r = st0.r;
-            unsafe { crate::kernel::gemv_i8(&pr.q32, st0.dirs(ci, r, ix.n()), ix.n(), &mut p[..r]) };
-            let pf: Vec<f64> = p[..r].iter().map(|&x| x as f64).collect();
-            super::calib::sigma(&pf, &st0.lam[ci * r..(ci + 1) * r], &st0.dsc[ci * r..(ci + 1) * r], rest[ci], qq)
-        };
-        let own_r = self.own.as_ref().map_or(0, |o| o.0.r);
-        let mut pbuf = vec![0f32; own_r];
-        let nprobe = if v == Variant::S1 && !all { knob.max(0.0) as usize } else { usize::MAX };
-        let anchors = |seen: usize| if ix.anc_centres && ix.nanch == k { seen } else { ix.nanch };
-        let mut anchored = !ix.nukey.is_empty();
+        let mut ch = Charges { m, ix, pr: &pr, anchored: !ix.nukey.is_empty(), gset: vec![false; ix.groups.len()] };
+        let mut spent = fixed;
         let mut visited = vec![false; k];
         let mut seen: Vec<usize> = Vec::new();
         let mut raced = false;
@@ -580,59 +559,54 @@ impl Simple {
         loop {
             let ts = tick();
             let mut sig = 0;
-            if v == Variant::S4Own {
-                while window.len() < LOOKAHEAD && !heap.is_empty() {
-                    let sc = m.i8_us * own_r as f64;
-                    if v.race() && spent + sc > cs {
-                        raced = true;
-                        break;
-                    }
-                    let ci = heap.pop().unwrap().1 .0;
-                    let tsp = tick();
-                    let s = own_sigma(ci, &mut pbuf);
-                    sig += tick() - tsp;
-                    rd.st.cyc[C_SPREADS] += own_r as u64;
-                    spent += sc;
-                    info.spreads += 1;
-                    window.push(Key(qm[ci] + psi * s, Reverse(ci)));
+            while window.len() < LOOKAHEAD && !stream.is_empty() {
+                let ci = stream.peek().unwrap().1 .0;
+                // a cluster cheaper to read than to price is read on its key's upper bound
+                if m.direct(nv_of(ci)) <= sc {
+                    stream.pop();
+                    window.push(Key(qm[ci] + psi * (self.top[ci] * qq).sqrt(), Reverse(ci)));
+                    continue;
                 }
+                if spent + sc > cs {
+                    raced = true;
+                    break;
+                }
+                stream.pop();
+                let tsp = tick();
+                let s = self.sigma(ix, ci, &pr.q32, qq, &mut p);
+                sig += tick() - tsp;
+                spent += sc;
+                info.spreads += 1;
+                window.push(Key(qm[ci] + psi * s, Reverse(ci)));
             }
-            let next = if raced { None } else if v == Variant::S4Own { window.pop() } else { heap.pop() };
+            let next = if raced { None } else { window.pop() };
             rd.st.cyc[P_SPREAD] += sig;
-            rd.st.cyc[P_SOLVE] += tick() - ts - sig;
+            rd.st.cyc[P_ORDER] += tick() - ts - sig;
             let Some(Key(key, Reverse(ci))) = next else { break };
             // the batched direct rows are scored first (their time is the reads')
-            let kth = rd.kth();
-            let stop = if v == Variant::S1 { info.visited >= nprobe && kth > f64::NEG_INFINITY } else { !all && kth > key };
-            if stop {
+            if !all && rd.kth() > key {
                 break;
             }
             let tch = tick();
-            let (rows, nv) = (ix.cl[ci].r1 - ix.cl[ci].r0, nv_of(ci));
-            let dir = m.direct(nv);
-            if v.race() && spent + dir > cs {
+            let nv = nv_of(ci);
+            if spent + m.direct(nv) > cs {
                 raced = true;
                 rd.st.cyc[P_CHOICE] += tick() - tch;
                 break;
             }
             seen.push(ci);
-            let g = ix.cl[ci].g;
-            let gnew = pr.gq[g].get().is_none();
-            let anc = if anchored { 0.0 } else { m.anc_us * anchors(seen.len()) as f64 };
-            let idx = m.index(rows, nv) + if gnew { m.grp_us } else { 0.0 } + anc;
-            let path = if idx < dir { KnnPath::Index } else { KnnPath::Direct };
+            let (path, cost, gnew) = ch.choose(ci, nv, Self::anchors(ix, seen.len()));
             if path == KnnPath::Index {
-                if !anchored {
+                if !ch.anchored {
                     pr.anc_among(ix, Some(&seen));
-                    anchored = true;
+                    ch.anchored = true;
                 }
                 info.index += 1;
                 info.groups += gnew as usize;
-                spent += idx;
             } else {
                 info.direct += 1;
-                spent += dir;
             }
+            spent += cost;
             rd.st.cyc[P_CHOICE] += tick() - tch;
             info.visited += 1;
             visited[ci] = true;
@@ -649,12 +623,155 @@ impl Simple {
             }
         }
         info.cost = spent;
+        rd.st.cyc[C_SPREADS] += (info.spreads * self.st.r) as u64;
         rd.st.cyc[C_DIRECT] += info.direct as u64;
         rd.st.cyc[C_INDEX] += info.index as u64;
         rd.st.cyc[C_GROUPS] += info.groups as u64;
         rd.st.cyc[C_VISITED] += info.visited as u64;
         let (ents, st) = rd.finish();
         (out(ents, st), info)
+    }
+
+    /// The approximate threshold query at t with knob `psi` (`PSI` by default): the visible rows scoring at least t of
+    /// the clusters the support table takes in and of those whose key reaches t, ascending; a subset of the exact
+    /// answer, and the exact answer when psi is infinite or the query hands over (`AdaptiveInfo::path` "scan" or
+    /// "exact"). `plan` is the reads' (and the exact query's on a hand-over).
+    pub fn threshold(&self, ix: &Index2, q: &[f32], t: f64, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (ThrOut2, AdaptiveInfo) {
+        let t0 = tick();
+        let (k, nl, m) = (ix.k(), ix.meta.nl(), &self.m);
+        let pr = prep2(ix, q);
+        let mut st = Stats::new(nl);
+        let nv_of = |ci: usize| vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+        let live: Vec<usize> = (0..k).filter(|&ci| nv_of(ci) > 0).collect();
+        let nvis: usize = live.iter().map(|&ci| nv_of(ci)).sum();
+        let all = psi.is_nan() || psi == f64::INFINITY;
+        let nusort = !ix.nukey.is_empty();
+        let fixed = m.i8_us * k as f64 + m.anc_us * Self::anchors(ix, live.len()) as f64;
+        let mut info = AdaptiveInfo { fixed, scan_cost: m.scan(nvis), ..AdaptiveInfo::default() };
+        let opts = Opts2 { vis, verify: false, want_iv: false, plan };
+        let done = |mut out: ThrOut2, st: &Stats| {
+            out.st.add(st);
+            out.st.cyc[P_QUERY] += tick() - t0;
+            out
+        };
+        if nvis == 0 {
+            info.path = "empty";
+            return (done(ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, &st), info);
+        }
+        let cs = info.scan_cost;
+        if fixed >= cs {
+            info.path = "scan";
+            info.cost = cs;
+            return (done(scan_visible(ix, &pr, t, vis, false, plan.pscan), &st), info);
+        }
+        let tc = tick();
+        let qm = self.ap.centre_scores(ix, &pr.q32);
+        st.cyc[P_PLAN] += tick() - tc;
+        // the support table's verdicts: wholly below t (dropped), wholly above (taken in), or open
+        let tch = tick();
+        if !nusort {
+            pr.anc_among(ix, Some(&live));
+        }
+        let mut pre = vec![Pre::Skip; k];
+        let mut open = Vec::new();
+        for &ci in &live {
+            match support_pre(ix, &pr, t, nv_of(ci), ci, nusort) {
+                Some(p) => pre[ci] = p,
+                None => open.push(ci),
+            }
+        }
+        st.cyc[P_CHOICE] += tick() - tch;
+        // the open clusters whose key reaches t; a sigma only for those whose bound reaches it, and where it costs
+        // less than the read it could save
+        let ts = tick();
+        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
+        let (sc, mut p, mut sig) = (self.sigma_cost(), vec![0f32; self.st.r], 0);
+        let mut spent = fixed;
+        let mut take = Vec::new();
+        let mut priced: Vec<usize> = Vec::new();
+        for &ci in &open {
+            if !all && qm[ci] + psi * (self.top[ci] * qq).sqrt() < t {
+                continue;
+            }
+            if all || m.direct(nv_of(ci)) <= sc {
+                take.push(ci);
+            } else {
+                priced.push(ci);
+            }
+        }
+        // the spreads are spent before anything is read: a scan that costs no more is taken first
+        if !all && spent + priced.len() as f64 * sc >= cs {
+            st.cyc[P_ORDER] += tick() - ts;
+            info.path = "scan";
+            info.cost = spent + cs;
+            return (done(scan_visible(ix, &pr, t, vis, false, plan.pscan), &st), info);
+        }
+        for &ci in &priced {
+            let tsp = tick();
+            let s = self.sigma(ix, ci, &pr.q32, qq, &mut p);
+            sig += tick() - tsp;
+            spent += sc;
+            info.spreads += 1;
+            if qm[ci] + psi * s >= t {
+                take.push(ci);
+            }
+        }
+        st.cyc[P_SPREAD] += sig;
+        st.cyc[P_ORDER] += tick() - ts - sig;
+        // the cost of reading them, against a scan and against the exact query (every open cluster)
+        let tch = tick();
+        let price = |set: &[usize]| -> (f64, Vec<(usize, KnnPath, bool)>) {
+            let mut ch = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
+            let mut tot = 0.0;
+            let paths = set.iter().map(|&ci| {
+                let (path, cost, gnew) = ch.choose(ci, nv_of(ci), 0);
+                tot += cost;
+                (ci, path, gnew)
+            }).collect();
+            (tot, paths)
+        };
+        let (cp, paths) = price(&take);
+        info.exact_cost = price(&open).0;
+        st.cyc[P_CHOICE] += tick() - tch;
+        // a scan cheaper than the reads, or reads as dear as the exact query's (every open cluster can hold answers)
+        if all || cs < cp || (!open.is_empty() && info.exact_cost <= cp) {
+            let exact = all || info.exact_cost <= cs;
+            info.path = if exact { "exact" } else { "scan" };
+            info.cost = spent + cs.min(info.exact_cost);
+            let out = if exact { threshold2(ix, &pr, t, &opts) } else { scan_visible(ix, &pr, t, vis, false, plan.pscan) };
+            return (done(out, &st), info);
+        }
+        info.path = "probe";
+        info.cost = spent + cp;
+        info.visited = take.len();
+        let tc = tick();
+        if nusort {
+            let mut gs: Vec<usize> = paths.iter().filter(|x| x.1 == KnnPath::Index).map(|x| ix.cl[x.0].g).collect();
+            gs.sort_unstable();
+            gs.dedup();
+            setup_groups(ix, &pr, &gs, &mut st);
+        }
+        let mut use_idx = vec![false; k];
+        let flat = matches!(plan.mode, PlanMode::Flat);
+        for &(ci, path, gnew) in &paths {
+            if path == KnnPath::Index {
+                info.index += 1;
+                info.groups += gnew as usize;
+                let pc = cut_pre(ix, &pr, t, vis, ci, nusort);
+                use_idx[ci] = !flat && matches!(pc, Pre::Open { ncand, .. } if ncand > 0);
+                pre[ci] = pc;
+            } else {
+                info.direct += 1;
+                pre[ci] = Pre::Direct;
+            }
+        }
+        st.cyc[C_SPREADS] += (info.spreads * self.st.r) as u64;
+        st.cyc[C_DIRECT] += info.direct as u64;
+        st.cyc[C_INDEX] += info.index as u64;
+        st.cyc[C_GROUPS] += info.groups as u64;
+        st.cyc[C_VISITED] += info.visited as u64;
+        let out = run_planned(ix, &pr, t, &opts, &pre, &use_idx, tick() - tc);
+        (done(out, &st), info)
     }
 }
 
