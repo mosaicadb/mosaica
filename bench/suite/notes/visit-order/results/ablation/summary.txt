@@ -1,0 +1,60 @@
+laion-clip-512-normalized, none: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s2 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 1587 us x1.00 / 18740 rows   1580 us x1.00 / 14962 rows   1613 us x1.02 / 14782 rows   1537 us x0.97 / 18740 rows   2062 us x1.30 / 62544 rows   2043 us x1.29 / 62544 rows   1062 us x0.67 / 32465 rows   933 us x0.59 / 17543 rows
+  0.9: 2295 us x1.00 / 39292 rows   2118 us x0.92 / 31030 rows   2473 us x1.08 / 30221 rows   2407 us x1.05 / 39292 rows   4543 us x1.98 / 122099 rows   4500 us x1.96 / 122099 rows   1637 us x0.71 / 75446 rows   1529 us x0.67 / 42191 rows
+  0.95: 4245 us x1.00 / 87178 rows   3306 us x0.78 / 59005 rows   3560 us x0.84 / 52722 rows   4620 us x1.09 / 87178 rows   13558 us x3.19 / 288243 rows   13445 us x3.17 / 288243 rows   3481 us x0.82 / 140335 rows   2486 us x0.59 / 79478 rows
+laion-clip-512-normalized, random-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s2 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 78 us x1.00 / 446 rows   71 us x0.90 / 446 rows   277 us x3.54 / 389 rows   66 us x0.84 / 446 rows   65 us x0.82 / 542 rows   68 us x0.86 / 590 rows   208 us x2.65 / 500 rows   166 us x2.12 / 432 rows
+  0.9: 162 us x1.00 / 1076 rows   153 us x0.94 / 1076 rows   374 us x2.30 / 849 rows   133 us x0.82 / 1076 rows   144 us x0.89 / 1330 rows   144 us x0.89 / 1484 rows   170 us x1.05 / 1181 rows   151 us x0.93 / 984 rows
+  0.95: 340 us x1.00 / 2046 rows   328 us x0.97 / 2046 rows   496 us x1.46 / 1384 rows   289 us x0.85 / 2046 rows   322 us x0.95 / 2672 rows   365 us x1.07 / 3257 rows   263 us x0.77 / 2800 rows   294 us x0.86 / 2114 rows
+laion-clip-512-normalized, random-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s2 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 1738 us x1.00 / 5052 rows   1462 us x0.84 / 4053 rows   868 us x0.50 / 4343 rows   698 us x0.40 / 5060 rows   1167 us x0.67 / 15906 rows   1303 us x0.75 / 15906 rows   521 us x0.30 / 8680 rows   379 us x0.22 / 4672 rows
+  0.9: 2757 us x1.00 / 12759 rows   2239 us x0.81 / 10316 rows   1618 us x0.59 / 9997 rows   1677 us x0.61 / 12907 rows   2839 us x1.03 / 35377 rows   3179 us x1.15 / 35377 rows   1227 us x0.45 / 22269 rows   826 us x0.30 / 11726 rows
+  0.95: 4850 us x1.00 / 26333 rows   4432 us x0.91 / 23222 rows   2808 us x0.58 / 18666 rows   3512 us x0.72 / 26762 rows   6112 us x1.26 / 58621 rows   6513 us x1.34 / 58643 rows   2417 us x0.50 / 36634 rows   2099 us x0.43 / 27785 rows
+laion-clip-512-normalized, region-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s2 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 1011 us x1.00 / 3079 rows   911 us x0.90 / 3079 rows   587 us x0.58 / 2546 rows   273 us x0.27 / 3079 rows   260 us x0.26 / 3188 rows   258 us x0.26 / 3433 rows   409 us x0.40 / 3082 rows   466 us x0.46 / 2903 rows
+  0.9: 1303 us x1.00 / 4588 rows   1172 us x0.90 / 4588 rows   767 us x0.59 / 3820 rows   431 us x0.33 / 4588 rows   419 us x0.32 / 4687 rows   422 us x0.32 / 5176 rows   472 us x0.36 / 4483 rows   614 us x0.47 / 4598 rows
+  0.95: 1629 us x1.00 / 6626 rows   1491 us x0.92 / 6626 rows   886 us x0.54 / 4727 rows   659 us x0.40 / 6626 rows   597 us x0.37 / 6139 rows   645 us x0.40 / 7103 rows   626 us x0.38 / 6421 rows   753 us x0.46 / 6193 rows
+laion-clip-512-normalized, region-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s2 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 2150 us x1.00 / 12479 rows   1805 us x0.84 / 12825 rows   1656 us x0.77 / 9881 rows   1522 us x0.71 / 12479 rows   2014 us x0.94 / 28385 rows   2169 us x1.01 / 28385 rows   1417 us x0.66 / 17978 rows   947 us x0.44 / 11978 rows
+  0.9: 4130 us x1.00 / 28477 rows   3526 us x0.85 / 30387 rows   2932 us x0.71 / 20596 rows   3287 us x0.80 / 28477 rows   4178 us x1.01 / 56343 rows   4468 us x1.08 / 56343 rows   3165 us x0.77 / 36338 rows   2401 us x0.58 / 26887 rows
+  0.95: 7054 us x1.00 / 54181 rows   5917 us x0.84 / 53590 rows   4839 us x0.69 / 36744 rows   6059 us x0.86 / 54181 rows   6142 us x0.87 / 75725 rows   6499 us x0.92 / 75725 rows   6150 us x0.87 / 62434 rows   4404 us x0.62 / 48042 rows
+yahoo-minilm-384-normalized, none: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 845 us x1.00 / 8163 rows   854 us x1.01 / 8054 rows   817 us x0.97 / 8167 rows   797 us x0.94 / 8163 rows   657 us x0.78 / 13819 rows   461 us x0.55 / 6899 rows   431 us x0.51 / 5871 rows
+  0.9: 1069 us x1.00 / 17272 rows   1030 us x0.96 / 13909 rows   1172 us x1.10 / 15961 rows   995 us x0.93 / 17272 rows   1970 us x1.84 / 91208 rows   784 us x0.73 / 17244 rows   680 us x0.64 / 13354 rows
+  0.95: 1449 us x1.00 / 30641 rows   1355 us x0.94 / 26080 rows   1490 us x1.03 / 25422 rows   1413 us x0.98 / 30641 rows   3003 us x2.07 / 153090 rows   - us / - rows   1206 us x0.83 / 27438 rows
+yahoo-minilm-384-normalized, random-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 40 us x1.00 / 226 rows   39 us x0.95 / 226 rows   166 us x4.09 / 190 rows   36 us x0.88 / 226 rows   185 us x4.58 / 2142 rows   77 us x1.90 / 184 rows   76 us x1.89 / 177 rows
+  0.9: 60 us x1.00 / 522 rows   59 us x0.99 / 522 rows   170 us x2.84 / 365 rows   54 us x0.89 / 522 rows   209 us x3.48 / 2409 rows   54 us x0.91 / 398 rows   47 us x0.78 / 342 rows
+  0.95: 101 us x1.00 / 1013 rows   100 us x0.99 / 1013 rows   197 us x1.94 / 685 rows   87 us x0.86 / 1013 rows   220 us x2.18 / 2543 rows   71 us x0.70 / 728 rows   64 us x0.64 / 655 rows
+yahoo-minilm-384-normalized, random-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 932 us x1.00 / 2622 rows   754 us x0.81 / 2101 rows   387 us x0.42 / 2145 rows   293 us x0.31 / 2622 rows   390 us x0.42 / 7059 rows   208 us x0.22 / 2104 rows   109 us x0.12 / 1970 rows
+  0.9: 1241 us x1.00 / 6034 rows   965 us x0.78 / 4724 rows   703 us x0.57 / 4851 rows   525 us x0.42 / 6034 rows   1515 us x1.22 / 16595 rows   517 us x0.42 / 4984 rows   286 us x0.23 / 4166 rows
+  0.95: 1852 us x1.00 / 11173 rows   1361 us x0.73 / 8856 rows   964 us x0.52 / 7210 rows   1019 us x0.55 / 11173 rows   6022 us x3.25 / 53091 rows   867 us x0.47 / 9402 rows   546 us x0.29 / 7273 rows
+yahoo-minilm-384-normalized, region-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 577 us x1.00 / 2699 rows   516 us x0.89 / 2699 rows   281 us x0.49 / 2148 rows   179 us x0.31 / 2699 rows   390 us x0.68 / 4720 rows   156 us x0.27 / 2157 rows   149 us x0.26 / 2251 rows
+  0.9: 715 us x1.00 / 4123 rows   646 us x0.90 / 4123 rows   384 us x0.54 / 3115 rows   279 us x0.39 / 4123 rows   439 us x0.61 / 5311 rows   222 us x0.31 / 2983 rows   239 us x0.33 / 3143 rows
+  0.95: 824 us x1.00 / 5448 rows   750 us x0.91 / 5448 rows   459 us x0.56 / 3826 rows   371 us x0.45 / 5448 rows   463 us x0.56 / 5606 rows   282 us x0.34 / 3796 rows   324 us x0.39 / 3975 rows
+yahoo-minilm-384-normalized, region-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 1015 us x1.00 / 5734 rows   946 us x0.93 / 5519 rows   802 us x0.79 / 5488 rows   570 us x0.56 / 5734 rows   670 us x0.66 / 10547 rows   486 us x0.48 / 4907 rows   369 us x0.36 / 4425 rows
+  0.9: 1625 us x1.00 / 11706 rows   1311 us x0.81 / 11134 rows   1217 us x0.75 / 8952 rows   1097 us x0.68 / 11706 rows   3611 us x2.22 / 35901 rows   873 us x0.54 / 10735 rows   625 us x0.38 / 8685 rows
+  0.95: 2786 us x1.00 / 22438 rows   2124 us x0.76 / 20835 rows   1695 us x0.61 / 16058 rows   2086 us x0.75 / 22438 rows   8118 us x2.91 / 74115 rows   1159 us x0.42 / 16566 rows   - us / - rows
+glove-100-angular, none: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 865 us x1.00 / 30469 rows   738 us x0.85 / 27969 rows   899 us x1.04 / 26962 rows   872 us x1.01 / 30472 rows   1872 us x2.16 / 178100 rows   867 us x1.00 / 55410 rows   656 us x0.76 / 36808 rows
+  0.9: 1779 us x1.00 / 81486 rows   1440 us x0.81 / 71132 rows   1320 us x0.74 / 58560 rows   2276 us x1.28 / 81534 rows   6771 us x3.81 / 312481 rows   1801 us x1.01 / 124066 rows   1237 us x0.70 / 79429 rows
+  0.95: 3219 us x1.00 / 172876 rows   2420 us x0.75 / 134154 rows   1746 us x0.54 / 91554 rows   4759 us x1.48 / 173040 rows   19041 us x5.91 / 555317 rows   4281 us x1.33 / 244291 rows   2174 us x0.68 / 154927 rows
+glove-100-angular, random-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 70 us x1.00 / 983 rows   70 us x1.00 / 983 rows   219 us x3.12 / 785 rows   67 us x0.96 / 983 rows   86 us x1.23 / 3366 rows   87 us x1.24 / 724 rows   76 us x1.08 / 1437 rows
+  0.9: 124 us x1.00 / 2100 rows   124 us x1.01 / 2100 rows   262 us x2.12 / 1537 rows   118 us x0.95 / 2100 rows   138 us x1.11 / 4451 rows   91 us x0.74 / 3664 rows   79 us x0.64 / 3214 rows
+  0.95: 213 us x1.00 / 3555 rows   209 us x0.99 / 3555 rows   312 us x1.47 / 2269 rows   190 us x0.89 / 3555 rows   328 us x1.54 / 7680 rows   93 us x0.44 / 5134 rows   225 us x1.06 / 5413 rows
+glove-100-angular, random-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 857 us x1.00 / 9555 rows   662 us x0.77 / 9043 rows   642 us x0.75 / 8515 rows   347 us x0.41 / 9555 rows   1393 us x1.63 / 49476 rows   398 us x0.46 / 12519 rows   303 us x0.35 / 9225 rows
+  0.9: 2142 us x1.00 / 28634 rows   1592 us x0.74 / 25975 rows   1191 us x0.56 / 18101 rows   1261 us x0.59 / 28638 rows   2141 us x1.00 / 75824 rows   918 us x0.43 / 27418 rows   695 us x0.32 / 22418 rows
+  0.95: 3688 us x1.00 / 54152 rows   3090 us x0.84 / 52503 rows   1705 us x0.46 / 27282 rows   2481 us x0.67 / 54161 rows   2762 us x0.75 / 91660 rows   1695 us x0.46 / 46714 rows   1023 us x0.28 / 33482 rows
+glove-100-angular, region-1: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 458 us x1.00 / 4593 rows   423 us x0.92 / 4593 rows   361 us x0.79 / 3696 rows   176 us x0.39 / 4593 rows   379 us x0.83 / 7547 rows   304 us x0.66 / 6518 rows   245 us x0.54 / 6392 rows
+  0.9: 610 us x1.00 / 6227 rows   572 us x0.94 / 6227 rows   480 us x0.79 / 5220 rows   245 us x0.40 / 6227 rows   420 us x0.69 / 8715 rows   362 us x0.59 / 8427 rows   354 us x0.58 / 8145 rows
+  0.95: - us / - rows   - us / - rows   568 us / 6365 rows   - us / - rows   417 us / 10204 rows   394 us / 9573 rows   408 us / 9021 rows
+glove-100-angular, region-25: us / rows to reach recall (spread / h16x4 / process:own / simple:s1 / simple:s3 / simple:s4 / simple:s4-own)
+  0.8: 1302 us x1.00 / 18071 rows   971 us x0.75 / 20928 rows   953 us x0.73 / 14841 rows   721 us x0.55 / 18072 rows   2457 us x1.89 / 71013 rows   651 us x0.50 / 21363 rows   510 us x0.39 / 15233 rows
+  0.9: 2639 us x1.00 / 41818 rows   1978 us x0.75 / 49776 rows   1525 us x0.58 / 31326 rows   1751 us x0.66 / 41827 rows   3497 us x1.33 / 99220 rows   1737 us x0.66 / 46570 rows   1028 us x0.39 / 31928 rows
+  0.95: 3633 us x1.00 / 60950 rows   3257 us x0.90 / 85754 rows   2415 us x0.66 / 53480 rows   2619 us x0.72 / 60966 rows   4017 us x1.11 / 113324 rows   2617 us x0.72 / 65667 rows   1336 us x0.37 / 41915 rows

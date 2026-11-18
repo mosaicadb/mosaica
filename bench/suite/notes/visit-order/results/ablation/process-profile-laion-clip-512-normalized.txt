@@ -1,0 +1,38 @@
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+process, spread group
+filter                point    total  centres  spreads    solve   groups   stored     rest   dirs direct  index  grps   us and counts, median over 100 queries
+none        mean_recall=0.8   1056.0     21.6     48.6     75.2     74.5    344.5    491.6   1024    1.0    3.0   1.0
+none        mean_recall=0.9   2016.7     22.9     46.7     71.0    104.3    622.6   1149.1   1024    3.0    9.0   2.0
+none       mean_recall=0.95   3864.7     33.7     66.2     78.2    195.3   1116.6   2374.7   1024    5.0   18.0   4.0
+random-1    mean_recall=0.8    157.0     13.8     37.2     66.4      0.0     26.0     13.5   1024    9.0    0.0   0.0
+random-1    mean_recall=0.9    223.8     20.2     52.1     69.3      0.0     58.7     23.5   1024   25.0    0.0   0.0
+random-1   mean_recall=0.95    311.0     24.6     63.8     72.9      0.0    119.3     30.3   1024   56.5    0.0   0.0
+random-25   mean_recall=0.8    354.0     23.8     63.2     70.3      0.0    169.4     27.3   1024    2.0    0.0   0.0
+random-25   mean_recall=0.9    714.5     26.5     68.4     73.0      0.0    501.5     45.2   1024    7.0    0.0   0.0
+random-25  mean_recall=0.95   1192.2     27.1     69.2     75.0      0.0    973.8     47.1   1024   14.5    0.0   0.0
+region-1    mean_recall=0.8    111.0     12.0     29.6     40.8      0.0     15.6     12.9   1024    7.0    0.0   0.0
+region-1    mean_recall=0.9    228.1     22.7     53.6     45.4      0.0     85.3     21.0   1024   25.0    0.0   0.0
+region-1   mean_recall=0.95    389.5     25.7     60.6     48.0      0.0    220.4     34.8   1024   57.5    0.0   0.0
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+process, spread own
+filter                point    total  centres  spreads    solve   groups   stored     rest   dirs direct  index  grps   us and counts, median over 100 queries
+none        mean_recall=0.8   1190.2     28.4     69.3    127.3     84.1    393.5    487.7   1072    1.0    2.0   1.0
+none        mean_recall=0.9   2725.9     31.8     90.0    129.6    138.1    861.0   1475.2   1184    3.0    8.0   2.0
+none       mean_recall=0.95   4573.1     37.3    115.5    136.7    202.4   1523.1   2558.2   1336    6.0   19.0   4.0
+random-1    mean_recall=0.8    236.7     17.9     55.9    114.7      0.0     31.8     16.4   1136   10.0    0.0   0.0
+random-1    mean_recall=0.9    380.6     27.5    106.8    134.8      0.0     79.1     32.5   1280   25.0    0.0   0.0
+random-1   mean_recall=0.95    474.2     28.5    124.5    140.9      0.0    137.5     42.8   1544   56.5    0.0   0.0
+random-25   mean_recall=0.8    411.3     23.9     65.9    118.0      0.0    180.1     23.4   1056    2.0    0.0   0.0
+random-25   mean_recall=0.9    699.4     25.5     73.7    120.2      0.0    461.9     18.0   1088    6.0    0.0   0.0
+random-25  mean_recall=0.95   1282.5     26.1     86.3    121.8      0.0    988.7     59.7   1184   14.5    0.0   0.0
+region-1    mean_recall=0.8    153.3     14.9     41.9     66.8      0.0     15.9     13.9   1120    8.0    0.0   0.0
+region-1    mean_recall=0.9    278.9     22.7     71.4     73.9      0.0     70.6     40.2   1320   24.0    0.0   0.0
+region-1   mean_recall=0.95    428.0     24.7     85.1     78.8      0.0    197.8     41.5   1512   54.0    0.0   0.0
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+filter     nprobe    total    order   groups   stored     rest  H cand   us, median over 100 queries
+none            8   1724.3     43.9    196.9    204.7   1278.7       0
+none           16   2794.0     48.1    296.1    202.9   2246.8       0
+none           32   5251.6     55.7    492.3    249.0   4454.6       0
+random-1        8     58.9     26.4      0.0     25.2      7.3       0
+random-1       16     87.2     32.7      0.0     43.2     11.3       0
+random-1       32    104.0     30.6      0.0     61.9     11.5       0

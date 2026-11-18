@@ -1,0 +1,38 @@
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+process, spread group
+filter                point    total  centres  spreads    solve   groups   stored     rest   dirs direct  index  grps   us and counts, median over 100 queries
+none        mean_recall=0.8   1179.0     19.4     46.3     57.3     75.4    245.5    735.2   1024    1.0    6.0   2.0
+none        mean_recall=0.9   1688.1     20.9     46.5     57.8     98.5    361.7   1102.7   1024    2.0   11.0   3.0
+none       mean_recall=0.95   2051.0     21.3     46.9     59.4    131.3    401.9   1390.3   1024    2.0   15.0   4.0
+random-1    mean_recall=0.8    113.6      7.1     25.5     49.9      0.0     20.7     10.4   1024   10.5    0.0   0.0
+random-1    mean_recall=0.9    138.8      7.7     27.6     51.6      0.0     32.6     19.4   1024   17.0    0.0   0.0
+random-1   mean_recall=0.95    151.4      9.3     31.0     51.6      0.0     44.6     14.8   1024   25.0    0.0   0.0
+random-25   mean_recall=0.8    396.0     14.4     44.8     52.8      0.0    255.4     28.7   1024    4.0    0.0   0.0
+random-25   mean_recall=0.9    650.7     18.8     63.2     67.9      0.0    468.6     32.3   1024    7.0    0.0   0.0
+random-25  mean_recall=0.95    796.5     16.2     49.2     53.6      0.0    641.6     35.9   1024   11.0    0.0   0.0
+region-1    mean_recall=0.8     91.9      6.8     21.6     26.9      0.0     22.1     14.5   1024    8.0    0.0   0.0
+region-1    mean_recall=0.9    180.1     12.5     36.4     30.2      0.0     92.6      8.5   1024   16.5    0.0   0.0
+region-1   mean_recall=0.95    233.8     14.0     40.9     32.4      0.0    131.1     15.4   1024   26.5    0.0   0.0
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+process, spread own
+filter                point    total  centres  spreads    solve   groups   stored     rest   dirs direct  index  grps   us and counts, median over 100 queries
+none        mean_recall=0.8   1294.3     19.6     61.0     92.4     75.6    336.6    709.2   1120    1.0    5.0   2.0
+none        mean_recall=0.9   1691.9     20.3     54.9     86.6    112.2    393.4   1024.4   1136    2.0   11.0   3.0
+none       mean_recall=0.95   2203.3     20.9     58.9     88.2    132.6    486.2   1416.6   1168    2.0   15.0   5.0
+random-1    mean_recall=0.8    151.1      7.1     32.4     83.9      0.0     20.4      7.2   1088    9.5    0.0   0.0
+random-1    mean_recall=0.9    173.8      7.9     35.8     84.2      0.0     31.3     14.6   1168   16.5    0.0   0.0
+random-1   mean_recall=0.95    209.9     10.0     43.7     89.7      0.0     48.8     17.7   1216   26.0    0.0   0.0
+random-25   mean_recall=0.8    377.0     13.8     47.6     83.0      0.0    217.5     15.1   1056    4.0    0.0   0.0
+random-25   mean_recall=0.9    571.5     15.4     54.1     83.2      0.0    398.8     20.0   1104    7.0    0.0   0.0
+random-25  mean_recall=0.95    784.4     15.6     59.4     85.5      0.0    583.0     40.9   1152   10.0    0.0   0.0
+region-1    mean_recall=0.8    132.0      8.2     31.1     43.2      0.0     24.9     24.6   1104    8.0    0.0   0.0
+region-1    mean_recall=0.9    266.4     16.9     60.0     65.6      0.0     94.1     29.8   1184   15.0    0.0   0.0
+region-1   mean_recall=0.95    348.9     18.4     67.4     68.5      0.0    166.9     27.7   1264   27.0    0.0   0.0
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+filter     nprobe    total    order   groups   stored     rest  H cand   us, median over 100 queries
+none            8   1195.4     26.8    122.5    102.9    943.2       0
+none           16   1913.4     30.5    198.1     97.9   1586.9       0
+none           32   3160.3     34.9    327.9    108.2   2689.3       0
+random-1        8     43.9     18.2      0.0     19.5      6.2       0
+random-1       16     65.4     21.5      0.0     36.7      7.3       0
+random-1       32    106.0     26.6      0.0     68.2     11.2       0
