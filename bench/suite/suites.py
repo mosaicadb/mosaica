@@ -201,15 +201,21 @@ SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m
 # The approximate mode (notes/visit-order/PLAN.md, hierarchy/policy.md): the quick suite's public datasets,
 # approximate k-NN only, unfiltered and under random and correlated (region) visible sets; vexact alone, since the
 # comparison is between its arms: the cluster orders `spread` (the default) and `h16x4` over a finer nprobe grid, and
-# the approximate process with each group's covariance as the spread (`process-group`) and with each cluster's own
-# where it can change the plan (`process-own`), swept over its mean-recall dial (the price the build fitted for it).
+# the approximate process with each cluster's own spread where it can change the plan (`process-own`), swept over
+# its price, and the simple arms (`simple-s1` to `simple-s4`, notes `v2::simple`), each swept over its raw knob.
 ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized"],
              filters=["none", "random-1", "random-25", "region-1", "region-25"],
              types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
-             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "h16x4", "process-group", "process-own"],
-                                                    approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256)],
-                                                    process=[dict(mean_recall=r, eps=0.0) for r in (0.5, 0.7, 0.8, 0.85, 0.9, 0.93, 0.95, 0.97, 0.98, 0.99)])),
+             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"],
+                                                    orders=["spread", "h16x4", "process-own", "simple-s1", "simple-s2", "simple-s3", "simple-s4", "simple-s4-own"],
+                                                    approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
+                                                    process=[dict(price=x, eps=0.0) for x in (1e-1, 3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5, 3e-6, 1e-6, 1e-7)],
+                                                    simple=dict(s1=[4, 8, 16, 32, 64, 128, 256, 512],
+                                                                s2=[0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25],
+                                                                s3=[0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25],
+                                                                s4=[2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7],
+                                                                **{"s4-own": [2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7]}))),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 
 # The same cells with the library's default order only, for comparing revisions of the library (which may not have

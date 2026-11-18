@@ -2523,3 +2523,121 @@ fn process_counts_on_a_real_fit() {
         }
     }
 }
+
+// ---------------- the simple arms ----------------
+
+/// The simple arms on `ix` with the constants timed on it, and with constants under which the index path and its
+/// groups are cheap (synth4k's small clusters are otherwise read directly).
+fn simples(ix: &Index2) -> Vec<(&'static str, simple::Simple)> {
+    let m = simple::measure(ix).unwrap();
+    let cheap = simple::Measured { cl_us: 0.01, size_us: 0.0, vis_us: 1e-4, grp_us: 0.01, anc_us: 1e-4, ..m };
+    vec![("measured", simple::Simple::new(ix, m).unwrap()), ("cheap index path", simple::Simple::new(ix, cheap).unwrap())]
+}
+
+/// Every simple arm returns visible items, each once and with its own score, k of them whenever k are visible, under
+/// every knob; the exact k best when the knob asks for everything, and when the scan race scans (before probing or
+/// the rest); and the race's modelled cost stays within twice that of a scan of the visible rows.
+#[test]
+fn simple_arms_answer_visible_items_and_exact_ones_when_asked() {
+    let f = fixture();
+    let ix = &f.ix;
+    let e = 64.0 * 2f64.powi(-24);
+    for (cname, sm) in simples(ix) {
+        let mut indexed = 0;
+        for (qi, q) in f.queries.iter().enumerate() {
+            let pr = prep2(ix, q);
+            for (sname, bm) in &f.sets {
+                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let t = truth(ix, q, bm.as_ref());
+                for kk in [1, 10, 100] {
+                    for v in simple::Variant::ALL {
+                        let knobs: &[f64] = match v {
+                            simple::Variant::S1 => &[0.0, 1.0, 4.0, f64::INFINITY],
+                            simple::Variant::S2 | simple::Variant::S3 => &[-1.0, 0.0, 0.4, 2.0, f64::INFINITY],
+                            _ => &[-1.0, 0.0, 3.5, f64::INFINITY],
+                        };
+                        for &knob in knobs {
+                            let what = format!("{cname}, query {qi}, set {sname}, k {kk}, {}, knob {knob}", v.name());
+                            let (out, info) = sm.knn(ix, q, kk, vis.as_ref(), v, knob, Plan::default());
+                            indexed += info.index;
+                            assert_eq!(out.ents.len(), kk.min(t.len()), "{what}: {} items", out.ents.len());
+                            let mut ids: Vec<u32> = out.ents.iter().map(|x| x.1).collect();
+                            ids.sort_unstable();
+                            ids.dedup();
+                            assert_eq!(ids.len(), out.ents.len(), "an item twice, {what}");
+                            assert!(out.ents.iter().all(|x| bm.as_ref().map_or(true, |b| b.contains(x.1))), "an invisible item, {what}");
+                            assert!(out.ents.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e), "a score not the item's, {what}");
+                            assert!(["probe", "race", "scan", "empty"].contains(&info.path), "{what}: {}", info.path);
+                            if knob == f64::INFINITY || info.path == "race" || info.path == "scan" {
+                                assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "not exact, {what}, path {}", info.path);
+                            }
+                            if v.race() {
+                                assert!(info.cost <= 2.0 * info.scan_cost * (1.0 + 1e-9) + 1e-9, "{what}: modelled cost {} over twice the scan's {}", info.cost, info.scan_cost);
+                            } else {
+                                assert!(info.path == "probe" || info.path == "empty", "{what}: {}", info.path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cname == "measured" || indexed > 0, "{cname}: no cluster took the index path");
+    }
+}
+
+/// The scan race scans the rest once the probe would cost more than a scan: with a probe that never stops (the knob
+/// asks for everything) and direct reads that cost far more than their rows, it races and answers exactly.
+#[test]
+fn the_scan_race_hands_over_to_the_scan() {
+    let f = fixture();
+    let ix = &f.ix;
+    let m = simple::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 50.0, cl_us: 1e3, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0 };
+    let sm = simple::Simple::new(ix, m).unwrap();
+    for q in &f.queries {
+        for v in [simple::Variant::S3, simple::Variant::S4Group, simple::Variant::S4Own] {
+            let (out, info) = sm.knn(ix, q, 10, None, v, f64::INFINITY, Plan::default());
+            assert_eq!(info.path, "race", "{}", v.name());
+            assert!(info.visited < ix.k() && info.cost <= 2.0 * info.scan_cost, "{info:?}");
+            assert_eq!(sub_values(ix, &out.ents, q), top_values(&truth(ix, q, None), 10));
+        }
+    }
+}
+
+/// The measured constants are timed once and cached under their key: a second open reads them, another key times
+/// them again. They are numbers of at least 0, and give the exact planner's rule.
+#[test]
+fn measured_constants_are_cached_and_read_again() {
+    let f = fixture();
+    let m = simple::measure(&f.ix).unwrap();
+    assert!(m.to_kv().lines().count() == 8 && simple::Measured::from_kv(&m.to_kv()).unwrap() == m);
+    assert!(m.row_us > 0.0 && m.i8_us > 0.0, "{m:?}");
+    let d = tmp_dir("measured");
+    let path = d.join(simple::COMPUTE_CACHE);
+    let (got, why) = simple::cached_measured(&path, "key A", || Some(m));
+    assert_eq!(got, Some(m));
+    assert!(why.starts_with("timed: no cache"), "{why}");
+    let (got, why) = simple::cached_measured(&path, "key A", || panic!("timed again under the same key"));
+    assert_eq!(got, Some(m));
+    assert!(why.starts_with("read from"), "{why}");
+    let m2 = simple::Measured { row_us: m.row_us * 2.0, ..m };
+    let (got, why) = simple::cached_measured(&path, "key B", || Some(m2));
+    assert_eq!(got, Some(m2));
+    assert!(why.starts_with("timed again") && why.contains("another machine"), "{why}");
+    let (got, _) = simple::cached_measured(&path, "key B", || panic!("timed again under the same key"));
+    assert_eq!(got, Some(m2));
+    // through the index directory, under the index's own key
+    let dir = d.join("index");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut logs = Vec::new();
+    let a = simple::measured_constants(&f.ix, dir.to_str().unwrap(), &mut |s| logs.push(s)).unwrap();
+    let b = simple::measured_constants(&f.ix, dir.to_str().unwrap(), &mut |s| logs.push(s)).unwrap();
+    assert_eq!(a, b);
+    assert!(logs[0].contains("timed: no cache") && logs[1].contains("read from"), "{logs:?}");
+    assert!(std::fs::read_to_string(dir.join(simple::COMPUTE_CACHE)).unwrap().contains(&simple::compute_key(&f.ix)));
+    // the rule: direct exactly where dir + row v <= cl + size S + vis v
+    let r = simple::Measured { i8_us: 0.0, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0 };
+    let (r0, kappa) = r.rule().unwrap();
+    assert_eq!(r0, 100);
+    assert!((kappa - 1.0 / 6.0).abs() < 1e-12);
+    assert_eq!(simple::Measured { vis_us: 0.2, ..r }.rule(), None);
+}

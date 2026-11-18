@@ -22,6 +22,7 @@ pub mod order;
 pub mod process;
 pub mod q;
 pub mod setup;
+pub mod simple;
 pub mod store;
 pub mod tail;
 

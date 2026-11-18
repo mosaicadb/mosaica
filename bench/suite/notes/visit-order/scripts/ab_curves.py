@@ -1,7 +1,7 @@
 # Time and rows to reach a recall, per arm, from ab_orders.py's output: each arm's (time, recall) and (rows, recall)
-# points over its grid (nprobe, or the process's dial), taken in order of rows read and interpolated linearly; "-"
-# where the grid's largest point does not reach it. Reads both the current output (a line per filter, arm and grid
-# point) and the earlier one (a line per filter and nprobe holding every order).
+# points over its grid (nprobe, the process's price, or a simple arm's knob), taken in order of rows read and
+# interpolated linearly; "-" where the grid's largest point does not reach it. Reads both the current output (a line
+# per filter, arm and grid point) and the earlier one (a line per filter and nprobe holding every order).
 # usage: python3 -I ab_curves.py AB_OUTPUT.txt [--targets 0.8,0.9,0.95]
 import argparse
 import re

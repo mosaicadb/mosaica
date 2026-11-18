@@ -9,6 +9,7 @@ use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
 use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::process::{ProcInfo, ProcOpts, Process, Spread, Stop};
+use vexact::v2::simple::{measured_constants, Simple, SimpleInfo, Variant};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -23,6 +24,9 @@ struct Index {
     pool: rayon::ThreadPool,
     /// The approximate process (`v2::process`), or why an index has none (no calibration).
     process: Result<Process, String>,
+    /// The simple arms (`v2::simple`), set up on first use with this machine's measured constants, or why not.
+    simple: std::sync::OnceLock<Result<Simple, String>>,
+    dir: String,
 }
 
 /// The process's options from the bindings' arguments: exactly one dial (`price` or `budget`), the spread's source
@@ -89,14 +93,19 @@ impl Index {
     /// its candidates per probed cluster, `OrderKind::H`), with f at
     /// `OrderKind::default_f`. `fit_queries` fits f for any of them on real queries. The clusters' radii and directions
     /// are the saved index's (`v2::order`, computed by the build); only radius's f is fitted here.
+    /// `rule`: the exact planner's rule in rows in memory, "fixed" (`Plan::default`'s R0 and kappa) or "measured"
+    /// (from this machine's measured constants, `simple::Measured::rule`, timed on first use and cached in `dir`).
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
-                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread"))]
+                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread", rule="fixed"))]
     #[allow(clippy::too_many_arguments)]
     fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
            full_file: Option<String>, advice: &str, read: &str, willneed: bool, direct_min: Option<usize>, dontcache_min: Option<usize>,
-           priced: Option<bool>, order: &str) -> PyResult<Index> {
+           priced: Option<bool>, order: &str, rule: &str) -> PyResult<Index> {
         let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
+        if rule != "fixed" && rule != "measured" {
+            return Err(PyValueError::new_err(format!("rule is fixed or measured, not {rule:?}")));
+        }
         if read != "uring" && read != "mmap" {
             return Err(PyValueError::new_err(format!("read is uring or mmap, not {read:?}")));
         }
@@ -147,7 +156,13 @@ impl Index {
                 pool.install(|| vexact::util::pin(cpu));
             }
             let process = Process::new(&ix);
-            Ok(Index { _p: p, ix, plan, approx, pseudo, dials: HashMap::new(), vis: None, pool, process })
+            let simple = std::sync::OnceLock::new();
+            if rule == "measured" {
+                let m = pool.install(|| measured_constants(&ix, &dir, &mut log)).ok_or_else(|| PyValueError::new_err("the measured rule needs stored vectors to time"))?;
+                (plan.r_rows, plan.r_kappa) = m.rule().unwrap_or((usize::MAX, 0.0));
+                let _ = simple.set(Simple::new(&ix, m).map_err(|e| e.to_string()));
+            }
+            Ok(Index { _p: p, ix, plan, approx, pseudo, dials: HashMap::new(), vis: None, pool, process, simple, dir })
         })
     }
 
@@ -331,7 +346,85 @@ impl Index {
         })))
     }
 
-    /// The approximate process's calibration as JSON (its tables, margin, price bands and the build's checks), or None.
+    /// Approximate k-NN by a simple arm (`v2::simple`): `variant` "s1" (the spread order, `knob` its nprobe), "s2"
+    /// (stopped when the next cluster's key falls below the k-th best, `knob` the key's f), "s3" (s2 racing a scan of
+    /// the visible rows), "s4" (s3 by mu + psi sigma with sigma from the group covariances, `knob` psi) or "s4-own"
+    /// (sigma from the clusters' own directions). An infinite knob asks for every cluster. Each cluster is read
+    /// directly or on the index path by this machine's measured constants (timed on first use and cached in the
+    /// index directory). Returns k ids whenever k items are visible.
+    #[pyo3(signature = (q, k, variant, knob))]
+    fn knn_simple<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, variant: &str, knob: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let q = q.as_slice()?;
+        let (sm, v) = self.simple_args(py, q, k, variant, knob)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| sm.knn(ix, q, k, vis, v, knob, plan).0.ents));
+        Ok(ids(py, &ents, k))
+    }
+
+    /// What one query of a simple arm did, as a dict: its path ("probe", "race", "scan", "empty"), the clusters
+    /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
+    /// costs (the order's, the whole query's, a scan's); and rows touched, full vectors read, clusters on the index
+    /// path and the time in ms.
+    #[pyo3(signature = (q, k, variant, knob))]
+    fn explain_simple<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, variant: &str, knob: f64) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let q = q.as_slice()?;
+        let (sm, v) = self.simple_args(py, q, k, variant, knob)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let tm = std::time::Instant::now();
+        let (out, i): (KnnOut2, SimpleInfo) = py.detach(|| self.pool.install(|| sm.knn(ix, q, k, vis, v, knob, plan)));
+        let ms = tm.elapsed().as_secs_f64() * 1e3;
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("path", i.path)?;
+        for (key, x) in [("visited", i.visited), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads)] {
+            d.set_item(key, x)?;
+        }
+        for (key, x) in [("fixed", i.fixed), ("cost", i.cost), ("scan_cost", i.scan_cost)] {
+            d.set_item(key, x)?;
+        }
+        d.set_item("touched", out.st.touched)?;
+        d.set_item("full_reads", out.st.full_reads)?;
+        d.set_item("clusters_open", out.st.clusters_open)?;
+        d.set_item("ms", ms)?;
+        Ok(d)
+    }
+
+    /// Where one query of a simple arm spends its time, as `profile`: the cycles of each phase (`Stats::cyc`; `P_PLAN`
+    /// the centre scores, `P_SPREAD` the spreads, `P_SOLVE` the order (keys, heap, stop), `P_CHOICE` the path choice
+    /// and the race's accounting, `P_QUERY` the whole call; the counts C_SPREADS (directions projected), C_DIRECT,
+    /// C_INDEX, C_GROUPS, C_VISITED) and the time stamp counter's cycles per second.
+    #[pyo3(signature = (q, k, variant, knob))]
+    fn profile_simple(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, variant: &str, knob: f64) -> PyResult<(Vec<u64>, f64)> {
+        let q = q.as_slice()?;
+        let (sm, v) = self.simple_args(py, q, k, variant, knob)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        Ok(py.detach(|| self.pool.install(|| {
+            vexact::v2::q::PROF.store(true, Relaxed);
+            let (t, c0) = (std::time::Instant::now(), unsafe { core::arch::x86_64::_rdtsc() });
+            let (mut out, _) = sm.knn(ix, q, k, vis, v, knob, plan);
+            let c1 = unsafe { core::arch::x86_64::_rdtsc() };
+            vexact::v2::q::PROF.store(false, Relaxed);
+            out.st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
+            (out.st.cyc.to_vec(), (c1 - c0) as f64 / t.elapsed().as_secs_f64())
+        })))
+    }
+
+    /// The simple arms' measured constants (`simple::Measured`, microseconds), with the exact planner's rule in rows
+    /// they give (r_rows, r_kappa; None where every cluster would be scored directly) and the plan's own.
+    #[getter]
+    fn measured_costs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let m = self.simple_arms(py)?.m;
+        let d = pyo3::types::PyDict::new(py);
+        for line in m.to_kv().lines() {
+            if let Some((key, x)) = line.split_once('=') {
+                d.set_item(key, x.parse::<f64>().unwrap_or(f64::NAN))?;
+            }
+        }
+        d.set_item("rule", m.rule())?;
+        d.set_item("plan_rule", (self.plan.r_rows, self.plan.r_kappa))?;
+        Ok(d)
+    }
+
+    /// The approximate process's calibration as JSON (its tables, margin and the build's checks), or None.
     #[getter]
     fn calibration(&self) -> Option<String> {
         self.ix.calib.as_ref().map(|c| c.json().to_string())
@@ -511,6 +604,33 @@ impl Index {
     #[getter]
     fn clusters(&self) -> usize {
         self.ix.k()
+    }
+}
+
+impl Index {
+    /// The simple arms' state, set up on first use: the constants read from the index directory's cache or timed on
+    /// this index's core and saved there (`simple::measured_constants`).
+    fn simple_arms(&self, py: Python<'_>) -> PyResult<&Simple> {
+        let (ix, dir, pool) = (&self.ix, &self.dir, &self.pool);
+        let r = self.simple.get_or_init(|| py.detach(|| pool.install(|| {
+            let mut log = |s: String| eprintln!("{s}");
+            measured_constants(ix, dir, &mut log)
+                .ok_or_else(|| "the simple arms' cost model is timed on stored vectors, and this index has none".to_string())
+                .and_then(|m| Simple::new(ix, m))
+        })));
+        r.as_ref().map_err(|e| PyValueError::new_err(e.clone()))
+    }
+
+    /// The simple arm named `variant` and its state, after checking the query, k and the knob.
+    fn simple_args(&self, py: Python<'_>, q: &[f32], k: usize, variant: &str, knob: f64) -> PyResult<(&Simple, Variant)> {
+        check_query(&self.ix, q, Some(k))?;
+        let v = Variant::parse(variant).map_err(PyValueError::new_err)?;
+        if knob.is_nan() {
+            return Err(PyValueError::new_err("the knob is a number (inf asks for every cluster), not NaN"));
+        }
+        let sm = self.simple_arms(py)?;
+        sm.check(&self.ix, v).map_err(PyValueError::new_err)?;
+        Ok((sm, v))
     }
 }
 

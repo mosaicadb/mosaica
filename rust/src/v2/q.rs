@@ -54,6 +54,9 @@ pub const C_SPREADS: usize = 26;
 pub const C_DIRECT: usize = 27;
 pub const C_INDEX: usize = 28;
 pub const C_GROUPS: usize = 29;
+/// The simple arms (`v2::simple`): their path choice and race accounting (cycles), and the clusters they visited.
+pub const P_CHOICE: usize = 30;
+pub const C_VISITED: usize = 31;
 pub static PROF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// In verify mode, record (true - estimate) / half-width of the checked intervals of items in the answer (true score
 /// at least the threshold) in Stats::errs.
@@ -2184,6 +2187,21 @@ pub const DISK_CACHE: &str = "disk-constants.txt";
 /// again.
 pub const DISK_KEY_VERSION: u32 = 2;
 
+/// The machine (/etc/machine-id, else the host name) and the CPU (its model name, or on machines whose /proc/cpuinfo
+/// has none, such as aarch64, its implementer, part, variant and revision), as cache keys name them.
+pub fn machine_and_cpu() -> (String, String) {
+    let clean = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let read = |p: &str| std::fs::read_to_string(p).ok().map(|s| clean(&s)).filter(|s| !s.is_empty());
+    let machine = read("/etc/machine-id").map(|m| format!("id {m}")).or_else(|| read("/proc/sys/kernel/hostname").map(|h| format!("host {h}"))).unwrap_or_else(|| "unknown".into());
+    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let field = |name: &str| info.lines().find(|l| l.split(':').next().is_some_and(|k| k.trim() == name)).and_then(|l| l.split_once(':')).map(|x| clean(x.1)).filter(|v| !v.is_empty());
+    let cpu = field("model name").or_else(|| {
+        let parts: Vec<String> = ["CPU implementer", "CPU architecture", "CPU variant", "CPU part", "CPU revision"].iter().filter_map(|f| field(f).map(|v| format!("{} {v}", f.trim_start_matches("CPU ")))).collect();
+        (!parts.is_empty()).then(|| parts.join(" "))
+    }).or_else(|| field("Hardware")).or_else(|| field("Processor")).unwrap_or_else(|| "unknown".into());
+    (machine, cpu)
+}
+
 /// The key the disk constants are cached under: the key's version; the machine (/etc/machine-id, else the host name);
 /// the CPU (its model name, or on machines whose /proc/cpuinfo has none, such as aarch64, its implementer, part,
 /// variant and revision); the device of the file `file` lies on (major:minor, its name, and the model and serial of
@@ -2195,13 +2213,7 @@ pub fn disk_key(file: &std::fs::File, policy: &super::disk::ReadPolicy) -> Resul
     use std::sync::atomic::Ordering::Relaxed;
     let clean = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let read = |p: &str| std::fs::read_to_string(p).ok().map(|s| clean(&s)).filter(|s| !s.is_empty());
-    let machine = read("/etc/machine-id").map(|m| format!("id {m}")).or_else(|| read("/proc/sys/kernel/hostname").map(|h| format!("host {h}"))).unwrap_or_else(|| "unknown".into());
-    let info = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
-    let field = |name: &str| info.lines().find(|l| l.split(':').next().is_some_and(|k| k.trim() == name)).and_then(|l| l.split_once(':')).map(|x| clean(x.1)).filter(|v| !v.is_empty());
-    let cpu = field("model name").or_else(|| {
-        let parts: Vec<String> = ["CPU implementer", "CPU architecture", "CPU variant", "CPU part", "CPU revision"].iter().filter_map(|f| field(f).map(|v| format!("{} {v}", f.trim_start_matches("CPU ")))).collect();
-        (!parts.is_empty()).then(|| parts.join(" "))
-    }).or_else(|| field("Hardware")).or_else(|| field("Processor")).unwrap_or_else(|| "unknown".into());
+    let (machine, cpu) = machine_and_cpu();
     let dev = file.metadata().map_err(|e| format!("the vectors file: {e}"))?.dev();
     let (maj, min) = (libc::major(dev), libc::minor(dev));
     let sys = format!("/sys/dev/block/{maj}:{min}");
@@ -2246,7 +2258,7 @@ fn read_disk_cache(path: &std::path::Path, key: &str) -> Result<(f64, f64), Stri
 
 /// An exclusive lock (flock) on the file `path`, created if need be, held until the result is dropped; None when the
 /// file cannot be created or locked.
-fn lock_file(path: &std::path::Path) -> Option<std::fs::File> {
+pub(super) fn lock_file(path: &std::path::Path) -> Option<std::fs::File> {
     use std::os::unix::io::AsRawFd;
     let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path).ok()?;
     (unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0).then_some(f)
@@ -2254,7 +2266,7 @@ fn lock_file(path: &std::path::Path) -> Option<std::fs::File> {
 
 /// Writes `text` to `path` through a temporary file of a name of its own (the process id and the time in nanoseconds)
 /// in the same directory, synced, then renamed over `path`: a reader sees the old file or the new one, whole.
-fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub(super) fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
     let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let name = path.file_name().map_or("cache".into(), |n| n.to_string_lossy().into_owned());
@@ -2319,7 +2331,7 @@ pub fn cached_disk_constants_or(path: &std::path::Path, fallback: Option<&std::p
 }
 
 /// FNV-1a, 64 bits: a hash that is the same in every build, for a cache file's name.
-fn fnv1a64(b: &[u8]) -> u64 {
+pub(super) fn fnv1a64(b: &[u8]) -> u64 {
     b.iter().fold(0xcbf29ce484222325u64, |h, &x| (h ^ x as u64).wrapping_mul(0x100000001b3))
 }
 
@@ -2336,7 +2348,7 @@ pub fn user_cache_file(user: &std::path::Path, key: &str) -> std::path::PathBuf 
 
 /// Whether a file can be created in `dir`: a probe file created and removed (the permission that matters for the
 /// cache's atomic write, which a lock file opened for writing does not show).
-fn dir_writable(dir: &std::path::Path) -> bool {
+pub(super) fn dir_writable(dir: &std::path::Path) -> bool {
     let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let probe = dir.join(format!(".vexact-probe.{}.{ns}", std::process::id()));
     match std::fs::OpenOptions::new().write(true).create_new(true).open(&probe) {
@@ -3486,7 +3498,7 @@ impl Approx {
     }
 
     /// sd(q) / sd(rad), sd(q) the standard deviation of the centre scores over the clusters.
-    fn sd_ratio(&self, qm: &[f64]) -> f64 {
+    pub fn sd_ratio(&self, qm: &[f64]) -> f64 {
         if self.sd_rad <= 0.0 || qm.is_empty() {
             return 0.0;
         }
@@ -3926,6 +3938,20 @@ impl<'a> KnnReader<'a> {
         self.top.score(ix, pr, &self.rows_in, &mut self.st);
         self.top.score(ix, pr, &self.pend, &mut self.st);
         self.st.cyc[P_FULL] += tick() - tf;
+    }
+
+    /// The running k-th best score (-inf until k are held), with the batched rows scored first.
+    pub fn kth(&mut self) -> f64 {
+        self.flush();
+        self.top.kth()
+    }
+
+    /// Holds k placeholder items scoring `t` (entity u32::MAX), as if k had been found at t: for timing a cluster's
+    /// read at a given running k-th best.
+    pub(super) fn prime(&mut self, t: f64) {
+        while !self.top.full() {
+            self.top.push(t, u32::MAX);
+        }
     }
 
     /// The k best (score, entity), best first (the lower entity first among equal scores), and the work done.

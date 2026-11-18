@@ -114,18 +114,21 @@ class Vexact(System):
 
     def settings(self, qtype, filtered):
         # the approximate mode's arms to compare (`orders`), one setting each: cluster orders stopped by nprobe (e.g.
-        # "radius", "spread", "h16x4"; grid `approx`) and the approximate process, "process-SPREAD" with SPREAD its
-        # spread's source (group, own, own-all; grid `process`, one of its dials per entry)
+        # "radius", "spread", "h16x4"; grid `approx`), the approximate process, "process-SPREAD" with SPREAD its
+        # spread's source (group, own, own-all; grid `process`, a price or a budget per entry), and the simple arms,
+        # "simple-VARIANT" (s1, s2, s3, s4, s4-own; grid `simple[VARIANT]`, the knob's values)
         return list(self.params.get("orders", ["default"])) if qtype == "approx" else ["default"]
 
     def use(self, setting):
         self.setting = setting
-        if setting != "default" and not setting.startswith("process-"):
+        if setting != "default" and not setting.startswith(("process-", "simple-")):
             self.ix.set_order(setting)
 
     def approx_grid_for(self, setting):
         if setting.startswith("process-"):
             return self.params.get("process", [])
+        if setting.startswith("simple-"):
+            return [dict(knob=v) for v in self.params.get("simple", {}).get(setting[len("simple-"):], [])]
         return self.approx_grid()
 
     def set_visible(self, ids, name=None):
@@ -144,8 +147,10 @@ class Vexact(System):
 
     def approx(self, q, k, p):
         if self.setting is not None and self.setting.startswith("process-"):
-            dial = {x: p[x] for x in ("price", "mean_recall", "recall", "budget") if x in p}
+            dial = {x: p[x] for x in ("price", "budget") if x in p}
             return self.ix.knn_process(self.q(q), k, spread=self.setting[len("process-"):], eps=p.get("eps", 0.0), **dial)
+        if self.setting is not None and self.setting.startswith("simple-"):
+            return self.ix.knn_simple(self.q(q), k, self.setting[len("simple-"):], p["knob"])
         return self.ix.knn_approx(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
 
     def approx_grid(self):
