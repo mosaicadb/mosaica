@@ -90,29 +90,24 @@ impl Table {
         self.ln_p_slope(zeta, lr).0
     }
 
-    /// ln P and its derivative in zeta (0 where it is constant or clamped).
-    #[inline]
+    /// ln P and its derivative in zeta (0 where it is constant or clamped). Written without branches (selects only),
+    /// so that a loop over units vectorises: below the grid the first segment at its start, above it the last at its
+    /// end plus the tail.
+    #[inline(always)]
     pub fn ln_p_slope(&self, zeta: f64, lr: f64) -> (f64, f64) {
-        let x = (zeta - self.lo) / self.step - 0.5;
         let last = (NG - 1) as f64;
-        let (v, d) = if x >= last {
-            (self.g[NG - 1] + self.slope * (x - last) * self.step, self.slope)
-        } else if x > 0.0 {
-            let i = x as usize;
-            let f = x - i as f64;
-            let dg = self.g[i + 1] - self.g[i];
-            (self.g[i] + f * dg, dg / self.step)
-        } else {
-            (self.g[0], 0.0)
-        };
+        let x = (zeta - self.lo) / self.step - 0.5;
+        let xc = x.max(0.0).min(last);
+        let i = (xc as usize).min(NG - 2);
+        let f = xc - i as f64;
+        let g: &[f64; NG] = self.g[..NG].try_into().expect("a table holds NG values");
+        let (g0, g1) = (g[i], g[i + 1]);
+        let over = (x - last).max(0.0);
+        let v = g0 + f * (g1 - g0) + self.slope * over * self.step;
+        let d = if x <= 0.0 { 0.0 } else if x >= last { self.slope } else { (g1 - g0) / self.step };
         let l = v + self.beta * lr;
-        if l > 0.0 {
-            (0.0, 0.0)
-        } else if l < LN_P_MIN {
-            (LN_P_MIN, 0.0)
-        } else {
-            (l, d)
-        }
+        let inside = l <= 0.0 && l >= LN_P_MIN;
+        (l.clamp(LN_P_MIN, 0.0), if inside { d } else { 0.0 })
     }
 
     /// The largest zeta at which ln P (for log relative radius `lr`) is still at least `y`; None when it never is,

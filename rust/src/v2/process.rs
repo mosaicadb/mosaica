@@ -10,8 +10,8 @@
 //! - k-NN: tau = tau*, the root of Lambda(tau*) = k, solved once and never updated; threshold: tau = t, the shares
 //!   normalised by max(Lambda(t), 1), and the clusters the support table decides wholly below t dropped and wholly
 //!   above emitted without a read;
-//! - the spreads are computed only for the units that can hold more than `EPS_MASS` of the answer (`decide`): a lower
-//!   bound of tau and an upper bound of each spread (its largest variance) bound every other unit's value;
+//! - tau* is solved over the units that hold more than `EPS_MASS` of the answer together (`decide`: their masses at a
+//!   lower bound of tau, tau* of the top units alone), the rest kept at that bound;
 //! - each unit's cost by the cost model (`Costs1`): read directly, dir + full n^vis; on the index path, cl + item n^vis,
 //!   with its group's setup grp(n) charged once per group;
 //! - the plan at a price lambda (`plan_at`): the closed set of actions maximising (sum of shares) - lambda (cost), a
@@ -42,8 +42,13 @@ use crate::kernel::Stats;
 pub const UNDECIDED: f64 = 0.1;
 /// Microseconds per cluster scored directly, beyond its rows. Hand-set; to be refitted from timings.
 pub const DIR_US: f64 = 0.2;
-/// The share of the answer the units left without their exact spread may hold, at most, together.
-pub const EPS_MASS: f64 = 1e-9;
+/// The share of the answer that the units left without their exact spreads may hold together, at most (bounded at
+/// a lower bound of tau with their spreads' upper bounds); their values stay at those bounds, so tau and the shares
+/// are within this of the ones with every spread exact.
+pub const EPS_MASS: f64 = 1e-3;
+/// The units of the largest centre scores whose tau* bounds the query's from below (any number gives a valid bound;
+/// more, a tighter one at more work).
+pub const TOP_UNITS: usize = 64;
 
 /// The process's cost model, in microseconds on one thread, for vectors of n dimensions (only ratios move the plan;
 /// the scale sets the unit of the price). Fitted to timings on this machine at n = 128, 384 and 512 (the suite's
@@ -466,22 +471,59 @@ impl Model<'_> {
     }
 }
 
+/// Units as contiguous arrays: centre score, inverse spread, log relative radius and visible rows.
+struct Soa {
+    mu: Vec<f64>,
+    inv: Vec<f64>,
+    lr: Vec<f64>,
+    nv: Vec<f64>,
+}
+
+impl Soa {
+    fn of(u: &Units, idx: impl Iterator<Item = usize>) -> Soa {
+        let mut a = Soa { mu: Vec::new(), inv: Vec::new(), lr: Vec::new(), nv: Vec::new() };
+        for i in idx {
+            a.mu.push(u.mu[i]);
+            a.inv.push(1.0 / u.s[i]);
+            a.lr.push(u.lr[i]);
+            a.nv.push(u.nv[i]);
+        }
+        a
+    }
+
+    /// Each unit's mass n^vis P(t) into `w` and its derivative in t into `wd` (one loop of table look-ups and
+    /// `exp_fast`, no branch: it vectorises).
+    fn masses(&self, tab: &Table, t: f64, w: &mut [f64], wd: &mut [f64]) {
+        for j in 0..self.mu.len() {
+            let (l, d) = tab.ln_p_slope((t - self.mu[j]) * self.inv[j], self.lr[j]);
+            let e = self.nv[j] * exp_fast(l);
+            w[j] = e;
+            wd[j] = e * d * self.inv[j];
+        }
+    }
+}
+
 /// The root tau* of Lambda(tau) = kk over the units `idx`, from `lo` (Lambda(lo) >= kk; -inf: unknown): Newton steps
 /// on ln Lambda with its derivative from the tables' slopes, kept inside a bracket (halving it when a step leaves
 /// it). Returns tau* and the evaluations of Lambda.
 fn solve_star(m: &Model, u: &Units, idx: &[usize], kk: f64, lo: f64) -> (f64, usize) {
     let lk = kk.ln();
     let mut ev = 0;
+    // the units by tier, as contiguous arrays (each tier's masses one loop without branches)
+    let parts: Vec<(&Table, Soa)> = [Tier::Group, Tier::Own].iter().map(|&t| (m.tabs[t as usize], Soa::of(u, idx.iter().copied().filter(|&i| u.tier[i] == t && !u.sure[i])))).filter(|p| !p.1.mu.is_empty()).collect();
+    let sure: f64 = idx.iter().filter(|&&i| u.sure[i]).map(|&i| u.nv[i]).sum();
+    let (mut w, mut wd) = (Vec::new(), Vec::new());
     let mut eval = |t: f64| -> (f64, f64) {
         ev += 1;
-        let (mut sw, mut sd) = (0f64, 0f64);
-        for &i in idx {
-            let tab = m.tabs[u.tier[i] as usize];
-            let inv = 1.0 / u.s[i];
-            let (l, d) = tab.ln_p_slope((t - u.mu[i]) * inv, u.lr[i]);
-            let w = u.nv[i] * exp_fast(l);
-            sw += w;
-            sd += w * d * inv;
+        let (mut sw, mut sd) = (sure, 0f64);
+        for (tab, a) in &parts {
+            w.resize(a.mu.len(), 0.0);
+            wd.resize(a.mu.len(), 0.0);
+            a.masses(tab, t, &mut w, &mut wd);
+            for (x, y) in w.iter().zip(&wd) {
+                sw += x;
+                sd += y;
+            }
         }
         (sw.max(1e-300).ln() - lk, sd / sw.max(1e-300))
     };
@@ -524,10 +566,10 @@ fn solve_star(m: &Model, u: &Units, idx: &[usize], kk: f64, lo: f64) -> (f64, us
     (x, ev)
 }
 
-/// tau and every unit's share at it: tau* for k-NN over the units `cand` (the rest hold under `EPS_MASS` of it), t
-/// for a threshold; shares n^vis P(tau) over Lambda(tau) (k-NN) or max(Lambda(t), 1) (threshold). Records Lambda and
-/// the evaluations in `info`.
-pub fn shares(m: &Model, u: &Units, cand: &[usize], target: Target, lo: f64, info: &mut ProcInfo) -> (f64, Vec<f64>) {
+/// tau and every unit's share at it: tau* for k-NN over the units `cand` (the rest, at their bounds `ub`, hold under
+/// `EPS_MASS` of it), t for a threshold; shares n^vis P(tau) over Lambda(tau) (k-NN) or max(Lambda(t), 1)
+/// (threshold), Lambda over every unit. Records Lambda and the evaluations in `info`.
+pub fn shares(m: &Model, u: &Units, cand: &[usize], ub: &[f64], target: Target, lo: f64, info: &mut ProcInfo) -> (f64, Vec<f64>) {
     let tau = match target {
         Target::Thr(t) => t,
         Target::Knn(kk) => {
@@ -536,7 +578,10 @@ pub fn shares(m: &Model, u: &Units, cand: &[usize], target: Target, lo: f64, inf
             t
         }
     };
-    let w: Vec<f64> = (0..u.cl.len()).map(|i| u.nv[i] * exp_fast(m.ln_p(u, i, tau))).collect();
+    let mut w = ub.to_vec();
+    for &i in cand {
+        w[i] = u.nv[i] * exp_fast(m.ln_p(u, i, tau));
+    }
     let sum: f64 = w.iter().sum();
     info.lambda = sum;
     let norm = match target {
@@ -562,34 +607,54 @@ pub fn decide(m: &Model, u: &mut Units, fill: &mut Fill, target: Target, stop: S
     let n = u.cl.len();
     let ag = m.cm.grp;
     let tier0 = if spread == Spread::OwnAll { Tier::Own } else { Tier::Group };
-    // a lower bound of tau: t, or the largest of the top units' own roots (each alone holds k at its root)
+    // every unit's spread of the first tier (bounds from its largest variance prune none on real data: the spread
+    // is a fraction of them, so the group tier's product over every group is cheaper than a choice of groups)
+    let need: Vec<usize> = (0..n).filter(|&i| !u.exact[i] && !u.sure[i]).collect();
+    info.spreads += fill(u, &need, tier0);
+    // a lower bound of tau: t, or tau* of the units of the largest centre scores alone (Lambda over a part is at most
+    // Lambda over all), started from the largest of the top units' own roots
     let lo = match target {
         Target::Thr(t) => t,
         Target::Knn(kk) => {
             let mut top: Vec<usize> = (0..n).collect();
-            let m8 = n.min(8);
-            if m8 < n {
-                top.select_nth_unstable_by(m8 - 1, |&a, &b| u.mu[b].total_cmp(&u.mu[a]).then(a.cmp(&b)));
+            let mt = n.min(TOP_UNITS);
+            if mt < n {
+                top.select_nth_unstable_by(mt - 1, |&a, &b| u.mu[b].total_cmp(&u.mu[a]).then(a.cmp(&b)));
             }
-            top.truncate(m8);
-            let need: Vec<usize> = top.iter().copied().filter(|&i| !u.exact[i]).collect();
-            info.spreads += fill(u, &need, tier0);
-            top.iter().filter_map(|&i| m.tabs[u.tier[i] as usize].zeta_at((kk as f64 / u.nv[i]).ln(), u.lr[i]).map(|z| u.mu[i] + u.s[i] * z)).fold(f64::NEG_INFINITY, f64::max)
+            top.truncate(mt);
+            let own = top.iter().filter_map(|&i| m.tabs[u.tier[i] as usize].zeta_at((kk as f64 / u.nv[i]).ln(), u.lr[i]).map(|z| u.mu[i] + u.s[i] * z)).fold(f64::NEG_INFINITY, f64::max);
+            let (t, ev) = solve_star(m, u, &top, kk as f64, own);
+            info.evals += ev;
+            let mass: f64 = top.iter().map(|&i| u.nv[i] * exp_fast(m.ln_p(u, i, t))).sum();
+            if mass >= kk as f64 * (1.0 - 1e-9) { t } else { own }
         }
     };
-    // the units that can hold more than EPS_MASS of the answer: P at the lower bound of tau, with each spread's upper
-    // bound where tau lies above the centre score (there P grows with the spread)
+    // each unit's mass at the lower bound of tau, a bound of its mass at tau; the units of the smallest bounds, together
+    // at most EPS_MASS of the answer, keep their bounds (taken by binary exponent, smallest first) and the rest are
+    // solved over
     let want = match target {
         Target::Knn(kk) => kk as f64,
         Target::Thr(_) => 1.0,
     };
-    let nmax = u.nv.iter().cloned().fold(1.0, f64::max);
-    let theta = (EPS_MASS * want / n.max(1) as f64).ln() - nmax.ln();
-    let cand: Vec<usize> = (0..n).filter(|&i| u.sure[i] || !lo.is_finite() || lo <= u.mu[i] || m.ln_p(u, i, lo) >= theta).collect();
-    let need: Vec<usize> = cand.iter().copied().filter(|&i| !u.exact[i] && !u.sure[i]).collect();
-    info.spreads += fill(u, &need, tier0);
+    let ub: Vec<f64> = (0..n).map(|i| if u.sure[i] || !lo.is_finite() || lo <= u.mu[i] { u.nv[i] } else { u.nv[i] * exp_fast(m.ln_p(u, i, lo)) }).collect();
+    let cand: Vec<usize> = {
+        let expo = |x: f64| (x.to_bits() >> 52) as usize & 2047;
+        let mut by = vec![0f64; 2048];
+        for &x in &ub {
+            by[expo(x)] += x;
+        }
+        let (mut held, mut cut) = (0.0, 2048);
+        for (e, &x) in by.iter().enumerate() {
+            if held + x > EPS_MASS * want {
+                cut = e;
+                break;
+            }
+            held += x;
+        }
+        (0..n).filter(|&i| expo(ub[i]) >= cut).collect()
+    };
     info.candidates = cand.len();
-    let (mut tau, mut v) = shares(m, u, &cand, target, lo, info);
+    let (mut tau, mut v) = shares(m, u, &cand, &ub, target, lo, info);
     // the units the support table puts wholly above t are emitted without a read: outside the plan, their shares
     // taken as given (a recall target asks the plan for the rest)
     let free: Vec<usize> = (0..n).filter(|&i| !u.sure[i]).collect();
@@ -608,7 +673,7 @@ pub fn decide(m: &Model, u: &mut Units, fill: &mut Fill, target: Target, stop: S
         let refine: Vec<usize> = (0..b.v.len()).filter(|&i| (floor..=ceil).contains(&dens(&b, i))).map(|i| b.units[i]).collect();
         info.refined = refine.len();
         info.spreads += fill(u, &refine, Tier::Own);
-        (tau, v) = shares(m, u, &cand, target, lo, info);
+        (tau, v) = shares(m, u, &cand, &ub, target, lo, info);
         b = Blocks::new(&free, &u.grp, &v, &u.nv, &m.cm);
         lam = dial_price(m, &b, stop, target, info.lambda, sure_share(&v));
         (val, cost, groups) = plan_at(&b, lam, ag, &mut act);
@@ -746,7 +811,7 @@ pub struct ProcInfo {
     pub scan_cost: f64,
     pub all_cost: f64,
     pub units: usize,
-    /// Units that can hold more than `EPS_MASS` of the answer (given their exact spreads).
+    /// Units tau* is solved over (the rest hold under `EPS_MASS` of the answer together).
     pub candidates: usize,
     pub direct: usize,
     pub index: usize,
@@ -875,6 +940,23 @@ impl Process {
         let mut fill = |u: &mut Units, idx: &[usize], tier: Tier| -> usize {
             let tf = tick();
             let mut rows = 0;
+            let ng = ix.groups.len();
+            if tier == Tier::Group {
+                // most groups asked for: one product over every group's directions
+                let mut want: Vec<usize> = idx.iter().map(|&i| u.grp[i]).filter(|&g| gsig[g] < 0.0).collect();
+                want.sort_unstable();
+                want.dedup();
+                if 2 * want.len() >= ng {
+                    let r = cal.gcov.r;
+                    let mut pall = vec![0f32; ng * r];
+                    unsafe { crate::kernel::gemv_i8(&pr.q32, &cal.gcov.dirs8, ix.n(), &mut pall) };
+                    for g in 0..ng {
+                        let pf: Vec<f64> = pall[g * r..(g + 1) * r].iter().map(|&x| x as f64).collect();
+                        gsig[g] = calib::sigma(&pf, &cal.gcov.lam[g * r..(g + 1) * r], &cal.gcov.dsc[g * r..(g + 1) * r], self.grest[g], qq);
+                    }
+                    rows += ng * r;
+                }
+            }
             for &i in idx {
                 let (ci, g) = (u.cl[i], u.grp[i]);
                 u.s[i] = match tier {
@@ -1231,9 +1313,8 @@ mod tests {
         Table { lo, step, g, beta: 0.3, slope }
     }
 
-    /// tau* from the solver is the root of Lambda over every unit (each unit's P by std's exp), to 1e-9 relative, on
-    /// random units of a Gaussian table, whatever the units the candidate rule leaves out; and it agrees with a plain
-    /// bisection of the full Lambda.
+    /// tau* from the solver is the root of Lambda (each unit's P by std's exp) to within EPS_MASS, the share the units
+    /// left out of the solve may hold, on random units of a Gaussian table; a plain bisection finds the same root.
     #[test]
     fn tau_star_solves_lambda() {
         let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(5);
@@ -1254,14 +1335,16 @@ mod tests {
             let mut inf = ProcInfo { scan_cost: f64::INFINITY, ..ProcInfo::default() };
             let _ = decide(&model, &mut uu, &mut fill, Target::Knn(kk), Stop::Price(1e-3), Spread::Group, &mut inf);
             let tau = inf.tau;
-            assert!((full(tau) / kk as f64 - 1.0).abs() < 1e-9, "trial {trial}: Lambda {} at tau* for k {kk}", full(tau));
-            // a plain bisection of the full Lambda
+            // over every unit (the units left at their bounds hold at most EPS_MASS of it)
+            let r = full(tau) / kk as f64 - 1.0;
+            assert!(r > -1e-9 && r < EPS_MASS + 1e-9, "trial {trial}: Lambda {} at tau* for k {kk}", full(tau));
+            // a plain bisection of the units' own Lambda gives the same root
             let (mut a, mut b) = (-20.0, 20.0);
             for _ in 0..200 {
                 let c = 0.5 * (a + b);
-                if full(c) >= kk as f64 { a = c } else { b = c }
+                if full(c) >= kk as f64 * (1.0 + r) { a = c } else { b = c }
             }
-            assert!((tau - a).abs() < 1e-9, "trial {trial}: tau* {tau} against the bisection's {a}");
+            assert!((tau - a).abs() < 1e-9 * (1.0 + tau.abs()), "trial {trial}: tau* {tau} against the bisection's {a}");
             assert!(inf.evals <= 40, "trial {trial}: {} evaluations", inf.evals);
         }
     }

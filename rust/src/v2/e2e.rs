@@ -464,10 +464,10 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 68a2f53eb4f1db0c");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 daf36e761f708261");
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
-    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 5b58e29aee21f7b0");
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 8fa68bf71f66dff2");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -2018,9 +2018,9 @@ fn the_calibration_is_built_saved_and_opened() {
     std::fs::remove_dir_all(&tmp).unwrap();
 }
 
-/// The process's values are shares of the answer: for k-NN, Lambda(tau*) = k and the shares sum to 1; for a
-/// threshold query, the shares are n^vis P(t) / max(Lambda(t), 1), summing to min(Lambda(t), 1). Every unit holds a
-/// visible row and has a positive k-NN share.
+/// The process's values are shares of the answer: for k-NN, Lambda(tau*) = k (within `EPS_MASS`) and the shares sum
+/// to 1; for a threshold query, the shares are n^vis P(t) / max(Lambda(t), 1), summing to min(Lambda(t), 1). Every
+/// unit holds a visible row and has a positive k-NN share.
 #[test]
 fn process_shares_sum_as_specified() {
     let f = fixture();
@@ -2041,7 +2041,8 @@ fn process_shares_sum_as_specified() {
                     }
                     let sum: f64 = units.iter().map(|u| u.1).sum();
                     assert!((sum - 1.0).abs() < 1e-9, "k-NN shares sum to {sum}, {what}, k {kk}");
-                    assert!((info.lambda / kk as f64 - 1.0).abs() < 1e-8, "Lambda(tau*) {} for k {kk}, {what}", info.lambda);
+                    let r = info.lambda / kk as f64 - 1.0;
+                    assert!(r > -1e-8 && r < process::EPS_MASS + 1e-8, "Lambda(tau*) {} for k {kk}, {what}", info.lambda);
                     assert!(units.iter().all(|u| nv(u.0) > 0 && u.1 > 0.0), "{what}");
                 }
                 for th in thresholds(&t) {
@@ -2488,4 +2489,50 @@ fn the_own_spread_refines_the_units_near_the_margin() {
         }
     }
     assert!(refined > 0 && changed > 0, "refined {refined}, changed {changed}");
+}
+
+/// Operation counts of the process on a real index (no timing): `VEXACT_PROC_FIT` a fitted directory (rebuilt into
+/// its `encoded`), `VEXACT_PROC_PREP` the suite's prep directory of its dataset (queries.npy, order*.npy, vis_*.npy).
+/// Per visible set, spread and mean-recall dial: mean recall@10, rows touched, units, candidates, directions projected,
+/// evaluations of Lambda, refined units, units read directly and on the index path, groups, paths.
+#[test]
+#[ignore]
+fn process_counts_on_a_real_fit() {
+    let (Ok(fit), Ok(prep)) = (std::env::var("VEXACT_PROC_FIT"), std::env::var("VEXACT_PROC_PREP")) else { return };
+    let (_, ix) = rebuild(&fit, &BuildOptions::default(), &mut |s| if s.contains("calibration") || s.contains("encoded") { eprintln!("{}", &s[..s.len().min(2000)]) }).unwrap();
+    let pc = process::Process::new(&ix).unwrap();
+    let rd = |name: &str| crate::util::read_npy(&format!("{prep}/{name}"));
+    let qn = rd("queries.npy");
+    let (nq, d) = (qn.shape[0], qn.shape[1]);
+    let qf: Vec<f64> = qn.data.chunks_exact(8).map(|b| f64::from_le_bytes(b.try_into().unwrap())).collect();
+    let n = ix.n();
+    let queries: Vec<Vec<f32>> = (0..nq).map(|i| {
+        let mut q: Vec<f32> = qf[i * d..(i + 1) * d].iter().map(|&x| x as f32).collect();
+        q.resize(n, 0.0);
+        q
+    }).collect();
+    let i32s = |a: &crate::util::Npy| -> Vec<i32> { a.data.chunks_exact(4).map(|b| i32::from_le_bytes(b.try_into().unwrap())).collect() };
+    for f in ["none", "random-1", "random-25", "region-1", "region-25"] {
+        let (vis, ord) = if f == "none" { (None, rd("order.npy")) } else { (Some(rd(&format!("vis_{f}.npy"))), rd(&format!("order_{f}.npy"))) };
+        let vis = vis.map(|v| Vis2::new(&ix, &i32s(&v).iter().map(|&e| e as u32).collect::<RoaringBitmap>()));
+        let (ow, ov) = (ord.shape[1], i32s(&ord));
+        for sp in [process::Spread::Group, process::Spread::Own] {
+            for r in [0.5, 0.8, 0.9, 0.95] {
+                let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::MeanRecall(r)) };
+                let mut acc = [0f64; 12];
+                let mut paths = std::collections::BTreeMap::new();
+                for (qi, q) in queries.iter().enumerate() {
+                    let (out, info) = pc.knn(&ix, q, 10, vis.as_ref(), None, &o);
+                    let want: std::collections::HashSet<u32> = ov[qi * ow..qi * ow + 10].iter().map(|&e| e as u32).collect();
+                    let rec = out.ents.iter().filter(|x| want.contains(&x.1)).count() as f64 / 10.0;
+                    for (a, v) in acc.iter_mut().zip([rec, out.st.touched as f64, info.units as f64, info.candidates as f64, info.spreads as f64, info.evals as f64, info.refined as f64, info.direct as f64, info.index as f64, info.groups as f64, info.pred, info.lam]) {
+                        *a += v / nq as f64;
+                    }
+                    *paths.entry(info.path).or_insert(0) += 1;
+                }
+                eprintln!("{f:<10} {:<6} mean_recall {r}: recall {:.3} rows {:.0} units {:.0} candidates {:.1} dirs {:.0} evals {:.1} refined {:.1} direct {:.1} index {:.1} groups {:.1} pred {:.3} price {:.2e} paths {paths:?}",
+                          sp.name(), acc[0], acc[1], acc[2], acc[3], acc[4], acc[5], acc[6], acc[7], acc[8], acc[9], acc[10], acc[11]);
+            }
+        }
+    }
 }
