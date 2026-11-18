@@ -18,12 +18,15 @@
 //!   next sigma or the next cluster's read would pass that of the scan (C_s), the rows not yet read are scanned instead.
 //!   The answer is then exact and the whole costs at most 2 C_s (the probe spends at most C_s, the rest of the scan at
 //!   most C_s, and no row is read twice).
-//! - a threshold query at t reads the clusters whose u reaches t (a sigma computed only for a cluster whose bound
-//!   reaches t), after the support table has dropped those wholly below t and taken in those wholly above it without a
-//!   read; each is read exactly as the exact query reads it. That set does not depend on what is read, so the race is
-//!   settled before reading: when a scan of the visible rows, or the exact query (every cluster the support table
-//!   leaves open), costs no more than the sigmas and the reads, the query hands over to the cheaper, which answers
-//!   exactly (with psi infinite it always does, unless the support table decided every cluster).
+//! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
+//!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
+//!   decision comes first from the bounds sqrt(low_c) |q| <= sigma_c <= sqrt(top_c) |q| (low_c the cluster's least
+//!   variance along a direction it holds): a cluster whose key's lower bound reaches t is read, one whose upper bound
+//!   does not is not, and only the rest are priced. When the reads already sure, with the sigmas still to price, cost
+//!   what a scan of the visible rows or the exact query (every open cluster) costs, the query hands over to the cheaper
+//!   of the two, which answers exactly, before computing any sigma; otherwise the sigmas are computed (the largest
+//!   bound first) racing that hand-over, and the reads taken are compared with it once more. With psi infinite it
+//!   always hands over, unless the support table decided every cluster.
 //! - each cluster is read directly or on the index path, whichever the measured cost model says is cheaper
 //!   (`Measured`), with a group's setup and the anchor search charged to the first cluster that needs them. Both paths
 //!   give the same answers: the constants change the answer only through the race and the hand-overs, which answer
@@ -500,6 +503,8 @@ pub struct Adaptive {
     /// direction (sigma <= sqrt(top |q|^2))
     rest: Vec<f64>,
     top: Vec<f64>,
+    /// per cluster, the least variance along a direction it holds (sigma >= sqrt(low |q|^2))
+    low: Vec<f64>,
 }
 
 /// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once.
@@ -546,7 +551,8 @@ impl Adaptive {
             (st.rad[c] * st.rad[c] - top).max(0.0) / (st.n0.max(r + 1) - r) as f64
         }).collect();
         let top = (0..ix.k()).map(|c| st.lam.get(c * r).map_or(0.0, |&l| l as f64).max(rest[c])).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top })
+        let low = (0..ix.k()).map(|c| st.lam[c * r..(c + 1) * r].iter().fold(rest[c], |a, &l| a.min(l as f64)) * (1.0 - 1e-9)).collect();
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low })
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -565,6 +571,16 @@ impl Adaptive {
     /// The upper bound of cluster ci's key (sigma <= sqrt(top |q|^2)).
     fn bound(&self, ci: usize, qm: &[f64], psi: f64, qq: f64) -> f64 {
         qm[ci] + psi * (self.top[ci] * qq).sqrt()
+    }
+
+    /// Every cluster's key mu + psi sigma for the query `q` (for tests).
+    #[cfg(test)]
+    pub(crate) fn keys(&self, ix: &Index2, q: &[f32], psi: f64) -> Vec<f64> {
+        let pr = prep2(ix, q);
+        let qm = self.centres.centre_scores(ix, &pr.q32);
+        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
+        let mut p = vec![0f32; self.st.r];
+        (0..ix.k()).map(|ci| qm[ci] + psi * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
     }
 
     /// The cost of one sigma (its directions' products).
@@ -796,22 +812,62 @@ impl Adaptive {
             }
         }
         st.cyc[P_CHOICE] += tick() - tch;
-        // the open clusters whose key reaches t: a sigma only for those whose bound reaches it
+        // the decision first from the bounds: sqrt(low |q|^2) <= sigma <= sqrt(top |q|^2) puts each open cluster
+        // surely in (its key's lower bound reaches t), surely out (its upper bound does not), or undecided
         let ts = tick();
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let (sc, mut p, mut sig) = (self.sigma_cost(), vec![0f32; self.st.r], 0);
-        let mut spent = fixed;
-        let mut take = Vec::new();
-        let priced: Vec<usize> = if all { Vec::new() } else { open.iter().copied().filter(|&ci| self.bound(ci, &qm, psi, qq) >= t).collect() };
-        // the sigmas are spent before anything is read: a scan that costs no more is taken first
-        if spent + priced.len() as f64 * sc >= cs {
-            st.cyc[P_ORDER] += tick() - ts;
-            info.path = "scan";
-            info.cost = spent + cs;
-            let out = scan(&mut st);
+        let (mut sure, mut undecided) = (Vec::new(), Vec::new());
+        for &ci in &open {
+            if all || qm[ci] + psi * (self.low[ci] * qq).sqrt() >= t {
+                sure.push(ci);
+            } else if self.bound(ci, &qm, psi, qq) >= t {
+                undecided.push((self.bound(ci, &qm, psi, qq), ci));
+            }
+        }
+        undecided.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        st.cyc[P_ORDER] += tick() - ts;
+        // the reads' costs (each cluster's cheaper path, a group's setup once), against a scan and against the exact
+        // query (every open cluster)
+        let tch = tick();
+        let mut ch = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
+        let mut paths: Vec<(usize, KnnPath, bool)> = Vec::new();
+        let mut cp = 0.0;
+        for &ci in &sure {
+            let (path, cost, gnew) = ch.choose(ci, nv_of(ci), 0);
+            cp += cost;
+            paths.push((ci, path, gnew));
+        }
+        info.exact_cost = {
+            let mut cx = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
+            open.iter().map(|&ci| cx.choose(ci, nv_of(ci), 0).1).sum()
+        };
+        let other = cs.min(info.exact_cost);
+        st.cyc[P_CHOICE] += tick() - tch;
+        let hand = |spent: f64, st: &mut Stats, info: &mut AdaptiveInfo| {
+            let exact = info.exact_cost <= cs;
+            info.path = if exact { "exact" } else { "scan" };
+            info.cost = spent + other;
+            if exact { threshold2(ix, &pr, t, &opts) } else { scan(st) }
+        };
+        // reads as dear as the exact query's (every open cluster surely holds answers), or the sure reads and the
+        // undecided clusters' sigmas costing what a scan or the exact query would: hand over, before any sigma
+        if (!open.is_empty() && sure.len() == open.len()) || cp + undecided.len() as f64 * sc >= other {
+            let out = hand(fixed, &mut st, &mut info);
             return (done(out, &st), info);
         }
-        for &ci in &priced {
+        // the undecided clusters' sigmas, the largest bound first, racing the hand-over: before each, when the sigmas
+        // spent and the reads taken would pass what a scan or the exact query costs, hand over
+        let mut spent = fixed;
+        let mut take = sure;
+        let ts = tick();
+        for &(_, ci) in &undecided {
+            if spent - fixed + cp + sc > other {
+                st.cyc[P_SPREAD] += sig;
+                st.cyc[P_ORDER] += tick() - ts - sig;
+                let out = hand(spent, &mut st, &mut info);
+                return (done(out, &st), info);
+            }
             let tsp = tick();
             let s = self.sigma(ix, ci, &pr.q32, qq, &mut p);
             sig += tick() - tsp;
@@ -819,34 +875,16 @@ impl Adaptive {
             info.spreads += 1;
             if qm[ci] + psi * s >= t {
                 take.push(ci);
+                let (path, cost, gnew) = ch.choose(ci, nv_of(ci), 0);
+                cp += cost;
+                paths.push((ci, path, gnew));
             }
-        }
-        if all {
-            take = open.clone();
         }
         st.cyc[P_SPREAD] += sig;
         st.cyc[P_ORDER] += tick() - ts - sig;
-        // the cost of reading them, against a scan and against the exact query (every open cluster)
-        let tch = tick();
-        let price = |set: &[usize]| -> (f64, Vec<(usize, KnnPath, bool)>) {
-            let mut ch = Charges { m, ix, pr: &pr, anchored: true, gset: vec![false; ix.groups.len()] };
-            let mut tot = 0.0;
-            let paths = set.iter().map(|&ci| {
-                let (path, cost, gnew) = ch.choose(ci, nv_of(ci), 0);
-                tot += cost;
-                (ci, path, gnew)
-            }).collect();
-            (tot, paths)
-        };
-        let (cp, paths) = price(&take);
-        info.exact_cost = price(&open).0;
-        st.cyc[P_CHOICE] += tick() - tch;
-        // a scan cheaper than the reads, or reads as dear as the exact query's (every open cluster can hold answers)
-        if cs < cp || (!open.is_empty() && info.exact_cost <= cp) {
-            let exact = info.exact_cost <= cs;
-            info.path = if exact { "exact" } else { "scan" };
-            info.cost = spent + cs.min(info.exact_cost);
-            let out = if exact { threshold2(ix, &pr, t, &opts) } else { scan(&mut st) };
+        // the reads left against a scan and the exact query (the sigmas are spent either way)
+        if other < cp || (!open.is_empty() && info.exact_cost <= cp) {
+            let out = hand(spent, &mut st, &mut info);
             return (done(out, &st), info);
         }
         info.path = "probe";

@@ -2228,6 +2228,48 @@ fn the_lazy_probe_reads_what_the_eager_one_reads() {
     assert!(stops > 0, "no probe stopped early");
 }
 
+/// The approximate threshold query decides from the bounds before computing a sigma: a probe returns every answer row
+/// of every cluster whose key reaches t (and only answer rows), and reads no cluster whose key is below t; a query
+/// that hands over computes no sigma unless it raced. Under every model, visible set, threshold and psi.
+#[test]
+fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
+    let f = fixture();
+    let ix = &f.ix;
+    let scan_cheap = adaptive::Measured { row_us: 1e-6, ..fixed_costs() };
+    let mut models: Vec<(&str, adaptive::Adaptive)> = adaptives(ix);
+    models.push(("scan cheap", adaptive::Adaptive::new(ix, scan_cheap).unwrap()));
+    let row_cl: Vec<usize> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c, cl.r1 - cl.r0)).collect();
+    let mut probes = 0;
+    for (cname, ad) in &models {
+        for (qi, q) in f.queries.iter().enumerate() {
+            for psi in [0.0, 1.0, 2.0, adaptive::PSI] {
+                let keys = ad.keys(ix, q, psi);
+                for (sname, bm) in &f.sets {
+                    let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                    let t = truth(ix, q, bm.as_ref());
+                    for th in thresholds(&t) {
+                        let what = format!("{cname}, query {qi}, set {sname}, t {th}, psi {psi}");
+                        let want = answer(&t, th);
+                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, Plan::default());
+                        let got = to_bitmap2(ix, &out.rows);
+                        assert!(got.is_subset(&want), "{what}");
+                        if info.path == "probe" {
+                            probes += 1;
+                            assert!(info.read.iter().all(|&c| keys[c as usize] >= th), "{what}: a cluster read whose key is below t");
+                            let reach: RoaringBitmap = want.iter().filter(|&e| keys[row_cl[ix.row_of_ent(e)]] >= th).collect();
+                            assert!(reach.is_subset(&got), "{what}: an answer row of a cluster whose key reaches t left out");
+                        }
+                        if *cname == "scan cheap" && info.path != "empty" {
+                            assert_eq!((info.path, info.spreads), ("scan", 0), "{what}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(probes > 0);
+}
+
 /// The answers do not depend on the measured constants but through the race and the hand-overs (which answer exactly):
 /// with the index path cheap or dear, a probe that does not race reads the same clusters and returns the same items,
 /// and a threshold query that probes in both returns the same rows.
