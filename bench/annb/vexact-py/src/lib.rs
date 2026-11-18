@@ -48,9 +48,10 @@ impl Index {
     /// `priced` overrides whether the planner prices the reads. Without `full_file` an opened index reads its vectors
     /// through the saved index's own mapping (normal advice, not priced).
     /// `order` is the approximate mode's cluster order (`OrderKind`): "radius", with f fitted on `pseudo` corpus
-    /// pseudo-queries, "spread" or "h4", "h16", "h4x8" (H with that many directions per cluster, and optionally
+    /// pseudo-queries, "spread" or "h4", "h16", "h4x8" (H with up to 16 directions per cluster, and optionally
     /// its candidates per probed cluster, `OrderKind::H`), with f at
-    /// `OrderKind::default_f`. `fit_queries` fits f for any of them on real queries.
+    /// `OrderKind::default_f`. `fit_queries` fits f for any of them on real queries. The clusters' radii and directions
+    /// are the saved index's (`v2::order`, computed by the build); only radius's f is fitted here.
     #[new]
     #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
                         read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread"))]
@@ -162,14 +163,13 @@ impl Index {
         Ok(())
     }
 
-    /// Switch the approximate mode's cluster order (as `order` at open). The radii are kept. Dials fitted before are
-    /// dropped.
+    /// Switch the approximate mode's cluster order (as `order` at open), over the radii and directions the index
+    /// stores. Dials fitted before are dropped.
     fn set_order(&mut self, py: Python<'_>, order: &str) -> PyResult<()> {
         let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
-        let rad = std::mem::take(&mut self.approx.rad);
         let (ix, pseudo) = (&self.ix, &self.pseudo);
         self.approx = match kind.default_f() {
-            Some(f) => py.detach(|| Approx::new(ix, kind, f, if rad.is_empty() { Approx::radii(ix) } else { rad })),
+            Some(f) => py.detach(|| Approx::new(ix, kind, f, Approx::radii(ix))),
             None if pseudo.is_empty() => Approx::centres(ix),
             None => py.detach(|| Approx::fit(ix, pseudo, kind).0),
         };

@@ -3287,9 +3287,10 @@ impl OrderKind {
             _ => {
                 let h = s.strip_prefix('h').map(|x| x.split_once('x').unwrap_or((x, "")));
                 match h.map(|(r, m)| (r.parse::<usize>(), if m.is_empty() { Ok(H_M) } else { m.parse::<usize>() })) {
-                    Some((Ok(r), Ok(m))) if (1..=64).contains(&r) => Ok(OrderKind::H { r, m }),
-                    _ => Err(format!("the order is radius, spread, or h with 1 to 64 directions per cluster and optionally x and \
-                                      the candidates per probed cluster (h4, h16, h4x8, h4x0 for every cluster), not {s:?}")),
+                    Some((Ok(r), Ok(m))) if (1..=super::order::R_MAX).contains(&r) => Ok(OrderKind::H { r, m }),
+                    _ => Err(format!("the order is radius, spread, or h with 1 to {} directions per cluster (the index stores that \
+                                      many) and optionally x and the candidates per probed cluster (h4, h16, h4x8, h4x0 for every \
+                                      cluster), not {s:?}", super::order::R_MAX)),
                 }
             }
         }
@@ -3312,72 +3313,42 @@ impl OrderKind {
     }
 }
 
-/// Each cluster's spread for the H order: its top r principal directions about its centre (int8 rows, a scale each),
-/// their variances, and the mean variance over the other dimensions.
+/// Each cluster's spread for the H order: the first r of the principal directions the index stores
+/// (`order::OrderState`), their variances, and the mean variance over the other dimensions the data spans.
 struct HSpread {
     r: usize,
     alpha: f64,
-    dirs8: Vec<i8>,
-    dsc: Vec<f32>,
-    lam: Vec<f32>,
+    st: std::sync::Arc<super::order::OrderState>,
     rest: Vec<f32>,
 }
 
 impl HSpread {
-    fn new(ix: &Index2, r: usize) -> HSpread {
-        use faer::{Accum, Mat, Par, Side};
-        let (n, k) = (ix.n(), ix.k());
-        let r = r.min(n);
-        // the dimensions the data spans (the fit pads the vectors with zero columns)
-        let n0 = (0..n).filter(|&i| (0..k).any(|c| ix.centres32[c * n + i] != 0.0)).count().max(r + 1);
-        let per: Vec<(Vec<i8>, Vec<f32>, Vec<f32>, f32)> = (0..k).into_par_iter().map(|ci| {
-            let c = &ix.cl[ci];
-            let rows = c.r1 - c.r0;
-            let m = ix.centre_f64(ci);
-            let mut x = Mat::<f64>::zeros(rows.max(1), n);
-            let mut buf = vec![0f64; n];
-            for (i, row) in (c.r0..c.r1).enumerate() {
-                ix.full_row_f64(row, &mut buf);
-                for j in 0..n {
-                    x[(i, j)] = buf[j] - m[j];
-                }
-            }
-            let mut cov = Mat::<f64>::zeros(n, n);
-            faer::linalg::matmul::matmul(cov.as_mut(), Accum::Replace, x.transpose(), x.as_ref(), 1.0 / rows.max(1) as f64, Par::Seq);
-            let tr: f64 = (0..n).map(|i| cov[(i, i)]).sum();
-            let e = cov.self_adjoint_eigen(Side::Lower).expect("a cluster's covariance has a symmetric eigendecomposition");
-            let (vals, u) = (e.S().column_vector(), e.U());
-            let mut o: Vec<usize> = (0..n).collect();
-            o.sort_by(|&a, &b| vals[b].total_cmp(&vals[a]));
-            let lam: Vec<f32> = o[..r].iter().map(|&j| vals[j].max(0.0) as f32).collect();
-            let rest = ((tr - lam.iter().map(|&l| l as f64).sum::<f64>()).max(0.0) / (n0 - r) as f64) as f32;
-            let (mut d8, mut sc) = (Vec::with_capacity(r * n), Vec::with_capacity(r));
-            for &j in &o[..r] {
-                let s = (0..n).fold(0f64, |a, i| a.max(u[(i, j)].abs())) / 127.0;
-                d8.extend((0..n).map(|i| if s > 0.0 { (u[(i, j)] / s).round() as i8 } else { 0 }));
-                sc.push(s as f32);
-            }
-            (d8, sc, lam, rest)
+    /// The spread with r directions (at most those stored): its rest is what the cluster's variance (its radius
+    /// squared) leaves after the first r directions, spread over the other dimensions.
+    fn new(st: std::sync::Arc<super::order::OrderState>, r: usize) -> HSpread {
+        let r = r.min(st.r);
+        let n0 = st.n0.max(r + 1);
+        let rest = st.rad.iter().enumerate().map(|(ci, &rad)| {
+            let top: f64 = st.lam[ci * st.r..ci * st.r + r].iter().map(|&l| l as f64).sum();
+            ((rad * rad - top).max(0.0) / (n0 - r) as f64) as f32
         }).collect();
         let alpha = if r <= 4 { 0.5 } else { 0.75 };
-        let mut h = HSpread { r, alpha, dirs8: Vec::with_capacity(k * r * n), dsc: Vec::new(), lam: Vec::new(), rest: Vec::new() };
-        for (d8, sc, lam, rest) in per {
-            h.dirs8.extend(d8);
-            h.dsc.extend(sc);
-            h.lam.extend(lam);
-            h.rest.push(rest);
-        }
-        h
+        HSpread { r, alpha, st, rest }
+    }
+
+    /// The largest variance along a direction of cluster ci.
+    fn lam1(&self, ci: usize) -> f32 {
+        if self.r == 0 { 0.0 } else { self.st.lam[ci * self.st.r] }
     }
 
     /// q' S_c q, from the query's f32 values and |q|^2.
     fn var(&self, ci: usize, q32: &[f32], qq: f64, n: usize, p: &mut [f32]) -> f64 {
-        let r = self.r;
-        unsafe { crate::kernel::gemv_i8(q32, &self.dirs8[ci * r * n..(ci + 1) * r * n], n, &mut p[..r]) };
+        let (r, rs) = (self.r, self.st.r);
+        unsafe { crate::kernel::gemv_i8(q32, self.st.dirs(ci, r, n), n, &mut p[..r]) };
         let (mut v, mut pp) = (0f64, 0f64);
         for j in 0..r {
-            let x = (p[j] * self.dsc[ci * r + j]) as f64;
-            v += self.lam[ci * r + j] as f64 * x * x;
+            let x = (p[j] * self.st.dsc[ci * rs + j]) as f64;
+            v += self.st.lam[ci * rs + j] as f64 * x * x;
             pp += x * x;
         }
         v + self.rest[ci] as f64 * (qq - pp).max(0.0)
@@ -3443,8 +3414,12 @@ pub fn pseudo_queries(ix: &Index2, nq: usize, kk: usize) -> Vec<(usize, Vec<f32>
 }
 
 impl Approx {
-    /// Every cluster's RMS radius about its stored centre, from the stored vectors.
+    /// Every cluster's RMS radius about its stored centre over all its rows: as the build stored it
+    /// (`order::OrderState`), else from the stored vectors.
     pub fn radii(ix: &Index2) -> Vec<f64> {
+        if let Some(st) = &ix.order {
+            return st.rad.to_vec();
+        }
         let n = ix.n();
         (0..ix.k()).into_par_iter().map(|ci| {
             let c = &ix.cl[ci];
@@ -3459,13 +3434,18 @@ impl Approx {
         }).collect()
     }
 
+    /// The order `kind` with radius weight f over the radii `rad`. `H` reads the directions the index stores; an index
+    /// that stores none (a synthetic one) has them computed here (`OrderState::compute`).
     pub fn new(ix: &Index2, kind: OrderKind, f: f64, rad: Vec<f64>) -> Approx {
         let k = rad.len().max(1) as f64;
         let mean = rad.iter().sum::<f64>() / k;
         let sd_rad = (rad.iter().map(|r| (r - mean) * (r - mean)).sum::<f64>() / k).sqrt();
         let (cen8, csc) = int8_centres(&ix.centres32, ix.n()).unwrap_or_default();
         let h = match kind {
-            OrderKind::H { r, .. } => Some(std::sync::Arc::new(HSpread::new(ix, r))),
+            OrderKind::H { r, .. } => {
+                let st = ix.order.clone().unwrap_or_else(|| std::sync::Arc::new(super::order::OrderState::compute(ix)));
+                Some(std::sync::Arc::new(HSpread::new(st, r)))
+            }
             _ => None,
         };
         Approx { kind, f, rad, sd_rad, cen8, csc, h }
@@ -3540,7 +3520,7 @@ impl Approx {
                     let base = qm[ci] + b * self.rad[ci];
                     // sigma_c lies in [s0, s1]; alpha z is negative when the cluster has under 2 k visible rows
                     let s0 = (h.rest[ci] as f64 * qq).sqrt() * 0.999;
-                    let s1 = (h.lam[ci * r].max(h.rest[ci]) as f64 * qq).sqrt() * 1.001;
+                    let s1 = (h.lam1(ci).max(h.rest[ci]) as f64 * qq).sqrt() * 1.001;
                     (base + (az * s0).min(az * s1), base + (az * s0).max(az * s1), ci, az)
                 }).collect();
                 let cut = if take > 0 && take < bounds.len() {

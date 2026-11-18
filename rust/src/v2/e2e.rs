@@ -260,6 +260,65 @@ fn the_h_order_cut_keeps_the_full_orders_first_clusters() {
     }
 }
 
+/// The approximate mode's order state is computed by the build from the rows it encodes and saved with the index: the
+/// index opened holds it to the bit (a build in memory too), and it is what the stored rows give again. Every order
+/// (`spread` and H with the stored directions or fewer) answers approximate k-NN on the opened index as on the built
+/// one, doing the same work. An index of the previous format, or one missing an order file, is refused with a
+/// message to rebuild it.
+#[test]
+fn the_order_state_is_built_saved_and_opened() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
+    let tmp = tmp_dir("order");
+    let edir = tmp.join("encoded");
+    let edir = edir.to_str().unwrap();
+    let (_, built) = rebuild_in(dir, edir, &BuildOptions::default(), &mut |_| {}).unwrap();
+    let (_, mut opened) = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    opened.repack = built.repack.clone();
+    same_order(&built, &opened);
+    same_order(&fixture().ix, &built);
+    let st = opened.order.as_ref().unwrap();
+    assert_eq!((st.r, st.n0, st.rad.len()), (order::R_MAX, 64, built.k()));
+    same_state(st, &order::OrderState::compute(&opened));
+    let f = fixture();
+    for name in ["spread", "h1", "h4", "h16", "h4x0", "h16x2"] {
+        let kind = OrderKind::parse(name).unwrap();
+        let fk = kind.default_f().unwrap();
+        let (a, b) = (Approx::new(&built, kind, fk, Approx::radii(&built)), Approx::new(&opened, kind, fk, Approx::radii(&opened)));
+        assert_eq!(a.rad.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), b.rad.iter().map(|x| x.to_bits()).collect::<Vec<_>>(), "{name}: radii");
+        for (qi, q) in f.queries.iter().enumerate() {
+            for (sname, bm) in &f.sets {
+                let (va, vb) = (bm.as_ref().map(|x| Vis2::new(&built, x)), bm.as_ref().map(|x| Vis2::new(&opened, x)));
+                for k in [1, 10, 100] {
+                    for np in [1, 3, 8, built.k()] {
+                        let x = knn2_fast(&built, &a, q, k, va.as_ref(), np, None, Plan::default());
+                        let y = knn2_fast(&opened, &b, q, k, vb.as_ref(), np, None, Plan::default());
+                        let what = format!("{name}, query {qi}, set {sname}, k {k}, nprobe {np}");
+                        assert_eq!(x.ents, y.ents, "{what}");
+                        same_work(&x.st, &y.st, &what);
+                    }
+                }
+            }
+        }
+    }
+    drop((built, opened));
+    // the previous format, and an order file missing, are refused
+    let json = format!("{edir}/index.json");
+    let text = std::fs::read_to_string(&json).unwrap();
+    std::fs::write(&json, text.replace(&format!("\"format\": {}", store::STORE_FORMAT), &format!("\"format\": {}", store::STORE_FORMAT - 1))).unwrap();
+    let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+    assert!(e.contains(&format!("format {}", store::STORE_FORMAT - 1)) && e.contains("rebuild"), "{e}");
+    std::fs::write(&json, &text).unwrap();
+    open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    for name in order::FILES {
+        let (path, keep) = (format!("{edir}/{name}"), format!("{edir}/{name}.kept"));
+        std::fs::rename(&path, &keep).unwrap();
+        let e = open_in(dir, edir, &OpenOptions::default(), &mut |_| {}).map(|_| ()).unwrap_err();
+        assert!(e.contains(name) && e.contains("rebuild"), "{e}");
+        std::fs::rename(&keep, &path).unwrap();
+    }
+    std::fs::remove_dir_all(&tmp).unwrap();
+}
+
 /// A saved index, opened, is the index that was built: the same codes, scalars, keys, plans, per-cluster records,
 /// tables and vectors, and every query path gives the same answers doing the same work. An open with other options
 /// is refused, and nothing is written into the fitted directory.
@@ -399,15 +458,16 @@ fn fewer_deterministic_levels_and_decisions_answer_exactly() {
 
 /// The default build of synth4k encodes as the reference build does: its code hash (the gates' `--rebuild --hash`
 /// reference; `code_hash` uses std's DefaultHasher, so a Rust release that changes it changes this value, not the
-/// codes) and its store hash (a fixed hash, `Fx`). The default since the levels-clusters decision has two
+/// codes) and its store hash (a fixed hash, `Fx`, over the order state too, which is the same bits whatever the
+/// instruction set). The default since the levels-clusters decision has two
 /// deterministic levels (`DLV`); the fit's own six (`dlv: None`, the earlier default) still give the earlier reference.
 #[test]
 fn synth4k_reference_hashes() {
     let ix = &fixture().ix;
-    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 e9ba6817c35cf8b0");
+    assert_eq!(format!("{:016x} {:016x}", ix.code_hash(), ix.store_hash()), "165fef0c0d6b5659 45b898e83a7e9b86");
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, six) = build(dir, &BuildOptions { dlv: None, ..BuildOptions::default() }, &mut |_| {}).unwrap();
-    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 3782663ec5d076fd");
+    assert_eq!(format!("{:016x} {:016x}", six.code_hash(), six.store_hash()), "7ac80b6c54101fa9 899ea7d7e812932c");
 }
 
 /// Which deterministic levels decide, chosen per query (`Plan::ddec`) on one index: threshold answers equal brute force
@@ -786,6 +846,20 @@ fn same_index(a: &Index2, b: &Index2) {
     for r in 0..a.nrows {
         assert_eq!(ra.row(r, a.n()), rb.row(r, b.n()), "row {r}'s stored vector");
     }
+    same_order(a, b);
+}
+
+/// Two indexes hold the same order state, to the bit.
+fn same_order(a: &Index2, b: &Index2) {
+    let (Some(x), Some(y)) = (&a.order, &b.order) else { panic!("an index without an order state") };
+    same_state(x, y);
+}
+
+fn same_state(x: &order::OrderState, y: &order::OrderState) {
+    let f32b = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let f64b = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!((x.r, x.n0, f64b(&x.rad), f32b(&x.lam), f32b(&x.dsc)), (y.r, y.n0, f64b(&y.rad), f32b(&y.lam), f32b(&y.dsc)), "the order state's radii and variances");
+    assert_eq!(&x.dirs8[..], &y.dirs8[..], "the order state's directions");
 }
 
 /// synth4k's vectors written as a two-cell partition (as tools/partition.py writes one): clusters 0..16 in cell 0, the

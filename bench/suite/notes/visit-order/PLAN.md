@@ -152,7 +152,9 @@ on glove `spread` loses 0.008 to 0.015 recall at a fixed nprobe for 3 to 4% fewe
 
 **Phase 2: H** (`OrderKind::H { r, m }`, the bindings' orders `h4`, `h16`, `h4x8`).
 - Each cluster's top r principal directions about its centre (int8, a scale each), their variances and the mean
-  variance of the rest are computed when the order is chosen (`HSpread::new`, faer): 0.4 s on glove. Not yet stored.
+  variance of the rest. The measurements below computed them exactly when the order was chosen (full covariance and
+  eigendecomposition, faer). They are now computed by the build and stored (`rust/src/v2/order.rs`, store format 7;
+  see the next section).
 - z(k, n) takes the cluster's visible rows, and is negative under 2k of them (the bounds allow either sign).
 - First version, the exact cut (the rank-0 bounds rest |q|² ≤ σ_c² ≤ λ₁|q|², `results/phase2-paired-h-exact-cut.txt`):
   unfiltered the bounds prune nothing (499 of 500 clusters computed on LAION; the order 113 to 317 µs for h4, 551 to
@@ -183,10 +185,32 @@ Time to reach a recall against `spread`, paired (negative is faster):
 h16x4 is the best order wherever the visible set is dense. Its state is 4 MB on LAION 1M (int8) and takes 6.3 s on
 4 threads to compute, almost all of it the full 512 × 512 eigendecompositions.
 
+**The order state at build** (`v2::order`). The build computes each cluster's state from the rows it encodes and
+saves it beside the index; an open maps it and computes nothing (radius's f is still fitted at open). Per cluster:
+its RMS radius over all its rows (f64), and 16 directions (int8 rows with an f32 scale each) with their variances
+(f32), 16·n + 136 bytes (8.3 kB at n = 512, 4.2 MB on LAION 1M; 720 MB at 1B and n = 2048). An order with r ≤ 16
+takes the first r; its rest is (rad² − Σ_{j≤r} λ_j) / (n₀ − r).
+- The directions come from up to 4,096 rows spread evenly over the cluster, by subspace iteration on a block of 32
+  started from random signs (5 products with the sample's covariance, Gram-Schmidt between them), then a 32 × 32
+  Rayleigh-Ritz step (Jacobi). All of it in a fixed order with separate multiplies and adds, so the state is the same
+  bits under AVX-512 and AVX2, built or recomputed from the saved rows.
+- Against the exact directions (`order::tests::sampled_directions_against_the_exact_ones_on_a_real_fit`, 40 clusters
+  of each fit, median / 90% / max): LAION (1,946 rows a cluster, all in the sample) variances 1 and 4 within
+  0.0000 / 0.0000 / 0.007, variance 16 0.0008 / 0.007 / 0.025; the span of the first 16 misses 0.0003 / 0.001 /
+  0.002 of their variance; σ_c(q) for centres as queries within 0.0009 / 0.0027 / 0.015 (16 directions) and
+  0.0009 / 0.0025 / 0.054 (4). Yahoo and glove alike (σ_c within 0.007 at 90%, 0.09 at most). The largest
+  principal angle of the first 16 is 0.06 to 0.7 rad at the median: their 16th and 17th variances are nearly equal,
+  so the span is ill-defined, while the variance it captures is not. From fewer rows the error is the sample's:
+  with 1,024 rows σ_c is within 0.007 to 0.022 at the median and 0.023 to 0.072 at 90%, variance 1 within 0.01 to
+  0.03 at the median; 4,096 rows of a 45,000-row cluster at 1B should be about half that (the error goes as
+  1/√rows).
+- Cost: 0.025 s a LAION cluster on one thread (the exact one 0.066 s); at 1B and n = 2048 about 0.25 s a cluster,
+  1.5 thread-hours for 22,000 clusters, where the exact covariances would take about 25 s a cluster (both
+  extrapolated from LAION by their operation counts).
+- The tables above were measured with the exact directions; the stored ones have not been run through the suite yet.
+
 **Next.**
-- Make h16 the default once its state is computed at build and stored (format version bumped) rather than at open,
-  and computed from a sample of each cluster's rows with a randomised top-r solver: at 1B (about 22,000 clusters of
-  45,000 rows) the full covariances would take hours.
+- Make h16 the default, after checking the stored directions on the paired suite.
 - Inserts leave the directions as built until compaction; n_c (for z) follows the visible counts already.
 - Phase 2b (the hierarchy) and phase 3 (stopping on the rad-aware model's probability) as planned. Under sparse
   filters the order is still the larger part of a query (18 of 24 µs on LAION at random-1 and nprobe 4).
