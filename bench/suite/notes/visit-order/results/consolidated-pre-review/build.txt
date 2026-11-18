@@ -1,0 +1,3 @@
+[build2] saved to /home/user/scratch-proc/work/laion-clip-512-normalized/vexact/index/encoded; store hash 3578622ebf9c2aea
+[build2] saved to /home/user/scratch-proc/work/yahoo-minilm-384-normalized/vexact/index/encoded; store hash 87d68435c09852b7
+[build2] saved to /home/user/scratch-proc/work/glove-100-angular/vexact/index/encoded; store hash f1322bfbd2068546

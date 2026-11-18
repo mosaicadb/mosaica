@@ -1,0 +1,11 @@
+laion-clip-512-normalized {'i8_us': 0.017337999999999996, 'row_us': 0.051172851173698075, 'dir_us': 1.2012646507998868, 'cl_us': 19.300204699163906, 'size_us': 0.004222517361551063, 'vis_us': 0.015665675176870557, 'grp_us': 48.93993548387096, 'anc_us': 0.0705065, 'rule': (510, 0.11892011242821267), 'plan_rule': (510, 0.11892011242821267)}
+laion-clip-512-normalized none fixed exact knn 36218.7 us, threshold 36034.6 us (median)
+laion-clip-512-normalized none measured exact knn 36651.5 us, threshold 36201.5 us (median)
+laion-clip-512-normalized random-1 fixed exact knn 609.1 us, threshold 616.3 us (median)
+laion-clip-512-normalized random-1 measured exact knn 606.1 us, threshold 619.6 us (median)
+laion-clip-512-normalized random-25 fixed exact knn 33258.9 us, threshold 43505.0 us (median)
+laion-clip-512-normalized random-25 measured exact knn 34247.7 us, threshold 34754.0 us (median)
+laion-clip-512-normalized region-1 fixed exact knn 696.2 us, threshold 709.9 us (median)
+laion-clip-512-normalized region-1 measured exact knn 693.7 us, threshold 712.2 us (median)
+laion-clip-512-normalized region-25 fixed exact knn 22977.0 us, threshold 26574.4 us (median)
+laion-clip-512-normalized region-25 measured exact knn 32904.5 us, threshold 34373.3 us (median)

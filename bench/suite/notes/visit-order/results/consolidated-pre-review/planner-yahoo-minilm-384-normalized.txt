@@ -1,0 +1,11 @@
+yahoo-minilm-384-normalized {'i8_us': 0.013460176991150444, 'row_us': 0.03194431899200966, 'dir_us': 1.1860824546107227, 'cl_us': 14.107022723835613, 'size_us': 0.00389149614499618, 'vis_us': 0.0144857587226992, 'grp_us': 27.79525, 'anc_us': 0.04799115044247788, 'rule': (740, 0.22289902975773143), 'plan_rule': (740, 0.22289902975773143)}
+yahoo-minilm-384-normalized none fixed exact knn 13162.0 us, threshold 14100.8 us (median)
+yahoo-minilm-384-normalized none measured exact knn 12897.5 us, threshold 14165.4 us (median)
+yahoo-minilm-384-normalized random-1 fixed exact knn 337.0 us, threshold 342.0 us (median)
+yahoo-minilm-384-normalized random-1 measured exact knn 334.1 us, threshold 343.6 us (median)
+yahoo-minilm-384-normalized random-25 fixed exact knn 14019.7 us, threshold 23853.6 us (median)
+yahoo-minilm-384-normalized random-25 measured exact knn 19014.1 us, threshold 19288.6 us (median)
+yahoo-minilm-384-normalized region-1 fixed exact knn 369.5 us, threshold 382.8 us (median)
+yahoo-minilm-384-normalized region-1 measured exact knn 367.0 us, threshold 409.1 us (median)
+yahoo-minilm-384-normalized region-25 fixed exact knn 10043.1 us, threshold 12071.3 us (median)
+yahoo-minilm-384-normalized region-25 measured exact knn 14354.1 us, threshold 14526.7 us (median)

@@ -1,0 +1,11 @@
+glove-100-angular {'i8_us': 0.005236486486486487, 'row_us': 0.015049637737470785, 'dir_us': 1.790864555443651, 'cl_us': 15.00637604382357, 'size_us': 0.0024136251452529247, 'vis_us': 0.014416496027512963, 'grp_us': 6.012233333333333, 'anc_us': 0.01934839527027027, 'rule': (20873, 3.812140484969334), 'plan_rule': (20873, 3.812140484969334)}
+glove-100-angular none fixed exact knn 16744.3 us, threshold 17542.9 us (median)
+glove-100-angular none measured exact knn 28943.1 us, threshold 37575.6 us (median)
+glove-100-angular random-1 fixed exact knn 491.3 us, threshold 531.2 us (median)
+glove-100-angular random-1 measured exact knn 481.5 us, threshold 525.9 us (median)
+glove-100-angular random-25 fixed exact knn 13284.3 us, threshold 19763.3 us (median)
+glove-100-angular random-25 measured exact knn 12883.2 us, threshold 12173.4 us (median)
+glove-100-angular region-1 fixed exact knn 214.7 us, threshold 247.9 us (median)
+glove-100-angular region-1 measured exact knn 214.8 us, threshold 242.8 us (median)
+glove-100-angular region-25 fixed exact knn 9072.3 us, threshold 10452.7 us (median)
+glove-100-angular region-25 measured exact knn 8458.9 us, threshold 7770.0 us (median)
