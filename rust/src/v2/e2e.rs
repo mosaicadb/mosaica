@@ -2021,7 +2021,7 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
                         ids.sort_unstable();
                         ids.dedup();
                         assert_eq!(ids.len(), out.ents.len(), "an item twice, {what}");
-                        assert!(out.ents.iter().all(|x| bm.as_ref().map_or(true, |b| b.contains(x.1))), "an invisible item, {what}");
+                        assert!(out.ents.iter().all(|x| bm.as_ref().is_none_or(|b| b.contains(x.1))), "an invisible item, {what}");
                         assert!(out.ents.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e), "a score not the item's, {what}");
                         assert!(["probe", "race", "scan", "empty"].contains(&info.path), "{what}: {}", info.path);
                         if psi == f64::INFINITY || info.path == "race" || info.path == "scan" {
