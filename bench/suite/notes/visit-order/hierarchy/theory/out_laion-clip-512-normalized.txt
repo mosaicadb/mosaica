@@ -1,0 +1,291 @@
+== laion-clip-512-normalized: N 1000448, K 500, groups 64, queries 100
+
+A. k = 10, unfiltered: share of rows (%) to mean recall .8 / .9 / .95 | recall at 0.5 / 1.6 / 6.3% of rows
+  G    centre score                               11.02 23.40 41.12 | 0.087 0.279 0.634
+  G    +0.2 rad                                   15.63 31.23 37.02 | 0.104 0.334 0.661
+  G    spread f'=0.4                              13.65 24.20 37.35 | 0.097 0.311 0.667
+  G    spread best f' (0.3)                       11.95 20.70 37.27 | 0.096 0.307 0.659
+  G    mu + psi sigma exact, best psi (3.5)        7.12 11.93 19.21 | 0.099 0.317 0.768
+  G    zeta, exact sigma, true tau                 7.32 12.54 19.71 | 0.100 0.321 0.758
+  G    (tau - mu) / rad, true tau                 18.38 38.18 49.10 | 0.098 0.315 0.623
+  G    clairvoyant                                 4.14  5.74  7.14 | 0.134 0.429 0.929
+  C    centre score                                2.27  6.13 11.40 | 0.497 0.730 0.903
+  C    +0.2 rad                                    1.72  4.15  7.30 | 0.538 0.783 0.942
+  C    spread f'=0.4                               1.77  4.06  7.45 | 0.540 0.783 0.937
+  C    spread best f' (0.5)                        1.70  3.80  6.78 | 0.544 0.788 0.937
+  C    mu + psi sigma exact, best psi (4.0)        1.32  2.67  5.17 | 0.610 0.840 0.964
+  C    zeta, exact sigma, true tau                 1.33  2.75  5.54 | 0.619 0.840 0.959
+  C    (tau - mu) / rad, true tau                  1.83  4.47  8.21 | 0.527 0.773 0.939
+  C    clairvoyant                                 0.58  0.85  1.11 | 0.759 0.989 1.000
+  a4   centre score                                1.40  3.85  8.84 | 0.653 0.811 0.928
+  a4   +0.2 rad                                    1.00  2.64  5.53 | 0.691 0.848 0.951
+  a4   spread f'=0.4                               1.07  2.52  5.49 | 0.692 0.852 0.952
+  a4   spread best f' (0.5)                        1.04  2.35  5.39 | 0.699 0.857 0.955
+  a4   mu + psi sigma exact, best psi (4.0)        0.70  1.66  3.13 | 0.749 0.897 0.980
+  a4   zeta, exact sigma, true tau                 0.67  1.66  3.16 | 0.757 0.895 0.980
+  a4   (tau - mu) / rad, true tau                  1.05  2.79  6.04 | 0.698 0.855 0.951
+  a4   clairvoyant                                 0.22  0.31  0.38 | 0.992 1.000 1.000
+  a16  centre score                                0.83  2.83  7.31 | 0.733 0.865 0.941
+  a16  +0.2 rad                                    0.63  1.71  4.09 | 0.771 0.894 0.974
+  a16  spread f'=0.4                               0.60  1.89  4.60 | 0.776 0.888 0.957
+  a16  spread best f' (0.6)                        0.59  1.62  4.20 | 0.786 0.899 0.966
+  a16  mu + psi sigma exact, best psi (4.0)        0.35  0.93  1.74 | 0.842 0.943 0.996
+  a16  zeta, exact sigma, true tau                 0.32  0.94  1.70 | 0.845 0.945 0.996
+  a16  (tau - mu) / rad, true tau                  0.60  1.83  4.21 | 0.783 0.889 0.966
+  a16  clairvoyant                                 0.08  0.10  0.12 | 1.000 1.000 1.000
+  d16  centre score                                0.70  2.47  7.46 | 0.745 0.874 0.945
+  d16  +0.2 rad                                    0.56  1.46  3.01 | 0.785 0.907 0.978
+  d16  spread f'=0.4                               0.52  1.54  4.07 | 0.794 0.903 0.969
+  d16  spread best f' (0.8)                        0.49  1.44  3.19 | 0.802 0.909 0.976
+  d16  mu + psi sigma exact, best psi (4.0)        0.33  0.75  1.43 | 0.859 0.958 0.995
+  d16  zeta, exact sigma, true tau                 0.29  0.76  1.45 | 0.861 0.959 0.993
+  d16  (tau - mu) / rad, true tau                  0.54  1.69  4.05 | 0.788 0.898 0.975
+  d16  clairvoyant                                 0.07  0.10  0.12 | 1.000 1.000 1.000
+  a64  centre score                                0.51  1.67  5.60 | 0.798 0.898 0.959
+  a64  +0.2 rad                                    0.28  1.08  2.46 | 0.839 0.925 0.985
+  a64  spread f'=0.4                               0.36  1.23  3.37 | 0.832 0.920 0.975
+  a64  spread best f' (1.0)                        0.27  1.02  2.22 | 0.840 0.933 0.982
+  a64  mu + psi sigma exact, best psi (3.0)        0.14  0.36  0.85 | 0.912 0.979 0.996
+  a64  zeta, exact sigma, true tau                 0.14  0.35  0.80 | 0.912 0.980 0.996
+  a64  (tau - mu) / rad, true tau                  0.28  1.20  2.45 | 0.841 0.922 0.979
+  a64  clairvoyant                                 0.03  0.04  0.04 | 1.000 1.000 1.000
+
+A. k = 100, unfiltered: share of rows (%) to mean recall .8 / .9 / .95 | recall at 0.5 / 1.6 / 6.3% of rows
+  G    centre score                               12.83 25.20 40.28 | 0.089 0.286 0.624
+  G    +0.2 rad                                   16.70 31.39 44.85 | 0.103 0.328 0.619
+  G    spread f'=0.4                              14.37 24.95 40.26 | 0.097 0.310 0.637
+  G    spread best f' (0.2)                       13.32 24.53 38.70 | 0.094 0.302 0.628
+  G    mu + psi sigma exact, best psi (3.5)        8.02 15.23 25.04 | 0.100 0.321 0.744
+  G    zeta, exact sigma, true tau                 8.12 15.19 24.77 | 0.103 0.330 0.740
+  G    (tau - mu) / rad, true tau                 17.44 35.51 47.72 | 0.100 0.320 0.621
+  G    clairvoyant                                 6.07 11.15 16.38 | 0.113 0.361 0.810
+  C    centre score                                2.96  7.71 14.96 | 0.484 0.701 0.882
+  C    +0.2 rad                                    2.60  6.29 13.03 | 0.495 0.732 0.900
+  C    spread f'=0.4                               2.34  5.86 11.51 | 0.514 0.738 0.907
+  C    spread best f' (0.6)                        2.41  5.78 11.84 | 0.504 0.743 0.908
+  C    mu + psi sigma exact, best psi (3.0)        1.73  4.12  7.94 | 0.547 0.787 0.934
+  C    zeta, exact sigma, true tau                 1.72  4.20  8.09 | 0.556 0.788 0.935
+  C    (tau - mu) / rad, true tau                  2.45  6.20 12.84 | 0.513 0.740 0.901
+  C    clairvoyant                                 1.29  2.51  3.90 | 0.597 0.837 0.986
+  a4   centre score                                1.89  5.57 11.88 | 0.607 0.778 0.910
+  a4   +0.2 rad                                    1.69  4.44  9.46 | 0.619 0.796 0.926
+  a4   spread f'=0.4                               1.52  4.09  8.63 | 0.640 0.805 0.932
+  a4   spread best f' (0.6)                        1.49  4.02  8.47 | 0.635 0.808 0.935
+  a4   mu + psi sigma exact, best psi (3.5)        1.08  2.81  5.80 | 0.681 0.845 0.954
+  a4   zeta, exact sigma, true tau                 1.07  2.83  5.83 | 0.692 0.844 0.954
+  a4   (tau - mu) / rad, true tau                  1.55  4.24  9.21 | 0.641 0.803 0.931
+  a4   clairvoyant                                 0.70  1.27  1.78 | 0.736 0.935 1.000
+  a16  centre score                                1.29  4.12  8.89 | 0.680 0.822 0.931
+  a16  +0.2 rad                                    1.07  3.01  6.65 | 0.700 0.843 0.947
+  a16  spread f'=0.4                               1.00  2.87  6.61 | 0.716 0.849 0.948
+  a16  spread best f' (0.6)                        0.97  2.62  6.13 | 0.722 0.854 0.951
+  a16  mu + psi sigma exact, best psi (3.5)        0.68  1.72  3.50 | 0.760 0.893 0.976
+  a16  zeta, exact sigma, true tau                 0.66  1.69  3.42 | 0.767 0.894 0.977
+  a16  (tau - mu) / rad, true tau                  0.97  2.80  6.29 | 0.720 0.849 0.950
+  a16  clairvoyant                                 0.34  0.55  0.71 | 0.882 1.000 1.000
+  d16  centre score                                1.13  3.56  8.07 | 0.697 0.836 0.936
+  d16  +0.2 rad                                    0.94  2.64  6.02 | 0.714 0.856 0.952
+  d16  spread f'=0.4                               0.88  2.63  5.53 | 0.730 0.863 0.956
+  d16  spread best f' (0.6)                        0.87  2.41  5.25 | 0.733 0.867 0.959
+  d16  mu + psi sigma exact, best psi (3.5)        0.61  1.52  3.23 | 0.775 0.904 0.980
+  d16  zeta, exact sigma, true tau                 0.59  1.49  3.19 | 0.780 0.906 0.981
+  d16  (tau - mu) / rad, true tau                  0.88  2.58  5.64 | 0.734 0.862 0.955
+  d16  clairvoyant                                 0.32  0.51  0.66 | 0.896 1.000 1.000
+  a64  centre score                                0.90  2.78  6.47 | 0.736 0.860 0.949
+  a64  +0.2 rad                                    0.70  2.03  4.90 | 0.758 0.883 0.962
+  a64  spread f'=0.4                               0.67  1.99  4.61 | 0.765 0.885 0.962
+  a64  spread best f' (0.8)                        0.61  1.70  4.13 | 0.779 0.895 0.969
+  a64  mu + psi sigma exact, best psi (3.0)        0.38  0.91  1.90 | 0.836 0.940 0.991
+  a64  zeta, exact sigma, true tau                 0.35  0.87  1.81 | 0.843 0.942 0.991
+  a64  (tau - mu) / rad, true tau                  0.61  1.80  4.33 | 0.778 0.892 0.965
+  a64  clairvoyant                                 0.16  0.23  0.29 | 1.000 1.000 1.000
+
+B. two-level probing, a16 under C, k = 10, child key spread f'=0.4. Flat order over every sub-centre: rows to .8/.9/.95 =  0.60  1.89  4.60 %
+   parent key: share of rows (%) to recall .9 with the best P parents expanded, P = 8, 16, 32, 64, 128 | parents needed to hold 95% / 100% of the first L flat leaves (mean; L = leaves to recall .9) | groups those parents lie in
+   centre score                              nan   nan   3.11  2.09  1.89 |   51.8  153.9 (L = 131, L/16 = 8.2) | 16.6
+   spread f'=0.4 (cluster)                   nan   nan   2.26  2.03  1.90 |   48.2  142.0 (L = 131, L/16 = 8.2) | 16.1
+   mu + 3 sigma_C (exact total spread)       nan   1.94  1.88  1.89  1.89 |   40.4  107.6 (L = 131, L/16 = 8.2) | 14.5
+   mu + 2 sigma_C                            nan   2.22  1.93  1.89  1.89 |   37.2  107.8 (L = 131, L/16 = 8.2) | 13.4
+   mu + z(1,F) s_g (between-child only)      nan   nan   2.38  1.99  1.90 |   39.7  117.6 (L = 131, L/16 = 8.2) | 14.6
+   mu + z(1,F) s_g + 2 sigma_within          nan   1.95  1.95  1.89  1.89 |   37.1  104.1 (L = 131, L/16 = 8.2) | 13.7
+   oracle: best child key                    nan   nan   2.09  1.89  1.89 |   28.6   33.6 (L = 131, L/16 = 8.2) | 12.1
+
+B. two-level probing, d16 under C, k = 10, child key spread f'=0.4. Flat order over every sub-centre: rows to .8/.9/.95 =  0.52  1.54  4.07 %
+   parent key: share of rows (%) to recall .9 with the best P parents expanded, P = 8, 16, 32, 64, 128 | parents needed to hold 95% / 100% of the first L flat leaves (mean; L = leaves to recall .9) | groups those parents lie in
+   centre score                              nan   nan   2.66  1.60  1.54 |   52.2  148.1 (L = 107, L/16 = 6.7) | 16.3
+   spread f'=0.4 (cluster)                   nan   nan   1.80  1.59  1.55 |   47.7  140.5 (L = 107, L/16 = 6.7) | 15.8
+   mu + 3 sigma_C (exact total spread)       nan   1.69  1.49  1.53  1.55 |   40.3  114.0 (L = 107, L/16 = 6.7) | 14.4
+   mu + 2 sigma_C                            nan   2.18  1.50  1.53  1.55 |   38.5  113.9 (L = 107, L/16 = 6.7) | 13.5
+   mu + z(1,F) s_g (between-child only)      nan   nan   1.96  1.54  1.55 |   42.1  126.7 (L = 107, L/16 = 6.7) | 14.6
+   mu + z(1,F) s_g + 2 sigma_within          nan   1.97  1.47  1.53  1.55 |   38.0  112.1 (L = 107, L/16 = 6.7) | 13.8
+   oracle: best child key                    nan   nan   1.54  1.54  1.54 |   26.0   30.2 (L = 107, L/16 = 6.7) | 11.2
+
+C. share f of the variance (over leaves) of the leaf centre score explained by the parent's centre score; share of parents that must be kept to hold 99% of the top leaves (by centre score), measured | predicted by (2.2)
+     G -> C    (64 -> 500): f mean 0.624 (10th-90th pct 0.54-0.71); top 0.2%: 0.251 | 0.198; top 1%: 0.360 | 0.340; top 5%: 0.547 | 0.550;
+     C -> a4   (500 -> 2000): f mean 0.875 (10th-90th pct 0.84-0.91); top 0.2%: 0.092 | 0.031; top 1%: 0.198 | 0.088; top 5%: 0.230 | 0.236;
+     C -> a16  (500 -> 7961): f mean 0.774 (10th-90th pct 0.72-0.82); top 0.2%: 0.330 | 0.077; top 1%: 0.398 | 0.173; top 5%: 0.454 | 0.366;
+    a4 -> a16  (2000 -> 7961): f mean 0.879 (10th-90th pct 0.85-0.91); top 0.2%: 0.192 | 0.029; top 1%: 0.299 | 0.085; top 5%: 0.355 | 0.232;
+   a16 -> a64  (7961 -> 31098): f mean 0.836 (10th-90th pct 0.79-0.87); top 0.2%: 0.384 | 0.046; top 1%: 0.427 | 0.118; top 5%: 0.511 | 0.287;
+     C -> a64  (500 -> 31098): f mean 0.662 (10th-90th pct 0.59-0.74); top 0.2%: 0.568 | 0.161; top 1%: 0.616 | 0.295; top 5%: 0.676 | 0.506;
+     G -> a16  (64 -> 7961): f mean 0.487 (10th-90th pct 0.38-0.58); top 0.2%: 0.578 | 0.366; top 1%: 0.688 | 0.517; top 5%: 0.703 | 0.698;
+     G -> a64  (64 -> 31098): f mean 0.418 (10th-90th pct 0.32-0.51); top 0.2%: 0.719 | 0.465; top 1%: 0.750 | 0.606; top 5%: 0.781 | 0.761;
+
+D. sub-centre scores from the first r coordinates of the group's basis (q.s = q.m_c + sum_{i<r} (V'q)_i (V^-1 (s - m_c))_i)
+   d16: rms of q.(s - m_c) 0.0130, sd over clusters of q.m_c 0.0222; exact sub-centre scores: rows to .9 =  1.54%.  r: residual variance share, rows to .9:  r=2: 0.752,  4.10%  r=4: 0.668,  3.91%  r=8: 0.539,  3.24%  r=16: 0.376,  2.83%  r=32: 0.248,  2.11%  r=64: 0.150,  1.80%  r=128: 0.079,  1.67%
+   a16: rms of q.(s - m_c) 0.0128, sd over clusters of q.m_c 0.0222; exact sub-centre scores: rows to .9 =  1.89%.  r: residual variance share, rows to .9:  r=2: 0.738,  4.38%  r=4: 0.652,  3.87%  r=8: 0.523,  3.10%  r=16: 0.360,  3.04%  r=32: 0.234,  2.47%  r=64: 0.140,  2.08%  r=128: 0.072,  2.00%
+   a64: rms of q.(s - m_c) 0.0169, sd over clusters of q.m_c 0.0222; exact sub-centre scores: rows to .9 =  1.23%.  r: residual variance share, rows to .9:  r=2: 0.777,  4.39%  r=4: 0.702,  3.87%  r=8: 0.588,  3.38%  r=16: 0.434,  2.69%  r=32: 0.308,  1.93%  r=64: 0.202,  1.55%  r=128: 0.111,  1.29%
+
+E. approximate threshold queries: answer = rows scoring at least t, t set per query for an answer of the given share. Share of rows (%) read to mean recall .8 / .9 / .95
+  answer 0.01%  C    centre score                                          2.96  7.71 14.96
+  answer 0.01%  C    spread f'=0.4                                         2.34  5.86 11.51
+  answer 0.01%  C    spread best f' (0.5)                                  2.31  5.89 11.49
+  answer 0.01%  C    zeta(t), exact sigma                                  1.72  4.20  8.09
+  answer 0.01%  C    (t - mu) / rad (no constant)                          2.45  6.20 12.84
+  answer 0.01%  C    clairvoyant                                           1.29  2.51  3.90
+  answer 0.01%  a16  centre score                                          1.29  4.12  8.89
+  answer 0.01%  a16  spread f'=0.4                                         1.00  2.87  6.61
+  answer 0.01%  a16  spread best f' (0.7)                                  0.96  2.64  5.94
+  answer 0.01%  a16  zeta(t), exact sigma                                  0.66  1.69  3.42
+  answer 0.01%  a16  (t - mu) / rad (no constant)                          0.97  2.80  6.29
+  answer 0.01%  a16  clairvoyant                                           0.34  0.55  0.71
+  answer 0.01%  a64  centre score                                          0.90  2.78  6.47
+  answer 0.01%  a64  spread f'=0.4                                         0.67  1.99  4.61
+  answer 0.01%  a64  spread best f' (1.0)                                  0.61  1.71  4.13
+  answer 0.01%  a64  zeta(t), exact sigma                                  0.35  0.87  1.81
+  answer 0.01%  a64  (t - mu) / rad (no constant)                          0.61  1.80  4.33
+  answer 0.01%  a64  clairvoyant                                           0.16  0.23  0.29
+  answer 0.1%  C    centre score                                          4.65 11.26 20.81
+  answer 0.1%  C    spread f'=0.4                                         4.22  9.72 17.91
+  answer 0.1%  C    spread best f' (0.3)                                  4.21  9.77 17.80
+  answer 0.1%  C    zeta(t), exact sigma                                  3.25  7.46 13.66
+  answer 0.1%  C    (t - mu) / rad (no constant)                          4.33 10.33 18.73
+  answer 0.1%  C    clairvoyant                                           2.98  6.27 10.56
+  answer 0.1%  a16  centre score                                          2.54  6.74 13.62
+  answer 0.1%  a16  spread f'=0.4                                         2.13  5.50 10.96
+  answer 0.1%  a16  spread best f' (0.5)                                  2.11  5.41 10.71
+  answer 0.1%  a16  zeta(t), exact sigma                                  1.67  3.86  7.21
+  answer 0.1%  a16  (t - mu) / rad (no constant)                          2.14  5.55 11.13
+  answer 0.1%  a16  clairvoyant                                           1.37  2.58  3.73
+  answer 0.1%  a64  centre score                                          1.94  5.21 10.71
+  answer 0.1%  a64  spread f'=0.4                                         1.59  4.15  8.37
+  answer 0.1%  a64  spread best f' (0.7)                                  1.56  3.96  7.84
+  answer 0.1%  a64  zeta(t), exact sigma                                  1.13  2.54  4.57
+  answer 0.1%  a64  (t - mu) / rad (no constant)                          1.55  4.10  8.30
+  answer 0.1%  a64  clairvoyant                                           0.85  1.41  1.84
+  answer 1%  C    centre score                                         10.92 21.47 34.05
+  answer 1%  C    spread f'=0.4                                        10.64 20.10 31.60
+  answer 1%  C    spread best f' (0.3)                                 10.47 19.80 31.27
+  answer 1%  C    zeta(t), exact sigma                                  9.22 17.22 26.83
+  answer 1%  C    (t - mu) / rad (no constant)                         10.57 20.27 32.13
+  answer 1%  C    clairvoyant                                           8.98 16.51 25.16
+  answer 1%  a16  centre score                                          7.43 15.30 25.60
+  answer 1%  a16  spread f'=0.4                                         6.78 13.64 22.27
+  answer 1%  a16  spread best f' (0.3)                                  6.77 13.74 22.62
+  answer 1%  a16  zeta(t), exact sigma                                  6.00 11.47 18.16
+  answer 1%  a16  (t - mu) / rad (no constant)                          6.81 13.83 22.66
+  answer 1%  a16  clairvoyant                                           5.70 10.28 14.95
+  answer 1%  a64  centre score                                          6.21 12.86 21.76
+  answer 1%  a64  spread f'=0.4                                         5.52 11.21 18.80
+  answer 1%  a64  spread best f' (0.5)                                  5.52 11.12 18.52
+  answer 1%  a64  zeta(t), exact sigma                                  4.74  8.79 13.73
+  answer 1%  a64  (t - mu) / rad (no constant)                          5.54 11.27 18.87
+  answer 1%  a64  clairvoyant                                           4.37  7.29  9.95
+  answer 10%  C    centre score                                         29.68 44.40 57.84
+  answer 10%  C    spread f'=0.4                                        30.31 44.51 57.48
+  answer 10%  C    spread best f' (0.15)                                29.07 43.35 56.23
+  answer 10%  C    zeta(t), exact sigma                                 28.33 41.72 53.80
+  answer 10%  C    (t - mu) / rad (no constant)                         29.12 43.36 56.35
+  answer 10%  C    clairvoyant                                          28.28 41.59 53.49
+  answer 10%  a16  centre score                                         24.21 37.18 49.72
+  answer 10%  a16  spread f'=0.4                                        24.21 36.14 47.53
+  answer 10%  a16  spread best f' (0.3)                                 23.75 35.71 47.24
+  answer 10%  a16  zeta(t), exact sigma                                 23.04 34.23 44.77
+  answer 10%  a16  (t - mu) / rad (no constant)                         23.61 35.74 47.38
+  answer 10%  a16  clairvoyant                                          22.86 33.77 43.75
+  answer 10%  a64  centre score                                         22.05 33.96 45.83
+  answer 10%  a64  spread f'=0.4                                        21.65 32.42 43.09
+  answer 10%  a64  spread best f' (0.3)                                 21.42 32.39 43.28
+  answer 10%  a64  zeta(t), exact sigma                                 20.74 30.52 39.75
+  answer 10%  a64  (t - mu) / rad (no constant)                         21.41 32.40 43.18
+  answer 10%  a64  clairvoyant                                          20.35 29.58 37.86
+
+F. visible sets, k = 10 among visible rows. Units probed in the order spread f'=0.4 (keys from whole-cluster centres and rad; units with no visible row skipped). Visible rows read to mean recall .8 / .9 / .95 | units probed at .9 | units holding a visible row / all units | cost at .9 in row-equivalents = visible rows + centres scored (flat: every centre; two-level: K + 16 x 2 x parents of the probed leaves)
+  random 1%                                    G    whole-unit centres        1674      3152      4686 |     17 |     64 /     64 | flat      3216
+  random 1%                                    G    clairvoyant                620       927      1219 |      5 |     64 /     64 | flat       991
+  random 1%                                    C    whole-unit centres         394       988      1734 |     48 |    498 /    500 | flat      1486
+  random 1%                                    C    clairvoyant                111       151       183 |      7 |    498 /    500 | flat       649
+  random 1%                                    a16  whole-unit centres         202       519      1095 |    250 |   4999 /   7961 | flat      5518, two-level      3138
+  random 1%                                    a16  clairvoyant                 17        21        24 |      9 |   4999 /   7961 | flat      5020, two-level       726
+  random 1%                                    a64  whole-unit centres         161       394       796 |    293 |   7621 /  31098 | flat      8015, two-level      9377
+  random 1%                                    a64  clairvoyant                 10        13        14 |      9 |   7621 /  31098 | flat      7634, two-level      1295
+  random 25%                                   G    whole-unit centres       36656     65213    107154 |     14 |     64 /     64 | flat     65277
+  random 25%                                   G    clairvoyant              11529     16185     21046 |      3 |     64 /     64 | flat     16249
+  random 25%                                   C    whole-unit centres        5222     13346     25252 |     26 |    499 /    500 | flat     13845
+  random 25%                                   C    clairvoyant               1793      2662      3442 |      5 |    499 /    500 | flat      3161
+  random 25%                                   a16  whole-unit centres        2084      6293     16523 |    172 |   7712 /   7961 | flat     14005, two-level      8136
+  random 25%                                   a16  clairvoyant                205       267       310 |      7 |   7712 /   7961 | flat      7979, two-level       922
+  random 25%                                   a64  whole-unit centres        1360      4253      9396 |    405 |  27124 /  31098 | flat     31377, two-level     12196
+  random 25%                                   a64  clairvoyant                 79       102       117 |      8 |  27124 /  31098 | flat     27226, two-level      1238
+  correlated 5% (rows nearest one corpus row)  G    whole-unit centres       14821     23102     32477 |     26 |     48 /     64 | flat     23150
+  correlated 5% (rows nearest one corpus row)  G    clairvoyant               7845     10143     12398 |      5 |     48 /     64 | flat     10191
+  correlated 5% (rows nearest one corpus row)  C    whole-unit centres        5501      8858     14287 |     55 |    274 /    500 | flat      9132
+  correlated 5% (rows nearest one corpus row)  C    clairvoyant               1400      1959      2360 |      6 |    274 /    500 | flat      2233
+  correlated 5% (rows nearest one corpus row)  a16  whole-unit centres        2142      4918      8163 |    238 |   2031 /   7961 | flat      6949, two-level      7476
+  correlated 5% (rows nearest one corpus row)  a16  clairvoyant                225       310       363 |      8 |   2031 /   7961 | flat      2341, two-level       993
+  correlated 5% (rows nearest one corpus row)  a64  whole-unit centres        1311      3513      6288 |    406 |   4688 /  31098 | flat      8201, two-level     12840
+  correlated 5% (rows nearest one corpus row)  a64  clairvoyant                 89       125       147 |      9 |   4688 /  31098 | flat      4813, two-level      1360
+  correlated 1% (rows nearest one corpus row)  G    whole-unit centres        5431      7184      8263 |     20 |     25 /     64 | flat      7209
+  correlated 1% (rows nearest one corpus row)  G    clairvoyant               3652      4982      5789 |      4 |     25 /     64 | flat      5007
+  correlated 1% (rows nearest one corpus row)  C    whole-unit centres        3014      4835      6518 |     57 |    111 /    500 | flat      4946
+  correlated 1% (rows nearest one corpus row)  C    clairvoyant               1263      1699      2129 |      6 |    111 /    500 | flat      1810
+  correlated 1% (rows nearest one corpus row)  a16  whole-unit centres        1409      3039      4341 |    189 |    556 /   7961 | flat      3595, two-level      5387
+  correlated 1% (rows nearest one corpus row)  a16  clairvoyant                215       301       363 |      8 |    556 /   7961 | flat       857, two-level       985
+  correlated 1% (rows nearest one corpus row)  a64  whole-unit centres        1008      2014      3438 |    257 |   1126 /  31098 | flat      3140, two-level      9323
+  correlated 1% (rows nearest one corpus row)  a64  clairvoyant                 93       132       161 |      9 |   1126 /  31098 | flat      1258, two-level      1419
+
+G. unfiltered, k = 10: at mean recall .9 and .95, mean rows, clusters touched, groups touched; cost in row-equivalents = rows + 200 x clusters + h_g x groups for h_g = 2,500 and 5,500
+   C    recall 0.9: rows    40573, clusters   20.0, groups   8.8; cost    66573 /    92973
+   C    recall 0.95: rows    74583, clusters   36.0, groups  13.9; cost   116483 /   158123
+   a16  recall 0.9: rows    18897, clusters   33.6, groups  13.7; cost    59746 /   100696
+   a16  recall 0.95: rows    46053, clusters   70.7, groups  23.8; cost   119722 /   191152
+   a64  recall 0.9: rows    12336, clusters   50.6, groups  19.0; cost    70008 /   127068
+   a64  recall 0.95: rows    33751, clusters  105.2, groups  31.5; cost   133570 /   228100
+   C    group penalty 0.00 sd(q):  recall 0.9: rows    40573, groups   8.8, cost    66573 /    92973;  recall 0.95: rows    74583, groups  13.9, cost   116483 /   158123;
+   C    group penalty 0.25 sd(q):  recall 0.9: rows    38615, groups   7.0, cost    59815 /    80695;  recall 0.95: rows    79819, groups  11.7, cost   116769 /   151989;
+   C    group penalty 0.50 sd(q):  recall 0.9: rows    47785, groups   7.0, cost    69760 /    90610;  recall 0.95: rows    89942, groups  11.1, cost   126367 /   159757;
+   C    group penalty 1.00 sd(q):  recall 0.9: rows    64606, groups   7.2, cost    88706 /   110186;  recall 0.95: rows   118958, groups  11.9, cost   160358 /   196118;
+   C    group penalty 2.00 sd(q):  recall 0.9: rows    66670, groups   7.8, cost    92445 /   115695;  recall 0.95: rows   114368, groups  12.9, cost   157693 /   196483;
+   a16  group penalty 0.00 sd(q):  recall 0.9: rows    18897, groups  13.7, cost    59746 /   100696;  recall 0.95: rows    46053, groups  23.8, cost   119722 /   191152;
+   a16  group penalty 0.25 sd(q):  recall 0.9: rows    20044, groups  10.9, cost    53749 /    86539;  recall 0.95: rows    51854, groups  19.7, cost   115519 /   174649;
+   a16  group penalty 0.50 sd(q):  recall 0.9: rows    21078, groups   8.9, cost    49410 /    76050;  recall 0.95: rows    56384, groups  16.7, cost   112504 /   162484;
+   a16  group penalty 1.00 sd(q):  recall 0.9: rows    32264, groups   8.2, cost    61064 /    85544;  recall 0.95: rows    74613, groups  14.3, cost   127987 /   170887;
+   a16  group penalty 2.00 sd(q):  recall 0.9: rows    75701, groups  10.5, cost   120620 /   152150;  recall 0.95: rows   148973, groups  18.7, cost   230229 /   286269;
+
+H. k = 10, unfiltered: sub-cluster keys with no state per sub-cluster beyond its centre and rad. Share of rows (%) to mean recall .8 / .9 / .95
+   a16  spread f'=0.4                                              (choice 0)  0.60  1.89  4.60
+   a16  spread, rad shrunk to the cluster's (n0 = 20), best f'     (choice 2)  0.59  1.67  4.18
+   a16  mu_s + psi sigma_C(q), best psi                            (choice 4)  0.67  1.69  3.47
+   a16  mu_s + psi sigma_C(q) rad_s / rad_C, best psi              (choice 4)  0.53  1.33  3.20
+   a16  mu_s + psi sigma_C(q) rad~_s / rad_C (shrunk), best psi    (choice 4)  0.57  1.35  3.07
+   a16  mu_s + psi sigma_s exact, best psi                         (choice 4)  0.35  0.93  1.74
+   d16  spread f'=0.4                                              (choice 0)  0.52  1.54  4.07
+   d16  spread, rad shrunk to the cluster's (n0 = 20), best f'     (choice 2)  0.49  1.49  3.14
+   d16  mu_s + psi sigma_C(q), best psi                            (choice 4)  0.55  1.60  3.21
+   d16  mu_s + psi sigma_C(q) rad_s / rad_C, best psi              (choice 5)  0.56  1.29  2.61
+   d16  mu_s + psi sigma_C(q) rad~_s / rad_C (shrunk), best psi    (choice 5)  0.55  1.30  2.68
+   d16  mu_s + psi sigma_s exact, best psi                         (choice 4)  0.33  0.75  1.43
+   a64  spread f'=0.4                                              (choice 0)  0.36  1.23  3.37
+   a64  spread, rad shrunk to the cluster's (n0 = 20), best f'     (choice 2)  0.30  1.10  2.55
+   a64  mu_s + psi sigma_C(q), best psi                            (choice 4)  0.43  1.14  2.59
+   a64  mu_s + psi sigma_C(q) rad_s / rad_C, best psi              (choice 5)  0.36  0.87  1.99
+   a64  mu_s + psi sigma_C(q) rad~_s / rad_C (shrunk), best psi    (choice 4)  0.36  1.02  2.21
+   a64  mu_s + psi sigma_s exact, best psi                         (choice 2)  0.14  0.36  0.85
+
+I. k = 10, unfiltered: spread of a unit's scores from its per-coordinate variances in its group's basis, sigma^2 = sum_{i<r} p_i^2 v_i + (one scalar per unit) x sum_{i>=r} p_i^2 vbar_i (vbar the group's). Key mu + psi sigma, best psi. Share of rows (%) to mean recall .9, and the correlation of log sigma with the exact one
+   C    exact sigma:  2.67%;  r=8:  3.33%, corr 0.94;  r=16:  3.36%, corr 0.94;  r=32:  3.33%, corr 0.95;  r=64:  3.31%, corr 0.95;  r=512:  3.23%, corr 0.95;
+   d16  exact sigma:  0.75%;  r=8:  1.32%, corr 0.76;  r=16:  1.39%, corr 0.77;  r=32:  1.36%, corr 0.77;  r=64:  1.33%, corr 0.78;  r=512:  1.35%, corr 0.78;
+   a64  exact sigma:  0.36%;  r=8:  1.05%, corr 0.64;  r=16:  1.04%, corr 0.65;  r=32:  0.99%, corr 0.65;  r=64:  0.95%, corr 0.66;  r=512:  0.92%, corr 0.66;
+   the group's shape alone (top r eigenpairs of the group's residual covariance + isotropic rest), scaled by rad_u^2 / tr: share of rows (%) to recall .9 with key mu + psi sigma, best psi
+   C     r=0:  3.72%, corr 0.44;  r=4:  3.53%, corr 0.56;  r=16:  3.44%, corr 0.74;  r=64:  3.01%, corr 0.87;  r=512:  3.11%, corr 0.94;
+   d16   r=0:  1.29%, corr 0.51;  r=4:  1.37%, corr 0.56;  r=16:  1.28%, corr 0.65;  r=64:  1.19%, corr 0.72;  r=512:  1.22%, corr 0.76;
+   a64   r=0:  0.96%, corr 0.49;  r=4:  1.03%, corr 0.52;  r=16:  0.98%, corr 0.57;  r=64:  0.91%, corr 0.62;  r=512:  0.92%, corr 0.64;

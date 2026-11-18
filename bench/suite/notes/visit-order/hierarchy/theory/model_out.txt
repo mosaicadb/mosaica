@@ -1,0 +1,10 @@
+1. Beam law. Tree of depth D, fan-out F, leaf score = sum over levels of independent N(0, share_l); targets = the top nprobe leaves; node key = its partial sum. Nodes needed per level to hold 99% of the targets' ancestors:
+   F 28, shares (0.33, 0.33, 0.33), K 21952, nprobe 64:  level 1 (28 nodes, f 0.33): measured 17, predicted 17  level 2 (784 nodes, f 0.67): measured 133, predicted 143
+   F 28, shares (0.15, 0.25, 0.6), K 21952, nprobe 64:  level 1 (28 nodes, f 0.15): measured 23, predicted 24  level 2 (784 nodes, f 0.40): measured 373, predicted 410
+   F 28, shares (0.6, 0.25, 0.15), K 21952, nprobe 64:  level 1 (28 nodes, f 0.60): measured 13, predicted 7  level 2 (784 nodes, f 0.85): measured 51, predicted 40
+   F 28, shares (0.05, 0.15, 0.8), K 21952, nprobe 64:  level 1 (28 nodes, f 0.05): measured 28, predicted 27  level 2 (784 nodes, f 0.20): measured 582, predicted 629
+   F 150, shares (0.3, 0.7), K 22500, nprobe 64:  level 1 (150 nodes, f 0.30): measured 94, predicted 100
+   F 150, shares (0.1, 0.9), K 22500, nprobe 64:  level 1 (150 nodes, f 0.10): measured 135, predicted 136
+
+2. Node index. Three nodes, two children each; a child's (g, w) is drawn independently from a node-specific law on three types; expanding node j costs e_j and reveals its children.
+   300 random instances: largest relative excess of the index policy over the optimum of the area objective 0.00e+00 (mean 0.00e+00); the same with the whole-node density as a node's index: largest 0.094, mean 0.0077, above 1e-9 on 109 instances; largest gap between the Lagrangian optimum and the threshold rule's closed form 3.55e-15
