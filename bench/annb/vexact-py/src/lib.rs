@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
 use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::process::{ProcInfo, ProcOpts, Process, Spread, Stop};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -20,6 +21,34 @@ struct Index {
     dials: HashMap<usize, Dial>,
     vis: Option<Vis2>,
     pool: rayon::ThreadPool,
+    /// The approximate process (`v2::process`), or why an index has none (no calibration).
+    process: Result<Process, String>,
+}
+
+/// The process's options from the bindings' arguments: exactly one dial (`price`, `mean_recall`, `recall`, `budget`),
+/// the spread's source and whether to use the control tables.
+#[allow(clippy::too_many_arguments)]
+fn proc_opts(plan: Plan, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<ProcOpts> {
+    let stop = match (price, mean_recall, recall, budget) {
+        (Some(x), None, None, None) if x >= 0.0 => Stop::Price(x),
+        (None, Some(x), None, None) if (0.0..=1.0).contains(&x) => Stop::MeanRecall(x),
+        (None, None, Some(x), None) if (0.0..=1.0).contains(&x) => Stop::Recall(x),
+        (None, None, None, Some(x)) if x >= 0.0 => Stop::Budget(x),
+        _ => return Err(PyValueError::new_err("give exactly one dial: price (recall per modelled microsecond, at least 0), mean_recall or recall (0 to 1), or budget (modelled microseconds, at least 0)")),
+    };
+    Ok(ProcOpts { spread: Spread::parse(spread).map_err(PyValueError::new_err)?, stop, plain: control, plan })
+}
+
+fn info_dict<'py>(py: Python<'py>, i: &ProcInfo) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    let d = pyo3::types::PyDict::new(py);
+    d.set_item("path", i.path)?;
+    for (k, v) in [("tau", i.tau), ("lam", i.lam), ("pred", i.pred), ("cost", i.cost), ("fixed", i.fixed), ("scan_cost", i.scan_cost), ("all_cost", i.all_cost), ("lambda", i.lambda)] {
+        d.set_item(k, v)?;
+    }
+    for (k, v) in [("units", i.units), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads), ("refined", i.refined), ("evals", i.evals)] {
+        d.set_item(k, v)?;
+    }
+    Ok(d)
 }
 
 #[pymethods]
@@ -109,7 +138,8 @@ impl Index {
             if let Some(cpu) = core {
                 pool.install(|| vexact::util::pin(cpu));
             }
-            Ok(Index { _p: p, ix, plan, approx, pseudo, dials: HashMap::new(), vis: None, pool })
+            let process = Process::new(&ix);
+            Ok(Index { _p: p, ix, plan, approx, pseudo, dials: HashMap::new(), vis: None, pool, process })
         })
     }
 
@@ -185,6 +215,117 @@ impl Index {
             k => format!("{k:?}").to_lowercase(),
         };
         (name, self.approx.f)
+    }
+
+    /// The dial's factors for k at miss rate `eps` (None at 0), fitted on first use.
+    fn eps_dial(&mut self, py: Python<'_>, k: usize, eps: f64) -> PyResult<Option<Vec<f32>>> {
+        if eps <= 0.0 {
+            return Ok(None);
+        }
+        self.fit_dial(py, k);
+        match self.dials.get(&k) {
+            Some(d) if d.eps.iter().any(|&x| (x - eps).abs() <= 1e-12 * eps) => Ok(Some(d.for_eps(eps).to_vec())),
+            Some(d) => Err(PyValueError::new_err(format!("eps {eps} has no fitted dial; use one of {:?}", d.eps))),
+            None => Err(PyValueError::new_err("no dial could be fitted: the index was opened with pseudo=0")),
+        }
+    }
+
+    /// The approximate k nearest by the approximate process (`v2::process`), with exactly one dial: `price` (recall
+    /// per modelled microsecond), `mean_recall` (the price the build fitted for that mean recall), `recall` (the
+    /// cheapest plan predicted to reach it, per query) or `budget` (modelled microseconds for the reads). `spread`:
+    /// "group" (each group's covariance), "own" (each cluster's own where it can change the plan) or "own-all".
+    /// `control`: the tables fitted without the shifted pseudo-queries. `eps` as for `knn_approx`.
+    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn knn_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+        let dial = self.eps_dial(py, k, eps)?;
+        let q = q.as_slice()?;
+        let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
+        let (ix, vis) = (&self.ix, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| pc.knn(ix, q, k, vis, dial.as_deref(), &o).0.ents));
+        Ok(ids(py, &ents, k))
+    }
+
+    /// The approximate threshold query by the approximate process: the visible entity ids of the planned clusters whose
+    /// stored vector x has q.x >= t, ascending (a subset of `threshold`'s answer). Dials as `knn_process`; the shares
+    /// are of the predicted answer.
+    #[pyo3(signature = (q, t, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false))]
+    #[allow(clippy::too_many_arguments)]
+    fn threshold_process<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+        let q = q.as_slice()?;
+        if q.len() != self.ix.n() {
+            return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), self.ix.n())));
+        }
+        let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
+        let (ix, vis) = (&self.ix, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| {
+            let r = pc.threshold(ix, q, t, vis, &o).0;
+            to_bitmap2(ix, &r.rows).iter().map(|e| e as i64).collect::<Vec<i64>>()
+        }));
+        Ok(PyArray1::from_vec(py, ents))
+    }
+
+    /// What one query of the process did, as a dict: its path ("plan", "scan", "exact", "empty"), tau, the price, the
+    /// predicted recall, the modelled costs (the plan's reads, the centre scores and spreads, a scan, every unit), the
+    /// units, those read directly and on the index path, the groups set up, the spreads' directions projected, the
+    /// units given their own spread and the evaluations of Lambda; and rows touched, full vectors read, clusters on the
+    /// index path and the time in ms. With `t`, a threshold query at t, else k-NN at k.
+    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0, t=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn explain_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+        let dial = self.eps_dial(py, k, eps)?;
+        let q = q.as_slice()?;
+        let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
+        let (ix, vis) = (&self.ix, self.vis.as_ref());
+        let tm = std::time::Instant::now();
+        let (info, st) = py.detach(|| self.pool.install(|| match t {
+            Some(t) => {
+                let (r, i) = pc.threshold(ix, q, t, vis, &o);
+                (i, r.st)
+            }
+            None => {
+                let (r, i) = pc.knn(ix, q, k, vis, dial.as_deref(), &o);
+                (i, r.st)
+            }
+        }));
+        let ms = tm.elapsed().as_secs_f64() * 1e3;
+        let d = info_dict(py, &info)?;
+        d.set_item("touched", st.touched)?;
+        d.set_item("full_reads", st.full_reads)?;
+        d.set_item("clusters_open", st.clusters_open)?;
+        d.set_item("ms", ms)?;
+        Ok(d)
+    }
+
+    /// Where one k-NN query of the process spends its time, as `profile`: the cycles of each phase (`Stats::cyc`;
+    /// `P_PLAN` the centre scores and the reads' setup, `P_SPREAD` the spreads, `P_SOLVE` tau and the plan, `P_QUERY`
+    /// the whole call; the process's counts after them) and the time stamp counter's cycles per second.
+    #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0))]
+    #[allow(clippy::too_many_arguments)]
+    fn profile_process(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<(Vec<u64>, f64)> {
+        let o = proc_opts(self.plan, price, mean_recall, recall, budget, spread, control)?;
+        let dial = self.eps_dial(py, k, eps)?;
+        let q = q.as_slice()?;
+        let pc = self.process.as_ref().map_err(|e| PyValueError::new_err(e.clone()))?;
+        let (ix, vis) = (&self.ix, self.vis.as_ref());
+        Ok(py.detach(|| self.pool.install(|| {
+            vexact::v2::q::PROF.store(true, Relaxed);
+            let (t, c0) = (std::time::Instant::now(), unsafe { core::arch::x86_64::_rdtsc() });
+            let (mut out, _) = pc.knn(ix, q, k, vis, dial.as_deref(), &o);
+            let c1 = unsafe { core::arch::x86_64::_rdtsc() };
+            vexact::v2::q::PROF.store(false, Relaxed);
+            out.st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
+            (out.st.cyc.to_vec(), (c1 - c0) as f64 / t.elapsed().as_secs_f64())
+        })))
+    }
+
+    /// The approximate process's calibration as JSON (its tables, margin, price bands and the build's checks), or None.
+    #[getter]
+    fn calibration(&self) -> Option<String> {
+        self.ix.calib.as_ref().map(|c| c.json().to_string())
     }
 
     /// Fit the approximate mode's dial for k (once per k; it is used when eps > 0).
