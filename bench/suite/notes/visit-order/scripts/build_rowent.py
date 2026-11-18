@@ -1,3 +1,4 @@
+# Historical: run against the library whose knn_approx was the order by nprobe (now knn_nprobe).
 # Builds the real index on a fit (vexact_py.Index, default pseudo-queries, as the suite), keeps its row order
 # (encoded/row_ent.bin -> FITDIR/row_ent_index.bin) for the pseudo-query replay, measures knn_approx recall@10 at eps 0
 # for a query set at nprobe 16/64/256 (to check O0 against the replay), then removes the encoded index.

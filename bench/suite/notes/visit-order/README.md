@@ -2,8 +2,9 @@
 
 Why vexact's approximate k-NN loses recall to faiss IVF on LAION text queries, what order it should visit clusters in
 instead, and how far that can be justified. These are offline replays and analysis: nothing here changes `rust/`.
-The order lives in `rust/src/v2/q.rs` (`Approx`, `Approx::fit`, `pseudo_queries`); the proposals below are for its
-owners.
+The order they studied lives on in `rust/src/v2/q.rs` (`Approx`, the `spread` order) as the legacy comparison arm;
+the library's approximate queries are now `rust/src/v2/adaptive.rs` (`PLAN.md`, Progress, "The ablation"), which
+replaced the radius order, `fit_queries`, H and the calibrated exceedance tables recommended below.
 
 - `theory.md`: the mathematical analysis (what is optimal, under which model; proofs, bounds, references), with
   synthetic checks in `theory/`. Its references were collected by an agent and have not each been checked.
@@ -106,7 +107,7 @@ the test machine's disk. Differences below about 0.01 are within noise at 100 qu
 10. **f′ estimated from the corpus** (within- against between-cluster spread) came out 2 to 3 times too low and is not
    usable as derived.
 
-## Recommendation
+## Recommendation (superseded: see `PLAN.md`, Progress)
 
 Retire today's order. Offer f′ = 0.4 (no extra state), H r4 and H r16 as options, with `fit_queries` kept as an
 override for users with a query sample. The principled successor to H (`theory.md`, section 9),

@@ -210,8 +210,31 @@ takes the first r; its rest is (rad² − Σ_{j≤r} λ_j) / (n₀ − r).
   extrapolated from LAION by their operation counts).
 - The tables above were measured with the exact directions; the stored ones have not been run through the suite yet.
 
+**Phase 3: the ablation, and the consolidated design.** Paired runs (k = 10, three datasets, five visible sets;
+`results/ablation/` on branch `ccr-b37f5194-u55ji1`, `summary.txt`) set a calibrated process (exceedance tables per
+spread tier, the plan at a price, its hand-overs; `hierarchy/policy.md` section 11) against simple arms built one
+step at a time: S1 the `spread` order by nprobe with a measured cost model for each cluster's path, S2 an adaptive
+stop (next key below the running k-th best), S3 a race against a scan of the visible rows, S4 the key μ + ψσ_c.
+S4 with each cluster's stored directions beat the calibrated process almost everywhere and is the first design to
+beat `spread` and h16x4 unfiltered. Time to recall 0.8 / 0.9 / 0.95 against `spread`: unfiltered LAION 0.59 / 0.67 /
+0.59, yahoo 0.51 / 0.64 / 0.83, glove 0.76 / 0.70 / 0.68; random-25 0.12 to 0.43; region-25 0.36 to 0.62; region-1
+0.26 to 0.58 (S1 better on LAION and glove); random-1 1.08 to 2.12 at 0.8 and 0.64 to 0.93 at 0.9. S2's f is not a
+robust knob (recall 0.99 at f 0.5 on glove, 1.0 to 1.25 on LAION); ψ is: 4 gives 0.78 to 0.89 unfiltered, 5 gives
+0.90 to 0.985, filtered sets more. The low-recall random-1 points were each arm's first cells, run right after
+another arm's last (most expensive) ones: `spread` at nprobe 4 took 122 µs for 90 rows on LAION against 55 µs for
+173 rows at nprobe 8. `scripts/ab_orders.py` now shuffles the cells per query.
+
+The library now has one approximate k-NN and one approximate threshold query (`rust/src/v2/adaptive.rs`; bindings
+`knn_approx(q, k, psi=4.5)`, `threshold_approx(q, t, psi=4.5)`): the key μ_c + ψσ_c(q) from the stored directions,
+computed in the `spread` order 8 clusters ahead of the probe, the stop at the running k-th best (threshold: the
+clusters whose key reaches t, after the support table), the race against a scan (k-NN; at most twice its modelled
+cost) and the hand-over to a scan or the exact query (threshold), and each cluster's path by constants measured on
+the machine and cached with the index. The calibrated process (its tables, group covariances, price and budget, and
+the build's calibration), the H order, the radius order and `fit_queries` are gone; the `spread` order by nprobe
+stays as `knn_nprobe`, the legacy comparison arm, until the owner's benchmark has run. The exact planner can take its
+rule in rows from the measured constants (`Index(..., rule="measured")`); its default is unchanged.
+
 **Next.**
-- Make h16 the default, after checking the stored directions on the paired suite.
-- Inserts leave the directions as built until compaction; n_c (for z) follows the visible counts already.
-- Phase 2b (the hierarchy) and phase 3 (stopping on the rad-aware model's probability) as planned. Under sparse
-  filters the order is still the larger part of a query (18 of 24 µs on LAION at random-1 and nprobe 4).
+- The final paired run (k-NN and threshold, five visible sets), then the legacy arm's removal.
+- Inserts leave the directions as built until compaction.
+- Phase 2b (the hierarchy) as planned.

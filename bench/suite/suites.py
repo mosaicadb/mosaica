@@ -24,7 +24,7 @@ SYSTEM_PARAMS = {
     # the index through bench/annb/vexact-py, built as bench/annb/vexact/module.py builds it (fit.py --basis dual, with
     # --query-sample from the learn sample on out-of-distribution sets), with the library's default levels (16, 32 B;
     # dlv=[] for the fit's six)
-    "vexact": dict(basis="dual", approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
+    "vexact": dict(basis="dual", approx=[dict(psi=x) for x in (3.5, 4.5, 6.0)]),
     # faiss IndexFlatIP: search / range_search; under a visible set through IDSelectorBitmap and over a compacted copy
     "faiss-flat": dict(settings=["idselector", "compacted"]),
     # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as the earlier threshold-db/ann.py)
@@ -62,7 +62,7 @@ VIBE_QUICK = {
     "algos": ["vexact-approx", "hnswlib", "ivfpqfs(faiss)", "glass"],
     "overlay": {
         "vexact-approx": {"approx": {"args": {"basis": ["dual"]},
-                                     "query_args": {"nprobe": [4, 16, 64, 256], "eps": [0, 0.03]}}},
+                                     "query_args": {"psi": [3.5, 4.5, 6]}}},
         "hnswlib": {"base": {"args": {"M": [16, 36], "efConstruction": [500]},
                              "query_args": {"ef": [10, 30, 100, 300, 1000]}}},
         "ivfpqfs(faiss)": {"base-1024": {"args": {"n_list": [1024], "dim_reduction": [0]},
@@ -76,7 +76,7 @@ ANNB_QUICK = {
     "algos": ["vexact-approx", "hnswlib", "faiss-ivfpqfs", "glass"],
     "overlay": {
         "vexact-approx": {"approx": {"args": [{"basis": "dual"}],
-                                     "query_args": [[4, 16, 64, 256], [0, 0.03]]}},
+                                     "query_args": [[3.5, 4.5, 6]]}},
         "hnswlib": {"M-16": {"arg_groups": [{"M": 16, "efConstruction": 500}], "args": {},
                              "query_args": [[10, 40, 120, 400, 800]]}},
         "faiss-ivfpqfs": {"base": {"args": [[2048]], "query_args": [[5, 10, 50], [10, 100]]}},
@@ -198,24 +198,16 @@ SCALE = scale_suite("scale", ["laion-10m", "laion-40m", "laion-100m"])
 # the same code on a small nested sample (2 parts: 200k in 500k in 1M), to test the scale path end to end
 SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m"])
 
-# The approximate mode (notes/visit-order/PLAN.md, hierarchy/policy.md): the quick suite's public datasets,
-# approximate k-NN only, unfiltered and under random and correlated (region) visible sets; vexact alone, since the
-# comparison is between its arms: the cluster orders `spread` (the default) and `h16x4` over a finer nprobe grid, and
-# the approximate process with each cluster's own spread where it can change the plan (`process-own`), swept over
-# its price, and the simple arms (`simple-s1` to `simple-s4`, notes `v2::simple`), each swept over its raw knob.
+# The approximate mode (notes/visit-order/PLAN.md): the quick suite's public datasets, approximate k-NN only,
+# unfiltered and under random and correlated (region) visible sets; vexact alone, since the comparison is between its
+# arms: the library's approximate k-NN (`adaptive`, over psi) and the legacy `spread` order over nprobe.
 ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized"],
              filters=["none", "random-1", "random-25", "region-1", "region-25"],
              types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
-             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"],
-                                                    orders=["spread", "h16x4", "process-own", "simple-s1", "simple-s2", "simple-s3", "simple-s4", "simple-s4-own"],
+             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "adaptive"],
                                                     approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
-                                                    process=[dict(price=x, eps=0.0) for x in (1e-1, 3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4, 3e-5, 1e-5, 3e-6, 1e-6, 1e-7)],
-                                                    simple=dict(s1=[4, 8, 16, 32, 64, 128, 256, 512],
-                                                                s2=[0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25],
-                                                                s3=[0.1, 0.2, 0.3, 0.4, 0.45, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25],
-                                                                s4=[2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7],
-                                                                **{"s4-own": [2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7]}))),
+                                                    adaptive=[dict(psi=x) for x in (2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7)])),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 
 # The same cells with the library's default order only, for comparing revisions of the library (which may not have

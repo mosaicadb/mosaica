@@ -18,10 +18,22 @@ float:
     run_groups:
       approx:
         args: [{basis: dual}]
-        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
-  # research/levels-clusters' candidates (REPORT_BUILD.md): A clusters by N, B two deterministic levels, C both
+        query_args: [[2, 3, 3.5, 4, 4.5, 5, 6, 7]]
+  # the legacy approximate arm (the spread order by nprobe), kept for comparison
   - base_args: ['@metric']
-    constructor: VexactApprox
+    constructor: VexactNprobe
+    disabled: false
+    docker_tag: ann-benchmarks-vexact
+    module: ann_benchmarks.algorithms.vexact
+    name: vexact-nprobe
+    run_groups:
+      nprobe:
+        args: [{basis: dual}]
+        query_args: [[1, 2, 4, 8, 16, 32, 64, 128, 256, 512], [0, 0.01, 0.03]]
+  # research/levels-clusters' candidates (REPORT_BUILD.md), in the legacy arm: A clusters by N, B two deterministic
+  # levels, C both
+  - base_args: ['@metric']
+    constructor: VexactNprobe
     disabled: false
     docker_tag: ann-benchmarks-vexact
     module: ann_benchmarks.algorithms.vexact

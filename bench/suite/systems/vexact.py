@@ -85,8 +85,12 @@ class Vexact(System):
     def index_opts(self):
         # the deterministic levels (`dlv`, cumulative bytes): None, the library's default (two, at 16 and 32 bytes);
         # [] the fit's six
+        # pseudo-queries are made only for the legacy arm's dial (eps > 0)
         dlv = self.params.get("dlv")
-        return {} if dlv is None else dict(dlv=list(dlv))
+        o = {} if dlv is None else dict(dlv=list(dlv))
+        if not any(p.get("eps", 0) > 0 for p in self.params.get("approx", [])):
+            o["pseudo"] = 0
+        return o
 
     def counters(self):
         # the reader's reads (io_uring, disk mode): count, bytes, and the time spent waiting for them
@@ -113,22 +117,17 @@ class Vexact(System):
         return tot
 
     def settings(self, qtype, filtered):
-        # the approximate mode's arms to compare (`orders`), one setting each: cluster orders stopped by nprobe (e.g.
-        # "radius", "spread", "h16x4"; grid `approx`), the approximate process, "process-SPREAD" with SPREAD its
-        # spread's source (group, own, own-all; grid `process`, a price or a budget per entry), and the simple arms,
-        # "simple-VARIANT" (s1, s2, s3, s4, s4-own; grid `simple[VARIANT]`, the knob's values)
+        # the approximate k-NN's arms to compare (`orders`), one setting each: "adaptive" (the library's approximate
+        # k-NN, `knn_approx`, over psi; grid `adaptive`) and "spread" (the legacy order by nprobe, kept as the
+        # comparison arm; grid `approx`)
         return list(self.params.get("orders", ["default"])) if qtype == "approx" else ["default"]
 
     def use(self, setting):
         self.setting = setting
-        if setting != "default" and not setting.startswith(("process-", "simple-")):
-            self.ix.set_order(setting)
 
     def approx_grid_for(self, setting):
-        if setting.startswith("process-"):
-            return self.params.get("process", [])
-        if setting.startswith("simple-"):
-            return [dict(knob=v) for v in self.params.get("simple", {}).get(setting[len("simple-"):], [])]
+        if setting == "adaptive":
+            return self.params.get("adaptive", [])
         return self.approx_grid()
 
     def set_visible(self, ids, name=None):
@@ -146,12 +145,12 @@ class Vexact(System):
         return self.ix.threshold(self.q(q), t)
 
     def approx(self, q, k, p):
-        if self.setting is not None and self.setting.startswith("process-"):
-            dial = {x: p[x] for x in ("price", "budget") if x in p}
-            return self.ix.knn_process(self.q(q), k, spread=self.setting[len("process-"):], eps=p.get("eps", 0.0), **dial)
-        if self.setting is not None and self.setting.startswith("simple-"):
-            return self.ix.knn_simple(self.q(q), k, self.setting[len("simple-"):], p["knob"])
-        return self.ix.knn_approx(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
+        # a grid point with psi is the approximate k-NN, one with nprobe the legacy arm
+        if "psi" in p:
+            return self.ix.knn_approx(self.q(q), k, p["psi"])
+        # (a library before the approximate k-NN took knn_approx's name has the legacy arm under that name)
+        legacy = getattr(self.ix, "knn_nprobe", None) or self.ix.knn_approx
+        return legacy(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
 
     def approx_grid(self):
         g = self.params.get("approx", [])

@@ -53,8 +53,8 @@ The image compiles with `-C target-cpu=native`, so build it on the machine that 
 ## How the index is run
 
 - **Build** (`fit`): `rust/tools/fit.py --basis dual` on the training vectors (the basis SYSTEM.md measures and `fit.py`'s
-  default; the build argument `basis: pca` selects pca), then `vexact_py.Index` on its output (encoding, the
-  approximate mode's cluster order fitted on 1,000 pseudo-queries). The bindings open the index saved in the fit when it was built with the same
+  default; the build argument `basis: pca` selects pca), then `vexact_py.Index` on its output (encoding;
+  nothing is fitted on queries). The bindings open the index saved in the fit when it was built with the same
 options, else encode the fit and save the index there (`v2::rebuild`; about 1.8 GB at 1M items, in the work directory, removed at exit), so the queries run on the index
 mapped from its files, as `v2::open` gives it. The planner times nothing: in memory it is the support table and the rule
 in rows (`Plan::default`). Without a `dlv` build argument the bindings build the library's default deterministic
@@ -63,12 +63,15 @@ in rows (`Plan::default`). Without a `dlv` build argument the bindings build the
   index; each variant needs its own directory (`cp -al` of the fit).
   The harness pins the container to one CPU, so the build runs single-threaded as every other algorithm's does.
 - **vexact-exact**: `knn2`, the exact k-NN through the planner. One configuration.
-- **vexact-approx**: `knn2_fast` over the first `nprobe` clusters (1 to 512), with the dial off (`eps` 0) or fitted
-  for a miss rate of 0.01 or 0.03 per level. The dials for k = 10 and k = 100 are fitted in `set_query_arguments`,
+- **vexact-approx**: the library's approximate k-NN (`knn_approx`, `v2::adaptive`): clusters in the order of their
+  centre score plus psi times the spread of their scores along the query, until the next one's falls below the running
+  k-th best, racing a scan of the visible rows; psi 2 to 7 (4.5 by default; larger reads more).
+- **vexact-nprobe**: the legacy arm, kept for comparison: `knn2_fast` over the first `nprobe` clusters (1 to 512) of
+  the `spread` order, with the dial off (`eps` 0) or fitted for a miss rate of 0.01 or 0.03 per level. The dials for k = 10 and k = 100 are fitted in `set_query_arguments`,
   outside the timed queries. At 64 dimensions (glove-25) the dial changes nothing, because reading a probed cluster's
   full vectors is cheaper than its codes. At 384 dimensions (VIBE's yahoo-minilm-384, k = 100) `eps` 0.03 is 1.46 times
   faster at nprobe 64 and 1.6 times at nprobe 128, for recall 0.001–0.002 lower.
-- **vexact-approx-lc**: as vexact-approx on research/levels-clusters' candidate builds (REPORT_BUILD.md, "the
+- **vexact-approx-lc**: as vexact-nprobe on research/levels-clusters' candidate builds (REPORT_BUILD.md, "the
   levels-clusters defaults"): A, clusters by N (build argument `clusters: by-n`, `fit.py --per-cluster by-n --groups
   by-n`); B, two deterministic levels (`dlv: "16.32"`); C, both. Not in `run.sh`'s default list; add it with `ALGOS`.
 - Each query is one call from Python, which adds a few microseconds to each query. This is small at the speeds measured

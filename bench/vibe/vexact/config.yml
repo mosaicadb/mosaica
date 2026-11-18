@@ -25,11 +25,26 @@ float:
         args:
           basis: [dual]
         query_args:
+          psi: [2, 3, 3.5, 4, 4.5, 5, 6, 7]
+  # the legacy approximate arm (the spread order by nprobe), kept for comparison
+  - base_args: ['@metric']
+    constructor: VexactNprobe
+    disabled: false
+    ood: true
+    singularity_image: vexact
+    module: vibe.algorithms.vexact
+    name: vexact-nprobe
+    run_groups:
+      nprobe:
+        args:
+          basis: [dual]
+        query_args:
           nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
           eps: [0, 0.01, 0.03]
-  # research/levels-clusters' candidates (REPORT_BUILD.md): A clusters by N, B two deterministic levels, C both
+  # research/levels-clusters' candidates (REPORT_BUILD.md), in the legacy arm: A clusters by N, B two deterministic
+  # levels, C both
   - base_args: ['@metric']
-    constructor: VexactApprox
+    constructor: VexactNprobe
     disabled: false
     ood: true
     singularity_image: vexact
@@ -59,20 +74,4 @@ float:
           clusters: [by-n]
           dlv: ["16.32"]
         query_args: *lc_query
-  - base_args: ['@metric']
-    constructor: VexactApprox
-    disabled: false
-    ood: true
-    singularity_image: vexact
-    module: vibe.algorithms.vexact
-    name: vexact-approx-queries
-    run_groups:
-      # the cluster order and dials fitted on the query sample; out-of-distribution datasets only
-      approx-queries:
-        args:
-          basis: [dual]
-          order: [queries]
-        query_args:
-          nprobe: [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-          eps: [0, 0.01, 0.03]
   normalized: *vexact

@@ -4,8 +4,8 @@
 # The build parameter `basis` (dual, the default, or pca) is fit.py's --basis; fit.py's own default is dual too, and the
 # measured index (SYSTEM.md) uses dual. With dual on a dataset that supplies a sample of its
 # queries (VIBE's out-of-distribution datasets, through fit_ood), the sample also shapes the basis (--query-sample).
-# The build parameter `order` (corpus, the default, or queries) is what the approximate mode's cluster order and dials are
-# fitted on: corpus pseudo-queries, or with `queries` 1,000 of the query sample and their true neighbours (fit_ood only).
+# The build parameter `order` is accepted as corpus only (the approximate k-NN fits nothing on queries; the legacy
+# arm's dial is fitted on corpus pseudo-queries).
 # The build parameters `clusters` and `dlv` are research/levels-clusters' options (REPORT_BUILD.md, "the levels-clusters
 # defaults"): `clusters` 1000 (the default, 1,000 items per cluster) or by-n (fit.py --per-cluster by-n --groups by-n),
 # and `dlv` the deterministic levels' cumulative bytes: default (the library's, 16.32), fit (the fit's six) or e.g. "16.32".
@@ -47,8 +47,8 @@ class Vexact(BaseANN):
             raise ValueError(f"basis is pca or dual, not {self.basis}")
         a = method_param if isinstance(method_param, dict) else dict(zip(BUILD_ARGS, rest))
         self.order = a.get("order") or "corpus"
-        if self.order not in ("corpus", "queries"):
-            raise ValueError(f"order is corpus or queries, not {self.order}")
+        if self.order != "corpus":
+            raise ValueError(f"order is corpus (nothing is fitted on queries any more), not {self.order}")
         self.clusters = str(a.get("clusters") or "1000")
         if not (self.clusters == "by-n" or self.clusters.isdigit()):
             raise ValueError(f"clusters is a number of items per cluster or by-n, not {self.clusters}")
@@ -59,17 +59,10 @@ class Vexact(BaseANN):
         self.index = None
 
     def fit(self, X):
-        if self.order == "queries":
-            raise ValueError("order=queries needs a sample of the queries (an out-of-distribution dataset)")
         self.build(X, None)
 
     def fit_ood(self, X, X_learn, X_learn_neighbors):
         self.build(X, X_learn if self.basis == "dual" else None)
-        if self.order == "queries":
-            pick = np.linspace(0, len(X_learn) - 1, min(1000, len(X_learn))).astype(np.int64)
-            qs = np.zeros((len(pick), len(self.qbuf)), np.float32)
-            qs[:, : X_learn.shape[1]] = X_learn[pick]
-            self.index.fit_queries(qs, np.ascontiguousarray(X_learn_neighbors[pick, :10], dtype=np.int64))
 
     def build(self, X, sample):
         work = tempfile.mkdtemp(prefix="vexact-", dir=os.environ.get("VEXACT_WORK"))
@@ -111,6 +104,23 @@ class VexactExact(Vexact):
 
 
 class VexactApprox(Vexact):
+    """The approximate k-NN (knn_approx), its knob psi (larger reads more)."""
+
+    def __init__(self, metric, method_param=None, *rest):
+        super().__init__(metric, method_param, *rest)
+        self.psi = 4.5
+
+    def set_query_arguments(self, psi):
+        self.psi = float(psi)
+        self.name = f"vexact-approx ({self.tag}, query sample={self.sampled}, psi={psi})"
+
+    def query(self, v, n):
+        return self.index.knn_approx(self.q(v), n, self.psi)
+
+
+class VexactNprobe(Vexact):
+    """The legacy approximate arm (the spread order by nprobe, knn_nprobe), kept for comparison."""
+
     def __init__(self, metric, method_param=None, *rest):
         super().__init__(metric, method_param, *rest)
         self.nprobe, self.eps = 1, 0.0
@@ -121,7 +131,7 @@ class VexactApprox(Vexact):
             # the dial is fitted per k; ANN-Benchmarks asks for 10 neighbours and VIBE for 100
             self.index.fit_dial(10)
             self.index.fit_dial(100)
-        self.name = f"vexact-approx ({self.tag}, query sample={self.sampled}, nprobe={nprobe}, eps={eps})"
+        self.name = f"vexact-nprobe ({self.tag}, query sample={self.sampled}, nprobe={nprobe}, eps={eps})"
 
     def query(self, v, n):
-        return self.index.knn_approx(self.q(v), n, self.nprobe, self.eps)
+        return self.index.knn_nprobe(self.q(v), n, self.nprobe, self.eps)
