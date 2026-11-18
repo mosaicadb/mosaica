@@ -1,5 +1,5 @@
 {
- "when": "2026-11-18 08:15:13 UTC",
+ "when": "2026-11-18 13:50:42 UTC",
  "kernel": "6.18.44-fc-v595",
  "virtualisation": "vm: kvm, container: docker",
  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
@@ -14,9 +14,9 @@
   "avx512_fp16"
  ],
  "ram_gib": 15.7,
- "ram_available_gib": 15.0,
+ "ram_available_gib": 14.8,
  "swap_gib": 0.0,
- "data_dir_free_gib": 11.7,
+ "data_dir_free_gib": 5.9,
  "data_dir_total_gib": 252.0,
  "datasets": [
   "glove-100-angular",
