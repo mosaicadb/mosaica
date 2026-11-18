@@ -1,0 +1,36 @@
+== glove-100-angular: groups among the first P clusters (flat spread .4), mean over queries
+P    8:   4.3 of 64
+P   16:   7.1 of 64
+P   32:  12.5 of 64
+P   64:  20.8 of 64
+P  128:  32.8 of 64
+P  256:  48.3 of 64
+R^2 of the truncated offset, x16 sub-centres: T 8: 0.538, T 16: 0.651, T 32: 0.777, T 64: 0.913
+s.d. of the offset q.(m_sub - m_parent) 0.0359; s.d. of q.m_c over clusters 0.0634
+even  queries: items at 0.9 / 0.95 flat 92270 / 148071 x16 30848 / 78782 ratio 2.99 / 1.88
+odd   queries: items at 0.9 / 0.95 flat 63617 / 149721 x16 35371 / 82763 ratio 1.80 / 1.81
+all   queries: items at 0.9 / 0.95 flat 74680 / 149041 x16 31553 / 82561 ratio 2.37 / 1.81
+== yahoo-minilm-384-normalized: groups among the first P clusters (flat spread .4), mean over queries
+P    8:   4.7 of 64
+P   16:   8.4 of 64
+P   32:  15.2 of 64
+P   64:  27.4 of 64
+P  128:  44.4 of 64
+P  256:  60.1 of 64
+R^2 of the truncated offset, x16 sub-centres: T 8: 0.558, T 16: 0.760, T 32: 0.892, T 64: 0.962, T 128: 0.991, T 256: 0.999
+s.d. of the offset q.(m_sub - m_parent) 0.0362; s.d. of q.m_c over clusters 0.0520
+even  queries: items at 0.9 / 0.95 flat 16874 / 30111 x16 4166 / 11778 ratio 4.05 / 2.56
+odd   queries: items at 0.9 / 0.95 flat 16900 / 28806 x16 3973 / 10242 ratio 4.25 / 2.81
+all   queries: items at 0.9 / 0.95 flat 16878 / 28896 x16 4130 / 11085 ratio 4.09 / 2.61
+== laion-clip-512-normalized: groups among the first P clusters (flat spread .4), mean over queries
+P    8:   4.4 of 64
+P   16:   7.5 of 64
+P   32:  12.8 of 64
+P   64:  20.7 of 64
+P  128:  33.6 of 64
+P  256:  51.5 of 64
+R^2 of the truncated offset, x16 sub-centres: T 8: 0.411, T 16: 0.610, T 32: 0.767, T 64: 0.868, T 128: 0.933, T 256: 0.979
+s.d. of the offset q.(m_sub - m_parent) 0.0148; s.d. of q.m_c over clusters 0.0223
+even  queries: items at 0.9 / 0.95 flat 33655 / 72094 x16 17739 / 46099 ratio 1.90 / 1.56
+odd   queries: items at 0.9 / 0.95 flat 37969 / 82252 x16 15962 / 31611 ratio 2.38 / 2.60
+all   queries: items at 0.9 / 0.95 flat 36393 / 75565 x16 16209 / 41020 ratio 2.25 / 1.84

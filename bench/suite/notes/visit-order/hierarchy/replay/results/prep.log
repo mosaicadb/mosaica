@@ -1,0 +1,21 @@
+[   13s] glove-100-angular: N 1183514 d 100 K 592 G 64
+[   13s] sub x4: 2368 leaves, sizes 6..2088 median 453
+[   13s] sub x16: 9472 leaves, sizes 1..759 median 113
+[   13s] sub x64: 37888 leaves, sizes 1..416 median 25
+[   13s] refit K 5000: 5000 clusters, sizes 1..1427 median 215
+WARNING clustering 200000 points to 20000 centroids: please provide at least 780000 training points
+[  793s] refit K 20000: 20000 clusters, sizes 1..684 median 31
+[    8s] yahoo-minilm-384-normalized: N 677305 d 384 K 339 G 64
+[    8s] sub x4: 1356 leaves, sizes 59..1451 median 475
+[    8s] sub x16: 5424 leaves, sizes 1..601 median 119
+[   21s] sub x64: 21696 leaves, sizes 1..226 median 28
+[  648s] refit K 5000: 5000 clusters, sizes 2..517 median 131
+WARNING clustering 200000 points to 20000 centroids: please provide at least 780000 training points
+[ 1559s] refit K 20000: 20000 clusters, sizes 1..340 median 25
+[   12s] laion-clip-512-normalized: N 1000448 d 512 K 500 G 64
+[   12s] sub x4: 2000 leaves, sizes 1..1863 median 467
+[   12s] sub x16: 7989 leaves, sizes 1..850 median 119
+[   12s] sub x64: 31941 leaves, sizes 1..525 median 27
+[  846s] refit K 5000: 5000 clusters, sizes 1..710 median 198
+WARNING clustering 200000 points to 20000 centroids: please provide at least 780000 training points
+[ 1643s] refit K 20000: 20000 clusters, sizes 1..554 median 30
