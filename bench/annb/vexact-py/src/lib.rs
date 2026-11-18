@@ -234,7 +234,8 @@ impl Index {
     /// per modelled microsecond), `mean_recall` (the price the build fitted for that mean recall), `recall` (the
     /// cheapest plan predicted to reach it, per query) or `budget` (modelled microseconds for the reads). `spread`:
     /// "group" (each group's covariance), "own" (each cluster's own where it can change the plan) or "own-all".
-    /// `control`: the tables fitted without the shifted pseudo-queries. `eps` as for `knn_approx`.
+    /// `control`: the tables fitted without the shifted pseudo-queries. `eps` as for `knn_approx`. Returns k ids
+    /// whenever k items are visible, whatever the dial (-1 only where fewer are visible).
     #[pyo3(signature = (q, k, price=None, mean_recall=None, recall=None, budget=None, spread="group", control=false, eps=0.0))]
     #[allow(clippy::too_many_arguments)]
     fn knn_process<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, price: Option<f64>, mean_recall: Option<f64>, recall: Option<f64>, budget: Option<f64>, spread: &str, control: bool, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {

@@ -2158,7 +2158,8 @@ fn process_threshold_answers_are_subsets_and_exact_when_asked_for_everything() {
     }
 }
 
-/// A per-query recall target's plan predicts at least the target, and a budget's plan costs at most the budget.
+/// A per-query recall target's plan predicts at least the target, and a budget's plan costs at most the budget
+/// unless it needs more to hold k visible rows.
 #[test]
 fn recall_targets_and_budgets_hold_in_the_plan() {
     let f = fixture();
@@ -2179,7 +2180,11 @@ fn recall_targets_and_budgets_hold_in_the_plan() {
                     let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(process::Stop::Budget(b)) };
                     let (_, units, info) = pc.shares_for(ix, q, process::Target::Knn(10), vis.as_ref(), &o);
                     if !units.is_empty() {
-                        assert!(info.cost <= b * (1.0 + 1e-9), "cost {} over the budget {b}, query {qi}, set {sname}, {sp:?}", info.cost);
+                        // over the budget only to hold k visible rows: then the plan less its largest unit holds fewer
+                        let nv = |ci: usize| vis.as_ref().map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize);
+                        let taken: Vec<usize> = units.iter().filter(|u| u.2 != process::Act::Skip).map(|u| nv(u.0)).collect();
+                        let fill = taken.iter().sum::<usize>() - taken.iter().copied().max().unwrap_or(0) < 10;
+                        assert!(info.cost <= b * (1.0 + 1e-9) || fill, "cost {} over the budget {b}, query {qi}, set {sname}, {sp:?}", info.cost);
                     }
                 }
             }
@@ -2247,6 +2252,33 @@ fn process_threshold_takes_the_clusters_wholly_above_t_without_reading() {
                             assert_eq!((info.path, out.st.full_reads, info.cost), ("plan", 0, 0.0), "{what}");
                             assert!((info.pred - 1.0).abs() < 1e-9, "predicted recall {}, {what}", info.pred);
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Approximate k-NN returns k items whenever k are visible (all of them when fewer are), under every dial, however
+/// little it asks for (a price no unit reaches, a budget of nothing, a low mean recall), every spread and visible set.
+#[test]
+fn process_knn_returns_k_items_whenever_k_are_visible() {
+    use process::Stop::*;
+    let f = fixture();
+    let ix = &f.ix;
+    let pc = process::Process::new(ix).unwrap();
+    let mut dials = proc_dials();
+    dials.extend([Price(1e9), Price(0.5), Budget(0.0), Budget(0.5), MeanRecall(0.0), MeanRecall(0.05), Recall(0.0), Recall(0.01)]);
+    for (qi, q) in f.queries.iter().enumerate() {
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let visible = truth(ix, q, bm.as_ref()).len();
+            for kk in [1, 10, 100] {
+                for sp in SPREADS {
+                    for &stop in &dials {
+                        let o = process::ProcOpts { spread: sp, ..process::ProcOpts::new(stop) };
+                        let (out, info) = pc.knn(ix, q, kk, vis.as_ref(), None, &o);
+                        assert_eq!(out.ents.len(), kk.min(visible), "query {qi}, set {sname}, k {kk}, {sp:?}, {stop:?}, path {}", info.path);
                     }
                 }
             }

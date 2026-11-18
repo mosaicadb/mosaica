@@ -192,6 +192,38 @@ pub fn plan_at(b: &Blocks, lam: f64, ag: f64, act: &mut Vec<Act>) -> (f64, f64, 
     (value, cost, groups)
 }
 
+/// A k-NN plan made to hold at least `kk` visible rows (`nv`, by unit), so that it returns k items whenever k are
+/// visible: the skipped units by value per cost, best first, each on the index path when its group is set up and
+/// that is the cheaper, else read directly. Returns the value and cost added.
+pub fn fill_to_k(b: &Blocks, act: &mut [Act], nv: &[f64], kk: usize) -> (f64, f64) {
+    let mut rows: f64 = (0..b.v.len()).filter(|&i| act[i] != Act::Skip).map(|i| nv[b.units[i]]).sum();
+    if rows >= kk as f64 {
+        return (0.0, 0.0);
+    }
+    let mut open = vec![false; b.gid.len()];
+    let mut skipped = Vec::new();
+    for j in 0..b.gid.len() {
+        for i in b.gstart[j]..b.gstart[j + 1] {
+            open[j] |= act[i] == Act::Index;
+            if act[i] == Act::Skip {
+                skipped.push((j, i));
+            }
+        }
+    }
+    skipped.sort_by(|x, y| (b.v[y.1] / b.cd[y.1].min(b.cx[y.1])).total_cmp(&(b.v[x.1] / b.cd[x.1].min(b.cx[x.1]))).then(x.1.cmp(&y.1)));
+    let (mut dv, mut dc) = (0.0, 0.0);
+    for (j, i) in skipped {
+        if rows >= kk as f64 {
+            break;
+        }
+        act[i] = if open[j] && b.cx[i] < b.cd[i] { Act::Index } else { Act::Direct };
+        dc += if act[i] == Act::Index { b.cx[i] } else { b.cd[i] };
+        dv += b.v[i];
+        rows += nv[b.units[i]];
+    }
+    (dv, dc)
+}
+
 /// The root of mass(tau) = want, mass positive and non-increasing (a sum of n P(tau)), by modified regula falsi on
 /// ln mass from a bracket grown from `top` in steps of `step` doubling; the bracket's end when mass never reaches
 /// `want` or never falls below it. Returns tau and the evaluations of mass.
@@ -640,6 +672,11 @@ impl Process {
             (lam, val, cost, groups) = self.plan_dial(cal, Tier::Own, &b, stop(&v), &target, nvis as f64, size, &mut act);
             st.cyc[P_SOLVE] += tick() - tp;
         }
+        if let Target::Knn(kk) = target {
+            let (dv, dc) = fill_to_k(&b, &mut act, &u.nv, kk);
+            val += dv;
+            cost += dc;
+        }
         info.tau = tau;
         info.lam = lam;
         info.pred = (val + sure(&v)).min(1.0);
@@ -692,8 +729,9 @@ impl Process {
         keyed.into_iter().map(|x| (x.2, x.3)).collect()
     }
 
-    /// Approximate k-NN: the k best visible items of the planned clusters (fewer when fewer are visible), decided
-    /// exactly where read; with `dial`, the index path's per-level factors (`Dial`).
+    /// Approximate k-NN: the k best visible items of the planned clusters, decided exactly where read, k of them
+    /// whenever k are visible (the plan holds at least k visible rows: `fill_to_k`; all of them when fewer are
+    /// visible); with `dial`, the index path's per-level factors (`Dial`).
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, dial: Option<&[f32]>, o: &ProcOpts) -> (KnnOut2, ProcInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
         let tm = Timer::new();
