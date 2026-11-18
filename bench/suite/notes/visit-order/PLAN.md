@@ -30,9 +30,10 @@ nprobe 64: under a sparse visible set an extra cluster costs about 1 µs. Conseq
 - If the harness is right about today's q·m, it is a quarter of a filtered query, and replacing it pays for H r4.
 - f′ is free.
 
-At scale the number of clusters grows as about √N (`fit.py`: 2,000 items per cluster up to 2M, doubling for each 4×
-N): about 7k clusters at 100M and 22k at 1B. There q·m over every cluster reads 11 MB of int8 centres per query, H r4
-over every cluster 90 MB and H r16 360 MB, so the spread can only be computed over a pre-filtered set of clusters.
+At scale the number of clusters grows as about √N (`tools/rules.py`: 2,000 items per cluster up to 2M, doubling for
+each further 4× N): 6,250 clusters of 16,000 at 100M and 15,625 of 64,000 at 1B. There q·m over every cluster reads
+8 MB of int8 centres per query at n = 512, H r4 over every cluster 32 MB and H r16 128 MB, so the spread can only be
+computed over a pre-filtered set of clusters.
 
 ## Making the orders cheap
 
@@ -188,7 +189,7 @@ h16x4 is the best order wherever the visible set is dense. Its state is 4 MB on 
 **The order state at build** (`v2::order`). The build computes each cluster's state from the rows it encodes and
 saves it beside the index; an open maps it and computes nothing (radius's f is still fitted at open). Per cluster:
 its RMS radius over all its rows (f64), and 16 directions (int8 rows with an f32 scale each) with their variances
-(f32), 16·n + 136 bytes (8.3 kB at n = 512, 4.2 MB on LAION 1M; 720 MB at 1B and n = 2048). An order with r ≤ 16
+(f32), 16·n + 136 bytes (8.3 kB at n = 512, 4.2 MB on LAION 1M; 510 MB at 1B and n = 2048). An order with r ≤ 16
 takes the first r; its rest is (rad² − Σ_{j≤r} λ_j) / (n₀ − r).
 - The directions come from up to 4,096 rows spread evenly over the cluster, by subspace iteration on a block of 32
   started from random signs (5 products with the sample's covariance, Gram-Schmidt between them), then a 32 × 32
@@ -202,10 +203,10 @@ takes the first r; its rest is (rad² − Σ_{j≤r} λ_j) / (n₀ − r).
   principal angle of the first 16 is 0.06 to 0.7 rad at the median: their 16th and 17th variances are nearly equal,
   so the span is ill-defined, while the variance it captures is not. From fewer rows the error is the sample's:
   with 1,024 rows σ_c is within 0.007 to 0.022 at the median and 0.023 to 0.072 at 90%, variance 1 within 0.01 to
-  0.03 at the median; 4,096 rows of a 45,000-row cluster at 1B should be about half that (the error goes as
+  0.03 at the median; 4,096 rows of a 64,000-row cluster at 1B should be about half that (the error goes as
   1/√rows).
 - Cost: 0.025 s a LAION cluster on one thread (the exact one 0.066 s); at 1B and n = 2048 about 0.25 s a cluster,
-  1.5 thread-hours for 22,000 clusters, where the exact covariances would take about 25 s a cluster (both
+  1.1 thread-hours for 15,625 clusters, where the exact covariances would take about 25 s a cluster (both
   extrapolated from LAION by their operation counts).
 - The tables above were measured with the exact directions; the stored ones have not been run through the suite yet.
 

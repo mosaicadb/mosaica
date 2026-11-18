@@ -2206,9 +2206,6 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                     }
                 }
             }
-        }
-        let mut ord_s = 0.0;
-        if real {
             let to = Timer::new();
             let row = |i: usize, out: &mut [f32]| out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h));
             let co = order::cluster(sizes[c], &row, &p.centres[c * n..(c + 1) * n], ord_r, order::SAMPLE, order::PASSES, c as u64);
@@ -2219,11 +2216,11 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 ord_dsc.put(c * ord_r, &co.dsc);
                 ord_dirs.put(c * ord_r * n, &co.dirs8);
             }
-            ord_s = to.s();
+            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: to.s() }
         } else {
             unsafe { ext.put(r0, &it.ext) };
+            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: 0.0 }
         }
-        Done { esc: cc.esc, x2max: it.x2max, numax, ord_s }
     }).collect();
     log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
                 t.s(), order::SAMPLE, done.iter().map(|d| d.ord_s).sum::<f64>(), crate::util::anon_mb()));
