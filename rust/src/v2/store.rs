@@ -5,8 +5,10 @@
 //! `ent_row.bin`, `nukey.bin`, `vectors.bin` (the f16 vectors in index row order, padded to whole 4,096-byte pages so
 //! that O_DIRECT reads of the last rows are not short), `offsets.bin`, `esc_key.bin` and `esc_val.bin` (the escapes),
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
-//! table), and `index.json` (sizes, the per-group calibration, constants and basis defect, the build options that
-//! decide the encoding, and the key of the fit and those options it was built from).
+//! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
+//! state, `order::OrderState`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
+//! number of directions the order state holds per cluster, the build options that decide the encoding, and the key of
+//! the fit and those options it was built from).
 //!
 //! A saved index is `DIR/encoded` in its index directory DIR (the fit). A rebuild holds an exclusive lock on
 //! `encoded.lock` beside it for its whole run, writes into a scratch directory of its own (`encoded.tmp-PID-NANOS`),
@@ -20,7 +22,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 6;
+pub const STORE_FORMAT: u64 = 7;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}
@@ -370,6 +372,7 @@ fn index_json(ix: &Index2, dir: &str, seal: Option<&Seal>) {
     let meta = serde_json::json!({
         "format": STORE_FORMAT, "index_format": INDEX_FORMAT, "key": seal.map(|s| s.key), "lib": LIB_FINGERPRINT, "n": ix.n(), "k": ix.k(), "nrows": ix.nrows,
         "npow": ix.meta.npow, "dlv": ix.meta.dlv, "rlv": ix.meta.rlv, "x2": ix.x2, "nanch": ix.nanch, "anc_centres": ix.anc_centres, "nent": ix.nent, "code_hash": format!("{:016x}", ix.code_hash()),
+        "order": ix.order.as_ref().map(|o| serde_json::json!({ "r": o.r, "n0": o.n0 })),
         "store_hash": seal.map(|s| format!("{:016x}", s.store_hash)), "plan_hash": seal.map(|s| format!("{:016x}", s.plan_hash)),
         "xs": seal.and_then(|s| s.xs).map(|x| x.json()),
         "options": seal.map(|s| s.options), "perm": seal.and_then(|s| s.perm).map(|(h, id)| serde_json::json!({ "hash": format!("{h:016x}"), "file": id.json() })),
@@ -697,10 +700,11 @@ pub fn log_stale(parent: &str, keep: &str, log: &mut dyn FnMut(String)) {
 /// Open the index saved in `dir` for the fit `p`, profile `prof` and options `o` (with `design_c` derived from them),
 /// which must be the ones it was built from: its `index.json` must hold `key` (`build_key`). Nothing is encoded: the
 /// per-row arrays and the vectors are mapped, the plans are derived from the fit as the build derives them (and must
-/// hash as they did at the build, `plan_hash`), and the calibration, constants, basis defects, per-cluster records and
-/// support table are read. Every file is read through one descriptor of `dir`, under the shared install lock, so all
-/// come from one complete build. Every check is over clusters, levels and tables, never over rows (`check_maps` checks
-/// the row maps, with `--hash` and `verify`). A missing, stale or damaged index is an error that says to rebuild.
+/// hash as they did at the build, `plan_hash`), and the calibration, constants, basis defects, per-cluster records,
+/// support table and order state are read or mapped. Every file is read through one descriptor of `dir`, under the
+/// shared install lock, so all come from one complete build. Every check is over clusters, levels and tables, never
+/// over rows (`check_maps` checks the row maps, with `--hash` and `verify`). A missing, stale or damaged index is an
+/// error that says to rebuild.
 ///
 /// The fit's vectors file and its perm.npy are not read (the index holds its own vectors and row-to-entity map); their
 /// identities are compared with the ones the index was built from (`XsId`, `check_file`): another length or
@@ -742,6 +746,9 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     let lscal: Vec<Arr<u8>> = (0..nl).map(|l| Arr::map(&f(&format!("scal{l}.bin")))).collect::<Result<_, _>>().map_err(ours)?;
     let (ahat, row_ent, ent_row, nukey): (Arr<i16>, Arr<u32>, Arr<u32>, Arr<u16>) = (Arr::map(&f("ahat.bin")).map_err(ours)?, Arr::map(&f("row_ent.bin")).map_err(ours)?, Arr::map(&f("ent_row.bin")).map_err(ours)?, Arr::map(&f("nukey.bin")).map_err(ours)?);
     let rows = disk::Rows::open(&f("vectors.bin"), nrows.checked_mul(n).ok_or(damaged("nrows x n overflows"))?, "normal").map_err(|e| format!("{}; rebuild the index", ours(e)))?;
+    let [orad, olam, odsc, odirs] = order::FILES.map(|name| f(name));
+    let gone = |e: String| if e.contains("rebuild") { ours(e) } else { format!("{}; rebuild the index", ours(e)) };
+    let (orad, olam, odsc, odirs): (Arr<f64>, Arr<f32>, Arr<f32>, Arr<i8>) = (Arr::map(&orad).map_err(gone)?, Arr::map(&olam).map_err(gone)?, Arr::map(&odsc).map_err(gone)?, Arr::map(&odirs).map_err(gone)?);
     drop(dfd);
     drop(lock);
     // the fit's vectors (its Xs.npy, or its partition) and its perm.npy, as they were when the index was built: by
@@ -845,8 +852,18 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     if nukey.is_empty() == o.nusort {
         return Err(format!("{dir} was built {} the norm sort, the options ask {}; rebuild it", if o.nusort { "without" } else { "with" }, if o.nusort { "for it" } else { "for none" }));
     }
+    // the order state, read as built: per cluster its radius, and r directions with their variances and scales
+    let (r, n0) = (order::r_of(n), order::spanned(&p.centres[..k * n], n));
+    if v["order"]["r"].as_u64() != Some(r as u64) || v["order"]["n0"].as_u64() != Some(n0 as u64) {
+        return Err(format!("{dir}/index.json does not record an order state of {r} directions over {n0} spanned dimensions ({}); rebuild the index", v["order"]));
+    }
+    if orad.len() != k || olam.len() != k * r || odsc.len() != k * r || odirs.len() != k * r * n {
+        return Err(damaged(&format!("the order state does not hold {r} directions of {n} dimensions for each of {k} clusters")));
+    }
+    let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
+        order,
         nukey,
         repack: vec![0.6; nl],
         ctab: Arc::new(ctab),
@@ -1117,9 +1134,10 @@ impl Index2 {
 
     /// A fixed hash (`Fx`) of everything the index holds and a query reads: `plan_hash`, the sizes and `x2`, every
     /// per-row array (codes, scalars, keys, row and entity maps, norm keys, compaction's row map), the offsets and
-    /// escapes, every per-cluster record and centre table, the support table and the stored vectors. Only the repack
-    /// thresholds, which are timed, are left out. The large arrays are hashed in parallel in fixed chunks (`Fx::big`),
-    /// so the value does not depend on the thread count. A built index and the same index opened hash alike.
+    /// escapes, every per-cluster record and centre table, the support table, the order state and the stored vectors.
+    /// Only the repack thresholds, which are timed, are left out. The large arrays are hashed in parallel in fixed
+    /// chunks (`Fx::big`), so the value does not depend on the thread count. A built index and the same index opened
+    /// hash alike.
     pub fn store_hash(&self) -> u64 {
         let mut h = Fx::default();
         h.str("vexact index");
@@ -1149,6 +1167,16 @@ impl Index2 {
         h.pod(&self.anchors[..]);
         h.pod(&self.hi[..]);
         h.pod(&self.lo[..]);
+        match &self.order {
+            None => h.u64(0),
+            Some(o) => {
+                h.usizes(&[1, o.r, o.n0]);
+                h.pod(&o.rad[..]);
+                h.pod(&o.lam[..]);
+                h.pod(&o.dsc[..]);
+                h.big_pod(&o.dirs8[..]);
+            }
+        }
         match &self.full {
             Full2::Real { rows } if self.vrow.is_empty() => h.big(rows.as_bytes(self.nrows * self.n())),
             // a compaction without its own vectors reads its parent's (hashed with the parent)

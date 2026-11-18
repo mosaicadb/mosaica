@@ -17,6 +17,7 @@ pub mod disk;
 #[cfg(test)]
 mod e2e;
 pub mod kern;
+pub mod order;
 pub mod q;
 pub mod setup;
 pub mod store;
@@ -1248,6 +1249,9 @@ pub struct Index2 {
     pub vrow: Vec<u32>,  // a compacted index sharing its parent's vectors: each row's row in Full2::Real (empty: the row itself)
     pub nent: usize,     // entity ids are below this
     pub nukey: Arr<u16>, // norm sort: per row, |z| as a code on its cluster's grid, rounded up (empty without the sort)            // per level: occupancy of slots held in place below which they are compacted first
+    /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
+    /// None for an index without stored vectors.
+    pub order: Option<Arc<order::OrderState>>,
 }
 
 /// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
@@ -1461,6 +1465,7 @@ impl Index2 {
             vrow,
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
+            order: self.order.clone(),
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -2147,11 +2152,20 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let nanch = anchors.len() / n;
     let anchors32: Vec<f32> = anchors.iter().map(|&v| v as f32).collect();
     let (thi, tlo) = (store::Out::<f32>::new(dir, "hi.bin", nanch * k), store::Out::<f32>::new(dir, "lo.bin", nanch * k));
-    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1 and the norm sort's grid
+    // the approximate mode's order state (`order`), from each cluster's f16 rows as they are encoded; none for a
+    // synthetic source
+    let (ord_r, kr) = (order::r_of(n), if real { k } else { 0 });
+    let ord_rad = store::Out::<f64>::new(dir, order::FILES[0], kr);
+    let ord_lam = store::Out::<f32>::new(dir, order::FILES[1], kr * ord_r);
+    let ord_dsc = store::Out::<f32>::new(dir, order::FILES[2], kr * ord_r);
+    let ord_dirs = store::Out::<i8>::new(dir, order::FILES[3], kr * ord_r * n);
+    // what each cluster leaves for the assembly: its escapes (local rows), largest |x|^2 - 1, the norm sort's grid and
+    // the seconds its order state took
     struct Done {
         esc: Vec<(u8, u8, u32, f32)>,
         x2max: f64,
         numax: f64,
+        ord_s: f64,
     }
     let done: Vec<Done> = (0..k).into_par_iter().map(|c| {
         let gp = &groups[p.grp[c]];
@@ -2192,12 +2206,35 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                     }
                 }
             }
+        }
+        let mut ord_s = 0.0;
+        if real {
+            let to = Timer::new();
+            let row = |i: usize, out: &mut [f32]| out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h));
+            let co = order::cluster(sizes[c], &row, &p.centres[c * n..(c + 1) * n], ord_r, order::SAMPLE, order::PASSES, c as u64);
+            // SAFETY: cluster c writes only its own entries of each array
+            unsafe {
+                ord_rad.put(c, &[co.rad]);
+                ord_lam.put(c * ord_r, &co.lam);
+                ord_dsc.put(c * ord_r, &co.dsc);
+                ord_dirs.put(c * ord_r * n, &co.dirs8);
+            }
+            ord_s = to.s();
         } else {
             unsafe { ext.put(r0, &it.ext) };
         }
-        Done { esc: cc.esc, x2max: it.x2max, numax }
+        Done { esc: cc.esc, x2max: it.x2max, numax, ord_s }
     }).collect();
-    log(format!("encoded {:.1}s, support table of {nanch} anchors with it; anon {:.0} MB", t.s(), crate::util::anon_mb()));
+    log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
+                t.s(), order::SAMPLE, done.iter().map(|d| d.ord_s).sum::<f64>(), crate::util::anon_mb()));
+    let order = real.then(|| Arc::new(order::OrderState {
+        r: ord_r,
+        n0: order::spanned(&p.centres[..k * n], n),
+        rad: ord_rad.finish(),
+        lam: ord_lam.finish(),
+        dsc: ord_dsc.finish(),
+        dirs8: ord_dirs.finish(),
+    }));
     let x2 = 1.0 + done.iter().map(|d| d.x2max).fold(0.0, f64::max) * (1.0 + 1e-9) + 1e-12;
     // the per-cluster records, from the written keys
     let ah_all = ahat.get();
@@ -2244,6 +2281,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     }).collect();
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
+        order,
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
         ctab: Arc::new(ctab),
