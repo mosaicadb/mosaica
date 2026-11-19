@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use roaring::RoaringBitmap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
-use vexact::v2::adaptive::{measured_constants, typical_rows, Adaptive, AdaptiveInfo, PSI};
+use vexact::v2::adaptive::{measured_constants, Adaptive, AdaptiveInfo, PSI};
 use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, threshold2, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
@@ -43,7 +43,7 @@ fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3
     for (key, x) in [("visited", i.read.len()), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads)] {
         d.set_item(key, x)?;
     }
-    for (key, x) in [("fixed", i.fixed), ("cost", i.cost), ("scan_cost", i.scan_cost), ("exact_cost", i.exact_cost)] {
+    for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost), ("exact_cost", i.exact_cost)] {
         d.set_item(key, x)?;
     }
     Ok(d)
@@ -134,7 +134,7 @@ impl Index {
             let adaptive = pool.install(|| measured_constants(&ix, &dir, &mut log)).and_then(|m| Adaptive::new(&ix, m));
             if rule == "measured" {
                 let ad = adaptive.as_ref().map_err(|e| PyValueError::new_err(format!("the measured rule: {e}")))?;
-                (plan.r_rows, plan.r_kappa) = ad.m.rule(typical_rows(&ix)).unwrap_or((usize::MAX, 0.0));
+                (plan.r_rows, plan.r_kappa) = ad.m.rule().unwrap_or((usize::MAX, 0.0));
             }
             Ok(Index { _p: p, ix, plan, approx, vis: None, pool, adaptive })
         })
@@ -259,7 +259,7 @@ impl Index {
                 d.set_item(key, x.parse::<f64>().unwrap_or(f64::NAN))?;
             }
         }
-        d.set_item("rule", m.rule(typical_rows(&self.ix)))?;
+        d.set_item("rule", m.rule())?;
         d.set_item("plan_rule", (self.plan.r_rows, self.plan.r_kappa))?;
         Ok(d)
     }

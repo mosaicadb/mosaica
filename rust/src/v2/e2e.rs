@@ -1980,21 +1980,20 @@ fn knn2_fast_is_unchanged() {
 /// Constants for the approximate queries that do not depend on the machine (in the proportions LAION's measured ones
 /// have), for tests that compare runs.
 fn fixed_costs() -> adaptive::Measured {
-    adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07 }
+    adaptive::Measured { dir_us: 1.2, row_us: [0.047, 0.06, 0.08, 0.1], cl_us: 15.0, cut_row_us: [0.014, 0.03, 0.05, 0.08], cut_us: 0.5, grp_us: 56.0, sig_us: 0.3 }
 }
 
 /// The approximate queries on `ix` with the constants timed on it, with `fixed_costs`, and with constants under which
 /// the index path and its groups are cheap (synth4k's small clusters are otherwise read directly).
 fn adaptives(ix: &Index2) -> Vec<(&'static str, adaptive::Adaptive)> {
     let m = adaptive::measure(ix).unwrap();
-    let cheap = adaptive::Measured { cl_us: 0.01, size_us: 0.0, vis_us: 1e-4, grp_us: 0.01, anc_us: 1e-4, ..m };
+    let cheap = cheap_index(m);
     ["measured", "fixed", "cheap index path"].into_iter().zip([m, fixed_costs(), cheap]).map(|(name, m)| (name, adaptive::Adaptive::new(ix, m).unwrap())).collect()
 }
 
 const PSIS: [f64; 5] = [0.0, 1.0, 2.0, adaptive::PSI, f64::INFINITY];
 
-/// The plan of the approximate k-NN's probes on synth4k: the exact planner scans synth4k's 4,000 rows first (they are
-/// fewer than the rule's rows), so under the default plan every approximate k-NN is the exact one.
+/// A plan under which the exact queries never scan synth4k first (its 4,000 rows are fewer than the rule's rows).
 fn probe_plan() -> Plan {
     Plan { mode: PlanMode::Index, ..Plan::default() }
 }
@@ -2013,9 +2012,9 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
     let f = fixture();
     let ix = &f.ix;
     let e = 64.0 * 2f64.powi(-24);
-    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
     let mut paths = std::collections::BTreeMap::new();
     let mut indexed = 0;
+    for ad in [adaptive::Adaptive::new(ix, fixed_costs()).unwrap(), adaptive::Adaptive::new(ix, cheap_index(fixed_costs())).unwrap()] {
     for (qi, q) in f.queries.iter().enumerate() {
         let pr = prep2(ix, q);
         for (sname, bm) in &f.sets {
@@ -2036,8 +2035,7 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
                         assert!(out.ents.iter().all(|x| bm.as_ref().is_none_or(|b| b.contains(x.1))), "an invisible item, {what}");
                         assert!(info.path == "exact" || out.ents.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e), "a score not the item's, {what}");
                         assert!(["probe", "scan", "exact", "empty"].contains(&info.path), "{what}: {}", info.path);
-                        let first = plan.scan_first(ix, vis.as_ref());
-                        assert_eq!(info.path == "exact", (psi == f64::INFINITY || first) && !t.is_empty(), "{what}: {}", info.path);
+                        assert_eq!(info.path == "exact", psi == f64::INFINITY && !t.is_empty(), "{what}: {}", info.path);
                         if info.path != "probe" {
                             assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "not exact, {what}, path {}", info.path);
                         }
@@ -2052,7 +2050,7 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
             }
         }
     }
-    assert!(paths.keys().all(|&(p, path)| p != "default" || path != "probe"), "{paths:?}");
+    }
     assert!(paths.contains_key(&("probe", "probe")) && indexed > 0, "{paths:?}, {indexed} index-path reads");
 }
 
@@ -2085,7 +2083,7 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                         // support table decides every cluster)
                         if psi == f64::INFINITY && info.path != "empty" && !(info.path == "probe" && info.read.is_empty()) {
                             assert!(info.path == "scan" || info.path == "sparse" || (info.path == "exact" && info.exact_cost <= info.scan_cost), "{what}: {info:?}");
-                            assert!(info.cost <= info.fixed + info.scan_cost.min(info.exact_cost) + 1e-9, "{what}: {info:?}");
+                            assert!(info.cost <= info.scan_cost.min(info.exact_cost) + 1e-9, "{what}: {info:?}");
                         }
                         if th == -2.0 && info.path == "probe" {
                             assert_eq!((got.len(), out.st.full_reads), (want.len(), 0), "a threshold below every score reads rows, {what}");
@@ -2130,7 +2128,7 @@ fn approximate_thresholds_on_sets_the_exact_query_scans_first_are_exact() {
                             assert_eq!(out.rows, ex.rows, "{what}: not the exact query's rows");
                             assert_eq!(to_bitmap2(ix, &out.rows), answer(&t, th), "{what}");
                             assert!(info.read.is_empty() && info.priced.is_empty() && info.spreads == 0, "{what}: {info:?}");
-                            assert_eq!((info.fixed, info.cost), (0.0, info.scan_cost), "{what}");
+                            assert_eq!(info.cost, info.scan_cost, "{what}");
                         } else {
                             other += 1;
                         }
@@ -2150,7 +2148,7 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, ix) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
     let f = fixture();
-    let cheap = adaptive::Measured { cl_us: 0.01, size_us: 0.0, vis_us: 1e-4, grp_us: 0.01, anc_us: 1e-4, ..fixed_costs() };
+    let cheap = cheap_index(fixed_costs());
     for m in [fixed_costs(), cheap] {
         let ad = adaptive::Adaptive::new(&ix, m).unwrap();
         for (qi, q) in f.queries.iter().enumerate() {
@@ -2185,7 +2183,7 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
 fn measured_constants_are_cached_and_read_again() {
     let f = fixture();
     let m = adaptive::measure(&f.ix).unwrap();
-    assert!(m.to_kv().lines().count() == 8 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
+    assert!(m.to_kv().lines().count() == 13 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
     assert!(m.check().is_ok(), "{m:?}");
     let d = tmp_dir("measured");
     let path = d.join(adaptive::COMPUTE_CACHE);
@@ -2195,22 +2193,22 @@ fn measured_constants_are_cached_and_read_again() {
     let (got, why) = adaptive::cached_measured(&path, "key A", || panic!("timed again under the same key")).unwrap();
     assert_eq!(got, m);
     assert!(why.starts_with("read from"), "{why}");
-    let m2 = adaptive::Measured { row_us: m.row_us * 2.0, ..m };
+    let m2 = adaptive::Measured { row_us: m.row_us.map(|x| x * 2.0), ..m };
     let (got, why) = adaptive::cached_measured(&path, "key B", || Ok(m2)).unwrap();
     assert_eq!(got, m2);
     assert!(why.starts_with("timed again") && why.contains("another machine"), "{why}");
     let (got, _) = adaptive::cached_measured(&path, "key B", || panic!("timed again under the same key")).unwrap();
     assert_eq!(got, m2);
     // a degenerate timing is refused and not saved: the cache still holds the last good constants
-    let e = adaptive::cached_measured(&path, "key C", || Ok(adaptive::Measured { row_us: 0.0, ..m })).unwrap_err();
+    let e = adaptive::cached_measured(&path, "key C", || Ok(adaptive::Measured { row_us: [0.0; 4], ..m })).unwrap_err();
     assert!(e.contains("row_us"), "{e}");
     assert!(adaptive::cached_measured(&path, "key C", || Err("busy".into())).is_err());
     let (got, _) = adaptive::cached_measured(&path, "key B", || panic!("timed again under the same key")).unwrap();
     assert_eq!(got, m2);
     // a cache whose text holds a degenerate value is timed again
-    std::fs::write(&path, format!("key=key D\n{}", adaptive::Measured { dir_us: 0.0, ..m }.to_kv())).unwrap();
+    std::fs::write(&path, format!("key=key D\n{}", adaptive::Measured { cl_us: -1.0, ..m }.to_kv())).unwrap();
     let (got, why) = adaptive::cached_measured(&path, "key D", || Ok(m)).unwrap();
-    assert!(got == m && why.starts_with("timed again") && why.contains("dir_us"), "{why}");
+    assert!(got == m && why.starts_with("timed again") && why.contains("cl_us"), "{why}");
     // through the index directory, under the index's own key: the machine, the library, the index's plan and where its
     // vectors are read from
     let dir = d.join("index");
@@ -2226,12 +2224,10 @@ fn measured_constants_are_cached_and_read_again() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, other) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
     assert_ne!(adaptive::compute_key(&other), key, "a norm-sorted build of the same fit");
-    // the rule: direct exactly where dir + row v <= cl + size S + vis v, the crossover kept at the typical size
-    let r = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0 };
-    let (r0, kappa) = r.rule(1000).unwrap();
-    assert_eq!(r0, 100);
-    assert!((kappa - 1.0 / 6.0).abs() < 1e-12);
-    assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(1000), None);
+    // the rule: direct exactly where dir + row v <= cut + cl + cut_row v, at visible share 1
+    let r = adaptive::Measured { dir_us: 1.0, row_us: [0.1, 0.2, 0.3, 0.4], cl_us: 6.5, cut_row_us: [0.04, 0.05, 0.06, 0.07], cut_us: 0.5, grp_us: 0.0, sig_us: 0.0 };
+    assert_eq!(r.rule(), Some((100, 0.0)));
+    assert_eq!(adaptive::Measured { cut_row_us: [0.2; 4], ..r }.rule(), None);
 }
 
 /// The k-NN window, under the probe plan: the clusters priced are the live clusters in decreasing stream key mu + z rad s, each read is
@@ -2415,9 +2411,9 @@ fn the_stream_key_ignores_a_part_of_the_query_no_cluster_varies_along() {
 fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
     let f = fixture();
     let ix = &f.ix;
-    let scan_cheap = adaptive::Measured { row_us: 1e-6, ..fixed_costs() };
+    let sigmas_dear = adaptive::Measured { sig_us: 1e9, ..fixed_costs() };
     let mut models: Vec<(&str, adaptive::Adaptive)> = adaptives(ix);
-    models.push(("scan cheap", adaptive::Adaptive::new(ix, scan_cheap).unwrap()));
+    models.push(("sigmas dear", adaptive::Adaptive::new(ix, sigmas_dear).unwrap()));
     let row_cl: Vec<usize> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c, cl.r1 - cl.r0)).collect();
     let mut probes = 0;
     for (cname, ad) in &models {
@@ -2439,8 +2435,9 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
                             let reach: RoaringBitmap = want.iter().filter(|&e| keys[row_cl[ix.row_of_ent(e)]] >= th).collect();
                             assert!(reach.is_subset(&got), "{what}: an answer row of a cluster whose key reaches t left out");
                         }
-                        if *cname == "scan cheap" && info.path != "empty" && info.path != "sparse" {
-                            assert_eq!((info.path, info.spreads), ("scan", 0), "{what}");
+                        if *cname == "sigmas dear" {
+                            // a sigma costs more than any hand-over: the bounds decide, or the query hands over
+                            assert_eq!(info.spreads, 0, "{what}: {info:?}");
                         }
                     }
                 }
@@ -2451,13 +2448,14 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
 }
 
 /// The answers do not depend on the measured constants but through the threshold query's hand-overs (which answer
-/// exactly): with the index path cheap or dear, k-NN reads the same clusters by the same paths and returns the same
-/// items (it uses no constant), and a threshold query that probes in both returns the same rows.
+/// exactly) and k-NN's choice of a sigma: with the index path cheap or dear (and sigmas cheaper than any read), k-NN
+/// reads the same clusters and returns the same items, and a threshold query that probes in both returns the same
+/// rows.
 #[test]
 fn the_constants_change_the_answer_only_through_the_race() {
     let f = fixture();
     let ix = &f.ix;
-    let base = adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07 };
+    let base = fixed_costs();
     let (a, b) = (adaptive::Adaptive::new(ix, cheap_index(base)).unwrap(), adaptive::Adaptive::new(ix, adaptive::Measured { cl_us: 1e6, ..base }).unwrap());
     let (mut both, mut index) = (0, 0);
     for (qi, q) in f.queries.iter().enumerate() {
@@ -2470,7 +2468,9 @@ fn the_constants_change_the_answer_only_through_the_race() {
                     let ((x, xi), (y, yi)) = (a.knn(ix, q, kk, vis.as_ref(), psi, probe_plan()), b.knn(ix, q, kk, vis.as_ref(), psi, probe_plan()));
                     both += (xi.path == "probe") as usize;
                     index += xi.index;
-                    assert_eq!((xi.path, &xi.read, xi.index, &x.ents), (yi.path, &yi.read, yi.index, &y.ents), "{what}");
+                    // the same clusters and items; their f32 products may round apart on the two paths
+                    assert_eq!((xi.path, &xi.read), (yi.path, &yi.read), "{what}");
+                    assert_eq!(x.ents.iter().map(|e| e.1).collect::<Vec<_>>(), y.ents.iter().map(|e| e.1).collect::<Vec<_>>(), "{what}");
                 }
             }
             for th in thresholds(&t) {
@@ -2488,7 +2488,7 @@ fn the_constants_change_the_answer_only_through_the_race() {
 
 /// `m` with the index path and its groups cheap.
 fn cheap_index(m: adaptive::Measured) -> adaptive::Measured {
-    adaptive::Measured { cl_us: 0.01, size_us: 0.0, vis_us: 1e-4, grp_us: 0.01, anc_us: 1e-4, ..m }
+    adaptive::Measured { cl_us: 0.01, cut_row_us: [1e-4; 4], cut_us: 1e-4, grp_us: 0.01, ..m }
 }
 
 /// The exact paths' answers and work on synth4k (plain and norm-sorted) under nine visible sets, 12 queries, every
@@ -2581,7 +2581,7 @@ fn study_order_rows_to_recall() {
     let prep = std::env::var("DIAG_PREP").unwrap();
     let sets: Vec<String> = std::env::var("DIAG_SETS").unwrap_or("none,random-25".into()).split(',').map(|s| s.to_string()).collect();
     let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    let m = adaptive::Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.0, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 50.0, anc_us: 0.07 };
+    let m = fixed_costs();
     let ad = adaptive::Adaptive::new(&ix, m).unwrap();
     let ap = Approx::spread(&ix);
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
@@ -2724,8 +2724,10 @@ fn study_count_model() {
     let dir = std::env::var("DIAG_DIR").unwrap();
     let prep = std::env::var("DIAG_PREP").unwrap();
     let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    // DIAG_OUT: every timed read as kind,nv,rows,c,us (c the rows the sorted range leaves; nv for a direct read)
+    let mut csv = std::env::var("DIAG_OUT").ok().map(|p| std::fs::File::create(p).unwrap());
     let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
-    let m = adaptive::Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.0, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 50.0, anc_us: 0.07 };
+    let m = fixed_costs();
     let ad = adaptive::Adaptive::new(&ix, m).unwrap();
     let (n, k, nl, ndl) = (ix.n(), ix.k(), ix.meta.nl(), ix.meta.ndl());
     let nf = n as f64;
@@ -2770,7 +2772,12 @@ fn study_count_model() {
             let pr = prep2(&ix, q);
             let t = std::time::Instant::now();
             setup_groups(&ix, &pr, &[g], &mut crate::kernel::Stats::new(nl));
-            gt += t.elapsed().as_secs_f64() * 1e6;
+            let tg = t.elapsed().as_secs_f64() * 1e6;
+            gt += tg;
+            if let Some(f) = csv.as_mut() {
+                use std::io::Write;
+                writeln!(f, "group,0,0,0,{tg}").unwrap();
+            }
             gm += grp_dots * dot;
         }
     }
@@ -2841,6 +2848,37 @@ fn study_count_model() {
                 } as f64;
                 let f = if sig[c] > 0.0 { sf((t - qmf) / sig[c]) } else { 0.0 };
                 lent[nl] += cr;
+                // the deterministic levels' pass-through: each row of the range passes level l when its score is at
+                // least t less its half-width there, w = (dwa_l pconst_l s_i ntab_l[code_i] + fixed + s_i ewdet) dial_l
+                // (code 15: the row's escaped rho); under the normal model of the cluster's scores, 1 - Phi((t - mu - w)
+                // / sigma), averaged over the rows, and the same at the rows' median w
+                if let (Some(f2), true) = (csv.as_mut(), cr > 0.0 && sig[c] > 0.0) {
+                    use std::io::Write;
+                    let gp = &ix.groups[g];
+                    let gq = pr.gq[g].get().unwrap();
+                    let cq = open_cluster(&ix, c, gq, &pr, qmf, plan, false);
+                    let vrows: Vec<usize> = (u0..u1).filter(|&r| vis.as_ref().is_none_or(|v| v.rows.binary_search(&(r as u32)).is_ok())).collect();
+                    let (mut avg, mut medp) = (Vec::new(), Vec::new());
+                    for l in 0..ndl {
+                        let sb = &ix.lscal[l][ix.soff[l][c]..];
+                        let srows = gp.levels[l].srows;
+                        let ws: Vec<f64> = vrows.iter().map(|&row| {
+                            let ri = row - cl.r0;
+                            let byte = sb[(ri / BLK) * srows * 16 + (ri % 32 & 15)];
+                            let code = (if ri % 32 < 16 { byte & 15 } else { byte >> 4 }) as usize;
+                            let si = crate::index::item_scale(ix.ahat[row], cl.mn32, gp.lamsum) as f64;
+                            let rho = if code == 15 { ix.esc.get(l as u8, 0, row as u32) as f64 } else { gp.pconst[l] as f64 * si * gp.ntab[l][code] as f64 };
+                            (cq.dwa[l] as f64 * rho + cq.fixed as f64 + si * cq.ewdet as f64) * pr.dial[l] as f64
+                        }).collect();
+                        avg.push(ws.iter().map(|&w| sf((t - qmf - w) / sig[c])).sum::<f64>() / ws.len() as f64);
+                        let mut wm = ws.clone();
+                        wm.sort_by(|a, b| a.total_cmp(b));
+                        medp.push(sf((t - qmf - wm[wm.len() / 2]) / sig[c]));
+                    }
+                    let obs: Vec<String> = (0..=nl).map(|l| s.enter[l].to_string()).collect();
+                    let fmt = |v: &[f64]| v.iter().map(|x| format!("{x:.5}")).collect::<Vec<_>>().join(";");
+                    writeln!(f2, "lev,{nv},{cr},{ti},{},{},{},{}", (t - qmf) / sig[c], obs.join(";"), fmt(&avg), fmt(&medp)).unwrap();
+                }
                 let deeper: f64 = (1..nl).map(|l| units(g, l) * (16.0 + f * cr) / nf).sum();
                 if cr > 0.0 {
                     pcomp[0] += (J + ndl + 2) as f64;
@@ -2859,6 +2897,11 @@ fn study_count_model() {
                 let td = tt.elapsed().as_secs_f64() * 1e6;
                 dm.push(nv as f64 * dot);
                 dt.push(td);
+                if let Some(f) = csv.as_mut() {
+                    use std::io::Write;
+                    writeln!(f, "direct,{nv},{},{},{td}", cl.r1 - cl.r0, nv).unwrap();
+                    writeln!(f, "index,{nv},{},{cr},{ti}", cl.r1 - cl.r0).unwrap();
+                }
                 im.push(predicted * dot);
                 ic.push(counted * dot);
                 it.push(ti);
