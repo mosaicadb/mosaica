@@ -2229,7 +2229,7 @@ fn the_window_reads_by_key_and_stops_below_the_kth_best() {
                             continue;
                         }
                         let priced: Vec<usize> = info.priced.iter().map(|&c| c as usize).collect();
-                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the isotropic key's order, {what}");
+                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the key's order, {what}");
                         for (i, &c) in info.read.iter().enumerate() {
                             let mut win: Vec<usize> = priced[..(w + i).min(priced.len())].iter().copied().filter(|x| !info.read[..i].contains(&(*x as u32))).collect();
                             win.sort_by(|x, y| by(x, y, &keys));
@@ -2250,6 +2250,108 @@ fn the_window_reads_by_key_and_stops_below_the_kth_best() {
     }
     eprintln!("{stops} stops, {same} returning what reading every cluster returns, {heuristic} with a cluster not priced above the k-th best");
     assert!(stops > 0 && same > 0, "{stops} stops, {same} exact");
+}
+
+/// The k-NN stream's key ignores a part of the query along which no cluster varies: on synth4k's centres, radii and
+/// sizes, with each cluster's variance held in a 16-dimensional subspace of the 64 (its own directions in it, at
+/// random), the query plus a multiple of a direction e outside that subspace on which every centre agrees keeps the
+/// stream's order and moves every key by the same amount; the key rad |q| / sqrt(n0) does not. With every cluster
+/// isotropic, the stream's scale is |q| / sqrt(n0).
+#[test]
+fn the_stream_key_ignores_a_part_of_the_query_no_cluster_varies_along() {
+    let f = fixture();
+    let (n, r, held) = (f.ix.n(), 16, 16);
+    let rows: Vec<u32> = (0..f.ix.nrows as u32).collect();
+    let rads: Vec<f64> = f.ix.order.as_ref().unwrap().rad.to_vec();
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(41);
+    let gauss = |rng: &mut rand_chacha::ChaCha8Rng| -> f64 { (0..12).map(|_| rng.gen::<f64>()).sum::<f64>() - 6.0 };
+    // orthonormal rows by Gram-Schmidt, in f64
+    let orth = |vs: &mut Vec<Vec<f64>>| {
+        for k in 0..vs.len() {
+            for j in 0..k {
+                let d: f64 = vs[j].iter().zip(&vs[k]).map(|(a, b)| a * b).sum();
+                let vj = vs[j].clone();
+                vs[k].iter_mut().zip(&vj).for_each(|(x, a)| *x -= d * a);
+            }
+            let nv = vs[k].iter().map(|x| x * x).sum::<f64>().sqrt();
+            vs[k].iter_mut().for_each(|x| *x /= nv);
+        }
+    };
+    // synth4k with each cluster's state replaced: its directions at random in the first `held` dimensions, its
+    // variances halving (summing to its radius squared, so no rest), or all equal to rad^2 / n (isotropic)
+    let with_state = |isotropic: bool, rng: &mut rand_chacha::ChaCha8Rng| {
+        let parts = (0..f.ix.k()).map(|ci| {
+            let mut u: Vec<Vec<f64>> = (0..r).map(|_| (0..n).map(|i| if i < held { gauss(rng) } else { 0.0 }).collect()).collect();
+            orth(&mut u);
+            let rr = rads[ci] * rads[ci];
+            let lam: Vec<f32> = if isotropic {
+                vec![(rr / n as f64) as f32; r]
+            } else {
+                (0..r).map(|j| (rr * 0.5f64.powi(j as i32 + 1)) as f32).collect()
+            };
+            let rad = if isotropic { rads[ci] } else { lam.iter().map(|&x| x as f64).sum::<f64>().sqrt() };
+            let (mut dsc, mut dirs8) = (Vec::new(), Vec::new());
+            for uj in &u {
+                let sc = uj.iter().fold(0f64, |a, &v| a.max(v.abs())) / 127.0;
+                dirs8.extend(uj.iter().map(|&v| (v / sc).round() as i8));
+                dsc.push(sc as f32);
+            }
+            order::ClusterOrder { rad, lam, dsc, dirs8 }
+        }).collect();
+        let mut ix = f.ix.compact(&rows, false);
+        ix.order = Some(std::sync::Arc::new(order::OrderState::from_clusters(parts, r, n)));
+        ix
+    };
+    let ix = with_state(false, &mut rng);
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let rad: Vec<f64> = ix.order.as_ref().unwrap().rad.to_vec();
+    // e: outside the held dimensions, and orthogonal to the centres' differences there
+    let mut vs: Vec<Vec<f64>> = (1..ix.k()).map(|ci| (0..n).map(|i| if i < held { 0.0 } else { ix.centre(ci)[i] as f64 - ix.centre(0)[i] as f64 }).collect()).collect();
+    vs.push((0..n).map(|i| if i < held { 0.0 } else { gauss(&mut rng) }).collect());
+    orth(&mut vs);
+    let e = vs.pop().unwrap();
+    let shift: Vec<f64> = (0..ix.k()).map(|ci| e.iter().zip(ix.centre(ci)).map(|(a, &b)| a * b as f64).sum()).collect();
+    assert!(shift.iter().all(|s| (s - shift[0]).abs() < 1e-6), "e is not common to the centres: {shift:?}");
+    let mut p = vec![0f32; r];
+    let order = |keys: &[f64]| {
+        let mut o: Vec<usize> = (0..keys.len()).collect();
+        o.sort_by(|&x, &y| keys[y].total_cmp(&keys[x]).then(x.cmp(&y)));
+        o
+    };
+    let mu = |q: &[f32]| -> Vec<f64> { (0..ix.k()).map(|ci| q.iter().zip(ix.centre(ci)).map(|(&x, &c)| x as f64 * c as f64).sum()).collect() };
+    let (mut cases, mut iso_moved) = (0, 0);
+    for (qi, q) in f.queries.iter().enumerate() {
+        let q32 = prep2(&ix, q).q32;
+        let qn = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
+        for a in [0.5, 3.0] {
+            let q2: Vec<f32> = q32.iter().zip(&e).map(|(&x, &d)| (x as f64 + a * qn * d) as f32).collect();
+            let (m1, m2) = (mu(&q32), mu(&q2));
+            let (s1, s2) = (ad.stream_scale(&q32, &mut p), ad.stream_scale(&q2, &mut p));
+            assert!((s2 - s1).abs() <= 1e-6 * s1, "query {qi}, a {a}: the stream's scale moved from {s1} to {s2}");
+            for psi in [2.0, adaptive::PSI, 8.0] {
+                let k1: Vec<f64> = (0..ix.k()).map(|ci| m1[ci] + psi * rad[ci] * s1).collect();
+                let k2: Vec<f64> = (0..ix.k()).map(|ci| m2[ci] + psi * rad[ci] * s2).collect();
+                assert_eq!(order(&k1), order(&k2), "query {qi}, a {a}, psi {psi}: the stream's order moved");
+                let iso = |q: &[f32], m: &[f64]| -> Vec<f64> {
+                    let qq = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>();
+                    (0..ix.k()).map(|ci| m[ci] + psi * rad[ci] * (qq / n as f64).sqrt()).collect()
+                };
+                cases += 1;
+                iso_moved += (order(&iso(&q32, &m1)) != order(&iso(&q2, &m2))) as usize;
+            }
+        }
+    }
+    eprintln!("the |q| key's order moved in {iso_moved} of {cases} cases");
+    assert!(iso_moved > 0, "the |q| key's order never moved, so the test shows nothing");
+    // every cluster isotropic: the scale is |q| / sqrt(n0)
+    let ix = with_state(true, &mut rng);
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    for q in &f.queries {
+        let q32 = prep2(&ix, q).q32;
+        let want = q32.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt() / (n as f64).sqrt();
+        let s = ad.stream_scale(&q32, &mut p);
+        assert!((s - want).abs() <= 1e-4 * want, "isotropic: the stream's scale is {s}, not {want}");
+    }
 }
 
 /// The approximate threshold query decides from the bounds before computing a sigma: a probe returns every answer row

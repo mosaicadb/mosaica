@@ -7,12 +7,15 @@
 //! every unit size and dataset, `hierarchy/theory.md` 3.4). Every sigma is at most sqrt(top_c) |q|, top_c the
 //! cluster's largest variance along a direction, so b_c = mu_c + psi sqrt(top_c) |q| bounds u_c from above.
 //!
-//! - k-NN takes the clusters in decreasing mu_c + psi sqrt(iso_c) |q| (the stream; the lower cluster first among equal
-//!   values), iso_c = rad_c^2 / n0 the cluster's variance per spanned dimension, so sqrt(iso_c) |q| is the spread of
-//!   its scores along a direction drawn at random: the key with the spread every cluster would have if it were
-//!   isotropic, free from the stored radius and with no constant of its own. (Its bound b_c, the stream first tried,
-//!   ranks clusters by their largest variance rather than their centre score: on LAION it read clusters that hold
-//!   nothing, recall 0.07 at psi 4.5.) It keeps the next `LOOKAHEAD` of them priced (sigma computed) in a window. It reads the window's cluster of largest key u,
+//! - k-NN takes the clusters in decreasing mu_c + psi rad_c sqrt(q' C q / tr C) (the stream; the lower cluster
+//!   first among equal values), rad_c the cluster's RMS radius and C the pooled within-cluster covariance
+//!   (`order::Pooled`, sum_c n_c S_c / N as its top directions and an isotropic rest): the key with the spread the
+//!   cluster would have if it were shaped as the clusters are on average, with no constant of its own. A part of q
+//!   along which no cluster varies leaves it unchanged (it moves every mu_c alike when the centres agree along it),
+//!   where rad_c |q| / sqrt(n0) would grow with it: a text query's part along directions the image clusters do not
+//!   span. (The key's bound b_c, the stream first tried, ranks clusters by their largest variance rather than their
+//!   centre score: on LAION it read clusters that hold nothing, recall 0.07 at psi 4.5.) It keeps the next
+//!   `LOOKAHEAD` of them priced (sigma computed) in a window. It reads the window's cluster of largest key u,
 //!   each whole by `KnnReader` (its visible rows scored from their stored vectors, or the index path at the running
 //!   k-th best), and stops when the window's largest key is below the running k-th best (minus infinity until k items
 //!   are held: k items are returned whenever k are visible). The stop is a heuristic: a cluster further down the
@@ -472,9 +475,10 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 /// What one approximate query did. `path`: "probe" (k-NN stopped by its knob; a threshold query's clusters read),
 /// "race" (k-NN: the rest scanned once the probe would cost more than a scan), "scan" (the visible rows scanned
 /// instead), "exact" (a threshold query handed to the exact one), "empty". `read`: the clusters the probe read, in
-/// order (not those a race scanned); `priced`: the clusters given a sigma, in order. Costs are modelled (`Measured`): `fixed` the order's (centre scores; the anchor
-/// search of a threshold query), `cost` what the query paid in all, `scan_cost` a scan of the visible rows,
-/// `exact_cost` (threshold) every cluster the support table leaves open, at its cheaper path.
+/// order (not those a race scanned); `priced`: the clusters given a sigma, in order. Costs are modelled
+/// (`Measured`): `fixed` the order's (centre scores; k-NN's product with the pooled directions; a threshold query's
+/// anchor search), `cost` what the query paid in all, `scan_cost` a scan of the visible rows, `exact_cost`
+/// (threshold) every cluster the support table leaves open, at its cheaper path.
 #[derive(Clone, Debug, Default)]
 pub struct AdaptiveInfo {
     pub path: &'static str,
@@ -517,8 +521,8 @@ pub struct Adaptive {
     top: Vec<f64>,
     /// per cluster, the least variance along a direction it holds (sigma >= sqrt(low |q|^2))
     low: Vec<f64>,
-    /// per cluster, its variance per spanned dimension, rad^2 / n0 (a direction's expected variance)
-    iso: Vec<f64>,
+    /// the pooled within-cluster covariance, whose share of its trace along the query scales the stream's radii
+    pooled: super::order::Pooled,
 }
 
 /// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once. A group's setup
@@ -570,15 +574,12 @@ impl Adaptive {
         m.check().map_err(|e| format!("the cost model cannot price a query: {e}"))?;
         let st = ix.order.clone().ok_or("this index holds no order state (the clusters' directions the approximate queries read); rebuild it")?;
         let r = st.r;
-        let rest: Vec<f64> = (0..ix.k()).map(|c| {
-            let lam = &st.lam[c * r..(c + 1) * r];
-            let top: f64 = lam.iter().map(|&l| l as f64).sum();
-            (st.rad[c] * st.rad[c] - top).max(0.0) / (st.n0.max(r + 1) - r) as f64
-        }).collect();
+        let rest: Vec<f64> = (0..ix.k()).map(|c| st.rest(c)).collect();
         let top = (0..ix.k()).map(|c| st.lam.get(c * r).map_or(0.0, |&l| l as f64).max(rest[c])).collect();
         let low = (0..ix.k()).map(|c| st.lam[c * r..(c + 1) * r].iter().fold(rest[c], |a, &l| a.min(l as f64)) * (1.0 - 1e-9)).collect();
-        let iso = (0..ix.k()).map(|c| st.rad[c] * st.rad[c] / st.n0.max(1) as f64).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, iso })
+        let sizes: Vec<usize> = ix.cl.iter().map(|c| c.r1 - c.r0).collect();
+        let pooled = super::order::Pooled::new(&st, &sizes, ix.n());
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled })
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -609,13 +610,20 @@ impl Adaptive {
         (0..ix.k()).map(|ci| qm[ci] + psi * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
     }
 
-    /// Every cluster's value in the k-NN stream, mu + psi sqrt(iso |q|^2), for the query `q` (for tests).
+    /// The stream's scale of the radii for the query's f32 values `q32` (`p` scratch of r values):
+    /// sqrt(q' C q / tr C), C the pooled within-cluster covariance.
+    pub(crate) fn stream_scale(&self, q32: &[f32], p: &mut [f32]) -> f64 {
+        let qq: f64 = q32.iter().map(|&x| x as f64 * x as f64).sum();
+        if self.pooled.tr > 0.0 { (self.pooled.quad(q32, qq, p) / self.pooled.tr).sqrt() } else { 0.0 }
+    }
+
+    /// Every cluster's value in the k-NN stream, mu + psi rad sqrt(q' C q / tr C), for the query `q` (for tests).
     #[cfg(test)]
     pub(crate) fn stream_keys(&self, ix: &Index2, q: &[f32], psi: f64) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
-        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        (0..ix.k()).map(|ci| qm[ci] + psi * (self.iso[ci] * qq).sqrt()).collect()
+        let s = self.stream_scale(&pr.q32, &mut vec![0f32; self.st.r]);
+        (0..ix.k()).map(|ci| qm[ci] + psi * self.st.rad[ci] * s).collect()
     }
 
     /// The cost of one sigma (its directions' products).
@@ -650,7 +658,8 @@ impl Adaptive {
         let live: Vec<usize> = (0..k).filter(|&ci| nv_of(ci) > 0).collect();
         let nvis: usize = live.iter().map(|&ci| nv_of(ci)).sum();
         let all = psi == f64::INFINITY;
-        let fixed = m.i8_us * k as f64;
+        // the centre scores, and the stream's product with the pooled directions
+        let fixed = m.i8_us * (k + if all { 0 } else { self.st.r }) as f64;
         let mut info = AdaptiveInfo { fixed, scan_cost: m.scan(nvis), ..AdaptiveInfo::default() };
         let out = |ents: Vec<(f64, u32)>, mut st: Stats| {
             st.cyc[P_QUERY] += tick() - t0;
@@ -673,15 +682,14 @@ impl Adaptive {
         st.cyc[P_PLAN] += tick() - tc;
         let ts = tick();
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        // clusters not yet priced, by their key's bound (psi infinite: by centre score, never priced), and priced ones
-        // by their key
-        // the stream by the isotropic key (psi infinite: by centre score, never priced), and the window of priced
-        // clusters
-        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { qm[ci] + psi * (self.iso[ci] * qq).sqrt() }, Reverse(ci))).collect();
+        let mut p = vec![0f32; self.st.r];
+        // the stream by mu + psi rad s, s the pooled covariance's share along the query (psi infinite: by centre
+        // score, never priced), and the window of priced clusters
+        let s = if all { 0.0 } else { self.stream_scale(&pr.q32, &mut p) };
+        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { qm[ci] + psi * self.st.rad[ci] * s }, Reverse(ci))).collect();
         let mut window: BinaryHeap<Key> = BinaryHeap::with_capacity(LOOKAHEAD);
         st.cyc[P_ORDER] += tick() - ts;
         let sc = self.sigma_cost();
-        let mut p = vec![0f32; self.st.r];
         let mut spent = fixed;
         let mut sig = 0;
         let mut ch = Charges::new(m, ix, &pr, !ix.nukey.is_empty());

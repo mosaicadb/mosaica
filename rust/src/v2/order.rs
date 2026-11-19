@@ -180,7 +180,13 @@ fn transpose_times_z(x: &[f32], n: usize, z: &[f32], y: &mut [f32]) {
 /// f64. A column left with under 1e-6 of the largest column's norm is in the span of those before it (the sample has
 /// fewer rows or dimensions than the block) and becomes zero.
 fn orthonormal(y: &[f32], n: usize) -> Vec<f32> {
-    let mut cols: Vec<Vec<f64>> = (0..BLOCK).map(|c| (0..n).map(|j| y[j * BLOCK + c] as f64).collect()).collect();
+    let y: Vec<f64> = y.iter().map(|&v| v as f64).collect();
+    orthonormal64(&y, n).iter().map(|&v| v as f32).collect()
+}
+
+/// `orthonormal` of an f64 matrix, in f64.
+fn orthonormal64(y: &[f64], n: usize) -> Vec<f64> {
+    let mut cols: Vec<Vec<f64>> = (0..BLOCK).map(|c| (0..n).map(|j| y[j * BLOCK + c]).collect()).collect();
     let norm = |v: &[f64]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
     let top = cols.iter().map(|c| norm(c)).fold(0f64, f64::max);
     for k in 0..BLOCK {
@@ -199,10 +205,10 @@ fn orthonormal(y: &[f32], n: usize) -> Vec<f32> {
             v.fill(0.0);
         }
     }
-    let mut q = vec![0f32; n * BLOCK];
+    let mut q = vec![0f64; n * BLOCK];
     for (c, col) in cols.iter().enumerate() {
         for (j, &v) in col.iter().enumerate() {
-            q[j * BLOCK + c] = v as f32;
+            q[j * BLOCK + c] = v;
         }
     }
     q
@@ -292,6 +298,132 @@ impl OrderState {
     /// Cluster ci's first `r` directions as int8 rows (r x n).
     pub fn dirs(&self, ci: usize, r: usize, n: usize) -> &[i8] {
         &self.dirs8[ci * self.r * n..(ci * self.r + r) * n]
+    }
+
+    /// Cluster ci's variance per spanned dimension its directions leave: what its radius holds beyond its directions'
+    /// variances, over the n0 - r other spanned dimensions.
+    pub fn rest(&self, ci: usize) -> f64 {
+        let r = self.r;
+        let top: f64 = self.lam[ci * r..(ci + 1) * r].iter().map(|&l| l as f64).sum();
+        (self.rad[ci] * self.rad[ci] - top).max(0.0) / (self.n0.max(r + 1) - r) as f64
+    }
+}
+
+/// Passes of the subspace iteration on the pooled covariance's low-rank part (`Pooled::new`).
+const POOL_PASSES: usize = 24;
+
+/// The pooled within-cluster covariance C = sum_c n_c S_c / N of the clusters' stored covariances S_c (each its
+/// directions and variances, `OrderState::lam`, and its isotropic rest, `OrderState::rest`), held as its top r
+/// directions (int8 rows with a scale each), their variances and an isotropic rest, as `OrderState` holds a cluster's.
+///
+/// C = sum_c w_c U_c (L_c - rest_c) U_c' + (sum_c w_c rest_c) I, w_c = n_c / N, each column of U_c a cluster's
+/// int8 direction scaled to unit length. Its top directions are those of the first term, an n x n matrix formed row by row in f64 (each entry summed over the clusters and directions in order),
+/// by a subspace iteration of `POOL_PASSES` passes from random signs and a Rayleigh-Ritz step; its trace is
+/// sum_c w_c rad_c^2, and the rest is what the trace holds beyond the top variances over the n0 - r other spanned
+/// dimensions. Every operation runs in a fixed order with separate multiplies and adds, so it is the same bits
+/// whatever the instruction set or the thread count. It costs about n^2 k r multiply-adds, rows in parallel (2.1e9
+/// for 500 clusters of 512 dimensions), and no pass over the vectors, so it is computed when the approximate queries
+/// open rather than stored.
+pub struct Pooled {
+    pub lam: Vec<f64>,
+    pub dsc: Vec<f32>,
+    pub dirs8: Vec<i8>,
+    pub rest: f64,
+    pub tr: f64,
+}
+
+impl Pooled {
+    /// C of the state `st` of vectors of n dimensions whose clusters hold `sizes` rows.
+    pub fn new(st: &OrderState, sizes: &[usize], n: usize) -> Pooled {
+        let (k, r) = (sizes.len(), st.r);
+        assert!(r <= BLOCK.min(n), "{r} directions of {n} dimensions do not fit a block of {BLOCK}");
+        let total: usize = sizes.iter().sum();
+        let w: Vec<f64> = sizes.iter().map(|&s| s as f64 / total.max(1) as f64).collect();
+        let rests: Vec<f64> = (0..k).map(|c| st.rest(c)).collect();
+        let tr: f64 = (0..k).map(|c| w[c] * st.rad[c] * st.rad[c]).sum();
+        let iso: f64 = (0..k).map(|c| w[c] * rests[c]).sum();
+        // each int8 direction's scale to unit length (the direction it rounds), so that the low-rank part's trace is
+        // the clusters' variances, whatever the rounding
+        let unit: Vec<f64> = st.dirs8[..k * r * n].chunks_exact(n.max(1)).map(|u| {
+            let nn: f64 = u.iter().map(|&x| x as f64 * x as f64).sum();
+            if nn > 0.0 { 1.0 / nn.sqrt() } else { 0.0 }
+        }).collect();
+        // the low-rank part, row by row
+        let m: Vec<f64> = (0..n).into_par_iter().flat_map_iter(|i| {
+            let mut row = vec![0f64; n];
+            for c in (0..k).filter(|&c| w[c] > 0.0) {
+                for j in 0..r {
+                    let d = st.dirs(c, r, n);
+                    let (u, sc) = (&d[j * n..(j + 1) * n], unit[c * r + j]);
+                    if u[i] == 0 {
+                        continue;
+                    }
+                    let a = w[c] * (st.lam[c * r + j] as f64 - rests[c]) * (u[i] as f64 * sc) * sc;
+                    for (o, &x) in row.iter_mut().zip(u) {
+                        *o += a * x as f64;
+                    }
+                }
+            }
+            row
+        }).collect();
+        let times = |x: &[f64]| -> Vec<f64> {
+            let mut y = vec![0f64; n * BLOCK];
+            for (mi, yi) in m.chunks_exact(n).zip(y.chunks_exact_mut(BLOCK)) {
+                for (&a, xj) in mi.iter().zip(x.chunks_exact(BLOCK)) {
+                    for c in 0..BLOCK {
+                        yi[c] += a * xj[c];
+                    }
+                }
+            }
+            y
+        };
+        let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(0);
+        let mut x: Vec<f64> = (0..n * BLOCK).map(|_| if rng.gen::<bool>() { 1.0 } else { -1.0 }).collect();
+        for _ in 0..POOL_PASSES {
+            x = orthonormal64(&times(&x), n);
+        }
+        let y = times(&x);
+        let mut b = vec![0f64; BLOCK * BLOCK];
+        for (xi, yi) in x.chunks_exact(BLOCK).zip(y.chunks_exact(BLOCK)) {
+            for a in 0..BLOCK {
+                for (c, o) in b[a * BLOCK..(a + 1) * BLOCK].iter_mut().enumerate() {
+                    *o += xi[a] * yi[c];
+                }
+            }
+        }
+        // symmetric up to rounding: its two halves averaged
+        for a in 0..BLOCK {
+            for c in a + 1..BLOCK {
+                let v = 0.5 * (b[a * BLOCK + c] + b[c * BLOCK + a]);
+                b[a * BLOCK + c] = v;
+                b[c * BLOCK + a] = v;
+            }
+        }
+        let (vals, vecs) = jacobi_desc(&mut b, BLOCK);
+        let (mut lam, mut dsc, mut dirs8) = (Vec::with_capacity(r), Vec::with_capacity(r), Vec::with_capacity(r * n));
+        for j in 0..r {
+            let u: Vec<f64> = (0..n).map(|i| (0..BLOCK).map(|c| x[i * BLOCK + c] * vecs[c * BLOCK + j]).sum()).collect();
+            let sc = u.iter().fold(0f64, |a, &v| a.max(v.abs())) / 127.0;
+            dirs8.extend(u.iter().map(|&v| if sc > 0.0 { (v / sc).round() as i8 } else { 0 }));
+            dsc.push(sc as f32);
+            lam.push((vals[j] + iso).max(0.0));
+        }
+        let rest = (tr - lam.iter().sum::<f64>()).max(0.0) / (st.n0.max(r + 1) - r) as f64;
+        Pooled { lam, dsc, dirs8, rest, tr }
+    }
+
+    /// q' C q for the query's f32 values `q32` and |q|^2 `qq` (`p` scratch of r values): one product with the r
+    /// int8 rows.
+    pub fn quad(&self, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
+        let r = self.lam.len();
+        unsafe { crate::kernel::gemv_i8(q32, &self.dirs8, q32.len(), &mut p[..r]) };
+        let (mut v, mut pp) = (0f64, 0f64);
+        for ((&pj, &sc), &l) in p[..r].iter().zip(&self.dsc).zip(&self.lam) {
+            let x = pj as f64 * sc as f64;
+            v += l * x * x;
+            pp += x * x;
+        }
+        (v + self.rest * (qq - pp).max(0.0)).max(0.0)
     }
 }
 

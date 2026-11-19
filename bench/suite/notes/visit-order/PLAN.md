@@ -226,8 +226,9 @@ another arm's last (most expensive) ones: `spread` at nprobe 4 took 122 µs for 
 
 The library now has one approximate k-NN and one approximate threshold query (`rust/src/v2/adaptive.rs`; bindings
 `knn_approx(q, k, psi=4.5)`, `threshold_approx(q, t, psi=4.5)`): the key μ_c + ψσ_c(q) from the stored directions,
-the clusters taken in decreasing μ_c + ψ·rad_c|q|/√n₀ (the key an isotropic cluster of the same radius would have;
-no fitted constant) with the next 8 priced (σ computed), the largest key among those read next, and the stop when their largest key is below the running k-th best (threshold:
+the clusters taken in decreasing μ_c + ψ·rad_c·√(qᵀC̄q / tr C̄) (C̄ the pooled within-cluster covariance, Σ_c n_c Σ_c / N
+from the stored directions, as its top 16 directions and an isotropic rest, computed at open; no fitted constant)
+with the next 8 priced (σ computed), the largest key among those read next, and the stop when their largest key is below the running k-th best (threshold:
 the clusters whose key reaches t, after the support table, decided from the bounds before any σ), the race against a scan (k-NN; at most twice its modelled
 cost) and the hand-over to a scan or the exact query (threshold), and each cluster's path by constants measured on
 the machine and cached with the index. The calibrated process (its tables, group covariances, price and budget, and
@@ -237,7 +238,13 @@ every cluster for the same items in 685). The exact lazy stop, which prices a cl
 best key priced, computed σ for every cluster on real data (the bound is about 5 times σ) and cost about 500 µs a
 query on LAION (`results/consolidated-exact-stop/` on branch `ccr-b37f5194-u55ji1`); it was taken out. A stream in
 the order of that bound (μ_c + ψ√(λ₁)|q|) instead ranks clusters by their largest variance: recall 0.07 at ψ 4.5 on
-LAION, so the stream takes the isotropic key; the `spread` order by nprobe
+LAION, so the stream takes the radius scaled by the query's share of the pooled covariance. A part of q along
+which no cluster varies leaves that scale unchanged, where rad_c|q|/√n₀ (the key first taken) grows with it. On
+LAION the two keys read nearly alike (ψ 4.5 unfiltered: recall 0.919 at 59.8k rows either way): the top 16 pooled
+directions hold 16% of the trace, so the scale stays within 0.97 to 1.11 of |q|/√n₀ over the 100 queries, where the
+pooled covariance of rows sampled from every cluster puts it at 0.56 to 1.30 (median 0.91; the scale from every
+cluster's stored directions, untruncated, correlates 0.98 with that but spans only 0.87 to 1.16, the clusters'
+isotropic rests holding most of their variance). The `spread` order by nprobe
 stays as `knn_nprobe`, the legacy comparison arm, until the owner's benchmark has run. The exact planner can take its
 rule in rows from the measured constants (`Index(..., rule="measured")`); its default is unchanged.
 
