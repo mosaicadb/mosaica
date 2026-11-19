@@ -1,0 +1,61 @@
+cost model (ad722d3):
+glove-100-angular none: adaptive / spread time to recall (exact knn2 19903.0 us at 0.999)
+  0.8: 840/946 = x0.89  0.9: 1255/1918 = x0.65  0.95: 2644/3519 = x0.75  0.98: 6262/5761 = x1.09  0.99: 11132/7880 = x1.41  0.995: 15129/8940 = x1.69
+glove-100-angular random-1: adaptive / spread time to recall (exact knn2 425.8 us at 0.999)
+  0.8: <158/99 = x1.59  0.9: 205/164 = x1.24  0.95: 417/252 = x1.65  0.98: 514/365 = x1.41  0.99: 522/542 = x0.96  0.995: 527/631 = x0.84
+glove-100-angular random-25: adaptive / spread time to recall (exact knn2 18425.7 us at 1.0)
+  0.8: 479/993 = x0.48  0.9: 791/2472 = x0.32  0.95: 1618/4419 = x0.37  0.98: 3648/7222 = x0.51  0.99: 7395/8712 = x0.85  0.995: 12050/10614 = x1.14
+laion-clip-512-normalized none: adaptive / spread time to recall (exact knn2 41412.4 us at 0.999)
+  0.8: 1102/1824 = x0.60  0.9: 1856/2880 = x0.64  0.95: 3473/5336 = x0.65  0.98: 6566/9458 = x0.69  0.99: 12199/12087 = x1.01  0.995: 21642/18091 = x1.20
+laion-clip-512-normalized random-1: adaptive / spread time to recall (exact knn2 891.7 us at 0.997)
+  0.8: 145/112 = x1.29  0.9: 201/198 = x1.02  0.95: 778/320 = x2.44  0.98: 965/541 = x1.78  0.99: 988/683 = x1.45  0.995: 999/1117 = x0.89
+laion-clip-512-normalized random-25: adaptive / spread time to recall (exact knn2 37638.9 us at 0.995)
+  0.8: 544/1738 = x0.31  0.9: 1132/3338 = x0.34  0.95: 2712/5977 = x0.45  0.98: 7333/11938 = x0.61  0.99: 13523/19259 = x0.70  0.995: 35775/30534 = x1.17
+yahoo-minilm-384-normalized none: adaptive / spread time to recall (exact knn2 17561.0 us at 1.0)
+  0.8: 439/<715 = x0.61  0.9: 710/1027 = x0.69  0.95: 1022/1468 = x0.70  0.98: 1811/2489 = x0.73  0.99: -  0.995: -
+yahoo-minilm-384-normalized random-1: adaptive / spread time to recall (exact knn2 566.1 us at 1.0)
+  0.8: 91/64 = x1.42  0.9: 110/97 = x1.13  0.95: 143/150 = x0.95  0.98: 237/258 = x0.92  0.99: 402/345 = x1.16  0.995: 559/499 = x1.12
+yahoo-minilm-384-normalized random-25: adaptive / spread time to recall (exact knn2 15635.2 us at 1.0)
+  0.8: 217/603 = x0.36  0.9: 349/994 = x0.35  0.95: 560/1564 = x0.36  0.98: 1451/2760 = x0.53  0.99: -  0.995: -
+
+modelled cost / measured time per point (adaptive)
+glove-100-angular none: psi 2: 0.64 {'probe': 100}; psi 2.5: 0.75 {'probe': 100}; psi 3: 1.16 {'probe': 100}; psi 3.5: 1.43 {'probe': 100}; psi 4: 2.68 {'probe': 100}; psi 4.5: 2.55 {'probe': 100}; psi 5: 2.05 {'probe': 97, 'race': 3}; psi 5.5: 1.44 {'race': 20, 'probe': 80}; psi 6: 1.39 {'race': 45, 'probe': 55}; psi 6.5: 0.86 {'race': 61, 'probe': 39}; psi 7: 0.92 {'race': 71, 'probe': 29}
+glove-100-angular random-1: psi 2: 1.45 {'race': 49, 'probe': 51}; psi 2.5: 0.59 {'race': 66, 'probe': 34}; psi 3: 0.67 {'race': 79, 'probe': 21}; psi 3.5: 0.74 {'race': 91, 'probe': 9}; psi 4: 0.77 {'race': 97, 'probe': 3}; psi 4.5: 0.77 {'race': 99, 'probe': 1}; psi 5: 0.77 {'race': 99, 'probe': 1}; psi 5.5: 0.77 {'race': 100}; psi 6: 0.76 {'race': 100}; psi 6.5: 0.78 {'race': 100}; psi 7: 0.78 {'race': 100}
+glove-100-angular random-25: psi 2: 0.32 {'probe': 100}; psi 2.5: 0.46 {'probe': 100}; psi 3: 0.78 {'probe': 100}; psi 3.5: 1.28 {'probe': 100}; psi 4: 1.22 {'probe': 95, 'race': 5}; psi 4.5: 0.89 {'race': 24, 'probe': 76}; psi 5: 0.51 {'race': 50, 'probe': 50}; psi 5.5: 0.50 {'race': 67, 'probe': 33}; psi 6: 0.53 {'race': 77, 'probe': 23}; psi 6.5: 0.56 {'race': 84, 'probe': 16}; psi 7: 0.58 {'race': 93, 'probe': 7}
+laion-clip-512-normalized none: psi 2: 0.81 {'probe': 100}; psi 2.5: 1.01 {'probe': 100}; psi 3: 1.21 {'probe': 100}; psi 3.5: 1.36 {'probe': 100}; psi 4: 1.75 {'probe': 100}; psi 4.5: 2.15 {'probe': 100}; psi 5: 2.08 {'probe': 98, 'race': 2}; psi 5.5: 1.95 {'probe': 98, 'race': 2}; psi 6: 1.59 {'probe': 96, 'race': 4}; psi 6.5: 1.58 {'probe': 91, 'race': 9}; psi 7: 1.58 {'probe': 83, 'race': 17}
+laion-clip-512-normalized random-1: psi 2: 2.14 {'probe': 81, 'race': 19}; psi 2.5: 2.43 {'probe': 67, 'race': 33}; psi 3: 0.84 {'probe': 44, 'race': 56}; psi 3.5: 0.93 {'probe': 32, 'race': 68}; psi 4: 1.06 {'probe': 20, 'race': 80}; psi 4.5: 1.14 {'probe': 8, 'race': 92}; psi 5: 1.19 {'race': 99, 'probe': 1}; psi 5.5: 1.18 {'race': 100}; psi 6: 1.19 {'race': 100}; psi 6.5: 1.19 {'race': 100}; psi 7: 1.20 {'race': 100}
+laion-clip-512-normalized random-25: psi 2: 0.55 {'probe': 100}; psi 2.5: 0.79 {'probe': 100}; psi 3: 1.21 {'probe': 100}; psi 3.5: 1.37 {'probe': 100}; psi 4: 1.72 {'probe': 99, 'race': 1}; psi 4.5: 1.47 {'probe': 97, 'race': 3}; psi 5: 1.30 {'probe': 94, 'race': 6}; psi 5.5: 1.11 {'probe': 88, 'race': 12}; psi 6: 0.97 {'probe': 78, 'race': 22}; psi 6.5: 0.79 {'probe': 70, 'race': 30}; psi 7: 0.66 {'probe': 56, 'race': 44}
+yahoo-minilm-384-normalized none: psi 2: 1.03 {'probe': 100}; psi 2.5: 0.99 {'probe': 100}; psi 3: 1.01 {'probe': 100}; psi 3.5: 1.13 {'probe': 100}; psi 4: 0.99 {'probe': 100}; psi 4.5: 1.03 {'probe': 100}; psi 5: 1.23 {'probe': 100}; psi 5.5: 1.37 {'probe': 100}; psi 6: 1.32 {'probe': 100}; psi 6.5: 1.38 {'probe': 100}; psi 7: 1.58 {'probe': 100}
+yahoo-minilm-384-normalized random-1: psi 2: 0.79 {'probe': 95, 'race': 5}; psi 2.5: 1.47 {'probe': 85, 'race': 15}; psi 3: 1.70 {'probe': 79, 'race': 21}; psi 3.5: 1.74 {'probe': 71, 'race': 29}; psi 4: 1.72 {'probe': 64, 'race': 36}; psi 4.5: 1.25 {'race': 45, 'probe': 55}; psi 5: 0.78 {'race': 55, 'probe': 45}; psi 5.5: 0.83 {'race': 65, 'probe': 35}; psi 6: 0.85 {'race': 75, 'probe': 25}; psi 6.5: 0.91 {'race': 86, 'probe': 14}; psi 7: 0.91 {'race': 90, 'probe': 10}
+yahoo-minilm-384-normalized random-25: psi 2: 0.50 {'probe': 100}; psi 2.5: 0.54 {'probe': 100}; psi 3: 0.67 {'probe': 100}; psi 3.5: 0.81 {'probe': 100}; psi 4: 1.04 {'probe': 100}; psi 4.5: 1.12 {'probe': 100}; psi 5: 1.16 {'probe': 100}; psi 5.5: 1.13 {'probe': 100}; psi 6: 1.07 {'probe': 100}; psi 6.5: 1.10 {'probe': 100}; psi 7: 0.97 {'probe': 100}
+
+no cost model:
+glove-100-angular none: adaptive / spread time to recall (exact knn2 17289.9 us at 0.999)
+  0.8: 636/827 = x0.77  0.9: 1036/1682 = x0.62  0.95: 2134/3052 = x0.70  0.98: 4586/4942 = x0.93  0.99: 8254/6631 = x1.24  0.995: 11344/7475 = x1.52
+glove-100-angular random-1: adaptive / spread time to recall (exact knn2 446.9 us at 0.999)
+  0.8: <444/106 = x4.18  0.9: <444/177 = x2.50  0.95: <444/270 = x1.64  0.98: <444/387 = x1.15  0.99: <444/577 = x0.77  0.995: <444/671 = x0.66
+glove-100-angular random-25: adaptive / spread time to recall (exact knn2 14824.8 us at 1.0)
+  0.8: 610/787 = x0.77  0.9: 935/1889 = x0.49  0.95: 1726/3327 = x0.52  0.98: 3593/5418 = x0.66  0.99: 6360/6532 = x0.97  0.995: 8758/7968 = x1.10
+laion-clip-512-normalized none: adaptive / spread time to recall (exact knn2 38953.1 us at 0.999)
+  0.8: 1104/1636 = x0.67  0.9: 1814/2606 = x0.70  0.95: 3094/4731 = x0.65  0.98: 5744/8582 = x0.67  0.99: 10021/11276 = x0.89  0.995: 19269/16602 = x1.16
+laion-clip-512-normalized random-1: adaptive / spread time to recall (exact knn2 890.8 us at 0.997)
+  0.8: <895/116 = x7.72  0.9: <895/198 = x4.53  0.95: <895/322 = x2.78  0.98: <895/542 = x1.65  0.99: <895/681 = x1.31  0.995: <895/1101 = x0.81
+laion-clip-512-normalized random-25: adaptive / spread time to recall (exact knn2 36227.7 us at 0.995)
+  0.8: 840/1409 = x0.60  0.9: 1451/2758 = x0.53  0.95: 2870/4963 = x0.58  0.98: 7086/10591 = x0.67  0.99: 12546/17547 = x0.71  0.995: 24211/28420 = x0.85
+yahoo-minilm-384-normalized none: adaptive / spread time to recall (exact knn2 16998.7 us at 1.0)
+  0.8: 506/<697 = x0.73  0.9: 828/1003 = x0.83  0.95: 1095/1429 = x0.77  0.98: 1732/2390 = x0.72  0.99: -  0.995: -
+yahoo-minilm-384-normalized random-1: adaptive / spread time to recall (exact knn2 547.8 us at 1.0)
+  0.8: <549/68 = x8.10  0.9: <549/100 = x5.50  0.95: <549/159 = x3.45  0.98: <549/270 = x2.03  0.99: <549/355 = x1.54  0.995: <549/504 = x1.09
+yahoo-minilm-384-normalized random-25: adaptive / spread time to recall (exact knn2 15673.7 us at 1.0)
+  0.8: 452/567 = x0.80  0.9: 667/918 = x0.73  0.95: 931/1432 = x0.65  0.98: 1855/2502 = x0.74  0.99: -  0.995: -
+
+modelled cost / measured time per point (adaptive)
+glove-100-angular none: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}
+glove-100-angular random-1: psi 2: 0.00 {'exact': 100}; psi 2.5: 0.00 {'exact': 100}; psi 3: 0.00 {'exact': 100}; psi 3.5: 0.00 {'exact': 100}; psi 4: 0.00 {'exact': 100}; psi 4.5: 0.00 {'exact': 100}; psi 5: 0.00 {'exact': 100}; psi 5.5: 0.00 {'exact': 100}; psi 6: 0.00 {'exact': 100}; psi 6.5: 0.00 {'exact': 100}; psi 7: 0.00 {'exact': 100}
+glove-100-angular random-25: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}
+laion-clip-512-normalized none: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}
+laion-clip-512-normalized random-1: psi 2: 0.00 {'exact': 100}; psi 2.5: 0.00 {'exact': 100}; psi 3: 0.00 {'exact': 100}; psi 3.5: 0.00 {'exact': 100}; psi 4: 0.00 {'exact': 100}; psi 4.5: 0.00 {'exact': 100}; psi 5: 0.00 {'exact': 100}; psi 5.5: 0.00 {'exact': 100}; psi 6: 0.00 {'exact': 100}; psi 6.5: 0.00 {'exact': 100}; psi 7: 0.00 {'exact': 100}
+laion-clip-512-normalized random-25: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}
+yahoo-minilm-384-normalized none: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}
+yahoo-minilm-384-normalized random-1: psi 2: 0.00 {'exact': 100}; psi 2.5: 0.00 {'exact': 100}; psi 3: 0.00 {'exact': 100}; psi 3.5: 0.00 {'exact': 100}; psi 4: 0.00 {'exact': 100}; psi 4.5: 0.00 {'exact': 100}; psi 5: 0.00 {'exact': 100}; psi 5.5: 0.00 {'exact': 100}; psi 6: 0.00 {'exact': 100}; psi 6.5: 0.00 {'exact': 100}; psi 7: 0.00 {'exact': 100}
+yahoo-minilm-384-normalized random-25: psi 2: 0.00 {'probe': 100}; psi 2.5: 0.00 {'probe': 100}; psi 3: 0.00 {'probe': 100}; psi 3.5: 0.00 {'probe': 100}; psi 4: 0.00 {'probe': 100}; psi 4.5: 0.00 {'probe': 100}; psi 5: 0.00 {'probe': 100}; psi 5.5: 0.00 {'probe': 100}; psi 6: 0.00 {'probe': 100}; psi 6.5: 0.00 {'probe': 100}; psi 7: 0.00 {'probe': 100}

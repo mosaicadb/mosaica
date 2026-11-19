@@ -1,0 +1,17 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/laion-clip-512-normalized/vexact/index/encoded in 0.363s: 1000448 rows, 500 clusters; when built: code hash 48fb4165d8f0231f, store hash 3578622ebf9c2aea
+[repack] occupancy thresholds by level [0.31, 0.3, 0.18, 0.28, 0.32, 0.36] (timed in 0.0s)
+[open] 0.573s in all: fit read 0.139s, key 0.033s, index opened 0.364s, repack timed 0.037s; anon 126 MB
+[approx] measured constants i8_us=0.026424 row_us=0.1195662155514989 dir_us=4.119353015164127 cl_us=28.830993875046 size_us=0.014698690163712457 vis_us=0.02449434034970988 grp_us=70.64299999999999 anc_us=0.09969775 cut_us=0.633970703125 und_us=3.6406861773064843 sig_us=0.40412988281250006: read from /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/laion-clip-512-normalized/vexact/index/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=260 r_kappa=0.155
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+approximate k-NN; measured constants {'i8_us': 0.026424, 'row_us': 0.1195662155514989, 'dir_us': 4.119353015164127, 'cl_us': 28.830993875046, 'size_us': 0.014698690163712457, 'vis_us': 0.02449434034970988, 'grp_us': 70.64299999999999, 'anc_us': 0.09969775, 'cut_us': 0.633970703125, 'und_us': 3.6406861773064843, 'sig_us': 0.40412988281250006, 'rule': (260, 0.15460608231945194), 'plan_rule': (64, 0.186)}
+filter                point    total  centres  spreads    order   choice   groups   stored     rest   dirs  visit direct  index  grps   us and counts, median over 100 queries
+none                  psi=3    681.9     23.7     19.3     35.3      5.1     55.1    347.0    196.5    144    2.0    1.0    1.0   1.0
+none                psi=4.5   2664.2     30.0     48.4     43.9     39.6    319.6    355.8   1826.9    344   14.5    1.0   13.0   6.0
+none                  psi=6  16026.8     54.8    270.4    101.1    254.9   1509.6    676.2  13159.8   1832  107.5    4.0  102.5  27.0
+random-1              psi=3    863.9     23.1     15.4     40.7      0.3      0.0    744.9     39.5    128    1.0    1.0    0.0   0.0
+random-1            psi=4.5    864.2     22.5     12.6     26.8      0.2      0.0    742.0     60.0    128    1.0    1.0    0.0   0.0
+random-1              psi=6   1198.3     35.9     17.0     39.6      0.2      0.0    998.0    107.5    128    1.0    1.0    0.0   0.0
+random-25             psi=3    429.3     28.1     19.4     39.9     10.3      0.0    315.0     16.6    168    3.5    3.5    0.0   0.0
+random-25           psi=4.5   2742.2     29.1     76.8     64.0    103.0      0.0   2363.4    105.8    592   30.0   30.0    0.0   0.0
+random-25             psi=6  14799.2     37.7    293.4    207.2    479.5      0.0  13298.8    482.6   1960  115.5  115.5    0.0   0.0

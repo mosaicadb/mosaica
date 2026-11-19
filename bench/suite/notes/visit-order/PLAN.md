@@ -285,38 +285,43 @@ branch `subclusters-exp`, not merged):
   the 1% losses), and clusters of 8,000 rows, where the gain should be larger.
 
 The owner's benchmark showed k-NN's time growing far faster than recall above ψ ≈ 5 (glove ψ 7 about 35 ms
-against exact `knn2` about 17 ms; LAION ψ 6 recall 0.980 at 231k rows against nprobe 64's 0.977 at 132k). Three
-changes. (1) ψ moves only the stop: the order is μ + z(1, S)σ, z(1, S) = Φ⁻¹(S/(S + 1)) of the cluster's S rows
-(3.3 at 2,000; all its rows, not its visible ones, as the multiplier is a property of the budget, `hierarchy/
-theory.md` 3.4), the stream μ + z(1, S)·rad·√(qᵀC̄q / tr C̄), and the stop the window's largest μ + ψσ below the
-running k-th best; a smaller ψ reads the first of what a larger one does. (2) The index path is priced at the
-running k-th best t from the rows its sorted range at t leaves and the share of them expected above t,
-Ḡ((t − μ)/σ), with the measured cost cl + size·S + (vis + und·share)·rows (`und_us` fitted on clusters spread over
-the centre-score ranking, not only the first 16); the sorted range itself drops almost nothing on glove (it keeps
-91 to 99% of a cluster's rows at the true 10th best, the far clusters included), so the saving is the levels'.
-The timing now flushes the cluster's stored vectors from every cache level before each read (it had evicted the
-core's L2 only, and the rows came from L3): the measured row cost about doubled (glove 0.019 → 0.033 µs, LAION
-0.055 → 0.116), as the owner's timing implied (glove ψ 7 modelled 21 ms, timed 35). (3) The probe races the exact
-query too: knn2's cost as its planner would run it, priced by the measured constants at the running k-th best,
-bought once the probe has spent what pricing it costs; past the cheaper of that and the scan, it hands over (path
-"exact"), so the whole is at most about twice the cheaper. ψ = ∞ is `knn2`.
+against exact `knn2` about 17 ms; LAION ψ 6 recall 0.980 at 231k rows against nprobe 64's 0.977 at 132k). The order
+was made independent of ψ (ψ moves only the stop): μ + z(1, v)σ, z(1, v) = Φ⁻¹(v/(v + 1)) of the cluster's v visible
+rows, the stream μ + z(1, v)·rad·√(qᵀC̄q / tr C̄), the stop the window's largest μ + ψσ below the running k-th best,
+ψ = ∞ the exact query. Two ways to read and hand over were then timed against `spread` (100 queries, 5 repetitions,
+core 3; time to a recall, adaptive / spread, ψ = ∞ left out of the curve):
+- *with a cost model* (`ad722d3`): each cluster read directly or on the index path by the measured constants, the
+  index path priced at the running k-th best from the rows its sorted range leaves and their share above it (the
+  timing flushing each cluster's vectors from the caches), and the scan race with a hand-over as soon as the reads
+  projected cost more than scanning the rest. An earlier version also predicted the exact query's cost per query
+  (`d3778d5`); pricing it cost about 1 ms a query on LAION and was taken out.
+- *with no per-query cost model* (the current code): the exact query when its planner scans the visible rows first
+  (`Plan::scan_first`), decided before anything is read; else each cluster read by the planner's rule in rows
+  (directly when it holds at most `Plan::direct_max` visible rows, else on the index path); no race.
 
-By explain_approx counts (30 queries, k 10; rows touched, the index path's included; clusters read, direct /
-index): glove unfiltered ψ 3.5 / 4 / 4.5 / 5: 0.807 at 48k (18.5: 3.7 / 14.8), 0.947 at 166k (69.5), 0.987 at
-362k (160: 15 / 145; 20k rows read from stored vectors), 0.997 at 644k (301); ψ 6 hands 6 of 30 to the exact
-query, ψ 7 24 of 30. Before: ψ 4.5 0.987 at 284k (137, all direct), ψ 5 0.997 at 528k; nprobe 128 0.970 at 257k,
-256 1.000 at 513k. LAION unfiltered ψ 4.5 / 5 / 5.5 / 6 / 7: 0.907 at 52k (24.7), 0.960 at 100k (48), 0.980 at
-160k (77.6: 3.1 / 74.5), 0.993 at 268k (132), 1.000 at 555k (278); before ψ 6 0.980 at 231k (127), ψ 7 0.993 at
-451k (244); nprobe 64 0.977 at 132k, 128 1.000 at 257k. Random-25: glove ψ 3.5 / 4 0.890 at 29k, 0.990 at 75k
-(nprobe 256 0.987 at 128k); LAION ψ 4.5 / 5 / 6 0.933 at 27k, 0.973 at 48k, 0.993 at 115k (nprobe 64 0.967 at 33k,
-256 0.997 at 126k), all read directly. So the decoupled order cuts LAION's rows at 0.98 by 31% but still reads
-more than nprobe at the top, and reads more than the coupled order on glove at 0.987 (362k against 284k), where a
-larger multiplier ordered better; most of glove's rows now go to the index path.
+| recall 0.8 / 0.9 / 0.95 / 0.98 / 0.99 / 0.995 | cost model | no cost model |
+|---|---|---|
+| LAION none | 0.60 / 0.64 / 0.65 / 0.69 / 1.01 / 1.20 | 0.67 / 0.70 / 0.65 / 0.67 / 0.89 / 1.16 |
+| LAION random-1 | 1.29 / 1.02 / 2.44 / 1.78 / 1.45 / 0.89 | 7.72 / 4.53 / 2.78 / 1.65 / 1.31 / 0.81 |
+| LAION random-25 | 0.31 / 0.34 / 0.45 / 0.61 / 0.70 / 1.17 | 0.60 / 0.53 / 0.58 / 0.67 / 0.71 / 0.85 |
+| yahoo none | 0.61 / 0.69 / 0.70 / 0.73 / - / - | 0.73 / 0.83 / 0.77 / 0.72 / - / - |
+| yahoo random-1 | 1.42 / 1.13 / 0.95 / 0.92 / 1.16 / 1.12 | 8.10 / 5.50 / 3.45 / 2.03 / 1.54 / 1.09 |
+| yahoo random-25 | 0.36 / 0.35 / 0.36 / 0.53 / - / - | 0.80 / 0.73 / 0.65 / 0.74 / - / - |
+| glove none | 0.89 / 0.65 / 0.75 / 1.09 / 1.41 / 1.69 | 0.77 / 0.62 / 0.70 / 0.93 / 1.24 / 1.52 |
+| glove random-1 | 1.59 / 1.24 / 1.65 / 1.41 / 0.96 / 0.84 | 4.18 / 2.50 / 1.64 / 1.15 / 0.77 / 0.66 |
+| glove random-25 | 0.48 / 0.32 / 0.37 / 0.51 / 0.85 / 1.14 | 0.77 / 0.49 / 0.52 / 0.66 / 0.97 / 1.10 |
+
+("-": spread's grid does not reach it within the run; a ratio at random-1 with no cost model is the exact query's
+time against spread's at that recall.) Unfiltered the two are within the runs' noise (spread's own times moved 5 to
+10% between them), the version without a cost model a little ahead on glove's top. It loses where its two rules
+misjudge the probe: at 1% visible the exact planner scans first, so every query is the exact one (0.9 recall costs
+the full scan, 4.5 to 5.5 times spread's time, where the probe had it at 1.0 to 1.1); at 25% the rule in rows sends
+most clusters to the index path (500 visible rows of 2,000, above the rule's 436), which for the probe costs more
+than reading them directly (LAION ψ 4: the same 30 clusters in 1.7 ms against 1.4; yahoo ψ 5 0.93 ms against 0.56),
+group setups included. Both rules were made for the exact threshold query, whose index path prunes at its final
+threshold.
 
 **Next.**
-- High recall: above ψ ≈ 5 the time grew far faster than recall in the owner's benchmark, and at the top the
-  approximate k-NN was slower than the legacy arm and than exact k-NN. Being fixed and timed: the order made
-  independent of ψ (ψ moves only the stop), the index path priced from the gap to the running k-th best, and a race
-  against the exact query (at most about twice its cost; ψ = ∞ is the exact query).
+- The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.

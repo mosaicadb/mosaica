@@ -1,0 +1,17 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/yahoo-minilm-384-normalized/vexact/index/encoded in 0.272s: 677305 rows, 339 clusters; when built: code hash d242d3c126b310a2, store hash 87d68435c09852b7
+[repack] occupancy thresholds by level [0.31, 0.31, 0.19, 0.32, 0.33, 0.36] (timed in 0.0s)
+[open] 0.438s in all: fit read 0.109s, key 0.019s, index opened 0.273s, repack timed 0.037s; anon 82 MB
+[approx] measured constants i8_us=0.015498525073746314 row_us=0.045351395930369576 dir_us=1.5886272271026602 cl_us=21.392730650677844 size_us=0.0051827446852392095 vis_us=0.01910472074334399 grp_us=35.18925 anc_us=0.06621755162241888: read from /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/yahoo-minilm-384-normalized/vexact/index/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=755 r_kappa=0.197
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+approximate k-NN; measured constants {'i8_us': 0.015498525073746314, 'row_us': 0.045351395930369576, 'dir_us': 1.5886272271026602, 'cl_us': 21.392730650677844, 'size_us': 0.0051827446852392095, 'vis_us': 0.01910472074334399, 'grp_us': 35.18925, 'anc_us': 0.06621755162241888, 'rule': (755, 0.1974629033318923), 'plan_rule': (64, 0.186)}
+filter                point    total  centres  spreads    order   choice   groups   stored     rest   dirs  visit direct  index  grps   us and counts, median over 100 queries
+none                  psi=3    431.4     12.9      8.3      9.2      0.0     36.0    106.4    258.6    128    1.0    0.0    1.0   1.0
+none                psi=4.5    814.9     12.8     12.2     11.1      0.0     74.9    114.5    589.4    160    3.0    0.0    3.0   2.0
+none                  psi=6   1720.9     11.9     26.6     16.0      0.0    191.2    126.0   1349.2    320   13.0    0.0   13.0   7.0
+random-1              psi=3    502.5      0.0      0.0      0.0      0.0      0.0      0.0    502.5      0    0.0    0.0    0.0   0.0
+random-1            psi=4.5    514.4      0.0      0.0      0.0      0.0      0.0      0.0    514.4      0    0.0    0.0    0.0   0.0
+random-1              psi=6    508.8      0.0      0.0      0.0      0.0      0.0      0.0    508.8      0    0.0    0.0    0.0   0.0
+random-25             psi=3    330.5     10.4      9.1      6.7      0.0     31.2     33.8    239.3    144    2.0    0.0    2.0   1.0
+random-25           psi=4.5    736.7     11.3     12.8      9.2      0.0     76.7     36.2    590.6    224    7.0    0.0    7.0   3.5
+random-25             psi=6   1778.5     12.7     29.6     16.7      0.0    227.9     48.9   1442.8    448   21.0    0.0   21.0  10.0
