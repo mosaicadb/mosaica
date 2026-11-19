@@ -488,7 +488,32 @@ in 10,000: 0.13 against 0.25) and under random-25 and region-25 (glove random-25
 0.22/0.26/0.32). k-NN, back to 3bd18eb's pricing, is within noise of 3bd18eb and better at glove unfiltered's top
 (1.02/1.38/1.69 of spread at 0.98/0.99/0.995 against 1.12/1.50/1.81).
 
+**Pushed for benchmarking (f528836), against the previous push (00965ba, consolidated-final).** k-NN time to recall
+0.8/0.9/0.95/0.98/0.99/0.995 as a multiple of spread's, each from its own run (cross-run; the ratio to spread takes
+out most, not all, of the machine's drift; "-" where the psi grid did not reach the recall):
+
+| | 00965ba | f528836 |
+|---|---|---|
+| LAION none | .61/.72/.76/1.97/-/- | .70/.68/.68/.68/.90/1.20 |
+| LAION random-1 | .96/.95/1.12/1.68/1.79/1.14 | 1.01/.99/1.00/.97/1.23/.96 |
+| LAION random-25 | .27/.35/.49/1.17/-/- | .28/.31/.40/.56/.69/1.06 |
+| LAION region-25 | .43/.57/.96/1.24/1.49/- | .46/.49/.58/.79/.99/.83 |
+| glove none | .62/.55/.71/1.16/1.51/1.88 | .84/.60/.74/1.02/1.38/1.69 |
+| glove random-25 | .34/.28/.24/.31/.37/.50 | .39/.25/.28/.46/.73/.82 |
+| glove region-1 | .43/.55/.58/.56/.55/.55 | .65/.66/.78/.79/.82/.82 |
+| glove region-25 | .39/.38/.38/.44/.52/.62 | .56/.48/.69/.79/.93/.80 |
+| yahoo none | .59/.72/.92/.99/-/- | .78/.80/.76/.70/-/- |
+| yahoo region-25 | .37/.38/.36/-/-/- | .61/.54/.46/.52/-/- |
+
+The cost of high psi (the reason for this round) is fixed: LAION at 0.98 goes from 1.97 to 0.68 of spread, and the
+filtered sets at 0.98 from 1.2-1.7 to 0.56-0.97. Known regressions against 00965ba: glove under filters (random-25
+at 0.99 0.37 to 0.73, region-1 about 0.55 to about 0.8, region-25), recall 0.8 on glove and yahoo unfiltered and on
+yahoo region-25, and the approximate threshold under 25% sets (glove random-25 at 0.9: 0.22 of exact against 0.14;
+cross-run). Not yet diagnosed; 00965ba's order put psi in the key (mu + psi sigma), which may suit glove's small
+clusters under filters.
+
 **Next.**
-- The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
+- Diagnose the glove filtered regression: the order (mu + z(1, nv) sigma against 00965ba's mu + psi sigma) or the
+  read choices; the owner's benchmark run is the reference.
 - The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.
