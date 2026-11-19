@@ -1,0 +1,17 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/yahoo-minilm-384-normalized/vexact/index/encoded in 0.276s: 677305 rows, 339 clusters; when built: code hash d242d3c126b310a2, store hash 87d68435c09852b7
+[repack] occupancy thresholds by level [0.31, 0.27, 0.2, 0.31, 0.33, 0.36] (timed in 0.0s)
+[open] 0.439s in all: fit read 0.106s, key 0.019s, index opened 0.277s, repack timed 0.037s; anon 82 MB
+[approx] measured constants dir_us=0.5082182679354674 row_us_1=0.08200860096646055 row_us_4=0.06103676306613422 row_us_16=0.05854871246576156 row_us_64=0.06315412277709608 cl_us=14.888479545147788 cut_row_us_1=0.021428186530233814 cut_row_us_4=0.03894062635923812 cut_row_us_16=0.06985814744748679 cut_row_us_64=0.1367910651237862 cut_us=1.82271875 grp_us=44.391999999999996 sig_us=1.37909375: read from /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sd/work/yahoo-minilm-384-normalized/vexact/index/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=267 r_kappa=0.000
+yahoo-minilm-384-normalized: 339 clusters, 677305 rows, k 10
+approximate k-NN; measured constants {'dir_us': 0.5082182679354674, 'row_us_1': 0.08200860096646055, 'row_us_4': 0.06103676306613422, 'row_us_16': 0.05854871246576156, 'row_us_64': 0.06315412277709608, 'cl_us': 14.888479545147788, 'cut_row_us_1': 0.021428186530233814, 'cut_row_us_4': 0.03894062635923812, 'cut_row_us_16': 0.06985814744748679, 'cut_row_us_64': 0.1367910651237862, 'cut_us': 1.82271875, 'grp_us': 44.391999999999996, 'sig_us': 1.37909375, 'rule': (267, 0.0), 'plan_rule': (64, 0.186)}
+filter                point    total  centres  spreads    order   choice   groups   stored     rest   dirs  visit direct  index  grps   us and counts, median over 100 queries
+none                  psi=3    507.0     11.7      9.4      9.3    124.6    117.1    100.9    134.0    128    1.0    0.0    1.0   4.0
+none                psi=4.5    860.5     11.7     12.7     11.0    130.1    116.8    114.2    464.0    160    3.0    0.0    3.0   5.0
+none                  psi=6   2300.9     14.7     33.0     21.4    356.7    311.3    139.5   1424.3    320   13.0    0.0   13.0   8.0
+random-1              psi=3     69.2      7.8     13.5     32.7      0.6      0.0     25.4    -11.0    240   10.0   10.0    0.0   0.0
+random-1            psi=4.5    148.6     12.7     27.9     78.2      1.7      0.0     62.6    -34.6    528   30.0   30.0    0.0   0.0
+random-1              psi=6    311.6     14.9     65.3    197.9      4.2      0.0    167.1   -137.8   1136   72.5   72.5    0.0   0.0
+random-25             psi=3    153.4     11.7      8.6      8.3      0.2      0.0    114.2     10.4    144    2.0    2.0    0.0   0.0
+random-25           psi=4.5    427.8     12.9     14.0     12.0      1.0      0.0    368.6     19.2    224    7.0    7.0    0.0   0.0
+random-25             psi=6   1582.2     16.0     39.8     24.3      4.1      0.0   1434.6     63.5    448   21.0   21.0    0.0   0.0

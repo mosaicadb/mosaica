@@ -358,6 +358,49 @@ does worse than the current order). So spread's edge in time at 0.99 and above i
 than ours for the same recall. It is execution, the cost per cluster and per row of the reads (legacy `knn2_fast`
 against the probe's reads and its index path).
 
+**A planner with few measured constants** (`results/measured-planner/`). Fitted to the study's single timed reads
+(`step1-fit.txt`), direct(nv) = a + nv·row and index(c) = cl + c·cut_row (c the rows the sorted range leaves) predict
+each read within a median of 1.02 to 1.26 and a 90th percentile of 1.5 to 2.6; timing the same read twice gives a
+90th percentile of 1.1 to 1.6 (`step1-timing-noise.txt`), so most of the tail is the timing's. Constants fitted
+unfiltered predict random-25's index reads 2.1 to 2.6 times too low: the per-row costs are timed at the visible
+share. The planner (current code): k-NN the exact query only at ψ = ∞, no race; a cluster's σ only when it costs less
+than reading the cluster directly; each read by the cheaper of direct(nv) and index(c) + a new group's setup, c at
+the running k-th best, the window's new groups set up in one batch; the threshold query priced by the same model.
+Its constants, each one thing the reads do, timed at open: `dir_us` (a direct read beyond its rows), `row_us` at
+four visible shares (a row read directly), `cl_us` (a cluster opened on the index path), `cut_row_us` at four shares
+(a row the sorted range leaves, through the levels), `cut_us` (computing the range), `grp_us` (a group's setup),
+`sig_us` (a σ). Time to recall against spread (k-NN, ψ = ∞ left out of the curve), 0.8 / 0.9 / 0.95 / 0.98 / 0.99 /
+0.995:
+
+| | measured planner | cost model (ad722d3) | no cost model (0d1a36c) |
+|---|---|---|---|
+| LAION none | 0.72 / 0.71 / 0.66 / 0.70 / 1.02 / 1.28 | 0.60 / 0.64 / 0.65 / 0.69 / 1.01 / 1.20 | 0.67 / 0.70 / 0.65 / 0.67 / 0.89 / 1.16 |
+| LAION random-1 | 0.92 / 0.97 / 0.97 / 0.95 / 1.12 / 0.89 | 1.29 / 1.02 / 2.44 / 1.78 / 1.45 / 0.89 | 7.72 / 4.53 / 2.78 / 1.65 / 1.31 / 0.81 |
+| LAION random-25 | 0.29 / 0.31 / 0.44 / 0.57 / 0.75 / 1.00 | 0.31 / 0.34 / 0.45 / 0.61 / 0.70 / 1.17 | 0.60 / 0.53 / 0.58 / 0.67 / 0.71 / 0.85 |
+| yahoo none | 0.86 / 0.82 / 0.78 / 0.75 / - / - | 0.61 / 0.69 / 0.70 / 0.73 / - / - | 0.73 / 0.83 / 0.77 / 0.72 / - / - |
+| yahoo random-1 | 1.00 / 0.83 / 0.83 / 0.74 / 0.75 / 0.79 | 1.42 / 1.13 / 0.95 / 0.92 / 1.16 / 1.12 | 8.10 / 5.50 / 3.45 / 2.03 / 1.54 / 1.09 |
+| yahoo random-25 | 0.29 / 0.32 / 0.36 / 0.50 / - / - | 0.36 / 0.35 / 0.36 / 0.53 / - / - | 0.80 / 0.73 / 0.65 / 0.74 / - / - |
+| glove none | 0.79 / 0.59 / 0.65 / 1.00 / 1.34 / 1.63 | 0.89 / 0.65 / 0.75 / 1.09 / 1.41 / 1.69 | 0.77 / 0.62 / 0.70 / 0.93 / 1.24 / 1.52 |
+| glove random-1 | 0.80 / 0.97 / 1.10 / 1.42 / 1.30 / 1.25 | 1.59 / 1.24 / 1.65 / 1.41 / 0.96 / 0.84 | 4.18 / 2.50 / 1.64 / 1.15 / 0.77 / 0.66 |
+| glove random-25 | 0.42 / 0.29 / 0.37 / 0.58 / 0.94 / 1.10 | 0.48 / 0.32 / 0.37 / 0.51 / 0.85 / 1.14 | 0.77 / 0.49 / 0.52 / 0.66 / 0.97 / 1.10 |
+
+The threshold query against the exact one (share 0.01, recall 0.9 / 0.95 / 0.99) did worse than with the earlier
+constants under random-25 (LAION 0.21 / 0.29 / 0.51 against 0.15 / 0.22 / 0.44; yahoo 0.10 / 0.17 / 0.31 against
+0.06 / 0.10 / 0.20; glove 0.34 / 0.41 / 0.50 against 0.14 / 0.20 / 0.30) and about as well unfiltered (LAION 0.37 /
+0.50 / 0.78 against 0.32 / 0.46 / 0.80): it prices the index path at every visible row with costs timed at a
+probe's k-th best, where its own threshold prunes differently.
+
+The index read's residual is not flat in the gap g = (t − μ)/σ (`gap-and-pass-through.txt`): reads of near clusters
+(g 1 to 3) take 1.3 to 1.9 times the fit, far ones (g ≥ 4) 0.95 to 1.14. The levels' pass-through follows the normal
+model with the code's own half-widths: a row passes level l when its score reaches t − w, w = (dwa_l · pconst_l ·
+s_i · ntab_l[code_i] + fixed + s_i · ewdet) · dial_l (dwa_l the query's norm, less α times the centre, in the group's
+coordinates weighted by the level's distortion D_l: what level l leaves unresolved, per query and cluster; pconst_l
+per group and level; s_i the row's scale from its key; ntab_l[code_i] the row's stored 4-bit residual-norm class,
+escapes stored per row; fixed per query and cluster), so 1 − Φ((t − μ − w)/σ) predicts the share of the range's rows
+entering each deeper level within 0.01 to 0.04 on every dataset and gap (glove 0.655 / 0.153 observed against 0.627 /
+0.173; yahoo 0.797 / 0.517 against 0.791 / 0.513; LAION 0.982 / 0.942 against 0.977 / 0.931), and the cluster's
+median w does as well as every row's.
+
 **Next.**
 - The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.

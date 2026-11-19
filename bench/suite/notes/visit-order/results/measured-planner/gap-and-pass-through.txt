@@ -1,0 +1,30 @@
+glove-100-angular none: index(c) = 8.75 + 0.0220 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [2,3): 1.38 (204)  g in [3,4): 1.33 (318)  g in [4,inf): 0.96 (496)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.655 / 0.627 / 0.633  l1: 0.153 / 0.173 / 0.156  then randomised levels and stored vectors observed: 0.016 0.001
+   at level 1 (last deterministic) by gap, observed/predicted: g [2,3): 0.393/0.404  g [3,4): 0.160/0.200  g [4,inf): 0.015/0.025
+glove-100-angular random-25: index(c) = 12.34 + 0.0497 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [1,2): 1.46 (38)  g in [2,3): 1.34 (327)  g in [3,4): 1.20 (281)  g in [4,inf): 0.93 (377)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.752 / 0.723 / 0.731  l1: 0.251 / 0.262 / 0.247  then randomised levels and stored vectors observed: 0.039 0.004
+   at level 1 (last deterministic) by gap, observed/predicted: g [1,2): 0.672/0.634  g [2,3): 0.467/0.466  g [3,4): 0.173/0.209  g [4,inf): 0.019/0.030
+yahoo-minilm-384-normalized none: index(c) = 25.43 + 0.0241 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [2,3): 1.83 (33)  g in [3,4): 1.60 (114)  g in [4,inf): 1.11 (875)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.797 / 0.791 / 0.801  l1: 0.517 / 0.513 / 0.506  then randomised levels and stored vectors observed: 0.257 0.015 0.002 0.000
+   at level 1 (last deterministic) by gap, observed/predicted: g [2,3): 0.961/0.937  g [3,4): 0.906/0.889  g [4,inf): 0.448/0.447
+yahoo-minilm-384-normalized random-25: index(c) = 29.39 + 0.0680 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [1,2): 1.78 (20)  g in [2,3): 1.92 (92)  g in [3,4): 1.55 (175)  g in [4,inf): 1.14 (737)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.888 / 0.882 / 0.896  l1: 0.662 / 0.658 / 0.657  then randomised levels and stored vectors observed: 0.398 0.042 0.006 0.002
+   at level 1 (last deterministic) by gap, observed/predicted: g [1,2): 0.998/0.990  g [2,3): 0.980/0.967  g [3,4): 0.947/0.935  g [4,inf): 0.545/0.544
+laion-clip-512-normalized none: index(c) = 39.30 + 0.0453 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [1,2): 1.41 (17)  g in [2,3): 1.35 (154)  g in [3,4): 1.23 (218)  g in [4,inf): 1.05 (635)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.982 / 0.977 / 0.988  l1: 0.942 / 0.931 / 0.949  then randomised levels and stored vectors observed: 0.812 0.189 0.012 0.002
+   at level 1 (last deterministic) by gap, observed/predicted: g [1,2): 1.000/0.996  g [2,3): 0.999/0.995  g [3,4): 0.995/0.987  g [4,inf): 0.909/0.895
+laion-clip-512-normalized random-25: index(c) = 43.93 + 0.1134 c; residual measured / predicted by gap g = (t - mu) / sigma:
+   g in [1,2): 1.32 (74)  g in [2,3): 1.26 (224)  g in [3,4): 1.16 (240)  g in [4,inf): 0.95 (485)
+   entering level l+1 per row entering level 0, observed / predicted (rows averaged) / predicted (median w):
+   l0: 0.990 / 0.987 / 0.994  l1: 0.963 / 0.956 / 0.969  then randomised levels and stored vectors observed: 0.870 0.294 0.036 0.008
+   at level 1 (last deterministic) by gap, observed/predicted: g [1,2): 1.000/0.999  g [2,3): 0.999/0.996  g [3,4): 0.998/0.992  g [4,inf): 0.923/0.911

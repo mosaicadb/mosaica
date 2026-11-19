@@ -1,0 +1,47 @@
+k-NN: time to recall, adaptive / spread (psi=inf left out)
+glove-100-angular none: adaptive / spread time to recall (exact knn2 20122.5 us at 0.999)
+  0.8: 772/978 = x0.79  0.9: 1165/1990 = x0.59  0.95: 2356/3647 = x0.65  0.98: 5890/5864 = x1.00  0.99: 10830/8062 = x1.34  0.995: 14901/9161 = x1.63
+glove-100-angular random-1: adaptive / spread time to recall (exact knn2 416.3 us at 0.999)
+  0.8: 78/98 = x0.80  0.9: 158/163 = x0.97  0.95: 276/251 = x1.10  0.98: 512/361 = x1.42  0.99: 685/528 = x1.30  0.995: 766/612 = x1.25
+glove-100-angular random-25: adaptive / spread time to recall (exact knn2 17618.8 us at 1.0)
+  0.8: 434/1030 = x0.42  0.9: 723/2529 = x0.29  0.95: 1594/4347 = x0.37  0.98: 4124/7074 = x0.58  0.99: 8046/8545 = x0.94  0.995: 11450/10415 = x1.10
+laion-clip-512-normalized none: adaptive / spread time to recall (exact knn2 38817.9 us at 0.999)
+  0.8: 1143/1580 = x0.72  0.9: 1777/2509 = x0.71  0.95: 3021/4555 = x0.66  0.98: 5723/8172 = x0.70  0.99: 10879/10635 = x1.02  0.995: 20786/16268 = x1.28
+laion-clip-512-normalized random-1: adaptive / spread time to recall (exact knn2 801.0 us at 0.997)
+  0.8: 99/108 = x0.92  0.9: 177/182 = x0.97  0.95: 286/295 = x0.97  0.98: 470/494 = x0.95  0.99: 696/619 = x1.12  0.995: 866/969 = x0.89
+laion-clip-512-normalized random-25: adaptive / spread time to recall (exact knn2 38239.2 us at 0.995)
+  0.8: 453/1552 = x0.29  0.9: 955/3126 = x0.31  0.95: 2490/5652 = x0.44  0.98: 6557/11577 = x0.57  0.99: 13846/18518 = x0.75  0.995: 29637/29727 = x1.00
+yahoo-minilm-384-normalized none: adaptive / spread time to recall (exact knn2 17056.1 us at 1.0)
+  0.8: 613/<710 = x0.86  0.9: 852/1037 = x0.82  0.95: 1156/1477 = x0.78  0.98: 1906/2544 = x0.75  0.99: -  0.995: -
+yahoo-minilm-384-normalized random-1: adaptive / spread time to recall (exact knn2 562.6 us at 1.0)
+  0.8: 62/61 = x1.00  0.9: 76/92 = x0.83  0.95: 122/148 = x0.83  0.98: 189/254 = x0.74  0.99: 255/340 = x0.75  0.995: 388/491 = x0.79
+yahoo-minilm-384-normalized random-25: adaptive / spread time to recall (exact knn2 15541.2 us at 1.0)
+  0.8: 183/622 = x0.29  0.9: 326/1017 = x0.32  0.95: 582/1601 = x0.36  0.98: 1452/2911 = x0.50  0.99: -  0.995: -
+
+modelled cost / measured time per point (adaptive)
+glove-100-angular none: psi 2: 0.30 {'probe': 100}; psi 2.5: 0.34 {'probe': 100}; psi 3: 0.64 {'probe': 100}; psi 3.5: 1.24 {'probe': 100}; psi 4: 2.36 {'probe': 100}; psi 4.5: 2.39 {'probe': 100}; psi 5: 1.78 {'probe': 100}; psi 5.5: 1.15 {'probe': 100}; psi 6: 1.14 {'probe': 100}; psi 6.5: 1.17 {'probe': 100}; psi 7: 1.23 {'probe': 100}
+glove-100-angular random-1: psi 2: 0.51 {'probe': 100}; psi 2.5: 0.82 {'probe': 100}; psi 3: 0.91 {'probe': 100}; psi 3.5: 1.00 {'probe': 100}; psi 4: 0.94 {'probe': 100}; psi 4.5: 0.99 {'probe': 100}; psi 5: 1.08 {'probe': 100}; psi 5.5: 1.16 {'probe': 100}; psi 6: 1.20 {'probe': 100}; psi 6.5: 1.21 {'probe': 100}; psi 7: 1.22 {'probe': 100}
+glove-100-angular random-25: psi 2: 0.31 {'probe': 100}; psi 2.5: 0.44 {'probe': 100}; psi 3: 0.63 {'probe': 100}; psi 3.5: 1.08 {'probe': 100}; psi 4: 0.85 {'probe': 100}; psi 4.5: 0.55 {'probe': 100}; psi 5: 0.41 {'probe': 100}; psi 5.5: 0.40 {'probe': 100}; psi 6: 0.43 {'probe': 100}; psi 6.5: 0.44 {'probe': 100}; psi 7: 0.47 {'probe': 100}
+laion-clip-512-normalized none: psi 2: 0.34 {'probe': 100}; psi 2.5: 0.40 {'probe': 100}; psi 3: 0.55 {'probe': 100}; psi 3.5: 0.74 {'probe': 100}; psi 4: 1.17 {'probe': 100}; psi 4.5: 1.55 {'probe': 100}; psi 5: 1.50 {'probe': 100}; psi 5.5: 1.47 {'probe': 100}; psi 6: 1.16 {'probe': 100}; psi 6.5: 1.00 {'probe': 100}; psi 7: 0.99 {'probe': 100}
+laion-clip-512-normalized random-1: psi 2: 0.67 {'probe': 100}; psi 2.5: 1.00 {'probe': 100}; psi 3: 1.18 {'probe': 100}; psi 3.5: 1.25 {'probe': 100}; psi 4: 1.23 {'probe': 100}; psi 4.5: 1.20 {'probe': 100}; psi 5: 1.20 {'probe': 100}; psi 5.5: 1.16 {'probe': 100}; psi 6: 1.21 {'probe': 100}; psi 6.5: 1.25 {'probe': 100}; psi 7: 1.26 {'probe': 100}
+laion-clip-512-normalized random-25: psi 2: 0.54 {'probe': 100}; psi 2.5: 0.73 {'probe': 100}; psi 3: 1.06 {'probe': 100}; psi 3.5: 1.13 {'probe': 100}; psi 4: 1.38 {'probe': 100}; psi 4.5: 1.05 {'probe': 100}; psi 5: 0.99 {'probe': 100}; psi 5.5: 0.80 {'probe': 100}; psi 6: 0.60 {'probe': 100}; psi 6.5: 0.58 {'probe': 100}; psi 7: 0.55 {'probe': 100}
+yahoo-minilm-384-normalized none: psi 2: 0.27 {'probe': 100}; psi 2.5: 0.26 {'probe': 100}; psi 3: 0.27 {'probe': 100}; psi 3.5: 0.29 {'probe': 100}; psi 4: 0.36 {'probe': 100}; psi 4.5: 0.44 {'probe': 100}; psi 5: 0.57 {'probe': 100}; psi 5.5: 0.69 {'probe': 100}; psi 6: 0.70 {'probe': 100}; psi 6.5: 0.80 {'probe': 100}; psi 7: 0.85 {'probe': 100}
+yahoo-minilm-384-normalized random-1: psi 2: 0.44 {'probe': 100}; psi 2.5: 0.52 {'probe': 100}; psi 3: 0.67 {'probe': 100}; psi 3.5: 0.84 {'probe': 100}; psi 4: 0.92 {'probe': 100}; psi 4.5: 0.97 {'probe': 100}; psi 5: 1.00 {'probe': 100}; psi 5.5: 1.01 {'probe': 100}; psi 6: 1.04 {'probe': 100}; psi 6.5: 1.11 {'probe': 100}; psi 7: 1.04 {'probe': 100}
+yahoo-minilm-384-normalized random-25: psi 2: 0.48 {'probe': 100}; psi 2.5: 0.47 {'probe': 100}; psi 3: 0.58 {'probe': 100}; psi 3.5: 0.71 {'probe': 100}; psi 4: 0.78 {'probe': 100}; psi 4.5: 0.81 {'probe': 100}; psi 5: 0.75 {'probe': 100}; psi 5.5: 0.77 {'probe': 100}; psi 6: 0.72 {'probe': 100}; psi 6.5: 0.73 {'probe': 100}; psi 7: 0.70 {'probe': 100}
+
+threshold: adaptive / exact
+glove-100-angular none share 0.0001: adaptive / exact  0.9: 5673/21921 = x0.26  0.95: 7263/21921 = x0.33  0.99: 11987/21921 = x0.55
+glove-100-angular none share 0.01: adaptive / exact  0.9: 18740/34058 = x0.55  0.95: 22565/34058 = x0.66  0.99: 26907/34058 = x0.79
+glove-100-angular none share 0.1: adaptive / exact  0.9: <37263/44969 = x0.83  0.95: <37263/44969 = x0.83  0.99: 41331/44969 = x0.92
+glove-100-angular random-1 share 0.01: adaptive / exact  0.9: <499/482 = x1.04  0.95: <499/482 = x1.04  0.99: <499/482 = x1.04
+glove-100-angular random-25 share 0.01: adaptive / exact  0.9: 8784/26114 = x0.34  0.95: 10671/26114 = x0.41  0.99: 12996/26114 = x0.50
+laion-clip-512-normalized none share 0.0001: adaptive / exact  0.9: 4684/40736 = x0.11  0.95: 5514/40736 = x0.14  0.99: 17016/40736 = x0.42
+laion-clip-512-normalized none share 0.01: adaptive / exact  0.9: 22350/60625 = x0.37  0.95: 30145/60625 = x0.50  0.99: 47073/60625 = x0.78
+laion-clip-512-normalized none share 0.1: adaptive / exact  0.9: <69919/89180 = x0.78  0.95: <69919/89180 = x0.78  0.99: 79290/89180 = x0.89
+laion-clip-512-normalized random-1 share 0.01: adaptive / exact  0.9: <844/843 = x1.00  0.95: <844/843 = x1.00  0.99: <844/843 = x1.00
+laion-clip-512-normalized random-25 share 0.01: adaptive / exact  0.9: 10999/51587 = x0.21  0.95: 15155/51587 = x0.29  0.99: 26058/51587 = x0.51
+yahoo-minilm-384-normalized none share 0.0001: adaptive / exact  0.9: 1714/19197 = x0.09  0.95: 2318/19197 = x0.12  0.99: 4721/19197 = x0.25
+yahoo-minilm-384-normalized none share 0.01: adaptive / exact  0.9: 7035/31956 = x0.22  0.95: 10862/31956 = x0.34  0.99: 17352/31956 = x0.54
+yahoo-minilm-384-normalized none share 0.1: adaptive / exact  0.9: <26454/48200 = x0.55  0.95: 34057/48200 = x0.71  0.99: 42061/48200 = x0.87
+yahoo-minilm-384-normalized random-1 share 0.01: adaptive / exact  0.9: <575/565 = x1.02  0.95: <575/565 = x1.02  0.99: <575/565 = x1.02
+yahoo-minilm-384-normalized random-25 share 0.01: adaptive / exact  0.9: 2957/28832 = x0.10  0.95: 4904/28832 = x0.17  0.99: 8886/28832 = x0.31
