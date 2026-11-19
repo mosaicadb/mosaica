@@ -1,0 +1,1 @@
+📦 Built wheel for abi3 Python ≥ 3.10 to /home/user/suite-data/wheels-proc/vexact_py-0.1.0-cp310-abi3-manylinux_2_34_x86_64.whl
