@@ -23,8 +23,7 @@
 //!   cluster on real data (the bound b_c is about 5 times the spread). A cluster gets its sigma only when that costs
 //!   less than reading it directly; else rad_c s stands for it in both keys. Each cluster is read directly or on the
 //!   index path, whichever the measured constants price lower: the index path at the rows its sorted range at the
-//!   running k-th best leaves, and its group's setup when the group is new (set up in one batch with the new groups
-//!   of the window's clusters the index path may take). There is no race: with direct reads batched, the worst a
+//!   running k-th best leaves, and its group's setup when the group is new (set up when its first cluster is read). There is no race: with direct reads batched, the worst a
 //!   probe does on a sparse visible set is reading the visible rows cluster by cluster, about a scan.
 //! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
 //!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
@@ -787,16 +786,8 @@ impl Adaptive {
                     pr.anc_among(ix, Some(&among));
                     anchored = true;
                 }
-                if new_group(g) {
-                    // this group set up with the other new groups of the window's clusters the index path may take,
-                    // in one batch
-                    let mut gs = vec![g];
-                    gs.extend(window.iter().map(|w| w.2).filter(|&w| m.direct(nv_of(w), rows_of(w)) > floor(w)).map(|w| ix.cl[w].g).filter(|&h| new_group(h)));
-                    gs.sort_unstable();
-                    gs.dedup();
-                    info.groups += gs.len();
-                    setup_groups(ix, &pr, &gs, &mut rd.st);
-                }
+                // a new group is set up by the read itself, when its first cluster is read
+                info.groups += new_group(g) as usize;
                 KnnPath::Index
             } else {
                 info.direct += 1;
