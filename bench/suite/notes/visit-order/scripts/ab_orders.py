@@ -10,7 +10,7 @@
 # paths (probe / race / scan / exact), clusters visited, read directly and on the index path, groups set up, spreads
 # computed and modelled cost against a scan's. ab_curves.py interpolates time and rows to a recall.
 # usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
-#        [--nprobe 4,...,512] [--psi 3,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
+#        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
 import argparse
 import os
 import random
@@ -26,7 +26,7 @@ from common import Prep, prep_dir, work_dir  # noqa: E402
 import vexact_py  # noqa: E402
 
 NPROBE = "4,8,16,32,64,128,256,512"
-PSI = "3,3.5,4,4.25,4.5,4.75,5,5.5,6,7"
+PSI = "2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7"
 
 
 def main():

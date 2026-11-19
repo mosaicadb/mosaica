@@ -8,30 +8,29 @@
 //! cluster's largest variance along a direction, so b_c = mu_c + psi sqrt(top_c) |q| bounds u_c from above.
 //!
 //! - k-NN reads the clusters in an order that does not depend on psi, and psi moves only where it stops. The order is
-//!   by o_c = mu_c + z_c sigma_c(q), z_c = z(1, S_c) = Phi^-1(S_c / (S_c + 1)) the expected best of the cluster's S_c
-//!   rows in units of their spread (3.3 at 2,000 rows; no constant: the order's multiplier is derived, and within the
-//!   3 to 4 that `hierarchy/theory.md` 3.4 measured best at every unit size). S_c counts all the cluster's rows, not
-//!   its visible ones: the order is for answers per row read, and 3.4 found that multiplier a property of the
-//!   budget, not of the unit, where z of the visible rows would drop to 1.7 at 20 of them. The clusters come from a
-//!   stream by mu_c + z_c rad_c sqrt(q' C q / tr C) (the lower cluster first among equal values), rad_c the
-//!   cluster's RMS radius and C the pooled within-cluster covariance (`order::Pooled`, sum_c n_c S_c / N as its top
-//!   directions and an isotropic rest): the spread the cluster would have if it were shaped as the clusters are on
-//!   average. A part of q along which no cluster varies leaves it unchanged (it moves every mu_c alike when the
-//!   centres agree along it), where rad_c |q| / sqrt(n0) would grow with it. The next `LOOKAHEAD` of the stream are
-//!   priced (sigma computed) in a window; the probe reads the window's cluster of largest o_c, each whole by
-//!   `KnnReader`, and stops when the window's largest u_c is below the running k-th best (minus infinity until k
-//!   items are held: k items are returned whenever k are visible). So a smaller psi reads and prices the first of
-//!   what a larger one does. The stop is a heuristic: a cluster further down the stream, not yet priced, may still
-//!   have a u above the k-th best; ruling that out exactly prices every cluster on real data (the bound b_c is about
-//!   5 times the spread). With psi infinite the query is the exact one (`knn2`).
-//! - the probe races the scan of the visible rows (C_s) and the exact query (its cost E predicted by
-//!   `Adaptive::exact_cost`: knn2 as its planner would run it, priced by the measured constants at the running k-th
-//!   best; pricing it costs a sorted range and a sigma per cluster, C_E, so it is bought only once the probe has
-//!   spent C_E with k items held): before each sigma, sorted range and read, when the probe's modelled cost would
-//!   pass the cheaper of the two it hands over to it, the rows not yet read scanned, or the exact query run from the
-//!   start. The answer is then exact. The probe spends at most min(C_s, E) beyond the anchor search and C_E (each
-//!   bought once, unchecked), and the hand-over at most C_s or E more (E as predicted): the whole is at most twice
-//!   the cheaper of the scan and the exact query, plus those two.
+//!   by o_c = mu_c + z_c sigma_c(q), z_c = z(1, v_c) = Phi^-1(v_c / (v_c + 1)) the expected best of the cluster's
+//!   v_c visible rows in units of their spread (3.3 at 2,000 rows, 1.7 at 20; derived, no constant): the best of what
+//!   the query can see. The clusters come from a stream by mu_c + z_c rad_c sqrt(q' C q / tr C) (the lower cluster
+//!   first among equal values), rad_c the cluster's RMS radius and C the pooled within-cluster covariance
+//!   (`order::Pooled`, sum_c n_c S_c / N as its top directions and an isotropic rest): the spread the cluster would
+//!   have if it were shaped as the clusters are on average. A part of q along which no cluster varies leaves it
+//!   unchanged (it moves every mu_c alike when the centres agree along it), where rad_c |q| / sqrt(n0) would grow
+//!   with it. The next `LOOKAHEAD` of the stream are priced (sigma computed) in a window; the probe reads the
+//!   window's cluster of largest o_c, each whole by `KnnReader`, and stops when the window's largest u_c is below the
+//!   running k-th best (minus infinity until k items are held: k items are returned whenever k are visible). So a
+//!   smaller psi reads and prices the first of what a larger one does. The stop is a heuristic: a cluster further
+//!   down the stream, not yet priced, may still have a u above the k-th best; ruling that out exactly prices every
+//!   cluster on real data (the bound b_c is about 5 times the spread). With psi infinite the query is the exact one
+//!   (`knn2`).
+//! - the probe races a scan of the visible rows (C_s): before each sigma, sorted range and read, when its modelled
+//!   cost would pass C_s, the rows not yet read are scanned instead, and the answer is exact; the whole is at most
+//!   2 C_s beyond the anchor search (the probe at most C_s, the rest of the scan at most C_s, no row read twice).
+//!   And it hands over to that scan at once, before spending its budget, when what it projects to read costs more
+//!   than scanning the rows not yet read: the projection takes the clusters not yet read whose stop key with the
+//!   stream's spread, mu_c + psi rad_c s, reaches the running k-th best, each at its sigma and its cheaper read of
+//!   every visible row (sorted once per query, the sums kept as the k-th best rises). Where the exact query scans
+//!   first (sparse visible sets) the scan is the exact query, less the rows already read; elsewhere the exact
+//!   query's cost is not predicted (pricing it cost as much as a dense probe, which stops far below it).
 //! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
 //!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
 //!   decision comes first from the bounds sqrt(low_c) |q| <= sigma_c <= sqrt(top_c) |q| (low_c the cluster's least
@@ -82,7 +81,8 @@ pub const LOOKAHEAD: usize = 8;
 /// - `grp_us`, a group's setup (a + b n^2 at this index's n), charged to the first cluster of a group on the index path;
 /// - `anc_us`, the search for the nearest anchor, per anchor searched, charged to the first cluster that needs it;
 /// - `cut_us`, pricing a cluster's index path: its centre score in f64 and its sorted range at a k-th best, with the
-///   visible rows in it counted.
+///   visible rows in it counted;
+/// - `sig_us`, one cluster's sigma (its r directions' products with the query and their sum).
 ///
 /// `i8_us`, `row_us` and `dir_us` are above 0, the others at least 0, all finite (`check`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -97,17 +97,18 @@ pub struct Measured {
     pub anc_us: f64,
     pub cut_us: f64,
     pub und_us: f64,
+    pub sig_us: f64,
 }
 
-const NAMES: [&str; 10] = ["i8_us", "row_us", "dir_us", "cl_us", "size_us", "vis_us", "grp_us", "anc_us", "cut_us", "und_us"];
+const NAMES: [&str; 11] = ["i8_us", "row_us", "dir_us", "cl_us", "size_us", "vis_us", "grp_us", "anc_us", "cut_us", "und_us", "sig_us"];
 
 impl Measured {
-    fn values(&self) -> [f64; 10] {
-        [self.i8_us, self.row_us, self.dir_us, self.cl_us, self.size_us, self.vis_us, self.grp_us, self.anc_us, self.cut_us, self.und_us]
+    fn values(&self) -> [f64; 11] {
+        [self.i8_us, self.row_us, self.dir_us, self.cl_us, self.size_us, self.vis_us, self.grp_us, self.anc_us, self.cut_us, self.und_us, self.sig_us]
     }
 
-    fn from_values(v: [f64; 10]) -> Measured {
-        Measured { i8_us: v[0], row_us: v[1], dir_us: v[2], cl_us: v[3], size_us: v[4], vis_us: v[5], grp_us: v[6], anc_us: v[7], cut_us: v[8], und_us: v[9] }
+    fn from_values(v: [f64; 11]) -> Measured {
+        Measured { i8_us: v[0], row_us: v[1], dir_us: v[2], cl_us: v[3], size_us: v[4], vis_us: v[5], grp_us: v[6], anc_us: v[7], cut_us: v[8], und_us: v[9], sig_us: v[10] }
     }
 
     /// Whether the constants can price a query: every one finite and at least 0, and a product, a row and a direct
@@ -129,7 +130,7 @@ impl Measured {
 
     /// The constants of `name=value` lines (as `to_kv` writes them), checked (`check`).
     pub fn from_kv(text: &str) -> Result<Measured, String> {
-        let mut v = [f64::NAN; 10];
+        let mut v = [f64::NAN; 11];
         for (i, k) in NAMES.iter().enumerate() {
             let x = text.lines().find_map(|l| l.strip_prefix(k).and_then(|r| r.strip_prefix('='))).ok_or_else(|| format!("no {k}"))?;
             v[i] = x.trim().parse::<f64>().map_err(|_| format!("{k}={x} is not a number"))?;
@@ -199,7 +200,7 @@ pub fn typical_rows(ix: &Index2) -> usize {
 ///   `T_CLUSTERS` more spread evenly over the rest by centre score, each read directly and on the index path at two
 ///   running k-th bests (the 10th and the 100th best of the first clusters' visible rows: a probe's at its end and
 ///   before it), so that the rows the index path's sorted range leaves run from all of a near cluster's to none of a
-///   far one's; and each one's index path priced (`cut_us`);
+///   far one's; and each one's index path priced (`cut_us`) and sigma computed (`sig_us`);
 /// - `T_GROUPS` group setups and one anchor search per pseudo-query, each on a fresh query;
 /// - every timing the fastest of `T_REPS`, each after reading twice the core's L2 (`evict_bytes`), and at least
 ///   `T_FLOOR_US`.
@@ -352,7 +353,7 @@ fn measure_once(ix: &Index2) -> Option<Measured> {
     }).collect();
     let plan = Plan::default();
     let (mut xd, mut td, mut xi, mut ti) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let (mut grp, mut anc, mut cut) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut grp, mut anc, mut cut, mut sig) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for q in &queries {
         for vis in &sets {
             let vis = vis.as_ref();
@@ -376,6 +377,13 @@ fn measure_once(ix: &Index2) -> Option<Measured> {
             let mut top = top;
             top.extend(spread(rest.len(), T_CLUSTERS).into_iter().map(|i| rest[i].1));
             pr.qms(ix, Some(&top));
+            if let Some(st) = ix.order.as_ref() {
+                sig.push(fastest(|| (), |_| {
+                    for &ci in &top {
+                        std::hint::black_box(sigma_of(st, st.rest(ci), n, ci, &pr.q32, qq, &mut sp));
+                    }
+                }) / top.len() as f64);
+            }
             if ix.nukey.is_empty() {
                 pr.anc_among(ix, Some(&top));
                 cut.push(fastest(|| (), |_| {
@@ -432,7 +440,7 @@ fn measure_once(ix: &Index2) -> Option<Measured> {
     let (d, i) = (fit_rel(&xd, &td), fit_rel(&xi, &ti));
     let dir_us = if d[0] > 0.0 { d[0] } else { xd.iter().zip(&td).map(|(x, &t)| t - d[1] * x[1]).fold(f64::INFINITY, f64::min).max(T_FLOOR_US) };
     let mean = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
-    Some(Measured { i8_us, row_us: d[1], dir_us, cl_us: i[0], size_us: i[1], vis_us: i[2], grp_us: mean(&grp), anc_us: mean(&anc), cut_us: mean(&cut), und_us: i[3] })
+    Some(Measured { i8_us, row_us: d[1], dir_us, cl_us: i[0], size_us: i[1], vis_us: i[2], grp_us: mean(&grp), anc_us: mean(&anc), cut_us: mean(&cut), und_us: i[3], sig_us: mean(&sig) })
 }
 
 /// The cost model's constants timed on `ix`, on the calling thread's pool (one thread in the bindings): `measure_once`,
@@ -458,7 +466,7 @@ pub fn measure(ix: &Index2) -> Result<Measured, String> {
 /// The cache of the measured constants in an index directory.
 pub const COMPUTE_CACHE: &str = "compute-constants.txt";
 /// The version of its key: changed when the timing or the key changes, so older caches are timed again.
-pub const COMPUTE_KEY_VERSION: u32 = 3;
+pub const COMPUTE_KEY_VERSION: u32 = 4;
 
 /// The key the measured constants are cached under: the key's version; the machine and CPU (`machine_and_cpu`) and the
 /// instruction set the library was built for; the library (`store::LIB_FINGERPRINT`); the index (its shape and its
@@ -546,7 +554,8 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 /// order (not those a race scanned); `priced`: the clusters given a sigma, in order. Costs are modelled
 /// (`Measured`): `fixed` the order's (centre scores; k-NN's product with the pooled directions; a threshold query's
 /// anchor search), `cost` what the query paid in all, `scan_cost` a scan of the visible rows, `exact_cost`
-/// (threshold) every cluster the support table leaves open, at its cheaper path.
+/// (threshold) every cluster the support table leaves open, at its cheaper path. `projected`: a k-NN race taken
+/// because the reads projected cost more than scanning the rows not yet read.
 #[derive(Clone, Debug, Default)]
 pub struct AdaptiveInfo {
     pub path: &'static str,
@@ -560,6 +569,7 @@ pub struct AdaptiveInfo {
     pub cost: f64,
     pub scan_cost: f64,
     pub exact_cost: f64,
+    pub projected: bool,
 }
 
 /// A cluster's key in a max-heap, the lower cluster first among equal keys.
@@ -591,9 +601,9 @@ pub struct Adaptive {
     low: Vec<f64>,
     /// the pooled within-cluster covariance, whose share of its trace along the query scales the stream's radii
     pooled: super::order::Pooled,
-    /// per cluster, the k-NN order's multiplier z(1, S) = Phi^-1(S / (S + 1)) for its S rows: the expected best of S
-    /// normal scores in units of their spread (`z_best`)
-    z: Vec<f64>,
+    /// the k-NN order's multiplier z(1, v) = Phi^-1(v / (v + 1)) for v = 0 to the largest cluster's rows: the expected
+    /// best of a cluster's v visible rows' scores in units of their spread (`z_best`)
+    ztab: Vec<f64>,
 }
 
 /// Gbar(x) = P(Z > x) for a standard normal Z (erfc by its Chebyshev fit, relative error under 1.2e-7).
@@ -686,8 +696,8 @@ impl Adaptive {
         let low = (0..ix.k()).map(|c| st.lam[c * r..(c + 1) * r].iter().fold(rest[c], |a, &l| a.min(l as f64)) * (1.0 - 1e-9)).collect();
         let sizes: Vec<usize> = ix.cl.iter().map(|c| c.r1 - c.r0).collect();
         let pooled = super::order::Pooled::new(&st, &sizes, ix.n());
-        let z = sizes.iter().map(|&s| z_best(s)).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, z })
+        let ztab = (0..=sizes.iter().copied().max().unwrap_or(0)).map(z_best).collect();
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, ztab })
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -717,28 +727,33 @@ impl Adaptive {
         if self.pooled.tr > 0.0 { (self.pooled.quad(q32, qq, p) / self.pooled.tr).sqrt() } else { 0.0 }
     }
 
+    /// z(1, v) for cluster ci's v visible rows.
+    fn z(&self, ix: &Index2, vis: Option<&Vis2>, ci: usize) -> f64 {
+        self.ztab[vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize)]
+    }
+
     /// Every cluster's value in the k-NN stream, mu + z rad sqrt(q' C q / tr C), for the query `q` (for tests).
     #[cfg(test)]
-    pub(crate) fn stream_keys(&self, ix: &Index2, q: &[f32]) -> Vec<f64> {
+    pub(crate) fn stream_keys(&self, ix: &Index2, q: &[f32], vis: Option<&Vis2>) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
         let s = self.stream_scale(&pr.q32, &mut vec![0f32; self.st.r]);
-        (0..ix.k()).map(|ci| qm[ci] + self.z[ci] * self.st.rad[ci] * s).collect()
+        (0..ix.k()).map(|ci| qm[ci] + self.z(ix, vis, ci) * self.st.rad[ci] * s).collect()
     }
 
     /// Every cluster's k-NN order key mu + z sigma for the query `q` (for tests).
     #[cfg(test)]
-    pub(crate) fn order_keys(&self, ix: &Index2, q: &[f32]) -> Vec<f64> {
+    pub(crate) fn order_keys(&self, ix: &Index2, q: &[f32], vis: Option<&Vis2>) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let mut p = vec![0f32; self.st.r];
-        (0..ix.k()).map(|ci| qm[ci] + self.z[ci] * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
+        (0..ix.k()).map(|ci| qm[ci] + self.z(ix, vis, ci) * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
     }
 
-    /// The cost of one sigma (its directions' products).
+    /// The cost of one sigma (measured, `Measured::sig_us`).
     fn sigma_cost(&self) -> f64 {
-        self.m.i8_us * self.st.r as f64
+        self.m.sig_us
     }
 
     /// The anchors a first anchor search scores when it may take the nearest of `among` clusters' anchors.
@@ -752,50 +767,14 @@ impl Adaptive {
         }
     }
 
-    /// The exact k-NN's (knn2's) cost on this visible set as its planner would run it, priced by the measured
-    /// constants at the running k-th best `t`: a scan when the planner scans first (`Plan::scan_first`); else the seed's
-    /// anchor search, and every cluster holding a visible row scored directly where the planner's rule in rows says so
-    /// (`Plan::direct_max`) and on the index path elsewhere, each only when its sorted range at t leaves a visible row,
-    /// at the rows it leaves and their share above t, a group's setup once. Pricing it costs `cut_us` and a sigma a
-    /// cluster. t is at most knn2's own k-th
-    /// best (its seed's), so no range is narrower than knn2's; the seed's probe and the selection are left out.
-    fn exact_cost(&self, ix: &Index2, pr: &Prep2, vis: Option<&Vis2>, plan: Plan, t: f64, live: &[usize], nvis: usize) -> f64 {
-        let m = &self.m;
-        if plan.scan_first(ix, vis) {
-            return m.scan(nvis);
-        }
-        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        let mut p = vec![0f32; self.st.r];
-        let mut gset = vec![false; ix.groups.len()];
-        let mut cost = m.anc_us * ix.nanch as f64;
-        for &ci in live {
-            let (rows, nv) = (ix.cl[ci].r1 - ix.cl[ci].r0, vis.map_or(ix.cl[ci].r1 - ix.cl[ci].r0, |v| v.cl_cnt[ci] as usize));
-            let c = if ix.nukey.is_empty() { cut_rows(ix, pr, vis, ci, pr.qm(ix, ci), t) } else { nv };
-            if c == 0 {
-                continue;
-            }
-            if matches!(plan.mode, PlanMode::Auto) && nv <= plan.direct_max(rows) {
-                cost += m.direct(nv);
-            } else {
-                let g = ix.cl[ci].g;
-                if !gset[g] {
-                    gset[g] = true;
-                    cost += m.grp_us;
-                }
-                let qm = pr.qm(ix, ci);
-                cost += m.index(rows, c, above(t, qm, self.sigma(ix, ci, &pr.q32, qq, &mut p)));
-            }
-        }
-        cost
-    }
-
     /// Approximate k-NN with knob `psi` (at least 0; `PSI` by default), as the module's comment says: the clusters in
-    /// the order of mu + z sigma (z = z(1, S) of each cluster's S rows; the stream by mu + z rad s, `LOOKAHEAD` priced
-    /// ahead), whatever psi; psi moves only the stop, when the window's largest mu + psi sigma is below the running k-th
-    /// best (a heuristic). Each cluster is read directly or on the index path at the rows its sorted range at the
-    /// running k-th best leaves, whichever the measured constants price lower; the probe races a scan of the visible
-    /// rows and the exact query (knn2), whichever is predicted cheaper. psi infinite is the exact query. Returns k items
-    /// whenever k are visible. `plan` is the index path's and the exact query's.
+    /// the order of mu + z sigma (z = z(1, v) of each cluster's v visible rows; the stream by mu + z rad s, `LOOKAHEAD`
+    /// priced ahead), whatever psi; psi moves only the stop, when the window's largest mu + psi sigma is below the
+    /// running k-th best (a heuristic). Each cluster is read directly or on the index path at the rows its sorted range
+    /// at the running k-th best leaves, whichever the measured constants price lower. The probe races a scan of the
+    /// visible rows, and hands over to it at once when the reads it projects cost more than scanning the rows not yet
+    /// read. psi infinite is the exact query (`knn2`). Returns k items whenever k are visible. `plan` is the index
+    /// path's and the exact query's.
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
         assert!(psi >= 0.0, "psi is at least 0 (infinity is the exact query), not {psi}");
@@ -818,7 +797,10 @@ impl Adaptive {
         }
         if psi == f64::INFINITY {
             (info.path, info.fixed) = ("exact", 0.0);
-            return (knn2(ix, q, kk, vis, plan), info);
+            let mut o = knn2(ix, q, kk, vis, plan);
+            // a scan counts its rows as read, not touched
+            o.st.touched = o.st.touched.max(o.st.full_reads);
+            return (o, info);
         }
         let pr = prep2(ix, q);
         let mut st = Stats::new(nl);
@@ -837,20 +819,32 @@ impl Adaptive {
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         let mut p = vec![0f32; self.st.r];
         // the stream by mu + z rad s, s the pooled covariance's share along the query, and the window of priced
-        // clusters, each with its order key mu + z sigma and its stop key mu + psi sigma
+        // clusters, each with its order key mu + z sigma, its stop key mu + psi sigma and its sigma
         let s = self.stream_scale(&pr.q32, &mut p);
-        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(qm[ci] + self.z[ci] * self.st.rad[ci] * s, Reverse(ci))).collect();
+        let z = |ci: usize| self.z(ix, vis, ci);
+        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(qm[ci] + z(ci) * self.st.rad[ci] * s, Reverse(ci))).collect();
         let mut window: Vec<(f64, f64, usize, f64)> = Vec::with_capacity(LOOKAHEAD);
         let stop_key = |w: &[(f64, f64, usize, f64)]| w.iter().map(|x| x.1).fold(f64::NEG_INFINITY, f64::max);
-        st.cyc[P_ORDER] += tick() - ts;
         let sc = self.sigma_cost();
+        // the projection of what the probe has left to read: the live clusters by mu + psi rad s (the stop key with
+        // the stream's spread), largest first, and the running sums of their sigmas and reads at every visible row
+        let mut proj: Vec<(f64, usize)> = live.iter().map(|&ci| (qm[ci] + psi * self.st.rad[ci] * s, ci)).collect();
+        proj.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut rank = vec![usize::MAX; k];
+        let mut sum = Vec::with_capacity(proj.len() + 1);
+        sum.push(0.0);
+        for (i, &(_, ci)) in proj.iter().enumerate() {
+            rank[ci] = i;
+            let (rows, nv) = (ix.cl[ci].r1 - ix.cl[ci].r0, nv_of(ci));
+            sum.push(sum[i] + sc + m.direct(nv).min(m.index(rows, nv, 1.0)));
+        }
+        let (mut upto, mut done) = (proj.len(), 0.0);
+        st.cyc[P_ORDER] += tick() - ts;
         let mut spent = fixed;
         let mut sig = 0;
         let mut ch = Charges::new(m, ix, &pr, !ix.nukey.is_empty());
         let mut visited = vec![false; k];
-        // the exact query's predicted cost, bought once the probe has spent what pricing it costs
-        let est = (m.cut_us + sc) * live.len() as f64;
-        let mut exact: Option<f64> = None;
+        let mut unread = nvis;
         let mut over = false;
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
         loop {
@@ -865,19 +859,28 @@ impl Adaptive {
                 spent += m.anc_us * Self::anchors(ix, among.len()) as f64;
                 ch.anchored = true;
             }
-            if cut && exact.is_none() && spent >= est {
-                let e = self.exact_cost(ix, &pr, vis, plan, kth, &live, nvis);
-                spent += est;
-                (exact, info.exact_cost) = (Some(e), e);
-            }
-            let budget = cs.min(exact.unwrap_or(f64::INFINITY));
-            // the stop, then the window filled from the stream (racing), then the stop again
+            // the stop, then the projection against a scan of the rows not yet read, then the window filled from the
+            // stream (racing), then the stop again
             if !window.is_empty() && kth > stop_key(&window) {
                 rd.st.cyc[P_ORDER] += tick() - ts;
                 break;
             }
+            if kth > f64::NEG_INFINITY {
+                while upto > 0 && proj[upto - 1].0 < kth {
+                    upto -= 1;
+                    if visited[proj[upto].1] {
+                        done -= sum[upto + 1] - sum[upto];
+                    }
+                }
+                if sum[upto] - done > m.scan(unread) {
+                    info.projected = true;
+                    over = true;
+                    rd.st.cyc[P_ORDER] += tick() - ts;
+                    break;
+                }
+            }
             while window.len() < LOOKAHEAD && !stream.is_empty() {
-                if spent + sc > budget {
+                if spent + sc > cs {
                     over = true;
                     break;
                 }
@@ -888,7 +891,7 @@ impl Adaptive {
                 spent += sc;
                 info.spreads += 1;
                 info.priced.push(ci as u32);
-                window.push((qm[ci] + self.z[ci] * sg, qm[ci] + psi * sg, ci, sg));
+                window.push((qm[ci] + z(ci) * sg, qm[ci] + psi * sg, ci, sg));
             }
             if over || window.is_empty() || kth > stop_key(&window) {
                 rd.st.cyc[P_ORDER] += tick() - ts;
@@ -902,7 +905,7 @@ impl Adaptive {
             let nv = nv_of(ci);
             // the rows its sorted range at the running k-th best leaves, and their share expected above it
             let (c, u) = if cut {
-                if spent + m.cut_us > budget {
+                if spent + m.cut_us > cs {
                     over = true;
                     rd.st.cyc[P_CHOICE] += tick() - tch;
                     break;
@@ -914,7 +917,7 @@ impl Adaptive {
                 (nv, 1.0)
             };
             let (path, cost, gnew) = ch.choose(ci, nv, c, u, Self::anchors(ix, info.read.len() + 1));
-            if spent + cost > budget {
+            if spent + cost > cs {
                 over = true;
                 rd.st.cyc[P_CHOICE] += tick() - tch;
                 break;
@@ -934,6 +937,10 @@ impl Adaptive {
             spent += cost;
             rd.st.cyc[P_CHOICE] += tick() - tch;
             visited[ci] = true;
+            unread -= nv;
+            if rank[ci] < upto {
+                done += sum[rank[ci] + 1] - sum[rank[ci]];
+            }
             rd.visit(ci, path);
         }
         rd.st.cyc[P_SPREAD] += sig;
@@ -945,16 +952,6 @@ impl Adaptive {
         rd.st.cyc[C_VISITED] += info.read.len() as u64;
         info.path = "probe";
         if over {
-            if let Some(e) = exact.filter(|&e| e < cs) {
-                // the exact query from the start (the probe's reads are not reused)
-                info.path = "exact";
-                info.cost = spent + e;
-                let (_, pst) = rd.finish();
-                let mut o = knn2(ix, q, kk, vis, plan);
-                o.st.add(&pst);
-                o.st.cyc[P_QUERY] += tick() - t0;
-                return (o, info);
-            }
             // the rows not yet read, scanned
             info.path = "race";
             for &ci in &live {
@@ -1168,7 +1165,7 @@ mod tests {
     /// cache's text too; the rule keeps the crossover at the typical size whatever the split of cl and size.
     #[test]
     fn degenerate_constants_are_refused() {
-        let m = Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.2, cl_us: 15.0, size_us: 0.004, vis_us: 0.015, grp_us: 56.0, anc_us: 0.08, cut_us: 0.0, und_us: 0.0 };
+        let m = Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.2, cl_us: 15.0, size_us: 0.004, vis_us: 0.015, grp_us: 56.0, anc_us: 0.08, cut_us: 0.0, und_us: 0.0, sig_us: 0.0 };
         assert!(m.check().is_ok());
         for bad in [Measured { row_us: 0.0, ..m }, Measured { i8_us: 0.0, ..m }, Measured { dir_us: 0.0, ..m }, Measured { cl_us: -1.0, ..m }, Measured { grp_us: f64::NAN, ..m }, Measured { vis_us: f64::INFINITY, ..m }] {
             assert!(bad.check().is_err(), "{bad:?}");

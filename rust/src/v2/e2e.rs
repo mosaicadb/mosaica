@@ -1980,7 +1980,7 @@ fn knn2_fast_is_unchanged() {
 /// Constants for the approximate queries that do not depend on the machine (in the proportions LAION's measured ones
 /// have), for tests that compare runs.
 fn fixed_costs() -> adaptive::Measured {
-    adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07, cut_us: 0.2, und_us: 0.0 }
+    adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07, cut_us: 0.2, und_us: 0.0, sig_us: 0.3 }
 }
 
 /// The approximate queries on `ix` with the constants timed on it, with `fixed_costs`, and with constants under which
@@ -2037,9 +2037,8 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
                         if info.path == "exact" && psi != f64::INFINITY {
                             assert_eq!(out.ents, knn2(ix, q, kk, vis.as_ref(), Plan::default()).ents, "{what}: not the exact query's answer");
                         }
-                        // at most twice the scan's modelled cost, beyond what is bought once unchecked (the anchor
-                        // search, the exact query's prediction)
-                        let once = ad.m.anc_us * ix.k() as f64 + (ad.m.cut_us + ad.m.i8_us * order::R_MAX as f64) * ix.k() as f64;
+                        // at most twice the scan's modelled cost, beyond the anchor search (bought once, unchecked)
+                        let once = ad.m.anc_us * ix.k() as f64;
                         assert!(info.cost <= 2.0 * info.scan_cost * (1.0 + 1e-9) + once + 1e-9, "{what}: modelled cost {} over twice the scan's {}", info.cost, info.scan_cost);
                         assert!((info.path == "exact" || out.st.touched as usize >= out.ents.len()) && (info.path != "scan" || out.st.touched as usize == t.len()), "{what}: {} rows touched", out.st.touched);
                     }
@@ -2057,7 +2056,7 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
 fn the_scan_race_hands_over_to_the_scan() {
     let f = fixture();
     let ix = &f.ix;
-    let m = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 50.0, cl_us: 1e3, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0, cut_us: 50.0, und_us: 0.0 };
+    let m = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 50.0, cl_us: 1e3, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0, cut_us: 50.0, und_us: 0.0, sig_us: 0.0 };
     let ad = adaptive::Adaptive::new(ix, m).unwrap();
     for q in &f.queries {
         let (out, info) = ad.knn(ix, q, 10, None, 1e9, Plan::default());
@@ -2065,39 +2064,6 @@ fn the_scan_race_hands_over_to_the_scan() {
         assert!(info.read.len() < ix.k() && info.cost <= 2.0 * info.scan_cost, "{info:?}");
         assert_eq!(sub_values(ix, &out.ents, q), top_values(&truth(ix, q, None), 10));
     }
-}
-
-/// The exact race hands over to the exact query once the probe would cost more than the exact query is predicted to:
-/// with a plan whose exact query does not scan first, sigmas dear, a scan dearer and the index path cheap, a probe
-/// that never stops (psi 1e9) returns the exact query's answer, at most its predicted cost beyond what it spent; it
-/// only does so once it holds k items (the prediction prices the sorted ranges at the running k-th best).
-#[test]
-fn the_exact_race_hands_over_to_the_exact_query() {
-    let f = fixture();
-    let ix = &f.ix;
-    let m = adaptive::Measured { i8_us: 1.0, row_us: 1.0, dir_us: 1e3, cl_us: 1.0, size_us: 0.0, vis_us: 0.01, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0 };
-    let ad = adaptive::Adaptive::new(ix, m).unwrap();
-    let plan = thr_plans()[1].1;
-    let mut handed = 0;
-    for (qi, q) in f.queries.iter().enumerate() {
-        for (sname, bm) in &f.sets {
-            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-            let t = truth(ix, q, bm.as_ref());
-            for kk in [1, 10, 100] {
-                let what = format!("query {qi}, set {sname}, k {kk}");
-                let (out, info) = ad.knn(ix, q, kk, vis.as_ref(), 1e9, plan);
-                if info.path != "exact" {
-                    continue;
-                }
-                handed += 1;
-                assert!(info.exact_cost > 0.0 && info.exact_cost < info.scan_cost, "{what}: {info:?}");
-                assert!(info.cost <= 2.0 * info.scan_cost + 1e-9, "{what}: {info:?}");
-                assert_eq!(out.ents, knn2(ix, q, kk, vis.as_ref(), plan).ents, "{what}");
-                assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "{what}");
-            }
-        }
-    }
-    assert!(handed > 0);
 }
 
 /// The approximate threshold query returns a subset of the exact answer (each row once), the exact answer when psi
@@ -2229,7 +2195,7 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
 fn measured_constants_are_cached_and_read_again() {
     let f = fixture();
     let m = adaptive::measure(&f.ix).unwrap();
-    assert!(m.to_kv().lines().count() == 10 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
+    assert!(m.to_kv().lines().count() == 11 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
     assert!(m.check().is_ok(), "{m:?}");
     let d = tmp_dir("measured");
     let path = d.join(adaptive::COMPUTE_CACHE);
@@ -2271,7 +2237,7 @@ fn measured_constants_are_cached_and_read_again() {
     let (_, other) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
     assert_ne!(adaptive::compute_key(&other), key, "a norm-sorted build of the same fit");
     // the rule: direct exactly where dir + row v <= cl + size S + vis v, the crossover kept at the typical size
-    let r = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0 };
+    let r = adaptive::Measured { i8_us: 1e-3, row_us: 0.1, dir_us: 1.0, cl_us: 7.0, size_us: 0.01, vis_us: 0.04, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0, sig_us: 0.0 };
     let (r0, kappa) = r.rule(1000).unwrap();
     assert_eq!(r0, 100);
     assert!((kappa - 1.0 / 6.0).abs() < 1e-12);
@@ -2299,16 +2265,16 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
     let mut ixs: Vec<(&str, &Index2, bool)> = vec![("synth4k", &f.ix, true), ("norm-sorted", &nus, true)];
     ixs.extend(comps.iter().map(|c| ("random compaction", c, false)));
     // sigmas and reads priced so that no race fires before the last cluster
-    let m = adaptive::Measured { i8_us: 1e-12, row_us: 1.0, dir_us: 1e-12, cl_us: 1e9, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0 };
+    let m = adaptive::Measured { i8_us: 1e-12, row_us: 1.0, dir_us: 1e-12, cl_us: 1e9, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0, sig_us: 0.0 };
     let w = adaptive::LOOKAHEAD;
-    let (mut stops, mut same, mut heuristic, mut grown) = (0, 0, 0, 0);
+    let (mut stops, mut same, mut heuristic, mut grown, mut raced) = (0, 0, 0, 0, 0);
     let by = |x: &usize, y: &usize, v: &[f64]| v[*y].total_cmp(&v[*x]).then(x.cmp(y));
     for &(name, ix, filtered) in &ixs {
         let ad = adaptive::Adaptive::new(ix, m).unwrap();
         for (qi, q) in f.queries.iter().enumerate() {
-            let (order, stream) = (ad.order_keys(ix, q), ad.stream_keys(ix, q));
             for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
                 let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                let (order, stream) = (ad.order_keys(ix, q, vis.as_ref()), ad.stream_keys(ix, q, vis.as_ref()));
                 let mut live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
                 live.sort_by(|x, y| by(x, y, &stream));
                 for kk in [1, 10, 100] {
@@ -2319,14 +2285,17 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
                         let (out, info) = ad.knn(ix, q, kk, vis.as_ref(), psi, Plan::default());
                         let (again, info2) = ad.knn(ix, q, kk, vis.as_ref(), psi, Plan::default());
                         assert_eq!((&out.ents, &info.read, &info.priced, info.path), (&again.ents, &info2.read, &info2.priced, info2.path), "not deterministic, {what}");
-                        if info.path != "probe" {
+                        if info.path != "probe" && info.path != "race" {
                             continue;
                         }
-                        if let Some((p0, r0, s0)) = &before {
-                            assert!(info.read.starts_with(r0) && info.priced.starts_with(s0), "psi {p0} read or priced what psi {psi} does not first, {what}");
-                            grown += (info.read.len() > r0.len()) as usize;
+                        raced += (info.path == "race") as usize;
+                        if info.path == "probe" {
+                            if let Some((p0, r0, s0)) = &before {
+                                assert!(info.read.starts_with(r0) && info.priced.starts_with(s0), "psi {p0} read or priced what psi {psi} does not first, {what}");
+                                grown += (info.read.len() > r0.len()) as usize;
+                            }
+                            before = Some((psi, info.read.clone(), info.priced.clone()));
                         }
-                        before = Some((psi, info.read.clone(), info.priced.clone()));
                         let priced: Vec<usize> = info.priced.iter().map(|&c| c as usize).collect();
                         assert_eq!(priced[..], live[..priced.len()], "the stream is not the stream key's order, {what}");
                         for (i, &c) in info.read.iter().enumerate() {
@@ -2334,7 +2303,7 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
                             win.sort_by(|x, y| by(x, y, &order));
                             assert_eq!(win.first(), Some(&(c as usize)), "read {i} is not the window's largest order key, {what}");
                         }
-                        if info.read.len() < live.len() && out.ents.len() == kk {
+                        if info.path == "probe" && info.read.len() < live.len() && out.ents.len() == kk {
                             stops += 1;
                             let kth = out.ents[kk - 1].0;
                             assert!(priced.iter().filter(|&&c| !info.read.contains(&(c as u32))).all(|&c| keys[c] < kth), "stopped with a stop key in the window at the k-th best, {what}");
@@ -2347,7 +2316,7 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
             }
         }
     }
-    eprintln!("{stops} stops, {same} returning what the exact query returns, {heuristic} with a cluster not priced above the k-th best, {grown} reading more at a larger psi");
+    eprintln!("{stops} stops, {same} returning what the exact query returns, {heuristic} with a cluster not priced above the k-th best, {grown} reading more at a larger psi, {raced} races");
     assert!(stops > 0 && same > 0 && grown > 0, "{stops} stops, {same} exact, {grown} grown");
 }
 
@@ -2503,7 +2472,7 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
 fn a_groups_setup_is_bought_once_its_savings_pay_for_it() {
     let f = fixture();
     let ix = &f.ix;
-    let base = adaptive::Measured { i8_us: 1e-6, row_us: 1.0, dir_us: 1e-6, cl_us: 0.0, size_us: 0.0, vis_us: 0.5, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0 };
+    let base = adaptive::Measured { i8_us: 1e-6, row_us: 1.0, dir_us: 1e-6, cl_us: 0.0, size_us: 0.0, vis_us: 0.5, grp_us: 0.0, anc_us: 0.0, cut_us: 0.0, und_us: 0.0, sig_us: 0.0 };
     let saving = 0.5 * (ix.nrows / ix.k()) as f64;
     let (mut free, mut never, mut some) = ((0, 0), (0, 0), (0, 0));
     for (grp, acc) in [(0.0, &mut free), (1e12, &mut never), (3.0 * saving, &mut some)] {
@@ -2527,7 +2496,7 @@ fn a_groups_setup_is_bought_once_its_savings_pay_for_it() {
 fn the_constants_change_the_answer_only_through_the_race() {
     let f = fixture();
     let ix = &f.ix;
-    let base = adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07, cut_us: 0.0, und_us: 0.0 };
+    let base = adaptive::Measured { i8_us: 0.017, row_us: 0.047, dir_us: 1.2, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 56.0, anc_us: 0.07, cut_us: 0.0, und_us: 0.0, sig_us: 0.0 };
     let (a, b) = (adaptive::Adaptive::new(ix, cheap_index(base)).unwrap(), adaptive::Adaptive::new(ix, adaptive::Measured { cl_us: 1e6, ..base }).unwrap());
     let (mut both, mut index) = (0, 0);
     for (qi, q) in f.queries.iter().enumerate() {
