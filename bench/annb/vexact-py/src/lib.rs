@@ -43,7 +43,7 @@ fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3
     for (key, x) in [("visited", i.read.len()), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads)] {
         d.set_item(key, x)?;
     }
-    for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost), ("exact_cost", i.exact_cost)] {
+    for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost)] {
         d.set_item(key, x)?;
     }
     Ok(d)
@@ -194,9 +194,9 @@ impl Index {
         Ok(PyArray1::from_vec(py, ents))
     }
 
-    /// What one approximate query did, as a dict: its path ("probe", "race", "scan", "exact", "sparse", "empty"), the clusters
+    /// What one approximate query did, as a dict: its path ("probe", "scan", "exact", "sparse", "empty"), the clusters
     /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
-    /// costs (the order's, the whole query's, a scan's, and for a threshold query the exact query's); and rows touched,
+    /// costs (the order's, the whole query's, and for a threshold query a scan's); and rows touched,
     /// full vectors read, clusters on the index path and the time in ms. With `t`, the threshold query at t, else
     /// k-NN at k.
     #[pyo3(signature = (q, k=10, psi=PSI, t=None))]

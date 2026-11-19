@@ -1980,7 +1980,7 @@ fn knn2_fast_is_unchanged() {
 /// Constants for the approximate queries that do not depend on the machine (in the proportions LAION's measured ones
 /// have), for tests that compare runs.
 fn fixed_costs() -> adaptive::Measured {
-    adaptive::Measured { dir_us: 1.2, row_us: [0.047, 0.06, 0.08, 0.1], cl_us: 15.0, cut_row_us: [0.014, 0.03, 0.05, 0.08], cut_us: 0.5, grp_us: 56.0, sig_us: 0.3 }
+    adaptive::Measured { dir_us: 1.2, row_us: [0.047, 0.06, 0.08, 0.1], cl_us: 15.0, cut_row_us: [0.014, 0.03, 0.05, 0.08], cut_us: 0.5, grp_us: 56.0, sig_us: 0.3, h: [1.0; 7], g_lo: 0.0, g_hi: 8.0 }
 }
 
 /// The approximate queries on `ix` with the constants timed on it, with `fixed_costs`, and with constants under which
@@ -2055,8 +2055,9 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
 }
 
 /// The approximate threshold query returns a subset of the exact answer (each row once), the exact answer when psi
-/// is infinite and on every hand-over (a scan, or the exact query); its reads take the clusters the support table puts
-/// wholly above t without reading them. Under each model some query probes and some hand over.
+/// is infinite (reading every cluster the support table leaves open, computing no sigma) and on a hand-over; its reads
+/// take the clusters the support table puts wholly above t without reading them. Under each model some query probes
+/// and some hands over.
 #[test]
 fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
     let f = fixture();
@@ -2079,11 +2080,9 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                         if psi == f64::INFINITY || info.path != "probe" {
                             assert_eq!(got, want, "not exact, {what}, path {}", info.path);
                         }
-                        // psi infinite hands over, to the cheaper of a scan and the exact query, and pays that (unless the
-                        // support table decides every cluster)
-                        if psi == f64::INFINITY && info.path != "empty" && !(info.path == "probe" && info.read.is_empty()) {
-                            assert!(info.path == "scan" || info.path == "sparse" || (info.path == "exact" && info.exact_cost <= info.scan_cost), "{what}: {info:?}");
-                            assert!(info.cost <= info.scan_cost.min(info.exact_cost) + 1e-9, "{what}: {info:?}");
+                        assert!(["probe", "sparse", "empty"].contains(&info.path), "{what}: {info:?}");
+                        if psi == f64::INFINITY {
+                            assert_eq!(info.spreads, 0, "{what}: {info:?}");
                         }
                         if th == -2.0 && info.path == "probe" {
                             assert_eq!((got.len(), out.st.full_reads), (want.len(), 0), "a threshold below every score reads rows, {what}");
@@ -2092,7 +2091,7 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                 }
             }
         }
-        assert!(paths.contains_key("probe") && (paths.contains_key("scan") || paths.contains_key("exact")), "{cname}: paths {paths:?}");
+        assert!(paths.contains_key("probe") && paths.contains_key("sparse"), "{cname}: paths {paths:?}");
     }
 }
 
@@ -2183,7 +2182,7 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
 fn measured_constants_are_cached_and_read_again() {
     let f = fixture();
     let m = adaptive::measure(&f.ix).unwrap();
-    assert!(m.to_kv().lines().count() == 13 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
+    assert!(m.to_kv().lines().count() == 22 && adaptive::Measured::from_kv(&m.to_kv()).unwrap() == m);
     assert!(m.check().is_ok(), "{m:?}");
     let d = tmp_dir("measured");
     let path = d.join(adaptive::COMPUTE_CACHE);
@@ -2225,7 +2224,7 @@ fn measured_constants_are_cached_and_read_again() {
     let (_, other) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
     assert_ne!(adaptive::compute_key(&other), key, "a norm-sorted build of the same fit");
     // the rule: direct exactly where dir + row v <= cut + cl + cut_row v, at visible share 1
-    let r = adaptive::Measured { dir_us: 1.0, row_us: [0.1, 0.2, 0.3, 0.4], cl_us: 6.5, cut_row_us: [0.04, 0.05, 0.06, 0.07], cut_us: 0.5, grp_us: 0.0, sig_us: 0.0 };
+    let r = adaptive::Measured { dir_us: 1.0, row_us: [0.1, 0.2, 0.3, 0.4], cl_us: 6.5, cut_row_us: [0.04, 0.05, 0.06, 0.07], cut_us: 0.5, grp_us: 0.0, sig_us: 0.0, h: [1.0; 7], g_lo: 0.0, g_hi: 8.0 };
     assert_eq!(r.rule(), Some((100, 0.0)));
     assert_eq!(adaptive::Measured { cut_row_us: [0.2; 4], ..r }.rule(), None);
 }
@@ -2405,8 +2404,8 @@ fn the_stream_key_ignores_a_part_of_the_query_no_cluster_varies_along() {
 }
 
 /// The approximate threshold query decides from the bounds before computing a sigma: a probe returns every answer row
-/// of every cluster whose key reaches t (and only answer rows), and reads no cluster whose key is below t; a query
-/// that hands over computes no sigma unless it raced. Under every model, visible set, threshold and psi.
+/// of every cluster whose key reaches t (and only answer rows), and reads no cluster whose key is below t, with sigmas
+/// cheap or dear; a query that hands over computes no sigma. Under every model, visible set, threshold and psi.
 #[test]
 fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
     let f = fixture();
@@ -2435,8 +2434,7 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
                             let reach: RoaringBitmap = want.iter().filter(|&e| keys[row_cl[ix.row_of_ent(e)]] >= th).collect();
                             assert!(reach.is_subset(&got), "{what}: an answer row of a cluster whose key reaches t left out");
                         }
-                        if *cname == "sigmas dear" {
-                            // a sigma costs more than any hand-over: the bounds decide, or the query hands over
+                        if info.path != "probe" {
                             assert_eq!(info.spreads, 0, "{what}: {info:?}");
                         }
                     }
@@ -2447,12 +2445,11 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
     assert!(probes > 0);
 }
 
-/// The answers do not depend on the measured constants but through the threshold query's hand-overs (which answer
-/// exactly) and k-NN's choice of a sigma: with the index path cheap or dear (and sigmas cheaper than any read), k-NN
-/// reads the same clusters and returns the same items, and a threshold query that probes in both returns the same
-/// rows.
+/// The answers do not depend on the measured constants but through k-NN's choice of a sigma: with the index path cheap
+/// or dear (and sigmas cheaper than any read), k-NN reads the same clusters and returns the same items, and a
+/// threshold query returns the same rows.
 #[test]
-fn the_constants_change_the_answer_only_through_the_race() {
+fn the_constants_change_the_answer_only_through_a_sigma() {
     let f = fixture();
     let ix = &f.ix;
     let base = fixed_costs();
@@ -2476,9 +2473,8 @@ fn the_constants_change_the_answer_only_through_the_race() {
             for th in thresholds(&t) {
                 for (psi, (_, plan)) in PSIS.into_iter().flat_map(|p| thr_plans().map(move |x| (p, x))) {
                     let ((x, xi), (y, yi)) = (a.threshold(ix, q, th, vis.as_ref(), psi, plan), b.threshold(ix, q, th, vis.as_ref(), psi, plan));
-                    if xi.path == "probe" && yi.path == "probe" {
-                        assert_eq!(to_bitmap2(ix, &x.rows), to_bitmap2(ix, &y.rows), "query {qi}, set {sname}, t {th}, psi {psi}");
-                    }
+                    assert_eq!((xi.path, &xi.read), (yi.path, &yi.read), "query {qi}, set {sname}, t {th}, psi {psi}");
+                    assert_eq!(to_bitmap2(ix, &x.rows), to_bitmap2(ix, &y.rows), "query {qi}, set {sname}, t {th}, psi {psi}");
                 }
             }
         }
@@ -2920,4 +2916,91 @@ fn study_count_model() {
     eprintln!("  index components in dots, counted / predicted: cluster setup {:.0} / {:.0}, tables {:.0} / {:.0}, first level {:.0} / {:.0}, deeper levels {:.0} / {:.0}, stored vectors {:.0} / {:.0}", comp[0], pcomp[0], comp[1], pcomp[1], comp[2], pcomp[2], comp[3], pcomp[3], comp[4], pcomp[4]);
     eprintln!("  rows entering each level, per row of the sorted ranges: {:?}", (0..nl).map(|l| (lent[l] / lent[nl] * 1000.0).round() / 1000.0).collect::<Vec<_>>());
     eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
+}
+
+/// Study (ignored; run by hand on a built index): the gap curve of the index path's row cost, fitted from three kinds of
+/// query (corpus rows as at open, the dataset's test queries, threshold queries at the prep's 1% thresholds), its
+/// residual by gap and by share once fitted, and the cost model's residual on region and random visible sets of the
+/// prep at matched per-cluster share and by the visible rows' run count. DIAG_DIR the index directory, DIAG_PREP the
+/// dataset's prep directory.
+#[test]
+#[ignore]
+fn study_gap_curve() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let real: Vec<Vec<f32>> = (0..8).map(|i| {
+        let mut v = vec![0f32; ix.n()];
+        v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]);
+        v
+    }).collect();
+    let th = crate::util::read_npy(&format!("{prep}/thresholds.npy"));
+    let (thv, tw) = th.rows_f32("thresholds").unwrap();
+    let at: Vec<f64> = (0..8).map(|i| thv[i * tw + tw / 2] as f64).collect();
+    let sets = adaptive::share_sets(&ix);
+    let kinds = [("corpus rows", adaptive::sample_reads(&ix, &adaptive::pseudo_queries(&ix), &sets, None)),
+                 ("test queries", adaptive::sample_reads(&ix, &real, &sets, None)),
+                 ("thresholds", adaptive::sample_reads(&ix, &real, &sets, Some(&at)))];
+    let ms: Vec<adaptive::Measured> = kinds.iter().map(|k| adaptive::fit_sampled(&k.1).unwrap()).collect();
+    eprintln!("{dir}");
+    for ((name, s), m) in kinds.iter().zip(&ms) {
+        let ir: Vec<&adaptive::Sample> = s.reads.iter().filter(|r| r.index).collect();
+        let cov: Vec<usize> = (0..adaptive::NG).map(|b| ir.iter().filter(|r| adaptive::g_bin(r.g) == b).count()).collect();
+        eprintln!("  {name}: h {:?}; gaps covered {:.2} to {:.2}; index reads per gap bin {cov:?}; cut_row_us {:?}, cl_us {:.1}",
+                  m.h.map(|x| (x * 100.0).round() / 100.0), m.g_lo, m.g_hi, m.cut_row_us.map(|x| (x * 1e4).round() / 1e4), m.cl_us);
+    }
+    for b in 0..adaptive::NG {
+        let v: Vec<f64> = ms.iter().map(|m| m.h[b] * m.cut_row_us[0]).collect();
+        let (lo, hi) = (v.iter().cloned().fold(f64::INFINITY, f64::min), v.iter().cloned().fold(0.0, f64::max));
+        eprint!("{}bin {b}: cost per row at share 1 by kind {:?}, max / min {:.2}", if b == 0 { "  " } else { "; " }, v.iter().map(|x| (x * 1e4).round() / 1e4).collect::<Vec<_>>(), hi / lo.max(1e-12));
+    }
+    eprintln!();
+    // the corpus-row fit's residual on its own reads and the test queries' reads, by gap bin and by share
+    let m = &ms[0];
+    let med = |mut v: Vec<f64>| -> f64 {
+        v.sort_by(|a, b| a.total_cmp(b));
+        if v.is_empty() { f64::NAN } else { v[v.len() / 2] }
+    };
+    for (name, s) in kinds.iter().take(2) {
+        let res = |r: &adaptive::Sample| r.us / if r.index { m.index(r.c, r.nv, r.rows, r.g) } else { m.direct(r.nv, r.rows) };
+        let byg: Vec<String> = (0..adaptive::NG).map(|b| format!("{:.2}", med(s.reads.iter().filter(|r| r.index && adaptive::g_bin(r.g) == b).map(res).collect()))).collect();
+        let bys: Vec<String> = (0..4).map(|si| format!("{:.2}/{:.2}", med(s.reads.iter().filter(|r| r.index && r.set == si).map(res).collect()), med(s.reads.iter().filter(|r| !r.index && r.set == si).map(res).collect()))).collect();
+        let cross: Vec<String> = (0..4).map(|si| (0..adaptive::NG).map(|b| format!("{:.2}", med(s.reads.iter().filter(|r| r.index && r.set == si && adaptive::g_bin(r.g) == b).map(res).collect()))).collect::<Vec<_>>().join(" ")).collect();
+        eprintln!("  residual of the corpus-row fit on the {name}' reads: index by gap bin {byg:?}; index / direct by share {bys:?}; index by share (rows) and gap bin (columns) {cross:?}");
+    }
+    // region against random sets at matched per-cluster share
+    let pset = |f: &str| -> Option<Vis2> {
+        let v = crate::util::read_npy(&format!("{prep}/vis_{f}.npy"));
+        let bm: RoaringBitmap = v.i32s().into_iter().map(|x| x as u32).collect();
+        Some(Vis2::new(&ix, &bm))
+    };
+    let names = ["random-1", "region-1", "random-25", "region-25"];
+    let psets: Vec<Option<Vis2>> = names.iter().map(|f| pset(f)).collect();
+    let s = adaptive::sample_reads(&ix, &real, &psets, None);
+    let runs = |set: usize, ci: usize| -> usize {
+        let v = psets[set].as_ref().unwrap();
+        let c = &ix.cl[ci];
+        let a = v.rows.partition_point(|&r| (r as usize) < c.r0);
+        let b = v.rows.partition_point(|&r| (r as usize) < c.r1);
+        (a..b).filter(|&i| i == a || v.rows[i] != v.rows[i - 1] + 1).count()
+    };
+    let res = |r: &adaptive::Sample| r.us / if r.index { m.index(r.c, r.nv, r.rows, r.g) } else { m.direct(r.nv, r.rows) };
+    let sbin = |r: &adaptive::Sample| -> usize { ((r.rows as f64 / r.nv.max(1) as f64).ln() / 4f64.ln()).clamp(0.0, 4.0) as usize };
+    for (si, name) in names.iter().enumerate() {
+        let rs: Vec<&adaptive::Sample> = s.reads.iter().filter(|r| r.set == si).collect();
+        let by_share: Vec<String> = (0..5).map(|b| {
+            let d: Vec<f64> = rs.iter().filter(|r| !r.index && sbin(r) == b).map(|r| res(r)).collect();
+            let i: Vec<f64> = rs.iter().filter(|r| r.index && sbin(r) == b).map(|r| res(r)).collect();
+            format!("1/4^{b}: {:.2}/{:.2} ({}/{})", med(d.clone()), med(i.clone()), d.len(), i.len())
+        }).collect();
+        let mean_run: Vec<f64> = rs.iter().map(|r| r.nv as f64 / runs(si, r.cluster).max(1) as f64).collect();
+        let by_run: Vec<String> = [(0.0, 1.5), (1.5, 4.0), (4.0, 16.0), (16.0, f64::INFINITY)].iter().map(|&(lo, hi)| {
+            let d: Vec<f64> = rs.iter().zip(&mean_run).filter(|(r, &mr)| !r.index && mr >= lo && mr < hi).map(|(r, _)| res(r)).collect();
+            let i: Vec<f64> = rs.iter().zip(&mean_run).filter(|(r, &mr)| r.index && mr >= lo && mr < hi).map(|(r, _)| res(r)).collect();
+            format!("run [{lo},{hi}): {:.2}/{:.2} ({}/{})", med(d.clone()), med(i.clone()), d.len(), i.len())
+        }).collect();
+        eprintln!("  {name}: residual direct/index by per-cluster share {by_share:?}; by mean visible run length {by_run:?}");
+    }
 }
