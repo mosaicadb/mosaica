@@ -1,0 +1,10 @@
+laion-clip-512-normalized, random-1: us / rows to reach recall (adaptive / adaptive-c / sub-a-filter / sub-c-filter / sub-c-own-filter)
+  0.8: 115 us x1.00 / 436 rows   118 us x1.02 / 436 rows   123 us x1.07 / 397 rows   124 us x1.07 / 492 rows   130 us x1.13 / 496 rows
+  0.9: 193 us x1.00 / 1195 rows   187 us x0.97 / 1195 rows   204 us x1.06 / 1192 rows   205 us x1.06 / 1210 rows   209 us x1.09 / 1300 rows
+  0.95: 335 us x1.00 / 3339 rows   338 us x1.01 / 3339 rows   388 us x1.16 / 3786 rows   392 us x1.17 / 4368 rows   415 us x1.24 / 4278 rows
+  0.99: 1156 us x1.00 / 7333 rows   1153 us x1.00 / 7333 rows   1221 us x1.06 / 8207 rows   1222 us x1.06 / 8438 rows   1231 us x1.06 / 8259 rows
+laion-clip-512-normalized, region-1: us / rows to reach recall (adaptive / adaptive-c / sub-a-filter / sub-c-filter / sub-c-own-filter)
+  0.8: 339 us x1.00 / 3237 rows   344 us x1.02 / 3237 rows   368 us x1.09 / 3027 rows   361 us x1.06 / 3027 rows   352 us x1.04 / 3051 rows
+  0.9: 563 us x1.00 / 5333 rows   549 us x0.98 / 5333 rows   645 us x1.15 / 5322 rows   622 us x1.10 / 5333 rows   609 us x1.08 / 5277 rows
+  0.95: 848 us x1.00 / 7116 rows   821 us x0.97 / 7116 rows   950 us x1.12 / 7254 rows   905 us x1.07 / 7276 rows   894 us x1.05 / 7114 rows
+  0.99: 944 us x1.00 / 9161 rows   925 us x0.98 / 9161 rows   1003 us x1.06 / 9290 rows   962 us x1.02 / 9299 rows   968 us x1.03 / 9312 rows

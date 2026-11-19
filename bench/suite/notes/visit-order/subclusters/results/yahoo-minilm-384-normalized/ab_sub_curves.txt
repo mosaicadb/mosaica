@@ -1,0 +1,25 @@
+yahoo-minilm-384-normalized, none: us / rows to reach recall (spread / adaptive / adaptive-c / sub-a-filter / sub-b-filter / sub-c-filter / sub-c / sub-c-own-filter)
+  0.8: 621 us x1.00 / 8163 rows   370 us x0.60 / 5877 rows   389 us x0.63 / 5877 rows   356 us x0.57 / 4379 rows   378 us x0.61 / 5729 rows   307 us x0.49 / 4379 rows   228 us x0.37 / 3580 rows   257 us x0.41 / 3448 rows
+  0.9: 934 us x1.00 / 17272 rows   641 us x0.69 / 13667 rows   705 us x0.75 / 13667 rows   645 us x0.69 / 9570 rows   685 us x0.73 / 12597 rows   604 us x0.65 / 9570 rows   492 us x0.53 / 9206 rows   491 us x0.53 / 7031 rows
+  0.95: 1344 us x1.00 / 30641 rows   1132 us x0.84 / 25442 rows   1242 us x0.92 / 25442 rows   1233 us x0.92 / 18601 rows   1195 us x0.89 / 23806 rows   1008 us x0.75 / 18601 rows   1035 us x0.77 / 18164 rows   867 us x0.65 / 14569 rows
+  0.99: 3534 us x1.00 / 112721 rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows
+yahoo-minilm-384-normalized, random-1: us / rows to reach recall (spread / adaptive / adaptive-c / sub-a-filter / sub-b-filter / sub-c-filter / sub-c / sub-c-own-filter)
+  0.8: 66 us x1.00 / 226 rows   63 us x0.95 / 175 rows   64 us x0.97 / 175 rows   74 us x1.12 / 164 rows   74 us x1.12 / 174 rows   70 us x1.06 / 167 rows   68 us x1.03 / 163 rows   68 us x1.03 / 163 rows
+  0.9: 96 us x1.00 / 522 rows   80 us x0.83 / 344 rows   83 us x0.86 / 344 rows   94 us x0.98 / 321 rows   91 us x0.95 / 343 rows   90 us x0.93 / 328 rows   94 us x0.98 / 382 rows   94 us x0.97 / 333 rows
+  0.95: 151 us x1.00 / 1013 rows   112 us x0.74 / 675 rows   117 us x0.77 / 675 rows   135 us x0.89 / 651 rows   139 us x0.92 / 673 rows   121 us x0.80 / 655 rows   133 us x0.88 / 1471 rows   126 us x0.83 / 640 rows
+  0.99: 342 us x1.00 / 2793 rows   219 us x0.64 / 2479 rows   219 us x0.64 / 2479 rows   258 us x0.75 / 2857 rows   252 us x0.74 / 2800 rows   240 us x0.70 / 2772 rows   454 us x1.33 / 4488 rows   265 us x0.78 / 2946 rows
+yahoo-minilm-384-normalized, random-25: us / rows to reach recall (spread / adaptive / adaptive-c / sub-a-filter / sub-b-filter / sub-c-filter / sub-c / sub-c-own-filter)
+  0.8: 566 us x1.00 / 2622 rows   168 us x0.30 / 1950 rows   162 us x0.29 / 1950 rows   161 us x0.28 / 1445 rows   171 us x0.30 / 1888 rows   146 us x0.26 / 1445 rows   146 us x0.26 / 1266 rows   135 us x0.24 / 1140 rows
+  0.9: 909 us x1.00 / 6034 rows   261 us x0.29 / 3864 rows   263 us x0.29 / 3864 rows   258 us x0.28 / 2771 rows   280 us x0.31 / 3608 rows   222 us x0.24 / 2771 rows   231 us x0.25 / 2603 rows   185 us x0.20 / 2019 rows
+  0.95: 1412 us x1.00 / 11173 rows   451 us x0.32 / 7170 rows   445 us x0.32 / 7170 rows   443 us x0.31 / 5559 rows   480 us x0.34 / 6986 rows   385 us x0.27 / 5559 rows   416 us x0.29 / 5441 rows   343 us x0.24 / 4372 rows
+  0.99: 3247 us x1.00 / 31870 rows   1479 us x0.46 / 20520 rows   1478 us x0.46 / 20520 rows   - us / - rows   1451 us x0.45 / 19804 rows   - us / - rows   - us / - rows   - us / - rows
+yahoo-minilm-384-normalized, region-1: us / rows to reach recall (spread / adaptive / adaptive-c / sub-a-filter / sub-b-filter / sub-c-filter / sub-c / sub-c-own-filter)
+  0.8: 510 us x1.00 / 2699 rows   202 us x0.40 / 2152 rows   194 us x0.38 / 2152 rows   228 us x0.45 / 1926 rows   227 us x0.45 / 2123 rows   202 us x0.40 / 1938 rows   203 us x0.40 / 2285 rows   209 us x0.41 / 1860 rows
+  0.9: 649 us x1.00 / 4123 rows   261 us x0.40 / 3217 rows   254 us x0.39 / 3217 rows   289 us x0.45 / 3028 rows   291 us x0.45 / 3138 rows   263 us x0.40 / 3041 rows   262 us x0.40 / 3641 rows   266 us x0.41 / 2959 rows
+  0.95: 771 us x1.00 / 5448 rows   337 us x0.44 / 4077 rows   328 us x0.43 / 4077 rows   374 us x0.49 / 4012 rows   358 us x0.46 / 4010 rows   345 us x0.45 / 4010 rows   451 us x0.58 / 5034 rows   370 us x0.48 / 4004 rows
+  0.99: 869 us x1.00 / 6508 rows   503 us x0.58 / 5446 rows   485 us x0.56 / 5446 rows   555 us x0.64 / 5477 rows   543 us x0.62 / 5495 rows   523 us x0.60 / 5502 rows   543 us x0.62 / 6273 rows   532 us x0.61 / 5575 rows
+yahoo-minilm-384-normalized, region-25: us / rows to reach recall (spread / adaptive / adaptive-c / sub-a-filter / sub-b-filter / sub-c-filter / sub-c / sub-c-own-filter)
+  0.8: 815 us x1.00 / 5734 rows   296 us x0.36 / 4529 rows   281 us x0.34 / 4529 rows   287 us x0.35 / 3364 rows   317 us x0.39 / 4321 rows   257 us x0.32 / 3364 rows   258 us x0.32 / 3088 rows   240 us x0.29 / 2767 rows
+  0.9: 1358 us x1.00 / 11706 rows   480 us x0.35 / 8194 rows   463 us x0.34 / 8194 rows   471 us x0.35 / 6261 rows   497 us x0.37 / 7668 rows   423 us x0.31 / 6262 rows   446 us x0.33 / 6053 rows   395 us x0.29 / 5431 rows
+  0.95: 2292 us x1.00 / 22438 rows   773 us x0.34 / 14317 rows   776 us x0.34 / 14317 rows   763 us x0.33 / 11867 rows   841 us x0.37 / 13978 rows   688 us x0.30 / 11868 rows   759 us x0.33 / 11765 rows   730 us x0.32 / 11413 rows
+  0.99: 4824 us x1.00 / 54830 rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows   - us / - rows

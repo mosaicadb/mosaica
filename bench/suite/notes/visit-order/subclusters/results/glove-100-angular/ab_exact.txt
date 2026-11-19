@@ -1,0 +1,13 @@
+glove-100-angular: 592 clusters, 100 queries, k 10, 5 repetitions; exact k-NN and threshold, default layout against layout (c)
+none       knn@10     answer      10.0  default   19739.5 us  (c)   21374.4 us  paired (c)/default median 1.081 [q25 1.052, q75 1.116]  answers differ 0
+none       thr@0.0001 answer     118.0  default   21713.4 us  (c)   23184.4 us  paired (c)/default median 1.079 [q25 1.053, q75 1.103]  answers differ 0
+none       thr@0.01   answer   11835.2  default   33051.3 us  (c)   34816.2 us  paired (c)/default median 1.054 [q25 1.030, q75 1.076]  answers differ 0
+none       thr@0.1    answer  118354.7  default   44431.8 us  (c)   46138.5 us  paired (c)/default median 1.037 [q25 1.015, q75 1.055]  answers differ 0
+random-1   knn@10     answer      10.0  default     382.1 us  (c)     384.2 us  paired (c)/default median 1.002 [q25 0.950, q75 1.050]  answers differ 0
+random-1   thr@0.01   answer     118.0  default     424.6 us  (c)     424.4 us  paired (c)/default median 1.002 [q25 0.952, q75 1.054]  answers differ 0
+random-25  knn@10     answer      10.0  default   16453.7 us  (c)   19244.9 us  paired (c)/default median 1.167 [q25 1.127, q75 1.222]  answers differ 0
+random-25  thr@0.01   answer    2958.8  default   24698.7 us  (c)   27279.4 us  paired (c)/default median 1.116 [q25 1.099, q75 1.131]  answers differ 0
+region-1   knn@10     answer      10.0  default     328.1 us  (c)     324.3 us  paired (c)/default median 0.992 [q25 0.954, q75 1.045]  answers differ 0
+region-1   thr@0.01   answer     118.1  default     374.0 us  (c)     371.9 us  paired (c)/default median 0.979 [q25 0.932, q75 1.017]  answers differ 0
+region-25  knn@10     answer      10.0  default   12115.6 us  (c)   12989.6 us  paired (c)/default median 1.093 [q25 1.063, q75 1.128]  answers differ 0
+region-25  thr@0.01   answer    2958.9  default   15032.7 us  (c)   15957.5 us  paired (c)/default median 1.066 [q25 1.039, q75 1.093]  answers differ 0

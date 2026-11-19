@@ -1,0 +1,13 @@
+laion-clip-512-normalized: 500 clusters, 100 queries, k 10, 5 repetitions; exact k-NN and threshold, default layout against layout (c)
+none       knn@10     answer      10.0  default   39984.7 us  (c)   42613.7 us  paired (c)/default median 1.051 [q25 1.028, q75 1.077]  answers differ 0
+none       thr@0.0001 answer      99.9  default   40327.0 us  (c)   42643.7 us  paired (c)/default median 1.053 [q25 1.025, q75 1.079]  answers differ 0
+none       thr@0.01   answer    9994.0  default   59647.4 us  (c)   60228.3 us  paired (c)/default median 1.023 [q25 1.002, q75 1.045]  answers differ 0
+none       thr@0.1    answer  100021.4  default   87447.8 us  (c)   89039.3 us  paired (c)/default median 1.017 [q25 1.004, q75 1.038]  answers differ 0
+random-1   knn@10     answer      10.0  default     897.9 us  (c)     891.7 us  paired (c)/default median 0.995 [q25 0.979, q75 1.021]  answers differ 0
+random-1   thr@0.01   answer     100.0  default     917.4 us  (c)     912.1 us  paired (c)/default median 0.999 [q25 0.981, q75 1.019]  answers differ 0
+random-25  knn@10     answer      10.0  default   38155.8 us  (c)   41396.4 us  paired (c)/default median 1.091 [q25 1.062, q75 1.113]  answers differ 0
+random-25  thr@0.01   answer    2499.5  default   52246.4 us  (c)   55123.8 us  paired (c)/default median 1.064 [q25 1.044, q75 1.080]  answers differ 0
+region-1   knn@10     answer      10.0  default     715.6 us  (c)     690.2 us  paired (c)/default median 0.970 [q25 0.951, q75 0.984]  answers differ 0
+region-1   thr@0.01   answer     100.1  default     729.4 us  (c)     703.4 us  paired (c)/default median 0.966 [q25 0.944, q75 0.988]  answers differ 0
+region-25  knn@10     answer      10.0  default   25193.6 us  (c)   26586.1 us  paired (c)/default median 1.043 [q25 1.018, q75 1.067]  answers differ 0
+region-25  thr@0.01   answer    2500.3  default   30511.7 us  (c)   31334.2 us  paired (c)/default median 1.030 [q25 1.012, q75 1.052]  answers differ 0

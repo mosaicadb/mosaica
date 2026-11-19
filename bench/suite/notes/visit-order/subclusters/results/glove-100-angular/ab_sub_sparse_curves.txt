@@ -1,0 +1,10 @@
+glove-100-angular, random-1: us / rows to reach recall (adaptive / adaptive-c / sub-a-filter / sub-c-filter / sub-c-own-filter)
+  0.8: 92 us x1.00 / 1128 rows   91 us x0.99 / 1128 rows   104 us x1.13 / 1195 rows   102 us x1.11 / 1119 rows   96 us x1.05 / 1157 rows
+  0.9: 131 us x1.00 / 3452 rows   129 us x0.98 / 3452 rows   142 us x1.08 / 3929 rows   144 us x1.09 / 3688 rows   135 us x1.03 / 3684 rows
+  0.95: 151 us x1.00 / 4614 rows   148 us x0.98 / 4614 rows   161 us x1.06 / 5296 rows   164 us x1.09 / 4972 rows   154 us x1.02 / 4948 rows
+  0.99: 566 us x1.00 / 8227 rows   551 us x0.97 / 8227 rows   593 us x1.05 / 8615 rows   574 us x1.01 / 8445 rows   578 us x1.02 / 8471 rows
+glove-100-angular, region-1: us / rows to reach recall (adaptive / adaptive-c / sub-a-filter / sub-c-filter / sub-c-own-filter)
+  0.8: 172 us x1.00 / 6091 rows   164 us x0.95 / 6091 rows   190 us x1.10 / 6339 rows   196 us x1.14 / 6281 rows   160 us x0.93 / 6174 rows
+  0.9: 355 us x1.00 / 8124 rows   333 us x0.94 / 8124 rows   358 us x1.01 / 8237 rows   341 us x0.96 / 8188 rows   333 us x0.94 / 8053 rows
+  0.95: 449 us x1.00 / 9168 rows   421 us x0.94 / 9168 rows   456 us x1.02 / 9299 rows   426 us x0.95 / 9256 rows   434 us x0.97 / 9098 rows
+  0.99: 462 us x1.00 / 10789 rows   455 us x0.98 / 10789 rows   487 us x1.05 / 10905 rows   463 us x1.00 / 10879 rows   463 us x1.00 / 10803 rows

@@ -1,0 +1,105 @@
+
+glove-100-angular, none: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           787    x1.00        611    x0.78        614    x0.78        532    x0.68
+  0.9          1324    x1.00       1038    x0.78       1146    x0.87        965    x0.73
+  0.95         2958    x1.00       2619    x0.89       2743    x0.93       2468    x0.83
+  0.99        13968    x1.00      12812    x0.92      16227    x1.16      12500    x0.89
+
+glove-100-angular, random-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8            92    x1.00        106    x1.15        103    x1.12        109    x1.18
+  0.9           125    x1.00        143    x1.14        356    x2.85        150    x1.20
+  0.95          141    x1.00        161    x1.14        493    x3.50        171    x1.21
+  0.99          546    x1.00        563    x1.03        592    x1.08        582    x1.07
+
+glove-100-angular, random-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           344    x1.00        331    x0.96        349    x1.01        274    x0.80
+  0.9           679    x1.00        613    x0.90        717    x1.06        562    x0.83
+  0.95         1075    x1.00        876    x0.81       1053    x0.98        852    x0.79
+  0.99         3943    x1.00       3353    x0.85       5196    x1.32       3453    x0.88
+
+glove-100-angular, region-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           173    x1.00        187    x1.08        430    x2.49        199    x1.15
+  0.9           342    x1.00        365    x1.07        477    x1.39        372    x1.09
+  0.95          438    x1.00        470    x1.07        487    x1.11        473    x1.08
+  0.99          465    x1.00        486    x1.05        499    x1.07        482    x1.04
+
+glove-100-angular, region-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           554    x1.00        472    x0.85        541    x0.98        421    x0.76
+  0.9          1148    x1.00       1085    x0.95       1045    x0.91        963    x0.84
+  0.95         1618    x1.00       1512    x0.93       1371    x0.85       1349    x0.83
+  0.99         5010    x1.00       4144    x0.83       9285    x1.85       4176    x0.83
+
+laion-clip-512-normalized, none: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8          1380    x1.00       1168    x0.85        867    x0.63       1168    x0.85
+  0.9          2358    x1.00       1967    x0.83       2155    x0.91       1876    x0.80
+  0.95         4170    x1.00       3686    x0.88       4585    x1.10       3702    x0.89
+  0.99        35863    x1.00      36580    x1.02      65222    x1.82      36960    x1.03
+
+laion-clip-512-normalized, random-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           127    x1.00        143    x1.13        155    x1.22        146    x1.15
+  0.9           207    x1.00        216    x1.04        233    x1.13        227    x1.10
+  0.95          356    x1.00        400    x1.12        387    x1.09        406    x1.14
+  0.99         1230    x1.00       1272    x1.03       1264    x1.03       1286    x1.05
+
+laion-clip-512-normalized, random-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           459    x1.00        389    x0.85        365    x0.80        355    x0.77
+  0.9          1011    x1.00        755    x0.75        760    x0.75        755    x0.75
+  0.95         2747    x1.00       1833    x0.67       1931    x0.70       1873    x0.68
+  0.99        29154    x1.00      24126    x0.83      38031    x1.30      24980    x0.86
+
+laion-clip-512-normalized, region-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           356    x1.00        369    x1.04        368    x1.03        378    x1.06
+  0.9           572    x1.00        639    x1.12        583    x1.02        642    x1.12
+  0.95          835    x1.00        917    x1.10        890    x1.07        916    x1.10
+  0.99          963    x1.00       1013    x1.05       1016    x1.06       1026    x1.07
+
+laion-clip-512-normalized, region-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8          1242    x1.00       1018    x0.82        966    x0.78       1031    x0.83
+  0.9          3313    x1.00       2371    x0.72       2415    x0.73       2557    x0.77
+  0.95         7517    x1.00       6465    x0.86       6408    x0.85       6327    x0.84
+  0.99        24017    x1.00      21108    x0.88      25915    x1.08      22122    x0.92
+
+yahoo-minilm-384-normalized, none: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           389    x1.00        307    x0.79        228    x0.59        257    x0.66
+  0.9           705    x1.00        604    x0.86        492    x0.70        491    x0.70
+  0.95         1242    x1.00       1008    x0.81       1035    x0.83        867    x0.70
+  0.99                     -                   -                   -                   -
+
+yahoo-minilm-384-normalized, random-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8            64    x1.00         70    x1.09         68    x1.06         68    x1.06
+  0.9            83    x1.00         90    x1.08         94    x1.13         94    x1.13
+  0.95          117    x1.00        121    x1.03        133    x1.14        126    x1.08
+  0.99          219    x1.00        240    x1.10        454    x2.07        265    x1.21
+
+yahoo-minilm-384-normalized, random-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           162    x1.00        146    x0.90        146    x0.90        135    x0.83
+  0.9           263    x1.00        222    x0.84        231    x0.88        185    x0.70
+  0.95          445    x1.00        385    x0.87        416    x0.93        343    x0.77
+  0.99         1478    x1.00                   -                   -                   -
+
+yahoo-minilm-384-normalized, region-1: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           194    x1.00        202    x1.04        203    x1.05        209    x1.08
+  0.9           254    x1.00        263    x1.04        262    x1.03        266    x1.05
+  0.95          328    x1.00        345    x1.05        451    x1.38        370    x1.13
+  0.99          485    x1.00        523    x1.08        543    x1.12        532    x1.10
+
+yahoo-minilm-384-normalized, region-25: time to recall, us, and against adaptive-c
+  recall          adaptive-c        sub-c-filter               sub-c    sub-c-own-filter
+  0.8           281    x1.00        257    x0.91        258    x0.92        240    x0.85
+  0.9           463    x1.00        423    x0.91        446    x0.96        395    x0.85
+  0.95          776    x1.00        688    x0.89        759    x0.98        730    x0.94
+  0.99                     -                   -                   -                   -
