@@ -1,0 +1,23 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sdS/work/laion-clip-512-normalized/vexact/index/encoded in 0.389s: 1000448 rows, 500 clusters; when built: code hash 48fb4165d8f0231f, store hash 3578622ebf9c2aea
+[repack] occupancy thresholds by level [0.31, 0.31, 0.22, 0.29, 0.35, 0.36] (timed in 0.0s)
+[open] 0.585s in all: fit read 0.134s, key 0.025s, index opened 0.390s, repack timed 0.037s; anon 126 MB
+[approx] measured constants dir_us=0.894788164038929 row_us_1=0.11155862791593571 row_us_4=0.07700085838663706 row_us_16=0.0771669963755789 row_us_64=0.07491513898447086 cl_us=10.571427956488028 cut_row_us_1=0.03039811675012935 cut_row_us_4=0.05548797518129605 cut_row_us_16=0.16520422481966 cut_row_us_64=0.35891105355567576 cut_us=2.1320312500000003 grp_us=85.453 sig_us=1.8911875: read from /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sdS/work/laion-clip-512-normalized/vexact/index/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=145 r_kappa=0.000
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+approximate k-NN; measured constants {'dir_us': 0.894788164038929, 'row_us_1': 0.11155862791593571, 'row_us_4': 0.07700085838663706, 'row_us_16': 0.0771669963755789, 'row_us_64': 0.07491513898447086, 'cl_us': 10.571427956488028, 'cut_row_us_1': 0.03039811675012935, 'cut_row_us_4': 0.05548797518129605, 'cut_row_us_16': 0.16520422481966, 'cut_row_us_64': 0.35891105355567576, 'cut_us': 2.1320312500000003, 'grp_us': 85.453, 'sig_us': 1.8911875, 'rule': (145, 0.0), 'plan_rule': (64, 0.186)}
+filter                point    total  centres  spreads    order   choice   groups   stored     rest   dirs  visit direct  index  grps   us and counts, median over 100 queries
+none                  psi=3    817.6     20.6     10.6     14.3      7.2     83.9    215.0    465.9    144    2.0    0.0    2.0   1.0
+none                psi=4.5   2445.2     19.9     34.1     21.6     33.8    299.0    278.6   1758.2    344   14.5    0.0   14.5   6.5
+none                  psi=6  12813.8     20.1    190.9     77.7    200.2   1239.1    647.3  10438.5   1944  114.5    3.5  111.5  27.0
+random-1              psi=3    156.7     18.3     34.8     84.8      1.4      0.0     67.7    -50.3    600   33.5   33.5    0.0   0.0
+random-1            psi=4.5    808.9     21.8    180.4    498.1      8.1      0.0    417.6   -317.1   3048  217.5  217.5    0.0   0.0
+random-1              psi=6   1589.3     22.0    363.6   1022.6     17.2      0.0    859.0   -695.2   6192  494.5  494.5    0.0   0.0
+random-25             psi=3    314.6     21.3     11.9     11.2      0.3      0.0    254.9     15.0    168    3.5    3.5    0.0   0.0
+random-25           psi=4.5   1963.3     19.1     61.0     42.5      5.3      0.0   1767.2     68.3    616   31.5   31.5    0.0   0.0
+random-25             psi=6   9855.2     21.2    283.9    318.5     18.4      0.0   9128.5     84.8   3088  186.0  186.0    0.0   0.0
+region-1              psi=3    757.6     20.5     43.1    236.3     15.4      0.0    578.5   -136.2    784  109.5  109.5    0.0   0.0
+region-1            psi=4.5    933.0     21.5     48.8    330.7     20.3      0.0    672.8   -161.1    832  248.0  248.0    0.0   0.0
+region-1              psi=6    970.3     22.1     49.2    340.6     20.6      0.0    696.5   -158.8    832  249.0  249.0    0.0   0.0
+region-25             psi=3    989.1     23.7     21.8     45.0     12.7     59.8    396.2    429.9    208    6.0    5.0    2.0   1.0
+region-25           psi=4.5   4554.0     20.1     89.5    241.7     85.5    396.2   1715.7   2005.3    864   47.0   31.0   18.0   8.0
+region-25             psi=6  18575.0     25.0    410.3   1525.4    423.9   1307.3   7809.2   7073.9   3960  241.5  175.0   72.0  25.0

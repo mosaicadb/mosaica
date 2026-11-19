@@ -466,6 +466,28 @@ are mixed: yahoo is better at 0.8 and 0.9 (0.53/0.72 of spread against 0.74/0.79
 at 0.9 to 0.95 on glove and LAION, with or without the hand-over. This is consistent with the gap curve fitted on corpus
 rows overpricing a threshold query's near clusters (above), but not yet tested.
 
+**The gap curve dropped; the threshold priced at its cut** (`results/threshold-cut/`). The curve was dropped: it
+differed by up to 2.2 times between query kinds, left yahoo's and LAION's residuals rising, and added about 108
+lines. The threshold's regression had another cause: it priced each cluster's index path at every visible row
+(`index(nv)` = cut_us + cl_us + cut_row_us(share) · nv against `direct` = dir_us + row_us(share) · nv), so the path
+saved only (row_us − cut_row_us) · nv. Under a filter cut_row_us is above row_us at most shares (yahoo and LAION at
+share 1/4 excepted, where clusters hold too few visible rows to cover cl_us), and unfiltered it pays only for
+glove clusters over about 1,100 rows. The threshold query now prices it as k-NN does: at the rows the sorted range at
+t leaves, found for the cluster being decided and only when the index path could be the cheaper, plus the group's
+setup when the group is new. The group bought by foregone savings against the k-NN rule (bought when the read with
+its setup is cheaper): the same decisions under random-25 (every cluster read directly in both), and within the
+runs' noise elsewhere. The noise is large: yahoo random-25 with identical decisions in both gives 0.18 against 0.23
+of the exact time at 0.99. Glove unfiltered is 0.54/0.65/0.77 against 0.55/0.67/0.80, glove region-25 0.39/0.45/0.53
+against 0.35/0.41/0.49. The k-NN rule, the simpler, was kept. Against 989bab9 (the same procedure) the threshold
+matches it unfiltered (glove 1 in 10,000 0.25/0.32/0.54 against 0.26/0.33/0.55; LAION 1% 0.38/0.51/0.78 against
+0.37/0.50/0.78; yahoo 1% 0.20/0.30/0.51 against 0.22/0.34/0.54) and beats it under random-25 (glove 0.22/0.26/0.32
+against 0.34/0.41/0.50; yahoo 0.07/0.13/0.23 against 0.10/0.17/0.31; LAION equal). It recovers 1e0061a's regression
+(LAION 1% at 0.99: 0.78 against 0.93). Under random-1 and region-1 it is 1.01 to 1.03 of the exact query (the sparse
+hand-over). Consolidated-final, an earlier build and session, still has the lower ratios at 0.9 unfiltered (glove 1
+in 10,000: 0.13 against 0.25) and under random-25 and region-25 (glove random-25 0.14/0.20/0.30 against
+0.22/0.26/0.32). k-NN, back to 3bd18eb's pricing, is within noise of 3bd18eb and better at glove unfiltered's top
+(1.02/1.38/1.69 of spread at 0.98/0.99/0.995 against 1.12/1.50/1.81).
+
 **Next.**
 - The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.
