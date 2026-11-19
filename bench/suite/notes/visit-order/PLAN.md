@@ -425,6 +425,47 @@ simpler one. Nothing in k-NN compares a modelled total with a scan or the exact 
 still hands over to the cheaper of a scan and the exact query when its sure reads (and the sigmas still to price)
 cost as much, comparing modelled read costs on both sides, with no per-query fixed work on either.
 
+**The measured gap curve** (`results/gap-curve/`). The index path's cost per row the range leaves is cut_row_us(share)
+× h(g), g = (cut − μ_c)/σ_c (rad_c · s where the cluster has no sigma), h in seven bins of g (edges 1 to 6), 1 at the
+median gap of the reads timed. At open each sampled cluster is read on the index path at a rotating cut (the query's
+10th and 100th best, μ + {0, 2, 4, 6} σ); g is clamped at query time to the 1st to 99th percentile of the gaps
+timed: 0 to 6.0 (glove), 0 to 13.7 (yahoo), 0 to 10.1 (LAION). The curves (`constants-*.txt`) fall from 2.3 to 3.5
+at g < 1 to 0.44 to 0.55 at g ≥ 6. The residual of the timed reads by gap bin (`gap-study.txt`) is flat on glove (1.00
+to 1.17) and rises from 1.05 to 1.38 (yahoo) and 1.01 to 1.35 (LAION). By share within a gap bin it ranges 0.96 to
+1.93 with no pattern across shares, so share × h(g) separates within the timing's noise and no 2-D table was built.
+
+The curve depends on which (cluster, cut) pairs are timed (`gap-study.txt`, three fits). Fitted on corpus rows as
+pseudo-queries, on test queries, and on threshold queries at the prep thresholds, the cost per row at share 1 differs
+by up to 2.19 (glove), 1.61 (yahoo) and 1.74 (LAION) between kinds in the same bin. The largest gaps are at g < 3,
+where threshold queries cost 0.5 to 0.7 of the corpus rows' cost. The threshold kind also covers fewer gaps (−0.3 to
+4.4 to 7.8). Corpus and test queries share a shape apart from the top bins, but corpus rows cost 1.2 to 1.5 times more
+on glove and less on LAION (the corpus fit leaves 0.79 to 0.86 on glove's test-query reads and 1.09 to 2.00 on
+LAION's). So g is not a sufficient statistic for the read's cost.
+
+Region against random filters, at matched per-cluster share, current model, real queries on the prep sets:
+direct/index residuals of 1.25/1.01 (random-1) against 1.29/0.87 (region-1) on glove, 1.88/1.84 against 1.77/1.65 on
+yahoo and 1.39/1.80 against 1.08/2.12 on LAION; 1.05/0.78, 1.61/1.41 and 1.51/1.39 (random-25) against 1.12/0.84,
+1.33/1.15 and 1.29/1.04 (region-25). Long visible runs are cheaper than the model says: yahoo region-25's residual
+falls from 1.76/1.44 at runs under 1.5 rows to 0.93/0.68 at 16 or more, LAION's from 1.42/1.44 to 1.10/1.06. No
+run-length term was built.
+
+The threshold query's modelled-total hand-over (to a scan or the exact query) against the sparse planner hand-over
+alone (`hand-over-kept/` and `hand-over-removed/`): removing it is within noise or better everywhere: glove random-25
+0.23/0.27/0.34 of the exact time to recall 0.9/0.95/0.99 against 0.29/0.36/0.44, glove region-25 0.30/0.35/0.42
+against 0.43/0.51/0.62, yahoo random-25 0.08/0.13/0.25 against 0.10/0.17/0.31, LAION within 0.01 to 0.06. It was
+removed. A threshold query now hands over only when its visible set makes the exact query scan first. With psi
+infinite it reads every open cluster without a sigma.
+
+Re-timed (`summary.txt`). k-NN against 3bd18eb is within noise under random-1 and random-25. The unfiltered results
+are mixed: yahoo is better at 0.8 and 0.9 (0.53/0.72 of spread against 0.74/0.79), glove is worse at 0.95 and 0.98
+(0.94/1.37 against 0.71/1.12), and LAION is 0.02 to 0.08 worse. Region-1 is 0.41 to 0.73 of spread, region-25 0.41 to
+1.12. The modelled k-NN cost per measured time moves toward 1 at small psi (0.38 to 0.55 at psi 2 before, 0.41 to
+1.02 now). The threshold under random-25 and region-25 matches or beats 989bab9. Under random-1 and region-1 it is
+1.00 to 1.03 of the exact query, against consolidated-final's 1.08 to 1.15 at 0.99. Unfiltered, it is worse than
+989bab9 at 0.99 (glove 1 in 10,000: 0.72 against 0.55, LAION 1%: 0.93 against 0.78, yahoo 1%: 0.64 against 0.54) and
+at 0.9 to 0.95 on glove and LAION, with or without the hand-over. This is consistent with the gap curve fitted on corpus
+rows overpricing a threshold query's near clusters (above), but not yet tested.
+
 **Next.**
 - The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.

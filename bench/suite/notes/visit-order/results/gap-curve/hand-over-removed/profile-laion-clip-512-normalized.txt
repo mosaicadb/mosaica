@@ -1,0 +1,23 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sdB/work/laion-clip-512-normalized/vexact/index/encoded in 0.410s: 1000448 rows, 500 clusters; when built: code hash 48fb4165d8f0231f, store hash 3578622ebf9c2aea
+[repack] occupancy thresholds by level [0.31, 0.3, 0.19, 0.31, 0.32, 0.39] (timed in 0.0s)
+[open] 0.619s in all: fit read 0.139s, key 0.031s, index opened 0.411s, repack timed 0.037s; anon 126 MB
+[approx] measured constants dir_us=1.150354330844546 row_us_1=0.0872190293056965 row_us_4=0.07086984923552038 row_us_16=0.06509947620099003 row_us_64=0.055943640006881803 cl_us=9.31410428922754 cut_row_us_1=0.03866818757585622 cut_row_us_4=0.08414685772483686 cut_row_us_16=0.16496364403572708 cut_row_us_64=0.26917623592280787 cut_us=1.8208125 grp_us=74.076 sig_us=1.7915625 h_0=3.5324266554989956 h_1=2.275239616711097 h_2=1.9150044536337534 h_3=1 h_4=1.0911411162837625 h_5=0.6127576384658291 h_6=0.5512460822822118 g_lo=0 g_hi=10.064406385932404: read from /tmp/claude-0/-home-user-mosaica/9dd9aa4f-8e82-5b20-b171-abce110d80dd/scratchpad/sdB/work/laion-clip-512-normalized/vexact/index/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=206 r_kappa=0.000
+laion-clip-512-normalized: 500 clusters, 1000448 rows, k 10
+approximate k-NN; measured constants {'dir_us': 1.150354330844546, 'row_us_1': 0.0872190293056965, 'row_us_4': 0.07086984923552038, 'row_us_16': 0.06509947620099003, 'row_us_64': 0.055943640006881803, 'cl_us': 9.31410428922754, 'cut_row_us_1': 0.03866818757585622, 'cut_row_us_4': 0.08414685772483686, 'cut_row_us_16': 0.16496364403572708, 'cut_row_us_64': 0.26917623592280787, 'cut_us': 1.8208125, 'grp_us': 74.076, 'sig_us': 1.7915625, 'h_0': 3.5324266554989956, 'h_1': 2.275239616711097, 'h_2': 1.9150044536337534, 'h_3': 1.0, 'h_4': 1.0911411162837625, 'h_5': 0.6127576384658291, 'h_6': 0.5512460822822118, 'g_lo': 0.0, 'g_hi': 10.064406385932404, 'rule': (206, 0.0), 'plan_rule': (64, 0.186)}
+filter                point    total  centres  spreads    order   choice   groups   stored     rest   dirs  visit direct  index  grps   us and counts, median over 100 queries
+none                  psi=3    549.1     20.2     16.4     13.7      8.3      0.0    486.6      3.8    144    2.0    2.0    0.0   0.0
+none                psi=4.5   2749.2     23.1     48.2     23.9     43.6    244.8    947.9   1417.6    344   14.5    5.0   10.5   4.0
+none                  psi=6  17558.7     42.4    292.4     97.1    302.0   1673.1   1999.0  13152.7   1944  114.5   11.0   99.0  27.0
+random-1              psi=3    188.3     21.8     38.3    100.4      1.7      0.0     82.1    -55.9    624   33.0   33.0    0.0   0.0
+random-1            psi=4.5    891.8     23.9    215.3    532.9      9.0      0.0    448.4   -337.8   3360  217.5  217.5    0.0   0.0
+random-1              psi=6   1588.8     21.4    379.2   1001.0     18.3      0.0    825.8   -657.0   6800  496.0  496.0    0.0   0.0
+random-25             psi=3    370.8     20.6     18.6     12.5      0.3      0.0    290.8     27.9    168    3.5    3.5    0.0   0.0
+random-25           psi=4.5   2579.8     22.6     74.8     53.9      6.1      0.0   2306.6    115.8    616   31.5   31.5    0.0   0.0
+random-25             psi=6  16833.6     38.0    467.3    445.3     80.4      0.0  15608.7    193.9   3088  186.0  186.0    0.0   0.0
+region-1              psi=3    836.4     24.0     54.5    250.6     17.1      0.0    625.2   -135.2    856  100.5  100.5    0.0   0.0
+region-1            psi=4.5    991.6     24.5     56.9    341.6     21.7      0.0    709.1   -162.2    928  248.0  248.0    0.0   0.0
+region-1              psi=6    991.2     24.6     57.1    358.0     21.4      0.0    713.0   -182.9    928  249.0  249.0    0.0   0.0
+region-25             psi=3    767.3     23.5     22.2     44.5     12.5      0.0    591.4     73.1    208    6.0    6.0    0.0   0.0
+region-25           psi=4.5   5203.1     24.1     99.9    249.6     87.3    180.1   3934.3    627.8    864   47.0   43.0    5.0   3.0
+region-25             psi=6  23010.6     39.6    528.4   1925.2    443.8    989.7  14235.6   4848.3   3960  241.5  203.0   41.5  17.0

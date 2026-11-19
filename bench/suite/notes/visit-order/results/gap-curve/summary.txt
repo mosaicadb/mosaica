@@ -1,0 +1,105 @@
+== gap curve, hand-over removed (current): k-NN time to recall, adaptive / spread
+glove-100-angular none: adaptive / spread time to recall (exact knn2 18120.8 us at 0.999)
+  0.8: 644/853 = x0.75  0.9: 1162/1722 = x0.67  0.95: 2985/3186 = x0.94  0.98: 7195/5260 = x1.37  0.99: 11614/7099 = x1.64  0.995: 15040/8018 = x1.88
+glove-100-angular random-1: adaptive / spread time to recall (exact knn2 422.1 us at 0.999)
+  0.8: 78/97 = x0.81  0.9: 149/167 = x0.89  0.95: 271/255 = x1.06  0.98: 496/365 = x1.36  0.99: 661/537 = x1.23  0.995: 749/623 = x1.20
+glove-100-angular random-25: adaptive / spread time to recall (exact knn2 16549.1 us at 1.0)
+  0.8: 348/827 = x0.42  0.9: 581/2142 = x0.27  0.95: 1125/3832 = x0.29  0.98: 3144/6287 = x0.50  0.99: 6058/7597 = x0.80  0.995: 8322/9341 = x0.89
+glove-100-angular region-1: adaptive / spread time to recall (exact knn2 348.9 us at 1.0)
+  0.8: 208/448 = x0.46  0.9: 295/556 = x0.53  0.95: 426/642 = x0.66  0.98: 530/765 = x0.69  0.99: 578/805 = x0.72  0.995: 602/826 = x0.73
+glove-100-angular region-25: adaptive / spread time to recall (exact knn2 11595.7 us at 1.0)
+  0.8: 598/1160 = x0.52  0.9: 1106/2464 = x0.45  0.95: 2524/3582 = x0.70  0.98: 4475/5794 = x0.77  0.99: 6137/6924 = x0.89  0.995: 7673/9687 = x0.79
+laion-clip-512-normalized none: adaptive / spread time to recall (exact knn2 37412.9 us at 0.999)
+  0.8: 980/1548 = x0.63  0.9: 1730/2448 = x0.71  0.95: 3160/4448 = x0.71  0.98: 5798/8072 = x0.72  0.99: 10163/10545 = x0.96  0.995: 19517/15811 = x1.23
+laion-clip-512-normalized random-1: adaptive / spread time to recall (exact knn2 867.0 us at 0.997)
+  0.8: 114/114 = x1.01  0.9: 206/196 = x1.06  0.95: 323/321 = x1.01  0.98: 554/544 = x1.02  0.99: 852/683 = x1.25  0.995: 1064/1098 = x0.97
+laion-clip-512-normalized random-25: adaptive / spread time to recall (exact knn2 36015.5 us at 0.995)
+  0.8: 430/1532 = x0.28  0.9: 918/2935 = x0.31  0.95: 2274/5327 = x0.43  0.98: 6506/10940 = x0.59  0.99: 12243/17736 = x0.69  0.995: 29946/28829 = x1.04
+laion-clip-512-normalized region-1: adaptive / spread time to recall (exact knn2 690.1 us at 0.996)
+  0.8: 344/731 = x0.47  0.9: 495/946 = x0.52  0.95: 739/1185 = x0.62  0.98: 832/1429 = x0.58  0.99: 854/1511 = x0.57  0.995: 864/1551 = x0.56
+laion-clip-512-normalized region-25: adaptive / spread time to recall (exact knn2 23579.2 us at 0.998)
+  0.8: 1031/2348 = x0.44  0.9: 2465/4529 = x0.54  0.95: 5634/7771 = x0.72  0.98: 12095/13183 = x0.92  0.99: 17779/15852 = x1.12  0.995: 20460/21769 = x0.94
+yahoo-minilm-384-normalized none: adaptive / spread time to recall (exact knn2 15892.3 us at 1.0)
+  0.8: 335/<633 = x0.53  0.9: 671/929 = x0.72  0.95: 1022/1318 = x0.78  0.98: 1700/2258 = x0.75  0.99: -  0.995: -
+yahoo-minilm-384-normalized random-1: adaptive / spread time to recall (exact knn2 510.4 us at 1.0)
+  0.8: 56/57 = x0.98  0.9: 73/88 = x0.83  0.95: 112/139 = x0.81  0.98: 168/237 = x0.71  0.99: 208/316 = x0.66  0.995: 337/458 = x0.74
+yahoo-minilm-384-normalized random-25: adaptive / spread time to recall (exact knn2 13154.8 us at 1.0)
+  0.8: 172/564 = x0.31  0.9: 283/910 = x0.31  0.95: 432/1400 = x0.31  0.98: 1177/2474 = x0.48  0.99: -  0.995: -
+yahoo-minilm-384-normalized region-1: adaptive / spread time to recall (exact knn2 408.3 us at 1.0)
+  0.8: 202/491 = x0.41  0.9: 286/623 = x0.46  0.95: 348/735 = x0.47  0.98: 428/802 = x0.53  0.99: 473/825 = x0.57  0.995: 482/836 = x0.58
+yahoo-minilm-384-normalized region-25: adaptive / spread time to recall (exact knn2 12078.4 us at 1.0)
+  0.8: 339/820 = x0.41  0.9: 645/1352 = x0.48  0.95: 925/2270 = x0.41  0.98: 1763/3735 = x0.47  0.99: -  0.995: -
+
+== modelled cost / measured time per point (k-NN, adaptive), 3bd18eb
+glove-100-angular none: psi 2: 0.44; psi 2.5: 0.46; psi 3: 0.87; psi 3.5: 1.36; psi 4: 2.44; psi 4.5: 2.27; psi 5: 1.68; psi 5.5: 1.12; psi 6: 1.04; psi 6.5: 1.08; psi 7: 1.17
+glove-100-angular random-1: psi 2: 0.55; psi 2.5: 0.89; psi 3: 1.05; psi 3.5: 1.03; psi 4: 0.95; psi 4.5: 1.03; psi 5: 1.10; psi 5.5: 1.14; psi 6: 1.20; psi 6.5: 1.20; psi 7: 1.22
+glove-100-angular random-25: psi 2: 0.36; psi 2.5: 0.51; psi 3: 0.73; psi 3.5: 1.31; psi 4: 0.99; psi 4.5: 0.68; psi 5: 0.48; psi 5.5: 0.45; psi 6: 0.48; psi 6.5: 0.49; psi 7: 0.52
+laion-clip-512-normalized none: psi 2: 0.38; psi 2.5: 0.46; psi 3: 0.66; psi 3.5: 0.89; psi 4: 1.25; psi 4.5: 1.51; psi 5: 1.45; psi 5.5: 1.36; psi 6: 1.17; psi 6.5: 1.01; psi 7: 0.95
+laion-clip-512-normalized random-1: psi 2: 0.56; psi 2.5: 0.73; psi 3: 0.90; psi 3.5: 1.08; psi 4: 1.07; psi 4.5: 0.99; psi 5: 1.01; psi 5.5: 1.00; psi 6: 1.03; psi 6.5: 1.03; psi 7: 1.05
+laion-clip-512-normalized random-25: psi 2: 0.41; psi 2.5: 0.56; psi 3: 0.78; psi 3.5: 0.95; psi 4: 1.12; psi 4.5: 0.90; psi 5: 0.74; psi 5.5: 0.71; psi 6: 0.58; psi 6.5: 0.51; psi 7: 0.46
+yahoo-minilm-384-normalized none: psi 2: 0.50; psi 2.5: 0.50; psi 3: 0.52; psi 3.5: 0.59; psi 4: 0.69; psi 4.5: 0.79; psi 5: 0.97; psi 5.5: 1.12; psi 6: 1.20; psi 6.5: 1.30; psi 7: 1.42
+yahoo-minilm-384-normalized random-1: psi 2: 0.50; psi 2.5: 0.62; psi 3: 0.71; psi 3.5: 0.94; psi 4: 1.03; psi 4.5: 1.16; psi 5: 1.17; psi 5.5: 1.25; psi 6: 1.30; psi 6.5: 1.23; psi 7: 1.26
+yahoo-minilm-384-normalized random-25: psi 2: 0.55; psi 2.5: 0.59; psi 3: 0.73; psi 3.5: 0.86; psi 4: 0.90; psi 4.5: 0.93; psi 5: 1.02; psi 5.5: 0.97; psi 6: 0.90; psi 6.5: 0.89; psi 7: 0.86
+
+== modelled cost / measured time per point (k-NN, adaptive), current
+glove-100-angular none: psi 2: 0.76; psi 2.5: 0.83; psi 3: 1.44; psi 3.5: 1.86; psi 4: 2.74; psi 4.5: 2.11; psi 5: 1.63; psi 5.5: 1.19; psi 6: 1.16; psi 6.5: 1.18; psi 7: 1.25
+glove-100-angular random-1: psi 2: 0.52; psi 2.5: 0.80; psi 3: 0.97; psi 3.5: 1.00; psi 4: 0.99; psi 4.5: 1.02; psi 5: 1.08; psi 5.5: 1.15; psi 6: 1.19; psi 6.5: 1.18; psi 7: 1.19
+glove-100-angular random-25: psi 2: 0.41; psi 2.5: 0.59; psi 3: 0.94; psi 3.5: 1.44; psi 4: 1.38; psi 4.5: 0.79; psi 5: 0.63; psi 5.5: 0.57; psi 6: 0.58; psi 6.5: 0.61; psi 7: 0.61
+glove-100-angular region-1: psi 2: 1.17; psi 2.5: 1.07; psi 3: 1.10; psi 3.5: 1.16; psi 4: 1.23; psi 4.5: 1.28; psi 5: 1.29; psi 5.5: 1.30; psi 6: 1.29; psi 6.5: 1.29; psi 7: 1.30
+glove-100-angular region-25: psi 2: 0.87; psi 2.5: 1.08; psi 3: 1.37; psi 3.5: 1.53; psi 4: 1.05; psi 4.5: 0.93; psi 5: 0.83; psi 5.5: 0.82; psi 6: 0.85; psi 6.5: 0.92; psi 7: 0.88
+laion-clip-512-normalized none: psi 2: 0.85; psi 2.5: 1.05; psi 3: 1.49; psi 3.5: 1.42; psi 4: 1.71; psi 4.5: 2.13; psi 5: 1.78; psi 5.5: 1.70; psi 6: 1.31; psi 6.5: 1.03; psi 7: 0.93
+laion-clip-512-normalized random-1: psi 2: 0.61; psi 2.5: 0.85; psi 3: 1.00; psi 3.5: 1.15; psi 4: 1.05; psi 4.5: 1.03; psi 5: 1.05; psi 5.5: 1.02; psi 6: 1.07; psi 6.5: 1.13; psi 7: 1.16
+laion-clip-512-normalized random-25: psi 2: 0.44; psi 2.5: 0.62; psi 3: 0.89; psi 3.5: 1.06; psi 4: 1.18; psi 4.5: 0.98; psi 5: 0.80; psi 5.5: 0.71; psi 6: 0.59; psi 6.5: 0.49; psi 7: 0.46
+laion-clip-512-normalized region-1: psi 2: 1.05; psi 2.5: 1.11; psi 3: 1.03; psi 3.5: 1.14; psi 4: 1.20; psi 4.5: 1.22; psi 5: 1.21; psi 5.5: 1.24; psi 6: 1.24; psi 6.5: 1.23; psi 7: 1.24
+laion-clip-512-normalized region-25: psi 2: 0.83; psi 2.5: 1.05; psi 3: 1.11; psi 3.5: 1.05; psi 4: 1.09; psi 4.5: 0.84; psi 5: 0.84; psi 5.5: 0.66; psi 6: 0.59; psi 6.5: 0.55; psi 7: 0.56
+yahoo-minilm-384-normalized none: psi 2: 1.02; psi 2.5: 1.03; psi 3: 1.10; psi 3.5: 1.26; psi 4: 1.30; psi 4.5: 1.34; psi 5: 1.41; psi 5.5: 1.35; psi 6: 1.32; psi 6.5: 1.36; psi 7: 1.34
+yahoo-minilm-384-normalized random-1: psi 2: 0.48; psi 2.5: 0.58; psi 3: 0.70; psi 3.5: 0.87; psi 4: 0.98; psi 4.5: 1.06; psi 5: 1.13; psi 5.5: 1.12; psi 6: 1.22; psi 6.5: 1.26; psi 7: 1.19
+yahoo-minilm-384-normalized random-25: psi 2: 0.53; psi 2.5: 0.56; psi 3: 0.64; psi 3.5: 0.78; psi 4: 0.90; psi 4.5: 1.00; psi 5: 1.08; psi 5.5: 1.09; psi 6: 1.02; psi 6.5: 0.94; psi 7: 0.87
+yahoo-minilm-384-normalized region-1: psi 2: 0.93; psi 2.5: 1.03; psi 3: 1.02; psi 3.5: 1.00; psi 4: 0.93; psi 4.5: 0.97; psi 5: 1.01; psi 5.5: 1.02; psi 6: 1.04; psi 6.5: 1.05; psi 7: 1.08
+yahoo-minilm-384-normalized region-25: psi 2: 0.86; psi 2.5: 1.01; psi 3: 1.04; psi 3.5: 1.21; psi 4: 1.12; psi 4.5: 1.04; psi 5: 1.19; psi 5.5: 1.19; psi 6: 1.14; psi 6.5: 1.10; psi 7: 1.10
+
+== threshold, hand-over kept: adaptive / exact time to recall
+glove-100-angular none share 0.0001: adaptive / exact  0.9: 6796/21064 = x0.32  0.95: 8889/21064 = x0.42  0.99: 15756/21064 = x0.75
+glove-100-angular none share 0.01: adaptive / exact  0.9: 19264/33186 = x0.58  0.95: 23493/33186 = x0.71  0.99: 27931/33186 = x0.84
+glove-100-angular none share 0.1: adaptive / exact  0.9: <32940/43982 = x0.75  0.95: <32940/43982 = x0.75  0.99: 37399/43982 = x0.85
+glove-100-angular random-1 share 0.01: adaptive / exact  0.9: <444/434 = x1.02  0.95: <444/434 = x1.02  0.99: <444/434 = x1.02
+glove-100-angular random-25 share 0.01: adaptive / exact  0.9: 7343/25147 = x0.29  0.95: 8944/25147 = x0.36  0.99: 11026/25147 = x0.44
+glove-100-angular region-1 share 0.01: adaptive / exact  0.9: <390/380 = x1.03  0.95: <390/380 = x1.03  0.99: <390/380 = x1.03
+glove-100-angular region-25 share 0.01: adaptive / exact  0.9: 6350/14734 = x0.43  0.95: 7527/14734 = x0.51  0.99: 9069/14734 = x0.62
+laion-clip-512-normalized none share 0.0001: adaptive / exact  0.9: 4910/39578 = x0.12  0.95: 5829/39578 = x0.15  0.99: 17016/39578 = x0.43
+laion-clip-512-normalized none share 0.01: adaptive / exact  0.9: 25411/58487 = x0.43  0.95: 35412/58487 = x0.61  0.99: 53386/58487 = x0.91
+laion-clip-512-normalized none share 0.1: adaptive / exact  0.9: <71034/87328 = x0.81  0.95: <71034/87328 = x0.81  0.99: 81028/87328 = x0.93
+laion-clip-512-normalized random-1 share 0.01: adaptive / exact  0.9: <925/914 = x1.01  0.95: <925/914 = x1.01  0.99: <925/914 = x1.01
+laion-clip-512-normalized random-25 share 0.01: adaptive / exact  0.9: 10565/50232 = x0.21  0.95: 14702/50232 = x0.29  0.99: 25679/50232 = x0.51
+laion-clip-512-normalized region-1 share 0.01: adaptive / exact  0.9: <693/692 = x1.00  0.95: <693/692 = x1.00  0.99: <693/692 = x1.00
+laion-clip-512-normalized region-25 share 0.01: adaptive / exact  0.9: 11273/30624 = x0.37  0.95: 15167/30624 = x0.50  0.99: 24289/30624 = x0.79
+yahoo-minilm-384-normalized none share 0.0001: adaptive / exact  0.9: 1952/18752 = x0.10  0.95: 2594/18752 = x0.14  0.99: 5063/18752 = x0.27
+yahoo-minilm-384-normalized none share 0.01: adaptive / exact  0.9: 7326/31497 = x0.23  0.95: 12245/31497 = x0.39  0.99: 20513/31497 = x0.65
+yahoo-minilm-384-normalized none share 0.1: adaptive / exact  0.9: <26807/47860 = x0.56  0.95: 36804/47860 = x0.77  0.99: 47327/47860 = x0.99
+yahoo-minilm-384-normalized random-1 share 0.01: adaptive / exact  0.9: <533/528 = x1.01  0.95: <533/528 = x1.01  0.99: <533/528 = x1.01
+yahoo-minilm-384-normalized random-25 share 0.01: adaptive / exact  0.9: 2834/27764 = x0.10  0.95: 4638/27764 = x0.17  0.99: 8533/27764 = x0.31
+yahoo-minilm-384-normalized region-1 share 0.01: adaptive / exact  0.9: <454/459 = x0.99  0.95: <454/459 = x0.99  0.99: <454/459 = x0.99
+yahoo-minilm-384-normalized region-25 share 0.01: adaptive / exact  0.9: 2325/16122 = x0.14  0.95: 3944/16122 = x0.24  0.99: 7468/16122 = x0.46
+
+== threshold, hand-over removed (current): adaptive / exact time to recall
+glove-100-angular none share 0.0001: adaptive / exact  0.9: 6833/21564 = x0.32  0.95: 8919/21564 = x0.41  0.99: 15625/21564 = x0.72
+glove-100-angular none share 0.01: adaptive / exact  0.9: 19374/33619 = x0.58  0.95: 23594/33619 = x0.70  0.99: 28807/33619 = x0.86
+glove-100-angular none share 0.1: adaptive / exact  0.9: <33530/44776 = x0.75  0.95: <33530/44776 = x0.75  0.99: 38035/44776 = x0.85
+glove-100-angular random-1 share 0.01: adaptive / exact  0.9: <480/470 = x1.02  0.95: <480/470 = x1.02  0.99: <480/470 = x1.02
+glove-100-angular random-25 share 0.01: adaptive / exact  0.9: 5805/25781 = x0.23  0.95: 7020/25781 = x0.27  0.99: 8708/25781 = x0.34
+glove-100-angular region-1 share 0.01: adaptive / exact  0.9: <376/365 = x1.03  0.95: <376/365 = x1.03  0.99: <376/365 = x1.03
+glove-100-angular region-25 share 0.01: adaptive / exact  0.9: 4503/15056 = x0.30  0.95: 5290/15056 = x0.35  0.99: 6327/15056 = x0.42
+laion-clip-512-normalized none share 0.0001: adaptive / exact  0.9: 4878/40413 = x0.12  0.95: 5793/40413 = x0.14  0.99: 16957/40413 = x0.42
+laion-clip-512-normalized none share 0.01: adaptive / exact  0.9: 25868/58817 = x0.44  0.95: 36048/58817 = x0.61  0.99: 54709/58817 = x0.93
+laion-clip-512-normalized none share 0.1: adaptive / exact  0.9: <71315/86185 = x0.83  0.95: <71315/86185 = x0.83  0.99: 86652/86185 = x1.01
+laion-clip-512-normalized random-1 share 0.01: adaptive / exact  0.9: <900/886 = x1.02  0.95: <900/886 = x1.02  0.99: <900/886 = x1.02
+laion-clip-512-normalized random-25 share 0.01: adaptive / exact  0.9: 11199/51760 = x0.22  0.95: 15349/51760 = x0.30  0.99: 26320/51760 = x0.51
+laion-clip-512-normalized region-1 share 0.01: adaptive / exact  0.9: <723/713 = x1.01  0.95: <723/713 = x1.01  0.99: <723/713 = x1.01
+laion-clip-512-normalized region-25 share 0.01: adaptive / exact  0.9: 11601/28485 = x0.41  0.95: 15522/28485 = x0.54  0.99: 24310/28485 = x0.85
+yahoo-minilm-384-normalized none share 0.0001: adaptive / exact  0.9: 1959/19724 = x0.10  0.95: 2647/19724 = x0.13  0.99: 5285/19724 = x0.27
+yahoo-minilm-384-normalized none share 0.01: adaptive / exact  0.9: 7703/33184 = x0.23  0.95: 12708/33184 = x0.38  0.99: 21074/33184 = x0.64
+yahoo-minilm-384-normalized none share 0.1: adaptive / exact  0.9: <27689/50255 = x0.55  0.95: 37524/50255 = x0.75  0.99: 47876/50255 = x0.95
+yahoo-minilm-384-normalized random-1 share 0.01: adaptive / exact  0.9: <540/531 = x1.02  0.95: <540/531 = x1.02  0.99: <540/531 = x1.02
+yahoo-minilm-384-normalized random-25 share 0.01: adaptive / exact  0.9: 2374/30855 = x0.08  0.95: 3995/30855 = x0.13  0.99: 7596/30855 = x0.25
+yahoo-minilm-384-normalized region-1 share 0.01: adaptive / exact  0.9: <414/414 = x1.00  0.95: <414/414 = x1.00  0.99: <414/414 = x1.00
+yahoo-minilm-384-normalized region-25 share 0.01: adaptive / exact  0.9: 1914/15638 = x0.12  0.95: 3136/15638 = x0.20  0.99: 5694/15638 = x0.36
