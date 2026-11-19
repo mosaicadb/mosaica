@@ -5,9 +5,14 @@
 #   benchmarked until the pin moves; the bindings (vexact-py) and the algorithm files come from this working tree.
 #   The image is built with -C target-cpu=native: build it on the machine that runs the benchmark.
 set -euo pipefail
-PIN=8f35446ec6134b3acd3b050525d4e3894af5448f
+PIN=7763464aa566688dbae9da59d69778ee2b17b47a
 AB=$(cd "$1" && pwd)
 REV=${2:-$PIN}
+# the bindings in this tree need the library's approximate queries (rust/src/v2/adaptive.rs): refuse an older rust/
+git -C "$(dirname "$0")" cat-file -e "$REV:rust/src/v2/adaptive.rs" 2>/dev/null || {
+  echo "rust/ at $REV is older than the bindings in this tree need (it has no rust/src/v2/adaptive.rs): pass a newer REV, or move PIN in bench/annb/install.sh" >&2
+  exit 2
+}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
 ALG=$AB/ann_benchmarks/algorithms/vexact

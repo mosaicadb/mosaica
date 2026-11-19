@@ -7,8 +7,8 @@
 //! `clusters.bin` (the per-cluster records and centre tables), `anchors.bin`, `hi.bin` and `lo.bin` (the support
 //! table), `order_rad.bin`, `order_lam.bin`, `order_dsc.bin` and `order_dirs.bin` (the approximate mode's cluster-order
 //! state, `order::OrderState`), and `index.json` (sizes, the per-group calibration, constants and basis defect, the
-//! number of directions the order state holds per cluster, the build options that decide the encoding, and the key of
-//! the fit and those options it was built from).
+//! number of directions the order state holds per cluster, the build options that decide the encoding, and the key
+//! of the fit and those options it was built from).
 //!
 //! A saved index is `DIR/encoded` in its index directory DIR (the fit). A rebuild holds an exclusive lock on
 //! `encoded.lock` beside it for its whole run, writes into a scratch directory of its own (`encoded.tmp-PID-NANOS`),
@@ -22,7 +22,7 @@ use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 
 /// The version of the saved index; any other is refused.
-pub const STORE_FORMAT: u64 = 7;
+pub const STORE_FORMAT: u64 = 10;
 
 /// Element types that are stored as their bytes.
 pub unsafe trait Plain: Copy + Send + Sync + 'static {}

@@ -4,10 +4,10 @@ use numpy::{PyArray1, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use roaring::RoaringBitmap;
-use std::collections::HashMap;
 use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
-use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, pseudo_queries, threshold2, to_bitmap2, Approx, OrderKind, Dial, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::adaptive::{measured_constants, typical_rows, Adaptive, AdaptiveInfo, PSI};
+use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, threshold2, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -15,19 +15,47 @@ struct Index {
     _p: Params,
     ix: Index2,
     plan: Plan,
+    /// The legacy approximate order (`spread`, by nprobe), kept as the comparison arm until the owner's benchmark has
+    /// run.
     approx: Approx,
-    pseudo: Vec<(usize, Vec<f32>, Vec<u32>)>,
-    dials: HashMap<usize, Dial>,
     vis: Option<Vis2>,
     pool: rayon::ThreadPool,
+    /// The approximate queries (`v2::adaptive`) with this machine's measured constants (timed at the first open on
+    /// this machine and cached in the index directory), or why they cannot run.
+    adaptive: Result<Adaptive, String>,
+}
+
+/// The query's length against the index's, and k at least 1 (k-NN), as errors to raise.
+fn check_query(ix: &Index2, q: &[f32], k: Option<usize>) -> PyResult<()> {
+    if q.len() != ix.n() {
+        return Err(PyValueError::new_err(format!("the query has {} values, the index {}", q.len(), ix.n())));
+    }
+    if k == Some(0) {
+        return Err(PyValueError::new_err("k must be at least 1"));
+    }
+    Ok(())
+}
+
+/// What an approximate query did, as a dict.
+fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    let d = pyo3::types::PyDict::new(py);
+    d.set_item("path", i.path)?;
+    for (key, x) in [("visited", i.read.len()), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads)] {
+        d.set_item(key, x)?;
+    }
+    for (key, x) in [("fixed", i.fixed), ("cost", i.cost), ("scan_cost", i.scan_cost), ("exact_cost", i.exact_cost)] {
+        d.set_item(key, x)?;
+    }
+    Ok(d)
 }
 
 #[pymethods]
 impl Index {
     /// Open the index saved in the fitted directory `dir` (from `rust/tools/fit.py`) when it was built with these options
     /// (`v2::saved_options`) and is not stale (`v2::open`, which maps it and encodes nothing); else encode the fit and
-    /// save the index there (`v2::rebuild`). Then fit the approximate mode's cluster order on `pseudo` corpus pseudo-queries. Queries run on one
-    /// thread, pinned to `core` when given.
+    /// save the index there (`v2::rebuild`). Queries run on one thread, pinned to `core` when given. The approximate
+    /// queries' cost model is read from the index directory's cache, or timed there on that core (a few seconds, once
+    /// per machine, library and index: `adaptive::measured_constants`).
     /// `plan`: "auto" (the planner: in memory, the support table and the rule in rows; nothing is timed), "index" (every
     /// cluster the support table leaves open on the index path), "flat" (decided from full vectors) or "scan".
     /// `dlv`: the deterministic levels' cumulative bytes (a build input, e.g. [16, 32]); None: the library's default
@@ -47,19 +75,18 @@ impl Index {
     /// `dontcache_min` (bytes; None: never) reads extents from that size up to `direct_min` with RWF_DONTCACHE.
     /// `priced` overrides whether the planner prices the reads. Without `full_file` an opened index reads its vectors
     /// through the saved index's own mapping (normal advice, not priced).
-    /// `order` is the approximate mode's cluster order (`OrderKind`): "radius", with f fitted on `pseudo` corpus
-    /// pseudo-queries, "spread" or "h4", "h16", "h4x8" (H with up to 16 directions per cluster, and optionally
-    /// its candidates per probed cluster, `OrderKind::H`), with f at
-    /// `OrderKind::default_f`. `fit_queries` fits f for any of them on real queries. The clusters' radii and directions
-    /// are the saved index's (`v2::order`, computed by the build); only radius's f is fitted here.
+    /// `rule`: the exact planner's rule in rows in memory, "fixed" (`Plan::default`'s R0 and kappa) or "measured"
+    /// (from this machine's measured constants, `adaptive::Measured::rule` at the index's typical cluster size).
     #[new]
-    #[pyo3(signature = (dir, core=None, pseudo=1000, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
-                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, order="spread"))]
+    #[pyo3(signature = (dir, core=None, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
+                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, rule="fixed"))]
     #[allow(clippy::too_many_arguments)]
-    fn new(py: Python<'_>, dir: String, core: Option<usize>, pseudo: usize, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
+    fn new(py: Python<'_>, dir: String, core: Option<usize>, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
            full_file: Option<String>, advice: &str, read: &str, willneed: bool, direct_min: Option<usize>, dontcache_min: Option<usize>,
-           priced: Option<bool>, order: &str) -> PyResult<Index> {
-        let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
+           priced: Option<bool>, rule: &str) -> PyResult<Index> {
+        if rule != "fixed" && rule != "measured" {
+            return Err(PyValueError::new_err(format!("rule is fixed or measured, not {rule:?}")));
+        }
         if read != "uring" && read != "mmap" {
             return Err(PyValueError::new_err(format!("read is uring or mmap, not {read:?}")));
         }
@@ -99,17 +126,17 @@ impl Index {
                     plan = disk_constants(&ix, plan, &dir, &mut log);
                 }
             }
-            let pseudo = pseudo_queries(&ix, pseudo, 10);
-            let approx = match kind.default_f() {
-                Some(f) => Approx::new(&ix, kind, f, Approx::radii(&ix)),
-                None if pseudo.is_empty() => Approx::centres(&ix),
-                None => Approx::fit(&ix, &pseudo, kind).0,
-            };
+            let approx = Approx::spread(&ix);
             let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().map_err(|e| PyValueError::new_err(e.to_string()))?;
             if let Some(cpu) = core {
                 pool.install(|| vexact::util::pin(cpu));
             }
-            Ok(Index { _p: p, ix, plan, approx, pseudo, dials: HashMap::new(), vis: None, pool })
+            let adaptive = pool.install(|| measured_constants(&ix, &dir, &mut log)).and_then(|m| Adaptive::new(&ix, m));
+            if rule == "measured" {
+                let ad = adaptive.as_ref().map_err(|e| PyValueError::new_err(format!("the measured rule: {e}")))?;
+                (plan.r_rows, plan.r_kappa) = ad.m.rule(typical_rows(&ix)).unwrap_or((usize::MAX, 0.0));
+            }
+            Ok(Index { _p: p, ix, plan, approx, vis: None, pool, adaptive })
         })
     }
 
@@ -131,70 +158,110 @@ impl Index {
         Ok(())
     }
 
-    /// Refit the approximate mode's cluster order, and later dials, on a sample of real queries instead of corpus
-    /// pseudo-queries: `qs` (one query per row, normalised here) and `gt`, each query's nearest entity ids, best first
-    /// (the first 10 are used). Dials fitted before are dropped.
-    fn fit_queries(&mut self, py: Python<'_>, qs: PyReadonlyArray2<'_, f32>, gt: PyReadonlyArray2<'_, i64>) -> PyResult<()> {
-        let (qa, ga) = (qs.as_array(), gt.as_array());
-        if qa.nrows() != ga.nrows() || qa.nrows() == 0 || qa.ncols() != self.ix.n() {
-            return Err(PyValueError::new_err(format!(
-                "need as many neighbour rows as queries, at least one query, and {} columns; got {:?} and {:?}",
-                self.ix.n(), qa.shape(), ga.shape())));
-        }
-        let n = self.ix.nrows as i64;
-        let mut pseudo = Vec::with_capacity(qa.nrows());
-        for (q, g) in qa.outer_iter().zip(ga.outer_iter()) {
-            let qn = q.iter().map(|&x| x as f64 * x as f64).sum::<f64>().sqrt();
-            if qn < 1e-12 {
-                continue;
-            }
-            if let Some(&bad) = g.iter().find(|&&e| e < 0 || e >= n) {
-                return Err(PyValueError::new_err(format!("entity id {bad} is outside 0..{n}")));
-            }
-            let q: Vec<f32> = q.iter().map(|&x| (x as f64 / qn) as f32).collect();
-            // a row past the index marks a held-out query, not a stored row
-            pseudo.push((usize::MAX, q, g.iter().take(10).map(|&e| e as u32).collect::<Vec<u32>>()));
-        }
-        let ix = &self.ix;
-        let kind = self.approx.kind;
-        self.approx = py.detach(|| Approx::fit(ix, &pseudo, kind).0);
-        self.pseudo = pseudo;
-        self.dials.clear();
-        Ok(())
+    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row taken in decreasing
+    /// mu + psi rad sqrt(q' C q / tr C) (centre score plus psi times the spread the cluster would have if shaped as
+    /// the clusters are on average, C their pooled covariance from the stored directions), the next 8 of them given their key u = mu + psi sigma (sigma the spread of the cluster's scores along the
+    /// query, from its stored directions); the one of largest u among those read next, stopping
+    /// when their largest u is below the running k-th best (minus infinity until k items are held). The stop is a
+    /// heuristic: a cluster not yet priced may still have a u above the k-th best. The probe races a scan of the
+    /// visible rows (the rest scanned, exactly, once the probe would cost more than the scan; at most twice the scan's
+    /// modelled cost in all). `psi` is the knob, a number of at least 0: larger reads more, inf
+    /// reads every cluster (exact); 4.5 by default, the recall it gives to be measured. Each cluster is read directly
+    /// or on the index path by this machine's measured constants, which give the same answers. Returns k ids whenever
+    /// k items are visible (-1 only where fewer are).
+    #[pyo3(signature = (q, k, psi=PSI))]
+    fn knn_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, Some(k), psi)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| ad.knn(ix, q, k, vis, psi, plan).0.ents));
+        Ok(ids(py, &ents, k))
     }
 
-    /// Switch the approximate mode's cluster order (as `order` at open), over the radii and directions the index
-    /// stores. Dials fitted before are dropped.
-    fn set_order(&mut self, py: Python<'_>, order: &str) -> PyResult<()> {
-        let kind = OrderKind::parse(order).map_err(PyValueError::new_err)?;
-        let (ix, pseudo) = (&self.ix, &self.pseudo);
-        self.approx = match kind.default_f() {
-            Some(f) => py.detach(|| Approx::new(ix, kind, f, Approx::radii(ix))),
-            None if pseudo.is_empty() => Approx::centres(ix),
-            None => py.detach(|| Approx::fit(ix, pseudo, kind).0),
-        };
-        self.dials.clear();
-        Ok(())
+    /// The approximate threshold query (`v2::adaptive`): the visible entity ids, ascending, scoring at least t among the
+    /// clusters the support table takes in and those whose mu + psi sigma reaches t, read exactly; a subset of
+    /// `threshold`'s answer, and all of it when the query hands over (to a scan, or to the exact query, when either costs
+    /// no more than those reads) or psi is inf. `psi` as for `knn_approx`.
+    #[pyo3(signature = (q, t, psi=PSI))]
+    fn threshold_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, None, psi)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| {
+            let r = ad.threshold(ix, q, t, vis, psi, plan).0;
+            to_bitmap2(ix, &r.rows).iter().map(|e| e as i64).collect::<Vec<i64>>()
+        }));
+        Ok(PyArray1::from_vec(py, ents))
     }
 
-    /// The approximate mode's cluster order and its f.
+    /// What one approximate query did, as a dict: its path ("probe", "race", "scan", "exact", "empty"), the clusters
+    /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
+    /// costs (the order's, the whole query's, a scan's, and for a threshold query the exact query's); and rows touched,
+    /// full vectors read, clusters on the index path and the time in ms. With `t`, the threshold query at t, else
+    /// k-NN at k.
+    #[pyo3(signature = (q, k=10, psi=PSI, t=None))]
+    fn explain_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, if t.is_none() { Some(k) } else { None }, psi)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let tm = std::time::Instant::now();
+        let (i, st) = py.detach(|| self.pool.install(|| match t {
+            Some(t) => {
+                let (r, i) = ad.threshold(ix, q, t, vis, psi, plan);
+                (i, r.st)
+            }
+            None => {
+                let (r, i) = ad.knn(ix, q, k, vis, psi, plan);
+                (i, r.st)
+            }
+        }));
+        let ms = tm.elapsed().as_secs_f64() * 1e3;
+        let d = info_dict(py, &i)?;
+        d.set_item("touched", st.touched)?;
+        d.set_item("full_reads", st.full_reads)?;
+        d.set_item("clusters_open", st.clusters_open)?;
+        d.set_item("ms", ms)?;
+        Ok(d)
+    }
+
+    /// Where one approximate query spends its time, as `profile`: the cycles of each phase (`Stats::cyc`; `P_PLAN` the
+    /// centre scores, `P_SPREAD` the spreads, `P_ORDER` the order (keys, heap, stop), `P_CHOICE` the path choice, the
+    /// anchor search and the race's accounting (a threshold query's support verdicts and pricing), `P_QUERY` the whole
+    /// call; the counts C_SPREADS (directions projected), C_DIRECT, C_INDEX, C_GROUPS, C_VISITED) and the time stamp
+    /// counter's cycles per second. With `t`, the threshold query at t.
+    #[pyo3(signature = (q, k=10, psi=PSI, t=None))]
+    fn profile_approx(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, psi: f64, t: Option<f64>) -> PyResult<(Vec<u64>, f64)> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, if t.is_none() { Some(k) } else { None }, psi)?;
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        Ok(py.detach(|| self.pool.install(|| {
+            vexact::v2::q::PROF.store(true, Relaxed);
+            let (tm, c0) = (std::time::Instant::now(), unsafe { core::arch::x86_64::_rdtsc() });
+            let mut st = match t {
+                Some(t) => ad.threshold(ix, q, t, vis, psi, plan).0.st,
+                None => ad.knn(ix, q, k, vis, psi, plan).0.st,
+            };
+            let c1 = unsafe { core::arch::x86_64::_rdtsc() };
+            vexact::v2::q::PROF.store(false, Relaxed);
+            st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
+            (st.cyc.to_vec(), (c1 - c0) as f64 / tm.elapsed().as_secs_f64())
+        })))
+    }
+
+    /// The approximate queries' measured constants (`adaptive::Measured`, microseconds), with the exact planner's rule
+    /// in rows they give (r_rows, r_kappa; None where every cluster would be scored directly) and the plan's own.
     #[getter]
-    fn order(&self) -> (String, f64) {
-        let name = match self.approx.kind {
-            OrderKind::H { r, m } => format!("h{r}x{m}"),
-            k => format!("{k:?}").to_lowercase(),
-        };
-        (name, self.approx.f)
-    }
-
-    /// Fit the approximate mode's dial for k (once per k; it is used when eps > 0).
-    fn fit_dial(&mut self, py: Python<'_>, k: usize) {
-        if self.pseudo.is_empty() || self.dials.contains_key(&k) {
-            return;
+    fn measured_costs<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let m = self.adaptive()?.m;
+        let d = pyo3::types::PyDict::new(py);
+        for line in m.to_kv().lines() {
+            if let Some((key, x)) = line.split_once('=') {
+                d.set_item(key, x.parse::<f64>().unwrap_or(f64::NAN))?;
+            }
         }
-        let (ix, ps, plan, ap) = (&self.ix, &self.pseudo[..self.pseudo.len().min(200)], self.plan, &self.approx);
-        let d = py.detach(|| Dial::fit(ix, ps, plan, false, k, ap));
-        self.dials.insert(k, d);
+        d.set_item("rule", m.rule(typical_rows(&self.ix)))?;
+        d.set_item("plan_rule", (self.plan.r_rows, self.plan.r_kappa))?;
+        Ok(d)
     }
 
     /// The exact k nearest entity ids by cosine, best first (-1 where fewer than k are visible).
@@ -205,25 +272,12 @@ impl Index {
         Ok(ids(py, &ents, k))
     }
 
-    /// The approximate k nearest: exact search of the visible items of the first `nprobe` clusters, with the dial
-    /// fitted for miss rate `eps` per level (0: off).
-    #[pyo3(signature = (q, k, nprobe, eps=0.0))]
-    fn knn_approx<'py>(&mut self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, nprobe: usize, eps: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
-        if eps > 0.0 {
-            self.fit_dial(py, k);
-        }
-        let dial = match self.dials.get(&k) {
-            Some(d) if eps > 0.0 => {
-                if !d.eps.iter().any(|&x| (x - eps).abs() <= 1e-12 * eps) {
-                    return Err(PyValueError::new_err(format!("eps {eps} has no fitted dial; use one of {:?}", d.eps)));
-                }
-                Some(d.for_eps(eps))
-            }
-            _ => None,
-        };
+    /// Legacy comparison arm, kept until the owner's benchmark has run: the approximate k nearest in the `spread` order
+    /// by nprobe (`knn2_fast`), exact search of the visible items of the first `nprobe` clusters.
+    fn knn_nprobe<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, nprobe: usize) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
-        let ents = py.detach(|| self.pool.install(|| knn2_fast(ix, ap, q, k, vis, nprobe, dial, plan).ents));
+        let ents = py.detach(|| self.pool.install(|| knn2_fast(ix, ap, q, k, vis, nprobe, None, plan).ents));
         Ok(ids(py, &ents, k))
     }
 
@@ -270,38 +324,29 @@ impl Index {
     }
 
     /// What one query did: rows touched, full vectors read, clusters opened on the index path, and the time in ms,
-    /// exact (nprobe None) or approximate.
-    #[pyo3(signature = (q, k, nprobe=None, eps=0.0))]
-    fn explain(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: Option<usize>, eps: f64) -> PyResult<(u64, u64, u64, f64)> {
-        if eps > 0.0 {
-            self.fit_dial(py, k);
-        }
-        let dial = if eps > 0.0 { self.dials.get(&k).map(|d| d.for_eps(eps)) } else { None };
+    /// exact (nprobe None) or by the legacy arm (`knn_nprobe`).
+    #[pyo3(signature = (q, k, nprobe=None))]
+    fn explain(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: Option<usize>) -> PyResult<(u64, u64, u64, f64)> {
         let q = q.as_slice()?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let t = std::time::Instant::now();
         let o: KnnOut2 = py.detach(|| self.pool.install(|| match nprobe {
             None => knn2(ix, q, k, vis, plan),
-            Some(np) => knn2_fast(ix, ap, q, k, vis, np, dial, plan),
+            Some(np) => knn2_fast(ix, ap, q, k, vis, np, None, plan),
         }));
         Ok((o.st.touched, o.st.full_reads, o.st.clusters_open, t.elapsed().as_secs_f64() * 1e3))
     }
 
-    /// Where one approximate query's time goes: the time-stamp-counter cycles of each phase (`Stats::cyc`, indexed by
-    /// the `P_*` constants of `v2::q`; `P_QUERY` is the whole call), with the time stamp counter's cycles per second.
-    #[pyo3(signature = (q, k, nprobe, eps=0.0))]
-    fn profile(&mut self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: usize, eps: f64) -> PyResult<(Vec<u64>, f64)> {
-        use std::sync::atomic::Ordering::Relaxed;
-        if eps > 0.0 {
-            self.fit_dial(py, k);
-        }
-        let dial = if eps > 0.0 { self.dials.get(&k).map(|d| d.for_eps(eps)) } else { None };
+    /// Where one query of the legacy arm (`knn_nprobe`) spends its time: the time-stamp-counter cycles of each phase
+    /// (`Stats::cyc`, indexed by the `P_*` constants of `v2::q`; `P_QUERY` is the whole call), with the time stamp
+    /// counter's cycles per second.
+    fn profile(&self, py: Python<'_>, q: PyReadonlyArray1<'_, f32>, k: usize, nprobe: usize) -> PyResult<(Vec<u64>, f64)> {
         let q = q.as_slice()?;
         let (ix, ap, plan, vis) = (&self.ix, &self.approx, self.plan, self.vis.as_ref());
         let (cyc, hz) = py.detach(|| self.pool.install(|| {
             vexact::v2::q::PROF.store(true, Relaxed);
             let (t, c0) = (std::time::Instant::now(), unsafe { core::arch::x86_64::_rdtsc() });
-            let mut o = knn2_fast(ix, ap, q, k, vis, nprobe, dial, plan);
+            let mut o = knn2_fast(ix, ap, q, k, vis, nprobe, None, plan);
             let c1 = unsafe { core::arch::x86_64::_rdtsc() };
             vexact::v2::q::PROF.store(false, Relaxed);
             o.st.cyc[vexact::v2::q::P_QUERY] = c1 - c0;
@@ -361,6 +406,22 @@ impl Index {
     #[getter]
     fn clusters(&self) -> usize {
         self.ix.k()
+    }
+}
+
+impl Index {
+    /// The approximate queries' state, or why they cannot run.
+    fn adaptive(&self) -> PyResult<&Adaptive> {
+        self.adaptive.as_ref().map_err(|e| PyValueError::new_err(e.clone()))
+    }
+
+    /// The approximate queries' state after checking the query, k (k-NN) and psi.
+    fn adaptive_args(&self, q: &[f32], k: Option<usize>, psi: f64) -> PyResult<&Adaptive> {
+        check_query(&self.ix, q, k)?;
+        if psi.is_nan() || psi < 0.0 {
+            return Err(PyValueError::new_err(format!("psi is a number of at least 0 (inf reads every cluster), not {psi}")));
+        }
+        self.adaptive()
     }
 }
 

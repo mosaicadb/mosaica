@@ -19,6 +19,7 @@ mod e2e;
 pub mod kern;
 pub mod order;
 pub mod q;
+pub mod adaptive;
 pub mod setup;
 pub mod store;
 pub mod tail;

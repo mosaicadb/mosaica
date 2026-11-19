@@ -113,13 +113,18 @@ class Vexact(System):
         return tot
 
     def settings(self, qtype, filtered):
-        # the approximate mode's cluster orders to compare (`orders`, e.g. ["radius", "spread"]), one setting each
+        # the approximate k-NN's arms to compare (`orders`), one setting each: "adaptive" (the library's approximate
+        # k-NN, `knn_approx`, over psi; grid `adaptive`) and "spread" (the legacy order by nprobe, kept as the
+        # comparison arm; grid `approx`)
         return list(self.params.get("orders", ["default"])) if qtype == "approx" else ["default"]
 
     def use(self, setting):
         self.setting = setting
-        if setting != "default":
-            self.ix.set_order(setting)
+
+    def approx_grid_for(self, setting):
+        if setting == "adaptive":
+            return self.params.get("adaptive", [])
+        return self.approx_grid()
 
     def set_visible(self, ids, name=None):
         self.vis = ids
@@ -136,11 +141,19 @@ class Vexact(System):
         return self.ix.threshold(self.q(q), t)
 
     def approx(self, q, k, p):
+        # a grid point with psi is the approximate k-NN, one with nprobe the legacy arm
+        if "psi" in p:
+            return self.ix.knn_approx(self.q(q), k, p["psi"])
+        if hasattr(self.ix, "knn_nprobe"):
+            return self.ix.knn_nprobe(self.q(q), k, p["nprobe"])
+        # a library before the approximate k-NN took knn_approx's name has the legacy arm (and its dial) under it
         return self.ix.knn_approx(self.q(q), k, p["nprobe"], p.get("eps", 0.0))
 
     def approx_grid(self):
         g = self.params.get("approx", [])
         if any(p.get("eps", 0) > 0 for p in g):
+            if not hasattr(self.ix, "fit_dial"):
+                raise ValueError("eps (the legacy arm's dial) was taken out of the library; drop it from the grid")
             for k in (10, 100):
                 self.ix.fit_dial(k)
         return g

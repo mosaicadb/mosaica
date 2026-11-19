@@ -24,7 +24,7 @@ SYSTEM_PARAMS = {
     # the index through bench/annb/vexact-py, built as bench/annb/vexact/module.py builds it (fit.py --basis dual, with
     # --query-sample from the learn sample on out-of-distribution sets), with the library's default levels (16, 32 B;
     # dlv=[] for the fit's six)
-    "vexact": dict(basis="dual", approx=[dict(nprobe=p, eps=0.0) for p in (16, 64, 256)]),
+    "vexact": dict(basis="dual", approx=[dict(psi=x) for x in (3.5, 4.5, 6.0)]),
     # faiss IndexFlatIP: search / range_search; under a visible set through IDSelectorBitmap and over a compacted copy
     "faiss-flat": dict(settings=["idselector", "compacted"]),
     # faiss IndexFlatIPPanorama, 8 levels, after an orthogonal PCA rotation (as the earlier threshold-db/ann.py)
@@ -62,7 +62,7 @@ VIBE_QUICK = {
     "algos": ["vexact-approx", "hnswlib", "ivfpqfs(faiss)", "glass"],
     "overlay": {
         "vexact-approx": {"approx": {"args": {"basis": ["dual"]},
-                                     "query_args": {"nprobe": [4, 16, 64, 256], "eps": [0, 0.03]}}},
+                                     "query_args": {"psi": [3.5, 4.5, 6]}}},
         "hnswlib": {"base": {"args": {"M": [16, 36], "efConstruction": [500]},
                              "query_args": {"ef": [10, 30, 100, 300, 1000]}}},
         "ivfpqfs(faiss)": {"base-1024": {"args": {"n_list": [1024], "dim_reduction": [0]},
@@ -76,7 +76,7 @@ ANNB_QUICK = {
     "algos": ["vexact-approx", "hnswlib", "faiss-ivfpqfs", "glass"],
     "overlay": {
         "vexact-approx": {"approx": {"args": [{"basis": "dual"}],
-                                     "query_args": [[4, 16, 64, 256], [0, 0.03]]}},
+                                     "query_args": [[3.5, 4.5, 6]]}},
         "hnswlib": {"M-16": {"arg_groups": [{"M": 16, "efConstruction": 500}], "args": {},
                              "query_args": [[10, 40, 120, 400, 800]]}},
         "faiss-ivfpqfs": {"base": {"args": [[2048]], "query_args": [[5, 10, 50], [10, 100]]}},
@@ -137,7 +137,7 @@ FULL = dict(
     ),
     params=dict(SYSTEM_PARAMS,
                 vexact=dict(SYSTEM_PARAMS["vexact"],
-                            approx=[dict(nprobe=p, eps=e) for p in (8, 32, 128, 512) for e in (0.0, 0.03)]),
+                            approx=[dict(psi=x) for x in (3.0, 4.0, 4.5, 5.0, 6.0, 7.0)]),
                 **{"faiss-hnsw": dict(SYSTEM_PARAMS["faiss-hnsw"], approx=[dict(ef=e) for e in (32, 128, 512, 2048)]),
                    "acorn": dict(SYSTEM_PARAMS["acorn"], approx=[dict(ef=e) for e in (32, 128, 512, 2048)])}),
     # the database runs on two datasets only
@@ -198,15 +198,16 @@ SCALE = scale_suite("scale", ["laion-10m", "laion-40m", "laion-100m"])
 # the same code on a small nested sample (2 parts: 200k in 500k in 1M), to test the scale path end to end
 SCALE_TEST = scale_suite("scale-test", ["laion-s200k", "laion-s500k", "laion-s1m"])
 
-# The approximate mode's cluster order (notes/visit-order/PLAN.md): the quick suite's public datasets, approximate k-NN
-# only, unfiltered and under random and correlated (region) visible sets, on a finer nprobe grid; vexact alone, since
-# the comparison is between its orders.
+# The approximate mode (notes/visit-order/PLAN.md): the quick suite's public datasets, approximate k-NN only,
+# unfiltered and under random and correlated (region) visible sets; vexact alone, since the comparison is between its
+# arms: the library's approximate k-NN (`adaptive`, over psi) and the legacy `spread` order over nprobe.
 ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized"],
              filters=["none", "random-1", "random-25", "region-1", "region-25"],
              types=dict(QUICK["types"], approx=dict(k=[10])), approx_unfiltered=True,
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
-             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["radius", "spread"],
-                                                    approx=[dict(nprobe=p, eps=0.0) for p in (4, 8, 16, 32, 64, 128, 256)])),
+             params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "adaptive"],
+                                                    approx=[dict(nprobe=p) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
+                                                    adaptive=[dict(psi=x) for x in (2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7)])),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 
 # The same cells with the library's default order only, for comparing revisions of the library (which may not have

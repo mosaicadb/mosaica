@@ -1,3 +1,4 @@
+# Historical: run against the library that fitted the radius order (Approx::fit, fit_queries), both since taken out.
 # Builds the real index (vexact_py.Index, as bench/suite/systems/vexact.py: default pseudo-queries, so Approx::fit runs
 # in Rust) on a fit and measures knn_approx recall@10 at eps 0 for the test queries at several nprobe, to identify the
 # f the library chose (by matching the numpy replay's per-f recall), and the same after fit_queries on learn queries.

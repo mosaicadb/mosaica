@@ -1,14 +1,22 @@
-# Paired comparison of the approximate mode's cluster orders on an index the suite kept (`run.py ... --keep-work`):
-# one index per order in this process, the orders taking turns query by query, so that a drift in the machine's speed
-# falls on all of them alike. Per (filter, nprobe) and order: mean recall@k against the prep's truth, rows touched
-# (the visible rows of the probed clusters, which does not depend on the machine), and the median over queries of
-# each query's median time; then each order's time relative to the first, as the median over queries of the ratio.
-# usage: SUITE_DATA=... python3 -I ab_orders.py DATASET radius spread [h4 ...] [--nprobe 4,16,64]
-#        [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
+# Paired comparison of the approximate queries on an index the suite kept (`run.py ... --keep-work`).
+# k-NN arms: `adaptive` (the library's approximate k-NN, `knn_approx`, swept over psi) and `spread` (the legacy order
+# by nprobe, `knn_nprobe`, kept as the comparison arm). With --threshold, threshold queries at the prep's thresholds
+# (one per answer share): `adaptive@SHARE` (`threshold_approx` over psi) against `exact@SHARE` (`threshold`, recall 1).
+# One index per arm in this process; for each query the (arm, grid point) cells run in an order shuffled per query
+# and repetition (seeded), so that neither a drift in the machine's speed nor the caches an arm's last cell leaves fall
+# on one arm's first cells. Per (filter, arm, grid point): mean recall against the prep's truth (k-NN: recall@k;
+# threshold: the share of the exact answer returned), rows touched (the visible rows the query read, which does not
+# depend on the machine), and the median over queries of each query's median time; for the adaptive arms also their
+# paths (probe / race / scan / exact), clusters visited, read directly and on the index path, groups set up, spreads
+# computed and modelled cost against a scan's. ab_curves.py interpolates time and rows to a recall.
+# usage: SUITE_DATA=... python3 -I ab_orders.py DATASET [spread] [adaptive] [--threshold]
+#        [--nprobe 4,...,512] [--psi 2,...,7] [--filters none,random-1,random-25] [--reps 5] [--core 3] [--k 10]
 import argparse
 import os
+import random
 import sys
 import time
+from collections import Counter
 
 import numpy as np
 
@@ -17,13 +25,18 @@ from common import Prep, prep_dir, work_dir  # noqa: E402
 
 import vexact_py  # noqa: E402
 
+NPROBE = "4,8,16,32,64,128,256,512"
+PSI = "2,2.5,3,3.5,4,4.5,5,5.5,6,7"
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dataset")
-    ap.add_argument("orders", nargs="+")
-    ap.add_argument("--nprobe", default="4,16,64")
-    ap.add_argument("--filters", default="none,random-1,random-25")
+    ap.add_argument("arms", nargs="*", default=["spread", "adaptive"])
+    ap.add_argument("--threshold", action="store_true", help="threshold queries instead of k-NN")
+    ap.add_argument("--nprobe", default=NPROBE, help="the legacy arm's nprobe")
+    ap.add_argument("--psi", default=PSI, help="the adaptive arm's psi")
+    ap.add_argument("--filters", default="none,random-1,random-25,region-1,region-25")
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--core", type=int, default=3)
     ap.add_argument("--k", type=int, default=10)
@@ -32,41 +45,82 @@ def main():
     prep = Prep(prep_dir(data, a.dataset))
     os.sched_setaffinity(0, {a.core})
     path = os.path.join(work_dir(data, a.dataset, "vexact"), "index")
-    ixs = [vexact_py.Index(path, core=a.core, order=o) for o in a.orders]
+    psis = [float(x) for x in a.psi.split(",")]
+    ix = {arm: vexact_py.Index(path, core=a.core) for arm in a.arms}
+    first = next(iter(ix.values()))
     Q = prep.queries()
-    qb = np.zeros(ixs[0].dim, np.float32)
-    print(f"{a.dataset}: {ixs[0].clusters} clusters, {len(Q)} queries, k {a.k}, {a.reps} repetitions; "
-          + ", ".join(f"{o} f={ix.order[1]:g}" for o, ix in zip(a.orders, ixs)))
-    w = max(len(o) for o in a.orders) + 2
+    qb = np.zeros(first.dim, np.float32)
+    print(f"{a.dataset}: {first.clusters} clusters, {len(Q)} queries, k {a.k}, {a.reps} repetitions; "
+          f"{'threshold' if a.threshold else 'k-NN'} arms " + ", ".join(a.arms))
+    if "adaptive" in ix:
+        print(f"adaptive: measured constants {ix['adaptive'].measured_costs}")
     for f in a.filters.split(","):
         vis = prep.vis(f)
-        for ix in ixs:
-            ix.set_visible(None if vis is None else vis.astype(np.int64))
-        truth = prep.order(f)
-        for npb in [int(x) for x in a.nprobe.split(",")]:
-            t = np.zeros((len(ixs), len(Q)))
-            rec = np.zeros((len(ixs), len(Q)))
-            rows = np.zeros((len(ixs), len(Q)))
-            for qi, q in enumerate(Q):
-                qb[:] = 0
-                qb[: len(q)] = q
-                want = set(truth[qi, : a.k].tolist())
-                ts = [[] for _ in ixs]
-                for rep in range(a.reps + 1):
-                    for j, ix in enumerate(ixs):
-                        t0 = time.perf_counter()
-                        got = ix.knn_approx(qb, a.k, npb, 0.0)
-                        dt = time.perf_counter() - t0
-                        if rep:
-                            ts[j].append(dt)
-                        else:
-                            rec[j, qi] = len(want & set(got.tolist())) / a.k
-                            rows[j, qi] = ix.explain(qb, a.k, npb)[0]
-                t[:, qi] = [np.median(x) * 1e6 for x in ts]
-            print(f"{f:<10} nprobe {npb:>4}  " + "  ".join(
-                f"{o:>{w}}: {rec[j].mean():.3f} {rows[j].mean():8.0f} rows {np.median(t[j]):8.1f} us"
-                + ("" if j == 0 else f" (x{np.median(t[j] / t[0]):.3f})")
-                for j, o in enumerate(a.orders)))
+        for x in ix.values():
+            x.set_visible(None if vis is None else vis.astype(np.int64))
+        order = prep.order(f)
+        # cells: (arm label, point label, call(q, qi), explain(q, qi), truth(qi))
+        cells = []
+        if not a.threshold:
+            want = lambda qi: set(order[qi, : a.k].tolist())
+            if "spread" in ix:
+                x = ix["spread"]
+                for p in [int(v) for v in a.nprobe.split(",")]:
+                    cells.append(("spread", f"nprobe={p}", lambda q, qi, x=x, p=p: x.knn_nprobe(q, a.k, p),
+                                  lambda q, qi, x=x, p=p: dict(touched=x.explain(q, a.k, p)[0]), want))
+            if "adaptive" in ix:
+                x = ix["adaptive"]
+                for v in psis:
+                    cells.append(("adaptive", f"psi={v:g}", lambda q, qi, x=x, v=v: x.knn_approx(q, a.k, v),
+                                  lambda q, qi, x=x, v=v: x.explain_approx(q, a.k, v), want))
+        else:
+            ths = prep.thresholds(f)
+            for j, share in enumerate(prep.filter_shares(f)):
+                size = prep.answer_size(f, share)
+                want = lambda qi, size=size: set(order[qi, :size].tolist())
+                t = lambda qi, j=j: float(ths[qi, j])
+                x = ix.get("adaptive", first)
+                cells.append((f"exact@{share:g}", "psi=inf", lambda q, qi, x=x, t=t: x.threshold(q, t(qi)),
+                              lambda q, qi, x=x, t=t: x.explain_approx(q, psi=float("inf"), t=t(qi)), want))
+                if "adaptive" in ix:
+                    for v in psis:
+                        cells.append((f"adaptive@{share:g}", f"psi={v:g}", lambda q, qi, x=x, v=v, t=t: x.threshold_approx(q, t(qi), v),
+                                      lambda q, qi, x=x, v=v, t=t: x.explain_approx(q, psi=v, t=t(qi)), want))
+        w = max(len(c[0]) for c in cells) + 2
+        rng = random.Random(f"{a.dataset}/{f}")
+        t_ = np.zeros((len(cells), len(Q)))
+        rec = np.zeros((len(cells), len(Q)))
+        rows = np.zeros((len(cells), len(Q)))
+        info = [[] for _ in cells]
+        for qi, q in enumerate(Q):
+            qb[:] = 0
+            qb[: len(q)] = q
+            ts = [[] for _ in cells]
+            for rep in range(a.reps + 1):
+                perm = list(range(len(cells)))
+                rng.shuffle(perm)
+                for j in perm:
+                    _, _, call, expl, want = cells[j]
+                    t0 = time.perf_counter()
+                    got = call(qb, qi)
+                    dt = time.perf_counter() - t0
+                    if rep:
+                        ts[j].append(dt)
+                    else:
+                        w_ = want(qi)
+                        rec[j, qi] = len(w_ & set(got.tolist())) / max(1, len(w_))
+                        e = expl(qb, qi)
+                        rows[j, qi] = e["touched"]
+                        info[j].append(e)
+            t_[:, qi] = [np.median(x) * 1e6 for x in ts]
+        for j, (arm, pl, _, _, _) in enumerate(cells):
+            line = f"{f:<10} {arm:<{w}} {pl}: {rec[j].mean():.3f} {rows[j].mean():8.0f} rows {np.median(t_[j]):8.1f} us"
+            if "visited" in info[j][0]:
+                m = lambda key: np.mean([e[key] for e in info[j]])
+                paths = Counter(e["path"] for e in info[j])
+                line += (f"  paths {dict(paths)} visited {m('visited'):.1f} direct {m('direct'):.1f} index {m('index'):.1f} "
+                         f"groups {m('groups'):.1f} spreads {m('spreads'):.0f} cost {m('cost'):.0f} scan {m('scan_cost'):.0f}")
+            print(line, flush=True)
 
 
 main()
