@@ -1,0 +1,54 @@
+== glove-100-angular none
+glove-100-angular none: n 128, one dot (warm direct read, per row) 0.0141 us; levels' units (group 0) [32.0, 32.0, 48.0, 48.0]
+  group setup: modelled 305 dots; measured / modelled 4.72
+  direct (nv dots): measured / modelled in sum 3.01; per read p10 2.04 median 2.94 p90 4.36 (1024 reads)
+  index, counted from its work: measured / modelled in sum 5.13; per read p10 2.69 median 4.29 p90 7.47 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 11.27; per read p10 5.43 median 8.58 p90 14.43 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 17292 / 20480, first level 618768 / 614982, deeper levels 781484 / 3556, stored vectors 4008 / 3556
+  rows entering each level, per row of the sorted ranges: [1.0, 0.655, 0.153, 0.016]
+  index time 103539 us in all, direct 104823 us; one dot 0.0141 us
+== glove-100-angular random-25
+glove-100-angular random-25: n 128, one dot (warm direct read, per row) 0.0157 us; levels' units (group 0) [32.0, 32.0, 48.0, 48.0]
+  group setup: modelled 305 dots; measured / modelled 5.15
+  direct (nv dots): measured / modelled in sum 4.28; per read p10 2.17 median 4.31 p90 7.73 (1024 reads)
+  index, counted from its work: measured / modelled in sum 10.68; per read p10 6.46 median 10.88 p90 18.63 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 21.84; per read p10 12.32 median 20.96 p90 34.52 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 17570 / 20480, first level 158048 / 154161, deeper levels 198104 / 2826, stored vectors 3644 / 2826
+  rows entering each level, per row of the sorted ranges: [1.0, 0.752, 0.251, 0.039]
+  index time 64729 us in all, direct 41537 us; one dot 0.0157 us
+== yahoo-minilm-384-normalized none
+yahoo-minilm-384-normalized none: n 384, one dot (warm direct read, per row) 0.0382 us; levels' units (group 0) [32.0, 32.0, 48.0, 80.0, 128.0, 192.0]
+  group setup: modelled 890 dots; measured / modelled 1.79
+  direct (nv dots): measured / modelled in sum 2.40; per read p10 1.78 median 2.22 p90 3.30 (1024 reads)
+  index, counted from its work: measured / modelled in sum 3.83; per read p10 2.50 median 3.77 p90 7.35 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 13.89; per read p10 7.96 median 12.64 p90 21.72 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 13503 / 21845, first level 172011 / 170752, deeper levels 538273 / 790, stored vectors 2190 / 632
+  rows entering each level, per row of the sorted ranges: [1.0, 0.797, 0.517, 0.257, 0.015, 0.002]
+  index time 107386 us in all, direct 188457 us; one dot 0.0382 us
+== yahoo-minilm-384-normalized random-25
+yahoo-minilm-384-normalized random-25: n 384, one dot (warm direct read, per row) 0.0196 us; levels' units (group 0) [32.0, 32.0, 48.0, 80.0, 128.0, 192.0]
+  group setup: modelled 890 dots; measured / modelled 2.49
+  direct (nv dots): measured / modelled in sum 6.75; per read p10 4.09 median 5.71 p90 9.52 (1024 reads)
+  index, counted from its work: measured / modelled in sum 25.44; per read p10 13.85 median 21.23 p90 34.44 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 73.33; per read p10 34.32 median 55.38 p90 93.80 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 13944 / 21845, first level 44091 / 42719, deeper levels 147172 / 1127, stored vectors 2176 / 902
+  rows entering each level, per row of the sorted ranges: [1.0, 0.888, 0.662, 0.398, 0.042, 0.006]
+  index time 107328 us in all, direct 67723 us; one dot 0.0196 us
+== laion-clip-512-normalized none
+laion-clip-512-normalized none: n 512, one dot (warm direct read, per row) 0.0569 us; levels' units (group 0) [32.0, 32.0, 48.0, 76.0, 120.0, 204.0]
+  group setup: modelled 1186 dots; measured / modelled 1.55
+  direct (nv dots): measured / modelled in sum 1.91; per read p10 1.44 median 1.74 p90 2.61 (1024 reads)
+  index, counted from its work: measured / modelled in sum 2.41; per read p10 1.60 median 2.32 p90 4.04 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 14.15; per read p10 9.37 median 13.24 p90 21.43 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 13392 / 16369, first level 137076 / 136114, deeper levels 819440 / 3175, stored vectors 5189 / 3389
+  rows entering each level, per row of the sorted ranges: [1.0, 0.982, 0.942, 0.812, 0.189, 0.012]
+  index time 134684 us in all, direct 237082 us; one dot 0.0569 us
+== laion-clip-512-normalized random-25
+laion-clip-512-normalized random-25: n 512, one dot (warm direct read, per row) 0.0370 us; levels' units (group 0) [32.0, 32.0, 48.0, 76.0, 120.0, 204.0]
+  group setup: modelled 1186 dots; measured / modelled 1.85
+  direct (nv dots): measured / modelled in sum 3.96; per read p10 2.81 median 3.72 p90 5.84 (1024 reads)
+  index, counted from its work: measured / modelled in sum 11.75; per read p10 8.35 median 11.56 p90 17.52 (1024 reads)
+  index, predicted before the read: measured / modelled in sum 50.04; per read p10 33.92 median 49.26 p90 71.25 (1024 reads)
+  index components in dots, counted / predicted: cluster setup 8192 / 8192, tables 13426 / 16369, first level 35008 / 34011, deeper levels 211753 / 2711, stored vectors 4880 / 2893
+  rows entering each level, per row of the sorted ranges: [1.0, 0.99, 0.963, 0.87, 0.294, 0.036]
+  index time 118693 us in all, direct 79630 us; one dot 0.0370 us

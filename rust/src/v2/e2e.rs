@@ -2568,3 +2568,313 @@ fn the_exact_paths_are_unchanged() {
     }
     assert_eq!(format!("{:016x}", fnv_lines(&lines)), "8ce77501d8d48630");
 }
+/// Study (ignored; run by hand on a built index): rows to recall 0.95, 0.99 and 0.995 for four cluster orders, each
+/// read whole and the same number of clusters for every query, a query reading nothing more once it holds its true
+/// ten: mu + z(1, v) sigma; spread; the tail order v Gbar((t - mu) / sigma) at the true 10th best (an oracle); and the
+/// tail order at the running 10th best, re-keyed within a window of 8 of the stream. DIAG_DIR the index directory,
+/// DIAG_PREP the dataset's prep directory, DIAG_SETS the visible sets (none, random-25, ...).
+#[test]
+#[ignore]
+fn study_order_rows_to_recall() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let sets: Vec<String> = std::env::var("DIAG_SETS").unwrap_or("none,random-25".into()).split(',').map(|s| s.to_string()).collect();
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let m = adaptive::Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.0, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 50.0, anc_us: 0.07 };
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let ap = Approx::spread(&ix);
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = qs.len() / d;
+    let k = ix.k();
+    let qsp: Vec<Vec<f32>> = (0..qs.len() / d).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+
+    let cl_of_row: Vec<usize> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c, cl.r1 - cl.r0)).collect();
+    let targets = [0.95, 0.99, 0.995];
+    let sf = |x: f64| -> f64 {
+        let z = x.abs() / std::f64::consts::SQRT_2;
+        let t = 1.0 / (1.0 + 0.5 * z);
+        let poly = -z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))));
+        let e = t * poly.exp();
+        if x >= 0.0 { 0.5 * e } else { 1.0 - 0.5 * e }
+    };
+    for set in &sets {
+        let (vis_bm, order_file) = if set == "none" {
+            (None, format!("{prep}/order.npy"))
+        } else {
+            let v = crate::util::read_npy(&format!("{prep}/vis_{set}.npy"));
+            let ids: RoaringBitmap = v.i32s().into_iter().map(|x| x as u32).collect();
+            (Some(ids), format!("{prep}/order_{set}.npy"))
+        };
+        let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+        let on = crate::util::read_npy(&order_file);
+        let ow = on.shape[1];
+        let ord = on.i32s();
+        let nv: Vec<usize> = (0..k).map(|c| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize)).collect();
+        // per query and order: the clusters in reading order (live ones), each read's new true top-10 hits
+        let names = ["mu+z(1,nv)sigma", "spread", "tail oracle", "tail running"];
+        let per: Vec<Vec<Vec<(usize, usize)>>> = (0..nq).into_par_iter().map(|qi| {
+            let q = &qsp[qi][..];
+            let pr = prep2(&ix, q);
+            let top10: Vec<u32> = ord[qi * ow..qi * ow + 10].iter().map(|&x| x as u32).collect();
+            let mut hits = vec![0usize; k];
+            for &e in &top10 {
+                hits[cl_of_row[ix.row_of_ent(e)]] += 1;
+            }
+            let score = |row: usize| -> f64 { ix.full_row_f16(row).iter().zip(&pr.q32).map(|(&h, &x)| crate::util::f16_to_f32(h) as f64 * x as f64).sum() };
+            let tk = top10.iter().map(|&e| score(ix.row_of_ent(e))).fold(f64::INFINITY, f64::min);
+            let mu = ad.keys(&ix, q, 0.0);
+            let sig: Vec<f64> = ad.keys(&ix, q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
+            let live: Vec<usize> = (0..k).filter(|&c| nv[c] > 0).collect();
+            let by = |key: &dyn Fn(usize) -> f64| {
+                let mut o = live.clone();
+                o.sort_by(|&a, &b| key(b).total_cmp(&key(a)).then(a.cmp(&b)));
+                o
+            };
+            let o1 = ad.order_keys(&ix, q, vis.as_ref());
+            let ord1 = by(&|c| o1[c]);
+            let ord2: Vec<usize> = ap.order(&ix, &pr, vis.as_ref()).into_iter().filter(|&c| nv[c] > 0).collect();
+            let tail = |t: f64, c: usize| -> f64 { nv[c] as f64 * sf((t - mu[c]) / sig[c].max(1e-12)) };
+            let ord3 = by(&|c| tail(tk, c));
+            // running: the stream of (i), a window of 8 re-keyed by the tail key at the running 10th best
+            let st_keys = ad.stream_keys(&ix, q, vis.as_ref());
+            let stream = by(&|c| st_keys[c]);
+            let mut ord4 = Vec::new();
+            let mut best: Vec<f64> = Vec::new();
+            let mut win: Vec<usize> = Vec::new();
+            let mut it = stream.into_iter();
+            let mut found = 0;
+            loop {
+                while win.len() < 8 {
+                    match it.next() {
+                        Some(c) => win.push(c),
+                        None => break,
+                    }
+                }
+                if win.is_empty() || found >= 10 {
+                    break;
+                }
+                let kth = if best.len() >= 10 { best[9] } else { f64::NEG_INFINITY };
+                let i = (0..win.len()).max_by(|&a, &b| tail(kth, win[a]).total_cmp(&tail(kth, win[b])).then(win[b].cmp(&win[a]))).unwrap();
+                let c = win.swap_remove(i);
+                ord4.push(c);
+                found += hits[c];
+                let cl = &ix.cl[c];
+                for r in cl.r0..cl.r1 {
+                    if vis_bm.as_ref().is_some_and(|b| !b.contains(ix.row_ent[r])) {
+                        continue;
+                    }
+                    best.push(score(r));
+                }
+                best.sort_by(|a, b| b.total_cmp(a));
+                best.truncate(10);
+            }
+            // each order up to the read that finds the last of the ten (a query reads nothing more after it)
+            [ord1, ord2, ord3, ord4].into_iter().map(|o| {
+                let mut f = 0;
+                let mut v = Vec::new();
+                for c in o {
+                    if f >= 10 {
+                        break;
+                    }
+                    f += hits[c];
+                    v.push((nv[c], hits[c]));
+                }
+                v
+            }).collect()
+        }).collect();
+        eprintln!("{dir} {set}: rows to recall (clusters read the same number for every query, interpolated)");
+        for (oi, name) in names.iter().enumerate() {
+            let maxm = per.iter().map(|p| p[oi].len()).max().unwrap();
+            let mut prev = (0.0, 0.0);
+            let mut out = Vec::new();
+            let mut ti = 0;
+            for mm in 1..=maxm {
+                let (mut rows, mut rec) = (0.0, 0.0);
+                for p in &per {
+                    let o = &p[oi];
+                    let take = mm.min(o.len());
+                    rows += o[..take].iter().map(|x| x.0).sum::<usize>() as f64;
+                    // a read beyond the sequence (all ten found) adds nothing: recall 1
+                    rec += if take < mm { 1.0 } else { o[..take].iter().map(|x| x.1).sum::<usize>() as f64 / 10.0 };
+                }
+                let (rows, rec) = (rows / per.len() as f64, rec / per.len() as f64);
+                while ti < targets.len() && rec >= targets[ti] {
+                    let r = if rec == prev.1 { rows } else { prev.0 + (rows - prev.0) * (targets[ti] - prev.1) / (rec - prev.1) };
+                    out.push(format!("{}: {:.0} rows ({mm} clusters)", targets[ti], r));
+                    ti += 1;
+                }
+                prev = (rows, rec);
+            }
+            eprintln!("  {name:<16} {}", out.join("  "));
+        }
+    }
+}
+
+/// Study (ignored; run by hand on a built index): a read path's work counted in d-dimensional dot products (a direct
+/// read nv; a group's setup 2n + sum nb_j^2 / n + ndl + J + 3; the index path's cluster setup, tables, rows through
+/// each level at its units / n and stored vectors read, both as counted from what the read did and as predicted before
+/// it from the sorted range and the share above the k-th best), times one dot product's time (a warm direct read, per
+/// row), against the measured time, for the first 16 clusters and 16 spread over the rest of 16 queries at their 10th
+/// and 100th best. DIAG_DIR, DIAG_PREP, DIAG_SET (none, random-25, ...).
+#[test]
+#[ignore]
+fn study_count_model() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let m = adaptive::Measured { i8_us: 0.02, row_us: 0.05, dir_us: 1.0, cl_us: 15.0, size_us: 0.005, vis_us: 0.014, grp_us: 50.0, anc_us: 0.07 };
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let (n, k, nl, ndl) = (ix.n(), ix.k(), ix.meta.nl(), ix.meta.ndl());
+    let nf = n as f64;
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let qsp: Vec<Vec<f32>> = (0..qs.len() / d).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
+    let plan = Plan::default();
+    let sf = |x: f64| -> f64 {
+        let z = x.abs() / std::f64::consts::SQRT_2;
+        let t = 1.0 / (1.0 + 0.5 * z);
+        let poly = -z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))));
+        let e = t * poly.exp();
+        if x >= 0.0 { 0.5 * e } else { 1.0 - 0.5 * e }
+    };
+    // per level: table units (nibbles a row reads), and the table build per level (16 entries a unit)
+    let units = |g: usize, l: usize| ix.groups[g].levels[l].units as f64;
+    // one dot product: a warm direct read of the largest cluster, per row
+    let big = (0..k).max_by_key(|&c| nv_of(c)).unwrap();
+    let q0: Vec<f32> = qsp[0].clone();
+    let pr0 = prep2(&ix, &q0);
+    let mut dot = f64::INFINITY;
+    for _ in 0..20 {
+        let mut r = KnnReader::new(&ix, &pr0, vis.as_ref(), 10, plan, crate::kernel::Stats::new(nl));
+        r.prime(-1e9);
+        let t = std::time::Instant::now();
+        r.visit(big, KnnPath::Direct);
+        r.kth();
+        dot = dot.min(t.elapsed().as_secs_f64() * 1e6 / nv_of(big) as f64);
+    }
+    eprintln!("{dir} {set}: n {n}, one dot (warm direct read, per row) {dot:.4} us; levels' units (group 0) {:?}", (0..nl).map(|l| units(0, l)).collect::<Vec<_>>());
+    // group setup: 2 n int8 products (basis, hi and lo), the rotations sum nb_j^2 MACs, ndl + J + 3 passes over n
+    let gp0 = &ix.groups[0];
+    let rot: f64 = (0..J).map(|j| (gp0.nb[j] * gp0.nb[j]) as f64).sum();
+    let grp_dots = 2.0 * nf + rot / nf + (ndl + J + 3) as f64;
+    let (mut gm, mut gt) = (0.0, 0.0);
+    for qi in 0..8 {
+        let q = &qsp[qi][..];
+        for g in 0..4.min(ix.groups.len()) {
+            let pr = prep2(&ix, q);
+            let t = std::time::Instant::now();
+            setup_groups(&ix, &pr, &[g], &mut crate::kernel::Stats::new(nl));
+            gt += t.elapsed().as_secs_f64() * 1e6;
+            gm += grp_dots * dot;
+        }
+    }
+    eprintln!("  group setup: modelled {grp_dots:.0} dots; measured / modelled {:.2}", gt / gm);
+    // reads
+    let (mut dm, mut dt, mut im, mut ic, mut it) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut comp, mut pcomp) = ([0f64; 5], [0f64; 5]);
+    let mut lent = vec![0f64; nl + 1];
+    for qi in 0..16 {
+        let q = &qsp[qi][..];
+        let pr = prep2(&ix, q);
+        let mu = ad.keys(&ix, q, 0.0);
+        let sig: Vec<f64> = ad.keys(&ix, q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
+        let mut live: Vec<(f64, usize)> = (0..k).filter(|&c| nv_of(c) > 0).map(|c| (ix.qm(&pr.q64, c), c)).collect();
+        live.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let top: Vec<usize> = live.iter().take(16).map(|x| x.1).collect();
+        let mut rd = KnnReader::new(&ix, &pr, vis.as_ref(), 100, plan, crate::kernel::Stats::new(nl));
+        for &c in &top {
+            rd.visit(c, KnnPath::Direct);
+        }
+        let best = rd.finish().0;
+        if best.len() < 100 {
+            continue;
+        }
+        let rest = &live[16..];
+        let mut sample = top.clone();
+        sample.extend((0..16).map(|i| rest[i * rest.len() / 16].1));
+        pr.anc_among(&ix, Some(&top));
+        let mut gs: Vec<usize> = sample.iter().map(|&c| ix.cl[c].g).collect();
+        gs.sort_unstable();
+        gs.dedup();
+        setup_groups(&ix, &pr, &gs, &mut crate::kernel::Stats::new(nl));
+        for &t in &[best[9].0, best[99].0] {
+            for &c in &sample {
+                let nv = nv_of(c);
+                let cl = &ix.cl[c];
+                let g = cl.g;
+                // index path, counted from what it did
+                let mut r = KnnReader::new(&ix, &pr, vis.as_ref(), 10, plan, crate::kernel::Stats::new(nl));
+                r.prime(t);
+                let tt = std::time::Instant::now();
+                r.visit(c, KnnPath::Index);
+                r.kth();
+                let ti = tt.elapsed().as_secs_f64() * 1e6;
+                let (_, s) = r.finish();
+                let opened = s.clusters_open > 0;
+                let mut counted = if opened { (J + ndl + 2) as f64 } else { 0.0 };
+                for l in 0..nl {
+                    if s.blocks[l] > 0 {
+                        counted += units(g, l) * 16.0 / nf + s.blocks[l] as f64 * BLK as f64 * units(g, l) / nf;
+                    }
+                }
+                counted += s.full_reads as f64;
+                comp[0] += if opened { (J + ndl + 2) as f64 } else { 0.0 };
+                comp[1] += (0..nl).filter(|&l| s.blocks[l] > 0).map(|l| units(g, l) * 16.0 / nf).sum::<f64>();
+                comp[2] += s.blocks[0] as f64 * BLK as f64 * units(g, 0) / nf;
+                comp[3] += (1..nl).map(|l| s.blocks[l] as f64 * BLK as f64 * units(g, l) / nf).sum::<f64>();
+                comp[4] += s.full_reads as f64;
+                for l in 0..nl {
+                    lent[l] += s.enter[l] as f64;
+                }
+                // predicted before reading: the sorted range's rows c through level 0, f c through the rest, f c read
+                let qmf = pr.qm(&ix, c);
+                let (u0, u1, _, _) = sorted_range2(&ix, c, &cut_params2(&ix, c, &pr, qmf), t);
+                let cr = match vis.as_ref() {
+                    None => u1 - u0,
+                    Some(v) => v.rows.partition_point(|&x| (x as usize) < u1) - v.rows.partition_point(|&x| (x as usize) < u0),
+                } as f64;
+                let f = if sig[c] > 0.0 { sf((t - qmf) / sig[c]) } else { 0.0 };
+                lent[nl] += cr;
+                let deeper: f64 = (1..nl).map(|l| units(g, l) * (16.0 + f * cr) / nf).sum();
+                if cr > 0.0 {
+                    pcomp[0] += (J + ndl + 2) as f64;
+                    pcomp[1] += (0..nl).map(|l| units(g, l) * 16.0 / nf).sum::<f64>();
+                    pcomp[2] += units(g, 0) * cr / nf;
+                    pcomp[3] += (1..nl).map(|l| units(g, l) * f * cr / nf).sum::<f64>();
+                    pcomp[4] += f * cr;
+                }
+                let predicted = if cr > 0.0 { (J + ndl + 2) as f64 + units(g, 0) * (16.0 + cr) / nf + deeper + f * cr } else { 0.0 };
+                // direct
+                let mut r = KnnReader::new(&ix, &pr, vis.as_ref(), 10, plan, crate::kernel::Stats::new(nl));
+                r.prime(t);
+                let tt = std::time::Instant::now();
+                r.visit(c, KnnPath::Direct);
+                r.kth();
+                let td = tt.elapsed().as_secs_f64() * 1e6;
+                dm.push(nv as f64 * dot);
+                dt.push(td);
+                im.push(predicted * dot);
+                ic.push(counted * dot);
+                it.push(ti);
+            }
+        }
+    }
+    let report = |name: &str, model: &[f64], meas: &[f64]| {
+        let mut r: Vec<f64> = meas.iter().zip(model).filter(|x| *x.1 > 0.0).map(|(a, b)| a / b).collect();
+        r.sort_by(|a, b| a.total_cmp(b));
+        let tot = meas.iter().sum::<f64>() / model.iter().sum::<f64>();
+        eprintln!("  {name}: measured / modelled in sum {tot:.2}; per read p10 {:.2} median {:.2} p90 {:.2} ({} reads)", r[r.len() / 10], r[r.len() / 2], r[r.len() * 9 / 10], r.len());
+    };
+    report("direct (nv dots)", &dm, &dt);
+    report("index, counted from its work", &ic, &it);
+    report("index, predicted before the read", &im, &it);
+    eprintln!("  index components in dots, counted / predicted: cluster setup {:.0} / {:.0}, tables {:.0} / {:.0}, first level {:.0} / {:.0}, deeper levels {:.0} / {:.0}, stored vectors {:.0} / {:.0}", comp[0], pcomp[0], comp[1], pcomp[1], comp[2], pcomp[2], comp[3], pcomp[3], comp[4], pcomp[4]);
+    eprintln!("  rows entering each level, per row of the sorted ranges: {:?}", (0..nl).map(|l| (lent[l] / lent[nl] * 1000.0).round() / 1000.0).collect::<Vec<_>>());
+    eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
+}

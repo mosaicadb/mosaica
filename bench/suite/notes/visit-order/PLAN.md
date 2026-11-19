@@ -321,6 +321,43 @@ than reading them directly (LAION ψ 4: the same 30 clusters in 1.7 ms against 1
 group setups included. Both rules were made for the exact threshold query, whose index path prunes at its final
 threshold.
 
+**Counting the reads in dot products, checked before building it.** The plan was to choose each cluster's read path
+by its work in d-dimensional dot products, from the structure and with no timing: a direct read nv; the index path a
+group's setup (2n + Σ nb_j²/n + ndl + J + 3), the cluster's setup and tables, the rows of its sorted range through
+the first level at its units/n each, and the f·nv rows expected above the k-th best through the rest and their stored
+vectors. Checked against measured time (`study_count_model`, three datasets, unfiltered and random-25, 1,024 reads
+each, one dot product the time of a warm direct read per row; `results/count-model-and-orders/`), it is off by far
+more than 1.5x, so it was not built:
+- The levels do not drop most rows early. Of the rows a sorted range leaves, 98%, 94% and 81% enter LAION's second,
+  third and fourth levels (yahoo 80%, 52%, 26%; glove 66%, 15%), where f is about 1%: the work through the deeper
+  levels is 100 to 500 times the prediction (LAION 819k dot products counted against 3k predicted), while the
+  first level, the tables, the cluster setup and the stored vectors read are each predicted within 1.5x.
+- Counted from what the reads did, the index path still costs more per counted dot product than a direct read does:
+  1.3 to 1.7 times unfiltered, 2.5 to 3.8 times under random-25, where clusters are smaller and per-cluster work
+  the counts do not hold (buffers, gathers, the levels' setup) weighs more.
+- A direct read costs 1.9 to 6.8 times the warm dot product per row (cold rows; scattered ones under random-25), and
+  a group's setup 1.6 to 5.2 times its count (glove's small n leaves fixed work dominant).
+
+**What limits the orders at high recall: the order or the execution.** Rows to recall (`study_order_rows_to_recall`;
+each order read whole, the same number of clusters for every query, a query reading nothing more once it holds its
+true ten; 100 queries):
+
+| rows to 0.95 / 0.99 / 0.995 | μ + z(1, v)σ | spread | tail, oracle t | tail, running t |
+|---|---|---|---|---|
+| LAION none | 31k / 49k / 57k | 39k / 62k / 66k | 35k / 51k / 62k | 36k / 58k / 65k |
+| LAION random-25 | 10.1k / 15.9k / 18.1k | 11.8k / 22.2k / 23.6k | 9.7k / 15.3k / 17.4k | 10.6k / 19.9k / 21.4k |
+| yahoo none | 12.9k / 23.4k / 24.8k | 15.0k / 27.6k / 29.2k | 14.8k / 24.4k / 26.6k | 14.9k / 26.8k / 28.2k |
+| yahoo random-25 | 4.5k / 8.2k / 9.4k | 5.9k / 9.6k / 10.8k | 4.8k / 8.7k / 10.4k | 4.9k / 9.3k / 11.0k |
+| glove none | 81k / 129k / 130k | 73k / 114k / 125k | 73k / 117k / 121k | 82k / 126k / 136k |
+| glove random-25 | 24.6k / 36.4k / 37.7k | 24.1k / 36.1k / 36.7k | 22.9k / 33.2k / 35.6k | 26.6k / 36.5k / 38.1k |
+
+The current order reads fewer rows than spread to 0.995 on LAION and yahoo (13 to 23% fewer) and 3 to 5% more on
+glove; the oracle tail order (the chance a cluster holds a visible row above the true 10th best) beats spread
+everywhere at 0.995 but gains little or nothing over the current order (and the tail order at the running k-th best
+does worse than the current order). So spread's edge in time at 0.99 and above is not its order: it reads more rows
+than ours for the same recall. It is execution, the cost per cluster and per row of the reads (legacy `knn2_fast`
+against the probe's reads and its index path).
+
 **Next.**
 - The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.
