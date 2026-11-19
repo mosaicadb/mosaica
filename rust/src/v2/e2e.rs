@@ -1993,6 +1993,12 @@ fn adaptives(ix: &Index2) -> Vec<(&'static str, adaptive::Adaptive)> {
 
 const PSIS: [f64; 5] = [0.0, 1.0, 2.0, adaptive::PSI, f64::INFINITY];
 
+/// The default plan, and one whose exact threshold query never scans first, so that the approximate one probes under
+/// the fixture's visible sets too (the default plan's exact query scans each of them first).
+fn thr_plans() -> [(&'static str, Plan); 2] {
+    [("default", Plan::default()), ("index", Plan { mode: PlanMode::Index, ..Plan::default() })]
+}
+
 /// Approximate k-NN returns visible items, each once and with its own score, k of them whenever k are visible, under
 /// every psi; the exact k best when psi is infinite and whenever the scan race scans (before probing or the rest); and
 /// the race's modelled cost stays within twice that of a scan of the visible rows. Every path counts the visible rows
@@ -2069,9 +2075,9 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                 let t = truth(ix, q, bm.as_ref());
                 for th in thresholds(&t).into_iter().chain([-2.0]) {
                     let want = answer(&t, th);
-                    for psi in PSIS {
-                        let what = format!("{cname}, query {qi}, set {sname}, t {th}, psi {psi}");
-                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, Plan::default());
+                    for (psi, (pname, plan)) in PSIS.into_iter().flat_map(|p| thr_plans().map(move |x| (p, x))) {
+                        let what = format!("{cname}, query {qi}, set {sname}, t {th}, psi {psi}, plan {pname}");
+                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, plan);
                         *paths.entry(info.path).or_insert(0) += 1;
                         let got = to_bitmap2(ix, &out.rows);
                         assert_eq!(got.len() as usize, out.rows.len(), "a row twice, {what}");
@@ -2082,7 +2088,7 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
                         // psi infinite hands over, to the cheaper of a scan and the exact query, and pays that (unless the
                         // support table decides every cluster)
                         if psi == f64::INFINITY && info.path != "empty" && !(info.path == "probe" && info.read.is_empty()) {
-                            assert!(info.path == "scan" || (info.path == "exact" && info.exact_cost <= info.scan_cost), "{what}: {info:?}");
+                            assert!(info.path == "scan" || info.path == "sparse" || (info.path == "exact" && info.exact_cost <= info.scan_cost), "{what}: {info:?}");
                             assert!(info.cost <= info.fixed + info.scan_cost.min(info.exact_cost) + 1e-9, "{what}: {info:?}");
                         }
                         if th == -2.0 && info.path == "probe" {
@@ -2094,6 +2100,51 @@ fn approximate_thresholds_are_subsets_and_exact_on_hand_overs() {
         }
         assert!(paths.contains_key("probe") && (paths.contains_key("scan") || paths.contains_key("exact")), "{cname}: paths {paths:?}");
     }
+}
+
+/// On a visible set the exact threshold query scans first (`Plan::threshold_scans_first`), the approximate one is the
+/// exact one from the start: path "sparse", the exact query's rows, nothing priced or read, the scan's cost; on the
+/// others (the unfiltered index here, every set under a plan that never scans first) it never takes that path. Under
+/// every psi, and under the default, index and scan plans.
+#[test]
+fn approximate_thresholds_on_sets_the_exact_query_scans_first_are_exact() {
+    let f = fixture();
+    let ix = &f.ix;
+    let ad = adaptive::Adaptive::new(ix, fixed_costs()).unwrap();
+    let plans = [thr_plans()[0], thr_plans()[1], ("scan", Plan { mode: PlanMode::Scan, ..Plan::default() })];
+    let (mut sparse, mut other) = (0, 0);
+    for (qi, q) in f.queries.iter().enumerate() {
+        let pr = prep2(ix, q);
+        for (sname, bm) in &f.sets {
+            let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+            let t = truth(ix, q, bm.as_ref());
+            for (pname, plan) in plans {
+                let first = plan.threshold_scans_first(ix, vis.as_ref());
+                for th in thresholds(&t) {
+                    let ex = threshold2(ix, &pr, th, &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+                    for psi in PSIS {
+                        let what = format!("query {qi}, set {sname}, plan {pname}, t {th}, psi {psi}");
+                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, plan);
+                        if info.path == "empty" {
+                            continue;
+                        }
+                        assert_eq!(info.path == "sparse", first, "{what}: {info:?}");
+                        if first {
+                            sparse += 1;
+                            assert_eq!(out.rows, ex.rows, "{what}: not the exact query's rows");
+                            assert_eq!(to_bitmap2(ix, &out.rows), answer(&t, th), "{what}");
+                            assert!(info.read.is_empty() && info.priced.is_empty() && info.spreads == 0, "{what}: {info:?}");
+                            assert_eq!((info.fixed, info.cost), (0.0, info.scan_cost), "{what}");
+                        } else {
+                            other += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(!Plan::default().threshold_scans_first(ix, None), "the unfiltered index is scanned first");
+    assert!(sparse > 0 && other > 0, "{sparse} sparse, {other} other");
 }
 
 /// On a norm-sorted index (no support table; the index path's groups set up before its cut) the approximate queries
@@ -2117,9 +2168,9 @@ fn the_approximate_queries_run_on_a_norm_sorted_index() {
                     if psi == f64::INFINITY {
                         assert_eq!(sub_values(&ix, &out.ents, q), top_values(&t, 10.min(t.len())), "{what}");
                     }
-                    for th in thresholds(&t) {
+                    for (th, (_, plan)) in thresholds(&t).into_iter().flat_map(|th| thr_plans().map(move |x| (th, x))) {
                         let want = answer(&t, th);
-                        let (out, info) = ad.threshold(&ix, q, th, vis.as_ref(), psi, Plan::default());
+                        let (out, info) = ad.threshold(&ix, q, th, vis.as_ref(), psi, plan);
                         let got = to_bitmap2(&ix, &out.rows);
                         assert!(got.is_subset(&want), "{what}, t {th}");
                         if psi == f64::INFINITY || info.path != "probe" {
@@ -2373,10 +2424,10 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
                 for (sname, bm) in &f.sets {
                     let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
                     let t = truth(ix, q, bm.as_ref());
-                    for th in thresholds(&t) {
-                        let what = format!("{cname}, query {qi}, set {sname}, t {th}, psi {psi}");
+                    for (th, (pname, plan)) in thresholds(&t).into_iter().flat_map(|th| thr_plans().map(move |x| (th, x))) {
+                        let what = format!("{cname}, query {qi}, set {sname}, t {th}, psi {psi}, plan {pname}");
                         let want = answer(&t, th);
-                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, Plan::default());
+                        let (out, info) = ad.threshold(ix, q, th, vis.as_ref(), psi, plan);
                         let got = to_bitmap2(ix, &out.rows);
                         assert!(got.is_subset(&want), "{what}");
                         if info.path == "probe" {
@@ -2385,7 +2436,7 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
                             let reach: RoaringBitmap = want.iter().filter(|&e| keys[row_cl[ix.row_of_ent(e)]] >= th).collect();
                             assert!(reach.is_subset(&got), "{what}: an answer row of a cluster whose key reaches t left out");
                         }
-                        if *cname == "scan cheap" && info.path != "empty" {
+                        if *cname == "scan cheap" && info.path != "empty" && info.path != "sparse" {
                             assert_eq!((info.path, info.spreads), ("scan", 0), "{what}");
                         }
                     }
@@ -2448,8 +2499,8 @@ fn the_constants_change_the_answer_only_through_the_race() {
                 }
             }
             for th in thresholds(&t) {
-                for psi in PSIS {
-                    let ((x, xi), (y, yi)) = (a.threshold(ix, q, th, vis.as_ref(), psi, Plan::default()), b.threshold(ix, q, th, vis.as_ref(), psi, Plan::default()));
+                for (psi, (_, plan)) in PSIS.into_iter().flat_map(|p| thr_plans().map(move |x| (p, x))) {
+                    let ((x, xi), (y, yi)) = (a.threshold(ix, q, th, vis.as_ref(), psi, plan), b.threshold(ix, q, th, vis.as_ref(), psi, plan));
                     if xi.path == "probe" && yi.path == "probe" {
                         assert_eq!(to_bitmap2(ix, &x.rows), to_bitmap2(ix, &y.rows), "query {qi}, set {sname}, t {th}, psi {psi}");
                     }

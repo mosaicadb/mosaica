@@ -181,7 +181,8 @@ impl Index {
     /// The approximate threshold query (`v2::adaptive`): the visible entity ids, ascending, scoring at least t among the
     /// clusters the support table takes in and those whose mu + psi sigma reaches t, read exactly; a subset of
     /// `threshold`'s answer, and all of it when the query hands over (to a scan, or to the exact query, when either costs
-    /// no more than those reads) or psi is inf. `psi` as for `knn_approx`.
+    /// no more than those reads), when psi is inf, and on a visible set the exact query scans first (`threshold` itself
+    /// from the start). `psi` as for `knn_approx`.
     #[pyo3(signature = (q, t, psi=PSI))]
     fn threshold_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, t: f64, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
@@ -194,7 +195,7 @@ impl Index {
         Ok(PyArray1::from_vec(py, ents))
     }
 
-    /// What one approximate query did, as a dict: its path ("probe", "race", "scan", "exact", "empty"), the clusters
+    /// What one approximate query did, as a dict: its path ("probe", "race", "scan", "exact", "sparse", "empty"), the clusters
     /// visited, read directly and on the index path, the groups set up, the clusters given a spread, the modelled
     /// costs (the order's, the whole query's, a scan's, and for a threshold query the exact query's); and rows touched,
     /// full vectors read, clusters on the index path and the time in ms. With `t`, the threshold query at t, else

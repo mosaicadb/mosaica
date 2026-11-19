@@ -35,7 +35,12 @@
 //!   what a scan of the visible rows or the exact query (every open cluster) costs, the query hands over to the cheaper
 //!   of the two, which answers exactly, before computing any sigma; otherwise the sigmas are computed (the largest
 //!   bound first) racing that hand-over, and the reads taken are compared with it once more. With psi infinite it
-//!   always hands over, unless the support table decided every cluster.
+//!   always hands over, unless the support table decided every cluster. On a visible set the exact query scans before
+//!   anything else (`Plan::threshold_scans_first`: every cluster holding a visible row could be scored directly, in
+//!   sum) the query is the exact one from the start, before the centre scores (path "sparse"): there every cluster
+//!   read costs more than its rows' share of that scan, and the bounds decide too little for the fixed work and the
+//!   sigmas to pay off (the paired runs at 1% visible: 1.04 to 1.29 times the exact query's time to recall 0.9 and
+//!   0.95, but for yahoo random-1). It is decided from the visible set alone, so every query on it hands over.
 //! - each cluster is read directly or on the index path, whichever the measured cost model says is cheaper
 //!   (`Measured`), with a group's setup and the anchor search charged to the first cluster that needs them. Both paths
 //!   give the same answers: the constants change the answer only through the race and the hand-overs, which answer
@@ -474,7 +479,8 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 
 /// What one approximate query did. `path`: "probe" (k-NN stopped by its knob; a threshold query's clusters read),
 /// "race" (k-NN: the rest scanned once the probe would cost more than a scan), "scan" (the visible rows scanned
-/// instead), "exact" (a threshold query handed to the exact one), "empty". `read`: the clusters the probe read, in
+/// instead), "exact" (a threshold query handed to the exact one), "sparse" (a threshold query that is the exact one
+/// from the start, on a visible set the exact query scans first; nothing else done), "empty". `read`: the clusters the probe read, in
 /// order (not those a race scanned); `priced`: the clusters given a sigma, in order. Costs are modelled
 /// (`Measured`): `fixed` the order's (centre scores; k-NN's product with the pooled directions; a threshold query's
 /// anchor search), `cost` what the query paid in all, `scan_cost` a scan of the visible rows, `exact_cost`
@@ -788,8 +794,8 @@ impl Adaptive {
     /// The approximate threshold query at t with knob `psi` (at least 0; `PSI` by default), as the module's comment
     /// says: the visible rows scoring at least t of the clusters the support table takes in and of those whose key
     /// reaches t, ascending; a subset of the exact answer, and the exact answer when the query hands over
-    /// (`AdaptiveInfo::path` "scan" or "exact", always when psi is infinite and the support table leaves a cluster
-    /// open). `plan` is the reads' (and the exact
+    /// (`AdaptiveInfo::path` "scan", "exact" or "sparse"; always when psi is infinite and the support table leaves a
+    /// cluster open, and on a visible set `plan`'s exact query scans first). `plan` is the reads' (and the exact
     /// query's on a hand-over).
     pub fn threshold(&self, ix: &Index2, q: &[f32], t: f64, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (ThrOut2, AdaptiveInfo) {
         assert!(psi >= 0.0, "psi is at least 0 (infinity reads every cluster), not {psi}");
@@ -820,6 +826,13 @@ impl Adaptive {
             return (done(ThrOut2 { st: Stats::new(nl), npow: ix.meta.npow, ..Default::default() }, &st), info);
         }
         let cs = info.scan_cost;
+        // a visible set the exact query scans first: the exact query, before anything else
+        if plan.threshold_scans_first(ix, vis) {
+            info.path = "sparse";
+            (info.fixed, info.cost, info.exact_cost) = (0.0, cs, cs);
+            let out = threshold2(ix, &pr, t, &opts);
+            return (done(out, &st), info);
+        }
         if fixed >= cs {
             info.path = "scan";
             info.cost = cs;

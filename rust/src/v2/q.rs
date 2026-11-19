@@ -2162,6 +2162,21 @@ impl Plan {
             _ => false,
         }
     }
+
+    /// The exact threshold query on `ix` scans the visible set (every row without one) before anything else
+    /// (`plan2`): always under `Scan`; under `Auto` in memory (reads not priced) when the visible rows number at most
+    /// the rule's rows (`direct_max`) summed over the clusters holding one; never under `Index` or `Flat`, nor with
+    /// priced reads, whose cost model decides after the support table.
+    pub fn threshold_scans_first(&self, ix: &Index2, vis: Option<&Vis2>) -> bool {
+        match self.mode {
+            PlanMode::Scan => true,
+            PlanMode::Auto if !ix.own_rows().is_some_and(|r| r.priced()) => {
+                let (nvis, lim) = rule_rows(ix, vis, *self);
+                nvis <= lim
+            }
+            _ => false,
+        }
+    }
 }
 
 /// The rows of the rule in memory on `ix`: the visible rows (every row without a visible set), and the most of them
@@ -2755,11 +2770,8 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     let live: Vec<usize> = (0..k).filter(|&ci| nvis_cl(ci) > 0).collect();
     // the whole query scans when every cluster holding a visible row could be scored directly (in sum), before the
     // anchors are searched or the support table read
-    if auto {
-        let (nvis, lim) = rule_rows(ix, o.vis, pl);
-        if nvis <= lim {
-            return Planned::Scan;
-        }
+    if auto && pl.threshold_scans_first(ix, o.vis) {
+        return Planned::Scan;
     }
     let tc0 = tick();
     let nusort = !ix.nukey.is_empty();

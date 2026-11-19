@@ -248,6 +248,23 @@ isotropic rests holding most of their variance). The `spread` order by nprobe
 stays as `knn_nprobe`, the legacy comparison arm, until the owner's benchmark has run. The exact planner can take its
 rule in rows from the measured constants (`Index(..., rule="measured")`); its default is unchanged.
 
+The approximate threshold query under 1% visible sets took 1.04 to 1.29 times the exact query's time to recall 0.9
+and 0.95 (`results/consolidated-final/`; yahoo random-1 0.90 and 0.93). On those sets the exact query scans the
+visible rows before anything else (its planner's rule in rows: every cluster holding a visible row could be scored
+directly, in sum), and the approximate one handed over too, to the same scan, in 75 to 100% of the queries at ψ 3 to
+6 (yahoo: 6 to 100%), but only after its fixed work (centre scores and anchor search: 53, 31 and 20 µs modelled on
+LAION, yahoo and glove random-1, against scans of 551, 275 and 207). It now is the exact query from the start on a
+visible set the exact query scans first (`Plan::threshold_scans_first`, path "sparse"), decided from the visible
+set alone: every query on random-1 and region-1 of the three datasets, none unfiltered or at 25%. Modelled saving
+a query at ψ 3 / 4.5 / 6: LAION random-1 63 / 57 / 53 µs, region-1 26 / 30 / 32; glove 20 and 15 at each ψ; yahoo
+random-1 −45 / 62 / 45, region-1 −61 / 3 / 13 (its ψ 3 probes were modelled cheaper than the scan, at recall 0.92
+and 0.85). A test on the measured costs alone (hand over when the exact query costs no more than the approximate
+one's fixed work and the reads it is sure of) cannot see these sets before the centre scores: the fixed work is a
+tenth of the scan, and no read is sure without them. k-NN keeps its probe there (its fixed work is 2 to 2.5% of
+the scan, and it reaches recall 0.9 reading a tenth to a third of the visible rows, in 0.5 to 1.1 times spread's
+time); its existing test, a scan when the fixed work costs as much as one, is that floor test and fires on none of
+these sets.
+
 **Next.**
 - The final paired run (k-NN and threshold, five visible sets), then the legacy arm's removal.
 - Inserts leave the directions as built until compaction.
