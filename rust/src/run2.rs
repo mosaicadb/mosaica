@@ -351,6 +351,8 @@ pub fn build_options() -> BuildOptions {
         // glibc's mmap threshold fixed for the build: only in a run that builds and then runs no experiment (the
         // setting stays for the rest of the process)
         tune_malloc: !MODES.iter().any(|m| *m != "create" && has_mode(m)),
+        // experimental: layout (c) of v2::sub, this many sub-clusters per cluster
+        sub: arg_usize("--sub", 0),
     }
 }
 

@@ -502,7 +502,7 @@ pub struct AdaptiveInfo {
 
 /// A cluster's key in a max-heap, the lower cluster first among equal keys.
 #[derive(PartialEq)]
-struct Key(f64, Reverse<usize>);
+pub(crate) struct Key(pub(crate) f64, pub(crate) Reverse<usize>);
 impl Eq for Key {}
 impl PartialOrd for Key {
     fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
@@ -519,12 +519,12 @@ impl Ord for Key {
 pub struct Adaptive {
     pub m: Measured,
     /// the int8 centres
-    centres: Approx,
-    st: std::sync::Arc<super::order::OrderState>,
+    pub(crate) centres: Approx,
+    pub(crate) st: std::sync::Arc<super::order::OrderState>,
     /// per cluster, the variance its directions leave per other spanned dimension, and the largest variance along any
     /// direction (sigma <= sqrt(top |q|^2))
-    rest: Vec<f64>,
-    top: Vec<f64>,
+    pub(crate) rest: Vec<f64>,
+    pub(crate) top: Vec<f64>,
     /// per cluster, the least variance along a direction it holds (sigma >= sqrt(low |q|^2))
     low: Vec<f64>,
     /// the pooled within-cluster covariance, whose share of its trace along the query scales the stream's radii
@@ -536,23 +536,23 @@ pub struct Adaptive {
 /// are: while the group is not set up, its clusters are read directly and the savings the index path would have given
 /// them (`lost`) are summed, and the cluster whose saving takes the sum to the setup's cost sets the group up. A group
 /// set up then costs at most twice what the best choice for its clusters read would have.
-struct Charges<'a> {
+pub(crate) struct Charges<'a> {
     m: &'a Measured,
     ix: &'a Index2,
     pr: &'a Prep2,
-    anchored: bool,
+    pub(crate) anchored: bool,
     gset: Vec<bool>,
     lost: Vec<f64>,
 }
 
 impl<'a> Charges<'a> {
-    fn new(m: &'a Measured, ix: &'a Index2, pr: &'a Prep2, anchored: bool) -> Charges<'a> {
+    pub(crate) fn new(m: &'a Measured, ix: &'a Index2, pr: &'a Prep2, anchored: bool) -> Charges<'a> {
         Charges { m, ix, pr, anchored, gset: vec![false; ix.groups.len()], lost: vec![0.0; ix.groups.len()] }
     }
 
     /// The path for cluster ci, `nv` of its rows visible, given what is already set up (`anchors` the anchors a first
     /// search would score), its cost, and whether it sets up a group; marks what the index path sets up.
-    fn choose(&mut self, ci: usize, nv: usize, anchors: usize) -> (KnnPath, f64, bool) {
+    pub(crate) fn choose(&mut self, ci: usize, nv: usize, anchors: usize) -> (KnnPath, f64, bool) {
         let (m, ix) = (self.m, self.ix);
         let rows = ix.cl[ci].r1 - ix.cl[ci].r0;
         let g = ix.cl[ci].g;
@@ -563,6 +563,21 @@ impl<'a> Charges<'a> {
         if save > 0.0 && (!gnew || self.lost[g] + save >= m.grp_us) {
             self.gset[g] = true;
             (KnnPath::Index, idx + if gnew { m.grp_us } else { 0.0 }, gnew)
+        } else {
+            self.lost[g] += save.max(0.0);
+            (KnnPath::Direct, dir, false)
+        }
+    }
+
+    /// As `choose`, for a read whose index path costs `idx` (the anchor search included when not yet done) and whose
+    /// direct read costs `dir` (a sub-cluster's, `sub::knn_sub`).
+    pub(crate) fn choose_with(&mut self, ci: usize, idx: f64, dir: f64) -> (KnnPath, f64, bool) {
+        let g = self.ix.cl[ci].g;
+        let gnew = !self.gset[g] && self.pr.gq[g].get().is_none();
+        let save = dir - idx;
+        if save > 0.0 && (!gnew || self.lost[g] + save >= self.m.grp_us) {
+            self.gset[g] = true;
+            (KnnPath::Index, idx + if gnew { self.m.grp_us } else { 0.0 }, gnew)
         } else {
             self.lost[g] += save.max(0.0);
             (KnnPath::Direct, dir, false)
@@ -589,7 +604,7 @@ impl Adaptive {
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
-    fn sigma(&self, ix: &Index2, ci: usize, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
+    pub(crate) fn sigma(&self, ix: &Index2, ci: usize, q32: &[f32], qq: f64, p: &mut [f32]) -> f64 {
         let (st, r, n) = (&self.st, self.st.r, ix.n());
         unsafe { crate::kernel::gemv_i8(q32, st.dirs(ci, r, n), n, &mut p[..r]) };
         let (mut v, mut pp) = (0f64, 0f64);
@@ -633,12 +648,12 @@ impl Adaptive {
     }
 
     /// The cost of one sigma (its directions' products).
-    fn sigma_cost(&self) -> f64 {
+    pub(crate) fn sigma_cost(&self) -> f64 {
         self.m.i8_us * self.st.r as f64
     }
 
     /// The anchors a first anchor search scores when it may take the nearest of `among` clusters' anchors.
-    fn anchors(ix: &Index2, among: usize) -> usize {
+    pub(crate) fn anchors(ix: &Index2, among: usize) -> usize {
         if !ix.nukey.is_empty() {
             0
         } else if ix.anc_centres && ix.nanch == ix.k() {
@@ -948,7 +963,7 @@ impl Adaptive {
                 info.index += 1;
                 info.groups += gnew as usize;
                 let pc = cut_pre(ix, &pr, t, vis, ci, nusort);
-                use_idx[ci] = !flat && matches!(pc, Pre::Open { ncand, .. } if ncand > 0);
+                use_idx[ci] = !flat && pc.ncand().is_some_and(|nc| nc > 0);
                 pre[ci] = pc;
             } else {
                 info.direct += 1;

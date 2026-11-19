@@ -20,6 +20,7 @@ pub mod kern;
 pub mod order;
 pub mod q;
 pub mod adaptive;
+pub mod sub;
 pub mod setup;
 pub mod store;
 pub mod tail;
@@ -73,6 +74,11 @@ pub struct BuildOptions {
     /// nothing but build (the vexact binary does, for a create or a rebuild run with no experiment). Not part of the
     /// key: it does not change what is built.
     pub tune_malloc: bool,
+    /// Experimental (layout (c) of `sub`; 0, the default, builds the default layout): split each cluster into this
+    /// many sub-clusters (`sub::kmeans` on its rows in key order, at most 255) and order its rows by (sub-cluster, key),
+    /// each sub-cluster one key-sorted run (`Index2::runs`). The exact paths search every run for its sorted range.
+    /// Not with the norm sort.
+    pub sub: usize,
 }
 impl Default for BuildOptions {
     fn default() -> BuildOptions {
@@ -95,6 +101,7 @@ impl Default for BuildOptions {
             csg_plain: false,
             cal_items: CAL_ITEMS,
             tune_malloc: false,
+            sub: 0,
         }
     }
 }
@@ -103,10 +110,15 @@ impl BuildOptions {
     /// its index.json ("options"), from which `open` derives its key again. The profile's path is made absolute.
     pub fn encoding_json(&self) -> serde_json::Value {
         let profile = self.profile.as_ref().map(|p| std::fs::canonicalize(p).map_or(p.clone(), |c| c.display().to_string()));
-        serde_json::json!({
+        let mut v = serde_json::json!({
             "profile": profile, "clusters": self.clusters, "rlv": self.rlv, "dlv": self.dlv, "design_exact": self.design_exact,
             "nusort": self.nusort, "nguar": self.nguar, "csg_plain": self.csg_plain, "cal_items": self.cal_items,
-        })
+        });
+        // recorded only when set, so that the default layout's record is as before
+        if self.sub > 0 {
+            v["sub"] = serde_json::json!(self.sub);
+        }
+        v
     }
     /// The options `encoding_json` recorded (the others at their defaults).
     pub fn from_encoding_json(v: &serde_json::Value) -> Result<BuildOptions, String> {
@@ -143,6 +155,10 @@ impl BuildOptions {
             },
             csg_plain: flag("csg_plain")?,
             cal_items: us(&v["cal_items"]).ok_or(bad("cal_items"))?,
+            sub: match &v["sub"] {
+                Value::Null => 0,
+                x => us(x).ok_or(bad("sub"))?,
+            },
             ..BuildOptions::default()
         })
     }
@@ -1253,6 +1269,10 @@ pub struct Index2 {
     /// The approximate mode's cluster-order state, from every row of each cluster (a compaction shares its parent's);
     /// None for an index without stored vectors.
     pub order: Option<Arc<order::OrderState>>,
+    /// Experimental layout (c) of `sub` (`BuildOptions::sub`): each cluster's rows ordered by (sub-cluster, key), so
+    /// that every sub-cluster is one key-sorted run. k x (s + 1) row offsets, the runs of cluster ci starting at
+    /// `subruns[ci * (s + 1)]`; empty for the default layout (one key-sorted run per cluster).
+    pub subruns: Arc<Vec<u32>>,
 }
 
 /// anchor . mhat for every (anchor, cluster), nanch x k (`Index2::apm`).
@@ -1308,6 +1328,16 @@ impl Index2 {
         e.sort_unstable();
         e.hash(&mut h);
         h.finish()
+    }
+    /// Layout (c)'s runs of cluster ci (s + 1 row offsets, the first its r0, the last its r1), or None for the default
+    /// layout, whose cluster is one key-sorted run.
+    #[inline]
+    pub fn runs(&self, ci: usize) -> Option<&[u32]> {
+        if self.subruns.is_empty() {
+            return None;
+        }
+        let w = self.subruns.len() / self.k();
+        Some(&self.subruns[ci * w..(ci + 1) * w])
     }
     pub fn n(&self) -> usize {
         self.meta.n
@@ -1467,6 +1497,8 @@ impl Index2 {
             nent: self.nent,
             nukey: if self.nukey.is_empty() { Arr::default() } else { rows.iter().map(|&r| self.nukey[r as usize]).collect() },
             order: self.order.clone(),
+            // a run keeps the rows of it that are kept, in their order: still contiguous and key-sorted
+            subruns: Arc::new(self.subruns.iter().map(|&b| rows.partition_point(|&r| r < b) as u32).collect()),
         }
     }
     /// Bytes this index holds of its own (codes, scalars, keys, ids, escapes and its own vectors), not the parts it
@@ -1516,6 +1548,24 @@ pub struct Items2 {
 }
 
 impl Items2 {
+    /// The items in the order `perm` (item j of the result is item perm[j]); nu, when set, follows.
+    pub fn permuted(self, perm: &[usize], n: usize) -> Items2 {
+        let mut z = vec![0f64; self.z.len()];
+        for (j, &k) in perm.iter().enumerate() {
+            z[j * n..(j + 1) * n].copy_from_slice(&self.z[k * n..(k + 1) * n]);
+        }
+        let x16 = if self.x16.is_empty() { Vec::new() } else { perm.iter().flat_map(|&k| self.x16[k * n..(k + 1) * n].iter().copied()).collect() };
+        let pick = |v: &[u32]| if v.is_empty() { Vec::new() } else { perm.iter().map(|&k| v[k]).collect() };
+        Items2 {
+            ah: perm.iter().map(|&k| self.ah[k]).collect(),
+            z,
+            ent: pick(&self.ent),
+            ext: pick(&self.ext),
+            x2max: self.x2max,
+            nu: if self.nu.is_empty() { Vec::new() } else { perm.iter().map(|&k| self.nu[k]).collect() },
+            x16,
+        }
+    }
     /// The items in ascending order of |z| (z = V_q^-1 r, the residual in the metric of the dual pair), with nu set.
     pub fn sort_by_nu(self, n: usize) -> Items2 {
         let nc = self.ah.len();
@@ -2167,12 +2217,33 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
         x2max: f64,
         numax: f64,
         ord_s: f64,
+        runs: Vec<u32>,
     }
+    assert!(o.sub == 0 || (!nusort && real && o.sub <= 255), "layout (c) needs stored vectors, at most 255 sub-clusters and no norm sort");
     let done: Vec<Done> = (0..k).into_par_iter().map(|c| {
         let gp = &groups[p.grp[c]];
         let it = src.items(c, p, gp, &mhats[c]);
         let it = if nusort { it.sort_by_nu(n) } else { it };
         assert_eq!(it.ah.len(), sizes[c], "cluster {c} gave {} items where the source gave its size as {}", it.ah.len(), sizes[c]);
+        // layout (c): the sub-clusters of the rows in key order, then the rows by (sub-cluster, key); `key_pos[i]` is
+        // where the row i-th in key order went, so that the order state is computed over the rows in key order, as the
+        // default layout's is
+        let (it, runs, key_pos) = if o.sub > 0 {
+            let x: Vec<f32> = it.x16.iter().map(|&h| f16_to_f32(h)).collect();
+            let lab = sub::kmeans(&x, n, o.sub, c as u64);
+            let (perm, cnt) = sub::run_order(&lab, o.sub);
+            let mut key_pos = vec![0usize; perm.len()];
+            for (j, &i) in perm.iter().enumerate() {
+                key_pos[i] = j;
+            }
+            let mut runs = vec![row0[c] as u32];
+            for &m in &cnt {
+                runs.push(runs.last().unwrap() + m as u32);
+            }
+            (it.permuted(&perm, n), runs, Some(key_pos))
+        } else {
+            (it, Vec::new(), None)
+        };
         let cc = encode_cluster(it, gp, &codes, &et, &meta, &rots, mn32[c], false);
         let r0 = row0[c];
         // SAFETY (each put below): cluster c writes only its own ranges, fixed above from the sizes before encoding
@@ -2208,7 +2279,10 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 }
             }
             let to = Timer::new();
-            let row = |i: usize, out: &mut [f32]| out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h));
+            let row = |i: usize, out: &mut [f32]| {
+                let i = key_pos.as_ref().map_or(i, |kp| kp[i]);
+                out.iter_mut().zip(&it.x16[i * n..(i + 1) * n]).for_each(|(o, &h)| *o = f16_to_f32(h))
+            };
             let co = order::cluster(sizes[c], &row, &p.centres[c * n..(c + 1) * n], ord_r, order::SAMPLE, order::PASSES, c as u64);
             // SAFETY: cluster c writes only its own entries of each array
             unsafe {
@@ -2217,12 +2291,13 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
                 ord_dsc.put(c * ord_r, &co.dsc);
                 ord_dirs.put(c * ord_r * n, &co.dirs8);
             }
-            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: to.s() }
+            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: to.s(), runs }
         } else {
             unsafe { ext.put(r0, &it.ext) };
-            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: 0.0 }
+            Done { esc: cc.esc, x2max: it.x2max, numax, ord_s: 0.0, runs }
         }
     }).collect();
+    let subruns: Vec<u32> = done.iter().flat_map(|d| d.runs.iter().copied()).collect();
     log(format!("encoded {:.1}s, with it the support table of {nanch} anchors and the order state ({ord_r} directions per cluster from up to {} of its rows: {:.1} thread-seconds); anon {:.0} MB",
                 t.s(), order::SAMPLE, done.iter().map(|d| d.ord_s).sum::<f64>(), crate::util::anon_mb()));
     let order = real.then(|| Arc::new(order::OrderState {
@@ -2280,6 +2355,7 @@ pub fn build2(p: &Params, prof: &[f64], src: &dyn Source2, full: Full2, o: &Buil
     let apm = anchor_mhat(&anchors, &cl, n);
     let ix = Index2 {
         order,
+        subruns: Arc::new(subruns),
         nukey: nukey.finish(),
         repack: vec![0.6; meta.nl()],
         ctab: Arc::new(ctab),

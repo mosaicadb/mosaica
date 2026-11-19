@@ -8,6 +8,7 @@ use vexact::index::Params;
 use std::sync::atomic::Ordering::Relaxed;
 use vexact::v2::adaptive::{measured_constants, typical_rows, Adaptive, AdaptiveInfo, PSI};
 use vexact::v2::q::{disk_constants, knn2, knn2_fast, prep2, threshold2, to_bitmap2, Approx, KnnOut2, Opts2, Plan, PlanMode, Vis2};
+use vexact::v2::sub::{knn_sub, read_costs, Layout, SigmaKind, SplitMode, SubInfo, SubState};
 use vexact::v2::{disk, open, rebuild, saved_options, BuildOptions, Full2, Index2, OpenOptions};
 
 #[pyclass(module = "vexact_py")]
@@ -23,6 +24,8 @@ struct Index {
     /// The approximate queries (`v2::adaptive`) with this machine's measured constants (timed at the first open on
     /// this machine and cached in the index directory), or why they cannot run.
     adaptive: Result<Adaptive, String>,
+    /// Experimental: the sub-clusters `knn_sub` reads (`v2::sub`), when the index was opened with a layout.
+    sub: Option<SubState>,
 }
 
 /// The query's length against the index's, and k at least 1 (k-NN), as errors to raise.
@@ -78,12 +81,17 @@ impl Index {
     /// `rule`: the exact planner's rule in rows in memory, "fixed" (`Plan::default`'s R0 and kappa) or "measured"
     /// (from this machine's measured constants, `adaptive::Measured::rule` at the index's typical cluster size).
     #[new]
+    /// Experimental (`v2::sub`): `sub_build` builds layout (c) with that many sub-clusters per cluster (0: the default
+    /// layout); `sub` ("masked", "keyranges" or "runs", the last on an index built with `sub_build`) computes the
+    /// sub-clusters `knn_sub` reads, `sub_count` per cluster.
     #[pyo3(signature = (dir, core=None, plan="auto", dlv=None, ddec=None, full_file=None, advice="random",
-                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, rule="fixed"))]
+                        read="uring", willneed=true, direct_min=Some(8192), dontcache_min=None, priced=None, rule="fixed",
+                        sub_build=0, sub=None, sub_count=16))]
     #[allow(clippy::too_many_arguments)]
     fn new(py: Python<'_>, dir: String, core: Option<usize>, plan: &str, dlv: Option<Vec<usize>>, ddec: Option<u32>,
            full_file: Option<String>, advice: &str, read: &str, willneed: bool, direct_min: Option<usize>, dontcache_min: Option<usize>,
-           priced: Option<bool>, rule: &str) -> PyResult<Index> {
+           priced: Option<bool>, rule: &str, sub_build: usize, sub: Option<String>, sub_count: usize) -> PyResult<Index> {
+        let layout = sub.as_deref().map(Layout::parse).transpose().map_err(PyValueError::new_err)?;
         if rule != "fixed" && rule != "measured" {
             return Err(PyValueError::new_err(format!("rule is fixed or measured, not {rule:?}")));
         }
@@ -103,7 +111,7 @@ impl Index {
                 Some(v) if v.is_empty() => None,
                 v => v,
             };
-            let o = BuildOptions { dlv, ..BuildOptions::default() };
+            let o = BuildOptions { dlv, sub: sub_build, ..BuildOptions::default() };
             let mut log = |s: String| eprintln!("{s}");
             let same = saved_options(&dir).is_ok_and(|s| s.encoding_json() == o.encoding_json());
             let (p, mut ix) = match same.then(|| open(&dir, &OpenOptions::default(), &mut log)) {
@@ -136,7 +144,15 @@ impl Index {
                 let ad = adaptive.as_ref().map_err(|e| PyValueError::new_err(format!("the measured rule: {e}")))?;
                 (plan.r_rows, plan.r_kappa) = ad.m.rule(typical_rows(&ix)).unwrap_or((usize::MAX, 0.0));
             }
-            Ok(Index { _p: p, ix, plan, approx, vis: None, pool, adaptive })
+            let sub = match layout {
+                None => None,
+                Some(l) => {
+                    let ss = SubState::new(&ix, l, sub_count).map_err(PyValueError::new_err)?;
+                    log(format!("[sub] {l:?}: {sub_count} sub-clusters per cluster in {:.1}s", ss.secs));
+                    Some(ss)
+                }
+            };
+            Ok(Index { _p: p, ix, plan, approx, vis: None, pool, adaptive, sub })
         })
     }
 
@@ -176,6 +192,80 @@ impl Index {
         let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
         let ents = py.detach(|| self.pool.install(|| ad.knn(ix, q, k, vis, psi, plan).0.ents));
         Ok(ids(py, &ents, k))
+    }
+
+    /// Experimental: the approximate k nearest with sub-clusters (`v2::sub::knn_sub`), on the index opened with a
+    /// layout (`sub`); `sigma` "scaled" (the cluster's spread times the radius ratio) or "own" (the sub-cluster's
+    /// variances along its cluster's directions); `mode` what a split cluster's sub-clusters are read by (`SplitMode`:
+    /// "bestfirst", "unsplit", "filter").
+    #[pyo3(signature = (q, k, psi=PSI, sigma="scaled", mode="bestfirst"))]
+    fn knn_sub<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, sigma: &str, mode: &str) -> PyResult<Bound<'py, PyArray1<i64>>> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, Some(k), psi)?;
+        let (ss, kind) = self.sub_args(sigma)?;
+        let mode = SplitMode::parse(mode).map_err(PyValueError::new_err)?;
+        if !psi.is_finite() {
+            return Err(PyValueError::new_err("knn_sub takes a finite psi"));
+        }
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let ents = py.detach(|| self.pool.install(|| knn_sub(ad, ix, ss, q, k, vis, psi, plan, kind, mode).0.ents));
+        Ok(ids(py, &ents, k))
+    }
+
+    /// What one `knn_sub` did, as `explain_approx` says, with the clusters split (`split`), the sub-clusters read
+    /// (`sub_reads`), the sub-centres scored (`sub_scored`) and the clusters scored but read whole (`unsplit`).
+    #[pyo3(signature = (q, k=10, psi=PSI, sigma="scaled", mode="bestfirst"))]
+    fn explain_sub<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64, sigma: &str, mode: &str) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let q = q.as_slice()?;
+        let ad = self.adaptive_args(q, Some(k), psi)?;
+        let (ss, kind) = self.sub_args(sigma)?;
+        let mode = SplitMode::parse(mode).map_err(PyValueError::new_err)?;
+        if !psi.is_finite() {
+            return Err(PyValueError::new_err("knn_sub takes a finite psi"));
+        }
+        let (ix, plan, vis) = (&self.ix, self.plan, self.vis.as_ref());
+        let tm = std::time::Instant::now();
+        let (i, st): (SubInfo, _) = py.detach(|| self.pool.install(|| {
+            let (r, i) = knn_sub(ad, ix, ss, q, k, vis, psi, plan, kind, mode);
+            (i, r.st)
+        }));
+        let ms = tm.elapsed().as_secs_f64() * 1e3;
+        let d = info_dict(py, &i.base)?;
+        for (key, x) in [("split", i.split), ("sub_reads", i.sub_reads), ("sub_scored", i.sub_scored), ("unsplit", i.unsplit)] {
+            d.set_item(key, x)?;
+        }
+        d.set_item("touched", st.touched)?;
+        d.set_item("full_reads", st.full_reads)?;
+        d.set_item("clusters_open", st.clusters_open)?;
+        d.set_item("ms", ms)?;
+        Ok(d)
+    }
+
+    /// Experimental: the read costs of sub-clusters against their clusters' (`v2::sub::read_costs`) for each row of `qs`
+    /// over its `top` clusters of largest centre score, under the current visible set: one tuple per (query, cluster)
+    /// of (cluster, visible rows, whole direct us, whole index us, best sub-cluster's rows, its direct us, its index
+    /// us, best four's rows, their direct us, their index us).
+    #[pyo3(signature = (qs, top=16))]
+    #[allow(clippy::type_complexity)]
+    fn sub_read_costs(&self, py: Python<'_>, qs: PyReadonlyArray2<'_, f32>, top: usize) -> PyResult<Vec<(usize, usize, f64, f64, usize, f64, f64, usize, f64, f64)>> {
+        let ss = self.sub.as_ref().ok_or_else(|| PyValueError::new_err("open the index with a sub-cluster layout (sub=...)"))?;
+        let rows: Vec<Vec<f32>> = qs.as_array().outer_iter().map(|r| r.to_vec()).collect();
+        if rows.iter().any(|r| r.len() != self.ix.n()) {
+            return Err(PyValueError::new_err(format!("the queries need {} values", self.ix.n())));
+        }
+        let (ix, vis) = (&self.ix, self.vis.as_ref());
+        let out = py.detach(|| self.pool.install(|| read_costs(ix, ss, &rows, vis, top)));
+        Ok(out.into_iter().map(|x| (x.ci, x.rows, x.whole_dir, x.whole_idx, x.one_rows, x.one_dir, x.one_idx, x.four_rows, x.four_dir, x.four_idx)).collect())
+    }
+
+    /// Experimental: the sub-clusters' layout, count, seconds to compute, bytes (the layout's own state, and the
+    /// approximate queries' per sub-cluster state) and the measured cost of expanding a cluster (us).
+    #[getter]
+    fn sub_info(&self) -> Option<(String, usize, f64, usize, usize, f64)> {
+        self.sub.as_ref().map(|s| {
+            let (a, b) = s.bytes(self.ix.n());
+            (format!("{:?}", s.layout), s.s, s.secs, a, b, s.e_us)
+        })
     }
 
     /// The approximate threshold query (`v2::adaptive`): the visible entity ids, ascending, scoring at least t among the
@@ -411,6 +501,12 @@ impl Index {
 }
 
 impl Index {
+    /// The sub-clusters and the spread `sigma` names, or why `knn_sub` cannot run.
+    fn sub_args(&self, sigma: &str) -> PyResult<(&SubState, SigmaKind)> {
+        let ss = self.sub.as_ref().ok_or_else(|| PyValueError::new_err("open the index with a sub-cluster layout (sub=...)"))?;
+        Ok((ss, SigmaKind::parse(sigma).map_err(PyValueError::new_err)?))
+    }
+
     /// The approximate queries' state, or why they cannot run.
     fn adaptive(&self) -> PyResult<&Adaptive> {
         self.adaptive.as_ref().map_err(|e| PyValueError::new_err(e.clone()))

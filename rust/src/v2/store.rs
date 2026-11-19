@@ -531,6 +531,10 @@ pub fn save_rest(ix: &Index2, dir: &str) {
         put_cluster(&mut w, c, t, ix.meta.ndl());
     }
     write_file(&f("clusters.bin"), &w.0);
+    // layout (c)'s runs, only for that layout
+    if !ix.subruns.is_empty() {
+        write_file(&f("subruns.bin"), &ix.subruns[..]);
+    }
     index_json(ix, dir, None);
 }
 
@@ -862,7 +866,24 @@ pub fn open(p: &Params, prof: &[f64], o: &BuildOptions, oo: &OpenOptions, design
     }
     let order = Some(Arc::new(order::OrderState { r, n0, rad: orad, lam: olam, dsc: odsc, dirs8: odirs }));
     let apm = anchor_mhat(&anchors, &cl, n);
+    // layout (c)'s runs: k x (sub + 1) ascending offsets from each cluster's first row to its last
+    let subruns: Vec<u32> = if o.sub > 0 {
+        let v: Vec<u32> = std::fs::read(format!("{dir}/subruns.bin")).map_err(|e| damaged(&format!("no runs for layout (c) ({e})")))?
+            .chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
+        let w = o.sub + 1;
+        let good = v.len() == k * w && (0..k).all(|ci| {
+            let r = &v[ci * w..(ci + 1) * w];
+            r[0] as usize == cl[ci].r0 && r[w - 1] as usize == cl[ci].r1 && r.windows(2).all(|x| x[0] <= x[1])
+        });
+        if !good {
+            return Err(damaged("its runs for layout (c) do not fit its clusters"));
+        }
+        v
+    } else {
+        Vec::new()
+    };
     let ix = Index2 {
+        subruns: Arc::new(subruns),
         order,
         nukey,
         repack: vec![0.6; nl],
@@ -1043,6 +1064,11 @@ pub fn build_key_with(p: &Params, prof: &[f64], o: &BuildOptions, lib: &str) -> 
     match o.nguar {
         Some(x) => h.pod(&[1.0, x]),
         None => h.u64(0),
+    }
+    // layout (c), hashed only when set
+    if o.sub > 0 {
+        h.str("sub");
+        h.u64(o.sub as u64);
     }
     format!("{:016x}", h.finish())
 }

@@ -714,19 +714,35 @@ pub fn cut_params2(ix: &Index2, ci: usize, pr: &Prep2, qm: f64) -> Cut {
 
 pub fn sorted_range2(ix: &Index2, ci: usize, cu: &Cut, t: f64) -> (usize, usize, usize, usize) {
     let c = &ix.cl[ci];
+    range_in(ix, c.r0, c.r1, range_ivs(ix, cu, t))
+}
+
+/// The key intervals of `sorted_range2` at t: the keys of the rows that may score t or more (rows outside it are
+/// out), and of those that may score below t (rows outside it are in).
+#[allow(clippy::type_complexity)]
+#[inline]
+pub fn range_ivs(ix: &Index2, cu: &Cut, t: f64) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
     let rr = ix.x2.sqrt();
-    let eps = 1e-9 + DA;
     let uset = isect(sup_set(cu.cm, cu.s1, rr, t - 1e-9), sup_set(cu.rm, cu.rp, rr, t - cu.bh - 1e-9));
     let lset = isect(inf_set(cu.cm, cu.s1, rr, t + 1e-9), inf_set(cu.rm, cu.rp, rr, t - cu.bl + 1e-9));
-    let ah = &ix.ahat[c.r0..c.r1];
+    (uset, lset)
+}
+
+/// `sorted_range2` over the key-sorted rows [r0, r1) of a cluster (all its rows, or one run of layout (c)) from the
+/// key intervals `range_ivs` gives.
+#[allow(clippy::type_complexity)]
+pub fn range_in(ix: &Index2, r0: usize, r1: usize, ivs: (Option<(f64, f64)>, Option<(f64, f64)>)) -> (usize, usize, usize, usize) {
+    let (uset, lset) = ivs;
+    let eps = 1e-9 + DA;
+    let ah = &ix.ahat[r0..r1];
     let rows = |iv: (f64, f64)| -> (usize, usize) {
         let (lo, hi) = (iv.0 - eps, iv.1 + eps);
         let a = ah.partition_point(|&x| (x as f64 / 32767.0) < lo);
         let b = ah.partition_point(|&x| (x as f64 / 32767.0) <= hi);
-        (c.r0 + a, c.r0 + b.max(a))
+        (r0 + a, r0 + b.max(a))
     };
     match uset {
-        None => (c.r0, c.r0, c.r0, c.r0),
+        None => (r0, r0, r0, r0),
         Some(u) => {
             let (u0, u1) = rows(u);
             match lset {
@@ -775,6 +791,11 @@ impl Vis2 {
         let mut rows: Vec<u32> = bm.iter().map(|e| ix.row_of_ent(e) as u32).collect();
         rows.sort_unstable();
         Vis2 { bits, cl_cnt, rows }
+    }
+    /// The visible rows of [a, b).
+    #[inline]
+    pub fn count(&self, a: usize, b: usize) -> usize {
+        count_bits(&self.bits, a, b)
     }
     #[inline]
     pub fn has(&self, r: usize) -> bool {
@@ -2661,13 +2682,26 @@ pub fn decide_full_packed(ix: &Index2, pr: &Prep2, t: f64, rows: &[u32], want_ex
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum Pre {
     Skip,
     In,
     /// every visible row scored from its vector, without a cut
     Direct,
     Open { qm: f64, u0: usize, u1: usize, d0: usize, d1: usize, ncand: usize },
+    /// Layout (c) (`Index2::runs`): the cut and sorted range of each run of the cluster, (u0, u1, d0, d1) as in
+    /// `Open`, and the visible candidates of all of them.
+    Runs { qm: f64, r: Box<[(u32, u32, u32, u32)]>, ncand: usize },
+}
+
+impl Pre {
+    /// The visible candidates a cut cluster leaves undecided (None when the cluster is not cut).
+    pub fn ncand(&self) -> Option<usize> {
+        match self {
+            Pre::Open { ncand, .. } | Pre::Runs { ncand, .. } => Some(*ncand),
+            _ => None,
+        }
+    }
 }
 
 /// What the planner chose for a threshold query: a scan of the visible set, or per cluster the index path or full
@@ -2718,6 +2752,20 @@ pub(super) fn support_pre(ix: &Index2, pr: &Prep2, t: f64, nvis: usize, ci: usiz
 pub(super) fn cut_pre(ix: &Index2, pr: &Prep2, t: f64, vis: Option<&Vis2>, ci: usize, nusort: bool) -> Pre {
     let c = &ix.cl[ci];
     let qm = pr.qm(ix, ci);
+    if let Some(runs) = ix.runs(ci) {
+        assert!(!nusort, "layout (c) is built without the norm sort");
+        // one cut, its key intervals searched in every run
+        let ivs = range_ivs(ix, &cut_params2(ix, ci, pr, qm), t);
+        let r: Box<[(u32, u32, u32, u32)]> = runs.windows(2).map(|w| {
+            let (u0, u1, d0, d1) = range_in(ix, w[0] as usize, w[1] as usize, ivs);
+            (u0 as u32, u1 as u32, d0 as u32, d1 as u32)
+        }).collect();
+        let ncand = r.iter().map(|&(_, _, d0, d1)| match vis {
+            None => (d1 - d0) as usize,
+            Some(v) => count_bits(&v.bits, d0 as usize, d1 as usize),
+        }).sum();
+        return Pre::Runs { qm, r, ncand };
+    }
     let (u0, u1, d0, d1) = if nusort {
         let nc = NuCut::new(ix, ci, pr, pr.gq[c.g].get().unwrap(), qm);
         let (u0, u1, d0, d1) = nu_range(ix, ci, &nc, t);
@@ -2789,7 +2837,7 @@ pub fn plan2(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     }).collect();
     let cut_cyc = tick() - tc0;
     let flat = matches!(pl.mode, PlanMode::Flat);
-    let use_idx: Vec<bool> = pre.iter().map(|p| matches!(p, Pre::Open { ncand, .. } if *ncand > 0) && !flat).collect();
+    let use_idx: Vec<bool> = pre.iter().map(|p| p.ncand().is_some_and(|nc| nc > 0) && !flat).collect();
     Planned::Run { pre, use_idx, cut_cyc }
 }
 
@@ -2841,7 +2889,7 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
         for &ci in open.iter().step_by(SAMPLE) {
             let p = cut(ci);
             nv_s += nvis_cl(ci);
-            if let Pre::Open { ncand, .. } = p {
+            if let Some(ncand) = p.ncand() {
                 nc_s += ncand;
             }
             pre[ci] = Some(p);
@@ -2902,7 +2950,7 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     let (mut ncand_all, mut nvis_all, mut ndirect) = (0usize, 0usize, 0usize);
     for (ci, p) in pre.iter().enumerate() {
         match p {
-            Pre::Open { ncand, .. } => {
+            Pre::Open { ncand, .. } | Pre::Runs { ncand, .. } => {
                 ncand_all += ncand;
                 nvis_all += nvis_cl(ci);
             }
@@ -2914,11 +2962,16 @@ fn plan2_priced(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2) -> Planned {
     let mut grp_gain = vec![0f64; ix.groups.len()];
     let mut full_all = 0f64;
     for (ci, p) in pre.iter().enumerate() {
-        if let Pre::Open { ncand, d0, d1, .. } = p {
+        let span = match p {
+            Pre::Open { d0, d1, .. } => d1 - d0,
+            Pre::Runs { r, .. } => r.iter().map(|x| (x.3 - x.2) as usize).sum(),
+            _ => 0,
+        };
+        if let Some(ncand) = p.ncand().as_ref() {
             if *ncand == 0 {
                 continue;
             }
-            let full = cand_us(*ncand, d1 - d0);
+            let full = cand_us(*ncand, span);
             full_all += full;
             let gain = full - idx_us(*ncand, d);
             use_idx[ci] = gain > 0.0;
@@ -3010,6 +3063,41 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                 });
             };
             let nvis_in = |r0: usize, r1: usize| o.vis.map_or(r1 - r0, |v| count_bits(&v.bits, r0, r1));
+            // the candidates (offsets in the cluster, ascending) decided on the index path or from full vectors
+            let decide = |acc: &mut ThrOut2, sv: &mut State, rd: &mut Option<super::disk::Reader<()>>, cands: Vec<u32>, qm: f64| {
+                acc.st.touched += cands.len() as u64;
+                let mut pend = Vec::new();
+                if use_idx[ci] {
+                    acc.idx_clusters += 1;
+                    let gq = get_gq2(ix, pr, c.g, &mut acc.st);
+                    let tq = tick();
+                    let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det);
+                    acc.st.cyc[P_CLSETUP] += tick() - tq;
+                    let mut ivv = Vec::new();
+                    let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
+                    unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, o.verify, sv, &mut acc.st, &mut out) };
+                    sv.recycle(&mut cq);
+                    acc.iv.extend(ivv);
+                } else {
+                    acc.flat_clusters += 1;
+                    acc.flat_items += cands.len() as u64;
+                    pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
+                }
+                // rows already in the page cache are decided from the mapping, without reads
+                match rd.as_mut() {
+                    Some(r) if !pend.is_empty() && !ix.full_cached(&pend) => {
+                        r.push((), pend);
+                        while r.full() {
+                            decide_batch(acc, r);
+                        }
+                    }
+                    _ => {
+                        let tf = tick();
+                        decide_full(ix, pr, t, &pend, o.want_iv, acc);
+                        acc.st.cyc[P_FULL] += tick() - tf;
+                    }
+                }
+            };
             match pre[ci] {
                 Pre::Skip => {
                     acc.st.clusters_out += 1;
@@ -3076,38 +3164,37 @@ pub fn run_planned(ix: &Index2, pr: &Prep2, t: f64, o: &Opts2, pre: &[Pre], use_
                     }
                     if d0 < d1 {
                         let cands = cands_of(ix, ci, d0, d1, o.vis);
-                        acc.st.touched += cands.len() as u64;
-                        let mut pend = Vec::new();
-                        if use_idx[ci] {
-                            acc.idx_clusters += 1;
-                            let gq = get_gq2(ix, pr, c.g, &mut acc.st);
-                            let tq = tick();
-                            let mut cq = open_cluster(ix, ci, gq, pr, qm, pl, pl.int_det);
-                            acc.st.cyc[P_CLSETUP] += tick() - tq;
-                            let mut ivv = Vec::new();
-                            let mut out = RunOut { rows_in: &mut acc.rows, pend: &mut pend, iv: if o.want_iv { Some(&mut ivv) } else { None } };
-                            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, o.verify, &mut sv, &mut acc.st, &mut out) };
-                            sv.recycle(&mut cq);
-                            acc.iv.extend(ivv);
+                        decide(&mut acc, &mut sv, &mut rd, cands, qm);
+                    }
+                }
+                Pre::Runs { qm, ref r, .. } => {
+                    acc.st.clusters_open += 1;
+                    let runs = ix.runs(ci).unwrap();
+                    let cu = if o.want_iv { Some(cut_params2(ix, ci, pr, qm)) } else { None };
+                    let mut cands = Vec::new();
+                    for (&(u0, u1, d0, d1), w) in r.iter().zip(runs.windows(2)) {
+                        let (u0, u1, d0, d1) = (u0 as usize, u1 as usize, d0 as usize, d1 as usize);
+                        acc.st.range_out += ((u0 - w[0] as usize) + (w[1] as usize - u1)) as u64;
+                        acc.st.range_in += ((d0 - u0) + (u1 - d1)) as u64;
+                        if let Some(cu) = &cu {
+                            let mut take = |r: usize| {
+                                acc.rows.push(r as u32);
+                                let (lb, ub) = key_interval2(ix, cu, r);
+                                acc.iv.push((r as u32, lb as f32, ub as f32, 254));
+                            };
+                            each(u0, d0, &mut take);
+                            each(d1, u1, &mut take);
                         } else {
-                            acc.flat_clusters += 1;
-                            acc.flat_items += cands.len() as u64;
-                            pend.extend(cands.iter().map(|&i| (c.r0 + i as usize) as u32));
+                            push(&mut acc, u0, d0, None);
+                            push(&mut acc, d1, u1, None);
                         }
-                        // rows already in the page cache are decided from the mapping, without reads
-                        match rd.as_mut() {
-                            Some(r) if !pend.is_empty() && !ix.full_cached(&pend) => {
-                                r.push((), pend);
-                                while r.full() {
-                                    decide_batch(&mut acc, r);
-                                }
-                            }
-                            _ => {
-                                let tf = tick();
-                                decide_full(ix, pr, t, &pend, o.want_iv, &mut acc);
-                                acc.st.cyc[P_FULL] += tick() - tf;
-                            }
+                        // the runs ascend, so their candidates do too
+                        if d0 < d1 {
+                            cands.extend(cands_of(ix, ci, d0, d1, o.vis));
                         }
+                    }
+                    if !cands.is_empty() {
+                        decide(&mut acc, &mut sv, &mut rd, cands, qm);
                     }
                 }
             }
@@ -3653,13 +3740,134 @@ pub struct KnnReader<'a> {
     pend: Vec<u32>,
     flat: Vec<u32>,
     pub st: Stats,
+    /// Sub-cluster reads (`visit_sel`): the per-cluster setups of the clusters opened on the index path, kept for the
+    /// next sub-cluster of the same cluster (most recent last).
+    cq_cache: Vec<(usize, CQ2)>,
 }
+
+/// A part of a cluster to read (`KnnReader::visit_sel`): rows in key-sorted ranges (contiguous sub-clusters, or every
+/// run of layout (c)), optionally only those whose label (indexed by row, below 32) is in the set `want` (bit l for
+/// label l).
+#[derive(Clone, Copy)]
+pub struct Sel<'s> {
+    pub ranges: &'s [(usize, usize)],
+    pub mask: Option<(&'s [u8], u32)>,
+}
+
+/// The per-cluster setups `KnnReader::visit_sel` keeps.
+const CQ_CACHE: usize = 16;
 
 impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), st, cq_cache: Vec::new() }
+    }
+
+    /// Calls `f` with every visible row of the selection, ascending within each range.
+    fn each_sel(&self, sel: Sel, a: usize, b: usize, f: &mut dyn FnMut(usize)) {
+        let mut g = |r: usize| {
+            if sel.mask.is_none_or(|(lab, want)| want >> lab[r] & 1 == 1) {
+                f(r)
+            }
+        };
+        match self.vis {
+            None => (a..b).for_each(&mut g),
+            Some(v) => v.each(a, b, &mut g),
+        }
+    }
+
+    /// Reads the selection `sel` of cluster ci by `path` (`Direct`: every visible row of it scored; `Index`: as
+    /// `visit` reads a cluster on the index path, the sorted range found in each range of the selection); `nv` its
+    /// visible rows when known (for the statistics), else counted. With `cache`, the cluster's per-query setup is kept
+    /// for its next selection (`CQ_CACHE` clusters). Until k items are held every visible row is scored, and then
+    /// the largest keys first, as `visit` does.
+    pub fn visit_sel(&mut self, ci: usize, sel: Sel, path: KnnPath, cache: bool) {
+        let (ix, pr) = (self.ix, self.pr);
+        let c = &ix.cl[ci];
+        if path != KnnPath::Index {
+            let mut rows = std::mem::take(&mut self.flat);
+            for &(a, b) in sel.ranges {
+                self.each_sel(sel, a, b, &mut |r| rows.push(r as u32));
+            }
+            self.st.touched += (rows.len() - self.flat.len()) as u64;
+            self.flat = rows;
+            if self.flat.len() >= 256 || !self.top.full() {
+                self.flush();
+            }
+            return;
+        }
+        self.flush();
+        self.rows_in.clear();
+        self.pend.clear();
+        let qm = pr.qm(ix, ci);
+        let mut cands: Vec<u32> = Vec::new();
+        if self.top.full() {
+            let ivs = range_ivs(ix, &cut_params2(ix, ci, pr, qm), self.top.kth());
+            let mut pend = std::mem::take(&mut self.pend);
+            for &(a, b) in sel.ranges {
+                let (u0, u1, d0, d1) = range_in(ix, a, b, ivs);
+                let n0 = pend.len();
+                self.each_sel(sel, u0, d0, &mut |r| pend.push(r as u32));
+                self.each_sel(sel, d1, u1, &mut |r| pend.push(r as u32));
+                self.st.range_in += (pend.len() - n0) as u64;
+                // (rows, not visible rows, as `visit` counts them; under a mask not counted)
+                if sel.mask.is_none() {
+                    self.st.range_out += ((u0 - a) + (b - u1)) as u64;
+                }
+                self.each_sel(sel, d0, d1, &mut |r| cands.push((r - c.r0) as u32));
+            }
+            self.pend = pend;
+        } else {
+            for &(a, b) in sel.ranges {
+                self.each_sel(sel, a, b, &mut |r| cands.push((r - c.r0) as u32));
+            }
+            let need = self.kk - self.top.h.len();
+            if cands.len() > need {
+                // enough here to fill the k best: the largest keys first, the rest run against the k-th of those
+                let mut by: Vec<(i16, u32)> = cands.iter().map(|&i| (ix.ahat[c.r0 + i as usize], i)).collect();
+                by.sort_unstable_by(|x, y| y.cmp(x));
+                let rows: Vec<u32> = by[..need].iter().map(|x| (c.r0 + x.1 as usize) as u32).collect();
+                let mut rest: Vec<u32> = by[need..].iter().map(|x| x.1).collect();
+                rest.sort_unstable();
+                cands = rest;
+                self.st.touched += rows.len() as u64;
+                self.top.score(ix, pr, &rows, &mut self.st);
+            } else {
+                let rows: Vec<u32> = cands.iter().map(|&i| (c.r0 + i as usize) as u32).collect();
+                self.st.touched += rows.len() as u64;
+                self.top.score(ix, pr, &rows, &mut self.st);
+                return;
+            }
+        }
+        let t = self.top.kth();
+        self.st.touched += (cands.len() + self.pend.len()) as u64;
+        if !cands.is_empty() {
+            self.st.clusters_open += 1;
+            let gq = get_gq2(ix, pr, c.g, &mut self.st);
+            let tq = tick();
+            let hit = if cache { self.cq_cache.iter().position(|x| x.0 == ci) } else { None };
+            let mut cq = match hit {
+                Some(i) => self.cq_cache.remove(i).1,
+                None => open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det),
+            };
+            self.st.cyc[P_CLSETUP] += tick() - tq;
+            let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };
+            unsafe { run_cluster(ix, ci, pr, gq, &mut cq, &cands, t, Mode2::Thr, false, &mut self.sv, &mut self.st, &mut out) };
+            if cache {
+                if self.cq_cache.len() >= CQ_CACHE {
+                    let mut old = self.cq_cache.remove(0).1;
+                    self.sv.recycle(&mut old);
+                }
+                self.cq_cache.push((ci, cq));
+            } else {
+                self.sv.recycle(&mut cq);
+            }
+        }
+        let tf = tick();
+        self.top.score(ix, pr, &self.rows_in, &mut self.st);
+        self.top.score(ix, pr, &self.pend, &mut self.st);
+        self.st.cyc[P_FULL] += tick() - tf;
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -3698,6 +3906,13 @@ impl<'a> KnnReader<'a> {
             if self.flat.len() >= 256 || !self.top.full() {
                 self.flush();
             }
+            return;
+        }
+        if let Some(runs) = ix.runs(ci) {
+            // layout (c): the sorted range in every run
+            let ranges: Vec<(usize, usize)> = runs.windows(2).map(|w| (w[0] as usize, w[1] as usize)).collect();
+            let index = self.top.full() && (path == KnnPath::Index || nv as f64 * COSTS.full_us > COSTS.index_us(nv, 1.0));
+            self.visit_sel(ci, Sel { ranges: &ranges, mask: None }, if index || !self.top.full() { KnnPath::Index } else { KnnPath::Direct }, false);
             return;
         }
         self.flush();
