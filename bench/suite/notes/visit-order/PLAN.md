@@ -284,6 +284,35 @@ branch `subclusters-exp`, not merged):
   the exact paths' kernel run once per run (to remove their cost), no splitting under sparse visible sets (to remove
   the 1% losses), and clusters of 8,000 rows, where the gain should be larger.
 
+The owner's benchmark showed k-NN's time growing far faster than recall above ψ ≈ 5 (glove ψ 7 about 35 ms
+against exact `knn2` about 17 ms; LAION ψ 6 recall 0.980 at 231k rows against nprobe 64's 0.977 at 132k). Three
+changes. (1) ψ moves only the stop: the order is μ + z(1, S)σ, z(1, S) = Φ⁻¹(S/(S + 1)) of the cluster's S rows
+(3.3 at 2,000; all its rows, not its visible ones, as the multiplier is a property of the budget, `hierarchy/
+theory.md` 3.4), the stream μ + z(1, S)·rad·√(qᵀC̄q / tr C̄), and the stop the window's largest μ + ψσ below the
+running k-th best; a smaller ψ reads the first of what a larger one does. (2) The index path is priced at the
+running k-th best t from the rows its sorted range at t leaves and the share of them expected above t,
+Ḡ((t − μ)/σ), with the measured cost cl + size·S + (vis + und·share)·rows (`und_us` fitted on clusters spread over
+the centre-score ranking, not only the first 16); the sorted range itself drops almost nothing on glove (it keeps
+91 to 99% of a cluster's rows at the true 10th best, the far clusters included), so the saving is the levels'.
+The timing now flushes the cluster's stored vectors from every cache level before each read (it had evicted the
+core's L2 only, and the rows came from L3): the measured row cost about doubled (glove 0.019 → 0.033 µs, LAION
+0.055 → 0.116), as the owner's timing implied (glove ψ 7 modelled 21 ms, timed 35). (3) The probe races the exact
+query too: knn2's cost as its planner would run it, priced by the measured constants at the running k-th best,
+bought once the probe has spent what pricing it costs; past the cheaper of that and the scan, it hands over (path
+"exact"), so the whole is at most about twice the cheaper. ψ = ∞ is `knn2`.
+
+By explain_approx counts (30 queries, k 10; rows touched, the index path's included; clusters read, direct /
+index): glove unfiltered ψ 3.5 / 4 / 4.5 / 5: 0.807 at 48k (18.5: 3.7 / 14.8), 0.947 at 166k (69.5), 0.987 at
+362k (160: 15 / 145; 20k rows read from stored vectors), 0.997 at 644k (301); ψ 6 hands 6 of 30 to the exact
+query, ψ 7 24 of 30. Before: ψ 4.5 0.987 at 284k (137, all direct), ψ 5 0.997 at 528k; nprobe 128 0.970 at 257k,
+256 1.000 at 513k. LAION unfiltered ψ 4.5 / 5 / 5.5 / 6 / 7: 0.907 at 52k (24.7), 0.960 at 100k (48), 0.980 at
+160k (77.6: 3.1 / 74.5), 0.993 at 268k (132), 1.000 at 555k (278); before ψ 6 0.980 at 231k (127), ψ 7 0.993 at
+451k (244); nprobe 64 0.977 at 132k, 128 1.000 at 257k. Random-25: glove ψ 3.5 / 4 0.890 at 29k, 0.990 at 75k
+(nprobe 256 0.987 at 128k); LAION ψ 4.5 / 5 / 6 0.933 at 27k, 0.973 at 48k, 0.993 at 115k (nprobe 64 0.967 at 33k,
+256 0.997 at 126k), all read directly. So the decoupled order cuts LAION's rows at 0.98 by 31% but still reads
+more than nprobe at the top, and reads more than the coupled order on glove at 0.987 (362k against 284k), where a
+larger multiplier ordered better; most of glove's rows now go to the index path.
+
 **Next.**
 - High recall: above ψ ≈ 5 the time grew far faster than recall in the owner's benchmark, and at the top the
   approximate k-NN was slower than the legacy arm and than exact k-NN. Being fixed and timed: the order made

@@ -207,7 +207,7 @@ ORDER = dict(QUICK, name="order", datasets=["glove-100-angular", "yahoo-minilm-3
              systems=dict(QUICK["systems"], approx=dict(ours=["vexact"])),
              params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "adaptive"],
                                                     approx=[dict(nprobe=p) for p in (4, 8, 16, 32, 64, 128, 256, 512)],
-                                                    adaptive=[dict(psi=x) for x in (2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 7)])),
+                                                    adaptive=[dict(psi=x) for x in (3, 3.5, 4, 4.25, 4.5, 4.75, 5, 5.5, 6, 7)])),
              public=dict(QUICK["public"], datasets={"vibe": [], "annb": []}))
 
 # The same cells with the library's default order only, for comparing revisions of the library (which may not have

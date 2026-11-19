@@ -25,7 +25,7 @@ float:
         args:
           basis: [dual]
         query_args:
-          psi: [2, 3, 3.5, 4, 4.5, 5, 6, 7]
+          psi: [3, 3.5, 4, 4.5, 5, 5.5, 6, 7]
   # the legacy approximate arm (the spread order by nprobe), kept for comparison
   - base_args: ['@metric']
     constructor: VexactNprobe

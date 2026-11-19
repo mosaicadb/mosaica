@@ -158,17 +158,16 @@ impl Index {
         Ok(())
     }
 
-    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row taken in decreasing
-    /// mu + psi rad sqrt(q' C q / tr C) (centre score plus psi times the spread the cluster would have if shaped as
-    /// the clusters are on average, C their pooled covariance from the stored directions), the next 8 of them given their key u = mu + psi sigma (sigma the spread of the cluster's scores along the
-    /// query, from its stored directions); the one of largest u among those read next, stopping
-    /// when their largest u is below the running k-th best (minus infinity until k items are held). The stop is a
-    /// heuristic: a cluster not yet priced may still have a u above the k-th best. The probe races a scan of the
-    /// visible rows (the rest scanned, exactly, once the probe would cost more than the scan; at most twice the scan's
-    /// modelled cost in all). `psi` is the knob, a number of at least 0: larger reads more, inf
-    /// reads every cluster (exact); 4.5 by default, the recall it gives to be measured. Each cluster is read directly
-    /// or on the index path by this machine's measured constants, which give the same answers. Returns k ids whenever
-    /// k items are visible (-1 only where fewer are).
+    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row read in an order that does not
+    /// depend on psi, by mu + z sigma (centre score plus z(1, S) = Phi^-1(S / (S + 1)) times the spread of the
+    /// cluster's scores along the query, S its rows), the next 8 of a stream priced ahead; psi moves only the stop,
+    /// when the largest mu + psi sigma of those 8 is below the running k-th best (minus infinity until k items are
+    /// held). The stop is a heuristic: a cluster not yet priced may still have a mu + psi sigma above the k-th best.
+    /// The probe races a scan of the visible rows and the exact query (`knn`), handing over to the cheaper (its answer
+    /// exact) once the probe would cost more; at most about twice the cheaper's modelled cost in all. `psi` is the
+    /// knob, a number of at least 0: larger reads more, inf is the exact query; 4.5 by default, the recall it gives to
+    /// be measured. Each cluster is read directly or on the index path by this machine's measured constants, which
+    /// give the same answers. Returns k ids whenever k items are visible (-1 only where fewer are).
     #[pyo3(signature = (q, k, psi=PSI))]
     fn knn_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
