@@ -1,0 +1,18 @@
+glove-100-angular (none and random-25 together; P = expected passes through the 4 deterministic levels, PassModel):
+   P PassModel / P from the exact half-widths: median 1.46 p10 1.21 p90 3.44; observed passes (rows entering levels 1..4) per row: 0.888, PassModel 1.219
+   cl + c cut_row(share)                  w [12.8374, 0.0189, 0.0459]; residual median 1.22 p10 0.76 p90 1.96; by set none 1.21 r25 1.24; by gap [1,2): 1.39  [2,3): 1.35  [3,4): 1.33  [4,5): 1.11  [5,inf): 0.83
+   cl + c lvl0(share) + c P deep          w [15.9869, 0.0055, 0.0257, 0.0136]; residual median 1.10 p10 0.79 p90 1.76; by set none 1.04 r25 1.13; by gap [1,2): 1.20  [2,3): 1.10  [3,4): 1.13  [4,5): 1.06  [5,inf): 1.00
+   cl + c lvl0(share) + c P deep(share)   w [16.8587, 0.007, 0.0043, 0.0114, 0.032]; residual median 1.06 p10 0.80 p90 1.69; by set none 1.04 r25 1.08; by gap [1,2): 1.02  [2,3): 1.01  [3,4): 1.11  [4,5): 1.07  [5,inf): 1.05
+   cl + c lvl0 + c P deep (no share)      w [25.3975, 0.0009, 0.0148]; residual median 1.14 p10 0.77 p90 1.87; by set none 0.99 r25 1.25; by gap [1,2): 1.38  [2,3): 1.19  [3,4): 1.17  [4,5): 1.06  [5,inf): 1.03
+yahoo-minilm-384-normalized (none and random-25 together; P = expected passes through the 6 deterministic levels, PassModel):
+   P PassModel / P from the exact half-widths: median 1.23 p10 1.01 p90 4.21; observed passes (rows entering levels 1..6) per row: 1.784, PassModel 1.970
+   cl + c cut_row(share)                  w [28.767, 0.0247, 0.0752]; residual median 1.19 p10 0.75 p90 1.92; by set none 1.17 r25 1.22; by gap [1,2): 1.84  [2,3): 1.67  [3,4): 1.51  [4,5): 1.38  [5,inf): 1.00
+   cl + c lvl0(share) + c P deep          w [23.9994, 0.0, 0.0564, 0.0145]; residual median 1.17 p10 0.76 p90 1.89; by set none 1.13 r25 1.22; by gap [1,2): 1.81  [2,3): 1.65  [3,4): 1.47  [4,5): 1.35  [5,inf): 0.99
+   cl + c lvl0(share) + c P deep(share)   w [22.1603, 0.0, 0.0, 0.0149, 0.0453]; residual median 1.17 p10 0.76 p90 1.89; by set none 1.12 r25 1.21; by gap [1,2): 1.78  [2,3): 1.63  [3,4): 1.46  [4,5): 1.34  [5,inf): 0.98
+   cl + c lvl0 + c P deep (no share)      w [54.0018, 0.0, 0.0069]; residual median 1.20 p10 0.75 p90 2.06; by set none 1.11 r25 1.30; by gap [1,2): 2.15  [2,3): 1.72  [3,4): 1.58  [4,5): 1.41  [5,inf): 1.00
+laion-clip-512-normalized (none and random-25 together; P = expected passes through the 6 deterministic levels, PassModel):
+   P PassModel / P from the exact half-widths: median 1.00 p10 1.00 p90 1.10; observed passes (rows entering levels 1..6) per row: 3.075, PassModel 2.000
+   cl + c cut_row(share)                  w [38.7424, 0.0406, 0.122]; residual median 1.12 p10 0.76 p90 1.72; by set none 1.10 r25 1.14; by gap [1,2): 1.33  [2,3): 1.31  [3,4): 1.21  [4,5): 1.06  [5,inf): 0.92
+   cl + c lvl0(share) + c P deep          w [38.7424, 0.0406, 0.122, 0.0]; residual median 1.12 p10 0.76 p90 1.72; by set none 1.10 r25 1.14; by gap [1,2): 1.33  [2,3): 1.31  [3,4): 1.21  [4,5): 1.06  [5,inf): 0.92
+   cl + c lvl0(share) + c P deep(share)   w [38.7424, 0.0406, 0.0, 0.0, 0.061]; residual median 1.12 p10 0.76 p90 1.72; by set none 1.10 r25 1.14; by gap [1,2): 1.33  [2,3): 1.31  [3,4): 1.21  [4,5): 1.06  [5,inf): 0.92
+   cl + c lvl0 + c P deep (no share)      w [77.5599, 0.0238, 0.0]; residual median 1.16 p10 0.76 p90 1.87; by set none 1.07 r25 1.29; by gap [1,2): 1.50  [2,3): 1.42  [3,4): 1.30  [4,5): 1.12  [5,inf): 0.94

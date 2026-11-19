@@ -401,6 +401,30 @@ entering each deeper level within 0.01 to 0.04 on every dataset and gap (glove 0
 0.173; yahoo 0.797 / 0.517 against 0.791 / 0.513; LAION 0.982 / 0.942 against 0.977 / 0.931), and the cluster's
 median w does as well as every row's.
 
+Going past step 1 although its 90th-percentile errors exceeded 1.5x was justified by timing the same reads twice:
+the timing alone spreads them about as widely (`results/measured-planner/step1-timing-noise.txt`).
+
+**A pass-through term, checked before building it** (`results/pass-through-and-groups/`). The deterministic levels'
+pass-through, 1 − Φ((t − μ − w_l)/σ) with the cluster's median half-width, as a regressor in the index read's fit
+(`pass-through-fits.txt`): on glove it flattens the residual by gap (1.39 at g 1 to 2 and 0.83 at g ≥ 5 without it,
+1.02 to 1.11 with a deep-level cost per share); on yahoo and LAION it does not (1.81 to 0.99 and 1.33 to 0.92 with
+or without it). With the observed entries into every level as regressors (an oracle, `pass-through-ceiling.txt`)
+the residual is flat on all three (1.02 to 1.19): the gap's cost on yahoo and LAION lies in the randomised levels
+and the stored vectors, whose half-widths take another form (the uncoded blocks' norms and the coded ones' variance),
+not in the deterministic levels. Even the exact deterministic pass-through leaves 1.65 (yahoo) and 1.32 (LAION) at
+g 1 to 2. The cheap form of w_l (the query's norm orthogonal to the centre times the group's root-mean-square
+distortion, in place of dwa_l, which needs the group's setup) is off from the exact one by a median of 1.0 to 1.46
+and a 90th percentile of 1.1 to 4.2. So the term was not built: it would need the randomised levels' pass-through
+too.
+
+**Groups set up on first read** (the current code) against the window's new groups set up in one batch (989bab9),
+the k-NN suite on both (`summary.txt`): within the runs' noise or better on LAION and yahoo (LAION unfiltered 0.63 to
+1.15 of spread against 0.70 to 1.21), better under glove random-25 (0.25 to 0.92 against 0.29 to 1.06), worse at the
+top of glove unfiltered (1.12 / 1.50 / 1.81 at 0.98 / 0.99 / 0.995 against 1.01 / 1.34 / 1.63). Kept, as the
+simpler one. Nothing in k-NN compares a modelled total with a scan or the exact query any more; the threshold query
+still hands over to the cheaper of a scan and the exact query when its sure reads (and the sigmas still to price)
+cost as much, comparing modelled read costs on both sides, with no per-query fixed work on either.
+
 **Next.**
 - The owner's choice between the two k-NN versions above (the cost model wins under the 1% and 25% sets).
 - The legacy arm's removal once the benchmark no longer needs it.

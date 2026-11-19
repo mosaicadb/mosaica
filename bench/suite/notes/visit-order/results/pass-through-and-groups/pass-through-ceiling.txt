@@ -1,0 +1,12 @@
+glove-100-angular levels 4
+   exact deterministic P                  residual median 1.09 p10 0.79 p90 1.77; by gap [1,2): 1.15  [2,3): 1.06  [3,4): 1.14  [4,5): 1.11  [5,inf): 1.01
+   observed entries, levels and vectors   residual median 1.09 p10 0.79 p90 1.78; by gap [1,2): 1.08  [2,3): 1.04  [3,4): 1.15  [4,5): 1.12  [5,inf): 1.01
+   observed entries per level             residual median 1.09 p10 0.79 p90 1.77; by gap [1,2): 1.03  [2,3): 1.05  [3,4): 1.15  [4,5): 1.10  [5,inf): 1.02
+yahoo-minilm-384-normalized levels 6
+   exact deterministic P                  residual median 1.09 p10 0.79 p90 1.69; by gap [1,2): 1.65  [2,3): 1.41  [3,4): 1.26  [4,5): 1.16  [5,inf): 0.99
+   observed entries, levels and vectors   residual median 1.06 p10 0.80 p90 1.64; by gap [1,2): 1.02  [2,3): 1.15  [3,4): 1.19  [4,5): 1.17  [5,inf): 1.01
+   observed entries per level             residual median 1.07 p10 0.80 p90 1.64; by gap [1,2): 1.02  [2,3): 1.12  [3,4): 1.18  [4,5): 1.17  [5,inf): 1.01
+laion-clip-512-normalized levels 6
+   exact deterministic P                  residual median 1.10 p10 0.77 p90 1.70; by gap [1,2): 1.32  [2,3): 1.28  [3,4): 1.17  [4,5): 1.03  [5,inf): 0.96
+   observed entries, levels and vectors   residual median 1.07 p10 0.79 p90 1.63; by gap [1,2): 1.02  [2,3): 1.14  [3,4): 1.13  [4,5): 1.03  [5,inf): 1.00
+   observed entries per level             residual median 1.06 p10 0.80 p90 1.62; by gap [1,2): 1.04  [2,3): 1.11  [3,4): 1.11  [4,5): 1.03  [5,inf): 1.01
