@@ -265,7 +265,29 @@ the scan, and it reaches recall 0.9 reading a tenth to a third of the visible ro
 time); its existing test, a scan when the fixed work costs as much as one, is that floor test and fires on none of
 these sets.
 
+**The hierarchy: decided.** No level over the clusters: trees over the centres save little at these cluster counts
+and only one level is ever useful (`hierarchy/replay.md`, `hierarchy/theory.md`), and re-clustering into more,
+smaller clusters breaks robustness under visible sets aligned with the real clusters (31 to 47 groups touched
+against 3). Under the clusters, sub-clusters were tried and are **shelved** (`subclusters.md`; experimental code on
+branch `subclusters-exp`, not merged):
+- Reading a sub-cluster costs the same per row as its whole cluster only when its rows are contiguous; a masked read
+  (a label per row, rows kept in key order) costs 1.1 to 2.5 times per row, and contiguous key ranges are free to
+  read but not coherent in space and gained nothing.
+- Contiguous k-means sub-clusters (rows ordered by sub-cluster, then key) leave the exact answers unchanged but cost
+  the exact queries 5 to 8% unfiltered and up to 17% (k-NN) or 12% (threshold) under random-25, from 16 binary
+  searches and 16 short runs per cluster in place of one.
+- With them the approximate k-NN took 0.69 to 0.88 of the current one's time unfiltered on glove and yahoo (0.80 to
+  1.01 on LAION) and 0.65 to 0.94 under the 25% sets, but 0.93 to 1.24 under the 1% sets, where it split too many
+  clusters for too little saving.
+- So it fails both halves of the bar set for it (a small cost to the exact queries, and clear approximate gains
+  without losses elsewhere). Worth revisiting if the approximate mode needs another 20 to 30%, with, cheapest first:
+  the exact paths' kernel run once per run (to remove their cost), no splitting under sparse visible sets (to remove
+  the 1% losses), and clusters of 8,000 rows, where the gain should be larger.
+
 **Next.**
-- The final paired run (k-NN and threshold, five visible sets), then the legacy arm's removal.
+- High recall: above ψ ≈ 5 the time grew far faster than recall in the owner's benchmark, and at the top the
+  approximate k-NN was slower than the legacy arm and than exact k-NN. Being fixed and timed: the order made
+  independent of ψ (ψ moves only the stop), the index path priced from the gap to the running k-th best, and a race
+  against the exact query (at most about twice its cost; ψ = ∞ is the exact query).
+- The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.
-- Phase 2b (the hierarchy) as planned.
