@@ -46,7 +46,6 @@ fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3
     for (key, x) in [("fixed", i.fixed), ("cost", i.cost), ("scan_cost", i.scan_cost), ("exact_cost", i.exact_cost)] {
         d.set_item(key, x)?;
     }
-    d.set_item("projected", i.projected)?;
     Ok(d)
 }
 
@@ -159,16 +158,16 @@ impl Index {
         Ok(())
     }
 
-    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row read in an order that does not
-    /// depend on psi, by mu + z sigma (centre score plus z(1, v) = Phi^-1(v / (v + 1)) times the spread of the
-    /// cluster's scores along the query, v its visible rows), the next 8 of a stream priced ahead; psi moves only the stop,
-    /// when the largest mu + psi sigma of those 8 is below the running k-th best (minus infinity until k items are
-    /// held). The stop is a heuristic: a cluster not yet priced may still have a mu + psi sigma above the k-th best.
-    /// The probe races a scan of the visible rows (the rest scanned, exactly, once the probe would cost more than the
-    /// scan, or as soon as the reads it projects would; at most twice the scan's modelled cost in all). `psi` is the
-    /// knob, a number of at least 0: larger reads more, inf is the exact query; 4.5 by default, the recall it gives to
-    /// be measured. Each cluster is read directly or on the index path by this machine's measured constants, which
-    /// give the same answers. Returns k ids whenever k items are visible (-1 only where fewer are).
+    /// The approximate k nearest (`v2::adaptive`): the exact query (`knn`) when psi is inf or when the exact planner
+    /// scans the visible rows first (sparse visible sets); else the clusters holding a visible row read in an order that
+    /// does not depend on psi, by mu + z sigma (centre score plus z(1, v) = Phi^-1(v / (v + 1)) times the spread of the
+    /// cluster's scores along the query, v its visible rows), the next 8 of a stream priced ahead; psi moves only the
+    /// stop, when the largest mu + psi sigma of those 8 is below the running k-th best (minus infinity until k items
+    /// are held). The stop is a heuristic: a cluster not yet priced may still have a mu + psi sigma above the k-th
+    /// best. Each cluster is read by the exact planner's rule in rows (directly when it holds few visible rows, else on
+    /// the index path); no cost is modelled. `psi` is the knob, a number of at least 0: larger reads more; 4.5 by
+    /// default, the recall it gives to be measured. Returns k ids whenever k items are visible (-1 only where fewer
+    /// are).
     #[pyo3(signature = (q, k, psi=PSI))]
     fn knn_approx<'py>(&self, py: Python<'py>, q: PyReadonlyArray1<'py, f32>, k: usize, psi: f64) -> PyResult<Bound<'py, PyArray1<i64>>> {
         let q = q.as_slice()?;
