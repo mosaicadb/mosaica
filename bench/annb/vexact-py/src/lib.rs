@@ -158,11 +158,13 @@ impl Index {
         Ok(())
     }
 
-    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row read in decreasing
-    /// u = mu + psi sigma (centre score plus psi times the spread of the cluster's scores along the query), stopping
-    /// before the first cluster whose u is below the running k-th best (minus infinity until k items are held), and
-    /// racing a scan of the visible rows (the rest scanned, exactly, once the probe would cost more than the scan; at
-    /// most twice the scan's modelled cost in all). `psi` is the knob, a number of at least 0: larger reads more, inf
+    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row taken in decreasing bound
+    /// mu + psi sqrt(top) |q| of u = mu + psi sigma (centre score plus psi times the spread of the cluster's scores
+    /// along the query), the next 8 of them given their sigma; the one of largest u among those read next, stopping
+    /// when their largest u is below the running k-th best (minus infinity until k items are held). The stop is a
+    /// heuristic: a cluster not yet priced may still have a u above the k-th best. The probe races a scan of the
+    /// visible rows (the rest scanned, exactly, once the probe would cost more than the scan; at most twice the scan's
+    /// modelled cost in all). `psi` is the knob, a number of at least 0: larger reads more, inf
     /// reads every cluster (exact); 4.5 by default, the recall it gives to be measured. Each cluster is read directly
     /// or on the index path by this machine's measured constants, which give the same answers. Returns k ids whenever
     /// k items are visible (-1 only where fewer are).

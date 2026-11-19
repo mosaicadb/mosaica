@@ -7,17 +7,19 @@
 //! every unit size and dataset, `hierarchy/theory.md` 3.4). Every sigma is at most sqrt(top_c) |q|, top_c the
 //! cluster's largest variance along a direction, so b_c = mu_c + psi sqrt(top_c) |q| bounds u_c from above.
 //!
-//! - k-NN reads the clusters in decreasing u (the lower cluster first among equal keys), each whole by `KnnReader`
-//!   (its visible rows scored from their stored vectors, or the index path at the running k-th best), and stops before
-//!   the first cluster whose u is below the running k-th best (k items are held by then: until k are, the k-th best is
-//!   minus infinity); it returns k items whenever k are visible. The sigmas are computed lazily under the bound: a
-//!   cluster's sigma is computed only when its bound beats the largest key computed so far, so the clusters come in
-//!   exactly the order, and the probe stops at exactly the cluster, that computing every sigma first would give. With
-//!   psi infinite every cluster is read (in decreasing centre score; no sigma is computed) and the answer is exact.
-//!   The probe races a scan of the visible rows: when it would stop it stops; otherwise, when its modelled cost with the
-//!   next sigma or the next cluster's read would pass that of the scan (C_s), the rows not yet read are scanned instead.
-//!   The answer is then exact and the whole costs at most 2 C_s (the probe spends at most C_s, the rest of the scan at
-//!   most C_s, and no row is read twice).
+//! - k-NN takes the clusters in decreasing bound b_c (the stream; the lower cluster first among equal bounds) and keeps
+//!   the next `LOOKAHEAD` of them priced (sigma computed) in a window. It reads the window's cluster of largest key u,
+//!   each whole by `KnnReader` (its visible rows scored from their stored vectors, or the index path at the running
+//!   k-th best), and stops when the window's largest key is below the running k-th best (minus infinity until k items
+//!   are held: k items are returned whenever k are visible). The stop is a heuristic: a cluster further down the
+//!   stream, not yet priced, may still have a key above the k-th best (its bound is above, but the bound is loose).
+//!   Pricing every cluster to rule that out costs a sigma for every cluster (the bound is about 5 times the spread on
+//!   real data), so the window is the price of not doing so, and recall is what the benchmark measures. With psi
+//!   infinite every cluster is read (in decreasing centre score; no sigma is computed) and the answer is exact. The
+//!   probe races a scan of the visible rows: when it would stop it stops; otherwise, when its modelled cost with the
+//!   next sigma or the next cluster's read would pass that of the scan (C_s), the rows not yet read are scanned
+//!   instead. The answer is then exact and the whole costs at most 2 C_s (the probe spends at most C_s, the rest of the
+//!   scan at most C_s, and no row is read twice).
 //! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
 //!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
 //!   decision comes first from the bounds sqrt(low_c) |q| <= sigma_c <= sqrt(top_c) |q| (low_c the cluster's least
@@ -43,6 +45,11 @@ use std::time::Instant;
 /// psi by default, from the grid the paired runs swept (2 to 7): the recall it gives on each dataset and visible set
 /// is to be measured on the re-timed runs.
 pub const PSI: f64 = 4.5;
+/// How far ahead of the probe k-NN looks: the clusters next by bound that have their sigma, among which the probe reads
+/// the largest key and whose largest key the stop compares with the running k-th best. A structural choice, not
+/// fitted: it costs this many sigmas beyond those of the clusters read, and a cluster can overtake by its spread only
+/// within it.
+pub const LOOKAHEAD: usize = 8;
 
 /// The cost model of the approximate queries, in microseconds on the calling thread, timed on this machine (`measure`):
 /// - `i8_us`, a product of the query with an int8 row of n (centre scores, spreads' directions);
@@ -461,13 +468,14 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 /// What one approximate query did. `path`: "probe" (k-NN stopped by its knob; a threshold query's clusters read),
 /// "race" (k-NN: the rest scanned once the probe would cost more than a scan), "scan" (the visible rows scanned
 /// instead), "exact" (a threshold query handed to the exact one), "empty". `read`: the clusters the probe read, in
-/// order (not those a race scanned). Costs are modelled (`Measured`): `fixed` the order's (centre scores; the anchor
+/// order (not those a race scanned); `priced`: the clusters given a sigma, in order. Costs are modelled (`Measured`): `fixed` the order's (centre scores; the anchor
 /// search of a threshold query), `cost` what the query paid in all, `scan_cost` a scan of the visible rows,
 /// `exact_cost` (threshold) every cluster the support table leaves open, at its cheaper path.
 #[derive(Clone, Debug, Default)]
 pub struct AdaptiveInfo {
     pub path: &'static str,
     pub read: Vec<u32>,
+    pub priced: Vec<u32>,
     pub direct: usize,
     pub index: usize,
     pub groups: usize,
@@ -594,6 +602,15 @@ impl Adaptive {
         (0..ix.k()).map(|ci| qm[ci] + psi * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
     }
 
+    /// Every cluster's key's upper bound mu + psi sqrt(top |q|^2) for the query `q` (for tests).
+    #[cfg(test)]
+    pub(crate) fn bounds(&self, ix: &Index2, q: &[f32], psi: f64) -> Vec<f64> {
+        let pr = prep2(ix, q);
+        let qm = self.centres.centre_scores(ix, &pr.q32);
+        let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
+        (0..ix.k()).map(|ci| self.bound(ci, &qm, psi, qq)).collect()
+    }
+
     /// The cost of one sigma (its directions' products).
     fn sigma_cost(&self) -> f64 {
         self.m.i8_us * self.st.r as f64
@@ -611,16 +628,10 @@ impl Adaptive {
     }
 
     /// Approximate k-NN with knob `psi` (at least 0; `PSI` by default; infinity reads every cluster and answers
-    /// exactly), as the module's comment says. Returns k items whenever k are visible. `plan` is the index path's
-    /// (its dial is the certified one).
+    /// exactly), as the module's comment says: the stream by bound, `LOOKAHEAD` priced ahead, the stop when the
+    /// window's largest key is below the running k-th best (a heuristic). Returns k items whenever k are visible.
+    /// `plan` is the index path's (its dial is the certified one).
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
-        self.knn_priced(ix, q, kk, vis, psi, plan, false)
-    }
-
-    /// `knn` with every sigma computed before the probe (`eager`) instead of lazily under the bound: the clusters it
-    /// reads and where it stops are the same, which the tests check; it spends more on sigmas.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn knn_priced(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan, eager: bool) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
         assert!(psi >= 0.0, "psi is at least 0 (infinity reads every cluster), not {psi}");
         let tm = Timer::new();
@@ -657,26 +668,14 @@ impl Adaptive {
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         // clusters not yet priced, by their key's bound (psi infinite: by centre score, never priced), and priced ones
         // by their key
-        let mut bound: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { self.bound(ci, &qm, psi, qq) }, Reverse(ci))).collect();
-        let mut priced: BinaryHeap<Key> = BinaryHeap::new();
+        // the stream by bound (psi infinite: by centre score, never priced), and the window of priced clusters
+        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { self.bound(ci, &qm, psi, qq) }, Reverse(ci))).collect();
+        let mut window: BinaryHeap<Key> = BinaryHeap::with_capacity(LOOKAHEAD);
         st.cyc[P_ORDER] += tick() - ts;
         let sc = self.sigma_cost();
         let mut p = vec![0f32; self.st.r];
         let mut spent = fixed;
         let mut sig = 0;
-        let mut price = |ci: usize, spent: &mut f64, priced: &mut BinaryHeap<Key>, info: &mut AdaptiveInfo| {
-            let tsp = tick();
-            let s = self.sigma(ix, ci, &pr.q32, qq, &mut p);
-            sig += tick() - tsp;
-            *spent += sc;
-            info.spreads += 1;
-            priced.push(Key(qm[ci] + psi * s, Reverse(ci)));
-        };
-        if eager && !all {
-            while let Some(Key(_, Reverse(ci))) = bound.pop() {
-                price(ci, &mut spent, &mut priced, &mut info);
-            }
-        }
         let mut ch = Charges::new(m, ix, &pr, !ix.nukey.is_empty());
         let mut visited = vec![false; k];
         let mut raced = false;
@@ -684,30 +683,35 @@ impl Adaptive {
         loop {
             let ts = tick();
             let next = if all {
-                bound.pop()
+                stream.pop()
             } else {
                 // the stop first: the running k-th best (the batched direct rows scored first; their time is the
-                // reads') above every key priced and every bound left
+                // reads') above the window's largest key
                 let kth = rd.kth();
-                let best = |h: &BinaryHeap<Key>| h.peek().map_or(f64::NEG_INFINITY, |x| x.0);
-                if kth > best(&priced).max(best(&bound)) {
+                if window.peek().is_some_and(|x| kth > x.0) {
                     rd.st.cyc[P_ORDER] += tick() - ts;
                     break;
                 }
-                // price the clusters whose bound beats the best key priced
-                while bound.peek().is_some_and(|b| priced.peek().is_none_or(|x| b > x)) {
+                // the window filled from the stream, racing the scan
+                while window.len() < LOOKAHEAD && !stream.is_empty() {
                     if spent + sc > cs {
                         raced = true;
                         break;
                     }
-                    let Key(_, Reverse(ci)) = bound.pop().unwrap();
-                    price(ci, &mut spent, &mut priced, &mut info);
+                    let Key(_, Reverse(ci)) = stream.pop().unwrap();
+                    let tsp = tick();
+                    let s = self.sigma(ix, ci, &pr.q32, qq, &mut p);
+                    sig += tick() - tsp;
+                    spent += sc;
+                    info.spreads += 1;
+                    info.priced.push(ci as u32);
+                    window.push(Key(qm[ci] + psi * s, Reverse(ci)));
                 }
                 if raced {
                     rd.st.cyc[P_ORDER] += tick() - ts;
                     break;
                 }
-                match priced.pop() {
+                match window.pop() {
                     Some(x) if kth > x.0 => {
                         rd.st.cyc[P_ORDER] += tick() - ts;
                         break;

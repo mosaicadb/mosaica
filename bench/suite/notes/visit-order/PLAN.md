@@ -226,13 +226,16 @@ another arm's last (most expensive) ones: `spread` at nprobe 4 took 122 µs for 
 
 The library now has one approximate k-NN and one approximate threshold query (`rust/src/v2/adaptive.rs`; bindings
 `knn_approx(q, k, psi=4.5)`, `threshold_approx(q, t, psi=4.5)`): the key μ_c + ψσ_c(q) from the stored directions,
-σ_c computed lazily under its bound √(λ₁)|q| (only when the bound beats the best key computed, so the order and the
-stop are those of every key computed first; the ablation's arm used the `spread` order 8 clusters ahead instead,
-which could stop before a cluster whose key reached the k-th best), the stop before the first cluster whose key is
-below the running k-th best (threshold: the clusters whose key reaches t, after the support table), the race against a scan (k-NN; at most twice its modelled
+the clusters taken in decreasing bound μ_c + ψ√(λ₁)|q| (no fitted constant) with the next 8 priced (σ computed), the
+largest key among those read next, and the stop when their largest key is below the running k-th best (threshold:
+the clusters whose key reaches t, after the support table, decided from the bounds before any σ), the race against a scan (k-NN; at most twice its modelled
 cost) and the hand-over to a scan or the exact query (threshold), and each cluster's path by constants measured on
 the machine and cached with the index. The calibrated process (its tables, group covariances, price and budget, and
-the build's calibration), the H order, the radius order and `fit_queries` are gone; the `spread` order by nprobe
+the build's calibration), the H order, the radius order and `fit_queries` are gone. The k-NN stop is a heuristic:
+a cluster not yet priced may still have a key above the k-th best (on synth4k 46 of 878 stops, against reading
+every cluster for the same items in 671). The exact lazy stop, which prices a cluster whenever its bound beats the
+best key priced, computed σ for every cluster on real data (the bound is about 5 times σ) and cost about 500 µs a
+query on LAION (`results/consolidated-exact-stop/` on branch `ccr-b37f5194-u55ji1`); it was taken out; the `spread` order by nprobe
 stays as `knn_nprobe`, the legacy comparison arm, until the owner's benchmark has run. The exact planner can take its
 rule in rows from the measured constants (`Index(..., rule="measured")`); its default is unchanged.
 

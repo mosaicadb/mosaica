@@ -2187,11 +2187,14 @@ fn measured_constants_are_cached_and_read_again() {
     assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(1000), None);
 }
 
-/// The lazy pricing under the bound reads the same clusters in the same order, stops at the same one and answers the
-/// same as pricing every cluster first, on synth4k, on a norm-sorted build, and on random compactions of it, under
-/// every visible set, k and psi.
+/// The k-NN window: the clusters priced are the live clusters in decreasing bound (the stream), each cluster read is
+/// the largest key among those priced and not yet read (the next `LOOKAHEAD` of the stream), and a probe that stops
+/// does so with every key in its window below the k-th best it returns. Runs are deterministic. On synth4k, on a
+/// norm-sorted build and on random compactions (those unfiltered), every visible set, k and psi; some stops return
+/// exactly what reading every cluster returns, and some are heuristic (a cluster not priced had a key above the k-th
+/// best).
 #[test]
-fn the_lazy_probe_reads_what_the_eager_one_reads() {
+fn the_window_reads_by_key_and_stops_below_the_kth_best() {
     let f = fixture();
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/synth4k");
     let (_, nus) = build(dir, &BuildOptions { nusort: true, ..BuildOptions::default() }, &mut |_| {}).unwrap();
@@ -2205,27 +2208,48 @@ fn the_lazy_probe_reads_what_the_eager_one_reads() {
     ixs.extend(comps.iter().map(|c| ("random compaction", c, false)));
     // sigmas and reads priced so that no race fires before the last cluster
     let m = adaptive::Measured { i8_us: 1e-12, row_us: 1.0, dir_us: 1e-12, cl_us: 1e9, size_us: 0.0, vis_us: 0.0, grp_us: 0.0, anc_us: 0.0 };
-    let mut stops = 0;
+    let w = adaptive::LOOKAHEAD;
+    let (mut stops, mut same, mut heuristic) = (0, 0, 0);
     for &(name, ix, filtered) in &ixs {
         let ad = adaptive::Adaptive::new(ix, m).unwrap();
         for (qi, q) in f.queries.iter().enumerate() {
-            for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
-                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-                for kk in [1, 10, 100] {
-                    for psi in [0.0, 1.0, 2.0, 3.5, adaptive::PSI, 8.0] {
+            for psi in [0.0, 1.0, 2.0, 3.5, adaptive::PSI, 8.0] {
+                let (keys, bounds) = (ad.keys(ix, q, psi), ad.bounds(ix, q, psi));
+                let by = |x: &usize, y: &usize, v: &[f64]| v[*y].total_cmp(&v[*x]).then(x.cmp(y));
+                for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
+                    let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
+                    let mut live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
+                    live.sort_by(|x, y| by(x, y, &bounds));
+                    for kk in [1, 10, 100] {
                         let what = format!("{name}, query {qi}, set {sname}, k {kk}, psi {psi}");
-                        let (lazy, li) = ad.knn_priced(ix, q, kk, vis.as_ref(), psi, Plan::default(), false);
-                        let (eager, ei) = ad.knn_priced(ix, q, kk, vis.as_ref(), psi, Plan::default(), true);
-                        assert_eq!((li.path, &li.read), (ei.path, &ei.read), "{what}");
-                        assert_eq!(lazy.ents, eager.ents, "{what}");
-                        assert!(li.spreads <= ei.spreads, "{what}");
-                        stops += (li.path == "probe" && li.read.len() < ix.k()) as usize;
+                        let (out, info) = ad.knn(ix, q, kk, vis.as_ref(), psi, Plan::default());
+                        let (again, info2) = ad.knn(ix, q, kk, vis.as_ref(), psi, Plan::default());
+                        assert_eq!((&out.ents, &info.read, &info.priced, info.path), (&again.ents, &info2.read, &info2.priced, info2.path), "not deterministic, {what}");
+                        if info.path != "probe" {
+                            continue;
+                        }
+                        let priced: Vec<usize> = info.priced.iter().map(|&c| c as usize).collect();
+                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the bound order, {what}");
+                        for (i, &c) in info.read.iter().enumerate() {
+                            let mut win: Vec<usize> = priced[..(w + i).min(priced.len())].iter().copied().filter(|x| !info.read[..i].contains(&(*x as u32))).collect();
+                            win.sort_by(|x, y| by(x, y, &keys));
+                            assert_eq!(win.first(), Some(&(c as usize)), "read {i} is not the window's largest key, {what}");
+                        }
+                        if info.read.len() < live.len() && out.ents.len() == kk {
+                            stops += 1;
+                            let kth = out.ents[kk - 1].0;
+                            assert!(priced.iter().filter(|&&c| !info.read.contains(&(c as u32))).all(|&c| keys[c] < kth), "stopped with a key in the window at the k-th best, {what}");
+                            heuristic += live.iter().any(|&c| !priced.contains(&c) && keys[c] >= kth) as usize;
+                            let all = ad.knn(ix, q, kk, vis.as_ref(), f64::INFINITY, Plan::default()).0;
+                            same += (out.ents.iter().map(|e| e.1).collect::<Vec<_>>() == all.ents.iter().map(|e| e.1).collect::<Vec<_>>()) as usize;
+                        }
                     }
                 }
             }
         }
     }
-    assert!(stops > 0, "no probe stopped early");
+    eprintln!("{stops} stops, {same} returning what reading every cluster returns, {heuristic} with a cluster not priced above the k-th best");
+    assert!(stops > 0 && same > 0, "{stops} stops, {same} exact");
 }
 
 /// The approximate threshold query decides from the bounds before computing a sigma: a probe returns every answer row
