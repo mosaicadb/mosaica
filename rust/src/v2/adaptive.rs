@@ -7,14 +7,18 @@
 //! every unit size and dataset, `hierarchy/theory.md` 3.4). Every sigma is at most sqrt(top_c) |q|, top_c the
 //! cluster's largest variance along a direction, so b_c = mu_c + psi sqrt(top_c) |q| bounds u_c from above.
 //!
-//! - k-NN takes the clusters in decreasing bound b_c (the stream; the lower cluster first among equal bounds) and keeps
-//!   the next `LOOKAHEAD` of them priced (sigma computed) in a window. It reads the window's cluster of largest key u,
+//! - k-NN takes the clusters in decreasing mu_c + psi sqrt(iso_c) |q| (the stream; the lower cluster first among equal
+//!   values), iso_c = rad_c^2 / n0 the cluster's variance per spanned dimension, so sqrt(iso_c) |q| is the spread of
+//!   its scores along a direction drawn at random: the key with the spread every cluster would have if it were
+//!   isotropic, free from the stored radius and with no constant of its own. (Its bound b_c, the stream first tried,
+//!   ranks clusters by their largest variance rather than their centre score: on LAION it read clusters that hold
+//!   nothing, recall 0.07 at psi 4.5.) It keeps the next `LOOKAHEAD` of them priced (sigma computed) in a window. It reads the window's cluster of largest key u,
 //!   each whole by `KnnReader` (its visible rows scored from their stored vectors, or the index path at the running
 //!   k-th best), and stops when the window's largest key is below the running k-th best (minus infinity until k items
 //!   are held: k items are returned whenever k are visible). The stop is a heuristic: a cluster further down the
-//!   stream, not yet priced, may still have a key above the k-th best (its bound is above, but the bound is loose).
-//!   Pricing every cluster to rule that out costs a sigma for every cluster (the bound is about 5 times the spread on
-//!   real data), so the window is the price of not doing so, and recall is what the benchmark measures. With psi
+//!   stream, not yet priced, may still have a key above the k-th best. Ruling that out exactly (pricing a cluster
+//!   whenever its bound b_c beats the best key priced) prices every cluster on real data, the bound being about 5
+//!   times the spread, so the window is the price of not doing so, and recall is what the benchmark measures. With psi
 //!   infinite every cluster is read (in decreasing centre score; no sigma is computed) and the answer is exact. The
 //!   probe races a scan of the visible rows: when it would stop it stops; otherwise, when its modelled cost with the
 //!   next sigma or the next cluster's read would pass that of the scan (C_s), the rows not yet read are scanned
@@ -513,6 +517,8 @@ pub struct Adaptive {
     top: Vec<f64>,
     /// per cluster, the least variance along a direction it holds (sigma >= sqrt(low |q|^2))
     low: Vec<f64>,
+    /// per cluster, its variance per spanned dimension, rad^2 / n0 (a direction's expected variance)
+    iso: Vec<f64>,
 }
 
 /// Per cluster, the costs a query charges as it reads: a group's setup once, the anchor search once. A group's setup
@@ -571,7 +577,8 @@ impl Adaptive {
         }).collect();
         let top = (0..ix.k()).map(|c| st.lam.get(c * r).map_or(0.0, |&l| l as f64).max(rest[c])).collect();
         let low = (0..ix.k()).map(|c| st.lam[c * r..(c + 1) * r].iter().fold(rest[c], |a, &l| a.min(l as f64)) * (1.0 - 1e-9)).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low })
+        let iso = (0..ix.k()).map(|c| st.rad[c] * st.rad[c] / st.n0.max(1) as f64).collect();
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, iso })
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -602,13 +609,13 @@ impl Adaptive {
         (0..ix.k()).map(|ci| qm[ci] + psi * self.sigma(ix, ci, &pr.q32, qq, &mut p)).collect()
     }
 
-    /// Every cluster's key's upper bound mu + psi sqrt(top |q|^2) for the query `q` (for tests).
+    /// Every cluster's value in the k-NN stream, mu + psi sqrt(iso |q|^2), for the query `q` (for tests).
     #[cfg(test)]
-    pub(crate) fn bounds(&self, ix: &Index2, q: &[f32], psi: f64) -> Vec<f64> {
+    pub(crate) fn stream_keys(&self, ix: &Index2, q: &[f32], psi: f64) -> Vec<f64> {
         let pr = prep2(ix, q);
         let qm = self.centres.centre_scores(ix, &pr.q32);
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
-        (0..ix.k()).map(|ci| self.bound(ci, &qm, psi, qq)).collect()
+        (0..ix.k()).map(|ci| qm[ci] + psi * (self.iso[ci] * qq).sqrt()).collect()
     }
 
     /// The cost of one sigma (its directions' products).
@@ -628,7 +635,7 @@ impl Adaptive {
     }
 
     /// Approximate k-NN with knob `psi` (at least 0; `PSI` by default; infinity reads every cluster and answers
-    /// exactly), as the module's comment says: the stream by bound, `LOOKAHEAD` priced ahead, the stop when the
+    /// exactly), as the module's comment says: the stream by the isotropic key, `LOOKAHEAD` priced ahead, the stop when the
     /// window's largest key is below the running k-th best (a heuristic). Returns k items whenever k are visible.
     /// `plan` is the index path's (its dial is the certified one).
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
@@ -668,8 +675,9 @@ impl Adaptive {
         let qq: f64 = pr.q32.iter().map(|&x| x as f64 * x as f64).sum();
         // clusters not yet priced, by their key's bound (psi infinite: by centre score, never priced), and priced ones
         // by their key
-        // the stream by bound (psi infinite: by centre score, never priced), and the window of priced clusters
-        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { self.bound(ci, &qm, psi, qq) }, Reverse(ci))).collect();
+        // the stream by the isotropic key (psi infinite: by centre score, never priced), and the window of priced
+        // clusters
+        let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(if all { qm[ci] } else { qm[ci] + psi * (self.iso[ci] * qq).sqrt() }, Reverse(ci))).collect();
         let mut window: BinaryHeap<Key> = BinaryHeap::with_capacity(LOOKAHEAD);
         st.cyc[P_ORDER] += tick() - ts;
         let sc = self.sigma_cost();

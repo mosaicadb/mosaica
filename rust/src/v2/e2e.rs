@@ -2187,7 +2187,7 @@ fn measured_constants_are_cached_and_read_again() {
     assert_eq!(adaptive::Measured { vis_us: 0.2, ..r }.rule(1000), None);
 }
 
-/// The k-NN window: the clusters priced are the live clusters in decreasing bound (the stream), each cluster read is
+/// The k-NN window: the clusters priced are the live clusters in decreasing isotropic key (the stream), each read is
 /// the largest key among those priced and not yet read (the next `LOOKAHEAD` of the stream), and a probe that stops
 /// does so with every key in its window below the k-th best it returns. Runs are deterministic. On synth4k, on a
 /// norm-sorted build and on random compactions (those unfiltered), every visible set, k and psi; some stops return
@@ -2214,12 +2214,12 @@ fn the_window_reads_by_key_and_stops_below_the_kth_best() {
         let ad = adaptive::Adaptive::new(ix, m).unwrap();
         for (qi, q) in f.queries.iter().enumerate() {
             for psi in [0.0, 1.0, 2.0, 3.5, adaptive::PSI, 8.0] {
-                let (keys, bounds) = (ad.keys(ix, q, psi), ad.bounds(ix, q, psi));
+                let (keys, stream) = (ad.keys(ix, q, psi), ad.stream_keys(ix, q, psi));
                 let by = |x: &usize, y: &usize, v: &[f64]| v[*y].total_cmp(&v[*x]).then(x.cmp(y));
                 for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
                     let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
                     let mut live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
-                    live.sort_by(|x, y| by(x, y, &bounds));
+                    live.sort_by(|x, y| by(x, y, &stream));
                     for kk in [1, 10, 100] {
                         let what = format!("{name}, query {qi}, set {sname}, k {kk}, psi {psi}");
                         let (out, info) = ad.knn(ix, q, kk, vis.as_ref(), psi, Plan::default());
@@ -2229,7 +2229,7 @@ fn the_window_reads_by_key_and_stops_below_the_kth_best() {
                             continue;
                         }
                         let priced: Vec<usize> = info.priced.iter().map(|&c| c as usize).collect();
-                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the bound order, {what}");
+                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the isotropic key's order, {what}");
                         for (i, &c) in info.read.iter().enumerate() {
                             let mut win: Vec<usize> = priced[..(w + i).min(priced.len())].iter().copied().filter(|x| !info.read[..i].contains(&(*x as u32))).collect();
                             win.sort_by(|x, y| by(x, y, &keys));

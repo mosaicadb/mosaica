@@ -158,9 +158,10 @@ impl Index {
         Ok(())
     }
 
-    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row taken in decreasing bound
-    /// mu + psi sqrt(top) |q| of u = mu + psi sigma (centre score plus psi times the spread of the cluster's scores
-    /// along the query), the next 8 of them given their sigma; the one of largest u among those read next, stopping
+    /// The approximate k nearest (`v2::adaptive`): the clusters holding a visible row taken in decreasing
+    /// mu + psi rad |q| / sqrt(n0) (centre score plus psi times the spread an isotropic cluster of its radius would
+    /// have), the next 8 of them given their key u = mu + psi sigma (sigma the spread of the cluster's scores along the
+    /// query, from its stored directions); the one of largest u among those read next, stopping
     /// when their largest u is below the running k-th best (minus infinity until k items are held). The stop is a
     /// heuristic: a cluster not yet priced may still have a u above the k-th best. The probe races a scan of the
     /// visible rows (the rest scanned, exactly, once the probe would cost more than the scan; at most twice the scan's
