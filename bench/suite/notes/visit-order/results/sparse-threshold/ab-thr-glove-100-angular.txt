@@ -1,0 +1,26 @@
+glove-100-angular: 592 clusters, 100 queries, k 10, 3 repetitions; threshold arms adaptive
+adaptive: measured constants {'i8_us': 0.010628378378378378, 'row_us': 0.01601839232948146, 'dir_us': 1.7747261339077516, 'cl_us': 14.72785476253383, 'size_us': 0.0030672483428476477, 'vis_us': 0.01478784681596414, 'grp_us': 6.3675999999999995, 'anc_us': 0.02079983108108108, 'rule': (10526, 2.492592357742548), 'plan_rule': (64, 0.186)}
+random-1   exact@0.01      psi=inf: 1.000        0 rows    447.7 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=2: 1.000        0 rows    455.8 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=3: 1.000        0 rows    450.5 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=4: 1.000        0 rows    448.1 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=4.5: 1.000        0 rows    449.4 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=5: 1.000        0 rows    450.2 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=6: 1.000        0 rows    448.3 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-1   adaptive@0.01   psi=7: 1.000        0 rows    450.5 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   exact@0.01      psi=inf: 0.999        0 rows    340.8 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=2: 0.999        0 rows    351.3 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=3: 0.999        0 rows    342.2 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=4: 0.999        0 rows    349.4 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=4.5: 0.999        0 rows    344.8 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=5: 0.999        0 rows    342.9 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=6: 0.999        0 rows    341.6 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+region-1   adaptive@0.01   psi=7: 0.999        0 rows    341.3 us  paths {'sparse': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 190 scan 190
+random-25  exact@0.01      psi=inf: 1.000   295878 rows  24846.1 us  paths {'scan': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 4758 scan 4739
+random-25  adaptive@0.01   psi=2: 0.739    34912 rows   1552.6 us  paths {'probe': 100} visited 60.6 direct 60.6 index 0.0 groups 0.0 spreads 454 cost 763 scan 4739
+random-25  adaptive@0.01   psi=3: 0.988   176841 rows   6151.3 us  paths {'probe': 100} visited 342.1 direct 342.1 index 0.0 groups 0.0 spreads 362 cost 3520 scan 4739
+random-25  adaptive@0.01   psi=4: 1.000   287213 rows   9356.0 us  paths {'scan': 91, 'probe': 9} visited 35.0 direct 35.0 index 0.0 groups 0.0 spreads 47 cost 4689 scan 4739
+random-25  adaptive@0.01   psi=4.5: 1.000   293372 rows   9236.2 us  paths {'scan': 98, 'probe': 2} visited 6.6 direct 6.6 index 0.0 groups 0.0 spreads 13 cost 4732 scan 4739
+random-25  adaptive@0.01   psi=5: 1.000   295120 rows   9292.3 us  paths {'scan': 99, 'probe': 1} visited 4.3 direct 4.3 index 0.0 groups 0.0 spreads 5 cost 4755 scan 4739
+random-25  adaptive@0.01   psi=6: 1.000   295878 rows   9514.6 us  paths {'scan': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 4758 scan 4739
+random-25  adaptive@0.01   psi=7: 1.000   295878 rows   9001.3 us  paths {'scan': 100} visited 0.0 direct 0.0 index 0.0 groups 0.0 spreads 0 cost 4758 scan 4739
