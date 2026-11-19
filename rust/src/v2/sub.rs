@@ -526,8 +526,8 @@ fn knn_sub_with(ad: &Adaptive, ix: &Index2, ss: &SubState, q: &[f32], kk: usize,
     let mut stream: BinaryHeap<Key> = live.iter().map(|&ci| Key(qm[ci] + psi * ad.st.rad[ci] * sscale, Reverse(ci))).collect();
     let mut window: BinaryHeap<Key> = BinaryHeap::with_capacity(LOOKAHEAD);
     let mut subs: BinaryHeap<SKey> = BinaryHeap::new();
-    // per priced cluster, its sigma and the query's projections on its directions
-    let mut priced: std::collections::HashMap<usize, (f64, Vec<f32>)> = std::collections::HashMap::new();
+    // per priced cluster (its slot in `pslot`), its sigma and the query's projections on its directions
+    let (mut pslot, mut psig, mut pbuf) = (vec![u32::MAX; k], Vec::with_capacity(4 * LOOKAHEAD), Vec::with_capacity(4 * LOOKAHEAD * r));
     let sc = ad.sigma_cost();
     let e = ss.e_us;
     // the least fixed cost of any one read: what a split cannot save
@@ -557,7 +557,9 @@ fn knn_sub_with(ad: &Adaptive, ix: &Index2, ss: &SubState, q: &[f32], kk: usize,
             }
             let Key(_, Reverse(ci)) = stream.pop().unwrap();
             let sg = ad.sigma(ix, ci, &pr.q32, qq, &mut p);
-            priced.insert(ci, (sg, p.clone()));
+            pslot[ci] = psig.len() as u32;
+            psig.push(sg);
+            pbuf.extend_from_slice(&p);
             spent += sc;
             info.base.spreads += 1;
             info.base.priced.push(ci as u32);
@@ -611,7 +613,8 @@ fn knn_sub_with(ad: &Adaptive, ix: &Index2, ss: &SubState, q: &[f32], kk: usize,
             info.sub_scored += s;
             ss.counts(ix, ci, vis, &mut nvs);
             ss.scores(ci, n, &pr.q32, &mut sco);
-            let (sg, pc) = &priced[&ci];
+            let slot = pslot[ci] as usize;
+            let (sg, pc) = (&psig[slot], &pbuf[slot * r..(slot + 1) * r]);
             let pp: f64 = pc.iter().enumerate().map(|(d, &x)| {
                 let y = x as f64 * ad.st.dsc[ci * r + d] as f64;
                 y * y

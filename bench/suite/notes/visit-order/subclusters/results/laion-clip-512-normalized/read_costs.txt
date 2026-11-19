@@ -1,0 +1,34 @@
+laion-clip-512-normalized: 500 clusters, 100 queries, top 16 clusters each
+  a masked: 16 sub-clusters a cluster, computed in 23.5s at open; layout state 0.50 MB, approximate state 4.80 MB; expanding a cluster 1.82 us
+  b keyranges: 16 sub-clusters a cluster, computed in 5.7s at open; layout state 0.03 MB, approximate state 4.80 MB; expanding a cluster 1.45 us
+  c runs: 16 sub-clusters a cluster, computed in 5.5s at open; layout state 0.03 MB, approximate state 4.80 MB; expanding a cluster 1.35 us
+
+none: mean over (query, cluster) samples with a sub-cluster read
+  layout        rows  whole dir/idx us | best sub: rows  dir/idx us  x whole | best four: rows  dir/idx us  x whole | fit us = fixed + per-row x rows: whole dir, whole idx, best sub dir, best sub idx
+  a masked       2293    139.2 /   102.0 |   160    14.4 /   46.6  x0.15 |   646    56.1 /  108.1  x0.57 | -3.08 + 62.0n, 27.24 + 32.6n, 3.36 + 69.2n, 32.07 + 90.8n  (ns a row)
+  b keyranges    2293    142.1 /   104.0 |   144     9.9 /   26.1  x0.10 |   574    36.3 /   50.7  x0.35 | 1.63 + 61.3n, 32.35 + 31.2n, 1.64 + 57.8n, 21.06 + 35.2n  (ns a row)
+  c runs         2293    140.2 /   113.4 |   160    10.7 /   28.7  x0.10 |   646    39.1 /   57.8  x0.36 | 2.27 + 60.1n, 31.68 + 35.6n, 1.52 + 57.5n, 22.10 + 41.5n  (ns a row)
+
+random-1: mean over (query, cluster) samples with a sub-cluster read
+  layout        rows  whole dir/idx us | best sub: rows  dir/idx us  x whole | best four: rows  dir/idx us  x whole | fit us = fixed + per-row x rows: whole dir, whole idx, best sub dir, best sub idx
+  a masked         23      3.4 /    38.6 |     2     1.2 /   22.1  x0.34 |     8     2.5 /   34.0  x0.72 | 1.41 + 88.5n, 24.14 + 634.8n, 0.82 + 161.1n, 20.22 + 878.6n  (ns a row)
+  b keyranges      23      3.6 /    38.9 |     2     1.0 /   20.2  x0.27 |     8     2.1 /   31.4  x0.60 | 1.44 + 93.1n, 23.90 + 655.9n, 0.68 + 148.2n, 18.17 + 1098.1n  (ns a row)
+  c runs           23      3.6 /    41.8 |     2     1.0 /   21.6  x0.28 |     8     2.1 /   32.9  x0.58 | 1.50 + 92.6n, 25.06 + 734.8n, 0.69 + 140.5n, 20.28 + 632.5n  (ns a row)
+
+random-25: mean over (query, cluster) samples with a sub-cluster read
+  layout        rows  whole dir/idx us | best sub: rows  dir/idx us  x whole | best four: rows  dir/idx us  x whole | fit us = fixed + per-row x rows: whole dir, whole idx, best sub dir, best sub idx
+  a masked        575     56.4 /    77.2 |    42     5.1 /   32.9  x0.09 |   167    17.2 /   67.7  x0.32 | -3.56 + 104.4n, 27.87 + 85.8n, 1.89 + 75.9n, 25.75 + 170.8n  (ns a row)
+  b keyranges     575     56.8 /    79.0 |    36     3.9 /   22.2  x0.07 |   145    12.6 /   39.2  x0.23 | -2.67 + 103.4n, 25.27 + 93.4n, 1.37 + 71.0n, 19.21 + 82.8n  (ns a row)
+  c runs          575     61.4 /    84.1 |    42     4.4 /   25.0  x0.08 |   167    14.5 /   45.1  x0.25 | -4.20 + 114.2n, 26.26 + 100.7n, 1.24 + 74.8n, 21.66 + 78.8n  (ns a row)
+
+region-1: mean over (query, cluster) samples with a sub-cluster read
+  layout        rows  whole dir/idx us | best sub: rows  dir/idx us  x whole | best four: rows  dir/idx us  x whole | fit us = fixed + per-row x rows: whole dir, whole idx, best sub dir, best sub idx
+  a masked         35      4.5 /    32.5 |     4     1.2 /   22.9  x0.28 |    14     2.4 /   30.4  x0.55 | 1.62 + 82.7n, 29.14 + 96.7n, 0.89 + 88.1n, 21.95 + 252.4n  (ns a row)
+  b keyranges      35      4.5 /    32.4 |     4     1.0 /   21.5  x0.23 |    12     1.9 /   27.8  x0.45 | 1.56 + 82.6n, 29.10 + 93.6n, 0.74 + 72.3n, 21.17 + 90.8n  (ns a row)
+  c runs           35      4.7 /    35.0 |     4     1.1 /   22.8  x0.24 |    14     2.2 /   29.5  x0.46 | 1.50 + 91.9n, 31.73 + 93.6n, 0.83 + 71.8n, 22.36 + 109.4n  (ns a row)
+
+region-25: mean over (query, cluster) samples with a sub-cluster read
+  layout        rows  whole dir/idx us | best sub: rows  dir/idx us  x whole | best four: rows  dir/idx us  x whole | fit us = fixed + per-row x rows: whole dir, whole idx, best sub dir, best sub idx
+  a masked        502     44.6 /    68.0 |    33     4.3 /   29.2  x0.11 |   144    15.1 /   58.2  x0.39 | 8.08 + 72.7n, 47.79 + 40.4n, 1.45 + 85.2n, 22.37 + 205.6n  (ns a row)
+  b keyranges     502     42.8 /    69.2 |    30     3.1 /   21.1  x0.08 |   123    10.0 /   36.6  x0.26 | 7.56 + 70.2n, 47.59 + 43.1n, 1.12 + 64.8n, 18.75 + 79.6n  (ns a row)
+  c runs          502     43.4 /    70.1 |    33     3.3 /   23.4  x0.09 |   144    11.2 /   41.4  x0.29 | 8.46 + 69.6n, 48.37 + 43.4n, 1.20 + 62.9n, 20.86 + 76.3n  (ns a row)

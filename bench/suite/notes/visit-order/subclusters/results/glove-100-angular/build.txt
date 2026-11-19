@@ -1,0 +1,18 @@
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/user/scratch-sub/def/glove-100-angular/encoded in 0.132s: 1183514 rows, 592 clusters; when built: code hash dc09c61881e4bbe5, store hash f1322bfbd2068546
+[repack] occupancy thresholds by level [0.31, 0.31, 0.25, 0.24] (timed in 0.0s)
+[open] 0.166s in all: fit read 0.008s, key 0.001s, index opened 0.132s, repack timed 0.025s; anon 26 MB
+[approx] measured constants i8_us=0.008214527027027026 row_us=0.016335187359675683 dir_us=1.781956684010154 cl_us=18.055506172228455 size_us=0.0032767844648634845 vis_us=0.015217634164708884 grp_us=6.496933333333333 anc_us=0.021400971283783786: read from /home/user/scratch-sub/def/glove-100-angular/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=14562 r_kappa=2.932
+glove-100-angular def: 1183514 rows, 592 clusters, open/build 0.2s; measured {'i8_us': 0.008214527027027026, 'row_us': 0.016335187359675683, 'dir_us': 1.781956684010154, 'cl_us': 18.055506172228455, 'size_us': 0.0032767844648634845, 'vis_us': 0.015217634164708884, 'grp_us': 6.496933333333333, 'anc_us': 0.021400971283783786, 'rule': (14562, 2.9321060327341604), 'plan_rule': (64, 0.186)}
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/user/scratch-sub/c/glove-100-angular/encoded in 0.129s: 1183514 rows, 592 clusters; when built: code hash ee325b69da46e97e, store hash cf06a3ea7a701dae
+[repack] occupancy thresholds by level [0.31, 0.3, 0.26, 0.24] (timed in 0.0s)
+[open] 0.160s in all: fit read 0.005s, key 0.001s, index opened 0.129s, repack timed 0.025s; anon 32 MB
+[approx] measured constants i8_us=0.008214527027027026 row_us=0.016335187359675683 dir_us=1.781956684010154 cl_us=18.055506172228455 size_us=0.0032767844648634845 vis_us=0.015217634164708884 grp_us=6.496933333333333 anc_us=0.021400971283783786: read from /home/user/scratch-sub/c/glove-100-angular/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=14562 r_kappa=2.932
+glove-100-angular c: 1183514 rows, 592 clusters, open/build 0.2s; measured {'i8_us': 0.008214527027027026, 'row_us': 0.016335187359675683, 'dir_us': 1.781956684010154, 'cl_us': 18.055506172228455, 'size_us': 0.0032767844648634845, 'vis_us': 0.015217634164708884, 'grp_us': 6.496933333333333, 'anc_us': 0.021400971283783786, 'rule': (14562, 2.9321060327341604), 'plan_rule': (64, 0.186)}
+[open] randomised code tan^2 by rate [0.0, 0.5655, 0.1604, 0.0395, 0.0103, 0.003, 0.0008, 0.0002, 0.0001]
+[open] opened /home/user/scratch-sub/c/glove-100-angular/encoded in 0.135s: 1183514 rows, 592 clusters; when built: code hash ee325b69da46e97e, store hash cf06a3ea7a701dae
+[repack] occupancy thresholds by level [0.3, 0.32, 0.26, 0.25] (timed in 0.0s)
+[open] 0.165s in all: fit read 0.004s, key 0.001s, index opened 0.136s, repack timed 0.025s; anon 32 MB
+[approx] measured constants i8_us=0.008214527027027026 row_us=0.016335187359675683 dir_us=1.781956684010154 cl_us=18.055506172228455 size_us=0.0032767844648634845 vis_us=0.015217634164708884 grp_us=6.496933333333333 anc_us=0.021400971283783786: read from /home/user/scratch-sub/c/glove-100-angular/compute-constants.txt, in 0.0s; the exact planner's rule from them: r_rows=14562 r_kappa=2.932
+glove-100-angular c: constants now {'i8_us': 0.008214527027027026, 'row_us': 0.016335187359675683, 'dir_us': 1.781956684010154, 'cl_us': 18.055506172228455, 'size_us': 0.0032767844648634845, 'vis_us': 0.015217634164708884, 'grp_us': 6.496933333333333, 'anc_us': 0.021400971283783786, 'rule': (14562, 2.9321060327341604), 'plan_rule': (64, 0.186)}
