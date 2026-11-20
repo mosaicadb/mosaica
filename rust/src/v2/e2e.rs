@@ -3178,3 +3178,56 @@ fn study_layered_exact() {
         eprintln!("tightness: median certified half-width / sigma at the first {lv} levels: {}", (0..lv).map(|l| format!("{:.2}", per.iter().map(|x| x[l]).sum::<f64>() / nq as f64)).collect::<Vec<_>>().join(" "));
     }
 }
+
+/// Study (ignored; run by hand, pinned to one core) for layered.md: the group count timed. Exact `knn2` at k = 10 and
+/// the approximate k-NN (`adaptive::Adaptive::knn`, its constants timed on this index) at each psi of DIAG_PSIS, for
+/// the first DIAG_NQ queries (50), DIAG_REPS times (2): per query the fastest repetition; printed: the median and the
+/// mean over the queries in microseconds, and the approximate recall. DIAG_DIR, DIAG_PREP, DIAG_SET.
+#[test]
+#[ignore]
+fn study_layered_group_timing() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let nq: usize = std::env::var("DIAG_NQ").ok().map_or(50, |s| s.parse().unwrap());
+    let reps: usize = std::env::var("DIAG_REPS").ok().map_or(2, |s| s.parse().unwrap());
+    let psis: Vec<f64> = std::env::var("DIAG_PSIS").unwrap_or("4,5,6".into()).split(',').map(|s| s.parse().unwrap()).collect();
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let m = adaptive::measure(&ix).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = nq.min(qs.len() / d);
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
+    let (ow, ord) = (on.shape[1], on.i32s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    let rec = |ents: &[(f64, u32)], qi: usize| ents.iter().filter(|e| ord[qi * ow..qi * ow + 10].contains(&(e.1 as i32))).count() as f64 / 10.0;
+    // one untimed pass, then the repetitions; the arms in turn within a query
+    let narm = 1 + psis.len();
+    let mut best = vec![vec![f64::INFINITY; nq]; narm];
+    let mut recall = vec![0.0; narm];
+    for rep in 0..=reps {
+        for qi in 0..nq {
+            for a in 0..narm {
+                let t = std::time::Instant::now();
+                let ents = if a == 0 { knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan).ents } else { ad.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan).0.ents };
+                let us = t.elapsed().as_secs_f64() * 1e6;
+                if rep == 0 {
+                    recall[a] += rec(&ents, qi) / nq as f64;
+                } else {
+                    best[a][qi] = best[a][qi].min(us);
+                }
+            }
+        }
+    }
+    eprintln!("{dir} {set}: groups {}, {nq} queries, {reps} repetitions; microseconds per query (median, mean of each query's fastest) and recall@10; measured constants {}", ix.groups.len(), m.to_kv().replace('\n', " "));
+    for a in 0..narm {
+        let mut v = best[a].clone();
+        v.sort_by(|x, y| x.total_cmp(y));
+        let name = if a == 0 { "knn2 exact".to_string() } else { format!("approximate psi {}", psis[a - 1]) };
+        eprintln!("{name:<20} median {:.0} mean {:.0} recall {:.4}", v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, recall[a]);
+    }
+}
