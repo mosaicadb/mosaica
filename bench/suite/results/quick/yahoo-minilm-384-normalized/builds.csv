@@ -4,4 +4,4 @@ pdx-bond,ok,5.8,3,0.971,2.01,"{""blocks"": 67}"
 faiss-panorama,ok,6.4,3,0.969,2.47,{}
 vexact,ok,75.4,3,1.205,1.93,"{""fit_s"": 37.7, ""encode_s"": 37.7, ""sample"": false}"
 faiss-hnsw,ok,211.6,3,1.050,2.08,"{""M"": 16, ""efConstruction"": 200, ""storage"": ""f32""}"
-acorn,ok,1246.8,3,1.210,0.03,"{""M"": 32, ""gamma"": 12, ""M_beta"": 32}"
+acorn,ok,1082.9,3,1.210,2.27,"{""M"": 32, ""gamma"": 12, ""M_beta"": 32}"
