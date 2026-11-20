@@ -48,7 +48,9 @@ four rules, each derived from N and the index and each off or free at 1M.**
    gives G* ∝ N/n² (rows per group ∝ n²; the clusters read cancel), with a factor the build can compute from the fit.
    Proposed: G = max(64, min(N/(3n²), K/8)): 64 at 1M (unchanged), 127 to 781 at 100M, 1,272 to 1,953 at 1B. By a proxy
    each doubling of G is worth 8% (yahoo) to 12% (LAION) of the 16 B code and nothing on glove; at 1B today's cap of 64 pools 244 clusters a basis.
-   This is the least supported number here.
+   This is the least supported number here. Section 8.7 reconciles it with the leaves: the leaf (2,000 rows) and
+   the basis (κn² rows) are fixed in N, only routing grows, the rule's K stays as the routing parents and the exact
+   path's unit, and G = N/(κn²) with no floor and no cap at K/8.
 6. **Rule 5, visible sets at scale**: counts per group to drop empty regions for G comparisons; a row-ordered
    Roaring bitmap beyond 2^27 rows (a 1B cluster is about one container). By the subsample law the sparse regime
    recedes: 1% visible is 20 rows a cluster at 1M and 640 at 1B, where rule 1 engages.
@@ -756,6 +758,116 @@ no polylogarithm on these data: with ideal spreads, an order built from centres 
 fixed leaf size, and η is a property of the data. Fixed overhead per query at 1B with every rule: the sketch 0.5 MB,
 3m full centres, the sigmas of the clusters and leaves read (1 to 7 MB), group setups 1 to 6 MB, tables 6 kB a
 leaf.
+
+### 8.7 One hierarchy: the five rules derived jointly
+
+Rule 4 as stated was inconsistent, as the owner noted: the balance (8.1) asks for a basis per fixed number of rows
+(∝ n²), yet G was counted in clusters, which grow as √N, and capped at K/8, so at large N the cap bound and a group
+shrank to 8 clusters for no reason of its own. Rules 2 and 4 say the same thing about two things: **what is stored
+and what is coded have a fixed size; only routing grows with N.** Derived together:
+
+| unit | size | why | count at N |
+|---|---|---|---|
+| **leaf**: the unit of storage and of an approximate read (a contiguous key-sorted run, an int8 centre, a radius, 16 directions) | s = 2,000 rows, fixed | the smallest unit the exact path's layout tolerates (62 blocks of 32; one range search per leaf, as at 1M today) and the cluster the fit already makes at 1M; a smaller leaf's centre and sigma cost what its rows save (7(b)) | L = N/2,000 |
+| **basis**: the unit of coding (a group's dual basis) | R = κ·n² rows, fixed in N; κ = ln 2·a·s/(β·b) from (8.1), about 1 where the bases matter (yahoo 1.2, LAION 0.8) and about 10 where they do not (glove) | a basis's setup (n² bytes) against what its tightness saves on the rows read under it; the clusters read cancel | G = N/(κn²) |
+| **routing**: whatever finds the leaves to read | grows with N; size set by its own cost, below | the only part that scales | parents K, a sketch of 32 B per parent and per leaf |
+
+A basis covers κn²/2,000 leaves: 8 at n = 128, 74 at n = 384, 131 at n = 512 (κ = 1). It is made of whole leaves that
+are neighbours (k-means of the leaf centres' directions, as groups are made of clusters today) and it does not need to
+respect parents; in practice whole parents where a parent is smaller than R, and one basis per parent where it is
+larger (n = 128 from 16M rows: G = K). The floor of 64 and the cap K/8 of rule 4 both go: neither was derived. In
+storage a basis costs n² bytes per κn² rows: **one byte per row at κ = 1, at every N and n.**
+
+**Should the cluster count stay ∝ √N? As routing, only loosely; as the exact path's unit, yes, and one structure
+can be both.** With leaves fixed, parents are routing. Scoring K parents and the leaves of the P expanded costs
+K·c + P·(L/K)·c with the same sketch bytes c at both levels, and P = 2.5m grows with K as p·K^μ (μ = 0.3 to 0.6,
+section 2), so the routing bytes are least at
+
+    K* = (p·(1 − μ)·L)^(1/(2 − μ)),        K* ∝ N^(0.6 to 0.7), near √(L·P),                             (8.2)
+
+not at √N exactly and not at √L: more parents than √L because expanding is dearer than scoring. With the fitted
+laws at 1B (L = 500,000): K* ≈ 12,000 for glove (m = 266 at the rule's K), 2,800 for yahoo (m = 30); the rule gives
+15,625. The minimum is flat and small: at the rule's K the routing is 0.6 to 1.3 MB a query at 1B against 10 to 109
+MB of reads, and at K* a few tenths of a MB less. So (8.2) is no reason to move K. The reasons to keep
+`per_cluster_by_n` are the exact path's: its cut and tables are per cluster, the support table is K × 1,024, and
+`rust/REPORT_SCALING.md` timed the √N rule for it. **Parents = the exact path's clusters = the rule's K; leaves and
+bases are fixed; the sketch sits on both levels.** A sketch over every leaf with no parents would also route (L·32
+bytes: 16 kB at 1M, 1.6 MB at 100M, less than today's K·n scan up to there), but it is linear in N (16 MB at 1B) and
+the exact path needs the parents anyway, so: parents and sketch, both.
+
+**Per query** (bytes; m parents the order reads, F = S/2,000 leaves a parent, n_l leaves read):
+routing K·32 + 3m·n + 2.5m·F·32; sigmas (m + n_l + 16)·16n; bases min(G, 2.5·(m/K)·G)·n²; tables 6 kB·n_l; codes
+18.5·rows; vectors 2n·(1% of rows). **Storage** (bytes per row unless said): codes and key 34 (deterministic
+levels; 276 with the randomised ones); stored vector 2n; leaf state (17n + 136)/2,000 = 1.2 / 3.3 / 4.4 at n = 128 /
+384 / 512; bases 1/κ; sketches 0.016 + 32·K/N; parents' centres n·K/N and support table 2,048·K/N (40 MB in all at
+1B).
+
+| | 1M | 10M | 100M | 1B |
+|---|---|---|---|---|
+| leaves L | 500 | 5,000 | 50,000 | 500,000 |
+| parents K, leaves a parent F | 500, 1 | 1,250, 4 | 6,250, 8 | 15,625, 32 |
+| bases G = min(K, N/n²), n = 128 / 384 / 512 | 61 / 7 / 4 | 610 / 68 / 38 | 6,104 / 678 / 381 | 15,625 / 6,782 / 3,815 |
+| bases, storage (n = 512) | 1 MB | 10 MB | 100 MB | 1 GB |
+| leaf state, n = 512 | 4.4 MB | 44 MB | 0.44 GB | 4.4 GB |
+| sketches (parents + leaves) | none (off) | 0.2 MB | 1.8 MB | 16.5 MB |
+| deterministic codes | 34 MB | 0.34 GB | 3.4 GB | 34 GB |
+
+Per query, model at recall 0.95 (`extrapolate.py`, design `joint`, κ = 1 for every dataset; the five rules as stated
+alongside):
+
+| dataset | N | visible | G: rules, joint | five rules | joint: total | joint by term: centres / sigmas / groups / tables / codes / vectors / leaves |
+|---|---|---|---|---|---|---|
+| glove | 1,000,000 | 1 | 64, 61 | 3.3 | 3.3 | 0.1 / 0.1 / 0.3 / 0.3 / 2.1 / 0.3 / 0.0 |
+| glove | 1,000,000 | 0.01 | 64, 61 | 0.7 | 0.7 | 0.1 / 0.2 / 0.0 / 0.0 / 0.0 / 0.4 / 0.0 |
+| glove | 10,000,000 | 1 | 156, 610 | 10.5 | 11.7 | 0.2 / 0.6 / 1.7 / 1.1 / 7.1 / 1.0 / 0.1 |
+| glove | 10,000,000 | 0.01 | 156, 610 | 1.9 | 2.5 | 0.2 / 0.8 / 0.0 / 0.0 / 0.0 / 1.4 / 0.2 |
+| glove | 100,000,000 | 1 | 781, 6,104 | 33.7 | 40.1 | 0.3 / 1.7 / 7.3 / 3.8 / 23.3 / 3.2 / 0.5 |
+| glove | 100,000,000 | 0.01 | 781, 6,104 | 4.6 | 7.9 | 0.3 / 2.4 / 0.0 / 0.0 / 0.0 / 4.6 / 0.7 |
+| glove | 1,000,000,000 | 1 | 1,953, 15,625 | 109 | 119 | 0.6 / 4.8 / 10.9 / 12.5 / 76.8 / 10.6 / 2.7 |
+| glove | 1,000,000,000 | 0.01 | 1,953, 15,625 | 10.7 | 24.1 | 0.6 / 0.8 / 15.4 / 2.3 / 4.4 / 0.6 / 0.0 |
+| yahoo | 1,000,000 | 1 | 64, 7 | 1.9 | 1.4 | 0.2 / 0.1 / 0.1 / 0.1 / 0.6 / 0.2 / 0.0 |
+| yahoo | 1,000,000 | 0.01 | 64, 7 | 0.7 | 0.7 | 0.2 / 0.2 / 0.1 / 0.1 / 0.0 / 0.0 / 0.0 |
+| yahoo | 10,000,000 | 1 | 64, 68 | 3.0 | 3.0 | 0.5 / 0.4 / 0.3 / 0.2 / 1.1 / 0.5 / 0.1 |
+| yahoo | 10,000,000 | 0.01 | 64, 68 | 1.4 | 1.5 | 0.5 / 0.2 / 0.5 / 0.2 / 0.0 / 0.0 / 0.0 |
+| yahoo | 100,000,000 | 1 | 226, 678 | 4.7 | 5.4 | 0.2 / 0.6 / 1.0 / 0.3 / 2.1 / 0.9 / 0.2 |
+| yahoo | 100,000,000 | 0.01 | 226, 678 | 1.5 | 2.6 | 0.2 / 0.3 / 1.6 / 0.2 / 0.1 / 0.0 / 0.0 |
+| yahoo | 1,000,000,000 | 1 | 1,953, 6,782 | 10.3 | 13.7 | 0.5 / 1.0 / 4.8 / 0.7 / 4.1 / 1.7 / 0.9 |
+| yahoo | 1,000,000,000 | 0.01 | 1,953, 6,782 | 4.0 | 6.0 | 0.6 / 1.4 / 0.0 / 0.0 / 0.0 / 2.6 / 1.4 |
+| laion | 1,000,000 | 1 | 64, 4 | 4.7 | 2.6 | 0.3 / 0.3 / 0.3 / 0.2 / 1.0 / 0.6 / 0.0 |
+| laion | 1,000,000 | 0.01 | 64, 4 | 1.4 | 1.2 | 0.3 / 0.4 / 0.3 / 0.2 / 0.0 / 0.0 / 0.0 |
+| laion | 10,000,000 | 1 | 64, 38 | 7.3 | 6.9 | 0.6 / 1.0 / 0.7 / 0.4 / 2.5 / 1.4 / 0.2 |
+| laion | 10,000,000 | 0.01 | 64, 38 | 3.2 | 2.6 | 0.6 / 0.5 / 1.0 / 0.3 / 0.1 / 0.0 / 0.0 |
+| laion | 100,000,000 | 1 | 127, 381 | 14.4 | 16.1 | 0.3 / 2.0 / 2.5 / 1.0 / 6.2 / 3.4 / 0.7 |
+| laion | 100,000,000 | 0.01 | 127, 381 | 3.3 | 5.7 | 0.3 / 0.8 / 3.6 / 0.5 / 0.3 / 0.1 / 0.0 |
+| laion | 1,000,000,000 | 1 | 1,272, 3,815 | 38.6 | 47.3 | 0.6 / 4.2 / 13.1 / 2.5 / 15.2 / 8.4 / 3.4 |
+| laion | 1,000,000,000 | 0.01 | 1,272, 3,815 | 10.7 | 23.0 | 0.7 / 1.0 / 18.5 / 0.7 / 1.4 / 0.8 / 0.0 |
+
+**At 1M, against today and against the five rules.**
+- Leaves: a cluster is one leaf. Parents: K = L, F = 1, nothing to expand. Sketch: off (K < 2,000). Rule 1 as
+  measured. **Identical to the five rules and to today's layout in everything but G.**
+- G is not identical: 61 at n = 128 (today 64), but 7 at n = 384 and 4 at n = 512 where today has 64. By the counts
+  this is no worse and usually better: a group's setup is half of rule 1's bytes at 1M on yahoo and LAION (5.2),
+  and with a basis per n² rows the model's totals fall from 1.9 to 1.4 MB (yahoo) and from 4.7 to 2.6 (LAION),
+  unchanged on glove. What it costs is tightness, by the proxy of 8.4: 26 to 40 bits a row at the 16 B level's
+  distortion on yahoo (G = 8 against 64) and about 60 on LAION (G = 4), which the approximate path pays as more
+  rows passing a level and the exact path as wider intervals. For an exact query at 1M the same balance holds in
+  bytes (the 64 setups with their rotations are about 20 MB at n = 384, as much as a 1% answer reads), but 64 was
+  chosen by timing exact queries, and bytes are not time. **So the joint design is identical at 1M only if κ is
+  taken from that timing instead of from (8.1)**: κ = 16,000/n² rows-per-basis today, which is 1 at n = 128, 0.11 at
+  n = 384 and 0.06 at n = 512. I would not change 1M on a proxy: keep today's G where a build already exists, and
+  settle κ by one count of bytes per row (approximate and exact) on yahoo or LAION encoded at G = 8, 16 and 64.
+  What must not be kept is G constant in N: whatever κ is, it is rows per basis, and G = N/(κn²).
+
+**Where this differs from the five rules as stated.** (i) Rule 4: G = N/(κn²), no floor of 64, no cap at K/8, one
+basis per parent at most; at κ = 1 that is 3 to 8 times more bases than rule 4 gave at 100M to 1B (and 1 GB of them
+at 1B), and in the model 1 to 13 MB more setups a query, which is the price (8.1) says the tightness is worth; the
+model does not credit the tightness, so its `joint` column is an upper bound on the cost. (ii) Rule 2 is no longer a
+switch at S > 2,000 but the definition of the stored unit; the rule's K is demoted to routing and to the exact
+path's unit. (iii) Rule 3's sketch covers leaves as well as parents (32 B a leaf), which the model already assumed.
+(iv) Rules 1 and 5 are unchanged; rule 5's group counts become counts per parent (15,625 comparisons at 1B, 62 kB)
+and per basis. (v) Under 1% sets at 100M to 1B the bases' setups are the largest term in the model (15 to 18 MB at
+κ = 1 on glove and LAION): there a query reads few rows under each basis, the balance (8.1) tips, and the planner's
+existing choice (direct reads when a group's setup is not repaid) is what bounds it.
 
 ## 9. Exact queries and visible sets
 

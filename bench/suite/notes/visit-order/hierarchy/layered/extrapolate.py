@@ -72,6 +72,11 @@ def cost(law, N, n, v, design):
         return one(law, N, n, v, False, False, 64, False)
     if design == "levels":
         opts = [one(law, N, n, v, False, False, 64, th) for th in (True, False)]
+    elif design == "joint":
+        # one hierarchy (layered.md 8.7): a basis per n^2 rows, in whole clusters; no floor, no cap but one per cluster
+        G = max(1.0, min(K, N / (n * n)))
+        opts = [one(law, N, n, v, K >= 2000, lv, G, th) for lv in ((False, True) if S > 2000 else (False,)) for th in (True, False)]
+        return min(opts, key=lambda o: sum(o[0].values()))
     else:
         G = max(64, min(N / (3 * n * n), K / 8))
         opts = [one(law, N, n, v, K >= 2000, lv, G, th) for lv in ((False, True) if S > 2000 else (False,)) for th in (True, False)]
@@ -111,5 +116,32 @@ def main():
                     print(head + " | " + " | ".join(cells) + f" | {G:,.0f} |")
 
 
+def joint():
+    """The jointly derived hierarchy against the five rules, by term (recall 0.95)."""
+    print("\n#### The joint hierarchy (8.7) against the five rules, recall 0.95, k = 10: MB per query (model)\n")
+    print("| dataset | N | visible | G: rules, joint | five rules | joint: total | joint by term: centres / sigmas / groups / tables / codes / vectors / leaves |")
+    print("|---|---|---|---|---|---|---|")
+    for path in sys.argv[1:]:
+        R = json.load(open(path))
+        ds = R["dataset"]
+        n = NPAD[ds]
+        xs, ys = [], []
+        for name, e in R["parts"].items():
+            if " | " in name or "visible" in name or e["K"] < 16:
+                continue
+            r = e["rows_clusters"]["10"][1][0]
+            if r is not None:
+                xs.append([1.0, np.log(e["n"] / e["K"]), np.log(e["n"])])
+                ys.append(np.log(r))
+        co, *_ = np.linalg.lstsq(np.array(xs), np.array(ys), rcond=None)
+        law = lambda S, N, co=co: float(np.exp(co[0] + co[1] * np.log(S) + co[2] * np.log(N)))
+        for N in (1e6, 1e7, 1e8, 1e9):
+            for v in (1.0, 0.01):
+                ta, *_, Ga = cost(law, N, n, v, "all")
+                tj, *_, Gj = cost(law, N, n, v, "joint")
+                print(f"| {ds} | {N:,.0f} | {v:g} | {Ga:,.0f}, {Gj:,.0f} | {mb(sum(ta.values()))} | {mb(sum(tj.values()))} | " + " / ".join(mb(tj[k]) for k in TERMS) + " |")
+
+
 if __name__ == "__main__":
     main()
+    joint()
