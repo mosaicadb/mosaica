@@ -780,6 +780,36 @@ one by one), which the estimate's reliability cannot change.
 - No change: the cause is spread over the planner's read choice (fixed this round) and the stop's tail, with no
   single small fix.
 
+**The scan hand-over was reverted** (71aa524; the PIN back at 5853926). It cost glove random-25 at 0.98 to 0.99 the
+full twice its bound allows, and helped only part of the 1% sets.
+
+**The stop without the shift (a) and small clusters straight into the batch (b), through the real code**
+(`results/probe-variants/`; `study_probe`, the index's measured constants, 50 queries, k 10, psi 2 to 7).
+
+(a) is the stop as the window's largest mu + psi rho sigma, with delta kept in the order only.
+- It saves 4 to 12% of clusters on glove and LAION region-1 at recall 0.9 to 0.95.
+- It breaks the bottom-set fix: under each cluster's bottom quarter it reads 156 clusters where 5853926 reads 6 (glove),
+  and 47 where it reads 3 (LAION), at recall 1.0 in both.
+- Dropped.
+
+(b) sends a cluster of at most r = 16 visible rows to the direct batch, with no sigma, window slot or pricing. It is
+read in stream order unless its stop key with rad s is below the k-th best.
+- It first lost half the recall, because the moments counted a direct read whose rows were still in the batch (sums
+  of 0). Moments are now taken only after a flush shows fewer than k items held.
+- With that fixed, against 5853926 (clusters to recall 0.9/0.95/0.99, small ones included):
+
+  | Set | 5853926 | (b) |
+  |---|---|---|
+  | glove region-1 | 281/318/360 | 197/269/327 |
+  | LAION region-1 | 150/196/234 | 112/156/196 |
+  | glove random-1 | 143/224/374 | 78/204/379 |
+  | LAION random-1 | 89/135/324 | 49/99/236 |
+
+- Rows fall alike, and the bottom sets are unchanged.
+- Reading the small clusters whatever their stop key (b') is close: better on glove random-1 at 0.99, worse on
+  region-1.
+- (b) is built.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's
