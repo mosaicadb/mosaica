@@ -44,6 +44,7 @@ fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3
         d.set_item(key, x)?;
     }
     d.set_item("rekeys", i.rekeys)?;
+    d.set_item("scanned", i.scanned)?;
     for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost), ("delta", i.delta), ("rho", i.rho)] {
         d.set_item(key, x)?;
     }
