@@ -2736,6 +2736,557 @@ fn study_order_rows_to_recall() {
     }
 }
 
+/// The visible set of a stress-test condition (`study_order_stress`), decided per query from the rows' scores.
+#[derive(Clone, Copy, Debug)]
+enum StressFilter {
+    None,
+    /// a uniform share of the rows, by a hash of the row
+    Random(f64),
+    /// the suites' region set at a share: rows whose nearest of 300 centres (random rows) lies in a random subset of the
+    /// centres, whole centres until the next would overshoot, then filled from that centre's rows
+    Region(f64),
+    /// a quarter of the rows: the region set at `alpha` of the quarter and random rows for the rest
+    Mix(f64),
+    /// the share of each cluster's rows scoring lowest (`top` false) or highest along the query
+    InCluster(f64, bool),
+    /// the share of all rows scoring highest along u = q cos(theta) + w sin(theta), w a random direction orthogonal
+    /// to q (theta in degrees)
+    Dir(f64, f64),
+}
+
+/// Study (ignored; run by hand on a built index): the cluster orders' stress tests, in rows touched to recall 0.9,
+/// 0.95, 0.99, 0.995 and 0.999 of the true k (brute force over the stored vectors), each order read whole and the same
+/// number of clusters for every query, a query reading nothing more once it holds its true k. The orders: mu + z(1, v)
+/// sigma; mu; mu + c sigma for c 2 to 5; spread; the gap order (mu - t) / sigma at the running k-th best (B); the tail
+/// order Gbar((t - mu) / sigma) v / (v + 16) at the running k-th best (D); B and D take the stream key mu + z(1, v) rad s
+/// until k rows are held. DIAG_DIR the index directory, DIAG_QUERIES the queries' .npy, DIAG_NQ the queries used (100),
+/// DIAG_VECTORS the vectors to create the index from when DIAG_DIR does not exist yet (2,000 rows a cluster),
+/// DIAG_CONDS the conditions (k: k 1 to 1000 under none, random-25 and region-25; base: k 10 and 100 under those;
+/// score: score-correlated sets; mix: region and random mixed; ood: queries from elsewhere; outlier: 0.1% of rows
+/// moved by 3 radii along random directions; merge: neighbouring clusters merged in pairs; sketch: mu + 3 sigma with
+/// sigma from the exact covariance, the stored directions and rest, Bruch et al.'s diagonal plus 4 or 8 eigenpairs, and
+/// the stored directions with a diagonal residual, and each one's error against the exact sigma). Prints one block per
+/// condition, visible set and k, with the truth's contributing clusters.
+#[test]
+#[ignore]
+fn study_order_stress() {
+    use rayon::prelude::*;
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let qpath = std::env::var("DIAG_QUERIES").unwrap();
+    let nq_max: usize = std::env::var("DIAG_NQ").ok().and_then(|x| x.parse().ok()).unwrap_or(100);
+    let conds: Vec<String> = std::env::var("DIAG_CONDS").unwrap_or("k".into()).split(',').map(|s| s.to_string()).collect();
+    // an index directory with a fit but no index yet (a scratch copy) is built first; with DIAG_VECTORS (a .npy) and no
+    // directory, the index is created from those vectors, 2,000 rows a cluster
+    let fresh = std::env::var("DIAG_VECTORS").ok().filter(|_| std::fs::read_dir(&dir).map_or(true, |mut d| d.next().is_none()));
+    let (_, ix) = match fresh {
+        Some(v) => create(&v, &dir, &BuildOptions { per_cluster: PerCluster::Items(2000), cert_time: 0.0, ..BuildOptions::default() }, &mut |_| {}),
+        None => open(&dir, &OpenOptions::default(), &mut |_| {}).or_else(|_| rebuild(&dir, &BuildOptions::default(), &mut |_| {})),
+    }
+    .unwrap();
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let ap = Approx::spread(&ix);
+    let (n, k, nr) = (ix.n(), ix.k(), ix.nrows);
+    let qn = crate::util::read_npy(&qpath);
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = (qs.len() / d).min(nq_max);
+    let queries: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; n]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    // the stored vectors in f32, row by row
+    let xs: Vec<f32> = (0..nr).into_par_iter().flat_map_iter(|r| ix.full_row_f16(r).iter().map(|&h| crate::util::f16_to_f32(h)).collect::<Vec<f32>>()).collect();
+    let row = |r: usize| &xs[r * n..(r + 1) * n];
+    let dot = |a: &[f32], b: &[f32]| -> f32 { a.iter().zip(b).map(|(x, y)| x * y).sum() };
+    let cl_of_row: Vec<usize> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c, cl.r1 - cl.r0)).collect();
+    let size: Vec<usize> = ix.cl.iter().map(|c| c.r1 - c.r0).collect();
+    let hash = |r: usize, salt: u64| -> f64 { ((r as u64 ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15).rotate_left(17).wrapping_mul(0xBF58_476D_1CE4_E5B9) >> 11) as f64 / (1u64 << 53) as f64 };
+    let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
+    let gauss = |rng: &mut rand_chacha::ChaCha8Rng, m: usize| -> Vec<f32> {
+        let nd = rand_distr::Normal::new(0.0f64, 1.0).unwrap();
+        (0..m).map(|_| rand_distr::Distribution::sample(&nd, rng) as f32).collect()
+    };
+    // the clusters' means and RMS radii
+    let means: Vec<Vec<f32>> = (0..k).into_par_iter().map(|c| {
+        let mut m = vec![0f64; n];
+        for r in ix.cl[c].r0..ix.cl[c].r1 {
+            for (a, &b) in m.iter_mut().zip(row(r)) {
+                *a += b as f64;
+            }
+        }
+        m.iter().map(|&a| (a / size[c].max(1) as f64) as f32).collect()
+    }).collect();
+    let radius: Vec<f64> = (0..k).into_par_iter().map(|c| {
+        let s: f64 = (ix.cl[c].r0..ix.cl[c].r1).map(|r| row(r).iter().zip(&means[c]).map(|(&a, &b)| ((a - b) as f64).powi(2)).sum::<f64>()).sum();
+        (s / size[c].max(1) as f64).sqrt()
+    }).collect();
+    // the region sets: each row's rank, centres (300 random rows) in a random order and each centre's rows in row order
+    let cent: Vec<usize> = (0..300).map(|_| rng.gen_range(0..nr)).collect();
+    let near: Vec<usize> = (0..nr).into_par_iter().map(|r| {
+        let x = row(r);
+        let dist: Vec<f32> = cent.iter().map(|&c| x.iter().zip(row(c)).map(|(p, q)| (p - q) * (p - q)).sum()).collect();
+        (0..cent.len()).min_by(|&a, &b| dist[a].total_cmp(&dist[b])).unwrap()
+    }).collect();
+    let mut cperm: Vec<usize> = (0..cent.len()).collect();
+    rand::seq::SliceRandom::shuffle(&mut cperm[..], &mut rng);
+    let mut pos = vec![0usize; cent.len()];
+    for (i, &c) in cperm.iter().enumerate() {
+        pos[c] = i;
+    }
+    let mut by_region: Vec<usize> = (0..nr).collect();
+    by_region.sort_by_key(|&r| (pos[near[r]], r));
+    let mut region_rank = vec![0usize; nr];
+    for (i, &r) in by_region.iter().enumerate() {
+        region_rank[r] = i;
+    }
+    // the outliers: 0.1% of rows, each with a random unit direction
+    let outl: Vec<(usize, Vec<f32>)> = (0..nr).filter(|&r| hash(r, 0xA5) < 0.001).map(|r| {
+        let mut u = gauss(&mut rng, d);
+        let un = u.iter().map(|x| x * x).sum::<f32>().sqrt();
+        u.iter_mut().for_each(|x| *x /= un);
+        u.resize(n, 0.0);
+        (r, u)
+    }).collect();
+    // neighbouring clusters merged in pairs: each cluster with the nearest unpaired one, nearest pairs first
+    let merged: Vec<Vec<usize>> = {
+        let mut pairs: Vec<(f32, usize, usize)> = Vec::new();
+        for a in 0..k {
+            for b in a + 1..k {
+                pairs.push((means[a].iter().zip(&means[b]).map(|(p, q)| (p - q) * (p - q)).sum(), a, b));
+            }
+        }
+        pairs.sort_by(|x, y| x.0.total_cmp(&y.0));
+        let mut used = vec![false; k];
+        let mut units = Vec::new();
+        for (_, a, b) in pairs {
+            if !used[a] && !used[b] {
+                used[a] = true;
+                used[b] = true;
+                units.push(vec![a, b]);
+            }
+        }
+        units.extend((0..k).filter(|&c| !used[c]).map(|c| vec![c]));
+        units
+    };
+    let singles: Vec<Vec<usize>> = (0..k).map(|c| vec![c]).collect();
+    // the covariance sketches (the sketch condition), per cluster: its exact covariance about its mean; the diagonal
+    // and the top 8 eigenpairs of the off-diagonal part scaled by the diagonal (Bruch et al., Eq. 8); the stored
+    // directions with their variances, and the diagonal of the covariance with their subspace removed (the hybrid)
+    struct Sketch {
+        cov: Vec<f32>,
+        dg: Vec<f64>,
+        sd: Vec<f64>,
+        q8: Vec<f64>,
+        l8: Vec<f64>,
+        u: Vec<f64>,
+        lu: Vec<f64>,
+        perp: Vec<f64>,
+        rest: f64,
+    }
+    let sketches: Vec<Sketch> = if conds.iter().any(|c| c == "sketch") {
+        let st = ix.order.as_ref().unwrap();
+        let rr = st.r;
+        (0..k).into_par_iter().map(|c| {
+            let m = size[c].max(1);
+            let mut a: Vec<f32> = Vec::with_capacity(m * n);
+            for r in ix.cl[c].r0..ix.cl[c].r1 {
+                a.extend(row(r).iter().zip(&means[c]).map(|(x, y)| x - y));
+            }
+            let mut cov = vec![0f32; n * n];
+            if size[c] > 0 {
+                unsafe { matrixmultiply::sgemm(n, size[c], n, 1.0 / m as f32, a.as_ptr(), 1, n as isize, a.as_ptr(), n as isize, 1, 0.0, cov.as_mut_ptr(), n as isize, 1) };
+            }
+            let dg: Vec<f64> = (0..n).map(|i| cov[i * n + i] as f64).collect();
+            let dmax = dg.iter().cloned().fold(0.0, f64::max);
+            let sd: Vec<f64> = dg.iter().map(|&x| if x > 1e-9 * dmax { x.sqrt() } else { 0.0 }).collect();
+            let mm = faer::Mat::from_fn(n, n, |i, j| if i == j || sd[i] == 0.0 || sd[j] == 0.0 { 0.0 } else { cov[i * n + j] as f64 / (sd[i] * sd[j]) });
+            let e = mm.self_adjoint_eigen(faer::Side::Lower).unwrap();
+            let (ev, eu) = (e.S().column_vector(), e.U());
+            let mut o: Vec<usize> = (0..n).collect();
+            o.sort_by(|&x, &y| ev[y].total_cmp(&ev[x]));
+            let l8: Vec<f64> = o[..8].iter().map(|&i| ev[i]).collect();
+            let q8: Vec<f64> = o[..8].iter().flat_map(|&i| (0..n).map(move |rw| (rw, i))).map(|(rw, i)| eu[(rw, i)]).collect();
+            let u: Vec<f64> = (0..rr).flat_map(|j| { let d8 = &st.dirs(c, rr, n)[j * n..(j + 1) * n]; let sc = st.dsc[c * rr + j] as f64; d8.iter().map(move |&x| x as f64 * sc) }).collect();
+            let lu: Vec<f64> = (0..rr).map(|j| st.lam[c * rr + j] as f64).collect();
+            // A = U Sigma (r x n), B = A U' (r x r); diag of (I - U'U) Sigma (I - U'U)
+            let av: Vec<f64> = (0..rr).flat_map(|j| { let uj = &u[j * n..(j + 1) * n]; let cv = &cov; (0..n).map(move |i| (0..n).map(|l| cv[i * n + l] as f64 * uj[l]).sum::<f64>()) }).collect();
+            let bv: Vec<f64> = (0..rr * rr).map(|x| { let (j, l) = (x / rr, x % rr); (0..n).map(|i| av[j * n + i] * u[l * n + i]).sum() }).collect();
+            let perp: Vec<f64> = (0..n).map(|i| {
+                let t1: f64 = (0..rr).map(|j| u[j * n + i] * av[j * n + i]).sum();
+                let t2: f64 = (0..rr).map(|j| (0..rr).map(|l| u[j * n + i] * bv[j * rr + l] * u[l * n + i]).sum::<f64>()).sum();
+                (dg[i] - 2.0 * t1 + t2).max(0.0)
+            }).collect();
+            Sketch { cov, dg, sd, q8, l8, u, lu, perp, rest: st.rest(c) }
+        }).collect()
+    } else {
+        Vec::new()
+    };
+    let qnorm = queries.iter().map(|q| q.iter().map(|x| x * x).sum::<f32>().sqrt()).sum::<f32>() / nq as f32;
+
+    // the conditions: (label, query transform, outliers, merged, visible sets, ks)
+    let three = vec![("none", StressFilter::None), ("random-25", StressFilter::Random(0.25)), ("region-25", StressFilter::Region(0.25))];
+    type Variant = (String, usize, bool, bool, Vec<(String, StressFilter)>, Vec<usize>);
+    let own = |v: &[(&str, StressFilter)]| -> Vec<(String, StressFilter)> { v.iter().map(|(a, b)| (a.to_string(), *b)).collect() };
+    let mut variants: Vec<Variant> = Vec::new();
+    for c in &conds {
+        match c.as_str() {
+            "k" => variants.push(("k".into(), 0, false, false, own(&three), vec![1, 10, 100, 1000])),
+            "base" => variants.push(("base".into(), 0, false, false, own(&three), vec![10, 100])),
+            "score" => {
+                let mut f = Vec::new();
+                for share in [0.25, 0.01] {
+                    let p = (share * 100.0) as usize;
+                    f.push((format!("bottom-{p}"), StressFilter::InCluster(share, false)));
+                    f.push((format!("top-{p}"), StressFilter::InCluster(share, true)));
+                    for th in [0.0, 45.0, 90.0] {
+                        f.push((format!("dir{th}-{p}"), StressFilter::Dir(th, share)));
+                    }
+                }
+                variants.push(("score".into(), 0, false, false, f, vec![10]));
+            }
+            "mix" => variants.push(("mix".into(), 0, false, false, [0.0, 0.25, 0.5, 0.75, 1.0].iter().map(|&a| (format!("region-share-{a}"), StressFilter::Mix(a))).collect(), vec![10])),
+            "ood" => {
+                for (i, name) in ["gauss", "noise-0.5", "noise-1", "negated"].iter().enumerate() {
+                    variants.push((format!("ood-{name}"), i + 1, false, false, own(&three), vec![10]));
+                }
+            }
+            "outlier" => variants.push(("outlier".into(), 0, true, false, own(&three), vec![10])),
+            "merge" => variants.push(("merge".into(), 0, false, true, own(&three), vec![10])),
+            "sketch" => variants.push(("sketch".into(), 0, false, false, own(&three[..2]), vec![10, 100])),
+            x => panic!("unknown condition {x}"),
+        }
+    }
+    let sknames = ["mu+3 sigma exact", "mu+3 sigma ours (16 dirs + rest)", "mu+3 sigma Bruch t=4", "mu+3 sigma Bruch t=8", "mu+3 sigma hybrid (16 dirs + diag)"];
+    let errnames = ["sigma ours", "sigma Bruch t=4", "sigma Bruch t=8", "sigma hybrid", "residual scalar rest", "residual diagonal"];
+    let onames = ["(i) mu+z(1,v)sigma", "mu", "mu+2sigma", "mu+2.5sigma", "mu+3sigma", "mu+3.5sigma", "mu+4sigma", "mu+5sigma", "spread", "(B) gap running", "(D) tail v/(v+16)"];
+    let cs = [2.0, 2.5, 3.0, 3.5, 4.0, 5.0];
+    let lnq = |g: f64| -> f64 {
+        let x = g / std::f64::consts::SQRT_2;
+        let za = x.abs();
+        let t = 1.0 / (1.0 + 0.5 * za);
+        let l = t.ln() - za * za - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 + t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277))))))));
+        // below the mean, ln(1 - Q(|g|)) without the cancellation that would tie every cluster far below t
+        if x >= 0.0 { l - std::f64::consts::LN_2 } else { (-0.5 * l.exp()).ln_1p() }
+    };
+    let key32 = |x: f32| -> u32 { let b = x.to_bits(); if b >> 31 == 1 { !b } else { b | 0x8000_0000 } };
+    let unkey32 = |u: u32| -> f32 { f32::from_bits(if u >> 31 == 1 { u & 0x7fff_ffff } else { !u }) };
+
+    // per query: for every variant, visible set and k, each order's reads (visible rows, true hits) and the truth's
+    // contributing clusters (count, mean hits, mean visible rows)
+    type Reads = Vec<Vec<(u32, u32)>>;
+    type Out = Vec<((String, String, usize), Reads, (f64, f64, f64), Vec<Vec<f64>>)>;
+    let per: Vec<Out> = (0..nq).into_par_iter().map(|qi| {
+        let mut out: Out = Vec::new();
+        let mut qrng = rand_chacha::ChaCha8Rng::seed_from_u64(1000 + qi as u64);
+        for (vlabel, qkind, outlier, merge, filters, ks) in &variants {
+            let base = &queries[qi];
+            let q: Vec<f32> = match qkind {
+                0 => base.clone(),
+                1 => {
+                    let mut g = gauss(&mut qrng, d);
+                    let gn = g.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    g.iter_mut().for_each(|x| *x *= qnorm / gn);
+                    g.resize(n, 0.0);
+                    g
+                }
+                2 | 3 => {
+                    let rel = if *qkind == 2 { 0.5 } else { 1.0 };
+                    let bn = base.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    let g = gauss(&mut qrng, d);
+                    let gn = g.iter().map(|x| x * x).sum::<f32>().sqrt();
+                    let mut v = base.clone();
+                    for (a, b) in v.iter_mut().zip(&g) {
+                        *a += b * rel * bn / gn;
+                    }
+                    v
+                }
+                _ => base.iter().map(|x| -x).collect(),
+            };
+            let pr = prep2(&ix, &q);
+            let mut s: Vec<f32> = (0..nr).map(|r| dot(&pr.q32, row(r))).collect();
+            if *outlier {
+                for (r, u) in &outl {
+                    s[*r] += (3.0 * radius[cl_of_row[*r]]) as f32 * dot(&pr.q32, u);
+                }
+            }
+            let mu = ad.keys(&ix, &q, 0.0);
+            let sig: Vec<f64> = ad.keys(&ix, &q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
+            let st_all = ad.stream_keys(&ix, &q, None);
+            let rads: Vec<f64> = (0..k).map(|c| {
+                let m = size[c] as f64;
+                (st_all[c] - mu[c]) / inv_norm(m / (m + 1.0)).max(1e-9)
+            }).collect();
+            let spread_cl = ap.order(&ix, &pr, None);
+            let is_sk = vlabel == "sketch";
+            // the sketches' sigmas (exact, ours, Bruch t 4 and 8, hybrid) and the residual beyond the stored directions
+            // (exact, the scalar rest, the hybrid's diagonal)
+            let (mut ssk, mut sres): (Vec<Vec<f64>>, Vec<Vec<f64>>) = (vec![Vec::new(); 5], vec![Vec::new(); 3]);
+            if is_sk {
+                let qv: Vec<f64> = pr.q32.iter().map(|&x| x as f64).collect();
+                let qq2: f64 = qv.iter().map(|x| x * x).sum();
+                for (c, sk) in sketches.iter().enumerate() {
+                    let quad = |v: &[f64]| -> f64 { (0..n).map(|i| v[i] * (0..n).map(|j| sk.cov[i * n + j] as f64 * v[j]).sum::<f64>()).sum() };
+                    let ex = quad(&qv);
+                    let diag: f64 = (0..n).map(|i| sk.dg[i] * qv[i] * qv[i]).sum();
+                    let pj: Vec<f64> = (0..8).map(|j| sk.l8[j] * (0..n).map(|i| sk.sd[i] * qv[i] * sk.q8[j * n + i]).sum::<f64>().powi(2)).collect();
+                    let b4 = diag + pj[..4].iter().sum::<f64>();
+                    let b8 = diag + pj.iter().sum::<f64>();
+                    let rr = sk.lu.len();
+                    let p: Vec<f64> = (0..rr).map(|j| (0..n).map(|i| sk.u[j * n + i] * qv[i]).sum()).collect();
+                    let qp: Vec<f64> = (0..n).map(|i| qv[i] - (0..rr).map(|j| p[j] * sk.u[j * n + i]).sum::<f64>()).collect();
+                    let top: f64 = (0..rr).map(|j| sk.lu[j] * p[j] * p[j]).sum();
+                    let rdg: f64 = (0..n).map(|i| sk.perp[i] * qp[i] * qp[i]).sum();
+                    let pp: f64 = p.iter().map(|x| x * x).sum();
+                    ssk[0].push(ex.max(0.0).sqrt());
+                    ssk[1].push(sig[c]);
+                    ssk[2].push(b4.max(0.0).sqrt());
+                    ssk[3].push(b8.max(0.0).sqrt());
+                    ssk[4].push((top + rdg).max(0.0).sqrt());
+                    sres[0].push(quad(&qp));
+                    sres[1].push(sk.rest * (qq2 - pp).max(0.0));
+                    sres[2].push(rdg);
+                }
+            }
+            // the units read (clusters, or merged pairs), and their model from their clusters' (pooled over all rows)
+            let units = if *merge { &merged } else { &singles };
+            let nu = units.len();
+            let pool = |v: &[f64]| -> Vec<f64> {
+                units.iter().map(|u| {
+                    let w: f64 = u.iter().map(|&c| size[c] as f64).sum::<f64>().max(1.0);
+                    let m: f64 = u.iter().map(|&c| size[c] as f64 * mu[c]).sum::<f64>() / w;
+                    (u.iter().map(|&c| size[c] as f64 * (v[c] * v[c] + (mu[c] - m).powi(2))).sum::<f64>() / w).sqrt()
+                }).collect()
+            };
+            let umu: Vec<f64> = units.iter().map(|u| {
+                let w: f64 = u.iter().map(|&c| size[c] as f64).sum::<f64>().max(1.0);
+                u.iter().map(|&c| size[c] as f64 * mu[c]).sum::<f64>() / w
+            }).collect();
+            let (usig, urad) = (pool(&sig), pool(&rads));
+            let mut unit_of = vec![0usize; k];
+            for (i, u) in units.iter().enumerate() {
+                for &c in u {
+                    unit_of[c] = i;
+                }
+            }
+            let mut seen = vec![false; nu];
+            let spread_u: Vec<usize> = spread_cl.iter().filter_map(|&c| { let u = unit_of[c]; (!seen[u]).then(|| { seen[u] = true; u }) }).collect();
+            // each cluster's rows by score, highest first
+            let by_score: Vec<Vec<(f32, u32)>> = (0..k).map(|c| {
+                let mut v: Vec<(f32, u32)> = (ix.cl[c].r0..ix.cl[c].r1).map(|r| (s[r], r as u32)).collect();
+                v.sort_by(|a, b| b.0.total_cmp(&a.0));
+                v
+            }).collect();
+            let qq = pr.q32.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-12);
+            let wdot: Option<Vec<f32>> = filters.iter().any(|f| matches!(f.1, StressFilter::Dir(..))).then(|| {
+                let mut w = gauss(&mut qrng, d);
+                w.resize(n, 0.0);
+                let p = dot(&w, &pr.q32) / (qq * qq);
+                for (a, &b) in w.iter_mut().zip(&pr.q32) {
+                    *a -= p * b;
+                }
+                let wn = w.iter().map(|x| x * x).sum::<f32>().sqrt();
+                w.iter_mut().for_each(|x| *x /= wn);
+                (0..nr).map(|r| dot(&w, row(r))).collect()
+            });
+            for (flabel, f) in filters {
+                // the visible rows' scores per unit, highest first
+                let vis_row: Box<dyn Fn(usize) -> bool + '_> = match *f {
+                    StressFilter::None => Box::new(|_| true),
+                    StressFilter::Random(p) => Box::new(move |r| hash(r, 0x51) < p),
+                    StressFilter::Region(p) => {
+                        let lim = (p * nr as f64) as usize;
+                        let rr = &region_rank;
+                        Box::new(move |r| rr[r] < lim)
+                    }
+                    StressFilter::Mix(a) => {
+                        let lim = (a * 0.25 * nr as f64) as usize;
+                        let p = (0.25 - a * 0.25) / (1.0 - a * 0.25).max(1e-12);
+                        let rr = &region_rank;
+                        Box::new(move |r| rr[r] < lim || hash(r, 0x52) < p)
+                    }
+                    StressFilter::InCluster(p, top) => {
+                        let mut keep = vec![false; nr];
+                        for c in 0..k {
+                            let m = ((p * size[c] as f64).ceil() as usize).min(size[c]);
+                            let v = &by_score[c];
+                            let part = if top { &v[..m] } else { &v[v.len() - m..] };
+                            for &(_, r) in part {
+                                keep[r as usize] = true;
+                            }
+                        }
+                        Box::new(move |r| keep[r])
+                    }
+                    StressFilter::Dir(th, p) => {
+                        let (ct, st) = (th.to_radians().cos() as f32, th.to_radians().sin() as f32);
+                        let w = wdot.as_ref().unwrap();
+                        let u: Vec<f32> = (0..nr).map(|r| ct * s[r] / qq + st * w[r]).collect();
+                        let mut sorted = u.clone();
+                        let m = ((p * nr as f64) as usize).clamp(1, nr);
+                        sorted.select_nth_unstable_by(nr - m, |a, b| a.total_cmp(b));
+                        let cut = sorted[nr - m];
+                        Box::new(move |r| u[r] >= cut)
+                    }
+                };
+                let lists: Vec<Vec<f32>> = units.iter().map(|u| {
+                    let mut v: Vec<f32> = u.iter().flat_map(|&c| by_score[c].iter().filter(|x| vis_row(x.1 as usize)).map(|x| x.0)).collect();
+                    v.sort_by(|a, b| b.total_cmp(a));
+                    v
+                }).collect();
+                let nv: Vec<usize> = lists.iter().map(|v| v.len()).collect();
+                let total: usize = nv.iter().sum();
+                let live: Vec<usize> = (0..nu).filter(|&u| nv[u] > 0).collect();
+                let z = |u: usize| inv_norm(nv[u] as f64 / (nv[u] as f64 + 1.0));
+                let by = |key: &dyn Fn(usize) -> f64| {
+                    let mut o = live.clone();
+                    o.sort_by(|&a, &b| key(b).total_cmp(&key(a)).then(a.cmp(&b)));
+                    o
+                };
+                let mut statics: Vec<Vec<usize>> = Vec::new();
+                if is_sk {
+                    for sv in &ssk {
+                        statics.push(by(&|u| umu[u] + 3.0 * sv[u]));
+                    }
+                } else {
+                    statics.push(by(&|u| umu[u] + z(u) * usig[u]));
+                    statics.push(by(&|u| umu[u]));
+                    for c in cs {
+                        statics.push(by(&|u| umu[u] + c * usig[u]));
+                    }
+                    statics.push(spread_u.iter().copied().filter(|&u| nv[u] > 0).collect());
+                }
+                let stream = |u: usize| umu[u] + z(u) * urad[u];
+                for &kk in ks {
+                    if total < kk {
+                        continue;
+                    }
+                    // the true k-th best visible score, and each unit's rows reaching it
+                    let mut all: Vec<f32> = lists.iter().flat_map(|v| v.iter().take(kk).copied()).collect();
+                    all.select_nth_unstable_by(kk - 1, |a, b| b.total_cmp(a));
+                    let tk = all[kk - 1];
+                    let hits: Vec<usize> = lists.iter().map(|v| v.partition_point(|&x| x >= tk)).collect();
+                    let contrib: Vec<usize> = (0..nu).filter(|&u| hits[u] > 0).collect();
+                    let mc = contrib.len() as f64;
+                    let kc = contrib.iter().map(|&u| hits[u]).sum::<usize>() as f64 / mc;
+                    let nbar = contrib.iter().map(|&u| nv[u]).sum::<usize>() as f64 / mc;
+                    // a running order: the unread unit of largest key at the running k-th best (the stream key until k
+                    // rows are held), until the k are found
+                    let running = |key: &dyn Fn(f64, usize) -> f64| -> Vec<usize> {
+                        let mut rest = live.clone();
+                        let mut heap: BinaryHeap<Reverse<u32>> = BinaryHeap::new();
+                        let (mut o, mut found) = (Vec::new(), 0);
+                        while !rest.is_empty() && found < kk {
+                            let t = if heap.len() == kk { unkey32(heap.peek().unwrap().0) as f64 } else { f64::NEG_INFINITY };
+                            let kf = |u: usize| if t == f64::NEG_INFINITY { stream(u) } else { key(t, u) };
+                            let i = (0..rest.len()).max_by(|&a, &b| kf(rest[a]).total_cmp(&kf(rest[b])).then(rest[b].cmp(&rest[a]))).unwrap();
+                            let u = rest.swap_remove(i);
+                            o.push(u);
+                            found += hits[u];
+                            for &x in &lists[u] {
+                                if heap.len() < kk {
+                                    heap.push(Reverse(key32(x)));
+                                } else if key32(x) > heap.peek().unwrap().0 {
+                                    heap.pop();
+                                    heap.push(Reverse(key32(x)));
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        o
+                    };
+                    let mut orders = statics.clone();
+                    let mut errs: Vec<Vec<f64>> = Vec::new();
+                    if is_sk {
+                        // the relative errors over the clusters the exact order reads to its last hit
+                        errs = vec![Vec::new(); 6];
+                        let mut f = 0;
+                        for &u in &orders[0] {
+                            if f >= kk {
+                                break;
+                            }
+                            f += hits[u];
+                            let ex = ssk[0][u].max(1e-12);
+                            for j in 0..4 {
+                                errs[j].push((ssk[j + 1][u] / ex - 1.0).abs());
+                            }
+                            let rex = sres[0][u].max(1e-12);
+                            errs[4].push((sres[1][u] / rex - 1.0).abs());
+                            errs[5].push((sres[2][u] / rex - 1.0).abs());
+                        }
+                    } else {
+                        orders.push(running(&|t, u| (umu[u] - t) / usig[u].max(1e-12)));
+                        orders.push(running(&|t, u| lnq((t - umu[u]) / usig[u].max(1e-12)) + (nv[u] as f64 / (nv[u] as f64 + 16.0)).ln()));
+                    }
+                    let seqs = orders.into_iter().map(|o| {
+                        let mut f = 0;
+                        let mut v = Vec::new();
+                        for u in o {
+                            if f >= kk {
+                                break;
+                            }
+                            f += hits[u];
+                            v.push((nv[u] as u32, hits[u] as u32));
+                        }
+                        v
+                    }).collect();
+                    out.push(((vlabel.clone(), flabel.clone(), kk), seqs, (mc, kc, nbar), errs));
+                }
+            }
+        }
+        out
+    }).collect();
+
+    // per condition, visible set and k: each order's rows (and clusters) to each recall, the same number of clusters
+    // read for every query, interpolated
+    let targets = [0.9, 0.95, 0.99, 0.995, 0.999];
+    let mut keys: Vec<(String, String, usize)> = Vec::new();
+    for o in &per {
+        for x in o {
+            if !keys.contains(&x.0) {
+                keys.push(x.0.clone());
+            }
+        }
+    }
+    for key in keys {
+        let rows_of: Vec<(&Reads, (f64, f64, f64))> = per.iter().flat_map(|o| o.iter().filter(|x| x.0 == key).map(|x| (&x.1, x.2))).collect();
+        let names: &[&str] = if key.0 == "sketch" { &sknames } else { &onames };
+        let nqk = rows_of.len() as f64;
+        let mc = rows_of.iter().map(|x| x.1 .0).sum::<f64>() / nqk;
+        let kc = rows_of.iter().map(|x| x.1 .1).sum::<f64>() / nqk;
+        let nbar = rows_of.iter().map(|x| x.1 .2).sum::<f64>() / nqk;
+        let cpred = rows_of.iter().map(|x| inv_norm((1.0 - x.1 .1 / x.1 .2).clamp(1e-9, 1.0 - 1e-9))).sum::<f64>() / nqk;
+        eprintln!("== {dir} {} {} k={}: queries {nqk} contributing {mc:.1} k_c {kc:.2} nbar {nbar:.0} c_pred {cpred:.2}", key.0, key.1, key.2);
+        if key.0 == "sketch" {
+            for (j, en) in errnames.iter().enumerate() {
+                let mut v: Vec<f64> = per.iter().flat_map(|o| o.iter().filter(|x| x.0 == key).flat_map(|x| x.3[j].iter().copied())).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                eprintln!("  error {en:<22} median {:.3} p90 {:.3} over {} query-cluster pairs", v[v.len() / 2], v[v.len() * 9 / 10], v.len());
+            }
+        }
+        for (oi, name) in names.iter().enumerate() {
+            let maxm = rows_of.iter().map(|p| p.0[oi].len()).max().unwrap();
+            let mut prev = (0.0, 0.0);
+            let mut cells = Vec::new();
+            let mut ti = 0;
+            for mm in 1..=maxm {
+                let (mut rows, mut rec) = (0.0, 0.0);
+                for p in &rows_of {
+                    let o = &p.0[oi];
+                    let take = mm.min(o.len());
+                    rows += o[..take].iter().map(|x| x.0 as f64).sum::<f64>();
+                    rec += if take < mm { 1.0 } else { o[..take].iter().map(|x| x.1 as f64).sum::<f64>() / key.2 as f64 };
+                }
+                let (rows, rec) = (rows / nqk, rec / nqk);
+                while ti < targets.len() && rec >= targets[ti] - 1e-12 {
+                    let r = if rec == prev.1 { rows } else { prev.0 + (rows - prev.0) * (targets[ti] - prev.1) / (rec - prev.1) };
+                    cells.push(format!("{}: {:.0} rows ({mm} clusters)", targets[ti], r));
+                    ti += 1;
+                }
+                prev = (rows, rec);
+            }
+            eprintln!("  {name:<22} {}", cells.join("  "));
+        }
+    }
+}
+
 /// Study (ignored; run by hand on a built index): a read path's work counted in d-dimensional dot products (a direct
 /// read nv; a group's setup 2n + sum nb_j^2 / n + ndl + J + 3; the index path's cluster setup, tables, rows through
 /// each level at its units / n and stored vectors read, both as counted from what the read did and as predicted before

@@ -1,0 +1,12 @@
+order                               worst all       worst w/o bottom        w/o bottom, k>1  share <= 1.10 (w/o bottom)
+(i) mu+z(1,v)sigma       3.88 laion bottom-1 k=10 0.995          | 1.88 laion dir90-1 k=10 0.9             | 1.88 laion dir90-1 k=10 0.9             | 0.52
+mu                       2.53 laion none k=1 0.99                | 2.53 laion none k=1 0.99                | 2.21 laion region-25 k=10 0.95          | 0.16
+mu+2sigma                4.55 laion bottom-1 k=10 0.999          | 1.42 laion none k=1 0.9                 | 1.31 laion none k=10 0.9                | 0.90
+mu+2.5sigma              5.67 laion bottom-1 k=10 0.995          | 1.31 glove none k=1 0.995               | 1.25 laion none k=10 0.9                | 0.96
+mu+3sigma                7.14 laion bottom-1 k=10 0.995          | 1.29 glove none k=1 0.995               | 1.23 held-llama region-25 k=100 0.9     | 0.97
+mu+3.5sigma              8.86 laion bottom-1 k=10 0.995          | 1.39 held-llama region-25 k=100 0.9     | 1.39 held-llama region-25 k=100 0.9     | 0.94
+mu+4sigma               10.38 laion bottom-1 k=10 0.995          | 1.56 held-llama region-25 k=100 0.9     | 1.56 held-llama region-25 k=100 0.9     | 0.90
+mu+5sigma               13.83 laion bottom-1 k=10 0.995          | 2.04 held-llama region-25 k=100 0.9     | 2.04 held-llama region-25 k=100 0.9     | 0.68
+spread                   8.28 glove bottom-1 k=10 0.99           | 2.66 synth-gauss-512 region-25 k=10 0.95 | 2.66 synth-gauss-512 region-25 k=10 0.95 | 0.35
+(B) gap running          1.48 synth-t3-100 none k=100 0.999      | 1.48 synth-t3-100 none k=100 0.999      | 1.48 synth-t3-100 none k=100 0.999      | 0.86
+(D) tail v/(v+16)       13.15 glove bottom-1 k=10 0.995          | 1.48 synth-t3-100 none k=100 0.999      | 1.48 synth-t3-100 none k=100 0.999      | 0.85

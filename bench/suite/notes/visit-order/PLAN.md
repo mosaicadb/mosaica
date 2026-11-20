@@ -568,6 +568,80 @@ The replay's two questions (`tables.txt`; rows / those of mu + z(1, v) sigma):
   (above). At psi 5 to 7 the stream ranked mostly by it, while mu + 5 sigma itself costs only 1.03 to 1.12 times the
   rows of (i).
 
+**The orders stress-tested** (`results/order-stress/`; `study_order_stress`, rows only, 100 queries, the same
+whole-cluster replay). Datasets:
+- glove, yahoo and LAION;
+- Gaussian and Student-t(3) mixtures at d 100 and 512 (100 clusters of 2,000, matched covariances);
+- two held-out sets never used before: llama-128-ip (257k rows, inner product, not normalised) and a 200k-row sample of
+  yandex-200 (Text2Image, out-of-distribution queries, cosine).
+
+Truth is brute force over the stored vectors. The region sets follow the suites' definition: 300 centres, here random
+rows. The orders, with ratios given to the best order in each row (`worst.txt`, `summary.txt`):
+- mu + c sigma at c 2 to 5 (00965ba's order at psi = c);
+- mu + z(1, v) sigma (i);
+- mu;
+- spread;
+- the gap (mu − t) / sigma at the running k-th best (B);
+- Gbar((t − mu) / sigma) v / (v + 16) (D).
+
+Findings:
+- **mu + 3 sigma.** Leaving the in-cluster bottom sets aside, it is within 1.10 of the best in 97% of cells. Its worst
+  cells are 1.29 (glove k 1 at 0.995) and 1.23 (llama region-25, k 100, at 0.9).
+- **mu + 2.5 sigma** is within 1.10 in 96% of cells; (i) in 52%; mu alone in 16%; spread in 35%.
+- **Where mu + c sigma breaks: rows sampled from the low tail of each cluster.** Under the in-cluster bottom 1% and
+  25% sets, mu + 3 sigma needs 1.4 to 7.1 times the best's rows (LAION bottom-1 7.1, glove 4.3). (i) needs 1.3 to 3.9.
+  mu alone is near the best there (1.00 to 1.5).
+- **B fixes that** (1.00 to 1.25). Elsewhere it loses up to 1.48 (t3-100, k 100 at 0.999), 1.08 to 1.23 under
+  LAION's top sets and 1.36 at k 1. It is within 1.10 in 86% of cells.
+- **D does not fix it** (2.7 to 13 times under bottom-1). Its per-row probability saturates near 1 there, and the v/(v + 16)
+  factor then ranks by cluster size.
+- **No order is within 10% of the best everywhere.** Without the adversarial bottom sets, mu + 2.5 to 3 sigma come
+  closest (worst 1.23 to 1.31).
+- **The other conditions are mild for mu + 3 sigma.** Its worst cells:
+  - score-correlated top and direction sets 1.08;
+  - the region/random mix 1.06;
+  - out-of-distribution queries 1.05 to 1.14 (negated at most);
+  - outliers 1.20 (LAION, at 0.9);
+  - merged neighbouring clusters 1.08;
+  - synthetic heavy tails 1.15 (t3, d 100, k 100, at 0.999).
+  The synthetic clusters are well separated: one or two clusters reach recall 0.995 unfiltered, so the orders differ
+  there only under region-25.
+- **Best c against k.** The best c falls with k on glove (unfiltered 5, 4, 4, 3 for k 1, 10, 100, 1000) and LAION
+  (3.5, 3, 3, 2.5), as c_pred = Phi^-1(1 − k_c / nbar) does (3.3 to 2.0 to 2.6). It does not on yahoo (2 to 3.5,
+  unordered), and on the synthetic sets it stays at 2 to 3.5 while c_pred falls to 0.9 to 1.8. The rows are flat in c:
+  mu + 3 sigma is within 1.08 of the best c in every block but llama k 100 (1.10 to 1.11) and the bottom sets.
+- **mu + 3 sigma's advantage over mu alone does not grow with k.** It shrinks on glove (1.36, 1.26, 1.19, 1.10 times
+  the rows for k 1 to 1000) and LAION (2.15, 1.60, 1.51, 1.35), and is flat on yahoo (1.10 to 1.20). Bruch et al.
+  report it widening, but in a regime with no filters and no stopping rule, measured otherwise.
+
+**The covariance sketches** (`sketch.txt`; mu + 3 sigma with sigma from each sketch, rows over the exact covariance's,
+recall 0.9 to 0.995; errors over the clusters the exact order reads):
+- **Ours** (16 int8 directions and a scalar rest) is within a few percent of exact on glove (0.95 to 1.03), yahoo (0.99
+  to 1.07) and yandex (1.01 to 1.09). It is not on LAION (1.02 to 1.13) or llama (1.08 to 1.25), where its sigma's
+  median error is 0.11 to 0.13 and 0.61 to 0.63.
+- **Bruch et al.'s** diagonal plus t eigenpairs is worse than ours everywhere but llama. At t = 4 it needs 1.03 to 1.48
+  times exact's rows (LAION 1.20 to 1.48); at t = 8, 1.01 to 1.40.
+- **The hybrid** (our directions plus a diagonal residual) closes llama (0.98 to 1.07). It does not close LAION (1.09
+  to 1.23, worse than ours, although its sigma's median error is lower, 0.055 against 0.12).
+- **Is the residual axis-aligned?** For the residual beyond our directions, the diagonal's median relative error
+  against the scalar rest's:
+  - LAION 0.22 to 0.25 against 0.47 to 0.58 (p90 0.41 to 0.47 against 1.6 to 2.6);
+  - llama 0.57 to 0.59 against 3.4;
+  - yandex 0.19 to 0.23 against 0.24 to 0.30;
+  - worse on glove (0.16 against 0.04);
+  - equal on yahoo (0.5 each).
+  So the residual is axis-aligned enough to matter on LAION and on the unnormalised inner-product set.
+- **Storage per cluster and multiply-adds per sigma, at d dimensions:**
+
+  | Sketch | Storage | Multiply-adds per sigma |
+  |---|---|---|
+  | Exact | 2 d^2 bytes (the triangle in f32) | d^2 |
+  | Ours | 16 d + about 136 bytes | 16 d |
+  | Bruch t | 4 d (t + 1) + 4 t bytes | d (t + 2) |
+  | Hybrid | 20 d + 136 bytes | about 33 d (the residual needs q − U'Uq) |
+
+  At d = 512: exact 512 KB; ours 8.3 KB; Bruch t = 4 10 KB and t = 8 18 KB; hybrid 10.4 KB.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's

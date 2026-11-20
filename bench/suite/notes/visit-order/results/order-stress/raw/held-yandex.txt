@@ -1,0 +1,120 @@
+== held-yandex base none k=10: queries 100 contributing 3.6 k_c 3.79 nbar 2218 c_pred 2.97
+  (i) mu+z(1,v)sigma     0.9: 10355 rows (7 clusters)  0.95: 13200 rows (11 clusters)  0.99: 20157 rows (29 clusters)  0.995: 21759 rows (42 clusters)  0.999: 22914 rows (60 clusters)
+  mu                     0.9: 13861 rows (10 clusters)  0.95: 20340 rows (20 clusters)  0.99: 28898 rows (46 clusters)  0.995: 29790 rows (53 clusters)  0.999: 30575 rows (67 clusters)
+  mu+2sigma              0.9: 9745 rows (7 clusters)  0.95: 13940 rows (13 clusters)  0.99: 20391 rows (30 clusters)  0.995: 21747 rows (39 clusters)  0.999: 22921 rows (62 clusters)
+  mu+2.5sigma            0.9: 9600 rows (7 clusters)  0.95: 13005 rows (11 clusters)  0.99: 20016 rows (30 clusters)  0.995: 21097 rows (38 clusters)  0.999: 22265 rows (61 clusters)
+  mu+3sigma              0.9: 9775 rows (7 clusters)  0.95: 12581 rows (11 clusters)  0.99: 19585 rows (29 clusters)  0.995: 20833 rows (38 clusters)  0.999: 21964 rows (60 clusters)
+  mu+3.5sigma            0.9: 9839 rows (7 clusters)  0.95: 13115 rows (12 clusters)  0.99: 20110 rows (31 clusters)  0.995: 20913 rows (36 clusters)  0.999: 22136 rows (58 clusters)
+  mu+4sigma              0.9: 10453 rows (8 clusters)  0.95: 13449 rows (12 clusters)  0.99: 20347 rows (31 clusters)  0.995: 21247 rows (37 clusters)  0.999: 22474 rows (58 clusters)
+  mu+5sigma              0.9: 11272 rows (8 clusters)  0.95: 14385 rows (12 clusters)  0.99: 21796 rows (34 clusters)  0.995: 22600 rows (39 clusters)  0.999: 23693 rows (58 clusters)
+  spread                 0.9: 11910 rows (9 clusters)  0.95: 17108 rows (17 clusters)  0.99: 26122 rows (44 clusters)  0.995: 27820 rows (56 clusters)  0.999: 28258 rows (63 clusters)
+  (B) gap running        0.9: 9896 rows (7 clusters)  0.95: 13426 rows (12 clusters)  0.99: 21089 rows (33 clusters)  0.995: 21923 rows (39 clusters)  0.999: 23055 rows (58 clusters)
+  (D) tail v/(v+16)      0.9: 9896 rows (7 clusters)  0.95: 13426 rows (12 clusters)  0.99: 21257 rows (34 clusters)  0.995: 21908 rows (39 clusters)  0.999: 23040 rows (58 clusters)
+== held-yandex base none k=100: queries 100 contributing 12.4 k_c 12.95 nbar 2134 c_pred 2.59
+  (i) mu+z(1,v)sigma     0.9: 16140 rows (9 clusters)  0.95: 26408 rows (15 clusters)  0.99: 52387 rows (38 clusters)  0.995: 60995 rows (50 clusters)  0.999: 67428 rows (67 clusters)
+  mu                     0.9: 22512 rows (12 clusters)  0.95: 38357 rows (23 clusters)  0.99: 65677 rows (49 clusters)  0.995: 71189 rows (57 clusters)  0.999: 77166 rows (79 clusters)
+  mu+2sigma              0.9: 16235 rows (9 clusters)  0.95: 27863 rows (17 clusters)  0.99: 52697 rows (39 clusters)  0.995: 59641 rows (49 clusters)  0.999: 66618 rows (65 clusters)
+  mu+2.5sigma            0.9: 15671 rows (9 clusters)  0.95: 26916 rows (16 clusters)  0.99: 52178 rows (38 clusters)  0.995: 59021 rows (48 clusters)  0.999: 66023 rows (64 clusters)
+  mu+3sigma              0.9: 15687 rows (9 clusters)  0.95: 26484 rows (16 clusters)  0.99: 51811 rows (38 clusters)  0.995: 58618 rows (48 clusters)  0.999: 65366 rows (65 clusters)
+  mu+3.5sigma            0.9: 16166 rows (9 clusters)  0.95: 26307 rows (16 clusters)  0.99: 51305 rows (38 clusters)  0.995: 58089 rows (48 clusters)  0.999: 65116 rows (68 clusters)
+  mu+4sigma              0.9: 16847 rows (10 clusters)  0.95: 26851 rows (16 clusters)  0.99: 51339 rows (38 clusters)  0.995: 58350 rows (48 clusters)  0.999: 65280 rows (67 clusters)
+  mu+5sigma              0.9: 18139 rows (11 clusters)  0.95: 29262 rows (18 clusters)  0.99: 52970 rows (39 clusters)  0.995: 61280 rows (52 clusters)  0.999: 66860 rows (69 clusters)
+  spread                 0.9: 22145 rows (13 clusters)  0.95: 34296 rows (21 clusters)  0.99: 61714 rows (47 clusters)  0.995: 67224 rows (54 clusters)  0.999: 75629 rows (81 clusters)
+  (B) gap running        0.9: 15782 rows (9 clusters)  0.95: 26326 rows (16 clusters)  0.99: 51442 rows (38 clusters)  0.995: 58584 rows (49 clusters)  0.999: 64763 rows (66 clusters)
+  (D) tail v/(v+16)      0.9: 15767 rows (9 clusters)  0.95: 26358 rows (16 clusters)  0.99: 51442 rows (38 clusters)  0.995: 58584 rows (49 clusters)  0.999: 64768 rows (66 clusters)
+== held-yandex base random-25 k=10: queries 100 contributing 4.1 k_c 3.34 nbar 566 c_pred 2.56
+  (i) mu+z(1,v)sigma     0.9: 3067 rows (8 clusters)  0.95: 4067 rows (12 clusters)  0.99: 5577 rows (28 clusters)  0.995: 5979 rows (39 clusters)  0.999: 6229 rows (55 clusters)
+  mu                     0.9: 4168 rows (12 clusters)  0.95: 5940 rows (20 clusters)  0.99: 7634 rows (35 clusters)  0.995: 7915 rows (42 clusters)  0.999: 8149 rows (56 clusters)
+  mu+2sigma              0.9: 2934 rows (8 clusters)  0.95: 4095 rows (13 clusters)  0.99: 5618 rows (29 clusters)  0.995: 5975 rows (38 clusters)  0.999: 6143 rows (48 clusters)
+  mu+2.5sigma            0.9: 2949 rows (8 clusters)  0.95: 3993 rows (13 clusters)  0.99: 5411 rows (26 clusters)  0.995: 5929 rows (40 clusters)  0.999: 6035 rows (47 clusters)
+  mu+3sigma              0.9: 2981 rows (8 clusters)  0.95: 3952 rows (13 clusters)  0.99: 5420 rows (27 clusters)  0.995: 5904 rows (40 clusters)  0.999: 6015 rows (47 clusters)
+  mu+3.5sigma            0.9: 3092 rows (9 clusters)  0.95: 3964 rows (13 clusters)  0.99: 5417 rows (27 clusters)  0.995: 5959 rows (40 clusters)  0.999: 6071 rows (46 clusters)
+  mu+4sigma              0.9: 3203 rows (9 clusters)  0.95: 4136 rows (14 clusters)  0.99: 5551 rows (28 clusters)  0.995: 6144 rows (43 clusters)  0.999: 6212 rows (47 clusters)
+  mu+5sigma              0.9: 3414 rows (10 clusters)  0.95: 4428 rows (15 clusters)  0.99: 6019 rows (32 clusters)  0.995: 6316 rows (40 clusters)  0.999: 6509 rows (51 clusters)
+  spread                 0.9: 4097 rows (12 clusters)  0.95: 5238 rows (19 clusters)  0.99: 7550 rows (43 clusters)  0.995: 7691 rows (47 clusters)  0.999: 7847 rows (60 clusters)
+  (B) gap running        0.9: 2978 rows (8 clusters)  0.95: 3969 rows (13 clusters)  0.99: 5510 rows (28 clusters)  0.995: 5996 rows (40 clusters)  0.999: 6162 rows (48 clusters)
+  (D) tail v/(v+16)      0.9: 2982 rows (8 clusters)  0.95: 3971 rows (13 clusters)  0.99: 5483 rows (27 clusters)  0.995: 5990 rows (40 clusters)  0.999: 6166 rows (49 clusters)
+== held-yandex base random-25 k=100: queries 100 contributing 15.4 k_c 9.42 nbar 539 c_pred 2.19
+  (i) mu+z(1,v)sigma     0.9: 5827 rows (12 clusters)  0.95: 8818 rows (19 clusters)  0.99: 15348 rows (42 clusters)  0.995: 16992 rows (52 clusters)  0.999: 18696 rows (70 clusters)
+  mu                     0.9: 7274 rows (15 clusters)  0.95: 11484 rows (26 clusters)  0.99: 18027 rows (50 clusters)  0.995: 19153 rows (58 clusters)  0.999: 21132 rows (81 clusters)
+  mu+2sigma              0.9: 5707 rows (12 clusters)  0.95: 8778 rows (20 clusters)  0.99: 15125 rows (42 clusters)  0.995: 16888 rows (53 clusters)  0.999: 18531 rows (70 clusters)
+  mu+2.5sigma            0.9: 5677 rows (12 clusters)  0.95: 8662 rows (20 clusters)  0.99: 15144 rows (42 clusters)  0.995: 16624 rows (51 clusters)  0.999: 18233 rows (68 clusters)
+  mu+3sigma              0.9: 5765 rows (13 clusters)  0.95: 8705 rows (20 clusters)  0.99: 15222 rows (43 clusters)  0.995: 16539 rows (51 clusters)  0.999: 18071 rows (68 clusters)
+  mu+3.5sigma            0.9: 5942 rows (13 clusters)  0.95: 8843 rows (20 clusters)  0.99: 15398 rows (44 clusters)  0.995: 16767 rows (51 clusters)  0.999: 18277 rows (70 clusters)
+  mu+4sigma              0.9: 6095 rows (13 clusters)  0.95: 9180 rows (21 clusters)  0.99: 15676 rows (45 clusters)  0.995: 16973 rows (52 clusters)  0.999: 18458 rows (71 clusters)
+  mu+5sigma              0.9: 6509 rows (14 clusters)  0.95: 10003 rows (23 clusters)  0.99: 16600 rows (48 clusters)  0.995: 17936 rows (56 clusters)  0.999: 19138 rows (71 clusters)
+  spread                 0.9: 7008 rows (16 clusters)  0.95: 11603 rows (28 clusters)  0.99: 18284 rows (52 clusters)  0.995: 19866 rows (60 clusters)  0.999: 22168 rows (85 clusters)
+  (B) gap running        0.9: 5675 rows (12 clusters)  0.95: 8652 rows (20 clusters)  0.99: 15477 rows (44 clusters)  0.995: 17016 rows (53 clusters)  0.999: 18303 rows (70 clusters)
+  (D) tail v/(v+16)      0.9: 5688 rows (12 clusters)  0.95: 8588 rows (20 clusters)  0.99: 15472 rows (44 clusters)  0.995: 17033 rows (53 clusters)  0.999: 18325 rows (70 clusters)
+== held-yandex base region-25 k=10: queries 100 contributing 4.3 k_c 3.23 nbar 589 c_pred 2.58
+  (i) mu+z(1,v)sigma     0.9: 4182 rows (10 clusters)  0.95: 5997 rows (18 clusters)  0.99: 8437 rows (37 clusters)  0.995: 8920 rows (47 clusters)  0.999: 9114 rows (59 clusters)
+  mu                     0.9: 5122 rows (15 clusters)  0.95: 7630 rows (28 clusters)  0.99: 10121 rows (54 clusters)  0.995: 10313 rows (59 clusters)  0.999: 10452 rows (66 clusters)
+  mu+2sigma              0.9: 3776 rows (11 clusters)  0.95: 5757 rows (20 clusters)  0.99: 7935 rows (40 clusters)  0.995: 8342 rows (51 clusters)  0.999: 8564 rows (62 clusters)
+  mu+2.5sigma            0.9: 3775 rows (11 clusters)  0.95: 5492 rows (19 clusters)  0.99: 7650 rows (38 clusters)  0.995: 8033 rows (48 clusters)  0.999: 8286 rows (61 clusters)
+  mu+3sigma              0.9: 3783 rows (11 clusters)  0.95: 5288 rows (18 clusters)  0.99: 7556 rows (39 clusters)  0.995: 7904 rows (48 clusters)  0.999: 8144 rows (60 clusters)
+  mu+3.5sigma            0.9: 3932 rows (12 clusters)  0.95: 5324 rows (18 clusters)  0.99: 7407 rows (37 clusters)  0.995: 7875 rows (46 clusters)  0.999: 8149 rows (58 clusters)
+  mu+4sigma              0.9: 3863 rows (12 clusters)  0.95: 5544 rows (19 clusters)  0.99: 7426 rows (36 clusters)  0.995: 8026 rows (49 clusters)  0.999: 8231 rows (58 clusters)
+  mu+5sigma              0.9: 4122 rows (12 clusters)  0.95: 5938 rows (21 clusters)  0.99: 7799 rows (39 clusters)  0.995: 8388 rows (53 clusters)  0.999: 8503 rows (59 clusters)
+  spread                 0.9: 4906 rows (15 clusters)  0.95: 6870 rows (25 clusters)  0.99: 9144 rows (47 clusters)  0.995: 9505 rows (57 clusters)  0.999: 9628 rows (63 clusters)
+  (B) gap running        0.9: 3877 rows (11 clusters)  0.95: 5401 rows (18 clusters)  0.99: 7566 rows (39 clusters)  0.995: 8127 rows (51 clusters)  0.999: 8276 rows (58 clusters)
+  (D) tail v/(v+16)      0.9: 3867 rows (11 clusters)  0.95: 5404 rows (18 clusters)  0.99: 7594 rows (39 clusters)  0.995: 8162 rows (51 clusters)  0.999: 8299 rows (58 clusters)
+== held-yandex base region-25 k=100: queries 100 contributing 16.8 k_c 8.13 nbar 578 c_pred 2.25
+  (i) mu+z(1,v)sigma     0.9: 8166 rows (15 clusters)  0.95: 12475 rows (24 clusters)  0.99: 20018 rows (48 clusters)  0.995: 21868 rows (57 clusters)  0.999: 23704 rows (77 clusters)
+  mu                     0.9: 9209 rows (19 clusters)  0.95: 14491 rows (32 clusters)  0.99: 21885 rows (57 clusters)  0.995: 23799 rows (66 clusters)  0.999: 25734 rows (84 clusters)
+  mu+2sigma              0.9: 7662 rows (16 clusters)  0.95: 11566 rows (25 clusters)  0.99: 19232 rows (51 clusters)  0.995: 21242 rows (60 clusters)  0.999: 22670 rows (73 clusters)
+  mu+2.5sigma            0.9: 7631 rows (16 clusters)  0.95: 11531 rows (25 clusters)  0.99: 18987 rows (49 clusters)  0.995: 20948 rows (59 clusters)  0.999: 22404 rows (74 clusters)
+  mu+3sigma              0.9: 7700 rows (16 clusters)  0.95: 11571 rows (26 clusters)  0.99: 18733 rows (48 clusters)  0.995: 20682 rows (58 clusters)  0.999: 22315 rows (75 clusters)
+  mu+3.5sigma            0.9: 7810 rows (17 clusters)  0.95: 11610 rows (26 clusters)  0.99: 18797 rows (49 clusters)  0.995: 20315 rows (57 clusters)  0.999: 22079 rows (75 clusters)
+  mu+4sigma              0.9: 7983 rows (17 clusters)  0.95: 11672 rows (26 clusters)  0.99: 18885 rows (49 clusters)  0.995: 20312 rows (57 clusters)  0.999: 22130 rows (75 clusters)
+  mu+5sigma              0.9: 8565 rows (19 clusters)  0.95: 12152 rows (27 clusters)  0.99: 19412 rows (51 clusters)  0.995: 20966 rows (60 clusters)  0.999: 22445 rows (77 clusters)
+  spread                 0.9: 9055 rows (19 clusters)  0.95: 14495 rows (33 clusters)  0.99: 22545 rows (58 clusters)  0.995: 24728 rows (69 clusters)  0.999: 26677 rows (88 clusters)
+  (B) gap running        0.9: 7643 rows (16 clusters)  0.95: 11339 rows (25 clusters)  0.99: 18723 rows (49 clusters)  0.995: 20247 rows (57 clusters)  0.999: 22060 rows (75 clusters)
+  (D) tail v/(v+16)      0.9: 7609 rows (16 clusters)  0.95: 11401 rows (25 clusters)  0.99: 18711 rows (48 clusters)  0.995: 20314 rows (57 clusters)  0.999: 22069 rows (75 clusters)
+== held-yandex sketch none k=10: queries 100 contributing 3.6 k_c 3.79 nbar 2218 c_pred 2.97
+  error sigma ours             median 0.049 p90 0.169 over 1026 query-cluster pairs
+  error sigma Bruch t=4        median 0.108 p90 0.339 over 1026 query-cluster pairs
+  error sigma Bruch t=8        median 0.156 p90 0.374 over 1026 query-cluster pairs
+  error sigma hybrid           median 0.040 p90 0.140 over 1026 query-cluster pairs
+  error residual scalar rest   median 0.297 p90 0.995 over 1026 query-cluster pairs
+  error residual diagonal      median 0.226 p90 0.827 over 1026 query-cluster pairs
+  mu+3 sigma exact       0.9: 9005 rows (6 clusters)  0.95: 12396 rows (11 clusters)  0.99: 18861 rows (27 clusters)  0.995: 19705 rows (35 clusters)  0.999: 20676 rows (51 clusters)
+  mu+3 sigma ours (16 dirs + rest) 0.9: 9775 rows (7 clusters)  0.95: 12581 rows (11 clusters)  0.99: 19585 rows (29 clusters)  0.995: 20833 rows (38 clusters)  0.999: 21964 rows (60 clusters)
+  mu+3 sigma Bruch t=4   0.9: 10098 rows (7 clusters)  0.95: 14809 rows (14 clusters)  0.99: 22996 rows (38 clusters)  0.995: 24199 rows (46 clusters)  0.999: 25457 rows (69 clusters)
+  mu+3 sigma Bruch t=8   0.9: 9775 rows (7 clusters)  0.95: 13427 rows (12 clusters)  0.99: 20475 rows (31 clusters)  0.995: 22285 rows (42 clusters)  0.999: 23524 rows (66 clusters)
+  mu+3 sigma hybrid (16 dirs + diag) 0.9: 9851 rows (7 clusters)  0.95: 12572 rows (11 clusters)  0.99: 19732 rows (30 clusters)  0.995: 20879 rows (38 clusters)  0.999: 22035 rows (60 clusters)
+== held-yandex sketch none k=100: queries 100 contributing 12.4 k_c 12.95 nbar 2134 c_pred 2.59
+  error sigma ours             median 0.047 p90 0.154 over 3169 query-cluster pairs
+  error sigma Bruch t=4        median 0.120 p90 0.308 over 3169 query-cluster pairs
+  error sigma Bruch t=8        median 0.169 p90 0.352 over 3169 query-cluster pairs
+  error sigma hybrid           median 0.037 p90 0.127 over 3169 query-cluster pairs
+  error residual scalar rest   median 0.242 p90 0.868 over 3169 query-cluster pairs
+  error residual diagonal      median 0.196 p90 0.711 over 3169 query-cluster pairs
+  mu+3 sigma exact       0.9: 15123 rows (9 clusters)  0.95: 26261 rows (16 clusters)  0.99: 48892 rows (35 clusters)  0.995: 57168 rows (48 clusters)  0.999: 61784 rows (59 clusters)
+  mu+3 sigma ours (16 dirs + rest) 0.9: 15687 rows (9 clusters)  0.95: 26484 rows (16 clusters)  0.99: 51811 rows (38 clusters)  0.995: 58618 rows (48 clusters)  0.999: 65366 rows (65 clusters)
+  mu+3 sigma Bruch t=4   0.9: 18049 rows (10 clusters)  0.95: 29526 rows (18 clusters)  0.99: 56080 rows (43 clusters)  0.995: 61933 rows (50 clusters)  0.999: 71328 rows (74 clusters)
+  mu+3 sigma Bruch t=8   0.9: 16128 rows (9 clusters)  0.95: 27901 rows (17 clusters)  0.99: 55072 rows (42 clusters)  0.995: 61365 rows (50 clusters)  0.999: 68304 rows (66 clusters)
+  mu+3 sigma hybrid (16 dirs + diag) 0.9: 15702 rows (9 clusters)  0.95: 26556 rows (16 clusters)  0.99: 51903 rows (38 clusters)  0.995: 58747 rows (48 clusters)  0.999: 65365 rows (65 clusters)
+== held-yandex sketch random-25 k=10: queries 100 contributing 4.1 k_c 3.34 nbar 566 c_pred 2.56
+  error sigma ours             median 0.043 p90 0.154 over 1153 query-cluster pairs
+  error sigma Bruch t=4        median 0.100 p90 0.295 over 1153 query-cluster pairs
+  error sigma Bruch t=8        median 0.143 p90 0.346 over 1153 query-cluster pairs
+  error sigma hybrid           median 0.035 p90 0.127 over 1153 query-cluster pairs
+  error residual scalar rest   median 0.239 p90 0.919 over 1153 query-cluster pairs
+  error residual diagonal      median 0.203 p90 0.747 over 1153 query-cluster pairs
+  mu+3 sigma exact       0.9: 2895 rows (8 clusters)  0.95: 3880 rows (13 clusters)  0.99: 5279 rows (26 clusters)  0.995: 5660 rows (37 clusters)  0.999: 5850 rows (47 clusters)
+  mu+3 sigma ours (16 dirs + rest) 0.9: 2981 rows (8 clusters)  0.95: 3952 rows (13 clusters)  0.99: 5420 rows (27 clusters)  0.995: 5904 rows (40 clusters)  0.999: 6015 rows (47 clusters)
+  mu+3 sigma Bruch t=4   0.9: 3222 rows (9 clusters)  0.95: 4291 rows (14 clusters)  0.99: 6130 rows (32 clusters)  0.995: 6483 rows (41 clusters)  0.999: 6714 rows (54 clusters)
+  mu+3 sigma Bruch t=8   0.9: 3004 rows (8 clusters)  0.95: 4267 rows (15 clusters)  0.99: 5666 rows (30 clusters)  0.995: 6105 rows (40 clusters)  0.999: 6352 rows (54 clusters)
+  mu+3 sigma hybrid (16 dirs + diag) 0.9: 2966 rows (8 clusters)  0.95: 3931 rows (13 clusters)  0.99: 5363 rows (26 clusters)  0.995: 5872 rows (40 clusters)  0.999: 5987 rows (47 clusters)
+== held-yandex sketch random-25 k=100: queries 100 contributing 15.4 k_c 9.42 nbar 539 c_pred 2.19
+  error sigma ours             median 0.048 p90 0.155 over 3608 query-cluster pairs
+  error sigma Bruch t=4        median 0.123 p90 0.324 over 3608 query-cluster pairs
+  error sigma Bruch t=8        median 0.172 p90 0.364 over 3608 query-cluster pairs
+  error sigma hybrid           median 0.038 p90 0.127 over 3608 query-cluster pairs
+  error residual scalar rest   median 0.240 p90 0.855 over 3608 query-cluster pairs
+  error residual diagonal      median 0.193 p90 0.700 over 3608 query-cluster pairs
+  mu+3 sigma exact       0.9: 5604 rows (12 clusters)  0.95: 8485 rows (19 clusters)  0.99: 14865 rows (42 clusters)  0.995: 16220 rows (51 clusters)  0.999: 17522 rows (66 clusters)
+  mu+3 sigma ours (16 dirs + rest) 0.9: 5765 rows (13 clusters)  0.95: 8705 rows (20 clusters)  0.99: 15222 rows (43 clusters)  0.995: 16539 rows (51 clusters)  0.999: 18071 rows (68 clusters)
+  mu+3 sigma Bruch t=4   0.9: 6179 rows (14 clusters)  0.95: 9304 rows (22 clusters)  0.99: 16298 rows (46 clusters)  0.995: 17666 rows (54 clusters)  0.999: 19872 rows (78 clusters)
+  mu+3 sigma Bruch t=8   0.9: 5885 rows (13 clusters)  0.95: 8979 rows (21 clusters)  0.99: 15973 rows (45 clusters)  0.995: 17336 rows (53 clusters)  0.999: 19318 rows (76 clusters)
+  mu+3 sigma hybrid (16 dirs + diag) 0.9: 5750 rows (13 clusters)  0.95: 8699 rows (20 clusters)  0.99: 15097 rows (42 clusters)  0.995: 16546 rows (51 clusters)  0.999: 18080 rows (68 clusters)
