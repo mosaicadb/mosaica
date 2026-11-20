@@ -204,8 +204,13 @@ def build(a, ds, sname, sysobj, threads, fname):
     except Unavailable as e:
         log(f"{sname} unavailable: {e}")
         st = "does not fit" if str(e).startswith("does not fit") else "unavailable"
-        merge_csv(os.path.join(rdir, fname), BUILD_COLS, [dict(system=sname, status=st, detail=str(e))],
-                  lambda r: r["system"] == sname)
+        path = os.path.join(rdir, fname)
+        prev = [r for r in (csv.DictReader(open(path)) if os.path.exists(path) else []) if r["system"] == sname]
+        if st == "unavailable" and prev and prev[0]["status"] == "ok":
+            # a system this machine cannot run (its binary not built here) keeps the build row its results came from
+            log(f"{sname}: keeping its earlier build row; its results are unchanged")
+            return False
+        merge_csv(path, BUILD_COLS, [dict(system=sname, status=st, detail=str(e))], lambda r: r["system"] == sname)
         return False
     build_s = time.time() - t
     # the larger of this process's peak and its children's (fit.py, acorn_bench)
