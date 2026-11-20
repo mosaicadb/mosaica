@@ -829,6 +829,26 @@ recall 0.8/0.9/0.95/0.98/0.99 over spread's:
 - Glove random-1 still trails 7536990 at 0.9 to 0.95.
 - Unfiltered and random-25 are as 5853926, within the runs' noise.
 
+**A new group bought as skis are** (d999606; `results/group-purchase/timing/`, against 3930562 back to back). While a
+group is not set up, the savings the index path would have given its clusters read directly are summed, and the
+cluster whose saving takes the sum to the setup's cost sets it up.
+- **Glove unfiltered:** at psi 5 the direct reads fall from 66 to 41 of 227, and time to recall 0.98/0.99/0.995 falls
+  from 1.76/1.58/2.28 to 1.60/1.42/2.14 of spread.
+- **LAION unfiltered and the region-1 sets:** within noise.
+- **random-25:** no cluster takes the index path on either dataset, before or after. Without the group's setup the
+  index path still saves nothing there (the measured cost per row the range leaves at a quarter visible is about twice
+  a direct row's). So under this planner the group's setup is not what keeps random-25 reading directly.
+- Kept.
+
+**The group-count rule** (`fit::Groups::ByN`, tools/rules.py's `by-n`): G = round(N / (`GROUP_KAPPA` n0^2)), from 1
+to K, kappa 0.5, with no 64 cap. The earlier default capped G at 64; by-k8 keeps its K/8 limit for earlier fits.
+- At 1M items: 122 groups at n0 128, 14 at 384, 8 at 512.
+- The suite's indexes: glove (1,183,514 rows, n0 100) 237 against 64 today; yahoo (677,305, 384) 9; LAION (1,000,448,
+  512) 8.
+- The 61 groups expected at n 128 would take kappa 1.
+- Not timed. The suite's indexes would have to be fitted again (tools/fit.py: the k-means, each group's basis and the
+  certification) for the rule to take effect, which is not a quick check.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's
