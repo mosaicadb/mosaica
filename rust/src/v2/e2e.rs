@@ -2759,13 +2759,16 @@ enum StressFilter {
 /// number of clusters for every query, a query reading nothing more once it holds its true k. The orders: mu + z(1, v)
 /// sigma; mu; mu + c sigma for c 2 to 5; spread; the gap order (mu - t) / sigma at the running k-th best (B); the tail
 /// order Gbar((t - mu) / sigma) v / (v + 16) at the running k-th best (D); B and D take the stream key mu + z(1, v) rad s
-/// until k rows are held. DIAG_DIR the index directory, DIAG_QUERIES the queries' .npy, DIAG_NQ the queries used (100),
+/// until k rows are held; the self-correcting orders mu + (delta + 3 rho) sigma (delta and rho the mean and spread of
+/// (s - mu) / sigma over the rows read, or over those a probe scores in full) and mu + (3 + delta_e) sigma (delta_e the
+/// shift that matches the rows held above each read's k-th best). DIAG_DIR the index directory, DIAG_QUERIES the queries' .npy, DIAG_NQ the queries used (100),
 /// DIAG_VECTORS the vectors to create the index from when DIAG_DIR does not exist yet (2,000 rows a cluster),
 /// DIAG_CONDS the conditions (k: k 1 to 1000 under none, random-25 and region-25; base: k 10 and 100 under those;
 /// score: score-correlated sets; mix: region and random mixed; ood: queries from elsewhere; outlier: 0.1% of rows
 /// moved by 3 radii along random directions; merge: neighbouring clusters merged in pairs; sketch: mu + 3 sigma with
 /// sigma from the exact covariance, the stored directions and rest, Bruch et al.'s diagonal plus 4 or 8 eigenpairs, and
-/// the stored directions with a diagonal residual, and each one's error against the exact sigma). Prints one block per
+/// the stored directions with a diagonal residual, and each one's error against the exact sigma; sketch-id: the same
+/// with stored rows as queries, each left out of its own truth). Prints one block per
 /// condition, visible set and k, with the truth's contributing clusters.
 #[test]
 #[ignore]
@@ -2951,12 +2954,19 @@ fn study_order_stress() {
             "outlier" => variants.push(("outlier".into(), 0, true, false, own(&three), vec![10])),
             "merge" => variants.push(("merge".into(), 0, false, true, own(&three), vec![10])),
             "sketch" => variants.push(("sketch".into(), 0, false, false, own(&three[..2]), vec![10, 100])),
+            "sketch-id" => variants.push(("sketch-id".into(), 5, false, false, own(&three[..2]), vec![10, 100])),
             x => panic!("unknown condition {x}"),
         }
     }
     let sknames = ["mu+3 sigma exact", "mu+3 sigma ours (16 dirs + rest)", "mu+3 sigma Bruch t=4", "mu+3 sigma Bruch t=8", "mu+3 sigma hybrid (16 dirs + diag)"];
     let errnames = ["sigma ours", "sigma Bruch t=4", "sigma Bruch t=8", "sigma hybrid", "residual scalar rest", "residual diagonal"];
-    let onames = ["(i) mu+z(1,v)sigma", "mu", "mu+2sigma", "mu+2.5sigma", "mu+3sigma", "mu+3.5sigma", "mu+4sigma", "mu+5sigma", "spread", "(B) gap running", "(D) tail v/(v+16)"];
+    let estnames = ["delta (SC)", "rho (SC)", "delta (SC-probe)", "rho (SC-probe)", "delta_e (E2)"];
+    // the in-distribution queries (sketch-id): stored rows spread over the index, each left out of its own truth
+    let qrow = |qi: usize| ((qi as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15) % nr as u64) as usize;
+    let onames = [
+        "(i) mu+z(1,v)sigma", "mu", "mu+2sigma", "mu+2.5sigma", "mu+3sigma", "mu+3.5sigma", "mu+4sigma", "mu+5sigma", "spread", "(B) gap running", "(D) tail v/(v+16)",
+        "(SC) self-correcting", "(SC-probe)", "(E2) exceedance",
+    ];
     let cs = [2.0, 2.5, 3.0, 3.5, 4.0, 5.0];
     let lnq = |g: f64| -> f64 {
         let x = g / std::f64::consts::SQRT_2;
@@ -2998,8 +3008,10 @@ fn study_order_stress() {
                     }
                     v
                 }
+                5 => row(qrow(qi)).to_vec(),
                 _ => base.iter().map(|x| -x).collect(),
             };
+            let self_row = if *qkind == 5 { qrow(qi) } else { usize::MAX };
             let pr = prep2(&ix, &q);
             let mut s: Vec<f32> = (0..nr).map(|r| dot(&pr.q32, row(r))).collect();
             if *outlier {
@@ -3015,7 +3027,7 @@ fn study_order_stress() {
                 (st_all[c] - mu[c]) / inv_norm(m / (m + 1.0)).max(1e-9)
             }).collect();
             let spread_cl = ap.order(&ix, &pr, None);
-            let is_sk = vlabel == "sketch";
+            let is_sk = vlabel.starts_with("sketch");
             // the sketches' sigmas (exact, ours, Bruch t 4 and 8, hybrid) and the residual beyond the stored directions
             // (exact, the scalar rest, the hybrid's diagonal)
             let (mut ssk, mut sres): (Vec<Vec<f64>>, Vec<Vec<f64>>) = (vec![Vec::new(); 5], vec![Vec::new(); 3]);
@@ -3126,7 +3138,7 @@ fn study_order_stress() {
                     }
                 };
                 let lists: Vec<Vec<f32>> = units.iter().map(|u| {
-                    let mut v: Vec<f32> = u.iter().flat_map(|&c| by_score[c].iter().filter(|x| vis_row(x.1 as usize)).map(|x| x.0)).collect();
+                    let mut v: Vec<f32> = u.iter().flat_map(|&c| by_score[c].iter().filter(|x| x.1 as usize != self_row && vis_row(x.1 as usize)).map(|x| x.0)).collect();
                     v.sort_by(|a, b| b.total_cmp(a));
                     v
                 }).collect();
@@ -3193,10 +3205,10 @@ fn study_order_stress() {
                         o
                     };
                     let mut orders = statics.clone();
-                    let mut errs: Vec<Vec<f64>> = Vec::new();
+                    // the sketches' relative errors, or the self-correcting orders' final estimates
+                    let mut errs: Vec<Vec<f64>> = vec![Vec::new(); if is_sk { 6 } else { 5 }];
                     if is_sk {
                         // the relative errors over the clusters the exact order reads to its last hit
-                        errs = vec![Vec::new(); 6];
                         let mut f = 0;
                         for &u in &orders[0] {
                             if f >= kk {
@@ -3214,6 +3226,89 @@ fn study_order_stress() {
                     } else {
                         orders.push(running(&|t, u| (umu[u] - t) / usig[u].max(1e-12)));
                         orders.push(running(&|t, u| lnq((t - umu[u]) / usig[u].max(1e-12)) + (nv[u] as f64 / (nv[u] as f64 + 16.0)).ln()));
+                        // the self-correcting orders, re-keyed after each read: mu + (delta + 3 rho) sigma, delta and rho
+                        // the mean and spread of (s - mu) / sigma over the rows scored in full (mode 0: every row read;
+                        // 1: the rows a probe scores in full, the clusters read before k rows are held and those of at
+                        // most 129 visible rows), the prior 0 and 1 until two rows are; and (mode 2) mu + (3 + delta_e)
+                        // sigma, delta_e the shift that makes sum nv Gbar((t_c - mu - delta_e sigma) / sigma) over the
+                        // clusters read once k rows were held equal the rows they held above t_c (t_c the k-th best
+                        // when c was read), from 0, within -3 to 3
+                        let adaptive = |mode: u8| -> (Vec<usize>, f64, f64) {
+                            let mut rest = live.clone();
+                            let mut heap: BinaryHeap<Reverse<u32>> = BinaryHeap::new();
+                            let (mut o, mut found) = (Vec::new(), 0);
+                            let (mut cnt, mut sz, mut szz) = (0f64, 0f64, 0f64);
+                            let (mut gs, mut obs, mut de): (Vec<(f64, f64)>, f64, f64) = (Vec::new(), 0.0, 0.0);
+                            while !rest.is_empty() && found < kk {
+                                let c = if mode == 2 {
+                                    3.0 + de
+                                } else if cnt >= 2.0 {
+                                    let m = sz / cnt;
+                                    m + 3.0 * (szz / cnt - m * m).max(0.0).sqrt()
+                                } else {
+                                    3.0
+                                };
+                                let key = |u: usize| umu[u] + c * usig[u];
+                                let i = (0..rest.len()).max_by(|&a, &b| key(rest[a]).total_cmp(&key(rest[b])).then(rest[b].cmp(&rest[a]))).unwrap();
+                                let u = rest.swap_remove(i);
+                                let held = heap.len() == kk;
+                                let t = if held { unkey32(heap.peek().unwrap().0) as f64 } else { f64::NEG_INFINITY };
+                                o.push(u);
+                                found += hits[u];
+                                let sg = usig[u].max(1e-12);
+                                if mode < 2 && (mode == 0 || !held || nv[u] <= 129) {
+                                    for &x in &lists[u] {
+                                        let zz = (x as f64 - umu[u]) / sg;
+                                        cnt += 1.0;
+                                        sz += zz;
+                                        szz += zz * zz;
+                                    }
+                                }
+                                if mode == 2 && held {
+                                    gs.push((nv[u] as f64, (t - umu[u]) / sg));
+                                    obs += lists[u].partition_point(|&x| x as f64 > t) as f64;
+                                    for _ in 0..4 {
+                                        let (mut f, mut fp) = (-obs, 0.0);
+                                        for &(w, g) in &gs {
+                                            f += w * lnq(g - de).exp();
+                                            fp += w * (-(g - de) * (g - de) / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt();
+                                        }
+                                        if fp < 1e-12 {
+                                            break;
+                                        }
+                                        de = (de - f / fp).clamp(-3.0, 3.0);
+                                    }
+                                }
+                                for &x in &lists[u] {
+                                    if heap.len() < kk {
+                                        heap.push(Reverse(key32(x)));
+                                    } else if key32(x) > heap.peek().unwrap().0 {
+                                        heap.pop();
+                                        heap.push(Reverse(key32(x)));
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+                            if mode == 2 {
+                                (o, de, 0.0)
+                            } else if cnt >= 2.0 {
+                                let m = sz / cnt;
+                                (o, m, (szz / cnt - m * m).max(0.0).sqrt())
+                            } else {
+                                (o, 0.0, 1.0)
+                            }
+                        };
+                        for mode in 0..3u8 {
+                            let (o, a, b) = adaptive(mode);
+                            orders.push(o);
+                            if mode < 2 {
+                                errs[2 * mode as usize].push(a);
+                                errs[2 * mode as usize + 1].push(b);
+                            } else {
+                                errs[4].push(a);
+                            }
+                        }
                     }
                     let seqs = orders.into_iter().map(|o| {
                         let mut f = 0;
@@ -3247,14 +3342,21 @@ fn study_order_stress() {
     }
     for key in keys {
         let rows_of: Vec<(&Reads, (f64, f64, f64))> = per.iter().flat_map(|o| o.iter().filter(|x| x.0 == key).map(|x| (&x.1, x.2))).collect();
-        let names: &[&str] = if key.0 == "sketch" { &sknames } else { &onames };
+        let names: &[&str] = if key.0.starts_with("sketch") { &sknames } else { &onames };
         let nqk = rows_of.len() as f64;
         let mc = rows_of.iter().map(|x| x.1 .0).sum::<f64>() / nqk;
         let kc = rows_of.iter().map(|x| x.1 .1).sum::<f64>() / nqk;
         let nbar = rows_of.iter().map(|x| x.1 .2).sum::<f64>() / nqk;
         let cpred = rows_of.iter().map(|x| inv_norm((1.0 - x.1 .1 / x.1 .2).clamp(1e-9, 1.0 - 1e-9))).sum::<f64>() / nqk;
         eprintln!("== {dir} {} {} k={}: queries {nqk} contributing {mc:.1} k_c {kc:.2} nbar {nbar:.0} c_pred {cpred:.2}", key.0, key.1, key.2);
-        if key.0 == "sketch" {
+        if !key.0.starts_with("sketch") {
+            for (j, en) in estnames.iter().enumerate() {
+                let mut v: Vec<f64> = per.iter().flat_map(|o| o.iter().filter(|x| x.0 == key).flat_map(|x| x.3[j].iter().copied())).collect();
+                v.sort_by(|a, b| a.total_cmp(b));
+                eprintln!("  estimate {en:<17} median {:.2} p10 {:.2} p90 {:.2} over {} queries", v[v.len() / 2], v[v.len() / 10], v[v.len() * 9 / 10], v.len());
+            }
+        }
+        if key.0.starts_with("sketch") {
             for (j, en) in errnames.iter().enumerate() {
                 let mut v: Vec<f64> = per.iter().flat_map(|o| o.iter().filter(|x| x.0 == key).flat_map(|x| x.3[j].iter().copied())).collect();
                 v.sort_by(|a, b| a.total_cmp(b));

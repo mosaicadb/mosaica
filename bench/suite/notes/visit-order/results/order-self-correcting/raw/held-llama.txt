@@ -1,0 +1,120 @@
+== held-llama base none k=10: queries 100 contributing 6.0 k_c 1.86 nbar 1581 c_pred 3.05
+  estimate delta (SC)        median -0.02 p10 -0.03 p90 -0.01 over 100 queries
+  estimate rho (SC)          median 0.61 p10 0.56 p90 0.68 over 100 queries
+  estimate delta (SC-probe)  median -0.03 p10 -0.05 p90 0.00 over 100 queries
+  estimate rho (SC-probe)    median 0.60 p10 0.50 p90 0.72 over 100 queries
+  estimate delta_e (E2)      median -1.36 p10 -1.61 p90 -1.06 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 29409 rows (23 clusters)  0.95: 36152 rows (35 clusters)  0.99: 41960 rows (51 clusters)  0.995: 42642 rows (56 clusters)  0.999: 43099 rows (62 clusters)
+  mu                     0.9: 35467 rows (27 clusters)  0.95: 44886 rows (39 clusters)  0.99: 51891 rows (59 clusters)  0.995: 52625 rows (65 clusters)  0.999: 53217 rows (73 clusters)
+  mu+2sigma              0.9: 25488 rows (20 clusters)  0.95: 30674 rows (28 clusters)  0.99: 37580 rows (45 clusters)  0.995: 37964 rows (47 clusters)  0.999: 38607 rows (55 clusters)
+  mu+2.5sigma            0.9: 24921 rows (21 clusters)  0.95: 29671 rows (27 clusters)  0.99: 37362 rows (47 clusters)  0.995: 37874 rows (50 clusters)  0.999: 38232 rows (56 clusters)
+  mu+3sigma              0.9: 25543 rows (22 clusters)  0.95: 31295 rows (30 clusters)  0.99: 38581 rows (49 clusters)  0.995: 39047 rows (52 clusters)  0.999: 39469 rows (58 clusters)
+  mu+3.5sigma            0.9: 27697 rows (24 clusters)  0.95: 34006 rows (34 clusters)  0.99: 40739 rows (52 clusters)  0.995: 41044 rows (54 clusters)  0.999: 41518 rows (61 clusters)
+  mu+4sigma              0.9: 29266 rows (26 clusters)  0.95: 38008 rows (41 clusters)  0.99: 43545 rows (56 clusters)  0.995: 44165 rows (61 clusters)  0.999: 44559 rows (68 clusters)
+  mu+5sigma              0.9: 32349 rows (29 clusters)  0.95: 44088 rows (49 clusters)  0.99: 52003 rows (79 clusters)  0.995: 52086 rows (79 clusters)  0.999: 52243 rows (81 clusters)
+  spread                 0.9: 27740 rows (22 clusters)  0.95: 33986 rows (32 clusters)  0.99: 39075 rows (44 clusters)  0.995: 39245 rows (45 clusters)  0.999: 39551 rows (49 clusters)
+  (B) gap running        0.9: 24274 rows (20 clusters)  0.95: 29618 rows (27 clusters)  0.99: 37076 rows (47 clusters)  0.995: 37614 rows (50 clusters)  0.999: 37958 rows (55 clusters)
+  (D) tail v/(v+16)      0.9: 24383 rows (20 clusters)  0.95: 29727 rows (27 clusters)  0.99: 37150 rows (47 clusters)  0.995: 37588 rows (49 clusters)  0.999: 38014 rows (55 clusters)
+  (SC) self-correcting   0.9: 25954 rows (21 clusters)  0.95: 31313 rows (28 clusters)  0.99: 37745 rows (44 clusters)  0.995: 38132 rows (47 clusters)  0.999: 38880 rows (56 clusters)
+  (SC-probe)             0.9: 26160 rows (21 clusters)  0.95: 31809 rows (29 clusters)  0.99: 37294 rows (42 clusters)  0.995: 38417 rows (51 clusters)  0.999: 38853 rows (57 clusters)
+  (E2) exceedance        0.9: 26442 rows (21 clusters)  0.95: 32088 rows (29 clusters)  0.99: 37693 rows (42 clusters)  0.995: 38717 rows (50 clusters)  0.999: 39426 rows (60 clusters)
+== held-llama base none k=100: queries 100 contributing 23.4 k_c 5.04 nbar 1711 c_pred 2.78
+  estimate delta (SC)        median -0.02 p10 -0.02 p90 -0.01 over 100 queries
+  estimate rho (SC)          median 0.63 p10 0.57 p90 0.69 over 100 queries
+  estimate delta (SC-probe)  median -0.03 p10 -0.05 p90 0.00 over 100 queries
+  estimate rho (SC-probe)    median 0.60 p10 0.50 p90 0.72 over 100 queries
+  estimate delta_e (E2)      median -1.05 p10 -1.26 p90 -0.74 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 46168 rows (29 clusters)  0.95: 60519 rows (39 clusters)  0.99: 82592 rows (62 clusters)  0.995: 87792 rows (71 clusters)  0.999: 93484 rows (88 clusters)
+  mu                     0.9: 50039 rows (29 clusters)  0.95: 70203 rows (41 clusters)  0.99: 99568 rows (66 clusters)  0.995: 105383 rows (76 clusters)  0.999: 110046 rows (91 clusters)
+  mu+2sigma              0.9: 38693 rows (25 clusters)  0.95: 54128 rows (35 clusters)  0.99: 78257 rows (58 clusters)  0.995: 84413 rows (68 clusters)  0.999: 88739 rows (82 clusters)
+  mu+2.5sigma            0.9: 38812 rows (25 clusters)  0.95: 54445 rows (37 clusters)  0.99: 78361 rows (59 clusters)  0.995: 84203 rows (68 clusters)  0.999: 88354 rows (81 clusters)
+  mu+3sigma              0.9: 41783 rows (28 clusters)  0.95: 57167 rows (39 clusters)  0.99: 80017 rows (61 clusters)  0.995: 85010 rows (69 clusters)  0.999: 89950 rows (85 clusters)
+  mu+3.5sigma            0.9: 46444 rows (32 clusters)  0.95: 62675 rows (44 clusters)  0.99: 83359 rows (64 clusters)  0.995: 88664 rows (73 clusters)  0.999: 93437 rows (87 clusters)
+  mu+4sigma              0.9: 52884 rows (36 clusters)  0.95: 68677 rows (49 clusters)  0.99: 90649 rows (73 clusters)  0.995: 93996 rows (79 clusters)  0.999: 98827 rows (96 clusters)
+  mu+5sigma              0.9: 57728 rows (40 clusters)  0.95: 86421 rows (64 clusters)  0.99: 102380 rows (85 clusters)  0.995: 107868 rows (95 clusters)  0.999: 110634 rows (105 clusters)
+  spread                 0.9: 40155 rows (26 clusters)  0.95: 57411 rows (38 clusters)  0.99: 79175 rows (59 clusters)  0.995: 83975 rows (66 clusters)  0.999: 88892 rows (81 clusters)
+  (B) gap running        0.9: 38483 rows (24 clusters)  0.95: 53694 rows (35 clusters)  0.99: 78428 rows (58 clusters)  0.995: 84374 rows (68 clusters)  0.999: 88335 rows (80 clusters)
+  (D) tail v/(v+16)      0.9: 38466 rows (24 clusters)  0.95: 53486 rows (35 clusters)  0.99: 78144 rows (58 clusters)  0.995: 84347 rows (68 clusters)  0.999: 88321 rows (80 clusters)
+  (SC) self-correcting   0.9: 38775 rows (24 clusters)  0.95: 53883 rows (35 clusters)  0.99: 78198 rows (57 clusters)  0.995: 83914 rows (67 clusters)  0.999: 88559 rows (82 clusters)
+  (SC-probe)             0.9: 38517 rows (24 clusters)  0.95: 54014 rows (35 clusters)  0.99: 78355 rows (57 clusters)  0.995: 84529 rows (68 clusters)  0.999: 89483 rows (83 clusters)
+  (E2) exceedance        0.9: 38130 rows (24 clusters)  0.95: 53611 rows (35 clusters)  0.99: 77562 rows (57 clusters)  0.995: 84080 rows (68 clusters)  0.999: 88675 rows (83 clusters)
+== held-llama base random-25 k=10: queries 100 contributing 6.2 k_c 1.73 nbar 389 c_pred 2.62
+  estimate delta (SC)        median -0.02 p10 -0.04 p90 -0.01 over 100 queries
+  estimate rho (SC)          median 0.61 p10 0.56 p90 0.69 over 100 queries
+  estimate delta (SC-probe)  median -0.03 p10 -0.07 p90 0.01 over 100 queries
+  estimate rho (SC-probe)    median 0.60 p10 0.51 p90 0.77 over 100 queries
+  estimate delta_e (E2)      median -1.18 p10 -1.41 p90 -0.83 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 9806 rows (30 clusters)  0.95: 11805 rows (41 clusters)  0.99: 13223 rows (57 clusters)  0.995: 13566 rows (67 clusters)  0.999: 13949 rows (92 clusters)
+  mu                     0.9: 10709 rows (30 clusters)  0.95: 13734 rows (44 clusters)  0.99: 15649 rows (61 clusters)  0.995: 16181 rows (76 clusters)  0.999: 16682 rows (106 clusters)
+  mu+2sigma              0.9: 7440 rows (23 clusters)  0.95: 8859 rows (30 clusters)  0.99: 10609 rows (47 clusters)  0.995: 11162 rows (60 clusters)  0.999: 11357 rows (73 clusters)
+  mu+2.5sigma            0.9: 7137 rows (22 clusters)  0.95: 9090 rows (33 clusters)  0.99: 10867 rows (52 clusters)  0.995: 11280 rows (62 clusters)  0.999: 11406 rows (70 clusters)
+  mu+3sigma              0.9: 7578 rows (25 clusters)  0.95: 9429 rows (37 clusters)  0.99: 11182 rows (54 clusters)  0.995: 11537 rows (63 clusters)  0.999: 11629 rows (69 clusters)
+  mu+3.5sigma            0.9: 8349 rows (30 clusters)  0.95: 10356 rows (43 clusters)  0.99: 11936 rows (60 clusters)  0.995: 12151 rows (66 clusters)  0.999: 12262 rows (72 clusters)
+  mu+4sigma              0.9: 8817 rows (32 clusters)  0.95: 10961 rows (46 clusters)  0.99: 12878 rows (66 clusters)  0.995: 13163 rows (74 clusters)  0.999: 13268 rows (80 clusters)
+  mu+5sigma              0.9: 9970 rows (38 clusters)  0.95: 13445 rows (61 clusters)  0.99: 15262 rows (81 clusters)  0.995: 15437 rows (85 clusters)  0.999: 15698 rows (96 clusters)
+  spread                 0.9: 8166 rows (25 clusters)  0.95: 10214 rows (35 clusters)  0.99: 11497 rows (48 clusters)  0.995: 11824 rows (58 clusters)  0.999: 11998 rows (72 clusters)
+  (B) gap running        0.9: 7112 rows (22 clusters)  0.95: 8647 rows (30 clusters)  0.99: 10556 rows (51 clusters)  0.995: 11005 rows (62 clusters)  0.999: 11127 rows (70 clusters)
+  (D) tail v/(v+16)      0.9: 7271 rows (22 clusters)  0.95: 8805 rows (30 clusters)  0.99: 10654 rows (51 clusters)  0.995: 11065 rows (61 clusters)  0.999: 11205 rows (70 clusters)
+  (SC) self-correcting   0.9: 7600 rows (23 clusters)  0.95: 9069 rows (31 clusters)  0.99: 10718 rows (49 clusters)  0.995: 11064 rows (58 clusters)  0.999: 11308 rows (73 clusters)
+  (SC-probe)             0.9: 7430 rows (23 clusters)  0.95: 8943 rows (31 clusters)  0.99: 10511 rows (46 clusters)  0.995: 10971 rows (58 clusters)  0.999: 11188 rows (71 clusters)
+  (E2) exceedance        0.9: 7457 rows (23 clusters)  0.95: 8827 rows (30 clusters)  0.99: 10552 rows (47 clusters)  0.995: 10946 rows (57 clusters)  0.999: 11204 rows (73 clusters)
+== held-llama base random-25 k=100: queries 100 contributing 26.5 k_c 4.34 nbar 438 c_pred 2.35
+  estimate delta (SC)        median -0.02 p10 -0.02 p90 -0.01 over 100 queries
+  estimate rho (SC)          median 0.63 p10 0.57 p90 0.70 over 100 queries
+  estimate delta (SC-probe)  median -0.04 p10 -0.08 p90 0.00 over 100 queries
+  estimate rho (SC-probe)    median 0.61 p10 0.51 p90 0.81 over 100 queries
+  estimate delta_e (E2)      median -0.79 p10 -1.00 p90 -0.54 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 13398 rows (32 clusters)  0.95: 17588 rows (42 clusters)  0.99: 23509 rows (63 clusters)  0.995: 24937 rows (71 clusters)  0.999: 27263 rows (94 clusters)
+  mu                     0.9: 13271 rows (31 clusters)  0.95: 18379 rows (43 clusters)  0.99: 25198 rows (65 clusters)  0.995: 27109 rows (75 clusters)  0.999: 29072 rows (94 clusters)
+  mu+2sigma              0.9: 11334 rows (28 clusters)  0.95: 15860 rows (40 clusters)  0.99: 21610 rows (59 clusters)  0.995: 23176 rows (68 clusters)  0.999: 24861 rows (86 clusters)
+  mu+2.5sigma            0.9: 12276 rows (31 clusters)  0.95: 16491 rows (42 clusters)  0.99: 22246 rows (61 clusters)  0.995: 23867 rows (71 clusters)  0.999: 25323 rows (86 clusters)
+  mu+3sigma              0.9: 13424 rows (34 clusters)  0.95: 17802 rows (45 clusters)  0.99: 23605 rows (66 clusters)  0.995: 24828 rows (73 clusters)  0.999: 26255 rows (87 clusters)
+  mu+3.5sigma            0.9: 15167 rows (39 clusters)  0.95: 20159 rows (52 clusters)  0.99: 25399 rows (73 clusters)  0.995: 26319 rows (78 clusters)  0.999: 27758 rows (94 clusters)
+  mu+4sigma              0.9: 17034 rows (44 clusters)  0.95: 21957 rows (57 clusters)  0.99: 27845 rows (79 clusters)  0.995: 29019 rows (87 clusters)  0.999: 29953 rows (99 clusters)
+  mu+5sigma              0.9: 21009 rows (55 clusters)  0.95: 28134 rows (75 clusters)  0.99: 32956 rows (96 clusters)  0.995: 33400 rows (99 clusters)  0.999: 34076 rows (108 clusters)
+  spread                 0.9: 12151 rows (31 clusters)  0.95: 16229 rows (41 clusters)  0.99: 22063 rows (60 clusters)  0.995: 23604 rows (69 clusters)  0.999: 25161 rows (84 clusters)
+  (B) gap running        0.9: 11387 rows (28 clusters)  0.95: 15733 rows (39 clusters)  0.99: 21580 rows (59 clusters)  0.995: 23095 rows (67 clusters)  0.999: 24881 rows (86 clusters)
+  (D) tail v/(v+16)      0.9: 11462 rows (28 clusters)  0.95: 15702 rows (39 clusters)  0.99: 21628 rows (59 clusters)  0.995: 23187 rows (68 clusters)  0.999: 24930 rows (86 clusters)
+  (SC) self-correcting   0.9: 11253 rows (28 clusters)  0.95: 15641 rows (39 clusters)  0.99: 21319 rows (58 clusters)  0.995: 23061 rows (67 clusters)  0.999: 24738 rows (85 clusters)
+  (SC-probe)             0.9: 11394 rows (28 clusters)  0.95: 15842 rows (40 clusters)  0.99: 21380 rows (57 clusters)  0.995: 23014 rows (66 clusters)  0.999: 24770 rows (85 clusters)
+  (E2) exceedance        0.9: 11742 rows (30 clusters)  0.95: 16147 rows (41 clusters)  0.99: 21832 rows (59 clusters)  0.995: 23343 rows (68 clusters)  0.999: 25048 rows (86 clusters)
+== held-llama base region-25 k=10: queries 100 contributing 6.1 k_c 1.91 nbar 508 c_pred 2.68
+  estimate delta (SC)        median -0.06 p10 -0.12 p90 -0.02 over 100 queries
+  estimate rho (SC)          median 0.60 p10 0.55 p90 0.68 over 100 queries
+  estimate delta (SC-probe)  median -0.09 p10 -0.20 p90 -0.02 over 100 queries
+  estimate rho (SC-probe)    median 0.61 p10 0.50 p90 0.77 over 100 queries
+  estimate delta_e (E2)      median -1.21 p10 -1.44 p90 -0.96 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 10891 rows (24 clusters)  0.95: 13888 rows (37 clusters)  0.99: 16586 rows (60 clusters)  0.995: 16680 rows (62 clusters)  0.999: 16788 rows (69 clusters)
+  mu                     0.9: 12577 rows (37 clusters)  0.95: 14087 rows (45 clusters)  0.99: 15582 rows (61 clusters)  0.995: 15803 rows (66 clusters)  0.999: 16108 rows (85 clusters)
+  mu+2sigma              0.9: 8612 rows (25 clusters)  0.95: 9830 rows (31 clusters)  0.99: 11657 rows (48 clusters)  0.995: 11916 rows (54 clusters)  0.999: 12167 rows (68 clusters)
+  mu+2.5sigma            0.9: 8560 rows (24 clusters)  0.95: 10073 rows (33 clusters)  0.99: 11677 rows (48 clusters)  0.995: 11895 rows (53 clusters)  0.999: 12153 rows (67 clusters)
+  mu+3sigma              0.9: 9063 rows (26 clusters)  0.95: 10480 rows (33 clusters)  0.99: 12116 rows (49 clusters)  0.995: 12308 rows (53 clusters)  0.999: 12526 rows (66 clusters)
+  mu+3.5sigma            0.9: 9859 rows (29 clusters)  0.95: 11423 rows (37 clusters)  0.99: 13311 rows (54 clusters)  0.995: 13503 rows (59 clusters)  0.999: 13569 rows (64 clusters)
+  mu+4sigma              0.9: 10468 rows (31 clusters)  0.95: 12644 rows (43 clusters)  0.99: 14346 rows (61 clusters)  0.995: 14511 rows (65 clusters)  0.999: 14639 rows (74 clusters)
+  mu+5sigma              0.9: 11960 rows (35 clusters)  0.95: 14518 rows (50 clusters)  0.99: 16871 rows (79 clusters)  0.995: 17026 rows (84 clusters)  0.999: 17200 rows (93 clusters)
+  spread                 0.9: 9486 rows (26 clusters)  0.95: 11270 rows (35 clusters)  0.99: 12494 rows (47 clusters)  0.995: 12702 rows (53 clusters)  0.999: 12870 rows (62 clusters)
+  (B) gap running        0.9: 8537 rows (25 clusters)  0.95: 9731 rows (31 clusters)  0.99: 11512 rows (49 clusters)  0.995: 11618 rows (52 clusters)  0.999: 11939 rows (68 clusters)
+  (D) tail v/(v+16)      0.9: 8545 rows (24 clusters)  0.95: 9868 rows (31 clusters)  0.99: 11566 rows (48 clusters)  0.995: 11722 rows (51 clusters)  0.999: 12046 rows (67 clusters)
+  (SC) self-correcting   0.9: 8859 rows (25 clusters)  0.95: 10075 rows (32 clusters)  0.99: 11664 rows (47 clusters)  0.995: 12038 rows (55 clusters)  0.999: 12272 rows (68 clusters)
+  (SC-probe)             0.9: 8984 rows (26 clusters)  0.95: 10119 rows (32 clusters)  0.99: 11831 rows (49 clusters)  0.995: 12139 rows (55 clusters)  0.999: 12387 rows (68 clusters)
+  (E2) exceedance        0.9: 8881 rows (25 clusters)  0.95: 9869 rows (31 clusters)  0.99: 11653 rows (47 clusters)  0.995: 12051 rows (56 clusters)  0.999: 12237 rows (66 clusters)
+== held-llama base region-25 k=100: queries 100 contributing 24.9 k_c 4.42 nbar 509 c_pred 2.39
+  estimate delta (SC)        median -0.05 p10 -0.10 p90 -0.02 over 100 queries
+  estimate rho (SC)          median 0.62 p10 0.57 p90 0.70 over 100 queries
+  estimate delta (SC-probe)  median -0.11 p10 -0.18 p90 -0.02 over 100 queries
+  estimate rho (SC-probe)    median 0.68 p10 0.53 p90 0.84 over 100 queries
+  estimate delta_e (E2)      median -0.82 p10 -1.05 p90 -0.58 over 100 queries
+  (i) mu+z(1,v)sigma     0.9: 15402 rows (29 clusters)  0.95: 20491 rows (39 clusters)  0.99: 29097 rows (65 clusters)  0.995: 30647 rows (73 clusters)  0.999: 32652 rows (93 clusters)
+  mu                     0.9: 16508 rows (37 clusters)  0.95: 20994 rows (47 clusters)  0.99: 28387 rows (70 clusters)  0.995: 30261 rows (80 clusters)  0.999: 31932 rows (97 clusters)
+  mu+2sigma              0.9: 12196 rows (28 clusters)  0.95: 16804 rows (39 clusters)  0.99: 23655 rows (60 clusters)  0.995: 25476 rows (70 clusters)  0.999: 27694 rows (92 clusters)
+  mu+2.5sigma            0.9: 13357 rows (31 clusters)  0.95: 17169 rows (40 clusters)  0.99: 23764 rows (61 clusters)  0.995: 25857 rows (73 clusters)  0.999: 27682 rows (92 clusters)
+  mu+3sigma              0.9: 15057 rows (35 clusters)  0.95: 19049 rows (45 clusters)  0.99: 24939 rows (66 clusters)  0.995: 26620 rows (77 clusters)  0.999: 28077 rows (92 clusters)
+  mu+3.5sigma            0.9: 16957 rows (40 clusters)  0.95: 21699 rows (52 clusters)  0.99: 26471 rows (73 clusters)  0.995: 27705 rows (82 clusters)  0.999: 29126 rows (99 clusters)
+  mu+4sigma              0.9: 19017 rows (45 clusters)  0.95: 24444 rows (61 clusters)  0.99: 28658 rows (82 clusters)  0.995: 29466 rows (88 clusters)  0.999: 30689 rows (104 clusters)
+  mu+5sigma              0.9: 24918 rows (61 clusters)  0.95: 29849 rows (79 clusters)  0.99: 33281 rows (99 clusters)  0.995: 33760 rows (104 clusters)  0.999: 34394 rows (113 clusters)
+  spread                 0.9: 13219 rows (31 clusters)  0.95: 17266 rows (40 clusters)  0.99: 24071 rows (61 clusters)  0.995: 25908 rows (71 clusters)  0.999: 27907 rows (92 clusters)
+  (B) gap running        0.9: 12299 rows (28 clusters)  0.95: 16513 rows (38 clusters)  0.99: 23504 rows (60 clusters)  0.995: 25463 rows (71 clusters)  0.999: 27633 rows (92 clusters)
+  (D) tail v/(v+16)      0.9: 12392 rows (28 clusters)  0.95: 16544 rows (38 clusters)  0.99: 23687 rows (60 clusters)  0.995: 25654 rows (71 clusters)  0.999: 27818 rows (92 clusters)
+  (SC) self-correcting   0.9: 12254 rows (28 clusters)  0.95: 16559 rows (38 clusters)  0.99: 23599 rows (60 clusters)  0.995: 25476 rows (70 clusters)  0.999: 27758 rows (91 clusters)
+  (SC-probe)             0.9: 12457 rows (29 clusters)  0.95: 16632 rows (38 clusters)  0.99: 23735 rows (61 clusters)  0.995: 25441 rows (70 clusters)  0.999: 27634 rows (91 clusters)
+  (E2) exceedance        0.9: 12299 rows (28 clusters)  0.95: 16828 rows (39 clusters)  0.99: 23615 rows (60 clusters)  0.995: 25562 rows (72 clusters)  0.999: 27587 rows (92 clusters)

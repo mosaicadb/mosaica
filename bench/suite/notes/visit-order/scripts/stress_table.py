@@ -11,7 +11,7 @@ blocks = []
 for path in sys.argv[3:]:
     cur = None
     for l in open(path):
-        m = re.match(r"== \S*/stress-ix/(\S+) (\S+) (\S+) k=(\d+): queries (\S+) contributing (\S+) k_c (\S+) nbar (\S+) c_pred (\S+)", l)
+        m = re.match(r"== (?:\S*/stress-ix/)?(\S+) (\S+) (\S+) k=(\d+): queries (\S+) contributing (\S+) k_c (\S+) nbar (\S+) c_pred (\S+)", l)
         if m:
             cur = dict(ds=m.group(1), cond=m.group(2), filt=m.group(3), k=int(m.group(4)), mc=float(m.group(6)), kc=float(m.group(7)),
                        nbar=float(m.group(8)), cpred=float(m.group(9)), orders={}, errs={})
@@ -64,7 +64,7 @@ for cond in conds:
         out.append(f"   {o:<34} worst {worst[0]:.2f} median {statistics.median(x[0] for x in rs):.2f}   "
                    f"(worst: {worst[1]['ds']} {worst[1]['filt']} k={worst[1]['k']} at {worst[2]})")
     # the best c per block (least rows summed over the recalls each mu + c sigma reaches), and c_pred
-    if cond != "sketch":
+    if not cond.startswith("sketch"):
         out.append("   best c of mu + c sigma per block (rows summed over recalls 0.9-0.995), against c_pred:")
         for b in bs:
             cs = [o for o in b["orders"] if re.fullmatch(r"mu\+[0-9.]+sigma", o)]

@@ -642,6 +642,55 @@ recall 0.9 to 0.995; errors over the clusters the exact order reads):
 
   At d = 512: exact 512 KB; ours 8.3 KB; Bruch t = 4 10 KB and t = 8 18 KB; hybrid 10.4 KB.
 
+**The self-correcting order** (`results/order-self-correcting/`; the same harness, every stress condition, 100
+queries). The orders:
+- **SC:** mu + (delta + 3 rho) sigma. Delta and rho are the mean and spread of z = (s − mu_c)/sigma_c over the rows
+  scored in full (every visible row of each cluster read), with the prior 0 and 1 until two rows are, re-keyed after
+  every read.
+- **SC-probe:** SC with moments only from the rows a probe scores in full: the clusters read before k rows are held,
+  and those of at most 129 visible rows.
+- **E2:** mu + (3 + delta_e) sigma. Delta_e is the shift that makes the model's count of visible rows above each
+  read's t_c match the observed count, by Newton's method from 0, held within −3 to 3.
+
+All are compared against the other orders in rows to recall 0.9 to 0.999. Results (`compare.txt`, `detail.txt`):
+- **SC against mu + 3 sigma, where mu + 3 sigma is within 1.10 of the best:** median 1.00 in every condition. The worst
+  cells are 1.01 to 1.10, and 1.14 at LAION unfiltered k 1 at 0.9. SC-probe has the same medians, with worst cells
+  of 1.13 to 1.14 (LAION k 1; the synthetic Gaussian d 100 under region-25), so the estimate mostly survives with
+  moments only from direct reads.
+- **Under the in-cluster bottom sets:** SC is at most 1.29 of the best (median 1.16), against mu + 3 sigma's 7.14
+  (median 1.91), B's 1.25 and mu's 1.50.
+- **Overall:** SC is within 1.10 of the best in 73 to 100% of cells per condition (73% under outliers, as mu + 3 sigma). Mu + 3 sigma is at 73 to 100%
+  (80% under the score sets), B at 69 to 100%.
+- **On the held-out sets** SC's worst cell is 1.07 against mu + 3 sigma's 1.23. On llama it learns rho 0.60 to 0.63,
+  correcting the stored sketch's overestimated sigma there.
+- **E2 is weaker:** worst 1.40 against mu + 3 sigma at k 1, and 1.81 under the bottom sets. Delta_e from a few counts
+  swings early (−1.4 to 0.7 under benign sets).
+- **The estimates under benign sets** (none, random, region, the mix, out-of-distribution queries, outliers, merged
+  clusters, the synthetic and held-out sets; per-block medians): delta −0.06 to 0.04 and rho 1.00 (0.86 to 1.12), but
+  0.60 to 0.63 on llama.
+  - Bottom sets: delta −1.2 to −2.8, rho 0.31 to 0.53.
+  - Top sets: delta 1.2 to 3.2, rho 0.32 to 0.63.
+  - Direction sets: in between.
+- **Against the success criteria:**
+  - Within about 1.3 of the best under the bottom sets: met (1.29).
+  - Within about 1.02 of mu + 3 sigma wherever that order was good: met in the median (1.00) but not in the worst cells
+    (up to 1.10; 1.14 at LAION k 1).
+
+**LAION's hybrid sketch, by query distribution** (`sketch-laion.txt`; mu + 3 sigma, rows over exact's at 0.9 to
+0.995). With LAION's text queries the hybrid loses to ours (1.09 to 1.23 against 1.02 to 1.13). With 100 stored image
+rows as queries (each left out of its own truth) it ties or wins in every cell (1.02 to 1.17 against 1.03 to 1.20). The
+out-of-distribution explanation holds in direction.
+
+The sigma errors do not explain it:
+- **Text queries:** ours 0.11 to 0.13, the hybrid 0.053 to 0.057.
+- **Image queries:** ours 0.068 to 0.073, the hybrid 0.053 to 0.057.
+- **The residual diagonal along the text queries' residual directions** is the more accurate one: 0.22 to 0.25 against
+  the scalar rest's 0.47 to 0.58 (p90 0.41 to 0.47 against 1.6 to 2.6). Along the image queries' it is 0.41 to 0.44
+  against 0.49 to 0.52.
+
+So the hybrid's loss on text queries comes with a smaller sigma error, not a larger one. The rows depend on how the
+errors fall across the clusters ranked, which these medians do not measure.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's

@@ -1,0 +1,16 @@
+laion sketch none k=10         rows / exact's at 0.9/0.95/0.99/0.995: ours 1.02/1.09/1.13/1.13; Bruch t=4 1.22/1.21/1.48/1.33; Bruch t=8 1.14/1.16/1.40/1.28; hybrid 1.13/1.11/1.23/1.21
+    relative error, median/p90: sigma ours 0.128/0.534; sigma Bruch t=4 0.099/0.275; sigma Bruch t=8 0.073/0.293; sigma hybrid 0.057/0.124; residual scalar rest 0.558/2.599; residual diagonal 0.253/0.467
+laion sketch none k=100        rows / exact's at 0.9/0.95/0.99/0.995: ours 1.07/1.08/1.08/1.06; Bruch t=4 1.25/1.34/1.23/1.21; Bruch t=8 1.17/1.25/1.17/1.17; hybrid 1.09/1.15/1.11/1.10
+    relative error, median/p90: sigma ours 0.124/0.394; sigma Bruch t=4 0.078/0.204; sigma Bruch t=8 0.068/0.204; sigma hybrid 0.053/0.115; residual scalar rest 0.530/1.981; residual diagonal 0.219/0.412
+laion sketch random-25 k=10    rows / exact's at 0.9/0.95/0.99/0.995: ours 1.03/1.06/1.05/1.04; Bruch t=4 1.20/1.25/1.25/1.27; Bruch t=8 1.10/1.20/1.21/1.25; hybrid 1.11/1.21/1.16/1.19
+    relative error, median/p90: sigma ours 0.128/0.427; sigma Bruch t=4 0.083/0.213; sigma Bruch t=8 0.066/0.189; sigma hybrid 0.055/0.119; residual scalar rest 0.575/2.211; residual diagonal 0.244/0.453
+laion sketch random-25 k=100   rows / exact's at 0.9/0.95/0.99/0.995: ours 1.08/1.06/1.10/1.06; Bruch t=4 1.24/1.25/1.26/1.26; Bruch t=8 1.15/1.18/1.20/1.22; hybrid 1.09/1.09/1.09/1.11
+    relative error, median/p90: sigma ours 0.111/0.344; sigma Bruch t=4 0.075/0.186; sigma Bruch t=8 0.063/0.176; sigma hybrid 0.055/0.116; residual scalar rest 0.468/1.608; residual diagonal 0.228/0.414
+laion sketch-id none k=10      rows / exact's at 0.9/0.95/0.99/0.995: ours 1.05/1.13/1.13/1.20; Bruch t=4 1.26/1.24/1.30/1.25; Bruch t=8 1.16/1.35/1.23/1.21; hybrid 1.04/1.10/1.08/1.17
+    relative error, median/p90: sigma ours 0.073/0.131; sigma Bruch t=4 0.052/0.134; sigma Bruch t=8 0.057/0.140; sigma hybrid 0.057/0.104; residual scalar rest 0.522/0.672; residual diagonal 0.438/0.544
+laion sketch-id none k=100     rows / exact's at 0.9/0.95/0.99/0.995: ours 1.07/1.08/1.10/1.12; Bruch t=4 1.25/1.28/1.28/1.24; Bruch t=8 1.19/1.25/1.20/1.25; hybrid 1.04/1.07/1.08/1.10
+    relative error, median/p90: sigma ours 0.069/0.128; sigma Bruch t=4 0.052/0.133; sigma Bruch t=8 0.064/0.157; sigma hybrid 0.054/0.100; residual scalar rest 0.491/0.654; residual diagonal 0.410/0.529
+laion sketch-id random-25 k=10 rows / exact's at 0.9/0.95/0.99/0.995: ours 1.03/1.11/1.20/1.15; Bruch t=4 1.23/1.33/1.39/1.46; Bruch t=8 1.11/1.25/1.34/1.45; hybrid 1.02/1.10/1.14/1.10
+    relative error, median/p90: sigma ours 0.068/0.126; sigma Bruch t=4 0.052/0.130; sigma Bruch t=8 0.057/0.143; sigma hybrid 0.055/0.100; residual scalar rest 0.519/0.674; residual diagonal 0.440/0.551
+laion sketch-id random-25 k=100 rows / exact's at 0.9/0.95/0.99/0.995: ours 1.08/1.07/1.10/1.09; Bruch t=4 1.19/1.29/1.19/1.22; Bruch t=8 1.17/1.22/1.21/1.17; hybrid 1.04/1.05/1.09/1.09
+    relative error, median/p90: sigma ours 0.069/0.131; sigma Bruch t=4 0.052/0.131; sigma Bruch t=8 0.065/0.155; sigma hybrid 0.053/0.101; residual scalar rest 0.497/0.659; residual diagonal 0.411/0.525

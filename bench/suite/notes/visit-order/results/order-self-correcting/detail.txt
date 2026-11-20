@@ -1,0 +1,131 @@
+== cells where a self-correcting order needs over 1.05 times mu+3sigma's rows (mu+3sigma within 1.10 of the best)
+   (E2) exceedance        1.17  glove k random-25 k=1 at 0.95
+   (E2) exceedance        1.17  glove k random-25 k=1 at 0.99
+   (E2) exceedance        1.09  glove k region-25 k=1 at 0.95
+   (E2) exceedance        1.05  glove k region-25 k=1 at 0.99
+   (E2) exceedance        1.13  glove k region-25 k=1 at 0.995
+   (E2) exceedance        1.13  glove k region-25 k=1 at 0.999
+   (E2) exceedance        1.09  held-yandex base none k=10 at 0.95
+   (SC) self-correcting   1.14  laion k none k=1 at 0.9
+   (SC-probe)             1.13  laion k none k=1 at 0.9
+   (E2) exceedance        1.40  laion k none k=1 at 0.9
+   (SC) self-correcting   1.07  laion k none k=1 at 0.95
+   (SC-probe)             1.07  laion k none k=1 at 0.95
+   (E2) exceedance        1.21  laion k none k=1 at 0.95
+   (SC) self-correcting   1.08  laion k none k=1 at 0.99
+   (SC-probe)             1.08  laion k none k=1 at 0.99
+   (E2) exceedance        1.24  laion k none k=1 at 0.99
+   (SC) self-correcting   1.08  laion k none k=1 at 0.995
+   (SC-probe)             1.06  laion k none k=1 at 0.995
+   (E2) exceedance        1.24  laion k none k=1 at 0.995
+   (SC) self-correcting   1.08  laion k none k=1 at 0.999
+   (SC-probe)             1.06  laion k none k=1 at 0.999
+   (E2) exceedance        1.24  laion k none k=1 at 0.999
+   (E2) exceedance        1.08  laion k none k=10 at 0.9
+   (E2) exceedance        1.17  laion k random-25 k=1 at 0.9
+   (E2) exceedance        1.15  laion k random-25 k=1 at 0.95
+   (E2) exceedance        1.16  laion k random-25 k=1 at 0.99
+   (E2) exceedance        1.18  laion k random-25 k=1 at 0.995
+   (E2) exceedance        1.18  laion k random-25 k=1 at 0.999
+   (SC) self-correcting   1.06  laion k random-25 k=10 at 0.95
+   (E2) exceedance        1.29  laion k region-25 k=1 at 0.9
+   (E2) exceedance        1.18  laion k region-25 k=1 at 0.95
+   (E2) exceedance        1.12  laion k region-25 k=1 at 0.99
+   (E2) exceedance        1.14  laion k region-25 k=1 at 0.995
+   (E2) exceedance        1.14  laion k region-25 k=1 at 0.999
+   (SC) self-correcting   1.07  laion k region-25 k=10 at 0.9
+   (SC-probe)             1.07  laion k region-25 k=10 at 0.9
+   (E2) exceedance        1.08  laion k region-25 k=10 at 0.9
+   (SC) self-correcting   1.07  laion k region-25 k=10 at 0.995
+   (SC-probe)             1.06  laion k region-25 k=10 at 0.995
+   (E2) exceedance        1.06  laion k region-25 k=10 at 0.995
+   (SC) self-correcting   1.06  laion score top-25 k=10 at 0.9
+   (SC-probe)             1.05  laion score top-25 k=10 at 0.9
+   (E2) exceedance        1.09  laion score top-25 k=10 at 0.9
+   (E2) exceedance        1.05  laion score top-25 k=10 at 0.999
+   (SC) self-correcting   1.06  laion score dir0-25 k=10 at 0.9
+   (SC-probe)             1.06  laion score dir0-25 k=10 at 0.9
+   (E2) exceedance        1.08  laion score dir0-25 k=10 at 0.9
+   (E2) exceedance        1.08  laion score dir45-25 k=10 at 0.9
+   (SC) self-correcting   1.06  laion score dir90-25 k=10 at 0.99
+   (SC-probe)             1.06  laion score dir90-25 k=10 at 0.99
+   (SC) self-correcting   1.06  laion score top-1 k=10 at 0.9
+   (SC-probe)             1.06  laion score top-1 k=10 at 0.9
+   (E2) exceedance        1.16  laion score top-1 k=10 at 0.9
+   (E2) exceedance        1.18  laion score top-1 k=10 at 0.95
+   (E2) exceedance        1.14  laion score top-1 k=10 at 0.99
+   (E2) exceedance        1.07  laion score top-1 k=10 at 0.995
+   (SC) self-correcting   1.09  laion score top-1 k=10 at 0.999
+   (SC-probe)             1.09  laion score top-1 k=10 at 0.999
+   (E2) exceedance        1.16  laion score top-1 k=10 at 0.999
+   (E2) exceedance        1.08  laion mix region-share-0 k=10 at 0.9
+   (SC) self-correcting   1.07  laion mix region-share-1 k=10 at 0.9
+   (SC-probe)             1.07  laion mix region-share-1 k=10 at 0.9
+   (E2) exceedance        1.08  laion mix region-share-1 k=10 at 0.9
+   (SC) self-correcting   1.07  laion mix region-share-1 k=10 at 0.995
+   (SC-probe)             1.06  laion mix region-share-1 k=10 at 0.995
+   (E2) exceedance        1.06  laion mix region-share-1 k=10 at 0.995
+   (E2) exceedance        1.06  laion ood-noise-1 region-25 k=10 at 0.95
+   (SC) self-correcting   1.05  laion ood-negated none k=10 at 0.9
+   (SC-probe)             1.05  laion ood-negated none k=10 at 0.95
+   (E2) exceedance        1.06  laion ood-negated none k=10 at 0.95
+   (SC) self-correcting   1.07  laion ood-negated random-25 k=10 at 0.9
+   (SC-probe)             1.07  laion ood-negated random-25 k=10 at 0.9
+   (E2) exceedance        1.07  laion ood-negated random-25 k=10 at 0.9
+   (SC) self-correcting   1.09  laion merge none k=10 at 0.95
+   (SC-probe)             1.09  laion merge none k=10 at 0.95
+   (E2) exceedance        1.10  laion merge none k=10 at 0.95
+   (SC-probe)             1.05  laion merge region-25 k=10 at 0.999
+   (E2) exceedance        1.07  synth-gauss-100 base random-25 k=10 at 0.999
+   (SC-probe)             1.14  synth-gauss-100 base region-25 k=10 at 0.95
+   (E2) exceedance        1.06  synth-gauss-100 base region-25 k=10 at 0.95
+   (SC-probe)             1.05  synth-gauss-100 base region-25 k=10 at 0.995
+   (E2) exceedance        1.07  synth-gauss-100 base region-25 k=10 at 0.995
+   (E2) exceedance        1.09  synth-t3-100 base none k=10 at 0.999
+   (E2) exceedance        1.10  yahoo k none k=1 at 0.9
+   (E2) exceedance        1.05  yahoo k none k=1 at 0.95
+   (E2) exceedance        1.07  yahoo k none k=10 at 0.95
+   (E2) exceedance        1.17  yahoo k random-25 k=1 at 0.95
+   (E2) exceedance        1.11  yahoo k random-25 k=1 at 0.99
+   (E2) exceedance        1.10  yahoo k random-25 k=1 at 0.995
+   (E2) exceedance        1.10  yahoo k random-25 k=1 at 0.999
+   (E2) exceedance        1.07  yahoo score top-25 k=10 at 0.9
+   (E2) exceedance        1.08  yahoo score top-25 k=10 at 0.95
+   (E2) exceedance        1.06  yahoo score dir0-25 k=10 at 0.95
+   (E2) exceedance        1.06  yahoo score dir45-25 k=10 at 0.95
+   (SC) self-correcting   1.10  yahoo score top-1 k=10 at 0.9
+   (SC-probe)             1.10  yahoo score top-1 k=10 at 0.9
+   (E2) exceedance        1.10  yahoo score top-1 k=10 at 0.9
+   (SC) self-correcting   1.10  yahoo score top-1 k=10 at 0.95
+   (SC-probe)             1.10  yahoo score top-1 k=10 at 0.95
+   (E2) exceedance        1.21  yahoo score top-1 k=10 at 0.95
+   (E2) exceedance        1.07  yahoo score top-1 k=10 at 0.995
+   (E2) exceedance        1.08  yahoo score top-1 k=10 at 0.999
+   (SC-probe)             1.05  yahoo mix region-share-0 k=10 at 0.95
+   (E2) exceedance        1.07  yahoo ood-noise-0.5 region-25 k=10 at 0.95
+   (E2) exceedance        1.07  yahoo ood-noise-1 none k=10 at 0.95
+   (SC) self-correcting   1.06  yahoo ood-negated none k=10 at 0.9
+   (SC) self-correcting   1.05  yahoo ood-negated none k=10 at 0.95
+   (SC) self-correcting   1.06  yahoo ood-negated random-25 k=10 at 0.9
+   (SC-probe)             1.05  yahoo ood-negated random-25 k=10 at 0.9
+   (SC) self-correcting   1.06  yahoo ood-negated random-25 k=10 at 0.95
+   (E2) exceedance        1.05  yahoo outlier none k=10 at 0.9
+   (E2) exceedance        1.06  yahoo outlier none k=10 at 0.95
+
+== the final estimates' per-block medians, pooled: median [min, max] over blocks
+   benign  (141 blocks): delta (SC) -0.00 [-0.06, 0.04]  rho (SC) 1.00 [0.60, 1.12]  delta (SC-probe) 0.00 [-0.37, 0.01]  rho (SC-probe) 1.00 [0.60, 1.14]  delta_e (E2) 0.00 [-1.36, 0.74]
+   dir     (18 blocks): delta (SC) 0.28 [-0.15, 1.59]  rho (SC) 0.86 [0.51, 1.09]  delta (SC-probe) 0.15 [-0.15, 1.61]  rho (SC-probe) 0.88 [0.53, 1.07]  delta_e (E2) 0.21 [-0.33, 1.31]
+   top     (6 blocks): delta (SC) 1.96 [1.20, 3.19]  rho (SC) 0.46 [0.32, 0.63]  delta (SC-probe) 1.95 [1.22, 3.19]  rho (SC-probe) 0.46 [0.32, 0.60]  delta_e (E2) 1.30 [0.21, 2.60]
+   bottom  (6 blocks): delta (SC) -1.94 [-2.80, -1.21]  rho (SC) 0.41 [0.31, 0.53]  delta (SC-probe) -1.93 [-2.80, -1.21]  rho (SC-probe) 0.40 [0.31, 0.52]  delta_e (E2) -1.46 [-2.77, 0.00]
+   glove  bottom-25  delta -1.30 rho 0.53  probe delta -1.29 rho 0.52  delta_e 0.00
+   glove  bottom-1   delta -2.80 rho 0.35  probe delta -2.80 rho 0.35  delta_e -2.77
+   laion  bottom-25  delta -1.21 rho 0.47  probe delta -1.21 rho 0.45  delta_e -0.78
+   laion  bottom-1   delta -2.53 rho 0.33  probe delta -2.53 rho 0.33  delta_e -2.25
+   yahoo  bottom-25  delta -1.36 rho 0.48  probe delta -1.33 rho 0.45  delta_e 0.00
+   yahoo  bottom-1   delta -2.68 rho 0.31  probe delta -2.68 rho 0.31  delta_e -2.14
+   glove  top-25     delta 1.25 rho 0.45  probe delta 1.25 rho 0.45  delta_e 0.21
+   glove  top-1      delta 2.49 rho 0.32  probe delta 2.49 rho 0.32  delta_e 1.38
+   laion  top-25     delta 1.20 rho 0.48  probe delta 1.22 rho 0.48  delta_e 0.41
+   laion  top-1      delta 2.52 rho 0.39  probe delta 2.52 rho 0.39  delta_e 1.75
+   yahoo  top-25     delta 1.43 rho 0.63  probe delta 1.41 rho 0.60  delta_e 1.22
+   yahoo  top-1      delta 3.19 rho 0.49  probe delta 3.19 rho 0.49  delta_e 2.60

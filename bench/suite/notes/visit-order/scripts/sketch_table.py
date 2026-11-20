@@ -9,11 +9,11 @@ out = []
 for path in sys.argv[2:]:
     blocks, cur = [], None
     for l in open(path):
-        m = re.match(r"== \S*/stress-ix/(\S+) (\S+) (\S+) k=(\d+)", l)
+        m = re.match(r"== (?:\S*/stress-ix/)?(\S+) (\S+) (\S+) k=(\d+)", l)
         if m:
             cur = None
-            if m.group(2) == "sketch":
-                cur = dict(name=f"{m.group(1)} {m.group(3)} k={m.group(4)}", errs=[], rows={})
+            if m.group(2).startswith("sketch"):
+                cur = dict(name=f"{m.group(1)} {m.group(2)} {m.group(3)} k={m.group(4)}", errs=[], rows={})
                 blocks.append(cur)
             continue
         if cur is None:
