@@ -23,6 +23,7 @@ For each type the suite names the standard system and the frontier one, beside o
 | exact k-NN | vexact (`knn`) | faiss `IndexFlatIP` | PDX-BOND; faiss Panorama (`IndexFlatIPPanorama`) | pgvector |
 | threshold | vexact (`threshold`) | faiss `IndexFlatIP.range_search` | faiss Panorama | pgvector |
 | approximate k-NN, filtered | vexact (`knn_approx`) | faiss HNSW + `IDSelectorBitmap` | ACORN-γ | |
+| approximate k-NN, unfiltered, this runner (`approx_unfiltered`) | vexact (`knn_approx`) | faiss HNSW; PyNNDescent | | |
 | approximate k-NN, unfiltered | VIBE / ANN-Benchmarks: vexact-approx, hnswlib, faiss IVF-PQ fast scan, glass (quick); the suites' default lists (full) |||
 
 ## Quick and full
@@ -70,7 +71,7 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
 ```bash
 # once: the bindings (see bench/annb/README.md), faiss, and optionally PDX-BOND and ACORN
 cd bench/annb/vexact-py && RUSTFLAGS="-C target-cpu=native" maturin build --release -o /tmp/wheels && pip install /tmp/wheels/vexact_py-*.whl
-pip install faiss-cpu h5py matplotlib pyyaml        # faiss 1.13 or later has Panorama; 1.16.0 was used
+pip install faiss-cpu h5py matplotlib pyyaml pynndescent   # faiss 1.13 or later has Panorama; 1.16.0 was used
 bash bench/suite/install/pdx.sh ~/src/pdx           # pdxearch with BOND
 bash bench/suite/install/acorn.sh ~/src/acorn       # then export ACORN_BENCH=~/src/acorn/acorn_bench
 
@@ -146,6 +147,10 @@ Add it to `datasets.py` (source `vibe` or `annb` take the public HDF5 files; ano
   has no range search); under a visible set `filtered_search` with a selection vector.
 - **faiss-hnsw**: `IndexHNSWFlat`, M 16, efConstruction 200, inner product; efSearch 64, 256, 1024 with
   `IDSelectorBitmap`.
+- **pynndescent**: pip `pynndescent` (0.7.0 was used), `NNDescent` with metric `dot` over the unit vectors,
+  n_neighbors 30, pruning_degree_multiplier 1.5, diversify_prob 1.0, built on the build cores (numba's threads) and queried on
+  one; epsilon 0.0 to 0.5 (ANN-Benchmarks' grid, extended to reach high recall). Approximate k-NN, unfiltered only: its
+  query takes no visible set, so it runs only where a suite sets `approx_unfiltered`.
 - **acorn**: ACORN-γ (stanford-futuredata/ACORN at c259f11 with `../threshold-db/acorn.patch`, the static
   `faiss_avx2` library) through `../threshold-db/acorn_bench.cpp`: M 32, γ 12, M_β 32, L2 over the unit vectors;
   efSearch 64, 256, 1024. The build is one piece on the build cores.

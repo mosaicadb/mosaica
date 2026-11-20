@@ -7,6 +7,7 @@ from .diskann import DiskANN
 from .pdx import PdxBond
 from .acorn import Acorn
 from .pgvector import PgVector
+from .pynndescent_sys import PyNNDescent
 
 REGISTRY = {c.name: c for c in (Vexact, FaissFlat, FaissPanorama, FaissHNSW, FaissFlatMmap, FaissIVFDisk, DiskANN,
-                                PdxBond, Acorn, PgVector)}
+                                PdxBond, Acorn, PgVector, PyNNDescent)}

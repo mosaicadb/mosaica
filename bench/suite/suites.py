@@ -35,6 +35,9 @@ SYSTEM_PARAMS = {
     "faiss-hnsw": dict(M=16, efConstruction=200, approx=[dict(ef=e) for e in (64, 256, 1024)]),
     # ACORN-gamma (stanford-futuredata/ACORN with ../threshold-db/acorn.patch), the README's M 32, gamma 12, M_beta 32
     "acorn": dict(M=32, gamma=12, M_beta=32, approx=[dict(ef=e) for e in (64, 256, 1024)]),
+    # PyNNDescent (unfiltered only: its query takes no visible set), metric dot over the unit vectors; epsilon from
+    # ANN-Benchmarks' grid for it, extended to 0.5 to reach high recall
+    "pynndescent": dict(n_neighbors=30, approx=[dict(epsilon=e) for e in (0.0, 0.04, 0.08, 0.12, 0.16, 0.24, 0.32, 0.4, 0.5)]),
     # PostgreSQL + pgvector, sequential scans (no vector index), timed at the client
     "pgvector": dict(),
     # under a memory cap: faiss flat opened memory-mapped (the scan baseline), faiss IVF with on-disk lists, DiskANN
@@ -87,6 +90,7 @@ ANNB_QUICK = {
 
 QUICK = dict(
     name="quick",
+    approx_unfiltered=True,
     datasets=["glove-100-angular", "yahoo-minilm-384-normalized", "laion-clip-512-normalized",
               "inaturalist-resnet-2048-cosine", "bioclip2-768"],
     nq=100,
@@ -98,9 +102,11 @@ QUICK = dict(
     systems=dict(
         exact=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["pdx-bond", "faiss-panorama"]),
         threshold=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["faiss-panorama"]),
-        approx=dict(ours=["vexact"], standard=["faiss-hnsw"], frontier=["acorn"]),
+        approx=dict(ours=["vexact"], standard=["faiss-hnsw", "pynndescent"], frontier=["acorn"]),
     ),
-    params=SYSTEM_PARAMS,
+    params=dict(SYSTEM_PARAMS, vexact=dict(SYSTEM_PARAMS["vexact"], orders=["spread", "adaptive"],
+                                         approx=[dict(nprobe=p) for p in (4, 8, 16, 64, 256)],
+                                         adaptive=[dict(psi=x) for x in (2, 2.5, 3, 3.5, 4, 4.25, 4.5, 4.75, 5, 5.5, 6, 7)])),
     only={},
     overrides={},
     caps=dict(datasets=["yahoo-minilm-384-normalized", "laion-clip-512-normalized"], fractions=[0.5, 0.25, 0.1],
@@ -133,7 +139,7 @@ FULL = dict(
                    database=["pgvector"]),
         threshold=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["faiss-panorama"],
                        database=["pgvector"]),
-        approx=dict(ours=["vexact"], standard=["faiss-hnsw"], frontier=["acorn"]),
+        approx=dict(ours=["vexact"], standard=["faiss-hnsw", "pynndescent"], frontier=["acorn"]),
     ),
     params=dict(SYSTEM_PARAMS,
                 vexact=dict(SYSTEM_PARAMS["vexact"],
