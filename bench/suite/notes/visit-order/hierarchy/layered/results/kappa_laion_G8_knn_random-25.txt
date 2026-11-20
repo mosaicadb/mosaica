@@ -1,0 +1,33 @@
+/home/user/scratch-layered/fit_laion_8 random-25: k 10, groups 8, levels end at [16, 32, 56, 96, 160, 256] B, rho derived; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors
+  level 0 (16 B): rho derived per group, min / median / max 0.0510 / 0.0534 / 0.0559; 1 / sqrt(n) = 0.0442
+  level 1 (32 B): rho derived per group, min / median / max 0.0487 / 0.0508 / 0.0522; 1 / sqrt(n) = 0.0442
+psi 3 direct      recall 0.7810 | 7.9 0.0 0.0 | 0 0 0 0 0 0 | 4277
+psi 3 certified   recall 0.7810 | 7.9 7.9 2.2 | 4267 4267 4266 4252 2120 557 | 471
+psi 3 statistical recall 0.7160 | 9.7 9.7 2.3 | 5212 790 658 577 408 237 | 371
+psi 3.5 direct      recall 0.8890 | 20.8 0.0 0.0 | 0 0 0 0 0 0 | 11016
+psi 3.5 certified   recall 0.8890 | 20.8 20.8 3.2 | 11006 11006 11000 10899 3669 617 | 477
+psi 3.5 statistical recall 0.8240 | 23.7 23.7 3.2 | 12439 1093 792 646 435 249 | 378
+psi 4 direct      recall 0.9390 | 50.5 0.0 0.0 | 0 0 0 0 0 0 | 26110
+psi 4 certified   recall 0.9390 | 50.5 50.5 4.5 | 26100 26099 26068 25624 5783 663 | 480
+psi 4 statistical recall 0.8960 | 51.4 51.4 4.5 | 26596 1710 1023 744 464 259 | 384
+psi 4.5 direct      recall 0.9780 | 90.2 0.0 0.0 | 0 0 0 0 0 0 | 46310
+psi 4.5 certified   recall 0.9780 | 90.2 90.2 5.5 | 46300 46293 46189 44748 7499 687 | 482
+psi 4.5 statistical recall 0.9530 | 90.4 90.4 5.5 | 46392 2928 1441 887 496 270 | 389
+psi 5 direct      recall 0.9900 | 146.5 0.0 0.0 | 0 0 0 0 0 0 | 74894
+psi 5 certified   recall 0.9900 | 146.5 146.5 6.5 | 74884 74849 74473 70568 9167 699 | 483
+psi 5 statistical recall 0.9800 | 146.6 146.6 6.5 | 74928 5248 2188 1108 532 279 | 393
+psi 5.5 direct      recall 0.9930 | 218.9 0.0 0.0 | 0 0 0 0 0 0 | 111319
+psi 5.5 certified   recall 0.9930 | 218.9 218.9 7.3 | 111309 111160 110109 101540 10520 705 | 483
+psi 5.5 statistical recall 0.9910 | 219.8 219.8 7.3 | 111743 9256 3455 1439 571 288 | 397
+psi 6 direct      recall 0.9950 | 295.1 0.0 0.0 | 0 0 0 0 0 0 | 149262
+psi 6 certified   recall 0.9950 | 295.1 295.1 7.8 | 149252 148824 146434 130763 11456 708 | 483
+psi 6 statistical recall 0.9950 | 295.1 295.1 7.8 | 149252 15501 5494 1939 614 297 | 400
+psi 6.5 direct      recall 0.9950 | 371.0 0.0 0.0 | 0 0 0 0 0 0 | 186248
+psi 6.5 certified   recall 0.9950 | 371.0 370.9 8.0 | 186238 185210 180698 156399 12101 709 | 483
+psi 6.5 statistical recall 0.9960 | 371.0 370.9 8.0 | 186238 24490 8582 2665 664 306 | 403
+psi 7 direct      recall 0.9950 | 425.4 0.0 0.0 | 0 0 0 0 0 0 | 212690
+psi 7 certified   recall 0.9950 | 425.4 425.3 8.0 | 212680 210942 204233 172482 12378 709 | 483
+psi 7 statistical recall 0.9960 | 425.4 425.3 8.0 | 212680 36055 12950 3703 720 315 | 406
+psi 8 direct      recall 0.9950 | 482.4 0.0 0.0 | 0 0 0 0 0 0 | 241079
+psi 8 certified   recall 0.9950 | 482.4 482.1 8.0 | 241068 237430 226896 185881 12613 709 | 484
+psi 8 statistical recall 0.9960 | 482.4 482.1 8.0 | 241068 65989 26314 7140 862 332 | 412

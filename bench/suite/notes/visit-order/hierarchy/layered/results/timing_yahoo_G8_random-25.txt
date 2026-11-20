@@ -1,0 +1,5 @@
+knn2 exact           median 12184 mean 13156 recall 1.0000
+approximate psi 4    median 322 mean 383 recall 0.8280 | clusters read directly 4.9, on the index path 0.0, groups set up 0.0; with a group's setup priced at 0: directly 4.9, index path 0.0
+approximate psi 5    median 701 mean 842 recall 0.9360 | clusters read directly 13.0, on the index path 0.0, groups set up 0.0; with a group's setup priced at 0: directly 13.0, index path 0.0
+approximate psi 6    median 1404 mean 1668 recall 0.9660 | clusters read directly 27.0, on the index path 0.0, groups set up 0.0; with a group's setup priced at 0: directly 27.0, index path 0.0
+ok

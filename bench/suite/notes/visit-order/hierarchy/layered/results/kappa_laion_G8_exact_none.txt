@@ -1,0 +1,6 @@
+/home/user/scratch-layered/fit_laion_8 none: groups 8, K 500, levels end at [16, 32, 56, 96, 160, 256] B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned
+knn k=10 | 1003735 984421 945082 802803 104745 7721 | 1389 | 500.0 0.0 0.0 | 0 | 8.0 | 0.0 0 | 0.00
+threshold 0 | 1000443 986417 948383 806260 73235 2368 | 313 | 500.0 0.0 0.0 | 0 | 8.0 | 1.0 5 | 0.00
+threshold 1 | 1000443 1000297 998588 984434 480997 86563 | 19479 | 500.0 0.0 0.0 | 0 | 8.0 | 1.0 5 | 0.00
+threshold 2 | 1000443 1000442 1000416 999887 862345 398892 | 141854 | 500.0 0.0 0.0 | 0 | 8.0 | 1.0 5 | 0.00
+tightness: median certified half-width / sigma at the first 3 levels: 9.32 7.81 5.94

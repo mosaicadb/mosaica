@@ -1,0 +1,3 @@
+/home/user/scratch-layered/fit_laion_64 random-25: groups 64, K 500, levels end at [16, 32, 56, 96, 160, 256] B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned
+knn k=10 | 243546 233418 218189 177399 27169 1198 | 9085 | 500.0 0.0 0.0 | 0 | 60.0 | 0.0 0 | 0.00
+threshold 0 | 241261 240952 239535 231779 111799 17559 | 13052 | 500.0 0.0 0.0 | 0 | 60.0 | 41.0 8851 | 0.00

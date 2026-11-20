@@ -3704,3 +3704,328 @@ fn study_count_model() {
     eprintln!("  rows entering each level, per row of the sorted ranges: {:?}", (0..nl).map(|l| (lent[l] / lent[nl] * 1000.0).round() / 1000.0).collect::<Vec<_>>());
     eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
 }
+
+/// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: per query,
+/// every cluster's centre score, sigma, order key and stream key, and for the DIAG_M clusters first in the k-NN order
+/// (among those holding a visible row) every visible row's entity, exact score, key, certified interval from the key
+/// alone and certified interval at each of the first DIAG_LEVELS levels. Nothing is timed. DIAG_DIR the index
+/// directory, DIAG_PREP the prep directory, DIAG_SET the visible set (none, random-25, ...), DIAG_OUT the output
+/// prefix: `.clu` (per query, K records of 4 f32: mu, sigma, order key, stream key), `.idx` (per query, M records of 2
+/// u32: cluster, visible rows; a cluster of u32::MAX pads a query with fewer live clusters), `.rows` (per row, 5 + 2
+/// levels words: entity u32, then f32 exact score, key, key interval lo and hi, each level's lo and hi), `.kst` (per
+/// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text).
+#[test]
+#[ignore]
+fn study_layered_dump() {
+    use rayon::prelude::*;
+    use std::io::Write;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let out = std::env::var("DIAG_OUT").unwrap();
+    let m: usize = std::env::var("DIAG_M").ok().map_or(48, |s| s.parse().unwrap());
+    let nlev: usize = std::env::var("DIAG_LEVELS").ok().map_or(3, |s| s.parse().unwrap());
+    let nqmax: usize = std::env::var("DIAG_NQ").ok().map_or(usize::MAX, |s| s.parse().unwrap());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = (qs.len() / d).min(nqmax);
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let nlev = nlev.min(nl);
+    let m = m.min(k);
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows)).unwrap();
+    let kst: Vec<f32> = (0..k).flat_map(|c| {
+        let cl = &ix.cl[c];
+        let nr = (cl.r1 - cl.r0).max(1) as f64;
+        let (s1, s2) = (cl.r0..cl.r1).fold((0.0, 0.0), |a, r| { let x = ix.ahat[r] as f64 / 32767.0; (a.0 + x, a.1 + x * x) });
+        [(s1 / nr) as f32, (s2 / nr) as f32]
+    }).collect();
+    std::fs::write(format!("{out}.kst"), kst.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    let (mut fc, mut fi, mut fr) = (std::fs::File::create(format!("{out}.clu")).unwrap(), std::fs::File::create(format!("{out}.idx")).unwrap(), std::io::BufWriter::new(std::fs::File::create(format!("{out}.rows")).unwrap()));
+    for chunk in (0..nq).collect::<Vec<_>>().chunks(12) {
+        let per: Vec<(Vec<f32>, Vec<u32>, Vec<u8>)> = chunk.par_iter().map(|&qi| {
+            let q = &qsp[qi][..];
+            let pr = prep2(&ix, q);
+            let mu = ad.keys(&ix, q, 0.0);
+            let k1 = ad.keys(&ix, q, 1.0);
+            let ok = ad.z_keys(&ix, q, vis.as_ref(), true);
+            let sk = ad.z_keys(&ix, q, vis.as_ref(), false);
+            let clu: Vec<f32> = (0..k).flat_map(|c| [mu[c] as f32, (k1[c] - mu[c]) as f32, ok[c] as f32, sk[c] as f32]).collect();
+            let mut o: Vec<usize> = (0..k).filter(|&c| nv_of(c) > 0).collect();
+            o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+            o.truncate(m);
+            pr.anc(&ix);
+            let mut st = crate::kernel::Stats::new(nl);
+            let mut rf = Refiner::new(&ix, &pr);
+            let (mut idx, mut rows) = (Vec::new(), Vec::new());
+            for &c in &o {
+                let cl = &ix.cl[c];
+                let vr: Vec<usize> = (cl.r0..cl.r1).filter(|&r| vis.as_ref().is_none_or(|v| v.has(r))).collect();
+                idx.extend([c as u32, vr.len() as u32]);
+                let cu = cut_params2(&ix, c, &pr, pr.qm(&ix, c));
+                let ivs: Vec<Vec<(f64, f64)>> = (0..nlev).map(|l| rf.refine(&vr.iter().map(|&r| (r as u32, l)).collect::<Vec<_>>(), &mut st)).collect();
+                for (i, &r) in vr.iter().enumerate() {
+                    rows.extend(ix.row_ent[r].to_le_bytes());
+                    let (klo, khi) = key_interval2(&ix, &cu, r);
+                    let mut w = vec![exact_value2(&ix, &pr, r) as f32, ix.ahat[r] as f32 / 32767.0, klo as f32, khi as f32];
+                    for iv in &ivs {
+                        w.extend([iv[i].0 as f32, iv[i].1 as f32]);
+                    }
+                    for x in w {
+                        rows.extend(x.to_le_bytes());
+                    }
+                }
+            }
+            idx.resize(2 * m, u32::MAX);
+            for j in o.len()..m {
+                idx[2 * j + 1] = 0;
+            }
+            (clu, idx, rows)
+        }).collect();
+        for (clu, idx, rows) in per {
+            fc.write_all(&clu.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+            fi.write_all(&idx.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+            fr.write_all(&rows).unwrap();
+        }
+    }
+    fr.flush().unwrap();
+    eprintln!("{dir} {set}: {nq} queries, {m} clusters each, {nlev} levels -> {out}.*");
+}
+
+/// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: the library's
+/// own reader (`KnnReader`) with each level's upper half-width multiplied by psi rho (`Prep2::dial`), against the same
+/// reads direct and with certified levels; nothing is timed, the reader's counters are summed. Clusters in the k-NN
+/// order, read until the next `LOOKAHEAD` clusters' largest mu + psi sigma is below the running k-th best; a cluster
+/// of at least DIAG_MIN visible rows on the index path. DIAG_DIR, DIAG_PREP, DIAG_SET; DIAG_RHO the levels' rho (comma
+/// separated; later levels take the last); DIAG_PSIS; DIAG_K. One line per psi and mode: recall, clusters read,
+/// clusters and groups opened on the index path, rows entering each level, stored vectors read.
+#[test]
+#[ignore]
+fn study_layered_kernel() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    // DIAG_RHO=derived: each deterministic level's median over the groups of rho derived below (later levels the last)
+    let rho_arg = std::env::var("DIAG_RHO").unwrap();
+    let mut rho: Vec<f64> = if rho_arg == "derived" { Vec::new() } else { rho_arg.split(',').map(|s| s.parse().unwrap()).collect() };
+    let psis: Vec<f64> = std::env::var("DIAG_PSIS").unwrap_or("3,4,5,6,7,8".into()).split(',').map(|s| s.parse().unwrap()).collect();
+    let kk: usize = std::env::var("DIAG_K").ok().map_or(10, |s| s.parse().unwrap());
+    let min_rows: usize = std::env::var("DIAG_MIN").ok().map_or(32, |s| s.parse().unwrap());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = qs.len() / d;
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
+    let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
+    let (ow, ord) = (on.shape[1], on.i32s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    eprintln!("{dir} {set}: k {kk}, groups {}, levels end at {:?} B, rho {rho_arg}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
+    // rho derived from the build's own design: a level's weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual
+    // variance at the level, pi_c the query profile), so both sides of Cauchy-Schwarz carry a_c = sqrt(v_c pi_c) =
+    // D_c^2 pi_c per coordinate, and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2
+    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
+    let n = ix.n();
+    for l in 0..ix.meta.ndl() {
+        let mut r: Vec<f64> = ix.groups.iter().enumerate().map(|(g, gp)| {
+            let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
+            a.iter().map(|x| x * x).sum::<f64>().sqrt() / a.iter().sum::<f64>()
+        }).collect();
+        r.sort_by(|a, b| a.total_cmp(b));
+        if rho_arg == "derived" {
+            rho.push(r[r.len() / 2]);
+        }
+        eprintln!("  level {l} ({} B): rho derived per group, min / median / max {:.4} / {:.4} / {:.4}; 1 / sqrt(n) = {:.4}", ix.meta.level_bytes(l), r[0], r[r.len() / 2], r[r.len() - 1], 1.0 / (n as f64).sqrt());
+    }
+    for &psi in &psis {
+        for mode in ["direct", "certified", "statistical"] {
+            let per: Vec<(f64, Vec<f64>)> = (0..nq).into_par_iter().map(|qi| {
+                let q = &qsp[qi][..];
+                let mut pr = prep2(&ix, q);
+                if mode == "statistical" {
+                    pr.dial = (0..nl).map(|l| (psi * rho[l.min(rho.len() - 1)]).min(1.0) as f32).collect();
+                }
+                let mu = ad.keys(&ix, q, 0.0);
+                let kp = ad.keys(&ix, q, psi);
+                let ok = ad.z_keys(&ix, q, vis.as_ref(), true);
+                let mut o: Vec<usize> = (0..k).filter(|&c| nv_of(c) > 0).collect();
+                o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+                let _ = &mu;
+                let mut rd = KnnReader::new(&ix, &pr, vis.as_ref(), kk, plan, crate::kernel::Stats::new(nl));
+                let mut groups = std::collections::HashSet::new();
+                let mut read = 0;
+                for j in 0..o.len() {
+                    let t = rd.kth();
+                    if t.is_finite() && o[j..(j + adaptive::LOOKAHEAD).min(o.len())].iter().all(|&c| kp[c] < t) {
+                        break;
+                    }
+                    let c = o[j];
+                    let before = rd.st.clusters_open;
+                    rd.visit(c, if mode != "direct" && nv_of(c) >= min_rows { KnnPath::Index } else { KnnPath::Direct });
+                    if rd.st.clusters_open > before {
+                        groups.insert(ix.cl[c].g);
+                    }
+                    read += 1;
+                }
+                let (ents, st) = rd.finish();
+                let truth = &ord[qi * ow..qi * ow + kk];
+                let rec = ents.iter().filter(|e| truth.contains(&(e.1 as i32))).count() as f64 / kk as f64;
+                let mut v = vec![read as f64, st.clusters_open as f64, groups.len() as f64];
+                v.extend((0..nl).map(|l| st.enter[l] as f64));
+                v.push(st.full_reads as f64);
+                (rec, v)
+            }).collect();
+            let rec = per.iter().map(|x| x.0).sum::<f64>() / nq as f64;
+            let m: Vec<f64> = (0..per[0].1.len()).map(|i| per.iter().map(|x| x.1[i]).sum::<f64>() / nq as f64).collect();
+            eprintln!("psi {psi} {mode:<11} recall {rec:.4} | {:.1} {:.1} {:.1} | {} | {:.0}", m[0], m[1], m[2], m[3..3 + nl].iter().map(|x| format!("{x:.0}")).collect::<Vec<_>>().join(" "), m[3 + nl]);
+        }
+    }
+}
+
+/// Study (ignored; run by hand on a built index) for layered.md 8.8: what the exact queries read, counted, and how
+/// tight the levels' certified intervals are. DIAG_DIR, DIAG_PREP, DIAG_SET. Per query kind (knn2 at k = 10, then
+/// threshold2 at each of the prep's thresholds for the set), means over the queries of: rows entering each level,
+/// stored vectors read, clusters opened on the index path, clusters the support table took in and dropped, rows the
+/// key's range dropped, groups set up, clusters and rows scored directly, the share of queries scanned. Unfiltered
+/// also: over each query's 4 first clusters, the median certified half-width of a row at each of the first 3 levels
+/// over the cluster's sigma, averaged.
+#[test]
+#[ignore]
+fn study_layered_exact() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = qs.len() / d;
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let tn = crate::util::read_npy(&if set == "none" { format!("{prep}/thresholds.npy") } else { format!("{prep}/thresholds_{set}.npy") });
+    let (tw, ths) = (tn.shape[1], tn.f64s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    eprintln!("{dir} {set}: groups {}, K {k}, levels end at {:?} B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
+    let line = |name: String, per: Vec<(Stats, u64, u64, bool)>| {
+        let n = per.len() as f64;
+        let m = |f: &dyn Fn(&(Stats, u64, u64, bool)) -> f64| per.iter().map(f).sum::<f64>() / n;
+        eprintln!("{name} | {} | {:.0} | {:.1} {:.1} {:.1} | {:.0} | {:.1} | {:.1} {:.0} | {:.2}", (0..nl).map(|l| format!("{:.0}", m(&|x| x.0.enter[l] as f64))).collect::<Vec<_>>().join(" "), m(&|x| x.0.full_reads as f64), m(&|x| x.0.clusters_open as f64), m(&|x| x.0.clusters_in as f64), m(&|x| x.0.clusters_out as f64), m(&|x| x.0.range_out as f64), m(&|x| x.0.groups as f64), m(&|x| x.1 as f64), m(&|x| x.2 as f64), m(&|x| x.3 as u8 as f64));
+    };
+    use crate::kernel::Stats;
+    let per: Vec<(Stats, u64, u64, bool)> = (0..nq).into_par_iter().map(|qi| {
+        let o = knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan);
+        (o.st, 0, 0, false)
+    }).collect();
+    line("knn k=10".into(), per);
+    for ti in 0..tw {
+        let per: Vec<(Stats, u64, u64, bool)> = (0..nq).into_par_iter().map(|qi| {
+            let pr = prep2(&ix, &qsp[qi]);
+            let o = threshold2(&ix, &pr, ths[qi * tw + ti], &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+            (o.st, o.flat_clusters, o.flat_items, o.scanned)
+        }).collect();
+        line(format!("threshold {ti}"), per);
+    }
+    if set == "none" {
+        let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+        let lv = nl.min(3);
+        let per: Vec<Vec<f64>> = (0..nq).into_par_iter().map(|qi| {
+            let q = &qsp[qi][..];
+            let pr = prep2(&ix, q);
+            let mu = ad.keys(&ix, q, 0.0);
+            let k1 = ad.keys(&ix, q, 1.0);
+            let ok = ad.z_keys(&ix, q, None, true);
+            let mut o: Vec<usize> = (0..k).collect();
+            o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+            let mut st = Stats::new(nl);
+            let mut rf = Refiner::new(&ix, &pr);
+            let mut acc = vec![0.0; lv];
+            for &c in &o[..4] {
+                let cl = &ix.cl[c];
+                let sg = (k1[c] - mu[c]).max(1e-12);
+                for l in 0..lv {
+                    let mut h: Vec<f64> = rf.refine(&(cl.r0..cl.r1).map(|r| (r as u32, l)).collect::<Vec<_>>(), &mut st).iter().map(|x| 0.5 * (x.1 - x.0)).collect();
+                    h.sort_by(|a, b| a.total_cmp(b));
+                    acc[l] += h[h.len() / 2] / sg / 4.0;
+                }
+            }
+            acc
+        }).collect();
+        eprintln!("tightness: median certified half-width / sigma at the first {lv} levels: {}", (0..lv).map(|l| format!("{:.2}", per.iter().map(|x| x[l]).sum::<f64>() / nq as f64)).collect::<Vec<_>>().join(" "));
+    }
+}
+
+/// Study (ignored; run by hand, pinned to one core) for layered.md: the group count timed. Exact `knn2` at k = 10 and
+/// the approximate k-NN (`adaptive::Adaptive::knn`, its constants timed on this index) at each psi of DIAG_PSIS, for
+/// the first DIAG_NQ queries (50), DIAG_REPS times (2): per query the fastest repetition; printed: the median and the
+/// mean over the queries in microseconds, and the approximate recall. DIAG_DIR, DIAG_PREP, DIAG_SET.
+#[test]
+#[ignore]
+fn study_layered_group_timing() {
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let nq: usize = std::env::var("DIAG_NQ").ok().map_or(50, |s| s.parse().unwrap());
+    let reps: usize = std::env::var("DIAG_REPS").ok().map_or(2, |s| s.parse().unwrap());
+    let psis: Vec<f64> = std::env::var("DIAG_PSIS").unwrap_or("4,5,6".into()).split(',').map(|s| s.parse().unwrap()).collect();
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let m = adaptive::measure(&ix).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    // the same reader with a group's setup priced at nothing: the reads it moves to the index path are the ones the
+    // real constants read directly because their group was new (counted in the untimed pass)
+    let ad0 = adaptive::Adaptive::new(&ix, adaptive::Measured { grp_us: 0.0, ..m }).unwrap();
+    let mut split = vec![[0.0f64; 5]; 1 + psis.len()];
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = nq.min(qs.len() / d);
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
+    let (ow, ord) = (on.shape[1], on.i32s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    let rec = |ents: &[(f64, u32)], qi: usize| ents.iter().filter(|e| ord[qi * ow..qi * ow + 10].contains(&(e.1 as i32))).count() as f64 / 10.0;
+    // one untimed pass, then the repetitions; the arms in turn within a query
+    let narm = 1 + psis.len();
+    let mut best = vec![vec![f64::INFINITY; nq]; narm];
+    let mut recall = vec![0.0; narm];
+    for rep in 0..=reps {
+        for qi in 0..nq {
+            for a in 0..narm {
+                let t = std::time::Instant::now();
+                let (ents, info) = if a == 0 { (knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan).ents, None) } else { let o = ad.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan); (o.0.ents, Some(o.1)) };
+                let us = t.elapsed().as_secs_f64() * 1e6;
+                if rep == 0 {
+                    recall[a] += rec(&ents, qi) / nq as f64;
+                    if let Some(i) = info {
+                        let i0 = ad0.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan).1;
+                        for (x, v) in split[a].iter_mut().zip([i.direct, i.index, i.groups, i0.direct, i0.index]) {
+                            *x += v as f64 / nq as f64;
+                        }
+                    }
+                } else {
+                    best[a][qi] = best[a][qi].min(us);
+                }
+            }
+        }
+    }
+    eprintln!("{dir} {set}: groups {}, {nq} queries, {reps} repetitions; microseconds per query (median, mean of each query's fastest) and recall@10; measured constants {}", ix.groups.len(), m.to_kv().replace('\n', " "));
+    for a in 0..narm {
+        let mut v = best[a].clone();
+        v.sort_by(|x, y| x.total_cmp(y));
+        let name = if a == 0 { "knn2 exact".to_string() } else { format!("approximate psi {}", psis[a - 1]) };
+        let sp = if a == 0 { String::new() } else { format!(" | clusters read directly {:.1}, on the index path {:.1}, groups set up {:.1}; with a group's setup priced at 0: directly {:.1}, index path {:.1}", split[a][0], split[a][1], split[a][2], split[a][3], split[a][4]) };
+        eprintln!("{name:<20} median {:.0} mean {:.0} recall {:.4}{sp}", v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, recall[a]);
+    }
+}

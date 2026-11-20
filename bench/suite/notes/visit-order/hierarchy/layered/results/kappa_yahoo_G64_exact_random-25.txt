@@ -1,0 +1,3 @@
+/home/user/scratch-layered/fit_yahoo_64 random-25: groups 64, K 339, levels end at [16, 32, 56, 96, 160, 256] B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned
+knn k=10 | 169563 109009 52203 19206 503 51 | 1891 | 339.0 0.0 0.0 | 680 | 63.0 | 0.0 0 | 0.00
+threshold 0 | 167481 166310 157755 126467 15996 2389 | 2418 | 339.0 0.0 0.0 | 0 | 63.0 | 7.0 1845 | 0.00
