@@ -691,6 +691,42 @@ The sigma errors do not explain it:
 So the hybrid's loss on text queries comes with a smaller sigma error, not a larger one. The rows depend on how the
 errors fall across the clusters ranked, which these medians do not measure.
 
+**The self-correcting k-NN order, built** (5853926; `results/self-correcting-knn/`). Only the order changed; the
+planner (read choice, constants, groups) is f528836's.
+- **Keys:**
+  - order mu + lambda sigma, lambda = delta + 3 rho (`ORDER_C`);
+  - stop: the window's largest mu + (delta + psi rho) sigma below the running k-th best;
+  - stream mu + lambda rad s.
+  z(1, v) is gone.
+- **Moments.** Delta and rho come from the clusters read directly while fewer than k items are held, each scored alone
+  in the direct batch. The batch keeps the scores' sum and sum of squares (two adds and a multiply a row, only in that
+  phase), converted once per cluster to z moments. The prior is 0 and 1 until two rows are in; lambda is frozen once k
+  items are held.
+- **Frozen against SC-probe** (the replay, `frozen.txt`; glove, yahoo, LAION and llama, k 1 and 10, none, random-25,
+  bottom-1, bottom-25, top-25): rows within 0.97 to 1.03, median 1.00. So the nv ≤ 129 clusters' moments after the
+  fill add nothing.
+- **Work per query** (`overhead.txt`, 50 queries):
+  - stream re-keys: unfiltered 0 to 0.12, random-25 1, region-1 2.4 to 3.5 on average (at most 9);
+  - each re-key a heapify of the clusters left in the stream (fewer than 592);
+  - the window's eight keys re-computed at each read.
+- **The threshold query does not use this order.** It reads by the bounds and mu + psi sigma at its own t.
+- **Timed against 00965ba's library (7536990) and f528836, back to back** (`timing/summary.txt`; 50 queries,
+  2 repetitions, psi 2 to 7 in steps of 1, so the ratios interpolate coarsely). Time to recall 0.8/0.9/0.95/0.98/0.99
+  over spread's:
+
+  | Set | 7536990 | f528836 | Self-correcting |
+  |---|---|---|---|
+  | glove none | 1.42/.82/1.92/2.32/2.61 | 1.58/.88/1.26/1.95/1.82 | 1.44/.81/1.41/1.58/1.38 |
+  | glove random-25 | 1.08/.78/.56/1.09/1.23 | 1.12/.85/.60/.94/1.40 | .96/.74/.55/1.14/1.27 |
+  | glove region-1 | .65/.67/.62/.56/.54 | .75/.84/.79/.73/.75 | .94/1.00/.92/.83/.81 |
+  | LAION none | .63/.92/1.25/1.43/2.09 | .72/.97/.92/1.03/1.06 | .70/.92/.83/1.01/1.08 |
+  | LAION random-25 | .40/.41/.61/1.13/- | .38/.38/.61/.51/.85 | .47/.37/.54/.56/.64 |
+  | LAION region-1 | .52/.64/.66/.60/.58 | .50/.68/.65/.57/.55 | .53/.63/.64/.59/- |
+
+  Glove region-1 is where the new order loses. Delta comes out at −0.6 there, which lowers both the order's lambda
+  and the stop. To the same recall it reads more clusters than f528836 (306 clusters for 0.94 at psi 5, against 204 for
+  0.99 at psi 3). 7536990's race to a scan remains the fastest under region-1.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's

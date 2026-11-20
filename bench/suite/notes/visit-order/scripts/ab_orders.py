@@ -40,6 +40,7 @@ def main():
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--core", type=int, default=3)
     ap.add_argument("--k", type=int, default=10)
+    ap.add_argument("--nq", type=int, default=0, help="the first this many queries (0: all)")
     a = ap.parse_args()
     data = os.environ["SUITE_DATA"]
     prep = Prep(prep_dir(data, a.dataset))
@@ -49,6 +50,8 @@ def main():
     ix = {arm: vexact_py.Index(path, core=a.core) for arm in a.arms}
     first = next(iter(ix.values()))
     Q = prep.queries()
+    if a.nq:
+        Q = Q[: a.nq]
     qb = np.zeros(first.dim, np.float32)
     print(f"{a.dataset}: {first.clusters} clusters, {len(Q)} queries, k {a.k}, {a.reps} repetitions; "
           f"{'threshold' if a.threshold else 'k-NN'} arms " + ", ".join(a.arms))
