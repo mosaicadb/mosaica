@@ -10,9 +10,9 @@ The machine's RAM (15.7 GiB) is the cap. Each size's f16 vectors (N x d x 2 byte
 
 | dataset | f16 vectors GiB | diskann: index GiB / build peak GiB | faiss-flat-mmap: index GiB / build peak GiB | faiss-hnsw: index GiB / build peak GiB | faiss-ivf-disk: index GiB / build peak GiB | vexact: index GiB / build peak GiB |
 |---|---|---|---|---|---|---|
-| laion-s200k | 0.19 (fits) | unavailable | 0.19 (fits) / 0.71 (fits) | 0.21 (fits) / 0.73 (fits) | 0.20 (fits) / 1.03 (fits) | 0.65 (fits) / 1.41 (fits) |
-| laion-s500k | 0.48 (fits) | unavailable | 0.48 (fits) / 1.57 (fits) | 0.54 (fits) / 1.63 (fits) | 0.48 (fits) / 1.67 (fits) | 1.63 (fits) / 1.77 (fits) |
-| laion-s1m | 0.95 (fits) | unavailable | 0.95 (fits) / 2.71 (fits) | 1.07 (fits) / 2.83 (fits) | 0.97 (fits) / 3.29 (fits) | 3.22 (fits) / 3.03 (fits) |
+| laion-s200k | 0.19 (fits) | 1.20 (fits) / 1.61 (fits) | 0.19 (fits) / 0.71 (fits) | 0.21 (fits) / 0.73 (fits) | 0.20 (fits) / 1.03 (fits) | 0.65 (fits) / 1.41 (fits) |
+| laion-s500k | 0.48 (fits) | 3.01 (fits) / 4.08 (fits) | 0.48 (fits) / 1.57 (fits) | 0.54 (fits) / 1.63 (fits) | 0.48 (fits) / 1.67 (fits) | 1.63 (fits) / 1.77 (fits) |
+| laion-s1m | 0.95 (fits) | does not fit (disk) | 0.95 (fits) / 2.71 (fits) | 1.07 (fits) / 2.83 (fits) | 0.97 (fits) / 3.29 (fits) | 3.22 (fits) / 3.03 (fits) |
 
 
 ## Exact k-NN
@@ -121,17 +121,17 @@ Several threads; recorded apart from the queries.
 
 | dataset | system | status | build s | threads | index GiB | peak RSS GiB | detail |
 |---|---|---|---|---|---|---|---|
-| laion-s200k | diskann | unavailable |  |  |  |  | diskann_bench is not built (install/diskann.sh) or not given ($DISKANN_BENCH) |
+| laion-s200k | diskann | ok | 101.9 | 3 | 1.204 | 1.61 | {"R": 64, "L": 100, "pq_ram_gb": 0.0205, "pq_fraction": 0.05} |
 | laion-s200k | faiss-flat-mmap | ok | 0.9 | 3 | 0.191 | 0.71 | {"storage": "f16"} |
 | laion-s200k | faiss-hnsw | ok | 34.0 | 3 | 0.215 | 0.73 | {"M": 16, "efConstruction": 200, "storage": "f16"} |
 | laion-s200k | faiss-ivf-disk | ok | 67.1 | 3 | 0.196 | 1.03 | {"nlist": 2048, "storage": "f16"} |
 | laion-s200k | vexact | ok | 68.8 | 3 | 0.650 | 1.41 | {"fit_s": 47.5, "encode_s": 18.3, "sample": true} |
-| laion-s500k | diskann | unavailable |  |  |  |  | diskann_bench is not built (install/diskann.sh) or not given ($DISKANN_BENCH) |
+| laion-s500k | diskann | ok | 518.7 | 3 | 3.009 | 4.08 | {"R": 64, "L": 100, "pq_ram_gb": 0.0512, "pq_fraction": 0.05} |
 | laion-s500k | faiss-flat-mmap | ok | 2.0 | 3 | 0.477 | 1.57 | {"storage": "f16"} |
 | laion-s500k | faiss-hnsw | ok | 107.5 | 3 | 0.537 | 1.63 | {"M": 16, "efConstruction": 200, "storage": "f16"} |
 | laion-s500k | faiss-ivf-disk | ok | 70.4 | 3 | 0.485 | 1.67 | {"nlist": 2048, "storage": "f16"} |
 | laion-s500k | vexact | ok | 99.0 | 3 | 1.626 | 1.77 | {"fit_s": 60.4, "encode_s": 33.8, "sample": true} |
-| laion-s1m | diskann | unavailable |  |  |  |  | diskann_bench is not built (install/diskann.sh) or not given ($DISKANN_BENCH) |
+| laion-s1m | diskann | does not fit |  |  |  |  | does not fit on disk: the build needs about 8.4 GB, 7.7 GB free |
 | laion-s1m | faiss-flat-mmap | ok | 4.7 | 3 | 0.954 | 2.71 | {"storage": "f16"} |
 | laion-s1m | faiss-hnsw | ok | 260.4 | 3 | 1.073 | 2.83 | {"M": 16, "efConstruction": 200, "storage": "f16"} |
 | laion-s1m | faiss-ivf-disk | ok | 193.9 | 3 | 0.969 | 3.29 | {"nlist": 4096, "storage": "f16"} |

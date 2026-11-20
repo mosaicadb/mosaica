@@ -58,7 +58,9 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
 - `check.py`: every exact answer against the truth, with the rounding allowance of the earlier `threshold-db/check.py`;
   writes `results/<suite>/<dataset>/check.csv`.
 - `report.py`: `results/<suite>/REPORT.md` (a table per type across datasets, the filtered approximate runs, the
-  builds) and a plot per type (`exact.png`, `threshold.png`, `approx.png`).
+  builds) and a plot per type (`exact.png`, `threshold.png`, `approx.png`; at scale `scale_exact.png`,
+  `scale_threshold.png`, `scale_approx.png` and `scale_build.png`, which plot each system's time against N, approximate
+  k-NN as the time to reach recall 0.8, 0.9 and 0.95, and the builds' time, index size and peak memory).
 - `public.py`: the public suites' driver (below).
 - `capmem.py`: the optional memory cap (cgroup v1 and v2) and its evidence; `prep_scale.py`: the LAION scale suites'
   prep; `machine.py`: the machine record a run keeps with its results.
