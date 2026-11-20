@@ -18,21 +18,9 @@ from common import RESULTS, share_label, summarise  # noqa: E402
 import suites as S  # noqa: E402
 
 ROLE_ORDER = {"ours": 0, "standard": 1, "frontier": 2, "database": 3, "in memory": 4}
-# one colour per system in every plot (matplotlib's ten-colour cycle), so a system reads the same across panels
+# the systems' order in the plots (their colours are plotting.COLOURS)
 SYSTEM_ORDER = ["vexact", "faiss-flat", "faiss-flat-mmap", "faiss-hnsw", "faiss-ivf-disk", "faiss-panorama", "pdx-bond",
                 "acorn", "diskann", "pgvector"]
-# the recall targets of the scale plots' approximate k-NN: the time each system needs to reach them
-RECALL_TARGETS = (0.8, 0.9, 0.95)
-
-
-def colour(system):
-    i = SYSTEM_ORDER.index(system) if system in SYSTEM_ORDER else len(SYSTEM_ORDER) + abs(hash(system)) % 10
-    return f"C{i % 10}"
-
-
-def style(setting):
-    """The line style of a system's setting: solid for its default, dashed for any other (e.g. faiss's compacted)."""
-    return "-" if col_setting(setting) in ("", "default") else "--"
 FILTER_ORDER = {f: i for i, f in enumerate(["none"] + list(S.FILTERS))}
 
 
@@ -219,9 +207,6 @@ def report(suite):
         f.write("\n".join(out))
     print(f"wrote {os.path.join(root, 'REPORT.md')}")
     if scale:
-        for f in ("exact.png", "threshold.png", "approx.png"):
-            if os.path.exists(os.path.join(root, f)):
-                os.remove(os.path.join(root, f))
         scale_plots(cells, builds, root)
     else:
         plots(cells, root)
@@ -387,7 +372,55 @@ def caps_section(suite):
     return out
 
 
+APPROX_TARGET = 0.95  # the quick and full suites' plots: approximate methods at their cheapest setting reaching it
+SCALE_TARGETS = (0.9, 0.95)  # the scale plots': one column each
+
+
+def _vis_share(f):
+    """The visible share (%) of a filter: 100 for none, the random set's share; None for other kinds."""
+    if f == "none":
+        return 100.0
+    d = S.FILTERS.get(f, {})
+    return 100.0 * d["share"] if d.get("kind") == "random" else None
+
+
+def _series(cells, qt, select, xof, target=None):
+    """Lines from the cells of one query type: `select(key)` picks the cells, `xof(key)` gives a cell's x. Exact
+    types: one point per cell. Approximate k-NN: per x, the cheapest setting reaching `target` (else the most
+    accurate one, hollow)."""
+    import plotting as P
+    groups = defaultdict(lambda: defaultdict(list))
+    for k in cells:
+        if k[1] != qt or not select(k):
+            continue
+        x = xof(k)
+        if x is None:
+            continue
+        ms = summarise(cells[k]["ms"])[0]
+        rec = float(np.mean(cells[k]["recall"])) if cells[k]["recall"] else 1.0
+        # by the setting as shown: a system's main settings (none, idselector, selection) are one line
+        groups[(k[4], col_setting(k[5]))][x].append((ms, rec))
+    out = []
+    for (system, setting), byx in sorted(groups.items(), key=lambda g: (SYSTEM_ORDER.index(g[0][0])
+                                                                       if g[0][0] in SYSTEM_ORDER else 99, g[0][1])):
+        if qt == "approx":
+            pts = [(x,) + P.cheapest(v, target) for x, v in byx.items()]
+            pts = [(x, ms, r, ok) for x, ms, r, ok in pts]
+        else:
+            pts = [(x, v[0][0], None, True) for x, v in byx.items()]
+        out.append(dict(name=P.name(system, setting, approx=qt == "approx"), colour=P.colour(system),
+                        exact=qt != "approx", pts=pts))
+    return out
+
+
+def _protocol(suite):
+    d = S.SUITES.get(suite, {})
+    return f"median over {d.get('nq', '?')} queries of each query's median of {d.get('reps', '?')} repetitions"
+
+
 def plots(cells, root):
+    """One figure per dataset: k-NN at k = 10 against the visible share, threshold queries at an answer of 1% of the
+    visible items against the visible share, and threshold queries against the answer size with every item visible."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -395,62 +428,41 @@ def plots(cells, root):
     except ImportError:
         print("matplotlib is not installed: no plots")
         return
-    for qt in ("exact", "threshold", "approx"):
-        keys = [k for k in cells if k[1] == qt]
-        if not keys:
+    import plotting as P
+    from datasets import DATASETS
+    P.setup(plt)
+    suite = os.path.basename(root)
+    for f in ("exact.png", "threshold.png", "approx.png"):
+        if os.path.exists(os.path.join(root, f)):
+            os.remove(os.path.join(root, f))
+    k10 = json.dumps({"k": 10}, separators=(",", ":"))
+    for ds in sorted({k[0] for k in cells}, key=ds_key):
+        vis_ticks = sorted({v for k in cells if k[0] == ds for v in [_vis_share(k[2])] if v is not None})
+        knn = (_series(cells, "exact", lambda k: k[0] == ds and k[3] == k10, lambda k: _vis_share(k[2]))
+               + _series(cells, "approx", lambda k: k[0] == ds and json.loads(k[3]).get("k") == 10,
+                         lambda k: _vis_share(k[2]), APPROX_TARGET))
+        thr_vis = _series(cells, "threshold", lambda k: k[0] == ds and json.loads(k[3])["share"] == 0.01,
+                          lambda k: _vis_share(k[2]))
+        thr_all = _series(cells, "threshold", lambda k: k[0] == ds and k[2] == "none",
+                          lambda k: 100.0 * json.loads(k[3])["share"])
+        panels = [(s, xl, t, ticks) for s, xl, t, ticks in (
+            (knn, "items visible (%, at random)", "k-NN, k = 10", vis_ticks),
+            (thr_vis, "items visible (%, at random)", "Threshold, answer 1% of the visible items", vis_ticks),
+            (thr_all, "answer size, as a share of the items", "Threshold, all items visible", None))
+            if any(len(x["pts"]) > 0 for x in s)]
+        if not panels:
             continue
-        dss = sorted({k[0] for k in keys}, key=ds_key)
-        fig, axes = plt.subplots(len(dss), 1, figsize=(10, 3.2 * len(dss)), squeeze=False)
-        for ax, ds in zip(axes[:, 0], dss):
-            kk = [k for k in keys if k[0] == ds]
-            if qt == "approx":
-                for (f, s, st) in sorted({(k[2], k[4], k[5]) for k in kk}):
-                    pts = sorted((np.mean(cells[k]["recall"]), summarise(cells[k]["ms"])[0])
-                                 for k in kk if (k[2], k[4], k[5]) == (f, s, st))
-                    ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", label=f"{col_name(s, st)}, {f}",
-                            color=colour(s), linestyle=FILTER_LINES[FILTER_ORDER.get(f, 0) % len(FILTER_LINES)])
-                ax.set_xlabel("recall")
-            else:
-                xs = sorted({(k[2], k[3]) for k in kk}, key=lambda x: (FILTER_ORDER.get(x[0], 99), param_key(qt, x[1])))
-                series = sorted({(k[4], col_setting(k[5])) for k in kk})
-                for j, (s, st) in enumerate(series):
-                    pts = [(i + (j - (len(series) - 1) / 2) * 0.06, summarise(cells[k]["ms"])[0])
-                           for i, x in enumerate(xs) for k in kk
-                           if (k[2], k[3], k[4], col_setting(k[5])) == (x[0], x[1], s, st)]
-                    ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o" if style(st) == "-" else "s",
-                            linestyle="", label=col_name(s, st), color=colour(s))
-                ax.set_xticks(range(len(xs)))
-                ax.set_xticklabels([f"{f}\n{param_label(qt, p)}" for f, p in xs], fontsize=8)
-            ax.set_yscale("log")
-            ax.set_ylabel("median ms / query")
-            ax.set_title(ds, fontsize=10)
-            ax.grid(alpha=0.3)
-            ax.legend(fontsize=7, loc="best")
-        fig.tight_layout()
-        fig.savefig(os.path.join(root, f"{qt}.png"), dpi=110)
-        plt.close(fig)
-
-
-FILTER_LINES = ["-", "--", ":", "-."]
-
-
-def time_at_recall(pts, target):
-    """The time a system needs for mean recall `target`, from its (recall, ms) points: on the points that are not
-    dominated (more recall for more time), interpolated in log time between the last point below the target and the
-    first at or above it; the first point's time when that already reaches it; None when no point does."""
-    front, best = [], -1.0
-    for r, ms in sorted(pts, key=lambda p: (p[1], -p[0])):
-        if r > best:
-            front.append((r, ms))
-            best = r
-    for i, (r, ms) in enumerate(front):
-        if r >= target:
-            if i == 0:
-                return ms
-            r0, m0 = front[i - 1]
-            t = (target - r0) / (r - r0)
-            return float(np.exp(np.log(m0) + t * (np.log(ms) - np.log(m0))))
-    return None
+        fig, axes = P.figure(plt, 1, len(panels))
+        for ax, (series, xlabel, title, ticks) in zip(axes[0], panels):
+            if ticks is None:
+                ticks = sorted({p[0] for x in series for p in x["pts"]})
+            P.draw(ax, series, xlabel, title, ticks, [f"{t:g}%" for t in ticks])
+        d = DATASETS.get(ds, {})
+        size = f" ({d['N'] / 1e6:.2g}M vectors, {d['d']} d)" if d.get("N") and d.get("d") else ""
+        P.finish(fig, plt, os.path.join(root, f"{ds}.png"), f"{ds}{size}, 1 thread",
+                 f"Median time per query ({_protocol(suite)}). Solid lines are exact. Dashed lines are approximate "
+                 f"methods at their cheapest setting\nwith mean recall ≥ {APPROX_TARGET:g}; hollow points did not reach "
+                 "it in the settings run and show the recall reached. A system missing at a point was not run there.")
 
 
 def n_label(n):
@@ -460,10 +472,9 @@ def n_label(n):
 
 
 def scale_plots(cells, builds, root):
-    """At scale: how each system's cost grows with N, one line per system across the sizes. Exact k-NN and threshold
-    queries plot the median time per query; approximate k-NN the time to reach each recall target
-    (`time_at_recall`); the build its time, index size and peak memory. Panels: rows are filters, columns the
-    parameter (k, share, recall target)."""
+    """At scale: how each system's time grows with N. One row per filter; columns: k-NN at k = 10 with approximate
+    methods at their cheapest setting reaching each recall target, and threshold queries. A second figure for the
+    builds: time, index size and peak memory."""
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -471,89 +482,62 @@ def scale_plots(cells, builds, root):
     except ImportError:
         print("matplotlib is not installed: no plots")
         return
+    import plotting as P
     from datasets import DATASETS
+    P.setup(plt)
+    suite = os.path.basename(root)
+    for f in ("exact.png", "threshold.png", "approx.png", "scale_exact.png", "scale_threshold.png",
+              "scale_approx.png"):
+        if os.path.exists(os.path.join(root, f)):
+            os.remove(os.path.join(root, f))
     N = lambda ds: DATASETS.get(ds, {}).get("N", 0)
-    dss = sorted({k[0] for k in cells}, key=ds_key)
-    ns = [N(d) for d in dss]
-
-    def frame(ax, title, ylabel):
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xticks(ns)
-        ax.set_xticklabels([n_label(n) for n in ns])
-        ax.minorticks_off()
-        ax.set_xlabel("vectors (N)")
-        ax.set_ylabel(ylabel)
-        ax.set_title(title, fontsize=10)
-        ax.grid(alpha=0.3)
-
-    def save(fig, axes, name):
-        handles = {}
-        for ax in axes.flat:
-            for h, l in zip(*ax.get_legend_handles_labels()):
-                handles.setdefault(l, h)
-        if handles:
-            fig.legend(list(handles.values()), list(handles.keys()), loc="lower center", ncol=min(5, len(handles)),
-                       fontsize=8, frameon=False)
-        fig.tight_layout(rect=(0, 0.04 + 0.025 * ((len(handles) - 1) // 5), 1, 1))
-        fig.savefig(os.path.join(root, name), dpi=110)
-        plt.close(fig)
-
-    for qt in ("exact", "threshold", "approx"):
-        keys = [k for k in cells if k[1] == qt]
-        if not keys:
-            continue
-        filters = sorted({k[2] for k in keys}, key=lambda f: FILTER_ORDER.get(f, 99))
-        if qt == "approx":
-            rows = [[(f, c) for c in RECALL_TARGETS] for f in filters]
-        else:
-            # only the (filter, parameter) cells that were run: the filtered rows have fewer parameters
-            rows = [[(f, c) for c in sorted({k[3] for k in keys if k[2] == f}, key=lambda p: param_key(qt, p))]
-                    for f in filters]
-        ncol = max(len(r) for r in rows)
-        fig, axes = plt.subplots(len(rows), ncol, figsize=(4.2 * ncol, 3.4 * len(rows)), squeeze=False)
-        for i, row in enumerate(rows):
+    ns = sorted({N(k[0]) for k in cells})
+    ticks = (ns, [n_label(n) for n in ns])
+    k10 = json.dumps({"k": 10}, separators=(",", ":"))
+    filters = sorted({k[2] for k in cells}, key=lambda f: FILTER_ORDER.get(f, 99))
+    rows = []
+    for f in filters:
+        row = []
+        for t in SCALE_TARGETS:
+            series = (_series(cells, "exact", lambda k: k[2] == f and k[3] == k10, lambda k: N(k[0]))
+                      + _series(cells, "approx", lambda k: k[2] == f and json.loads(k[3]).get("k") == 10,
+                                lambda k: N(k[0]), t))
+            row.append((series, f"k-NN, k = 10, approximate at recall ≥ {t:g}"))
+        shares = sorted({json.loads(k[3])["share"] for k in cells if k[1] == "threshold" and k[2] == f})
+        if shares:
+            sh = shares[len(shares) // 2]
+            row.append((_series(cells, "threshold", lambda k: k[2] == f and json.loads(k[3])["share"] == sh,
+                                lambda k: N(k[0])), f"Threshold, answer {share_label(sh)}"))
+        rows.append((f, [r for r in row if any(x["pts"] for x in r[0])]))
+    rows = [r for r in rows if r[1]]
+    if rows:
+        ncol = max(len(r[1]) for r in rows)
+        fig, axes = P.figure(plt, len(rows), ncol)
+        for i, (f, row) in enumerate(rows):
             for j in range(len(row), ncol):
                 axes[i, j].axis("off")
-            for j, (f, c) in enumerate(row):
-                ax = axes[i, j]
-                series = sorted({(k[4], k[5]) for k in keys if k[2] == f},
-                                key=lambda x: (SYSTEM_ORDER.index(x[0]) if x[0] in SYSTEM_ORDER else 99, x[1]))
-                for s, st in series:
-                    xs, ys = [], []
-                    for ds in dss:
-                        if qt == "approx":
-                            pts = [(np.mean(cells[k]["recall"]), summarise(cells[k]["ms"])[0]) for k in keys
-                                   if k[0] == ds and k[2] == f and (k[4], k[5]) == (s, st) and cells[k]["recall"]]
-                            y = time_at_recall(pts, c) if pts else None
-                        else:
-                            kk = [k for k in keys if k[0] == ds and k[2] == f and k[3] == c and (k[4], k[5]) == (s, st)]
-                            y = summarise(cells[kk[0]]["ms"])[0] if kk else None
-                        if y is not None:
-                            xs.append(N(ds))
-                            ys.append(y)
-                    if xs:
-                        ax.plot(xs, ys, marker="o", color=colour(s), linestyle=style(st), label=col_name(s, st))
-                what = (f"recall {c:g}" if qt == "approx" else param_label(qt, c))
-                frame(ax, f"{f}, {what}", "ms / query" + (" to reach the recall" if qt == "approx" else ""))
-        title = {"exact": "Exact k-NN", "threshold": "Threshold queries (answer share)",
-                 "approx": "Approximate k-NN: time to reach a recall (absent: not reached)"}[qt]
-        fig.suptitle(title, fontsize=11)
-        save(fig, axes, f"scale_{qt}.png")
-
+            vis = "all items visible" if f == "none" else f"{_vis_share(f):g}% visible at random" if _vis_share(f) else f
+            for j, (series, title) in enumerate(row):
+                P.draw(axes[i, j], series, "vectors (N)", f"{title}; {vis}", *ticks)
+        P.finish(fig, plt, os.path.join(root, "scale.png"), "Time per query as the collection grows, 1 thread",
+                 f"Median time per query ({_protocol(suite)}). Solid lines are exact. Dashed lines are approximate "
+                 "methods at their cheapest setting reaching the recall\ntarget; hollow points did not reach it in the "
+                 "settings run and show the recall reached. A system missing at a size did not fit or was not run "
+                 "(see the report's regimes).")
     ok = [b for b in builds if b["status"] == "ok"]
     if ok:
-        fig, axes = plt.subplots(1, 3, figsize=(13, 3.6), squeeze=False)
+        fig, axes = P.figure(plt, 1, 3)
         systems = sorted({b["system"] for b in ok}, key=lambda x: SYSTEM_ORDER.index(x) if x in SYSTEM_ORDER else 99)
-        for ax, (field, ylabel) in zip(axes[0], (("build_s", "build s"), ("index_gib", "index GiB"),
-                                                 ("peak_rss_gib", "build peak RSS GiB"))):
-            for sname in systems:
-                pts = sorted((N(b["dataset"]), float(b[field])) for b in ok if b["system"] == sname and b[field])
-                if pts:
-                    ax.plot([p[0] for p in pts], [p[1] for p in pts], marker="o", color=colour(sname), label=sname)
-            frame(ax, ylabel, ylabel)
-        fig.suptitle("Builds (a system missing at a size did not fit or was not run)", fontsize=11)
-        save(fig, axes, "scale_build.png")
+        for ax, (field, title) in zip(axes[0], (("build_s", "Build time (s)"), ("index_gib", "Index size (GiB)"),
+                                                 ("peak_rss_gib", "Build peak memory (GiB)"))):
+            series = [dict(name=P.name(sname), colour=P.colour(sname), exact=True,
+                           pts=[(N(b["dataset"]), float(b[field]), None, True) for b in ok
+                                if b["system"] == sname and b[field]]) for sname in systems]
+            P.draw(ax, series, "vectors (N)", title, *ticks)
+            ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+        P.finish(fig, plt, os.path.join(root, "scale_build.png"), "Builds as the collection grows",
+                 "Build time with the suite's build cores, the index's size on disk (or in memory for an in-memory "
+                 "system) and the build's peak resident memory.\nA system missing at a size did not fit or was not run.")
 
 
 if __name__ == "__main__":
