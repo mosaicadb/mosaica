@@ -7,3 +7,4 @@ threshold,random-1,default,0.32,0.00
 threshold,random-25,default,4.47,0.00
 approx,random-1,default,0.39,0.00
 approx,random-25,default,4.63,0.00
+approx,none,default,0.02,0.00

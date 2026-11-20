@@ -2,5 +2,5 @@ system,status,build_s,threads,index_gib,peak_rss_gib,detail
 faiss-flat,ok,1.0,3,0.441,0.97,{}
 pdx-bond,ok,3.8,3,0.569,1.07,"{""blocks"": 116}"
 faiss-panorama,ok,1.7,3,0.441,1.20,{}
-faiss-hnsw,ok,211.6,3,0.582,1.11,"{""M"": 16, ""efConstruction"": 200}"
-vexact,ok,39.4,3,0.701,0.97,"{""fit_s"": 20.4, ""encode_s"": 19.0, ""sample"": false}"
+vexact,ok,40.4,3,0.701,0.97,"{""fit_s"": 21.2, ""encode_s"": 18.9, ""sample"": false}"
+faiss-hnsw,ok,216.0,3,0.582,1.11,"{""M"": 16, ""efConstruction"": 200, ""storage"": ""f32""}"
