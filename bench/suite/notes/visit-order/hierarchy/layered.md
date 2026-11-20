@@ -658,9 +658,21 @@ Today G = min(64, K, N/(20n)). What moves with G:
 
   glove (K 592, n 128) is flat: f at 16 B 0.832 (1 group), 0.835 (8), 0.839 (64), 0.851 (592); 131 → 128 → 122 bits.
 
-(LAION's run of the proxy had not finished when this was written; `layered/results/groups_laion.md` if present.)
+  LAION text (K 500, n 512), the same columns:
 
-  (LAION's run was stopped before its last two rows.) On yahoo each doubling of the groups is worth about 10 bits a
+| groups | clusters per group | f at 16 B | f at 32 B | bits for G = 64's distortion at 16 B | int8 bases, MB |
+|---|---|---|---|---|---|
+| 1 | 500 | 0.467 | 0.639 | 226 | 0.3 |
+| 2 | 250 | 0.490 | 0.659 | 209 | 0.5 |
+| 4 | 125 | 0.513 | 0.679 | 191 | 1.0 |
+| 8 | 62 | 0.545 | 0.705 | 168 | 2.1 |
+| 16 | 31 | 0.565 | 0.720 | 154 | 4.2 |
+| 32 | 16 | 0.585 | 0.736 | 142 | 8.4 |
+| 64 | 8 | 0.606 | 0.753 | 128 | 16.8 |
+| 128 | 4 | 0.634 | 0.774 | 112 | 33.6 |
+| 250 | 2 | 0.662 | 0.795 | 96 | 65.5 |
+
+  (LAION's run was stopped before its last row.) On yahoo each doubling of the groups is worth about 10 bits a
   row at the 16 B level's distortion (8% of the code), on LAION 12 to 23 bits (9 to 18%), from 1 group to one per
   cluster; on glove, nearly isotropic, nothing. At 1B with 64 groups a group pools
   244 clusters, the left end of the table: on yahoo-like data the 16 B level would explain what about 11 B explain
