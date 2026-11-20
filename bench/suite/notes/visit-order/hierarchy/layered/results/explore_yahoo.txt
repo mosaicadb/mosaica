@@ -1,0 +1,38 @@
+yahoo: 100 queries, K 339, 16 clusters dumped, levels end at [16, 32, 56, 96, 160, 256] B, n 384; first 12 clusters of each query
+library sigma / empirical sd of the cluster's scores: quantiles 5/50/95% 0.849 0.916 0.957
+   key: f (variance explained) 10/50/90% -0.044 0.058 0.220 | slope 10/50/90% 0.170 0.816 1.325 | certified half-width / cluster sd, median 9.56
+        per (query, cluster): rms(error / half-width) x sqrt(d), quantiles 5/25/50/75/95% 1.596 1.830 2.000 2.179 2.507
+        error / certified half-width: all rows rms 0.103 q1/50/99/99.9% -0.217 -0.006 0.275 0.401 | top-100 rows mean 0.332 rms 0.344 q 0.126 0.329 0.572 0.712
+        error / derived tau:          all rows rms 1.159 q1/50/99/99.9% -2.435 -0.073 3.015 4.357 | top-100 rows mean 3.475 rms 3.643 q 1.367 3.384 6.611 9.777
+          share with error > 1 tau: all 0.1859 (normal 0.1587), top-100 0.9979
+          share with error > 1.5 tau: all 0.1009 (normal 0.0668), top-100 0.9834
+          share with error > 2 tau: all 0.0503 (normal 0.0228), top-100 0.9378
+          share with error > 2.5 tau: all 0.0232 (normal 0.0062), top-100 0.8332
+          share with error > 3 tau: all 0.0102 (normal 0.0013), top-100 0.6489
+  16 B: f (variance explained) 10/50/90% 0.763 0.836 0.887 | slope 10/50/90% 1.038 1.091 1.161 | certified half-width / cluster sd, median 6.18
+        per (query, cluster): rms(error / half-width) x sqrt(d), quantiles 5/25/50/75/95% 1.143 1.217 1.266 1.327 1.436
+        error / certified half-width: all rows rms 0.065 q1/50/99/99.9% -0.144 -0.002 0.167 0.255 | top-100 rows mean 0.166 rms 0.188 q -0.009 0.160 0.409 0.544
+        error / derived tau:          all rows rms 1.277 q1/50/99/99.9% -2.830 -0.038 3.263 5.001 | top-100 rows mean 3.262 rms 3.682 q -0.167 3.127 8.023 10.668
+          share with error > 1 tau: all 0.2073 (normal 0.1587), top-100 0.9231
+          share with error > 1.5 tau: all 0.1160 (normal 0.0668), top-100 0.8638
+          share with error > 2 tau: all 0.0606 (normal 0.0228), top-100 0.7672
+          share with error > 2.5 tau: all 0.0301 (normal 0.0062), top-100 0.6603
+          share with error > 3 tau: all 0.0147 (normal 0.0013), top-100 0.5329
+  32 B: f (variance explained) 10/50/90% 0.872 0.912 0.939 | slope 10/50/90% 1.042 1.075 1.116 | certified half-width / cluster sd, median 4.77
+        per (query, cluster): rms(error / half-width) x sqrt(d), quantiles 5/25/50/75/95% 1.104 1.155 1.195 1.240 1.327
+        error / certified half-width: all rows rms 0.061 q1/50/99/99.9% -0.138 -0.001 0.154 0.230 | top-100 rows mean 0.139 rms 0.160 q -0.026 0.134 0.353 0.476
+        error / derived tau:          all rows rms 1.205 q1/50/99/99.9% -2.705 -0.022 3.018 4.512 | top-100 rows mean 2.722 rms 3.130 q -0.502 2.618 6.915 9.319
+          share with error > 1 tau: all 0.1957 (normal 0.1587), top-100 0.8770
+          share with error > 1.5 tau: all 0.1041 (normal 0.0668), top-100 0.7877
+          share with error > 2 tau: all 0.0502 (normal 0.0228), top-100 0.6690
+          share with error > 2.5 tau: all 0.0231 (normal 0.0062), top-100 0.5332
+          share with error > 3 tau: all 0.0103 (normal 0.0013), top-100 0.3970
+  56 B: f (variance explained) 10/50/90% 0.913 0.949 0.969 | slope 10/50/90% 0.996 1.021 1.053 | certified half-width / cluster sd, median 3.52
+        per (query, cluster): rms(error / half-width) x sqrt(d), quantiles 5/25/50/75/95% 1.152 1.200 1.233 1.274 1.359
+        error / certified half-width: all rows rms 0.063 q1/50/99/99.9% -0.144 -0.001 0.154 0.230 | top-100 rows mean 0.111 rms 0.143 q -0.066 0.103 0.369 0.514
+        error / derived tau:          all rows rms 1.241 q1/50/99/99.9% -2.818 -0.017 3.019 4.500 | top-100 rows mean 2.185 rms 2.809 q -1.289 2.014 7.240 10.071
+          share with error > 1 tau: all 0.2043 (normal 0.1587), top-100 0.7439
+          share with error > 1.5 tau: all 0.1110 (normal 0.0668), top-100 0.6261
+          share with error > 2 tau: all 0.0542 (normal 0.0228), top-100 0.5025
+          share with error > 2.5 tau: all 0.0244 (normal 0.0062), top-100 0.3870
+          share with error > 3 tau: all 0.0103 (normal 0.0013), top-100 0.2842

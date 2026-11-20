@@ -2917,3 +2917,185 @@ fn study_count_model() {
     eprintln!("  rows entering each level, per row of the sorted ranges: {:?}", (0..nl).map(|l| (lent[l] / lent[nl] * 1000.0).round() / 1000.0).collect::<Vec<_>>());
     eprintln!("  index time {:.0} us in all, direct {:.0} us; one dot {dot:.4} us", it.iter().sum::<f64>(), dt.iter().sum::<f64>());
 }
+
+/// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: per query,
+/// every cluster's centre score, sigma, order key and stream key, and for the DIAG_M clusters first in the k-NN order
+/// (among those holding a visible row) every visible row's entity, exact score, key, certified interval from the key
+/// alone and certified interval at each of the first DIAG_LEVELS levels. Nothing is timed. DIAG_DIR the index
+/// directory, DIAG_PREP the prep directory, DIAG_SET the visible set (none, random-25, ...), DIAG_OUT the output
+/// prefix: `.clu` (per query, K records of 4 f32: mu, sigma, order key, stream key), `.idx` (per query, M records of 2
+/// u32: cluster, visible rows; a cluster of u32::MAX pads a query with fewer live clusters), `.rows` (per row, 5 + 2
+/// levels words: entity u32, then f32 exact score, key, key interval lo and hi, each level's lo and hi), `.kst` (per
+/// cluster, 2 f32: the mean of its rows' keys and of their squares) and `.meta` (text).
+#[test]
+#[ignore]
+fn study_layered_dump() {
+    use rayon::prelude::*;
+    use std::io::Write;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let out = std::env::var("DIAG_OUT").unwrap();
+    let m: usize = std::env::var("DIAG_M").ok().map_or(48, |s| s.parse().unwrap());
+    let nlev: usize = std::env::var("DIAG_LEVELS").ok().map_or(3, |s| s.parse().unwrap());
+    let nqmax: usize = std::env::var("DIAG_NQ").ok().map_or(usize::MAX, |s| s.parse().unwrap());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = (qs.len() / d).min(nqmax);
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let nlev = nlev.min(nl);
+    let m = m.min(k);
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    std::fs::write(format!("{out}.meta"), format!("nq {nq}\nk {k}\nm {m}\nlevels {nlev}\nlevel_bytes {:?}\nndl {}\nnl {nl}\nn {}\nrows {}\nset {set}\n", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>(), ix.meta.ndl(), ix.n(), ix.nrows)).unwrap();
+    let kst: Vec<f32> = (0..k).flat_map(|c| {
+        let cl = &ix.cl[c];
+        let nr = (cl.r1 - cl.r0).max(1) as f64;
+        let (s1, s2) = (cl.r0..cl.r1).fold((0.0, 0.0), |a, r| { let x = ix.ahat[r] as f64 / 32767.0; (a.0 + x, a.1 + x * x) });
+        [(s1 / nr) as f32, (s2 / nr) as f32]
+    }).collect();
+    std::fs::write(format!("{out}.kst"), kst.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+    let (mut fc, mut fi, mut fr) = (std::fs::File::create(format!("{out}.clu")).unwrap(), std::fs::File::create(format!("{out}.idx")).unwrap(), std::io::BufWriter::new(std::fs::File::create(format!("{out}.rows")).unwrap()));
+    for chunk in (0..nq).collect::<Vec<_>>().chunks(12) {
+        let per: Vec<(Vec<f32>, Vec<u32>, Vec<u8>)> = chunk.par_iter().map(|&qi| {
+            let q = &qsp[qi][..];
+            let pr = prep2(&ix, q);
+            let mu = ad.keys(&ix, q, 0.0);
+            let k1 = ad.keys(&ix, q, 1.0);
+            let ok = ad.order_keys(&ix, q, vis.as_ref());
+            let sk = ad.stream_keys(&ix, q, vis.as_ref());
+            let clu: Vec<f32> = (0..k).flat_map(|c| [mu[c] as f32, (k1[c] - mu[c]) as f32, ok[c] as f32, sk[c] as f32]).collect();
+            let mut o: Vec<usize> = (0..k).filter(|&c| nv_of(c) > 0).collect();
+            o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+            o.truncate(m);
+            pr.anc(&ix);
+            let mut st = crate::kernel::Stats::new(nl);
+            let mut rf = Refiner::new(&ix, &pr);
+            let (mut idx, mut rows) = (Vec::new(), Vec::new());
+            for &c in &o {
+                let cl = &ix.cl[c];
+                let vr: Vec<usize> = (cl.r0..cl.r1).filter(|&r| vis.as_ref().is_none_or(|v| v.has(r))).collect();
+                idx.extend([c as u32, vr.len() as u32]);
+                let cu = cut_params2(&ix, c, &pr, pr.qm(&ix, c));
+                let ivs: Vec<Vec<(f64, f64)>> = (0..nlev).map(|l| rf.refine(&vr.iter().map(|&r| (r as u32, l)).collect::<Vec<_>>(), &mut st)).collect();
+                for (i, &r) in vr.iter().enumerate() {
+                    rows.extend(ix.row_ent[r].to_le_bytes());
+                    let (klo, khi) = key_interval2(&ix, &cu, r);
+                    let mut w = vec![exact_value2(&ix, &pr, r) as f32, ix.ahat[r] as f32 / 32767.0, klo as f32, khi as f32];
+                    for iv in &ivs {
+                        w.extend([iv[i].0 as f32, iv[i].1 as f32]);
+                    }
+                    for x in w {
+                        rows.extend(x.to_le_bytes());
+                    }
+                }
+            }
+            idx.resize(2 * m, u32::MAX);
+            for j in o.len()..m {
+                idx[2 * j + 1] = 0;
+            }
+            (clu, idx, rows)
+        }).collect();
+        for (clu, idx, rows) in per {
+            fc.write_all(&clu.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+            fi.write_all(&idx.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>()).unwrap();
+            fr.write_all(&rows).unwrap();
+        }
+    }
+    fr.flush().unwrap();
+    eprintln!("{dir} {set}: {nq} queries, {m} clusters each, {nlev} levels -> {out}.*");
+}
+
+/// Study (ignored; run by hand on a built index) for bench/suite/notes/visit-order/hierarchy/layered.md: the library's
+/// own reader (`KnnReader`) with each level's upper half-width multiplied by psi rho (`Prep2::dial`), against the same
+/// reads direct and with certified levels; nothing is timed, the reader's counters are summed. Clusters in the k-NN
+/// order, read until the next `LOOKAHEAD` clusters' largest mu + psi sigma is below the running k-th best; a cluster
+/// of at least DIAG_MIN visible rows on the index path. DIAG_DIR, DIAG_PREP, DIAG_SET; DIAG_RHO the levels' rho (comma
+/// separated; later levels take the last); DIAG_PSIS; DIAG_K. One line per psi and mode: recall, clusters read,
+/// clusters and groups opened on the index path, rows entering each level, stored vectors read.
+#[test]
+#[ignore]
+fn study_layered_kernel() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let rho: Vec<f64> = std::env::var("DIAG_RHO").unwrap().split(',').map(|s| s.parse().unwrap()).collect();
+    let psis: Vec<f64> = std::env::var("DIAG_PSIS").unwrap_or("3,4,5,6,7,8".into()).split(',').map(|s| s.parse().unwrap()).collect();
+    let kk: usize = std::env::var("DIAG_K").ok().map_or(10, |s| s.parse().unwrap());
+    let min_rows: usize = std::env::var("DIAG_MIN").ok().map_or(32, |s| s.parse().unwrap());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = qs.len() / d;
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let nv_of = |c: usize| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize);
+    let on = crate::util::read_npy(&if set == "none" { format!("{prep}/order.npy") } else { format!("{prep}/order_{set}.npy") });
+    let (ow, ord) = (on.shape[1], on.i32s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    eprintln!("{dir} {set}: k {kk}, levels end at {:?} B, rho {rho:?}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
+    // rho derived from the build's own design: a level's weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual
+    // variance at the level, pi_c the query profile), so both sides of Cauchy-Schwarz carry a_c = sqrt(v_c pi_c) =
+    // D_c^2 pi_c per coordinate, and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2
+    let prof = crate::util::read_npy(&format!("{dir}/profile.npy")).f64s();
+    let n = ix.n();
+    for l in 0..ix.meta.ndl() {
+        let mut r: Vec<f64> = ix.groups.iter().enumerate().map(|(g, gp)| {
+            let a: Vec<f64> = (0..n).map(|c| (gp.d[l][c] as f64).powi(2) * (prof[g * n + c] + 1e-10)).collect();
+            a.iter().map(|x| x * x).sum::<f64>().sqrt() / a.iter().sum::<f64>()
+        }).collect();
+        r.sort_by(|a, b| a.total_cmp(b));
+        eprintln!("  level {l} ({} B): rho derived per group, min / median / max {:.4} / {:.4} / {:.4}; 1 / sqrt(n) = {:.4}", ix.meta.level_bytes(l), r[0], r[r.len() / 2], r[r.len() - 1], 1.0 / (n as f64).sqrt());
+    }
+    for &psi in &psis {
+        for mode in ["direct", "certified", "statistical"] {
+            let per: Vec<(f64, Vec<f64>)> = (0..nq).into_par_iter().map(|qi| {
+                let q = &qsp[qi][..];
+                let mut pr = prep2(&ix, q);
+                if mode == "statistical" {
+                    pr.dial = (0..nl).map(|l| (psi * rho[l.min(rho.len() - 1)]).min(1.0) as f32).collect();
+                }
+                let mu = ad.keys(&ix, q, 0.0);
+                let kp = ad.keys(&ix, q, psi);
+                let ok = ad.order_keys(&ix, q, vis.as_ref());
+                let mut o: Vec<usize> = (0..k).filter(|&c| nv_of(c) > 0).collect();
+                o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+                let _ = &mu;
+                let mut rd = KnnReader::new(&ix, &pr, vis.as_ref(), kk, plan, crate::kernel::Stats::new(nl));
+                let mut groups = std::collections::HashSet::new();
+                let mut read = 0;
+                for j in 0..o.len() {
+                    let t = rd.kth();
+                    if t.is_finite() && o[j..(j + adaptive::LOOKAHEAD).min(o.len())].iter().all(|&c| kp[c] < t) {
+                        break;
+                    }
+                    let c = o[j];
+                    let before = rd.st.clusters_open;
+                    rd.visit(c, if mode != "direct" && nv_of(c) >= min_rows { KnnPath::Index } else { KnnPath::Direct });
+                    if rd.st.clusters_open > before {
+                        groups.insert(ix.cl[c].g);
+                    }
+                    read += 1;
+                }
+                let (ents, st) = rd.finish();
+                let truth = &ord[qi * ow..qi * ow + kk];
+                let rec = ents.iter().filter(|e| truth.contains(&(e.1 as i32))).count() as f64 / kk as f64;
+                let mut v = vec![read as f64, st.clusters_open as f64, groups.len() as f64];
+                v.extend((0..nl).map(|l| st.enter[l] as f64));
+                v.push(st.full_reads as f64);
+                (rec, v)
+            }).collect();
+            let rec = per.iter().map(|x| x.0).sum::<f64>() / nq as f64;
+            let m: Vec<f64> = (0..per[0].1.len()).map(|i| per.iter().map(|x| x.1[i]).sum::<f64>() / nq as f64).collect();
+            eprintln!("psi {psi} {mode:<11} recall {rec:.4} | {:.1} {:.1} {:.1} | {} | {:.0}", m[0], m[1], m[2], m[3..3 + nl].iter().map(|x| format!("{x:.0}")).collect::<Vec<_>>().join(" "), m[3 + nl]);
+        }
+    }
+}
