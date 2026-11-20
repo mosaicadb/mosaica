@@ -43,7 +43,8 @@ fn info_dict<'py>(py: Python<'py>, i: &AdaptiveInfo) -> PyResult<Bound<'py, pyo3
     for (key, x) in [("visited", i.read.len()), ("direct", i.direct), ("index", i.index), ("groups", i.groups), ("spreads", i.spreads)] {
         d.set_item(key, x)?;
     }
-    for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost)] {
+    d.set_item("rekeys", i.rekeys)?;
+    for (key, x) in [("cost", i.cost), ("direct_cost", i.direct_cost), ("index_cost", i.index_cost), ("sigma_cost", i.sigma_cost), ("scan_cost", i.scan_cost), ("delta", i.delta), ("rho", i.rho)] {
         d.set_item(key, x)?;
     }
     Ok(d)

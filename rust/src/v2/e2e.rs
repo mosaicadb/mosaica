@@ -2258,14 +2258,14 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
         for (qi, q) in f.queries.iter().enumerate() {
             for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
                 let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-                let (order, stream) = (ad.order_keys(ix, q, vis.as_ref()), ad.stream_keys(ix, q, vis.as_ref()));
-                let mut live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
-                live.sort_by(|x, y| by(x, y, &stream));
+                let live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
+                // the stream and order keys at each lambda the queries use
+                let mut cache: std::collections::HashMap<u64, (Vec<f64>, Vec<f64>)> = std::collections::HashMap::new();
+                let mut keys_at = |lam: f64| cache.entry(lam.to_bits()).or_insert_with(|| (ad.stream_keys(ix, q, lam), ad.keys(ix, q, lam))).clone();
                 for kk in [1, 10, 100] {
                     let mut before: Option<(f64, Vec<u32>, Vec<u32>)> = None;
                     for psi in [0.0, 1.0, 2.0, 3.5, adaptive::PSI, 8.0] {
                         let what = format!("{name}, query {qi}, set {sname}, k {kk}, psi {psi}");
-                        let keys = ad.keys(ix, q, psi);
                         let (out, info) = ad.knn(ix, q, kk, vis.as_ref(), psi, probe_plan());
                         let (again, info2) = ad.knn(ix, q, kk, vis.as_ref(), psi, probe_plan());
                         assert_eq!((&out.ents, &info.read, &info.priced, info.path), (&again.ents, &info2.read, &info2.priced, info2.path), "not deterministic, {what}");
@@ -2278,15 +2278,24 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
                         }
                         before = Some((psi, info.read.clone(), info.priced.clone()));
                         let priced: Vec<usize> = info.priced.iter().map(|&c| c as usize).collect();
-                        assert_eq!(priced[..], live[..priced.len()], "the stream is not the stream key's order, {what}");
+                        // each cluster leaves the stream with the largest stream key, at the lambda then, of those left
+                        for (j, &c) in priced.iter().enumerate() {
+                            let (stream, _) = keys_at(info.lam_priced[j]);
+                            let first = live.iter().copied().filter(|x| !priced[..j].contains(x)).min_by(|x, y| by(x, y, &stream));
+                            assert_eq!(first, Some(c), "the stream is not the stream key's order, {what}");
+                        }
                         for (i, &c) in info.read.iter().enumerate() {
+                            let (_, order) = keys_at(info.lam_read[i]);
                             let mut win: Vec<usize> = priced[..(w + i).min(priced.len())].iter().copied().filter(|x| !info.read[..i].contains(&(*x as u32))).collect();
                             win.sort_by(|x, y| by(x, y, &order));
                             assert_eq!(win.first(), Some(&(c as usize)), "read {i} is not the window's largest order key, {what}");
                         }
+                        // lambda is ORDER_C until the moments move it, and the stream is re-keyed each time they do
+                        assert!(info.rekeys > 0 || info.lam_read.iter().chain(&info.lam_priced).all(|&l| l == adaptive::ORDER_C), "{what}: {info:?}");
                         if info.read.len() < live.len() && out.ents.len() == kk {
                             stops += 1;
                             let kth = out.ents[kk - 1].0;
+                            let keys = ad.keys(ix, q, info.delta + psi * info.rho);
                             assert!(priced.iter().filter(|&&c| !info.read.contains(&(c as u32))).all(|&c| keys[c] < kth), "stopped with a stop key in the window at the k-th best, {what}");
                             heuristic += live.iter().any(|&c| !priced.contains(&c) && keys[c] >= kth) as usize;
                             let all = ad.knn(ix, q, kk, vis.as_ref(), f64::INFINITY, probe_plan()).0;
@@ -2445,11 +2454,12 @@ fn approximate_thresholds_read_exactly_the_clusters_whose_key_reaches_t() {
     assert!(probes > 0);
 }
 
-/// The answers do not depend on the measured constants but through k-NN's choice of a sigma: with the index path cheap
-/// or dear (and sigmas cheaper than any read), k-NN reads the same clusters and returns the same items, and a
-/// threshold query returns the same rows.
+/// The answers do not depend on the measured constants but through k-NN's choice of a sigma and its order's moments
+/// (taken from the clusters read directly while fewer than k items are held): with the index path cheap or dear (and
+/// sigmas cheaper than any read), k-NN reads the same clusters and returns the same items whenever its estimates come
+/// out the same, and a threshold query returns the same rows.
 #[test]
-fn the_constants_change_the_answer_only_through_a_sigma() {
+fn the_constants_change_the_answer_only_through_a_sigma_and_the_moments() {
     let f = fixture();
     let ix = &f.ix;
     let base = fixed_costs();
@@ -2463,6 +2473,9 @@ fn the_constants_change_the_answer_only_through_a_sigma() {
                 for psi in PSIS {
                     let what = format!("query {qi}, set {sname}, k {kk}, psi {psi}");
                     let ((x, xi), (y, yi)) = (a.knn(ix, q, kk, vis.as_ref(), psi, probe_plan()), b.knn(ix, q, kk, vis.as_ref(), psi, probe_plan()));
+                    if (xi.delta, xi.rho) != (yi.delta, yi.rho) {
+                        continue;
+                    }
                     both += (xi.path == "probe") as usize;
                     index += xi.index;
                     // the same clusters and items; their f32 products may round apart on the two paths
@@ -2631,7 +2644,7 @@ fn study_order_rows_to_recall() {
             let mu = ad.keys(&ix, q, 0.0);
             let sig: Vec<f64> = ad.keys(&ix, q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
             // rad s from the unfiltered stream key mu + z(1, S) rad s (S the cluster's rows)
-            let st_all = ad.stream_keys(&ix, q, None);
+            let st_all = ad.z_keys(&ix, q, None, false);
             let rads: Vec<f64> = (0..k).map(|c| {
                 let n = (ix.cl[c].r1 - ix.cl[c].r0) as f64;
                 (st_all[c] - mu[c]) / inv_norm(n / (n + 1.0)).max(1e-9)
@@ -2642,8 +2655,8 @@ fn study_order_rows_to_recall() {
                 o.sort_by(|&a, &b| key(b).total_cmp(&key(a)).then(a.cmp(&b)));
                 o
             };
-            let o1 = ad.order_keys(&ix, q, vis.as_ref());
-            let st_keys = ad.stream_keys(&ix, q, vis.as_ref());
+            let o1 = ad.z_keys(&ix, q, vis.as_ref(), true);
+            let st_keys = ad.z_keys(&ix, q, vis.as_ref(), false);
             let tail = |t: f64, c: usize| -> f64 { nv[c] as f64 * sf((t - mu[c]) / sig[c].max(1e-12)) };
             let gap = |sc: &[f64], t: f64, c: usize| -> f64 { (mu[c] - t) / sc[c].max(1e-12) };
             let mut orders: Vec<Vec<usize>> = vec![by(&|c| o1[c]), by(&|c| st_keys[c]), by(&|c| mu[c])];
@@ -2955,17 +2968,27 @@ fn study_order_stress() {
             "merge" => variants.push(("merge".into(), 0, false, true, own(&three), vec![10])),
             "sketch" => variants.push(("sketch".into(), 0, false, false, own(&three[..2]), vec![10, 100])),
             "sketch-id" => variants.push(("sketch-id".into(), 5, false, false, own(&three[..2]), vec![10, 100])),
+            "frozen" => {
+                let f = vec![
+                    ("none".to_string(), StressFilter::None),
+                    ("random-25".to_string(), StressFilter::Random(0.25)),
+                    ("bottom-1".to_string(), StressFilter::InCluster(0.01, false)),
+                    ("bottom-25".to_string(), StressFilter::InCluster(0.25, false)),
+                    ("top-25".to_string(), StressFilter::InCluster(0.25, true)),
+                ];
+                variants.push(("frozen".into(), 0, false, false, f, vec![1, 10]));
+            }
             x => panic!("unknown condition {x}"),
         }
     }
     let sknames = ["mu+3 sigma exact", "mu+3 sigma ours (16 dirs + rest)", "mu+3 sigma Bruch t=4", "mu+3 sigma Bruch t=8", "mu+3 sigma hybrid (16 dirs + diag)"];
     let errnames = ["sigma ours", "sigma Bruch t=4", "sigma Bruch t=8", "sigma hybrid", "residual scalar rest", "residual diagonal"];
-    let estnames = ["delta (SC)", "rho (SC)", "delta (SC-probe)", "rho (SC-probe)", "delta_e (E2)"];
+    let estnames = ["delta (SC)", "rho (SC)", "delta (SC-probe)", "rho (SC-probe)", "delta_e (E2)", "delta (SC-frozen)", "rho (SC-frozen)"];
     // the in-distribution queries (sketch-id): stored rows spread over the index, each left out of its own truth
     let qrow = |qi: usize| ((qi as u64 + 1).wrapping_mul(0x9E37_79B9_7F4A_7C15) % nr as u64) as usize;
     let onames = [
         "(i) mu+z(1,v)sigma", "mu", "mu+2sigma", "mu+2.5sigma", "mu+3sigma", "mu+3.5sigma", "mu+4sigma", "mu+5sigma", "spread", "(B) gap running", "(D) tail v/(v+16)",
-        "(SC) self-correcting", "(SC-probe)", "(E2) exceedance",
+        "(SC) self-correcting", "(SC-probe)", "(E2) exceedance", "(SC-frozen)",
     ];
     let cs = [2.0, 2.5, 3.0, 3.5, 4.0, 5.0];
     let lnq = |g: f64| -> f64 {
@@ -3021,7 +3044,7 @@ fn study_order_stress() {
             }
             let mu = ad.keys(&ix, &q, 0.0);
             let sig: Vec<f64> = ad.keys(&ix, &q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
-            let st_all = ad.stream_keys(&ix, &q, None);
+            let st_all = ad.z_keys(&ix, &q, None, false);
             let rads: Vec<f64> = (0..k).map(|c| {
                 let m = size[c] as f64;
                 (st_all[c] - mu[c]) / inv_norm(m / (m + 1.0)).max(1e-9)
@@ -3206,7 +3229,7 @@ fn study_order_stress() {
                     };
                     let mut orders = statics.clone();
                     // the sketches' relative errors, or the self-correcting orders' final estimates
-                    let mut errs: Vec<Vec<f64>> = vec![Vec::new(); if is_sk { 6 } else { 5 }];
+                    let mut errs: Vec<Vec<f64>> = vec![Vec::new(); if is_sk { 6 } else { 7 }];
                     if is_sk {
                         // the relative errors over the clusters the exact order reads to its last hit
                         let mut f = 0;
@@ -3229,7 +3252,8 @@ fn study_order_stress() {
                         // the self-correcting orders, re-keyed after each read: mu + (delta + 3 rho) sigma, delta and rho
                         // the mean and spread of (s - mu) / sigma over the rows scored in full (mode 0: every row read;
                         // 1: the rows a probe scores in full, the clusters read before k rows are held and those of at
-                        // most 129 visible rows), the prior 0 and 1 until two rows are; and (mode 2) mu + (3 + delta_e)
+                        // most 129 visible rows; 3: only the clusters read before k rows are held, the estimate frozen
+                        // after), the prior 0 and 1 until two rows are; and (mode 2) mu + (3 + delta_e)
                         // sigma, delta_e the shift that makes sum nv Gbar((t_c - mu - delta_e sigma) / sigma) over the
                         // clusters read once k rows were held equal the rows they held above t_c (t_c the k-th best
                         // when c was read), from 0, within -3 to 3
@@ -3256,7 +3280,13 @@ fn study_order_stress() {
                                 o.push(u);
                                 found += hits[u];
                                 let sg = usig[u].max(1e-12);
-                                if mode < 2 && (mode == 0 || !held || nv[u] <= 129) {
+                                let take = match mode {
+                                    0 => true,
+                                    1 => !held || nv[u] <= 129,
+                                    3 => !held,
+                                    _ => false,
+                                };
+                                if take {
                                     for &x in &lists[u] {
                                         let zz = (x as f64 - umu[u]) / sg;
                                         cnt += 1.0;
@@ -3299,14 +3329,19 @@ fn study_order_stress() {
                                 (o, 0.0, 1.0)
                             }
                         };
-                        for mode in 0..3u8 {
+                        for mode in 0..4u8 {
                             let (o, a, b) = adaptive(mode);
                             orders.push(o);
-                            if mode < 2 {
-                                errs[2 * mode as usize].push(a);
-                                errs[2 * mode as usize + 1].push(b);
-                            } else {
-                                errs[4].push(a);
+                            match mode {
+                                0 | 1 => {
+                                    errs[2 * mode as usize].push(a);
+                                    errs[2 * mode as usize + 1].push(b);
+                                }
+                                2 => errs[4].push(a),
+                                _ => {
+                                    errs[5].push(a);
+                                    errs[6].push(b);
+                                }
                             }
                         }
                     }

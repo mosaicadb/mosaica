@@ -3565,17 +3565,34 @@ impl TopK {
     }
     /// Scores `rows` from their stored vectors (f32 products) and keeps the k best.
     fn score(&mut self, ix: &Index2, pr: &Prep2, rows: &[u32], st: &mut Stats) {
+        self.score_sums::<false>(ix, pr, rows, st);
+    }
+
+    /// `score`, returning with SUMS the sum of the scores and of their squares (else zeros).
+    fn score_sums<const SUMS: bool>(&mut self, ix: &Index2, pr: &Prep2, rows: &[u32], st: &mut Stats) -> (f64, f64) {
         st.full_reads += rows.len() as u64;
+        let (mut a, mut b) = (0f64, 0f64);
         let mut ch = rows.chunks_exact(4);
         for r in &mut ch {
             let sc = unsafe { crate::kernel::dot_f16_x4(&pr.q32, [0, 1, 2, 3].map(|i| ix.full_row_f16(r[i] as usize))) };
             for i in 0..4 {
-                self.push(sc[i] as f64, ix.row_ent[r[i] as usize]);
+                let x = sc[i] as f64;
+                if SUMS {
+                    a += x;
+                    b += x * x;
+                }
+                self.push(x, ix.row_ent[r[i] as usize]);
             }
         }
         for &r in ch.remainder() {
-            self.push(unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r as usize)) } as f64, ix.row_ent[r as usize]);
+            let x = unsafe { crate::kernel::dot_f16(&pr.q32, ix.full_row_f16(r as usize)) } as f64;
+            if SUMS {
+                a += x;
+                b += x * x;
+            }
+            self.push(x, ix.row_ent[r as usize]);
         }
+        (a, b)
     }
 }
 
@@ -3652,6 +3669,9 @@ pub struct KnnReader<'a> {
     rows_in: Vec<u32>,
     pend: Vec<u32>,
     flat: Vec<u32>,
+    /// with `track_sums`, the sum of the batched direct rows' scores and of their squares since `take_sums`
+    track: bool,
+    sums: (f64, f64),
     pub st: Stats,
 }
 
@@ -3659,7 +3679,7 @@ impl<'a> KnnReader<'a> {
     pub fn new(ix: &'a Index2, pr: &'a Prep2, vis: Option<&'a Vis2>, kk: usize, plan: Plan, st: Stats) -> KnnReader<'a> {
         assert!(matches!(ix.full, Full2::Real { .. }), "approximate k-NN scores from stored vectors");
         let top = TopK { kk, h: std::collections::BinaryHeap::with_capacity(kk + 1) };
-        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), st }
+        KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), track: false, sums: (0.0, 0.0), st }
     }
 
     /// The visible rows of [a, b), from the sorted list.
@@ -3669,13 +3689,29 @@ impl<'a> KnnReader<'a> {
         &v.rows[i..i + v.rows[i..].partition_point(|&r| (r as usize) < b)]
     }
 
-    /// The batched directly scored rows, scored in row order.
+    /// The batched directly scored rows, scored in row order (their scores' sums kept when tracked).
     fn flush(&mut self) {
         let tf = tick();
         self.flat.sort_unstable();
-        self.top.score(self.ix, self.pr, &self.flat, &mut self.st);
+        if self.track {
+            let (a, b) = self.top.score_sums::<true>(self.ix, self.pr, &self.flat, &mut self.st);
+            self.sums = (self.sums.0 + a, self.sums.1 + b);
+        } else {
+            self.top.score(self.ix, self.pr, &self.flat, &mut self.st);
+        }
         self.flat.clear();
         self.st.cyc[P_FULL] += tick() - tf;
+    }
+
+    /// Keeps (or, `on` false, stops keeping) the sum of the directly scored rows' scores and of their squares
+    /// (`take_sums`).
+    pub fn track_sums(&mut self, on: bool) {
+        self.track = on;
+    }
+
+    /// The sums of the directly scored rows' scores and of their squares since the last call, and starts them again.
+    pub fn take_sums(&mut self) -> (f64, f64) {
+        std::mem::take(&mut self.sums)
     }
 
     /// Reads cluster ci's visible rows by `path`.
