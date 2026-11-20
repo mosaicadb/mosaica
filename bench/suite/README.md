@@ -61,7 +61,9 @@ Both are plain dicts in `suites.py`; `params` there holds each system's build an
   builds) and its figures (`plotting.py`, in the style of the earlier threshold-db and topk plots: exact methods solid,
   approximate methods dashed at their cheapest setting reaching a recall target, hollow where none did, names at the
   line ends): per dataset `<dataset>.png` (k-NN at k = 10 and threshold queries against the share of items visible,
-  and threshold queries against the answer size); at scale `scale.png` (time against N per filter, approximate k-NN
+  and threshold queries against the answer size); `recall_qps.png`, the ANN-Benchmarks view (per dataset and
+  filter, recall@10 against queries per second, approximate methods through their Pareto frontier and exact methods
+  as points); at scale `scale.png` (time against N per filter, approximate k-NN
   at recall 0.9 and 0.95) and `scale_build.png` (build time, index size and peak memory against N).
 - `public.py`: the public suites' driver (below).
 - `capmem.py`: the optional memory cap (cgroup v1 and v2) and its evidence; `prep_scale.py`: the LAION scale suites'

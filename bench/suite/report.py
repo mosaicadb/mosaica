@@ -210,6 +210,7 @@ def report(suite):
         scale_plots(cells, builds, root)
     else:
         plots(cells, root)
+    recall_qps(cells, root)
 
 
 def machine_record(root):
@@ -463,6 +464,91 @@ def plots(cells, root):
                  f"Median time per query ({_protocol(suite)}). Solid lines are exact. Dashed lines are approximate "
                  f"methods at their cheapest setting\nwith mean recall ≥ {APPROX_TARGET:g}; hollow points did not reach "
                  "it in the settings run and show the recall reached. A system missing at a point was not run there.")
+
+
+def recall_qps(cells, root):
+    """The ANN-Benchmarks view: per (dataset, filter), recall against queries per second at k = 10, every system
+    overlaid. Approximate systems are a line through their Pareto frontier over their settings; exact systems one
+    point each at their recall (1, or just under where answers differ within the rounding allowance). QPS is one
+    thread's 1 / mean query time (the mean over queries of each query's median of its repetitions)."""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        return
+    import plotting as P
+    from datasets import DATASETS
+    P.setup(plt)
+    pts = defaultdict(list)  # (ds, filter, system, setting, approx) -> [(recall, qps)]
+    for k, c in cells.items():
+        if k[1] not in ("exact", "approx") or json.loads(k[3]).get("k") != 10 or not c["ms"]:
+            continue
+        rec = float(np.mean(c["recall"])) if c["recall"] else 1.0
+        pts[(k[0], k[2], k[4], col_setting(k[5]), k[1] == "approx")].append((rec, 1000.0 / float(np.mean(c["ms"]))))
+    if not any(key[4] for key in pts):
+        return
+    dss = sorted({key[0] for key in pts}, key=ds_key)
+    filters = sorted({key[1] for key in pts}, key=lambda f: FILTER_ORDER.get(f, 99))
+    fig, axes = plt.subplots(len(dss), len(filters), figsize=(4.3 * len(filters), 3.5 * len(dss) + 1.6),
+                             squeeze=False)
+    handles = {}
+    for i, ds in enumerate(dss):
+        for j, f in enumerate(filters):
+            ax = axes[i, j]
+            keys = sorted((key for key in pts if key[0] == ds and key[1] == f),
+                          key=lambda key: (not key[4], SYSTEM_ORDER.index(key[2]) if key[2] in SYSTEM_ORDER else 99,
+                                           key[3]))
+            if not keys:
+                ax.axis("off")
+                continue
+            for key in keys:
+                _, _, system, setting, approx = key
+                label = P.name(system, setting, approx=approx)
+                v = sorted(pts[key], key=lambda p: (-p[0], -p[1]))
+                # the Pareto frontier: from the most accurate setting down, keep a point only if it is faster
+                front, best = [], -1.0
+                for r, q in v:
+                    if q > best:
+                        front.append((r, q))
+                        best = q
+                front.sort()
+                h, = ax.plot([p[0] for p in front], [p[1] for p in front], linestyle="--" if approx else "none",
+                             marker="o" if approx else ("s" if setting else "D"), ms=5 if approx else 7,
+                             color=P.colour(system), mfc=P.colour(system) if approx else "white", mew=1.6, lw=1.8)
+                handles.setdefault(label, h)
+            ax.set_yscale("log")
+            ax.yaxis.set_major_locator(matplotlib.ticker.LogLocator(subs=(1.0, 2.0, 5.0)))
+            ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+            ax.yaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
+            rmin = min(p[0] for key in keys for p in pts[key])
+            ax.set_xlim(max(0.0, rmin - 0.03), 1.008)
+            ax.grid(True, color=P.GRID, lw=0.8)
+            ax.tick_params(length=0)
+            vis = "all items visible" if f == "none" else (f"{_vis_share(f):g}% visible at random" if _vis_share(f)
+                                                            else f)
+            d = DATASETS.get(ds, {})
+            size = f" ({d['N'] / 1e6:.2g}M)" if d.get("N") else ""
+            ax.set_title(f"{ds}{size}\n{vis}", loc="left", fontsize=9.5, color=P.INK)
+            ax.set_xlabel("recall@10")
+            ax.set_ylabel("queries per second")
+    fig.legend(list(handles.values()), list(handles.keys()), loc="lower center", ncol=min(6, len(handles)),
+               fontsize=8.5, frameon=False)
+    nleg = (len(handles) - 1) // 6 + 1
+    h = fig.get_size_inches()[1]
+    fig.subplots_adjust(top=1 - 1.45 / h, bottom=(0.55 + 0.25 * nleg) / h + 0.6 / h, hspace=0.7, wspace=0.3,
+                        left=0.07, right=0.98)
+    fig.text(0.07, 1 - 0.25 / h, "Recall against queries per second, k-NN at k = 10, 1 thread", ha="left", va="top",
+             fontsize=12.5, color=P.INK, fontweight="bold")
+    import textwrap
+    sub = ("Up and to the right is better. Approximate methods (dashed) through the Pareto frontier of their settings; "
+           "exact methods (open diamonds; squares for a setting such as faiss's compacted copy) at their recall, for "
+           "reference. QPS is 1 / mean query time on one thread. A panel without a dashed line had no approximate run "
+           "under that filter.")
+    fig.text(0.07, 1 - 0.6 / h, "\n".join(textwrap.wrap(sub, int(fig.get_size_inches()[0] * 14))), ha="left",
+             va="top", fontsize=8.8, color=P.MUTED)
+    fig.savefig(os.path.join(root, "recall_qps.png"), dpi=130, facecolor="white")
+    plt.close(fig)
 
 
 def n_label(n):
