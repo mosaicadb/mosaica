@@ -31,7 +31,8 @@
 //!   it is read into the direct batch as it leaves the stream, unless its stop key with rad_c s is below the running
 //!   k-th best. Each cluster is read directly or on the
 //!   index path, whichever the measured constants price lower: the index path at the rows its sorted range at the
-//!   running k-th best leaves, and its group's setup when the group is new (set up when its first cluster is read). There is no race: with direct reads batched, the worst a
+//!   running k-th best leaves; a new group's setup is bought once the savings its clusters read directly would have
+//!   had reach its cost (set up when that cluster is read). There is no race: with direct reads batched, the worst a
 //!   probe does on a sparse visible set is reading the visible rows cluster by cluster, about a scan.
 //! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
 //!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
@@ -678,7 +679,8 @@ impl Adaptive {
     /// below the running k-th best (a heuristic). A cluster gets its sigma when
     /// that costs less than reading it directly, else rad s stands for it. Each cluster is read directly or on the
     /// index path, whichever the measured constants price lower (`Measured::direct`, `Measured::index` at the rows its
-    /// sorted range at the running k-th best leaves, a group's setup when its group is new). Returns k items whenever
+    /// sorted range at the running k-th best leaves; a new group bought once its clusters' foregone savings reach its
+    /// setup's cost). Returns k items whenever
     /// k are visible. `plan` is the index path's and the exact query's.
     pub fn knn(&self, ix: &Index2, q: &[f32], kk: usize, vis: Option<&Vis2>, psi: f64, plan: Plan) -> (KnnOut2, AdaptiveInfo) {
         assert!(kk > 0, "approximate k-NN needs k of at least 1");
@@ -738,7 +740,10 @@ impl Adaptive {
         let mut anchored = !ix.nukey.is_empty();
         // a group new to this query, and the least the index path can cost a cluster beyond its rows
         let new_group = |g: usize| pr.gq[g].get().is_none();
-        let floor = |ci: usize| m.cut_us + m.cl_us + if new_group(ix.cl[ci].g) { m.grp_us } else { 0.0 };
+        // a new group's setup is bought as skis are: while it is not set up, the savings the index path would have
+        // given its clusters read directly are summed (`lost`), and the cluster whose saving takes the sum to the
+        // setup's cost sets it up (at most twice the best purchase)
+        let mut lost = vec![0f64; ix.groups.len()];
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
         rd.track_sums(true);
         loop {
@@ -795,9 +800,9 @@ impl Adaptive {
             let (nv, rows, g) = (nv_of(ci), rows_of(ci), ix.cl[ci].g);
             let direct = m.direct(nv, rows);
             // the index path, unless it cannot be cheaper: at the rows the sorted range at the running k-th best
-            // leaves (every visible row before k items are held), and the group's setup when its group is new
-            let index = if direct <= floor(ci) {
-                f64::INFINITY
+            // leaves (every visible row before k items are held), and whether it needs its group set up
+            let (index0, need) = if direct <= m.cut_us + m.cl_us {
+                (f64::INFINITY, false)
             } else if kth > f64::NEG_INFINITY && ix.nukey.is_empty() {
                 if !anchored {
                     // the anchor the sorted ranges need, the nearest of the clusters read
@@ -806,12 +811,18 @@ impl Adaptive {
                     anchored = true;
                 }
                 let c = cut_rows(ix, &pr, vis, ci, pr.qm(ix, ci), kth);
-                m.index(c, nv, rows) + if c > 0 && new_group(g) { m.grp_us } else { 0.0 }
+                (m.index(c, nv, rows), c > 0 && new_group(g))
             } else {
-                m.index(nv, nv, rows) - m.cut_us + if new_group(g) { m.grp_us } else { 0.0 }
+                (m.index(nv, nv, rows) - m.cut_us, new_group(g))
             };
+            let save = direct - index0;
+            let take = save > 0.0 && (!need || lost[g] + save >= m.grp_us);
+            if need && save > 0.0 && !take {
+                lost[g] += save;
+            }
+            let index = index0 + if need { m.grp_us } else { 0.0 };
             info.read.push(ci as u32);
-            let path = if index < direct {
+            let path = if take {
                 info.index += 1;
                 info.index_cost += index;
                 if !anchored {
