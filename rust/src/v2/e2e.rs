@@ -3024,7 +3024,9 @@ fn study_layered_kernel() {
     let dir = std::env::var("DIAG_DIR").unwrap();
     let prep = std::env::var("DIAG_PREP").unwrap();
     let set = std::env::var("DIAG_SET").unwrap_or("none".into());
-    let rho: Vec<f64> = std::env::var("DIAG_RHO").unwrap().split(',').map(|s| s.parse().unwrap()).collect();
+    // DIAG_RHO=derived: each deterministic level's median over the groups of rho derived below (later levels the last)
+    let rho_arg = std::env::var("DIAG_RHO").unwrap();
+    let mut rho: Vec<f64> = if rho_arg == "derived" { Vec::new() } else { rho_arg.split(',').map(|s| s.parse().unwrap()).collect() };
     let psis: Vec<f64> = std::env::var("DIAG_PSIS").unwrap_or("3,4,5,6,7,8".into()).split(',').map(|s| s.parse().unwrap()).collect();
     let kk: usize = std::env::var("DIAG_K").ok().map_or(10, |s| s.parse().unwrap());
     let min_rows: usize = std::env::var("DIAG_MIN").ok().map_or(32, |s| s.parse().unwrap());
@@ -3041,7 +3043,7 @@ fn study_layered_kernel() {
     let (ow, ord) = (on.shape[1], on.i32s());
     let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
     let plan = Plan::default();
-    eprintln!("{dir} {set}: k {kk}, levels end at {:?} B, rho {rho:?}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
+    eprintln!("{dir} {set}: k {kk}, groups {}, levels end at {:?} B, rho {rho_arg}; per query: recall | clusters read, opened on the index path, groups | rows entering each level | stored vectors", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
     // rho derived from the build's own design: a level's weights are D_c^4 = v_c / pi_c (v_c the coordinate's residual
     // variance at the level, pi_c the query profile), so both sides of Cauchy-Schwarz carry a_c = sqrt(v_c pi_c) =
     // D_c^2 pi_c per coordinate, and E[error^2] / E[half-width^2] = sum a_c^2 / (sum a_c)^2
@@ -3053,6 +3055,9 @@ fn study_layered_kernel() {
             a.iter().map(|x| x * x).sum::<f64>().sqrt() / a.iter().sum::<f64>()
         }).collect();
         r.sort_by(|a, b| a.total_cmp(b));
+        if rho_arg == "derived" {
+            rho.push(r[r.len() / 2]);
+        }
         eprintln!("  level {l} ({} B): rho derived per group, min / median / max {:.4} / {:.4} / {:.4}; 1 / sqrt(n) = {:.4}", ix.meta.level_bytes(l), r[0], r[r.len() / 2], r[r.len() - 1], 1.0 / (n as f64).sqrt());
     }
     for &psi in &psis {
@@ -3097,5 +3102,79 @@ fn study_layered_kernel() {
             let m: Vec<f64> = (0..per[0].1.len()).map(|i| per.iter().map(|x| x.1[i]).sum::<f64>() / nq as f64).collect();
             eprintln!("psi {psi} {mode:<11} recall {rec:.4} | {:.1} {:.1} {:.1} | {} | {:.0}", m[0], m[1], m[2], m[3..3 + nl].iter().map(|x| format!("{x:.0}")).collect::<Vec<_>>().join(" "), m[3 + nl]);
         }
+    }
+}
+
+/// Study (ignored; run by hand on a built index) for layered.md 8.8: what the exact queries read, counted, and how
+/// tight the levels' certified intervals are. DIAG_DIR, DIAG_PREP, DIAG_SET. Per query kind (knn2 at k = 10, then
+/// threshold2 at each of the prep's thresholds for the set), means over the queries of: rows entering each level,
+/// stored vectors read, clusters opened on the index path, clusters the support table took in and dropped, rows the
+/// key's range dropped, groups set up, clusters and rows scored directly, the share of queries scanned. Unfiltered
+/// also: over each query's 4 first clusters, the median certified half-width of a row at each of the first 3 levels
+/// over the cluster's sigma, averaged.
+#[test]
+#[ignore]
+fn study_layered_exact() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let set = std::env::var("DIAG_SET").unwrap_or("none".into());
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = qs.len() / d;
+    let (k, nl) = (ix.k(), ix.meta.nl());
+    let vis_bm: Option<RoaringBitmap> = (set != "none").then(|| crate::util::read_npy(&format!("{prep}/vis_{set}.npy")).i32s().into_iter().map(|x| x as u32).collect());
+    let vis = vis_bm.as_ref().map(|b| Vis2::new(&ix, b));
+    let tn = crate::util::read_npy(&if set == "none" { format!("{prep}/thresholds.npy") } else { format!("{prep}/thresholds_{set}.npy") });
+    let (tw, ths) = (tn.shape[1], tn.f64s());
+    let qsp: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    let plan = Plan::default();
+    eprintln!("{dir} {set}: groups {}, K {k}, levels end at {:?} B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned", ix.groups.len(), (0..nl).map(|l| ix.meta.level_bytes(l)).collect::<Vec<_>>());
+    let line = |name: String, per: Vec<(Stats, u64, u64, bool)>| {
+        let n = per.len() as f64;
+        let m = |f: &dyn Fn(&(Stats, u64, u64, bool)) -> f64| per.iter().map(f).sum::<f64>() / n;
+        eprintln!("{name} | {} | {:.0} | {:.1} {:.1} {:.1} | {:.0} | {:.1} | {:.1} {:.0} | {:.2}", (0..nl).map(|l| format!("{:.0}", m(&|x| x.0.enter[l] as f64))).collect::<Vec<_>>().join(" "), m(&|x| x.0.full_reads as f64), m(&|x| x.0.clusters_open as f64), m(&|x| x.0.clusters_in as f64), m(&|x| x.0.clusters_out as f64), m(&|x| x.0.range_out as f64), m(&|x| x.0.groups as f64), m(&|x| x.1 as f64), m(&|x| x.2 as f64), m(&|x| x.3 as u8 as f64));
+    };
+    use crate::kernel::Stats;
+    let per: Vec<(Stats, u64, u64, bool)> = (0..nq).into_par_iter().map(|qi| {
+        let o = knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan);
+        (o.st, 0, 0, false)
+    }).collect();
+    line("knn k=10".into(), per);
+    for ti in 0..tw {
+        let per: Vec<(Stats, u64, u64, bool)> = (0..nq).into_par_iter().map(|qi| {
+            let pr = prep2(&ix, &qsp[qi]);
+            let o = threshold2(&ix, &pr, ths[qi * tw + ti], &Opts2 { vis: vis.as_ref(), verify: false, want_iv: false, plan });
+            (o.st, o.flat_clusters, o.flat_items, o.scanned)
+        }).collect();
+        line(format!("threshold {ti}"), per);
+    }
+    if set == "none" {
+        let ad = adaptive::Adaptive::new(&ix, fixed_costs()).unwrap();
+        let lv = nl.min(3);
+        let per: Vec<Vec<f64>> = (0..nq).into_par_iter().map(|qi| {
+            let q = &qsp[qi][..];
+            let pr = prep2(&ix, q);
+            let mu = ad.keys(&ix, q, 0.0);
+            let k1 = ad.keys(&ix, q, 1.0);
+            let ok = ad.order_keys(&ix, q, None);
+            let mut o: Vec<usize> = (0..k).collect();
+            o.sort_by(|&a, &b| ok[b].total_cmp(&ok[a]).then(a.cmp(&b)));
+            let mut st = Stats::new(nl);
+            let mut rf = Refiner::new(&ix, &pr);
+            let mut acc = vec![0.0; lv];
+            for &c in &o[..4] {
+                let cl = &ix.cl[c];
+                let sg = (k1[c] - mu[c]).max(1e-12);
+                for l in 0..lv {
+                    let mut h: Vec<f64> = rf.refine(&(cl.r0..cl.r1).map(|r| (r as u32, l)).collect::<Vec<_>>(), &mut st).iter().map(|x| 0.5 * (x.1 - x.0)).collect();
+                    h.sort_by(|a, b| a.total_cmp(b));
+                    acc[l] += h[h.len() / 2] / sg / 4.0;
+                }
+            }
+            acc
+        }).collect();
+        eprintln!("tightness: median certified half-width / sigma at the first {lv} levels: {}", (0..lv).map(|l| format!("{:.2}", per.iter().map(|x| x[l]).sum::<f64>() / nq as f64)).collect::<Vec<_>>().join(" "));
     }
 }

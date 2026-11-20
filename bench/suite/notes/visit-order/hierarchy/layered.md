@@ -50,7 +50,8 @@ four rules, each derived from N and the index and each off or free at 1M.**
    each doubling of G is worth 8% (yahoo) to 12% (LAION) of the 16 B code and nothing on glove; at 1B today's cap of 64 pools 244 clusters a basis.
    This is the least supported number here. Section 8.7 reconciles it with the leaves: the leaf (2,000 rows) and
    the basis (κn² rows) are fixed in N, only routing grows, the rule's K stays as the routing parents and the exact
-   path's unit, and G = N/(κn²) with no floor and no cap at K/8.
+   path's unit, and G = N/(κn²) with no floor and no cap at K/8. Re-encodes at G = 8, 16, 64 (8.8) measure κ at 1.1 (yahoo)
+   and 0.7 (LAION) by bytes, exact queries included; the price is 4 to 55% more row work, so 1M keeps 64 until timed.
 6. **Rule 5, visible sets at scale**: counts per group to drop empty regions for G comparisons; a row-ordered
    Roaring bitmap beyond 2^27 rows (a 1B cluster is about one container). By the subsample law the sparse regime
    recedes: 1% visible is 20 rows a cluster at 1M and 640 at 1B, where rule 1 engages.
@@ -869,6 +870,82 @@ and per basis. (v) Under 1% sets at 100M to 1B the bases' setups are the largest
 κ = 1 on glove and LAION): there a query reads few rows under each basis, the balance (8.1) tips, and the planner's
 existing choice (direct reads when a group's setup is not repaid) is what bounds it.
 
+### 8.8 The count of κ: re-encodes at G = 8, 16 and 64 [measured]
+
+yahoo (n 384) and LAION (n 512) were fitted again by `rust/tools/fit.py --groups G` (the suite's path, same seed, so
+the same clusters) and encoded with the default build, one at a time, at G = 8, 16 and 64; rows per basis over n²
+(κ) is then 0.57 / 0.29 / 0.07 on yahoo and 0.48 / 0.24 / 0.06 on LAION. Counted with the suite's 100 queries by
+`study_layered_kernel` (approximate k-NN, ρ derived per fit) and `study_layered_exact` (new: `knn2` at k = 10 and
+`threshold2` at the prep's thresholds), unfiltered and under random-25; bytes as in 5.4, with a group's setup n²
+plus the rotations where a randomised level is read. Every table, with the rows entering each level:
+`layered/results/kappa_tables.md`. Nothing was timed.
+
+**Tightness.** Median certified half-width over the cluster's σ at 16 / 32 / 56 B:
+
+| G | yahoo | LAION text |
+|---|---|---|
+| 8 | 6.73 / 5.24 / 3.76 | 9.32 / 7.81 / 5.94 |
+| 16 | 6.62 / 5.14 / 3.85 | 9.19 / 7.67 / 5.95 |
+| 64 | 6.36 / 4.91 / 3.65 | 8.81 / 7.29 / 5.62 |
+
+Eight times fewer bases widen the intervals by 6% at 16 B: less than the proxy of 8.4 suggested. The exact queries
+then carry more rows into the deeper levels (yahoo `knn2`: 441,760 rows at 32 B against 360,424; LAION at 96 B:
+802,803 against 709,847).
+
+**Total counted MB per query** (codes + stored vectors + group setups + tables; the smallest in bold):
+
+| | visible set | yahoo G = 8 / 16 / 64 | LAION G = 8 / 16 / 64 |
+|---|---|---|---|
+| exact `knn2`, k = 10 | none | **44.3** / 46.5 / 58.6 | **135** / 138 / 160 |
+| exact threshold, 0.01% | none | **47.4** / 49.6 / 62.4 | **131** / 136 / 159 |
+| exact threshold, 1% | none | **91.5** / 94.7 / 108 | **195** / 200 / 222 |
+| exact threshold, 10% | none | **145** / 147 / 160 | 377 / **376** / 388 |
+| exact `knn2`, k = 10 | random-25 | **24.0** / 26.3 / 40.4 | **64.1** / 68.7 / 92.6 |
+| exact threshold, 1% | random-25 | **38.5** / 41.3 / 55.9 | **78.3** / 83.0 / 107 |
+| approximate, rule 1, recall 0.9 / 0.95 / 0.99 | none | **2.27 / 2.86 / 4.79**; 2.39 / 3.09 / 4.91; 2.46 / 3.27 / 6.29 | **7.24 / 10.0 / 20.6**; 7.36 / 10.5 / 22.1; 8.12 / 11.8 / 20.8 |
+| approximate, rule 1 | random-25 | **0.91 / 1.27 / 2.66**; 1.00 / 1.36 / 3.19; 1.20 / 1.88 / 4.96 | **3.16 / 4.31 / 8.78**; 3.52 / 5.24 / 10.1; 4.91 / 7.92 / 16.8 |
+| approximate, today's certified levels | none | **3.00 / 4.27 / 7.87**; 3.13 / 4.57 / 8.54; 3.50 / 5.39 / 10.5 | **11.1 / 17.6 / 38.0**; 12.0 / 19.1 / 41.9; 14.1 / 23.4 / 50.5 |
+| approximate, today's direct reads | none | the same at every G (no group is set up): 10.1 / 19.2 / 48.4 | |
+
+What moves, 64 → 8 groups:
+
+| | yahoo | LAION text |
+|---|---|---|
+| exact, group setups (every group is set up: the support table decided no cluster on these queries) | 20.6 → 2.6 MB | 36.8 → 4.6 MB |
+| exact `knn2`, codes read | 25.5 → 28.4 MB (+12%) | 97.5 → 104 MB (+7%) |
+| exact threshold 1%, codes and vectors | 70.9 → 72.3 MB (+2%) | 161 → 166 MB (+3%) |
+| rule 1, clusters read to recall 0.95 / 0.99 | 14 / 41 → 16 / 46 | 68 / 138 → 94 / 216 |
+| rule 1, rows at the 16 B level, recall 0.99 | 83,506 → 92,127 (+10%) | 279,853 → 433,892 (+55%) |
+| rule 1, group setups, recall 0.99 | 2.49 → 0.75 MB | 8.24 → 1.92 MB |
+
+- **By counted bytes G = 8 is the minimum of the three for the exact queries and for the approximate ones**, on both
+  datasets, unfiltered and at 25% (one tie: LAION's 10% threshold). Exact queries read 3 to 24% fewer bytes
+  unfiltered and 27 to 41% fewer at random-25. The minimum lies at or below 8.
+- **κ measured.** For an exact query every group is set up, so the balance is G·s·n² against the codes' slope:
+  3.7% more code bytes per halving of G on yahoo, 2.2% on LAION. That puts the minimum at G ≈ 4 on yahoo and 5 on
+  LAION, **κ = 1.1 and 0.7, against the proxy's 1.2 and 0.8.** The proxy overstated the slope (8 and 12%) and
+  understated the bytes it applies to; the two cancel. The form G = N/(κn²) with κ about 1 stands, on real encodes.
+- **The cost is rows, not bytes.** Every byte saved is a setup byte; what rises is work per row: the exact queries
+  carry 4 to 23% more rows into each deeper level, and rule 1 loses more per level (lower f), so to the same recall it
+  reads 10% (yahoo) to 55% (LAION text, recall 0.99) more first-level rows, where its bytes only tie (20.6 against
+  20.8 MB). Setups are bulk int8 products; rows are kernel work. Whether the trade is a gain in time these counts
+  cannot say.
+
+**Recommendation.**
+- **At 1M keep G = 64 until it is timed**, and time exactly this: `knn2`, `threshold2` and the approximate k-NN at
+  G = 8, 16 and 64 on yahoo and LAION (the fits are one `fit.py --groups G` away). The counts say what to expect:
+  setups ÷ 8 (18 to 32 MB less per exact query), row work + 4 to 23% for exact queries and + 10 to 55% for rule 1
+  at high recall. If a middle is wanted without timing, G = 16 keeps 80 to 90% of the exact queries' byte saving
+  (46.5 of 58.6 → 44.3 on yahoo; 138 of 160 → 135 on LAION), but for rule 1 on LAION it already has the extra rows
+  (210 clusters at recall 0.99), so it is not a safer point for the approximate path.
+- **At scale the conclusion of 8.7 holds and is now measured, not a proxy**: a basis per about n² rows (κ of 0.7 to
+  1.1 by bytes); never G constant in N. If the timing at 1M favours 64 at n = 384 to 512, the same timing gives the κ
+  to carry (0.06 to 0.07, 16,000 rows a basis), and G = N/(κn²) follows from it, which reaches the cap of one basis per
+  parent at about 100M (16,000-row parents).
+- Limits: 100 queries; G below 8 was not encoded; LAION's queries are out of distribution (the only dataset where
+  rule 1's rows rise sharply); the tables' bytes (12 to 25 MB of every exact total) are a structural upper bound,
+  the same at every G; random-25 only among the filters.
+
 ## 9. Exact queries and visible sets
 
 **Exact queries are untouched.** Nothing stored changes: the same rows in the same order, the same codes, bases,
@@ -967,6 +1044,8 @@ In order; each step is small and can be judged alone on the suite (recall agains
 - `layered/scaling.py`, `scaling_tables.py`, `extrapolate.py`: replay A and its model; `results/scaling_*.json`,
   `results/scaling_tables.md`, `results/extrapolate.md`. `layered/nested.py`: replay A2 (leaves inside parents),
   `results/nested_*.md`. `layered/groups.py`: the groups proxy, `results/groups_*.md`.
+- `study_layered_exact` (e2e.rs) and `layered/kappa_tables.py`: the count of 8.8, `results/kappa_*.txt`,
+  `results/kappa_tables.md`.
 - `rust/src/v2/e2e.rs`: `study_layered_dump` (the dump replay B reads) and `study_layered_kernel` (the library's
   reader with the factor; also prints ρ derived). `layered/dump.sh`, `kernel.sh` run them on an index built from the
   suite's fits with this tree's library.

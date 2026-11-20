@@ -1,0 +1,6 @@
+/home/user/scratch-layered/fit_yahoo_16 none: groups 16, K 339, levels end at [16, 32, 56, 96, 160, 256] B; per query: rows entering each level | stored vectors | clusters opened, taken in, dropped by the support table | rows the key's range dropped | groups set up | clusters, rows scored directly | scanned
+knn k=10 | 677895 419058 194525 67532 1536 150 | 71 | 339.0 0.0 0.0 | 2400 | 16.0 | 0.0 0 | 0.00
+threshold 0 | 676934 496965 240633 78883 1587 150 | 35 | 339.0 0.0 0.0 | 371 | 16.0 | 0.0 0 | 0.00
+threshold 1 | 677305 675008 652370 534795 69973 10404 | 2472 | 339.0 0.0 0.0 | 0 | 16.0 | 0.0 0 | 0.00
+threshold 2 | 677305 677285 676896 670516 390791 97168 | 23769 | 339.0 0.0 0.0 | 0 | 16.0 | 0.0 0 | 0.00
+tightness: median certified half-width / sigma at the first 3 levels: 6.62 5.14 3.85
