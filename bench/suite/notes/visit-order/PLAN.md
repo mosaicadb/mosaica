@@ -512,8 +512,65 @@ yahoo region-25, and the approximate threshold under 25% sets (glove random-25 a
 cross-run). Not yet diagnosed; 00965ba's order put psi in the key (mu + psi sigma), which may suit glove's small
 clusters under filters.
 
+**The glove regression, diagnosed** (`results/glove-regression/`, `results/order-rows/`). Run back to back in one
+session (twice each), the regression is real under filters. At 0.95/0.98/0.99/0.995, as a multiple of spread's time:
+- random-25: 0.20 to 0.49 (00965ba) against 0.28 to 0.81 (f528836);
+- region-1: 0.56 to 0.71 against 0.76 to 0.81;
+- region-25: 0.38 to 0.64 against 0.72 to 0.96.
+
+Unfiltered, the regression at 0.8 is in the baseline, not in the probe. The two builds' spread times differ by about 15%
+(936 and 884 µs against 783 and 748), while the adaptive times are within noise (535 to 599 against 576 to 580). Above
+0.98, f528836 is ahead: 1.07 to 1.85 against 1.11 to 2.07.
+
+Order and execution, separated by the rows touched and clusters visited to each recall:
+- **random-25 and region-25.** It is the order. To the same recall, f528836 touches 16 to 36% more rows (random-25) and 49 to
+  79% more (region-25, recall 0.8 to 0.99). Every read is direct in both, and the time per row is about
+  the same (21 to 30 ns; f528836's first run was 39 ns at 0.99).
+- **region-1.** It is the execution. f528836 touches no more rows but visits 2 to 4 times the clusters (129 to 303
+  against 71 to 79 at 0.95 and above). 00965ba raced a scan of the visible rows and scanned the rest once the probe would
+  cost more (75 to 100% of its queries at psi 3 and above). f528836 reads the rest cluster by cluster, each paying a
+  sigma and the stream's bookkeeping. At about 0.9 µs a cluster, reading every cluster costs 636 µs against the exact
+  query's 292 to 320.
+
+The order effect is the z(1, v) factor: it favours clusters with many visible rows. In the offline replay
+(`study_order_rows_to_recall`: every order read whole, the same number of clusters for every query, 100 queries,
+k 10), mu + z(1, v) sigma needs 1.12 to 1.22 times the rows of mu + 4 sigma on glove unfiltered and random-25, and 1.41
+to 1.53 times under region-25.
+
+The replay's two questions (`tables.txt`; rows / those of mu + z(1, v) sigma):
+- **The free pooled spread (rad s) against sigma.**
+  - (ii) mu + z(1, v) rad s needs 0.99 to 1.14 times the rows of (i) on glove, 1.03 to 1.21 on yahoo and 1.06 to 1.46
+    on LAION (1.19 to 1.25 unfiltered, 1.23 to 1.46 under region-25). The rad s ratios below are on the same base.
+  - mu alone needs 1.06 to 1.22 times unfiltered on glove and yahoo, and 1.43 to 1.83 on LAION. It needs fewer rows
+    under the region sets (0.67 to 0.83 under region-1), but by reading many more, smaller clusters.
+  - So sigma earns its cost: rad s is not within a few percent anywhere but glove, and on LAION it is a poor proxy.
+    The gap order ranked by rad s needs 1.65 to 1.80 times the rows of (i) on LAION at 0.98 and above, unfiltered.
+- **The gap order (mu − t) / sigma.** The running 10th best re-keyed after every read is within 4% of the oracle t
+  everywhere. Against (i):
+  - glove 0.64 to 0.89;
+  - LAION 0.64 to 0.89 under random-1 and the region sets (0.95 to 1.08 under random-25);
+  - yahoo region-1 0.80 to 0.85;
+  - but yahoo unfiltered 1.03 to 1.14 and LAION unfiltered 1.03 to 1.11.
+  The static mu + 3 sigma (no t, no re-keying) does as well or better: 0.85 to 0.91 on glove unfiltered, 0.97 to 1.01
+  on yahoo and LAION unfiltered, and 0.63 to 0.94 under the region sets of all three. It never exceeds 1.04 (yahoo and LAION
+  random-25 at 0.9).
+  The gap order and mu + 3 sigma read more, smaller clusters: glove region-1 to 0.9, 201 to 206 clusters against 36.
+
+**Verdict.**
+- **Rows:** mu + 3 sigma is the cheapest order that needs no t, or ties with the gap order, on every dataset and
+  filter. The nv factor costs rows everywhere it changes the order.
+- **Compute per cluster:** both need each cluster's sigma, an r-dimensional int8 product with the query (sig_us 0.5 µs
+  on glove, 1.2 on yahoo, 1.9 on LAION), as (i) does. Ranking all clusters by it means pricing every cluster
+  (K sigmas, 0.3 to 1 ms a query), unless a stream and window stand in as now.
+- **What the replay does not measure:** the per-cluster read cost, which is what the nv factor saves (fewer, larger
+  clusters); and the window. Its rows favour mu + 3 sigma, but the time depends on that per-cluster cost.
+- **00965ba's failure at high psi** fits the replay. Its stream was mu + psi rad s, and on LAION rad s is a poor proxy
+  (above). At psi 5 to 7 the stream ranked mostly by it, while mu + 5 sigma itself costs only 1.03 to 1.12 times the
+  rows of (i).
+
 **Next.**
-- Diagnose the glove filtered regression: the order (mu + z(1, nv) sigma against 00965ba's mu + psi sigma) or the
-  read choices; the owner's benchmark run is the reference.
+- The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
+  mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's
+  race did). Held this round: no library change.
 - The legacy arm's removal once the benchmark no longer needs it.
 - Inserts leave the directions as built until compaction.

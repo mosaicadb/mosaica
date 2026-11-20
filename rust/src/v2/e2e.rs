@@ -2564,11 +2564,15 @@ fn the_exact_paths_are_unchanged() {
     }
     assert_eq!(format!("{:016x}", fnv_lines(&lines)), "8ce77501d8d48630");
 }
-/// Study (ignored; run by hand on a built index): rows to recall 0.95, 0.99 and 0.995 for four cluster orders, each
-/// read whole and the same number of clusters for every query, a query reading nothing more once it holds its true
-/// ten: mu + z(1, v) sigma; spread; the tail order v Gbar((t - mu) / sigma) at the true 10th best (an oracle); and the
-/// tail order at the running 10th best, re-keyed within a window of 8 of the stream. DIAG_DIR the index directory,
-/// DIAG_PREP the dataset's prep directory, DIAG_SETS the visible sets (none, random-25, ...).
+/// Study (ignored; run by hand on a built index): rows to recall 0.9, 0.95, 0.98, 0.99 and 0.995 for cluster orders,
+/// each read whole and the same number of clusters for every query, a query reading nothing more once it holds its
+/// true ten. The orders: mu + z(1, v) sigma (the probe's window key); mu + z(1, v) rad s (its stream key, s =
+/// sqrt(q' C q / tr C), C the pooled covariance: no work per cluster); mu alone; mu + psi sigma at psi 3, 4 and 5 (the
+/// order of 00965ba); spread; the standardised gap (mu - t) / sigma and (mu - t) / (rad s), largest first, at t the
+/// true 10th best (an oracle) and at the running 10th best (every unread cluster re-keyed after each read; the stream
+/// key until ten rows are held); and the tail order v Gbar((t - mu) / sigma) at the true 10th best and at the running
+/// one within a window of 8 of the stream. DIAG_DIR the index directory, DIAG_PREP the dataset's prep directory,
+/// DIAG_SETS the visible sets (none, random-25, ...).
 #[test]
 #[ignore]
 fn study_order_rows_to_recall() {
@@ -2587,7 +2591,7 @@ fn study_order_rows_to_recall() {
     let qsp: Vec<Vec<f32>> = (0..qs.len() / d).map(|i| { let mut v = vec![0f32; ix.n()]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
 
     let cl_of_row: Vec<usize> = ix.cl.iter().enumerate().flat_map(|(c, cl)| std::iter::repeat_n(c, cl.r1 - cl.r0)).collect();
-    let targets = [0.95, 0.99, 0.995];
+    let targets = [0.9, 0.95, 0.98, 0.99, 0.995];
     let sf = |x: f64| -> f64 {
         let z = x.abs() / std::f64::consts::SQRT_2;
         let t = 1.0 / (1.0 + 0.5 * z);
@@ -2595,6 +2599,10 @@ fn study_order_rows_to_recall() {
         let e = t * poly.exp();
         if x >= 0.0 { 0.5 * e } else { 1.0 - 0.5 * e }
     };
+    let names = [
+        "mu+z sigma (i)", "mu+z rad s (ii)", "mu (iii)", "mu+3 sigma", "mu+4 sigma", "mu+5 sigma", "spread",
+        "gap sigma oracle", "gap rad s oracle", "gap sigma running", "gap rad s running", "tail oracle", "tail running",
+    ];
     for set in &sets {
         let (vis_bm, order_file) = if set == "none" {
             (None, format!("{prep}/order.npy"))
@@ -2608,8 +2616,8 @@ fn study_order_rows_to_recall() {
         let ow = on.shape[1];
         let ord = on.i32s();
         let nv: Vec<usize> = (0..k).map(|c| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize)).collect();
-        // per query and order: the clusters in reading order (live ones), each read's new true top-10 hits
-        let names = ["mu+z(1,nv)sigma", "spread", "tail oracle", "tail running"];
+        // per query and order: the clusters in reading order (live ones), each read's visible rows and new true top-10
+        // hits
         let per: Vec<Vec<Vec<(usize, usize)>>> = (0..nq).into_par_iter().map(|qi| {
             let q = &qsp[qi][..];
             let pr = prep2(&ix, q);
@@ -2622,6 +2630,12 @@ fn study_order_rows_to_recall() {
             let tk = top10.iter().map(|&e| score(ix.row_of_ent(e))).fold(f64::INFINITY, f64::min);
             let mu = ad.keys(&ix, q, 0.0);
             let sig: Vec<f64> = ad.keys(&ix, q, 1.0).iter().zip(&mu).map(|(a, b)| a - b).collect();
+            // rad s from the unfiltered stream key mu + z(1, S) rad s (S the cluster's rows)
+            let st_all = ad.stream_keys(&ix, q, None);
+            let rads: Vec<f64> = (0..k).map(|c| {
+                let n = (ix.cl[c].r1 - ix.cl[c].r0) as f64;
+                (st_all[c] - mu[c]) / inv_norm(n / (n + 1.0)).max(1e-9)
+            }).collect();
             let live: Vec<usize> = (0..k).filter(|&c| nv[c] > 0).collect();
             let by = |key: &dyn Fn(usize) -> f64| {
                 let mut o = live.clone();
@@ -2629,45 +2643,59 @@ fn study_order_rows_to_recall() {
                 o
             };
             let o1 = ad.order_keys(&ix, q, vis.as_ref());
-            let ord1 = by(&|c| o1[c]);
-            let ord2: Vec<usize> = ap.order(&ix, &pr, vis.as_ref()).into_iter().filter(|&c| nv[c] > 0).collect();
-            let tail = |t: f64, c: usize| -> f64 { nv[c] as f64 * sf((t - mu[c]) / sig[c].max(1e-12)) };
-            let ord3 = by(&|c| tail(tk, c));
-            // running: the stream of (i), a window of 8 re-keyed by the tail key at the running 10th best
             let st_keys = ad.stream_keys(&ix, q, vis.as_ref());
-            let stream = by(&|c| st_keys[c]);
-            let mut ord4 = Vec::new();
-            let mut best: Vec<f64> = Vec::new();
-            let mut win: Vec<usize> = Vec::new();
-            let mut it = stream.into_iter();
-            let mut found = 0;
-            loop {
-                while win.len() < 8 {
-                    match it.next() {
-                        Some(c) => win.push(c),
-                        None => break,
-                    }
-                }
-                if win.is_empty() || found >= 10 {
-                    break;
-                }
-                let kth = if best.len() >= 10 { best[9] } else { f64::NEG_INFINITY };
-                let i = (0..win.len()).max_by(|&a, &b| tail(kth, win[a]).total_cmp(&tail(kth, win[b])).then(win[b].cmp(&win[a]))).unwrap();
-                let c = win.swap_remove(i);
-                ord4.push(c);
-                found += hits[c];
-                let cl = &ix.cl[c];
-                for r in cl.r0..cl.r1 {
-                    if vis_bm.as_ref().is_some_and(|b| !b.contains(ix.row_ent[r])) {
-                        continue;
-                    }
-                    best.push(score(r));
-                }
-                best.sort_by(|a, b| b.total_cmp(a));
-                best.truncate(10);
+            let tail = |t: f64, c: usize| -> f64 { nv[c] as f64 * sf((t - mu[c]) / sig[c].max(1e-12)) };
+            let gap = |sc: &[f64], t: f64, c: usize| -> f64 { (mu[c] - t) / sc[c].max(1e-12) };
+            let mut orders: Vec<Vec<usize>> = vec![by(&|c| o1[c]), by(&|c| st_keys[c]), by(&|c| mu[c])];
+            for psi in [3.0, 4.0, 5.0] {
+                orders.push(by(&|c| mu[c] + psi * sig[c]));
             }
+            orders.push(ap.order(&ix, &pr, vis.as_ref()).into_iter().filter(|&c| nv[c] > 0).collect());
+            orders.push(by(&|c| gap(&sig, tk, c)));
+            orders.push(by(&|c| gap(&rads, tk, c)));
+            // a running order: after each read the next is the unread cluster (of a window of `win` from the stream,
+            // or of all) of largest key at the running 10th best, until the ten are found
+            let running = |key: &dyn Fn(f64, usize) -> f64, win: Option<usize>| -> Vec<usize> {
+                let stream = by(&|c| st_keys[c]);
+                let mut it = stream.iter().copied();
+                let mut cand: Vec<usize> = if win.is_some() { Vec::new() } else { stream.clone() };
+                let (mut out, mut best, mut found) = (Vec::new(), Vec::<f64>::new(), 0);
+                loop {
+                    if let Some(w) = win {
+                        while cand.len() < w {
+                            match it.next() {
+                                Some(c) => cand.push(c),
+                                None => break,
+                            }
+                        }
+                    }
+                    if cand.is_empty() || found >= 10 {
+                        break;
+                    }
+                    let kth = if best.len() >= 10 { best[9] } else { f64::NEG_INFINITY };
+                    let i = (0..cand.len()).max_by(|&a, &b| key(kth, cand[a]).total_cmp(&key(kth, cand[b])).then(cand[b].cmp(&cand[a]))).unwrap();
+                    let c = cand.swap_remove(i);
+                    out.push(c);
+                    found += hits[c];
+                    let cl = &ix.cl[c];
+                    for r in cl.r0..cl.r1 {
+                        if vis_bm.as_ref().is_some_and(|b| !b.contains(ix.row_ent[r])) {
+                            continue;
+                        }
+                        best.push(score(r));
+                    }
+                    best.sort_by(|a, b| b.total_cmp(a));
+                    best.truncate(10);
+                }
+                out
+            };
+            for sc in [&sig, &rads] {
+                orders.push(running(&|t, c| if t == f64::NEG_INFINITY { st_keys[c] } else { gap(sc, t, c) }, None));
+            }
+            orders.push(by(&|c| tail(tk, c)));
+            orders.push(running(&|t, c| tail(t, c), Some(8)));
             // each order up to the read that finds the last of the ten (a query reads nothing more after it)
-            [ord1, ord2, ord3, ord4].into_iter().map(|o| {
+            orders.into_iter().map(|o| {
                 let mut f = 0;
                 let mut v = Vec::new();
                 for c in o {
@@ -2703,7 +2731,7 @@ fn study_order_rows_to_recall() {
                 }
                 prev = (rows, rec);
             }
-            eprintln!("  {name:<16} {}", out.join("  "));
+            eprintln!("  {name:<18} {}", out.join("  "));
         }
     }
 }
