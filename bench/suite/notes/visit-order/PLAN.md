@@ -727,6 +727,59 @@ planner (read choice, constants, groups) is f528836's.
   and the stop. To the same recall it reads more clusters than f528836 (306 clusters for 0.94 at psi 5, against 204 for
   0.99 at psi 3). 7536990's race to a scan remains the fastest under region-1.
 
+**The scan hand-over** (46b41d3; `results/scan-handover/`). The probe hands the rest to a scan once its work W reaches
+the visible rows left R. W is the rows scored from stored vectors plus r = 16 for each sigma. Every cluster left is
+then read directly, in row order and batched (path "race"), and the answer is exact. There is no modelled cost.
+
+**First version: W counted rows touched.** That counts every row in an index-path range, so the hand-over fired at
+psi 5 in half of glove's unfiltered queries and slowed them (`timing-touched/`).
+
+**Counting rows scored, timed against 7536990 and 5853926 back to back** (`timing/summary.txt`; 50 queries, 2
+repetitions, psi 2 to 7). Time to recall 0.8/0.9/0.95/0.98/0.99 over spread's:
+
+| Set | 7536990 | 5853926 | Hand-over |
+|---|---|---|---|
+| glove none | 1.57/.86/1.87/2.23/2.57 | 1.46/.80/1.44/1.63/1.43 | 1.43/.82/1.52/1.72/1.53 |
+| glove random-1 | 1.11/.88/.61/1.23/.97 | 1.20/1.62/1.62/1.54/1.35 | 1.13/1.89/1.92/1.83/1.24 |
+| glove region-1 | .64/.65/.62/.57/.56 | 1.00/1.10/1.00/.89/.86 | .79/.86/.81/.74/.72 |
+| glove random-25 | .96/.68/.48/.98/1.10 | .98/.76/.54/1.15/1.27 | 1.10/.86/.63/1.54/1.73 |
+| LAION none | .69/1.01/1.40/1.62/2.28 | .72/1.10/1.01/1.10/1.10 | .71/1.08/.89/1.02/.98 |
+| LAION random-1 | 1.34/1.18/1.34/1.10/1.37 | 1.18/1.44/1.14/1.37/1.48 | 1.06/1.28/1.09/1.65/1.45 |
+| LAION region-1 | .50/.64/.68/.61/.58 | .52/.64/.65/.59/- | .49/.64/.70/.59/- |
+| LAION random-25 | .41/.41/.69/1.25/- | .47/.39/.58/.61/.68 | .42/.36/.51/.53/.57 |
+
+Where it fires (`races.txt`):
+- the 1% sets from psi 3 to 4 up (most queries by psi 5 to 6);
+- unfiltered only at psi 6 to 7 (glove, 31 to 38 of 50 queries; LAION 4 of 50 at psi 7);
+- random-25 from psi 5 on glove, psi 6 on LAION.
+
+It helps glove region-1 (0.72 to 0.86 of spread, against 0.86 to 1.10) and the top of random-1 (0.995: 1.04 against
+1.28). It costs glove random-25 at 0.98 to 0.99 (1.54 to 1.73, against 1.15 to 1.27). There the probe's long queries
+already read most of the visible rows, so the hand-over doubles them, as its bound allows. It also costs glove
+random-1 at 0.9 to 0.98. Glove region-1 still trails 7536990 (0.55 to 0.65), whose race priced the probe's per-cluster
+overhead (a sigma, the order, a direct read's fixed cost).
+
+**The shrunk estimate (B) was not built.** The replay (`replay/`, the stress harness with random-1, region-1 and
+region-25 at k 10) shows the frozen self-correcting order needing no more rows than mu + 3 sigma on the 1% and region
+sets. Glove region-1 at 0.9/0.99: 2,953/4,197 rows against 3,042/4,174; LAION 2,114/3,283 against 2,116/3,213. So the
+order does not misfire on region in rows. The time it loses there is per-cluster work (about 200 small clusters read
+one by one), which the estimate's reliability cannot change.
+
+**Glove unfiltered at 0.98 to 0.99** (5853926 against spread, same session; `profiles/`):
+- At recall 0.99 the probe touches 477k rows over 227 clusters (37 read directly, 190 on the index path) in 12.1 ms.
+  Spread touches about 425k rows over about 210 clusters in about 8.4 ms (interpolated between nprobe 128 and 256).
+- So 12% more rows and about 28% more time a row (25 against 20 ns).
+- The profiles (medians) place the per-row gap:
+  - Direct reads: whole clusters of about 2,000 rows scored from their stored vectors at about 30 ns a row, against
+    the index path's about 20 ns. The measured constants price direct reads as cheaper there, often when the group
+    is new.
+  - The probe's per-cluster work: pricing the index path (cut_rows) 0.3 ms, groups 0.2 ms, sigmas 0.13 ms and the
+    order 0.1 ms, about 7% at psi 5.
+- The rest of the mean gap is the long tail of queries the stop lets run (mean 227 clusters against a median of
+  about 155).
+- No change: the cause is spread over the planner's read choice (fixed this round) and the stop's tail, with no
+  single small fix.
+
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
   mu + z(1, v) sigma, and on sparse sets a hand-over to the scan once the probe's reads would cost more (as 00965ba's

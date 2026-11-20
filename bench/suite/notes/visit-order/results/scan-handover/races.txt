@@ -1,0 +1,49 @@
+== the scan hand-over's firing: per visible set and psi, recall, rows touched, mean us, paths, clusters visited
+   glove-100-angular            none       psi 2    recall 0.342 rows    2591 us    231.0 {'probe': 50} visited 1.0
+   glove-100-angular            none       psi 3    recall 0.544 rows    7960 us    394.1 {'probe': 50} visited 3.2
+   glove-100-angular            none       psi 4    recall 0.924 rows   95840 us   2119.3 {'probe': 50} visited 42.7
+   glove-100-angular            none       psi 5    recall 0.990 rows  476664 us  12763.9 {'probe': 50} visited 226.6
+   glove-100-angular            none       psi 6    recall 0.996 rows  873284 us  24997.1 {'race': 31, 'probe': 19} visited 375.0
+   glove-100-angular            none       psi 7    recall 0.998 rows  991746 us  26747.4 {'race': 38, 'probe': 12} visited 422.7
+   glove-100-angular            random-1   psi 2    recall 0.572 rows     249 us     62.9 {'probe': 50} visited 10.6
+   glove-100-angular            random-1   psi 3    recall 0.856 rows    1822 us    150.6 {'probe': 48, 'race': 2} visited 69.0
+   glove-100-angular            random-1   psi 4    recall 0.984 rows    8206 us    683.5 {'race': 32, 'probe': 18} visited 160.4
+   glove-100-angular            random-1   psi 5    recall 1.000 rows   10350 us    734.0 {'race': 43, 'probe': 7} visited 184.4
+   glove-100-angular            random-1   psi 6    recall 1.000 rows   11003 us    734.4 {'race': 46, 'probe': 4} visited 193.9
+   glove-100-angular            random-1   psi 7    recall 1.000 rows   11666 us    726.0 {'race': 49, 'probe': 1} visited 203.8
+   glove-100-angular            region-1   psi 2    recall 0.252 rows     621 us     78.6 {'probe': 50} visited 36.8
+   glove-100-angular            region-1   psi 3    recall 0.492 rows    2563 us    124.0 {'probe': 44, 'race': 6} visited 95.6
+   glove-100-angular            region-1   psi 4    recall 0.786 rows    6561 us    388.2 {'probe': 28, 'race': 22} visited 177.3
+   glove-100-angular            region-1   psi 5    recall 0.942 rows    9939 us    624.9 {'probe': 12, 'race': 38} visited 217.9
+   glove-100-angular            region-1   psi 6    recall 0.990 rows   11538 us    623.7 {'race': 48, 'probe': 2} visited 230.6
+   glove-100-angular            region-1   psi 7    recall 1.000 rows   11835 us    634.5 {'race': 50} visited 234.1
+   glove-100-angular            random-25  psi 2    recall 0.360 rows     779 us    111.7 {'probe': 50} visited 1.2
+   glove-100-angular            random-25  psi 3    recall 0.702 rows    5260 us    340.0 {'probe': 50} visited 8.8
+   glove-100-angular            random-25  psi 4    recall 0.956 rows   56909 us   3143.2 {'probe': 48, 'race': 2} visited 93.6
+   glove-100-angular            random-25  psi 5    recall 0.994 rows  212907 us  18188.8 {'race': 34, 'probe': 16} visited 209.9
+   glove-100-angular            random-25  psi 6    recall 1.000 rows  241787 us  18533.6 {'race': 39, 'probe': 11} visited 236.8
+   glove-100-angular            random-25  psi 7    recall 1.000 rows  276832 us  18459.7 {'race': 45, 'probe': 5} visited 270.7
+   laion-clip-512-normalized    none       psi 2    recall 0.526 rows    2400 us    567.8 {'probe': 50} visited 1.0
+   laion-clip-512-normalized    none       psi 3    recall 0.658 rows    4228 us    687.0 {'probe': 50} visited 1.9
+   laion-clip-512-normalized    none       psi 4    recall 0.842 rows   17749 us   1324.4 {'probe': 50} visited 8.7
+   laion-clip-512-normalized    none       psi 5    recall 0.956 rows   73571 us   3967.8 {'probe': 50} visited 36.5
+   laion-clip-512-normalized    none       psi 6    recall 0.992 rows  227674 us  11968.1 {'probe': 50} visited 115.7
+   laion-clip-512-normalized    none       psi 7    recall 1.000 rows  504098 us  28699.6 {'probe': 46, 'race': 4} visited 254.4
+   laion-clip-512-normalized    random-1   psi 2    recall 0.662 rows     175 us     97.7 {'probe': 50} visited 8.1
+   laion-clip-512-normalized    random-1   psi 3    recall 0.850 rows     805 us    143.3 {'probe': 50} visited 40.4
+   laion-clip-512-normalized    random-1   psi 4    recall 0.960 rows    3590 us    391.4 {'probe': 39, 'race': 11} visited 121.7
+   laion-clip-512-normalized    random-1   psi 5    recall 0.986 rows    6946 us   1226.6 {'probe': 20, 'race': 30} visited 184.1
+   laion-clip-512-normalized    random-1   psi 6    recall 0.994 rows    8890 us   1302.0 {'race': 42, 'probe': 8} visited 214.3
+   laion-clip-512-normalized    random-1   psi 7    recall 0.998 rows    9741 us   1308.9 {'race': 48, 'probe': 2} visited 223.1
+   laion-clip-512-normalized    region-1   psi 2    recall 0.316 rows     443 us    119.0 {'probe': 50} visited 14.0
+   laion-clip-512-normalized    region-1   psi 3    recall 0.584 rows    1606 us    250.0 {'probe': 49, 'race': 1} visited 40.5
+   laion-clip-512-normalized    region-1   psi 4    recall 0.856 rows    4880 us    490.6 {'probe': 34, 'race': 16} visited 88.0
+   laion-clip-512-normalized    region-1   psi 5    recall 0.946 rows    8385 us   1017.1 {'race': 38, 'probe': 12} visited 123.4
+   laion-clip-512-normalized    region-1   psi 6    recall 0.968 rows    9485 us   1058.6 {'race': 47, 'probe': 3} visited 128.7
+   laion-clip-512-normalized    region-1   psi 7    recall 0.988 rows    9582 us   1049.0 {'race': 47, 'probe': 3} visited 131.8
+   laion-clip-512-normalized    random-25  psi 2    recall 0.488 rows     623 us    231.3 {'probe': 50} visited 1.1
+   laion-clip-512-normalized    random-25  psi 3    recall 0.704 rows    1752 us    388.2 {'probe': 50} visited 3.3
+   laion-clip-512-normalized    random-25  psi 4    recall 0.898 rows    8077 us   1203.6 {'probe': 50} visited 15.7
+   laion-clip-512-normalized    random-25  psi 5    recall 0.976 rows   29941 us   4306.6 {'probe': 50} visited 60.0
+   laion-clip-512-normalized    random-25  psi 6    recall 0.992 rows   98531 us  13343.6 {'probe': 41, 'race': 9} visited 154.6
+   laion-clip-512-normalized    random-25  psi 7    recall 0.994 rows  209332 us  41035.8 {'race': 37, 'probe': 13} visited 236.7

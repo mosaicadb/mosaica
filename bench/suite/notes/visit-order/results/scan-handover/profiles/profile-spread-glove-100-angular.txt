@@ -1,0 +1,5 @@
+glove-100-angular: 592 clusters, 1183514 rows, k 10
+filter     nprobe    total    order   groups   stored     rest   us, median over 100 queries
+none          128   6474.4     45.5    154.8     81.7   6192.4
+none          256  12275.6     64.9    259.3     96.4  11855.0
+none          512  25990.6    126.5    392.1    147.8  25324.3
