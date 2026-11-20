@@ -51,7 +51,8 @@ four rules, each derived from N and the index and each off or free at 1M.**
    This is the least supported number here. Section 8.7 reconciles it with the leaves: the leaf (2,000 rows) and
    the basis (κn² rows) are fixed in N, only routing grows, the rule's K stays as the routing parents and the exact
    path's unit, and G = N/(κn²) with no floor and no cap at K/8. Re-encodes at G = 8, 16, 64 (8.8) measure κ at 1.1 (yahoo)
-   and 0.7 (LAION) by bytes, exact queries included; the price is 4 to 55% more row work, so 1M keeps 64 until timed.
+   and 0.7 (LAION) by bytes, exact queries included. Timed (8.10): 8 groups are never slower than 64 at 1M and
+   10 to 26% faster for `knn2` on yahoo and the approximate reader unfiltered, so G can follow the rule at 1M too.
 6. **Rule 5, visible sets at scale**: counts per group to drop empty regions for G comparisons; a row-ordered
    Roaring bitmap beyond 2^27 rows (a 1B cluster is about one container). By the subsample law the sparse regime
    recedes: 1% visible is 20 rows a cluster at 1M and 640 at 1B, where rule 1 engages.
@@ -1004,6 +1005,72 @@ centre each), not the basis groups of rule 4.
 recommendation (keep 64 at 1M until timed) can be narrowed: for exact threshold queries the timing exists and
 favours fewer groups; what remains untimed is `knn2` and the approximate reader at n = 384 to 512.
 
+### 8.10 The group count timed [measured, time]
+
+The one timing in this note. `study_layered_group_timing` (`layered/group_timing.sh "8 64" 50 2`, then 16): fits by
+`fit.py --groups G`, default encode, one at a time; exact `knn2` at k = 10 and the library's adaptive k-NN as it is
+(certified levels, its cost constants timed at each open) at ψ = 4, 5, 6; the first 50 of the suite's queries, an
+untimed pass and 2 repetitions, each query's fastest; one thread on core 3; arms in turn within a query. Median ms
+per query, G = 8 / 16 / 64 (recall is the same at every G to within 0.006: the same clusters and stop):
+
+| | visible set | yahoo (n 384) | LAION text (n 512) |
+|---|---|---|---|
+| exact `knn2` | none | **14.3** / 15.7 / 17.7 | 36.2 / **34.7** / 37.5 |
+| exact `knn2` | random-25 | **12.2** / 14.9 / 15.2 | 35.5 / **34.8** / 37.4 |
+| approximate, ψ = 4 (recall 0.73; 0.87) | none | **0.49** / 0.50 / 0.54 | **1.38** / 1.47 / 1.57 |
+| approximate, ψ = 5 (0.87; 0.96) | none | **0.71** / 0.73 / 0.80 | 3.55 / **3.50** / 4.18 |
+| approximate, ψ = 6 (0.96; 0.99) | none | **1.08** / 1.32 / 1.46 | **9.67** / 10.2 / 12.4 |
+| approximate, ψ = 4 / 5 / 6 | random-25 | 0.32 / 0.70 / 1.40; 0.36 / 0.76 / 1.48; 0.33 / 0.75 / 1.42 | 1.40 / 5.70 / 17.1; 1.30 / 6.03 / 16.2; 1.34 / 5.74 / 18.6 |
+
+- **Fewer groups are faster or equal in every cell.** yahoo `knn2`: 19 to 20% faster at 8 groups than at 64.
+  Approximate unfiltered: 10 to 26% (yahoo) and 12 to 22% (LAION), most at high ψ, where more groups are opened.
+  LAION `knn2` and both approximate random-25 rows move by under 8% with no order in G: within the noise of 50
+  queries and 2 repetitions (the constants timed at open differ between runs too). Nothing is slower at 8 beyond
+  that noise; the extra row work the counts of 8.8 showed (codes + 7 to 12%) does not show as time.
+- **A group's setup in time**, from the differences: 60 µs (yahoo `knn2`, 56 fewer groups for 3.4 ms), 80 µs (yahoo
+  approximate at ψ = 6, 4.5 fewer groups), about 130 µs (LAION approximate at ψ = 6, 21 fewer groups for 2.7 ms):
+  the 56 to 120 µs earlier reports measured.
+- **κ implied by time**: the minimum is at or below G = 8, so κ ≥ 0.57 (yahoo) and ≥ 0.48 (LAION), against 1.1 and 0.7
+  from the counts (8.8), 1.2 and 0.8 from the proxy (8.4) and ≥ 0.24 from the 768-dimension timing (8.9). Four
+  estimates, three kinds of evidence, the same side of today's 0.06 to 0.07.
+
+**The reader's read paths** (mean clusters per query in the untimed pass; "priced direct because the group was
+new" is counted by running the same reader with a group's setup priced at 0 and taking the reads that move to the
+index path):
+
+| | G | clusters read directly / on the index path, ψ = 4, 5, 6 | groups set up | direct because the group was new |
+|---|---|---|---|---|
+| yahoo, none | 8 | 0 / 2.4, 0 / 6.5, 0 / 15.3 | 1.3, 1.9, 3.0 | 0 |
+| yahoo, none | 64 | 0 / 2.4, 0.1 / 6.3, 0.3 / 14.6 | 1.8, 3.6, 7.5 | all of them (0, 0.1, 0.3) |
+| LAION, none | 8 | 0.4 / 14.7, 0.7 / 49.6, 0.8 / 134.1 | 2.5, 4.7, 6.6 | all (0.4, 0.7, 0.8) |
+| LAION, none | 16 | 1.0 / 14.3, 2.0 / 48.4, 3.4 / 131.8 | 3.4, 7.2, 11.9 | all (1.0, 2.0, 3.4) |
+| LAION, none | 64 | 1.2 / 14.0, 3.4 / 47.5, 8.3 / 127.5 | 5.0, 13.7, 27.6 | all (1.2, 3.4, 8.3) |
+| yahoo, random-25 | 8, 16, 64 | every cluster directly (4.9, 13, 27) | 0 | 0 to 1.1 of 27 |
+| LAION, random-25 | 8 | 29.2 / 0, 91.8 / 0, 223.8 / 0 | 0 | 26.6, 81.9, 194.4 (87 to 91%) |
+| LAION, random-25 | 16 | 29.3 / 0, 90.7 / 0, 223.5 / 0 | 0 | 28.6, 87.9, 213.2 (95 to 98%) |
+| LAION, random-25 | 64 | 29.2 / 0, 90.4 / 0, 224.8 / 0 | 0 | 18.0, 54.0, 126.9 (56 to 62%) |
+
+- **Unfiltered**, nearly every cluster is on the index path at every G on these two datasets (not glove's case); the
+  few direct reads are all first clusters of a new group, and fewer groups remove them (LAION at ψ = 6: 8.3 → 0.8).
+- **LAION under random-25: every cluster is read directly at every G, and 56 to 98% of them only because their group
+  was new.** No group is ever set up, so every later cluster of the same group meets the same price again. This is
+  not cured by fewer groups (at G = 8 a query at ψ = 6 would use 7 groups for 194 clusters, and still opens none):
+  the reader charges a group's whole setup to the one cluster being priced, and at 500 visible rows a cluster that
+  never pays. It is the choice the implementation agent saw on glove. A group's setup has to be priced against
+  the clusters of the window (or of the stream) that share it, as the threshold query's "group bought by foregone
+  savings" did (`PLAN.md`); with rule 1 the stake is larger, since the index path is then much cheaper per row.
+  yahoo under random-25 reads directly on its own merits.
+- The shares at G = 16 and 64 are not in order (95 to 98% against 56 to 62%): the cost constants are timed at each
+  open and differ between the encodes, which moves this choice. Another reason to price groups structurally.
+
+**Recommendation, replacing 8.8's "keep 64 until timed".** At 1M and n = 384 to 512, 8 groups are no slower than 64 for
+anything timed here and 10 to 26% faster for exact `knn2` on yahoo and for the approximate reader unfiltered; with
+8.9's threshold timings at n = 768, every exact and approximate query kind now has a timing on the same side. So the
+group count can follow G = N/(κn²) at 1M too, with κ between 0.5 and 1 (8 groups at these sizes; 4 to 7 by κ = 1 was
+not encoded or timed). Not covered: rule 1 (not in the library; its counts in 8.8 show 10 to 55% more first-level rows
+at fewer groups on LAION text at the same recall), glove and n ≤ 128 (where κ = 1 gives 61 groups, as today), region
+sets, k other than 10.
+
 ## 9. Exact queries and visible sets
 
 **Exact queries are untouched.** Nothing stored changes: the same rows in the same order, the same codes, bases,
@@ -1095,13 +1162,14 @@ In order; each step is small and can be judged alone on the suite (recall agains
 - k = 1,000, AVX2 against AVX-512, and writes were not studied: the rule changes no stored byte and no kernel
   instruction, only a factor, so both instruction sets and inserts behave as today; ρ is per group and level and
   moves only when the build's weights do (a rebuild).
-- No time was measured anywhere.
+- No time was measured anywhere except in 8.10 (the group count).
 
 ## Files
 
 - `layered/scaling.py`, `scaling_tables.py`, `extrapolate.py`: replay A and its model; `results/scaling_*.json`,
   `results/scaling_tables.md`, `results/extrapolate.md`. `layered/nested.py`: replay A2 (leaves inside parents),
   `results/nested_*.md`. `layered/groups.py`: the groups proxy, `results/groups_*.md`.
+- `study_layered_group_timing` (e2e.rs) and `layered/group_timing.sh`: the timing of 8.10, `results/timing_*.txt`.
 - `study_layered_exact` (e2e.rs) and `layered/kappa_tables.py`: the count of 8.8, `results/kappa_*.txt`,
   `results/kappa_tables.md`.
 - `rust/src/v2/e2e.rs`: `study_layered_dump` (the dump replay B reads) and `study_layered_kernel` (the library's

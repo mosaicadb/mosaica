@@ -3195,6 +3195,10 @@ fn study_layered_group_timing() {
     let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).unwrap();
     let m = adaptive::measure(&ix).unwrap();
     let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    // the same reader with a group's setup priced at nothing: the reads it moves to the index path are the ones the
+    // real constants read directly because their group was new (counted in the untimed pass)
+    let ad0 = adaptive::Adaptive::new(&ix, adaptive::Measured { grp_us: 0.0, ..m }).unwrap();
+    let mut split = vec![[0.0f64; 5]; 1 + psis.len()];
     let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
     let (qs, d) = qn.rows_f32("queries").unwrap();
     let nq = nq.min(qs.len() / d);
@@ -3213,10 +3217,16 @@ fn study_layered_group_timing() {
         for qi in 0..nq {
             for a in 0..narm {
                 let t = std::time::Instant::now();
-                let ents = if a == 0 { knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan).ents } else { ad.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan).0.ents };
+                let (ents, info) = if a == 0 { (knn2(&ix, &qsp[qi], 10, vis.as_ref(), plan).ents, None) } else { let o = ad.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan); (o.0.ents, Some(o.1)) };
                 let us = t.elapsed().as_secs_f64() * 1e6;
                 if rep == 0 {
                     recall[a] += rec(&ents, qi) / nq as f64;
+                    if let Some(i) = info {
+                        let i0 = ad0.knn(&ix, &qsp[qi], 10, vis.as_ref(), psis[a - 1], plan).1;
+                        for (x, v) in split[a].iter_mut().zip([i.direct, i.index, i.groups, i0.direct, i0.index]) {
+                            *x += v as f64 / nq as f64;
+                        }
+                    }
                 } else {
                     best[a][qi] = best[a][qi].min(us);
                 }
@@ -3228,6 +3238,7 @@ fn study_layered_group_timing() {
         let mut v = best[a].clone();
         v.sort_by(|x, y| x.total_cmp(y));
         let name = if a == 0 { "knn2 exact".to_string() } else { format!("approximate psi {}", psis[a - 1]) };
-        eprintln!("{name:<20} median {:.0} mean {:.0} recall {:.4}", v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, recall[a]);
+        let sp = if a == 0 { String::new() } else { format!(" | clusters read directly {:.1}, on the index path {:.1}, groups set up {:.1}; with a group's setup priced at 0: directly {:.1}, index path {:.1}", split[a][0], split[a][1], split[a][2], split[a][3], split[a][4]) };
+        eprintln!("{name:<20} median {:.0} mean {:.0} recall {:.4}{sp}", v[v.len() / 2], v.iter().sum::<f64>() / v.len() as f64, recall[a]);
     }
 }
