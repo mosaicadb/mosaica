@@ -946,6 +946,64 @@ What moves, 64 → 8 groups:
   rule 1's rows rise sharply); the tables' bytes (12 to 25 MB of every exact total) are a structural upper bound,
   the same at every G; random-25 only among the filters.
 
+### 8.9 Three earlier reports, reconciled with 8.7 and 8.8 [reading pass; no runs]
+
+**`rust/REPORT_CLUSTERSIZE.md`: groups timed at 1M, BioCLIP-2, n = 768, exact threshold queries.** Its fits P and D
+have the same clusters and differ only in the grouping, so they are a timed test of κ = N/(G·n²): P4 / P16 (64 / 62
+groups, κ = 0.026 / 0.027), D4 (31 groups, κ = 0.055), D16 (7 groups, κ = 0.24). Read at fixed clusters (the report's
+own summary compares against the 1,000-row base, which mixes in the cluster size):
+
+| ms, D against P (same clusters) | text 0.01% / 0.1% / 1% / 10% / 50% / 75% | item 0.01% / 0.1% / 1% / 10% / 50% / 75% |
+|---|---|---|
+| 4,000 rows: D4 (31 groups) / P4 (64) | 22.5 / 26.6, 27.9 / 32.2, 49.8 / 54.5, 79.1 / 84.1, 107.8 / 112.5, 101.3 / 105.8 | 2.1 / 2.3, 3.7 / 3.7, 12.0 / 16.0, 67.4 / 74.5, 100.8 / 103.9, 92.5 / 98.8 |
+| 16,000 rows: D16 (7) / P16 (62) | 20.6 / 28.8, 27.2 / 31.8, 49.1 / 55.0, 79.0 / 81.8, 106.4 / 106.1, 101.0 / 99.3 | 3.0 / 4.5, 5.6 / 9.4, 14.0 / 19.7, 70.1 / 71.9, 100.6 / 100.9, 91.5 / 91.7 |
+
+- **The timing agrees with κ.** With the clusters held fixed, fewer groups are faster or equal in all 24 cells
+  (noise 6%): by 4 to 29% at answers up to 1%, by 0 to 10% at 10% and above. The "+18 to 44% on item small
+  answers" quoted for D16 is against the base and is the 16,000-row cluster, not the 7 groups: against P16, D16 is
+  33 to 40% faster there. So at n = 768 exact threshold queries at 1M are no slower at κ = 0.24 than at 0.027, and
+  D4's κ = 0.055 is faster than 0.026 everywhere.
+- **The bytes agree with 8.8's cost.** D16 reads 5 to 27% more bytes per row than P16 (text 50%: 429 against 357
+  B), the same sign and size as 8.8's +2 to +12% codes at G = 8 (those bytes left the setups out; 8.8 counts them,
+  which is why its totals fall). At large answers the extra row work and the setups saved cancel in time (106.4
+  against 106.1 ms).
+- **Its measured setup, 0.12 ms a group**, is the s of (8.1) in time: 7.7 ms of a 43 ms text 0.01% query at 64
+  groups. Its reason for not lowering G ("the group cost does not grow with N, since G is capped") is the same
+  observation as 8.7 from the other side: at fixed G the setups vanish from large indexes, and so does the basis's
+  fit to its rows. G = N/(κn²) keeps both shares constant.
+- What it does not cover, and the timing of task 2 would: `knn2`, the approximate reader, n = 384 and 512, the
+  default 2,000-row clusters, random-25.
+
+**`rust/REPORT_SCALING.md`: the √N rule, timed at 500k to 3M.** 64 groups there is a cap that was kept, not a
+group count that was timed as best. Its warnings for scale against the joint design:
+
+| warning | joint design (8.7) |
+|---|---|
+| the approximate mode's u16 row positions cover clusters under 65,536 rows; from 16,000 rows a cluster some need u32 | **addressed**: the approximate path's unit is the 2,000-row leaf; the largest leaf (4 to 5 times the mean) is far under 65,536. The exact path indexes in the parent with u32 already (`REPORT_CLUSTERSIZE.md`, "Limits checked") |
+| `fit.py` fits centres on a 200,000-row sample, thin at large K (13 rows a centre at 1B) | **addressed for leaves, open for parents**: leaves are fitted inside each parent on its own rows (64,000 rows for 32 leaves), no global sample; the parents' sample must still grow with K (the Rust partition takes 200 rows a centre; `fit.py` does not) |
+| 16,000-row clusters are 1.4 to 2.4 times slower on selective item queries at 1M; not timed at a matching N | **open**: the exact path's unit is still the parent. The leaves are not used by the exact cut (the key is along the parent's centre). Whether an exact query could cut per leaf is a separate question, not studied |
+| fixed sub-clusters of about 62 rows make the rows scanned independent of the parent size | **the same finding** as section 2 (rows depend on the leaf, N^η) and the reason 8.7 makes the parents routing only. Its leaf was 62 rows chosen for rows alone; 8.7's is 2,000 because of the exact layout and because rule 1 makes a leaf's extra rows cost 18.5 B each |
+
+**`groups/REPORT.md`: what a grouping can buy.** Its "groups" are the cells of the partition (clusters with a
+centre each), not the basis groups of rule 4.
+- *A grouping is worth at most log₂K bits per item; 16 times as many cells save a text query 4.5 of 45 coordinates
+  per item and cost 11.4 in centres; the residual falls as K^(−0.053).* This bounds what leaves can do for the
+  **certificates**: nothing worth their centres. It does not touch 8.7, where leaves are not asked to tighten any
+  bound; they are routing units for the approximate path, paid for by rows not read (section 2's law), and the
+  exact path does not read their centres. It is also why 8.8 found tightness nearly flat in G (6% for 8 times
+  fewer bases): what a finer structure can add to a certificate is small on this data.
+- *The metric result (30 to 44% from the norm M = Σ_Q⁻¹ # Σ_R)* is the dual basis the index now uses. It says the
+  gain is in the metric, which a basis fitted on more rows estimates better, not worse; the measured ρ and
+  tightness of 8.8 are in that basis.
+- **Rule 4 is unchanged, and its direction is supported**: both results say more, smaller coding units buy little,
+  which is κ large (few bases) rather than small. What the report adds is a caution for the other end: nothing
+  here suggests that bases finer than κ ≈ 1 would pay at scale either.
+
+**Net.** The one prior timing of the group count (n = 768) agrees with the counts of 8.8 in sign and in size: at
+1M, 64 groups is more than the exact threshold queries want, κ of at least 0.24 costs them no time. 8.8's
+recommendation (keep 64 at 1M until timed) can be narrowed: for exact threshold queries the timing exists and
+favours fewer groups; what remains untimed is `knn2` and the approximate reader at n = 384 to 512.
+
 ## 9. Exact queries and visible sets
 
 **Exact queries are untouched.** Nothing stored changes: the same rows in the same order, the same codes, bases,
