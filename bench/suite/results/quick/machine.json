@@ -1,0 +1,29 @@
+{
+ "when": "2026-11-20 22:02:49 UTC",
+ "kernel": "6.18.44-fc-v726",
+ "virtualisation": "vm: kvm, container: docker",
+ "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+ "cores": 4,
+ "simd": [
+  "avx2",
+  "fma",
+  "avx512f",
+  "avx512bw",
+  "avx512vl",
+  "avx512_vnni",
+  "avx512_fp16"
+ ],
+ "ram_gib": 15.7,
+ "ram_available_gib": 15.0,
+ "swap_gib": 0.0,
+ "data_dir_free_gib": 7.1,
+ "data_dir_total_gib": 252.0,
+ "datasets": [
+  "inaturalist-resnet-2048-cosine"
+ ],
+ "stages": [
+  "prep",
+  "run",
+  "check"
+ ]
+}

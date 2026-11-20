@@ -330,10 +330,12 @@ inaturalist-resnet-2048-cosine and glove-100-angular: `results/quick/REPORT.md`.
 - **The scale suite** was tested end to end on its small sizes (`scale-test`: 200k, 500k and 1M from two LAION parts;
   `results/scale-test/REPORT.md`, which records the machine); `scale` itself (10M to 100M) is for a machine with the
   disk and memory above.
-- **vexact's build and query path moved under the quick results.** `results/quick` was run with the earlier defaults
-  (1,000 items per cluster, the fit's six deterministic levels) and before the query-path speedups of
-  `research/exact-vector-search` (20591ca); `results/scale-test` is on the current defaults and code. Rerun the quick
-  suite before comparing vexact's numbers across the two.
+- **vexact in `results/quick` is on `rust/` at d999606** (the adaptive approximate order over psi, the library's
+  default levels) for glove-100-angular, yahoo-minilm-384-normalized and laion-clip-512-normalized, rerun alone
+  (`--systems vexact`); the other systems' rows are from the earlier run, as their code did not change.
+  **inaturalist-resnet-2048-cosine is not rerun**: its prep (a 4.1 GB download and a 4.1 GB corpus beside a 4.4 GB
+  index) did not fit on the test machine's disk, so its vexact rows are still those of the earlier defaults (1,000
+  items per cluster, the fit's six deterministic levels, the nprobe order) and are not comparable with the others.
 
 ## The scripts this suite replaced
 
