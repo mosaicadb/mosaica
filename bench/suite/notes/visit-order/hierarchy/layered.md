@@ -47,7 +47,7 @@ four rules, each derived from N and the index and each off or free at 1M.**
 5. **Rule 4, the number of groups** (8.4). The balance of a group's setup (n²) against what its tighter basis saves
    gives G* ∝ N/n² (rows per group ∝ n²; the clusters read cancel), with a factor the build can compute from the fit.
    Proposed: G = max(64, min(N/(3n²), K/8)): 64 at 1M (unchanged), 127 to 781 at 100M, 1,272 to 1,953 at 1B. By a proxy
-   on yahoo each doubling of G is worth 8% of the 16 B code; at 1B today's cap of 64 pools 244 clusters a basis.
+   each doubling of G is worth 8% (yahoo) to 12% (LAION) of the 16 B code and nothing on glove; at 1B today's cap of 64 pools 244 clusters a basis.
    This is the least supported number here.
 6. **Rule 5, visible sets at scale**: counts per group to drop empty regions for G comparisons; a row-ordered
    Roaring bitmap beyond 2^27 rows (a 1B cluster is about one container). By the subsample law the sparse regime
@@ -660,10 +660,11 @@ Today G = min(64, K, N/(20n)). What moves with G:
 
 (LAION's run of the proxy had not finished when this was written; `layered/results/groups_laion.md` if present.)
 
-  On yahoo each doubling of the groups is worth about 10 bits a row at the 16 B level's distortion (8% of the
-  code), from 1 group to one per cluster; on glove, nearly isotropic, nothing. At 1B with 64 groups a group pools
+  (LAION's run was stopped before its last two rows.) On yahoo each doubling of the groups is worth about 10 bits a
+  row at the 16 B level's distortion (8% of the code), on LAION 12 to 23 bits (9 to 18%), from 1 group to one per
+  cluster; on glove, nearly isotropic, nothing. At 1B with 64 groups a group pools
   244 clusters, the left end of the table: on yahoo-like data the 16 B level would explain what about 11 B explain
-  with today's 5 to 8 clusters a group. That widens every certified interval too (the exact queries read deeper),
+  with today's 5 to 8 clusters a group, on LAION-like data what about 10 B explain. That widens every certified interval too (the exact queries read deeper),
   and it lowers f, so the levels' rule passes more rows and loses more recall per stage (4.3). The proxy is PCA
   with isotropic queries, not the dual basis; the trend, not the level, is what it shows.
 - **The support table and certification** do not depend on G: the table is anchors × clusters, every bound holds in
@@ -673,14 +674,15 @@ Today G = min(64, K, N/(20n)). What moves with G:
   set for the dearer one.
 
 **The rule [derived].** A group pays when what its tighter basis saves on the rows read under it exceeds its setup.
-Let β be the share of a row's bytes a doubling of G saves (the proxy's slope: 0.08 on yahoo, 0.01 on glove), b the
+Let β be the share of a row's bytes a doubling of G saves (the proxy's slope: 0.08 on yahoo, 0.12 on LAION, 0.01
+on glove), b the
 bytes a query reads per row of a cluster it reads, a = 2.5 the concentration above, s the setup in units of n².
 Per query the rows cost m·S·b·(1 − β·log₂G) and the setups a·(m/K)·G·s·n²; the minimum over G is at
 
     G* = (β·b / (ln 2 · a · s)) · N / n²,          bounded by K/8 above.                              (8.1)
 
 The clusters read, m, cancel: **rows per group proportional to n²**, a group as large as the square of the dimension.
-With b = 18.5 (the levels' rule) and s = 1: G* = 0.85·N/n² on yahoo-like data, 0.1·N/n² on glove-like; for exact
+With b = 18.5 (the levels' rule) and s = 1: G* = 0.85·N/n² on yahoo-like data, 1.3·N/n² on LAION-like, 0.1·N/n² on glove-like; for exact
 queries (b of 40 to 130 B, s ≈ 2) 1 to 3 N/n². β is a property of the data the build can compute from the fit as
 `groups.py` does (cluster covariances in candidate bases), so (8.1) has no fitted constant.
 
