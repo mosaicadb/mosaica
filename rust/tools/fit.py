@@ -7,7 +7,7 @@
 #   VECTORS.npy: N x n, float16/32/64; row i is entity i. The vectors are read from it as needed (no float32 copy).
 #   --per-cluster: by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x N (4,000 up to 8M, 8,000
 #     up to 32M, ...; research/levels-clusters' rule, `per_cluster`); or M items per cluster on average (1,000 before).
-#   --groups: by-n (default): min(64, K, N / (20 n)) (levels-clusters' rule); by-k8: min(64, K / 8, N / (20 n)); or G.
+#   --groups: by-n (default): round(N / (0.5 n^2)), from 1 to K; by-k8: min(64, K / 8, N / (20 n)); or G.
 #   --rows: a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...
 #   --basis pca: each group's PCA basis of the residuals and the data-only profile H25.
 #   --basis dual (default): the dual pair of the geometric-mean metric M = Sigma_Q^-1 # Sigma_R per group. Sigma_Q is one
@@ -175,7 +175,7 @@ def main():
     ap.add_argument("--cert-time", type=float, default=600, help="seconds allowed for the constant's certificate")
     ap.add_argument("--per-cluster", default="by-n",
                     help="by-n (default): 2,000 items per cluster up to 2M items, doubling for each 4x; or items per cluster on average (1000 before)")
-    ap.add_argument("--groups", default="by-n", help="by-n (default): min(64, K, N / (20 n)); by-k8: min(64, K / 8, N / (20 n)); or G")
+    ap.add_argument("--groups", default="by-n", help="by-n (default): round(N / (0.5 n^2)), from 1 to K; by-k8: min(64, K / 8, N / (20 n)); or G")
     ap.add_argument("--rows", default="", help="a .npy of row numbers of VECTORS: fit those rows only, as entities 0, 1, ...")
     a = ap.parse_args()
     if a.query_sample and a.basis != "dual":
