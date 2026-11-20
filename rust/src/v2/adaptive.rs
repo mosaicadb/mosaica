@@ -28,11 +28,8 @@
 //!   cluster on real data (the bound b_c is about 5 times the spread). A cluster gets its sigma only when that costs
 //!   less than reading it directly; else rad_c s stands for it in both keys. Each cluster is read directly or on the
 //!   index path, whichever the measured constants price lower: the index path at the rows its sorted range at the
-//!   running k-th best leaves, and its group's setup when the group is new (set up when its first cluster is read).
-//!   The probe races a scan of the rest, with no modelled cost: once the work so far, the rows it has scored from their
-//!   stored vectors and r rows for each sigma (r the stored directions, about what a sigma reads), reaches the visible
-//!   rows of the clusters not yet read, it reads every one of those directly, in row order and batched (path "race"),
-//!   and the answer is exact. So it scores at most about twice the rows of the cheaper of the probe and a scan.
+//!   running k-th best leaves, and its group's setup when the group is new (set up when its first cluster is read). There is no race: with direct reads batched, the worst a
+//!   probe does on a sparse visible set is reading the visible rows cluster by cluster, about a scan.
 //! - a threshold query at t reads the clusters whose u reaches t, after the support table has dropped those wholly
 //!   below t and taken in those wholly above it without a read; each is read exactly as the exact query reads it. The
 //!   decision comes first from the bounds sqrt(low_c) |q| <= sigma_c <= sqrt(top_c) |q| (low_c the cluster's least
@@ -486,14 +483,12 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 }
 
 /// What one approximate query did. `path`: "probe" (k-NN stopped by its knob; a threshold query's clusters read),
-/// "race" (k-NN handed the rest to a scan),
 /// "scan" (k-NN with no more visible rows than k, scanned), "exact" (k-NN at psi infinite: the exact query), "sparse"
 /// (a threshold query that is the exact one from
 /// the start, on a visible set the exact query scans first; nothing else done), "empty". `read`: the clusters the
 /// probe read, in order; `priced`: the clusters given a sigma, in order; k-NN's `lam_read` and `lam_priced`: the order's
 /// lambda when each read was chosen and when each priced cluster left the stream, `rekeys`: the stream's re-keyings,
-/// `delta` and `rho`: the estimates at the end, `scanned`: the clusters read by the scan hand-over (path "race"; not
-/// in `read`). Costs are modelled (`Measured`): `cost`
+/// `delta` and `rho`: the estimates at the end. Costs are modelled (`Measured`): `cost`
 /// what the query paid in all; k-NN's `direct_cost`, `index_cost` (its groups' setups included) and `sigma_cost`;
 /// a threshold query's `scan_cost` (every visible cluster read directly).
 #[derive(Clone, Debug, Default)]
@@ -515,7 +510,6 @@ pub struct AdaptiveInfo {
     pub rekeys: usize,
     pub delta: f64,
     pub rho: f64,
-    pub scanned: usize,
 }
 
 /// A cluster's key in a max-heap, the lower cluster first among equal keys.
@@ -676,8 +670,7 @@ impl Adaptive {
     /// (`knn2`) when psi is infinite; else the clusters in the order of mu + lambda sigma (lambda = delta + `ORDER_C`
     /// rho, from the rows read directly while fewer than k items are held; the stream by mu + lambda rad s, `LOOKAHEAD`
     /// priced ahead), whatever psi, psi moving only the stop, when the window's largest mu + (delta + psi rho) sigma is
-    /// below the running k-th best (a heuristic), or once its work reaches the visible rows left, when it reads them all
-    /// directly (exact). A cluster gets its sigma when
+    /// below the running k-th best (a heuristic). A cluster gets its sigma when
     /// that costs less than reading it directly, else rad s stands for it. Each cluster is read directly or on the
     /// index path, whichever the measured constants price lower (`Measured::direct`, `Measured::index` at the rows its
     /// sorted range at the running k-th best leaves, a group's setup when its group is new). Returns k items whenever
@@ -743,8 +736,6 @@ impl Adaptive {
         let floor = |ci: usize| m.cut_us + m.cl_us + if new_group(ix.cl[ci].g) { m.grp_us } else { 0.0 };
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
         rd.track_sums(true);
-        // the visible rows of the clusters not yet read
-        let mut left = nvis;
         loop {
             let ts = tick();
             // the running k-th best (the batched direct rows scored first; their time is the reads'), the stop, the
@@ -753,20 +744,6 @@ impl Adaptive {
             // the moments are taken only while fewer than k items are held
             if kth > f64::NEG_INFINITY {
                 rd.track_sums(false);
-            }
-            // the scan hand-over: the work so far (rows scored from their stored vectors, r for each sigma) has reached
-            // the visible rows left, so every cluster left is read directly, in row order
-            if rd.st.full_reads as usize + self.st.r * info.spreads >= left {
-                let mut rest: Vec<usize> = window.drain(..).map(|w| w.0).chain(stream.drain().map(|Key(_, Reverse(c))| c)).collect();
-                rest.sort_unstable_by_key(|&c| ix.cl[c].r0);
-                rd.st.cyc[P_ORDER] += tick() - ts;
-                for &ci in &rest {
-                    info.direct_cost += m.direct(nv_of(ci), rows_of(ci));
-                    rd.visit(ci, KnnPath::Direct);
-                }
-                info.direct += rest.len();
-                info.scanned = rest.len();
-                break;
             }
             if !window.is_empty() && kth > stop_key(&window, delta, rho) {
                 rd.st.cyc[P_ORDER] += tick() - ts;
@@ -801,7 +778,6 @@ impl Adaptive {
             rd.st.cyc[P_ORDER] += tick() - ts;
             let tch = tick();
             let (nv, rows, g) = (nv_of(ci), rows_of(ci), ix.cl[ci].g);
-            left -= nv;
             let direct = m.direct(nv, rows);
             // the index path, unless it cannot be cheaper: at the rows the sorted range at the running k-th best
             // leaves (every visible row before k items are held), and the group's setup when its group is new
@@ -870,8 +846,8 @@ impl Adaptive {
         rd.st.cyc[C_DIRECT] += info.direct as u64;
         rd.st.cyc[C_INDEX] += info.index as u64;
         rd.st.cyc[C_GROUPS] += info.groups as u64;
-        rd.st.cyc[C_VISITED] += (info.read.len() + info.scanned) as u64;
-        info.path = if info.scanned > 0 { "race" } else { "probe" };
+        rd.st.cyc[C_VISITED] += info.read.len() as u64;
+        info.path = "probe";
         info.cost = info.direct_cost + info.index_cost + info.sigma_cost;
         let (ents, st) = rd.finish();
         (out(ents, st), info)

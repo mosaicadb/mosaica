@@ -2034,7 +2034,7 @@ fn approximate_knn_answers_visible_items_and_exact_ones_when_asked() {
                         assert_eq!(ids.len(), out.ents.len(), "an item twice, {what}");
                         assert!(out.ents.iter().all(|x| bm.as_ref().is_none_or(|b| b.contains(x.1))), "an invisible item, {what}");
                         assert!(info.path == "exact" || out.ents.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e), "a score not the item's, {what}");
-                        assert!(["probe", "race", "scan", "exact", "empty"].contains(&info.path), "{what}: {}", info.path);
+                        assert!(["probe", "scan", "exact", "empty"].contains(&info.path), "{what}: {}", info.path);
                         assert_eq!(info.path == "exact", psi == f64::INFINITY && !t.is_empty(), "{what}: {}", info.path);
                         if info.path != "probe" {
                             assert_eq!(sub_values(ix, &out.ents, q), top_values(&t, kk.min(t.len())), "not exact, {what}, path {}", info.path);
@@ -2476,7 +2476,7 @@ fn the_constants_change_the_answer_only_through_a_sigma_and_the_moments() {
                     if (xi.delta, xi.rho) != (yi.delta, yi.rho) {
                         continue;
                     }
-                    both += ["probe", "race"].contains(&xi.path) as usize;
+                    both += (xi.path == "probe") as usize;
                     index += xi.index;
                     // the same clusters and items; their f32 products may round apart on the two paths
                     assert_eq!((xi.path, &xi.read), (yi.path, &yi.read), "{what}");
