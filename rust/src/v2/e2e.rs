@@ -2258,7 +2258,9 @@ fn the_window_reads_by_order_key_and_stops_below_the_kth_best() {
         for (qi, q) in f.queries.iter().enumerate() {
             for (sname, bm) in f.sets.iter().filter(|s| filtered || s.1.is_none()) {
                 let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-                let live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 > ix.cl[c].r0, |v| v.cl_cnt[c] > 0)).collect();
+                // the clusters that can enter the window: more than r visible rows (the others go to the direct batch)
+                let r = ix.order.as_ref().unwrap().r;
+                let live: Vec<usize> = (0..ix.k()).filter(|&c| vis.as_ref().map_or(ix.cl[c].r1 - ix.cl[c].r0, |v| v.cl_cnt[c] as usize) > r).collect();
                 // the stream and order keys at each lambda the queries use
                 let mut cache: std::collections::HashMap<u64, (Vec<f64>, Vec<f64>)> = std::collections::HashMap::new();
                 let mut keys_at = |lam: f64| cache.entry(lam.to_bits()).or_insert_with(|| (ad.stream_keys(ix, q, lam), ad.keys(ix, q, lam))).clone();
@@ -3424,6 +3426,71 @@ fn study_order_stress() {
                 prev = (rows, rec);
             }
             eprintln!("  {name:<22} {}", cells.join("  "));
+        }
+    }
+}
+
+/// Study (ignored; run by hand on a built index): the k-NN probe through the real code, with the index's measured
+/// constants: mean recall of the true 10, clusters read (and of those batched), rows touched, per psi, under the
+/// prep's random-1 and region-1 and, per query, the bottom quarter of each cluster's rows by score. DIAG_DIR (a fit;
+/// built when it holds no index), DIAG_PREP, DIAG_NQ (50).
+#[test]
+#[ignore]
+fn study_probe() {
+    use rayon::prelude::*;
+    let dir = std::env::var("DIAG_DIR").unwrap();
+    let prep = std::env::var("DIAG_PREP").unwrap();
+    let nq_max: usize = std::env::var("DIAG_NQ").ok().and_then(|x| x.parse().ok()).unwrap_or(50);
+    let (_, ix) = open(&dir, &OpenOptions::default(), &mut |_| {}).or_else(|_| rebuild(&dir, &BuildOptions::default(), &mut |_| {})).unwrap();
+    let m = adaptive::measured_constants(&ix, &dir, &mut |_| {}).unwrap();
+    let ad = adaptive::Adaptive::new(&ix, m).unwrap();
+    let (n, nr, k) = (ix.n(), ix.nrows, ix.k());
+    let qn = crate::util::read_npy(&format!("{prep}/queries.npy"));
+    let (qs, d) = qn.rows_f32("queries").unwrap();
+    let nq = (qs.len() / d).min(nq_max);
+    let queries: Vec<Vec<f32>> = (0..nq).map(|i| { let mut v = vec![0f32; n]; v[..d].copy_from_slice(&qs[i * d..(i + 1) * d]); v }).collect();
+    // every row's score for every query
+    let scores: Vec<Vec<f32>> = queries.par_iter().map(|q| {
+        let pr = prep2(&ix, q);
+        (0..nr).map(|r| ix.full_row_f16(r).iter().zip(&pr.q32).map(|(&h, &x)| crate::util::f16_to_f32(h) * x).sum()).collect()
+    }).collect();
+    let read_set = |name: &str| -> RoaringBitmap { crate::util::read_npy(&format!("{prep}/vis_{name}.npy")).i32s().into_iter().map(|x| x as u32).collect() };
+    let fixed: Vec<(&str, RoaringBitmap)> = vec![("random-1", read_set("random-1")), ("region-1", read_set("region-1"))];
+    for (fname, per_query) in [("random-1", false), ("region-1", false), ("bottom-25", true)] {
+        // per query: the visible set and the true 10
+        let sets: Vec<(RoaringBitmap, Vec<u32>)> = (0..nq).map(|qi| {
+            let bm: RoaringBitmap = if per_query {
+                let mut b = RoaringBitmap::new();
+                for c in 0..k {
+                    let (r0, r1) = (ix.cl[c].r0, ix.cl[c].r1);
+                    let mut rows: Vec<usize> = (r0..r1).collect();
+                    rows.sort_by(|&a, &b| scores[qi][a].total_cmp(&scores[qi][b]));
+                    for &r in &rows[..((r1 - r0) + 3) / 4] {
+                        b.insert(ix.row_ent[r]);
+                    }
+                }
+                b
+            } else {
+                fixed.iter().find(|x| x.0 == fname).unwrap().1.clone()
+            };
+            let mut vis_rows: Vec<usize> = (0..nr).filter(|&r| bm.contains(ix.row_ent[r])).collect();
+            vis_rows.sort_by(|&a, &b| scores[qi][b].total_cmp(&scores[qi][a]));
+            let top: Vec<u32> = vis_rows.iter().take(10).map(|&r| ix.row_ent[r]).collect();
+            (bm, top)
+        }).collect();
+        {
+            let name = "probe";
+            for psi in [2.0, 3.0, 4.0, 5.0, 6.0, 7.0] {
+                let res: Vec<(f64, f64, f64, f64)> = (0..nq).into_par_iter().map(|qi| {
+                    let vis = Vis2::new(&ix, &sets[qi].0);
+                    let (out, info) = ad.knn(&ix, &queries[qi], 10, Some(&vis), psi, Plan::default());
+                    let got: std::collections::HashSet<u32> = out.ents.iter().map(|e| e.1).collect();
+                    let rec = sets[qi].1.iter().filter(|e| got.contains(e)).count() as f64 / sets[qi].1.len().max(1) as f64;
+                    (rec, (info.read.len() + info.batched) as f64, info.batched as f64, out.st.touched as f64)
+                }).collect();
+                let mean = |f: &dyn Fn(&(f64, f64, f64, f64)) -> f64| res.iter().map(f).sum::<f64>() / res.len() as f64;
+                eprintln!("{dir} {fname} {name:<4} psi {psi}: recall {:.3} clusters {:.1} (batched {:.1}) rows {:.0}", mean(&|x| x.0), mean(&|x| x.1), mean(&|x| x.2), mean(&|x| x.3));
+            }
         }
     }
 }

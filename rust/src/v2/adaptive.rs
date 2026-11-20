@@ -26,7 +26,10 @@
 //!   smaller psi reads and prices the first of what a larger one does. The stop is a heuristic: a cluster further
 //!   down the stream, not yet priced, may still have a u above the k-th best; ruling that out exactly prices every
 //!   cluster on real data (the bound b_c is about 5 times the spread). A cluster gets its sigma only when that costs
-//!   less than reading it directly; else rad_c s stands for it in both keys. Each cluster is read directly or on the
+//!   less than reading it directly; else rad_c s stands for it in both keys. A cluster of at most r visible rows (r
+//!   the stored directions: its sigma would cost about as much as reading it) takes no sigma, window slot or pricing:
+//!   it is read into the direct batch as it leaves the stream, unless its stop key with rad_c s is below the running
+//!   k-th best. Each cluster is read directly or on the
 //!   index path, whichever the measured constants price lower: the index path at the rows its sorted range at the
 //!   running k-th best leaves, and its group's setup when the group is new (set up when its first cluster is read). There is no race: with direct reads batched, the worst a
 //!   probe does on a sparse visible set is reading the visible rows cluster by cluster, about a scan.
@@ -488,7 +491,8 @@ pub fn measured_constants(ix: &Index2, dir: &str, log: &mut dyn FnMut(String)) -
 /// the start, on a visible set the exact query scans first; nothing else done), "empty". `read`: the clusters the
 /// probe read, in order; `priced`: the clusters given a sigma, in order; k-NN's `lam_read` and `lam_priced`: the order's
 /// lambda when each read was chosen and when each priced cluster left the stream, `rekeys`: the stream's re-keyings,
-/// `delta` and `rho`: the estimates at the end. Costs are modelled (`Measured`): `cost`
+/// `delta` and `rho`: the estimates at the end, `batched`: the clusters of at most r visible rows read straight into the
+/// direct batch (not in `read`). Costs are modelled (`Measured`): `cost`
 /// what the query paid in all; k-NN's `direct_cost`, `index_cost` (its groups' setups included) and `sigma_cost`;
 /// a threshold query's `scan_cost` (every visible cluster read directly).
 #[derive(Clone, Debug, Default)]
@@ -510,6 +514,7 @@ pub struct AdaptiveInfo {
     pub rekeys: usize,
     pub delta: f64,
     pub rho: f64,
+    pub batched: usize,
 }
 
 /// A cluster's key in a max-heap, the lower cluster first among equal keys.
@@ -751,6 +756,16 @@ impl Adaptive {
             }
             while window.len() < LOOKAHEAD {
                 let Some(Key(_, Reverse(ci))) = stream.pop() else { break };
+                // a cluster of at most r visible rows (a sigma would cost about as much as reading it) takes no sigma, no
+                // window slot and no pricing: it goes straight into the direct batch, in stream order, unless its stop
+                // key with the stream's spread is below the k-th best
+                if nv_of(ci) <= self.st.r {
+                    if kth <= qm[ci] + (delta + psi * rho) * self.st.rad[ci] * s {
+                        rd.visit(ci, KnnPath::Direct);
+                        info.batched += 1;
+                    }
+                    continue;
+                }
                 // its sigma when that costs less than reading the cluster directly, else the stream's spread
                 let sg = if m.sig_us < m.direct(nv_of(ci), rows_of(ci)) {
                     let tsp = tick();
@@ -813,8 +828,9 @@ impl Adaptive {
                 KnnPath::Direct
             };
             rd.st.cyc[P_CHOICE] += tick() - tch;
-            // a cluster read directly while fewer than k items are held is scored in full, and alone: its rows' moments
-            let fill = kth == f64::NEG_INFINITY && path == KnnPath::Direct;
+            // a cluster read directly while fewer than k items are held (the batch scored first, the small clusters'
+            // reads among it) is scored in full, and alone: its rows' moments
+            let fill = kth == f64::NEG_INFINITY && path == KnnPath::Direct && rd.kth() == f64::NEG_INFINITY;
             if fill {
                 rd.take_sums();
             }
