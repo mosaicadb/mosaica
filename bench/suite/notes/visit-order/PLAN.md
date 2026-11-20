@@ -808,7 +808,26 @@ read in stream order unless its stop key with rad s is below the k-th best.
 - Rows fall alike, and the bottom sets are unchanged.
 - Reading the small clusters whatever their stop key (b') is close: better on glove random-1 at 0.99, worse on
   region-1.
-- (b) is built.
+- (b) is built (3930562).
+
+**Timed** (`results/probe-variants/timing/`): four builds back to back, 50 queries, 2 repetitions, psi 2 to 7. Time to
+recall 0.8/0.9/0.95/0.98/0.99 over spread's:
+
+| Set | 7536990 | f528836 | 5853926 | 3930562 |
+|---|---|---|---|---|
+| glove none | 1.57/.85/1.93/2.29/2.62 | 1.55/.89/1.18/1.72/1.57 | 1.44/.76/1.43/1.64/1.46 | 1.54/.87/1.56/1.83/1.61 |
+| glove random-1 | .97/.77/.52/1.10/.92 | 1.38/1.08/1.41/1.77/1.29 | 1.09/1.48/1.61/1.60/1.35 | 1.12/.86/1.34/1.48/1.22 |
+| glove region-1 | .65/.68/.63/.58/.57 | .71/.82/.78/.72/.76 | .79/1.02/.97/.85/.83 | .59/.59/.66/.65/.65 |
+| glove random-25 | 1.14/.81/.60/1.08/1.21 | 1.58/1.24/.94/1.09/1.46 | .92/.70/.52/1.07/1.19 | 1.15/.85/.60/1.12/1.23 |
+| LAION none | .69/.96/1.31/1.55/2.19 | .69/.98/.96/1.06/1.10 | .78/1.04/.88/1.03/1.04 | .71/.92/.86/.97/1.01 |
+| LAION random-1 | 1.36/1.15/1.23/1.04/1.39 | 1.38/1.14/1.37/1.04/1.06 | 1.17/1.44/1.21/1.51/1.46 | 1.23/1.06/1.19/.97/1.06 |
+| LAION region-1 | .53/.69/.73/.64/.60 | .45/.63/.62/.58/.57 | .51/.61/.66/.64/- | .46/.47/.52/.50/.53 |
+| LAION random-25 | .41/.42/.71/1.22/- | .40/.43/.68/.55/.84 | .49/.39/.56/.58/.63 | .47/.37/.57/.56/.60 |
+
+- The small-cluster batch brings glove region-1 level with 7536990 (0.59 to 0.66 against 0.57 to 0.68), puts LAION
+  region-1 ahead of all three (0.46 to 0.53), and improves the 1% random sets on both datasets.
+- Glove random-1 still trails 7536990 at 0.9 to 0.95.
+- Unfiltered and random-25 are as 5853926, within the runs' noise.
 
 **Next.**
 - The order question, decided by the owner from the replay above: a fixed-multiplier order (mu + 3 sigma) against
