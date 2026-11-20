@@ -95,6 +95,9 @@ QUICK = dict(
     filters=["none", "random-1", "random-25"],
     # under a visible set: exact k-NN k = 10, threshold at 1% of the visible set, approximate k-NN k = 10
     filtered=dict(exact=dict(k=[10]), threshold=dict(shares=[1e-2]), approx=dict(k=[10])),
+    # approximate k-NN unfiltered too, so each dataset's recall/QPS figure has its unfiltered panel (the public
+    # suites remain the standard comparison over more systems and settings)
+    approx_unfiltered=True,
     systems=dict(
         exact=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["pdx-bond", "faiss-panorama"]),
         threshold=dict(ours=["vexact"], standard=["faiss-flat"], frontier=["faiss-panorama"]),
@@ -228,8 +231,8 @@ def types_for(suite, dataset):
 
 
 def cells(suite, dataset, qtype, cap=False):
-    """(filter, parameter list) for one type on one dataset: unfiltered with the type's parameters (none for approx:
-    the public suites run it, except under a cap and at scale), and each visible set with the `filtered` parameters.
+    """(filter, parameter list) for one type on one dataset: unfiltered with the type's parameters (for approx only
+    where the suite sets `approx_unfiltered`), and each visible set with the `filtered` parameters.
     With cap, the cap axis's own types, filters and parameters."""
     if cap:
         c = suite["caps"]
