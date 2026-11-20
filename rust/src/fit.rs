@@ -24,20 +24,14 @@ const HEDGE: f64 = 0.25;
 const FORMAT: u64 = 2;
 const RIDGE: f64 = 0.1;
 
-/// Items per group in units of n0^2 for `Groups::ByN`: a group's basis is fitted to an n0 x n0 covariance, and with fewer
-/// than about kappa n0^2 items a group's own basis stops paying for its setup (the timed 8 against 64 groups at 1M items,
-/// layered.md 8.10, and rust/REPORT_CLUSTERSIZE.md at 768 dimensions put kappa at 0.5 or more).
-pub const GROUP_KAPPA: f64 = 0.5;
-
 /// How the fit divides its clusters into groups (each with a basis of its own).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Groups {
     /// min(64, K / 8, N / (20 n)), at least 1: enough items per group for a basis, at most 64 groups and 8 clusters per
     /// group on average (the default before research/levels-clusters' rule).
     ByK8,
-    /// round(N / (`GROUP_KAPPA` n^2)), from 1 to K: about kappa n^2 items a group, with the cluster size by N
-    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`); the default, as tools/fit.py's. At 1M
-    /// items: 122 groups at n 128, 14 at 384, 8 at 512.
+    /// min(64, K, N / (20 n)), at least 1: research/levels-clusters' rule, with its cluster size by N
+    /// (`per_cluster_by_n`, given to tools/partition.py as `--per-cluster by-n`); the default, as tools/fit.py's.
     ByN,
     /// This many groups, at most K.
     Fixed(usize),
@@ -47,7 +41,7 @@ impl Groups {
     pub fn count(&self, nrow: usize, k: usize, n0: usize) -> usize {
         match *self {
             Groups::ByK8 => 1.max(64.min(k / 8).min(nrow / (20 * n0))),
-            Groups::ByN => ((nrow as f64 / (GROUP_KAPPA * (n0 * n0) as f64) + 0.5).floor() as usize).clamp(1, k.max(1)),
+            Groups::ByN => 1.max(64.min(k).min(nrow / (20 * n0))),
             Groups::Fixed(g) => 1.max(g.min(k)),
         }
     }
@@ -943,10 +937,8 @@ mod tests {
         // 1M items of 768 dimensions: 1,000 clusters by default, 500 by the rule
         assert_eq!(Groups::ByK8.count(1_000_000, 1000, 768), 64);
         assert_eq!(Groups::ByK8.count(1_000_000, 500, 768), 62);
-        assert_eq!(Groups::ByN.count(1_000_000, 500, 768), 3);
-        assert_eq!((Groups::ByN.count(1_000_000, 500, 128), Groups::ByN.count(1_000_000, 500, 384), Groups::ByN.count(1_000_000, 500, 512)), (122, 14, 8));
-        assert_eq!(Groups::ByN.count(1_000_000, 100, 128), 100);
-        assert_eq!(Groups::ByN.count(60_000, 30, 768), 1);
+        assert_eq!(Groups::ByN.count(1_000_000, 500, 768), 64);
+        assert_eq!(Groups::ByN.count(60_000, 30, 768), 3);
         assert_eq!(Groups::ByK8.count(60_000, 60, 768), 3);
         assert_eq!(Groups::ByN.count(1_000, 4, 768), 1);
         assert_eq!(Groups::Fixed(10).count(1_000_000, 4, 768), 4);
@@ -962,7 +954,7 @@ mod tests {
     fn python_rules_agree() {
         let tools = concat!(env!("CARGO_MANIFEST_DIR"), "/tools");
         let ns: [usize; 13] = [1_000, 60_000, 1_000_000, 1_999_999, 2_000_000, 2_000_001, 8_000_000, 8_000_001, 32_000_000, 32_000_001, 128_000_000, 128_000_001, 1_000_000_000];
-        let gs: [(usize, usize, usize); 10] = [(1_000_000, 500, 768), (1_000_000, 1000, 768), (60_000, 30, 768), (60_000, 60, 768), (1_000, 4, 768), (1_000_000_000, 15_625, 768), (4_000, 32, 64), (1_000_000, 500, 128), (1_000_000, 500, 384), (1_183_514, 592, 100)];
+        let gs: [(usize, usize, usize); 7] = [(1_000_000, 500, 768), (1_000_000, 1000, 768), (60_000, 30, 768), (60_000, 60, 768), (1_000, 4, 768), (1_000_000_000, 15_625, 768), (4_000, 32, 64)];
         let script = format!(
             "import sys\nsys.path.insert(0, {tools:?})\nimport rules\n\
              for m in ('fit', 'partition'):\n    try:\n        mod = __import__(m)\n    except ImportError as e:\n        print('skip', m, e)\n        continue\n    \
