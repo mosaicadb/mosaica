@@ -2374,7 +2374,8 @@ fn the_level_ratios_are_stored_and_survive_a_reopen() {
 }
 
 /// A query the index cannot answer (a zero row, which a fit accepts) is left out of the level ratios: with one added
-/// they are the ratios without it, from one query fewer.
+/// they are the ratios without it, bit for bit, from the same queries. The ratios do not depend on the threads that
+/// measure them.
 #[test]
 fn a_zero_row_is_left_out_of_the_level_ratios() {
     let ix = &fixture().ix;
@@ -2386,7 +2387,12 @@ fn a_zero_row_is_left_out_of_the_level_ratios() {
     let (a, na) = adaptive::level_ratios(ix, &qs);
     let (b, nb) = adaptive::level_ratios(ix, &with_zero);
     assert_eq!((na, nb), (qs.len(), qs.len()));
-    assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-6 * x), "{a:?} {b:?}");
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&a), bits(&b));
+    for threads in [1, 3] {
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(threads).build().unwrap();
+        assert_eq!(bits(&pool.install(|| adaptive::level_ratios(ix, &qs).0)), bits(&a), "{threads} threads");
+    }
 }
 
 /// The level ratios measure each training query as k-NN reads it, at unit scale: queries scaled by 2^-10 give the

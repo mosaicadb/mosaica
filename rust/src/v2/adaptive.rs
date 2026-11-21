@@ -227,10 +227,11 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<
     let centres = Approx::centres(ix);
     let rest: Vec<f64> = (0..k).map(|c| st.rest(c)).collect();
     let rows_of = |c: usize| ix.cl[c].r1 - ix.cl[c].r0;
-    // per cluster: its pairs, and per level the rows and the sum of z^2
-    let empty = || (vec![0usize; k], vec![(0f64, 0f64); k * ndl]);
+    // per query, each cluster it reads with its rows and sum of z^2 per level; added in query order, so that the sums
+    // do not depend on how the queries were split over threads
     let used: Vec<&(Vec<f32>, Option<usize>)> = queries.iter().filter(|(q, _)| query_ok(q).is_ok()).collect();
-    let (pairs, acc) = used.par_iter().map(|&x| x).fold(empty, |(mut pairs, mut acc), (q, own)| {
+    type Sums = Vec<(usize, Vec<(f64, f64)>)>;
+    let per: Vec<Sums> = used.par_iter().map(|&(q, own)| {
         // scaled as k-NN scales the query (`Prep2::unit`), since the intervals carry an absolute margin
         let pr = prep2(ix, q).unit();
         let qm = centres.centre_scores(ix, &pr.q32);
@@ -243,33 +244,39 @@ pub fn level_ratios(ix: &Index2, queries: &[(Vec<f32>, Option<usize>)]) -> (Vec<
         by.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut rf = Refiner::new(ix, &pr);
         let mut sts = Stats::new(nl);
+        let mut out = Vec::new();
         for &(_, c) in by.iter().take(RATIO_CLUSTERS) {
             let cl = &ix.cl[c];
             let rows: Vec<u32> = (cl.r0..cl.r1).filter(|&r| Some(r) != *own).map(|r| r as u32).collect();
             if rows.len() < 2 {
                 continue;
             }
-            pairs[c] += 1;
             let gp = &ix.groups[cl.g];
             let s: Vec<f64> = rows.iter().map(|&r| exact_value2(ix, &pr, r as usize)).collect();
-            for l in 0..ndl {
+            let sums = (0..ndl).map(|l| {
                 let iv = rf.refine(&rows.iter().map(|&r| (r, l)).collect::<Vec<_>>(), &mut sts);
-                let a = &mut acc[c * ndl + l];
+                let mut a = (0f64, 0f64);
                 for (&s, &(lo, hi)) in s.iter().zip(&iv) {
                     let unit = gp.rho[l] as f64 * (hi - lo) / 2.0;
                     if unit > 0.0 {
                         let z = (s - (lo + hi) / 2.0) / unit;
-                        *a = (a.0 + 1.0, a.1 + z * z);
+                        a = (a.0 + 1.0, a.1 + z * z);
                     }
                 }
-            }
+                a
+            }).collect();
+            out.push((c, sums));
         }
-        (pairs, acc)
-    }).reduce(empty, |(mut p, mut a), (p2, a2)| {
-        p.iter_mut().zip(p2).for_each(|(x, y)| *x += y);
-        a.iter_mut().zip(a2).for_each(|(x, y)| *x = (x.0 + y.0, x.1 + y.1));
-        (p, a)
-    });
+        out
+    }).collect();
+    let (mut pairs, mut acc) = (vec![0usize; k], vec![(0f64, 0f64); k * ndl]);
+    for (c, sums) in per.into_iter().flatten() {
+        pairs[c] += 1;
+        for (l, x) in sums.into_iter().enumerate() {
+            let a = &mut acc[c * ndl + l];
+            *a = (a.0 + x.0, a.1 + x.1);
+        }
+    }
     let ng = ix.groups.len();
     let (mut grp, mut all) = (vec![(0f64, 0f64); ng * ndl], vec![(0f64, 0f64); ndl]);
     for c in 0..k {
