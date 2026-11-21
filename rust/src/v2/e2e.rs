@@ -2434,13 +2434,13 @@ fn the_w2_spread_takes_the_centre_term_off() {
             let g = ix.cl[ci].g;
             let gq = group_q2r(ix, g, &pr, false);
             let alr = cluster_q2(ix, ci, &gq, &pr, pr.qm(ix, ci)).alr as f64;
-            let got = w2_tau2(ix, ci, &gq, alr, &st.coefs_of(ci, n, &pr.q32));
+            let got = w2_tau2(ix, ci, &gq, alr, &st.coefs_of(ci, n, &pr.q32)[..st.r]);
             let m = &ix.centres32[ci * n..(ci + 1) * n];
             let a: Vec<f32> = (0..st.r).map(|j| {
                 let p = &st.dirs(ci, st.r, n)[j * n..(j + 1) * n];
                 (p.iter().zip(&pr.q32).zip(m).map(|((&x, &y), &z)| x as f64 * (y as f64 - alr * z as f64)).sum::<f64>() * st.dsc[ci * st.r + j] as f64) as f32
             }).collect();
-            let a0 = st.coefs_of(ci, n, &pr.q32);
+            let a0 = st.coefs_of(ci, n, &pr.q32)[..st.r].to_vec();
             for (l, &gl) in got.iter().enumerate().take(ndl) {
                 let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[ci].mv32);
                 let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
@@ -2607,7 +2607,7 @@ fn study_w2_cost() {
         for &c in o.iter().take(m) {
             let gq = group_q2r(&ix, ix.cl[c].g, &pr, false);
             let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
-            let a = st.coefs_of(c, n, &pr.q32);
+            let a = st.coefs_of(c, n, &pr.q32)[..st.r].to_vec();
             cases.push((c, gq, alr, a, pr.q32.clone()));
         }
     }
@@ -2675,8 +2675,8 @@ fn study_w2_alr() {
         let alr = cluster_q2(&ix, c, &gq, &pr, pr.qm(&ix, c)).alr as f64;
         let (h, mv) = (wf.h(n, ndl, g, l), &ix.cl[c].mv32);
         let t = |off: f64| -> f64 { (0..n).map(|j| (gq.qv[j] - off * mv[j] as f64).powi(2) * h[j] as f64).sum() };
-        let a = st.coefs_of(c, n, &q);
-        let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n]);
+        let a = st.coefs_of(c, n, &q)[..st.r].to_vec();
+        let am = st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])[..st.r].to_vec();
         let a2: Vec<f32> = a.iter().zip(&am).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
         let (w, wv) = (tau2(c, l, &a, t(0.0)), tau2(c, l, &a2, t(alr)));
         let tm = Timer::new();
@@ -2735,7 +2735,7 @@ fn study_w2_forms() {
         let qv = group_q2r(&ix, g, &pr, false).qv;
         let h = wf.h(n, ndl, g, l);
         let t: f64 = (0..n).map(|j| qv[j].powi(2) * h[j] as f64).sum();
-        let a = st.coefs_of(c, n, &q);
+        let a = st.coefs_of(c, n, &q)[..st.r].to_vec();
         let rec = wf.of(ndl, c, l);
         let tau2 = wf.tau2(ndl, c, l, &a, t);
         rt.push(tau2 / f[12]);

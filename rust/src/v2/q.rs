@@ -1189,14 +1189,18 @@ pub fn w2_tau2(ix: &Index2, ci: usize, gq: &GQ2, alr: f64, a: &[f32]) -> [f64; N
     let (n, ndl, g) = (ix.n(), ix.meta.ndl(), ix.cl[ci].g);
     let wf = ix.wforms.as_ref().expect("the W2 width reads the index's W2 forms");
     let pm = &wf.pm[ci * wf.r..(ci + 1) * wf.r];
-    let a: Vec<f32> = a.iter().zip(pm).map(|(&x, &y)| (x as f64 - alr * y as f64) as f32).collect();
+    let mut ac = [0f32; super::order::R_MAX];
+    for ((x, &aj), &y) in ac.iter_mut().zip(a).zip(pm) {
+        *x = (aj as f64 - alr * y as f64) as f32;
+    }
+    let a = &ac[..wf.r];
     let mv = &ix.cl[ci].mv32;
     let mut t = [0f64; NDL_MAX];
     for l in (0..ndl).step_by(2) {
         let h1 = wf.h(n, ndl, g, (l + 1).min(ndl - 1));
         (t[l], t[(l + 1).min(NDL_MAX - 1)]) = unsafe { centred_sq2(&gq.qv32, mv, alr as f32, wf.h(n, ndl, g, l), h1) };
     }
-    let o = super::wrule::outer(&a);
+    let o = super::wrule::outer(a);
     let mut tau2 = [0f64; NDL_MAX];
     for (l, x) in tau2.iter_mut().enumerate().take(ndl) {
         *x = wf.tau2_outer(ndl, ci, l, &o, t[l]);
@@ -4000,7 +4004,7 @@ pub struct KnnReader<'a> {
     /// psi of the deterministic levels' W2 width (`with_width`)
     width: Option<f64>,
     /// the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
-    pub coef: Option<Vec<f32>>,
+    pub coef: Option<[f32; super::order::R_MAX]>,
     pub st: Stats,
 }
 
@@ -4021,10 +4025,10 @@ impl<'a> KnnReader<'a> {
 
     /// Cluster ci's W2 width on `cq` (its group's setup `gq`), from its coefficients on its order directions (given by
     /// the caller, else computed as its sigma computes them; `w2_tau2`).
-    fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<Vec<f32>>) {
-        let ix = self.ix;
-        let a = coef.unwrap_or_else(|| ix.order.as_ref().unwrap().coefs_of(ci, ix.n(), &self.pr.q32));
-        let tau2 = w2_tau2(ix, ci, gq, cq.alr as f64, &a);
+    fn w2(&mut self, ci: usize, gq: &GQ2, cq: &mut CQ2, psi: f64, coef: Option<[f32; super::order::R_MAX]>) {
+        let (ix, st) = (self.ix, self.ix.order.as_ref().unwrap());
+        let a = coef.unwrap_or_else(|| st.coefs_of(ci, ix.n(), &self.pr.q32));
+        let tau2 = w2_tau2(ix, ci, gq, cq.alr as f64, &a[..st.r]);
         cq.set_w2(ix, ci, psi, &tau2);
     }
 

@@ -296,16 +296,20 @@ impl OrderState {
     }
 
     /// Cluster ci's coefficients on its directions, a_j = p_j . q, from the products `p` of its int8 rows with the query
-    /// (`kernel::gemv_i8`): each times its direction's scale.
-    pub fn coefs(&self, ci: usize, p: &[f32]) -> Vec<f32> {
-        p.iter().zip(&self.dsc[ci * self.r..(ci + 1) * self.r]).map(|(&x, &d)| x * d).collect()
+    /// (`kernel::gemv_i8`): each times its direction's scale, in the first r values.
+    pub fn coefs(&self, ci: usize, p: &[f32]) -> [f32; R_MAX] {
+        let mut a = [0f32; R_MAX];
+        for ((x, &pj), &d) in a.iter_mut().zip(p).zip(&self.dsc[ci * self.r..(ci + 1) * self.r]) {
+            *x = pj * d;
+        }
+        a
     }
 
     /// `coefs` for the query's f32 values `q32` (n of them).
-    pub fn coefs_of(&self, ci: usize, n: usize, q32: &[f32]) -> Vec<f32> {
-        let mut p = vec![0f32; self.r];
-        unsafe { crate::kernel::gemv_i8(q32, self.dirs(ci, self.r, n), n, &mut p) };
-        self.coefs(ci, &p)
+    pub fn coefs_of(&self, ci: usize, n: usize, q32: &[f32]) -> [f32; R_MAX] {
+        let mut p = [0f32; R_MAX];
+        unsafe { crate::kernel::gemv_i8(q32, self.dirs(ci, self.r, n), n, &mut p[..self.r]) };
+        self.coefs(ci, &p[..self.r])
     }
 
     /// Cluster ci's first `r` directions as int8 rows (r x n).

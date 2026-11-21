@@ -318,7 +318,7 @@ pub fn finish(ix: &Index2, sums: &[Summed]) -> WForms {
         out
     }).collect();
     let st = ix.order.as_ref().unwrap();
-    let pm = (0..k).flat_map(|c| st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])).collect();
+    let pm = (0..k).flat_map(|c| st.coefs_of(c, n, &ix.centres32[c * n..(c + 1) * n])[..r].to_vec()).collect();
     let h = (0..ng * ndl * n).map(|i| {
         let (gl, t) = (i / n, i % n);
         ((ix.groups[gl / ndl].d[gl % ndl][t] as f64).powi(2) * g[i]) as f32

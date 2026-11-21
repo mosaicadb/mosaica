@@ -772,7 +772,7 @@ impl Adaptive {
         let mut lost = vec![0f64; ix.groups.len()];
         let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(psi);
         // each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
-        let mut wcoef: Vec<Option<Vec<f32>>> = Vec::new();
+        let mut wcoef: Vec<Option<[f32; order::R_MAX]>> = Vec::with_capacity(LOOKAHEAD);
         loop {
             let ts = tick();
             // the running k-th best (the batched direct rows scored first; their time is the reads'), the moments of
