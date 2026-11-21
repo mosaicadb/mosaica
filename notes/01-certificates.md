@@ -1160,7 +1160,12 @@ session on 21 November 2026. None is repaired at commit 8c0b316f9.
    - *Exposure of the 1M index.* `rust/results/run1m.log` and `scale.log` print "x2 bound 4.882e-4", so
      √x₂ − 1 = 2.44·10⁻⁴, sixteen times DA. A row at the top of that norm range is clamped past DA when its angle to its
      centre direction is under about 21 mrad. The range referee estimates, without measuring, that the 8-bit centre of
-     a cluster of duplicates sits about 8 mrad from its rows at n = 768. Whether any row qualifies has not been counted.
+     a cluster of duplicates sits about 8 mrad from its rows at n = 768.
+   - *Count on built indexes* [measured, by the visit-order session, eight indexes, 21 November 2026]
+     (`program/LOG-2026-11-21.md`, "After the first pass"). No row lies beyond 1 + DA on any of the eight indexes. The
+     largest |x·m̂| is 0.996 (BioCLIP), and the largest row norm is 1 + 4.0·10⁻⁴ (SIFT). So no recorded result was
+     touched by this defect, and its repair is preventive. The owner decided on 21 November 2026 to repair it now, by
+     adding each cluster's largest clamp excess to its key allowance.
    - *Repairs proposed.* The range referee: assert |x·m̂| ≤ 1 + 10⁻⁷ at build, or widen the sorted range by
      DA + max(0, √x₂ − 1). In its model the widening gave 0 wrong decisions in 369,600 checks of seed 2, and rows decided
      fell from 10.73M to 10.57M, where √x₂ − 1 is near 10⁻³ [model]. The kernel referee: assert |x·m̂| ≤ 1 + 10⁻⁷ at

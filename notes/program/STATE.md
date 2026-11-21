@@ -1,6 +1,7 @@
 # Theory program: state
 
-Kept by the PI. Written 21 November 2026 at the end of the first pass. The running log of that pass, with the
+Kept by the PI. Written 21 November 2026 at the end of the first pass, which the owner closed that day; the branch
+`research/theory-program` was merged into `research/exact-vector-search`. The running log of that pass, with the
 measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of `../README.md`.
 
 ## What entered the chapters
@@ -17,6 +18,7 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
 | 4, §4.9 | The hand-over, the rate–margin law and its dump test, the price of a stored scalar, the optimum with scalars charged | [model], [computed], [measured] |
 | 5, §5.8a | The stop on expected misses dropped; the fixed-cluster-count replay | [measured] |
 | 5, §5.9a | The level width as a measured rule with a stated condition | [measured]; one lemma [proved, unrefereed] |
+| 5, §5.9a.8 | The levels' dial against the stop's: the shape and the criterion stand; the derived formula is not to be built | [model], [measured]; one statement [refuted] |
 | 5, §5.10.1a | The tree as a random energy model; two leaf floors | revised after a referee, not re-read |
 | 7 | Eight things tried and ruled out | carried from the tracks |
 
@@ -57,6 +59,12 @@ measurements the chapters cite, is `LOG-2026-11-21.md`. Statuses use the tags of
   for now (the owner first chose 0.2 and then kept 0.5 until it is measured). Any weight gives a sound index; only
   widths move. The weight is a dial, not a share of traffic. Deferred: a native comparison of the data-only fit and
   the fits at 0.2 and 0.5 on both query sets (floors B4d has the figures by formula). With the implementing session.
+- The levels' dial in approximate mode. The derivation of it from the stop's dial with nothing fitted did not succeed
+  (`approximate/DIAL.md`; `approximate/referee/referee-3.md`: do not build the formula). What stands is the shape, an
+  offset of the stop's dial, and the criterion, equal risk per row declined. The owner waits on the timing of
+  ψ_ℓ = max(0, ψ − 1.5), where the 1.5 is fitted on three datasets of 100 queries. A later step if that pays:
+  replace the fitted offset by the two tail rates measured at build from corpus items used as queries (untested).
+  Untested under either: filters, and the randomised levels' dial.
 
 ## Rules for agents on this machine
 

@@ -103,6 +103,7 @@ chapter cites them; paths are those of the chapter.
 | 1.bi | Defect 8, groups with fewer rows than n: a 617-row group needs 200 B at w* = 0.06 against a mean of 36 B; costs bytes, not soundness | [measured] | 1.8a | `program/partition/experiment/RESULTS.md` items 1, 2 (`diag_groups.py`) |
 | 1.am | Prior work read in full: VA-file, IQ-tree, BOND, LEMP, ANSMET, PDX, Panorama, Extended RaBitQ, QUIP, LeanVec, RoarGraph, ScaNN's anisotropic loss, iDistance, M-tree, list of clusters, Schubert, GNAT, LAESA, Tribase | [cited] | 1.9 | `lit/REPORT.md` |
 | 1.an | Prior work from abstracts or summaries: VA+-file, FEXIPRO, L2AP, ScaNN, SOAR, SPANN, SPFresh, Fukunaga–Narendra, TRIM, CLIP | [cited, unchecked] | 1.9 | `lit/REPORT.md` |
+| 1.bj | No row lies beyond 1 + DA on eight built indexes; largest \|x·m̂\| 0.996, largest norm 1 + 4.0·10⁻⁴; the key-clamp repair is preventive | [measured] | 1.8a | `program/LOG-2026-11-21.md`, visit-order session |
 | 2.0 | The floor Σ√min(γ_i, θ) with B counting code bits only | [refuted] | 2.1 | `FINDINGS.md` §5; `agent1/REPORT.md` §2; `PROOFS.md` Agent 1 |
 | 2.1 | With exact real scalars no positive floor holds; with ‖e‖ and m·e the cell has measure zero | [proved, refereed] | 2.1 | `PROOFS.md` Agent 1; `proofcheck/REFEREE.md` verdicts |
 | 2.1R | For non-Gaussian r the proved bound falls by exp(−J/k) | [proved, refereed] | 2.1 | `PROOFS.md`; `REFEREE.md`; `CONSOLIDATED_PROOFS.md` §1 remarks |
@@ -507,6 +508,12 @@ chapter cites them; paths are those of the chapter.
 | 5.z | Shares cancel common miscalibration (by 5.27); drift measured | [proved, unrefereed] | 5.12 | `hierarchy/policy.md` §11.3 |
 | 5.cs | A SOAR second assignment read 12–15% fewer items at the same recall and was no faster (glove 863 against 922 queries a second) | [measured] | 5.13 | `bench/REPORT.md` "What the numbers say" item (c) |
 | 5.aa | A sub-centre as a 20-byte coded row would not rank sub-centres | [conjecture] | Open | `hierarchy/theory.md` §5.2 |
+| 5.ct | With ψ0 = ψ the sampled width is too wide: time to recall 1.25–1.78 times the derived-ρ build on LAION, yahoo, BioCLIP; 0.57–0.88 on iNaturalist | [measured] | 5.9a.8 | `program/LOG-2026-11-21.md`, visit-order session |
+| 5.cu | The stop's ψ is roughly a quantile of the threshold's height in the neighbours' home clusters (median 2.8–3.6 spreads); (5.8) already pays for the height | [model] | 5.9a.8 | `program/approximate/DIAL.md`; `program/approximate/referee/referee-3.md` |
+| 5.cv | Cost-optimal split of misses between stop and levels: equal risk per row declined, with κ = c₁/(c₀ + c₁φ); equal risk per neighbour would need κ near 80 | [model] | 5.9a.8 | `program/approximate/DIAL.md`; `program/approximate/referee/referee-3.md` |
+| 5.cw | The derived formula ψ0 = max(0, ψ − ū − s̄ + (1/√2)·ln(1/(κφ̂))) has nothing fitted | [refuted] | 5.9a.8 | `program/approximate/referee/referee-3.md` §4 |
+| 5.cx | The levels' dial must rise with ψ (0.72–0.85 per unit in replay); a constant caps LAION's recall at 0.970 / 0.989 for ψ0 = 2 / 3 | [model] | 5.9a.8 | `program/approximate/DIAL.md`; `program/approximate/referee/referee-3.md` |
+| 5.cy | Fixed ψ0 = 3: time over the earlier build 0.84/0.59/0.56 iNaturalist, 0.93/1.06/1.31 yahoo, 1.44/1.77/– LAION; LAION rows past the levels 15,304 → 5,699 | [measured] | 5.9a.8 | `program/LOG-2026-11-21.md`, visit-order session |
 | 7.a | Block norms cut the text half-width by 10% or more only with J ≥ 8, and from J = 4 cost more bytes than they save; the mixed basis cuts text 21–33% and costs items 6–19%; 0 violations | [measured] | 7.1 | `stage0-block-norms/REPORT.md` "Verdict", "The numbers that decide it" |
 | 7.b | The best diagonal weighting per (query, item) pair sits at about 0.6 of the single norm for every kind of query | [measured] | 7.1 | `stage0-block-norms/REPORT.md` "What it shows" |
 | 7.c | The built code sits 1.31–1.77 times above the cap bound in tan (the bound is 3.bi, 4.ah); 1.31–1.42 where the variance sits, none of it nesting | [measured] | 7.2 | `codes/built.py`; `codes/REPORT.md` "Where the built code stands" |
@@ -576,23 +583,23 @@ chapter cites them; paths are those of the chapter.
 | [proved, unrefereed] | 121 |
 | [sketch: gap named] | 17 |
 | [conjecture] | 16 |
-| [refuted] | 31 |
-| [measured] | 132 |
+| [refuted] | 32 |
+| [measured] | 135 |
 | [computed] | 49 |
-| [model] | 98 |
+| [model] | 101 |
 | [cited] | 8 |
 | [cited, unchecked] | 15 |
-| total | 553 |
+| total | 560 |
 
 | Chapter | Rows |
 |---|---|
-| 1 | 89 |
+| 1 | 90 |
 | 2 | 59 |
 | 3 | 130 |
 | 4 | 83 |
-| 5 | 132 |
+| 5 | 138 |
 | 7 | 60 |
-| total | 553 |
+| total | 560 |
 
 Rows are claims as the chapters group them, so a measured row often holds several figures, and a row's secondary tags
 (a [conjecture] inside a [measured] row, for example) are not counted. Six results and one measurement appear in two

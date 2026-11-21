@@ -949,6 +949,77 @@ the sign of an upper bound used for v_R (`referee-2.md` §7).
   is 0.27 to 0.47 of the score's spread, and the factor is 1.8 to 2.8 at a decay rate of 2.2 [computed, by referee 2]
   (`referee-2.md` §7).
 
+### 5.9a.8 The levels' dial against the stop's dial
+
+Sources: `program/approximate/DIAL.md` (the derivation, unrefereed as written) and
+`program/approximate/referee/referee-3.md` (its referee). Timings are by the visit-order session
+(`program/LOG-2026-11-21.md`, "After the first pass", and that session's branch research/sampled-width). In this
+subsection ψ is the stop's dial of section 5.8 and ψ0 the levels' dial of rule (5.8).
+
+**The question.** The reader as first built used ψ0 = ψ, so that one knob set both rules. That is too wide. At ψ of 5
+to 6 the levels' width is about 1.6 times the derived width on yahoo, and the time to a given recall is 1.25 to 1.78
+times that of the derived-ρ build on LAION, yahoo and BioCLIP, and 0.57 to 0.88 on iNaturalist, where the derived
+width was too narrow [measured, by the visit-order session, 100 queries a dataset, unfiltered]. The owner asked for
+ψ0 as a function of ψ with no constant fitted offline.
+
+**Why equal dials are wrong** [model] (`DIAL.md` §2.1 and §2.2; `referee-3.md` §2: the algebra is right, and the reading
+holds to within a factor 1.2 to 2.5). The stop declines a cluster when the threshold sits more than δ + ψ·ρ spreads
+above the cluster's mean. So ψ is, roughly, a quantile of the height of the threshold in the neighbours' home
+clusters, whose median is 2.8 to 3.6 spreads on the three dumps [measured, by simulation on the dumps of yahoo, LAION
+and iNaturalist, `dial_laws*`]. The width of (5.8) already pays for that height through its term in ζ. The levels'
+dial therefore has to cover only the scatter g that is left, and equal dials charge the height twice.
+
+**The criterion** [model] (`DIAL.md` §2.4; `referee-3.md` §3, derived independently, with one correction). Split one
+budget of missed neighbours between the stop and the levels so that the cost of the query is least. The first-order
+condition is equal risk per row declined: a row that the levels drop at their margin is as likely to be a neighbour
+as a row of a cluster that the stop declines, up to the factor κ = c₁/(c₀ + c₁·φ), with c₀ the cost of a row of a
+newly read cluster, c₁ the cost of a row that passes the levels and φ the share of rows the levels pass. The referee's
+correction is the term c₁·φ: opening a cluster also sends rows through the levels. Equal risk per neighbour, or per
+cluster, is a different criterion and is not the optimum: it would be the optimum only at κ near 80, and the reader's
+runs give 2 to 7 [measured, by the visit-order session, as read by referee 3].
+
+**The formula that was derived, and why it is not recommended.** The derivation gives
+
+    ψ0 = max(0, ψ − ū − s̄ + (1/√2)·ln(1/(κ·φ̂))),
+
+with ū the median over the k held rows of ((t̂ − μ_c)/σ_c − δ)/ρ in each row's home cluster, s̄ a term for the held
+rows' slack above t̂, and φ̂ the share of sampled clusters' rows that the levels have passed so far [model] (`DIAL.md`
+§2.5 and §3). The referee's verdict is that it should not be built (`referee-3.md`, "Verdicts in one place"), for three reasons.
+
+- It is never better than a constant dial in the replay. At its own mean dial a constant passes fewer rows and drops
+  fewer neighbours on all three datasets, and the formula's spread of 0.6 to 0.8 between clusters is what costs it
+  [measured, by simulation: a causal replay on the three dumps that uses the running threshold at each read,
+  `dial_replay*`, re-run in `ref3_replay.py`].
+- The 1/√2 is the tail rate of a Laplace law of unit spread, used as a stand-in. It is a tuning constant in effect.
+  With the measured tail rates θ_y of the scatter and θ_u of the height the rule is
+  −s̄ + (θ_y/θ_u)·(ψ − ū) + θ_y·ln(θ_u/(θ_y·κ·φ̂)), which is 0.7 to 1.2 units wider and dearer, and is then fitted
+  [model] (`referee-3.md` §4). The statement that the formula has nothing fitted is [refuted].
+- The replay's proxy for time is wrong on LAION. It prices the sample at about 8% of the cost where the timing puts
+  it near a third (about 800 µs a query), and it leaves out the first cluster, which is read before k rows are held
+  and is 80% of yahoo's rows past the levels at ψ = 5 (`referee-3.md` §5 and §7).
+
+Two further corrections by the referee. The statement that unfiltered δ and ρ sit on their priors holds for yahoo
+(0.0 to 0.6 clusters read directly a query) and roughly for LAION, and is [refuted] for iNaturalist (3 to 10 a
+query), which is where the formula misses. And at the measured slopes m the frame lacks a term −(m − 1)·x/√ϑ, about
+0.67 units of the dial on iNaturalist.
+
+**What stands.**
+- The dial is an offset of the stop's and must rise with it, at 0.72 to 0.85 per unit of ψ in the replay [model]
+  (`referee-3.md` §8). A constant is not enough: at ψ = 9 the reader's recall is capped at 0.970 for ψ0 = 2 and
+  0.989 for ψ0 = 3 on LAION [measured, by the visit-order session].
+- At a fixed ψ0 = 3 the time to recall 0.9 / 0.95 / 0.99 over the earlier build is 0.84 / 0.59 / 0.56 on iNaturalist,
+  0.93 / 1.06 / 1.31 on yahoo and 1.44 / 1.77 / – on LAION, and the rows past the deterministic levels at ψ = 5 on
+  LAION fall from 15,304 to 5,699 [measured, by the visit-order session, unfiltered]. What is left of LAION's cost is
+  the sample itself.
+- The rule the evidence supports for the next timing is ψ0 = max(0, ψ − c) with c ≈ 1.5. The constant c is fitted, on
+  three datasets of 100 queries each (`referee-3.md`, "Verdicts in one place" and §6). The owner waits on its timing (21 November 2026).
+- A way to remove the fitted constant, untested: measure θ_y and θ_u at build, from corpus items used as queries,
+  for which the true neighbours are known. The derivation found estimates of them within one query too noisy, and
+  the pooled sample's tail 3 to 12 times lighter than the neighbours' at a dial of 4 (`DIAL.md` §5 and §6).
+
+Not tested under any of these: filters, and the dial of the randomised levels, which still use ψ and whose risk is a
+union over four levels.
+
 ## 5.10 Hierarchies
 
 ### 5.10.1 A beam over a tree
