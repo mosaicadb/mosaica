@@ -1,5 +1,5 @@
 //! The W2 width's stored forms: what the approximate k-NN needs at build time to predict, per query, the spread of a
-//! row's error at each deterministic level of a cluster (`adaptive::WidthRule::W2`).
+//! row's error at each deterministic level of a cluster (`KnnReader::with_width`).
 //!
 //! Notation (the theory session's, as `study_w_rule` replayed it): at level l of group g a row's error vector in the
 //! group's weighted coordinates is u = (z - s sig val_l) / d_l (z the row in the group's basis, s its scale, val_l the

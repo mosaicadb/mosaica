@@ -630,7 +630,7 @@ pub struct CQ2 {
     pub ddec: u32,    // threshold queries decide at deterministic level l only when bit l is set (the plan's, else the index's Meta2::ddec)
     pub int: Option<IntDet>,
     /// per deterministic level, the factor on the item intervals' upper half-width: the query's (`Prep2::dial`), or
-    /// the cluster's statistical width (`set_width`)
+    /// the cluster's W2 width (`set_w2`)
     pub ddial: [f32; NDL_MAX],
 }
 
@@ -658,18 +658,6 @@ impl CQ2 {
             let tau2 = super::wrule::packed_quad(&rec[..rp], a) + gamma * (tl - super::wrule::packed_quad(&rec[rp..2 * rp], a)).max(0.0);
             let den = self.dwa[l] as f64 * u.sqrt();
             self.ddial[l] = if den > 0.0 { (psi * tau2.max(0.0).sqrt() / den).min(1.0) as f32 } else { 1.0 };
-        }
-    }
-
-    /// The deterministic levels read at the statistical width for `psi`: min(1, psi rho_g,l r_c,l) of each upper
-    /// half-width, rho_g,l the derived width's share (`GroupPlan2::rho`) and r_c,l cluster ci's stored ratio
-    /// (`Index2::lratio`, `adaptive::level_ratios`).
-    pub fn set_width(&mut self, ix: &Index2, ci: usize, psi: f64) {
-        let ndl = ix.meta.ndl();
-        let gp = &ix.groups[ix.cl[ci].g];
-        let r = &ix.lratio.as_ref().expect("the statistical width reads the index's level ratios")[ci * ndl..(ci + 1) * ndl];
-        for (l, d) in self.ddial[..ndl].iter_mut().enumerate() {
-            *d = (psi * gp.rho[l] as f64 * r[l] as f64).min(1.0) as f32;
         }
     }
 
@@ -3953,11 +3941,11 @@ pub struct KnnReader<'a> {
     zcl: Vec<(usize, usize, f64, f64)>,
     /// over those clusters' rows once scored, z = (s - mu) / sigma: count, sum and sum of squares (`take_z`)
     z: (f64, f64, f64),
-    /// psi and rule of the deterministic levels' statistical width (`with_width`)
-    width: Option<(f64, super::adaptive::WidthRule)>,
-    /// under W2, the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
+    /// psi of the deterministic levels' W2 width (`with_width`)
+    width: Option<f64>,
+    /// the next cluster's coefficients on its order directions when the caller has them (`visit` takes them)
     pub coef: Option<Vec<f32>>,
-    /// under W2, per group, T = D'GD at each deterministic level once the group is first read
+    /// per group, T = D'GD at each deterministic level once the group is first read
     wt: Vec<Option<[f64; NDL_MAX]>>,
     pub st: Stats,
 }
@@ -3969,12 +3957,11 @@ impl<'a> KnnReader<'a> {
         KnnReader { ix, pr, vis, kk, plan, top, sv: State::default(), rows_in: Vec::new(), pend: Vec::new(), flat: Vec::new(), zcl: Vec::new(), z: (0.0, 0.0, 0.0), width: None, coef: None, wt: Vec::new(), st }
     }
 
-    /// The reader with each cluster's deterministic levels on the index path read at its statistical width for `psi`
-    /// (at least 0; infinity is the certified width) under `rule` (`CQ2::set_width` for the stored ratio, `CQ2::set_w2`
-    /// for W2), not at the query's dial; the `Derived` rule is the query's dial (`Adaptive::dial`) and sets nothing here.
-    pub fn with_width(mut self, psi: f64, rule: super::adaptive::WidthRule) -> KnnReader<'a> {
+    /// The reader with each cluster's deterministic levels on the index path read at its W2 width for `psi` (at least
+    /// 0; infinity is the certified width; `CQ2::set_w2`), not at the query's dial.
+    pub fn with_width(mut self, psi: f64) -> KnnReader<'a> {
         assert!(psi >= 0.0, "the statistical width needs a psi of at least 0, not {psi}");
-        self.width = Some((psi, rule));
+        self.width = Some(psi);
         self
     }
 
@@ -4118,10 +4105,8 @@ impl<'a> KnnReader<'a> {
                 let gq = get_gq2(ix, pr, c.g, &mut self.st);
                 let tq = tick();
                 let mut cq = open_cluster(ix, ci, gq, pr, qm, self.plan, self.plan.int_det);
-                match self.width {
-                    Some((psi, super::adaptive::WidthRule::Ratio)) => cq.set_width(ix, ci, psi),
-                    Some((psi, super::adaptive::WidthRule::W2)) => self.w2(ci, gq, &mut cq, psi, coef),
-                    _ => {}
+                if let Some(psi) = self.width {
+                    self.w2(ci, gq, &mut cq, psi, coef);
                 }
                 self.st.cyc[P_CLSETUP] += tick() - tq;
                 let mut out = RunOut { rows_in: &mut self.rows_in, pend: &mut self.pend, iv: None };

@@ -2470,25 +2470,22 @@ fn the_level_ratios_do_not_depend_on_the_queries_scale() {
     assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() <= 1e-3 * x), "{a:?} {b:?}");
 }
 
-/// A cluster read on the index path at the statistical width, under the stored ratio (each deterministic level at
-/// min(1, psi rho r) of its half-width, r the cluster's stored ratio) and under W2 (min(1, psi tau / (dwa sqrt U)), tau
-/// from the cluster's stored forms), sends on from each level no row the certified width would drop: against
-/// the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and the items
-/// it finds above t are among those the certified read finds, each with its own score. Over synth4k's clusters of at
-/// least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels, the width takes
-/// effect under each rule, and the cap binds: under the ratio, where psi rho r reaches 1 at every level the read is
-/// the certified one; under W2, some reads at a large psi are the certified one.
+/// A cluster read on the index path at the W2 width (each deterministic level at min(1, psi tau / (dwa sqrt U)) of its
+/// half-width, tau from the cluster's stored forms) sends on from each level no row the certified width would drop:
+/// against the same read at the certified width, as many rows or fewer enter each level and its stored vectors, and
+/// the items it finds above t are among those the certified read finds, each with its own score. Over synth4k's
+/// clusters of at least 64 rows, at a high t and at each cluster's median score, on the integer and the float levels,
+/// the width takes effect, and the cap binds: some reads at a large psi, and every read at an infinite one, are the
+/// certified read.
 #[test]
 fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
     let f = fixture();
     let ix = &f.ix;
     let (nl, ndl) = (ix.meta.nl(), ix.meta.ndl());
     let e = 64.0 * 2f64.powi(-24);
-    let ratio = ix.lratio.as_ref().unwrap();
     let big: Vec<usize> = (0..ix.k()).filter(|&c| ix.cl[c].r1 - ix.cl[c].r0 >= 64).collect();
     assert!(big.len() >= 4, "{} clusters of at least 64 rows", big.len());
-    let rules = [adaptive::WidthRule::Ratio, adaptive::WidthRule::W2];
-    let (mut capped, mut fewer) = ([0; 2], [0; 2]);
+    let (mut capped, mut fewer) = (0, 0);
     for (qi, q) in f.queries.iter().enumerate() {
         let pr = prep2(ix, q);
         // thresholds between two rows' scores, so that no row's product rounds to either side of t
@@ -2496,17 +2493,16 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
         let t10 = (tr[9].0 + tr[10].0) / 2.0;
         for &ci in &big {
             let c = &ix.cl[ci];
-            let gp = &ix.groups[c.g];
             let mut sc: Vec<f64> = (c.r0..c.r1).map(|r| exact_value2(ix, &pr, r)).collect();
             sc.sort_by(f64::total_cmp);
             for t in [t10, (sc[sc.len() / 2] + sc[sc.len() / 2 + 1]) / 2.0] {
                 for plan in [Plan::default(), Plan { int_det: false, gtab: false, repack: false, ..Plan::default() }] {
-                    for (psi, (ri, &rule)) in [0.5, 2.0, adaptive::PSI, 50.0].into_iter().flat_map(|p| rules.iter().enumerate().map(move |x| (p, x))) {
-                        let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}, {rule:?}", plan.int_det);
+                    for psi in [0.5, 2.0, adaptive::PSI, 50.0, f64::INFINITY] {
+                        let what = format!("query {qi}, cluster {ci}, t {t}, int {}, psi {psi}", plan.int_det);
                         let read = |width: Option<f64>| {
                             let mut rd = KnnReader::new(ix, &pr, None, ix.nrows, plan, crate::kernel::Stats::new(nl));
                             if let Some(p) = width {
-                                rd = rd.with_width(p, rule);
+                                rd = rd.with_width(p);
                             }
                             rd.prime(t);
                             rd.visit(ci, KnnPath::Index);
@@ -2529,17 +2525,15 @@ fn the_statistical_width_drops_only_what_the_certified_width_keeps() {
                             assert!(fb.iter().any(|x| x.1 == ent), "{what}: entity {ent} not found by the certified read");
                         }
                         let same = (&sa.enter, sa.full_reads, &fa) == (&sb.enter, sb.full_reads, &fb);
-                        if rule == adaptive::WidthRule::Ratio && (0..ndl).all(|l| psi * gp.rho[l] as f64 * ratio[ci * ndl + l] as f64 >= 1.0) {
-                            assert!(same, "{what}: capped at every level, yet not the certified read");
-                        }
-                        capped[ri] += (psi == 50.0 && same) as usize;
-                        fewer[ri] += (sa.enter[ndl] < sb.enter[ndl]) as usize;
+                        assert!(same || psi.is_finite(), "{what}: an infinite psi, yet not the certified read");
+                        capped += (psi == 50.0 && same) as usize;
+                        fewer += (sa.enter[ndl] < sb.enter[ndl]) as usize;
                     }
                 }
             }
         }
     }
-    assert!(capped.iter().chain(&fewer).all(|&x| x > 0), "per rule {rules:?}: {capped:?} reads at psi 50 the certified one, {fewer:?} dropping more rows than the certified width");
+    assert!(capped > 0 && fewer > 0, "{capped} reads at psi 50 the certified one, {fewer} dropping more rows than the certified width");
 }
 
 /// Study (ignored; run by hand on a fit, which it rebuilds when its saved index is stale, as the bindings do): the level
@@ -2642,33 +2636,6 @@ fn study_w_unit() {
     writeln!(f, "# qi c l rms_h D dwa rms_r").unwrap();
     for x in lines {
         writeln!(f, "{x}").unwrap();
-    }
-}
-
-/// Under every width rule the approximate k-NN returns k visible items, each with its own score, the exact query's at
-/// psi infinite; the derived rule reads as the query's dial alone (every cluster the same factor per level).
-#[test]
-fn every_width_rule_answers_k_items_with_their_scores() {
-    let f = fixture();
-    let ix = &f.ix;
-    let e = 64.0 * 2f64.powi(-24);
-    for rule in [adaptive::WidthRule::Derived, adaptive::WidthRule::Ratio, adaptive::WidthRule::W2] {
-        let mut ad = adaptive::Adaptive::new(ix, cheap_index(fixed_costs())).unwrap();
-        ad.rule = rule;
-        assert_eq!(ad.dial(2.0)[..ix.meta.ndl()].iter().all(|&d| d == 1.0), rule != adaptive::WidthRule::Derived, "{rule:?}");
-        for q in &f.queries {
-            let pr = prep2(ix, q);
-            for (sname, bm) in &f.sets[..3] {
-                let vis = bm.as_ref().map(|b| Vis2::new(ix, b));
-                let want = truth(ix, q, bm.as_ref()).len().min(10);
-                for psi in [0.5, 2.0, adaptive::PSI] {
-                    let got = ad.knn(ix, q, 10, vis.as_ref(), psi, probe_plan()).0.ents;
-                    assert_eq!(got.len(), want, "{rule:?}, set {sname}, psi {psi}");
-                    assert!(got.iter().all(|&(s, ent)| (s - exact_value2(ix, &pr, ix.row_of_ent(ent))).abs() <= e && bm.as_ref().is_none_or(|b| b.contains(ent))), "{rule:?}, set {sname}, psi {psi}");
-                }
-                assert_eq!(ad.knn(ix, q, 10, vis.as_ref(), f64::INFINITY, probe_plan()).0.ents, knn2(ix, q, 10, vis.as_ref(), probe_plan()).ents);
-            }
-        }
     }
 }
 

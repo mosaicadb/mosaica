@@ -654,30 +654,6 @@ impl Ord for Key {
     }
 }
 
-/// How approximate k-NN widens its deterministic levels on the index path (`KnnReader::with_width`): every cluster at
-/// min(1, psi rho_l) of its half-width, rho_l the median over the groups of `GroupPlan2::rho` (`Derived`); at
-/// min(1, psi rho_g,l r_c,l), r the cluster's stored ratio (`Ratio`, `level_ratios`); or at min(1, psi tau / (dwa
-/// sqrt U)), tau the error's spread the cluster's stored forms predict for the query (`W2`, `wrule`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum WidthRule {
-    Derived,
-    #[default]
-    Ratio,
-    W2,
-}
-
-impl WidthRule {
-    /// The rule named `derived`, `ratio` or `w2`.
-    pub fn parse(s: &str) -> Result<WidthRule, String> {
-        match s {
-            "derived" => Ok(WidthRule::Derived),
-            "ratio" => Ok(WidthRule::Ratio),
-            "w2" => Ok(WidthRule::W2),
-            _ => Err(format!("the width rule is derived, ratio or w2, not {s:?}")),
-        }
-    }
-}
-
 /// The approximate queries' state for one index.
 pub struct Adaptive {
     pub m: Measured,
@@ -695,12 +671,9 @@ pub struct Adaptive {
     /// per randomised level, the spread of a row's error as a share of its certified half-width, the median over the
     /// groups of 1 / c (its half-width is c times the spread, c the certified constant `GroupPlan2::csgl`); k-NN at psi
     /// reads each randomised level at psi / c of its half-width (at most the certified width), and each deterministic
-    /// one at its cluster's statistical width (`KnnReader::with_width`): psi spreads of the row's error at every level
+    /// one at its cluster's W2 width (`KnnReader::with_width`): psi spreads of the row's error at every level
     inv_c: Vec<f64>,
-    /// per deterministic level, the median over the groups of `GroupPlan2::rho` (the `Derived` rule's share)
-    rho: Vec<f64>,
-    /// the deterministic levels' width on the index path
-    pub rule: WidthRule,
+    ndl: usize,
 }
 
 /// Per cluster, the path a threshold query reads it on and its cost, as k-NN prices it: the index path at the rows
@@ -766,26 +739,15 @@ impl Adaptive {
             r.sort_by(f64::total_cmp);
             r.get(r.len() / 2).copied().unwrap_or(1.0)
         }).collect();
-        let rho: Vec<f64> = (0..ndl).map(|l| {
-            let mut r: Vec<f64> = ix.groups.iter().filter(|gp| gp.cal.is_some()).map(|gp| gp.rho[l] as f64).collect();
-            r.sort_by(f64::total_cmp);
-            r.get(r.len() / 2).copied().unwrap_or(1.0)
-        }).collect();
-        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, inv_c, rho, rule: WidthRule::default() })
+        Ok(Adaptive { m, centres: Approx::centres(ix), st, rest, top, low, pooled, inv_c, ndl })
     }
 
-    /// Each level's factor on its half-width for a query at psi (`Prep2::dial`): at a deterministic level min(1, psi
-    /// rho_l) under the `Derived` rule, else 1 (k-NN sets it cluster by cluster, `KnnReader::with_width`); min(1, psi /
-    /// c) at a randomised one; 1 (certified) at psi infinite.
+    /// Each level's factor on its half-width for a query at psi (`Prep2::dial`): 1 at a deterministic level (k-NN sets
+    /// it cluster by cluster, `KnnReader::with_width`), min(1, psi / c) at a randomised one; 1 (certified) at psi
+    /// infinite.
     pub fn dial(&self, psi: f64) -> Vec<f32> {
-        self.dial_levels(psi, psi)
-    }
-
-    /// `dial` with the deterministic levels at `level_psi`.
-    fn dial_levels(&self, psi: f64, level_psi: f64) -> Vec<f32> {
-        let at = |p: f64, r: f64| if p.is_finite() { (p * r).min(1.0) as f32 } else { 1.0 };
-        let det = self.rho.iter().map(|&r| if self.rule == WidthRule::Derived { at(level_psi, r) } else { 1.0 });
-        det.chain(self.inv_c.iter().map(|&r| at(psi, r))).collect()
+        let det = (0..self.ndl).map(|_| 1.0);
+        det.chain(self.inv_c.iter().map(|&r| if psi.is_finite() { (psi * r).min(1.0) as f32 } else { 1.0 })).collect()
     }
 
     /// sigma_c(q) of cluster ci from its stored directions (`p` scratch of r values), the query's f32 values and |q|^2.
@@ -910,8 +872,7 @@ impl Adaptive {
         // scores below are the scaled query's (Prep2::unit), scaled back on the way out
         let mut pr = pr.unit();
         let lpsi = level_psi.unwrap_or(psi);
-        pr.dial = self.dial_levels(psi, lpsi);
-        let w2 = self.rule == WidthRule::W2;
+        pr.dial = self.dial(psi);
         let tc = tick();
         let qm = self.centres.centre_scores(ix, &pr.q32);
         st.cyc[P_PLAN] += tick() - tc;
@@ -941,11 +902,8 @@ impl Adaptive {
         // given its clusters read directly are summed (`lost`), and the cluster whose saving takes the sum to the
         // setup's cost sets it up (at most twice the best purchase)
         let mut lost = vec![0f64; ix.groups.len()];
-        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st);
-        if self.rule != WidthRule::Derived {
-            rd = rd.with_width(lpsi, self.rule);
-        }
-        // under W2, each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
+        let mut rd = KnnReader::new(ix, &pr, vis, kk, plan, st).with_width(lpsi);
+        // each window cluster's coefficients on its directions, from its sigma (none: the reader computes them)
         let mut wcoef: Vec<Option<Vec<f32>>> = Vec::new();
         loop {
             let ts = tick();
@@ -992,14 +950,10 @@ impl Adaptive {
                     info.sigma_cost += m.sig_us;
                     info.priced.push(ci as u32);
                     info.lam_priced.push(lam_stream);
-                    if w2 {
-                        wcoef.push(Some(p.iter().zip(&self.st.dsc[ci * self.st.r..(ci + 1) * self.st.r]).map(|(&x, &d)| x * d).collect()));
-                    }
+                    wcoef.push(Some(p.iter().zip(&self.st.dsc[ci * self.st.r..(ci + 1) * self.st.r]).map(|(&x, &d)| x * d).collect()));
                     sg
                 } else {
-                    if w2 {
-                        wcoef.push(None);
-                    }
+                    wcoef.push(None);
                     self.st.rad[ci] * s
                 };
                 window.push((ci, sg));
@@ -1012,7 +966,7 @@ impl Adaptive {
             let key = |&(ci, sg): &(usize, f64)| Key(qm[ci] + lam * sg, Reverse(ci));
             let i = (0..window.len()).max_by(|&a, &b| key(&window[a]).cmp(&key(&window[b]))).unwrap();
             let (ci, sg) = window.swap_remove(i);
-            let coef = if w2 { wcoef.swap_remove(i) } else { None };
+            let coef = wcoef.swap_remove(i);
             info.lam_read.push(lam);
             rd.st.cyc[P_ORDER] += tick() - ts;
             let tch = tick();
