@@ -71,3 +71,17 @@ re-run on 21 November because agents of this program broke looser versions of th
   rows). Reported by the session that added the SOAR and SPANN references.
 - Chapter 2, Editor's query 18: whether κ_k − k is least at k = 1 for every k (computed to 10⁷, not proved).
 - Chapter 6, section 6.2's summary of chapter 2's query 8 is out of date.
+
+## Update 09:15, 21 November
+
+The machine is free on every core as of 09:10 (the visit-order session has finished timing and will send the
+fixed-cluster-count replay numbers). Jobs now go through `program/run-limited.sh` (cores, threads, address-space cap).
+
+Running:
+- The partition experiment on the 200k sample (`partition/experiment/`), in the order of `partition/EXPERIMENT-SPEC.md`:
+  first how far the built fit is from a fixed point, the noise between seeds and the price of the built grouping.
+- The rate-margin test on the 50k verify dump (`confidence/dump-test/`): the specified criteria, then a term-by-term
+  account of why in-distribution queries at large answers read about twice what the law predicts.
+
+Done since the table above was written: chapter 2 carries the proved floor (section 2.9a), audited; the confidence
+lower bounds and the partition claims are revised after their referees; neither has entered the chapters.
